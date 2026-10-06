@@ -227,19 +227,27 @@ def load_structures(session: Session, taxonomy_id: str) -> list[StructureSummary
 
 
 def resolve_entity_name(session: Session, report_def: Report) -> str | None:
-  """The linked entity's name for a shared-in report, else the parent entity's."""
+  """The name of the entity the report is about: for a shared-in report, the
+  linked row standing for the sender's entity; else the report's own entity,
+  falling back to the group parent."""
+  from robosystems.models.extensions import Entity
+  from robosystems.operations.roboledger.entity_scope import (
+    find_linked_entity_id,
+    find_parent_entity,
+    report_entity_id,
+  )
+
+  facts_entity_id = report_entity_id(session, report_def.id)
   if report_def.source_graph_id:
-    row = session.execute(
-      text(
-        "SELECT name FROM entities WHERE metadata->>'source_graph_id' = :sgid LIMIT 1"
-      ),
-      {"sgid": report_def.source_graph_id},
-    ).first()
+    linked_id = find_linked_entity_id(
+      session, report_def.source_graph_id, facts_entity_id
+    )
+    entity = session.get(Entity, linked_id) if linked_id else None
   else:
-    row = session.execute(
-      text("SELECT name FROM entities WHERE is_parent = true LIMIT 1")
-    ).first()
-  return row.name if row else None
+    entity = session.get(Entity, facts_entity_id) if facts_entity_id else None
+    if entity is None:
+      entity = find_parent_entity(session)
+  return entity.name if entity else None
 
 
 def report_to_response(

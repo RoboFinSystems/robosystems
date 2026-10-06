@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.entity import (
@@ -17,6 +17,7 @@ from robosystems.models.api.extensions.entity import (
   ChangeReportingStyleResponse,
 )
 from robosystems.models.extensions import Entity
+from robosystems.operations.roboledger.entity_scope import resolve_entity
 
 # Every Style needs a Network for each; ``comprehensive_income`` is optional.
 _REQUIRED_STATEMENT_TYPES: tuple[str, ...] = (
@@ -36,19 +37,11 @@ class ReportingStyleInvalidError(ValueError):
 
 
 def _resolve_entity(session: Session, entity_id: str | None) -> Entity:
-  """The given entity, else the primary (earliest-created, as the renderer's
-  ``_get_entity_id`` resolves it)."""
-  if entity_id:
-    entity = session.get(Entity, entity_id)
-    if entity is None:
-      raise EntityNotFoundError(f"Entity {entity_id!r} not found in this graph.")
-    return entity
-  entity = session.execute(
-    select(Entity).order_by(Entity.created_at.asc()).limit(1)
-  ).scalar_one_or_none()
-  if entity is None:
-    raise EntityNotFoundError("No entity found. Import data before setting a Style.")
-  return entity
+  """The given entity, else the group parent."""
+  try:
+    return resolve_entity(session, entity_id)
+  except LookupError as exc:
+    raise EntityNotFoundError(str(exc)) from exc
 
 
 def change_reporting_style(

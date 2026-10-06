@@ -110,3 +110,88 @@ def test_close_stamped_facts_get_an_entity_edge(tenant):
     con.close()
 
   assert edges == {"fact_fs_close": ENTITY, "fact_fs_report": ENTITY}
+
+
+def _seed_shared():
+  """A report shared in from a group: its facts carry the sender's
+  subsidiary id. This graph holds an unkeyed linked row from before the key
+  (the sender's parent) and a keyed row for the subsidiary."""
+  from robosystems.models.api.fact_provenance import AssertedProvenance
+  from robosystems.models.extensions.entity import Entity
+  from robosystems.models.extensions.roboledger.fact import Fact
+  from robosystems.models.extensions.roboledger.report import Report
+  from robosystems.operations.roboledger.fact_set import create_fact_set
+
+  with extensions_session(GRAPH) as session:
+    session.add(
+      Entity(
+        id="ent_linked_unkeyed",
+        name="Sender Holdings",
+        source="linked",
+        is_parent=False,
+        metadata_={"source_graph_id": "kg_sender"},
+        created_by="usr_seed",
+      )
+    )
+    session.add(
+      Entity(
+        id="ent_linked_sub",
+        name="Sender Sub LLC",
+        source="linked",
+        is_parent=False,
+        metadata_={"source_graph_id": "kg_sender", "source_entity_id": "ent_src_sub"},
+        created_by="usr_seed",
+      )
+    )
+    session.add(
+      Report(
+        id="rpt_shared",
+        name="Shared",
+        taxonomy_id="tax_sr1",
+        source_graph_id="kg_sender",
+        created_by="usr_seed",
+      )
+    )
+    session.flush()
+    create_fact_set(
+      session,
+      id="fs_shared",
+      period_end=date(2026, 7, 31),
+      factset_type="report",
+      entity_id="ent_src_sub",
+      report_id="rpt_shared",
+      provenance=AssertedProvenance(
+        source_system="cross_graph_share", asserted_by="usr_seed", basis_note="t"
+      ),
+      created_by="usr_seed",
+    )
+    session.flush()
+    session.add(
+      Fact(
+        id="fact_shared",
+        element_id="el_cash",
+        value=50.0,
+        period_end=date(2026, 7, 31),
+        period_type="instant",
+        entity_id="ent_src_sub",
+        fact_set_id="fs_shared",
+      )
+    )
+    session.commit()
+
+
+def test_a_shared_fact_gets_one_edge_to_the_keyed_linked_row(tenant):
+  duckdb = pytest.importorskip("duckdb")
+  _seed_shared()
+  sql = _staging_sql(GRAPH, ENTITY, build_postgres_connstr())["FACT_HAS_ENTITY"]
+  con = duckdb.connect()
+  try:
+    con.execute("INSTALL postgres; LOAD postgres")
+    con.execute(sql)
+    edges = con.execute(
+      "SELECT dst FROM FACT_HAS_ENTITY WHERE src = 'fact_shared'"
+    ).fetchall()
+  finally:
+    con.close()
+
+  assert edges == [("ent_linked_sub",)]

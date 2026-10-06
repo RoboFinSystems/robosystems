@@ -11,13 +11,16 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from types import SimpleNamespace
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
+
+if TYPE_CHECKING:
+  from robosystems.models.extensions.entity import Entity
 
 # ── Metadata sub-shapes ────────────────────────────────────────────────────
 
@@ -318,7 +321,6 @@ def build_report_bundle(
   from robosystems.models.extensions.association import Association
   from robosystems.models.extensions.element import Element
   from robosystems.models.extensions.element_label import ElementLabel
-  from robosystems.models.extensions.entity import Entity
   from robosystems.models.extensions.roboledger.fact import Fact
   from robosystems.models.extensions.roboledger.fact_set import FactSet
   from robosystems.models.extensions.roboledger.report import Report
@@ -331,7 +333,7 @@ def build_report_bundle(
   )
   from robosystems.operations.roboledger.reports.network_picker import (
     get_render_network,
-    load_primary_reporting_style,
+    load_entity_reporting_style,
   )
   from robosystems.taxonomy.pins import resolve_pin
 
@@ -341,7 +343,8 @@ def build_report_bundle(
   if report is None:
     raise LookupError(f"Report {report_id!r} not found in active session.")
 
-  reporting_style_id = load_primary_reporting_style(session)
+  bundle_entity = _report_entity(session, report_id)
+  reporting_style_id = load_entity_reporting_style(session, str(bundle_entity.id))
 
   # The framework pin is Graph-level, so it comes from the platform DB.
   with platform_session() as pdb:
@@ -451,12 +454,7 @@ def build_report_bundle(
     if envelope is not None:
       ib_envelopes.append(envelope)
 
-  # Single-entity assumption, matching ``create_report``.
-  entity = (
-    session.execute(select(Entity).order_by(Entity.created_at.asc())).scalars().first()
-  )
-  if entity is None:
-    raise LookupError("No entity rows in tenant — Report cannot be bundled.")
+  entity = bundle_entity
 
   entity_meta = EntityMeta(
     id=str(entity.id),
@@ -526,6 +524,17 @@ def build_report_bundle(
 
 
 # ── Internal projection helpers ────────────────────────────────────────────
+
+
+def _report_entity(session: Session, report_id: str) -> Entity:
+  """The entity the report's facts belong to, else the group parent. Raises
+  ``LookupError`` when the tenant has no entity."""
+  from robosystems.operations.roboledger.entity_scope import (
+    report_entity_id,
+    resolve_entity,
+  )
+
+  return resolve_entity(session, report_entity_id(session, report_id))
 
 
 def _disclosure_sort_key(structure: Any) -> tuple[int, float, str, str]:

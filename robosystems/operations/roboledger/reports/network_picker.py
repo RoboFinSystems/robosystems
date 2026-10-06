@@ -12,6 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from robosystems.config.constants import ReportingStyleConstants
+from robosystems.operations.roboledger.entity_scope import resolve_entity_id
 
 DEFAULT_STYLE_ID = ReportingStyleConstants.DEFAULT_STYLE_ID
 
@@ -87,18 +88,9 @@ def load_entity_reporting_style(session: Session, entity_id: str) -> str:
 
 
 def load_primary_reporting_style(session: Session) -> str:
-  """The Reporting Style of the graph's primary (earliest-created) entity.
-
-  Must pick the same entity as ``statement_sets._get_entity_id``. Prefer
-  ``load_entity_reporting_style`` when the entity is known. Raises
-  ``LookupError`` when the tenant has no entity yet.
-  """
-  row = session.execute(
-    text("SELECT reporting_style_id FROM entities ORDER BY created_at ASC LIMIT 1")
-  ).fetchone()
-  if row is None:
-    raise LookupError("No entity found in tenant schema. Import data first.")
-  return str(row.reporting_style_id) if row.reporting_style_id else DEFAULT_STYLE_ID
+  """The group parent's Reporting Style. Prefer ``load_entity_reporting_style``
+  when the entity is known. Raises ``LookupError`` before any entity exists."""
+  return load_entity_reporting_style(session, resolve_entity_id(session))
 
 
 # Corporate default; other entity-form Styles override it in their metadata.

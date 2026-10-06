@@ -6,6 +6,7 @@ Arrow. Order is a correctness constraint: ``NODE_TABLES`` before
 ``RELATIONSHIP_TABLES``, each ordered so an edge's endpoints are staged first.
 """
 
+import asyncio
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -340,6 +341,29 @@ def build_postgres_connstr() -> str:
   connstr = f"dbname={dbname} user={user} password={password} host={host} port={port}"
 
   return connstr
+
+
+def _group_parent_id(graph_id: str) -> str:
+  """The tenant's group parent, which owns the single-entity fanouts. A graph
+  with no entity yet keeps the provisioning id, so its fanouts stay empty."""
+  from robosystems.db.extensions import extensions_session
+  from robosystems.operations.roboledger.entity_scope import (
+    NoEntityError,
+    resolve_entity_id,
+  )
+
+  try:
+    with extensions_session(graph_id) as session:
+      return resolve_entity_id(session)
+  except NoEntityError:
+    return f"entity_{graph_id}"
+
+
+async def _resolve_group_parent(graph_id: str) -> str:
+  try:
+    return await asyncio.to_thread(_group_parent_id, graph_id)
+  except Exception as exc:
+    raise RuntimeError(f"Group parent lookup failed: {exc}") from exc
 
 
 def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
@@ -1159,9 +1183,17 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     JOIN postgres_scan('{c}', '{s}', 'reports') rd
       ON fs.report_id = rd.id
     JOIN postgres_scan('{c}', '{s}', 'entities') e
-      ON e.metadata->>'source_graph_id' = rd.source_graph_id
+      ON e.source = 'linked'
+      AND (e.metadata->>'source_graph_id') = rd.source_graph_id
+      AND ((e.metadata->>'source_entity_id') = rf.entity_id
+           OR (e.metadata->>'source_entity_id') IS NULL)
     WHERE rd.source_graph_id IS NOT NULL
       AND fs.scenario_id IS NULL
+    -- One edge per fact: the keyed row over a row from before the key.
+    QUALIFY row_number() OVER (
+      PARTITION BY rf.id
+      ORDER BY ((e.metadata->>'source_entity_id') IS NULL), e.id
+    ) = 1
   """
 
   tables["STRUCTURE_HAS_FACT_SET"] = f"""
@@ -1311,7 +1343,7 @@ class ExtensionsMaterializer:
     """Stage from PostgreSQL, then materialize into the graph.
 
     ``graph_id`` is both the graph database and the tenant schema name;
-    ``entity_id`` defaults to ``entity_{graph_id}``.
+    ``entity_id`` defaults to the group parent (``entity_scope``).
 
     An existing database takes the blue-green path: a WIP copy is built
     alongside the live graph and swapped in on success, so the live graph keeps
@@ -1325,8 +1357,6 @@ class ExtensionsMaterializer:
     from robosystems.graph_api.client.factory import get_graph_client
 
     start_time = time.time()
-    entity_id = entity_id or f"entity_{graph_id}"
-
     result = MaterializeResult(graph_id=graph_id)
 
     try:
@@ -1366,6 +1396,10 @@ class ExtensionsMaterializer:
         else:
           lock = await self._acquire_lock(graph_id)
         try:
+          # Resolved under the lock, after the pause and lock gates, so a
+          # refused start reports the refusal rather than a lookup.
+          if not entity_id:
+            entity_id = await _resolve_group_parent(graph_id)
           db_exists = await client.database_exists(graph_id)
 
           # The ledger is a full projection: copied in place into a populated

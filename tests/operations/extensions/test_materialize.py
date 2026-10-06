@@ -28,6 +28,16 @@ ENTITY_ID = "entity_kg01234567890abcdef"
 CONNSTR = "dbname=extensions user=postgres password=postgres host=pg port=5432"
 
 
+@pytest.fixture(autouse=True)
+def _group_parent_without_a_database(monkeypatch):
+  """These tests mock the graph client and never reach Postgres; the parent
+  lookup is covered by the entity_scope DB tests."""
+  monkeypatch.setattr(
+    "robosystems.operations.extensions.materialize._group_parent_id",
+    lambda graph_id: f"entity_{graph_id}",
+  )
+
+
 class TestBuildPostgresConnstr:
   def test_parses_url(self):
     with patch.object(
@@ -585,6 +595,30 @@ class TestExtensionsMaterializer:
     assert result.status == "error"
     assert len(result.errors) > 0
     assert "Connection refused" in result.errors[0]
+
+  @pytest.mark.asyncio
+  async def test_a_failed_parent_lookup_fails_the_run(self):
+    from robosystems.operations.extensions.materialize import ExtensionsMaterializer
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+      patch(
+        "robosystems.operations.extensions.materialize._group_parent_id",
+        side_effect=RuntimeError("extensions database unreachable"),
+      ),
+      patch(
+        "robosystems.graph_api.client.factory.get_graph_client",
+        return_value=mock_client,
+      ),
+    ):
+      result = await ExtensionsMaterializer().materialize(GRAPH_ID)
+
+    assert result.status == "error"
+    assert "Group parent lookup failed" in result.errors[0]
+    mock_client.database_exists.assert_not_called()
 
   @pytest.mark.asyncio
   async def test_default_entity_id(self):

@@ -83,7 +83,6 @@ from robosystems.operations.information_block.forecast_history import (
   numeric_facts,
 )
 from robosystems.operations.information_block.metrics import (
-  _default_entity_id,
   _metric_unit,
 )
 from robosystems.operations.information_block.rules.expressions import (
@@ -94,6 +93,7 @@ from robosystems.operations.information_block.rules.expressions import (
   lhs_variable_names,
   parse_arithmetic_expression,
 )
+from robosystems.operations.roboledger.entity_scope import resolve_entity_id
 from robosystems.operations.roboledger.fact_set import create_fact_set
 from robosystems.operations.roboledger.fiscal_calendar.periods import (
   add_months,
@@ -310,7 +310,7 @@ def cmd_compute_forecast(
       f"Forecast {scenario_id!r} has no lever FactSet — the block is "
       "corrupt; re-create it via update-information-block."
     )
-  entity_id = body.entity_id or lever_set.entity_id or _default_entity_id(session)
+  entity_id = resolve_entity_id(session, body.entity_id or lever_set.entity_id)
 
   # Lever and line-assertion values bind from the authored facts, not the
   # mechanics copy. Levers key by qname (rule operands name qnames);

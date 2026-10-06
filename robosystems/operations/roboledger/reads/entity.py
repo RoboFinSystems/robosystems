@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.entity import LedgerEntityResponse
 from robosystems.models.extensions import Entity
+from robosystems.operations.roboledger.entity_scope import find_parent_entity
 
 
 def entity_to_response(entity: Entity) -> LedgerEntityResponse:
@@ -48,18 +49,8 @@ def entity_to_response(entity: Entity) -> LedgerEntityResponse:
 
 
 def resolve_parent_entity(session: Session) -> Entity | None:
-  """The ledger's own entity: what every writer means by "the entity".
-
-  Filtered by predicate because a tenant that received a shared report also
-  holds the sender's entity as a linked row, and an unfiltered ``LIMIT 1`` can
-  return it.
-  """
-  return (
-    session.query(Entity)
-    .filter(Entity.is_parent.is_(True), Entity.source != "linked")
-    .order_by(Entity.created_at.asc())
-    .first()
-  )
+  """The group parent (see ``entity_scope``), or None before one exists."""
+  return find_parent_entity(session)
 
 
 def get_parent_entity(session: Session) -> LedgerEntityResponse | None:

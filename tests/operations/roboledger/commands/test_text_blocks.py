@@ -198,7 +198,9 @@ class TestBindTextBlock:
     standing_result.scalar_one_or_none.return_value = standing
     existing_result = MagicMock()
     existing_result.scalars.return_value.all.return_value = [old_fact]
-    session.execute.side_effect = [standing_result, existing_result]
+    named_entity = MagicMock()
+    named_entity.fetchone.return_value = MagicMock(id="ent_1")
+    session.execute.side_effect = [named_entity, standing_result, existing_result]
 
     with patch.object(tb.Document, "get_by_id_and_graph", return_value=_doc()):
       resp = tb.bind_text_block(session, MagicMock(), "kg_x", _request(), "usr_1")

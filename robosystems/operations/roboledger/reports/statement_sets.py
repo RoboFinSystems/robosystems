@@ -30,6 +30,10 @@ from robosystems.operations.information_block.rules.engine import (
 from robosystems.operations.roboledger.commands._guards import (
   rule_summary as _rule_summary,
 )
+from robosystems.operations.roboledger.entity_scope import (
+  NoEntityError,
+  resolve_entity_id,
+)
 from robosystems.operations.roboledger.fact_set import create_fact_set
 from robosystems.operations.roboledger.reports.calc_dag import (
   load_rs_gaap_calculations,
@@ -56,10 +60,6 @@ if TYPE_CHECKING:
   from sqlalchemy.orm import Session
 
 
-class NoEntityError(Exception):
-  """Raised when the report path can't find an Entity to tag facts to."""
-
-
 class StatementStampError(Exception):
   """Raised when a reporting-configured tenant's close-time stamp fails.
 
@@ -80,17 +80,6 @@ class StatementStampResult:
   fact_set_ids: dict[str, str] = field(default_factory=dict)
   # None when no statement rules exist or evaluation errored (non-fatal).
   rule_summary: dict[str, int] | None = None
-
-
-def _get_entity_id(session: Session, graph_id: str) -> str:
-  """The earliest-created entity: the primary entity of a single-entity graph."""
-  result = session.execute(
-    text("SELECT id FROM entities ORDER BY created_at ASC LIMIT 1")
-  )
-  row = result.fetchone()
-  if row is None:
-    raise NoEntityError("No entity found. Import data before creating reports.")
-  return row.id
 
 
 def _evaluate_report_structures(
@@ -357,24 +346,33 @@ def _persist_report_facts(
   )
 
 
+def _scope_entity_id(session: Session, entity_id: str | None) -> str | None:
+  """The entity a stamp, retract or check acts on; None before any exists."""
+  try:
+    return resolve_entity_id(session, entity_id)
+  except NoEntityError:
+    return None
+
+
 def _canonical_set_ids_in_window(
-  session: Session, period_start: date, period_end: date
+  session: Session, period_start: date, period_end: date, entity_id: str
 ) -> list[str]:
-  """Canonical statement set ids for exactly this period window.
+  """One entity's canonical statement set ids for exactly this period window.
 
   Window-scoped, not per-structure: a reclose after a reporting-style change
-  must retire the old style's sets too. Excludes publication snapshots and
-  scenario months.
+  must retire the old style's sets too. Entity-scoped: closing one entity
+  never touches another's. Excludes publication snapshots and scenario months.
   """
   return list(
     session.execute(
       text(
         "SELECT id FROM fact_sets "
         "WHERE period_start = :ps AND period_end = :pe "
+        "  AND entity_id = :eid "
         "  AND factset_type = 'report' "
         "  AND report_id IS NULL AND scenario_id IS NULL"
       ),
-      {"ps": period_start, "pe": period_end},
+      {"ps": period_start, "pe": period_end, "eid": entity_id},
     )
     .scalars()
     .all()
@@ -382,21 +380,46 @@ def _canonical_set_ids_in_window(
 
 
 def has_canonical_statement_sets(
-  session: Session, *, period_start: date, period_end: date
+  session: Session,
+  *,
+  period_start: date,
+  period_end: date,
+  entity_id: str | None = None,
 ) -> bool:
-  """Whether the window already carries close-stamped canonical sets."""
-  return bool(_canonical_set_ids_in_window(session, period_start, period_end))
+  """Whether the entity's window already carries close-stamped canonical sets.
+
+  ``entity_id`` defaults to the group parent.
+  """
+  scope = _scope_entity_id(session, entity_id)
+  if scope is None:
+    return False
+  return bool(_canonical_set_ids_in_window(session, period_start, period_end, scope))
 
 
 def retract_canonical_statement_sets(
-  session: Session, *, period_start: date, period_end: date
+  session: Session,
+  *,
+  period_start: date,
+  period_end: date,
+  entity_id: str | None = None,
 ) -> list[str]:
-  """Delete the window's canonical statement sets (reopen / replace path).
+  """Delete one entity's canonical statement sets for the window (reopen /
+  replace path). ``entity_id`` defaults to the group parent.
 
   VerificationResults have no FK to fact_sets, so they are swept first; facts
   cascade. Returns the retracted fact_set ids.
   """
-  set_ids = _canonical_set_ids_in_window(session, period_start, period_end)
+  scope = _scope_entity_id(session, entity_id)
+  if scope is None:
+    return []
+  return _retract_window(session, period_start, period_end, scope)
+
+
+def _retract_window(
+  session: Session, period_start: date, period_end: date, entity_id: str
+) -> list[str]:
+  """Retract for an already-resolved entity."""
+  set_ids = _canonical_set_ids_in_window(session, period_start, period_end, entity_id)
   if not set_ids:
     return []
   session.execute(
@@ -414,8 +437,10 @@ def stamp_canonical_statement_sets(
   period_start: date,
   period_end: date,
   actor_id: str,
+  entity_id: str | None = None,
 ) -> StatementStampResult:
-  """Pivot the posted ledger and stamp the period's canonical statement sets.
+  """Pivot the posted ledger and stamp one entity's canonical statement sets
+  for the period. ``entity_id`` defaults to the group parent.
 
   Statements only; disclosures and text blocks are publication concerns.
   Idempotent: the window's existing canonical sets are replaced.
@@ -433,10 +458,10 @@ def stamp_canonical_statement_sets(
   if mapping is None:
     return StatementStampResult(stamped=False, note="no_coa_mapping")
 
-  try:
-    entity_id = _get_entity_id(session, graph_id)
-  except NoEntityError:
+  scope = _scope_entity_id(session, entity_id)
+  if scope is None:
     return StatementStampResult(stamped=False, note="no_entity")
+  entity_id = scope
 
   reporting_style_id = load_entity_reporting_style(session, entity_id)
   element_to_structures, structure_to_factset = _build_structure_mapping(
@@ -465,9 +490,7 @@ def stamp_canonical_statement_sets(
       periods=[PeriodSpec(start=period_start, end=period_end, label=period_label)],
       close_target_qname=close_target,
     )
-    retract_canonical_statement_sets(
-      session, period_start=period_start, period_end=period_end
-    )
+    _retract_window(session, period_start, period_end, entity_id)
     _pre_create_report_fact_sets(
       session,
       None,

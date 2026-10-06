@@ -16,6 +16,8 @@ from robosystems.operations.roboledger.schedules.service import (
   _generate_monthly_periods,
 )
 
+_SVC_MOD = "robosystems.operations.roboledger.schedules.service"
+
 
 @pytest.fixture(autouse=True)
 def _period_gate_open():
@@ -131,7 +133,7 @@ class TestCreateSchedule:
     # Mock _ensure_schedule_taxonomy
     session.execute.return_value.fetchone.return_value = MagicMock(id="tax_sched_01")
     # Mock _get_entity_id
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="Office Furniture Depreciation",
@@ -158,7 +160,7 @@ class TestCreateSchedule:
 
     session.execute.return_value.fetchone.return_value = MagicMock(id="tax_01")
 
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="FactSet Test",
@@ -194,7 +196,7 @@ class TestCreateSchedule:
 
     session.execute.return_value.fetchone.return_value = MagicMock(id="tax_01")
 
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="No Scope",
@@ -221,7 +223,7 @@ class TestCreateSchedule:
 
     session.execute.return_value.fetchone.return_value = MagicMock(id="tax_01")
 
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="No Metadata",
@@ -244,7 +246,7 @@ class TestCreateSchedule:
 
     session.execute.return_value.fetchone.return_value = MagicMock(id="tax_01")
 
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="Scoped Schedule",
@@ -287,7 +289,7 @@ class TestCreateSchedule:
 
     session.execute.return_value.fetchone.return_value = MagicMock(id="tax_01")
 
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="Boundary Test",
@@ -319,7 +321,7 @@ class TestCreateSchedule:
 
     session.execute.return_value.fetchone.return_value = MagicMock(id="tax_01")
 
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="Test",
@@ -364,7 +366,7 @@ class TestCreateScheduleExistingStructure:
     existing.metadata_ = {}
     existing.artifact_mechanics = {}
 
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       result = svc.create_schedule(
         session,
         name="Rebuilt Schedule",
@@ -408,7 +410,7 @@ class TestCreateScheduleExistingStructure:
     existing.metadata_ = {}
     existing.artifact_mechanics = {}
 
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="Rebuilt",
@@ -442,7 +444,7 @@ class TestCreateScheduleExistingStructure:
     existing.metadata_ = {}
     existing.artifact_mechanics = {}
 
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="Rebuilt",
@@ -481,7 +483,7 @@ class TestCreateScheduleExistingStructure:
     existing.metadata_ = {}
     existing.artifact_mechanics = {}
 
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="Rebuilt",
@@ -518,7 +520,7 @@ class TestCreateScheduleHasPartArcs:
     # SumEquals rule), so the cm role lookup is the only execute() call.
     session.execute.return_value = cm_result
 
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="Prepaid Amortization",
@@ -551,7 +553,7 @@ class TestCreateScheduleHasPartArcs:
   def test_no_has_part_arcs_when_cm_roles_absent(self):
     session = _mock_session()  # default execute().scalars() → []
     svc = ScheduleService()
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="No CM Roles",
@@ -606,7 +608,7 @@ class TestCreateScheduleCreditDirection:
     seq.append(qname_row)
     session.execute.side_effect = seq
 
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="Direction Test",
@@ -720,7 +722,7 @@ class TestCreateScheduleSumEqualsRule:
       else None
     )
 
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="Depr Test",
@@ -772,7 +774,7 @@ class TestCreateScheduleSumEqualsRule:
     qname_row.scalar.return_value = "fac:Expense"
     session.execute.side_effect = [cm_roles_row, balance_row, contra_row, qname_row]
 
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="Prepaid no-original",
@@ -823,7 +825,7 @@ class TestCreateScheduleSumEqualsRule:
       fetchone=MagicMock(return_value=MagicMock(id="tax_01"))
     )
     svc = ScheduleService()
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="No Metadata",
@@ -847,7 +849,7 @@ class TestCreateScheduleSourceTransactionId:
       fetchone=MagicMock(return_value=MagicMock(id="tax_01"))
     )
     svc = ScheduleService()
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="Linked Schedule",
@@ -869,7 +871,7 @@ class TestCreateScheduleSourceTransactionId:
       fetchone=MagicMock(return_value=MagicMock(id="tax_01"))
     )
     svc = ScheduleService()
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="No Link",
@@ -918,7 +920,7 @@ class TestCreateScheduleMaterializesObligations:
       fetchone=MagicMock(return_value=MagicMock(id="tax_01"))
     )
     svc = ScheduleService()
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="3-month schedule",
@@ -956,7 +958,7 @@ class TestCreateScheduleMaterializesObligations:
       fetchone=MagicMock(return_value=MagicMock(id="tax_01"))
     )
     svc = ScheduleService()
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="Linked obligations",
@@ -981,7 +983,7 @@ class TestCreateScheduleMaterializesObligations:
       fetchone=MagicMock(return_value=MagicMock(id="tax_01"))
     )
     svc = ScheduleService()
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="Metadata round-trip",
@@ -1018,7 +1020,7 @@ class TestCreateScheduleMaterializesObligations:
       fetchone=MagicMock(return_value=MagicMock(id="tax_01"))
     )
     svc = ScheduleService()
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="Stamped",
@@ -1047,7 +1049,7 @@ class TestCreateScheduleMaterializesObligations:
       fetchone=MagicMock(return_value=MagicMock(id="tax_01"))
     )
     svc = ScheduleService()
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="Timestamps",
@@ -1079,7 +1081,7 @@ class TestCreateScheduleMaterializesObligations:
       fetchone=MagicMock(return_value=MagicMock(id="tax_01"))
     )
     svc = ScheduleService()
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="Backfilled depreciation",
@@ -1115,7 +1117,7 @@ class TestCreateScheduleMaterializesObligations:
       fetchone=MagicMock(return_value=MagicMock(id="tax_01"))
     )
     svc = ScheduleService()
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="Fresh schedule",
@@ -1141,7 +1143,7 @@ class TestCreateScheduleMaterializesObligations:
       fetchone=MagicMock(return_value=MagicMock(id="tax_01"))
     )
     svc = ScheduleService()
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="84-month depreciation",
@@ -1483,7 +1485,7 @@ class TestCreateScheduleMaterializesObligations:
     session.add.side_effect = _stamp_structure_id
 
     svc = ScheduleService()
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="Schema check",
@@ -2208,7 +2210,7 @@ def test_sumequals_rule_generates_for_coa_debit_with_null_qname() -> None:
   session.execute.return_value.scalar.return_value = None
 
   svc = ScheduleService()
-  with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+  with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
     svc.create_schedule(
       session,
       name="Prepaid Insurance Amortization",
@@ -2401,7 +2403,7 @@ class TestCreateScheduleResidualValue:
     qname_row.scalar.return_value = "fac:DeprExpense"
     session.execute.side_effect = [cm_roles_row, balance_row, qname_row]
 
-    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    with patch(f"{_SVC_MOD}.resolve_entity_id", return_value="ent_01"):
       svc.create_schedule(
         session,
         name="Residual Test",

@@ -38,6 +38,10 @@ from robosystems.models.extensions import (
 from robosystems.models.extensions.structure import TEXT_BLOCK_CAPS
 from robosystems.operations.aws.s3 import S3Client
 from robosystems.operations.information_block.envelope import DISCLOSURE_BLOCK_TYPE
+from robosystems.operations.roboledger.entity_scope import (
+  report_entity_id,
+  resolve_entity_id,
+)
 from robosystems.operations.roboledger.fact_set import create_fact_set
 from robosystems.operations.roboledger.reads.blocked_source_graphs import (
   is_source_blocked,
@@ -61,7 +65,6 @@ from robosystems.operations.roboledger.reports.statement_sets import (  # noqa: 
   NoEntityError,
   _build_structure_mapping,
   _evaluate_report_structures,
-  _get_entity_id,
   _persist_report_facts,
   _pick_disclosure_structures,
   _pre_create_report_fact_sets,
@@ -317,7 +320,7 @@ def create_report(
 
   # The Style's close target decides where derived cumulative earnings land
   # (RetainedEarnings / PartnersCapital / MembersEquity by entity form).
-  entity_id = _get_entity_id(session, graph_id)
+  entity_id = resolve_entity_id(session)
   reporting_style_id = load_entity_reporting_style(session, entity_id)
   close_target = load_close_target_concept(session, reporting_style_id)
 
@@ -461,7 +464,9 @@ def regenerate_report(
   report_def.generation_status = "generating"
   session.flush()
 
-  entity_id = _get_entity_id(session, graph_id)
+  # The report keeps the entity it was generated for; a report with no facts
+  # yet takes the group parent, as ``create_report`` does.
+  entity_id = resolve_entity_id(session, report_entity_id(session, report_def.id))
   reporting_style_id = load_entity_reporting_style(session, entity_id)
   close_target = load_close_target_concept(session, reporting_style_id)
 
@@ -1418,7 +1423,12 @@ def _share_to_target(
         )
         target_session.add(rf)
 
-      _ensure_linked_entity(target_session, source_graph_id, shared_by)
+      source_entity_id = next(
+        (fs["entity_id"] for fs in source_fact_sets if fs.get("entity_id")), None
+      )
+      _ensure_linked_entity(
+        target_session, source_graph_id, shared_by, source_entity_id
+      )
 
       # Re-checked: a block committed mid-copy must win, or the recipient's
       # purge (already run) would miss this copy.
@@ -1719,23 +1729,40 @@ def _ensure_shared_elements(
 
 
 def _ensure_linked_entity(
-  target_session: Session, source_graph_id: str, shared_by: str
+  target_session: Session,
+  source_graph_id: str,
+  shared_by: str,
+  source_entity_id: str | None = None,
 ) -> None:
   """Upsert a linked Entity for the source company in the target graph.
 
-  Also links unlinked securities carrying the same ``source_graph_id``.
+  The source company is the entity the shared report's facts belong to, else
+  the source graph's group parent. The linked row is keyed on the source graph
+  and that entity, so two subsidiaries of one graph stay two rows. Also links
+  unlinked securities carrying the same ``source_graph_id``.
   """
   from robosystems.db.extensions import extensions_session
   from robosystems.models.extensions.entity import Entity
+  from robosystems.operations.roboledger.entity_scope import (
+    find_linked_entity_id,
+    find_parent_entity,
+  )
 
   try:
     with extensions_session(source_graph_id) as source_session:
-      source_entity = source_session.execute(
-        select(Entity).where(Entity.is_parent.is_(True)).limit(1)
-      ).scalar_one_or_none()
+      source_entity = (
+        source_session.get(Entity, source_entity_id) if source_entity_id else None
+      )
+      if source_entity is None:
+        source_entity = find_parent_entity(source_session)
 
       if not source_entity:
         return
+      source_entity_id = str(source_entity.id)
+      source_parent = find_parent_entity(source_session)
+      is_source_parent = (
+        source_parent is not None and source_parent.id == source_entity.id
+      )
 
       entity_data = {
         "name": source_entity.name,
@@ -1749,11 +1776,14 @@ def _ensure_linked_entity(
   except Exception:
     logger.warning(f"Could not read source entity from {source_graph_id}")
     entity_data = {"name": f"Entity ({source_graph_id})"}
+    is_source_parent = source_entity_id is None
 
-  existing = target_session.execute(
-    text("SELECT id FROM entities WHERE metadata->>'source_graph_id' = :sgid LIMIT 1"),
-    {"sgid": source_graph_id},
-  ).scalar_one_or_none()
+  existing = find_linked_entity_id(
+    target_session,
+    source_graph_id,
+    source_entity_id,
+    match_unkeyed=is_source_parent,
+  )
 
   if existing:
     target_session.execute(
@@ -1766,11 +1796,15 @@ def _ensure_linked_entity(
           cik = :cik,
           ticker = :ticker,
           state_of_incorporation = :state_of_incorporation,
+          metadata = CASE WHEN CAST(:seid AS text) IS NULL THEN metadata
+                     ELSE metadata || jsonb_build_object('source_entity_id', :seid)
+                     END,
           updated_at = now()
         WHERE id = :entity_id
       """),
       {
         "entity_id": existing,
+        "seid": source_entity_id,
         "name": entity_data["name"],
         "legal_name": entity_data.get("legal_name"),
         "entity_type": entity_data.get("entity_type"),
@@ -1798,7 +1832,10 @@ def _ensure_linked_entity(
       is_parent=False,
       status="active",
       address_country="US",
-      metadata_={"source_graph_id": source_graph_id},
+      metadata_={
+        "source_graph_id": source_graph_id,
+        **({"source_entity_id": source_entity_id} if source_entity_id else {}),
+      },
       created_by=shared_by,
     )
     target_session.add(linked_entity)

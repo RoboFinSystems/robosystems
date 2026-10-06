@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.fact_provenance import (
@@ -56,6 +56,7 @@ from robosystems.operations.information_block.rules.expressions import (
   lhs_variable_names,
   parse_arithmetic_expression,
 )
+from robosystems.operations.roboledger.entity_scope import resolve_entity_id
 from robosystems.operations.roboledger.fact_set import create_fact_set
 from robosystems.operations.roboledger.reports.calc_dag import topo_sort_calculations
 from robosystems.utils.ulid import generate_prefixed_ulid
@@ -65,16 +66,6 @@ from robosystems.utils.ulid import generate_prefixed_ulid
 class _BoundOperand:
   value: float
   period_start: date | None
-
-
-def _default_entity_id(session: Session) -> str:
-  """Earliest-created entity, the primary entity for single-entity graphs."""
-  row = session.execute(
-    text("SELECT id FROM entities ORDER BY created_at ASC LIMIT 1")
-  ).fetchone()
-  if row is None:
-    raise ValueError("No entity found. Import data before computing metrics.")
-  return row.id
 
 
 def _bind_operand(
@@ -200,7 +191,7 @@ def cmd_compute_metrics(
       f"{body.structure_id!r} is {structure.block_type!r}"
     )
 
-  entity_id = body.entity_id or _default_entity_id(session)
+  entity_id = resolve_entity_id(session, body.entity_id)
 
   associations = (
     session.execute(
@@ -541,7 +532,7 @@ def cmd_assert_metrics(
       f"{body.structure_id!r} is {structure.block_type!r}"
     )
 
-  entity_id = body.entity_id or _default_entity_id(session)
+  entity_id = resolve_entity_id(session, body.entity_id)
 
   associations = (
     session.execute(
