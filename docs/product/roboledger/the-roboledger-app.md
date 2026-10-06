@@ -42,11 +42,11 @@ An entry in a closed month can't be changed until the month is reopened. While Q
 
 **Statements** shows the balance sheet, income statement, cash flow and statement of equity straight from the current ledger, for any period. Nothing is saved, and no close is needed.
 
-![Live statements showing a balance sheet with current and prior columns](images/statements.png)
+![Live statements showing a balance sheet with prior and current columns](images/statements.png)
 
 **Closing Book** is where the month-end close lives. The period close view shows the last closed month, the month you're working towards, what's blocking it, and each schedule's entry for the month. Beside it are the statements from your latest report, your account rollups, your schedules, your reconciliations with the transactions that changed in QuickBooks after a sync, and the trial balance. See [Close the month with your AI assistant](month-end-close.md), [Schedules for recurring entries](schedules.md), [Reconcile your accounts](reconcile-your-accounts.md) and [When QuickBooks changes after a sync](changes-after-sync.md).
 
-![The Closing Book period close view, showing the last closed month, a blocker, and four schedule entries pending for August](images/closing-book.png)
+![The Closing Book period close view, showing August closed, September as the close target and closeable now, and six schedule entries drafted for September](images/closing-book.png)
 
 ## Reports
 

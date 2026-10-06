@@ -38,7 +38,7 @@ claude plugin install robosystems@robosystems
 
 ## ChatGPT
 
-Turn on developer mode in ChatGPT's settings, then create an app (ChatGPT has also called it a connector) with the address above. Developer mode isn't available on every ChatGPT plan, and on a business workspace an admin may need to allow it. A connection added this way serves every tool of the graph you choose, RoboLedger included.
+Open **Plugins**, then **Add → Create custom MCP server**. Paste the address under Connection, leave Authentication on OAuth, accept the warning about custom servers and choose **Create as a plugin**. Custom MCP servers aren't available on every ChatGPT plan; if the menu item is missing, turn on developer mode in ChatGPT's settings, and on a business workspace an admin may need to allow it. A connection added this way serves every tool of the graph you choose, RoboLedger included.
 
 To read SEC filings with no address to paste, install [RoboSystems](https://chatgpt.com/plugins/plugin_asdk_app_6a8f6d7d50d081918787990d4cab45ca) from ChatGPT's plugin directory instead. That listing reaches the SEC filings only, and it is not the Claude Code plugin above. You still need a RoboSystems account with an SEC filings subscription.
 
