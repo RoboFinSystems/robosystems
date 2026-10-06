@@ -7,7 +7,7 @@ Portable Grafana dashboard exports with templated datasource UIDs for easy impor
 | File | Description |
 |------|-------------|
 | `ops.json` | Platform observability (API, ECS, RDS, Valkey, Prometheus metrics) |
-| `logs.json` | CloudWatch logs (API, Dagster, Graph API) |
+| `logs.json` | CloudWatch logs: ingest per log group, errors and security events by service, API failures and slow requests, Graph API query latency, live streams |
 | `cur.json` | AWS Cost and Usage Report dashboard |
 
 ## Template Variables
@@ -17,10 +17,12 @@ Dashboards use Grafana template variables for datasources and environment select
 | Variable | Type | Used In | Description |
 |----------|------|---------|-------------|
 | `${prometheus}` | Prometheus | ops | Amazon Managed Prometheus |
-| `${cloudwatch}` | CloudWatch | ops | AWS CloudWatch metrics |
-| `${datasource}` | CloudWatch | logs | CloudWatch datasource |
+| `${cloudwatch}` | CloudWatch | ops, logs | AWS CloudWatch metrics and Logs Insights |
 | `${athena}` | Athena | cur | AWS Athena for CUR data |
 | `${env}` | Custom | ops, logs | Environment selector (`prod`, `staging`) |
+| `${level}` | Custom | logs | `ERROR`, `WARNING`, `INFO` or All, applied to the log panels |
+| `${search}` | Textbox | logs | Regular expression matched against each line in the log panels |
+| `${log_groups}`, `${log_group_names}` | Query | logs | Hidden: the log groups under `/robosystems/${env}/`, as ARNs for Logs Insights and as names for the ingest metrics |
 | `${cur_table}` | Constant | cur | Athena table the CUR is crawled into (hidden; set once after import) |
 | `${granularity}` | Custom | cur | Bucket size for the cost time series: daily, weekly or monthly |
 
@@ -67,6 +69,23 @@ Ensure AWS resources are tagged for the dashboard filters:
 
 Lines without a tag are not dropped: untagged spend is attributed to the AWS product that
 billed it (component) or shown as `untagged` (environment).
+
+## Logs Setup
+
+The `logs.json` dashboard needs only the CloudWatch datasource. The CloudFormation templates
+create one log group per service under `/robosystems/${Environment}/` (`api`, `worker`,
+`dagster`, `graph-api`, plus `audit-firehose` and `bastion-host`); the dashboard discovers
+whatever exists under that prefix, so a stack that is not deployed shows an empty panel
+rather than an error.
+
+- The error, security, API and Graph API panels parse the structured JSON lines the services
+  write (`level`, `component`, `action`, `status_code`, `duration_ms`, `user_id`,
+  `request_id`) and fall back to the level word for text lines such as Dagster's own output.
+- Every Logs Insights panel scans the selected time range on each load, and CloudWatch bills
+  that per GB scanned. The dashboard defaults to 24 hours; widen the range deliberately.
+- **Audit Delivery Failures** counts subscription-filter deliveries that failed or were
+  throttled. The API group's filter forwards security and operation audit records to the
+  audit Firehose, so anything above zero means audit records were not delivered.
 
 ### Cost Methodology
 
