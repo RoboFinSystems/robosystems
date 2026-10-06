@@ -5,9 +5,9 @@ written by ``refresh-reconciliations``; the block write slots are stubs.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from robosystems.models.api.information_block import (
   ArtifactResponse,
@@ -21,6 +21,7 @@ from robosystems.models.api.information_block import (
 )
 from robosystems.models.extensions.roboledger.fact import Fact
 from robosystems.models.extensions.roboledger.fact_set import FactSet
+from robosystems.models.extensions.rule import Rule
 from robosystems.operations.information_block.envelope import (
   association_to_connection,
   elements_to_lites,
@@ -37,6 +38,17 @@ RECONCILIATION_DISPLAY_NAME = "Reconciliation"
 RECONCILIATION_CATEGORY = "Close"
 # The forecast lever set's precedent: a standing set scoped by its structure.
 RECONCILIATION_FACTSET_TYPE = "custom"
+
+
+def own_rule_id(structure_id: Any) -> Any:
+  """The id of a block's own rule, as a scalar subquery: the first ``EqualTo``
+  rule written on it. A rule added to the block later, by any path, is never
+  the one its status is read from. ``structure_id`` is an id or a column."""
+  return (
+    select(func.min(Rule.id))
+    .where(Rule.target_structure_id == structure_id, Rule.rule_pattern == "EqualTo")
+    .scalar_subquery()
+  )
 
 
 def standing_fact_sets(

@@ -35,6 +35,7 @@ from robosystems.models.extensions.roboledger import Event, Fact, FactSet
 from robosystems.operations.information_block.reconciliation import (
   RECONCILIATION_BLOCK_TYPE,
   RECONCILIATION_FACTSET_TYPE,
+  own_rule_id,
 )
 from robosystems.operations.information_block.rules.engine import (
   evaluate_rules_for_structure,
@@ -351,11 +352,8 @@ def _create_block(
 
 
 def reconciliation_rule(session: Session, structure_id: str) -> Rule | None:
-  return session.execute(
-    select(Rule)
-    .where(Rule.target_structure_id == structure_id, Rule.rule_pattern == "EqualTo")
-    .limit(1)
-  ).scalar_one_or_none()
+  rule_id = session.execute(select(own_rule_id(structure_id))).scalar()
+  return session.get(Rule, rule_id) if rule_id else None
 
 
 def _entity_id(session: Session) -> str:

@@ -44,6 +44,7 @@ def _taxonomy(taxonomy_type: str) -> MagicMock:
   taxonomy = MagicMock()
   taxonomy.taxonomy_type = taxonomy_type
   taxonomy.name = "Tenant Framework"
+  taxonomy.is_locked = False
   return taxonomy
 
 

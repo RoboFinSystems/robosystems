@@ -17,7 +17,6 @@ from robosystems.models.api.extensions.reconciliations import (
 from robosystems.models.api.information_block import ReconciliationMechanics
 from robosystems.models.extensions import (
   Element,
-  Rule,
   Structure,
   VerificationResult,
 )
@@ -26,6 +25,7 @@ from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalen
 from robosystems.operations.information_block.reconciliation import (
   RECONCILIATION_BLOCK_TYPE,
   RECONCILIATION_FACTSET_TYPE,
+  own_rule_id,
 )
 from robosystems.operations.roboledger.fiscal_calendar import period_date_range
 
@@ -195,12 +195,10 @@ def list_reconciliations(session: Session, period: str) -> ReconciliationListRes
     # stamped on this set says nothing about whether the ledger ties.
     for result in session.execute(
       select(VerificationResult)
-      .join(Rule, Rule.id == VerificationResult.rule_id)
       .join(FactSet, FactSet.id == VerificationResult.fact_set_id)
       .where(
         VerificationResult.fact_set_id.in_(fact_set_ids),
-        Rule.target_structure_id == FactSet.structure_id,
-        Rule.rule_pattern == "EqualTo",
+        VerificationResult.rule_id == own_rule_id(FactSet.structure_id),
       )
       .order_by(VerificationResult.evaluated_at.desc())
     ).scalars():

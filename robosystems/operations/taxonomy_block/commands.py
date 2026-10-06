@@ -95,6 +95,8 @@ def update_taxonomy_block(
   )
   if taxonomy is None:
     raise ValueError(f"taxonomy_id {body.taxonomy_id!r} not found")
+  if taxonomy.is_locked:
+    raise ValueError(f"taxonomy {body.taxonomy_id!r} is locked and cannot be updated.")
 
   entry = _get_entry_or_422(taxonomy.taxonomy_type)
   _check_authoring_enabled(taxonomy.taxonomy_type)
