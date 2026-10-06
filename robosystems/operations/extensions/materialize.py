@@ -111,6 +111,7 @@ RELATIONSHIP_TABLES = [
   "EVENT_DISCHARGES_EVENT",
   "EVENT_REPLACES_EVENT",
   # roboledger transaction edges
+  "ENTITY_OWNS_ENTITY",
   "ENTITY_HAS_TRANSACTION",
   "EVENT_TRIGGERS_TRANSACTION",
   "TRANSACTION_HAS_ENTRY",
@@ -192,6 +193,7 @@ TABLE_EXTENSIONS: dict[str, str] = {
   "EVENT_DISCHARGES_EVENT": "base",
   "EVENT_REPLACES_EVENT": "base",
   # roboledger edges
+  "ENTITY_OWNS_ENTITY": "roboledger",
   "ENTITY_HAS_TRANSACTION": "roboledger",
   "EVENT_TRIGGERS_TRANSACTION": "roboledger",
   "TRANSACTION_HAS_ENTRY": "roboledger",
@@ -691,10 +693,24 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
 
   # ── Relationship Tables ──────────────────────────────────────────────
 
+  # A group parent to each subsidiary it holds. Linked counterparties are
+  # other graphs' companies and have no parent here.
+  tables["ENTITY_OWNS_ENTITY"] = f"""
+    CREATE OR REPLACE TABLE ENTITY_OWNS_ENTITY AS
+    SELECT
+      parent_entity_id                AS src,
+      id                              AS dst
+    FROM postgres_scan('{c}', '{s}', 'entities')
+    WHERE parent_entity_id IS NOT NULL
+      AND source <> 'linked'
+  """
+
+  # Each row hangs off the entity whose books it is in. A row from before
+  # rows carried one is the group parent's.
   tables["ENTITY_HAS_TRANSACTION"] = f"""
     CREATE OR REPLACE TABLE ENTITY_HAS_TRANSACTION AS
     SELECT
-      '{entity_id}'                   AS src,
+      COALESCE(entity_id, '{entity_id}') AS src,
       id                              AS dst
     FROM postgres_scan('{c}', '{s}', 'transactions')
   """
@@ -833,7 +849,8 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
   """
 
   # ── REA edges ────────────────────────────────────────────────────────
-  # Entity is the per-graph singleton, fanned out to every Agent / Event.
+  # A counterparty is the group's, so every Agent hangs off the group parent;
+  # an Event hangs off the entity it happened to.
 
   tables["ENTITY_HAS_AGENT"] = f"""
     CREATE OR REPLACE TABLE ENTITY_HAS_AGENT AS
@@ -846,7 +863,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
   tables["ENTITY_HAS_EVENT"] = f"""
     CREATE OR REPLACE TABLE ENTITY_HAS_EVENT AS
     SELECT
-      '{entity_id}'                   AS src,
+      COALESCE(entity_id, '{entity_id}') AS src,
       id                              AS dst
     FROM postgres_scan('{c}', '{s}', 'events')
   """
@@ -1076,25 +1093,48 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       AND is_active = true
   """
 
+  # The entity a report was generated for is the one its fact sets carry,
+  # the earliest deciding (`entity_scope.report_entity_id`).
+  report_entity = f"""(
+      SELECT report_id, entity_id
+      FROM postgres_scan('{c}', '{s}', 'fact_sets')
+      WHERE report_id IS NOT NULL AND entity_id IS NOT NULL
+        AND scenario_id IS NULL
+      QUALIFY row_number() OVER (
+        PARTITION BY report_id ORDER BY created_at, id
+      ) = 1
+    )"""
+
   tables["ENTITY_HAS_REPORT"] = f"""
     CREATE OR REPLACE TABLE ENTITY_HAS_REPORT AS
-    -- Native reports (no source_graph_id) belong to the graph's own entity
+    -- Native reports (no source_graph_id) belong to the entity they were
+    -- generated for; one with no facts yet is the group parent's
     SELECT
-      '{entity_id}'                   AS src,
+      COALESCE(own.entity_id, '{entity_id}') AS src,
       rd.id                           AS dst
     FROM postgres_scan('{c}', '{s}', 'reports') rd
+    LEFT JOIN {report_entity} own ON own.report_id = rd.id
     WHERE rd.generation_status = 'published'
       AND rd.source_graph_id IS NULL
     UNION ALL
-    -- Shared reports belong to the linked entity matching source_graph_id
+    -- Shared reports belong to the linked entity for their source company:
+    -- the row keyed to that company, else the one from before rows were keyed
     SELECT
       e.id                            AS src,
       rd.id                           AS dst
     FROM postgres_scan('{c}', '{s}', 'reports') rd
+    LEFT JOIN {report_entity} sent ON sent.report_id = rd.id
     JOIN postgres_scan('{c}', '{s}', 'entities') e
-      ON e.metadata->>'source_graph_id' = rd.source_graph_id
+      ON e.source = 'linked'
+      AND (e.metadata->>'source_graph_id') = rd.source_graph_id
+      AND ((e.metadata->>'source_entity_id') = sent.entity_id
+           OR (e.metadata->>'source_entity_id') IS NULL)
     WHERE rd.generation_status = 'published'
       AND rd.source_graph_id IS NOT NULL
+    QUALIFY row_number() OVER (
+      PARTITION BY rd.id
+      ORDER BY ((e.metadata->>'source_entity_id') IS NULL), e.id
+    ) = 1
   """
 
   # Inner-joined to `taxonomies` for the same reason as `FACT_HAS_ELEMENT`:

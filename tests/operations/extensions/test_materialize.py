@@ -437,6 +437,7 @@ class TestTableOrdering:
     }
     # RoboLedger edges: three-level ledger + dimensional tags + reporting
     assert set(by_extension["roboledger"]) == {
+      "ENTITY_OWNS_ENTITY",
       "ENTITY_HAS_TRANSACTION",
       "EVENT_TRIGGERS_TRANSACTION",  # McCarthy bridge
       "TRANSACTION_HAS_ENTRY",

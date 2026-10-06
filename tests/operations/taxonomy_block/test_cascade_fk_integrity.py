@@ -138,7 +138,7 @@ def _build_disclosure_taxonomy(session: Session) -> dict:
     structure_id=structure.id,
     period_end=date(2026, 6, 30),
     factset_type="disclosure",
-    entity_id="ent_1",
+    entity_id=PARENT_ENTITY_ID,
   )
   fact_set.provenance = {"origin": "text_block", "document_id": "doc_1"}
   session.add(fact_set)
@@ -151,7 +151,7 @@ def _build_disclosure_taxonomy(session: Session) -> dict:
     value_type="inline",
     period_end=date(2026, 6, 30),
     period_type="duration",
-    entity_id="ent_1",
+    entity_id=PARENT_ENTITY_ID,
     structure_id=structure.id,
     fact_set_id=fact_set.id,
   )
@@ -221,7 +221,7 @@ class TestCascadeDeleteTaxonomy:
         value=100,
         period_end=date(2026, 6, 30),
         period_type="duration",
-        entity_id="ent_1",
+        entity_id=PARENT_ENTITY_ID,
         fact_set_id=built["fact_set"].id,
       )
     )

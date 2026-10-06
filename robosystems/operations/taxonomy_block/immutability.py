@@ -140,11 +140,13 @@ def _affected_fact_set_ids(
 
 
 def _closed_canonical_predicates():
-  """The close-minted population: canonical sets whose window a closed period covers."""
+  """The close-minted population: canonical sets whose window a closed period
+  of the same entity covers."""
   closed_period = (
     select(FiscalPeriod.id)
     .where(
       FiscalPeriod.status == "closed",
+      FiscalPeriod.entity_id == FactSet.entity_id,
       FiscalPeriod.start_date <= FactSet.period_start,
       FiscalPeriod.end_date >= FactSet.period_end,
     )
@@ -183,6 +185,7 @@ def _disturbed_fact_set_ids(
         .join(Entry, Entry.id == LineItem.entry_id)
         .where(
           LineItem.element_id.in_(sources),
+          Entry.entity_id == FactSet.entity_id,
           Entry.status.in_(sorted(LANDED_ENTRY_STATUSES)),
           Entry.posting_date <= FactSet.period_end,
         )
@@ -213,6 +216,7 @@ def _closed_period_names(
     .join(
       FactSet,
       and_(
+        FiscalPeriod.entity_id == FactSet.entity_id,
         FiscalPeriod.start_date <= FactSet.period_start,
         FiscalPeriod.end_date >= FactSet.period_end,
       ),

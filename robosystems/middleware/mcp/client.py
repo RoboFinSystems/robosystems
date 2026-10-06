@@ -469,6 +469,7 @@ class GraphMCPClient:
       "ASSOCIATION_HAS_TO_ELEMENT": "Target element in calculation relationship",
       # RoboLedger extension relationships - Transaction section (entity graphs only)
       "LINE_ITEM_HAS_DIMENSION": "Links line items to dimensional qualifiers (department, class, etc.)",
+      "ENTITY_OWNS_ENTITY": "Links a group parent to each subsidiary that keeps its books in the graph",
       "ENTITY_HAS_TRANSACTION": "Links entities to their financial transactions",
       "TRANSACTION_HAS_ENTRY": "Links transactions to their ledger entries",
       "ENTRY_HAS_LINE_ITEM": "Links ledger entries to their line items (debits/credits)",
@@ -519,6 +520,7 @@ class GraphMCPClient:
       "ASSOCIATION_HAS_FROM_ELEMENT": ("Association", "Element"),
       "ASSOCIATION_HAS_TO_ELEMENT": ("Association", "Element"),
       # RoboLedger extension - Transaction section
+      "ENTITY_OWNS_ENTITY": ("Entity", "Entity"),
       "ENTITY_HAS_TRANSACTION": ("Entity", "Transaction"),
       "TRANSACTION_HAS_ENTRY": ("Transaction", "Entry"),
       "ENTRY_HAS_LINE_ITEM": ("Entry", "LineItem"),

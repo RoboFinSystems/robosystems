@@ -97,7 +97,7 @@ def _canonical_set(
     period_start=window[0],
     period_end=window[1],
     factset_type="report",
-    entity_id="ent_1",
+    entity_id=PARENT_ENTITY_ID,
   )
   fact_set.provenance = {
     "origin": "pivot",
@@ -115,7 +115,7 @@ def _canonical_set(
       period_start=window[0],
       period_end=window[1],
       period_type="duration",
-      entity_id="ent_1",
+      entity_id=PARENT_ENTITY_ID,
       structure_id=structure.id,
       fact_set_id=fact_set.id,
     )
