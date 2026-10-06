@@ -57,6 +57,6 @@ Run log tailing as a background command rather than backgrounding it with `&` �
 
 ## When it doesn't come up
 
-- Code changes not picked up → `just restart`
+- Code changes not picked up → `just restart`. Only a locally built backend runs the checkout's source; with the image lines set in `.env` the stack runs the published release, whatever the checkout holds
 - Dependency or Dockerfile changes → `just rebuild`
 - Taxonomy/framework source edits → `just reset-local` (tears down, wipes data, rebuilds, reseeds)

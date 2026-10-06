@@ -9,7 +9,7 @@
 # QUICK START:
 #   just start             # Full Docker setup (creates .env files automatically)
 #   just upgrade           # Fetch the latest images / rebuild, recreate what changed
-#   just restart           # After code changes (no rebuild)
+#   just restart           # After code changes to a local build (no rebuild)
 #   just test              # Run tests
 #   just logs api          # View API logs
 #
@@ -18,6 +18,9 @@
 _env := ".env"
 _local_env := ".env.local"
 _store_volumes := "robosystems-pg-data robosystems-valkey-data robosystems-opensearch-data robosystems-localstack-data"
+# Makes `up` rebuild the images built here. A published image keeps the pull
+# policy set beside it in .env, so it is never built over.
+_build_local := "ROBOSYSTEMS_LOCAL_PULL_POLICY=build"
 
 # Default recipe (runs when `just` is invoked with no args) — lists all recipes
 default:
@@ -31,8 +34,8 @@ start profile="robosystems" build="":
     @test -f {{_env}} || cp .env.example {{_env}}
     @test -f {{_local_env}} || cp .env.local.example {{_local_env}}
     @just install-hooks
-    docker compose -f compose.yaml --env-file {{_env}} --profile {{profile}} up \
-        {{ if build != "" { "--build" } else { "" } }} --detach
+    {{ if build != "" { _build_local } else { "" } }} docker compose -f compose.yaml \
+        --env-file {{_env}} --profile {{profile}} up --detach
 
 # Stop containers without removing them (restart with `just start`)
 stop profile="robosystems":
@@ -46,13 +49,13 @@ teardown profile="robosystems":
 upgrade profile="robosystems" scope="":
     @bin/tools/upgrade.sh {{profile}} {{scope}}
 
-# Rebuild containers (rebuilds images and force recreates - for package/env changes)
+# Rebuild the images built here and force recreate (package/env changes); a published image is recreated as pulled
 rebuild profile="robosystems":
     @test -f {{_env}} || cp .env.example {{_env}}
-    docker compose -f compose.yaml --env-file {{_env}} --profile {{profile}} up \
-        --build --force-recreate --detach
+    {{_build_local}} docker compose -f compose.yaml --env-file {{_env}} --profile {{profile}} up \
+        --force-recreate --detach
 
-# Quick restart containers to pick up code changes via volume mounts (no rebuild)
+# Quick restart to pick up code changes in a locally built backend, via its source mount (no rebuild)
 restart profile="robosystems":
     docker compose -f compose.yaml --profile {{profile}} restart
 

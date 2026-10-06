@@ -432,7 +432,7 @@ GET  /health                              # Health check
 ### Docker Issues
 
 ```bash
-just restart               # Code changes not picked up
+just restart               # Code changes not picked up (local builds; a published image runs its own source)
 just rebuild               # Dependency changes not working
 just logs api              # Check API logs
 just logs-grep worker ERROR  # Search worker logs
