@@ -26,7 +26,7 @@ fi
 
 test -f .env || cp .env.example .env
 
-COMPOSE="docker compose -f compose.yaml --env-file .env --profile ${PROFILE}"
+COMPOSE="docker compose $(bin/tools/compose-files.sh .env) --env-file .env --profile ${PROFILE}"
 
 echo "🔍 Resolving images for profile '${PROFILE}'..."
 
