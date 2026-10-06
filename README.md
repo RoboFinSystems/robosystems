@@ -77,7 +77,7 @@ just start apps
 # Refresh images and recreate the containers that changed (after a git pull)
 just upgrade
 
-# Restart to pick up code changes; rebuild after dependency changes
+# Local builds: restart to pick up code changes; rebuild after dependency changes
 just restart
 just rebuild
 ```
@@ -108,6 +108,8 @@ With `just start apps` (frontend apps):
 | RoboInvestor App | http://localhost:3002 |
 
 ### Local Development
+
+`just start` runs the published images as released, so the checkout supplies configuration, not code. To run your own changes, comment out the image lines in `.env`: the stack is then built from the checkout, with its source mounted so an edit applies on `just restart`.
 
 ```bash
 # Setup Python environment (uv automatically handles Python versions)
