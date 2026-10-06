@@ -5,11 +5,10 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
-from robosystems.database import get_async_db_session, get_db_session, session
+from robosystems.database import get_async_db_session, session
 from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import (
   get_current_user,
-  get_current_user_with_graph,
 )
 from robosystems.middleware.operations import (
   IdempotencyCache,
@@ -39,9 +38,7 @@ from robosystems.models.api import (
 from robosystems.models.api.common import (
   AUTHENTICATED_ERROR_RESPONSES,
   OPERATION_ERROR_RESPONSES,
-  RESOURCE_ERROR_RESPONSES,
   ErrorCode,
-  SuccessResponse,
   create_error_response,
 )
 from robosystems.models.api.graphs.core import CreateGraphRequest
@@ -50,7 +47,6 @@ from robosystems.models.api.user import (
   UserGraphsResponse,
 )
 from robosystems.models.core import Graph, GraphUser, OrgLimits, OrgRole, OrgUser, User
-from robosystems.operations.graph import selection
 
 router = APIRouter(prefix="/v1/graphs", tags=["Graphs"])
 
@@ -714,54 +710,3 @@ async def get_graph_capacity(
       ErrorCode.INTERNAL_ERROR,
       f"Failed to check capacity: {e!s}",
     )
-
-
-@router.post(
-  "/{graph_id}/select",
-  response_model=SuccessResponse,
-  summary="Select Graph",
-  description=(
-    "Deprecated: use `PUT /v1/user/selected-graph`, which writes the same "
-    "selection. Remembers the graph as the caller's current one."
-  ),
-  operation_id="selectGraph",
-  deprecated=True,
-  responses={**RESOURCE_ERROR_RESPONSES},
-)
-@endpoint_metrics_decorator(
-  endpoint_name="/v1/graphs/{graph_id}/select",
-  business_event_type="graph_selected",
-)
-async def select_graph(
-  graph_id: str,
-  current_user: User = Depends(get_current_user_with_graph),
-  db: Session = Depends(get_db_session),
-  _rate_limit: None = Depends(user_management_rate_limit_dependency),
-):
-  try:
-    selection.select_graph(current_user.id, graph_id, db)
-  except selection.GraphNotAccessible:
-    raise create_error_response(
-      status_code=status.HTTP_403_FORBIDDEN,
-      detail="Access denied to this graph",
-      code=ErrorCode.FORBIDDEN,
-    )
-  except selection.GraphNotFound:
-    raise create_error_response(
-      status_code=status.HTTP_404_NOT_FOUND,
-      detail="Graph not found",
-      code=ErrorCode.NOT_FOUND,
-    )
-  except Exception as e:
-    logger.error(f"Error selecting graph: {e!s}")
-    raise create_error_response(
-      status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail="Error selecting graph",
-      code=ErrorCode.INTERNAL_ERROR,
-    )
-
-  return SuccessResponse(
-    success=True,
-    message="Graph selected successfully",
-    data={"selectedGraphId": graph_id},
-  )

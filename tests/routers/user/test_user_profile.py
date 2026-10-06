@@ -586,65 +586,6 @@ class TestUserGraphs:
 
   @patch("robosystems.models.core.GraphUser.set_selected_graph")
   @patch("robosystems.models.core.GraphUser.get_by_user_id")
-  def test_select_user_graph_success(
-    self, mock_get_by_user_id, mock_set_selected, client_with_graphs: TestClient
-  ):
-    """Test successful graph selection."""
-    # Mock the user's available graphs (to pass access check)
-    mock_get_by_user_id.return_value = client_with_graphs.mock_user.graphs
-
-    # Mock successful graph selection
-    mock_set_selected.return_value = True
-
-    response = client_with_graphs.post(f"/v1/graphs/{VALID_TEST_GRAPH_ID_2}/select")
-
-    assert response.status_code == 200
-    data = response.json()
-
-    # SuccessResponse format
-    assert data["success"] is True
-    assert data["message"] == "Graph selected successfully"
-    assert data["data"]["selectedGraphId"] == VALID_TEST_GRAPH_ID_2
-
-    # Verify the method was called with correct parameters
-    mock_set_selected.assert_called_once()
-
-  @patch("robosystems.models.core.GraphUser.get_by_user_id")
-  def test_select_user_graph_access_denied(
-    self, mock_get_by_user_id, client_with_graphs: TestClient
-  ):
-    """Test graph selection for graph user doesn't have access to."""
-    # Mock the user's available graphs (only has access to graph1, graph2, graph3)
-    mock_get_by_user_id.return_value = client_with_graphs.mock_user.graphs
-
-    # Try to select a graph that's not in the user's available graphs
-    response = client_with_graphs.post("/v1/graphs/unauthorized-graph/select")
-
-    assert response.status_code == 403
-    data = response.json()
-    # Handle structured error response
-    assert "access denied" in data["detail"]["detail"].lower()
-
-  @patch("robosystems.models.core.GraphUser.set_selected_graph")
-  @patch("robosystems.models.core.GraphUser.get_by_user_id")
-  def test_select_user_graph_not_found(
-    self, mock_get_by_user_id, mock_set_selected, client_with_graphs: TestClient
-  ):
-    """Test graph selection for non-existent graph."""
-    # Create a mock graph that includes the requested graph in user's available graphs
-    mock_graphs = client_with_graphs.mock_user.graphs.copy()
-    mock_graphs.append(Mock(graph_id="kg99999999999999999"))
-    mock_get_by_user_id.return_value = mock_graphs
-
-    # Mock graph not found by set_selected_graph (passes access check but fails selection)
-    mock_set_selected.return_value = False
-
-    response = client_with_graphs.post("/v1/graphs/kg99999999999999999/select")
-
-    assert response.status_code == 404
-
-  @patch("robosystems.models.core.GraphUser.set_selected_graph")
-  @patch("robosystems.models.core.GraphUser.get_by_user_id")
   def test_set_selected_graph_success(
     self, mock_get_by_user_id, mock_set_selected, client_with_graphs: TestClient
   ):
