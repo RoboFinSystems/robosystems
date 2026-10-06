@@ -36,6 +36,7 @@ from robosystems.operations.roboledger.reconciliations import (
   NothingToReconcileError,
   SourceLedgerResolver,
 )
+from tests.ledger_entity import PARENT_ENTITY_ID
 
 from .conftest import GRAPH_ID, classified_account, entry
 
@@ -290,7 +291,11 @@ def test_a_sync_on_a_ledger_waiting_for_its_statement_refreshes_nothing(books):
   )
 
   session, accounts = books
-  session.add(FiscalCalendar(graph_id=GRAPH_ID, closed_through_period="2026-08"))
+  session.add(
+    FiscalCalendar(
+      entity_id=PARENT_ENTITY_ID, graph_id=GRAPH_ID, closed_through_period="2026-08"
+    )
+  )
   _record(session, accounts["cash"], 4_800.00)
 
   with patch.object(
@@ -324,7 +329,11 @@ def test_a_required_statement_holds_the_close_until_one_is_recorded(books):
   from robosystems.operations.roboledger.fiscal_calendar import FiscalCalendarService
 
   session, accounts = books
-  session.add(FiscalCalendar(graph_id=GRAPH_ID, closed_through_period="2026-08"))
+  session.add(
+    FiscalCalendar(
+      entity_id=PARENT_ENTITY_ID, graph_id=GRAPH_ID, closed_through_period="2026-08"
+    )
+  )
   rec = _record(session, accounts["loan"], 4_800.00)
   with patch(f"{_COMMANDS}._explicit_write_members", return_value={"usr"}):
     set_reconciliation_policy(
@@ -356,7 +365,11 @@ def test_a_corrected_balance_lapses_the_sign_off_and_the_original_restores_it(bo
   from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
 
   session, accounts = books
-  session.add(FiscalCalendar(graph_id=GRAPH_ID, closed_through_period="2026-08"))
+  session.add(
+    FiscalCalendar(
+      entity_id=PARENT_ENTITY_ID, graph_id=GRAPH_ID, closed_through_period="2026-08"
+    )
+  )
   rec = _record(session, accounts["loan"], 4_800.00)
   with patch(f"{_COMMANDS}._explicit_write_members", return_value={"usr"}):
     sign_off_reconciliation(

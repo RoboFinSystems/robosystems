@@ -34,6 +34,7 @@ from robosystems.operations.roboledger.commands._guards import (
   assert_period_not_closed,
 )
 from robosystems.operations.roboledger.entity_scope import (
+  find_entity_id,
   owner_entity_id,
   resolve_entity_id,
 )
@@ -938,13 +939,17 @@ class ScheduleService:
     session: Session,
     period_start: date,
     period_end: date,
+    *,
+    entity_id: str | None = None,
   ) -> PeriodCloseStatus:
-    """Get close status for the schedules that have work in a fiscal period.
+    """Get close status for an entity's schedules that have work in a fiscal
+    period. ``entity_id`` defaults to the group parent.
 
     Scoped to schedules carrying a fact or an entry in the period, so the
     pending count agrees with the obligation gate. Terminated, run-to-term
     and not-yet-started schedules are absent rather than listed at zero.
     """
+    entity_id = find_entity_id(session, entity_id)
     # best_entry: the most-advanced entry per structure (posted > draft > other).
     result = session.execute(
       text(f"""
@@ -990,6 +995,7 @@ class ScheduleService:
         LEFT JOIN reversal r ON r.reversal_of = be.entry_id
         WHERE s.block_type = 'schedule'
           AND s.is_active = true
+          AND s.entity_id = :entity_id
           -- A schedule with neither a fact nor an entry in this period has no
           -- work in it: it was terminated before the period, has run to term,
           -- or has not started yet. Without this the LEFT JOIN renders all
@@ -1000,16 +1006,25 @@ class ScheduleService:
           AND (f.id IS NOT NULL OR be.entry_id IS NOT NULL)
         ORDER BY s.name
       """),
-      {"period_start": period_start, "period_end": period_end},
+      {
+        "period_start": period_start,
+        "period_end": period_end,
+        "entity_id": entity_id,
+      },
     )
 
     fp_result = session.execute(
       text("""
         SELECT status, close_receipt FROM fiscal_periods
-        WHERE start_date <= :period_start AND end_date >= :period_end
+        WHERE entity_id = :entity_id
+          AND start_date <= :period_start AND end_date >= :period_end
         LIMIT 1
       """),
-      {"period_start": period_start, "period_end": period_end},
+      {
+        "period_start": period_start,
+        "period_end": period_end,
+        "entity_id": entity_id,
+      },
     )
     fp_row = fp_result.fetchone()
     period_status = fp_row.status if fp_row else "open"
@@ -1110,7 +1125,8 @@ class ScheduleService:
         fence_dates.append(date(period_end.year + 1, 1, 1))
       else:
         fence_dates.append(date(period_end.year, period_end.month + 1, 1))
-    assert_period_not_closed(session, *fence_dates)
+    entity_id = owner_entity_id(session, structure)
+    assert_period_not_closed(session, *fence_dates, entity_id=entity_id)
 
     # PRIMARY_ENTRY_SQL excludes generated reversals: an auto_reverse
     # schedule's reversal lands on the first day of the next period with the
@@ -1236,7 +1252,6 @@ class ScheduleService:
     # No transaction_id, deliberately: a schedule entry has no source-system
     # record, and synthesizing a Transaction would manufacture adapter-mirror
     # rows. Reads anchor on Entry.
-    entity_id = owner_entity_id(session, structure)
     entry = Entry(
       entity_id=entity_id,
       type=template.get("entry_type", "closing"),
@@ -1395,12 +1410,13 @@ class ScheduleService:
         f"total_debit={total_debit} total_credit={total_credit}"
       )
 
+    entity_id = resolve_entity_id(session, entity_id)
     # A draft in a closed period could never be posted.
-    self._assert_period_not_closed(session, posting_date)
+    assert_period_not_closed(session, posting_date, entity_id=entity_id)
     assert_accounts_postable(session, (li["element_id"] for li in normalized))
 
     entry = Entry(
-      entity_id=resolve_entity_id(session, entity_id),
+      entity_id=entity_id,
       type=entry_type,
       status="draft",
       posting_date=posting_date,
@@ -1534,7 +1550,9 @@ class ScheduleService:
       .scalars()
       .all()
     )
-    assert_period_not_closed(session, *stale_dates)
+    assert_period_not_closed(
+      session, *stale_dates, entity_id=owner_entity_id(session, structure)
+    )
 
     # A landed entry (reversed included) after the cutoff is the record of
     # that period's recognition; truncating under it would orphan it. Counted
@@ -1634,10 +1652,6 @@ class ScheduleService:
       "facts_deleted": facts_deleted,
       "reason": reason,
     }
-
-  def _assert_period_not_closed(self, session: Session, posting_date: date) -> None:
-    """Raise ClosedPeriodError if `posting_date` falls in a closed period."""
-    assert_period_not_closed(session, posting_date)
 
   def _delete_draft_entry(self, session: Session, entry_id: str) -> None:
     """Delete a draft entry, its draft auto-reversal, and their line items.

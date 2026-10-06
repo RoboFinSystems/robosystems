@@ -189,6 +189,7 @@ def test_delete_schedule_deletes_drafts_after_fencing_their_periods() -> None:
   structure = MagicMock()
   structure.id = "struct_sched"
   structure.block_type = "schedule"
+  structure.entity_id = "ent_1"
 
   executes = _delete_executes()
   executes[1] = _exec_result(scalars_all=[date(2026, 9, 30)])
@@ -209,7 +210,7 @@ def test_delete_schedule_deletes_drafts_after_fencing_their_periods() -> None:
   ):
     delete_schedule(session, DeleteScheduleRequest(structure_id="struct_sched"))
 
-  fence.assert_called_once_with(session, date(2026, 9, 30))
+  fence.assert_called_once_with(session, date(2026, 9, 30), entity_id="ent_1")
   statements = [str(call.args[0]) for call in session.execute.call_args_list]
   assert "DELETE FROM line_items" in statements[4]
   assert "DELETE FROM entries" in statements[5]
@@ -551,7 +552,8 @@ def _rebuild_session(
     9. count facts → fetchone
     10. count distinct periods → fetchone
   query().filter().delete() captures the deleted models in order.
-  _calendar_closed_through_date uses session.query(FiscalCalendar).first().
+  _calendar_closed_through_date uses
+  session.query(FiscalCalendar).filter(...).first().
 
   session.get is now shared: `lock_by_id` fetches the locked schedule
   `Structure` through it, and the supersede path fetches the old `Event`. It
@@ -583,12 +585,12 @@ def _rebuild_session(
   session.get.side_effect = _get
 
   # session.query(...) is used both by _calendar_closed_through_date
-  # (FiscalCalendar.first() → None) and by the cascade deletes
+  # (FiscalCalendar.filter().first() → None) and by the cascade deletes
   # (.filter().delete()).
   def _query(model):
     if model.__name__ == "FiscalCalendar":
       q = MagicMock()
-      q.first.return_value = None
+      q.filter.return_value.first.return_value = None
       return q
     return _Query(model, deleted_models)
 
@@ -934,7 +936,7 @@ def test_reinstate_reopened_schedule_scopes_promotes_now_open_facts() -> None:
   with patch.object(
     sched_cmds, "_calendar_closed_through_date", return_value=date(2026, 2, 28)
   ):
-    n = sched_cmds.reinstate_reopened_schedule_scopes(session)
+    n = sched_cmds.reinstate_reopened_schedule_scopes(session, "ent_1")
 
   assert n == 3
   stmt_arg, params = session.execute.call_args[0]
@@ -942,7 +944,8 @@ def test_reinstate_reopened_schedule_scopes_promotes_now_open_facts() -> None:
   assert "UPDATE facts" in sql
   assert "fact_scope = 'in_scope'" in sql
   assert "block_type = 'schedule'" in sql
-  assert params == {"closed_through": date(2026, 2, 28)}
+  assert "entity_id = :entity_id" in sql
+  assert params == {"closed_through": date(2026, 2, 28), "entity_id": "ent_1"}
 
 
 def test_reinstate_reopened_schedule_scopes_handles_null_boundary() -> None:
@@ -958,11 +961,11 @@ def test_reinstate_reopened_schedule_scopes_handles_null_boundary() -> None:
   session.execute.return_value = exec_result
 
   with patch.object(sched_cmds, "_calendar_closed_through_date", return_value=None):
-    n = sched_cmds.reinstate_reopened_schedule_scopes(session)
+    n = sched_cmds.reinstate_reopened_schedule_scopes(session, "ent_1")
 
   assert n == 5
   _stmt, params = session.execute.call_args[0]
-  assert params == {"closed_through": None}
+  assert params == {"closed_through": None, "entity_id": "ent_1"}
 
 
 # ── terminate_schedule ─────────────────────────────────────────────────────

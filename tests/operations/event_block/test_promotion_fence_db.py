@@ -75,6 +75,7 @@ def ext_session():
 def _seed_calendar(session, *, may_status: str = "closed") -> None:
   session.add(
     FiscalPeriod(
+      entity_id=PARENT_ENTITY_ID,
       graph_id=GRAPH_ID,
       name="2026-05",
       start_date=date(2026, 5, 1),
@@ -85,6 +86,7 @@ def _seed_calendar(session, *, may_status: str = "closed") -> None:
   )
   session.add(
     FiscalPeriod(
+      entity_id=PARENT_ENTITY_ID,
       graph_id=GRAPH_ID,
       name="2026-06",
       start_date=date(2026, 6, 1),

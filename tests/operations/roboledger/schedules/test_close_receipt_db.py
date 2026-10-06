@@ -27,6 +27,7 @@ from robosystems.db.extensions import ExtensionsBase
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
 from robosystems.operations.roboledger.reads.schedules import get_period_close_status
 from robosystems.operations.roboledger.schedules.service import ScheduleService
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
 
 pytestmark = pytest.mark.unit
 
@@ -67,6 +68,7 @@ def ext_session():
   session = sessionmaker(bind=engine)()
   session.execute(text(f'SET search_path TO "{schema}"'))
   ExtensionsBase.metadata.create_all(bind=session.connection())
+  seed_parent_entity(session)
   session.commit()
   session.execute(text(f'SET search_path TO "{schema}"'))
   try:
@@ -82,6 +84,7 @@ def ext_session():
 def _period(session, *, status, receipt):
   session.add(
     FiscalPeriod(
+      entity_id=PARENT_ENTITY_ID,
       graph_id="kg_test",
       name="2026-07",
       start_date=PERIOD_START,

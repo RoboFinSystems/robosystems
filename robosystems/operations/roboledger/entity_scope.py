@@ -42,6 +42,21 @@ def resolve_entity_id(session: Session, entity_id: str | None = None) -> str:
   return str(row.id)
 
 
+def find_entity_id(session: Session, entity_id: str | None = None) -> str | None:
+  """:func:`resolve_entity_id` for a read: None on a graph with no entity yet,
+  where there is nothing of anyone's to return."""
+  try:
+    return resolve_entity_id(session, entity_id)
+  except NoEntityError:
+    return None
+
+
+def is_group_parent(session: Session, entity_id: str) -> bool:
+  """Whether ``entity_id`` is the group parent, the entity the graph's own
+  source connection books for."""
+  return find_entity_id(session) == entity_id
+
+
 def resolve_entity(session: Session, entity_id: str | None = None) -> Entity:
   """The ORM row for :func:`resolve_entity_id`."""
   resolved_id = resolve_entity_id(session, entity_id)

@@ -19,6 +19,10 @@ from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
 from robosystems.operations.locking import bounded_lock_wait
+from robosystems.operations.roboledger.entity_scope import (
+  is_group_parent,
+  resolve_entity_id,
+)
 
 from .periods import period_date_range
 from .qb_writeback import WRITEBACK_EXCLUDED_EVENT_STATUSES
@@ -91,13 +95,15 @@ class WritebackFailed(PeriodCloseError):
 
 
 def drafts_close_posts(
-  session: Session, period_start: date, period_end: date
+  session: Session, period_start: date, period_end: date, *, entity_id: str | None
 ) -> Query[Entry]:
-  """The window's drafts a close posts: all but a retracted event's leftovers."""
+  """The drafts an entity's close of the window posts: all of its own but a
+  retracted event's leftovers. ``entity_id=None`` is every entity's, for a
+  read across the graph; a close always names one."""
   retracted_event_ids = session.query(Event.id).filter(
     Event.status.in_(WRITEBACK_EXCLUDED_EVENT_STATUSES)
   )
-  return session.query(Entry).filter(
+  in_window = [
     Entry.posting_date >= period_start,
     Entry.posting_date <= period_end,
     Entry.status == "draft",
@@ -105,7 +111,10 @@ def drafts_close_posts(
       Entry.triggered_by_event_id.is_(None),
       ~Entry.triggered_by_event_id.in_(retracted_event_ids),
     ),
-  )
+  ]
+  if entity_id is not None:
+    in_window.append(Entry.entity_id == entity_id)
+  return session.query(Entry).filter(*in_window)
 
 
 @dataclass
@@ -171,7 +180,8 @@ def _build_close_receipt(
 
 
 class PeriodCloseService:
-  """Run a period close as one transaction, which the caller commits.
+  """Run one entity's period close as one transaction, which the caller
+  commits. A sibling's drafts, periods and statements are not touched.
 
   The one exception is the QB pre-publish step, which commits its own
   qb_external_id markers: they record external writes that must survive a
@@ -202,6 +212,7 @@ class PeriodCloseService:
     allow_unposted_source_events: bool = False,
     allow_unreconciled_accounts: bool = False,
     note: str | None = None,
+    entity_id: str | None = None,
   ) -> PeriodCloseResult:
     gate = self._fcs.closeable_gate(
       session,
@@ -214,23 +225,35 @@ class PeriodCloseService:
       allow_reconciling_items=allow_reconciling_items,
       allow_unposted_source_events=allow_unposted_source_events,
       allow_unreconciled_accounts=allow_unreconciled_accounts,
+      entity_id=entity_id,
     )
     if not gate.is_closeable:
       raise CloseGateFailed(gate)
+    # A closeable gate found the entity's calendar, so the entity resolves.
+    entity_id = entity_id or resolve_entity_id(session)
 
     # Only a QuickBooks sync seeds rows past the setup month, so a native or
     # bank-feed ledger reaches its next closeable period with no row for it.
     self._fcs.ensure_fiscal_periods(
-      session, graph_id, start_period=period, end_period=period
+      session,
+      graph_id,
+      start_period=period,
+      end_period=period,
+      entity_id=entity_id,
     )
 
     period_start, period_end = period_date_range(period)
 
     # Draft + posted together, before anything mutates.
-    self._preflight_bs_check(session, period_start, period_end)
+    self._preflight_bs_check(session, period_start, period_end, entity_id)
 
     published_to_qb = self._publish_drafts_to_qb(
-      session, graph_id, period_start, period_end, actor_id=actor_id
+      session,
+      graph_id,
+      period_start,
+      period_end,
+      actor_id=actor_id,
+      entity_id=entity_id,
     )
 
     # The caller's session-scoped period fence serializes the whole close
@@ -245,7 +268,11 @@ class PeriodCloseService:
     ):
       fp = (
         session.query(FiscalPeriod)
-        .filter(FiscalPeriod.graph_id == graph_id, FiscalPeriod.name == period)
+        .filter(
+          FiscalPeriod.graph_id == graph_id,
+          FiscalPeriod.entity_id == entity_id,
+          FiscalPeriod.name == period,
+        )
         .populate_existing()
         .with_for_update()
         .one_or_none()
@@ -258,7 +285,9 @@ class PeriodCloseService:
 
     # Drafts the pre-publish step published are already posted.
     now = datetime.now(UTC)
-    posted_locally = drafts_close_posts(session, period_start, period_end).update(
+    posted_locally = drafts_close_posts(
+      session, period_start, period_end, entity_id=entity_id
+    ).update(
       {Entry.status: "posted", Entry.posted_at: now},
       synchronize_session=False,
     )
@@ -268,7 +297,7 @@ class PeriodCloseService:
     # Must run before this period flips to closed: on a never-closed
     # calendar the sequence check resolves the expected close from the
     # earliest non-closed FiscalPeriod, which has to still be this one.
-    cal_before = self._fcs.get(session, graph_id)
+    cal_before = self._fcs.get(session, graph_id, entity_id=entity_id)
     target_before = cal_before.close_target_period if cal_before else None
 
     effective_note = self._audit_note(
@@ -301,6 +330,7 @@ class PeriodCloseService:
         actor_id=actor_id,
         actor_type=actor_type,
         note=effective_note,
+        entity_id=entity_id,
       )
     else:
       calendar = self._fcs.advance_closed_through(
@@ -310,6 +340,7 @@ class PeriodCloseService:
         actor_id=actor_id,
         actor_type=actor_type,
         note=effective_note,
+        entity_id=entity_id,
       )
 
     target_auto_advanced = (
@@ -332,6 +363,7 @@ class PeriodCloseService:
       period_start=period_start,
       period_end=period_end,
       actor_id=actor_id,
+      entity_id=entity_id,
     )
 
     # Rule failures never fail the close; they surface in rule_summary.
@@ -340,10 +372,11 @@ class PeriodCloseService:
       period_start=period_start,
       period_end=period_end,
       actor_id=actor_id,
+      entity_id=entity_id,
     )
 
     logger.info(
-      f"Period {period} closed for graph {graph_id}: "
+      f"Period {period} closed for graph {graph_id} entity {entity_id}: "
       f"entries_posted={entries_posted} "
       f"(published_to_qb={published_to_qb} posted_locally={posted_locally}) "
       f"reclose={is_reclose} "
@@ -386,6 +419,7 @@ class PeriodCloseService:
     period_start,
     period_end,
     actor_id: str,
+    entity_id: str,
   ) -> StatementStampResult:
     stamper = self._statement_stamper
     if stamper is None:
@@ -400,6 +434,7 @@ class PeriodCloseService:
       period_start=period_start,
       period_end=period_end,
       actor_id=actor_id,
+      entity_id=entity_id,
     )
 
   def _publish_drafts_to_qb(
@@ -410,12 +445,15 @@ class PeriodCloseService:
     period_end,
     *,
     actor_id: str,
+    entity_id: str,
   ) -> int:
     """Publish in-period RoboLedger-originated drafts to QuickBooks.
 
-    Only for graphs with a write-back QB connection. Each publish also posts
-    its draft; returns the count published. Every rejection is collected,
-    then `WritebackFailed` is raised before the close mutates anything.
+    Only for the entity the graph's write-back QB connection books for, which
+    is the group parent: a subsidiary's drafts are never sent to the parent's
+    company file. Each publish also posts its draft; returns the count
+    published. Every rejection is collected, then `WritebackFailed` is raised
+    before the close mutates anything.
 
     Deliberately not atomic with the close: the `qb_external_id` markers
     (the only dedupe key) are committed here so a failed close can't roll
@@ -430,6 +468,9 @@ class PeriodCloseService:
       select_writeback_eligible_entries,
     )
 
+    if not is_group_parent(session, entity_id):
+      return 0
+
     # Shared with the outbox read (`list_period_drafts`) so its preview
     # matches this write.
     with _PlatformSessionFactory() as platform_session:
@@ -443,7 +484,7 @@ class PeriodCloseService:
     qb_connection_id = writeback.connection_id
 
     drafts_to_publish = select_writeback_eligible_entries(
-      session, period_start, period_end
+      session, period_start, period_end, entity_id=entity_id
     )
 
     if not drafts_to_publish:
@@ -525,6 +566,7 @@ class PeriodCloseService:
     session: Session,
     period_start,
     period_end,
+    entity_id: str,
   ) -> None:
     row = session.execute(
       text("""
@@ -533,11 +575,16 @@ class PeriodCloseService:
           COALESCE(SUM(li.credit_amount), 0) AS total_credit
         FROM line_items li
         JOIN entries e ON e.id = li.entry_id
-        WHERE e.posting_date >= :period_start
+        WHERE e.entity_id = :entity_id
+          AND e.posting_date >= :period_start
           AND e.posting_date <= :period_end
           AND e.status IN ('draft', 'posted')
       """),
-      {"period_start": period_start, "period_end": period_end},
+      {
+        "entity_id": entity_id,
+        "period_start": period_start,
+        "period_end": period_end,
+      },
     ).fetchone()
     total_debit = int(row.total_debit) if row else 0
     total_credit = int(row.total_credit) if row else 0
@@ -551,8 +598,10 @@ class PeriodCloseService:
     period_start,
     period_end,
     actor_id: str,
+    entity_id: str,
   ) -> tuple[dict[str, int] | None, tuple[str, ...]]:
-    """Evaluate rules on every schedule with facts in the period.
+    """Evaluate rules on each of the entity's schedules with facts in the
+    period.
 
     Returns (rule_summary, evaluated_structure_ids). An engine exception is
     logged and skipped; it never fails the close.
@@ -570,12 +619,17 @@ class PeriodCloseService:
           FROM structures s
           JOIN facts f ON f.structure_id = s.id
           WHERE s.block_type = 'schedule'
+            AND f.entity_id = :entity_id
             AND f.fact_scope = 'in_scope'
             AND f.period_end >= :period_start
             AND f.period_end <= :period_end
           """
         ),
-        {"period_start": period_start, "period_end": period_end},
+        {
+          "entity_id": entity_id,
+          "period_start": period_start,
+          "period_end": period_end,
+        },
       )
       .scalars()
       .all()

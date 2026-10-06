@@ -33,6 +33,7 @@ from robosystems.operations.roboledger.reads.reconciliations import (
   list_reconciliations,
 )
 from robosystems.operations.roboledger.reconciliations import SourceLedgerResolver
+from tests.ledger_entity import PARENT_ENTITY_ID
 
 from .conftest import GRAPH_ID, LIVE_CONNECTION, SYNCED_AT, TIED, source_report
 
@@ -370,7 +371,11 @@ def test_the_block_reads_as_an_information_block(ledger):
 def closed_through_july(ledger):
   from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
 
-  ledger.add(FiscalCalendar(graph_id=GRAPH_ID, closed_through_period="2026-07"))
+  ledger.add(
+    FiscalCalendar(
+      entity_id=PARENT_ENTITY_ID, graph_id=GRAPH_ID, closed_through_period="2026-07"
+    )
+  )
   ledger.commit()
   return ledger
 

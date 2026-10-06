@@ -118,7 +118,7 @@ def apply_handler(
   )
   # Same fence journal-entry commands take. Without it a DSL handler can
   # mint a draft while close is publishing, or after statements are stamped.
-  assert_period_not_closed(session, posting_date)
+  assert_period_not_closed(session, posting_date, entity_id=event.entity_id)
 
   # One timestamp shared by every row this invocation writes.
   now = datetime.now(UTC)

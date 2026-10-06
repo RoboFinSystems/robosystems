@@ -330,6 +330,7 @@ def create_report(
     mapping_id=body.mapping_id,
     periods=periods,
     close_target_qname=close_target,
+    entity_id=entity_id,
   )
 
   element_to_structures, structure_to_factset = _build_structure_mapping(
@@ -476,6 +477,7 @@ def regenerate_report(
     mapping_id=report_def.mapping_id or "",
     periods=periods,
     close_target_qname=close_target,
+    entity_id=entity_id,
   )
 
   element_to_structures, structure_to_factset = _build_structure_mapping(

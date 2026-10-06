@@ -762,7 +762,11 @@ def test_an_account_that_tied_and_then_drifts_holds_the_close(prepaid):
   from robosystems.operations.roboledger.fiscal_calendar import FiscalCalendarService
 
   session, accounts, _ = prepaid
-  session.add(FiscalCalendar(graph_id=GRAPH_ID, closed_through_period="2026-07"))
+  session.add(
+    FiscalCalendar(
+      entity_id=PARENT_ENTITY_ID, graph_id=GRAPH_ID, closed_through_period="2026-07"
+    )
+  )
   _refresh(session)
   entry(session, date(2026, 8, 12), accounts["prepaid"], accounts["cash"], 60_000)
   session.commit()

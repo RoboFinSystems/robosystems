@@ -489,6 +489,7 @@ def stamp_canonical_statement_sets(
       mapping_id=mapping.id,
       periods=[PeriodSpec(start=period_start, end=period_end, label=period_label)],
       close_target_qname=close_target,
+      entity_id=entity_id,
     )
     _retract_window(session, period_start, period_end, entity_id)
     _pre_create_report_fact_sets(

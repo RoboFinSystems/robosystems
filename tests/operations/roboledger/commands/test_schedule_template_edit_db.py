@@ -87,7 +87,7 @@ def _register(session, structure_id, _new_debit):
 def _close_gate(session, _structure_id, new_debit):
   # January has matured and is not drafted yet: the gate counts it on the
   # account the draft will post to.
-  balances = _undrafted_schedule_balances(session, date(2026, 2, 15))
+  balances = _undrafted_schedule_balances(session, date(2026, 2, 15), None)
   assert balances.get(new_debit) == 10_000
 
 

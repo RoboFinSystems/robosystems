@@ -34,6 +34,7 @@ def _pending_event(
   """Build a stand-in pending schedule_entry_due event row."""
   return SimpleNamespace(
     id=event_id,
+    entity_id="ent_1",
     event_type="schedule_entry_due",
     status=status,
     occurred_at=datetime.combine(
@@ -270,7 +271,7 @@ class TestAutopilotMode:
       ),
       patch(
         "robosystems.operations.event_block.promotion.assert_period_not_closed",
-        side_effect=lambda _s, *dates: order.append(f"fence:{dates}"),
+        side_effect=lambda _s, *dates, **_scope: order.append(f"fence:{dates}"),
       ),
     ):
       promote_pending_obligations(
@@ -621,6 +622,7 @@ class TestStrandedObligations:
     event is left alone (dispatch would reject its metadata anyway)."""
     opaque = SimpleNamespace(
       id="evt_opaque",
+      entity_id="ent_1",
       event_type="schedule_entry_due",
       status="classified",
       occurred_at=datetime(2026, 1, 31, 23, 59, 59, tzinfo=UTC),

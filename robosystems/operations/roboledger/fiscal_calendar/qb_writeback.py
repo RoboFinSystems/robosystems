@@ -97,13 +97,15 @@ def _entry_not_yet_in_qb() -> ColumnElement[bool]:
 
 
 def select_writeback_eligible_entries(
-  session: Session, period_start: date, period_end: date
+  session: Session, period_start: date, period_end: date, *, entity_id: str
 ) -> list[Row[tuple[Entry, Event]]]:
-  """Entries that publish on close *if* a write-back connection exists."""
+  """The entity's entries that publish on close *if* a write-back connection
+  exists."""
   return (
     session.query(Entry, Event)
     .join(Event, Event.id == Entry.triggered_by_event_id)
     .filter(
+      Entry.entity_id == entity_id,
       Entry.posting_date >= period_start,
       Entry.posting_date <= period_end,
       Entry.status == "draft",
@@ -116,11 +118,11 @@ def select_writeback_eligible_entries(
 
 
 def writeback_eligible_entry_ids(
-  session: Session, period_start: date, period_end: date
+  session: Session, period_start: date, period_end: date, *, entity_id: str
 ) -> set[str]:
   return {
     str(entry.id)
     for entry, _event in select_writeback_eligible_entries(
-      session, period_start, period_end
+      session, period_start, period_end, entity_id=entity_id
     )
   }

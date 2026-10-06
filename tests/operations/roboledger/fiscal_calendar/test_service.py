@@ -26,6 +26,7 @@ from robosystems.operations.roboledger.fiscal_calendar.service import (
   FiscalCalendarService,
   InvalidCloseTargetError,
 )
+from tests.ledger_entity import PARENT_ENTITY_ID
 
 
 def set_reconciling_items(monkeypatch, rows) -> None:
@@ -33,7 +34,17 @@ def set_reconciling_items(monkeypatch, rows) -> None:
   monkeypatch.setattr(
     "robosystems.operations.roboledger.commands.reconciling_items."
     "find_unresolved_reconciling_items",
-    lambda session, *, as_of: list(rows),
+    lambda session, *, as_of, entity_id=None: list(rows),
+  )
+
+
+@pytest.fixture(autouse=True)
+def _one_entity(monkeypatch):
+  """The stub has no entities table: every calendar here is the parent's
+  unless a test names another entity."""
+  monkeypatch.setattr(
+    "robosystems.operations.roboledger.fiscal_calendar.service.resolve_entity_id",
+    lambda session, entity_id=None: entity_id or PARENT_ENTITY_ID,
   )
 
 
@@ -58,7 +69,7 @@ def _no_reconciliations(monkeypatch):
   """
   monkeypatch.setattr(
     "robosystems.operations.roboledger.reads.reconciliations.unreconciled_for_close",
-    lambda session, period: [],
+    lambda session, period, entity_id=None: [],
   )
 
 
@@ -678,6 +689,7 @@ class TestCloseableGate:
     # Seed a FiscalPeriod row in 'closing' status (simulating reopen)
     session.add(
       FiscalPeriod(
+        entity_id=PARENT_ENTITY_ID,
         graph_id=GRAPH_ID,
         name="2025-06",
         start_date=date(2025, 6, 1),
@@ -859,6 +871,7 @@ class TestPendingObligationsGate:
     from robosystems.models.extensions.roboledger.event import Event
 
     evt = Event(
+      entity_id=PARENT_ENTITY_ID,
       event_type="schedule_entry_due",
       event_category="recognition",
       event_class="economic",
@@ -927,6 +940,7 @@ class TestPendingObligationsGate:
     svc, session = self._service_with_calendar()
     session.add(
       Event(
+        entity_id=PARENT_ENTITY_ID,
         event_type="journal_entry_recorded",
         event_category="other",
         event_class="economic",
@@ -974,6 +988,7 @@ class TestStrandedObligationsGate:
     from robosystems.models.extensions.roboledger.event import Event
 
     return Event(
+      entity_id=PARENT_ENTITY_ID,
       id=event_id,
       event_type="schedule_entry_due",
       event_category="recognition",
@@ -995,6 +1010,7 @@ class TestStrandedObligationsGate:
     from robosystems.models.extensions.roboledger.entry import Entry
 
     return Entry(
+      entity_id=PARENT_ENTITY_ID,
       type="closing",
       status="draft",
       posting_date=date.fromisoformat(posting_date),
@@ -1066,6 +1082,7 @@ class TestStrandedObligationsGate:
 
     session.add(
       Event(
+        entity_id=PARENT_ENTITY_ID,
         id="evt_future",
         event_type="schedule_entry_due",
         event_category="recognition",

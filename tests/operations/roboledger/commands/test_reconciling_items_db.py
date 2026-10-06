@@ -148,6 +148,7 @@ def _seed_elements(db) -> dict[str, str]:
 def _seed_periods(db) -> None:
   db.add(
     FiscalPeriod(
+      entity_id=PARENT_ENTITY_ID,
       graph_id=GRAPH_ID,
       name="2026-07",
       start_date=PERIOD_START,
@@ -158,6 +159,7 @@ def _seed_periods(db) -> None:
   )
   db.add(
     FiscalPeriod(
+      entity_id=PARENT_ENTITY_ID,
       graph_id=GRAPH_ID,
       name="2026-08",
       start_date=OPEN_START,
@@ -467,7 +469,9 @@ def test_catch_up_entry_never_publishes_back_to_the_source(session):
   )
   session.flush()
 
-  eligible = select_writeback_eligible_entries(session, OPEN_START, OPEN_END)
+  eligible = select_writeback_eligible_entries(
+    session, OPEN_START, OPEN_END, entity_id=PARENT_ENTITY_ID
+  )
   assert result.catch_up.entry_id not in {str(entry.id) for entry, _ in eligible}
 
 

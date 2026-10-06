@@ -379,6 +379,7 @@ def dispatch_preview(
   session: Session,
   body: CreateEventBlockRequest,
   metadata: BankFeedMetadata,
+  entity_id: str | None = None,
 ) -> HandlerPreview:
   """The entry the commit would write — the inbox's preview of an approve.
 
@@ -411,7 +412,7 @@ def dispatch_preview(
     lines=lines,
     connection_id=metadata.connection_id,
   )
-  preview = journal_dispatch_preview(session, body, journal)
+  preview = journal_dispatch_preview(session, body, journal, entity_id)
   preview.computed_values = {
     **(preview.computed_values or {}),
     "direction": "in" if (body.amount or 0) > 0 else "out",

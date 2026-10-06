@@ -98,6 +98,7 @@ def dispatch_preview(
   session: Session,
   body: CreateEventBlockRequest,
   metadata: JournalEntryReversedMetadata,
+  entity_id: str | None = None,
 ) -> HandlerPreview:
   """Validate the original entry + closed-period gate without persisting."""
   from sqlalchemy import select
@@ -136,7 +137,9 @@ def dispatch_preview(
   try:
     # Both months, as the command fences them: reversing marks the original
     # `reversed`, a change to its month.
-    assert_period_not_closed(session, original.posting_date, posting_date)
+    assert_period_not_closed(
+      session, original.posting_date, posting_date, entity_id=original.entity_id
+    )
   except (ClosedPeriodError, RowLockedError) as e:
     errors.append(str(e))
 

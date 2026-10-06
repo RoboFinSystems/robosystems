@@ -96,11 +96,13 @@ class TestFiscalCalendarCreate:
 
     service = FiscalCalendarService()
     session = MagicMock()
-    session.flush.side_effect = _integrity_error("uq_fiscal_calendar_graph")
+    session.flush.side_effect = _integrity_error("uq_fiscal_calendar_graph_entity")
+    # No sibling calendar to match the fiscal year against.
+    session.query.return_value.filter.return_value.first.return_value = None
     with pytest.MonkeyPatch.context() as mp:
-      mp.setattr(service, "get", lambda _s, _g: None)
+      mp.setattr(service, "get", lambda _s, _g, **_scope: None)
       with pytest.raises(CalendarAlreadyInitializedError):
-        service.get_or_create(session, "kg_x")
+        service.get_or_create(session, "kg_x", entity_id="ent_1")
 
 
 class TestViolatedConstraint:

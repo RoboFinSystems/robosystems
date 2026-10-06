@@ -164,6 +164,7 @@ def dispatch_preview(
   session: Session,
   body: CreateEventBlockRequest,
   metadata: AssetDisposedMetadata,
+  entity_id: str | None = None,
 ) -> HandlerPreview:
   """The plan ``dispatch`` would execute, behind the same validation gates."""
   from robosystems.operations.locking import RowLockedError
@@ -182,7 +183,7 @@ def dispatch_preview(
       gain_loss_element_id=metadata.gain_loss_element_id,
     )
     # dispatch posts on the disposal date and refuses a closed period.
-    assert_period_not_closed(session, body.occurred_at.date())
+    assert_period_not_closed(session, body.occurred_at.date(), entity_id=entity_id)
   except (ValueError, ClosedPeriodError, RowLockedError, ScheduleNotFoundError) as e:
     return HandlerPreview(
       would_succeed=False,

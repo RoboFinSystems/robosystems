@@ -446,13 +446,16 @@ class OLTPLoader:
           assert_period_not_closed,
         )
 
-        wipe_dates = (
-          session.query(Entry.posting_date)
+        wipe_dates: dict[str, list] = {}
+        for wipe_entity_id, posting_date in (
+          session.query(Entry.entity_id, Entry.posting_date)
           .filter(Entry.triggered_by_event_id.in_(events_to_wipe_subq))
           .distinct()
           .all()
-        )
-        assert_period_not_closed(session, *(d for (d,) in wipe_dates))
+        ):
+          wipe_dates.setdefault(str(wipe_entity_id), []).append(posting_date)
+        for wipe_entity_id, posting_dates in sorted(wipe_dates.items()):
+          assert_period_not_closed(session, *posting_dates, entity_id=wipe_entity_id)
         session.query(LineItem).filter(LineItem.entry_id.in_(entry_subq)).delete(
           synchronize_session=False
         )

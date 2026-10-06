@@ -26,7 +26,6 @@ from robosystems.models.api.extensions.schedules import (
 )
 from robosystems.models.extensions import Fact, Structure
 from robosystems.models.extensions.element import Element
-from robosystems.models.extensions.entity import Entity
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.event_handler import EventHandler
@@ -47,7 +46,7 @@ from robosystems.operations.roboledger.fiscal_calendar.close_service import (
   drafts_close_posts,
 )
 from robosystems.operations.roboledger.schedules.service import ScheduleService
-from tests.ledger_entity import PARENT_ENTITY_ID
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
 
 pytestmark = pytest.mark.unit
 
@@ -72,6 +71,7 @@ def ext_session():
   session = sessionmaker(bind=engine)()
   session.execute(text(f'SET search_path TO "{schema}"'))
   ExtensionsBase.metadata.create_all(bind=session.connection())
+  seed_parent_entity(session)
   session.commit()
   session.execute(text(f'SET search_path TO "{schema}"'))
 
@@ -94,7 +94,6 @@ def _element(session, name: str, *, is_active: bool = True) -> str:
 
 def _schedule(session) -> tuple[str, str, str]:
   """A three-month depreciation schedule; returns (structure, debit, credit)."""
-  session.add(Entity(id=PARENT_ENTITY_ID, name="Fictional Co", created_by="usr"))
   debit = _element(session, "Depreciation Expense")
   credit = _element(session, "Accumulated Depreciation")
   created = create_schedule(
@@ -295,7 +294,11 @@ def test_delete_takes_a_voided_obligations_leftover_draft_in_a_closed_month(
   structure_id = _drafted(session)
   (leftover,) = _schedule_entries(session, structure_id)
   session.get(Event, leftover.triggered_by_event_id).status = "voided"
-  session.add(FiscalCalendar(graph_id=GRAPH_ID, closed_through_period="2026-01"))
+  session.add(
+    FiscalCalendar(
+      entity_id=PARENT_ENTITY_ID, graph_id=GRAPH_ID, closed_through_period="2026-01"
+    )
+  )
   session.commit()
 
   delete_schedule(session, DeleteScheduleRequest(structure_id=structure_id))
@@ -307,7 +310,11 @@ def test_delete_takes_a_voided_obligations_leftover_draft_in_a_closed_month(
 def test_delete_still_refuses_a_live_draft_in_a_closed_month(ext_session):
   session = ext_session
   structure_id = _drafted(session)
-  session.add(FiscalCalendar(graph_id=GRAPH_ID, closed_through_period="2026-01"))
+  session.add(
+    FiscalCalendar(
+      entity_id=PARENT_ENTITY_ID, graph_id=GRAPH_ID, closed_through_period="2026-01"
+    )
+  )
   session.commit()
 
   with pytest.raises(ClosedPeriodError):
@@ -326,7 +333,11 @@ def test_ending_early_takes_a_leftover_draft_in_a_closed_month(ext_session):
   )
   january.status = "posted"
   session.get(Event, february.triggered_by_event_id).status = "voided"
-  session.add(FiscalCalendar(graph_id=GRAPH_ID, closed_through_period="2026-02"))
+  session.add(
+    FiscalCalendar(
+      entity_id=PARENT_ENTITY_ID, graph_id=GRAPH_ID, closed_through_period="2026-02"
+    )
+  )
   session.commit()
   kept, open_month = january.id, march.posting_date
 
@@ -398,5 +409,13 @@ def test_a_voided_events_draft_is_not_work_a_close_will_post(ext_session):
   _draft(session, triggered_by_event_id=_event(session, status="superseded"))
   session.commit()
 
-  assert drafts_close_posts(session, JAN_START, JAN_END).count() == 2
-  assert drafts_close_posts(session, date(2026, 2, 1), date(2026, 2, 28)).count() == 0
+  assert (
+    drafts_close_posts(session, JAN_START, JAN_END, entity_id=PARENT_ENTITY_ID).count()
+    == 2
+  )
+  assert (
+    drafts_close_posts(
+      session, date(2026, 2, 1), date(2026, 2, 28), entity_id=PARENT_ENTITY_ID
+    ).count()
+    == 0
+  )

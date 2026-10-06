@@ -44,7 +44,7 @@ from robosystems.operations.event_block.commands import (
 from robosystems.operations.event_block.promotion import promote_pending_obligations
 from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands.schedules import promote_obligations
-from tests.ledger_entity import PARENT_ENTITY_ID
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity_on
 
 pytestmark = pytest.mark.integration
 
@@ -86,6 +86,7 @@ def tenant():
         bind=conn.execution_options(schema_translate_map={None: GRAPH}),
         tables=_tenant_tables(),
       )
+      seed_parent_entity_on(conn.execution_options(schema_translate_map={None: GRAPH}))
     yield
   finally:
     with engine.begin() as conn:

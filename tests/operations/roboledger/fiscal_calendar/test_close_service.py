@@ -35,6 +35,20 @@ from robosystems.operations.roboledger.reports.statement_sets import (
 )
 
 GRAPH_ID = "kg01234567890abcdef"
+ENTITY_ID = "ent_1"
+
+_CLOSE = "robosystems.operations.roboledger.fiscal_calendar.close_service"
+
+
+@pytest.fixture(autouse=True)
+def _one_entity():
+  """The mocked session has no entities table: every close here is the group
+  parent's, so the resolver's query never eats an ordered execute result."""
+  with (
+    patch(f"{_CLOSE}.resolve_entity_id", side_effect=lambda s, e=None: e or ENTITY_ID),
+    patch(f"{_CLOSE}.is_group_parent", return_value=True),
+  ):
+    yield
 
 
 def _noop_stamper(session, **kwargs):
@@ -825,6 +839,7 @@ class TestClosePrePublishWriteback:
         period_start=datetime(2026, 5, 1).date(),
         period_end=datetime(2026, 5, 31).date(),
         actor_id="usr_1",
+        entity_id=ENTITY_ID,
       )
 
     # No drafts queried — we returned at the no-connection branch.
@@ -892,6 +907,7 @@ class TestClosePrePublishWriteback:
           period_start=datetime(2026, 5, 1).date(),
           period_end=datetime(2026, 5, 31).date(),
           actor_id="usr_1",
+          entity_id=ENTITY_ID,
         )
 
     # The failure carries both offenders' detail (only evt_2 failed,

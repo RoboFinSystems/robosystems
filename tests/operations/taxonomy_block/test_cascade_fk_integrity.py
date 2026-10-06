@@ -46,6 +46,7 @@ from robosystems.operations.taxonomy_block.cascade import (
 from robosystems.operations.taxonomy_block.update_apply import (
   apply_structures_to_remove,
 )
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
 
 pytestmark = pytest.mark.unit
 
@@ -70,6 +71,7 @@ def ext_session():
   session = session_factory()
   session.execute(text(f'SET search_path TO "{schema}"'))
   ExtensionsBase.metadata.create_all(bind=session.connection())
+  seed_parent_entity(session)
   session.commit()
   session.execute(text(f'SET search_path TO "{schema}"'))
 
@@ -319,6 +321,7 @@ class TestCurationNeverReachesImmutableSets:
     built["fact_set"].period_start = date(2026, 6, 1)
     ext_session.add(
       FiscalPeriod(
+        entity_id=PARENT_ENTITY_ID,
         graph_id="kg0123456789abcdef01",
         name="2026-06",
         start_date=date(2026, 6, 1),
@@ -341,6 +344,7 @@ class TestCurationNeverReachesImmutableSets:
     built["fact_set"].period_start = date(2026, 6, 1)
     ext_session.add(
       FiscalPeriod(
+        entity_id=PARENT_ENTITY_ID,
         graph_id="kg0123456789abcdef01",
         name="2026-06",
         start_date=date(2026, 6, 1),

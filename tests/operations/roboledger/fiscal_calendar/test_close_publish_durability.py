@@ -129,7 +129,12 @@ def _publish(session, fake_execute):
     ),
   ):
     svc._publish_drafts_to_qb(
-      session, GRAPH_ID, JUNE_START, JUNE_END, actor_id="usr_test"
+      session,
+      GRAPH_ID,
+      JUNE_START,
+      JUNE_END,
+      actor_id="usr_test",
+      entity_id=PARENT_ENTITY_ID,
     )
 
 

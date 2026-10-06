@@ -26,6 +26,7 @@ from robosystems.operations.roboledger.commands._guards import (
 from robosystems.operations.roboledger.commands.reconciling_items import (
   _closed_period_names,
 )
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity_on
 
 pytestmark = pytest.mark.integration
 
@@ -53,6 +54,7 @@ def tenant():
         bind=conn.execution_options(schema_translate_map={None: GRAPH}),
         tables=tables,
       )
+      seed_parent_entity_on(conn.execution_options(schema_translate_map={None: GRAPH}))
     yield
   finally:
     with engine.begin() as conn:
@@ -66,7 +68,11 @@ def ledger_closed_through_july(tenant):
   with extensions_session(GRAPH) as session:
     session.execute(text("DELETE FROM fiscal_periods"))
     session.execute(text("DELETE FROM fiscal_calendar"))
-    session.add(FiscalCalendar(graph_id=GRAPH, closed_through_period="2026-07"))
+    session.add(
+      FiscalCalendar(
+        entity_id=PARENT_ENTITY_ID, graph_id=GRAPH, closed_through_period="2026-07"
+      )
+    )
     for name, start, end, status in (
       ("2026-06", date(2026, 6, 1), date(2026, 6, 30), "closed"),
       ("2026-07", date(2026, 7, 1), date(2026, 7, 31), "closed"),
@@ -74,6 +80,7 @@ def ledger_closed_through_july(tenant):
     ):
       session.add(
         FiscalPeriod(
+          entity_id=PARENT_ENTITY_ID,
           graph_id=GRAPH,
           name=name,
           start_date=start,
@@ -120,5 +127,7 @@ def test_one_closed_date_among_open_ones_refuses():
 def test_the_reconciling_item_plan_uses_the_same_rule():
   with extensions_session(GRAPH) as session:
     assert _closed_period_names(
-      session, [date(2019, 5, 1), date(2026, 7, 3), date(2026, 8, 20)]
+      session,
+      [date(2019, 5, 1), date(2026, 7, 3), date(2026, 8, 20)],
+      PARENT_ENTITY_ID,
     ) == ["2019-05", "2026-07"]

@@ -354,7 +354,11 @@ def test_a_sync_that_recomputes_the_same_figures_keeps_their_preparer(
   """A scheduled sync re-running a comparison by hand left the figures as they
   were: whoever ran them still prepared what a reviewer signs."""
   session = ext_session
-  session.add(FiscalCalendar(graph_id=GRAPH_ID, closed_through_period="2026-07"))
+  session.add(
+    FiscalCalendar(
+      entity_id=PARENT_ENTITY_ID, graph_id=GRAPH_ID, closed_through_period="2026-07"
+    )
+  )
   session.commit()
   source = patch.object(
     SourceLedgerResolver,
@@ -496,7 +500,11 @@ def _a_second_passing_rule_on_the_block(session, rec):
 )
 def test_only_the_blocks_own_rule_decides_its_status(loan, door):
   session, structure_id = loan
-  session.add(FiscalCalendar(graph_id=GRAPH_ID, closed_through_period="2026-07"))
+  session.add(
+    FiscalCalendar(
+      entity_id=PARENT_ENTITY_ID, graph_id=GRAPH_ID, closed_through_period="2026-07"
+    )
+  )
   record_statement_balance(
     session,
     RecordStatementBalanceRequest(

@@ -73,3 +73,27 @@ def test_every_ledger_row_is_built_with_its_entity():
       ):
         offenders.append(f"{path.relative_to(_PACKAGE.parent)}:{node.lineno}")
   assert not offenders, "Ledger rows built without entity_id: " + ", ".join(offenders)
+
+
+_GUARDS = _PACKAGE / "operations" / "roboledger" / "commands" / "_guards.py"
+_CALENDAR_CHECKS = {"assert_period_not_closed", "closed_periods"}
+
+
+def test_every_closed_period_check_names_its_entity():
+  """A closed-month check with no entity reads the group parent's calendar,
+  which is the wrong one for a subsidiary's write."""
+  offenders = []
+  for path in _PACKAGE.rglob("*.py"):
+    if path == _GUARDS:
+      continue
+    for node in ast.walk(ast.parse(path.read_text())):
+      if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in _CALENDAR_CHECKS
+        and not any(keyword.arg == "entity_id" for keyword in node.keywords)
+      ):
+        offenders.append(f"{path.relative_to(_PACKAGE.parent)}:{node.lineno}")
+  assert not offenders, "Closed-period checks with no entity_id: " + ", ".join(
+    offenders
+  )

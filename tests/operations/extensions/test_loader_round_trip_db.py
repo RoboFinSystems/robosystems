@@ -113,6 +113,7 @@ def _seed(db) -> dict[str, str]:
   ):
     db.add(
       FiscalPeriod(
+        entity_id=PARENT_ENTITY_ID,
         graph_id=GRAPH_ID,
         name=name,
         start_date=start,

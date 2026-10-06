@@ -14,10 +14,12 @@ from robosystems.models.api.extensions.fiscal_calendar import (
 from robosystems.models.core.connection.connection import Connection, ConnectionStatus
 from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
+from robosystems.operations.roboledger.entity_scope import is_group_parent
 
 
 def get_fiscal_year_start_month(session: Session) -> int:
-  """The graph's fiscal year start month, defaulting to 1."""
+  """The graph's fiscal year start month, defaulting to 1. Every entity's
+  calendar carries the same one."""
   cal = session.query(FiscalCalendar).first()
   if cal and cal.fiscal_year_start_month:
     return int(cal.fiscal_year_start_month)
@@ -58,6 +60,16 @@ def qb_sync_state(platform_db: Session, graph_id: str) -> tuple[bool, datetime |
   return (True, connection.last_sync)
 
 
+def entity_sync_state(
+  session: Session, platform_db: Session, graph_id: str, entity_id: str | None
+) -> tuple[bool, datetime | None]:
+  """`qb_sync_state` for one entity. The graph's QuickBooks connection books
+  for the group parent, so a subsidiary has no sync its close waits on."""
+  if entity_id is None or not is_group_parent(session, entity_id):
+    return (False, None)
+  return qb_sync_state(platform_db, graph_id)
+
+
 def build_fiscal_calendar_response(
   session: Session,
   graph_id: str,
@@ -66,10 +78,15 @@ def build_fiscal_calendar_response(
   last_sync_at: datetime | None,
   service,
 ) -> FiscalCalendarResponse:
-  """`service` is passed in so a patched `FiscalCalendarService` flows through."""
+  """The calendar's own entity's periods and gate. `service` is passed in so
+  a patched `FiscalCalendarService` flows through."""
+  entity_id = str(calendar.entity_id)
   periods = (
     session.query(FiscalPeriod)
-    .filter(FiscalPeriod.graph_id == graph_id)
+    .filter(
+      FiscalPeriod.graph_id == graph_id,
+      FiscalPeriod.entity_id == entity_id,
+    )
     .order_by(FiscalPeriod.start_date)
     .all()
   )
@@ -84,6 +101,7 @@ def build_fiscal_calendar_response(
       next_period_to_close,
       has_sync_connection=has_sync_connection,
       last_sync_at=last_sync_at,
+      entity_id=entity_id,
     )
 
   pending_obligation_sample = (

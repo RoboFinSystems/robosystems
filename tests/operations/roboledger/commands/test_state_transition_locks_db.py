@@ -35,7 +35,7 @@ from robosystems.operations.roboledger.commands.journal_entries import (
   reverse_journal_entry,
   update_journal_entry,
 )
-from tests.ledger_entity import PARENT_ENTITY_ID
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity_on
 
 pytestmark = pytest.mark.integration
 
@@ -69,6 +69,7 @@ def tenant():
         bind=conn.execution_options(schema_translate_map={None: GRAPH}),
         tables=_tenant_tables(),
       )
+      seed_parent_entity_on(conn.execution_options(schema_translate_map={None: GRAPH}))
       # Migration 0032 creates this per tenant; metadata.create_all builds it
       # from the model, so asserting it exists here also checks the two have
       # not drifted apart.
@@ -243,6 +244,7 @@ class TestPeriodTransitionLock:
     with extensions_session(GRAPH) as session:
       session.add(
         FiscalPeriod(
+          entity_id=PARENT_ENTITY_ID,
           graph_id=GRAPH,
           name=PERIOD,
           start_date=date(2026, 1, 1),
@@ -303,6 +305,7 @@ class TestPeriodWriteFence:
       )
       session.add(
         FiscalPeriod(
+          entity_id=PARENT_ENTITY_ID,
           graph_id=GRAPH,
           name=PERIOD,
           start_date=date(2026, 1, 1),

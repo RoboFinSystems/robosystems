@@ -96,7 +96,9 @@ def _draft(db, *, label: str, source: str, metadata: dict) -> str:
 
 
 def _publishing(db) -> set[str]:
-  return writeback_eligible_entry_ids(db, PERIOD_START, PERIOD_END)
+  return writeback_eligible_entry_ids(
+    db, PERIOD_START, PERIOD_END, entity_id=PARENT_ENTITY_ID
+  )
 
 
 def test_source_decides_when_the_flag_is_absent(session):
@@ -170,7 +172,9 @@ def test_the_row_query_and_the_id_query_agree(session):
   _draft(session, label="held", source="manual", metadata={"publish_to_source": False})
   _draft(session, label="sent", source="system", metadata={"publish_to_source": True})
 
-  rows = select_writeback_eligible_entries(session, PERIOD_START, PERIOD_END)
+  rows = select_writeback_eligible_entries(
+    session, PERIOD_START, PERIOD_END, entity_id=PARENT_ENTITY_ID
+  )
 
   assert {str(entry.id) for entry, _event in rows} == _publishing(session)
 

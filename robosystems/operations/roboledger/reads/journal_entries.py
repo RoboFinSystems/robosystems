@@ -22,6 +22,7 @@ from robosystems.models.api.extensions.transactions import (
   LedgerJournalEntryResponse,
   LedgerLineItemResponse,
 )
+from robosystems.operations.roboledger.entity_scope import find_entity_id
 
 # ORDER BY cannot be a bind parameter, so it is interpolated, only ever from
 # the fixed `EntryOrder` values, never caller input.
@@ -36,6 +37,7 @@ _ENTRY_ROWS_TEMPLATE = """
       AND (:type IS NULL OR e.type = :type)
       AND (:provenance IS NULL OR e.provenance = :provenance)
       AND (:transaction_id IS NULL OR e.transaction_id = :transaction_id)
+      AND (:entity_id IS NULL OR e.entity_id = :entity_id)
     ORDER BY {order_by}
     LIMIT :limit OFFSET :offset
   )
@@ -84,6 +86,7 @@ _COUNT_SQL = text("""
     AND (:type IS NULL OR e.type = :type)
     AND (:provenance IS NULL OR e.provenance = :provenance)
     AND (:transaction_id IS NULL OR e.transaction_id = :transaction_id)
+    AND (:entity_id IS NULL OR e.entity_id = :entity_id)
 """)
 
 
@@ -130,12 +133,14 @@ def fetch_entry_rows(
   type: str | None = None,
   provenance: str | None = None,
   transaction_id: str | None = None,
+  entity_id: str | None = None,
   limit: int | None = None,
   offset: int = 0,
   order_by: EntryOrder = EntryOrder.RECENT_FIRST,
 ) -> list[EntryRow]:
   """Fetch entries with their line items, in cents. Without a
-  ``transaction_id`` filter, parentless entries are included."""
+  ``transaction_id`` filter, parentless entries are included; without an
+  ``entity_id``, every entity's."""
   rows = session.execute(
     _SQL_BY_ORDER[order_by],
     {
@@ -145,6 +150,7 @@ def fetch_entry_rows(
       "type": type,
       "provenance": provenance,
       "transaction_id": transaction_id,
+      "entity_id": entity_id,
       "limit": limit if limit is not None else _NO_LIMIT,
       "offset": offset,
     },
@@ -199,11 +205,16 @@ def list_journal_entries(
   type: str | None = None,
   provenance: str | None = None,
   transaction_id: str | None = None,
+  entity_id: str | None = None,
   limit: int = 100,
   offset: int = 0,
 ) -> LedgerJournalEntryListResponse:
-  """List journal entries with line items, newest first. Amounts are dollars;
-  pagination counts entries."""
+  """List one entity's journal entries with line items, newest first.
+  ``entity_id`` defaults to the group parent, except under a
+  ``transaction_id``, which already names whose entries they are. Amounts are
+  dollars; pagination counts entries."""
+  if entity_id is not None or transaction_id is None:
+    entity_id = find_entity_id(session, entity_id)
   params = {
     "start_date": start_date,
     "end_date": end_date,
@@ -211,6 +222,7 @@ def list_journal_entries(
     "type": type,
     "provenance": provenance,
     "transaction_id": transaction_id,
+    "entity_id": entity_id,
   }
   total = session.execute(_COUNT_SQL, params).scalar() or 0
 

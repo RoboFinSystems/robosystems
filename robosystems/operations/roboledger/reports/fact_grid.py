@@ -124,19 +124,27 @@ def generate_report_facts(
   mapping_id: str,
   periods: list[PeriodSpec],
   close_target_qname: str = "rs-gaap:RetainedEarningsAccumulatedDeficit",
+  entity_id: str | None = None,
 ) -> ReportFacts:
   """Generate structure-agnostic facts for all mapped elements across periods.
 
-  ``close_target_qname`` is the equity concept cumulative earnings close to —
-  the Reporting Style's earnings home (``PartnersCapital`` / ``MembersEquity``
-  for PART/LLC) — so earnings land on the form's capital line and the BS foots.
+  ``entity_id`` restricts the pivot to that entity's entries; every caller
+  that reports for an entity passes it. ``close_target_qname`` is the equity
+  concept cumulative earnings close to — the Reporting Style's earnings home
+  (``PartnersCapital`` / ``MembersEquity`` for PART/LLC) — so earnings land on
+  the form's capital line and the BS foots.
   """
   arc_type = _arc_type_for_taxonomy(session, taxonomy_id)
   facts: list[ReportFact] = []
 
   for period in periods:
     balances = _read_mapped_balances(
-      session, mapping_id, period.start, period.end, arc_type=arc_type
+      session,
+      mapping_id,
+      period.start,
+      period.end,
+      arc_type=arc_type,
+      entity_id=entity_id,
     )
     for balance in balances.values():
       facts.append(
@@ -189,6 +197,7 @@ def generate_report_facts(
       period.end,
       arc_type=arc_type,
       close_target_qname=close_target_qname,
+      entity_id=entity_id,
     )
 
   # NetIncomeLoss as its own fact: the IS bottom line and the first child
@@ -202,13 +211,13 @@ def generate_report_facts(
   # Investing/financing CF facts from per-line flow concepts. Must run
   # before _derive_cash_flow_facts so its "direct fact wins" guard skips
   # the ΔBS derivation for these leaves.
-  _emit_flow_facts(session, facts, periods, mapping_id, arc_type)
+  _emit_flow_facts(session, facts, periods, mapping_id, arc_type, entity_id)
 
   # Balances the day before each period starts, where that is not the previous
   # column's end (year-over-year, YTD, rolling). The cash flow measures change
   # from a period's opening, not from whichever column precedes it. Kept out of
   # ``facts`` so they are never rendered.
-  opening_facts = _load_opening_facts(session, mapping_id, periods, arc_type)
+  opening_facts = _load_opening_facts(session, mapping_id, periods, arc_type, entity_id)
 
   # Operating CF from BS deltas (indirect method); needs every period's BS.
   _derive_cash_flow_facts(session, facts, periods, opening_facts)
@@ -556,8 +565,10 @@ def _read_mapped_balances(
   period_start: date,
   period_end: date,
   arc_type: str = "mapping",
+  entity_id: str | None = None,
 ) -> dict[str, _Balance]:
-  """Mapped trial balance per reporting target (same join as /trial-balance/mapped).
+  """Mapped trial balance per reporting target (same join as /trial-balance/mapped),
+  for one entity's entries when ``entity_id`` is given.
 
   Windowing keys off the target's ``period_type``, not its SFAC 6 trait
   (which can be NULL or contra-*): instant concepts load cumulatively
@@ -596,6 +607,7 @@ def _read_mapped_balances(
           AND t.category = 'elementsOfFinancialStatements'
       ) tcls ON tcls.element_id = target.id
       WHERE e.status IN :landed_entry_statuses
+        AND (:entity_id IS NULL OR e.entity_id = :entity_id)
         AND target.element_type = 'concept'
         AND target.is_abstract = false
         AND (e.posting_date <= :end_date OR :end_date IS NULL)
@@ -613,6 +625,7 @@ def _read_mapped_balances(
       "arc_type": arc_type,
       "start_date": period_start,
       "end_date": period_end,
+      "entity_id": entity_id,
     },
   )
 
@@ -1052,6 +1065,7 @@ def _emit_flow_facts(
   periods: list[PeriodSpec],
   mapping_id: str,
   arc_type: str,
+  entity_id: str | None = None,
 ) -> None:
   """Emit investing/financing CF facts from per-line flows, per period.
 
@@ -1091,6 +1105,7 @@ def _emit_flow_facts(
           AND t.identifier IN ('investingActivity', 'financingActivity')
         WHERE li.flow_element_id IS NOT NULL
           AND en.status IN :landed_entry_statuses
+          AND (:entity_id IS NULL OR en.entity_id = :entity_id)
           AND en.posting_date BETWEEN :start AND :end
           AND COALESCE(racct.qname, acct.qname) = ANY(:cash_qnames)
         GROUP BY flow_id, rf.qname, rf.name, rf.balance_type
@@ -1124,6 +1139,7 @@ def _emit_flow_facts(
           AND t.identifier IN ('investingActivity', 'financingActivity')
         WHERE li.flow_element_id IS NULL
           AND en.status IN :landed_entry_statuses
+          AND (:entity_id IS NULL OR en.entity_id = :entity_id)
           AND en.posting_date BETWEEN :start AND :end
           AND COALESCE(racct.qname, acct.qname) <> ALL(:cash_qnames)
           AND EXISTS (
@@ -1151,6 +1167,7 @@ def _emit_flow_facts(
       "start": period.start,
       "end": period.end,
       "cash_qnames": cash_qnames,
+      "entity_id": entity_id,
     }
     # flow_id -> [qname, name, balance_type, summed_value]
     combined: dict[str, list] = {}
@@ -1221,6 +1238,7 @@ def _load_opening_facts(
   mapping_id: str,
   periods: list[PeriodSpec],
   arc_type: str,
+  entity_id: str | None = None,
 ) -> list[ReportFact]:
   """Instant balances at each period's opening, where that isn't already
   another column's end. The earliest column needs one too, or its cash flow
@@ -1234,7 +1252,7 @@ def _load_opening_facts(
       continue
     loaded.add(opening)
     balances = _read_mapped_balances(
-      session, mapping_id, opening, opening, arc_type=arc_type
+      session, mapping_id, opening, opening, arc_type=arc_type, entity_id=entity_id
     )
     for balance in balances.values():
       opening_facts.append(
@@ -1643,6 +1661,7 @@ def _cumulative_closeable_sums(
   mapping_id: str,
   period_end: date,
   arc_type: str = "mapping",
+  entity_id: str | None = None,
 ) -> tuple[float, float, float]:
   """Cumulative (revenue, expense, equity_reductions) from inception to period_end.
 
@@ -1675,6 +1694,7 @@ def _cumulative_closeable_sums(
           AND t.category = 'elementsOfFinancialStatements'
       ) tcls ON tcls.element_id = target.id
       WHERE e.status IN :landed_entry_statuses
+        AND (:entity_id IS NULL OR e.entity_id = :entity_id)
         AND target.element_type = 'concept'
         AND target.is_abstract = false
         AND e.posting_date <= :end_date
@@ -1684,6 +1704,7 @@ def _cumulative_closeable_sums(
       "mapping_id": mapping_id,
       "arc_type": arc_type,
       "end_date": period_end,
+      "entity_id": entity_id,
     },
   )
 
@@ -1807,6 +1828,7 @@ def _close_prior_periods_to_retained_earnings(
   period_end: date,
   arc_type: str = "mapping",
   close_target_qname: str = "rs-gaap:RetainedEarningsAccumulatedDeficit",
+  entity_id: str | None = None,
 ) -> None:
   """Add un-closed net income from before the current period to the close target.
 
@@ -1816,7 +1838,7 @@ def _close_prior_periods_to_retained_earnings(
   sum is only the still-unclosed portion — no double count.
   """
   cumulative_revenue, cumulative_expenses, cumulative_equity_reductions = (
-    _cumulative_closeable_sums(session, mapping_id, period_end, arc_type)
+    _cumulative_closeable_sums(session, mapping_id, period_end, arc_type, entity_id)
   )
   cumulative_net_income = (
     cumulative_revenue - cumulative_expenses + cumulative_equity_reductions

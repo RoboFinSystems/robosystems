@@ -626,13 +626,13 @@ def update_event_block(
     )
     fence_dates.update(_retraction_fence_dates(session, peek.id))
   if fence_dates:
-    assert_period_not_closed(session, *sorted(fence_dates))
+    assert_period_not_closed(session, *sorted(fence_dates), entity_id=peek.entity_id)
   # Retraction fence (see `_assert_retractable`), on the rows' own posting
   # dates: an event with no ledger rows stays retractable in a closed period.
   if body.transition_to in _RETRACTED_STATUSES:
     retraction_dates = _retraction_fence_dates(session, peek.id)
     if retraction_dates:
-      assert_period_not_closed(session, *retraction_dates)
+      assert_period_not_closed(session, *retraction_dates, entity_id=peek.entity_id)
   with bounded_lock_wait(
     session,
     f"Event {body.event_id} is being written by another process "
@@ -788,8 +788,11 @@ def preview_event_block(
   session: Session,
   body: CreateEventBlockRequest,
   created_by: str,
+  *,
+  entity_id: str | None = None,
 ) -> PreviewEventBlockResponse:
-  """Dry-run handler resolution and template evaluation; writes nothing."""
+  """Dry-run handler resolution and template evaluation; writes nothing.
+  Checked against ``entity_id``'s calendar, default the group parent's."""
   from robosystems.operations.roboledger.reads.event_handler import handler_to_response
 
   python_handler = get_python_handler(body.event_type)
@@ -803,7 +806,7 @@ def preview_event_block(
         validation_errors=[f"metadata validation: {e}"],
         would_succeed=False,
       )
-    preview = python_handler.dispatch_preview(session, body, typed_metadata)
+    preview = python_handler.dispatch_preview(session, body, typed_metadata, entity_id)
     return _python_preview_to_response(preview, python_handler)
 
   errors: list[str] = []
@@ -846,6 +849,7 @@ def preview_event_block(
         effective_at=body.effective_at,
         occurred_at=body.occurred_at,
       ),
+      entity_id=entity_id,
     )
   except (ClosedPeriodError, RowLockedError) as e:
     errors.append(str(e))
@@ -998,6 +1002,7 @@ def execute_event_block(
         effective_at=peek.effective_at,
         occurred_at=peek.occurred_at,
       ),
+      entity_id=peek.entity_id,
     )
   with bounded_lock_wait(
     session,

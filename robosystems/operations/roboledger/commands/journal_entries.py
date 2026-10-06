@@ -323,7 +323,7 @@ def create_journal_entry(
     `NoEntityError` / `EntityNotInGraphError` if the entity does not resolve.
   """
   entity_id = resolve_entity_id(session, entity_id)
-  assert_period_not_closed(session, body.posting_date)
+  assert_period_not_closed(session, body.posting_date, entity_id=entity_id)
 
   normalized, total_debit, _total_credit = validate_and_normalize_lines(body.line_items)
   # Only posted (replayed) history carries the source into the exemption; a
@@ -411,7 +411,7 @@ def update_journal_entry(
   dates = [peeked_date]
   if body.posting_date is not None:
     dates.append(body.posting_date)
-  assert_period_not_closed(session, *dates)
+  assert_period_not_closed(session, *dates, entity_id=peek.entity_id)
 
   _lock_owning_event(session, peek)
   entry = lock_by_id(
@@ -482,7 +482,7 @@ def delete_journal_entry(session: Session, body: DeleteJournalEntryRequest) -> d
   """
   peek = _load_entry_or_404(session, body.entry_id)
   peeked_date = peek.posting_date
-  assert_period_not_closed(session, peeked_date)
+  assert_period_not_closed(session, peeked_date, entity_id=peek.entity_id)
 
   # Under the event lock the sibling count below cannot change.
   owner = _lock_owning_event(session, peek)
@@ -537,7 +537,9 @@ def reverse_journal_entry(
   if peek is None:
     raise JournalEntryNotFoundError(body.entry_id)
   posting_date = body.posting_date or datetime.now(UTC).date()
-  assert_period_not_closed(session, peek.posting_date, posting_date)
+  assert_period_not_closed(
+    session, peek.posting_date, posting_date, entity_id=peek.entity_id
+  )
 
   # Locked so two concurrent reversals cannot both see 'posted' and reverse
   # twice (balanced, so the trial balance would not catch it).

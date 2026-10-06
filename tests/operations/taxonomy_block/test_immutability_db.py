@@ -77,6 +77,7 @@ def ext_session():
 def _period(session: Session, name: str, window: tuple[date, date], status: str):
   session.add(
     FiscalPeriod(
+      entity_id=PARENT_ENTITY_ID,
       graph_id=GRAPH,
       name=name,
       start_date=window[0],
