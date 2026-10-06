@@ -52,3 +52,18 @@ def test_connections_router_exposes_expected_paths():
     "/oauth/init",
   ):
     assert expected in all_paths
+
+
+def test_routes_follow_documented_order():
+  """The reference renders operations in registration order, so this is it."""
+  assert [e.operation_id for e in router.routes] == [
+    "getConnectionOptions",
+    "listConnections",
+    "createConnection",
+    "initOAuth",
+    "oauthCallback",
+    "getConnection",
+    "deleteConnection",
+    "syncConnection",
+    "setConnectionWritePolicy",
+  ]
