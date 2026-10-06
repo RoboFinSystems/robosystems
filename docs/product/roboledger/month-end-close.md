@@ -61,7 +61,7 @@ A few blockers can be closed over on purpose. In the app, **Allow stale sync**, 
 
 **Ledger → Closing Book** shows the same picture your assistant works from: the last closed month, the month you're working towards, what's blocking it, and each schedule's entry for the month with its amount and status. You can draft entries, close a month and reopen one from here too.
 
-![The Closing Book period close view, showing the last closed month, a blocker, and four schedule entries pending for August](images/closing-book.png)
+![The Closing Book period close view, showing August closed, September as the close target and closeable now, and six schedule entries drafted for September](images/closing-book.png)
 
 ## After the close
 

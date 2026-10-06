@@ -22,7 +22,7 @@ In the app, choose the period: this month or last, this quarter or last, monthly
 
 Open a report in **Reports → View Reports**. The statements, and any notes attached to the report, are listed on the left. Each one opens as a rendered statement, and you can switch to the facts behind it and the checks it passed.
 
-![An open report, with its statements and notes listed on the left and the balance sheet on the right](images/report.png)
+![An open draft report, with its statements and notes listed on the left and the balance sheet on the right](images/report.png)
 
 **Ask about this report** answers questions from the report inside the app. It runs on RoboLedger's own AI, so it uses credits. Asking your assistant about the same report through your own connection doesn't.
 

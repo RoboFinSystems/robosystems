@@ -88,7 +88,7 @@ Then the month is checked with the same rules that check your actual statements:
 
 Open **Plan** in RoboLedger. It shows your statements and the scenario's assumptions in one monthly grid, with actual months on the left and forecast months on the right. Forecast months are marked with an F.
 
-![The Plan page for a demo company: three actual months, then forecast months marked F, with assumptions above the income statement](images/plan.png)
+![The Plan page for a demo company in thousands: three actual months, then forecast months marked F, with assumptions above the income statement](images/plan.png)
 
 The assumptions rows run across the actual months too. There they show what each rate really was, so you can see at a glance whether 5% monthly growth is a stretch or a slowdown.
 
