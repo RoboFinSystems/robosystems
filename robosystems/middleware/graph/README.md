@@ -91,10 +91,6 @@ never branch on which one they got. It offers `execute_query`,
 `with`. Build one through `create_universal_repository()` /
 `get_universal_repository()` rather than instantiating the class.
 
-`dependencies/` holds the path-param helpers `require_entity`,
-`require_user_graph`, `require_graph_category` (each with an `optional_*`
-variant).
-
 ## Authorization: one gauntlet, all transports
 
 `statement_kernel.py` is the single policy path for graph statements. REST

@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
-from robosystems.database import get_async_db_session, session
+from robosystems.database import get_async_db_session, get_db_session, session
 from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import (
   get_current_user,
@@ -50,6 +50,7 @@ from robosystems.models.api.user import (
   UserGraphsResponse,
 )
 from robosystems.models.core import Graph, GraphUser, OrgLimits, OrgRole, OrgUser, User
+from robosystems.operations.graph import selection
 
 router = APIRouter(prefix="/v1/graphs", tags=["Graphs"])
 
@@ -719,7 +720,12 @@ async def get_graph_capacity(
   "/{graph_id}/select",
   response_model=SuccessResponse,
   summary="Select Graph",
+  description=(
+    "Deprecated: use `PUT /v1/user/selected-graph`, which writes the same "
+    "selection. Remembers the graph as the caller's current one."
+  ),
   operation_id="selectGraph",
+  deprecated=True,
   responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
@@ -729,68 +735,23 @@ async def get_graph_capacity(
 async def select_graph(
   graph_id: str,
   current_user: User = Depends(get_current_user_with_graph),
+  db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
 ):
-  user_id = getattr(current_user, "id", None) if current_user else None
-
   try:
-    user_graphs = GraphUser.get_by_user_id(current_user.id, session)
-    user_graph_ids = [ug.graph_id for ug in user_graphs]
-
-    if graph_id not in user_graph_ids:
-      metrics_instance = get_endpoint_metrics()
-      metrics_instance.record_business_event(
-        endpoint="/v1/graphs/{graph_id}/select",
-        method="POST",
-        event_type="graph_selection_access_denied",
-        event_data={
-          "user_id": user_id,
-          "requested_graph_id": graph_id,
-          "available_graphs_count": len(user_graph_ids),
-        },
-        user_id=user_id,
-      )
-      raise create_error_response(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Access denied to this graph",
-        code=ErrorCode.FORBIDDEN,
-      )
-
-    success = GraphUser.set_selected_graph(current_user.id, graph_id, session)
-
-    if not success:
-      metrics_instance = get_endpoint_metrics()
-      metrics_instance.record_business_event(
-        endpoint="/v1/graphs/{graph_id}/select",
-        method="POST",
-        event_type="graph_selection_not_found",
-        event_data={"user_id": user_id, "requested_graph_id": graph_id},
-        user_id=user_id,
-      )
-      raise create_error_response(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail="Graph not found",
-        code=ErrorCode.NOT_FOUND,
-      )
-
-    metrics_instance = get_endpoint_metrics()
-    metrics_instance.record_business_event(
-      endpoint="/v1/graphs/{graph_id}/select",
-      method="POST",
-      event_type="graph_selected",
-      event_data={"user_id": user_id, "selected_graph_id": graph_id},
-      user_id=user_id,
+    selection.select_graph(current_user.id, graph_id, db)
+  except selection.GraphNotAccessible:
+    raise create_error_response(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail="Access denied to this graph",
+      code=ErrorCode.FORBIDDEN,
     )
-
-    return SuccessResponse(
-      success=True,
-      message="Graph selected successfully",
-      data={"selectedGraphId": graph_id},
+  except selection.GraphNotFound:
+    raise create_error_response(
+      status_code=status.HTTP_404_NOT_FOUND,
+      detail="Graph not found",
+      code=ErrorCode.NOT_FOUND,
     )
-
-  except HTTPException:
-    raise
-
   except Exception as e:
     logger.error(f"Error selecting graph: {e!s}")
     raise create_error_response(
@@ -798,3 +759,9 @@ async def select_graph(
       detail="Error selecting graph",
       code=ErrorCode.INTERNAL_ERROR,
     )
+
+  return SuccessResponse(
+    success=True,
+    message="Graph selected successfully",
+    data={"selectedGraphId": graph_id},
+  )

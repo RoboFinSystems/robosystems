@@ -92,6 +92,17 @@ class UpdatePasswordRequest(BaseModel):
   confirm_password: str = Field(..., min_length=8, description="Confirm new password")
 
 
+class SetSelectedGraphRequest(BaseModel):
+  """Request model for setting the user's selected graph."""
+
+  graph_id: str = Field(
+    ...,
+    min_length=1,
+    description="The graph the apps open on the caller's next load",
+    examples=["kg1a2b3c4d5"],
+  )
+
+
 class GraphInfo(BaseModel):
   """Graph information for user."""
 

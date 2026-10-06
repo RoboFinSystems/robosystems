@@ -643,6 +643,57 @@ class TestUserGraphs:
 
     assert response.status_code == 404
 
+  @patch("robosystems.models.core.GraphUser.set_selected_graph")
+  @patch("robosystems.models.core.GraphUser.get_by_user_id")
+  def test_set_selected_graph_success(
+    self, mock_get_by_user_id, mock_set_selected, client_with_graphs: TestClient
+  ):
+    """The user endpoint writes the selection the graphs list reports."""
+    mock_get_by_user_id.return_value = client_with_graphs.mock_user.graphs
+    mock_set_selected.return_value = True
+
+    response = client_with_graphs.put(
+      "/v1/user/selected-graph", json={"graph_id": VALID_TEST_GRAPH_ID_2}
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["data"]["selectedGraphId"] == VALID_TEST_GRAPH_ID_2
+    user_id, graph_id, _session = mock_set_selected.call_args.args
+    assert (user_id, graph_id) == ("test-user-456", VALID_TEST_GRAPH_ID_2)
+
+  @patch("robosystems.models.core.GraphUser.get_by_user_id")
+  def test_set_selected_graph_access_denied(
+    self, mock_get_by_user_id, client_with_graphs: TestClient
+  ):
+    """A graph the caller does not belong to is refused."""
+    mock_get_by_user_id.return_value = client_with_graphs.mock_user.graphs
+
+    response = client_with_graphs.put(
+      "/v1/user/selected-graph", json={"graph_id": "kg99999999999999999"}
+    )
+
+    assert response.status_code == 403
+    assert "access denied" in response.json()["detail"]["detail"].lower()
+
+  @patch("robosystems.models.core.GraphUser.set_selected_graph")
+  @patch("robosystems.models.core.GraphUser.get_by_user_id")
+  def test_set_selected_graph_not_found(
+    self, mock_get_by_user_id, mock_set_selected, client_with_graphs: TestClient
+  ):
+    """A membership that vanishes before the write is a 404."""
+    mock_graphs = client_with_graphs.mock_user.graphs.copy()
+    mock_graphs.append(Mock(graph_id="kg99999999999999999"))
+    mock_get_by_user_id.return_value = mock_graphs
+    mock_set_selected.return_value = False
+
+    response = client_with_graphs.put(
+      "/v1/user/selected-graph", json={"graph_id": "kg99999999999999999"}
+    )
+
+    assert response.status_code == 404
+
 
 class TestUserAPIKeys:
   """Test user API key management endpoints using pure mocked authentication."""
