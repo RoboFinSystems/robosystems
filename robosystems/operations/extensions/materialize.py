@@ -359,6 +359,13 @@ def _group_parent_id(graph_id: str) -> str:
     return f"entity_{graph_id}"
 
 
+async def _resolve_group_parent(graph_id: str) -> str:
+  try:
+    return await asyncio.to_thread(_group_parent_id, graph_id)
+  except Exception as exc:
+    raise RuntimeError(f"Group parent lookup failed: {exc}") from exc
+
+
 def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
   """``{table_name: CREATE TABLE SQL}`` for every node and relationship table.
 
@@ -1352,18 +1359,6 @@ class ExtensionsMaterializer:
     start_time = time.time()
     result = MaterializeResult(graph_id=graph_id)
 
-    if not entity_id:
-      try:
-        entity_id = await asyncio.to_thread(_group_parent_id, graph_id)
-      except Exception as e:
-        logger.error(f"Failed to resolve the group parent for {graph_id}: {e}")
-        result.status = "error"
-        result.errors.append(
-          redact_connection_secrets(f"Group parent lookup failed: {e!s}")
-        )
-        result.duration_ms = (time.time() - start_time) * 1000
-        return result
-
     try:
       client = await get_graph_client(graph_id=graph_id, operation_type="write")
     except Exception as e:
@@ -1401,6 +1396,10 @@ class ExtensionsMaterializer:
         else:
           lock = await self._acquire_lock(graph_id)
         try:
+          # Resolved under the lock, after the pause and lock gates, so a
+          # refused start reports the refusal rather than a lookup.
+          if not entity_id:
+            entity_id = await _resolve_group_parent(graph_id)
           db_exists = await client.database_exists(graph_id)
 
           # The ledger is a full projection: copied in place into a populated

@@ -600,18 +600,25 @@ class TestExtensionsMaterializer:
   async def test_a_failed_parent_lookup_fails_the_run(self):
     from robosystems.operations.extensions.materialize import ExtensionsMaterializer
 
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
     with (
       patch(
         "robosystems.operations.extensions.materialize._group_parent_id",
         side_effect=RuntimeError("extensions database unreachable"),
       ),
-      patch("robosystems.graph_api.client.factory.get_graph_client") as client,
+      patch(
+        "robosystems.graph_api.client.factory.get_graph_client",
+        return_value=mock_client,
+      ),
     ):
       result = await ExtensionsMaterializer().materialize(GRAPH_ID)
 
     assert result.status == "error"
     assert "Group parent lookup failed" in result.errors[0]
-    client.assert_not_called()
+    mock_client.database_exists.assert_not_called()
 
   @pytest.mark.asyncio
   async def test_default_entity_id(self):
