@@ -135,16 +135,23 @@ The MCP server carries the schema, example queries, a concept resolver, statemen
 
 ### Example queries
 
-Consolidated annual revenue for one filer, robust across the different revenue elements filers use:
+Consolidated annual revenue for one filer, robust across the different revenue elements filers use, with the
+filing each value came from:
 
 ```cypher
-MATCH (f:Fact {has_dimensions: false})-[:FACT_HAS_ELEMENT]->(e:Element),
+MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact {has_dimensions: false}),
+      (f)-[:FACT_HAS_ELEMENT]->(e:Element),
       (f)-[:FACT_HAS_ENTITY]->(ent:Entity {ticker: 'NVDA'}),
       (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'})
 WHERE e.canonical_concept = 'revenue' AND f.numeric_value IS NOT NULL
-RETURN ent.ticker, e.qname, p.end_date, f.numeric_value AS revenue
-ORDER BY p.end_date DESC LIMIT 10
+RETURN p.end_date, f.numeric_value AS revenue, r.form, r.filing_date, r.accession_number
+ORDER BY p.end_date DESC, r.filing_date LIMIT 20
 ```
+
+A period usually appears more than once: each 10-K also reports the prior years as comparatives, and those
+can differ from the original after a restatement or reclassification. Keep `r.filing_date` in the result and
+choose deliberately — the earliest filing for a period gives the value as first reported, and the latest
+filing on or before a date gives the value as it was known then, which is what a backtest needs.
 
 A whole income statement via the presentation structure (anchor on the entity first — thousands of filings share each statement type):
 
@@ -180,7 +187,8 @@ you *want* segment breakdowns), and anchor on an entity, report, element, or dat
   matching `ladybug` before opening the new file (a RoboSystems checkout gets the new pin with the release
   that shipped it).
 - Superseded snapshots are removed to keep the dataset one snapshot deep; pin a commit with
-  `--revision` only while it is still listed.
+  `--revision` only while it is still listed. To reproduce a result later, keep your own copy of the
+  snapshot you used.
 - The hosted graph at robosystems.ai is rebuilt nightly; this file is that graph as of the snapshot date.
 
 ## Provenance and licence
