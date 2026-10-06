@@ -30,8 +30,11 @@ from robosystems.models.api.extensions.taxonomies import (
   CreateMappingAssociationOperation,
 )
 from robosystems.models.api.information_block import EvaluateRulesRequest
-from robosystems.models.api.taxonomy_block import DeleteTaxonomyBlockRequest
-from robosystems.models.extensions import Taxonomy
+from robosystems.models.api.taxonomy_block import (
+  DeleteTaxonomyBlockRequest,
+  UpdateTaxonomyBlockRequest,
+)
+from robosystems.models.extensions import Rule, Structure, Taxonomy
 from robosystems.models.extensions.entity import Entity
 from robosystems.models.extensions.roboledger import Event, FactSet
 from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
@@ -73,11 +76,15 @@ from robosystems.operations.roboledger.reconciliations import (
 from robosystems.operations.roboledger.reconciliations.blocks import (
   POLICY_CHANGE_EVENT_TYPE,
   SIGN_OFF_EVENT_TYPE,
+  reconciliation_rule,
 )
 from robosystems.operations.roboledger.reconciliations.observations import (
   BALANCE_OBSERVED_EVENT_TYPE,
 )
-from robosystems.operations.taxonomy_block.commands import delete_taxonomy_block
+from robosystems.operations.taxonomy_block.commands import (
+  delete_taxonomy_block,
+  update_taxonomy_block,
+)
 
 from .conftest import (
   GRAPH_ID,
@@ -432,14 +439,61 @@ def _a_pass_from_another_rule_lands_on_the_set(session, rec):
   session.commit()
 
 
+def _update_the_blocks_taxonomy(session, rec):
+  structure = session.get(Structure, rec.structure_id)
+  with pytest.raises(ValueError, match="locked"):
+    update_taxonomy_block(
+      session,
+      UpdateTaxonomyBlockRequest(taxonomy_id=str(structure.taxonomy_id)),
+      "usr_writer",
+    )
+  session.rollback()
+
+
+def _a_second_passing_rule_on_the_block(session, rec):
+  # However it got there: the status is still read from the block's own rule.
+  own = reconciliation_rule(session, rec.structure_id)
+  assert own is not None
+  session.add(
+    Rule(
+      taxonomy_id=own.taxonomy_id,
+      rule_category=own.rule_category,
+      rule_pattern="EqualTo",
+      rule_expression=own.rule_expression,
+      rule_severity="error",
+      rule_origin="native",
+      target_kind="structure",
+      target_structure_id=own.target_structure_id,
+      rule_variables=own.rule_variables,
+      metadata_={"tolerance": 1e12},
+      created_by="usr_writer",
+    )
+  )
+  session.flush()
+  cmd_evaluate_rules(
+    session,
+    EvaluateRulesRequest(structure_id=rec.structure_id, fact_set_id=rec.fact_set_id),
+    "usr_writer",
+  )
+  session.commit()
+
+
 @pytest.mark.parametrize(
   "door",
   [
     _stamp_another_structures_rules,
     _arc_a_foreign_element_onto_the_block,
     _a_pass_from_another_rule_lands_on_the_set,
+    _update_the_blocks_taxonomy,
+    _a_second_passing_rule_on_the_block,
   ],
-  ids=["evaluate-rules", "mapping-arc", "foreign-result"],
+  ids=[
+    "evaluate-rules",
+    "mapping-arc",
+    "foreign-result",
+    "taxonomy-update",
+    "second-rule",
+  ],
 )
 def test_only_the_blocks_own_rule_decides_its_status(loan, door):
   session, structure_id = loan
