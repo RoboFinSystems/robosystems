@@ -92,6 +92,9 @@ ipython_config.py
 dagster_home/*
 !dagster_home/dagster.yaml
 !dagster_home/dagster_prod.yaml
+!dagster_home/storage/
+dagster_home/storage/*
+!dagster_home/storage/.gitkeep
 
 # SageMath parsed files
 *.sage.py

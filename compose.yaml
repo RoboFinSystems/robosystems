@@ -2,12 +2,14 @@
 # their image is built here (ROBOSYSTEMS_IMAGE unset), so an edit applies on
 # `just restart`. With a published image the mount lands under /mnt/checkout,
 # where nothing reads it, and the image runs the release it was built from.
+# The same holds for building: `just rebuild` sets ROBOSYSTEMS_LOCAL_PULL_POLICY
+# to `build`, which only reaches a service whose own pull policy is unset.
 services:
   # Robosystems API
   api:
     container_name: robosystems-api
     image: ${ROBOSYSTEMS_IMAGE:-robosystems-local}
-    pull_policy: ${ROBOSYSTEMS_PULL_POLICY:-never}
+    pull_policy: ${ROBOSYSTEMS_PULL_POLICY:-${ROBOSYSTEMS_LOCAL_PULL_POLICY:-never}}
     build:
       context: .
       dockerfile: Dockerfile
@@ -41,7 +43,7 @@ services:
   graph-api:
     container_name: robosystems-graph-api
     image: ${ROBOSYSTEMS_IMAGE:-robosystems-local}
-    pull_policy: ${ROBOSYSTEMS_PULL_POLICY:-never}
+    pull_policy: ${ROBOSYSTEMS_PULL_POLICY:-${ROBOSYSTEMS_LOCAL_PULL_POLICY:-never}}
     build:
       context: .
       dockerfile: Dockerfile
@@ -87,7 +89,7 @@ services:
   dagster-webserver:
     container_name: robosystems-dagster-webserver
     image: ${ROBOSYSTEMS_IMAGE:-robosystems-local}
-    pull_policy: ${ROBOSYSTEMS_PULL_POLICY:-never}
+    pull_policy: ${ROBOSYSTEMS_PULL_POLICY:-${ROBOSYSTEMS_LOCAL_PULL_POLICY:-never}}
     build:
       context: .
       dockerfile: Dockerfile
@@ -100,7 +102,9 @@ services:
       - "8002:8002"
     volumes:
       - ./robosystems:${ROBOSYSTEMS_IMAGE:+/mnt/checkout}/app/robosystems
-      - ./dagster_home:/app/dagster_home
+      # Run logs and step outputs, shared by the two Dagster services.
+      # dagster.yaml itself comes from the image.
+      - ./dagster_home/storage:/app/dagster_home/storage
       - ./data/staging:/app/data/staging
       - ./data/artifacts:/app/data/artifacts
     depends_on:
@@ -123,7 +127,7 @@ services:
   dagster-daemon:
     container_name: robosystems-dagster-daemon
     image: ${ROBOSYSTEMS_IMAGE:-robosystems-local}
-    pull_policy: ${ROBOSYSTEMS_PULL_POLICY:-never}
+    pull_policy: ${ROBOSYSTEMS_PULL_POLICY:-${ROBOSYSTEMS_LOCAL_PULL_POLICY:-never}}
     build:
       context: .
       dockerfile: Dockerfile
@@ -135,7 +139,7 @@ services:
       - .env
     volumes:
       - ./robosystems:${ROBOSYSTEMS_IMAGE:+/mnt/checkout}/app/robosystems
-      - ./dagster_home:/app/dagster_home
+      - ./dagster_home/storage:/app/dagster_home/storage
       - ./data/staging:/app/data/staging
       - ./data/artifacts:/app/data/artifacts
     depends_on:
@@ -156,7 +160,7 @@ services:
   worker:
     container_name: robosystems-worker
     image: ${ROBOSYSTEMS_IMAGE:-robosystems-local}
-    pull_policy: ${ROBOSYSTEMS_PULL_POLICY:-never}
+    pull_policy: ${ROBOSYSTEMS_PULL_POLICY:-${ROBOSYSTEMS_LOCAL_PULL_POLICY:-never}}
     build:
       context: .
       dockerfile: Dockerfile
@@ -376,7 +380,7 @@ services:
   robosystems-app:
     container_name: robosystems-app
     image: ${ROBOSYSTEMS_APP_IMAGE:-robosystems-app-local}
-    pull_policy: ${ROBOSYSTEMS_APP_PULL_POLICY:-never}
+    pull_policy: ${ROBOSYSTEMS_APP_PULL_POLICY:-${ROBOSYSTEMS_LOCAL_PULL_POLICY:-never}}
     build:
       context: ../robosystems-app
       dockerfile: Dockerfile
@@ -406,7 +410,7 @@ services:
   roboledger-app:
     container_name: roboledger-app
     image: ${ROBOLEDGER_APP_IMAGE:-roboledger-app-local}
-    pull_policy: ${ROBOLEDGER_APP_PULL_POLICY:-never}
+    pull_policy: ${ROBOLEDGER_APP_PULL_POLICY:-${ROBOSYSTEMS_LOCAL_PULL_POLICY:-never}}
     build:
       context: ../roboledger-app
       dockerfile: Dockerfile
@@ -436,7 +440,7 @@ services:
   roboinvestor-app:
     container_name: roboinvestor-app
     image: ${ROBOINVESTOR_APP_IMAGE:-roboinvestor-app-local}
-    pull_policy: ${ROBOINVESTOR_APP_PULL_POLICY:-never}
+    pull_policy: ${ROBOINVESTOR_APP_PULL_POLICY:-${ROBOSYSTEMS_LOCAL_PULL_POLICY:-never}}
     build:
       context: ../roboinvestor-app
       dockerfile: Dockerfile
