@@ -1,6 +1,7 @@
-# Runs every image as it was built. A service built from a local checkout also
-# gets its source mounted, by the compose.source*.yaml files that `just start`
-# layers on (bin/tools/compose-files.sh).
+# The backend services mount the checkout over /app/robosystems only when
+# their image is built here (ROBOSYSTEMS_IMAGE unset), so an edit applies on
+# `just restart`. With a published image the mount lands under /mnt/checkout,
+# where nothing reads it, and the image runs the release it was built from.
 services:
   # Robosystems API
   api:
@@ -17,6 +18,8 @@ services:
       - .env
     ports:
       - "8000:8000"
+    volumes:
+      - ./robosystems:${ROBOSYSTEMS_IMAGE:+/mnt/checkout}/app/robosystems
     healthcheck:
       test: ["CMD", "python3", "/app/bin/healthcheck.py", "http://robosystems-api:8000/v1/status"]
       interval: 30s
@@ -56,6 +59,7 @@ services:
     ports:
       - "8001:8001"
     volumes:
+      - ./robosystems:${ROBOSYSTEMS_IMAGE:+/mnt/checkout}/app/robosystems
       - ./data/lbug-dbs:/app/data/lbug-dbs
       - ./data/staging:/app/data/staging
       - ./data/artifacts:/app/data/artifacts
@@ -95,6 +99,7 @@ services:
     ports:
       - "8002:8002"
     volumes:
+      - ./robosystems:${ROBOSYSTEMS_IMAGE:+/mnt/checkout}/app/robosystems
       - ./dagster_home:/app/dagster_home
       - ./data/staging:/app/data/staging
       - ./data/artifacts:/app/data/artifacts
@@ -129,6 +134,7 @@ services:
     env_file:
       - .env
     volumes:
+      - ./robosystems:${ROBOSYSTEMS_IMAGE:+/mnt/checkout}/app/robosystems
       - ./dagster_home:/app/dagster_home
       - ./data/staging:/app/data/staging
       - ./data/artifacts:/app/data/artifacts
@@ -159,6 +165,8 @@ services:
       - DOCKER_PROFILE=worker
     env_file:
       - .env
+    volumes:
+      - ./robosystems:${ROBOSYSTEMS_IMAGE:+/mnt/checkout}/app/robosystems
     depends_on:
       valkey:
         condition: service_healthy

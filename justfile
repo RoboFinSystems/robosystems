@@ -31,7 +31,7 @@ start profile="robosystems" build="":
     @test -f {{_env}} || cp .env.example {{_env}}
     @test -f {{_local_env}} || cp .env.local.example {{_local_env}}
     @just install-hooks
-    docker compose $(bin/tools/compose-files.sh {{_env}}) --env-file {{_env}} --profile {{profile}} up \
+    docker compose -f compose.yaml --env-file {{_env}} --profile {{profile}} up \
         {{ if build != "" { "--build" } else { "" } }} --detach
 
 # Stop containers without removing them (restart with `just start`)
@@ -49,10 +49,10 @@ upgrade profile="robosystems" scope="":
 # Rebuild containers (rebuilds images and force recreates - for package/env changes)
 rebuild profile="robosystems":
     @test -f {{_env}} || cp .env.example {{_env}}
-    docker compose $(bin/tools/compose-files.sh {{_env}}) --env-file {{_env}} --profile {{profile}} up \
+    docker compose -f compose.yaml --env-file {{_env}} --profile {{profile}} up \
         --build --force-recreate --detach
 
-# Quick restart to pick up code changes in locally built services, via their source mounts (no rebuild)
+# Quick restart to pick up code changes in a locally built backend, via its source mount (no rebuild)
 restart profile="robosystems":
     docker compose -f compose.yaml --profile {{profile}} restart
 
