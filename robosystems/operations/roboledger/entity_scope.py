@@ -60,11 +60,16 @@ def find_parent_entity(session: Session) -> Entity | None:
 
 
 def report_entity_id(session: Session, report_id: str) -> str | None:
-  """The entity a report's facts belong to; None for a report with no facts."""
+  """The entity a report's facts belong to; None for a report with no facts.
+
+  A report is generated for one entity, so its fact sets agree; the earliest
+  set decides if they ever do not.
+  """
   row = session.execute(
     text(
       "SELECT entity_id FROM fact_sets "
-      "WHERE report_id = :rid AND entity_id IS NOT NULL LIMIT 1"
+      "WHERE report_id = :rid AND entity_id IS NOT NULL "
+      "ORDER BY created_at ASC, id ASC LIMIT 1"
     ),
     {"rid": report_id},
   ).fetchone()
@@ -72,13 +77,18 @@ def report_entity_id(session: Session, report_id: str) -> str | None:
 
 
 def find_linked_entity_id(
-  session: Session, source_graph_id: str, source_entity_id: str | None = None
+  session: Session,
+  source_graph_id: str,
+  source_entity_id: str | None = None,
+  *,
+  match_unkeyed: bool = True,
 ) -> str | None:
   """The linked row standing for a sharing graph's entity.
 
   Keyed on the source graph and the source entity, so two subsidiaries of one
-  sending graph stay two rows. A row from before the key carried the entity
-  matches any entity of its graph, after an exact match.
+  sending graph stay two rows. A row from before the key stood for the
+  sender's parent; it matches after an exact match, and only when
+  ``match_unkeyed`` (pass False for an entity that is not the sender's parent).
   """
   row = session.execute(
     text(
@@ -86,9 +96,9 @@ def find_linked_entity_id(
       "WHERE source = 'linked' AND metadata->>'source_graph_id' = :sgid "
       "  AND (CAST(:seid AS text) IS NULL "
       "       OR metadata->>'source_entity_id' = :seid "
-      "       OR metadata->>'source_entity_id' IS NULL) "
+      "       OR (:unkeyed AND metadata->>'source_entity_id' IS NULL)) "
       "ORDER BY (metadata->>'source_entity_id' IS NULL), created_at ASC LIMIT 1"
     ),
-    {"sgid": source_graph_id, "seid": source_entity_id},
+    {"sgid": source_graph_id, "seid": source_entity_id, "unkeyed": match_unkeyed},
   ).fetchone()
   return str(row.id) if row else None

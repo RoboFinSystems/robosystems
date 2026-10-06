@@ -357,9 +357,6 @@ def _group_parent_id(graph_id: str) -> str:
       return resolve_entity_id(session)
   except NoEntityError:
     return f"entity_{graph_id}"
-  except Exception as exc:
-    logger.warning(f"Group parent lookup failed for {graph_id}; using default: {exc}")
-    return f"entity_{graph_id}"
 
 
 def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
@@ -1185,6 +1182,11 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
            OR (e.metadata->>'source_entity_id') IS NULL)
     WHERE rd.source_graph_id IS NOT NULL
       AND fs.scenario_id IS NULL
+    -- One edge per fact: the keyed row over a row from before the key.
+    QUALIFY row_number() OVER (
+      PARTITION BY rf.id
+      ORDER BY ((e.metadata->>'source_entity_id') IS NULL), e.id
+    ) = 1
   """
 
   tables["STRUCTURE_HAS_FACT_SET"] = f"""
@@ -1348,9 +1350,19 @@ class ExtensionsMaterializer:
     from robosystems.graph_api.client.factory import get_graph_client
 
     start_time = time.time()
-    entity_id = entity_id or await asyncio.to_thread(_group_parent_id, graph_id)
-
     result = MaterializeResult(graph_id=graph_id)
+
+    if not entity_id:
+      try:
+        entity_id = await asyncio.to_thread(_group_parent_id, graph_id)
+      except Exception as e:
+        logger.error(f"Failed to resolve the group parent for {graph_id}: {e}")
+        result.status = "error"
+        result.errors.append(
+          redact_connection_secrets(f"Group parent lookup failed: {e!s}")
+        )
+        result.duration_ms = (time.time() - start_time) * 1000
+        return result
 
     try:
       client = await get_graph_client(graph_id=graph_id, operation_type="write")

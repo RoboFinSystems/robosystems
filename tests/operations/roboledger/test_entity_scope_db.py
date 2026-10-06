@@ -141,6 +141,13 @@ class TestLinkedEntityKey:
     legacy = self._linked(tenant_session, None)
     assert find_linked_entity_id(tenant_session, "kg_group", "ent_a") == legacy.id
 
+  def test_an_unkeyed_row_is_not_claimed_for_a_non_parent(self, tenant_session):
+    self._linked(tenant_session, None)
+    assert (
+      find_linked_entity_id(tenant_session, "kg_group", "ent_b", match_unkeyed=False)
+      is None
+    )
+
   def test_another_graphs_rows_never_match(self, tenant_session):
     self._linked(tenant_session, "ent_a")
     assert find_linked_entity_id(tenant_session, "kg_other", "ent_a") is None
@@ -165,6 +172,13 @@ class TestAReportNamesItsOwnEntity:
 
     assert report_entity_id(t.session, report.id) == t.sub.id
     assert resolve_entity_name(t.session, report) == "Maple Court LLC"
+
+  def test_the_earliest_fact_set_decides_a_mixed_report(self, two_entities):
+    t = two_entities
+    report = self._report(t.session)
+    _canonical_set(t.session, t.sub.id, report_id=report.id)
+    _canonical_set(t.session, t.parent.id, report_id=report.id)
+    assert report_entity_id(t.session, report.id) == t.sub.id
 
   def test_a_report_without_facts_falls_back_to_the_parent(self, two_entities):
     t = two_entities

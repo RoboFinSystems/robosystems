@@ -38,7 +38,10 @@ from robosystems.models.extensions import (
 from robosystems.models.extensions.structure import TEXT_BLOCK_CAPS
 from robosystems.operations.aws.s3 import S3Client
 from robosystems.operations.information_block.envelope import DISCLOSURE_BLOCK_TYPE
-from robosystems.operations.roboledger.entity_scope import resolve_entity_id
+from robosystems.operations.roboledger.entity_scope import (
+  report_entity_id,
+  resolve_entity_id,
+)
 from robosystems.operations.roboledger.fact_set import create_fact_set
 from robosystems.operations.roboledger.reads.blocked_source_graphs import (
   is_source_blocked,
@@ -461,7 +464,9 @@ def regenerate_report(
   report_def.generation_status = "generating"
   session.flush()
 
-  entity_id = resolve_entity_id(session)
+  # The report keeps the entity it was generated for; a report with no facts
+  # yet takes the group parent, as ``create_report`` does.
+  entity_id = resolve_entity_id(session, report_entity_id(session, report_def.id))
   reporting_style_id = load_entity_reporting_style(session, entity_id)
   close_target = load_close_target_concept(session, reporting_style_id)
 
@@ -1754,6 +1759,10 @@ def _ensure_linked_entity(
       if not source_entity:
         return
       source_entity_id = str(source_entity.id)
+      source_parent = find_parent_entity(source_session)
+      is_source_parent = (
+        source_parent is not None and source_parent.id == source_entity.id
+      )
 
       entity_data = {
         "name": source_entity.name,
@@ -1767,8 +1776,14 @@ def _ensure_linked_entity(
   except Exception:
     logger.warning(f"Could not read source entity from {source_graph_id}")
     entity_data = {"name": f"Entity ({source_graph_id})"}
+    is_source_parent = source_entity_id is None
 
-  existing = find_linked_entity_id(target_session, source_graph_id, source_entity_id)
+  existing = find_linked_entity_id(
+    target_session,
+    source_graph_id,
+    source_entity_id,
+    match_unkeyed=is_source_parent,
+  )
 
   if existing:
     target_session.execute(
