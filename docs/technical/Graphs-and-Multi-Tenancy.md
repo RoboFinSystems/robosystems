@@ -241,7 +241,7 @@ curl "https://api.robosystems.ai/v1/graphs" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
-`POST /v1/graphs/{graph_id}/select` sets the `selectedGraphId` that comes back on subsequent list calls — it is how the frontends remember which graph you were last working in.
+`PUT /v1/user/selected-graph` sets the `selectedGraphId` that comes back on subsequent list calls — it is how the frontends remember which graph you were last working in.
 
 ### Inspect a Single Graph
 
