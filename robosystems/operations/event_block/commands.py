@@ -919,6 +919,7 @@ def preview_event_block(
         for txn in planned
         for element_id in (txn.debit_element_id, txn.credit_element_id)
       ),
+      entity_id=entity_id,
     )
   except InactiveAccountError as e:
     errors.append(str(e))

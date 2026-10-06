@@ -1002,7 +1002,7 @@ class TestInactiveAccountGuard:
     args, kwargs = _accounts_postable.call_args
     assert args[0] is session
     assert sorted(args[1]) == ["elem_cash", "elem_revenue"]
-    assert kwargs == {"source": "quickbooks"}
+    assert kwargs == {"source": "quickbooks", "entity_id": ENTITY_ID}
 
   @patch(f"{MODULE}._entry_to_response")
   @patch(f"{MODULE}.assert_period_not_closed")
@@ -1019,7 +1019,7 @@ class TestInactiveAccountGuard:
     create_journal_entry(session, body, "usr_1")
 
     _args, kwargs = _accounts_postable.call_args
-    assert kwargs == {"source": None}
+    assert kwargs == {"source": None, "entity_id": ENTITY_ID}
 
   @patch(f"{MODULE}.assert_period_not_closed")
   @patch(f"{MODULE}.resolve_flow_element_id", return_value=None)
@@ -1058,4 +1058,4 @@ class TestInactiveAccountGuard:
 
     args, kwargs = _accounts_postable.call_args
     assert sorted(args[1]) == ["elem_cash", "elem_revenue"]
-    assert kwargs == {}
+    assert kwargs == {"entity_id": ENTITY_ID}

@@ -181,8 +181,8 @@ class TestAnchor:
       "u",
     )
 
-    book = find_mapping_structure(ext_session)
-    other = find_mapping_structure(ext_session, "us-gaap")
+    book = find_mapping_structure(ext_session, chart_id=chart_id)
+    other = find_mapping_structure(ext_session, "us-gaap", chart_id=chart_id)
     assert book is not None and other is not None
     assert book.name == GAAP_MAPPING
     assert other.name == "A us-gaap mapping"

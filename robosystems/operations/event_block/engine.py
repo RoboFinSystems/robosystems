@@ -151,7 +151,9 @@ def apply_handler(
       debit_element_id = str(interpolate(debit_element_id, context))
     if "{{" in credit_element_id:
       credit_element_id = str(interpolate(credit_element_id, context))
-    assert_accounts_postable(session, (debit_element_id, credit_element_id))
+    assert_accounts_postable(
+      session, (debit_element_id, credit_element_id), entity_id=event.entity_id
+    )
 
     debit_cents = _resolve_amount(debit_spec["amount"], context)
     credit_cents = _resolve_amount(credit_spec["amount"], context)

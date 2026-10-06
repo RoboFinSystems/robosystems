@@ -1440,18 +1440,16 @@ class OLTPLoader:
     from robosystems.operations.taxonomy_block.coa_mappings import (
       BOOK_FRAMEWORK,
       ensure_mapping_structure,
+      entity_chart_id,
     )
     from robosystems.utils.ulid import generate_prefixed_ulid
 
     try:
       with extensions_session(graph_id, statement_timeout_ms=None) as session:
-        existing_coa = (
-          session.query(Taxonomy)
-          .filter(
-            Taxonomy.taxonomy_type == "chart_of_accounts", Taxonomy.is_active.is_(True)
-          )
-          .first()
-        )
+        # The synced chart is the group parent's: its connection books for it.
+        entity = resolve_parent_entity(session)
+        chart_id = entity_chart_id(session, str(entity.id) if entity else None)
+        existing_coa = session.get(Taxonomy, chart_id) if chart_id else None
 
         if not existing_coa:
           source_label = source.replace("_", " ").title()
@@ -1484,7 +1482,6 @@ class OLTPLoader:
             f"{existing_coa.id} for {graph_id}"
           )
 
-        entity = resolve_parent_entity(session)
         if entity:
           existing_adoption = (
             session.query(EntityTaxonomy)

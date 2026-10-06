@@ -1,11 +1,12 @@
-"""Initialize a chart of accounts from a shipped template, once, for a company
-with no chart (a QuickBooks-synced tenant's chart arrives with the sync).
+"""Initialize an entity's chart of accounts from a shipped template, once, for
+an entity with no chart (a QuickBooks-synced one's arrives with the sync).
 
 One transaction, two steps: the Taxonomy Block envelope (the chart plus one
 ``coa_mapping`` structure per framework the tenant carries) through the CoA
 handler, then each framework's mapping arcs resolved by qname against the
 tenant's library copy, since the handler resolves refs only within the
-envelope. The chart is minted as tenant-owned ``coa:*`` elements.
+envelope. The chart is minted as tenant-owned elements: ``coa:*`` for the
+group parent, a prefix of its own for any other entity.
 """
 
 from __future__ import annotations
@@ -26,12 +27,15 @@ from robosystems.models.api.taxonomy_block import (
   TaxonomyBlockElementRequest,
   TaxonomyBlockStructureRequest,
 )
-from robosystems.models.extensions import Element, Taxonomy
+from robosystems.models.extensions import Element, Entity
 from robosystems.operations.roboledger.commands.taxonomies import (
   MappingAssociationExistsError,
   create_mapping_association,
 )
-from robosystems.operations.roboledger.reads.entity import resolve_parent_entity
+from robosystems.operations.roboledger.entity_scope import find_entity_id
+from robosystems.operations.taxonomy_block.chart_of_accounts import (
+  chart_namespace,
+)
 from robosystems.operations.taxonomy_block.chart_of_accounts import (
   create as create_chart_block,
 )
@@ -42,6 +46,7 @@ from robosystems.operations.taxonomy_block.chart_templates import (
   resolve_form,
 )
 from robosystems.operations.taxonomy_block.coa_mappings import (
+  entity_chart_id,
   find_mapping_structure,
   framework_taxonomy_id,
 )
@@ -51,11 +56,11 @@ DEFAULT_CHART_NAME = "Chart of Accounts"
 
 
 class ChartAlreadyExistsError(ValueError):
-  """The graph already has an active chart of accounts."""
+  """The entity already has an active chart of accounts."""
 
   def __init__(self, taxonomy_id: str) -> None:
     super().__init__(
-      "This graph already has a chart of accounts; a chart is never "
+      "This entity already has a chart of accounts; a chart is never "
       "replaced. Customize it with update-taxonomy-block."
     )
     self.taxonomy_id = taxonomy_id
@@ -67,47 +72,47 @@ class ChartTemplateNotFoundError(LookupError):
     self.key = key
 
 
-def active_chart_id(session: Session) -> str | None:
-  """The graph's active ``chart_of_accounts`` taxonomy id, if any.
+def active_chart_id(session: Session, entity_id: str | None = None) -> str | None:
+  """The entity's active ``chart_of_accounts`` taxonomy id, if any; the group
+  parent's when no entity is named.
 
   Any origin counts — QuickBooks-synced, taxonomy-block-authored, or
   template-initialized. Initialize is one-time; a chart is never replaced.
   """
-  return session.execute(
-    select(Taxonomy.id)
-    .where(
-      Taxonomy.taxonomy_type == COA_TAXONOMY_TYPE,
-      Taxonomy.is_active.is_(True),
-    )
-    .order_by(Taxonomy.created_at)
-    .limit(1)
-  ).scalar_one_or_none()
+  return entity_chart_id(session, find_entity_id(session, entity_id))
 
 
 def initialize_chart_of_accounts(
   session: Session,
   body: InitializeChartOfAccountsRequest,
   created_by: str,
+  *,
+  entity_id: str | None = None,
 ) -> InitializeChartOfAccountsResponse:
+  """Initialize the entity's chart, default the group parent's. Each entity
+  keeps its own; a sibling already having one is no bar."""
   template = get_template(body.template)
   if template is None:
     raise ChartTemplateNotFoundError(body.template)
 
-  existing = active_chart_id(session)
+  owner_id = find_entity_id(session, entity_id)
+  existing = entity_chart_id(session, owner_id)
   if existing is not None:
     raise ChartAlreadyExistsError(existing)
 
-  entity_type = _resolve_entity_type(session, body.entity_type)
+  entity_type = _resolve_entity_type(session, body.entity_type, owner_id)
   name = (body.name or "").strip() or DEFAULT_CHART_NAME
   applicable, skipped = _applicable_mapping_sets(session, template)
+  namespace = chart_namespace(session, owner_id)
 
   payload = CreateTaxonomyBlockRequest(
     name=name,
     taxonomy_type=COA_TAXONOMY_TYPE,
+    standard=namespace,
     description=f"{template.display_name} chart, initialized from a template.",
     elements=[
       TaxonomyBlockElementRequest(
-        qname=f"coa:{code}",
+        qname=f"{namespace or 'coa'}:{code}",
         name=account_name,
         trait=trait,
         balance_type=balance_type,
@@ -143,7 +148,7 @@ def initialize_chart_of_accounts(
       "frameworks": [mapping_set.framework for mapping_set in applicable],
     },
   )
-  taxonomy_id = create_chart_block(session, payload, created_by)
+  taxonomy_id = create_chart_block(session, payload, created_by, entity_id=owner_id)
 
   coa_rows = session.execute(
     select(Element.code, Element.id).where(Element.taxonomy_id == taxonomy_id)
@@ -188,13 +193,15 @@ def initialize_chart_of_accounts(
   )
 
 
-def _resolve_entity_type(session: Session, requested: str | None) -> str:
+def _resolve_entity_type(
+  session: Session, requested: str | None, entity_id: str | None
+) -> str:
   """The legal form the equity rows are mapped for — always one of the
   forms the templates know, so the response and the taxonomy metadata record
   what was actually applied rather than the request string."""
   if requested and requested.strip():
     return resolve_form(requested)
-  entity = resolve_parent_entity(session)
+  entity = session.get(Entity, entity_id) if entity_id is not None else None
   form = getattr(entity, "entity_type", None) if entity is not None else None
   return resolve_form(form)
 

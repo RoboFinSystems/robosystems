@@ -2,23 +2,13 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from robosystems.operations.taxonomy_block.chart_of_accounts import _auto_link_entity
 
-# The ledger's own entity is resolved by predicate (parent, not `linked`), not
-# by `LIMIT 1`; these tests pin the link logic and stub the resolver.
-_RESOLVER = (
-  "robosystems.operations.taxonomy_block.chart_of_accounts.resolve_parent_entity"
-)
-
-
-def _entity(entity_id: str = "ent_1") -> MagicMock:
-  e = MagicMock()
-  e.id = entity_id
-  return e
+# The caller names the entity the chart belongs to; these tests pin the link
+# logic for it.
+ENTITY_ID = "ent_1"
 
 
 def _entity_taxonomy(taxonomy_id: str = "tx_1", is_primary: bool = True) -> MagicMock:
@@ -31,28 +21,19 @@ def _entity_taxonomy(taxonomy_id: str = "tx_1", is_primary: bool = True) -> Magi
 
 
 class TestAutoLinkEntity:
-  @pytest.fixture(autouse=True)
-  def _resolver(self):
-    with patch(_RESOLVER) as resolver:
-      self.resolver = resolver
-      yield
-
   def test_no_entity_is_noop(self) -> None:
     """No entity in graph → nothing written."""
     session = MagicMock()
-    self.resolver.return_value = None
-    _auto_link_entity(session, "tx_1")
+    _auto_link_entity(session, "tx_1", None)
     session.execute.assert_not_called()
     session.add.assert_not_called()
     session.flush.assert_not_called()
 
   def test_no_prior_link_creates_primary(self) -> None:
     """Entity exists but no CoA link yet → new primary row added."""
-    entity = _entity()
-    self.resolver.return_value = entity
     session = MagicMock()
     session.execute.return_value.scalar_one_or_none.side_effect = [None]
-    _auto_link_entity(session, "tx_1")
+    _auto_link_entity(session, "tx_1", ENTITY_ID)
     session.add.assert_called_once()
     added = session.add.call_args[0][0]
     assert added.taxonomy_id == "tx_1"
@@ -61,34 +42,28 @@ class TestAutoLinkEntity:
 
   def test_existing_primary_link_is_noop(self) -> None:
     """Link already exists and is primary → early return, no writes."""
-    entity = _entity()
     existing = _entity_taxonomy(taxonomy_id="tx_1", is_primary=True)
-    self.resolver.return_value = entity
     session = MagicMock()
     session.execute.return_value.scalar_one_or_none.side_effect = [existing]
-    _auto_link_entity(session, "tx_1")
+    _auto_link_entity(session, "tx_1", ENTITY_ID)
     session.add.assert_not_called()
     session.flush.assert_not_called()
 
   def test_existing_non_primary_link_is_promoted(self) -> None:
     """Link exists but is non-primary → flip is_primary, no new row."""
-    entity = _entity()
     existing = _entity_taxonomy(taxonomy_id="tx_1", is_primary=False)
-    self.resolver.return_value = entity
     session = MagicMock()
     session.execute.return_value.scalar_one_or_none.side_effect = [existing]
-    _auto_link_entity(session, "tx_1")
+    _auto_link_entity(session, "tx_1", ENTITY_ID)
     assert existing.is_primary is True
     session.add.assert_not_called()
     session.flush.assert_called()
 
   def test_new_primary_demotes_old_primary(self) -> None:
     """Creating a new primary link calls query().filter().update() to demote others."""
-    entity = _entity()
-    self.resolver.return_value = entity
     session = MagicMock()
     session.execute.return_value.scalar_one_or_none.side_effect = [None]
-    _auto_link_entity(session, "tx_new")
+    _auto_link_entity(session, "tx_new", ENTITY_ID)
     session.query.assert_called()
     update_call = session.query.return_value.filter.return_value.update
     update_call.assert_called_once_with(
@@ -97,11 +72,9 @@ class TestAutoLinkEntity:
 
   def test_idempotent_second_call(self) -> None:
     """Calling _auto_link_entity twice for the same taxonomy is a no-op on second call."""
-    entity = _entity()
     existing = _entity_taxonomy(taxonomy_id="tx_1", is_primary=True)
-    self.resolver.return_value = entity
     session = MagicMock()
     session.execute.return_value.scalar_one_or_none.side_effect = [existing, existing]
-    _auto_link_entity(session, "tx_1")
-    _auto_link_entity(session, "tx_1")
+    _auto_link_entity(session, "tx_1", ENTITY_ID)
+    _auto_link_entity(session, "tx_1", ENTITY_ID)
     session.add.assert_not_called()

@@ -1196,7 +1196,9 @@ class ScheduleService:
 
     # Before the staleness check: an unchanged draft on a retired account
     # would still post at close.
-    assert_accounts_postable(session, (debit_element_id, credit_element_id))
+    assert_accounts_postable(
+      session, (debit_element_id, credit_element_id), entity_id=entity_id
+    )
 
     amount_dollars = fact_row.value
     amount_cents = round(amount_dollars * 100)
@@ -1413,7 +1415,9 @@ class ScheduleService:
     entity_id = resolve_entity_id(session, entity_id)
     # A draft in a closed period could never be posted.
     assert_period_not_closed(session, posting_date, entity_id=entity_id)
-    assert_accounts_postable(session, (li["element_id"] for li in normalized))
+    assert_accounts_postable(
+      session, (li["element_id"] for li in normalized), entity_id=entity_id
+    )
 
     entry = Entry(
       entity_id=entity_id,

@@ -332,6 +332,7 @@ def create_journal_entry(
     session,
     (li["element_id"] for li in normalized),
     source=body.source if body.status == "posted" else None,
+    entity_id=entity_id,
   )
 
   status = body.status
@@ -443,7 +444,9 @@ def update_journal_entry(
     normalized, _dr, _cr = validate_and_normalize_lines(new_line_inputs)
     # A draft edit is authored, whatever the entry's provenance: retired
     # accounts are closed to it.
-    assert_accounts_postable(session, (li["element_id"] for li in normalized))
+    assert_accounts_postable(
+      session, (li["element_id"] for li in normalized), entity_id=entry.entity_id
+    )
 
     session.query(LineItem).filter(LineItem.entry_id == entry.id).delete(
       synchronize_session=False

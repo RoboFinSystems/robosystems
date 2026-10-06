@@ -384,15 +384,17 @@ def _trigger_auto_map_if_needed(
 
   from robosystems.db.extensions import extensions_session
   from robosystems.models.extensions import Association
+  from robosystems.operations.roboledger.entity_scope import find_entity_id
   from robosystems.operations.taxonomy_block.coa_mappings import (
     BOOK_FRAMEWORK,
-    find_mapping_structure,
+    find_entity_mapping,
   )
 
   mapping_id: str | None = None
   try:
     with extensions_session(config.graph_id, statement_timeout_ms=None) as session:
-      structure = find_mapping_structure(session, BOOK_FRAMEWORK)
+      # The synced chart is the group parent's.
+      structure = find_entity_mapping(session, find_entity_id(session), BOOK_FRAMEWORK)
       if structure is None:
         context.log.info(
           "No book coa_mapping structure found on graph; skipping auto-map trigger"

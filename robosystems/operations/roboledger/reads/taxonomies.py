@@ -38,7 +38,11 @@ from robosystems.operations.library.reads import (
 from robosystems.operations.roboledger.entry_status import (
   landed_entry_bindparam,
 )
-from robosystems.operations.roboledger.reads.accounts import coa_element_clause
+from robosystems.operations.roboledger.reads.accounts import (
+  account_scope,
+  entity_accounts_clause,
+  mapping_account_scope,
+)
 from robosystems.operations.taxonomy_block.coa_mappings import (
   BOOK_FRAMEWORK,
   in_block,
@@ -183,14 +187,15 @@ def list_elements(
   )
 
 
-def count_coa_elements(session: Session) -> int:
-  """Count active, non-abstract Chart-of-Accounts elements."""
+def count_coa_elements(session: Session, *, entity_id: str | None = None) -> int:
+  """Count one entity's active, non-abstract Chart-of-Accounts elements,
+  default the group parent's."""
   return (
     session.execute(
       select(func.count())
       .select_from(Element)
       .where(
-        coa_element_clause(),
+        entity_accounts_clause(account_scope(session, entity_id)),
         Element.is_active.is_(True),
         Element.is_abstract.is_(False),
       )
@@ -294,11 +299,23 @@ def suggest_mapping_candidates(
 
 
 def list_unmapped_elements(
-  session: Session, mapping_id: str | None = None
+  session: Session,
+  mapping_id: str | None = None,
+  *,
+  entity_id: str | None = None,
 ) -> list[UnmappedElementResponse]:
-  """List CoA elements not yet mapped to the reporting taxonomy."""
+  """List an entity's CoA elements not yet mapped to the reporting taxonomy.
+
+  A ``mapping_id`` names the entity itself: the one whose chart it maps from.
+  Without one, ``entity_id`` does, default the group parent.
+  """
+  scope = (
+    mapping_account_scope(session, mapping_id)
+    if mapping_id
+    else account_scope(session, entity_id)
+  )
   coa_query = select(Element).where(
-    coa_element_clause(),
+    entity_accounts_clause(scope),
     Element.is_active.is_(True),
     Element.is_abstract.is_(False),
   )
@@ -640,7 +657,7 @@ def get_mapping_coverage(session: Session, mapping_id: str) -> MappingCoverageRe
       select(func.count())
       .select_from(Element)
       .where(
-        coa_element_clause(),
+        entity_accounts_clause(mapping_account_scope(session, mapping_id)),
         Element.is_active.is_(True),
         Element.is_abstract.is_(False),
       )

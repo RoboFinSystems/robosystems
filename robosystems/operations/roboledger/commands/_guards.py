@@ -13,7 +13,10 @@ from sqlalchemy.orm import Session
 from robosystems.models.extensions import Element
 from robosystems.operations.locking import acquire_shared_period_fence
 from robosystems.operations.roboledger.commands.connections import SEVERABLE_SOURCES
-from robosystems.operations.roboledger.entity_scope import resolve_entity_id
+from robosystems.operations.roboledger.entity_scope import (
+  is_group_parent,
+  resolve_entity_id,
+)
 
 _LIBRARY_SEEDER = "library-seeder"
 
@@ -183,10 +186,77 @@ class InactiveAccountError(ValueError):
     )
 
 
+class AccountOutsideEntityChartError(ValueError):
+  """A line item names an account in another entity's chart of accounts.
+  Each entity keeps its books in its own chart; entities combine at the
+  reporting concepts their charts map to, never at an account."""
+
+  def __init__(self, accounts: list[tuple[str, str | None, str | None]]) -> None:
+    self.accounts = accounts
+    named = ", ".join(
+      f"{code or '?'} {name or ''}".strip() + f" ({element_id})"
+      for element_id, code, name in accounts
+    )
+    super().__init__(
+      f"Cannot post to another entity's account(s): {named}. Use the "
+      "matching account in this entity's own chart of accounts."
+    )
+
+
+_ACCOUNTS_OUTSIDE_ENTITY_CHART = text("""
+  SELECT e.id, e.code, e.name,
+         EXISTS (
+           SELECT 1 FROM entity_taxonomies owner
+           WHERE owner.taxonomy_id = t.id AND owner.basis = 'chart_of_accounts'
+         ) AS owned
+  FROM elements e
+  JOIN taxonomies t
+    ON t.id = e.taxonomy_id AND t.taxonomy_type = 'chart_of_accounts'
+  WHERE e.id = ANY(:element_ids)
+    AND NOT EXISTS (
+      SELECT 1 FROM entity_taxonomies own
+      WHERE own.taxonomy_id = t.id
+        AND own.basis = 'chart_of_accounts'
+        AND own.entity_id = :entity_id
+    )
+  ORDER BY e.code, e.id
+""")
+
+
+def _accounts_outside_entity_chart(
+  session: Session, element_ids: list[str], entity_id: str
+) -> list[tuple[str, str | None, str | None]]:
+  """The chart accounts among ``element_ids`` that are not ``entity_id``'s.
+
+  A chart linked to no entity is the group parent's. Anything that is not a
+  chart account (a library concept posted to directly) is nobody's and passes.
+  """
+  rows = session.execute(
+    _ACCOUNTS_OUTSIDE_ENTITY_CHART,
+    {"element_ids": element_ids, "entity_id": entity_id},
+  ).all()
+  if not rows:
+    return []
+  unowned_are_ours = any(not row.owned for row in rows) and is_group_parent(
+    session, entity_id
+  )
+  return [
+    (str(row.id), row.code, row.name)
+    for row in rows
+    if row.owned or not unowned_are_ours
+  ]
+
+
 def assert_accounts_postable(
-  session: Session, element_ids: Iterable[str], *, source: str | None = None
+  session: Session,
+  element_ids: Iterable[str],
+  *,
+  source: str | None = None,
+  entity_id: str | None = None,
 ) -> None:
-  """Raise `InactiveAccountError` if any line-item element is retired.
+  """Raise `InactiveAccountError` if any line-item element is retired, and
+  `AccountOutsideEntityChartError` if one belongs to an entity other than
+  ``entity_id``, the entity whose books the lines go into.
 
   A ``source`` in `SEVERABLE_SOURCES` is exempt: a synced ledger replays
   history against accounts retired after use. Callers pass ``source`` only for
@@ -205,3 +275,7 @@ def assert_accounts_postable(
   inactive = [(str(eid), code, name) for eid, code, name in rows]
   if inactive:
     raise InactiveAccountError(inactive)
+  if entity_id is not None:
+    foreign = _accounts_outside_entity_chart(session, ids, entity_id)
+    if foreign:
+      raise AccountOutsideEntityChartError(foreign)

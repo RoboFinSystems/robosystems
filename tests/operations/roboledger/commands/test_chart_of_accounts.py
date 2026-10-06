@@ -49,14 +49,13 @@ def _scalar_result(value):
 def _session_for(
   template_key: str,
   *,
-  existing_chart=None,
   library_misses=(),
   has_rs_gaap: bool = True,
 ):
-  """A session whose ``execute`` answers, in call order: the active-chart
-  probe, the rs-gaap taxonomy probe, the new chart's elements, then — when
-  rs-gaap is present — the library elements for the template's targets
-  (minus ``library_misses``). The mapping-structure lookup is stubbed."""
+  """A session whose ``execute`` answers, in call order: the rs-gaap taxonomy
+  probe, the new chart's elements, then — when rs-gaap is present — the
+  library elements for the template's targets (minus ``library_misses``).
+  The entity, its chart and the mapping-structure lookup are stubbed."""
   template = CHART_TEMPLATES[template_key]
   coa_rows = [(code, f"elem_{code}") for code, *_ in template.accounts]
   targets = sorted(
@@ -69,7 +68,6 @@ def _session_for(
   ]
   session = MagicMock()
   answers = [
-    _scalar_result(existing_chart),
     _scalar_result("tax_rs_gaap" if has_rs_gaap else None),
     _row_result(coa_rows),
   ]
@@ -86,7 +84,9 @@ class TestInitializeChartOfAccounts:
     with (
       patch(f"{_MOD}.create_chart_block", return_value="tax_new") as create,
       patch(f"{_MOD}.create_mapping_association") as map_assoc,
-      patch(f"{_MOD}.resolve_parent_entity", return_value=None) as entity,
+      patch(f"{_MOD}.find_entity_id", return_value=None) as entity,
+      patch(f"{_MOD}.entity_chart_id", return_value=None) as chart,
+      patch(f"{_MOD}.chart_namespace", return_value=None) as namespace,
       patch(
         f"{_MOD}.find_mapping_structure",
         return_value=SimpleNamespace(id="struct_map"),
@@ -95,10 +95,13 @@ class TestInitializeChartOfAccounts:
       self.create = create
       self.map_assoc = map_assoc
       self.entity = entity
+      self.chart = chart
+      self.namespace = namespace
       yield
 
   def test_refuses_when_a_chart_exists(self) -> None:
-    session = _session_for("saas", existing_chart="tax_existing")
+    session = _session_for("saas")
+    self.chart.return_value = "tax_existing"
     with pytest.raises(ChartAlreadyExistsError) as exc:
       initialize_chart_of_accounts(
         session, InitializeChartOfAccountsRequest(template="saas"), "usr_1"
@@ -176,8 +179,9 @@ class TestInitializeChartOfAccounts:
   def test_entity_type_defaults_to_the_graphs_entity(self) -> None:
     entity = MagicMock()
     entity.entity_type = "LLC"
-    self.entity.return_value = entity
+    self.entity.return_value = "ent_1"
     session = _session_for("services")
+    session.get.return_value = entity
 
     response = initialize_chart_of_accounts(
       session, InitializeChartOfAccountsRequest(template="services"), "usr_1"
@@ -190,8 +194,9 @@ class TestInitializeChartOfAccounts:
   def test_explicit_entity_type_wins_over_the_entity(self) -> None:
     entity = MagicMock()
     entity.entity_type = "corporation"
-    self.entity.return_value = entity
+    self.entity.return_value = "ent_1"
     session = _session_for("product")
+    session.get.return_value = entity
 
     response = initialize_chart_of_accounts(
       session,
@@ -199,7 +204,7 @@ class TestInitializeChartOfAccounts:
       "usr_1",
     )
     assert response.entity_type == "partnership"
-    self.entity.assert_not_called()
+    session.get.assert_not_called()
 
   def test_unknown_entity_type_reports_the_form_actually_used(self) -> None:
     """An unrecognised legal form maps the corporation equity rows; the
@@ -252,3 +257,23 @@ class TestInitializeChartOfAccounts:
     )
     assert response.name == "Cadence Books"
     assert self.create.call_args.args[1].name == "Cadence Books"
+
+  def test_a_chart_is_initialized_for_the_entity_named(self) -> None:
+    """A subsidiary's chart is its own: the check, the link and the account
+    prefix all follow the entity, not the graph."""
+    self.entity.side_effect = lambda _session, entity_id=None: entity_id
+    self.namespace.return_value = "coa-mcl"
+    session = _session_for("saas")
+
+    initialize_chart_of_accounts(
+      session,
+      InitializeChartOfAccountsRequest(template="saas"),
+      "usr_1",
+      entity_id="ent_sub",
+    )
+
+    self.chart.assert_called_once_with(session, "ent_sub")
+    payload = self.create.call_args.args[1]
+    assert payload.standard == "coa-mcl"
+    assert all(e.qname.startswith("coa-mcl:") for e in payload.elements)
+    assert self.create.call_args.kwargs == {"entity_id": "ent_sub"}

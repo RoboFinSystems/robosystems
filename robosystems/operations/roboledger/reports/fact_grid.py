@@ -1540,17 +1540,23 @@ def _check_cash_flow_tie_out(
 def _count_unmapped(
   session: Session, mapping_id: str, arc_type: str = "mapping"
 ) -> int:
-  """Count CoA elements that have no association of the given arc-type."""
+  """Count the CoA elements of the mapping's entity that have no association
+  of the given arc-type in it."""
   from robosystems.models.extensions.roboledger import COA_SOURCES
+  from robosystems.operations.roboledger.reads.accounts import (
+    OWNED_ACCOUNT_SQL,
+    mapping_account_scope,
+  )
 
   result = session.execute(
-    text("""
+    text(f"""
       SELECT COUNT(*) AS cnt
       FROM elements e
       WHERE e.source = ANY(:sources)
         AND (e.taxonomy_id IS NULL OR e.taxonomy_id IN (
           SELECT id FROM taxonomies WHERE taxonomy_type = 'chart_of_accounts'
         ))
+        AND {OWNED_ACCOUNT_SQL.format(alias="e")}
         AND e.is_active = true
         AND NOT EXISTS (
           SELECT 1 FROM associations ea
@@ -1563,6 +1569,7 @@ def _count_unmapped(
       "sources": list(COA_SOURCES),
       "mapping_id": mapping_id,
       "arc_type": arc_type,
+      **mapping_account_scope(session, mapping_id).params(),
     },
   )
   row = result.fetchone()

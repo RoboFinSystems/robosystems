@@ -109,9 +109,7 @@ def _stamp(session, **patches):
   }
   defaults.update(patches)
   with (
-    patch(
-      f"{_MOD}.find_mapping_structure", MagicMock(return_value=session.book_mapping)
-    ),
+    patch(f"{_MOD}.find_entity_mapping", MagicMock(return_value=session.book_mapping)),
     patch(
       f"{_MOD}.load_entity_reporting_style", defaults["load_entity_reporting_style"]
     ),
@@ -138,7 +136,10 @@ def _stamp(session, **patches):
 
 class TestSoftSkips:
   def test_no_coa_mapping(self):
-    session = _session(mapping=None, execute_side_effects=[])
+    session = _session(
+      mapping=None,
+      execute_side_effects=[_exec_fetchone(_row(id="ent_1"))],  # resolve_entity_id
+    )
     result = _stamp(session)
     assert result.stamped is False
     assert result.note == "no_coa_mapping"
