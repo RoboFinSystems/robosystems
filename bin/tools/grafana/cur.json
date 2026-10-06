@@ -15,22 +15,26 @@
       }
     ]
   },
+  "description": "AWS spend from the Cost and Usage Report via Athena: structural cost by component, environment, product, usage type and purchase option.",
   "editable": true,
   "fiscalYearStartMonth": 0,
-  "graphTooltip": 0,
+  "graphTooltip": 1,
   "id": null,
   "links": [],
   "panels": [
     {
       "datasource": {
-        "type": "grafana-athena-datasource",
-        "uid": "${athena}"
+        "type": "datasource",
+        "uid": "-- Dashboard --"
       },
+      "description": "Structural cost over the selected range. Effective cost: Savings Plan and Reserved Instance discounts applied, commitment fees counted only for their unused portion, credits and refunds excluded, RI fees excluded (they book once a month and would distort a running month). Respects the Environment, Component, Product and Usage Type filters.",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "fixedColor": "blue",
+            "mode": "fixed"
           },
+          "decimals": 2,
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -38,22 +42,12 @@
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
               }
             ]
           },
           "unit": "currencyUSD"
         },
         "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 0,
-        "y": 0
       },
       "id": 8,
       "options": {
@@ -62,62 +56,49 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["sum"],
-          "fields": "",
+          "calcs": [
+            "sum"
+          ],
+          "fields": "/^Cost$/",
           "values": false
         },
         "showPercentChange": false,
-        "textMode": "auto",
+        "textMode": "value",
         "wideLayout": true
       },
-      "pluginVersion": "10.4.1",
+      "pluginVersion": "10.4.7",
       "targets": [
         {
-          "connectionArgs": {
-            "catalog": "AwsDataCatalog",
-            "database": "athenacurcfn_robo_systems_cost_and_usage",
-            "region": "us-east-1",
-            "resultReuseEnabled": false,
-            "resultReuseMaxAgeInMinutes": 60
-          },
           "datasource": {
-            "type": "grafana-athena-datasource",
-            "uid": "${athena}"
+            "type": "datasource",
+            "uid": "-- Dashboard --"
           },
-          "format": 1,
-          "rawSQL": "SELECT\n      DATE(line_item_usage_start_date) as usage_date,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      line_item_line_item_type != 'Credit' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment)) AND\n      (product_product_name) in ($product) AND\n      (line_item_usage_type) in ($usagetype)\nGROUP BY 1\nORDER BY cost, usage_date",
-          "refId": "A",
-          "table": "robosystemscostandusage"
+          "panelId": 16,
+          "refId": "A"
         }
       ],
       "title": "Period Cost",
-      "transformations": [
-        {
-          "id": "prepareTimeSeries",
-          "options": {
-            "format": "multi"
-          }
-        },
-        {
-          "id": "renameByRegex",
-          "options": {
-            "regex": "^cost (.+)$",
-            "renamePattern": "$1"
-          }
-        }
-      ],
-      "type": "stat"
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      }
     },
     {
       "datasource": {
-        "type": "grafana-athena-datasource",
-        "uid": "${athena}"
+        "type": "datasource",
+        "uid": "-- Dashboard --"
       },
+      "description": "Mean of the daily structural cost over the selected range. Multiply by the days in a month for a run rate.",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "fixedColor": "blue",
+            "mode": "fixed"
           },
+          "decimals": 2,
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -125,22 +106,12 @@
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
               }
             ]
           },
           "unit": "currencyUSD"
         },
         "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 6,
-        "y": 0
       },
       "id": 4,
       "options": {
@@ -149,62 +120,49 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["mean"],
-          "fields": "",
+          "calcs": [
+            "mean"
+          ],
+          "fields": "/^Cost$/",
           "values": false
         },
         "showPercentChange": false,
-        "textMode": "auto",
+        "textMode": "value",
         "wideLayout": true
       },
-      "pluginVersion": "10.4.1",
+      "pluginVersion": "10.4.7",
       "targets": [
         {
-          "connectionArgs": {
-            "catalog": "AwsDataCatalog",
-            "database": "athenacurcfn_robo_systems_cost_and_usage",
-            "region": "us-east-1",
-            "resultReuseEnabled": false,
-            "resultReuseMaxAgeInMinutes": 60
-          },
           "datasource": {
-            "type": "grafana-athena-datasource",
-            "uid": "${athena}"
+            "type": "datasource",
+            "uid": "-- Dashboard --"
           },
-          "format": 1,
-          "rawSQL": "SELECT\n      DATE(line_item_usage_start_date) as usage_date,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      line_item_line_item_type != 'Credit' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment)) AND\n      (product_product_name) in ($product) AND\n      (line_item_usage_type) in ($usagetype)\nGROUP BY 1\nORDER BY cost, usage_date",
-          "refId": "A",
-          "table": "robosystemscostandusage"
+          "panelId": 16,
+          "refId": "A"
         }
       ],
       "title": "Average Daily Cost",
-      "transformations": [
-        {
-          "id": "prepareTimeSeries",
-          "options": {
-            "format": "multi"
-          }
-        },
-        {
-          "id": "renameByRegex",
-          "options": {
-            "regex": "^cost (.+)$",
-            "renamePattern": "$1"
-          }
-        }
-      ],
-      "type": "stat"
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      }
     },
     {
       "datasource": {
-        "type": "grafana-athena-datasource",
-        "uid": "${athena}"
+        "type": "datasource",
+        "uid": "-- Dashboard --"
       },
+      "description": "Most expensive single day in the range; a jump here is where to start reading the breakdowns below.",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "fixedColor": "blue",
+            "mode": "fixed"
           },
+          "decimals": 2,
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -212,22 +170,12 @@
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
               }
             ]
           },
           "unit": "currencyUSD"
         },
         "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 12,
-        "y": 0
       },
       "id": 9,
       "options": {
@@ -236,62 +184,49 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["max"],
-          "fields": "",
+          "calcs": [
+            "max"
+          ],
+          "fields": "/^Cost$/",
           "values": false
         },
         "showPercentChange": false,
-        "textMode": "auto",
+        "textMode": "value",
         "wideLayout": true
       },
-      "pluginVersion": "10.4.1",
+      "pluginVersion": "10.4.7",
       "targets": [
         {
-          "connectionArgs": {
-            "catalog": "AwsDataCatalog",
-            "database": "athenacurcfn_robo_systems_cost_and_usage",
-            "region": "us-east-1",
-            "resultReuseEnabled": false,
-            "resultReuseMaxAgeInMinutes": 60
-          },
           "datasource": {
-            "type": "grafana-athena-datasource",
-            "uid": "${athena}"
+            "type": "datasource",
+            "uid": "-- Dashboard --"
           },
-          "format": 1,
-          "rawSQL": "SELECT\n      DATE(line_item_usage_start_date) as usage_date,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      line_item_line_item_type != 'Credit' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment)) AND\n      (product_product_name) in ($product) AND\n      (line_item_usage_type) in ($usagetype)\nGROUP BY 1\nORDER BY cost, usage_date",
-          "refId": "A",
-          "table": "robosystemscostandusage"
+          "panelId": 16,
+          "refId": "A"
         }
       ],
       "title": "Max Daily Cost",
-      "transformations": [
-        {
-          "id": "prepareTimeSeries",
-          "options": {
-            "format": "multi"
-          }
-        },
-        {
-          "id": "renameByRegex",
-          "options": {
-            "regex": "^cost (.+)$",
-            "renamePattern": "$1"
-          }
-        }
-      ],
-      "type": "stat"
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      }
     },
     {
       "datasource": {
-        "type": "grafana-athena-datasource",
-        "uid": "${athena}"
+        "type": "datasource",
+        "uid": "-- Dashboard --"
       },
+      "description": "Period cost plus the promotional credits and refunds applied in the range: what was actually billed. Credits are account-level lines with no tags, so with a Component or Environment selected this equals Period Cost.",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "fixedColor": "blue",
+            "mode": "fixed"
           },
+          "decimals": 2,
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -299,130 +234,208 @@
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
               }
             ]
           },
-          "unit": "none"
+          "unit": "currencyUSD"
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 18,
-        "y": 0
-      },
-      "id": 10,
+      "id": 15,
       "options": {
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["count"],
-          "fields": "",
+          "calcs": [
+            "sum"
+          ],
+          "fields": "/^Net/",
           "values": false
         },
         "showPercentChange": false,
-        "textMode": "auto",
+        "textMode": "value",
         "wideLayout": true
       },
-      "pluginVersion": "10.4.1",
+      "pluginVersion": "10.4.7",
       "targets": [
         {
-          "connectionArgs": {
-            "catalog": "AwsDataCatalog",
-            "database": "athenacurcfn_robo_systems_cost_and_usage",
-            "region": "us-east-1",
-            "resultReuseEnabled": false,
-            "resultReuseMaxAgeInMinutes": 60
-          },
           "datasource": {
-            "type": "grafana-athena-datasource",
-            "uid": "${athena}"
+            "type": "datasource",
+            "uid": "-- Dashboard --"
           },
-          "format": 1,
-          "rawSQL": "SELECT\n      DATE(line_item_usage_start_date) as usage_date,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      line_item_line_item_type != 'Credit' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment)) AND\n      (product_product_name) in ($product) AND\n      (line_item_usage_type) in ($usagetype)\nGROUP BY 1\nORDER BY cost, usage_date",
-          "refId": "A",
-          "table": "robosystemscostandusage"
+          "panelId": 16,
+          "refId": "A"
         }
       ],
-      "title": "Days in Period",
-      "transformations": [
-        {
-          "id": "prepareTimeSeries",
-          "options": {
-            "format": "multi"
-          }
-        },
-        {
-          "id": "renameByRegex",
-          "options": {
-            "regex": "^cost (.+)$",
-            "renamePattern": "$1"
-          }
-        }
-      ],
-      "type": "stat"
+      "title": "Net After Credits",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      }
     },
     {
       "datasource": {
         "type": "grafana-athena-datasource",
         "uid": "${athena}"
       },
+      "description": "Structural cost per UTC day with a trailing 7-day average, and the net after credits as a dashed line. Effective cost: Savings Plan and Reserved Instance discounts applied, commitment fees counted only for their unused portion, credits and refunds excluded, RI fees excluded (they book once a month and would distort a running month). The four tiles above are reductions of this panel's query, so the dashboard runs one Athena query for the overview.",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "fixedColor": "blue",
+            "mode": "fixed"
           },
           "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 1,
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
               "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
             }
           },
-          "fieldMinMax": false,
           "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
           "unit": "currencyUSD"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/^7-day/"
+            },
+            "properties": [
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "group": "B",
+                  "mode": "none"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/^Net/"
+            },
+            "properties": [
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "group": "B",
+                  "mode": "none"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#8e8e8e",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    6,
+                    4
+                  ],
+                  "fill": "dash"
+                }
+              }
+            ]
+          }
+        ]
       },
-      "gridPos": {
-        "h": 13,
-        "w": 6,
-        "x": 0,
-        "y": 4
-      },
-      "id": 2,
+      "id": 16,
       "options": {
-        "displayLabels": ["name"],
         "legend": {
+          "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": false
-        },
-        "pieType": "donut",
-        "reduceOptions": {
-          "calcs": ["sum"],
-          "fields": "",
-          "values": true
+          "showLegend": true
         },
         "tooltip": {
-          "mode": "single",
-          "sort": "none"
+          "mode": "multi",
+          "sort": "desc"
         }
       },
+      "pluginVersion": "10.4.7",
       "targets": [
         {
           "connectionArgs": {
-            "catalog": "AwsDataCatalog",
-            "database": "athenacurcfn_robo_systems_cost_and_usage",
-            "region": "us-east-1",
+            "catalog": "__default",
+            "database": "__default",
+            "region": "__default",
             "resultReuseEnabled": false,
             "resultReuseMaxAgeInMinutes": 60
           },
@@ -431,19 +444,101 @@
             "uid": "${athena}"
           },
           "format": 1,
-          "rawSQL": "SELECT\n      CASE\n            WHEN resource_tags_user_component in ($component) AND resource_tags_user_component != '' THEN resource_tags_user_component\n            WHEN product_servicename = 'Amazon Virtual Private Cloud' THEN 'VPC'\n            WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n            WHEN product_servicename IS NOT NULL AND product_servicename != '' THEN replace(replace(replace(product_servicename,'Amazon',''),'AWS',''),' ','')\n            ELSE 'Other'\n      END as component,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      line_item_line_item_type != 'Credit' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment)) AND\n      (product_product_name) in ($product) AND\n      (line_item_usage_type) in ($usagetype)\nGROUP BY 1\nORDER BY cost DESC",
-          "refId": "A",
-          "table": "robosystemscostandusage"
+          "rawSQL": "WITH daily AS (\n  SELECT\n    date_trunc('day', line_item_usage_start_date) AS day,\n    sum(CASE WHEN line_item_line_item_type NOT IN ('Credit', 'Refund', 'RIFee') THEN CASE\n      WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n      WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n      WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n      WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n      WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n      WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n      ELSE line_item_unblended_cost\n    END ELSE 0 END) AS cost,\n    sum(CASE WHEN line_item_line_item_type IN ('Credit', 'Refund') THEN line_item_unblended_cost ELSE 0 END) AS credits\n  FROM ${cur_table}\n  WHERE DATE(line_item_usage_start_date) BETWEEN date_add('day', -6, DATE($__timeFrom)) AND DATE($__timeTo)\n    AND ('__all__' IN (${environment:sqlstring}) OR coalesce(nullif(resource_tags_user_environment, ''), 'untagged') IN (${environment:sqlstring}))\n    AND ('__all__' IN (${component:sqlstring}) OR CASE\n          WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n          WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n          WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n          ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n        END IN (${component:sqlstring}))\n    AND ('__all__' IN (${product:sqlstring}) OR regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') IN (${product:sqlstring}))\n    AND ('__all__' IN (${usagetype:sqlstring}) OR line_item_usage_type IN (${usagetype:sqlstring}))\n  GROUP BY 1\n)\nSELECT\n  day,\n  cost AS \"Cost\",\n  avg(cost) OVER (ORDER BY day ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) AS \"7-day average\",\n  cost + credits AS \"Net after credits\"\nFROM daily\nWHERE day >= DATE($__timeFrom)\nORDER BY day",
+          "refId": "A"
         }
       ],
-      "title": "Cost by Component",
-      "type": "piechart"
+      "title": "Daily Cost",
+      "transformations": [],
+      "type": "timeseries",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      }
     },
     {
       "datasource": {
         "type": "grafana-athena-datasource",
         "uid": "${athena}"
       },
+      "description": "Period total per platform component (the Component tag). Lines without the tag fall back to the AWS product that billed them, so untagged spend is visible rather than dropped. Effective cost: Savings Plan and Reserved Instance discounts applied, commitment fees counted only for their unused portion, credits and refunds excluded, RI fees excluded (they book once a month and would distort a running month).",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "decimals": 2,
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "id": 2,
+      "options": {
+        "displayMode": "basic",
+        "maxVizHeight": 28,
+        "minVizHeight": 18,
+        "minVizWidth": 8,
+        "namePlacement": "left",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": true
+        },
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
+      },
+      "pluginVersion": "10.4.7",
+      "targets": [
+        {
+          "connectionArgs": {
+            "catalog": "__default",
+            "database": "__default",
+            "region": "__default",
+            "resultReuseEnabled": false,
+            "resultReuseMaxAgeInMinutes": 60
+          },
+          "datasource": {
+            "type": "grafana-athena-datasource",
+            "uid": "${athena}"
+          },
+          "format": 0,
+          "rawSQL": "SELECT\n  CASE\n    WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n    WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n    WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n    ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n  END AS component,\n  sum(CASE\n    WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n    WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n    WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n    WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n    WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n    WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n    ELSE line_item_unblended_cost\n  END) AS cost\nFROM ${cur_table}\nWHERE DATE(line_item_usage_start_date) BETWEEN DATE($__timeFrom) AND DATE($__timeTo)\n  AND line_item_line_item_type NOT IN ('Credit', 'Refund', 'RIFee')\n  AND ('__all__' IN (${environment:sqlstring}) OR coalesce(nullif(resource_tags_user_environment, ''), 'untagged') IN (${environment:sqlstring}))\n  AND ('__all__' IN (${component:sqlstring}) OR CASE\n        WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n        WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n        WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n        ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n      END IN (${component:sqlstring}))\n  AND ('__all__' IN (${product:sqlstring}) OR regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') IN (${product:sqlstring}))\n  AND ('__all__' IN (${usagetype:sqlstring}) OR line_item_usage_type IN (${usagetype:sqlstring}))\nGROUP BY 1\nHAVING sum(CASE\n    WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n    WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n    WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n    WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n    WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n    WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n    ELSE line_item_unblended_cost\n  END) > 0\nORDER BY cost DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Cost by Component",
+      "type": "bargauge",
+      "gridPos": {
+        "h": 11,
+        "w": 7,
+        "x": 0,
+        "y": 13
+      }
+    },
+    {
+      "datasource": {
+        "type": "grafana-athena-datasource",
+        "uid": "${athena}"
+      },
+      "description": "Component cost over time. The top 10 categories by total are drawn; the rest stack as Other. Bucket size follows the Granularity selector; the legend holds the period total and the per-bucket mean.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -452,13 +547,13 @@
           "custom": {
             "axisBorderShow": false,
             "axisCenteredZero": false,
-            "axisColorMode": "series",
+            "axisColorMode": "text",
             "axisLabel": "",
-            "axisPlacement": "right",
+            "axisPlacement": "auto",
             "barAlignment": 1,
-            "drawStyle": "line",
-            "fillOpacity": 100,
-            "gradientMode": "hue",
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
@@ -466,15 +561,12 @@
             },
             "insertNulls": false,
             "lineInterpolation": "linear",
-            "lineStyle": {
-              "fill": "solid"
-            },
-            "lineWidth": 0,
-            "pointSize": 3,
+            "lineWidth": 1,
+            "pointSize": 4,
             "scaleDistribution": {
               "type": "linear"
             },
-            "showPoints": "auto",
+            "showPoints": "never",
             "spanNulls": false,
             "stacking": {
               "group": "A",
@@ -492,43 +584,54 @@
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
               }
             ]
           },
           "unit": "currencyUSD"
         },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 13,
-        "w": 18,
-        "x": 6,
-        "y": 4
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Other"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#8e8e8e",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
       },
       "id": 1,
       "options": {
         "legend": {
-          "calcs": [],
-          "displayMode": "list",
+          "calcs": [
+            "sum",
+            "mean"
+          ],
+          "displayMode": "table",
           "placement": "right",
           "showLegend": true,
-          "width": 130
+          "sortBy": "Total",
+          "sortDesc": true
         },
         "tooltip": {
-          "mode": "single",
-          "sort": "none"
+          "mode": "multi",
+          "sort": "desc"
         }
       },
+      "pluginVersion": "10.4.7",
       "targets": [
         {
           "connectionArgs": {
-            "catalog": "AwsDataCatalog",
-            "database": "athenacurcfn_robo_systems_cost_and_usage",
-            "region": "us-east-1",
+            "catalog": "__default",
+            "database": "__default",
+            "region": "__default",
             "resultReuseEnabled": false,
             "resultReuseMaxAgeInMinutes": 60
           },
@@ -537,31 +640,12 @@
             "uid": "${athena}"
           },
           "format": 1,
-          "rawSQL": "SELECT\n      DATE(line_item_usage_start_date) as usage_date,\n      CASE\n            WHEN resource_tags_user_component in ($component) AND resource_tags_user_component != '' THEN resource_tags_user_component\n            WHEN product_servicename = 'Amazon Virtual Private Cloud' THEN 'VPC'\n            WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n            WHEN product_servicename IS NOT NULL AND product_servicename != '' THEN replace(replace(replace(product_servicename,'Amazon',''),'AWS',''),' ','')\n            ELSE 'Other'\n      END as component,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      line_item_line_item_type != 'Credit' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment)) AND\n      (product_product_name) in ($product) AND\n      (line_item_usage_type) in ($usagetype)\nGROUP BY 1,2\nORDER BY cost, usage_date",
-          "refId": "A",
-          "table": "robosystemscostandusage"
+          "rawSQL": "WITH lines AS (\n  SELECT\n    date_trunc('$granularity', line_item_usage_start_date) AS bucket,\n    CASE\n      WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n      WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n      WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n      ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n    END AS category,\n    CASE\n      WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n      WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n      WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n      WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n      WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n      WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n      ELSE line_item_unblended_cost\n    END AS cost\n  FROM ${cur_table}\n  WHERE DATE(line_item_usage_start_date) BETWEEN DATE($__timeFrom) AND DATE($__timeTo)\n    AND line_item_line_item_type NOT IN ('Credit', 'Refund', 'RIFee')\n    AND ('__all__' IN (${environment:sqlstring}) OR coalesce(nullif(resource_tags_user_environment, ''), 'untagged') IN (${environment:sqlstring}))\n    AND ('__all__' IN (${component:sqlstring}) OR CASE\n          WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n          WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n          WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n          ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n        END IN (${component:sqlstring}))\n    AND ('__all__' IN (${product:sqlstring}) OR regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') IN (${product:sqlstring}))\n    AND ('__all__' IN (${usagetype:sqlstring}) OR line_item_usage_type IN (${usagetype:sqlstring}))\n),\nranked AS (\n  SELECT category, row_number() OVER (ORDER BY sum(cost) DESC) AS rn\n  FROM lines\n  GROUP BY category\n)\nSELECT\n  l.bucket,\n  CASE WHEN r.rn <= 10 THEN l.category ELSE 'Other' END AS component,\n  sum(l.cost) AS cost\nFROM lines l\nJOIN ranked r ON r.category = l.category\nGROUP BY 1, 2\nORDER BY 1, min(CASE WHEN r.rn <= 10 THEN r.rn ELSE 11 END)",
+          "refId": "A"
         }
       ],
-      "title": "Component Cost Timeseries",
+      "title": "${granularity:text} Cost by Component",
       "transformations": [
-        {
-          "id": "filterByValue",
-          "options": {
-            "filters": [
-              {
-                "config": {
-                  "id": "greater",
-                  "options": {
-                    "value": 0
-                  }
-                },
-                "fieldName": "cost"
-              }
-            ],
-            "match": "all",
-            "type": "include"
-          }
-        },
         {
           "id": "prepareTimeSeries",
           "options": {
@@ -576,61 +660,68 @@
           }
         }
       ],
-      "type": "timeseries"
+      "type": "timeseries",
+      "gridPos": {
+        "h": 11,
+        "w": 17,
+        "x": 7,
+        "y": 13
+      }
     },
     {
       "datasource": {
         "type": "grafana-athena-datasource",
         "uid": "${athena}"
       },
+      "description": "Period total per Environment tag. Account-level services that cannot carry the tag (CloudWatch, VPC, Route 53, commitment fees) show as untagged. Effective cost: Savings Plan and Reserved Instance discounts applied, commitment fees counted only for their unused portion, credits and refunds excluded, RI fees excluded (they book once a month and would distort a running month).",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "fixedColor": "blue",
+            "mode": "fixed"
           },
-          "custom": {
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            }
-          },
+          "decimals": 2,
           "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
           "unit": "currencyUSD"
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 13,
-        "w": 6,
-        "x": 0,
-        "y": 17
-      },
       "id": 3,
       "options": {
-        "displayLabels": ["name"],
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": false
-        },
-        "pieType": "donut",
+        "displayMode": "basic",
+        "maxVizHeight": 28,
+        "minVizHeight": 18,
+        "minVizWidth": 8,
+        "namePlacement": "left",
+        "orientation": "horizontal",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": true
         },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
       },
+      "pluginVersion": "10.4.7",
       "targets": [
         {
           "connectionArgs": {
-            "catalog": "AwsDataCatalog",
-            "database": "athenacurcfn_robo_systems_cost_and_usage",
-            "region": "us-east-1",
+            "catalog": "__default",
+            "database": "__default",
+            "region": "__default",
             "resultReuseEnabled": false,
             "resultReuseMaxAgeInMinutes": 60
           },
@@ -638,20 +729,26 @@
             "type": "grafana-athena-datasource",
             "uid": "${athena}"
           },
-          "format": 1,
-          "rawSQL": "SELECT\n      CASE\n            WHEN resource_tags_user_environment != '' THEN resource_tags_user_environment\n            WHEN product_servicename = 'Amazon Virtual Private Cloud' THEN 'shared'\n            WHEN product_servicename = 'AmazonCloudWatch' THEN 'shared'\n            ELSE 'other'\n      END as environment,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      line_item_line_item_type != 'Credit' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment)) AND\n      (product_product_name) in ($product) AND\n      (line_item_usage_type) in ($usagetype)\nGROUP BY 1\nORDER BY cost DESC",
-          "refId": "A",
-          "table": "robosystemscostandusage"
+          "format": 0,
+          "rawSQL": "SELECT\n  coalesce(nullif(resource_tags_user_environment, ''), 'untagged') AS environment,\n  sum(CASE\n    WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n    WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n    WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n    WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n    WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n    WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n    ELSE line_item_unblended_cost\n  END) AS cost\nFROM ${cur_table}\nWHERE DATE(line_item_usage_start_date) BETWEEN DATE($__timeFrom) AND DATE($__timeTo)\n  AND line_item_line_item_type NOT IN ('Credit', 'Refund', 'RIFee')\n  AND ('__all__' IN (${environment:sqlstring}) OR coalesce(nullif(resource_tags_user_environment, ''), 'untagged') IN (${environment:sqlstring}))\n  AND ('__all__' IN (${component:sqlstring}) OR CASE\n        WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n        WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n        WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n        ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n      END IN (${component:sqlstring}))\n  AND ('__all__' IN (${product:sqlstring}) OR regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') IN (${product:sqlstring}))\n  AND ('__all__' IN (${usagetype:sqlstring}) OR line_item_usage_type IN (${usagetype:sqlstring}))\nGROUP BY 1\nHAVING sum(CASE\n    WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n    WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n    WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n    WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n    WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n    WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n    ELSE line_item_unblended_cost\n  END) > 0\nORDER BY cost DESC",
+          "refId": "A"
         }
       ],
       "title": "Cost by Environment",
-      "type": "piechart"
+      "type": "bargauge",
+      "gridPos": {
+        "h": 8,
+        "w": 7,
+        "x": 0,
+        "y": 24
+      }
     },
     {
       "datasource": {
         "type": "grafana-athena-datasource",
         "uid": "${athena}"
       },
+      "description": "Environment cost over time. The top 10 categories by total are drawn; the rest stack as Other. Bucket size follows the Granularity selector; the legend holds the period total and the per-bucket mean.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -660,13 +757,13 @@
           "custom": {
             "axisBorderShow": false,
             "axisCenteredZero": false,
-            "axisColorMode": "series",
+            "axisColorMode": "text",
             "axisLabel": "",
-            "axisPlacement": "right",
-            "barAlignment": -1,
-            "drawStyle": "line",
-            "fillOpacity": 100,
-            "gradientMode": "hue",
+            "axisPlacement": "auto",
+            "barAlignment": 1,
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
@@ -674,12 +771,12 @@
             },
             "insertNulls": false,
             "lineInterpolation": "linear",
-            "lineWidth": 0,
-            "pointSize": 3,
+            "lineWidth": 1,
+            "pointSize": 4,
             "scaleDistribution": {
               "type": "linear"
             },
-            "showPoints": "auto",
+            "showPoints": "never",
             "spanNulls": false,
             "stacking": {
               "group": "A",
@@ -697,43 +794,54 @@
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
               }
             ]
           },
           "unit": "currencyUSD"
         },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 13,
-        "w": 18,
-        "x": 6,
-        "y": 17
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Other"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#8e8e8e",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
       },
       "id": 6,
       "options": {
         "legend": {
-          "calcs": [],
-          "displayMode": "list",
+          "calcs": [
+            "sum",
+            "mean"
+          ],
+          "displayMode": "table",
           "placement": "right",
           "showLegend": true,
-          "width": 130
+          "sortBy": "Total",
+          "sortDesc": true
         },
         "tooltip": {
-          "mode": "single",
-          "sort": "none"
+          "mode": "multi",
+          "sort": "desc"
         }
       },
+      "pluginVersion": "10.4.7",
       "targets": [
         {
           "connectionArgs": {
-            "catalog": "AwsDataCatalog",
-            "database": "athenacurcfn_robo_systems_cost_and_usage",
-            "region": "us-east-1",
+            "catalog": "__default",
+            "database": "__default",
+            "region": "__default",
             "resultReuseEnabled": false,
             "resultReuseMaxAgeInMinutes": 60
           },
@@ -742,12 +850,11 @@
             "uid": "${athena}"
           },
           "format": 1,
-          "rawSQL": "SELECT\n      DATE(line_item_usage_start_date) as usage_date,\n      CASE\n            WHEN resource_tags_user_environment != '' THEN resource_tags_user_environment\n            WHEN product_servicename = 'Amazon Virtual Private Cloud' THEN 'shared'\n            WHEN product_servicename = 'AmazonCloudWatch' THEN 'shared'\n            ELSE 'other'\n      END as environment,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      line_item_line_item_type != 'Credit' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment)) AND\n      (product_product_name) in ($product) AND\n      (line_item_usage_type) in ($usagetype)\nGROUP BY 1,2\nORDER BY cost, usage_date",
-          "refId": "A",
-          "table": "robosystemscostandusage"
+          "rawSQL": "WITH lines AS (\n  SELECT\n    date_trunc('$granularity', line_item_usage_start_date) AS bucket,\n    coalesce(nullif(resource_tags_user_environment, ''), 'untagged') AS category,\n    CASE\n      WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n      WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n      WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n      WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n      WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n      WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n      ELSE line_item_unblended_cost\n    END AS cost\n  FROM ${cur_table}\n  WHERE DATE(line_item_usage_start_date) BETWEEN DATE($__timeFrom) AND DATE($__timeTo)\n    AND line_item_line_item_type NOT IN ('Credit', 'Refund', 'RIFee')\n    AND ('__all__' IN (${environment:sqlstring}) OR coalesce(nullif(resource_tags_user_environment, ''), 'untagged') IN (${environment:sqlstring}))\n    AND ('__all__' IN (${component:sqlstring}) OR CASE\n          WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n          WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n          WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n          ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n        END IN (${component:sqlstring}))\n    AND ('__all__' IN (${product:sqlstring}) OR regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') IN (${product:sqlstring}))\n    AND ('__all__' IN (${usagetype:sqlstring}) OR line_item_usage_type IN (${usagetype:sqlstring}))\n),\nranked AS (\n  SELECT category, row_number() OVER (ORDER BY sum(cost) DESC) AS rn\n  FROM lines\n  GROUP BY category\n)\nSELECT\n  l.bucket,\n  CASE WHEN r.rn <= 10 THEN l.category ELSE 'Other' END AS environment,\n  sum(l.cost) AS cost\nFROM lines l\nJOIN ranked r ON r.category = l.category\nGROUP BY 1, 2\nORDER BY 1, min(CASE WHEN r.rn <= 10 THEN r.rn ELSE 11 END)",
+          "refId": "A"
         }
       ],
-      "title": "Environment Cost Timeseries",
+      "title": "${granularity:text} Cost by Environment",
       "transformations": [
         {
           "id": "prepareTimeSeries",
@@ -763,61 +870,68 @@
           }
         }
       ],
-      "type": "timeseries"
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 17,
+        "x": 7,
+        "y": 24
+      }
     },
     {
       "datasource": {
         "type": "grafana-athena-datasource",
         "uid": "${athena}"
       },
+      "description": "Period total per AWS product, with the Amazon/AWS prefix dropped from the names. Effective cost: Savings Plan and Reserved Instance discounts applied, commitment fees counted only for their unused portion, credits and refunds excluded, RI fees excluded (they book once a month and would distort a running month).",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "fixedColor": "blue",
+            "mode": "fixed"
           },
-          "custom": {
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            }
-          },
+          "decimals": 2,
           "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
           "unit": "currencyUSD"
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 13,
-        "w": 6,
-        "x": 0,
-        "y": 30
-      },
       "id": 5,
       "options": {
-        "displayLabels": ["name"],
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": false
-        },
-        "pieType": "donut",
+        "displayMode": "basic",
+        "maxVizHeight": 28,
+        "minVizHeight": 18,
+        "minVizWidth": 8,
+        "namePlacement": "left",
+        "orientation": "horizontal",
         "reduceOptions": {
-          "calcs": ["sum"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": true
         },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
       },
+      "pluginVersion": "10.4.7",
       "targets": [
         {
           "connectionArgs": {
-            "catalog": "AwsDataCatalog",
-            "database": "athenacurcfn_robo_systems_cost_and_usage",
-            "region": "us-east-1",
+            "catalog": "__default",
+            "database": "__default",
+            "region": "__default",
             "resultReuseEnabled": false,
             "resultReuseMaxAgeInMinutes": 60
           },
@@ -825,21 +939,26 @@
             "type": "grafana-athena-datasource",
             "uid": "${athena}"
           },
-          "format": 1,
-          "rawSQL": "SELECT\n      CASE\n            WHEN product_servicename = 'Amazon Virtual Private Cloud' THEN 'VPC'\n            WHEN product_servicename != '' THEN replace(product_servicename,'Amazon','')\n            ELSE 'Other'\n      END as service,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      line_item_line_item_type != 'Credit' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment)) AND\n      (product_product_name) in ($product) AND\n      (line_item_usage_type) in ($usagetype)\nGROUP BY 1\nORDER BY cost DESC",
-          "refId": "A",
-          "table": "robosystemscostandusage"
+          "format": 0,
+          "rawSQL": "SELECT\n  regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') AS product,\n  sum(CASE\n    WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n    WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n    WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n    WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n    WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n    WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n    ELSE line_item_unblended_cost\n  END) AS cost\nFROM ${cur_table}\nWHERE DATE(line_item_usage_start_date) BETWEEN DATE($__timeFrom) AND DATE($__timeTo)\n  AND line_item_line_item_type NOT IN ('Credit', 'Refund', 'RIFee')\n  AND ('__all__' IN (${environment:sqlstring}) OR coalesce(nullif(resource_tags_user_environment, ''), 'untagged') IN (${environment:sqlstring}))\n  AND ('__all__' IN (${component:sqlstring}) OR CASE\n        WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n        WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n        WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n        ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n      END IN (${component:sqlstring}))\n  AND ('__all__' IN (${product:sqlstring}) OR regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') IN (${product:sqlstring}))\n  AND ('__all__' IN (${usagetype:sqlstring}) OR line_item_usage_type IN (${usagetype:sqlstring}))\nGROUP BY 1\nHAVING sum(CASE\n    WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n    WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n    WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n    WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n    WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n    WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n    ELSE line_item_unblended_cost\n  END) > 0\nORDER BY cost DESC",
+          "refId": "A"
         }
       ],
       "title": "Cost by AWS Product",
-      "type": "piechart"
+      "type": "bargauge",
+      "gridPos": {
+        "h": 11,
+        "w": 7,
+        "x": 0,
+        "y": 32
+      }
     },
     {
       "datasource": {
         "type": "grafana-athena-datasource",
         "uid": "${athena}"
       },
-      "description": "",
+      "description": "AWS product cost over time. The top 10 categories by total are drawn; the rest stack as Other. Bucket size follows the Granularity selector; the legend holds the period total and the per-bucket mean.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -848,13 +967,13 @@
           "custom": {
             "axisBorderShow": false,
             "axisCenteredZero": false,
-            "axisColorMode": "series",
+            "axisColorMode": "text",
             "axisLabel": "",
-            "axisPlacement": "right",
-            "barAlignment": -1,
-            "drawStyle": "line",
-            "fillOpacity": 100,
-            "gradientMode": "hue",
+            "axisPlacement": "auto",
+            "barAlignment": 1,
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
@@ -862,12 +981,12 @@
             },
             "insertNulls": false,
             "lineInterpolation": "linear",
-            "lineWidth": 0,
-            "pointSize": 3,
+            "lineWidth": 1,
+            "pointSize": 4,
             "scaleDistribution": {
               "type": "linear"
             },
-            "showPoints": "auto",
+            "showPoints": "never",
             "spanNulls": false,
             "stacking": {
               "group": "A",
@@ -885,43 +1004,54 @@
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
               }
             ]
           },
           "unit": "currencyUSD"
         },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 13,
-        "w": 18,
-        "x": 6,
-        "y": 30
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Other"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#8e8e8e",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
       },
       "id": 7,
       "options": {
         "legend": {
-          "calcs": [],
-          "displayMode": "list",
+          "calcs": [
+            "sum",
+            "mean"
+          ],
+          "displayMode": "table",
           "placement": "right",
           "showLegend": true,
-          "width": 130
+          "sortBy": "Total",
+          "sortDesc": true
         },
         "tooltip": {
-          "mode": "single",
-          "sort": "none"
+          "mode": "multi",
+          "sort": "desc"
         }
       },
+      "pluginVersion": "10.4.7",
       "targets": [
         {
           "connectionArgs": {
-            "catalog": "AwsDataCatalog",
-            "database": "athenacurcfn_robo_systems_cost_and_usage",
-            "region": "us-east-1",
+            "catalog": "__default",
+            "database": "__default",
+            "region": "__default",
             "resultReuseEnabled": false,
             "resultReuseMaxAgeInMinutes": 60
           },
@@ -930,31 +1060,12 @@
             "uid": "${athena}"
           },
           "format": 1,
-          "rawSQL": "SELECT\n      DATE(line_item_usage_start_date) as usage_date,\n      CASE\n            WHEN product_servicename = 'Amazon Virtual Private Cloud' THEN 'VPC'\n            WHEN product_servicename != '' THEN replace(product_servicename,'Amazon','')\n            ELSE 'Other'\n      END as service,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      line_item_line_item_type != 'Credit' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment)) AND\n      (product_product_name) in ($product) AND\n      (line_item_usage_type) in ($usagetype)\nGROUP BY 1,2\nORDER BY cost, usage_date",
-          "refId": "A",
-          "table": "robosystemscostandusage"
+          "rawSQL": "WITH lines AS (\n  SELECT\n    date_trunc('$granularity', line_item_usage_start_date) AS bucket,\n    regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') AS category,\n    CASE\n      WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n      WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n      WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n      WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n      WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n      WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n      ELSE line_item_unblended_cost\n    END AS cost\n  FROM ${cur_table}\n  WHERE DATE(line_item_usage_start_date) BETWEEN DATE($__timeFrom) AND DATE($__timeTo)\n    AND line_item_line_item_type NOT IN ('Credit', 'Refund', 'RIFee')\n    AND ('__all__' IN (${environment:sqlstring}) OR coalesce(nullif(resource_tags_user_environment, ''), 'untagged') IN (${environment:sqlstring}))\n    AND ('__all__' IN (${component:sqlstring}) OR CASE\n          WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n          WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n          WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n          ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n        END IN (${component:sqlstring}))\n    AND ('__all__' IN (${product:sqlstring}) OR regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') IN (${product:sqlstring}))\n    AND ('__all__' IN (${usagetype:sqlstring}) OR line_item_usage_type IN (${usagetype:sqlstring}))\n),\nranked AS (\n  SELECT category, row_number() OVER (ORDER BY sum(cost) DESC) AS rn\n  FROM lines\n  GROUP BY category\n)\nSELECT\n  l.bucket,\n  CASE WHEN r.rn <= 10 THEN l.category ELSE 'Other' END AS product,\n  sum(l.cost) AS cost\nFROM lines l\nJOIN ranked r ON r.category = l.category\nGROUP BY 1, 2\nORDER BY 1, min(CASE WHEN r.rn <= 10 THEN r.rn ELSE 11 END)",
+          "refId": "A"
         }
       ],
-      "title": "AWS Product Cost Timeseries",
+      "title": "${granularity:text} Cost by AWS Product",
       "transformations": [
-        {
-          "id": "filterByValue",
-          "options": {
-            "filters": [
-              {
-                "config": {
-                  "id": "greater",
-                  "options": {
-                    "value": 0
-                  }
-                },
-                "fieldName": "cost"
-              }
-            ],
-            "match": "all",
-            "type": "include"
-          }
-        },
         {
           "id": "prepareTimeSeries",
           "options": {
@@ -969,61 +1080,68 @@
           }
         }
       ],
-      "type": "timeseries"
+      "type": "timeseries",
+      "gridPos": {
+        "h": 11,
+        "w": 17,
+        "x": 7,
+        "y": 32
+      }
     },
     {
       "datasource": {
         "type": "grafana-athena-datasource",
         "uid": "${athena}"
       },
+      "description": "Period total per billing usage type: the finest grain the report offers. Pick a Component or Product above to read what inside it costs. Effective cost: Savings Plan and Reserved Instance discounts applied, commitment fees counted only for their unused portion, credits and refunds excluded, RI fees excluded (they book once a month and would distort a running month).",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "fixedColor": "blue",
+            "mode": "fixed"
           },
-          "custom": {
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            }
-          },
+          "decimals": 2,
           "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
           "unit": "currencyUSD"
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 13,
-        "w": 6,
-        "x": 0,
-        "y": 43
-      },
       "id": 11,
       "options": {
-        "displayLabels": ["name"],
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": false
-        },
-        "pieType": "donut",
+        "displayMode": "basic",
+        "maxVizHeight": 28,
+        "minVizHeight": 18,
+        "minVizWidth": 8,
+        "namePlacement": "left",
+        "orientation": "horizontal",
         "reduceOptions": {
-          "calcs": ["sum"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": true
         },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
       },
+      "pluginVersion": "10.4.7",
       "targets": [
         {
           "connectionArgs": {
-            "catalog": "AwsDataCatalog",
-            "database": "athenacurcfn_robo_systems_cost_and_usage",
-            "region": "us-east-1",
+            "catalog": "__default",
+            "database": "__default",
+            "region": "__default",
             "resultReuseEnabled": false,
             "resultReuseMaxAgeInMinutes": 60
           },
@@ -1031,20 +1149,26 @@
             "type": "grafana-athena-datasource",
             "uid": "${athena}"
           },
-          "format": 1,
-          "rawSQL": "SELECT\n      line_item_usage_type as usage_type,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      line_item_line_item_type != 'Credit' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment)) AND\n      (product_product_name) in ($product) AND\n      (line_item_usage_type) in ($usagetype)\nGROUP BY 1\nORDER BY cost DESC",
-          "refId": "A",
-          "table": "robosystemscostandusage"
+          "format": 0,
+          "rawSQL": "SELECT\n  line_item_usage_type AS usage_type,\n  sum(CASE\n    WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n    WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n    WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n    WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n    WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n    WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n    ELSE line_item_unblended_cost\n  END) AS cost\nFROM ${cur_table}\nWHERE DATE(line_item_usage_start_date) BETWEEN DATE($__timeFrom) AND DATE($__timeTo)\n  AND line_item_line_item_type NOT IN ('Credit', 'Refund', 'RIFee')\n  AND ('__all__' IN (${environment:sqlstring}) OR coalesce(nullif(resource_tags_user_environment, ''), 'untagged') IN (${environment:sqlstring}))\n  AND ('__all__' IN (${component:sqlstring}) OR CASE\n        WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n        WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n        WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n        ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n      END IN (${component:sqlstring}))\n  AND ('__all__' IN (${product:sqlstring}) OR regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') IN (${product:sqlstring}))\n  AND ('__all__' IN (${usagetype:sqlstring}) OR line_item_usage_type IN (${usagetype:sqlstring}))\nGROUP BY 1\nHAVING sum(CASE\n    WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n    WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n    WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n    WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n    WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n    WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n    ELSE line_item_unblended_cost\n  END) > 0\nORDER BY cost DESC",
+          "refId": "A"
         }
       ],
-      "title": "Cost by AWS Usage Type",
-      "type": "piechart"
+      "title": "Cost by Usage Type",
+      "type": "bargauge",
+      "gridPos": {
+        "h": 11,
+        "w": 7,
+        "x": 0,
+        "y": 43
+      }
     },
     {
       "datasource": {
         "type": "grafana-athena-datasource",
         "uid": "${athena}"
       },
+      "description": "Usage type cost over time. The top 10 categories by total are drawn; the rest stack as Other. Bucket size follows the Granularity selector; the legend holds the period total and the per-bucket mean.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1053,13 +1177,13 @@
           "custom": {
             "axisBorderShow": false,
             "axisCenteredZero": false,
-            "axisColorMode": "series",
+            "axisColorMode": "text",
             "axisLabel": "",
-            "axisPlacement": "right",
-            "barAlignment": -1,
-            "drawStyle": "line",
-            "fillOpacity": 100,
-            "gradientMode": "hue",
+            "axisPlacement": "auto",
+            "barAlignment": 1,
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
@@ -1067,12 +1191,12 @@
             },
             "insertNulls": false,
             "lineInterpolation": "linear",
-            "lineWidth": 0,
-            "pointSize": 3,
+            "lineWidth": 1,
+            "pointSize": 4,
             "scaleDistribution": {
               "type": "linear"
             },
-            "showPoints": "auto",
+            "showPoints": "never",
             "spanNulls": false,
             "stacking": {
               "group": "A",
@@ -1088,44 +1212,56 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
-              },
-              {
-                "color": "red",
-                "value": 80
+                "color": "green",
+                "value": null
               }
             ]
           },
           "unit": "currencyUSD"
         },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 13,
-        "w": 18,
-        "x": 6,
-        "y": 43
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Other"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#8e8e8e",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
       },
       "id": 12,
       "options": {
         "legend": {
-          "calcs": [],
-          "displayMode": "list",
+          "calcs": [
+            "sum",
+            "mean"
+          ],
+          "displayMode": "table",
           "placement": "right",
           "showLegend": true,
-          "width": 130
+          "sortBy": "Total",
+          "sortDesc": true
         },
         "tooltip": {
-          "mode": "single",
-          "sort": "none"
+          "mode": "multi",
+          "sort": "desc"
         }
       },
+      "pluginVersion": "10.4.7",
       "targets": [
         {
           "connectionArgs": {
-            "catalog": "AwsDataCatalog",
-            "database": "athenacurcfn_robo_systems_cost_and_usage",
-            "region": "us-east-1",
+            "catalog": "__default",
+            "database": "__default",
+            "region": "__default",
             "resultReuseEnabled": false,
             "resultReuseMaxAgeInMinutes": 60
           },
@@ -1134,31 +1270,12 @@
             "uid": "${athena}"
           },
           "format": 1,
-          "rawSQL": "SELECT\n      DATE(line_item_usage_start_date) as usage_date,\n      line_item_usage_type as usage_type,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      line_item_line_item_type != 'Credit' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment)) AND\n      (product_product_name) in ($product) AND\n      (line_item_usage_type) in ($usagetype)\nGROUP BY 1,2\nORDER BY cost, usage_date",
-          "refId": "A",
-          "table": "robosystemscostandusage"
+          "rawSQL": "WITH lines AS (\n  SELECT\n    date_trunc('$granularity', line_item_usage_start_date) AS bucket,\n    line_item_usage_type AS category,\n    CASE\n      WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n      WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n      WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n      WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n      WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n      WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n      ELSE line_item_unblended_cost\n    END AS cost\n  FROM ${cur_table}\n  WHERE DATE(line_item_usage_start_date) BETWEEN DATE($__timeFrom) AND DATE($__timeTo)\n    AND line_item_line_item_type NOT IN ('Credit', 'Refund', 'RIFee')\n    AND ('__all__' IN (${environment:sqlstring}) OR coalesce(nullif(resource_tags_user_environment, ''), 'untagged') IN (${environment:sqlstring}))\n    AND ('__all__' IN (${component:sqlstring}) OR CASE\n          WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n          WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n          WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n          ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n        END IN (${component:sqlstring}))\n    AND ('__all__' IN (${product:sqlstring}) OR regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') IN (${product:sqlstring}))\n    AND ('__all__' IN (${usagetype:sqlstring}) OR line_item_usage_type IN (${usagetype:sqlstring}))\n),\nranked AS (\n  SELECT category, row_number() OVER (ORDER BY sum(cost) DESC) AS rn\n  FROM lines\n  GROUP BY category\n)\nSELECT\n  l.bucket,\n  CASE WHEN r.rn <= 10 THEN l.category ELSE 'Other' END AS usage_type,\n  sum(l.cost) AS cost\nFROM lines l\nJOIN ranked r ON r.category = l.category\nGROUP BY 1, 2\nORDER BY 1, min(CASE WHEN r.rn <= 10 THEN r.rn ELSE 11 END)",
+          "refId": "A"
         }
       ],
-      "title": "AWS Usage Type Cost Timeseries",
+      "title": "${granularity:text} Cost by Usage Type",
       "transformations": [
-        {
-          "id": "filterByValue",
-          "options": {
-            "filters": [
-              {
-                "config": {
-                  "id": "greater",
-                  "options": {
-                    "value": 0
-                  }
-                },
-                "fieldName": "cost"
-              }
-            ],
-            "match": "all",
-            "type": "include"
-          }
-        },
         {
           "id": "prepareTimeSeries",
           "options": {
@@ -1173,18 +1290,238 @@
           }
         }
       ],
-      "type": "timeseries"
+      "type": "timeseries",
+      "gridPos": {
+        "h": 11,
+        "w": 17,
+        "x": 7,
+        "y": 43
+      }
+    },
+    {
+      "datasource": {
+        "type": "grafana-athena-datasource",
+        "uid": "${athena}"
+      },
+      "description": "Period total by how the usage was bought. Unused Commitment is the part of a Savings Plan or RI commitment that no usage consumed. Effective cost: Savings Plan and Reserved Instance discounts applied, commitment fees counted only for their unused portion, credits and refunds excluded, RI fees excluded (they book once a month and would distort a running month).",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "decimals": 2,
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "id": 14,
+      "options": {
+        "displayMode": "basic",
+        "maxVizHeight": 28,
+        "minVizHeight": 18,
+        "minVizWidth": 8,
+        "namePlacement": "left",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": true
+        },
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
+      },
+      "pluginVersion": "10.4.7",
+      "targets": [
+        {
+          "connectionArgs": {
+            "catalog": "__default",
+            "database": "__default",
+            "region": "__default",
+            "resultReuseEnabled": false,
+            "resultReuseMaxAgeInMinutes": 60
+          },
+          "datasource": {
+            "type": "grafana-athena-datasource",
+            "uid": "${athena}"
+          },
+          "format": 0,
+          "rawSQL": "SELECT\n  CASE\n    WHEN line_item_line_item_type = 'DiscountedUsage' THEN 'Reserved Instance'\n    WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN 'Savings Plan'\n    WHEN line_item_usage_type LIKE '%Spot%' THEN 'Spot'\n    WHEN line_item_line_item_type = 'Usage' THEN 'On-Demand'\n    WHEN line_item_line_item_type IN ('RIFee', 'SavingsPlanRecurringFee', 'SavingsPlanUpfrontFee') THEN 'Unused Commitment'\n    ELSE 'Tax & Fees'\n  END AS purchase_option,\n  sum(CASE\n    WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n    WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n    WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n    WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n    WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n    WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n    ELSE line_item_unblended_cost\n  END) AS cost\nFROM ${cur_table}\nWHERE DATE(line_item_usage_start_date) BETWEEN DATE($__timeFrom) AND DATE($__timeTo)\n  AND line_item_line_item_type NOT IN ('Credit', 'Refund', 'RIFee')\n  AND ('__all__' IN (${environment:sqlstring}) OR coalesce(nullif(resource_tags_user_environment, ''), 'untagged') IN (${environment:sqlstring}))\n  AND ('__all__' IN (${component:sqlstring}) OR CASE\n        WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n        WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n        WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n        ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n      END IN (${component:sqlstring}))\n  AND ('__all__' IN (${product:sqlstring}) OR regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') IN (${product:sqlstring}))\n  AND ('__all__' IN (${usagetype:sqlstring}) OR line_item_usage_type IN (${usagetype:sqlstring}))\nGROUP BY 1\nHAVING sum(CASE\n    WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n    WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n    WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n    WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n    WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n    WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n    ELSE line_item_unblended_cost\n  END) > 0\nORDER BY cost DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Cost by Purchase Option",
+      "type": "bargauge",
+      "gridPos": {
+        "h": 8,
+        "w": 7,
+        "x": 0,
+        "y": 54
+      }
+    },
+    {
+      "datasource": {
+        "type": "grafana-athena-datasource",
+        "uid": "${athena}"
+      },
+      "description": "Purchase option cost over time. The top 10 categories by total are drawn; the rest stack as Other. Bucket size follows the Granularity selector; the legend holds the period total and the per-bucket mean.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 1,
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Other"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#8e8e8e",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [
+            "sum",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "sortBy": "Total",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "10.4.7",
+      "targets": [
+        {
+          "connectionArgs": {
+            "catalog": "__default",
+            "database": "__default",
+            "region": "__default",
+            "resultReuseEnabled": false,
+            "resultReuseMaxAgeInMinutes": 60
+          },
+          "datasource": {
+            "type": "grafana-athena-datasource",
+            "uid": "${athena}"
+          },
+          "format": 1,
+          "rawSQL": "WITH lines AS (\n  SELECT\n    date_trunc('$granularity', line_item_usage_start_date) AS bucket,\n    CASE\n      WHEN line_item_line_item_type = 'DiscountedUsage' THEN 'Reserved Instance'\n      WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN 'Savings Plan'\n      WHEN line_item_usage_type LIKE '%Spot%' THEN 'Spot'\n      WHEN line_item_line_item_type = 'Usage' THEN 'On-Demand'\n      WHEN line_item_line_item_type IN ('RIFee', 'SavingsPlanRecurringFee', 'SavingsPlanUpfrontFee') THEN 'Unused Commitment'\n      ELSE 'Tax & Fees'\n    END AS category,\n    CASE\n      WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n      WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n      WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n      WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n      WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n      WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n      ELSE line_item_unblended_cost\n    END AS cost\n  FROM ${cur_table}\n  WHERE DATE(line_item_usage_start_date) BETWEEN DATE($__timeFrom) AND DATE($__timeTo)\n    AND line_item_line_item_type NOT IN ('Credit', 'Refund', 'RIFee')\n    AND ('__all__' IN (${environment:sqlstring}) OR coalesce(nullif(resource_tags_user_environment, ''), 'untagged') IN (${environment:sqlstring}))\n    AND ('__all__' IN (${component:sqlstring}) OR CASE\n          WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n          WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n          WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n          ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n        END IN (${component:sqlstring}))\n    AND ('__all__' IN (${product:sqlstring}) OR regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') IN (${product:sqlstring}))\n    AND ('__all__' IN (${usagetype:sqlstring}) OR line_item_usage_type IN (${usagetype:sqlstring}))\n),\nranked AS (\n  SELECT category, row_number() OVER (ORDER BY sum(cost) DESC) AS rn\n  FROM lines\n  GROUP BY category\n)\nSELECT\n  l.bucket,\n  CASE WHEN r.rn <= 10 THEN l.category ELSE 'Other' END AS purchase_option,\n  sum(l.cost) AS cost\nFROM lines l\nJOIN ranked r ON r.category = l.category\nGROUP BY 1, 2\nORDER BY 1, min(CASE WHEN r.rn <= 10 THEN r.rn ELSE 11 END)",
+          "refId": "A"
+        }
+      ],
+      "title": "${granularity:text} Cost by Purchase Option",
+      "transformations": [
+        {
+          "id": "prepareTimeSeries",
+          "options": {
+            "format": "multi"
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "^cost (.+)$",
+            "renamePattern": "$1"
+          }
+        }
+      ],
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 17,
+        "x": 7,
+        "y": 54
+      }
     }
   ],
   "refresh": "",
   "schemaVersion": 39,
-  "tags": ["robosystems", "infrastructure", "cost"],
+  "tags": [
+    "robosystems",
+    "infrastructure",
+    "cost"
+  ],
   "templating": {
     "list": [
       {
         "current": {
           "selected": false,
-          "text": "RoboSystems CUR",
+          "text": "",
           "value": null
         },
         "hide": 0,
@@ -1196,15 +1533,20 @@
         "query": "grafana-athena-datasource",
         "queryValue": "",
         "refresh": 1,
-        "regex": "RoboSystems CUR",
+        "regex": "",
         "skipUrlSync": false,
         "type": "datasource"
       },
       {
+        "allValue": "'__all__'",
         "current": {
           "selected": true,
-          "text": ["All"],
-          "value": ["$__all"]
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
         },
         "datasource": {
           "type": "grafana-athena-datasource",
@@ -1219,15 +1561,14 @@
         "options": [],
         "query": {
           "connectionArgs": {
-            "catalog": "AwsDataCatalog",
-            "database": "athenacurcfn_robo_systems_cost_and_usage",
-            "region": "us-east-1",
+            "catalog": "__default",
+            "database": "__default",
+            "region": "__default",
             "resultReuseEnabled": false,
             "resultReuseMaxAgeInMinutes": 60
           },
           "format": 1,
-          "rawSQL": "select distinct resource_tags_user_environment\nfrom robosystemscostandusage \nwhere year = '$year' and month = '$month'",
-          "table": "robosystemscostandusage"
+          "rawSQL": "SELECT DISTINCT coalesce(nullif(resource_tags_user_environment, ''), 'untagged')\nFROM ${cur_table}\nWHERE year = '$year'\nORDER BY 1"
         },
         "refresh": 1,
         "regex": "",
@@ -1236,10 +1577,15 @@
         "type": "query"
       },
       {
+        "allValue": "'__all__'",
         "current": {
           "selected": true,
-          "text": ["All"],
-          "value": ["$__all"]
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
         },
         "datasource": {
           "type": "grafana-athena-datasource",
@@ -1254,15 +1600,14 @@
         "options": [],
         "query": {
           "connectionArgs": {
-            "catalog": "AwsDataCatalog",
-            "database": "athenacurcfn_robo_systems_cost_and_usage",
-            "region": "us-east-1",
+            "catalog": "__default",
+            "database": "__default",
+            "region": "__default",
             "resultReuseEnabled": false,
             "resultReuseMaxAgeInMinutes": 60
           },
           "format": 1,
-          "rawSQL": "select distinct resource_tags_user_component\nfrom robosystemscostandusage\nwhere year = '$year' and month = '$month'",
-          "table": "robosystemscostandusage"
+          "rawSQL": "SELECT DISTINCT CASE\n    WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n    WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n    WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n    ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n  END\nFROM ${cur_table}\nWHERE year = '$year'\nORDER BY 1"
         },
         "refresh": 1,
         "regex": "",
@@ -1271,10 +1616,15 @@
         "type": "query"
       },
       {
+        "allValue": "'__all__'",
         "current": {
           "selected": true,
-          "text": ["All"],
-          "value": ["$__all"]
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
         },
         "datasource": {
           "type": "grafana-athena-datasource",
@@ -1288,7 +1638,6 @@
         "name": "product",
         "options": [],
         "query": {
-          "column": "product_product_name",
           "connectionArgs": {
             "catalog": "__default",
             "database": "__default",
@@ -1297,8 +1646,7 @@
             "resultReuseMaxAgeInMinutes": 60
           },
           "format": 1,
-          "rawSQL": "SELECT DISTINCT product_product_name \nfrom robosystemscostandusage \nwhere year = '$year' and month = '$month'",
-          "table": "robosystemscostandusage"
+          "rawSQL": "SELECT DISTINCT regexp_replace(product_product_name, '^(Amazon|AWS) ?', '')\nFROM ${cur_table}\nWHERE year = '$year'\nORDER BY 1"
         },
         "refresh": 1,
         "regex": "",
@@ -1307,10 +1655,15 @@
         "type": "query"
       },
       {
+        "allValue": "'__all__'",
         "current": {
           "selected": true,
-          "text": ["All"],
-          "value": ["$__all"]
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
         },
         "datasource": {
           "type": "grafana-athena-datasource",
@@ -1332,7 +1685,7 @@
             "resultReuseMaxAgeInMinutes": 60
           },
           "format": 1,
-          "rawSQL": "SELECT DISTINCT line_item_usage_type \nfrom robosystemscostandusage \nwhere year = '$year' and month = '$month'"
+          "rawSQL": "SELECT DISTINCT line_item_usage_type\nFROM ${cur_table}\nWHERE year = '$year'\nORDER BY 1"
         },
         "refresh": 1,
         "regex": "",
@@ -1343,47 +1696,48 @@
       {
         "current": {
           "selected": false,
-          "text": "3",
-          "value": "3"
+          "text": "Daily",
+          "value": "day"
         },
-        "datasource": {
-          "type": "grafana-athena-datasource",
-          "uid": "${athena}"
-        },
-        "definition": "",
-        "hide": 2,
+        "hide": 0,
         "includeAll": false,
+        "label": "Granularity",
         "multi": false,
-        "name": "month",
-        "options": [],
-        "query": {
-          "connectionArgs": {
-            "catalog": "__default",
-            "database": "__default",
-            "region": "__default",
-            "resultReuseEnabled": false,
-            "resultReuseMaxAgeInMinutes": 60
+        "name": "granularity",
+        "options": [
+          {
+            "selected": true,
+            "text": "Daily",
+            "value": "day"
           },
-          "format": 1,
-          "rawSQL": "select distinct month\nfrom robosystemscostandusage\nwhere year = '2026' \norder by month desc\nlimit 1"
-        },
-        "refresh": 1,
-        "regex": "",
+          {
+            "selected": false,
+            "text": "Weekly",
+            "value": "week"
+          },
+          {
+            "selected": false,
+            "text": "Monthly",
+            "value": "month"
+          }
+        ],
+        "query": "Daily : day, Weekly : week, Monthly : month",
+        "queryValue": "",
         "skipUrlSync": false,
-        "sort": 0,
-        "type": "query"
+        "type": "custom"
       },
       {
         "current": {
           "selected": false,
-          "text": "2026",
-          "value": "2026"
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "grafana-athena-datasource",
           "uid": "${athena}"
         },
         "definition": "",
+        "description": "Latest year partition; scopes the filter option queries to one year of partitions.",
         "hide": 2,
         "includeAll": false,
         "multi": false,
@@ -1398,18 +1752,39 @@
             "resultReuseMaxAgeInMinutes": 60
           },
           "format": 1,
-          "rawSQL": "select distinct year\nfrom robosystemscostandusage\norder by year desc\nlimit 1"
+          "rawSQL": "SELECT max(year) FROM ${cur_table}"
         },
         "refresh": 1,
         "regex": "",
         "skipUrlSync": false,
         "sort": 0,
         "type": "query"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "robosystemscostandusage",
+          "value": "robosystemscostandusage"
+        },
+        "description": "Athena table the Cost and Usage Report is crawled into. The database, catalog and region come from the Athena datasource.",
+        "hide": 2,
+        "label": "CUR table",
+        "name": "cur_table",
+        "options": [
+          {
+            "selected": true,
+            "text": "robosystemscostandusage",
+            "value": "robosystemscostandusage"
+          }
+        ],
+        "query": "robosystemscostandusage",
+        "skipUrlSync": false,
+        "type": "constant"
       }
     ]
   },
   "time": {
-    "from": "now-30d",
+    "from": "now-31d",
     "to": "now-1d"
   },
   "timepicker": {
@@ -1417,7 +1792,7 @@
   },
   "timezone": "utc",
   "title": "RoboSystems Cost and Usage Dashboard",
-  "uid": null,
-  "version": 1,
+  "uid": "depgbcbsbfe2oa",
+  "version": 68,
   "weekStart": ""
 }
