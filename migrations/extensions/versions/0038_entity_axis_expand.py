@@ -10,27 +10,33 @@ this one is still writing.
 Per tenant schema:
 
 - ``entity_id`` is added, nullable, to ``entries``, ``events``,
-  ``transactions``, ``fiscal_calendar`` and ``fiscal_periods``, and to
-  ``structures``, where only schedules and reconciliations carry one.
+  ``transactions``, ``fiscal_calendar`` and ``fiscal_periods``, with the
+  group parent as its DEFAULT. The parent is the one
+  ``entity_scope.resolve_entity_id`` names: the earliest ``is_parent`` row
+  that is not a linked counterparty. A constant default puts every existing
+  row on the parent without rewriting the table, and it stays on the column:
+  tasks from the previous release keep inserting without it while this
+  deploys, and their rows land on the only entity the graph has.
+- ``structures`` gets the column too, where only schedules and
+  reconciliations carry an entity. Those rows are updated, and the default
+  set afterwards. It also stamps the few shared blocks created before the
+  contract release, which clears them again; no read looks at the column
+  for those block types.
 - The calendar and its periods become one set per entity: unique on
   ``(graph_id, entity_id)`` and ``(graph_id, entity_id, name)``, replacing
   the per-graph constraints. A one-entity schema satisfies both, so the swap
   moves no row.
-- Every existing row is backfilled to the group parent, the same rule
-  ``entity_scope.resolve_entity_id`` applies: the earliest ``is_parent`` row
-  that is not a linked counterparty.
-- Each column gets that parent as its DEFAULT. Tasks from the previous
-  release keep inserting without the column while this deploys, and the
-  default lands their rows on the only entity the graph has. On
-  ``structures`` that also stamps the few shared blocks created before the
-  contract release, which clears them again; no read looks at the column
-  for those block types.
 
 A schema with books and no entity (a graph created with
-``create_entity=false``) gets one: ``entity_<schema>``, the id the graph
-materializer has always assumed for it, named after the schema until someone
-renames it. Books with entities but no group parent among them are not a
-state this can repair, and stop the migration with the schema's name.
+``create_entity=false``) gets one: ``entity_<schema>``, the id graph creation
+gives one, named after the schema until someone renames it. Books with
+entities but no group parent among them are not a state this can repair, and
+stop the migration with the schema's name. A schema with neither gets the
+columns and no default; its first ledger write makes the parent
+(``entity_scope.ensure_entity_id``).
+
+This is safe under the previous release's code, so it can be applied ahead
+of the deploy that needs it.
 
 Fresh tenants get the columns from the model, NOT NULL from the start.
 
@@ -88,10 +94,11 @@ _SAFE_ID = re.compile(r"^[A-Za-z0-9_\-]+$")
 _BLOCK_TYPES_SQL = ", ".join(f"'{block_type}'" for block_type in ENTITY_BLOCK_TYPES)
 
 
-def _add_columns(conn: Connection, schema: str) -> None:
+def _add_columns(conn: Connection, schema: str, parent_id: str | None) -> None:
   t = TenantOps(conn, schema)
+  default = f"'{parent_id}'" if parent_id else None
   for table, index in LEDGER_TABLES.items():
-    t.add_column(table, "entity_id", "VARCHAR")
+    t.add_column(table, "entity_id", "VARCHAR", default=default)
     if index is not None:
       t.create_index(index[0], table, index[1])
   t.add_column("structures", "entity_id", "VARCHAR")
@@ -160,16 +167,24 @@ def _placeholder_parent(conn: Connection, schema: str, books: dict[str, int]) ->
   return entity_id
 
 
-def _backfill(conn: Connection, schema: str) -> None:
+def _resolve_parent(conn: Connection, schema: str) -> str | None:
+  """The schema's group parent, made if it has books and no entity. None for
+  a schema with neither."""
   parent_id = _group_parent(conn, schema)
   if parent_id is None:
     books = _books(conn, schema)
     if not books:
-      return
+      return None
     parent_id = _placeholder_parent(conn, schema, books)
+  # It is inlined into DDL below, where a bind cannot go.
   if not _SAFE_ID.match(parent_id):
     raise RuntimeError(f"{schema}: unexpected entity id {parent_id!r}")
+  return parent_id
 
+
+def _backfill(conn: Connection, schema: str, parent_id: str) -> None:
+  # The ledger tables have no row left to update when the column was added
+  # above with its default; this is for a schema that already had the column.
   for table in LEDGER_TABLES:
     conn.execute(
       text(
@@ -196,8 +211,10 @@ def _backfill(conn: Connection, schema: str) -> None:
 
 
 def _expand(conn: Connection, schema: str) -> None:
-  _add_columns(conn, schema)
-  _backfill(conn, schema)
+  parent_id = _resolve_parent(conn, schema)
+  _add_columns(conn, schema, parent_id)
+  if parent_id is not None:
+    _backfill(conn, schema, parent_id)
 
 
 def _revert(conn: Connection, schema: str) -> None:
@@ -216,7 +233,7 @@ def _revert(conn: Connection, schema: str) -> None:
 def upgrade() -> None:
   conn = op.get_bind()
   # public holds the library and no ledger rows: the structure only.
-  _add_columns(conn, "public")
+  _add_columns(conn, "public", None)
   for_each_tenant_schema(conn, _expand)
 
 

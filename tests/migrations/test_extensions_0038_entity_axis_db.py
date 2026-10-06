@@ -125,6 +125,13 @@ class Tenant:
       {"id": row_id},
     ).scalar_one()
 
+  def tuple_id(self, table: str, row_id: str) -> str:
+    """Where the row's current version sits; any UPDATE of it moves this."""
+    return self.conn.execute(
+      text(f'SELECT ctid::text FROM "{self.schema}".{table} WHERE id = :id'),
+      {"id": row_id},
+    ).scalar_one()
+
   def default(self, table: str) -> str | None:
     return self.conn.execute(
       text(
@@ -190,6 +197,20 @@ def test_existing_books_land_on_the_group_parent(tenant):
   ):
     assert tenant.column(table, row_id) == "ent_parent", table
   assert tenant.column("structures", "struct_statement") is None
+
+
+def test_existing_ledger_rows_are_filled_without_being_rewritten(tenant):
+  """The parent arrives as the column's default. Updating every row instead
+  would hold each table's lock for as long as the table is big."""
+  tenant.entity("ent_parent", is_parent=True, source="native", at=T0)
+  tenant.books()
+  rows = (("entries", "je_1"), ("events", "evt_1"), ("transactions", "txn_1"))
+  before = [tenant.tuple_id(table, row_id) for table, row_id in rows]
+
+  tenant.expand()
+
+  assert [tenant.tuple_id(table, row_id) for table, row_id in rows] == before
+  assert [tenant.column(table, row_id) for table, row_id in rows] == ["ent_parent"] * 3
 
 
 def test_a_task_from_before_the_migration_keeps_writing(tenant):

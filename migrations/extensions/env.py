@@ -63,16 +63,20 @@ def run_migrations_offline() -> None:
 #   the locks it already took on every earlier tenant and stalling their
 #   requests. With a bound the migration fails fast on that tenant, releases
 #   everything, and is retried after a pause. Statements can raise their own
-#   `SET LOCAL lock_timeout` when they know better.
+#   `SET LOCAL lock_timeout` when they know better. A deadlock with a request
+#   that reaches the same tables in another order ends the same way and gets
+#   the same retry.
 MIGRATION_LOCK_TIMEOUT = "30s"
 MIGRATION_LOCK_RETRIES = 5
 MIGRATION_LOCK_RETRY_PAUSE_SECONDS = 10.0
 
 
 def _is_lock_timeout(exc: BaseException) -> bool:
-  """psycopg2 raises `lock_not_available` (55P03) for a lock_timeout."""
+  """Whether the migration lost a lock to live traffic and rolled back whole:
+  `lock_not_available` (55P03) for a lock_timeout, `deadlock_detected`
+  (40P01) for a deadlock."""
   orig = getattr(exc, "orig", None)
-  return getattr(orig, "pgcode", None) == "55P03"
+  return getattr(orig, "pgcode", None) in ("55P03", "40P01")
 
 
 def run_migrations_online() -> None:
@@ -102,8 +106,8 @@ def run_migrations_online() -> None:
       if not _is_lock_timeout(exc) or attempt >= MIGRATION_LOCK_RETRIES:
         raise
       print(
-        f"extensions migration hit lock_timeout ({MIGRATION_LOCK_TIMEOUT}) on "
-        f"attempt {attempt}/{MIGRATION_LOCK_RETRIES}; retrying in "
+        f"extensions migration lost a lock (lock_timeout {MIGRATION_LOCK_TIMEOUT}, "
+        f"or a deadlock) on attempt {attempt}/{MIGRATION_LOCK_RETRIES}; retrying in "
         f"{MIGRATION_LOCK_RETRY_PAUSE_SECONDS:.0f}s",
         file=sys.stderr,
       )
