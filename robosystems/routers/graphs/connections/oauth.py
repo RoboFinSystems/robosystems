@@ -155,7 +155,9 @@ async def _init_plaid_link(
 
   Update mode when the connection already holds an Item (a login to repair);
   a new Item otherwise. The state outlives the default OAuth window: the
-  bank's own multi-factor step happens inside Link.
+  bank's own multi-factor step happens inside Link. Asked again while the
+  token lives — the app's return from a bank that signs in through OAuth —
+  it answers with the same token and a fresh state.
   """
   from robosystems.adapters.plaid.client import PlaidError
   from robosystems.operations.providers.oauth_handler import OAuthState
@@ -165,7 +167,9 @@ async def _init_plaid_link(
   )
 
   try:
-    link = await create_link_token(connection_id, user_id, db)
+    link = await create_link_token(
+      connection_id, user_id, db, redirect_uri=redirect_uri or None
+    )
   except PlaidError as exc:
     logger.warning(
       "Plaid refused a Link token for connection %s: %s (request %s)",

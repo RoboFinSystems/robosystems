@@ -10,6 +10,7 @@ token (update mode when the Item's login needs repair), and
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -18,6 +19,7 @@ from sqlalchemy.orm import Session
 from ...adapters.bank_feed.window import default_backfill_start
 from ...adapters.plaid.client import PlaidClient, PlaidError
 from ...config import env
+from ...config.valkey_registry import ValkeyDatabase, create_redis_client
 from ...logger import logger
 from ...models.api.graphs.connections import PlaidConnectionConfig
 from ...operations.connection_service import ConnectionService, dispatch_first_sync
@@ -126,26 +128,109 @@ async def refresh_pending_window(
   )
 
 
+# A Link token lives for its own expiry (Plaid says how long); it is kept
+# here for that time, so a second ask for the same connection gets the same
+# token. Plaid requires it: a bank that signs in through OAuth sends the
+# user back to the app, which must open Link again with the token it
+# started with — and that token is not kept in the browser.
+LINK_TOKEN_KEY_PREFIX = "plaid:link_token:"
+LINK_TOKEN_TTL_SECONDS = 25 * 60
+
+
+def _link_token_key(connection_id: str) -> str:
+  return f"{LINK_TOKEN_KEY_PREFIX}{connection_id}"
+
+
+def _link_token_ttl(link: dict[str, Any]) -> int:
+  """Seconds the token is worth keeping: Plaid's expiry less a minute, or
+  the default when the response names none."""
+  raw = link.get("expiration")
+  if not raw:
+    return LINK_TOKEN_TTL_SECONDS
+  try:
+    expires = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+  except ValueError:
+    return LINK_TOKEN_TTL_SECONDS
+  if expires.tzinfo is None:
+    expires = expires.replace(tzinfo=UTC)
+  return max(60, int((expires - datetime.now(UTC)).total_seconds()) - 60)
+
+
+def cached_link_token(
+  connection_id: str, *, redirect_uri: str | None
+) -> dict[str, Any] | None:
+  """The connection's live Link token, when it was made for this redirect."""
+  try:
+    raw = create_redis_client(ValkeyDatabase.AUTH).get(_link_token_key(connection_id))
+  except Exception as exc:
+    logger.warning(f"Plaid Link token cache read failed for {connection_id}: {exc}")
+    return None
+  if not raw:
+    return None
+  try:
+    entry = json.loads(raw)
+  except (TypeError, ValueError):
+    return None
+  if entry.get("redirect_uri") != (redirect_uri or None):
+    return None
+  link = entry.get("link")
+  return dict(link) if isinstance(link, dict) else None
+
+
+def cache_link_token(
+  connection_id: str, link: dict[str, Any], *, redirect_uri: str | None
+) -> None:
+  """Keep the token for its life. A cache outage is never a reason for Link
+  not to open; it only means an OAuth bank's return cannot resume."""
+  try:
+    create_redis_client(ValkeyDatabase.AUTH).setex(
+      _link_token_key(connection_id),
+      _link_token_ttl(link),
+      json.dumps({"link": link, "redirect_uri": redirect_uri or None}),
+    )
+  except Exception as exc:
+    logger.warning(f"Plaid Link token cache write failed for {connection_id}: {exc}")
+
+
+def forget_link_token(connection_id: str) -> None:
+  """Drop the token once Link is done with it, or the connection is gone."""
+  try:
+    create_redis_client(ValkeyDatabase.AUTH).delete(_link_token_key(connection_id))
+  except Exception as exc:
+    logger.warning(f"Plaid Link token cache delete failed for {connection_id}: {exc}")
+
+
 async def create_link_token(
-  connection_id: str, user_id: str, db: Session
+  connection_id: str,
+  user_id: str,
+  db: Session,
+  *,
+  redirect_uri: str | None = None,
 ) -> dict[str, Any]:
-  """A Link token for this connection.
+  """A Link token for this connection — the same one while it lives.
 
   A connection that already holds an Item opens Link in update mode on it,
   to repair the login or re-select accounts. An Item Plaid no longer knows
   cannot be updated, so Link starts a fresh one; the callback swaps it in.
+  ``redirect_uri`` is where a bank that signs in through OAuth sends the
+  user back; Plaid requires it on the token, and the app's return there
+  asks for the token again, which is why it is kept.
   """
+  cached = cached_link_token(connection_id, redirect_uri=redirect_uri)
+  if cached is not None:
+    return cached
   credentials = _credentials(connection_id, db)
   access_token = credentials.get("access_token")
   history = days_requested(_window_start(credentials))
   client = plaid_client()
   try:
     try:
-      return await asyncio.to_thread(
+      link = await asyncio.to_thread(
         client.create_link_token,
         client_user_id=user_id,
         access_token=access_token,
         days_requested=history,
+        redirect_uri=redirect_uri,
       )
     except PlaidError as exc:
       if not (access_token and exc.item_gone):
@@ -155,11 +240,16 @@ async def create_link_token(
         connection_id,
         exc.code,
       )
-      return await asyncio.to_thread(
-        client.create_link_token, client_user_id=user_id, days_requested=history
+      link = await asyncio.to_thread(
+        client.create_link_token,
+        client_user_id=user_id,
+        days_requested=history,
+        redirect_uri=redirect_uri,
       )
   finally:
     client.close()
+  cache_link_token(connection_id, link, redirect_uri=redirect_uri)
+  return link
 
 
 async def complete_plaid_link(
@@ -218,6 +308,9 @@ async def complete_plaid_link(
         raise DuplicateBankConnectionError(duplicate, institution_name)
   finally:
     client.close()
+
+  # The token Link opened with is spent.
+  forget_link_token(connection_id)
 
   stored = await ConnectionService.update(
     connection_id=connection_id,
@@ -434,6 +527,7 @@ async def cleanup_plaid_connection(connection: dict[str, Any], graph_id: str) ->
   purged = purge_bank_feed_connection(
     graph_id, provider=PROVIDER, connection_id=connection_id
   )
+  forget_link_token(connection_id)
 
   with platform_session() as db:
     creds = ConnectionCredentials.get_by_connection_id(connection_id, db)

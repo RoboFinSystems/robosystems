@@ -115,6 +115,111 @@ async def test_create_pins_the_default_window_when_none_is_given():
   assert stored == default_backfill_start().isoformat()
 
 
+class _FakeValkey:
+  """GET / SETEX / DELETE over a dict, with the TTL each key was given."""
+
+  def __init__(self) -> None:
+    self.store: dict[str, str] = {}
+    self.ttls: dict[str, int] = {}
+
+  def get(self, key):
+    return self.store.get(key)
+
+  def setex(self, key, ttl, value):
+    self.store[key] = value
+    self.ttls[key] = ttl
+
+  def delete(self, key):
+    self.store.pop(key, None)
+    self.ttls.pop(key, None)
+
+
+@pytest.fixture(autouse=True)
+def _link_token_cache():
+  """Every Link-token ask reads and writes a cache; the tests get a fake."""
+  fake = _FakeValkey()
+  with patch(f"{MODULE}.create_redis_client", return_value=fake):
+    yield fake
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestLinkTokenCache:
+  """The token is kept for its life: the app's return from a bank that
+  signs in through OAuth asks for it again and must get the same one."""
+
+  async def test_a_second_ask_gets_the_same_token_without_plaid(
+    self, _link_token_cache
+  ):
+    from robosystems.operations.providers.plaid_provider import create_link_token
+
+    client = _client()
+    client.create_link_token.return_value = {
+      "link_token": "link-1",
+      "expiration": "2099-01-01T00:00:00Z",
+    }
+    with (
+      patch(f"{MODULE}._credentials", return_value={"sync_config": {}}),
+      patch(f"{MODULE}.plaid_client", return_value=client),
+    ):
+      first = await create_link_token(
+        "conn_1", "usr_1", MagicMock(), redirect_uri="https://app/cb"
+      )
+      second = await create_link_token(
+        "conn_1", "usr_1", MagicMock(), redirect_uri="https://app/cb"
+      )
+    assert first == second and first["link_token"] == "link-1"
+    assert client.create_link_token.call_count == 1
+    assert client.create_link_token.call_args.kwargs["redirect_uri"] == "https://app/cb"
+    # Kept until a minute before Plaid's expiry.
+    assert _link_token_cache.ttls["plaid:link_token:conn_1"] > 60
+
+  async def test_a_token_for_another_redirect_is_made_anew(self, _link_token_cache):
+    from robosystems.operations.providers.plaid_provider import create_link_token
+
+    client = _client()
+    with (
+      patch(f"{MODULE}._credentials", return_value={"sync_config": {}}),
+      patch(f"{MODULE}.plaid_client", return_value=client),
+    ):
+      await create_link_token("conn_1", "usr_1", MagicMock(), redirect_uri="https://a")
+      await create_link_token("conn_1", "usr_1", MagicMock(), redirect_uri="https://b")
+    assert client.create_link_token.call_count == 2
+
+  async def test_the_ttl_defaults_when_plaid_names_no_expiry(self, _link_token_cache):
+    from robosystems.operations.providers.plaid_provider import (
+      LINK_TOKEN_TTL_SECONDS,
+      create_link_token,
+    )
+
+    client = _client()
+    with (
+      patch(f"{MODULE}._credentials", return_value={"sync_config": {}}),
+      patch(f"{MODULE}.plaid_client", return_value=client),
+    ):
+      await create_link_token("conn_1", "usr_1", MagicMock())
+    assert _link_token_cache.ttls["plaid:link_token:conn_1"] == LINK_TOKEN_TTL_SECONDS
+
+  async def test_a_cache_outage_still_opens_link(self):
+    from robosystems.operations.providers.plaid_provider import create_link_token
+
+    client = _client()
+    with (
+      patch(f"{MODULE}.create_redis_client", side_effect=RuntimeError("down")),
+      patch(f"{MODULE}._credentials", return_value={"sync_config": {}}),
+      patch(f"{MODULE}.plaid_client", return_value=client),
+    ):
+      link = await create_link_token("conn_1", "usr_1", MagicMock())
+    assert link["link_token"] == "link-1"
+
+  def test_forgetting_drops_the_token(self, _link_token_cache):
+    from robosystems.operations.providers.plaid_provider import forget_link_token
+
+    _link_token_cache.store["plaid:link_token:conn_1"] = "{}"
+    forget_link_token("conn_1")
+    assert "plaid:link_token:conn_1" not in _link_token_cache.store
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestLinkToken:
@@ -272,6 +377,13 @@ class TestCompleteLink:
     assert consent.call_args.kwargs["provider"] == "plaid"
     assert registry.call_args.kwargs["full_rebuild"] is True
     assert registry.call_args.kwargs["connection_id"] == "conn_1"
+
+  async def test_completing_link_forgets_the_token(self, _link_token_cache):
+    _link_token_cache.store["plaid:link_token:conn_1"] = "{}"
+    await self._complete(
+      _client(), {"auth_mode": "link", "sync_config": {"since_date": "2026-01-01"}}
+    )
+    assert "plaid:link_token:conn_1" not in _link_token_cache.store
 
   async def test_update_mode_keeps_the_item_and_its_cursor(self):
     client = _client()
