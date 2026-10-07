@@ -1414,7 +1414,10 @@ class TestProviderCompatibility:
     assert exc.value.code == "QUICKBOOKS_ACTIVE"
 
   @pytest.mark.unit
-  def test_bank_feed_for_an_unknown_entity_is_refused(self):
+  @pytest.mark.parametrize("live", [("quickbooks",), ()])
+  def test_bank_feed_for_an_unknown_entity_is_refused(self, live):
+    """Whatever else is live — a named entity is resolved first, so one
+    the graph lacks is refused as such and never reaches the chart probe."""
     from robosystems.operations.connection_service import (
       ProviderConflictError,
       assert_provider_compatible,
@@ -1426,11 +1429,20 @@ class TestProviderCompatibility:
         f"{MODULE}._is_group_parent",
         side_effect=ProviderConflictError("ENTITY_NOT_FOUND", "no such entity"),
       ),
+      patch(f"{MODULE}._graph_has_chart") as has_chart,
     ):
-      MockConn.get_all_for_graph.return_value = self._live("quickbooks")
+      MockConn.get_all_for_graph.return_value = self._live(*live)
       with pytest.raises(ProviderConflictError) as exc:
         assert_provider_compatible("kg_test", "plaid", MagicMock(), entity_id="nope")
     assert exc.value.code == "ENTITY_NOT_FOUND"
+    assert exc.value.http_status == 404
+    has_chart.assert_not_called()
+
+  @pytest.mark.unit
+  def test_a_conflict_answers_409(self):
+    from robosystems.operations.connection_service import ProviderConflictError
+
+    assert ProviderConflictError("QUICKBOOKS_ACTIVE", "x").http_status == 409
 
   @pytest.mark.unit
   def test_bank_feed_needs_a_chart(self):
@@ -1511,7 +1523,7 @@ class TestProviderCompatibility:
     with (
       patch(f"{MODULE}.Connection") as MockConn,
       patch(f"{MODULE}.ConnectionCredentials") as MockCreds,
-      patch(f"{MODULE}._is_group_parent", return_value=False) as parent,
+      patch(f"{MODULE}._any_is_group_parent", return_value=False) as parent,
       patch(f"{MODULE}._parent_has_feed_account", return_value=False),
       patch(f"{MODULE}._graph_has_native_books", return_value=False),
     ):
@@ -1520,7 +1532,32 @@ class TestProviderCompatibility:
         "sync_config": {"since_date": None, "entity_id": "ent_sub"}
       }
       assert_provider_compatible("kg_test", "quickbooks", MagicMock())
-    parent.assert_called_once_with("kg_test", "ent_sub")
+    parent.assert_called_once_with("kg_test", ["ent_sub"])
+
+  @pytest.mark.unit
+  def test_a_stale_stored_entity_on_a_feed_is_not_the_parent(self):
+    """A feed whose stored entity the graph no longer has blocks nothing
+    and is never reported as an entity the caller named."""
+    from robosystems.operations.connection_service import _any_is_group_parent
+    from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
+
+    def find(ext, entity_id=None):
+      if entity_id is None:
+        return "ent_p"
+      if entity_id == "gone":
+        raise EntityNotInGraphError("gone")
+      return entity_id
+
+    with (
+      patch(f"{MODULE}._probe_books", side_effect=lambda g, pred: pred(MagicMock())),
+      patch(
+        "robosystems.operations.roboledger.entity_scope.find_entity_id",
+        side_effect=find,
+      ),
+    ):
+      assert _any_is_group_parent("kg_test", ["gone"]) is False
+      assert _any_is_group_parent("kg_test", ["gone", "ent_sub"]) is False
+      assert _any_is_group_parent("kg_test", ["gone", "ent_p"]) is True
 
   @pytest.mark.unit
   def test_quickbooks_refused_when_a_feed_account_sits_on_the_parent(self):

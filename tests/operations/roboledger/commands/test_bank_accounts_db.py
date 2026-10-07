@@ -48,14 +48,15 @@ from tests.operations.roboledger.commands.test_reconciling_items_db import (
 
 __all__ = ["_skip_platform_db_checks", "session"]
 
-COMMANDS = "robosystems.operations.roboledger.commands.bank_accounts"
+# The command imports the platform read lazily, so it is patched at its source.
+SERVICE = "robosystems.operations.connection_service"
 
 
 @pytest.fixture(autouse=True)
 def _no_synced_ledger():
   """No QuickBooks on the graph unless a test says so; the platform
   database is not part of these tests."""
-  with patch(f"{COMMANDS}.synced_ledger_live", return_value=False):
+  with patch(f"{SERVICE}.synced_ledger_live", return_value=False):
     yield
 
 
@@ -515,7 +516,7 @@ def test_an_entity_quickbooks_keeps_is_refused(session):
     "user_test",
     graph_id=GRAPH_ID,
   )
-  with patch(f"{COMMANDS}.synced_ledger_live", return_value=True) as live:
+  with patch(f"{SERVICE}.synced_ledger_live", return_value=True) as live:
     with pytest.raises(QuickBooksKeptEntityError):
       link_bank_account(
         session,

@@ -29,7 +29,6 @@ from robosystems.models.api.extensions.bank_accounts import (
 )
 from robosystems.models.extensions import Element
 from robosystems.models.extensions.roboledger import Event
-from robosystems.operations.connection_service import synced_ledger_live
 from robosystems.operations.roboledger.entity_scope import (
   ensure_entity_id,
   is_group_parent,
@@ -229,6 +228,10 @@ def _linked_element(session: Session, connection_id: str, account_id: str):
 def _assert_not_synced(session: Session, graph_id: str, entity_id: str) -> None:
   """A feed account never books where a synced ledger keeps the books: the
   group parent, while QuickBooks is connected."""
+  # Imported here: the connection service reaches back into the ledger's
+  # commands, so a module-level import would be a cycle waiting to happen.
+  from robosystems.operations.connection_service import synced_ledger_live
+
   if is_group_parent(session, entity_id) and synced_ledger_live(graph_id):
     raise QuickBooksKeptEntityError(entity_id)
 

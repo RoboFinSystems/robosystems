@@ -135,11 +135,7 @@ async def create_connection(
       )
     except ProviderConflictError as conflict:
       raise create_error_response(
-        status_code=(
-          status.HTTP_404_NOT_FOUND
-          if conflict.code == "ENTITY_NOT_FOUND"
-          else status.HTTP_409_CONFLICT
-        ),
+        status_code=conflict.http_status,
         detail=conflict.message,
         code=conflict.code,
       )

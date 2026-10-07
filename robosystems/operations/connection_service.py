@@ -461,6 +461,12 @@ class ProviderConflictError(Exception):
     self.code = code
     self.message = message
 
+  @property
+  def http_status(self) -> int:
+    """What the routers answer: 404 for an entity the graph lacks, 409 for a
+    conflict with the books it keeps."""
+    return 404 if self.code == "ENTITY_NOT_FOUND" else 409
+
 
 def assert_provider_compatible(
   graph_id: str, provider: str, session: Session, *, entity_id: str | None = None
@@ -487,8 +493,11 @@ def assert_provider_compatible(
   live = {(c.provider or "").lower() for c in connections}
 
   if wanted in BANK_FEED_PROVIDERS:
+    # A named entity is resolved first, whatever else is live: one the graph
+    # lacks is refused as such, never reached by a later probe.
+    lands_on_parent = _is_group_parent(graph_id, entity_id)
     blocking = sorted(live & SYNCED_LEDGER_PROVIDERS)
-    if blocking and _is_group_parent(graph_id, entity_id):
+    if blocking and lands_on_parent:
       raise ProviderConflictError(
         "QUICKBOOKS_ACTIVE",
         f"{blocking[0].capitalize()} keeps the group parent's books, so a bank "
@@ -560,14 +569,40 @@ def _feed_lands_on_parent(
   graph_id: str, feeds: list[Connection], session: Session
 ) -> bool:
   """Whether any live bank feed's accounts land on the group parent: the
-  entity it was connected for, from its connect-time config."""
+  entity it was connected for, from its connect-time config. A stored
+  entity the graph no longer has is nobody's, not the parent's."""
+  targets: list[str | None] = []
   for feed in feeds:
     creds = ConnectionCredentials.get_by_connection_id(str(feed.id), session)
     stored = dict(creds.get_credentials()) if creds is not None else {}
     target = (stored.get("sync_config") or {}).get("entity_id")
-    if _is_group_parent(graph_id, str(target) if target else None):
-      return True
-  return False
+    targets.append(str(target) if target else None)
+  if None in targets:
+    return True
+  if not targets:
+    return False
+  return _any_is_group_parent(graph_id, [t for t in targets if t])
+
+
+def _any_is_group_parent(graph_id: str, entity_ids: list[str]) -> bool:
+  """One probe for several stored entities; one the graph lacks is skipped."""
+  from robosystems.operations.roboledger.entity_scope import (
+    EntityNotInGraphError,
+    NoEntityError,
+    find_entity_id,
+  )
+
+  def probe(ext: Session) -> bool:
+    parent = find_entity_id(ext)
+    for entity_id in entity_ids:
+      try:
+        if find_entity_id(ext, entity_id) == parent:
+          return True
+      except (EntityNotInGraphError, NoEntityError):
+        continue
+    return False
+
+  return _probe_books(graph_id, probe)
 
 
 def _parent_has_feed_account(graph_id: str) -> bool:
