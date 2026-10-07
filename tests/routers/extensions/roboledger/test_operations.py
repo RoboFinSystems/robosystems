@@ -21,6 +21,7 @@ from robosystems.models.api.extensions.blocked_source_graphs import (
   BlockSourceGraphResult,
 )
 from robosystems.models.api.extensions.entity import (
+  CreateEntityRequest,
   LedgerEntityResponse,
   UpdateEntityRequest,
 )
@@ -47,7 +48,11 @@ from robosystems.models.api.extensions.reports import (
   ShareReportResponse,
   ShareResultItem,
 )
-from robosystems.operations.roboledger.commands.entity import ParentEntityNotFoundError
+from robosystems.operations.roboledger.commands.entity import (
+  EntityTickerTakenError,
+  ParentEntityNotFoundError,
+)
+from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
 from robosystems.routers.extensions.roboledger.operations import (
   AutoMapElementsOperation,
   BlockSourceGraphOperation,
@@ -58,6 +63,7 @@ from robosystems.routers.extensions.roboledger.operations import (
   auto_map_elements_op,
   block_source_graph_op,
   close_period_op,
+  create_entity_op,
   create_report_op,
   delete_journal_entry_op,
   file_report_op,
@@ -160,6 +166,86 @@ class _FakeCache:
     self.bindings.setdefault(operation_id, set()).add(cache_key)
 
 
+class TestCreateEntityOp:
+  @pytest.mark.asyncio
+  async def test_creates_a_subsidiary_and_marks_the_graph(self) -> None:
+    body = CreateEntityRequest(name="Maple Court LLC", entity_type="llc")
+    created = _make_entity_response().model_copy(
+      update={
+        "id": "ent_sub",
+        "name": "Maple Court LLC",
+        "is_parent": False,
+        "parent_entity_id": "ent_kg01234567890abcdef",
+        "ownership_pct": 100.0,
+      }
+    )
+
+    with (
+      patch(
+        "robosystems.operations.roboledger.commands.entity.create_entity",
+        return_value=created,
+      ) as cmd,
+      _mock_session_ctx() as mock_session,
+      patch("robosystems.middleware.extensions.mark_graph_stale") as mark,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      envelope = await create_entity_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert envelope.operation == "create-entity"
+    assert envelope.status == "completed"
+    assert envelope.result is not None
+    assert envelope.result["id"] == "ent_sub"
+    assert envelope.result["parent_entity_id"] == "ent_kg01234567890abcdef"
+    assert envelope.result["ownership_pct"] == 100.0
+    # The registrar passes the actor as created_by.
+    assert cmd.call_args.kwargs["created_by"] == "usr_test123"
+    # An Entity node and an ENTITY_OWNS_ENTITY edge have to reach the graph.
+    mark.assert_called_once_with(GRAPH_ID, "entity_created")
+
+  @pytest.mark.asyncio
+  @pytest.mark.parametrize(
+    ("error", "status"),
+    [
+      (EntityNotInGraphError("Entity 'ent_x' not found in this graph."), 404),
+      (EntityTickerTakenError("HH"), 409),
+    ],
+  )
+  async def test_refusals_map_to_their_status(self, error, status) -> None:
+    body = CreateEntityRequest(name="Maple Court LLC")
+
+    with (
+      patch(
+        "robosystems.operations.roboledger.commands.entity.create_entity",
+        side_effect=error,
+      ),
+      _mock_session_ctx() as mock_session,
+      patch("robosystems.middleware.extensions.mark_graph_stale") as mark,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      with pytest.raises(HTTPException) as exc:
+        await create_entity_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+
+    assert exc.value.status_code == status
+    assert str(error) in exc.value.detail
+    mark.assert_not_called()
+
+
 class TestUpdateEntityOp:
   @pytest.mark.asyncio
   async def test_happy_path_wraps_result_in_envelope(self) -> None:
@@ -226,7 +312,8 @@ class TestUpdateEntityOp:
 
   @pytest.mark.asyncio
   async def test_rejects_empty_update_with_400(self) -> None:
-    body = UpdateEntityRequest()  # all fields None
+    # `entity_id` names the target; it is not a change.
+    body = UpdateEntityRequest(entity_id="ent_sub")
 
     with pytest.raises(HTTPException) as exc:
       await update_entity_op(

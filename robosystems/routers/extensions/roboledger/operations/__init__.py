@@ -209,6 +209,9 @@ from robosystems.routers.extensions.roboledger.operations.setup import (
   change_reporting_style_op as change_reporting_style_op,
 )
 from robosystems.routers.extensions.roboledger.operations.setup import (
+  create_entity_op as create_entity_op,
+)
+from robosystems.routers.extensions.roboledger.operations.setup import (
   initialize_chart_of_accounts_op as initialize_chart_of_accounts_op,
 )
 from robosystems.routers.extensions.roboledger.operations.setup import (

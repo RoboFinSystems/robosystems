@@ -67,6 +67,7 @@ from robosystems.graphql.types.report_package import ReportPackage
 from robosystems.models.api.extensions.reports import (
   ReportLifecycle as PydanticReportLifecycle,
 )
+from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
 from robosystems.operations.roboledger.fiscal_calendar import (
   FiscalCalendarService,
   parse_period,
@@ -170,11 +171,22 @@ class LedgerQuery:
   # ── Entity ──────────────────────────────────────────────────────────────
 
   @strawberry.field
-  def entity(self, info: Info[GraphQLContext, None]) -> LedgerEntity | None:
-    """Return the parent ledger entity (company) for a graph."""
+  def entity(
+    self,
+    info: Info[GraphQLContext, None],
+    entity_id: str | None = None,
+  ) -> LedgerEntity | None:
+    """One entity of the graph's reporting group: the named one, else the
+    group parent. Null on a graph with no entity yet.
+
+    Args:
+      entity_id: A subsidiary's id. Omit for the group parent.
+    """
     try:
       with _open_session_for_any(info, _ENTITY_EXTENSIONS) as session:
-        response = reads_entity.get_parent_entity(session)
+        response = reads_entity.get_entity(session, entity_id)
+    except EntityNotInGraphError as exc:
+      raise strawberry.exceptions.StrawberryGraphQLError(str(exc)) from exc
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
     if response is None:

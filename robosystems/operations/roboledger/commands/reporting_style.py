@@ -44,6 +44,62 @@ def _resolve_entity(session: Session, entity_id: str | None) -> Entity:
     raise EntityNotFoundError(str(exc)) from exc
 
 
+def require_reporting_style(session: Session, reporting_style_id: str) -> str | None:
+  """Check that ``reporting_style_id`` is a renderable Style in this graph:
+  present, active, of the right block type, with a Network for every required
+  statement. Returns its code (e.g. ``BSC-CORP-IS02-CF1``), None if unstamped.
+  Raises `ReportingStyleInvalidError`.
+  """
+  row = session.execute(
+    text(
+      """
+      SELECT id, block_type, is_active, metadata
+      FROM structures
+      WHERE id = :sid
+      """
+    ),
+    {"sid": reporting_style_id},
+  ).fetchone()
+  if row is None:
+    raise ReportingStyleInvalidError(
+      f"Reporting Style {reporting_style_id!r} not found in tenant schema."
+    )
+  # Legacy ``custom`` Style rows stay selectable; the picker accepts them too.
+  if row.block_type not in ("reporting_style", "custom"):
+    raise ReportingStyleInvalidError(
+      f"Structure {reporting_style_id!r} has block_type={row.block_type!r}; "
+      f"expected 'reporting_style' (or 'custom' for legacy tenants)."
+    )
+  if not row.is_active:
+    raise ReportingStyleInvalidError(
+      f"Reporting Style {reporting_style_id!r} is inactive."
+    )
+
+  composed = {
+    r.statement_type
+    for r in session.execute(
+      text(
+        """
+        SELECT statement_type FROM reporting_style_networks
+        WHERE reporting_style_id = :sid
+        """
+      ),
+      {"sid": reporting_style_id},
+    ).fetchall()
+  }
+  missing = [st for st in _REQUIRED_STATEMENT_TYPES if st not in composed]
+  if missing:
+    raise ReportingStyleInvalidError(
+      f"Reporting Style {reporting_style_id!r} has an incomplete "
+      f"composition — missing Network(s) for: {', '.join(missing)}. Author the "
+      f"missing reporting_style_networks rows before switching."
+    )
+
+  # e.g. BSC-CORP-IS02-CF1, stamped at seed time; None if unstamped.
+  metadata = row.metadata if isinstance(row.metadata, dict) else {}
+  return metadata.get("reporting_style_code")
+
+
 def change_reporting_style(
   session: Session, body: ChangeReportingStyleRequest
 ) -> ChangeReportingStyleResponse:
@@ -64,54 +120,7 @@ def change_reporting_style(
       changed=False,
     )
 
-  row = session.execute(
-    text(
-      """
-      SELECT id, block_type, is_active, metadata
-      FROM structures
-      WHERE id = :sid
-      """
-    ),
-    {"sid": body.reporting_style_id},
-  ).fetchone()
-  if row is None:
-    raise ReportingStyleInvalidError(
-      f"Reporting Style {body.reporting_style_id!r} not found in tenant schema."
-    )
-  # Legacy ``custom`` Style rows stay selectable; the picker accepts them too.
-  if row.block_type not in ("reporting_style", "custom"):
-    raise ReportingStyleInvalidError(
-      f"Structure {body.reporting_style_id!r} has block_type={row.block_type!r}; "
-      f"expected 'reporting_style' (or 'custom' for legacy tenants)."
-    )
-  if not row.is_active:
-    raise ReportingStyleInvalidError(
-      f"Reporting Style {body.reporting_style_id!r} is inactive."
-    )
-
-  composed = {
-    r.statement_type
-    for r in session.execute(
-      text(
-        """
-        SELECT statement_type FROM reporting_style_networks
-        WHERE reporting_style_id = :sid
-        """
-      ),
-      {"sid": body.reporting_style_id},
-    ).fetchall()
-  }
-  missing = [st for st in _REQUIRED_STATEMENT_TYPES if st not in composed]
-  if missing:
-    raise ReportingStyleInvalidError(
-      f"Reporting Style {body.reporting_style_id!r} has an incomplete "
-      f"composition — missing Network(s) for: {', '.join(missing)}. Author the "
-      f"missing reporting_style_networks rows before switching."
-    )
-
-  # e.g. BSC-CORP-IS02-CF1, stamped at seed time; None if unstamped.
-  metadata = row.metadata if isinstance(row.metadata, dict) else {}
-  reporting_style_code = metadata.get("reporting_style_code")
+  reporting_style_code = require_reporting_style(session, body.reporting_style_id)
 
   entity.reporting_style_id = body.reporting_style_id
   entity.updated_at = datetime.now(UTC)

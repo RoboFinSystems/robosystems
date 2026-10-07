@@ -32,6 +32,7 @@ from robosystems.models.api.extensions.accounts import (
 from robosystems.models.api.extensions.agent import LedgerAgentResponse
 from robosystems.models.api.extensions.entity import LedgerEntityResponse
 from robosystems.models.api.extensions.reports import ReportBundleDownloadResponse
+from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
 
 GRAPH_ID = "kg01234567890abcdef"
 
@@ -164,7 +165,7 @@ class TestExtensionGate:
     with (
       _patch_session(),
       patch(
-        "robosystems.operations.roboledger.reads.entity.get_parent_entity",
+        "robosystems.operations.roboledger.reads.entity.get_entity",
         return_value=mock_response,
       ),
     ):
@@ -191,7 +192,7 @@ class TestEntityResolver:
     with (
       _patch_session(),
       patch(
-        "robosystems.operations.roboledger.reads.entity.get_parent_entity",
+        "robosystems.operations.roboledger.reads.entity.get_entity",
         return_value=mock_response,
       ),
     ):
@@ -210,7 +211,7 @@ class TestEntityResolver:
     with (
       _patch_session(),
       patch(
-        "robosystems.operations.roboledger.reads.entity.get_parent_entity",
+        "robosystems.operations.roboledger.reads.entity.get_entity",
         return_value=None,
       ),
     ):
@@ -221,6 +222,51 @@ class TestEntityResolver:
 
     assert result.errors is None
     assert result.data == {"entity": None}
+
+  def test_names_a_subsidiary_by_id(self) -> None:
+    sub = LedgerEntityResponse(
+      id="ent_sub",
+      name="Maple Court LLC",
+      status="active",
+      is_parent=False,
+      parent_entity_id="ent_01",
+      ownership_pct=100.0,
+    )
+    with (
+      _patch_session(),
+      patch(
+        "robosystems.operations.roboledger.reads.entity.get_entity",
+        return_value=sub,
+      ) as get_entity,
+    ):
+      result = schema.execute_sync(
+        'query { entity(entityId: "ent_sub") { id parentEntityId ownershipPct } }',
+        context_value=_ctx(),
+      )
+
+    assert result.errors is None
+    assert result.data == {
+      "entity": {"id": "ent_sub", "parentEntityId": "ent_01", "ownershipPct": 100.0}
+    }
+    assert get_entity.call_args.args[1] == "ent_sub"
+
+  def test_an_id_outside_the_graph_is_its_own_error(self) -> None:
+    """Not `LEDGER_NOT_INITIALIZED`: the ledger is there, the id is not its."""
+    with (
+      _patch_session(),
+      patch(
+        "robosystems.operations.roboledger.reads.entity.get_entity",
+        side_effect=EntityNotInGraphError("Entity 'ent_x' not found in this graph."),
+      ),
+    ):
+      result = schema.execute_sync(
+        'query { entity(entityId: "ent_x") { id } }',
+        context_value=_ctx(),
+      )
+
+    assert result.errors is not None
+    assert "not found in this graph" in result.errors[0].message
+    assert not result.errors[0].extensions
 
   def test_raises_typed_error_when_schema_not_initialized(self) -> None:
     """Schema-missing errors must surface as a typed GraphQL error.
@@ -234,7 +280,7 @@ class TestEntityResolver:
     with (
       _patch_session(),
       patch(
-        "robosystems.operations.roboledger.reads.entity.get_parent_entity",
+        "robosystems.operations.roboledger.reads.entity.get_entity",
         side_effect=ProgrammingError("stmt", {}, Exception("schema missing")),
       ),
     ):
@@ -260,7 +306,7 @@ class TestEntityReadsOnInvestorGraphs:
     with (
       _patch_session(),
       patch(
-        "robosystems.operations.roboledger.reads.entity.get_parent_entity",
+        "robosystems.operations.roboledger.reads.entity.get_entity",
         return_value=fund,
       ),
     ):

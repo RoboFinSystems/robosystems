@@ -24,6 +24,7 @@ from robosystems.models.api.extensions.chart_of_accounts import (
 from robosystems.models.api.extensions.entity import (
   ChangeReportingStyleRequest,
   ChangeReportingStyleResponse,
+  CreateEntityRequest,
   LedgerEntityResponse,
   UpdateEntityRequest,
 )
@@ -39,7 +40,14 @@ from robosystems.operations.roboledger.commands.chart_of_accounts import (
 from robosystems.operations.roboledger.commands.chart_of_accounts import (
   initialize_chart_of_accounts as cmd_initialize_chart_of_accounts,
 )
-from robosystems.operations.roboledger.commands.entity import ParentEntityNotFoundError
+from robosystems.operations.roboledger.commands.entity import (
+  EntityHierarchyError,
+  EntityTickerTakenError,
+  ParentEntityNotFoundError,
+)
+from robosystems.operations.roboledger.commands.entity import (
+  create_entity as cmd_create_entity,
+)
 from robosystems.operations.roboledger.commands.entity import (
   update_entity as cmd_update_entity,
 )
@@ -53,6 +61,7 @@ from robosystems.operations.roboledger.commands.reporting_style import (
   ReportingStyleInvalidError,
   change_reporting_style,
 )
+from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
 from robosystems.operations.roboledger.fiscal_calendar.service import (
   CalendarAlreadyInitializedError,
   InvalidCloseTargetError,
@@ -156,8 +165,43 @@ initialize_chart_of_accounts_op = _registrar.register(
 )
 
 
+# A new entity is an Entity node and an ENTITY_OWNS_ENTITY edge in the graph.
+create_entity_op = _registrar.register(
+  OperationSpec(
+    name="create-entity",
+    summary="Create Entity",
+    description=(
+      "Add an entity to the graph's reporting group: a subsidiary under "
+      "`parent_entity_id` (default the group parent) that keeps its own "
+      "books, chart of accounts and close, on the group's fiscal cadence. "
+      "A graph created without an entity gets this one as its group parent. "
+      "Creates the entity row only — give it a chart next "
+      "(initialize-chart-of-accounts with `entity_id`) and a calendar "
+      "(initialize with `entity_id`); from then on every ledger operation "
+      "takes `entity_id` to act in its books, and omitting it means the "
+      "group parent. The Reporting Style follows `entity_type` unless "
+      "`reporting_style_id` names one. `ticker` prefixes the entity's "
+      "account names and must be unique in the graph (409). There is no "
+      "cap on entities: a graph is one reporting group, and everyone with "
+      "access to it sees every entity."
+    ),
+    command=cmd_create_entity,
+    request_model=CreateEntityRequest,
+    result_type=LedgerEntityResponse,
+    business_event_type="ledger_create_entity",
+    error_map={
+      EntityNotInGraphError: 404,
+      EntityHierarchyError: 422,
+      EntityTickerTakenError: 409,
+      ReportingStyleInvalidError: 422,
+    },
+    mark_stale_reason="entity_created",
+  )
+)
+
+
 def _require_entity_updates(body: UpdateEntityRequest) -> None:
-  if not body.model_dump(exclude_none=True):
+  if not body.model_dump(exclude_none=True, exclude={"entity_id"}):
     raise HTTPException(status_code=400, detail="No fields provided for update.")
 
 
@@ -168,9 +212,10 @@ update_entity_op = _registrar.register(
     name="update-entity",
     summary="Update Entity",
     description=(
-      "Update the graph's primary entity. Only provided (non-null) fields "
-      "are updated. The graph is implicit in the URL — the operation "
-      "always targets the graph's primary entity."
+      "Update an entity of the graph's reporting group. Only provided "
+      "(non-null) fields are updated. Omit `entity_id` to target the group "
+      "parent; name a subsidiary's id to edit it. `ownership_pct` is "
+      "refused on the group parent (422)."
     ),
     command=cmd_update_entity,
     request_model=UpdateEntityRequest,
@@ -179,7 +224,11 @@ update_entity_op = _registrar.register(
     # Keeps the empty-body 400 without mapping ValueError to 400, which would
     # swallow the command's genuine 422 validation failures.
     pre_validate=_require_entity_updates,
-    error_map={ParentEntityNotFoundError: 404},
+    error_map={
+      ParentEntityNotFoundError: 404,
+      EntityNotInGraphError: 404,
+      EntityHierarchyError: 422,
+    },
     mark_stale_reason="entity_updated",
   )
 )

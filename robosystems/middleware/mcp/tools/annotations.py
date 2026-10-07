@@ -94,6 +94,7 @@ WRITE_TOOL_HINTS: dict[str, ToolHints] = {
   # Counterparties and the reporting entity.
   "create-agent": _ADDS,
   "update-agent": _REPLACES,
+  "create-entity": _ADDS,
   "update-entity": _REPLACES,
   # Taxonomy and mapping.
   "initialize-chart-of-accounts": _ADDS_ONCE,

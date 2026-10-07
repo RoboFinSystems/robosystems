@@ -54,11 +54,13 @@ The single source of truth is the Pydantic model in `robosystems/models/api/exte
 
 ```python
 @strawberry.field
-def entity(self, info: Info[GraphQLContext, None]) -> LedgerEntity | None:
-    """Return the parent ledger entity (company) for a graph."""
+def entity(
+    self, info: Info[GraphQLContext, None], entity_id: str | None = None
+) -> LedgerEntity | None:
+    """One entity of the reporting group: the named one, else the group parent."""
     try:
         with _open_session(info, "roboledger") as session:
-            response = reads_entity.get_parent_entity(session)
+            response = reads_entity.get_entity(session, entity_id)
     except (ValueError, ProgrammingError):
         _raise_ledger_not_initialized()
     if response is None:

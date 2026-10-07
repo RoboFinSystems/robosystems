@@ -1,10 +1,11 @@
 """Ledger entity API models.
 
 The Entity is the legal/operating subject the ledger reports for —
-the company whose books we're keeping. One graph typically maps to
-one primary entity (e.g. a single LLC, corp, or LP); multi-entity
-consolidation uses parent/child entity hierarchy via
-`parent_entity_id`.
+the company whose books we're keeping. A graph is one reporting
+group: the group parent and the subsidiaries under it
+(`parent_entity_id`), each keeping its own books, chart of accounts
+and close. An operation that names no `entity_id` acts on the group
+parent.
 """
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -73,6 +74,13 @@ class LedgerEntityResponse(BaseModel):
   parent_entity_id: str | None = Field(
     None, description="Parent entity ID for subsidiaries; null for top-level."
   )
+  ownership_pct: float | None = Field(
+    None,
+    description=(
+      "The parent's share of this entity, as a percent (100 = wholly "
+      "owned). Null on the group parent, and where it was never recorded."
+    ),
+  )
 
   # Source provenance
   source: str = Field(
@@ -105,15 +113,21 @@ class LedgerEntityResponse(BaseModel):
 
 
 class UpdateEntityRequest(BaseModel):
-  """Update the graph's primary entity. All fields are optional —
-  pass only what changes. Identifiers (CIK, LEI, tax_id) are typically
-  set once at onboarding; address fields are flattened to make them
-  easy to project into reporting forms (1099, state filings).
+  """Update an entity of the graph's reporting group. All fields are
+  optional — pass only what changes. Identifiers (CIK, LEI, tax_id) are
+  typically set once at onboarding; address fields are flattened to make
+  them easy to project into reporting forms (1099, state filings).
 
-  The graph is implicit (URL path) — there's no `entity_id` field
-  because the operation always targets the graph's primary entity.
+  Omit `entity_id` to target the group parent.
   """
 
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity to update. Omit to target the group parent — the "
+      "single-entity default."
+    ),
+  )
   name: str | None = None
   legal_name: str | None = None
   uri: str | None = None
@@ -138,6 +152,15 @@ class UpdateEntityRequest(BaseModel):
   address_state: str | None = None
   address_postal_code: str | None = None
   address_country: str | None = None
+  ownership_pct: float | None = Field(
+    None,
+    gt=0,
+    le=100,
+    description=(
+      "The parent's share of this entity, as a percent. Refused on the "
+      "group parent, which has no owner in the graph."
+    ),
+  )
 
   model_config = ConfigDict(
     json_schema_extra={
@@ -158,6 +181,109 @@ class UpdateEntityRequest(BaseModel):
           "address_country": "US",
         },
         {"name": "Acme Holdings, LLC"},
+        {"entity_id": "ent_01J9ZK3M4N5P6Q7R8S9T0V1W2X", "ownership_pct": 80},
+      ]
+    }
+  )
+
+
+class CreateEntityRequest(BaseModel):
+  """Add an entity to the graph's reporting group.
+
+  The new entity is a subsidiary of `parent_entity_id`, default the group
+  parent, and keeps its own books: give it a chart next
+  (`initialize-chart-of-accounts` with `entity_id`) and a calendar
+  (`initialize`), then name it with `entity_id` on any ledger operation.
+  A graph created without an entity gets this one as its group parent.
+  There is no cap on entities in a graph; capacity is the tier's.
+  """
+
+  name: str = Field(..., min_length=1, max_length=255, description="Display name.")
+  legal_name: str | None = Field(
+    None, description="Registered legal name. Defaults to `name`."
+  )
+  entity_type: str | None = Field(
+    None,
+    description=(
+      "Legal form: `corporation`, `llc`, `partnership`, "
+      "`sole_proprietorship`, `non_profit`. Picks the default Reporting "
+      "Style (partnership and llc have equity-form Styles of their own; "
+      "anything else is corporate) and the equity rows of a chart template."
+    ),
+  )
+  reporting_style_id: str | None = Field(
+    None,
+    description=(
+      "Structure id of the Reporting Style to present under, validated in "
+      "the graph like change-reporting-style. Omit to derive it from "
+      "`entity_type`."
+    ),
+  )
+  parent_entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity this one is held under. Omit for the group parent; name "
+      "a subsidiary to nest a sub-group under it."
+    ),
+  )
+  ownership_pct: float | None = Field(
+    None,
+    gt=0,
+    le=100,
+    description=(
+      "The parent's share of this entity, as a percent (100 = wholly "
+      "owned). Omit when not recorded. Refused on a graph's first entity, "
+      "which becomes the group parent."
+    ),
+  )
+  ticker: str | None = Field(
+    None,
+    min_length=1,
+    max_length=10,
+    description=(
+      "Short symbol, unique in the graph; it prefixes the entity's account "
+      "names (`coa-<ticker>:1000`). Derived from the name's initials when "
+      "omitted."
+    ),
+  )
+  uri: str | None = Field(None, description="Canonical URL / external identifier.")
+  cik: str | None = None
+  sic: str | None = None
+  sic_description: str | None = None
+  category: str | None = None
+  state_of_incorporation: str | None = None
+  fiscal_year_end: str | None = Field(
+    None,
+    description=(
+      "Fiscal year-end as MM-DD. Defaults to the parent's: a graph has one "
+      "fiscal cadence, and every entity's calendar follows it."
+    ),
+  )
+  tax_id: str | None = None
+  lei: str | None = None
+  industry: str | None = None
+  phone: str | None = None
+  website: str | None = None
+  address_line1: str | None = None
+  address_city: str | None = None
+  address_state: str | None = None
+  address_postal_code: str | None = None
+  address_country: str | None = None
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {"name": "Maple Court LLC", "entity_type": "llc", "ownership_pct": 100},
+        {
+          "name": "Harbor Property Management LLC",
+          "legal_name": "Harbor Property Management, LLC",
+          "entity_type": "llc",
+          "ticker": "HPM",
+          "parent_entity_id": "ent_01J9ZK3M4N5P6Q7R8S9T0V1W2X",
+          "ownership_pct": 60,
+          "state_of_incorporation": "DE",
+          "tax_id": "12-3456789",
+        },
       ]
     }
   )
