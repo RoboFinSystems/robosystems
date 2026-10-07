@@ -218,6 +218,9 @@ from robosystems.routers.extensions.roboledger.operations.setup import (
   initialize_op as initialize_op,
 )
 from robosystems.routers.extensions.roboledger.operations.setup import (
+  link_bank_account_op as link_bank_account_op,
+)
+from robosystems.routers.extensions.roboledger.operations.setup import (
   update_entity_op as update_entity_op,
 )
 from robosystems.routers.extensions.roboledger.operations.taxonomy import (

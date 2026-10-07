@@ -98,6 +98,7 @@ WRITE_TOOL_HINTS: dict[str, ToolHints] = {
   "update-entity": _REPLACES,
   # Taxonomy and mapping.
   "initialize-chart-of-accounts": _ADDS_ONCE,
+  "link-bank-account": _REPLACES,
   "create-taxonomy-block": _ADDS,
   "update-taxonomy-block": _REPLACES_ONCE_PER_STATE,
   "delete-taxonomy-block": _REPLACES,

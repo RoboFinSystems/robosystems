@@ -128,11 +128,16 @@ def load_sync(
   chart: ChartIndex,
   since: date | None = None,
   rekey_replaced: bool = False,
+  account_entities: dict[str, str] | None = None,
+  charts_by_entity: dict[str, ChartIndex] | None = None,
 ) -> PlaidLoadReport:
   """``rekey_replaced`` is set on a replay (no cursor): only then does every
   id the feed still has arrive in one batch, which is what makes an event
-  under another Item's id safe to re-key."""
+  under another Item's id safe to re-key. ``account_entities`` says which
+  entity each feed account books to (see ``transform``)."""
   report = PlaidLoadReport()
+  account_entities = account_entities or {}
+  charts_by_entity = charts_by_entity or {}
   by_account = {account.account_id: account for account in accounts}
 
   removed_ids = [
@@ -188,6 +193,8 @@ def load_sync(
     since=since,
     exclude=frozenset(in_pairs),
     unpairable=frozenset(i for i in ids if txn_external_id(i) in singles),
+    account_entities=account_entities,
+    charts_by_entity=charts_by_entity,
   )
   report.skipped = result.skipped
   report.classification = result.classification
@@ -219,6 +226,8 @@ def load_sync(
       item_id=item_id,
       report=report,
       consumed=consumed,
+      account_entities=account_entities,
+      charts_by_entity=charts_by_entity,
     )
   )
 
@@ -840,6 +849,8 @@ def reconcile_pairs(
   item_id: str | None,
   report: PlaidLoadReport,
   consumed: set[str],
+  account_entities: dict[str, str] | None = None,
+  charts_by_entity: dict[str, ChartIndex] | None = None,
 ) -> list[dict[str, Any]]:
   """Apply the batch's changes to legs already inside a pair.
 
@@ -865,7 +876,9 @@ def reconcile_pairs(
     current = {
       **legs,
       **{
-        leg_id: leg_from_transaction(txn, by_account, account_elements)
+        leg_id: leg_from_transaction(
+          txn, by_account, account_elements, account_entities
+        )
         for leg_id, txn in changed.items()
       },
     }
@@ -889,6 +902,8 @@ def reconcile_pairs(
             agent_ids,
             connection_id=connection_id,
             item_id=item_id,
+            account_entities=account_entities,
+            charts_by_entity=charts_by_entity,
           )
           out.append(event)
         else:
@@ -1006,10 +1021,16 @@ def find_waiting_leg(
   day = str(payload["occurred_at"])[:10]
   lo, hi = window(day, TRANSFER_WINDOW_DAYS)
   account_id = str(payload["metadata"].get("account_id") or "")
+  # Only a leg on the same entity's books is this leg's other side; a
+  # movement between two entities' accounts is intercompany, two lines.
+  same_entity = (
+    [Event.entity_id == str(payload["entity_id"])] if payload.get("entity_id") else []
+  )
   rows = (
     session.execute(
       select(Event)
       .where(
+        *same_entity,
         Event.source == SOURCE,
         Event.status.in_(COUNTERPART_STATUSES),
         Event.event_type == "external_transfer",

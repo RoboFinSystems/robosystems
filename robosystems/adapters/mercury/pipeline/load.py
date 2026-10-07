@@ -57,6 +57,8 @@ def load_feed(
   account_elements: dict[str, str],
   chart: ChartIndex,
   include_treasury: bool = True,
+  account_entities: dict[str, str] | None = None,
+  charts_by_entity: dict[str, ChartIndex] | None = None,
 ) -> LoadReport:
   report = LoadReport()
   accounts = bank_accounts(raw, include_treasury=include_treasury)
@@ -79,6 +81,8 @@ def load_feed(
     chart=chart,
     agent_ids=agent_ids,
     include_treasury=include_treasury,
+    account_entities=account_entities,
+    charts_by_entity=charts_by_entity,
   )
   report.skipped = result.skipped
   report.classification = result.classification

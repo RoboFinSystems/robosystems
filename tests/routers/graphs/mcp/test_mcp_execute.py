@@ -38,6 +38,7 @@ class TestWriteClassificationFailClosed:
       "create-mapping-association",
       "update-agent",
       "link-entity-taxonomy",
+      "link-bank-account",
       "promote-obligations",
       # hand-written writes
       "write-graph-cypher",

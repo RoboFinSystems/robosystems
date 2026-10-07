@@ -12,15 +12,36 @@ from robosystems.adapters.bank_feed.accounts import (
   ChartRequiredError,
   _next_code,
   _unique_qname,
+  account_entities,
   build_chart_index,
+  chart_indexes,
   link_bank_accounts,
 )
-from robosystems.adapters.bank_feed.chart import BankAccount
+from robosystems.adapters.bank_feed.chart import BankAccount, ChartIndex
 
 MODULE = "robosystems.adapters.bank_feed.accounts"
 
 
-def _element(id, name, *, code=None, qname=None, metadata=None, is_active=True):
+@pytest.fixture(autouse=True)
+def _plain_prefix():
+  """The group parent's chart: the plain prefix, no qname taken yet."""
+  with (
+    patch(f"{MODULE}.chart_qname_prefix", return_value="coa"),
+    patch(f"{MODULE}.taken_qnames", return_value=set()),
+  ):
+    yield
+
+
+def _element(
+  id,
+  name,
+  *,
+  code=None,
+  qname=None,
+  metadata=None,
+  is_active=True,
+  taxonomy_id="tax_1",
+):
   return SimpleNamespace(
     id=id,
     name=name,
@@ -31,6 +52,7 @@ def _element(id, name, *, code=None, qname=None, metadata=None, is_active=True):
     external_source=None,
     external_id=None,
     connection_id=None,
+    taxonomy_id=taxonomy_id,
   )
 
 
@@ -195,6 +217,76 @@ class TestLinkBankAccounts:
 
 
 @pytest.mark.unit
+class TestLinksAcrossCharts:
+  """A feed account moved to a subsidiary's chart is found there on the next
+  sync; a name match and a new account are the group parent's chart only."""
+
+  def test_a_link_in_another_entitys_chart_is_honoured(self):
+    moved = _element(
+      "e_sub",
+      "Chase Checking ••1234",
+      taxonomy_id="tax_sub",
+      metadata={
+        BANK_FEED_KEY: {
+          "provider": "plaid",
+          "account_id": "acct_1",
+          "connection_id": "conn_1",
+        }
+      },
+    )
+    session = _Session([moved])
+    with (
+      patch(f"{MODULE}.active_chart_id", return_value="tax_1"),
+      patch(f"{MODULE}.update_chart_block") as update,
+    ):
+      result = link_bank_accounts(
+        session, [_checking()], provider="plaid", connection_id="conn_1", created_by="u"
+      )
+    assert result.links == {"acct_1": "e_sub"}
+    assert (result.linked, result.created) == (1, 0)
+    update.assert_not_called()
+
+  def test_a_name_match_in_another_entitys_chart_is_not_claimed(self):
+    sibling = _element("e_sub", "Mercury Checking 1234", taxonomy_id="tax_sub")
+    created = _element("e2", "Mercury Checking ••1234", qname="coa:MercuryChecking1234")
+    session = _Session([sibling], [created])
+    with (
+      patch(f"{MODULE}.active_chart_id", return_value="tax_1"),
+      patch(f"{MODULE}.update_chart_block") as update,
+    ):
+      result = link_bank_accounts(
+        session,
+        [_checking()],
+        provider="mercury",
+        connection_id="conn_1",
+        created_by="u",
+      )
+    # Created on the parent's chart, not linked to the subsidiary's account.
+    assert result.links == {"acct_1": "e2"}
+    assert update.call_args.args[1].taxonomy_id == "tax_1"
+    assert BANK_FEED_KEY not in sibling.metadata_
+
+  def test_codes_are_allocated_against_the_parents_chart_only(self):
+    sub_taken = _element("e_sub", "Sub checking", code="1010", taxonomy_id="tax_sub")
+    created = _element("e2", "Mercury Checking ••1234", qname="coa:MercuryChecking1234")
+    session = _Session([sub_taken], [created])
+    with (
+      patch(f"{MODULE}.active_chart_id", return_value="tax_1"),
+      patch(f"{MODULE}.update_chart_block") as update,
+    ):
+      link_bank_accounts(
+        session,
+        [_checking()],
+        provider="mercury",
+        connection_id="conn_1",
+        created_by="u",
+      )
+    # The parent's chart has no codes, so the new account gets none; the
+    # subsidiary's 1010 is not in the way.
+    assert update.call_args.args[1].elements_to_add[0].code is None
+
+
+@pytest.mark.unit
 class TestHelpers:
   def test_next_code_skips_taken(self):
     taken = {"1010", "1020"}
@@ -205,6 +297,7 @@ class TestHelpers:
     taken = {"coa:1010"}
     assert _unique_qname(taken, "1010") == "coa:10102"
     assert _unique_qname(set(), "Cash") == "coa:Cash"
+    assert _unique_qname({"coa:1010"}, "1010", "coa-cadence") == "coa-cadence:1010"
 
   def test_build_chart_index_reads_name_and_code(self):
     session = MagicMock()
@@ -221,6 +314,30 @@ class TestHelpers:
   def test_build_chart_index_without_chart_is_empty(self):
     with patch(f"{MODULE}.active_chart_id", return_value=None):
       assert build_chart_index(MagicMock()).resolve("cash") is None
+
+  def test_build_chart_index_reads_the_named_entitys_chart(self):
+    session = MagicMock()
+    session.execute.return_value.all.return_value = [("e9", "Rent", "6500")]
+    with patch(f"{MODULE}.active_chart_id", return_value="tax_sub") as chart:
+      index = build_chart_index(session, "ent_sub")
+    chart.assert_called_once_with(session, "ent_sub")
+    assert index.resolve("rent") == "e9"
+
+  def test_chart_indexes_one_per_entity(self):
+    with patch(f"{MODULE}.build_chart_index", return_value=ChartIndex()) as build:
+      indexes = chart_indexes(MagicMock(), ["ent_b", "ent_a", "ent_a", None])
+    assert sorted(indexes) == ["ent_a", "ent_b"]
+    assert build.call_count == 2
+
+  def test_account_entities_falls_back_to_the_parent(self):
+    session = MagicMock()
+    session.execute.return_value.all.return_value = [
+      SimpleNamespace(element_id="e_sub", entity_id="ent_sub"),
+      SimpleNamespace(element_id="e_par", entity_id=None),
+    ]
+    owners = account_entities(session, ["e_sub", "e_par", None], parent_id="ent_p")
+    assert owners == {"e_sub": "ent_sub", "e_par": "ent_p"}
+    assert account_entities(session, [], parent_id="ent_p") == {}
 
 
 @pytest.mark.unit

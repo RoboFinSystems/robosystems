@@ -15,6 +15,12 @@ from .ar_ap import (
   OpenBalanceAggregate,
   OpenBalanceByAgent,
 )
+from .bank_accounts import (
+  BankAccountListResponse,
+  BankAccountResponse,
+  LinkBankAccountRequest,
+  LinkBankAccountResponse,
+)
 from .chart_of_accounts import (
   ChartTemplateSummary,
   InitializeChartOfAccountsRequest,
@@ -94,6 +100,8 @@ __all__ = [
   "AccountTreeNode",
   "AccountTreeResponse",
   "AnalyticalStatementFactRow",
+  "BankAccountListResponse",
+  "BankAccountResponse",
   "BindTextBlockRequest",
   "BindTextBlockResponse",
   "ChartTemplateSummary",
@@ -122,6 +130,8 @@ __all__ = [
   "LedgerTransactionDetailResponse",
   "LedgerTransactionListResponse",
   "LedgerTransactionSummaryResponse",
+  "LinkBankAccountRequest",
+  "LinkBankAccountResponse",
   "LiveFinancialStatementRequest",
   "LiveFinancialStatementResponse",
   "LiveStatementFactRow",

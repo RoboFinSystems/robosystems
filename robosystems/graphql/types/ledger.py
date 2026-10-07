@@ -48,6 +48,12 @@ from robosystems.models.api.extensions.ar_ap import (
 from robosystems.models.api.extensions.ar_ap import (
   OpenBalanceByAgent as PydanticOpenBalanceByAgent,
 )
+from robosystems.models.api.extensions.bank_accounts import (
+  BankAccountListResponse as PydanticBankAccountListResponse,
+)
+from robosystems.models.api.extensions.bank_accounts import (
+  BankAccountResponse as PydanticBankAccountResponse,
+)
 from robosystems.models.api.extensions.blocked_source_graphs import (
   BlockedSourceGraphListResponse as PydanticBlockedSourceGraphListResponse,
 )
@@ -416,6 +422,16 @@ class Account:
 @pydantic_type(model=PydanticAccountListResponse, all_fields=True)
 class AccountList:
   """Paginated list of Chart of Accounts elements."""
+
+
+@pydantic_type(model=PydanticBankAccountResponse, all_fields=True)
+class BankAccount:
+  """A bank or card account on an entity's chart, and what writes to it."""
+
+
+@pydantic_type(model=PydanticBankAccountListResponse, all_fields=True)
+class BankAccountList:
+  """The group's bank and card accounts."""
 
 
 @strawberry.type
