@@ -1372,7 +1372,7 @@ class TestCreateConnectionBooksGuard:
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail["code"] == "NATIVE_BOOKS_PRESENT"
     assert exc_info.value.detail["detail"] == "native books"
-    guard.assert_called_once_with(GRAPH_ID, "quickbooks", mock_db)
+    guard.assert_called_once_with(GRAPH_ID, "quickbooks", mock_db, entity_id=None)
     mock_list.assert_not_awaited()
     mock_registry.create_connection.assert_not_awaited()
 
@@ -1605,6 +1605,90 @@ class TestCreateMercuryConnection:
     config = registry.create_connection.call_args.args[2]
     assert isinstance(config, MercuryConnectionConfig)
     assert config.since_date == date(2026, 1, 1)
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_a_feeds_entity_reaches_the_guard(self):
+    """A bank feed names the entity its accounts land on; the books guard
+    judges that entity, not the graph (the parent on QuickBooks, an LLC on
+    Plaid)."""
+    from robosystems.models.api.graphs.connections import (
+      CreateConnectionRequest,
+      PlaidConnectionConfig,
+    )
+
+    request = CreateConnectionRequest(
+      provider="plaid",
+      plaid_config=PlaidConnectionConfig(entity_id="ent_sub"),
+    )
+    components = _make_robustness_components()
+    with (
+      patch(
+        f"{MANAGEMENT_MODULE}.create_robustness_components", return_value=components
+      ),
+      patch(f"{MANAGEMENT_MODULE}.record_operation_start"),
+      patch(f"{MANAGEMENT_MODULE}.record_operation_success"),
+      patch(f"{MANAGEMENT_MODULE}.assert_provider_compatible") as guard,
+      patch(f"{MANAGEMENT_MODULE}.provider_registry") as registry,
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.list_connections",
+        new_callable=AsyncMock,
+        return_value=[],
+      ),
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.get_connection",
+        new_callable=AsyncMock,
+        return_value=_make_connection_dict(provider="plaid", status="pending_oauth"),
+      ),
+    ):
+      registry.get_provider = MagicMock(return_value=MagicMock())
+      registry.create_connection = AsyncMock(return_value=CONNECTION_ID)
+      result = await create_connection(
+        graph_id=GRAPH_ID,
+        request=request,
+        current_user=_make_mock_user(),
+        db=MagicMock(),
+        _rate_limit=None,
+      )
+    assert result.provider == "plaid"
+    assert guard.call_args.args[1] == "plaid"
+    assert guard.call_args.kwargs == {"entity_id": "ent_sub"}
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_a_feed_for_an_unknown_entity_is_404(self):
+    from robosystems.models.api.graphs.connections import (
+      CreateConnectionRequest,
+      PlaidConnectionConfig,
+    )
+    from robosystems.operations.connection_service import ProviderConflictError
+
+    request = CreateConnectionRequest(
+      provider="plaid", plaid_config=PlaidConnectionConfig(entity_id="nope")
+    )
+    components = _make_robustness_components()
+    with (
+      patch(
+        f"{MANAGEMENT_MODULE}.create_robustness_components", return_value=components
+      ),
+      patch(f"{MANAGEMENT_MODULE}.record_operation_start"),
+      patch(f"{MANAGEMENT_MODULE}.record_operation_failure"),
+      patch(
+        f"{MANAGEMENT_MODULE}.assert_provider_compatible",
+        side_effect=ProviderConflictError("ENTITY_NOT_FOUND", "no such entity"),
+      ),
+      patch(f"{MANAGEMENT_MODULE}.provider_registry") as registry,
+    ):
+      registry.get_provider = MagicMock(return_value=MagicMock())
+      with pytest.raises(HTTPException) as exc:
+        await create_connection(
+          graph_id=GRAPH_ID,
+          request=request,
+          current_user=_make_mock_user(),
+          db=MagicMock(),
+          _rate_limit=None,
+        )
+    assert exc.value.status_code == 404
 
   @pytest.mark.unit
   @pytest.mark.asyncio

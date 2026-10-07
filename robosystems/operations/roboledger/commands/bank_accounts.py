@@ -31,6 +31,7 @@ from robosystems.models.extensions import Element
 from robosystems.models.extensions.roboledger import Event
 from robosystems.operations.roboledger.entity_scope import (
   ensure_entity_id,
+  is_group_parent,
   resolve_entity_id,
 )
 from robosystems.operations.roboledger.reads.accounts import coa_element_clause
@@ -42,6 +43,7 @@ __all__ = [
   "ChartRequiredError",
   "FeedAccountNotFoundError",
   "NotAChartAccountError",
+  "QuickBooksKeptEntityError",
   "link_bank_account",
 ]
 
@@ -76,6 +78,16 @@ class NotAChartAccountError(ValueError):
   """The target is not an active account of a chart, or not of the entity named."""
 
 
+class QuickBooksKeptEntityError(ValueError):
+  """The target entity's books are kept by a synced ledger."""
+
+  def __init__(self, entity_id: str) -> None:
+    super().__init__(
+      f"QuickBooks keeps entity {entity_id!r}'s books; a bank feed cannot book "
+      "there. Move the account to a subsidiary, or sever QuickBooks first."
+    )
+
+
 class AccountAlreadyFedError(ValueError):
   """Another connection's feed already books to the target account."""
 
@@ -88,7 +100,11 @@ class AccountAlreadyFedError(ValueError):
 
 
 def link_bank_account(
-  session: Session, body: LinkBankAccountRequest, created_by: str
+  session: Session,
+  body: LinkBankAccountRequest,
+  created_by: str,
+  *,
+  graph_id: str,
 ) -> LinkBankAccountResponse:
   current = _linked_element(session, body.connection_id, body.account_id)
   if current is None:
@@ -119,8 +135,10 @@ def link_bank_account(
       return _response(
         body, provider, current, current, str(target_entity), changed=False
       )
+    _assert_not_synced(session, graph_id, str(target_entity))
   else:
     target_entity = resolve_entity_id(session, body.entity_id)
+    _assert_not_synced(session, graph_id, target_entity)
     chart_id = entity_chart_id(session, target_entity)
     if chart_id is None:
       raise ChartRequiredError(
@@ -205,6 +223,17 @@ def _linked_element(session: Session, connection_id: str, account_id: str):
       link["account_id"].astext == account_id,
     )
   ).scalar_one_or_none()
+
+
+def _assert_not_synced(session: Session, graph_id: str, entity_id: str) -> None:
+  """A feed account never books where a synced ledger keeps the books: the
+  group parent, while QuickBooks is connected."""
+  # Imported here: the connection service reaches back into the ledger's
+  # commands, so a module-level import would be a cycle waiting to happen.
+  from robosystems.operations.connection_service import synced_ledger_live
+
+  if is_group_parent(session, entity_id) and synced_ledger_live(graph_id):
+    raise QuickBooksKeptEntityError(entity_id)
 
 
 def _assert_linkable(session: Session, target: Element, body: LinkBankAccountRequest):

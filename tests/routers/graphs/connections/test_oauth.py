@@ -1239,5 +1239,43 @@ class TestInitOAuthBooksGuard:
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail["code"] == "NATIVE_BOOKS_PRESENT"
-    guard.assert_called_once_with(GRAPH_ID, "quickbooks", mock_db)
+    guard.assert_called_once_with(GRAPH_ID, "quickbooks", mock_db, entity_id=None)
     mock_oauth_handler.get_authorization_url.assert_not_called()
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_a_resumed_link_is_judged_by_its_stored_entity(self):
+    """A pending feed carries the entity it was connected for; the guard
+    judges that entity, and one the graph no longer has is a 404, the same
+    answer the create route gives."""
+    from robosystems.operations.connection_service import ProviderConflictError
+
+    mock_user = _make_mock_user()
+    mock_db = MagicMock()
+    request = _make_oauth_init_request()
+    connection_dict = _make_connection_dict(provider="plaid")
+    connection_dict["credentials"] = {"sync_config": {"entity_id": "gone"}}
+
+    with (
+      patch(
+        f"{OAUTH_MODULE}.ConnectionService.get_connection",
+        new_callable=AsyncMock,
+        return_value=connection_dict,
+      ),
+      patch(
+        f"{OAUTH_MODULE}.assert_provider_compatible",
+        side_effect=ProviderConflictError("ENTITY_NOT_FOUND", "no such entity"),
+      ) as guard,
+      pytest.raises(HTTPException) as exc_info,
+    ):
+      await init_oauth(
+        graph_id=GRAPH_ID,
+        request=request,
+        current_user=mock_user,
+        db=mock_db,
+        _rate_limit=None,
+      )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail["code"] == "ENTITY_NOT_FOUND"
+    guard.assert_called_once_with(GRAPH_ID, "plaid", mock_db, entity_id="gone")

@@ -150,10 +150,11 @@ mercury_oauth_handler = OAuthHandler(mercury_oauth_provider)
 
 def _sync_config(config: MercuryConnectionConfig | None) -> dict[str, Any]:
   if config is None:
-    return {"since_date": None, "include_treasury": True}
+    return {"since_date": None, "include_treasury": True, "entity_id": None}
   return {
     "since_date": config.since_date.isoformat() if config.since_date else None,
     "include_treasury": bool(config.include_treasury),
+    "entity_id": config.entity_id,
   }
 
 

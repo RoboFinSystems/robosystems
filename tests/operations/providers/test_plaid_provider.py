@@ -95,7 +95,7 @@ async def test_create_opens_a_pending_connection_with_the_sync_config():
   assert kwargs["metadata"] == {"status": "pending_oauth"}
   assert kwargs["credentials"] == {
     "auth_mode": "link",
-    "sync_config": {"since_date": "2026-01-01"},
+    "sync_config": {"since_date": "2026-01-01", "entity_id": None},
   }
 
 
@@ -694,6 +694,24 @@ class TestPendingWindow:
       )
     creds = update.call_args.kwargs["credentials"]
     assert creds == {"auth_mode": "link", "sync_config": {"since_date": "2026-03-01"}}
+
+  async def test_a_newer_entity_joins_the_parked_window(self):
+    """The second create names the subsidiary and no window: the entity
+    lands on the row, the parked window stays."""
+    from robosystems.operations.providers.plaid_provider import refresh_pending_window
+
+    with (
+      patch(
+        f"{MODULE}._credentials",
+        return_value={"auth_mode": "link", "sync_config": {"since_date": "2025-01-01"}},
+      ),
+      patch(f"{MODULE}.ConnectionService.update", new_callable=AsyncMock) as update,
+    ):
+      await refresh_pending_window(
+        "conn_1", PlaidConnectionConfig(entity_id="ent_sub"), "usr_1", MagicMock()
+      )
+    creds = update.call_args.kwargs["credentials"]
+    assert creds["sync_config"] == {"since_date": "2025-01-01", "entity_id": "ent_sub"}
 
   async def test_no_window_or_the_same_window_writes_nothing(self):
     from robosystems.operations.providers.plaid_provider import refresh_pending_window

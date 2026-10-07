@@ -124,12 +124,18 @@ async def create_connection(
     # Validates the provider is enabled before any database work.
     provider_registry.get_provider(request.provider)
 
-    # Native and synced ledgers never mix.
+    # Native and synced ledgers never mix — per entity: a feed names the
+    # entity its accounts land on, default the group parent.
     try:
-      assert_provider_compatible(graph_id, request.provider, db)
+      assert_provider_compatible(
+        graph_id,
+        request.provider,
+        db,
+        entity_id=getattr(config, "entity_id", None) or None,
+      )
     except ProviderConflictError as conflict:
       raise create_error_response(
-        status_code=status.HTTP_409_CONFLICT,
+        status_code=conflict.http_status,
         detail=conflict.message,
         code=conflict.code,
       )

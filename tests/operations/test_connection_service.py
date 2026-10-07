@@ -1362,7 +1362,7 @@ class TestProviderCompatibility:
     return [_make_mock_connection(provider=p) for p in providers]
 
   @pytest.mark.unit
-  def test_bank_feed_refused_while_quickbooks_is_live(self):
+  def test_bank_feed_refused_on_the_parent_while_quickbooks_is_live(self):
     from robosystems.operations.connection_service import (
       ProviderConflictError,
       assert_provider_compatible,
@@ -1377,8 +1377,72 @@ class TestProviderCompatibility:
         assert_provider_compatible("kg_test", "mercury", MagicMock())
 
     assert exc.value.code == "QUICKBOOKS_ACTIVE"
-    assert "quickbooks" in exc.value.message
+    assert "Quickbooks keeps the group parent" in exc.value.message
     has_chart.assert_not_called()
+
+  @pytest.mark.unit
+  def test_bank_feed_allowed_for_a_subsidiary_beside_quickbooks(self):
+    """The holdco: the parent on QuickBooks, an LLC on Plaid. The feed names
+    the subsidiary it lands on, and the chart checked is that entity's."""
+    from robosystems.operations.connection_service import assert_provider_compatible
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}._is_group_parent", return_value=False) as parent,
+      patch(f"{MODULE}._graph_has_chart", return_value=True) as has_chart,
+    ):
+      MockConn.get_all_for_graph.return_value = self._live("quickbooks")
+      assert_provider_compatible("kg_test", "plaid", MagicMock(), entity_id="ent_sub")
+    parent.assert_called_once_with("kg_test", "ent_sub")
+    has_chart.assert_called_once_with("kg_test", "ent_sub")
+
+  @pytest.mark.unit
+  def test_bank_feed_naming_the_parent_by_id_is_still_the_parent(self):
+    from robosystems.operations.connection_service import (
+      ProviderConflictError,
+      assert_provider_compatible,
+    )
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}._is_group_parent", return_value=True),
+      patch(f"{MODULE}._graph_has_chart", return_value=True),
+    ):
+      MockConn.get_all_for_graph.return_value = self._live("quickbooks")
+      with pytest.raises(ProviderConflictError) as exc:
+        assert_provider_compatible("kg_test", "plaid", MagicMock(), entity_id="ent_p")
+    assert exc.value.code == "QUICKBOOKS_ACTIVE"
+
+  @pytest.mark.unit
+  @pytest.mark.parametrize("live", [("quickbooks",), ()])
+  def test_bank_feed_for_an_unknown_entity_is_refused(self, live):
+    """Whatever else is live — a named entity is resolved first, so one
+    the graph lacks is refused as such and never reaches the chart probe."""
+    from robosystems.operations.connection_service import (
+      ProviderConflictError,
+      assert_provider_compatible,
+    )
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(
+        f"{MODULE}._is_group_parent",
+        side_effect=ProviderConflictError("ENTITY_NOT_FOUND", "no such entity"),
+      ),
+      patch(f"{MODULE}._graph_has_chart") as has_chart,
+    ):
+      MockConn.get_all_for_graph.return_value = self._live(*live)
+      with pytest.raises(ProviderConflictError) as exc:
+        assert_provider_compatible("kg_test", "plaid", MagicMock(), entity_id="nope")
+    assert exc.value.code == "ENTITY_NOT_FOUND"
+    assert exc.value.http_status == 404
+    has_chart.assert_not_called()
+
+  @pytest.mark.unit
+  def test_a_conflict_answers_409(self):
+    from robosystems.operations.connection_service import ProviderConflictError
+
+    assert ProviderConflictError("QUICKBOOKS_ACTIVE", "x").http_status == 409
 
   @pytest.mark.unit
   def test_bank_feed_needs_a_chart(self):
@@ -1417,6 +1481,7 @@ class TestProviderCompatibility:
 
     with (
       patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}._parent_has_feed_account", return_value=False),
       patch(f"{MODULE}._graph_has_native_books", return_value=True) as native,
     ):
       MockConn.get_all_for_graph.return_value = []
@@ -1427,7 +1492,8 @@ class TestProviderCompatibility:
     native.assert_called_once_with("kg_test", synced_source="quickbooks")
 
   @pytest.mark.unit
-  def test_quickbooks_refused_beside_a_live_bank_feed(self):
+  def test_quickbooks_refused_beside_a_bank_feed_on_the_parent(self):
+    """A feed connected for the group parent (no entity named) lands there."""
     from robosystems.operations.connection_service import (
       ProviderConflictError,
       assert_provider_compatible,
@@ -1435,9 +1501,13 @@ class TestProviderCompatibility:
 
     with (
       patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}.ConnectionCredentials") as MockCreds,
       patch(f"{MODULE}._graph_has_native_books", return_value=False) as native,
     ):
       MockConn.get_all_for_graph.return_value = self._live("mercury")
+      MockCreds.get_by_connection_id.return_value.get_credentials.return_value = {
+        "sync_config": {"since_date": None}
+      }
       with pytest.raises(ProviderConflictError) as exc:
         assert_provider_compatible("kg_test", "quickbooks", MagicMock())
 
@@ -1445,11 +1515,76 @@ class TestProviderCompatibility:
     native.assert_not_called()
 
   @pytest.mark.unit
+  def test_quickbooks_allowed_beside_a_bank_feed_on_a_subsidiary(self):
+    """The holdco the other way round: the LLC's feed first, QuickBooks for
+    the parent after — allowed while the parent's own books stay untouched."""
+    from robosystems.operations.connection_service import assert_provider_compatible
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}.ConnectionCredentials") as MockCreds,
+      patch(f"{MODULE}._any_is_group_parent", return_value=False) as parent,
+      patch(f"{MODULE}._parent_has_feed_account", return_value=False),
+      patch(f"{MODULE}._graph_has_native_books", return_value=False),
+    ):
+      MockConn.get_all_for_graph.return_value = self._live("plaid")
+      MockCreds.get_by_connection_id.return_value.get_credentials.return_value = {
+        "sync_config": {"since_date": None, "entity_id": "ent_sub"}
+      }
+      assert_provider_compatible("kg_test", "quickbooks", MagicMock())
+    parent.assert_called_once_with("kg_test", ["ent_sub"])
+
+  @pytest.mark.unit
+  def test_a_stale_stored_entity_on_a_feed_is_not_the_parent(self):
+    """A feed whose stored entity the graph no longer has blocks nothing
+    and is never reported as an entity the caller named."""
+    from robosystems.operations.connection_service import _any_is_group_parent
+    from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
+
+    def find(ext, entity_id=None):
+      if entity_id is None:
+        return "ent_p"
+      if entity_id == "gone":
+        raise EntityNotInGraphError("gone")
+      return entity_id
+
+    with (
+      patch(f"{MODULE}._probe_books", side_effect=lambda g, pred: pred(MagicMock())),
+      patch(
+        "robosystems.operations.roboledger.entity_scope.find_entity_id",
+        side_effect=find,
+      ),
+    ):
+      assert _any_is_group_parent("kg_test", ["gone"]) is False
+      assert _any_is_group_parent("kg_test", ["gone", "ent_sub"]) is False
+      assert _any_is_group_parent("kg_test", ["gone", "ent_p"]) is True
+
+  @pytest.mark.unit
+  def test_quickbooks_refused_when_a_feed_account_sits_on_the_parent(self):
+    """A feed account moved onto the parent's chart counts as native books
+    there, whatever entity its connection was made for."""
+    from robosystems.operations.connection_service import (
+      ProviderConflictError,
+      assert_provider_compatible,
+    )
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}._parent_has_feed_account", return_value=True),
+      patch(f"{MODULE}._graph_has_native_books", return_value=False),
+    ):
+      MockConn.get_all_for_graph.return_value = []
+      with pytest.raises(ProviderConflictError) as exc:
+        assert_provider_compatible("kg_test", "quickbooks", MagicMock())
+    assert exc.value.code == "NATIVE_BOOKS_PRESENT"
+
+  @pytest.mark.unit
   def test_quickbooks_allowed_on_a_fresh_graph(self):
     from robosystems.operations.connection_service import assert_provider_compatible
 
     with (
       patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}._parent_has_feed_account", return_value=False),
       patch(f"{MODULE}._graph_has_native_books", return_value=False),
     ):
       MockConn.get_all_for_graph.return_value = []

@@ -125,17 +125,23 @@ def link_bank_accounts(
   provider: str,
   connection_id: str,
   created_by: str,
+  entity_id: str | None = None,
 ) -> AccountLinkResult:
   """Return ``{feed_account_id: element_id}`` for every account, creating
   the ones nothing on the chart matches. Flushes; the caller commits.
 
   A link is honoured in whichever entity's chart it sits; a name match and a
-  new account are the group parent's chart only.
+  new account are on the chart of ``entity_id``, the entity the feed was
+  connected for (default the group parent).
   """
-  chart_id = active_chart_id(session)
+  chart_id = active_chart_id(session, entity_id)
   if chart_id is None:
     raise ChartRequiredError(
-      "This graph has no chart of accounts; initialize one before syncing a bank feed."
+      f"Entity {entity_id!r} has no chart of accounts; initialize one before "
+      "syncing a bank feed."
+      if entity_id
+      else "This graph has no chart of accounts; initialize one before syncing a "
+      "bank feed."
     )
 
   elements = chart_accounts(session)
