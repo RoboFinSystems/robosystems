@@ -11,12 +11,12 @@ The screens below show Cadence Labs, a made-up company used for demos.
 
 ![The RoboLedger home page, with transaction and account counts, recent transactions and the latest report](images/home.png)
 
-The menu at the top right picks the company you're looking at, if you have more than one. **Home** shows recent transactions, your latest reports and shortcuts.
+The menu at the top right picks the company you're looking at: every company in every graph you can reach, grouped by graph and searchable by name or ticker. Pick a subsidiary and every page shows its books. **Home** shows recent transactions, your latest reports and shortcuts.
 
 ## Entity
 
-- **Entity Info** holds your company's details.
-- **All Entities** lists every company across your graphs.
+- **Entity Info** holds the selected company's details and, for a subsidiary, names its parent and the share held.
+- **All Entities** is the graph's reporting group: each company, the share the parent holds and the month it's closed through, with **New Entity** to add one. See [Work across several companies](working-across-companies.md#several-companies-in-one-graph).
 - **Connections** is where you connect QuickBooks, press **Sync Now**, choose sync options, and disconnect. See [Connect your books to your AI assistant](connect-your-books.md).
 
 ## Agents
@@ -40,7 +40,7 @@ An entry in a closed month can't be changed until the month is reopened. While Q
 
 **Trial Balance** shows each account's debits and credits, and whether they agree.
 
-**Statements** shows the balance sheet, income statement, cash flow and statement of equity straight from the current ledger, for any period. Nothing is saved, and no close is needed.
+**Statements** shows the balance sheet, income statement, cash flow and statement of equity straight from the current ledger, for any period. On a group parent, a Scope control switches between the company's own statement and the combined one across the group. Nothing is saved, and no close is needed.
 
 ![Live statements showing a balance sheet with prior and current columns](images/statements.png)
 

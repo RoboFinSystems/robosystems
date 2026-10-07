@@ -17,9 +17,9 @@ Each graph is its own subscription on your organization's payment method, with i
 
 A graph is one **reporting group**: the group parent, the company the graph was created for, and the subsidiaries under it. Each company in the group keeps its own books, its own chart of accounts and mapping, its own fiscal calendar and its own close, on the group's fiscal year. Counterparties and the reporting library are shared across the group. A subsidiary's books don't come from QuickBooks; your assistant, the API and file-based integrations write them.
 
-Ask your assistant to add a subsidiary: its name, its legal form and the share the parent holds. It gets a chart of accounts from a template and a calendar on the group's cadence, and from then on every question or action names the company it's about. When you don't name one, your assistant works on the group parent. There is no limit on the companies in a group; the graph's tier decides its capacity.
+Ask your assistant to add a subsidiary: its name, its legal form and the share the parent holds. It gets a chart of accounts from a template and a calendar on the group's cadence, and from then on every question or action names the company it's about. When you don't name one, your assistant works on the group parent. In the app, **Entity → All Entities** shows the group and **New Entity** adds a company: its name, legal name, legal form, ticker, the company it's held under and the parent's share. There is no limit on the companies in a group; the graph's tier decides its capacity.
 
-The group's combined statements are the sum of every company's own, line by line at the reporting concepts. They are combined, not consolidated: nothing is eliminated between the companies, so a balance one owes another is still in. Ask for the combined balance sheet on the group parent, or for any one company's own.
+The group's combined statements are the sum of every company's own, line by line at the reporting concepts. They are combined, not consolidated: nothing is eliminated between the companies, so a balance one owes another is still in. Ask for the combined balance sheet on the group parent, or for any one company's own. In the app, **Ledger → Statements** on the group parent has a Scope control, _This entity_ or _Combined_, and the combined view says how many companies it summed.
 
 A reporting group is companies under common control. It is not a way to put several clients in one graph: everyone with access to the graph sees every company in it.
 
@@ -34,9 +34,9 @@ Two kinds of role are at work. A graph role, set in **Members**, covers one comp
 
 ## Move between companies in the app
 
-The menu at the top right of RoboLedger lists one company for each of your RoboLedger graphs. Pick one and every page switches to that company's graph.
+The menu at the top right of RoboLedger lists every company in every RoboLedger graph you can reach, grouped by graph, with each group parent first and its subsidiaries under it. Type to narrow the list by name or ticker. Pick a company and every page shows its books; a company in another graph switches the graph first. The company you're on is remembered between visits.
 
-**Entity → All Entities** lists every company across your graphs in one table, with its graph's name and ID, and marks the one you're working on. The graph ID is what a client's investor or lender needs if you share reports with them.
+**Entity → All Entities** is the selected graph's reporting group: each company's legal form, the share the parent holds, its status and the month it's closed through, with **Select** to move to one and **New Entity** to add one. **Entity → Entity Info** holds the selected company's details and, for a subsidiary, names its parent and the share held. The graph's ID, which a client's investor or lender needs if you share reports with them, is on the graph's **Dashboard** at [robosystems.ai](https://robosystems.ai).
 
 ## Connect your AI assistant to each company
 
