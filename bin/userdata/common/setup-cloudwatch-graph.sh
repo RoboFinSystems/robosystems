@@ -5,6 +5,10 @@
 # Note: Environment is included in the namespace (e.g., RoboSystems/Graph/prod)
 # rather than as a dimension, since CloudWatch Agent's append_dimensions
 # doesn't reliably propagate custom dimensions to the OTEL-based config.
+#
+# Every metric here bills as a custom metric per instance, so collect only
+# what an alarm, dashboard, scaling policy or the volume monitor reads.
+# Disk I/O is already free in AWS/EBS.
 
 set -e
 
@@ -65,21 +69,10 @@ cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << EOF
       "cpu": {
         "measurement": [
           {
-            "name": "cpu_usage_idle",
-            "rename": "CPU_USAGE_IDLE",
-            "unit": "Percent"
-          },
-          {
-            "name": "cpu_usage_iowait",
-            "rename": "CPU_USAGE_IOWAIT",
-            "unit": "Percent"
-          },
-          {
             "name": "cpu_usage_active",
             "rename": "CPU_USAGE_ACTIVE",
             "unit": "Percent"
-          },
-          "cpu_time_guest"
+          }
         ],
         "totalcpu": true,
         "metrics_collection_interval": 60
@@ -91,7 +84,6 @@ cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << EOF
             "rename": "DISK_USED_PERCENT",
             "unit": "Percent"
           },
-          "used",
           "total"
         ],
         "metrics_collection_interval": 60,
@@ -99,27 +91,9 @@ cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << EOF
           "${DISK_MONITOR_PATH}"
         ]
       },
-      "diskio": {
-        "measurement": [
-          "io_time",
-          "read_bytes",
-          "write_bytes"
-        ],
-        "metrics_collection_interval": 60,
-        "resources": [
-          "*"
-        ]
-      },
       "mem": {
         "measurement": [
           "mem_used_percent"
-        ],
-        "metrics_collection_interval": 60
-      },
-      "netstat": {
-        "measurement": [
-          "tcp_established",
-          "tcp_time_wait"
         ],
         "metrics_collection_interval": 60
       }

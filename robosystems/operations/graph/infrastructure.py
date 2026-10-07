@@ -695,10 +695,11 @@ class InstanceMonitor:
     return result
 
   def collect_metrics(self) -> MetricsResult:
-    """Publish fleet capacity and utilization metrics to CloudWatch.
+    """Publish fleet composition and free tenant slots to CloudWatch.
 
-    The fleet's auto-scaling policies consume these, so a failed collection run
-    leaves scaling decisions on stale data.
+    TenantSlotsFree backs the capacity alarm; InstancesByAge and InstancesByTier
+    feed the ops dashboard. Each is a billed custom metric, so nothing is
+    published that no alarm or dashboard reads.
     """
     logger.info("Starting Graph metrics collection")
 
@@ -726,24 +727,12 @@ class InstanceMonitor:
         )
         instances.extend(instances_response.get("Items", []))
 
-      total_capacity = 0
-      total_used = 0
-      total_available = 0
       instance_age_buckets = {"new": 0, "stabilizing": 0, "stable": 0}
       tier_counts = dict.fromkeys(TIER_CAPACITY_MAP, 0)
       metrics: list[dict[str, Any]] = []
 
-      default_max_dbs = 50
-
       for instance in instances:
-        instance_id = instance.get("instance_id")
         tier = instance.get("tier") or instance.get("cluster_tier", "ladybug-standard")
-        max_dbs = int(
-          instance.get("total_capacity")
-          or instance.get("max_databases", default_max_dbs)
-        )
-        used_dbs = int(instance.get("database_count", 0))
-        available_dbs = int(instance.get("available_capacity", max_dbs - used_dbs))
         created_at = instance.get("created_at", "")
 
         if tier in tier_counts:
@@ -765,49 +754,8 @@ class InstanceMonitor:
         else:
           instance_age_buckets["stable"] += 1
 
-        utilization = (used_dbs / max_dbs * 100) if max_dbs > 0 else 0
-
-        total_capacity += max_dbs
-        total_used += used_dbs
-        total_available += available_dbs
-
-        metrics.extend(
-          [
-            {
-              "MetricName": "InstanceDatabaseCount",
-              "Value": used_dbs,
-              "Unit": "Count",
-              "Dimensions": [
-                {"Name": "InstanceId", "Value": instance_id},
-                {"Name": "ClusterTier", "Value": tier},
-              ],
-            },
-            {
-              "MetricName": "InstanceUtilization",
-              "Value": utilization,
-              "Unit": "Percent",
-              "Dimensions": [
-                {"Name": "InstanceId", "Value": instance_id},
-                {"Name": "ClusterTier", "Value": tier},
-              ],
-            },
-            {
-              "MetricName": "InstanceAvailableSlots",
-              "Value": available_dbs,
-              "Unit": "Count",
-              "Dimensions": [
-                {"Name": "InstanceId", "Value": instance_id},
-                {"Name": "ClusterTier", "Value": tier},
-              ],
-            },
-          ]
-        )
-
-      # One paginated pass yields both the active count and the per-instance
-      # occupancy TenantSlotsFree needs.
       occupied_by_instance: dict[str, int] = {}
       try:
-        total_active = 0
         scan_kwargs: dict[str, Any] = {
           "FilterExpression": "#s <> :deleted AND #s <> :pending_deletion",
           "ExpressionAttributeNames": {"#s": "status", "#i": "instance_id"},
@@ -820,7 +768,6 @@ class InstanceMonitor:
         while True:
           graph_response = graph_table.scan(**scan_kwargs)
           for row in graph_response.get("Items", []):
-            total_active += 1
             if row.get("status") in OCCUPYING_DATABASE_STATUSES:
               row_instance = row.get("instance_id")
               if row_instance:
@@ -836,8 +783,6 @@ class InstanceMonitor:
         # headroom nobody verified. Leave it unpublished and let the alarm's
         # TreatMissingData: breaching speak instead.
         logger.warning(f"Graph registry scan failed, skipping TenantSlotsFree: {exc}")
-        total_active = total_used
-        occupied_by_instance = {}
         tenant_slots_free = None
       else:
         tenant_slots_free = dict.fromkeys(TENANT_TIERS, 0)
@@ -854,45 +799,7 @@ class InstanceMonitor:
           occupied = occupied_by_instance.get(instance_id, 0)
           tenant_slots_free[tier] += max(0, slot_total - occupied)
 
-      if total_capacity > 0:
-        available_percent = (total_available / total_capacity) * 100
-        used_percent = (total_used / total_capacity) * 100
-
-        metrics.extend(
-          [
-            {
-              "MetricName": "ClusterTotalCapacity",
-              "Value": total_capacity,
-              "Unit": "Count",
-            },
-            {
-              "MetricName": "ClusterTotalUsed",
-              "Value": total_used,
-              "Unit": "Count",
-            },
-            {
-              "MetricName": "ClusterTotalActive",
-              "Value": total_active,
-              "Unit": "Count",
-            },
-            {
-              "MetricName": "ClusterAvailableCapacityPercent",
-              "Value": available_percent,
-              "Unit": "Percent",
-            },
-            {
-              "MetricName": "ClusterUsedCapacityPercent",
-              "Value": used_percent,
-              "Unit": "Percent",
-            },
-            {
-              "MetricName": "ClusterInstanceCount",
-              "Value": len(instances),
-              "Unit": "Count",
-            },
-          ]
-        )
-
+      if instances:
         for age_type, count in instance_age_buckets.items():
           metrics.append(
             {
@@ -918,7 +825,7 @@ class InstanceMonitor:
               }
             )
 
-      # Outside the `total_capacity > 0` branch: an empty fleet's zero free
+      # Outside the `if instances` branch: an empty fleet's zero free
       # slots is exactly the reading worth alarming on.
       if tenant_slots_free is not None:
         metrics.extend(

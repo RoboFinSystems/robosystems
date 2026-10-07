@@ -1227,11 +1227,6 @@ def publish_monitoring_metrics(results: dict):
         "Unit": "Count",
       },
       {
-        "MetricName": "InstancesMonitored",
-        "Value": results.get("instances_checked", 0),
-        "Unit": "Count",
-      },
-      {
         "MetricName": "VolumesExpanded",
         "Value": len(results.get("volumes_expanded", [])),
         "Unit": "Count",
