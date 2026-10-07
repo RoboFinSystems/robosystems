@@ -72,7 +72,9 @@ def txn_external_id(transaction_id: str) -> str:
 
 
 def pair_external_id(first: str, second: str) -> str:
-  return f"plaid_xfer_{min(first, second)}"
+  """Both legs, ordered: a leg released from a dissolved pair can pair anew
+  without colliding with the id its old pair keeps."""
+  return f"plaid_xfer_{min(first, second)}_{max(first, second)}"
 
 
 # ── Accounts and counterparties ─────────────────────────────────────────────

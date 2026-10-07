@@ -68,7 +68,7 @@ HINT_KEYS = (
   "classification_source",
 )
 UNPOSTED_STATUSES = frozenset({"captured", "classified"})
-POSTED_STATUSES = frozenset({"committed", "fulfilled"})
+POSTED_STATUSES = frozenset({"committed", "pending", "fulfilled"})
 # Reconciling-item bookkeeping that is never part of an accepted payload.
 DRIFT_BOOKKEEPING_KEYS = frozenset(
   {"drift_payload", "drift_detected_at", "reconciliation_history"}
@@ -683,12 +683,19 @@ def pair_events_by_leg(
     chunk = leg_ids[start : start + 500]
     rows = (
       session.execute(
-        select(Event).where(
+        select(Event)
+        .where(
           Event.source == SOURCE,
           Event.event_type == "internal_transfer",
           Event.metadata_["connection_id"].astext == connection_id,
           Event.metadata_["legs"].has_any(array(chunk)),
         )
+        # Held until this run commits: a classify or a resolve made while
+        # the bank was pulled waits, rather than being written over from
+        # the copy this run read. Ordered, so two runs lock the same rows
+        # the same way.
+        .order_by(Event.id)
+        .with_for_update()
       )
       .scalars()
       .all()

@@ -98,6 +98,9 @@ def build_event_context(event) -> dict:
     "source": event.source,
     "external_id": event.external_id,
     "amount": event.amount,
+    # Bank money-out is signed negative and the DSL has no abs(): a rule on
+    # an outgoing line posts its magnitude from here.
+    "amount_abs": abs(int(event.amount or 0)),
     "currency": event.currency,
     "description": event.description,
     "metadata": dict(event.metadata_ or {}),

@@ -37,6 +37,7 @@ from robosystems.adapters.bank_feed.sync import (
   release_sync_lock,
   update_last_sync,
 )
+from robosystems.logger import logger
 
 SOURCE = "plaid"
 SOURCE_LABEL = "Plaid"
@@ -46,6 +47,8 @@ PULL_WAIT_SECONDS = 600
 PULL_RECHECK_SECONDS = 60
 PULL_POLL_SECONDS = 10
 # How many extra cursors the first run to see the history complete drains.
+# Re-Links handled inside one run before the rest waits for the next sync.
+RELINK_RERUNS = 2
 SETTLE_ROUNDS = 10
 
 
@@ -98,6 +101,51 @@ def get_dagster_components() -> dict[str, list]:
 def _run_plaid_sync(
   context: AssetExecutionContext, config: PlaidSyncConfig
 ) -> MaterializeResult:
+  """Sync the connection's Item, and the Item that replaced it mid-run.
+
+  A re-Link during this run stores a new access token and Item and sets the
+  cursor back to the start; its own first sync cannot start while this one
+  holds the lock. So the body re-reads the credentials when it is done —
+  whether the pull landed or failed, since the old Item's failure is usually
+  the re-Link itself (``ITEM_NOT_FOUND`` on a removed Item) — and, if the
+  Item changed under it, runs again for the new Item: the old Item's cursor
+  was refused by ``store_cursor``, and the new pull re-keys what the old one
+  captured. Bounded, so a connection re-linked on every pull cannot hold the
+  lock forever; what is left runs on the next sync, which starts from the
+  new Item's empty cursor anyway.
+  """
+  credentials = load_credentials(config.connection_id)
+  error: BaseException | None = None
+  result: MaterializeResult | None = None
+  for rerun in range(RELINK_RERUNS + 1):
+    try:
+      result, error = _sync_item(context, config, credentials), None
+    except Exception as exc:
+      result, error = None, exc
+    current = load_credentials(config.connection_id)
+    relinked = bool(current.get("access_token")) and current.get(
+      "item_id"
+    ) != credentials.get("item_id")
+    if not relinked or rerun == RELINK_RERUNS:
+      break
+    context.log.info(
+      f"Plaid connection {config.connection_id} was re-linked during this sync "
+      f"(item {credentials.get('item_id')} -> {current.get('item_id')}"
+      f"{', whose pull failed: ' + str(error) if error else ''}); running the "
+      "new Item's first pull now"
+    )
+    credentials = current
+  if error is not None:
+    raise error
+  assert result is not None
+  return result
+
+
+def _sync_item(
+  context: AssetExecutionContext,
+  config: PlaidSyncConfig,
+  credentials: dict[str, Any],
+) -> MaterializeResult:
   from robosystems.adapters.bank_feed.accounts import (
     build_chart_index,
     link_bank_accounts,
@@ -108,7 +156,6 @@ def _run_plaid_sync(
   from robosystems.db.extensions import extensions_session
   from robosystems.operations.providers.plaid_provider import plaid_client
 
-  credentials = load_credentials(config.connection_id)
   access_token = credentials.get("access_token")
   if not access_token:
     raise Failure(
@@ -121,6 +168,9 @@ def _run_plaid_sync(
   cursor = sync_cursor(config, credentials)
   history_seen = bool(credentials.get("history_complete_at"))
   item_id = credentials.get("item_id")
+  # A replaced Item's lines are re-keyed on every pull until one drains the
+  # history, not only on the first: a slow bank delivers the rest later.
+  rekey = cursor is None or bool(credentials.get("rekey_pending"))
   context.log.info(
     f"Plaid sync for graph={config.graph_id} connection={config.connection_id} "
     f"item={item_id} from {'the stored cursor' if cursor else 'the start'}"
@@ -143,7 +193,7 @@ def _run_plaid_sync(
       sync = settle_after_history(context, client, access_token, sync)
   except PlaidError as exc:
     if exc.needs_reauth:
-      mark_needs_reauth(config.connection_id)
+      mark_needs_reauth(config.connection_id, item_id=item_id)
       raise Failure(
         description=f"Plaid needs the customer back in Link: {exc}",
         metadata={"plaid_error_code": exc.code or ""},
@@ -199,7 +249,7 @@ def _run_plaid_sync(
       account_elements=link_result.links,
       chart=chart,
       since=since,
-      rekey_replaced=cursor is None,
+      rekey_replaced=rekey,
     )
     session.commit()
 
@@ -221,11 +271,12 @@ def _run_plaid_sync(
       },
     )
 
-  cursor_stored = bool(sync.next_cursor)
-  if cursor_stored:
-    store_cursor(
-      config.connection_id, sync.next_cursor, history_complete=sync.history_complete
-    )
+  cursor_stored = bool(sync.next_cursor) and store_cursor(
+    config.connection_id,
+    sync.next_cursor,
+    item_id=item_id,
+    history_complete=sync.history_complete,
+  )
 
   context.log.info(
     f"Accounts: {link_result.linked} linked, {link_result.created} created. "
@@ -355,11 +406,20 @@ def load_credentials(connection_id: str) -> dict[str, Any]:
 
 
 def store_cursor(
-  connection_id: str, cursor: str, *, history_complete: bool = False
-) -> None:
-  """Advance the stored cursor, re-reading the bundle so a concurrent re-link
-  that replaced the access token is never overwritten. The first time the
-  history is complete, stamp ``history_complete_at``."""
+  connection_id: str,
+  cursor: str,
+  *,
+  item_id: str | None,
+  history_complete: bool = False,
+) -> bool:
+  """Advance the stored cursor for the Item this run synced.
+
+  Re-reads the bundle and writes nothing when the Item changed under the run:
+  a re-Link stored a new token with the cursor at the start, and the old
+  Item's cursor would send the new one's history to the wrong place. The
+  first time the history is complete, stamp ``history_complete_at`` and drop
+  the re-key marker a re-Link left. Returns whether the cursor was stored.
+  """
   from robosystems.database import SessionFactory
   from robosystems.models.core.connection.connection_credentials import (
     ConnectionCredentials,
@@ -368,16 +428,51 @@ def store_cursor(
   with SessionFactory() as session:
     row = ConnectionCredentials.get_by_connection_id(connection_id, session)
     if row is None:
-      return
+      return False
     current = dict(row.get_credentials())
+    if not current.get("access_token"):
+      logger.info(
+        "Plaid cursor for connection %s not stored: the connection no longer "
+        "holds an Item",
+        connection_id,
+      )
+      return False
+    if item_id and current.get("item_id") and current.get("item_id") != item_id:
+      logger.info(
+        "Plaid cursor for connection %s not stored: the run synced item %s and "
+        "the connection now holds item %s",
+        connection_id,
+        item_id,
+        current.get("item_id"),
+      )
+      return False
     now = datetime.now(UTC).isoformat()
     updated = {**current, "cursor": cursor, "cursor_updated_at": now}
-    if history_complete and not current.get("history_complete_at"):
-      updated["history_complete_at"] = now
+    if history_complete:
+      if not current.get("history_complete_at"):
+        updated["history_complete_at"] = now
+      updated.pop("rekey_pending", None)
     row.update_credentials(updated, session)
+    return True
 
 
-def mark_needs_reauth(connection_id: str) -> None:
+def mark_needs_reauth(connection_id: str, *, item_id: str | None = None) -> None:
+  """Flip the connection to ``needs_reauth`` for the Item that failed.
+
+  An Item a re-Link already replaced answers ``ITEM_NOT_FOUND`` to the run
+  that was still syncing it; that is not the fresh connection's problem, so
+  the mark is skipped when the stored Item is a different one."""
   from robosystems.operations.connection_service import ConnectionService
 
+  if item_id:
+    stored = load_credentials(connection_id).get("item_id")
+    if stored and stored != item_id:
+      logger.info(
+        "Plaid connection %s not marked needs_reauth: item %s failed, the "
+        "connection now holds item %s",
+        connection_id,
+        item_id,
+        stored,
+      )
+      return
   ConnectionService.mark_connection_needs_reauth_sync(connection_id)

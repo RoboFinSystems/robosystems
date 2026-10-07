@@ -12,6 +12,7 @@ from robosystems.adapters.bank_feed.load import (
   LoadReport,
   capture_event,
   earliest_plausible,
+  existing_events,
   refresh_hints,
 )
 
@@ -87,3 +88,19 @@ def test_earliest_plausible_skips_placeholder_years():
   ]
   assert earliest_plausible(events) == "2026-02-01T00:00:00Z"
   assert earliest_plausible([]) is None
+
+
+@pytest.mark.unit
+def test_existing_events_locks_the_rows_a_run_will_write():
+  """A classify or resolve made while the bank was pulled waits for the run,
+  instead of being written over from the copy the run read."""
+  from unittest.mock import MagicMock
+
+  from sqlalchemy.dialects import postgresql
+
+  session = MagicMock()
+  session.execute.return_value.scalars.return_value.all.return_value = []
+  existing_events(session, "plaid", ["plaid_txn_1"])
+  statement = session.execute.call_args.args[0]
+  sql = str(statement.compile(dialect=postgresql.dialect()))
+  assert "FOR UPDATE" in sql

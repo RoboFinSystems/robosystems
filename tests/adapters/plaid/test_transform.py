@@ -179,7 +179,7 @@ class TestTransform:
 
   def test_the_transfer_pair_collapses_to_one_event(self):
     events = _by_external_id(_run())
-    pair = events["plaid_xfer_t_xfer_in"]
+    pair = events["plaid_xfer_t_xfer_in_t_xfer_out"]
     assert pair["event_type"] == "internal_transfer"
     assert pair["amount"] == 50000
     assert pair["occurred_at"] == "2026-03-19T00:00:00Z"

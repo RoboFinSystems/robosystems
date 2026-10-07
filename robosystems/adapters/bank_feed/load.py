@@ -119,7 +119,14 @@ def existing_events(
     chunk = external_ids[start : start + _BATCH]
     rows = (
       session.execute(
-        select(Event).where(Event.source == source, Event.external_id.in_(chunk))
+        select(Event)
+        .where(Event.source == source, Event.external_id.in_(chunk))
+        # Held until the run commits: a classify, commit or resolve made
+        # while the bank was pulled waits for the run instead of being
+        # written over from the stale copy the run read. Ordered, so two
+        # runs lock the same rows the same way.
+        .order_by(Event.id)
+        .with_for_update()
       )
       .scalars()
       .all()
