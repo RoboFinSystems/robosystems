@@ -64,6 +64,8 @@ class ReconciliationWindow:
   period: str
   period_end: date
   fiscal_year_start: date
+  # Whose books the window is over; None reads every entity's.
+  entity_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -256,12 +258,15 @@ class ScheduleRegisterResolver:
 
   def resolve(self, session: Session, window: ReconciliationWindow) -> IndependentSide:
     as_of = window.period_end
+    active = select(Structure).where(
+      Structure.block_type == "schedule", Structure.is_active.is_(True)
+    )
+    if window.entity_id is not None:
+      active = active.where(Structure.entity_id == window.entity_id)
     schedules = [
       schedule
       for schedule in session.execute(
-        select(Structure)
-        .where(Structure.block_type == "schedule", Structure.is_active.is_(True))
-        .order_by(Structure.name.asc(), Structure.id.asc())
+        active.order_by(Structure.name.asc(), Structure.id.asc())
       ).scalars()
       if not _template(schedule).get("auto_reverse")
     ]

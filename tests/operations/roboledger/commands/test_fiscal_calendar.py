@@ -40,6 +40,20 @@ GRAPH_ID = "kg01234567890abcdef"
 _MOD = "robosystems.operations.roboledger.commands.fiscal_calendar"
 
 
+ENTITY_ID = "ent_1"
+
+
+@pytest.fixture(autouse=True)
+def _one_entity():
+  """The mocked session has no entities table: commands act on ``ENTITY_ID``
+  unless a test names another."""
+  with (
+    patch(f"{_MOD}.ensure_entity_id", side_effect=lambda s, e=None: e or ENTITY_ID),
+    patch(f"{_MOD}.find_entity_id", side_effect=lambda s, e=None: e or ENTITY_ID),
+  ):
+    yield
+
+
 @pytest.fixture(autouse=True)
 def _noop_exclusive_period_fence():
   """Unit tests here mock the session; the exclusive fence talks to Postgres."""
@@ -89,12 +103,53 @@ def _stub_period_lock(session, fp):
   q.one_or_none.return_value = fp
 
 
+class TestCloseWaitsForTheFenceFirst:
+  def test_the_ledger_session_is_first_read_under_the_fence(
+    self, _noop_exclusive_period_fence
+  ):
+    """The background close can wait minutes for the fence. A query on the
+    ledger session before that wait would leave it idle in a transaction for
+    as long, and the database ends those."""
+    order: list[str] = []
+    fence = _noop_exclusive_period_fence.return_value
+    fence.__enter__.side_effect = lambda *a, **k: order.append("fence held")
+    close_service = MagicMock()
+    close_service.close.return_value = _close_result()
+
+    def entity(session, entity_id=None):
+      order.append("entity read")
+      return ENTITY_ID
+
+    def sync_state(*args):
+      order.append("sync read")
+      return (False, None)
+
+    with (
+      patch(f"{_MOD}.find_entity_id", side_effect=entity),
+      patch(f"{_MOD}.entity_sync_state", side_effect=sync_state),
+      patch(f"{_MOD}.build_fiscal_calendar_response", return_value=_fc_response()),
+    ):
+      close_period(
+        MagicMock(),
+        MagicMock(),
+        GRAPH_ID,
+        "2026-01",
+        actor_id="usr_1",
+        allow_stale_sync=False,
+        note=None,
+        service=MagicMock(),
+        close_service=close_service,
+      )
+
+    assert order[:3] == ["fence held", "entity read", "sync read"]
+
+
 class TestClosePeriodResponseMapping:
   def _run(self, result: PeriodCloseResult, **overrides):
     close_service = MagicMock()
     close_service.close.return_value = result
     with (
-      patch(f"{_MOD}.qb_sync_state", return_value=(False, None)),
+      patch(f"{_MOD}.entity_sync_state", return_value=(False, None)),
       patch(f"{_MOD}.build_fiscal_calendar_response", return_value=_fc_response()),
     ):
       return close_period(
@@ -188,7 +243,7 @@ class TestReopenRetractsCanonicalSets:
 
     retract = MagicMock(return_value=list(retracted))
     with (
-      patch(f"{_MOD}.qb_sync_state", return_value=(False, None)),
+      patch(f"{_MOD}.entity_sync_state", return_value=(False, None)),
       patch(f"{_MOD}.build_fiscal_calendar_response", return_value=_fc_response()),
       patch(
         "robosystems.operations.roboledger.commands.schedules."
@@ -328,7 +383,7 @@ class TestBackfillPlanHistory:
         fp.status = next(fp_iter)
         q.filter.return_value.one.return_value = fp
       else:  # the min(posting_date) expression
-        q.scalar.return_value = earliest
+        q.filter.return_value.scalar.return_value = earliest
       return q
 
     session.query.side_effect = _query
@@ -349,7 +404,7 @@ class TestBackfillPlanHistory:
     """
     body = body or BackfillPlanHistoryRequest()
 
-    def _has_sets(_session, *, period_start, period_end):
+    def _has_sets(_session, *, period_start, period_end, entity_id=None):
       return period_start.strftime("%Y-%m") in stamped_windows
 
     close_result = MagicMock()
@@ -369,7 +424,7 @@ class TestBackfillPlanHistory:
     with (
       patch(f"{_MOD}._restamp_closed_period", restamp_mock),
       patch(f"{_MOD}.close_period", close_mock),
-      patch(f"{_MOD}.qb_sync_state", return_value=(False, None)),
+      patch(f"{_MOD}.entity_sync_state", return_value=(False, None)),
       patch(f"{_MOD}.build_fiscal_calendar_response", return_value=_fc_response()),
       patch(
         "robosystems.operations.roboledger.reports.statement_sets."
@@ -424,6 +479,7 @@ class TestBackfillPlanHistory:
       start_period="2025-11",
       end_period=self.CLOSED_THROUGH,
       closed_through=self.CLOSED_THROUGH,
+      entity_id=ENTITY_ID,
     )
 
   def test_already_stamped_months_untouched(self):
@@ -546,7 +602,7 @@ class TestRestampClosedPeriod:
       close_service.close.return_value = _close_result()
     with (
       patch(f"{_MOD}._reopen_under_fence") as reopen_body,
-      patch(f"{_MOD}.qb_sync_state", return_value=(False, None)),
+      patch(f"{_MOD}.entity_sync_state", return_value=(False, None)),
       patch(f"{_MOD}.build_fiscal_calendar_response", return_value=_fc_response()),
       patch(f"{_MOD}.exclusive_period_fence") as fence,
     ):
@@ -563,6 +619,7 @@ class TestRestampClosedPeriod:
         allow_stale_sync=False,
         allow_stranded_obligations=False,
         allow_reconciling_items=False,
+        entity_id=ENTITY_ID,
       )
     return result, session, reopen_body, close_service, fence
 

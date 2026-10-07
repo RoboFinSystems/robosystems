@@ -35,6 +35,7 @@ from robosystems.operations.taxonomy_block.immutability import (
   assert_history_undisturbed,
   find_protected_fact_sets,
 )
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
 
 pytestmark = pytest.mark.unit
 
@@ -59,6 +60,7 @@ def ext_session():
   session = session_factory()
   session.execute(text(f'SET search_path TO "{schema}"'))
   ExtensionsBase.metadata.create_all(bind=session.connection())
+  seed_parent_entity(session)
   session.commit()
   session.execute(text(f'SET search_path TO "{schema}"'))
 
@@ -75,6 +77,7 @@ def ext_session():
 def _period(session: Session, name: str, window: tuple[date, date], status: str):
   session.add(
     FiscalPeriod(
+      entity_id=PARENT_ENTITY_ID,
       graph_id=GRAPH,
       name=name,
       start_date=window[0],
@@ -94,7 +97,7 @@ def _canonical_set(
     period_start=window[0],
     period_end=window[1],
     factset_type="report",
-    entity_id="ent_1",
+    entity_id=PARENT_ENTITY_ID,
   )
   fact_set.provenance = {
     "origin": "pivot",
@@ -112,7 +115,7 @@ def _canonical_set(
       period_start=window[0],
       period_end=window[1],
       period_type="duration",
-      entity_id="ent_1",
+      entity_id=PARENT_ENTITY_ID,
       structure_id=structure.id,
       fact_set_id=fact_set.id,
     )
@@ -123,7 +126,12 @@ def _canonical_set(
 def _landed_line(
   session: Session, account: Element, posting_date: date, status: str = "posted"
 ) -> None:
-  entry = Entry(posting_date=posting_date, status=status, created_by="usr_1")
+  entry = Entry(
+    entity_id=PARENT_ENTITY_ID,
+    posting_date=posting_date,
+    status=status,
+    created_by="usr_1",
+  )
   session.add(entry)
   session.flush()
   session.add(

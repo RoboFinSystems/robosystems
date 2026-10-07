@@ -27,6 +27,7 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   PeriodSpec,
   generate_report_facts,
 )
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity_on
 
 pytestmark = pytest.mark.integration
 
@@ -72,6 +73,7 @@ def tenant():
         bind=conn.execution_options(schema_translate_map={None: GRAPH}),
         tables=tables,
       )
+      seed_parent_entity_on(conn.execution_options(schema_translate_map={None: GRAPH}))
     yield _seed()
   finally:
     with engine.begin() as conn:
@@ -132,6 +134,7 @@ def _seed() -> dict[str, str]:
 def _post(ids, lines):
   with extensions_session(GRAPH) as session:
     entry = Entry(
+      entity_id=PARENT_ENTITY_ID,
       type="standard",
       status="posted",
       posting_date=date(2026, 9, 15),

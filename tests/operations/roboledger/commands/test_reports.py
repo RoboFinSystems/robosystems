@@ -929,37 +929,61 @@ def test_snapshot_text_block_facts_empty_when_no_bindings() -> None:
   )
 
 
-def test_create_report_loads_structures_for_the_resolved_taxonomy() -> None:
-  """A standard name ('rs-gaap') resolves to a taxonomy id; the response's
-  structures must be loaded for that id, not the name the caller sent."""
+# Everything create_report hands off to, mocked so a test can watch one seam.
+_CREATE_REPORT_COLLABORATORS = (
+  "build_periods",
+  "periods_to_json",
+  "resolve_entity_id",
+  "load_entity_reporting_style",
+  "load_close_target_concept",
+  "generate_report_facts",
+  "_pre_create_report_fact_sets",
+  "_persist_report_facts",
+  "_snapshot_text_block_facts",
+  "_evaluate_report_structures",
+  "_stamp_report_bundle",
+  "resolve_entity_name",
+  "report_to_response",
+  "load_structures",
+)
+
+
+def _create_report(body: MagicMock, **replacements) -> dict[str, MagicMock]:
+  """Run create_report with its collaborators mocked. Returns the mocks."""
   from robosystems.operations.roboledger.commands import reports as mod
 
   session = MagicMock()
   session.execute.return_value.fetchone.return_value = ("tax_resolved", "rs-gaap")
-  body = MagicMock(taxonomy_id="rs-gaap", periods=None)
-  names = [
-    "build_periods",
-    "periods_to_json",
-    "resolve_entity_id",
-    "load_entity_reporting_style",
-    "load_close_target_concept",
-    "generate_report_facts",
-    "_pre_create_report_fact_sets",
-    "_persist_report_facts",
-    "_snapshot_text_block_facts",
-    "_evaluate_report_structures",
-    "_stamp_report_bundle",
-    "resolve_entity_name",
-    "report_to_response",
-  ]
   with ExitStack() as stack:
-    for n in names:
-      stack.enter_context(patch.object(mod, n))
+    mocks = {
+      name: stack.enter_context(patch.object(mod, name, **replacements.get(name, {})))
+      for name in _CREATE_REPORT_COLLABORATORS
+    }
     stack.enter_context(patch.object(mod, "Report"))
     stack.enter_context(
       patch.object(mod, "_build_structure_mapping", return_value=({}, {}))
     )
-    load_structures = stack.enter_context(patch.object(mod, "load_structures"))
+    stack.enter_context(patch.object(mod, "mapping_owner_id", return_value="ent_sub"))
     mod.create_report(session, body, graph_id="kg_demo", created_by="usr_test")
+  mocks["session"] = session
+  return mocks
 
-  load_structures.assert_called_once_with(session, "tax_resolved")
+
+def test_create_report_loads_structures_for_the_resolved_taxonomy() -> None:
+  """A standard name ('rs-gaap') resolves to a taxonomy id; the response's
+  structures must be loaded for that id, not the name the caller sent."""
+  mocks = _create_report(MagicMock(taxonomy_id="rs-gaap", periods=None))
+
+  mocks["load_structures"].assert_called_once_with(mocks["session"], "tax_resolved")
+
+
+def test_create_report_is_for_the_entity_whose_chart_the_mapping_maps_from() -> None:
+  """A report made from a subsidiary's mapping pivots that subsidiary's books
+  and puts its fact sets on it, not on the group parent."""
+  mocks = _create_report(
+    MagicMock(taxonomy_id="rs-gaap", mapping_id="struct_sub_mapping", periods=None),
+    resolve_entity_id={"side_effect": lambda session, entity_id=None: entity_id},
+  )
+
+  assert mocks["generate_report_facts"].call_args.kwargs["entity_id"] == "ent_sub"
+  assert mocks["_pre_create_report_fact_sets"].call_args.args[2] == "ent_sub"

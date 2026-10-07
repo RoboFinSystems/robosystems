@@ -30,6 +30,7 @@ from robosystems.operations.event_block.commands import (
   create_event_block_in_session,
   update_event_block,
 )
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
 
 pytestmark = pytest.mark.unit
 
@@ -51,6 +52,7 @@ def session():
   db = sessionmaker(bind=engine)()
   db.execute(text(f'SET search_path TO "{schema}"'))
   ExtensionsBase.metadata.create_all(bind=db.connection())
+  seed_parent_entity(db)
   db.commit()
   db.execute(text(f'SET search_path TO "{schema}"'))
   try:
@@ -86,6 +88,7 @@ def _seed(db) -> tuple[str, str]:
     ids.append(str(element.id))
   db.add(
     FiscalPeriod(
+      entity_id=PARENT_ENTITY_ID,
       graph_id=GRAPH_ID,
       name="2026-07",
       start_date=date(2026, 7, 1),

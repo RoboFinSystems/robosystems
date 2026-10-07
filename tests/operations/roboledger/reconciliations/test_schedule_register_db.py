@@ -22,7 +22,6 @@ from robosystems.models.api.extensions.schedules import (
   ScheduleMetadataRequest,
 )
 from robosystems.models.extensions import Structure
-from robosystems.models.extensions.entity import Entity
 from robosystems.models.extensions.roboledger import Entry, Event
 from robosystems.operations.information_block import get_information_block
 from robosystems.operations.roboledger.commands.reconciliations import (
@@ -40,6 +39,7 @@ from robosystems.operations.roboledger.reconciliations import (
   SourceLedgerResolver,
 )
 from robosystems.operations.roboledger.schedules import ScheduleService
+from tests.ledger_entity import PARENT_ENTITY_ID
 
 from .conftest import GRAPH_ID, classified_account, entry
 
@@ -55,7 +55,6 @@ def native(ext_session):
   """A ledger with no source behind it: the accounts a prepaid and a fixed
   asset need, and nothing booked yet."""
   session = ext_session
-  session.add(Entity(name="Fictional Co", created_by="usr"))
   accounts = {
     "cash": classified_account(session, "Checking", "asset"),
     "prepaid": classified_account(session, "Prepaid Insurance", "asset"),
@@ -427,6 +426,7 @@ def test_a_disposal_that_has_not_been_processed_changes_nothing(native):
   _book_month(session, structure_id, 1)
   session.add(
     Event(
+      entity_id=PARENT_ENTITY_ID,
       event_type="asset_disposed",
       event_category="adjustment",
       event_class="economic",
@@ -456,6 +456,7 @@ def test_a_disposed_asset_carries_nothing_from_then_on(native):
   )
   session.add(
     Event(
+      entity_id=PARENT_ENTITY_ID,
       event_type="asset_disposed",
       event_category="adjustment",
       event_class="economic",
@@ -761,7 +762,11 @@ def test_an_account_that_tied_and_then_drifts_holds_the_close(prepaid):
   from robosystems.operations.roboledger.fiscal_calendar import FiscalCalendarService
 
   session, accounts, _ = prepaid
-  session.add(FiscalCalendar(graph_id=GRAPH_ID, closed_through_period="2026-07"))
+  session.add(
+    FiscalCalendar(
+      entity_id=PARENT_ENTITY_ID, graph_id=GRAPH_ID, closed_through_period="2026-07"
+    )
+  )
   _refresh(session)
   entry(session, date(2026, 8, 12), accounts["prepaid"], accounts["cash"], 60_000)
   session.commit()

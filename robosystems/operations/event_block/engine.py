@@ -118,7 +118,7 @@ def apply_handler(
   )
   # Same fence journal-entry commands take. Without it a DSL handler can
   # mint a draft while close is publishing, or after statements are stamped.
-  assert_period_not_closed(session, posting_date)
+  assert_period_not_closed(session, posting_date, entity_id=event.entity_id)
 
   # One timestamp shared by every row this invocation writes.
   now = datetime.now(UTC)
@@ -151,7 +151,9 @@ def apply_handler(
       debit_element_id = str(interpolate(debit_element_id, context))
     if "{{" in credit_element_id:
       credit_element_id = str(interpolate(credit_element_id, context))
-    assert_accounts_postable(session, (debit_element_id, credit_element_id))
+    assert_accounts_postable(
+      session, (debit_element_id, credit_element_id), entity_id=event.entity_id
+    )
 
     debit_cents = _resolve_amount(debit_spec["amount"], context)
     credit_cents = _resolve_amount(credit_spec["amount"], context)
@@ -163,6 +165,7 @@ def apply_handler(
       )
 
     txn = Transaction(
+      entity_id=event.entity_id,
       type=event.event_type,
       amount=debit_cents,
       currency=event.currency or "USD",
@@ -179,6 +182,7 @@ def apply_handler(
     session.flush()
 
     entry = Entry(
+      entity_id=event.entity_id,
       transaction_id=txn.id,
       type="standard",
       posting_date=posting_date,

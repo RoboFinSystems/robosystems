@@ -47,7 +47,7 @@ class EventBlockPythonHandler:
   target_status: str
   dispatch: Callable[[Session, Event, BaseModel, str], HandlerResult]
   dispatch_preview: Callable[
-    [Session, CreateEventBlockRequest, BaseModel], HandlerPreview
+    [Session, CreateEventBlockRequest, BaseModel, str | None], HandlerPreview
   ]
   validate_classification: Callable[[Event, BaseModel], None] | None = None
 

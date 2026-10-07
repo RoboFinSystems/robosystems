@@ -131,18 +131,19 @@ def filter_stranded_obligations(session: Session, events: list[Event]) -> list[E
   return stranded
 
 
-def find_stranded_obligations(session: Session, *, as_of: datetime) -> list[Event]:
-  """Matured `classified` obligations whose closing entry was never drafted."""
-  classified = (
-    session.query(Event)
-    .filter(
-      Event.event_type == "schedule_entry_due",
-      Event.status == "classified",
-      Event.occurred_at <= as_of,
-    )
-    .order_by(Event.occurred_at.asc())
-    .all()
+def find_stranded_obligations(
+  session: Session, *, as_of: datetime, entity_id: str | None = None
+) -> list[Event]:
+  """Matured `classified` obligations whose closing entry was never drafted,
+  across the graph or for one entity."""
+  query = session.query(Event).filter(
+    Event.event_type == "schedule_entry_due",
+    Event.status == "classified",
+    Event.occurred_at <= as_of,
   )
+  if entity_id is not None:
+    query = query.filter(Event.entity_id == entity_id)
+  classified = query.order_by(Event.occurred_at.asc()).all()
   return filter_stranded_obligations(session, classified)
 
 
@@ -168,20 +169,25 @@ def _fence_write_set(session: Session, write_set: list[Event]) -> list[tuple[str
   Returns ``(event_id, reason)`` for obligations in closed periods. A fence
   held exclusively by a closer propagates as retryable ``RowLockedError``.
   """
-  by_date: dict[date, list[Event]] = {}
+  # Each obligation is checked against its own entity's calendar. Months
+  # ascending, as every writer fences them.
+  by_date: dict[tuple[date, str], list[Event]] = {}
   for evt in write_set:
     posting_date = posting_date_for_event(
       effective_at=evt.effective_at,
       occurred_at=evt.occurred_at,
     )
-    by_date.setdefault(posting_date, []).append(evt)
+    by_date.setdefault((posting_date, str(evt.entity_id or "")), []).append(evt)
 
   closed: list[tuple[str, str]] = []
-  for posting_date in sorted(by_date):
+  for posting_date, entity_id in sorted(by_date):
     try:
-      assert_period_not_closed(session, posting_date)
+      # No entity on the row: the guard reads the group parent's calendar.
+      assert_period_not_closed(session, posting_date, entity_id=entity_id or None)
     except ClosedPeriodError as e:
-      closed.extend((evt.id, f"closed period: {e}") for evt in by_date[posting_date])
+      closed.extend(
+        (evt.id, f"closed period: {e}") for evt in by_date[(posting_date, entity_id)]
+      )
   return closed
 
 

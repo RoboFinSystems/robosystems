@@ -22,7 +22,6 @@ from robosystems.models.extensions import (
   Structure,
   VerificationResult,
 )
-from robosystems.models.extensions.entity import Entity
 from robosystems.models.extensions.roboledger import COA_SOURCES, Fact, FactSet
 from robosystems.operations.information_block import get_information_block
 from robosystems.operations.roboledger.commands.reconciliations import (
@@ -34,6 +33,7 @@ from robosystems.operations.roboledger.reads.reconciliations import (
   list_reconciliations,
 )
 from robosystems.operations.roboledger.reconciliations import SourceLedgerResolver
+from tests.ledger_entity import PARENT_ENTITY_ID
 
 from .conftest import GRAPH_ID, LIVE_CONNECTION, SYNCED_AT, TIED, source_report
 
@@ -50,7 +50,6 @@ _BILL_REMOVED = (
 
 @pytest.fixture()
 def ledger(ext_session, books):
-  ext_session.add(Entity(name="Fictional Co", created_by="usr"))
   ext_session.commit()
   return ext_session
 
@@ -372,7 +371,11 @@ def test_the_block_reads_as_an_information_block(ledger):
 def closed_through_july(ledger):
   from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
 
-  ledger.add(FiscalCalendar(graph_id=GRAPH_ID, closed_through_period="2026-07"))
+  ledger.add(
+    FiscalCalendar(
+      entity_id=PARENT_ENTITY_ID, graph_id=GRAPH_ID, closed_through_period="2026-07"
+    )
+  )
   ledger.commit()
   return ledger
 

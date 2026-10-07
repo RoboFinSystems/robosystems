@@ -30,6 +30,7 @@ from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
   select_writeback_eligible_entries,
   writeback_eligible_entry_ids,
 )
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
 
 pytestmark = pytest.mark.unit
 
@@ -51,6 +52,7 @@ def session():
   db = sessionmaker(bind=engine)()
   db.execute(text(f'SET search_path TO "{schema}"'))
   ExtensionsBase.metadata.create_all(bind=db.connection())
+  seed_parent_entity(db)
   db.commit()
   db.execute(text(f'SET search_path TO "{schema}"'))
   try:
@@ -66,6 +68,7 @@ def session():
 def _draft(db, *, label: str, source: str, metadata: dict) -> str:
   """A draft entry in the period, owned by an event with this metadata."""
   event = Event(
+    entity_id=PARENT_ENTITY_ID,
     event_type="journal_entry_recorded",
     event_category="adjustment",
     event_class="economic",
@@ -79,6 +82,7 @@ def _draft(db, *, label: str, source: str, metadata: dict) -> str:
   db.add(event)
   db.flush()
   entry = Entry(
+    entity_id=PARENT_ENTITY_ID,
     posting_date=date(2026, 8, 15),
     memo=label,
     status="draft",
@@ -92,7 +96,9 @@ def _draft(db, *, label: str, source: str, metadata: dict) -> str:
 
 
 def _publishing(db) -> set[str]:
-  return writeback_eligible_entry_ids(db, PERIOD_START, PERIOD_END)
+  return writeback_eligible_entry_ids(
+    db, PERIOD_START, PERIOD_END, entity_id=PARENT_ENTITY_ID
+  )
 
 
 def test_source_decides_when_the_flag_is_absent(session):
@@ -166,7 +172,9 @@ def test_the_row_query_and_the_id_query_agree(session):
   _draft(session, label="held", source="manual", metadata={"publish_to_source": False})
   _draft(session, label="sent", source="system", metadata={"publish_to_source": True})
 
-  rows = select_writeback_eligible_entries(session, PERIOD_START, PERIOD_END)
+  rows = select_writeback_eligible_entries(
+    session, PERIOD_START, PERIOD_END, entity_id=PARENT_ENTITY_ID
+  )
 
   assert {str(entry.id) for entry, _event in rows} == _publishing(session)
 
@@ -175,6 +183,7 @@ def _sibling(db, entry_id: str, *, posting_date: date) -> str:
   """A second draft on the same event as ``entry_id``."""
   first = db.get(Entry, entry_id)
   entry = Entry(
+    entity_id=PARENT_ENTITY_ID,
     posting_date=posting_date,
     memo="sibling",
     status="draft",

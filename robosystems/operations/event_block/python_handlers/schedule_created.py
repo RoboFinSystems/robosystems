@@ -59,6 +59,7 @@ def dispatch_preview(
   session: Session,
   body: CreateEventBlockRequest,
   metadata: ScheduleCreatedMetadata,
+  entity_id: str | None = None,
 ) -> HandlerPreview:
   """Capture-only preview: the event row is the only artifact."""
   return HandlerPreview(

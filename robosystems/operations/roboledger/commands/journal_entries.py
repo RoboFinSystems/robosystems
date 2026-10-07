@@ -33,6 +33,7 @@ from robosystems.operations.roboledger.commands._guards import (
   assert_accounts_postable,
   assert_period_not_closed,
 )
+from robosystems.operations.roboledger.entity_scope import ensure_entity_id
 
 
 class JournalEntryNotFoundError(LookupError):
@@ -305,19 +306,24 @@ def create_journal_entry(
   session: Session,
   body: CreateJournalEntryRequest,
   created_by: str,
+  *,
+  entity_id: str | None = None,
 ) -> JournalEntryResponse:
-  """Create a journal entry with balanced line items.
+  """Create a journal entry with balanced line items in one entity's books.
 
-  ``status='posted'`` (historical import) posts immediately, bypassing the
-  draft-review-close workflow. Either status is refused in a closed period.
+  ``entity_id`` defaults to the group parent. ``status='posted'`` (historical
+  import) posts immediately, bypassing the draft-review-close workflow. Either
+  status is refused in a closed period.
 
   Raises:
     `ClosedPeriodError`, `UnbalancedJournalEntryError`, `ValueError` for a
       malformed line.
     `InactiveAccountError` if a line names a retired account, except for a
       synced ledger's replayed history (a synced `source` with `status='posted'`).
+    `EntityNotInGraphError` if the named entity is not this graph's.
   """
-  assert_period_not_closed(session, body.posting_date)
+  entity_id = ensure_entity_id(session, entity_id)
+  assert_period_not_closed(session, body.posting_date, entity_id=entity_id)
 
   normalized, total_debit, _total_credit = validate_and_normalize_lines(body.line_items)
   # Only posted (replayed) history carries the source into the exemption; a
@@ -326,6 +332,7 @@ def create_journal_entry(
     session,
     (li["element_id"] for li in normalized),
     source=body.source if body.status == "posted" else None,
+    entity_id=entity_id,
   )
 
   status = body.status
@@ -334,6 +341,7 @@ def create_journal_entry(
   transaction_id = body.transaction_id
   if not transaction_id:
     txn = Transaction(
+      entity_id=entity_id,
       type=body.transaction_type,
       amount=total_debit,
       date=body.posting_date,
@@ -349,6 +357,7 @@ def create_journal_entry(
     transaction_id = txn.id
 
   entry = Entry(
+    entity_id=entity_id,
     transaction_id=transaction_id,
     type=body.type,
     status=status,
@@ -403,7 +412,7 @@ def update_journal_entry(
   dates = [peeked_date]
   if body.posting_date is not None:
     dates.append(body.posting_date)
-  assert_period_not_closed(session, *dates)
+  assert_period_not_closed(session, *dates, entity_id=peek.entity_id)
 
   _lock_owning_event(session, peek)
   entry = lock_by_id(
@@ -435,7 +444,9 @@ def update_journal_entry(
     normalized, _dr, _cr = validate_and_normalize_lines(new_line_inputs)
     # A draft edit is authored, whatever the entry's provenance: retired
     # accounts are closed to it.
-    assert_accounts_postable(session, (li["element_id"] for li in normalized))
+    assert_accounts_postable(
+      session, (li["element_id"] for li in normalized), entity_id=entry.entity_id
+    )
 
     session.query(LineItem).filter(LineItem.entry_id == entry.id).delete(
       synchronize_session=False
@@ -474,7 +485,7 @@ def delete_journal_entry(session: Session, body: DeleteJournalEntryRequest) -> d
   """
   peek = _load_entry_or_404(session, body.entry_id)
   peeked_date = peek.posting_date
-  assert_period_not_closed(session, peeked_date)
+  assert_period_not_closed(session, peeked_date, entity_id=peek.entity_id)
 
   # Under the event lock the sibling count below cannot change.
   owner = _lock_owning_event(session, peek)
@@ -529,7 +540,9 @@ def reverse_journal_entry(
   if peek is None:
     raise JournalEntryNotFoundError(body.entry_id)
   posting_date = body.posting_date or datetime.now(UTC).date()
-  assert_period_not_closed(session, peek.posting_date, posting_date)
+  assert_period_not_closed(
+    session, peek.posting_date, posting_date, entity_id=peek.entity_id
+  )
 
   # Locked so two concurrent reversals cannot both see 'posted' and reverse
   # twice (balanced, so the trial balance would not catch it).
@@ -559,6 +572,7 @@ def reverse_journal_entry(
   now = datetime.now(UTC)
 
   reversing_entry = Entry(
+    entity_id=original.entity_id,
     transaction_id=original.transaction_id,
     type="reversing",
     status="posted",

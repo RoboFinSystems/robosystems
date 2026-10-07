@@ -465,12 +465,12 @@ class TestResolveBasePeriod:
   def test_fiscal_calendar_closed_through(self) -> None:
     session = MagicMock()
     calendar = SimpleNamespace(closed_through_period="2026-05")
-    session.query.return_value.order_by.return_value.first.return_value = calendar
+    session.query.return_value.filter.return_value.one_or_none.return_value = calendar
     assert forecast_handlers._resolve_base_period(session, "ent_1", None) == "2026-05"
 
   def test_data_driven_fallback_from_newest_report_month(self) -> None:
     session = MagicMock()
-    session.query.return_value.order_by.return_value.first.return_value = None
+    session.query.return_value.filter.return_value.one_or_none.return_value = None
     with patch.object(
       forecast_handlers,
       "_latest_report_period_end_before",
@@ -480,7 +480,7 @@ class TestResolveBasePeriod:
 
   def test_raises_when_nothing_to_project_from(self) -> None:
     session = MagicMock()
-    session.query.return_value.order_by.return_value.first.return_value = None
+    session.query.return_value.filter.return_value.one_or_none.return_value = None
     with (
       patch.object(
         forecast_handlers, "_latest_report_period_end_before", return_value=None

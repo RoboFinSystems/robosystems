@@ -24,6 +24,7 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   PeriodSpec,
   generate_report_facts,
 )
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity_on
 
 pytestmark = pytest.mark.integration
 
@@ -78,6 +79,7 @@ def tenant():
         bind=conn.execution_options(schema_translate_map={None: GRAPH}),
         tables=tables,
       )
+      seed_parent_entity_on(conn.execution_options(schema_translate_map={None: GRAPH}))
     yield _seed()
   finally:
     with engine.begin() as conn:
@@ -161,9 +163,10 @@ def _seed() -> dict[str, str]:
   return ids
 
 
-def _post(ids, lines, posting_date=date(2026, 1, 15)):
+def _post(ids, lines, posting_date=date(2026, 1, 15), entity_id=PARENT_ENTITY_ID):
   with extensions_session(GRAPH) as session:
     entry = Entry(
+      entity_id=entity_id,
       type="standard",
       status="posted",
       posting_date=posting_date,
@@ -192,9 +195,11 @@ def empty_ledger(tenant):
   yield
 
 
-def _facts(ids, periods=(JAN,)):
+def _facts(ids, periods=(JAN,), entity_id=None):
   with extensions_session(GRAPH) as session:
-    return generate_report_facts(session, "", ids["mapping"], list(periods)).facts
+    return generate_report_facts(
+      session, "", ids["mapping"], list(periods), entity_id=entity_id
+    ).facts
 
 
 def _column(facts, qname, period):
@@ -277,3 +282,51 @@ def test_a_single_column_cash_flow_is_derived(tenant):
   facts = _facts(tenant, (Q3,))
 
   assert _column(facts, AR_CHANGE, Q3) == pytest.approx(-50.0)
+
+
+SUBSIDIARY = "ent_test_sub"
+
+
+def test_a_siblings_postings_stay_out_of_an_entitys_statements(tenant):
+  """Two entities posting to the same mapped accounts: each one's pivot is
+  its own entries, on every read the pivot makes (balances, the close to
+  retained earnings, the cash flow)."""
+  _post(tenant, [("cash", 500_000, 0), ("revenue", 0, 500_000)])
+  _post(
+    tenant,
+    [("cash", 70_000, 0), ("revenue", 0, 70_000)],
+    entity_id=SUBSIDIARY,
+  )
+  _post(
+    tenant,
+    [("expense", 20_000, 0), ("cash", 0, 20_000)],
+    posting_date=date(2025, 12, 10),
+    entity_id=SUBSIDIARY,
+  )
+
+  parent = _facts(tenant, entity_id=PARENT_ENTITY_ID)
+  sub = _facts(tenant, entity_id=SUBSIDIARY)
+
+  assert _value(parent, "rs-gaap:Revenues") == pytest.approx(5000.0)
+  assert _value(parent, "rs-gaap:Cash") == pytest.approx(5000.0)
+  assert _value(parent, "rs-gaap:RetainedEarningsAccumulatedDeficit") == pytest.approx(
+    5000.0
+  )
+  assert _value(sub, "rs-gaap:Revenues") == pytest.approx(700.0)
+  # December's expense is the subsidiary's alone, in cash and in the earnings
+  # carried into January.
+  assert _value(sub, "rs-gaap:Cash") == pytest.approx(500.0)
+  assert _value(sub, "rs-gaap:RetainedEarningsAccumulatedDeficit") == pytest.approx(
+    500.0
+  )
+
+
+def test_a_pivot_with_no_entity_reads_the_whole_graph(tenant):
+  _post(tenant, [("cash", 500_000, 0), ("revenue", 0, 500_000)])
+  _post(
+    tenant,
+    [("cash", 70_000, 0), ("revenue", 0, 70_000)],
+    entity_id=SUBSIDIARY,
+  )
+
+  assert _value(_facts(tenant), "rs-gaap:Revenues") == pytest.approx(5700.0)

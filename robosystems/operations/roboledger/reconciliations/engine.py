@@ -39,9 +39,10 @@ _RETAINED_EARNINGS_SUB_TYPE = "RetainedEarnings"
 
 
 def reconciliation_window(
-  period: str, fiscal_year_start_month: int
+  period: str, fiscal_year_start_month: int, entity_id: str | None = None
 ) -> ReconciliationWindow:
-  """The period's last day and the first day of the fiscal year holding it."""
+  """The period's last day and the first day of the fiscal year holding it,
+  over one entity's books."""
   _, period_end = period_date_range(period)
   year = period_end.year
   if period_end.month < fiscal_year_start_month:
@@ -50,6 +51,7 @@ def reconciliation_window(
     period=period,
     period_end=period_end,
     fiscal_year_start=date(year, fiscal_year_start_month, 1),
+    entity_id=entity_id,
   )
 
 
@@ -68,8 +70,15 @@ def ledger_digest(session: Session, window: ReconciliationWindow) -> str:
   for the fiscal year to it. Any entry landing in, leaving or moving within
   the window changes it."""
   return _ledger_fingerprint(
-    get_net_balances_cents(session, None, window.period_end),
-    get_net_balances_cents(session, window.fiscal_year_start, window.period_end),
+    get_net_balances_cents(
+      session, None, window.period_end, entity_id=window.entity_id
+    ),
+    get_net_balances_cents(
+      session,
+      window.fiscal_year_start,
+      window.period_end,
+      entity_id=window.entity_id,
+    ),
   )
 
 
@@ -111,7 +120,9 @@ def _ledger_balances(
   return balances, notes
 
 
-def _draft_balances(session: Session, as_of: date) -> dict[str, int]:
+def _draft_balances(
+  session: Session, as_of: date, entity_id: str | None
+) -> dict[str, int]:
   """Debits minus credits, by account, of the drafts a close will post."""
   # Function-level: the close service imports the gate, which reads
   # reconciliations.
@@ -119,7 +130,9 @@ def _draft_balances(session: Session, as_of: date) -> dict[str, int]:
     drafts_close_posts,
   )
 
-  drafts = drafts_close_posts(session, date.min, as_of).with_entities(Entry.id)
+  drafts = drafts_close_posts(
+    session, date.min, as_of, entity_id=entity_id
+  ).with_entities(Entry.id)
   rows = session.execute(
     select(
       LineItem.element_id,
@@ -134,7 +147,9 @@ def _draft_balances(session: Session, as_of: date) -> dict[str, int]:
   }
 
 
-def _undrafted_schedule_balances(session: Session, as_of: date) -> dict[str, int]:
+def _undrafted_schedule_balances(
+  session: Session, as_of: date, entity_id: str | None
+) -> dict[str, int]:
   """Debits minus credits, by account, of matured schedule entries that have
   no entry yet. The close gate holds until they are drafted."""
   # One amount per obligation, read the way the schedule's own drafting
@@ -160,6 +175,7 @@ def _undrafted_schedule_balances(session: Session, as_of: date) -> dict[str, int
       ) f ON TRUE
       WHERE ev.event_type = 'schedule_entry_due'
         AND ev.status IN ('pending', 'classified')
+        AND (:entity_id IS NULL OR ev.entity_id = :entity_id)
         AND ev.occurred_at <= :as_of_end
         AND s.metadata->'entry_template'->>'credit_element_id' IS NOT NULL
         AND NOT EXISTS (
@@ -170,7 +186,10 @@ def _undrafted_schedule_balances(session: Session, as_of: date) -> dict[str, int
             AND e.posting_date <= f.period_end
         )
     """),
-    {"as_of_end": datetime.combine(as_of, time.max, tzinfo=UTC)},
+    {
+      "as_of_end": datetime.combine(as_of, time.max, tzinfo=UTC),
+      "entity_id": entity_id,
+    },
   )
   balances: dict[str, int] = {}
   for row in rows:
@@ -206,9 +225,15 @@ def _compute_account_scope(
     side.as_of.get(element_id, window.period_end)
     for element_id in side.covered_element_ids
   }
-  landed = {d: get_net_balances_cents(session, None, d) for d in dates}
+  landed = {
+    d: get_net_balances_cents(session, None, d, entity_id=window.entity_id)
+    for d in dates
+  }
   awaiting_close = {
-    d: (_draft_balances(session, d), _undrafted_schedule_balances(session, d))
+    d: (
+      _draft_balances(session, d, window.entity_id),
+      _undrafted_schedule_balances(session, d, window.entity_id),
+    )
     for d in dates
   }
   elements = {
@@ -321,9 +346,14 @@ def compute_reconciliations(
     return _compute_account_scope(
       session, window=window, side=side, include_tied=include_tied
     )
-  cumulative = get_net_balances_cents(session, None, window.period_end)
+  cumulative = get_net_balances_cents(
+    session, None, window.period_end, entity_id=window.entity_id
+  )
   year_to_date = get_net_balances_cents(
-    session, window.fiscal_year_start, window.period_end
+    session,
+    window.fiscal_year_start,
+    window.period_end,
+    entity_id=window.entity_id,
   )
   # Accounts with activity or known to the source; the library's concepts
   # share the table and are not chart accounts.

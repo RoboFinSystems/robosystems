@@ -187,8 +187,8 @@ BASE_NODES = [
 
 # Base Relationships - Common Foundation
 BASE_RELATIONSHIPS = [
-  # No parent-subsidiary edge: nothing writes one. When consolidation ships,
-  # add ENTITY_OWNS_ENTITY sourced from OLTP entities.parent_entity_id.
+  # The parent-subsidiary edge, ENTITY_OWNS_ENTITY, lives in the roboledger
+  # extension: only a ledger's reporting group writes one.
   # XBRL Core Relationships - Global relationships for shared XBRL concepts
   Relationship(
     name="ELEMENT_HAS_LABEL",

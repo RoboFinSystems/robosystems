@@ -50,7 +50,7 @@ from robosystems.operations.roboledger.reports.network_picker import (
 )
 from robosystems.operations.taxonomy_block.coa_mappings import (
   BOOK_FRAMEWORK,
-  find_mapping_structure,
+  find_entity_mapping,
 )
 from robosystems.utils.ulid import generate_prefixed_ulid
 
@@ -454,11 +454,10 @@ def stamp_canonical_statement_sets(
   Statement-rule verification afterwards is non-fatal; a failed check is a
   finding on the month (``rule_summary``), not a reason to refuse the close.
   """
-  mapping = find_mapping_structure(session, BOOK_FRAMEWORK)
+  scope = _scope_entity_id(session, entity_id)
+  mapping = find_entity_mapping(session, scope, BOOK_FRAMEWORK)
   if mapping is None:
     return StatementStampResult(stamped=False, note="no_coa_mapping")
-
-  scope = _scope_entity_id(session, entity_id)
   if scope is None:
     return StatementStampResult(stamped=False, note="no_entity")
   entity_id = scope
@@ -489,6 +488,7 @@ def stamp_canonical_statement_sets(
       mapping_id=mapping.id,
       periods=[PeriodSpec(start=period_start, end=period_end, label=period_label)],
       close_target_qname=close_target,
+      entity_id=entity_id,
     )
     _retract_window(session, period_start, period_end, entity_id)
     _pre_create_report_fact_sets(

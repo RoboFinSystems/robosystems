@@ -33,7 +33,11 @@ from robosystems.operations.roboledger.commands._guards import (
   assert_accounts_postable,
   assert_period_not_closed,
 )
-from robosystems.operations.roboledger.entity_scope import resolve_entity_id
+from robosystems.operations.roboledger.entity_scope import (
+  ensure_entity_id,
+  find_entity_id,
+  owner_entity_id,
+)
 from robosystems.operations.roboledger.entry_status import (
   GENERATED_REVERSAL_SQL,
   LANDED_ENTRY_STATUSES,
@@ -138,6 +142,7 @@ class ScheduleService:
     schedule_metadata: ScheduleMetadata | None,
     created_by: str,
     source_transaction_id: str | None,
+    entity_id: str,
   ) -> tuple[Structure, dict, dict, str]:
     """Create the Structure, its element associations, and the
     cm:Debit/cm:Credit has-part posting arcs. Not called on rebuild, which
@@ -159,6 +164,7 @@ class ScheduleService:
     structure = Structure(
       name=name,
       block_type="schedule",
+      entity_id=entity_id,
       taxonomy_id=taxonomy_id,
       concept_arrangement="roll_forward",
       artifact_mechanics=artifact_mechanics,
@@ -285,8 +291,12 @@ class ScheduleService:
     closed_through: date | None = None,
     source_transaction_id: str | None = None,
     existing_structure: Structure | None = None,
+    entity_id: str | None = None,
   ) -> Structure:
     """Create a schedule with one generated fact set per monthly period.
+
+    The schedule belongs to ``entity_id`` (default the group parent): its
+    facts, obligations and closing entries all land in that entity's books.
 
     ``monthly_amount`` is in cents. ``taxonomy_id=None`` uses or creates a
     default "Schedules" taxonomy. ``element_ids`` are the elements the
@@ -306,6 +316,7 @@ class ScheduleService:
     """
     if existing_structure is not None:
       structure = existing_structure
+      entity_id = owner_entity_id(session, structure)
       taxonomy_id = str(structure.taxonomy_id)
       metadata, artifact_mechanics = self._build_schedule_definition_blobs(
         name=name,
@@ -320,6 +331,7 @@ class ScheduleService:
       structure.artifact_mechanics = artifact_mechanics
       session.flush()
     else:
+      entity_id = ensure_entity_id(session, entity_id)
       structure, metadata, artifact_mechanics, taxonomy_id = (
         self._build_schedule_structure(
           session,
@@ -333,11 +345,11 @@ class ScheduleService:
           schedule_metadata=schedule_metadata,
           created_by=created_by,
           source_transaction_id=source_transaction_id,
+          entity_id=entity_id,
         )
       )
 
     fact_set_id = generate_prefixed_ulid("fs")
-    entity_id = resolve_entity_id(session)
 
     # A custom periodic-amounts curve is asserted by the caller; a
     # straight-line schedule is derived from method + params.
@@ -618,6 +630,7 @@ class ScheduleService:
         periods=periods,
         closed_through=closed_through,
         created_by=created_by,
+        entity_id=entity_id,
       )
     )
 
@@ -649,6 +662,7 @@ class ScheduleService:
     monthly_amount: int,
     periods: list[tuple[date, date]],
     created_by: str,
+    entity_id: str,
     closed_through: date | None = None,
   ) -> tuple[str, int]:
     """Emit `schedule_created` + one `schedule_entry_due` per period.
@@ -670,6 +684,7 @@ class ScheduleService:
     session.add(
       Event(
         id=schedule_created_event_id,
+        entity_id=entity_id,
         event_type="schedule_created",
         # Moves no resource: it arranges future recognition, which the
         # economic schedule_entry_due children carry.
@@ -708,6 +723,7 @@ class ScheduleService:
       session.add(
         Event(
           id=generate_prefixed_ulid("evt"),
+          entity_id=entity_id,
           event_type="schedule_entry_due",
           event_category="recognition",
           event_class="economic",
@@ -895,6 +911,7 @@ class ScheduleService:
       session.add(
         Event(
           id=new_event_id,
+          entity_id=old_evt.entity_id,
           event_type="schedule_entry_due",
           event_category="recognition",
           event_class="economic",
@@ -922,13 +939,17 @@ class ScheduleService:
     session: Session,
     period_start: date,
     period_end: date,
+    *,
+    entity_id: str | None = None,
   ) -> PeriodCloseStatus:
-    """Get close status for the schedules that have work in a fiscal period.
+    """Get close status for an entity's schedules that have work in a fiscal
+    period. ``entity_id`` defaults to the group parent.
 
     Scoped to schedules carrying a fact or an entry in the period, so the
     pending count agrees with the obligation gate. Terminated, run-to-term
     and not-yet-started schedules are absent rather than listed at zero.
     """
+    entity_id = find_entity_id(session, entity_id)
     # best_entry: the most-advanced entry per structure (posted > draft > other).
     result = session.execute(
       text(f"""
@@ -974,6 +995,7 @@ class ScheduleService:
         LEFT JOIN reversal r ON r.reversal_of = be.entry_id
         WHERE s.block_type = 'schedule'
           AND s.is_active = true
+          AND s.entity_id = :entity_id
           -- A schedule with neither a fact nor an entry in this period has no
           -- work in it: it was terminated before the period, has run to term,
           -- or has not started yet. Without this the LEFT JOIN renders all
@@ -984,16 +1006,25 @@ class ScheduleService:
           AND (f.id IS NOT NULL OR be.entry_id IS NOT NULL)
         ORDER BY s.name
       """),
-      {"period_start": period_start, "period_end": period_end},
+      {
+        "period_start": period_start,
+        "period_end": period_end,
+        "entity_id": entity_id,
+      },
     )
 
     fp_result = session.execute(
       text("""
         SELECT status, close_receipt FROM fiscal_periods
-        WHERE start_date <= :period_start AND end_date >= :period_end
+        WHERE entity_id = :entity_id
+          AND start_date <= :period_start AND end_date >= :period_end
         LIMIT 1
       """),
-      {"period_start": period_start, "period_end": period_end},
+      {
+        "period_start": period_start,
+        "period_end": period_end,
+        "entity_id": entity_id,
+      },
     )
     fp_row = fp_result.fetchone()
     period_status = fp_row.status if fp_row else "open"
@@ -1094,7 +1125,8 @@ class ScheduleService:
         fence_dates.append(date(period_end.year + 1, 1, 1))
       else:
         fence_dates.append(date(period_end.year, period_end.month + 1, 1))
-    assert_period_not_closed(session, *fence_dates)
+    entity_id = owner_entity_id(session, structure)
+    assert_period_not_closed(session, *fence_dates, entity_id=entity_id)
 
     # PRIMARY_ENTRY_SQL excludes generated reversals: an auto_reverse
     # schedule's reversal lands on the first day of the next period with the
@@ -1164,7 +1196,9 @@ class ScheduleService:
 
     # Before the staleness check: an unchanged draft on a retired account
     # would still post at close.
-    assert_accounts_postable(session, (debit_element_id, credit_element_id))
+    assert_accounts_postable(
+      session, (debit_element_id, credit_element_id), entity_id=entity_id
+    )
 
     amount_dollars = fact_row.value
     amount_cents = round(amount_dollars * 100)
@@ -1221,6 +1255,7 @@ class ScheduleService:
     # record, and synthesizing a Transaction would manufacture adapter-mirror
     # rows. Reads anchor on Entry.
     entry = Entry(
+      entity_id=entity_id,
       type=template.get("entry_type", "closing"),
       status="draft",
       posting_date=posting_date,
@@ -1264,6 +1299,7 @@ class ScheduleService:
       reversal_memo = f"Reverse: {entry_memo}"
 
       reversal_entry = Entry(
+        entity_id=entity_id,
         type="reversing",
         status="draft",
         posting_date=reversal_date,
@@ -1329,6 +1365,7 @@ class ScheduleService:
     created_by: str,
     entry_type: str = "closing",
     provenance: str = "manual_entry",
+    entity_id: str | None = None,
   ) -> ClosingEntryResult:
     """Create a non-schedule draft entry with any number of balanced lines
     (disposals, impairments, reclassifications).
@@ -1375,11 +1412,15 @@ class ScheduleService:
         f"total_debit={total_debit} total_credit={total_credit}"
       )
 
+    entity_id = ensure_entity_id(session, entity_id)
     # A draft in a closed period could never be posted.
-    self._assert_period_not_closed(session, posting_date)
-    assert_accounts_postable(session, (li["element_id"] for li in normalized))
+    assert_period_not_closed(session, posting_date, entity_id=entity_id)
+    assert_accounts_postable(
+      session, (li["element_id"] for li in normalized), entity_id=entity_id
+    )
 
     entry = Entry(
+      entity_id=entity_id,
       type=entry_type,
       status="draft",
       posting_date=posting_date,
@@ -1513,7 +1554,9 @@ class ScheduleService:
       .scalars()
       .all()
     )
-    assert_period_not_closed(session, *stale_dates)
+    assert_period_not_closed(
+      session, *stale_dates, entity_id=owner_entity_id(session, structure)
+    )
 
     # A landed entry (reversed included) after the cutoff is the record of
     # that period's recognition; truncating under it would orphan it. Counted
@@ -1613,10 +1656,6 @@ class ScheduleService:
       "facts_deleted": facts_deleted,
       "reason": reason,
     }
-
-  def _assert_period_not_closed(self, session: Session, posting_date: date) -> None:
-    """Raise ClosedPeriodError if `posting_date` falls in a closed period."""
-    assert_period_not_closed(session, posting_date)
 
   def _delete_draft_entry(self, session: Session, entry_id: str) -> None:
     """Delete a draft entry, its draft auto-reversal, and their line items.

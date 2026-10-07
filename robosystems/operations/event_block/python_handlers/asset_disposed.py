@@ -16,6 +16,7 @@ from robosystems.models.api.event_block import CreateEventBlockRequest
 from robosystems.models.extensions import Rule, Structure
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
+from robosystems.operations.roboledger.entity_scope import owner_entity_id
 from robosystems.operations.roboledger.schedules.service import ScheduleService
 
 from ._disposal_plan import ScheduleNotFoundError, compute_disposal_plan
@@ -76,6 +77,11 @@ def _void_pending_obligations_for_schedule(
   )
 
 
+def _schedule_entity_id(session: Session, structure_id: str) -> str:
+  """The entity whose books a disposal posts in: the schedule's own."""
+  return owner_entity_id(session, session.get(Structure, structure_id))
+
+
 def _delete_sum_equals_rule(session: Session, structure_id: str) -> None:
   """Delete the schedule's SumEquals rule (unsatisfiable once obligations are
   voided) and its verification_results rows, which don't cascade."""
@@ -127,6 +133,10 @@ def dispatch(
 
   _delete_sum_equals_rule(session, metadata.schedule_id)
 
+  # The disposal is the schedule's, whichever entity the event was filed under.
+  entity_id = _schedule_entity_id(session, metadata.schedule_id)
+  event.entity_id = entity_id
+
   service = ScheduleService()
   memo = metadata.memo or f"Asset disposal for schedule {metadata.schedule_id}"
   entry_result = service.create_manual_closing_entry(
@@ -137,6 +147,7 @@ def dispatch(
     created_by=created_by,
     entry_type="closing",
     provenance="event_handler",
+    entity_id=entity_id,
   )
 
   session.execute(
@@ -163,8 +174,10 @@ def dispatch_preview(
   session: Session,
   body: CreateEventBlockRequest,
   metadata: AssetDisposedMetadata,
+  entity_id: str | None = None,
 ) -> HandlerPreview:
-  """The plan ``dispatch`` would execute, behind the same validation gates."""
+  """The plan ``dispatch`` would execute, behind the same validation gates.
+  The schedule decides the entity, as it does in ``dispatch``."""
   from robosystems.operations.locking import RowLockedError
   from robosystems.operations.roboledger.commands._guards import (
     ClosedPeriodError,
@@ -181,7 +194,11 @@ def dispatch_preview(
       gain_loss_element_id=metadata.gain_loss_element_id,
     )
     # dispatch posts on the disposal date and refuses a closed period.
-    assert_period_not_closed(session, body.occurred_at.date())
+    assert_period_not_closed(
+      session,
+      body.occurred_at.date(),
+      entity_id=_schedule_entity_id(session, metadata.schedule_id),
+    )
   except (ValueError, ClosedPeriodError, RowLockedError, ScheduleNotFoundError) as e:
     return HandlerPreview(
       would_succeed=False,

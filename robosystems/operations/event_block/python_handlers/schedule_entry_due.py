@@ -91,6 +91,7 @@ def dispatch_preview(
   session: Session,
   body: CreateEventBlockRequest,
   metadata: ScheduleEntryDueMetadata,
+  entity_id: str | None = None,
 ) -> HandlerPreview:
   """Describe the draft from the schedule's in-scope period fact.
 

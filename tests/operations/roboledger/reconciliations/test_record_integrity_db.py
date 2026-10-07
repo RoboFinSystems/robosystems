@@ -35,7 +35,6 @@ from robosystems.models.api.taxonomy_block import (
   UpdateTaxonomyBlockRequest,
 )
 from robosystems.models.extensions import Rule, Structure, Taxonomy
-from robosystems.models.extensions.entity import Entity
 from robosystems.models.extensions.roboledger import Event, FactSet
 from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
 from robosystems.operations.event_block.commands import (
@@ -85,6 +84,7 @@ from robosystems.operations.taxonomy_block.commands import (
   delete_taxonomy_block,
   update_taxonomy_block,
 )
+from tests.ledger_entity import PARENT_ENTITY_ID
 
 from .conftest import (
   GRAPH_ID,
@@ -106,7 +106,6 @@ _EVERYONE = {"usr", "usr2", "usr3"}
 def loan(ext_session):
   """A ledger with a 4,800.00 loan, and a statement for it recorded by `usr`."""
   session = ext_session
-  session.add(Entity(name="Fictional Co", created_by="usr"))
   cash = classified_account(session, "Checking", "asset")
   account = classified_account(
     session, "Equipment Loan", "liability", balance_type="credit"
@@ -220,6 +219,7 @@ def test_only_a_committed_sign_off_counts(loan):
   digest = session.query(FactSet).one().metadata_["balance_digest"]
   session.add(
     Event(
+      entity_id=PARENT_ENTITY_ID,
       event_type=SIGN_OFF_EVENT_TYPE,
       event_category="approval",
       event_class="support",
@@ -354,8 +354,11 @@ def test_a_sync_that_recomputes_the_same_figures_keeps_their_preparer(
   """A scheduled sync re-running a comparison by hand left the figures as they
   were: whoever ran them still prepared what a reviewer signs."""
   session = ext_session
-  session.add(Entity(name="Fictional Co", created_by="usr"))
-  session.add(FiscalCalendar(graph_id=GRAPH_ID, closed_through_period="2026-07"))
+  session.add(
+    FiscalCalendar(
+      entity_id=PARENT_ENTITY_ID, graph_id=GRAPH_ID, closed_through_period="2026-07"
+    )
+  )
   session.commit()
   source = patch.object(
     SourceLedgerResolver,
@@ -497,7 +500,11 @@ def _a_second_passing_rule_on_the_block(session, rec):
 )
 def test_only_the_blocks_own_rule_decides_its_status(loan, door):
   session, structure_id = loan
-  session.add(FiscalCalendar(graph_id=GRAPH_ID, closed_through_period="2026-07"))
+  session.add(
+    FiscalCalendar(
+      entity_id=PARENT_ENTITY_ID, graph_id=GRAPH_ID, closed_through_period="2026-07"
+    )
+  )
   record_statement_balance(
     session,
     RecordStatementBalanceRequest(

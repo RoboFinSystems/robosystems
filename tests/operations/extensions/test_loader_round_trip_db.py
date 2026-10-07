@@ -36,6 +36,7 @@ from robosystems.operations.roboledger.commands.reconciling_items import (
   plan_reconciling_item,
   resolve_reconciling_item,
 )
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
 
 pytestmark = pytest.mark.unit
 
@@ -63,6 +64,7 @@ def db():
   session = sessionmaker(bind=engine)()
   session.execute(text(f'SET search_path TO "{schema}"'))
   ExtensionsBase.metadata.create_all(bind=session.connection())
+  seed_parent_entity(session)
   session.commit()
   session.execute(text(f'SET search_path TO "{schema}"'))
   try:
@@ -111,6 +113,7 @@ def _seed(db) -> dict[str, str]:
   ):
     db.add(
       FiscalPeriod(
+        entity_id=PARENT_ENTITY_ID,
         graph_id=GRAPH_ID,
         name=name,
         start_date=start,
@@ -382,6 +385,7 @@ def test_a_captured_copy_of_a_round_trip_is_voided_not_booked(db):
   ids = _seed(db)
   _written_back_event(db, ids, source="schedule")
   copy = Event(
+    entity_id=PARENT_ENTITY_ID,
     event_type="journal_entry_recorded",
     event_category="adjustment",
     event_class="economic",

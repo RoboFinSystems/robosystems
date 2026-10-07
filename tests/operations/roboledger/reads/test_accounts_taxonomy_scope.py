@@ -20,12 +20,28 @@ integration tests.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
+import pytest
 from sqlalchemy.dialects import postgresql
 
 from robosystems.operations.roboledger.reads import accounts as reads_accounts
 from robosystems.operations.roboledger.reads import taxonomies as reads_taxonomies
+from robosystems.operations.roboledger.reads.accounts import AccountScope
+
+PARENT_SCOPE = AccountScope("ent_parent", True)
+SUBSIDIARY_SCOPE = AccountScope("ent_sub", False)
+
+
+@pytest.fixture(autouse=True)
+def _parent_scope():
+  """Every read here is the group parent's; the scope lookup is answered so
+  each ``execute`` the mock records is one of the read's own queries."""
+  with (
+    patch.object(reads_accounts, "account_scope", return_value=PARENT_SCOPE),
+    patch.object(reads_taxonomies, "account_scope", return_value=PARENT_SCOPE),
+  ):
+    yield
 
 
 def _compiled_sql(call_args) -> str:
@@ -55,6 +71,32 @@ class TestCoaElementClause:
     sql = str(clause.compile(dialect=postgresql.dialect()))
     assert "elements.source IN" in sql
     _assert_taxonomy_guard(sql)
+
+
+class TestEntityAccountsClause:
+  """An entity's accounts are those of the charts linked to it. Accounts in
+  no entity's chart are the group parent's and nobody else's."""
+
+  @staticmethod
+  def _sql(scope: AccountScope) -> str:
+    clause = reads_accounts.entity_accounts_clause(scope)
+    return str(clause.compile(dialect=postgresql.dialect()))
+
+  def test_every_scope_keeps_the_chart_account_guard(self):
+    for scope in (PARENT_SCOPE, SUBSIDIARY_SCOPE):
+      sql = self._sql(scope)
+      assert "elements.source IN" in sql
+      _assert_taxonomy_guard(sql)
+
+  def test_a_subsidiary_sees_only_charts_linked_to_it(self):
+    sql = self._sql(SUBSIDIARY_SCOPE)
+    assert "entity_taxonomies.entity_id" in sql
+    assert "NOT IN" not in sql
+
+  def test_the_parent_also_takes_what_no_entity_owns(self):
+    sql = self._sql(PARENT_SCOPE)
+    assert "entity_taxonomies.entity_id" in sql
+    assert "NOT IN" in sql
 
 
 class TestAccountReadsScoped:

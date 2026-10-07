@@ -1,5 +1,5 @@
-"""Per-tenant fiscal periods, backing the closed-period posting controls.
-Isolation comes from the tenant schema; `graph_id` is a defensive
+"""Fiscal periods, one set per entity, backing the closed-period posting
+controls. Isolation comes from the tenant schema; `graph_id` is a defensive
 discriminator."""
 
 from datetime import UTC, datetime
@@ -22,7 +22,9 @@ from robosystems.utils.ulid import generate_prefixed_ulid
 class FiscalPeriod(ExtensionsBase):
   __tablename__ = "fiscal_periods"
   __table_args__ = (
-    UniqueConstraint("graph_id", "name", name="uq_fiscal_period_graph_name"),
+    UniqueConstraint(
+      "graph_id", "entity_id", "name", name="uq_fiscal_period_graph_entity_name"
+    ),
     Index("idx_fiscal_periods_graph", "graph_id"),
     Index("idx_fiscal_periods_dates", "graph_id", "start_date", "end_date"),
     CheckConstraint(
@@ -36,6 +38,7 @@ class FiscalPeriod(ExtensionsBase):
   )
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("fp"))
   graph_id = Column(String, nullable=False)
+  entity_id = Column(String, nullable=False)
   name = Column(String, nullable=False)
 
   # Period
@@ -59,4 +62,4 @@ class FiscalPeriod(ExtensionsBase):
   )
 
   def __repr__(self) -> str:
-    return f"<FiscalPeriod {self.graph_id} {self.name} {self.status}>"
+    return f"<FiscalPeriod {self.graph_id} {self.entity_id} {self.name} {self.status}>"

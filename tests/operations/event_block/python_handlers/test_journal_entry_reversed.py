@@ -262,7 +262,7 @@ class TestPreviewAgreesWithExecution:
     # must not pass the preview while the command refuses it.
     from robosystems.operations.roboledger.commands._guards import ClosedPeriodError
 
-    def gate(_session, *dates):
+    def gate(_session, *dates, **_scope):
       for d in dates:
         if d is not None and d <= date(2026, 2, 28):
           raise ClosedPeriodError("2026-02", d)

@@ -37,6 +37,7 @@ from sqlalchemy.orm import sessionmaker
 import robosystems.models.extensions  # noqa: F401  (register models on ExtensionsBase)
 from robosystems.db.extensions import ExtensionsBase
 from robosystems.models.extensions import Element, ElementTrait, Trait
+from tests.ledger_entity import seed_parent_entity
 
 pytestmark = pytest.mark.unit
 
@@ -56,6 +57,7 @@ def ext_session():
   session = sessionmaker(bind=engine)()
   session.execute(text(f'SET search_path TO "{schema}"'))
   ExtensionsBase.metadata.create_all(bind=session.connection())
+  seed_parent_entity(session)
   session.commit()
   session.execute(text(f'SET search_path TO "{schema}"'))
 

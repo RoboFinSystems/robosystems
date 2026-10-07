@@ -22,6 +22,7 @@ from robosystems.operations.roboledger.fiscal_calendar import FiscalCalendarServ
 from robosystems.operations.roboledger.fiscal_calendar.service import (
   CloseableGateResult,
 )
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
 
 pytestmark = pytest.mark.unit
 
@@ -41,6 +42,7 @@ def session():
   db = sessionmaker(bind=engine)()
   db.execute(text(f'SET search_path TO "{schema}"'))
   ExtensionsBase.metadata.create_all(bind=db.connection())
+  seed_parent_entity(db)
   db.commit()
   db.execute(text(f'SET search_path TO "{schema}"'))
   try:
@@ -60,6 +62,7 @@ def _event(session, *, source, status, occurred, event_type="expense", metadata=
   event_id = f"evt_{uuid.uuid4().hex[:10]}"
   session.add(
     Event(
+      entity_id=PARENT_ENTITY_ID,
       id=event_id,
       event_type=event_type,
       event_category="purchase",
@@ -131,6 +134,7 @@ def test_a_drafted_manual_journal_entry_does_not_block(session):
   )
   session.add(
     Entry(
+      entity_id=PARENT_ENTITY_ID,
       posting_date=date(2026, 7, 15),
       triggered_by_event_id=event_id,
       created_by="u",

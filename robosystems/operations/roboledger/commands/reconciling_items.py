@@ -53,6 +53,7 @@ from robosystems.operations.roboledger.commands._guards import (
   assert_period_not_closed,
   closed_periods,
 )
+from robosystems.operations.roboledger.entity_scope import owner_entity_id
 from robosystems.operations.roboledger.fiscal_calendar.periods import period_date_range
 from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
   PUBLISH_TO_SOURCE_KEY,
@@ -353,7 +354,9 @@ def _restate_blockers(
         "the difference"
       )
 
-  closed = _closed_period_names(session, [e.posting_date for e in entries])
+  closed = _closed_period_names(
+    session, [e.posting_date for e in entries], owner_entity_id(session, event)
+  )
   if closed:
     blockers.append(
       f"posted in closed period(s) {', '.join(closed)} — reopen first, or catch up"
@@ -432,30 +435,39 @@ def _has_dimension_links(
   return any(session.execute(check.limit(1)).first() is not None for check in checks)
 
 
-def _closed_period_names(session: Session, posting_dates: list[date]) -> list[str]:
-  return [month for month, _ in closed_periods(session, posting_dates)]
+def _closed_period_names(
+  session: Session, posting_dates: list[date], entity_id: str
+) -> list[str]:
+  return [
+    month for month, _ in closed_periods(session, posting_dates, entity_id=entity_id)
+  ]
 
 
-def _default_catch_up_date(session: Session, graph_id: str) -> date | None:
-  period = FiscalCalendarService()._earliest_open_period(session, graph_id)
+def _default_catch_up_date(
+  session: Session, graph_id: str, entity_id: str
+) -> date | None:
+  period = FiscalCalendarService()._earliest_open_period(session, graph_id, entity_id)
   if period is None:
     return None
   return period_date_range(period)[1]
 
 
 def find_unresolved_reconciling_items(
-  session: Session, *, as_of: date
+  session: Session, *, as_of: date, entity_id: str | None = None
 ) -> list[tuple[str, str | None]]:
   """``(event_id, external_id)`` of flagged events with entries posting on or
-  before ``as_of``; read by the close gate."""
-  return [
-    (str(event_id), external_id)
-    for event_id, external_id in session.query(Event.id, Event.external_id)
+  before ``as_of``, across the graph or for one entity; read by the close
+  gate."""
+  query = (
+    session.query(Event.id, Event.external_id)
     .join(Entry, Entry.triggered_by_event_id == Event.id)
     .filter(Event.payload_drift.is_(True), Entry.posting_date <= as_of)
-    .distinct()
-    .order_by(Event.id.asc())
-    .all()
+  )
+  if entity_id is not None:
+    query = query.filter(Event.entity_id == entity_id)
+  return [
+    (str(event_id), external_id)
+    for event_id, external_id in query.distinct().order_by(Event.id.asc()).all()
   ]
 
 
@@ -561,7 +573,8 @@ def _plan_with_stamp(
   )
 
   posting_dates = sorted({e.posting_date for e in entries if e.posting_date})
-  closed_periods = _closed_period_names(session, posting_dates)
+  entity_id = owner_entity_id(session, event)
+  closed_periods = _closed_period_names(session, posting_dates, entity_id)
   blockers = _restate_blockers(session, event, entries, accepted)
 
   drift_detected_at = metadata.get("drift_detected_at")
@@ -583,7 +596,7 @@ def _plan_with_stamp(
     else None,
     # Never default to a disposition the plan already knows is blocked.
     default_disposition="catch_up" if (closed_periods or blockers) else "restate",
-    default_posting_date=_default_catch_up_date(session, graph_id),
+    default_posting_date=_default_catch_up_date(session, graph_id, entity_id),
     affected_posting_dates=posting_dates,
     closed_periods=closed_periods,
     prior_entries=_entry_summaries(session, entries),
@@ -679,6 +692,7 @@ def resolve_reconciling_item(
       )
 
   # Fence every period this touches before locking any row.
+  entity_id = owner_entity_id(session, _load_event(session, body.event_id))
   fence_dates = list(plan.affected_posting_dates)
   if catch_up_date is not None:
     fence_dates.append(catch_up_date)
@@ -688,9 +702,9 @@ def resolve_reconciling_item(
       for summary in plan.accepted_entries
       if summary.posting_date is not None
     )
-    assert_period_not_closed(session, *fence_dates)
+    assert_period_not_closed(session, *fence_dates, entity_id=entity_id)
   elif catch_up_date is not None:
-    assert_period_not_closed(session, catch_up_date)
+    assert_period_not_closed(session, catch_up_date, entity_id=entity_id)
 
   with bounded_lock_wait(
     session,
@@ -782,6 +796,7 @@ def resolve_reconciling_item(
         ),
         created_by,
         graph_id=graph_id,
+        entity_id=entity_id,
       )
       session.flush()
       created = session.execute(

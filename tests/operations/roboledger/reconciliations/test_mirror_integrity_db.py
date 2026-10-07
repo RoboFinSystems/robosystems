@@ -25,6 +25,7 @@ from robosystems.operations.roboledger.reconciliations import (
   SourceLedgerResolver,
   reconciliation_window,
 )
+from tests.ledger_entity import PARENT_ENTITY_ID
 
 from .conftest import (
   GRAPH_ID,
@@ -179,7 +180,11 @@ def test_income_accounts_are_summed_over_the_ledgers_own_fiscal_year(
 ):
   """A July year start makes March and April 2026 an earlier year: their
   result leaves the income accounts and lands in retained earnings."""
-  ext_session.add(FiscalCalendar(graph_id=GRAPH_ID, fiscal_year_start_month=7))
+  ext_session.add(
+    FiscalCalendar(
+      entity_id=PARENT_ENTITY_ID, graph_id=GRAPH_ID, fiscal_year_start_month=7
+    )
+  )
   ext_session.commit()
   source = source_report(
     ("35", "Checking", 138_000), ("3", "Retained Earnings", -138_000)

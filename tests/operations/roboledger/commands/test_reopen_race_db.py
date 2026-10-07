@@ -19,6 +19,7 @@ from robosystems.operations.roboledger.commands.fiscal_calendar import (
 from robosystems.operations.roboledger.fiscal_calendar.service import (
   FiscalCalendarService,
 )
+from tests.ledger_entity import seed_parent_entity_on
 
 pytestmark = pytest.mark.integration
 
@@ -47,6 +48,7 @@ def tenant():
         bind=conn.execution_options(schema_translate_map={None: GRAPH}),
         tables=tables,
       )
+      seed_parent_entity_on(conn.execution_options(schema_translate_map={None: GRAPH}))
     yield
   finally:
     with engine.begin() as conn:

@@ -66,7 +66,9 @@ class TestWritebackEligibleEntryIds:
     ]
     session.query.return_value.join.return_value.filter.return_value.all.return_value = rows
 
-    ids = writeback_eligible_entry_ids(session, date(2026, 1, 1), date(2026, 1, 31))
+    ids = writeback_eligible_entry_ids(
+      session, date(2026, 1, 1), date(2026, 1, 31), entity_id="ent_1"
+    )
 
     assert ids == {"e1", "e2"}
 
@@ -75,7 +77,9 @@ class TestWritebackEligibleEntryIds:
     session.query.return_value.join.return_value.filter.return_value.all.return_value = []
 
     assert (
-      writeback_eligible_entry_ids(session, date(2026, 1, 1), date(2026, 1, 31))
+      writeback_eligible_entry_ids(
+        session, date(2026, 1, 1), date(2026, 1, 31), entity_id="ent_1"
+      )
       == set()
     )
 
@@ -86,7 +90,9 @@ class TestWritebackEligibleEntryIds:
     session = MagicMock()
     session.query.return_value.join.return_value.filter.return_value.all.return_value = []
 
-    select_writeback_eligible_entries(session, date(2026, 1, 1), date(2026, 1, 31))
+    select_writeback_eligible_entries(
+      session, date(2026, 1, 1), date(2026, 1, 31), entity_id="ent_1"
+    )
 
     predicates = [
       str(arg.compile(compile_kwargs={"literal_binds": True}))

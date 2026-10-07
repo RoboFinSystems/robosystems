@@ -88,6 +88,7 @@ def test_a_failed_publish_does_not_cost_the_markers_of_earlier_ones():
       return_value=MagicMock(connection_id="conn_1"),
     ),
     patch(f"{_QB}.select_writeback_eligible_entries", return_value=drafts),
+    patch(f"{_MODULE}.is_group_parent", return_value=True),
   ):
     with pytest.raises(WritebackFailed) as exc:
       PeriodCloseService(MagicMock())._publish_drafts_to_qb(
@@ -96,6 +97,7 @@ def test_a_failed_publish_does_not_cost_the_markers_of_earlier_ones():
         date(2026, 1, 1),
         date(2026, 1, 31),
         actor_id="usr_1",
+        entity_id="ent_1",
       )
 
   # The two that reached QuickBooks did so, and the batch error names only the

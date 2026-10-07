@@ -57,6 +57,7 @@ class PeriodCloseTask(BaseTask):
     from robosystems.operations.roboledger.commands.fiscal_calendar import (
       close_period as cmd_close_period,
     )
+    from robosystems.operations.roboledger.entity_scope import find_entity_id
     from robosystems.operations.roboledger.fiscal_calendar import (
       FiscalCalendarService,
       PeriodAlreadyClosedError,
@@ -69,7 +70,9 @@ class PeriodCloseTask(BaseTask):
     from robosystems.operations.roboledger.fiscal_calendar.close_service import (
       PeriodCloseService,
     )
-    from robosystems.operations.roboledger.reads.fiscal_calendar import qb_sync_state
+    from robosystems.operations.roboledger.reads.fiscal_calendar import (
+      entity_sync_state,
+    )
 
     period = self.params["period"]
     graph_id = self.graph_id
@@ -77,6 +80,7 @@ class PeriodCloseTask(BaseTask):
       raise ValueError("period_close requires a graph_id")
 
     service = FiscalCalendarService()
+    entity_param = self.params.get("entity_id")
     with platform_session() as platform_db, extensions_session(graph_id) as session:
       try:
         result = cmd_close_period(
@@ -105,6 +109,7 @@ class PeriodCloseTask(BaseTask):
           # Usually what holds the fence is another close of the same
           # period; waiting it out yields "already closed" with a receipt.
           fence_wait_ms=self.budget_seconds * 1000,
+          entity_id=entity_param,
         )
       except CLOSE_DOMAIN_ERRORS as exc:
         payload = close_error_payload(exc, period=period)
@@ -119,6 +124,7 @@ class PeriodCloseTask(BaseTask):
             session.query(FiscalPeriod.close_receipt)
             .filter(
               FiscalPeriod.graph_id == graph_id,
+              FiscalPeriod.entity_id == find_entity_id(session, entity_param),
               FiscalPeriod.name == period,
             )
             .scalar()
@@ -137,7 +143,9 @@ class PeriodCloseTask(BaseTask):
         )
         return payload
 
-      has_sync, _last_sync_at = qb_sync_state(platform_db, graph_id)
+      has_sync, _last_sync_at = entity_sync_state(
+        session, platform_db, graph_id, find_entity_id(session, entity_param)
+      )
 
     return {
       **close_success_payload(result, has_sync_connection=has_sync),

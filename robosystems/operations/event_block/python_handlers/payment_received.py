@@ -179,10 +179,11 @@ def dispatch_preview(
   session: Session,
   body: CreateEventBlockRequest,
   metadata: JournalEntryRecordedMetadata,
+  entity_id: str | None = None,
 ) -> HandlerPreview:
   """The journal_entry_recorded GL plan; discharge resolution runs only on
   dispatch."""
-  return journal_dispatch_preview(session, body, metadata)
+  return journal_dispatch_preview(session, body, metadata, entity_id)
 
 
 PAYMENT_RECEIVED_HANDLER = EventBlockPythonHandler(

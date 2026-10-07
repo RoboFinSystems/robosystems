@@ -232,6 +232,15 @@ TRANSACTION_NODES = [
 ]
 
 TRANSACTION_RELATIONSHIPS = [
+  # Entity → Entity: a graph is a reporting group, and its parent owns the
+  # subsidiaries that keep their books in it.
+  Relationship(
+    name="ENTITY_OWNS_ENTITY",
+    from_node="Entity",
+    to_node="Entity",
+    description="Group parent owns a subsidiary whose books are in the same graph",
+    properties=[],
+  ),
   Relationship(
     name="ENTITY_HAS_TRANSACTION",
     from_node="Entity",

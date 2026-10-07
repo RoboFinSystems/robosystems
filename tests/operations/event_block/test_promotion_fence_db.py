@@ -33,6 +33,7 @@ from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
 from robosystems.operations.event_block.promotion import promote_pending_obligations
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
 
 pytestmark = pytest.mark.unit
 
@@ -57,6 +58,7 @@ def ext_session():
   session = sessionmaker(bind=engine)()
   session.execute(text(f'SET search_path TO "{schema}"'))
   ExtensionsBase.metadata.create_all(bind=session.connection())
+  seed_parent_entity(session)
   session.commit()
   session.execute(text(f'SET search_path TO "{schema}"'))
 
@@ -73,6 +75,7 @@ def ext_session():
 def _seed_calendar(session, *, may_status: str = "closed") -> None:
   session.add(
     FiscalPeriod(
+      entity_id=PARENT_ENTITY_ID,
       graph_id=GRAPH_ID,
       name="2026-05",
       start_date=date(2026, 5, 1),
@@ -83,6 +86,7 @@ def _seed_calendar(session, *, may_status: str = "closed") -> None:
   )
   session.add(
     FiscalPeriod(
+      entity_id=PARENT_ENTITY_ID,
       graph_id=GRAPH_ID,
       name="2026-06",
       start_date=date(2026, 6, 1),
@@ -112,6 +116,7 @@ def _seed_calendar(session, *, may_status: str = "closed") -> None:
 
 def _obligation(session, *, status: str, period_end: date) -> Event:
   event = Event(
+    entity_id=PARENT_ENTITY_ID,
     event_type="schedule_entry_due",
     event_category="adjustment",
     occurred_at=datetime.combine(period_end, datetime.min.time(), tzinfo=UTC),
@@ -132,6 +137,7 @@ def _obligation(session, *, status: str, period_end: date) -> Event:
 def _draft_for(session, event: Event) -> Entry:
   """The closing entry a past autopilot dispatch left behind."""
   entry = Entry(
+    entity_id=PARENT_ENTITY_ID,
     posting_date=event.occurred_at.date(),
     status="draft",
     memo="depreciation",

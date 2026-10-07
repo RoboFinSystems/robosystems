@@ -36,6 +36,10 @@ from robosystems.operations.information_block.rules.engine import (
 from robosystems.operations.roboledger.commands._guards import (
   rule_summary as _rule_summary,
 )
+from robosystems.operations.roboledger.entity_scope import (
+  ensure_entity_id,
+  owner_entity_id,
+)
 from robosystems.operations.roboledger.entry_status import (
   landed_entry_bindparam,
 )
@@ -52,9 +56,9 @@ class ScheduleNotFoundError(LookupError):
     self.structure_id = structure_id
 
 
-def _calendar_closed_through_date(session: Session):
-  """End date of the calendar's `closed_through_period`; None when there is
-  no calendar or nothing is closed."""
+def _calendar_closed_through_date(session: Session, entity_id: str):
+  """End date of the entity's `closed_through_period`; None when it has no
+  calendar or nothing is closed."""
   from robosystems.models.extensions.roboledger.fiscal_calendar import (
     FiscalCalendar,
   )
@@ -62,16 +66,19 @@ def _calendar_closed_through_date(session: Session):
     period_date_range,
   )
 
-  cal = session.query(FiscalCalendar).first()
+  cal = (
+    session.query(FiscalCalendar).filter(FiscalCalendar.entity_id == entity_id).first()
+  )
   if cal is None or not cal.closed_through_period:
     return None
   _, period_end = period_date_range(str(cal.closed_through_period))
   return period_end
 
 
-def reinstate_reopened_schedule_scopes(session: Session) -> int:
-  """Re-stamp ``historical`` schedule facts after ``closed_through`` back to
-  ``in_scope`` once reopen-period has moved the boundary back.
+def reinstate_reopened_schedule_scopes(session: Session, entity_id: str) -> int:
+  """Re-stamp the entity's ``historical`` schedule facts after its
+  ``closed_through`` back to ``in_scope`` once reopen-period has moved the
+  boundary back.
 
   Scope is stamped only at generation, so without this a reopened month drops
   out of the roll-forward and the re-close skips it. Idempotent; returns the
@@ -79,20 +86,21 @@ def reinstate_reopened_schedule_scopes(session: Session) -> int:
   """
   from sqlalchemy import text
 
-  closed_through = _calendar_closed_through_date(session)
+  closed_through = _calendar_closed_through_date(session, entity_id)
   result = session.execute(
     text(
       """
       UPDATE facts
       SET fact_scope = 'in_scope'
       WHERE fact_scope = 'historical'
+        AND entity_id = :entity_id
         AND structure_id IN (
           SELECT id FROM structures WHERE block_type = 'schedule'
         )
         AND (:closed_through IS NULL OR period_end > :closed_through)
       """
     ),
-    {"closed_through": closed_through},
+    {"closed_through": closed_through, "entity_id": entity_id},
   )
   return result.rowcount or 0
 
@@ -132,8 +140,14 @@ def create_schedule(
   session: Session,
   body: CreateScheduleRequest,
   created_by: str,
+  *,
+  entity_id: str | None = None,
 ) -> ScheduleCreatedResponse:
-  """Raises `ValueError` for validation failures (mapped to 422)."""
+  """Create a schedule in one entity's books, default the group parent.
+
+  Raises `ValueError` for validation failures (mapped to 422).
+  """
+  entity_id = ensure_entity_id(session, entity_id)
   _validate_element_references(session, body)
   service = ScheduleService()
   et = EntryTemplate(
@@ -160,7 +174,7 @@ def create_schedule(
   # already-closed range would block close-period forever.
   effective_closed_through = body.closed_through
   if effective_closed_through is None:
-    effective_closed_through = _calendar_closed_through_date(session)
+    effective_closed_through = _calendar_closed_through_date(session, entity_id)
 
   structure = service.create_schedule(
     session,
@@ -175,6 +189,7 @@ def create_schedule(
     created_by=created_by,
     closed_through=effective_closed_through,
     source_transaction_id=body.source_transaction_id,
+    entity_id=entity_id,
   )
 
   count_row = session.execute(
@@ -401,7 +416,7 @@ def _landed_entry_count(session: Session, structure_id: str) -> int:
   return int(row.c) if row and row.c else 0
 
 
-def _fence_draft_periods(session: Session, structure_id: str) -> None:
+def _fence_draft_periods(session: Session, structure: Structure) -> None:
   """Fence before the draft deletes lock rows: fence, then rows, as every
   ledger writer does.
 
@@ -424,12 +439,14 @@ def _fence_draft_periods(session: Session, structure_id: str) -> None:
         "WHERE e.source_structure_id = :sid AND e.status = 'draft' "
         "AND (ev.id IS NULL OR ev.status NOT IN :retracted)"
       ).bindparams(bindparam("retracted", expanding=True)),
-      {"sid": structure_id, "retracted": list(WRITEBACK_EXCLUDED_EVENT_STATUSES)},
+      {"sid": structure.id, "retracted": list(WRITEBACK_EXCLUDED_EVENT_STATUSES)},
     )
     .scalars()
     .all()
   )
-  assert_period_not_closed(session, *draft_dates)
+  assert_period_not_closed(
+    session, *draft_dates, entity_id=owner_entity_id(session, structure)
+  )
 
 
 def _delete_draft_entries(session: Session, structure_id: str) -> None:
@@ -457,7 +474,7 @@ def delete_schedule(session: Session, body: DeleteScheduleRequest) -> dict:
 
   # Fence, then count: a close that posts one of these drafts either finished
   # before the fence, and is counted, or waits behind it.
-  _fence_draft_periods(session, structure.id)
+  _fence_draft_periods(session, structure)
   landed = _landed_entry_count(session, structure.id)
   if landed:
     raise ValueError(
@@ -782,7 +799,7 @@ def rebuild_schedule(
   # Landed entries depend on the facts a rebuild regenerates. Fence, then
   # count: a close that posts one of these drafts either finished before the
   # fence, and is counted, or waits behind it.
-  _fence_draft_periods(session, structure.id)
+  _fence_draft_periods(session, structure)
   landed = _landed_entry_count(session, structure.id)
   if landed:
     raise ValueError(
@@ -796,7 +813,9 @@ def rebuild_schedule(
     "schedule_created_event_id"
   )
 
-  closed_through = _calendar_closed_through_date(session)
+  closed_through = _calendar_closed_through_date(
+    session, owner_entity_id(session, structure)
+  )
 
   service = ScheduleService()
 

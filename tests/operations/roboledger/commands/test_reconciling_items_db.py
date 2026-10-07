@@ -49,6 +49,7 @@ from robosystems.operations.roboledger.commands.reconciling_items import (
 from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
   select_writeback_eligible_entries,
 )
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
 
 pytestmark = pytest.mark.unit
 
@@ -89,6 +90,7 @@ def session():
   db = sessionmaker(bind=engine)()
   db.execute(text(f'SET search_path TO "{schema}"'))
   ExtensionsBase.metadata.create_all(bind=db.connection())
+  seed_parent_entity(db)
   db.commit()
   db.execute(text(f'SET search_path TO "{schema}"'))
   try:
@@ -146,6 +148,7 @@ def _seed_elements(db) -> dict[str, str]:
 def _seed_periods(db) -> None:
   db.add(
     FiscalPeriod(
+      entity_id=PARENT_ENTITY_ID,
       graph_id=GRAPH_ID,
       name="2026-07",
       start_date=PERIOD_START,
@@ -156,6 +159,7 @@ def _seed_periods(db) -> None:
   )
   db.add(
     FiscalPeriod(
+      entity_id=PARENT_ENTITY_ID,
       graph_id=GRAPH_ID,
       name="2026-08",
       start_date=OPEN_START,
@@ -465,7 +469,9 @@ def test_catch_up_entry_never_publishes_back_to_the_source(session):
   )
   session.flush()
 
-  eligible = select_writeback_eligible_entries(session, OPEN_START, OPEN_END)
+  eligible = select_writeback_eligible_entries(
+    session, OPEN_START, OPEN_END, entity_id=PARENT_ENTITY_ID
+  )
   assert result.catch_up.entry_id not in {str(entry.id) for entry, _ in eligible}
 
 
@@ -547,6 +553,7 @@ def test_restate_refuses_when_another_event_shares_the_transaction(session):
     .scalar()
   )
   intruder = Entry(
+    entity_id=PARENT_ENTITY_ID,
     transaction_id=transaction_id,
     posting_date=date(2026, 7, 9),
     memo="unrelated",

@@ -12,6 +12,7 @@ from robosystems.models.api.extensions.trial_balance import (
   TrialBalanceResponse,
   TrialBalanceRow,
 )
+from robosystems.operations.roboledger.entity_scope import find_entity_id
 from robosystems.operations.roboledger.entry_status import (
   landed_entry_bindparam,
 )
@@ -33,6 +34,7 @@ _TRIAL_BALANCE_SQL = text("""
       AND tr.category = 'elementsOfFinancialStatements'
   ) t ON t.element_id = a.id
   WHERE e.status IN :landed_entry_statuses
+    AND (:entity_id IS NULL OR e.entity_id = :entity_id)
     AND (e.posting_date >= :start_date OR :start_date IS NULL)
     AND (e.posting_date <= :end_date OR :end_date IS NULL)
   GROUP BY a.id, a.code, a.name, t.identifier, a.metadata->>'account_type'
@@ -44,10 +46,14 @@ def get_net_balances_cents(
   session: Session,
   start_date: date | None = None,
   end_date: date | None = None,
+  *,
+  entity_id: str | None = None,
 ) -> dict[str, int]:
-  """Each account's landed debits minus credits over the window, in cents."""
+  """Each account's landed debits minus credits over the window, in cents,
+  in one entity's books or, with no ``entity_id``, across the graph."""
   result = session.execute(
-    _TRIAL_BALANCE_SQL, {"start_date": start_date, "end_date": end_date}
+    _TRIAL_BALANCE_SQL,
+    {"start_date": start_date, "end_date": end_date, "entity_id": entity_id},
   )
   return {str(row.id): int(row.total_debits) - int(row.total_credits) for row in result}
 
@@ -56,10 +62,18 @@ def get_trial_balance(
   session: Session,
   start_date: date | None = None,
   end_date: date | None = None,
+  *,
+  entity_id: str | None = None,
 ) -> TrialBalanceResponse:
-  """Return the trial balance for posted entries in the given date range."""
+  """Return one entity's trial balance for posted entries in the given date
+  range. ``entity_id`` defaults to the group parent."""
   result = session.execute(
-    _TRIAL_BALANCE_SQL, {"start_date": start_date, "end_date": end_date}
+    _TRIAL_BALANCE_SQL,
+    {
+      "start_date": start_date,
+      "end_date": end_date,
+      "entity_id": find_entity_id(session, entity_id),
+    },
   )
 
   rows: list[TrialBalanceRow] = []

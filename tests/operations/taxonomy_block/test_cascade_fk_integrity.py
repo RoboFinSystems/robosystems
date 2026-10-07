@@ -46,6 +46,7 @@ from robosystems.operations.taxonomy_block.cascade import (
 from robosystems.operations.taxonomy_block.update_apply import (
   apply_structures_to_remove,
 )
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
 
 pytestmark = pytest.mark.unit
 
@@ -70,6 +71,7 @@ def ext_session():
   session = session_factory()
   session.execute(text(f'SET search_path TO "{schema}"'))
   ExtensionsBase.metadata.create_all(bind=session.connection())
+  seed_parent_entity(session)
   session.commit()
   session.execute(text(f'SET search_path TO "{schema}"'))
 
@@ -136,7 +138,7 @@ def _build_disclosure_taxonomy(session: Session) -> dict:
     structure_id=structure.id,
     period_end=date(2026, 6, 30),
     factset_type="disclosure",
-    entity_id="ent_1",
+    entity_id=PARENT_ENTITY_ID,
   )
   fact_set.provenance = {"origin": "text_block", "document_id": "doc_1"}
   session.add(fact_set)
@@ -149,7 +151,7 @@ def _build_disclosure_taxonomy(session: Session) -> dict:
     value_type="inline",
     period_end=date(2026, 6, 30),
     period_type="duration",
-    entity_id="ent_1",
+    entity_id=PARENT_ENTITY_ID,
     structure_id=structure.id,
     fact_set_id=fact_set.id,
   )
@@ -219,7 +221,7 @@ class TestCascadeDeleteTaxonomy:
         value=100,
         period_end=date(2026, 6, 30),
         period_type="duration",
-        entity_id="ent_1",
+        entity_id=PARENT_ENTITY_ID,
         fact_set_id=built["fact_set"].id,
       )
     )
@@ -319,6 +321,7 @@ class TestCurationNeverReachesImmutableSets:
     built["fact_set"].period_start = date(2026, 6, 1)
     ext_session.add(
       FiscalPeriod(
+        entity_id=PARENT_ENTITY_ID,
         graph_id="kg0123456789abcdef01",
         name="2026-06",
         start_date=date(2026, 6, 1),
@@ -341,6 +344,7 @@ class TestCurationNeverReachesImmutableSets:
     built["fact_set"].period_start = date(2026, 6, 1)
     ext_session.add(
       FiscalPeriod(
+        entity_id=PARENT_ENTITY_ID,
         graph_id="kg0123456789abcdef01",
         name="2026-06",
         start_date=date(2026, 6, 1),

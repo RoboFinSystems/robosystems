@@ -40,9 +40,10 @@ def dispatch_preview(
   session: Session,
   body: CreateEventBlockRequest,
   metadata: JournalEntryRecordedMetadata,
+  entity_id: str | None = None,
 ) -> HandlerPreview:
   """Preview is identical to journal_entry_recorded — see payment_received."""
-  return journal_dispatch_preview(session, body, metadata)
+  return journal_dispatch_preview(session, body, metadata, entity_id)
 
 
 BILL_PAID_HANDLER = EventBlockPythonHandler(

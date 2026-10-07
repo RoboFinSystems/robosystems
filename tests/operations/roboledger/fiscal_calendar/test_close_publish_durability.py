@@ -34,6 +34,7 @@ from robosystems.operations.roboledger.fiscal_calendar.close_service import (
 from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
   WritebackConnection,
 )
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
 
 pytestmark = pytest.mark.unit
 
@@ -57,6 +58,7 @@ def ext_session():
   session = sessionmaker(bind=engine)()
   session.execute(text(f'SET search_path TO "{schema}"'))
   ExtensionsBase.metadata.create_all(bind=session.connection())
+  seed_parent_entity(session)
   session.commit()
   session.execute(text(f'SET search_path TO "{schema}"'))
 
@@ -72,6 +74,7 @@ def ext_session():
 
 def _seed_draft(session, memo: str) -> tuple[Entry, Event]:
   event = Event(
+    entity_id=PARENT_ENTITY_ID,
     event_type="schedule_entry_due",
     event_category="recognition",
     occurred_at=datetime(2026, 6, 15, tzinfo=UTC),
@@ -81,6 +84,7 @@ def _seed_draft(session, memo: str) -> tuple[Entry, Event]:
   session.add(event)
   session.flush()
   entry = Entry(
+    entity_id=PARENT_ENTITY_ID,
     posting_date=date(2026, 6, 15),
     status="draft",
     memo=memo,
@@ -125,7 +129,12 @@ def _publish(session, fake_execute):
     ),
   ):
     svc._publish_drafts_to_qb(
-      session, GRAPH_ID, JUNE_START, JUNE_END, actor_id="usr_test"
+      session,
+      GRAPH_ID,
+      JUNE_START,
+      JUNE_END,
+      actor_id="usr_test",
+      entity_id=PARENT_ENTITY_ID,
     )
 
 

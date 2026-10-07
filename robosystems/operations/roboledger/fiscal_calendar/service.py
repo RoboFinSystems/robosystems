@@ -1,9 +1,10 @@
-"""Rolling close state for the fiscal calendar.
+"""Rolling close state for the fiscal calendar, one calendar per entity.
 
 Owns the `closed_through_period` / `close_target_period` pointers, the
-closeable gate, and the `fiscal_calendar_events` audit trail. Operates
-within the caller's extensions-DB transaction; close orchestration lives in
-the close-period operation.
+closeable gate, and the `fiscal_calendar_events` audit trail. Every call
+takes the entity whose close it is about and defaults to the group parent.
+Operates within the caller's extensions-DB transaction; close orchestration
+lives in the close-period operation.
 """
 
 from __future__ import annotations
@@ -23,6 +24,10 @@ from robosystems.models.extensions.roboledger.fiscal_calendar import (
   FiscalCalendarEvent,
 )
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
+from robosystems.operations.roboledger.entity_scope import (
+  ensure_entity_id,
+  find_entity_id,
+)
 
 from .periods import (
   last_completed_period,
@@ -105,18 +110,37 @@ class AdvanceSequenceError(FiscalCalendarError):
   """Raised when advance_closed_through() receives a non-sequential period."""
 
 
-class FiscalCalendarService:
-  """Fiscal calendar state for a graph. Sessions arrive tenant-scoped."""
+def _scope(session: Session, entity_id: str | None) -> str:
+  """The entity a calendar is being set up for: the one named, else the group
+  parent, which a graph created without an entity gets here."""
+  return entity_id or ensure_entity_id(session)
 
-  def get(self, session: Session, graph_id: str) -> FiscalCalendar | None:
+
+class FiscalCalendarService:
+  """Fiscal calendar state for one entity of a graph. Sessions arrive
+  tenant-scoped."""
+
+  def get(
+    self, session: Session, graph_id: str, *, entity_id: str | None = None
+  ) -> FiscalCalendar | None:
+    """The entity's calendar; None before it is initialized, or on a graph
+    with no entity yet."""
+    entity_id = entity_id or find_entity_id(session)
+    if entity_id is None:
+      return None
     return (
       session.query(FiscalCalendar)
-      .filter(FiscalCalendar.graph_id == graph_id)
+      .filter(
+        FiscalCalendar.graph_id == graph_id,
+        FiscalCalendar.entity_id == entity_id,
+      )
       .one_or_none()
     )
 
-  def require(self, session: Session, graph_id: str) -> FiscalCalendar:
-    calendar = self.get(session, graph_id)
+  def require(
+    self, session: Session, graph_id: str, *, entity_id: str | None = None
+  ) -> FiscalCalendar:
+    calendar = self.get(session, graph_id, entity_id=entity_id)
     if calendar is None:
       raise FiscalCalendarError(
         f"Fiscal calendar not initialized for graph {graph_id}. "
@@ -124,7 +148,9 @@ class FiscalCalendarService:
       )
     return calendar
 
-  def require_locked(self, session: Session, graph_id: str) -> FiscalCalendar:
+  def require_locked(
+    self, session: Session, graph_id: str, *, entity_id: str | None = None
+  ) -> FiscalCalendar:
     """`require`, with the calendar row locked for the write that follows.
 
     Serializes the pointer writers (set-close-target, close's advance,
@@ -134,6 +160,8 @@ class FiscalCalendarService:
     """
     from robosystems.operations.locking import bounded_lock_wait
 
+    # No entity means no calendar: the query below finds none and says so.
+    entity_id = entity_id or find_entity_id(session)
     session.flush()
     with bounded_lock_wait(
       session,
@@ -142,7 +170,10 @@ class FiscalCalendarService:
     ):
       calendar = (
         session.query(FiscalCalendar)
-        .filter(FiscalCalendar.graph_id == graph_id)
+        .filter(
+          FiscalCalendar.graph_id == graph_id,
+          FiscalCalendar.entity_id == entity_id,
+        )
         .populate_existing()
         .with_for_update()
         .one_or_none()
@@ -161,14 +192,22 @@ class FiscalCalendarService:
     *,
     fiscal_year_start_month: int = 1,
     created_by: str | None = None,
+    entity_id: str | None = None,
   ) -> FiscalCalendar:
-    """Idempotent. Leaves both pointers unset; `initialize` does full setup."""
-    calendar = self.get(session, graph_id)
+    """Idempotent. Leaves both pointers unset; `initialize` does full setup.
+
+    Raises `FiscalCalendarError` when a sibling entity's calendar already
+    sets a different fiscal year start: the cadence is the graph's.
+    """
+    entity_id = _scope(session, entity_id)
+    calendar = self.get(session, graph_id, entity_id=entity_id)
     if calendar is not None:
       return calendar
 
+    self._assert_group_cadence(session, graph_id, entity_id, fiscal_year_start_month)
     calendar = FiscalCalendar(
       graph_id=graph_id,
+      entity_id=entity_id,
       fiscal_year_start_month=fiscal_year_start_month,
       created_by=created_by,
       updated_by=created_by,
@@ -178,16 +217,39 @@ class FiscalCalendarService:
       session.flush()
     except IntegrityError as exc:
       # Two initializations raced past the `get` above.
-      if not violates(exc, "uq_fiscal_calendar_graph"):
+      if not violates(exc, "uq_fiscal_calendar_graph_entity"):
         raise
       raise CalendarAlreadyInitializedError(
         f"Fiscal calendar for graph {graph_id} was initialized concurrently."
       ) from exc
     logger.info(
-      f"Created fiscal calendar for graph {graph_id} "
+      f"Created fiscal calendar for graph {graph_id} entity {entity_id} "
       f"(fiscal_year_start_month={fiscal_year_start_month})"
     )
     return calendar
+
+  @staticmethod
+  def _assert_group_cadence(
+    session: Session, graph_id: str, entity_id: str, fiscal_year_start_month: int
+  ) -> None:
+    """One fiscal year cadence per graph: an entity's calendar matches its
+    siblings'."""
+    sibling = (
+      session.query(FiscalCalendar)
+      .filter(
+        FiscalCalendar.graph_id == graph_id,
+        FiscalCalendar.entity_id != entity_id,
+      )
+      .first()
+    )
+    if sibling is None:
+      return
+    group_month = int(sibling.fiscal_year_start_month)
+    if group_month != fiscal_year_start_month:
+      raise FiscalCalendarError(
+        f"This graph's fiscal year starts in month {group_month}; every "
+        f"entity in it shares that cadence (got {fiscal_year_start_month})."
+      )
 
   def initialize(
     self,
@@ -199,17 +261,20 @@ class FiscalCalendarService:
     actor_id: str | None = None,
     actor_type: str = "user",
     note: str | None = None,
+    entity_id: str | None = None,
   ) -> FiscalCalendar:
-    """One-time ledger initialization.
+    """One-time initialization of an entity's calendar.
 
     `closed_through=None` means a fresh business that has never closed; the
     target is then left for the caller to set. Otherwise the target becomes
     the month after `closed_through`, which must be a completed month.
 
-    Raises `CalendarAlreadyInitializedError` if already initialized, and
-    `InvalidCloseTargetError` if `closed_through` is malformed or future.
+    Raises `CalendarAlreadyInitializedError` if already initialized,
+    `InvalidCloseTargetError` if `closed_through` is malformed or future, and
+    `FiscalCalendarError` if the fiscal year start differs from a sibling's.
     """
-    existing = self.get(session, graph_id)
+    entity_id = _scope(session, entity_id)
+    existing = self.get(session, graph_id, entity_id=entity_id)
     if existing is not None and existing.initialized_at is not None:
       raise CalendarAlreadyInitializedError(
         f"Fiscal calendar for graph {graph_id} is already initialized "
@@ -233,7 +298,10 @@ class FiscalCalendarService:
       graph_id,
       fiscal_year_start_month=fiscal_year_start_month,
       created_by=actor_id,
+      entity_id=entity_id,
     )
+    if existing is not None:
+      self._assert_group_cadence(session, graph_id, entity_id, fiscal_year_start_month)
     calendar.fiscal_year_start_month = fiscal_year_start_month
     calendar.closed_through_period = closed_through
     calendar.close_target_period = (
@@ -253,7 +321,7 @@ class FiscalCalendarService:
       note=note,
     )
     logger.info(
-      f"Initialized fiscal calendar for graph {graph_id} "
+      f"Initialized fiscal calendar for graph {graph_id} entity {entity_id} "
       f"closed_through={closed_through} target={calendar.close_target_period}"
     )
     return calendar
@@ -267,6 +335,7 @@ class FiscalCalendarService:
     actor_id: str | None = None,
     actor_type: str = "user",
     note: str | None = None,
+    entity_id: str | None = None,
   ) -> FiscalCalendar:
     """Set the close target: a completed month at or after `closed_through`.
 
@@ -281,7 +350,7 @@ class FiscalCalendarService:
     except ValueError as e:
       raise InvalidCloseTargetError(str(e)) from e
 
-    calendar = self.require_locked(session, graph_id)
+    calendar = self.require_locked(session, graph_id, entity_id=entity_id)
 
     last_valid = last_completed_period()
     if period > last_valid:
@@ -315,15 +384,21 @@ class FiscalCalendarService:
     logger.info(f"Fiscal calendar {graph_id} close_target {previous_value} → {period}")
     return calendar
 
-  def _earliest_open_period(self, session: Session, graph_id: str) -> str | None:
-    """Earliest non-closed FiscalPeriod name (YYYY-MM), or None if none exist.
+  def _earliest_open_period(
+    self, session: Session, graph_id: str, entity_id: str
+  ) -> str | None:
+    """The entity's earliest non-closed FiscalPeriod name (YYYY-MM), or None
+    if none exist.
 
     The first close must be this period: closing a later one first would move
     `closed_through` past the earlier months and strand them for good.
     """
     row = (
       session.query(FiscalPeriod.name)
-      .filter(FiscalPeriod.graph_id == graph_id)
+      .filter(
+        FiscalPeriod.graph_id == graph_id,
+        FiscalPeriod.entity_id == entity_id,
+      )
       .filter(FiscalPeriod.status != "closed")
       .order_by(FiscalPeriod.start_date.asc())
       .first()
@@ -345,7 +420,9 @@ class FiscalCalendarService:
       return False
     if calendar.closed_through_period is not None:
       return next_period(calendar.closed_through_period) == period
-    return self._earliest_open_period(session, graph_id) == period
+    return (
+      self._earliest_open_period(session, graph_id, str(calendar.entity_id)) == period
+    )
 
   def advance_closed_through(
     self,
@@ -356,6 +433,7 @@ class FiscalCalendarService:
     actor_id: str | None = None,
     actor_type: str = "user",
     note: str | None = None,
+    entity_id: str | None = None,
   ) -> FiscalCalendar:
     """Advance `closed_through_period` to `period` after a close.
 
@@ -365,12 +443,14 @@ class FiscalCalendarService:
 
     Raises ``AdvanceSequenceError`` if `period` is out of sequence.
     """
-    calendar = self.require_locked(session, graph_id)
+    calendar = self.require_locked(session, graph_id, entity_id=entity_id)
 
     if calendar.closed_through_period:
       expected: str | None = next_period(calendar.closed_through_period)
     else:
-      expected = self._earliest_open_period(session, graph_id) or period
+      expected = (
+        self._earliest_open_period(session, graph_id, str(calendar.entity_id)) or period
+      )
 
     if period != expected:
       raise AdvanceSequenceError(
@@ -434,13 +514,14 @@ class FiscalCalendarService:
     actor_id: str | None = None,
     actor_type: str = "user",
     note: str | None = None,
+    entity_id: str | None = None,
   ) -> FiscalCalendar:
     """Re-close a reopened period without moving `closed_through_period`.
 
     A reopen of a non-latest period never retreated the pointer, so its
     re-close must not advance it.
     """
-    calendar = self.require_locked(session, graph_id)
+    calendar = self.require_locked(session, graph_id, entity_id=entity_id)
     calendar.last_close_at = datetime.now(UTC)
     calendar.updated_by = actor_id
     session.flush()
@@ -472,6 +553,7 @@ class FiscalCalendarService:
     actor_id: str | None = None,
     actor_type: str = "user",
     note: str | None = None,
+    entity_id: str | None = None,
   ) -> FiscalCalendar:
     """Retreat `closed_through_period` by one if `reopened_period` is it.
 
@@ -483,7 +565,7 @@ class FiscalCalendarService:
     if not reason:
       raise FiscalCalendarError("reopen requires a non-empty reason")
 
-    calendar = self.require_locked(session, graph_id)
+    calendar = self.require_locked(session, graph_id, entity_id=entity_id)
     previous_closed_through = calendar.closed_through_period
 
     if calendar.closed_through_period == reopened_period:
@@ -523,9 +605,11 @@ class FiscalCalendarService:
     allow_reconciling_items: bool = False,
     allow_unposted_source_events: bool = False,
     allow_unreconciled_accounts: bool = False,
+    entity_id: str | None = None,
   ) -> CloseableGateResult:
-    """Check whether `period` can be closed now. Read-only; every blocker is
-    returned, not just the first.
+    """Check whether `period` can be closed now in one entity's books.
+    Read-only; every blocker is returned, not just the first, and each counts
+    that entity's rows only.
 
     Gates: sequence; period complete; sync current; no pending obligations;
     no stranded obligations (bypass: `allow_stranded_obligations`); no
@@ -541,18 +625,23 @@ class FiscalCalendarService:
     today = today or date.today()
     blockers: list[str] = []
 
-    calendar = self.get(session, graph_id)
+    calendar = self.get(session, graph_id, entity_id=entity_id)
     if calendar is None:
       return CloseableGateResult(
         is_closeable=False,
         blockers=[CloseableGateResult.NO_CALENDAR],
       )
+    entity_id = str(calendar.entity_id)
 
     # A reopened period ('closing') can sit anywhere in the closed range;
     # re-closing it fills a gap, so the sequence gates don't apply.
     fp_row = (
       session.query(FiscalPeriod)
-      .filter(FiscalPeriod.graph_id == graph_id, FiscalPeriod.name == period)
+      .filter(
+        FiscalPeriod.graph_id == graph_id,
+        FiscalPeriod.entity_id == entity_id,
+        FiscalPeriod.name == period,
+      )
       .first()
     )
     is_reclose = fp_row is not None and fp_row.status == "closing"
@@ -561,7 +650,7 @@ class FiscalCalendarService:
       if calendar.closed_through_period:
         expected: str | None = next_period(calendar.closed_through_period)
       else:
-        expected = self._earliest_open_period(session, graph_id)
+        expected = self._earliest_open_period(session, graph_id, entity_id)
       if expected is not None and period != expected:
         blockers.append(CloseableGateResult.SEQUENCE)
 
@@ -595,6 +684,7 @@ class FiscalCalendarService:
     pending_count = (
       session.query(Event)
       .filter(
+        Event.entity_id == entity_id,
         Event.event_type == "schedule_entry_due",
         Event.status == "pending",
         Event.occurred_at <= period_end_dt,
@@ -608,6 +698,7 @@ class FiscalCalendarService:
       pending_events = (
         session.query(Event)
         .filter(
+          Event.entity_id == entity_id,
           Event.event_type == "schedule_entry_due",
           Event.status == "pending",
           Event.occurred_at <= period_end_dt,
@@ -627,7 +718,9 @@ class FiscalCalendarService:
       find_stranded_obligations,
     )
 
-    stranded_events = find_stranded_obligations(session, as_of=period_end_dt)
+    stranded_events = find_stranded_obligations(
+      session, as_of=period_end_dt, entity_id=entity_id
+    )
     stranded_count = len(stranded_events)
     stranded_sample: list[PendingObligationDetail] = []
     if stranded_count > 0:
@@ -642,7 +735,9 @@ class FiscalCalendarService:
       find_unresolved_reconciling_items,
     )
 
-    reconciling_rows = find_unresolved_reconciling_items(session, as_of=period_end)
+    reconciling_rows = find_unresolved_reconciling_items(
+      session, as_of=period_end, entity_id=entity_id
+    )
     reconciling_count = len(reconciling_rows)
     reconciling_sample: list[str] = []
     if reconciling_count > 0:
@@ -662,6 +757,7 @@ class FiscalCalendarService:
     posting_date = func.date(func.coalesce(Event.effective_at, Event.occurred_at))
     has_rows = select(Entry.id).where(Entry.triggered_by_event_id == Event.id).exists()
     unposted_query = session.query(Event).filter(
+      Event.entity_id == entity_id,
       Event.status.in_(("captured", "classified")),
       Event.event_type != "schedule_entry_due",
       posting_date >= period_start,
@@ -684,7 +780,7 @@ class FiscalCalendarService:
       unreconciled_for_close,
     )
 
-    unreconciled = unreconciled_for_close(session, period)
+    unreconciled = unreconciled_for_close(session, period, entity_id=entity_id)
     unreconciled_count = len(unreconciled)
     if unreconciled_count > 0 and not allow_unreconciled_accounts:
       blockers.append(CloseableGateResult.UNRECONCILED_ACCOUNTS)
@@ -782,7 +878,9 @@ class FiscalCalendarService:
       start = next_period(calendar.closed_through_period)
     else:
       if session is not None and graph_id is not None:
-        earliest = self._earliest_open_period(session, graph_id)
+        earliest = self._earliest_open_period(
+          session, graph_id, str(calendar.entity_id)
+        )
         start = earliest or calendar.close_target_period
       else:
         return [calendar.close_target_period]
@@ -802,15 +900,21 @@ class FiscalCalendarService:
     start_period: str,
     end_period: str,
     closed_through: str | None = None,
+    entity_id: str | None = None,
   ) -> int:
-    """Create missing monthly FiscalPeriod rows from start to end, inclusive.
+    """Create the entity's missing monthly FiscalPeriod rows from start to
+    end, inclusive.
 
     Periods ≤ `closed_through` are created closed. Returns rows inserted.
     """
+    entity_id = _scope(session, entity_id)
     existing_names = {
       name
       for (name,) in session.query(FiscalPeriod.name)
-      .filter(FiscalPeriod.graph_id == graph_id)
+      .filter(
+        FiscalPeriod.graph_id == graph_id,
+        FiscalPeriod.entity_id == entity_id,
+      )
       .all()
     }
 
@@ -823,6 +927,7 @@ class FiscalCalendarService:
         status = "closed" if (closed_through and current <= closed_through) else "open"
         period = FiscalPeriod(
           graph_id=graph_id,
+          entity_id=entity_id,
           name=current,
           start_date=period_start,
           end_date=period_end,

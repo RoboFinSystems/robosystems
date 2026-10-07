@@ -55,6 +55,17 @@ def _period_gate_open():
 MODULE = "robosystems.operations.roboledger.commands.journal_entries"
 
 _DATE = date(2026, 1, 15)
+ENTITY_ID = "ent_1"
+
+
+@pytest.fixture(autouse=True)
+def _one_entity():
+  """A MagicMock session has no entities table: an entry with no entity named
+  lands on ``ENTITY_ID``."""
+  with patch(
+    f"{MODULE}.ensure_entity_id", side_effect=lambda s, e=None: e or ENTITY_ID
+  ):
+    yield
 
 
 @pytest.fixture(autouse=True)
@@ -92,6 +103,7 @@ def _mock_entry(
 ):
   e = MagicMock()
   e.id = entry_id
+  e.entity_id = ENTITY_ID
   e.status = status
   e.transaction_id = transaction_id
   e.type = "standard"
@@ -473,7 +485,7 @@ class TestCreateJournalEntry:
     mock_resp.return_value = MagicMock()
     session = MagicMock()
     create_journal_entry(session, self._body(), "usr_1")
-    mock_guard.assert_called_once_with(session, _DATE)
+    mock_guard.assert_called_once_with(session, _DATE, entity_id=ENTITY_ID)
 
 
 # ── update_journal_entry ──────────────────────────────────────────────────
@@ -529,7 +541,7 @@ class TestUpdateJournalEntry:
       session,
       UpdateJournalEntryRequest(entry_id="entry_01", posting_date=new_date),
     )
-    mock_guard.assert_called_once_with(session, _DATE, new_date)
+    mock_guard.assert_called_once_with(session, _DATE, new_date, entity_id=ENTITY_ID)
 
   @patch(f"{MODULE}._load_line_items", return_value=[])
   def test_memo_only_update_still_fences_the_existing_period(self, mock_load):
@@ -539,7 +551,7 @@ class TestUpdateJournalEntry:
       update_journal_entry(
         session, UpdateJournalEntryRequest(entry_id="entry_01", memo="Updated")
       )
-      mock_guard.assert_called_once_with(session, _DATE)
+      mock_guard.assert_called_once_with(session, _DATE, entity_id=ENTITY_ID)
 
   @patch(f"{MODULE}.assert_period_not_closed")
   @patch(f"{MODULE}._load_line_items", return_value=[])
@@ -604,7 +616,7 @@ class TestUpdateJournalEntry:
       update_journal_entry(
         session, UpdateJournalEntryRequest(entry_id="entry_01", memo="x")
       )
-    mock_guard.assert_called_once_with(session, date(2026, 1, 15))
+    mock_guard.assert_called_once_with(session, date(2026, 1, 15), entity_id=ENTITY_ID)
 
 
 # ── delete_journal_entry ──────────────────────────────────────────────────
@@ -640,7 +652,7 @@ class TestDeleteJournalEntry:
       result = delete_journal_entry(
         session, DeleteJournalEntryRequest(entry_id="entry_01")
       )
-    mock_guard.assert_called_once_with(session, _DATE)
+    mock_guard.assert_called_once_with(session, _DATE, entity_id=ENTITY_ID)
     assert result == {"deleted": True}
     session.delete.assert_called_once_with(entry)
     session.flush.assert_called()
@@ -722,7 +734,7 @@ class TestDeleteJournalEntry:
     session.get.return_value = locked
     with pytest.raises(RowLockedError, match="moved to another period"):
       delete_journal_entry(session, DeleteJournalEntryRequest(entry_id="entry_01"))
-    mock_guard.assert_called_once_with(session, date(2026, 1, 15))
+    mock_guard.assert_called_once_with(session, date(2026, 1, 15), entity_id=ENTITY_ID)
 
 
 # ── reverse_journal_entry ─────────────────────────────────────────────────
@@ -990,7 +1002,7 @@ class TestInactiveAccountGuard:
     args, kwargs = _accounts_postable.call_args
     assert args[0] is session
     assert sorted(args[1]) == ["elem_cash", "elem_revenue"]
-    assert kwargs == {"source": "quickbooks"}
+    assert kwargs == {"source": "quickbooks", "entity_id": ENTITY_ID}
 
   @patch(f"{MODULE}._entry_to_response")
   @patch(f"{MODULE}.assert_period_not_closed")
@@ -1007,7 +1019,7 @@ class TestInactiveAccountGuard:
     create_journal_entry(session, body, "usr_1")
 
     _args, kwargs = _accounts_postable.call_args
-    assert kwargs == {"source": None}
+    assert kwargs == {"source": None, "entity_id": ENTITY_ID}
 
   @patch(f"{MODULE}.assert_period_not_closed")
   @patch(f"{MODULE}.resolve_flow_element_id", return_value=None)
@@ -1046,4 +1058,4 @@ class TestInactiveAccountGuard:
 
     args, kwargs = _accounts_postable.call_args
     assert sorted(args[1]) == ["elem_cash", "elem_revenue"]
-    assert kwargs == {}
+    assert kwargs == {"entity_id": ENTITY_ID}

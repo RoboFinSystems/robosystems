@@ -1,10 +1,13 @@
-"""Fiscal calendar models — the rolling state of a graph's close cadence.
+"""Fiscal calendar models — the rolling state of an entity's close.
 
-`FiscalCalendar` holds `closed_through_period` (system-maintained) and
-`close_target_period` (user-set). Close processes the periods between them in
-order; when they meet, the target advances one month. `FiscalCalendarEvent`
-is the append-only audit log of every mutation. Isolation comes from the
-tenant schema; `graph_id` is only a defensive discriminator.
+One `FiscalCalendar` row per entity. The fiscal year start is the graph's
+cadence, the same on every row; `closed_through_period` (system-maintained)
+and `close_target_period` (user-set) are that entity's own, so one entity can
+be closed through a month its sibling is still working in. Close processes
+the periods between the two pointers in order; when they meet, the target
+advances one month. `FiscalCalendarEvent` is the append-only audit log of
+every mutation. Isolation comes from the tenant schema; `graph_id` is only a
+defensive discriminator.
 """
 
 from datetime import UTC, datetime
@@ -26,11 +29,11 @@ from robosystems.utils.ulid import generate_prefixed_ulid
 
 
 class FiscalCalendar(ExtensionsBase):
-  """Per-graph rolling close state pointer (tenant-scoped)."""
+  """Per-entity rolling close state pointer (tenant-scoped)."""
 
   __tablename__ = "fiscal_calendar"
   __table_args__ = (
-    UniqueConstraint("graph_id", name="uq_fiscal_calendar_graph"),
+    UniqueConstraint("graph_id", "entity_id", name="uq_fiscal_calendar_graph_entity"),
     Index("idx_fiscal_calendar_graph", "graph_id"),
     CheckConstraint(
       "fiscal_year_start_month BETWEEN 1 AND 12",
@@ -46,8 +49,10 @@ class FiscalCalendar(ExtensionsBase):
 
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("fcal"))
   graph_id = Column(String, nullable=False)
+  entity_id = Column(String, nullable=False)
 
-  # Period naming stays YYYY-MM regardless.
+  # Period naming stays YYYY-MM regardless. One cadence per graph: every
+  # entity's row carries the same month.
   fiscal_year_start_month = Column(Integer, nullable=False, default=1)
 
   # YYYY-MM
@@ -68,7 +73,7 @@ class FiscalCalendar(ExtensionsBase):
 
   def __repr__(self) -> str:
     return (
-      f"<FiscalCalendar {self.graph_id} "
+      f"<FiscalCalendar {self.graph_id} {self.entity_id} "
       f"closed_through={self.closed_through_period} "
       f"target={self.close_target_period}>"
     )

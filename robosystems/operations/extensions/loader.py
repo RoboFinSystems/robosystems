@@ -446,13 +446,19 @@ class OLTPLoader:
           assert_period_not_closed,
         )
 
-        wipe_dates = (
-          session.query(Entry.posting_date)
+        wipe_dates: dict[str, list] = {}
+        for wipe_entity_id, posting_date in (
+          session.query(Entry.entity_id, Entry.posting_date)
           .filter(Entry.triggered_by_event_id.in_(events_to_wipe_subq))
           .distinct()
           .all()
-        )
-        assert_period_not_closed(session, *(d for (d,) in wipe_dates))
+        ):
+          wipe_dates.setdefault(str(wipe_entity_id or ""), []).append(posting_date)
+        for wipe_entity_id, posting_dates in sorted(wipe_dates.items()):
+          # No entity on the row: the guard reads the group parent's calendar.
+          assert_period_not_closed(
+            session, *posting_dates, entity_id=wipe_entity_id or None
+          )
         session.query(LineItem).filter(LineItem.entry_id.in_(entry_subq)).delete(
           synchronize_session=False
         )
@@ -1074,6 +1080,11 @@ class OLTPLoader:
     two non-zero lines are dropped, and so are transactions left with none.
     """
     from robosystems.models.extensions.roboledger import Event
+    from robosystems.operations.roboledger.entity_scope import ensure_entity_id
+
+    # A connection is one entity's source; until a connection carries its own
+    # entity, that is the group parent.
+    entity_id = ensure_entity_id(session)
 
     txns_by_ext: dict[str, dict] = {}
     for row in dbt_data.get("transactions", []) or []:
@@ -1344,6 +1355,7 @@ class OLTPLoader:
       else:
         new_events.append(
           Event(
+            entity_id=entity_id,
             event_type=event_type,
             event_category=event_category,
             event_class="economic",
@@ -1431,18 +1443,16 @@ class OLTPLoader:
     from robosystems.operations.taxonomy_block.coa_mappings import (
       BOOK_FRAMEWORK,
       ensure_mapping_structure,
+      entity_chart_id,
     )
     from robosystems.utils.ulid import generate_prefixed_ulid
 
     try:
       with extensions_session(graph_id, statement_timeout_ms=None) as session:
-        existing_coa = (
-          session.query(Taxonomy)
-          .filter(
-            Taxonomy.taxonomy_type == "chart_of_accounts", Taxonomy.is_active.is_(True)
-          )
-          .first()
-        )
+        # The synced chart is the group parent's: its connection books for it.
+        entity = resolve_parent_entity(session)
+        chart_id = entity_chart_id(session, str(entity.id) if entity else None)
+        existing_coa = session.get(Taxonomy, chart_id) if chart_id else None
 
         if not existing_coa:
           source_label = source.replace("_", " ").title()
@@ -1475,7 +1485,6 @@ class OLTPLoader:
             f"{existing_coa.id} for {graph_id}"
           )
 
-        entity = resolve_parent_entity(session)
         if entity:
           existing_adoption = (
             session.query(EntityTaxonomy)

@@ -26,6 +26,7 @@ from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.operations.roboledger.reads.account_rollups import (
   get_account_rollups,
 )
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
 
 pytestmark = pytest.mark.unit
 
@@ -48,6 +49,7 @@ def ext_session():
   session = sessionmaker(bind=engine)()
   session.execute(text(f'SET search_path TO "{schema}"'))
   ExtensionsBase.metadata.create_all(bind=session.connection())
+  seed_parent_entity(session)
   session.commit()
   session.execute(text(f'SET search_path TO "{schema}"'))
 
@@ -105,6 +107,7 @@ def seeded_mapping(ext_session):
 
   def _entry_with_line(posting_date: date, status: str, credit_cents: int) -> None:
     entry = Entry(
+      entity_id=PARENT_ENTITY_ID,
       posting_date=posting_date,
       status=status,
       created_by="usr_test",

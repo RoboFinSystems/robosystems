@@ -32,6 +32,7 @@ from robosystems.models.api.extensions.reports import (
 from robosystems.models.extensions import Report
 from robosystems.models.extensions.roboledger import Structure
 from robosystems.operations.aws.s3 import S3Client
+from robosystems.operations.roboledger.entity_scope import resolve_entity_id
 from robosystems.operations.roboledger.reads.fiscal_calendar import (
   get_fiscal_year_start_month,
 )
@@ -49,12 +50,13 @@ from robosystems.operations.roboledger.reports.fact_grid import (
 from robosystems.operations.roboledger.reports.guard_rails import validate_report
 from robosystems.operations.roboledger.reports.network_picker import (
   load_close_target_concept,
+  load_entity_reporting_style,
   load_primary_reporting_style,
 )
 from robosystems.operations.serialization.flavors import RdfFlavor, XbrlFlavor
 from robosystems.operations.taxonomy_block.coa_mappings import (
   BOOK_FRAMEWORK,
-  find_mapping_structure,
+  find_entity_mapping,
 )
 
 VALID_BLOCK_TYPES = {
@@ -126,8 +128,10 @@ def generate_adhoc_private_statement(
   statement_type: str,
   periods: list[FactPeriodSpec],
   reporting_style_id: str,
+  entity_id: str | None = None,
 ):
-  """Build a one-shot statement from the current ledger, with no saved Report.
+  """Build a one-shot statement from one entity's current ledger, with no
+  saved Report.
 
   The Network comes from the entity's Reporting Style. The arc walk is scoped
   to rs-gaap-presentation, where every Default Style Network lives; a Style
@@ -136,7 +140,7 @@ def generate_adhoc_private_statement(
   Returns ``(grid, unmapped_count)``. Raises `CoaMappingNotFoundError` if the
   tenant has no CoA→GAAP mapping yet.
   """
-  mapping = find_mapping_structure(session, BOOK_FRAMEWORK)
+  mapping = find_entity_mapping(session, entity_id, BOOK_FRAMEWORK)
   if mapping is None:
     raise CoaMappingNotFoundError(
       "No CoA→GAAP mapping found. Run the mapping workflow first."
@@ -156,6 +160,7 @@ def generate_adhoc_private_statement(
     mapping_id=mapping.id,
     periods=periods,
     close_target_qname=load_close_target_concept(session, reporting_style_id),
+    entity_id=entity_id,
   )
 
   grid = render_structure_view(
@@ -919,21 +924,25 @@ def get_live_financial_statement(
   period_end: date,
   limit: int = 1000,
   reporting_style_id: str | None = None,
+  entity_id: str | None = None,
 ) -> LiveFinancialStatementResponse:
-  """Render a current + prior ad-hoc statement from OLTP data.
+  """Render a current + prior ad-hoc statement from one entity's OLTP data,
+  default the group parent's.
 
   Drops abstract and all-zero rows and caps at ``limit`` (``truncated``).
-  ``reporting_style_id`` defaults to the primary entity's Style. Raises
+  ``reporting_style_id`` defaults to the entity's Style. Raises
   ``CoaMappingNotFoundError`` when no CoA→GAAP mapping exists.
   """
+  entity_id = resolve_entity_id(session, entity_id)
   if reporting_style_id is None:
-    reporting_style_id = load_primary_reporting_style(session)
+    reporting_style_id = load_entity_reporting_style(session, entity_id)
   periods = build_current_and_prior_periods(period_start, period_end)
   grid, unmapped_count = generate_adhoc_private_statement(
     session,
     statement_type=statement_type,
     periods=periods,
     reporting_style_id=reporting_style_id,
+    entity_id=entity_id,
   )
   # Validate the full grid: all-zero children still foot their subtotals.
   validation = validate_report(

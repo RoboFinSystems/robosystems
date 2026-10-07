@@ -12,6 +12,10 @@ from robosystems.models.api.extensions.fiscal_calendar import (
   DraftLineItem,
   PeriodDraftsResponse,
 )
+from robosystems.operations.roboledger.entity_scope import (
+  find_entity_id,
+  is_group_parent,
+)
 from robosystems.operations.roboledger.fiscal_calendar import period_date_range
 from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
   WritebackConnection,
@@ -27,19 +31,27 @@ def list_period_drafts(
   session: Session,
   period: str,
   writeback: WritebackConnection | None = None,
+  *,
+  entity_id: str | None = None,
 ) -> PeriodDraftsResponse:
-  """Return all draft entries for review within a given YYYY-MM period.
+  """Return an entity's draft entries for review within a given YYYY-MM
+  period. ``entity_id`` defaults to the group parent.
 
   With a ``writeback`` connection, each draft carries ``will_publish_to_qb``
   from the same predicate close uses (``qb_writeback.py``); without one, every
-  draft is local-only.
+  draft is local-only. The connection is the group parent's: a subsidiary's
+  drafts never publish to it.
   """
   period_start, period_end = period_date_range(period)
 
+  defaulted = entity_id is None
+  entity_id = find_entity_id(session, entity_id)
+  if entity_id is None or not (defaulted or is_group_parent(session, entity_id)):
+    writeback = None
   has_writeback = writeback is not None
   eligible_ids = (
-    writeback_eligible_entry_ids(session, period_start, period_end)
-    if has_writeback
+    writeback_eligible_entry_ids(session, period_start, period_end, entity_id=entity_id)
+    if has_writeback and entity_id is not None
     else set()
   )
 
@@ -48,6 +60,7 @@ def list_period_drafts(
     start_date=period_start,
     end_date=period_end,
     status="draft",
+    entity_id=entity_id,
     order_by=EntryOrder.PERIOD_REVIEW,
   )
 

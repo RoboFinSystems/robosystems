@@ -41,7 +41,10 @@ from robosystems.operations.information_block.rules.engine import (
   evaluate_rules_for_structure,
 )
 from robosystems.operations.locking import bounded_lock_wait
-from robosystems.operations.roboledger.entity_scope import resolve_entity_id
+from robosystems.operations.roboledger.entity_scope import (
+  ensure_entity_id,
+  owner_entity_id,
+)
 from robosystems.operations.roboledger.fact_set import create_fact_set
 
 from .resolvers import IndependentSide, ReconciliationWindow
@@ -305,6 +308,7 @@ def _create_block(
     name=name,
     description=description,
     block_type=RECONCILIATION_BLOCK_TYPE,
+    entity_id=ensure_entity_id(session),
     taxonomy_id=concepts.taxonomy_id,
     concept_arrangement="set",
     member_arrangement=None,
@@ -413,7 +417,7 @@ def record_reconciliation(
     )
   account_scope = (structure.artifact_mechanics or {}).get("scope") == "account"
   concepts = ensure_reconciliation_concepts(session, created_by)
-  entity_id = resolve_entity_id(session)
+  entity_id = owner_entity_id(session, structure)
   provenance = ObservedProvenance(
     source=side.source,
     method=side.method,
@@ -589,6 +593,7 @@ def record_policy_change(
   what the close waits on leaves a record of who did it and what it was."""
   now = datetime.now(UTC)
   event = Event(
+    entity_id=owner_entity_id(session, structure),
     event_type=POLICY_CHANGE_EVENT_TYPE,
     event_category="control",
     event_class="support",
@@ -620,6 +625,7 @@ def record_sign_off(
   compared = fact_set.metadata_ or {}
   now = datetime.now(UTC)
   event = Event(
+    entity_id=owner_entity_id(session, structure),
     event_type=SIGN_OFF_EVENT_TYPE,
     event_category="approval",
     event_class="support",

@@ -3,6 +3,8 @@ full envelope and every atom is written in one transaction."""
 
 from __future__ import annotations
 
+import re
+
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -21,12 +23,16 @@ from robosystems.models.extensions import (
   Association,
   Element,
   ElementTrait,
+  Entity,
   EntityTaxonomy,
   Structure,
   Taxonomy,
   Trait,
 )
-from robosystems.operations.roboledger.reads.entity import resolve_parent_entity
+from robosystems.operations.roboledger.entity_scope import (
+  find_entity_id,
+  is_group_parent,
+)
 from robosystems.operations.taxonomy_block._helpers import qname_for
 from robosystems.operations.taxonomy_block.auto_rules import (
   emit_auto_rules,
@@ -134,19 +140,58 @@ def _update_efs_classification(
   _assign_efs_classification(session, element_id, identifier)
 
 
-def _auto_link_entity(session: Session, taxonomy_id: str) -> None:
-  """Link the graph entity to this CoA as primary chart_of_accounts.
+_DEFAULT_NAMESPACE = "coa"
 
-  No-op without an entity. Demotes any existing primary CoA link (one
-  primary per entity) and promotes an existing non-primary link.
+
+def chart_namespace(session: Session, entity_id: str | None) -> str | None:
+  """The qname prefix a new chart's accounts take when its author names none.
+
+  Account qnames are unique across the graph, so two entities starting from
+  the same template cannot both mint ``coa:1000``. The group parent's chart
+  keeps the plain prefix (None here, the handler's default); a sibling's gets
+  one of its own, from its ticker or name.
   """
-  entity = resolve_parent_entity(session)
-  if entity is None:
+  if entity_id is None or is_group_parent(session, entity_id):
+    return None
+  entity = session.get(Entity, entity_id)
+  label = (entity.ticker or entity.name or "") if entity is not None else ""
+  slug = re.sub(r"[^a-z0-9]", "", str(label).lower())[:12] or entity_id[-6:].lower()
+  base = f"{_DEFAULT_NAMESPACE}-{slug}"
+  candidate, suffix = base, 1
+  while _namespace_taken(session, candidate):
+    suffix += 1
+    candidate = f"{base}{suffix}"
+  return candidate
+
+
+def _namespace_taken(session: Session, namespace: str) -> bool:
+  return (
+    session.execute(
+      select(Taxonomy.id).where(Taxonomy.standard == namespace).limit(1)
+    ).first()
+    is not None
+    or session.execute(
+      select(Element.id).where(Element.qname.like(f"{namespace}:%")).limit(1)
+    ).first()
+    is not None
+  )
+
+
+def _auto_link_entity(
+  session: Session, taxonomy_id: str, entity_id: str | None
+) -> None:
+  """Link the chart to the entity that keeps its books in it, as that
+  entity's primary chart_of_accounts.
+
+  No-op without an entity. Demotes the entity's existing primary CoA link
+  (one primary per entity) and promotes an existing non-primary link.
+  """
+  if entity_id is None:
     return
 
   existing = session.execute(
     select(EntityTaxonomy).where(
-      EntityTaxonomy.entity_id == entity.id,
+      EntityTaxonomy.entity_id == entity_id,
       EntityTaxonomy.taxonomy_id == taxonomy_id,
       EntityTaxonomy.basis == "chart_of_accounts",
     )
@@ -157,7 +202,7 @@ def _auto_link_entity(session: Session, taxonomy_id: str) -> None:
       return
     existing.is_primary = True
     session.query(EntityTaxonomy).filter(
-      EntityTaxonomy.entity_id == entity.id,
+      EntityTaxonomy.entity_id == entity_id,
       EntityTaxonomy.basis == "chart_of_accounts",
       EntityTaxonomy.is_primary.is_(True),
       EntityTaxonomy.taxonomy_id != taxonomy_id,
@@ -166,7 +211,7 @@ def _auto_link_entity(session: Session, taxonomy_id: str) -> None:
     return
 
   session.query(EntityTaxonomy).filter(
-    EntityTaxonomy.entity_id == entity.id,
+    EntityTaxonomy.entity_id == entity_id,
     EntityTaxonomy.basis == "chart_of_accounts",
     EntityTaxonomy.is_primary.is_(True),
   ).update({"is_primary": False}, synchronize_session=False)
@@ -174,7 +219,7 @@ def _auto_link_entity(session: Session, taxonomy_id: str) -> None:
 
   session.add(
     EntityTaxonomy(
-      entity_id=entity.id,
+      entity_id=entity_id,
       taxonomy_id=taxonomy_id,
       basis="chart_of_accounts",
       is_primary=True,
@@ -198,8 +243,11 @@ def create(
   session: Session,
   payload: CreateTaxonomyBlockRequest,
   created_by: str,
+  *,
+  entity_id: str | None = None,
 ) -> str:
-  """Create a CoA taxonomy + its elements, structures, and associations.
+  """Create an entity's CoA taxonomy + its elements, structures, and
+  associations. ``entity_id`` defaults to the group parent.
 
   Returns the new taxonomy_id. Parents are filled in a second pass, so
   element order in the envelope doesn't matter.
@@ -209,6 +257,12 @@ def create(
       f"chart_of_accounts handler received payload with taxonomy_type="
       f"{payload.taxonomy_type!r}"
     )
+
+  owner_id = find_entity_id(session, entity_id)
+  if payload.standard is None:
+    namespace = chart_namespace(session, owner_id)
+    if namespace is not None:
+      payload = payload.model_copy(update={"standard": namespace})
 
   issues = validate_create_envelope(payload, session)
   if issues:
@@ -351,7 +405,7 @@ def create(
     )
     session.flush()
 
-  _auto_link_entity(session, taxonomy.id)
+  _auto_link_entity(session, taxonomy.id, owner_id)
 
   return taxonomy.id
 

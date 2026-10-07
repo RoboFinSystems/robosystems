@@ -1,6 +1,7 @@
 """Fiscal calendar and period-close commands over `FiscalCalendarService` and
 `PeriodCloseService`. Each takes an extensions session plus a platform
-session (for QB sync state).
+session (for QB sync state), and acts on one entity's calendar: the one it
+names, else the group parent's.
 """
 
 from __future__ import annotations
@@ -26,6 +27,10 @@ from robosystems.operations.locking import (
   bounded_lock_wait,
   exclusive_period_fence,
 )
+from robosystems.operations.roboledger.entity_scope import (
+  ensure_entity_id,
+  find_entity_id,
+)
 from robosystems.operations.roboledger.fiscal_calendar import (
   CloseGateFailed,
   FiscalCalendarError,
@@ -47,7 +52,7 @@ from robosystems.operations.roboledger.fiscal_calendar.close_service import (
 )
 from robosystems.operations.roboledger.reads.fiscal_calendar import (
   build_fiscal_calendar_response,
-  qb_sync_state,
+  entity_sync_state,
 )
 
 
@@ -121,11 +126,14 @@ def initialize_ledger(
   body: InitializeLedgerRequest,
   actor_id: str,
   service: FiscalCalendarService,
+  *,
+  entity_id: str | None = None,
 ) -> tuple[InitializeLedgerResponse, list[str]]:
-  """Initialize a fiscal calendar and seed fiscal periods.
+  """Initialize an entity's fiscal calendar and seed its fiscal periods.
 
   Raises `CalendarAlreadyInitializedError` / `InvalidCloseTargetError`.
   """
+  entity_id = ensure_entity_id(session, entity_id)
   warnings: list[str] = []
   if body.auto_seed_schedules:
     warnings.append(
@@ -142,6 +150,7 @@ def initialize_ledger(
     actor_id=actor_id,
     actor_type="user",
     note=body.note,
+    entity_id=entity_id,
   )
 
   current = current_month_period()
@@ -156,11 +165,12 @@ def initialize_ledger(
     start_period=start_period,
     end_period=current,
     closed_through=body.closed_through,
+    entity_id=entity_id,
   )
 
   session.commit()
 
-  has_sync, last_sync_at = qb_sync_state(platform_db, graph_id)
+  has_sync, last_sync_at = entity_sync_state(session, platform_db, graph_id, entity_id)
   fc_response = build_fiscal_calendar_response(
     session, graph_id, calendar, has_sync, last_sync_at, service
   )
@@ -180,7 +190,10 @@ def set_close_target(
   actor_id: str,
   note: str | None,
   service: FiscalCalendarService,
+  *,
+  entity_id: str | None = None,
 ) -> FiscalCalendarResponse:
+  entity_id = find_entity_id(session, entity_id)
   calendar = service.set_close_target(
     session,
     graph_id,
@@ -188,9 +201,10 @@ def set_close_target(
     actor_id=actor_id,
     actor_type="user",
     note=note,
+    entity_id=entity_id,
   )
   session.commit()
-  has_sync, last_sync_at = qb_sync_state(platform_db, graph_id)
+  has_sync, last_sync_at = entity_sync_state(session, platform_db, graph_id, entity_id)
   return build_fiscal_calendar_response(
     session, graph_id, calendar, has_sync, last_sync_at, service
   )
@@ -212,8 +226,9 @@ def close_period(
   allow_unposted_source_events: bool = False,
   allow_unreconciled_accounts: bool = False,
   fence_wait_ms: int | None = None,
+  entity_id: str | None = None,
 ) -> ClosePeriodResponse:
-  """Close a fiscal period and commit.
+  """Close one entity's fiscal period and commit.
 
   `fence_wait_ms=None` uses the request default (no wait); the worker
   passes its own budget.
@@ -222,7 +237,6 @@ def close_period(
   `PeriodAlreadyClosedError`, `RowLockedError`, `UnbalancedLedgerError`,
   `WritebackFailed`, `StatementStampError`, `FiscalCalendarError`.
   """
-  has_sync, last_sync_at = qb_sync_state(platform_db, graph_id)
   # The fence spans the QB publish commit and this commit, so no writer can
   # slip a draft into the month between stamping and commit.
   with exclusive_period_fence(
@@ -234,6 +248,14 @@ def close_period(
     ),
     wait_ms=fence_wait_ms,
   ):
+    # Resolved under the fence: the worker can wait on it for minutes, and a
+    # query before the wait would leave this session idle in a transaction.
+    # None only on a graph with no entity, where the gate reports the missing
+    # calendar.
+    entity_id = find_entity_id(session, entity_id)
+    has_sync, last_sync_at = entity_sync_state(
+      session, platform_db, graph_id, entity_id
+    )
     result = close_service.close(
       session,
       graph_id,
@@ -248,6 +270,7 @@ def close_period(
       allow_unposted_source_events=allow_unposted_source_events,
       allow_unreconciled_accounts=allow_unreconciled_accounts,
       note=note,
+      entity_id=entity_id,
     )
     session.commit()
 
@@ -285,8 +308,10 @@ def reopen_period(
   note: str | None,
   service: FiscalCalendarService,
   actor_type: str = "user",
+  entity_id: str | None = None,
 ) -> ReopenPeriodResult:
-  """Reopen the latest closed period, retracting its canonical statements.
+  """Reopen an entity's latest closed period, retracting its canonical
+  statements.
 
   Raises `PeriodNotFoundInLedgerError`, `PeriodNotClosedError`,
   `ReopenOrderError` (a later month is still closed), or
@@ -295,6 +320,7 @@ def reopen_period(
   # Same fence as close_period, so a reopen can't interleave with a close
   # or another reopen. Lock order: fence, then the FiscalPeriod row.
   with exclusive_period_fence(graph_id, period, detail=_fence_detail(period)):
+    entity_id = find_entity_id(session, entity_id)
     calendar, retracted = _reopen_under_fence(
       session,
       graph_id,
@@ -304,6 +330,7 @@ def reopen_period(
       note=note,
       service=service,
       actor_type=actor_type,
+      entity_id=entity_id,
     )
     session.commit()
 
@@ -311,7 +338,7 @@ def reopen_period(
 
   mark_graph_stale(graph_id, "period_reopened")
 
-  has_sync, last_sync_at = qb_sync_state(platform_db, graph_id)
+  has_sync, last_sync_at = entity_sync_state(session, platform_db, graph_id, entity_id)
   return ReopenPeriodResult(
     fiscal_calendar=build_fiscal_calendar_response(
       session, graph_id, calendar, has_sync, last_sync_at, service
@@ -337,6 +364,7 @@ def _reopen_under_fence(
   note: str | None,
   service: FiscalCalendarService,
   actor_type: str,
+  entity_id: str | None,
   enforce_latest: bool = True,
 ):
   """The reopen's writes, flushed but not committed.
@@ -353,19 +381,25 @@ def _reopen_under_fence(
   with bounded_lock_wait(session, _fence_detail(period)):
     fp = (
       session.query(FiscalPeriod)
-      .filter(FiscalPeriod.graph_id == graph_id, FiscalPeriod.name == period)
+      .filter(
+        FiscalPeriod.graph_id == graph_id,
+        FiscalPeriod.entity_id == entity_id,
+        FiscalPeriod.name == period,
+      )
       .populate_existing()
       .with_for_update()
       .one_or_none()
     )
-  if fp is None:
+  if fp is None or entity_id is None:
     raise PeriodNotFoundInLedgerError(period)
   if fp.status != "closed":
     raise PeriodNotClosedError(period, fp.status)
   if enforce_latest:
     # Under the calendar lock (period row first, then calendar, as close's
     # advance takes them): an unlocked read races the next month's close.
-    closed_through = service.require_locked(session, graph_id).closed_through_period
+    closed_through = service.require_locked(
+      session, graph_id, entity_id=entity_id
+    ).closed_through_period
     if closed_through != period:
       raise ReopenOrderError(period, closed_through)
 
@@ -382,6 +416,7 @@ def _reopen_under_fence(
     actor_id=actor_id,
     actor_type=actor_type,
     note=note,
+    entity_id=entity_id,
   )
   # The reopened window's schedule facts go back from 'historical' to
   # 'in_scope' so the re-close sees the movement. Local import: module cycle.
@@ -389,14 +424,16 @@ def _reopen_under_fence(
     reinstate_reopened_schedule_scopes,
   )
 
-  reinstate_reopened_schedule_scopes(session)
+  reinstate_reopened_schedule_scopes(session, entity_id)
 
   from robosystems.operations.roboledger.reports.statement_sets import (
     retract_canonical_statement_sets,
   )
 
   ps, pe = period_date_range(period)
-  retracted = retract_canonical_statement_sets(session, period_start=ps, period_end=pe)
+  retracted = retract_canonical_statement_sets(
+    session, period_start=ps, period_end=pe, entity_id=entity_id
+  )
   return calendar, retracted
 
 
@@ -409,8 +446,9 @@ def backfill_plan_history(
   service: FiscalCalendarService,
   close_service: PeriodCloseService,
   actor_type: str = "user",
+  entity_id: str | None = None,
 ) -> BackfillPlanHistoryResponse:
-  """Compile monthly statement history behind the close boundary.
+  """Compile an entity's monthly statement history behind its close boundary.
 
   Walks months lacking canonical statements (every month with
   ``body.restamp``) oldest-first through a real reopen → close, so every
@@ -421,7 +459,10 @@ def backfill_plan_history(
 
   Raises `FiscalCalendarError` or `BackfillPreconditionError`.
   """
-  calendar = service.require(session, graph_id)
+  entity_id = find_entity_id(session, entity_id)
+  calendar = service.require(session, graph_id, entity_id=entity_id)
+  # The calendar exists, so its entity does.
+  entity_id = entity_id or str(calendar.entity_id)
   closed_through = calendar.closed_through_period
   if closed_through is None:
     raise BackfillPreconditionError(
@@ -431,7 +472,11 @@ def backfill_plan_history(
       "catch up normally.",
     )
 
-  earliest_date = session.query(sa_func.min(Entry.posting_date)).scalar()
+  earliest_date = (
+    session.query(sa_func.min(Entry.posting_date))
+    .filter(Entry.entity_id == entity_id)
+    .scalar()
+  )
   if earliest_date is None:
     raise BackfillPreconditionError(
       "no_ledger_data",
@@ -455,6 +500,7 @@ def backfill_plan_history(
     start_period=start,
     end_period=closed_through,
     closed_through=closed_through,
+    entity_id=entity_id,
   )
   if rows_created:
     session.commit()
@@ -469,7 +515,7 @@ def backfill_plan_history(
   while current <= closed_through:
     ps, pe = period_date_range(current)
     if body.restamp or not has_canonical_statement_sets(
-      session, period_start=ps, period_end=pe
+      session, period_start=ps, period_end=pe, entity_id=entity_id
     ):
       candidates.append(current)
     current = next_period(current)
@@ -477,7 +523,7 @@ def backfill_plan_history(
   processed: list[BackfillPeriodOutcome] = []
   for period in candidates[: body.max_periods]:
     ps, pe = period_date_range(period)
-    draft_count = drafts_close_posts(session, ps, pe).count()
+    draft_count = drafts_close_posts(session, ps, pe, entity_id=entity_id).count()
     if draft_count:
       processed.append(
         BackfillPeriodOutcome(
@@ -493,7 +539,11 @@ def backfill_plan_history(
 
     fp = (
       session.query(FiscalPeriod)
-      .filter(FiscalPeriod.graph_id == graph_id, FiscalPeriod.name == period)
+      .filter(
+        FiscalPeriod.graph_id == graph_id,
+        FiscalPeriod.entity_id == entity_id,
+        FiscalPeriod.name == period,
+      )
       .one()
     )
     try:
@@ -515,6 +565,7 @@ def backfill_plan_history(
           allow_reconciling_items=body.allow_reconciling_items,
           allow_unposted_source_events=body.allow_unposted_source_events,
           allow_unreconciled_accounts=body.allow_unreconciled_accounts,
+          entity_id=entity_id,
         )
       else:
         close_result = close_period(
@@ -532,6 +583,7 @@ def backfill_plan_history(
           allow_reconciling_items=body.allow_reconciling_items,
           allow_unposted_source_events=body.allow_unposted_source_events,
           allow_unreconciled_accounts=body.allow_unreconciled_accounts,
+          entity_id=entity_id,
         )
       processed.append(
         BackfillPeriodOutcome(
@@ -562,8 +614,8 @@ def backfill_plan_history(
   attempted = {outcome.period for outcome in processed}
   remaining = [p for p in candidates if p not in attempted]
 
-  refreshed = service.require(session, graph_id)
-  has_sync, last_sync_at = qb_sync_state(platform_db, graph_id)
+  refreshed = service.require(session, graph_id, entity_id=entity_id)
+  has_sync, last_sync_at = entity_sync_state(session, platform_db, graph_id, entity_id)
   return BackfillPlanHistoryResponse(
     fiscal_calendar=build_fiscal_calendar_response(
       session, graph_id, refreshed, has_sync, last_sync_at, service
@@ -591,14 +643,16 @@ def _restamp_closed_period(
   allow_stale_sync: bool,
   allow_stranded_obligations: bool,
   allow_reconciling_items: bool,
+  entity_id: str,
   allow_unposted_source_events: bool = False,
   allow_unreconciled_accounts: bool = False,
 ) -> ClosePeriodResponse:
-  """Reopen and re-close a period in one transaction under one fence.
+  """Reopen and re-close an entity's period in one transaction under one
+  fence.
 
   Any failure rolls the reopen back with it.
   """
-  has_sync, last_sync_at = qb_sync_state(platform_db, graph_id)
+  has_sync, last_sync_at = entity_sync_state(session, platform_db, graph_id, entity_id)
   with exclusive_period_fence(graph_id, period, detail=_fence_detail(period)):
     _reopen_under_fence(
       session,
@@ -609,6 +663,7 @@ def _restamp_closed_period(
       note=note,
       service=service,
       actor_type=actor_type,
+      entity_id=entity_id,
       enforce_latest=False,
     )
     result = close_service.close(
@@ -625,6 +680,7 @@ def _restamp_closed_period(
       allow_unposted_source_events=allow_unposted_source_events,
       allow_unreconciled_accounts=allow_unreconciled_accounts,
       note=note,
+      entity_id=entity_id,
     )
     session.commit()
 

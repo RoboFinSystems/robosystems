@@ -33,6 +33,7 @@ from robosystems.models.extensions import Element
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.operations.roboledger.reads.trial_balance import get_trial_balance
+from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
 
 pytestmark = pytest.mark.unit
 
@@ -56,6 +57,7 @@ def ext_session():
   session = sessionmaker(bind=engine)()
   session.execute(text(f'SET search_path TO "{schema}"'))
   ExtensionsBase.metadata.create_all(bind=session.connection())
+  seed_parent_entity(session)
   session.commit()
   session.execute(text(f'SET search_path TO "{schema}"'))
 
@@ -89,6 +91,7 @@ def _entry(
   reversal_of=None,
 ):
   entry = Entry(
+    entity_id=PARENT_ENTITY_ID,
     posting_date=date(2026, 3, 10),
     status=status,
     type=type_,

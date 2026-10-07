@@ -97,7 +97,9 @@ def _resolve_base_period(
   from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
 
   calendar = (
-    session.query(FiscalCalendar).order_by(FiscalCalendar.created_at.asc()).first()
+    session.query(FiscalCalendar)
+    .filter(FiscalCalendar.entity_id == entity_id)
+    .one_or_none()
   )
   if calendar is not None and calendar.closed_through_period:
     return calendar.closed_through_period

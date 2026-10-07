@@ -35,10 +35,15 @@ from robosystems.operations.locking import (
   ordered_lock_column,
 )
 from robosystems.operations.roboledger.commands._guards import (
+  AccountOutsideEntityChartError,
   ClosedPeriodError,
   InactiveAccountError,
   assert_accounts_postable,
   assert_period_not_closed,
+)
+from robosystems.operations.roboledger.entity_scope import (
+  ensure_entity_id,
+  find_entity_id,
 )
 from robosystems.operations.roboledger.entry_status import (
   LANDED_ENTRY_STATUSES,
@@ -347,8 +352,10 @@ def _build_event_row(
   body: CreateEventBlockRequest,
   created_by: str,
   status: str,
+  entity_id: str,
 ) -> Event:
   return Event(
+    entity_id=entity_id,
     event_type=body.event_type,
     event_category=body.event_category,
     event_class=body.event_class,
@@ -379,8 +386,12 @@ def create_event_block(
   created_by: str,
   *,
   graph_id: str,
+  entity_id: str | None = None,
 ) -> EventBlockEnvelope:
   """Persist an event block and commit, optionally firing its handler.
+
+  The event lands on ``entity_id``, default the group parent, and every GL
+  row its handler writes inherits that entity.
 
   ``apply_handlers=False`` captures the row (``status='captured'``, no GL
   rows). ``apply_handlers=True`` resolves a handler (Python registry first,
@@ -394,7 +405,7 @@ def create_event_block(
   # internal callers that set their own.
   _refuse_system_metadata(body.metadata)
   _event, envelope = create_event_block_in_session(
-    session, body, created_by, graph_id=graph_id
+    session, body, created_by, graph_id=graph_id, entity_id=entity_id
   )
   session.commit()
   return envelope
@@ -406,6 +417,7 @@ def create_event_block_in_session(
   created_by: str,
   *,
   graph_id: str,
+  entity_id: str | None = None,
 ) -> tuple[Event, EventBlockEnvelope]:
   """:func:`create_event_block` without the commit; returns row and envelope.
 
@@ -415,6 +427,7 @@ def create_event_block_in_session(
   refuse_reserved_event_type(body.event_type)
   _validate_event_source(body.source, graph_id)
   _validate_routed_connection(body.metadata, graph_id)
+  entity_id = ensure_entity_id(session, entity_id)
   _assert_not_duplicate(session, body)
 
   if body.apply_handlers:
@@ -427,7 +440,9 @@ def create_event_block_in_session(
           f"event_type='{body.event_type}' metadata validation failed: {e}"
         )
 
-      event = _build_event_row(body, created_by, status=python_handler.target_status)
+      event = _build_event_row(
+        body, created_by, python_handler.target_status, entity_id
+      )
       session.add(event)
       _flush_new_event(session, event, body)
 
@@ -453,7 +468,7 @@ def create_event_block_in_session(
       metadata=body.metadata,
     )
 
-    event = _build_event_row(body, created_by, status="classified")
+    event = _build_event_row(body, created_by, "classified", entity_id)
     session.add(event)
     _flush_new_event(session, event, body)
 
@@ -468,7 +483,7 @@ def create_event_block_in_session(
     envelope = _to_envelope(event, body.dimension_ids)
     return event, envelope
 
-  event = _build_event_row(body, created_by, status="captured")
+  event = _build_event_row(body, created_by, "captured", entity_id)
   session.add(event)
   _flush_new_event(session, event, body)
 
@@ -615,13 +630,13 @@ def update_event_block(
     )
     fence_dates.update(_retraction_fence_dates(session, peek.id))
   if fence_dates:
-    assert_period_not_closed(session, *sorted(fence_dates))
+    assert_period_not_closed(session, *sorted(fence_dates), entity_id=peek.entity_id)
   # Retraction fence (see `_assert_retractable`), on the rows' own posting
   # dates: an event with no ledger rows stays retractable in a closed period.
   if body.transition_to in _RETRACTED_STATUSES:
     retraction_dates = _retraction_fence_dates(session, peek.id)
     if retraction_dates:
-      assert_period_not_closed(session, *retraction_dates)
+      assert_period_not_closed(session, *retraction_dates, entity_id=peek.entity_id)
   with bounded_lock_wait(
     session,
     f"Event {body.event_id} is being written by another process "
@@ -777,10 +792,15 @@ def preview_event_block(
   session: Session,
   body: CreateEventBlockRequest,
   created_by: str,
+  *,
+  entity_id: str | None = None,
 ) -> PreviewEventBlockResponse:
-  """Dry-run handler resolution and template evaluation; writes nothing."""
+  """Dry-run handler resolution and template evaluation; writes nothing.
+  Checked against ``entity_id``'s calendar and chart, default the group
+  parent's."""
   from robosystems.operations.roboledger.reads.event_handler import handler_to_response
 
+  entity_id = find_entity_id(session, entity_id)
   python_handler = get_python_handler(body.event_type)
   if python_handler is not None:
     try:
@@ -792,7 +812,7 @@ def preview_event_block(
         validation_errors=[f"metadata validation: {e}"],
         would_succeed=False,
       )
-    preview = python_handler.dispatch_preview(session, body, typed_metadata)
+    preview = python_handler.dispatch_preview(session, body, typed_metadata, entity_id)
     return _python_preview_to_response(preview, python_handler)
 
   errors: list[str] = []
@@ -835,6 +855,7 @@ def preview_event_block(
         effective_at=body.effective_at,
         occurred_at=body.occurred_at,
       ),
+      entity_id=entity_id,
     )
   except (ClosedPeriodError, RowLockedError) as e:
     errors.append(str(e))
@@ -904,8 +925,9 @@ def preview_event_block(
         for txn in planned
         for element_id in (txn.debit_element_id, txn.credit_element_id)
       ),
+      entity_id=entity_id,
     )
-  except InactiveAccountError as e:
+  except (InactiveAccountError, AccountOutsideEntityChartError) as e:
     errors.append(str(e))
 
   return PreviewEventBlockResponse(
@@ -987,6 +1009,7 @@ def execute_event_block(
         effective_at=peek.effective_at,
         occurred_at=peek.occurred_at,
       ),
+      entity_id=peek.entity_id,
     )
   with bounded_lock_wait(
     session,

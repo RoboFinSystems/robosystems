@@ -17,11 +17,26 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from robosystems.operations.roboledger.reads.journal_entries import (
   list_journal_entries,
 )
+
+ENTITY_ID = "ent_1"
+
+
+@pytest.fixture(autouse=True)
+def _one_entity():
+  """The mock session serves the count and entry queries in order; the
+  entity lookup is answered here so it takes neither."""
+  with patch(
+    "robosystems.operations.roboledger.reads.journal_entries.find_entity_id",
+    side_effect=lambda s, e=None: e or ENTITY_ID,
+  ):
+    yield
 
 
 def _line_row(

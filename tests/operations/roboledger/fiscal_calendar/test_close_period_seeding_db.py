@@ -19,6 +19,7 @@ from robosystems.operations.roboledger.fiscal_calendar import (
 from robosystems.operations.roboledger.reports.statement_sets import (
   StatementStampResult,
 )
+from tests.ledger_entity import seed_parent_entity
 
 pytestmark = pytest.mark.unit
 
@@ -39,6 +40,7 @@ def session():
   db = sessionmaker(bind=engine)()
   db.execute(text(f'SET search_path TO "{schema}"'))
   ExtensionsBase.metadata.create_all(bind=db.connection())
+  seed_parent_entity(db)
   db.commit()
   db.execute(text(f'SET search_path TO "{schema}"'))
   try:

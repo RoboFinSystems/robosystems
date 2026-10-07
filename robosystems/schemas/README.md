@@ -116,10 +116,12 @@ Selected relationships:
 - `EVENT_DISCHARGES_EVENT` — settlement / reciprocity
 - `EVENT_REPLACES_EVENT` — correction chain
 
-Parent–subsidiary ownership has **no edge**: nothing writes one on either path
-(SEC or OLTP materialization), so `base.py` declares no `ENTITY_OWNS_ENTITY`.
-Ownership is carried today by the `Entity.parent_entity_id` property, sourced
-from OLTP `entities.parent_entity_id`.
+Parent–subsidiary ownership is `ENTITY_OWNS_ENTITY`, declared in the
+`roboledger` extension rather than here: a ledger graph is a reporting group
+whose parent owns the subsidiaries that keep their books in it, and OLTP
+materialization writes the edge from `entities.parent_entity_id`. The SEC path
+writes none, so the base schema declares none; `Entity.parent_entity_id`
+carries the same fact as a property on both.
 
 `Agent` and `Event` are universal REA primitives. `Event.event_action` carries the canonical action vocabulary
 (`models/extensions/roboledger/event.py:EVENT_ACTIONS`), refining the coarser

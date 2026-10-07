@@ -27,6 +27,7 @@ from robosystems.operations.information_block.reconciliation import (
   RECONCILIATION_FACTSET_TYPE,
   own_rule_id,
 )
+from robosystems.operations.roboledger.entity_scope import find_entity_id
 from robosystems.operations.roboledger.fiscal_calendar import period_date_range
 
 _QNAME_PREFIX = "rs-rec:"
@@ -62,6 +63,7 @@ def _stale_blocks(
   period: str,
   structures: list[Structure],
   fact_sets: dict[str, FactSet],
+  entity_id: str | None,
 ) -> set[str]:
   """The blocks whose recorded comparison no longer describes the books.
 
@@ -94,11 +96,15 @@ def _stale_blocks(
   if not compared:
     return set()
   closed_through = session.execute(
-    select(FiscalCalendar.closed_through_period).limit(1)
+    select(FiscalCalendar.closed_through_period)
+    .where(FiscalCalendar.entity_id == entity_id)
+    .limit(1)
   ).scalar()
   if closed_through and period <= closed_through:
     return set()
-  window = reconciliation_window(period, get_fiscal_year_start_month(session))
+  window = reconciliation_window(
+    period, get_fiscal_year_start_month(session), entity_id
+  )
 
   def _account_digests(method: str) -> dict[str, str]:
     element_ids = frozenset(
@@ -146,19 +152,24 @@ def _observed_at(provenance: dict | None) -> datetime | None:
   return datetime.fromisoformat(value) if value else None
 
 
-def list_reconciliations(session: Session, period: str) -> ReconciliationListResponse:
-  """Each active reconciliation block's standing at the period's last day.
+def list_reconciliations(
+  session: Session, period: str, *, entity_id: str | None = None
+) -> ReconciliationListResponse:
+  """Each of an entity's active reconciliation blocks, with its standing at
+  the period's last day. ``entity_id`` defaults to the group parent.
 
   A block with no comparison for the period is ``not_started``. Raises
   ``ValueError`` on a malformed period.
   """
   _, as_of = period_date_range(period)
+  entity_id = find_entity_id(session, entity_id)
   structures = (
     session.execute(
       select(Structure)
       .where(
         Structure.block_type == RECONCILIATION_BLOCK_TYPE,
         Structure.is_active.is_(True),
+        Structure.entity_id == entity_id,
       )
       .order_by(Structure.created_at.asc(), Structure.id.asc())
     )
@@ -211,7 +222,7 @@ def list_reconciliations(session: Session, period: str) -> ReconciliationListRes
   )
 
   sign_offs = standing_sign_offs(session, structure_ids, period)
-  stale = _stale_blocks(session, period, list(structures), fact_sets)
+  stale = _stale_blocks(session, period, list(structures), fact_sets, entity_id)
 
   def _count(fact_set_id: str, name: str) -> int | None:
     value = values.get((fact_set_id, name))
@@ -287,12 +298,14 @@ def ready_for_close(rec: ReconciliationSummary) -> bool:
 
 
 def unreconciled_for_close(
-  session: Session, period: str
+  session: Session, period: str, *, entity_id: str | None = None
 ) -> list[ReconciliationSummary]:
-  """The reconciliations a close of ``period`` waits on that are not ready
-  for it, including any never compared."""
+  """The reconciliations an entity's close of ``period`` waits on that are
+  not ready for it, including any never compared."""
   return [
     rec
-    for rec in list_reconciliations(session, period).reconciliations
+    for rec in list_reconciliations(
+      session, period, entity_id=entity_id
+    ).reconciliations
     if rec.required_for_close and not ready_for_close(rec)
   ]

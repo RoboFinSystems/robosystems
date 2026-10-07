@@ -32,6 +32,7 @@ def _event(event_id: str, status: str = "classified") -> SimpleNamespace:
   """Build a minimal stand-in for an Event row that satisfies _to_envelope."""
   return SimpleNamespace(
     id=event_id,
+    entity_id="ent_1",
     event_type="invoice_issued",
     event_category="sales",
     event_class="economic",
@@ -883,7 +884,7 @@ class TestFieldCorrections:
       ),
       patch(
         "robosystems.operations.event_block.commands.assert_period_not_closed",
-        side_effect=lambda _s, *dates: fenced.extend(dates),
+        side_effect=lambda _s, *dates, **_scope: fenced.extend(dates),
       ),
     ):
       body = UpdateEventBlockRequest(
@@ -949,7 +950,7 @@ class TestFieldCorrections:
       ),
       patch(
         "robosystems.operations.event_block.commands.assert_period_not_closed",
-        side_effect=lambda _s, *dates: fenced.extend(dates),
+        side_effect=lambda _s, *dates, **_scope: fenced.extend(dates),
       ),
     ):
       body = UpdateEventBlockRequest(

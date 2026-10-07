@@ -15,12 +15,18 @@ from robosystems.models.api.extensions.account_rollups import (
   AccountRollupsResponse,
 )
 from robosystems.models.extensions.roboledger import COA_SOURCES, Structure
+from robosystems.operations.roboledger.entity_scope import find_entity_id
 from robosystems.operations.roboledger.entry_status import (
   landed_entry_bindparam,
 )
+from robosystems.operations.roboledger.reads.accounts import (
+  OWNED_ACCOUNT_SQL,
+  mapping_account_scope,
+)
 from robosystems.operations.taxonomy_block.coa_mappings import (
   BOOK_FRAMEWORK,
-  find_mapping_structure,
+  find_entity_mapping,
+  mapping_owner_id,
 )
 
 
@@ -79,6 +85,7 @@ _ROLLUP_SQL = text("""
     FROM line_items li
     JOIN entries e ON e.id = li.entry_id
     WHERE e.status IN :landed_entry_statuses
+      AND (:entity_id IS NULL OR e.entity_id = :entity_id)
       AND (e.posting_date >= :start_date OR :start_date IS NULL)
       AND (e.posting_date <= :end_date OR :end_date IS NULL)
     GROUP BY li.element_id
@@ -89,13 +96,14 @@ _ROLLUP_SQL = text("""
 """).bindparams(landed_entry_bindparam())
 
 
-_UNMAPPED_SQL = text("""
+_UNMAPPED_SQL = text(f"""
   SELECT COUNT(*) AS cnt
   FROM elements e
   WHERE e.source = ANY(:sources)
     AND (e.taxonomy_id IS NULL OR e.taxonomy_id IN (
       SELECT id FROM taxonomies WHERE taxonomy_type = 'chart_of_accounts'
     ))
+    AND {OWNED_ACCOUNT_SQL.format(alias="e")}
     AND e.is_active = true
     AND e.is_abstract = false
     AND NOT EXISTS (
@@ -113,13 +121,19 @@ def get_account_rollups(
   mapping_id: str | None = None,
   start_date: date | None = None,
   end_date: date | None = None,
+  entity_id: str | None = None,
 ) -> AccountRollupsResponse:
-  """Return CoA accounts grouped by reporting element with balances.
+  """Return one entity's CoA accounts grouped by reporting element with
+  balances.
 
-  Without `mapping_id`, uses the book mapping (empty response if none). Raises `MappingNotFoundError` for an unknown id.
+  Without `mapping_id`, uses the entity's book mapping, default the group
+  parent's (empty response if none). A `mapping_id` names the entity itself:
+  the one whose chart it maps from. Raises `MappingNotFoundError` for an
+  unknown id.
   """
   if not mapping_id:
-    mapping = find_mapping_structure(session, BOOK_FRAMEWORK)
+    entity_id = find_entity_id(session, entity_id)
+    mapping = find_entity_mapping(session, entity_id, BOOK_FRAMEWORK)
 
     if not mapping:
       return AccountRollupsResponse(
@@ -136,6 +150,7 @@ def get_account_rollups(
     if not mapping:
       raise MappingNotFoundError("Mapping not found")
     mapping_name = str(mapping.name)
+    entity_id = mapping_owner_id(session, mapping_id) or find_entity_id(session)
 
   result = session.execute(
     _ROLLUP_SQL,
@@ -143,6 +158,7 @@ def get_account_rollups(
       "mapping_id": mapping_id,
       "start_date": start_date,
       "end_date": end_date,
+      "entity_id": entity_id,
     },
   )
 
@@ -187,7 +203,11 @@ def get_account_rollups(
 
   unmapped_result = session.execute(
     _UNMAPPED_SQL,
-    {"mapping_id": mapping_id, "sources": list(COA_SOURCES)},
+    {
+      "mapping_id": mapping_id,
+      "sources": list(COA_SOURCES),
+      **mapping_account_scope(session, mapping_id).params(),
+    },
   )
   unmapped_row = unmapped_result.fetchone()
   total_unmapped = unmapped_row.cnt if unmapped_row else 0
