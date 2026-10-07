@@ -164,7 +164,13 @@ def cached_link_token(
   try:
     raw = create_redis_client(ValkeyDatabase.AUTH).get(_link_token_key(connection_id))
   except Exception as exc:
-    logger.warning(f"Plaid Link token cache read failed for {connection_id}: {exc}")
+    # The exception text is not logged: a Valkey client error can carry its
+    # connection URL, credentials and all.
+    logger.warning(
+      "Plaid Link token cache read failed for %s: %s",
+      connection_id,
+      type(exc).__name__,
+    )
     return None
   if not raw:
     return None
@@ -200,7 +206,11 @@ def cache_link_token(
       ),
     )
   except Exception as exc:
-    logger.warning(f"Plaid Link token cache write failed for {connection_id}: {exc}")
+    logger.warning(
+      "Plaid Link token cache write failed for %s: %s",
+      connection_id,
+      type(exc).__name__,
+    )
 
 
 def forget_link_token(connection_id: str) -> None:
@@ -208,7 +218,11 @@ def forget_link_token(connection_id: str) -> None:
   try:
     create_redis_client(ValkeyDatabase.AUTH).delete(_link_token_key(connection_id))
   except Exception as exc:
-    logger.warning(f"Plaid Link token cache delete failed for {connection_id}: {exc}")
+    logger.warning(
+      "Plaid Link token cache delete failed for %s: %s",
+      connection_id,
+      type(exc).__name__,
+    )
 
 
 async def create_link_token(
