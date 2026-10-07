@@ -340,7 +340,7 @@ class TestTransferLegsAcrossSyncs:
       self._waiting(), self._incoming(), connection_id="conn_1", item_id=ITEM_ID
     )
     assert merged["event_type"] == "internal_transfer"
-    assert merged["external_id"] == "plaid_xfer_t_in"
+    assert merged["external_id"] == "plaid_xfer_t_in_t_out"
     assert merged["metadata"]["legs"] == ["t_out", "t_in"]
     assert merged["metadata"]["from_element_id"] == "e_chk"
     assert merged["metadata"]["to_element_id"] == "e_sav"

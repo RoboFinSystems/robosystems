@@ -263,6 +263,8 @@ class TestCompleteLink:
     assert "status" not in first
     assert creds["access_token"] == "access-new" and creds["item_id"] == "item-new"
     assert creds["institution_id"] == "ins_1" and creds["cursor"] is None
+    # A first Item has nothing to re-key, and no history to reset.
+    assert creds["history_complete_at"] is None and creds["rekey_pending"] is False
     assert creds["sync_config"] == {"since_date": "2026-01-01"}
     assert [a["mask"] for a in creds["accounts"]] == ["1234", "9012"]
     assert final["status"] == "connected"
@@ -308,7 +310,11 @@ class TestCompleteLink:
       },
     )
     client.remove_item.assert_called_once_with("access-dead")
-    assert update.call_args_list[0].kwargs["credentials"]["cursor"] is None
+    creds = update.call_args_list[0].kwargs["credentials"]
+    assert creds["cursor"] is None
+    # The old Item's lines are re-keyed on every pull until the history drains,
+    # and the drain-after-history runs again for the new Item.
+    assert creds["rekey_pending"] is True and creds["history_complete_at"] is None
     assert registry.call_args.kwargs["full_rebuild"] is True
 
   async def test_the_old_item_outlives_a_failed_credential_write(self):

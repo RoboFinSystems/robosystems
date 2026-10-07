@@ -113,7 +113,7 @@ class TestBody:
     ):
       with pytest.raises(Failure, match="back in Link"):
         _run_plaid_sync(build_asset_context(), _config())
-    mark.assert_called_once_with("conn_1")
+    mark.assert_called_once_with("conn_1", item_id=None)
     client.close.assert_called_once()
 
   def test_a_transient_error_does_not_touch_the_connection(self):
@@ -136,7 +136,9 @@ class TestBody:
   def test_the_cursor_advances_only_when_plaid_was_ready(self):
     run = _run_body([_sync("HISTORICAL_UPDATE_COMPLETE", next_cursor="c9")])
     run.client.sync_transactions.assert_called_once_with("access-1", "c8")
-    run.store.assert_called_once_with("conn_1", "c9", history_complete=True)
+    run.store.assert_called_once_with(
+      "conn_1", "c9", item_id="i1", history_complete=True
+    )
     run.session.commit.assert_called_once()
     summary = run.update.call_args.args[2]
     assert summary["cursor_stored"] is True
@@ -157,7 +159,9 @@ class TestBody:
     )
     assert run.client.sync_transactions.call_count == 4
     assert run.clock.sleep.call_count == 2
-    run.store.assert_called_once_with("conn_1", "c2", history_complete=True)
+    run.store.assert_called_once_with(
+      "conn_1", "c2", item_id="i1", history_complete=True
+    )
     run.bootstrap.assert_called_once()
 
   def test_the_first_run_to_see_the_history_drains_what_lands_with_it(self):
@@ -173,7 +177,9 @@ class TestBody:
     )
     assert len(run.load.call_args.kwargs["sync"].added) == 217
     assert run.load.call_args.kwargs["rekey_replaced"] is True
-    run.store.assert_called_once_with("conn_1", "c2", history_complete=True)
+    run.store.assert_called_once_with(
+      "conn_1", "c2", item_id="i1", history_complete=True
+    )
     run.bootstrap.assert_called_once()
 
   def test_a_run_after_the_history_was_seen_does_not_drain(self):
@@ -201,7 +207,9 @@ class TestBody:
       credentials=FIRST_SYNC,
     )
     assert run.clock.sleep.call_count == 1
-    run.store.assert_called_once_with("conn_1", "c1", history_complete=True)
+    run.store.assert_called_once_with(
+      "conn_1", "c1", item_id="i1", history_complete=True
+    )
 
   def test_a_later_run_rechecks_a_pending_history_only_briefly(self):
     run = _run_body(
@@ -210,7 +218,9 @@ class TestBody:
     )
     polls = PULL_RECHECK_SECONDS // PULL_POLL_SECONDS + 1
     assert run.client.sync_transactions.call_count == polls
-    run.store.assert_called_once_with("conn_1", "c9", history_complete=False)
+    run.store.assert_called_once_with(
+      "conn_1", "c9", item_id="i1", history_complete=False
+    )
     run.bootstrap.assert_not_called()
 
   def test_a_partial_history_is_captured_but_the_calendar_waits(self):
@@ -219,9 +229,44 @@ class TestBody:
       credentials=FIRST_SYNC,
     )
     run.session.commit.assert_called_once()
-    run.store.assert_called_once_with("conn_1", "c1", history_complete=False)
+    run.store.assert_called_once_with(
+      "conn_1", "c1", item_id="i1", history_complete=False
+    )
     run.bootstrap.assert_not_called()
     assert run.update.call_args.args[2]["history_complete"] is False
+
+  def test_a_replaced_item_rekeys_until_a_run_drains_the_history(self):
+    run = _run_body(
+      [_sync("HISTORICAL_UPDATE_COMPLETE", next_cursor="c9")],
+      credentials={**SEEN, "rekey_pending": True},
+    )
+    assert run.load.call_args.kwargs["rekey_replaced"] is True
+    assert run.update.call_args.args[2]["window"]["full_rebuild"] is False
+
+  def test_a_relink_during_the_run_gets_its_first_pull_in_the_same_run(self):
+    before = dict(SEEN)
+    after = {"access_token": "access-2", "item_id": "i2", "cursor": None}
+    run = _run_body(
+      [
+        _sync("HISTORICAL_UPDATE_COMPLETE", next_cursor="c9"),
+        _sync("HISTORICAL_UPDATE_COMPLETE", next_cursor="d1"),
+        _sync("HISTORICAL_UPDATE_COMPLETE"),
+      ],
+      credentials=[before, after, after],
+    )
+    calls = run.client.sync_transactions.call_args_list
+    assert calls[0].args == ("access-1", "c8")
+    assert calls[1].args == ("access-2", None)
+    stored = [c.kwargs["item_id"] for c in run.store.call_args_list]
+    assert stored == ["i1", "i2"]
+    assert run.load.call_args_list[1].kwargs["rekey_replaced"] is True
+
+  def test_a_run_whose_item_did_not_change_syncs_once(self):
+    run = _run_body(
+      [_sync("HISTORICAL_UPDATE_COMPLETE", next_cursor="c9")],
+      credentials=[dict(SEEN), dict(SEEN)],
+    )
+    assert run.client.sync_transactions.call_count == 1
 
   def test_failed_captures_hold_the_cursor_and_fail_the_run(self):
     run = _run_body(
@@ -280,9 +325,15 @@ def _run_body(syncs, *, credentials=None, failed=0, errors=(), expect=None):
   )
   report.as_counts.return_value = {}
   run = SimpleNamespace(client=client, session=session, error=None, result=None)
-  credentials = dict(SEEN if credentials is None else credentials)
+  if isinstance(credentials, list):
+    loader = patch(f"{MODULE}.load_credentials", side_effect=credentials)
+  else:
+    loader = patch(
+      f"{MODULE}.load_credentials",
+      return_value=dict(SEEN if credentials is None else credentials),
+    )
   with (
-    patch(f"{MODULE}.load_credentials", return_value=credentials),
+    loader,
     patch(
       "robosystems.operations.providers.plaid_provider.plaid_client",
       return_value=client,
@@ -297,7 +348,7 @@ def _run_body(syncs, *, credentials=None, failed=0, errors=(), expect=None):
       "robosystems.adapters.plaid.pipeline.load.load_sync", return_value=report
     ) as load,
     patch(f"{MODULE}.time") as clock,
-    patch(f"{MODULE}.store_cursor") as store,
+    patch(f"{MODULE}.store_cursor", return_value=True) as store,
     patch(f"{MODULE}.update_last_sync") as update,
     patch(f"{MODULE}.bootstrap_fiscal_calendar_if_needed") as bootstrap,
     patch(f"{MODULE}.mark_graph_stale") as stale,
@@ -311,3 +362,87 @@ def _run_body(syncs, *, credentials=None, failed=0, errors=(), expect=None):
         _run_plaid_sync(build_asset_context(), _config())
       run.error = excinfo.value
   return run
+
+
+def _credential_row(current: dict):
+  row = MagicMock()
+  row.get_credentials.return_value = dict(current)
+  return row
+
+
+@pytest.mark.unit
+class TestCursorStore:
+  def _store(self, current, **kwargs):
+    from robosystems.adapters.plaid.pipeline.assets import store_cursor
+
+    row = _credential_row(current)
+    session = MagicMock()
+    factory = MagicMock()
+    factory.return_value.__enter__.return_value = session
+    with (
+      patch("robosystems.database.SessionFactory", factory),
+      patch(
+        "robosystems.models.core.connection.connection_credentials."
+        "ConnectionCredentials.get_by_connection_id",
+        return_value=row,
+      ),
+    ):
+      stored = store_cursor("conn_1", "c9", **kwargs)
+    return stored, row
+
+  def test_the_cursor_of_a_replaced_item_is_refused(self):
+    stored, row = self._store({"item_id": "i2", "cursor": None}, item_id="i1")
+    assert stored is False
+    row.update_credentials.assert_not_called()
+
+  def test_the_same_item_advances_and_a_drained_history_clears_the_rekey(self):
+    stored, row = self._store(
+      {"item_id": "i1", "cursor": "c8", "rekey_pending": True},
+      item_id="i1",
+      history_complete=True,
+    )
+    assert stored is True
+    written = row.update_credentials.call_args.args[0]
+    assert written["cursor"] == "c9"
+    assert written["history_complete_at"]
+    assert "rekey_pending" not in written
+
+  def test_a_partial_history_keeps_the_rekey_marker(self):
+    stored, row = self._store(
+      {"item_id": "i1", "rekey_pending": True}, item_id="i1", history_complete=False
+    )
+    assert stored is True
+    assert row.update_credentials.call_args.args[0]["rekey_pending"] is True
+
+  def test_a_bundle_without_an_item_still_advances(self):
+    stored, row = self._store({"cursor": "c8"}, item_id="i1")
+    assert stored is True
+
+
+@pytest.mark.unit
+class TestReauthMark:
+  def test_a_replaced_item_does_not_mark_the_fresh_connection(self):
+    from robosystems.adapters.plaid.pipeline.assets import mark_needs_reauth
+
+    with (
+      patch(f"{MODULE}.load_credentials", return_value={"item_id": "i2"}),
+      patch(
+        "robosystems.operations.connection_service.ConnectionService."
+        "mark_connection_needs_reauth_sync"
+      ) as mark,
+    ):
+      mark_needs_reauth("conn_1", item_id="i1")
+    mark.assert_not_called()
+
+  def test_the_item_that_failed_marks_it(self):
+    from robosystems.adapters.plaid.pipeline.assets import mark_needs_reauth
+
+    with (
+      patch(f"{MODULE}.load_credentials", return_value={"item_id": "i1"}),
+      patch(
+        "robosystems.operations.connection_service.ConnectionService."
+        "mark_connection_needs_reauth_sync"
+      ) as mark,
+    ):
+      mark_needs_reauth("conn_1", item_id="i1")
+    mark.assert_called_once_with("conn_1")

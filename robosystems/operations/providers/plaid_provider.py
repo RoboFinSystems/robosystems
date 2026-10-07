@@ -231,6 +231,15 @@ async def complete_plaid_link(
       "institution_name": institution_name,
       "accounts": fingerprint,
       "cursor": None if new_item else credentials.get("cursor"),
+      # A new Item starts its history over: the drain-after-history runs
+      # again, and every pull re-keys the old Item's lines until one run
+      # sees the history complete (a slow bank delivers it over several).
+      "history_complete_at": None
+      if new_item
+      else credentials.get("history_complete_at"),
+      "rekey_pending": (
+        bool(prior_item) if new_item else credentials.get("rekey_pending")
+      ),
       "linked_at": datetime.now(UTC).isoformat(),
     },
     graph_id=graph_id,

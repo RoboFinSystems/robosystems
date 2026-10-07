@@ -126,7 +126,7 @@ def test_a_leg_classified_to_the_other_bank_account_merges_into_a_pair(session):
 
   assert report.transfers_matched == 1 and report.events_created == 1
   assert session.get(Event, outflow_id) is None  # the single leg is gone
-  pair = session.query(Event).filter(Event.external_id == "plaid_xfer_t_in").one()
+  pair = session.query(Event).filter(Event.external_id == "plaid_xfer_t_in_t_out").one()
   assert pair.event_type == "internal_transfer" and pair.status == "captured"
   assert pair.amount == 50000 and pair.resource_element_id == elements[NEW_EXPENSE]
   assert pair.metadata_["legs"] == ["t_out", "t_in"]
