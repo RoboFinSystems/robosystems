@@ -93,6 +93,15 @@ class TestGetClosePlaybookContent:
     assert "closed_through" in blob
     assert "pending_obligations" in blob
 
+  def test_names_the_entity_rule_in_every_mode(self) -> None:
+    """A subsidiary closes on its own calendar; the playbook has to say that
+    entity_id goes on every call of the sequence, in every mode."""
+    for mode in ("overview", "initiate", "recurring"):
+      blob = json.dumps(_run(mode))
+      assert "ENTITIES:" in blob, mode
+      assert "entity_id on EVERY call" in blob, mode
+      assert "omitted, they act on the group parent" in blob, mode
+
   def test_initiate_teaches_orient_then_watermark(self) -> None:
     """The initiate track must tell the agent to read the calendar's
     closed_through first and stamp the matching watermark on every schedule

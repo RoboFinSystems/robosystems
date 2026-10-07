@@ -31,7 +31,7 @@ from robosystems.models.api.extensions.reports import (
   StructureSummary,
   ValidationCheckResponse,
 )
-from robosystems.models.extensions import Report
+from robosystems.models.extensions import Entity, Report
 from robosystems.models.extensions.roboledger import Structure
 from robosystems.operations.aws.s3 import S3Client
 from robosystems.operations.roboledger.entity_scope import (
@@ -43,15 +43,17 @@ from robosystems.operations.roboledger.reads.fiscal_calendar import (
   get_fiscal_year_start_month,
 )
 from robosystems.operations.roboledger.reports.fact_grid import (
+  FactGrid,
+  FactRow,
+  _compute_prior_period,
+  generate_report_facts,
+  render_structure_view,
+)
+from robosystems.operations.roboledger.reports.fact_grid import (
   PeriodSpec as FactPeriodSpec,
 )
 from robosystems.operations.roboledger.reports.fact_grid import (
   ReportFact as ReportFactData,
-)
-from robosystems.operations.roboledger.reports.fact_grid import (
-  _compute_prior_period,
-  generate_report_facts,
-  render_structure_view,
 )
 from robosystems.operations.roboledger.reports.guard_rails import validate_report
 from robosystems.operations.roboledger.reports.network_picker import (
@@ -943,6 +945,87 @@ def build_current_and_prior_periods(start: date, end: date) -> list[FactPeriodSp
   ]
 
 
+class CombinedViewOnParentOnlyError(ValueError):
+  """A combined statement is read on the group parent, never on a subsidiary."""
+
+  def __init__(self, entity_id: str) -> None:
+    super().__init__(
+      f"Entity {entity_id!r} is a subsidiary; the combined statement of the "
+      "group is read on the group parent (omit entity_id)."
+    )
+
+
+def _own_entity_ids(session: Session, parent_id: str) -> list[str]:
+  """The group's own entities, the parent first, then by creation."""
+  rows = session.execute(
+    select(Entity.id)
+    .where(Entity.source != "linked", Entity.id != parent_id)
+    .order_by(Entity.created_at, Entity.id)
+  ).scalars()
+  return [parent_id, *(str(row) for row in rows)]
+
+
+def _combined_statement(
+  session: Session,
+  *,
+  statement_type: str,
+  periods: list[FactPeriodSpec],
+  reporting_style_id: str,
+  parent_id: str,
+):
+  """Every entity's statement under the parent's Style, summed row by row:
+  the combination happens at the rs-gaap concepts, where every entity's own
+  chart has been mapped. No eliminations (M2). An entity with no mapping is
+  left out; with none mapped at all the parent's error stands.
+
+  Returns ``(grid, unmapped_count, combined_entity_ids)``.
+  """
+  base: FactGrid | None = None
+  unmapped_count = 0
+  combined: list[str] = []
+  first_error: CoaMappingNotFoundError | None = None
+  for entity_id in _own_entity_ids(session, parent_id):
+    try:
+      grid, unmapped = generate_adhoc_private_statement(
+        session,
+        statement_type=statement_type,
+        periods=periods,
+        reporting_style_id=reporting_style_id,
+        entity_id=entity_id,
+      )
+    except CoaMappingNotFoundError as exc:
+      first_error = first_error or exc
+      continue
+    combined.append(entity_id)
+    unmapped_count += unmapped
+    if base is None:
+      base = grid
+      continue
+    _add_into(base, grid)
+  if base is None:
+    assert first_error is not None
+    raise first_error
+  return base, unmapped_count, combined
+
+
+def _add_into(base: FactGrid, other: FactGrid) -> None:
+  """Sum ``other``'s rows into ``base``'s, matched by concept. Both come from
+  the same Style, so the rows agree; a row only ``other`` has is appended."""
+  by_qname: dict[str, FactRow] = {}
+  for row in base.rows:
+    by_qname.setdefault(row.element_qname, row)
+  for row in other.rows:
+    target = by_qname.get(row.element_qname)
+    if target is None:
+      base.rows.append(row)
+      by_qname[row.element_qname] = row
+      continue
+    target.values = [
+      (a or 0.0) + (b or 0.0) if a is not None or b is not None else None
+      for a, b in zip(target.values, row.values, strict=False)
+    ]
+
+
 def get_live_financial_statement(
   session: Session,
   *,
@@ -953,25 +1036,40 @@ def get_live_financial_statement(
   limit: int = 1000,
   reporting_style_id: str | None = None,
   entity_id: str | None = None,
+  consolidated: bool = False,
 ) -> LiveFinancialStatementResponse:
   """Render a current + prior ad-hoc statement from one entity's OLTP data,
-  default the group parent's.
+  default the group parent's; ``consolidated`` combines every entity of the
+  group under the parent's Style, summed per concept with no eliminations.
 
   Drops abstract and all-zero rows and caps at ``limit`` (``truncated``).
   ``reporting_style_id`` defaults to the entity's Style. Raises
-  ``CoaMappingNotFoundError`` when no CoA→GAAP mapping exists.
+  ``CoaMappingNotFoundError`` when no CoA→GAAP mapping exists, and
+  ``CombinedViewOnParentOnlyError`` for ``consolidated`` on a subsidiary.
   """
   entity_id = resolve_entity_id(session, entity_id)
   if reporting_style_id is None:
     reporting_style_id = load_entity_reporting_style(session, entity_id)
   periods = build_current_and_prior_periods(period_start, period_end)
-  grid, unmapped_count = generate_adhoc_private_statement(
-    session,
-    statement_type=statement_type,
-    periods=periods,
-    reporting_style_id=reporting_style_id,
-    entity_id=entity_id,
-  )
+  combined_entity_ids: list[str] = []
+  if consolidated:
+    if not is_group_parent(session, entity_id):
+      raise CombinedViewOnParentOnlyError(entity_id)
+    grid, unmapped_count, combined_entity_ids = _combined_statement(
+      session,
+      statement_type=statement_type,
+      periods=periods,
+      reporting_style_id=reporting_style_id,
+      parent_id=entity_id,
+    )
+  else:
+    grid, unmapped_count = generate_adhoc_private_statement(
+      session,
+      statement_type=statement_type,
+      periods=periods,
+      reporting_style_id=reporting_style_id,
+      entity_id=entity_id,
+    )
   # Validate the full grid: all-zero children still foot their subtotals.
   validation = validate_report(
     statement_type, grid.rows, period_labels=[p.label for p in periods]
@@ -1002,6 +1100,9 @@ def get_live_financial_statement(
 
   return LiveFinancialStatementResponse(
     graph_id=graph_id,
+    entity_id=entity_id,
+    consolidated=consolidated,
+    combined_entity_ids=combined_entity_ids,
     statement_type=statement_type,
     periods=[PeriodSpec(start=p.start, end=p.end, label=p.label) for p in periods],
     facts=facts,

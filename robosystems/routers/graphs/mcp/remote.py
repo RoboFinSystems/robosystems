@@ -46,6 +46,7 @@ from robosystems.middleware.mcp.tools.annotations import tool_annotations
 from robosystems.middleware.mcp.tools.classification import CYPHER_READ_TOOLS
 from robosystems.middleware.mcp.tools.manager import ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS
 from robosystems.middleware.mcp.tools.sensitive import mask_tax_ids_for_graph
+from robosystems.middleware.operations import run_off_loop
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
@@ -234,7 +235,8 @@ async def _handle_initialize(
   try:
     tools = _without(await handler.get_tools(), excluded_tools)
     try:
-      instructions = handler.get_instructions(tools)
+      # Names the reporting group, which is a database read.
+      instructions = await run_off_loop(handler.get_instructions, tools)
     except Exception as instructions_error:
       logger.warning(
         f"Failed to build MCP instructions for graph {graph_id}: {instructions_error}"

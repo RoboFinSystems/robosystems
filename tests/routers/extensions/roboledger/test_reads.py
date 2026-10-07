@@ -120,7 +120,7 @@ class TestLiveFinancialStatementOp:
   @pytest.mark.unit
   async def test_the_named_entity_reaches_the_read(self):
     body = LiveFinancialStatementRequest(
-      statement_type="balance_sheet", entity_id="ent_sub"
+      statement_type="balance_sheet", entity_id="ent_sub", consolidated=True
     )
     cm = MagicMock()
     cm.__enter__.return_value = MagicMock()
@@ -153,6 +153,7 @@ class TestLiveFinancialStatementOp:
       )
 
     assert read.call_args.kwargs["entity_id"] == "ent_sub"
+    assert read.call_args.kwargs["consolidated"] is True
 
   async def test_unknown_statement_type_returns_400_with_valid_types(self):
     """Unknown statement types return 400 with the list of valid types

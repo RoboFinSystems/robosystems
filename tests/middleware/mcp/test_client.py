@@ -234,6 +234,35 @@ class TestGraphMCPClient:
       assert "HAS_REPORT" in info["relationship_types"]
 
   @pytest.mark.asyncio
+  async def test_get_graph_info_names_the_reporting_group(
+    self, mock_async_graph_client, mock_httpx_client
+  ):
+    mock_async_graph_client.get_info = AsyncMock(
+      return_value={"database_path": "/p", "read_only": False, "uptime_seconds": 1}
+    )
+    mock_async_graph_client.query.side_effect = [
+      {"data": [], "execution_time_ms": 1},
+      {"data": [], "execution_time_ms": 1},
+    ]
+    group = [
+      {"id": "ent_parent", "name": "Harbor Holdings", "is_group_parent": True},
+      {"id": "ent_sub", "name": "Maple Court LLC", "is_group_parent": False},
+    ]
+    with (
+      patch(
+        "robosystems.middleware.mcp.client.httpx.AsyncClient",
+        return_value=mock_httpx_client,
+      ),
+      patch.object(GraphMCPClient, "_ledger_entities", AsyncMock(return_value=group)),
+    ):
+      client = GraphMCPClient(api_base_url="http://test:8001", graph_id="kg_x")
+      client.graph_client = mock_async_graph_client
+
+      info = await client.get_graph_info()
+
+    assert info["entities"] == group
+
+  @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_close(self, mock_async_graph_client, mock_httpx_client):
     """Test client close."""

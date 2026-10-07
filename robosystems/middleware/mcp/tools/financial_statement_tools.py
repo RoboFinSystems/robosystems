@@ -17,6 +17,7 @@ from robosystems.operations.roboledger.reads.reports import (
   ANALYSIS_STATEMENT_TYPES,
   MCP_LIVE_STATEMENT_TYPES,
   CoaMappingNotFoundError,
+  CombinedViewOnParentOnlyError,
   get_live_financial_statement,
   resolve_reporting_window,
 )
@@ -123,6 +124,7 @@ class LiveFinancialStatementTool(BaseTool):
 
 **PARAMETERS:**
 - `entity_id` (optional) — the entity whose books to render; omit for the group parent
+- `consolidated` (optional, default false) — on the group parent, combine every entity of the group: each one's statement under the parent's Reporting Style, summed per rs-gaap concept, no eliminations; `combined_entity_ids` on the response names who was summed, and an entity with no mapping yet is left out
 - `statement_type` (required) — one of the three below (a statement of equity is not offered here yet: the live path renders equity balances, not a rollforward)
 - income_statement — Revenue, expenses, net income
 - balance_sheet — Assets, liabilities, equity (instant periods)
@@ -168,6 +170,14 @@ Facts with element qnames, names, classifications, and values aligned with `peri
             "default": 1000,
           },
           "entity_id": ENTITY_ID_ARGUMENT,
+          "consolidated": {
+            "type": "boolean",
+            "default": False,
+            "description": (
+              "Combine every entity of the group, summed per rs-gaap concept "
+              "with no eliminations. Only on the group parent."
+            ),
+          },
         },
         "required": ["statement_type"],
         "additionalProperties": False,
@@ -227,8 +237,9 @@ Facts with element qnames, names, classifications, and values aligned with `peri
           period_end=end,
           limit=limit,
           entity_id=arguments.get("entity_id"),
+          consolidated=bool(arguments.get("consolidated", False)),
         )
-      except CoaMappingNotFoundError as exc:
+      except (CoaMappingNotFoundError, CombinedViewOnParentOnlyError) as exc:
         return {
           "error": str(exc),
           "statement_type": statement_type,

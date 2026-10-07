@@ -32,6 +32,7 @@ from robosystems.models.core import User
 from robosystems.operations.roboledger.reads.reports import (
   LIVE_STATEMENT_TYPES,
   CoaMappingNotFoundError,
+  CombinedViewOnParentOnlyError,
   get_live_financial_statement,
   resolve_reporting_window,
 )
@@ -59,7 +60,9 @@ _require_roboledger = require_graph_extension("roboledger")
     "OLTP ledger data using the active CoA→GAAP mapping. This is the "
     "authoritative source for RoboLedger entity graphs — no graph "
     "materialization required. One entity's books: `entity_id` names a "
-    "subsidiary, omitted means the group parent. Rejected on "
+    "subsidiary, omitted means the group parent; `consolidated` on the parent "
+    "combines every entity of the group at the rs-gaap concepts, with no "
+    "eliminations. Rejected on "
     "shared-repository graphs; those should use "
     "`financial-statement-analysis` instead."
   ),
@@ -116,9 +119,10 @@ async def live_financial_statement_op(
             period_end=end,
             limit=body.limit,
             entity_id=body.entity_id,
+            consolidated=body.consolidated,
             # Reporting Style resolves from the entity on this same session.
           )
-        except CoaMappingNotFoundError as exc:
+        except (CoaMappingNotFoundError, CombinedViewOnParentOnlyError) as exc:
           raise HTTPException(status_code=422, detail=str(exc))
     except ProgrammingError:
       raise _ledger_404()

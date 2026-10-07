@@ -640,6 +640,16 @@ class LiveFinancialStatementRequest(BaseModel):
   fiscal_year: int | None = Field(
     None, description="Fiscal year for annual window (anchored on FiscalCalendar)"
   )
+  consolidated: bool = Field(
+    False,
+    description=(
+      "Combine every entity of the reporting group: each entity's statement "
+      "under the group parent's Reporting Style, summed per rs-gaap concept, "
+      "with no eliminations. Only on the group parent (422 on a subsidiary). "
+      "An entity with no CoA mapping yet contributes nothing and is left out "
+      "of `combined_entity_ids`."
+    ),
+  )
   limit: int = Field(
     1000,
     ge=1,
@@ -667,6 +677,16 @@ class LiveFinancialStatementResponse(BaseModel):
   """Rendered OLTP-backed ad-hoc statement."""
 
   graph_id: str
+  entity_id: str | None = Field(
+    None, description="The entity whose books were rendered."
+  )
+  consolidated: bool = Field(
+    False, description="Whether the group's entities were combined into this."
+  )
+  combined_entity_ids: list[str] = Field(
+    default_factory=list,
+    description="The entities summed into a combined statement, parent first.",
+  )
   statement_type: str
   periods: list[PeriodSpec] = Field(
     ...,

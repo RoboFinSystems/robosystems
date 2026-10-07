@@ -129,9 +129,16 @@ class TestLiveFinancialStatementToolExecute:
         ),
       ) as read,
     ):
-      await tool.execute({"statement_type": "balance_sheet", "entity_id": "ent_sub"})
+      await tool.execute(
+        {
+          "statement_type": "balance_sheet",
+          "entity_id": "ent_sub",
+          "consolidated": True,
+        }
+      )
 
     assert read.call_args.kwargs["entity_id"] == "ent_sub"
+    assert read.call_args.kwargs["consolidated"] is True
 
   @pytest.mark.unit
   async def test_validation_rides_the_payload(self):
