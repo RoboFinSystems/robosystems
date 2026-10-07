@@ -120,4 +120,12 @@ class LinkBankAccountResponse(BaseModel):
       "in the previous entity's chart."
     ),
   )
-  changed: bool = True
+  pairs_across_entities: int = Field(
+    0,
+    description=(
+      "Open transfer pairs whose two legs now sit on two entities, because "
+      "only one leg's account moved. Intercompany; the commit guard refuses "
+      "them until the other leg follows."
+    ),
+  )
+  changed: bool = Field(True, description="False when the link already stood.")

@@ -292,8 +292,11 @@ link_bank_account_op = _registrar.register(
       "change their suggestion is resolved again on the new chart, and a "
       "classification that named the old entity's account is dropped); "
       "posted entries stay where they were posted. An account another "
-      "connection already feeds is refused. Read the group's accounts with "
-      "the `bankAccounts` GraphQL field."
+      "connection already feeds is refused. An account the feed created "
+      "and then left stays on its chart as an ordinary account. A sync "
+      "already in flight when the link moves can still land a line or two "
+      "on the old account; running this again moves them. Read the group's "
+      "accounts with the `bankAccounts` GraphQL field."
     ),
     command=cmd_link_bank_account,
     request_model=LinkBankAccountRequest,

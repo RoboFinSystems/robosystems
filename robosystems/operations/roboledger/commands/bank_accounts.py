@@ -113,6 +113,8 @@ def link_bank_account(
       raise NotAChartAccountError(
         f"Account {body.element_id!r} is not in entity {body.entity_id!r}'s chart."
       )
+    # Checked after `_assert_linkable`, which the current account passes by
+    # construction (its own link is this one): a no-op is still a valid ask.
     if str(target.id) == str(current.id):
       return _response(
         body, provider, current, current, str(target_entity), changed=False
@@ -143,10 +145,15 @@ def link_bank_account(
       created_by=created_by,
     )
     target = session.get(Element, ids[body.account_id])
-    assert target is not None
+    if target is None:
+      raise RuntimeError(
+        f"Chart account for {provider} account {body.account_id} was not created"
+      )
     created = True
 
-  _release_provenance(current, provider, body.account_id)
+  if not created:
+    # The create path gave it up before the new row existed.
+    _release_provenance(current, provider, body.account_id)
   current.metadata_ = {
     key: value
     for key, value in (current.metadata_ or {}).items()
@@ -155,7 +162,7 @@ def link_bank_account(
   if not created:
     target.metadata_ = {**(target.metadata_ or {}), BANK_FEED_KEY: link}
 
-  repointed, unclassified = _repoint_open_lines(
+  repointed, unclassified, split = _repoint_open_lines(
     session,
     provider=provider,
     connection_id=body.connection_id,
@@ -186,6 +193,7 @@ def link_bank_account(
     created=created,
     repointed=repointed,
     unclassified=unclassified,
+    split=split,
   )
 
 
@@ -234,13 +242,14 @@ def _repoint_open_lines(
   entity_id: str,
   entity_changed: bool,
   parent_id: str,
-) -> tuple[int, int]:
+) -> tuple[int, int, int]:
   """Move the feed's still-open lines to the new account and entity.
 
   Across an entity change the suggestion is resolved again, by name, on the
   new entity's chart, and a classification that named an account in the old
   chart is dropped: the line goes back to the inbox rather than post into
-  another entity's books.
+  another entity's books. Returns the lines moved, the lines unclassified,
+  and the pairs whose two legs now sit on two entities.
   """
   link = Event.metadata_
   rows = (
@@ -263,7 +272,7 @@ def _repoint_open_lines(
     .all()
   )
   chart = build_chart_index(session, entity_id) if entity_changed else None
-  repointed = unclassified = 0
+  repointed = unclassified = split = 0
   for event in rows:
     meta = dict(event.metadata_ or {})
     if event.resource_element_id == old:
@@ -272,11 +281,15 @@ def _repoint_open_lines(
       if meta.get(key) == old:
         meta[key] = new
     if meta.get("kind") == "internal_transfer":
-      # A pair books on the receiving side; both legs usually move together.
-      owners = account_entities(
-        session, [meta.get("to_element_id")], parent_id=parent_id
-      )
-      event.entity_id = owners.get(str(meta.get("to_element_id"))) or entity_id
+      # A pair books on the receiving side. When only one leg moved, the
+      # pair now crosses two entities — intercompany, which the books do
+      # not tie yet; it is counted so the caller can say so, and the commit
+      # guard refuses it until its other leg follows or it is dissolved.
+      legs = [str(meta.get("from_element_id")), str(meta.get("to_element_id"))]
+      owners = account_entities(session, legs, parent_id=parent_id)
+      event.entity_id = owners.get(legs[1]) or entity_id
+      if owners.get(legs[0]) != owners.get(legs[1]):
+        split += 1
     else:
       event.entity_id = entity_id
       if chart is not None and _reclassify(meta, chart, session, entity_id, parent_id):
@@ -284,7 +297,7 @@ def _repoint_open_lines(
         unclassified += 1
     event.metadata_ = meta
     repointed += 1
-  return repointed, unclassified
+  return repointed, unclassified, split
 
 
 def _reclassify(
@@ -332,6 +345,7 @@ def _response(
   created: bool = False,
   repointed: int = 0,
   unclassified: int = 0,
+  split: int = 0,
 ) -> LinkBankAccountResponse:
   return LinkBankAccountResponse(
     connection_id=body.connection_id,
@@ -343,5 +357,6 @@ def _response(
     account_created=created,
     events_repointed=repointed,
     events_unclassified=unclassified,
+    pairs_across_entities=split,
     changed=changed,
   )

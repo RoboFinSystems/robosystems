@@ -461,5 +461,21 @@ def test_a_pair_books_on_its_receiving_leg(session):
   moved = session.get(Event, str(pair.id))
   assert moved.metadata_["from_element_id"] == result.element_id
   assert moved.metadata_["to_element_id"] == savings
-  # The receiving account stayed on the parent, so the pair still books there.
+  # The receiving account stayed on the parent, so the pair still books
+  # there — and it is now a pair across two entities, which is reported.
   assert moved.entity_id == PARENT_ENTITY_ID
+  assert result.pairs_across_entities == 1
+
+  # Move the other leg too: the pair is whole again, on the subsidiary.
+  whole = link_bank_account(
+    session,
+    LinkBankAccountRequest(
+      connection_id=CONNECTION, account_id="acc_sav", entity_id=sub
+    ),
+    "user_test",
+  )
+  assert whole.pairs_across_entities == 0
+  followed = session.get(Event, str(pair.id))
+  assert followed.entity_id == sub
+  assert followed.metadata_["to_element_id"] == whole.element_id
+  assert followed.resource_element_id == whole.element_id
