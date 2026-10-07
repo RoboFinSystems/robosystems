@@ -47,6 +47,8 @@ PULL_WAIT_SECONDS = 600
 PULL_RECHECK_SECONDS = 60
 PULL_POLL_SECONDS = 10
 # How many extra cursors the first run to see the history complete drains.
+# Re-Links handled inside one run before the rest waits for the next sync.
+RELINK_RERUNS = 2
 SETTLE_ROUNDS = 10
 
 
@@ -103,23 +105,39 @@ def _run_plaid_sync(
 
   A re-Link during this run stores a new access token and Item and sets the
   cursor back to the start; its own first sync cannot start while this one
-  holds the lock. So the body re-reads the credentials when it is done and,
-  if the Item changed under it, runs once more for the new Item: the old
-  Item's cursor was refused by ``store_cursor``, and the new pull re-keys
-  what the old one captured.
+  holds the lock. So the body re-reads the credentials when it is done —
+  whether the pull landed or failed, since the old Item's failure is usually
+  the re-Link itself (``ITEM_NOT_FOUND`` on a removed Item) — and, if the
+  Item changed under it, runs again for the new Item: the old Item's cursor
+  was refused by ``store_cursor``, and the new pull re-keys what the old one
+  captured. Bounded, so a connection re-linked on every pull cannot hold the
+  lock forever; what is left runs on the next sync, which starts from the
+  new Item's empty cursor anyway.
   """
   credentials = load_credentials(config.connection_id)
-  result = _sync_item(context, config, credentials)
-  current = load_credentials(config.connection_id)
-  if current.get("access_token") and current.get("item_id") != credentials.get(
-    "item_id"
-  ):
+  error: BaseException | None = None
+  result: MaterializeResult | None = None
+  for rerun in range(RELINK_RERUNS + 1):
+    try:
+      result, error = _sync_item(context, config, credentials), None
+    except Exception as exc:
+      result, error = None, exc
+    current = load_credentials(config.connection_id)
+    relinked = bool(current.get("access_token")) and current.get(
+      "item_id"
+    ) != credentials.get("item_id")
+    if not relinked or rerun == RELINK_RERUNS:
+      break
     context.log.info(
       f"Plaid connection {config.connection_id} was re-linked during this sync "
-      f"(item {credentials.get('item_id')} -> {current.get('item_id')}); running "
-      "the new Item's first pull now"
+      f"(item {credentials.get('item_id')} -> {current.get('item_id')}"
+      f"{', whose pull failed: ' + str(error) if error else ''}); running the "
+      "new Item's first pull now"
     )
-    result = _sync_item(context, config, current)
+    credentials = current
+  if error is not None:
+    raise error
+  assert result is not None
   return result
 
 
@@ -412,6 +430,13 @@ def store_cursor(
     if row is None:
       return False
     current = dict(row.get_credentials())
+    if not current.get("access_token"):
+      logger.info(
+        "Plaid cursor for connection %s not stored: the connection no longer "
+        "holds an Item",
+        connection_id,
+      )
+      return False
     if item_id and current.get("item_id") and current.get("item_id") != item_id:
       logger.info(
         "Plaid cursor for connection %s not stored: the run synced item %s and "

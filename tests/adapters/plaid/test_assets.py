@@ -261,6 +261,50 @@ class TestBody:
     assert stored == ["i1", "i2"]
     assert run.load.call_args_list[1].kwargs["rekey_replaced"] is True
 
+  def test_a_failed_pull_of_a_replaced_item_still_runs_the_new_items_first_pull(
+    self,
+  ):
+    before = dict(SEEN)
+    after = {"access_token": "access-2", "item_id": "i2", "cursor": None}
+    run = _run_body(
+      [
+        PlaidError("gone", code="ITEM_LOGIN_REQUIRED"),
+        _sync("HISTORICAL_UPDATE_COMPLETE", next_cursor="d1"),
+        _sync("HISTORICAL_UPDATE_COMPLETE"),
+      ],
+      credentials=[before, after, after],
+    )
+    # The old Item's failure is the re-Link itself; the run ends on the new
+    # Item's pull, and the reauth mark was offered the Item that failed.
+    assert isinstance(run.result, MaterializeResult)
+    run.mark.assert_called_once_with("conn_1", item_id="i1")
+    calls = run.client.sync_transactions.call_args_list
+    assert calls[1].args == ("access-2", None)
+    assert [c.kwargs["item_id"] for c in run.store.call_args_list] == ["i2"]
+
+  def test_a_failed_pull_with_no_relink_still_fails(self):
+    run = _run_body(
+      [PlaidError("gone", code="ITEM_LOGIN_REQUIRED")],
+      credentials=[dict(SEEN), dict(SEEN)],
+      expect=Failure,
+    )
+    assert "back in Link" in str(run.error)
+    run.store.assert_not_called()
+
+  def test_reruns_for_relinks_are_bounded(self):
+    a = dict(SEEN)
+    b = {"access_token": "access-2", "item_id": "i2", "cursor": None}
+    c = {"access_token": "access-3", "item_id": "i3", "cursor": None}
+    d = {"access_token": "access-4", "item_id": "i4", "cursor": None}
+    run = _run_body(
+      lambda *args: _sync("HISTORICAL_UPDATE_COMPLETE", next_cursor="x"),
+      credentials=[a, b, c, d],
+    )
+    # One pull plus two re-runs (each pull loads once; the drain after the
+    # history adds sync calls, not loads); the fourth Item waits for the
+    # next sync.
+    assert run.load.call_count == 3
+
   def test_a_run_whose_item_did_not_change_syncs_once(self):
     run = _run_body(
       [_sync("HISTORICAL_UPDATE_COMPLETE", next_cursor="c9")],
@@ -349,11 +393,12 @@ def _run_body(syncs, *, credentials=None, failed=0, errors=(), expect=None):
     ) as load,
     patch(f"{MODULE}.time") as clock,
     patch(f"{MODULE}.store_cursor", return_value=True) as store,
+    patch(f"{MODULE}.mark_needs_reauth") as mark,
     patch(f"{MODULE}.update_last_sync") as update,
     patch(f"{MODULE}.bootstrap_fiscal_calendar_if_needed") as bootstrap,
     patch(f"{MODULE}.mark_graph_stale") as stale,
   ):
-    run.clock, run.store, run.update = clock, store, update
+    run.clock, run.store, run.update, run.mark = clock, store, update, mark
     run.bootstrap, run.stale, run.load = bootstrap, stale, load
     if expect is None:
       run.result = _run_plaid_sync(build_asset_context(), _config())
@@ -391,13 +436,15 @@ class TestCursorStore:
     return stored, row
 
   def test_the_cursor_of_a_replaced_item_is_refused(self):
-    stored, row = self._store({"item_id": "i2", "cursor": None}, item_id="i1")
+    stored, row = self._store(
+      {"access_token": "t", "item_id": "i2", "cursor": None}, item_id="i1"
+    )
     assert stored is False
     row.update_credentials.assert_not_called()
 
   def test_the_same_item_advances_and_a_drained_history_clears_the_rekey(self):
     stored, row = self._store(
-      {"item_id": "i1", "cursor": "c8", "rekey_pending": True},
+      {"access_token": "t", "item_id": "i1", "cursor": "c8", "rekey_pending": True},
       item_id="i1",
       history_complete=True,
     )
@@ -409,14 +456,21 @@ class TestCursorStore:
 
   def test_a_partial_history_keeps_the_rekey_marker(self):
     stored, row = self._store(
-      {"item_id": "i1", "rekey_pending": True}, item_id="i1", history_complete=False
+      {"access_token": "t", "item_id": "i1", "rekey_pending": True},
+      item_id="i1",
+      history_complete=False,
     )
     assert stored is True
     assert row.update_credentials.call_args.args[0]["rekey_pending"] is True
 
   def test_a_bundle_without_an_item_still_advances(self):
-    stored, row = self._store({"cursor": "c8"}, item_id="i1")
+    stored, row = self._store({"access_token": "t", "cursor": "c8"}, item_id="i1")
     assert stored is True
+
+  def test_a_disconnected_bundle_takes_no_cursor(self):
+    stored, row = self._store({"item_id": "i1", "cursor": "c8"}, item_id="i1")
+    assert stored is False
+    row.update_credentials.assert_not_called()
 
 
 @pytest.mark.unit

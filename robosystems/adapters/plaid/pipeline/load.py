@@ -692,7 +692,9 @@ def pair_events_by_leg(
         )
         # Held until this run commits: a classify or a resolve made while
         # the bank was pulled waits, rather than being written over from
-        # the copy this run read.
+        # the copy this run read. Ordered, so two runs lock the same rows
+        # the same way.
+        .order_by(Event.id)
         .with_for_update()
       )
       .scalars()
