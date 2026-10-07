@@ -1411,6 +1411,7 @@ class TestAccountRollupsResolver:
       "mapping_id": "map_1",
       "start_date": date(2026, 3, 1),
       "end_date": date(2026, 3, 31),
+      "entity_id": None,
     }
 
   def test_unknown_mapping_is_null(self) -> None:
@@ -1681,3 +1682,100 @@ class TestNotInitializedAcrossReads:
       result = _run(query)
     assert result.errors is not None
     assert result.errors[0].extensions == {"code": "LEDGER_NOT_INITIALIZED"}
+
+
+class TestBooksReadsNameTheirEntity:
+  """Each books read takes `entityId` and hands it to its read, which
+  defaults to the group parent when nothing is named."""
+
+  @staticmethod
+  def _cases():
+    from robosystems.models.api.common import create_pagination_info
+    from robosystems.models.api.extensions.accounts import AccountTreeResponse
+    from robosystems.models.api.extensions.ar_ap import OpenBalanceAggregate
+    from robosystems.models.api.extensions.closing_book import (
+      ClosingBookStructuresResponse,
+    )
+    from robosystems.models.api.extensions.reports import ReportListResponse
+    from robosystems.models.api.extensions.transactions import (
+      LedgerTransactionListResponse,
+    )
+    from robosystems.operations.roboledger.reads.summary import LedgerCounts
+
+    aggregate = OpenBalanceAggregate(
+      total_open_cents=0, counterparty_count=0, open_event_count=0, currency="USD"
+    )
+    page = create_pagination_info(0, 100, 0)
+    return [
+      (
+        'openReceivables(entityId: "ent_sub") { totalOpenCents }',
+        "ar_ap.compute_open_receivables",
+        aggregate,
+        "arg",
+      ),
+      (
+        'openPayables(entityId: "ent_sub") { totalOpenCents }',
+        "ar_ap.compute_open_payables",
+        aggregate,
+        "arg",
+      ),
+      (
+        'openReceivablesByAgent(entityId: "ent_sub") { agentId }',
+        "ar_ap.list_open_receivables_by_agent",
+        [],
+        "arg",
+      ),
+      (
+        'openPayablesByAgent(entityId: "ent_sub") { agentId }',
+        "ar_ap.list_open_payables_by_agent",
+        [],
+        "arg",
+      ),
+      (
+        'eventBlocks(entityId: "ent_sub") { id }',
+        "event_block.list_event_blocks",
+        [],
+        "kwarg",
+      ),
+      (
+        'summary(entityId: "ent_sub") { entityId }',
+        "summary.get_ledger_counts",
+        LedgerCounts(0, 0, 0, 0, None, None, entity_id="ent_sub"),
+        "arg",
+      ),
+      (
+        'transactions(entityId: "ent_sub") { pagination { total } }',
+        "transactions.list_transactions",
+        LedgerTransactionListResponse(transactions=[], pagination=page),
+        "kwarg",
+      ),
+      (
+        'accountTree(entityId: "ent_sub") { totalAccounts }',
+        "accounts.get_account_tree",
+        AccountTreeResponse(roots=[], total_accounts=0),
+        "kwarg",
+      ),
+      (
+        'closingBookStructures(entityId: "ent_sub") { hasData }',
+        "closing_book.get_closing_book_structures",
+        ClosingBookStructuresResponse(categories=[], has_data=False),
+        "kwarg",
+      ),
+      (
+        'reports(entityId: "ent_sub") { reports { id } }',
+        "reports.list_reports",
+        ReportListResponse(reports=[]),
+        "kwarg",
+      ),
+    ]
+
+  @pytest.mark.parametrize("case", range(10))
+  def test_the_named_entity_reaches_the_read(self, case: int) -> None:
+    field, target, value, how = self._cases()[case]
+    with patch(f"{_OPS}.{target}", return_value=value) as read:
+      result = _run("query { " + field + " }")
+    assert result.errors is None, result.errors
+    if how == "arg":
+      assert read.call_args.args[1] == "ent_sub"
+    else:
+      assert read.call_args.kwargs["entity_id"] == "ent_sub"

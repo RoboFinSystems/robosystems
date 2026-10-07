@@ -972,7 +972,7 @@ def _create_report(body: MagicMock, **replacements) -> dict[str, MagicMock]:
 def test_create_report_loads_structures_for_the_resolved_taxonomy() -> None:
   """A standard name ('rs-gaap') resolves to a taxonomy id; the response's
   structures must be loaded for that id, not the name the caller sent."""
-  mocks = _create_report(MagicMock(taxonomy_id="rs-gaap", periods=None))
+  mocks = _create_report(MagicMock(taxonomy_id="rs-gaap", periods=None, entity_id=None))
 
   mocks["load_structures"].assert_called_once_with(mocks["session"], "tax_resolved")
 
@@ -981,9 +981,48 @@ def test_create_report_is_for_the_entity_whose_chart_the_mapping_maps_from() -> 
   """A report made from a subsidiary's mapping pivots that subsidiary's books
   and puts its fact sets on it, not on the group parent."""
   mocks = _create_report(
-    MagicMock(taxonomy_id="rs-gaap", mapping_id="struct_sub_mapping", periods=None),
+    MagicMock(
+      taxonomy_id="rs-gaap",
+      mapping_id="struct_sub_mapping",
+      periods=None,
+      entity_id=None,
+    ),
     resolve_entity_id={"side_effect": lambda session, entity_id=None: entity_id},
   )
 
   assert mocks["generate_report_facts"].call_args.kwargs["entity_id"] == "ent_sub"
   assert mocks["_pre_create_report_fact_sets"].call_args.args[2] == "ent_sub"
+
+
+def test_create_report_takes_the_entity_the_mapping_is_for() -> None:
+  """Naming the entity whose chart the mapping maps from is the same report."""
+  mocks = _create_report(
+    MagicMock(
+      taxonomy_id="rs-gaap",
+      mapping_id="struct_sub_mapping",
+      periods=None,
+      entity_id="ent_sub",
+    ),
+    resolve_entity_id={"side_effect": lambda session, entity_id=None: entity_id},
+  )
+
+  assert mocks["generate_report_facts"].call_args.kwargs["entity_id"] == "ent_sub"
+
+
+def test_create_report_refuses_an_entity_the_mapping_is_not_for() -> None:
+  """A report for one entity made from another's mapping would pivot the
+  wrong books under the wrong Style; it is refused, not silently re-pointed."""
+  from robosystems.operations.roboledger.commands.reports import (
+    ReportEntityMismatchError,
+  )
+
+  with pytest.raises(ReportEntityMismatchError):
+    _create_report(
+      MagicMock(
+        taxonomy_id="rs-gaap",
+        mapping_id="struct_sub_mapping",
+        periods=None,
+        entity_id="ent_parent",
+      ),
+      resolve_entity_id={"side_effect": lambda session, entity_id=None: entity_id},
+    )

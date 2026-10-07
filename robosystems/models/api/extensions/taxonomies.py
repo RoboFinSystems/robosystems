@@ -365,6 +365,10 @@ class LinkEntityTaxonomyRequest(BaseModel):
   explicitly.
   """
 
+  entity_id: str | None = Field(
+    None,
+    description="The entity to link, by id. Omit for the group parent.",
+  )
   taxonomy_id: str = Field(..., description="The taxonomy to link to.")
   basis: Literal["reporting", "chart_of_accounts", "mapping", "schedule"] = Field(
     "chart_of_accounts",

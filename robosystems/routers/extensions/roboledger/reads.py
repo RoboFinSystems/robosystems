@@ -58,8 +58,10 @@ _require_roboledger = require_graph_extension("roboledger")
     "Generate an ad-hoc financial statement directly from the tenant's "
     "OLTP ledger data using the active CoA→GAAP mapping. This is the "
     "authoritative source for RoboLedger entity graphs — no graph "
-    "materialization required. Rejected on shared-repository graphs; "
-    "those should use `financial-statement-analysis` instead."
+    "materialization required. One entity's books: `entity_id` names a "
+    "subsidiary, omitted means the group parent. Rejected on "
+    "shared-repository graphs; those should use "
+    "`financial-statement-analysis` instead."
   ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
@@ -113,6 +115,7 @@ async def live_financial_statement_op(
             period_start=start,
             period_end=end,
             limit=body.limit,
+            entity_id=body.entity_id,
             # Reporting Style resolves from the entity on this same session.
           )
         except CoaMappingNotFoundError as exc:

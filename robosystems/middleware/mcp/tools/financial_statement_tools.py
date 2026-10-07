@@ -28,6 +28,7 @@ from robosystems.operations.roboledger.views import (
 )
 
 from .base_tool import BaseTool
+from .constants import ENTITY_ID_ARGUMENT
 
 # The columns a filing presents: two balance-sheet instants, three years of
 # flows. Anything more (a 10-K's quarterly note data) is on request.
@@ -121,6 +122,7 @@ class LiveFinancialStatementTool(BaseTool):
 - Only available on RoboLedger tenant entity graphs (not SEC shared repo)
 
 **PARAMETERS:**
+- `entity_id` (optional) — the entity whose books to render; omit for the group parent
 - `statement_type` (required) — one of the three below (a statement of equity is not offered here yet: the live path renders equity balances, not a rollforward)
 - income_statement — Revenue, expenses, net income
 - balance_sheet — Assets, liabilities, equity (instant periods)
@@ -165,6 +167,7 @@ Facts with element qnames, names, classifications, and values aligned with `peri
             "description": "Max fact rows returned (1-1000). Leave at the default for a whole statement; a lower cap cuts rows while subtotals still reflect the full set.",
             "default": 1000,
           },
+          "entity_id": ENTITY_ID_ARGUMENT,
         },
         "required": ["statement_type"],
         "additionalProperties": False,
@@ -223,6 +226,7 @@ Facts with element qnames, names, classifications, and values aligned with `peri
           period_start=start,
           period_end=end,
           limit=limit,
+          entity_id=arguments.get("entity_id"),
         )
       except CoaMappingNotFoundError as exc:
         return {

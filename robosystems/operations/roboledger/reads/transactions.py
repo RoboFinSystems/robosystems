@@ -17,6 +17,7 @@ from robosystems.models.api.extensions.transactions import (
   LedgerTransactionSummaryResponse,
 )
 from robosystems.models.extensions import Element, Entry, LineItem, Transaction
+from robosystems.operations.roboledger.entity_scope import find_entity_id
 
 
 def _txn_to_summary(row: Transaction) -> LedgerTransactionSummaryResponse:
@@ -45,11 +46,17 @@ def list_transactions(
   end_date: date | None = None,
   limit: int = 100,
   offset: int = 0,
+  entity_id: str | None = None,
 ) -> LedgerTransactionListResponse:
-  """List transactions filtered by type and date range, paginated."""
+  """List one entity's transactions, default the group parent's, filtered by
+  type and date range, paginated."""
   query = select(Transaction)
   count_query = select(func.count()).select_from(Transaction)
 
+  entity_id = find_entity_id(session, entity_id)
+  if entity_id is not None:
+    query = query.where(Transaction.entity_id == entity_id)
+    count_query = count_query.where(Transaction.entity_id == entity_id)
   if type is not None:
     query = query.where(Transaction.type == type)
     count_query = count_query.where(Transaction.type == type)

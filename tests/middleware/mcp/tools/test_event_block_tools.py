@@ -84,6 +84,16 @@ class TestListEventBlocksReconcilingItemFilter:
     assert ops_mock.call_args.kwargs["is_reconciling_item"] is True
 
   @pytest.mark.asyncio
+  async def test_entity_id_forwards_to_ops(self) -> None:
+    with (
+      _patched_session(),
+      patch(f"{MODULE}.ops_list_event_blocks", return_value=[]) as ops_mock,
+    ):
+      await ListEventBlocksTool(_client()).execute({"entity_id": "ent_sub"})
+
+    assert ops_mock.call_args.kwargs["entity_id"] == "ent_sub"
+
+  @pytest.mark.asyncio
   async def test_is_reconciling_item_omitted_forwards_none(self) -> None:
     with (
       _patched_session(),

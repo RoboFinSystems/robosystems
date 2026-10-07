@@ -405,7 +405,7 @@ def create_event_block(
   # internal callers that set their own.
   _refuse_system_metadata(body.metadata)
   _event, envelope = create_event_block_in_session(
-    session, body, created_by, graph_id=graph_id, entity_id=entity_id
+    session, body, created_by, graph_id=graph_id, entity_id=entity_id or body.entity_id
   )
   session.commit()
   return envelope
@@ -800,7 +800,7 @@ def preview_event_block(
   parent's."""
   from robosystems.operations.roboledger.reads.event_handler import handler_to_response
 
-  entity_id = find_entity_id(session, entity_id)
+  entity_id = find_entity_id(session, entity_id or body.entity_id)
   python_handler = get_python_handler(body.event_type)
   if python_handler is not None:
     try:

@@ -11,10 +11,17 @@ from robosystems.models.api.extensions.closing_book import (
   ClosingBookItem,
   ClosingBookStructuresResponse,
 )
+from robosystems.models.extensions import Taxonomy
 from robosystems.models.extensions.roboledger import Report, Structure
+from robosystems.operations.roboledger.entity_scope import (
+  find_entity_id,
+  is_group_parent,
+)
 from robosystems.operations.roboledger.entry_status import (
   landed_entry_bindparam,
 )
+from robosystems.operations.roboledger.reads.reports import report_entity_clause
+from robosystems.operations.taxonomy_block.coa_mappings import entity_charts
 
 _STATEMENT_TYPES = {
   "income_statement",
@@ -29,9 +36,14 @@ _STATEMENT_LABELS = {
 }
 
 
-def get_closing_book_structures(session: Session) -> ClosingBookStructuresResponse:
-  """Aggregate closing-book categories for the sidebar navigation."""
+def get_closing_book_structures(
+  session: Session, entity_id: str | None = None
+) -> ClosingBookStructuresResponse:
+  """Aggregate one entity's closing-book categories for the sidebar
+  navigation, default the group parent's."""
   categories: list[ClosingBookCategory] = []
+  entity_id = find_entity_id(session, entity_id)
+  is_parent = entity_id is not None and is_group_parent(session, entity_id)
 
   # Period Close first: the frontend opens on it.
   categories.append(
@@ -50,7 +62,10 @@ def get_closing_book_structures(session: Session) -> ClosingBookStructuresRespon
   # Statements, from the most recent report
   latest_report = session.execute(
     select(Report)
-    .where(Report.generation_status.in_(["complete", "published", "generating"]))
+    .where(
+      Report.generation_status.in_(["complete", "published", "generating"]),
+      report_entity_clause(entity_id, is_parent),
+    )
     .order_by(Report.created_at.desc())
     .limit(1)
   ).scalar_one_or_none()
@@ -86,9 +101,11 @@ def get_closing_book_structures(session: Session) -> ClosingBookStructuresRespon
   mappings = (
     session.execute(
       select(Structure)
+      .join(Taxonomy, Structure.taxonomy_id == Taxonomy.id)
       .where(
         Structure.block_type == "coa_mapping",
         Structure.is_active.is_(True),
+        entity_charts(session, entity_id, Taxonomy.source_taxonomy_id),
       )
       .order_by(Structure.name)
     )
@@ -114,6 +131,7 @@ def get_closing_book_structures(session: Session) -> ClosingBookStructuresRespon
       .where(
         Structure.block_type == "schedule",
         Structure.is_active.is_(True),
+        Structure.entity_id == entity_id,
       )
       .order_by(Structure.name)
     )
@@ -136,8 +154,10 @@ def get_closing_book_structures(session: Session) -> ClosingBookStructuresRespon
   # Reconciliations and the Trial Balance, when anything is posted
   has_posted = session.execute(
     text(
-      "SELECT EXISTS(SELECT 1 FROM entries WHERE status IN :landed_entry_statuses)"
-    ).bindparams(landed_entry_bindparam())
+      "SELECT EXISTS(SELECT 1 FROM entries WHERE status IN :landed_entry_statuses "
+      "AND (CAST(:eid AS text) IS NULL OR entity_id = :eid))"
+    ).bindparams(landed_entry_bindparam()),
+    {"eid": entity_id},
   ).scalar()
 
   if has_posted:

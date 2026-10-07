@@ -51,6 +51,14 @@ class CreateReportRequest(BaseModel):
   inputs to period generation.
   """
 
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity the report is for, by id. Omit for the entity whose chart "
+      "`mapping_id` maps from (the group parent on a one-entity graph). "
+      "Named alongside a mapping of another entity's chart, it is refused."
+    ),
+  )
   name: str = Field(
     ...,
     description="Human-readable report name shown in lists and headers.",
@@ -362,9 +370,16 @@ class ReportResponse(BaseModel):
       "sections (BS / IS / CF / Equity / Schedules)."
     ),
   )
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity the report is about. Null on a shared-in copy, and on a "
+      "report from before entities were recorded, which is the group parent's."
+    ),
+  )
   entity_name: str | None = Field(
     None,
-    description="Display name of the primary entity the report is tagged to.",
+    description="Display name of the entity the report is tagged to.",
   )
   filing_status: str = Field(
     "draft",
@@ -598,6 +613,13 @@ class ReportBundleDownloadResponse(BaseModel):
 class LiveFinancialStatementRequest(BaseModel):
   """Request for live-financial-statement (OLTP, entity graphs only)."""
 
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity whose books this acts on, by id. Omit for the group "
+      "parent — the single-entity default."
+    ),
+  )
   statement_type: str = Field(
     ...,
     description=(

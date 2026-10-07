@@ -119,6 +119,13 @@ def _entity_charts(
   return or_(linked, unlinked) if is_group_parent(session, entity_id) else linked
 
 
+def entity_charts(
+  session: Session, entity_id: str | None, chart_id: ColumnElement[str]
+) -> ColumnElement[bool]:
+  """`_entity_charts`, for callers outside this module."""
+  return _entity_charts(session, entity_id, chart_id)
+
+
 def entity_chart_id(session: Session, entity_id: str | None) -> str | None:
   """The active chart of accounts ``entity_id`` keeps its books in: the
   earliest of its charts (see `_entity_charts`)."""

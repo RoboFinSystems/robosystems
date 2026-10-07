@@ -118,6 +118,42 @@ class TestLiveFinancialStatementOp:
     assert "not_real" in exc_info.value.detail
 
   @pytest.mark.unit
+  async def test_the_named_entity_reaches_the_read(self):
+    body = LiveFinancialStatementRequest(
+      statement_type="balance_sheet", entity_id="ent_sub"
+    )
+    cm = MagicMock()
+    cm.__enter__.return_value = MagicMock()
+    cm.__exit__.return_value = False
+    with (
+      patch(f"{MODULE}.extensions_session", return_value=cm),
+      patch(
+        f"{MODULE}.resolve_reporting_window",
+        return_value=(date(2026, 1, 1), date(2026, 3, 31)),
+      ),
+      patch(
+        f"{MODULE}.get_live_financial_statement",
+        return_value=LiveFinancialStatementResponse(
+          graph_id=GRAPH_ID,
+          statement_type="balance_sheet",
+          periods=[],
+          facts=[],
+          fact_count=0,
+          unmapped_count=0,
+        ),
+      ) as read,
+    ):
+      await live_financial_statement_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        _ext=MagicMock(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert read.call_args.kwargs["entity_id"] == "ent_sub"
+
   async def test_unknown_statement_type_returns_400_with_valid_types(self):
     """Unknown statement types return 400 with the list of valid types
     so callers know what to retry with."""

@@ -13,6 +13,8 @@ if TYPE_CHECKING:
     ReportPackageEnvelope,
   )
 
+from sqlalchemy import ColumnElement, or_, true
+
 from robosystems.config import env
 from robosystems.config.storage.graph import get_report_bundle_key
 from robosystems.logger import logger
@@ -32,7 +34,11 @@ from robosystems.models.api.extensions.reports import (
 from robosystems.models.extensions import Report
 from robosystems.models.extensions.roboledger import Structure
 from robosystems.operations.aws.s3 import S3Client
-from robosystems.operations.roboledger.entity_scope import resolve_entity_id
+from robosystems.operations.roboledger.entity_scope import (
+  find_entity_id,
+  is_group_parent,
+  resolve_entity_id,
+)
 from robosystems.operations.roboledger.reads.fiscal_calendar import (
   get_fiscal_year_start_month,
 )
@@ -282,6 +288,7 @@ def report_to_response(
     created_at=report_def.created_at,
     last_generated=report_def.last_generated,
     structures=structures,
+    entity_id=report_def.entity_id,
     entity_name=entity_name,
     filing_status=report_def.filing_status,
     filed_at=report_def.filed_at,
@@ -294,15 +301,36 @@ def report_to_response(
   )
 
 
+def report_entity_clause(entity_id: str | None, is_parent: bool) -> ColumnElement[bool]:
+  """Predicate for the reports that are ``entity_id``'s. A report with no
+  entity (shared in, or from before the column) is the group parent's; on a
+  graph with no entity yet every report passes."""
+  if entity_id is None:
+    return true()
+  if is_parent:
+    return or_(Report.entity_id == entity_id, Report.entity_id.is_(None))
+  return Report.entity_id == entity_id
+
+
 def list_reports(
-  session: Session, lifecycle: ReportLifecycle = ReportLifecycle.CURRENT
+  session: Session,
+  lifecycle: ReportLifecycle = ReportLifecycle.CURRENT,
+  *,
+  entity_id: str | None = None,
 ) -> ReportListResponse:
-  """List report definitions, most recent first.
+  """List one entity's report definitions, default the group parent's, most
+  recent first.
 
   ``current`` (the default) leaves out archived reports, ``archived`` returns
   only those, and ``all`` returns every report.
   """
-  query = select(Report).order_by(Report.created_at.desc())
+  entity_id = find_entity_id(session, entity_id)
+  is_parent = entity_id is not None and is_group_parent(session, entity_id)
+  query = (
+    select(Report)
+    .where(report_entity_clause(entity_id, is_parent))
+    .order_by(Report.created_at.desc())
+  )
   if lifecycle == ReportLifecycle.CURRENT:
     query = query.where(Report.filing_status != "archived")
   elif lifecycle == ReportLifecycle.ARCHIVED:
