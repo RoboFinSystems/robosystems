@@ -18,6 +18,7 @@ from robosystems.models.api.fact_provenance import AssertedProvenance
 from robosystems.models.extensions import Element, Entity
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.report import Report
+from robosystems.operations.roboledger import entity_scope
 from robosystems.operations.roboledger.commands._guards import closed_periods
 from robosystems.operations.roboledger.commands.journal_entries import (
   create_journal_entry,
@@ -118,8 +119,17 @@ class TestAGraphCreatedWithoutItsEntity:
     schema = session.execute(text("SELECT current_schema()")).scalar_one()
     assert parent.id == f"entity_{schema}"
     assert parent.is_parent and parent.source == "native"
+    # A test tenant has no platform record, so the name falls back to the id.
+    assert parent.name == schema
     assert session.get(Entry, created.id).entity_id == parent.id
     assert resolve_entity_id(session) == parent.id
+
+  def test_the_parent_carries_the_graphs_name(self, tenant_session, monkeypatch):
+    monkeypatch.setattr(entity_scope, "graph_display_name", lambda _: "Harbinger Group")
+
+    parent_id = ensure_entity_id(tenant_session)
+
+    assert tenant_session.get(Entity, parent_id).name == "Harbinger Group"
 
   def test_a_second_write_finds_the_same_one(self, tenant_session):
     first = ensure_entity_id(tenant_session)
@@ -267,3 +277,18 @@ class TestAReportNamesItsOwnEntity:
     t = two_entities
     report = self._report(t.session)
     assert resolve_entity_name(t.session, report) == "Harbor Holdings"
+
+
+class TestGraphDisplayName:
+  def test_an_unknown_graph_falls_back_to_its_id(self):
+    assert entity_scope.graph_display_name("kg_nowhere") == "kg_nowhere"
+
+  def test_a_platform_read_that_fails_falls_back_to_its_id(self, monkeypatch):
+    import robosystems.db.platform as platform
+
+    def boom():
+      raise RuntimeError("platform db down")
+
+    monkeypatch.setattr(platform, "SessionFactory", boom)
+
+    assert entity_scope.graph_display_name("kg_x") == "kg_x"
