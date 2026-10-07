@@ -37,6 +37,7 @@ from robosystems.operations.aws.s3 import S3Client
 from robosystems.operations.roboledger.entity_scope import (
   find_entity_id,
   is_group_parent,
+  own_entity_ids,
   resolve_entity_id,
 )
 from robosystems.operations.roboledger.reads.fiscal_calendar import (
@@ -243,7 +244,6 @@ def resolve_entity_name(session: Session, report_def: Report) -> str | None:
   """The name of the entity the report is about: for a shared-in report, the
   linked row standing for the sender's entity; else the report's own entity,
   falling back to the group parent."""
-  from robosystems.models.extensions import Entity
   from robosystems.operations.roboledger.entity_scope import (
     find_linked_entity_id,
     find_parent_entity,
@@ -955,16 +955,6 @@ class CombinedViewOnParentOnlyError(ValueError):
     )
 
 
-def _own_entity_ids(session: Session, parent_id: str) -> list[str]:
-  """The group's own entities, the parent first, then by creation."""
-  rows = session.execute(
-    select(Entity.id)
-    .where(Entity.source != "linked", Entity.id != parent_id)
-    .order_by(Entity.created_at, Entity.id)
-  ).scalars()
-  return [parent_id, *(str(row) for row in rows)]
-
-
 def _combined_statement(
   session: Session,
   *,
@@ -984,7 +974,7 @@ def _combined_statement(
   unmapped_count = 0
   combined: list[str] = []
   first_error: CoaMappingNotFoundError | None = None
-  for entity_id in _own_entity_ids(session, parent_id):
+  for entity_id in own_entity_ids(session, parent_id):
     try:
       grid, unmapped = generate_adhoc_private_statement(
         session,

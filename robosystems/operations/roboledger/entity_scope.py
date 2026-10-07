@@ -106,6 +106,20 @@ def find_parent_entity(session: Session) -> Entity | None:
     return None
 
 
+def own_entity_ids(session: Session, entity_id: str | None = None) -> list[str]:
+  """The group's own entities — never a linked counterparty — with the named
+  one (default the group parent) first, then the rest by creation."""
+  first = resolve_entity_id(session, entity_id)
+  rows = session.execute(
+    text(
+      "SELECT id FROM entities WHERE source <> 'linked' AND id <> :first "
+      "ORDER BY created_at ASC, id ASC"
+    ),
+    {"first": first},
+  ).scalars()
+  return [first, *(str(row) for row in rows)]
+
+
 def owner_entity_id(session: Session, owner: object) -> str:
   """The entity a row belongs to (a schedule, a reconciliation, an event).
   A row from before rows carried one belongs to the group parent."""
