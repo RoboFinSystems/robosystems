@@ -69,6 +69,10 @@ A few blockers can be closed over on purpose. In the app, **Allow stale sync**, 
 - **Run your forecasts again.** The month you closed becomes an actual, and each scenario picks up from its real closing balances. See [Plan and forecast with your AI assistant](plan-and-forecast.md).
 - **Create a report** if you send statements to anyone. See [Reports and sharing](reports-and-sharing.md).
 
+## Closing a subsidiary
+
+Each company in a reporting group closes on its own calendar. Name the company when you ask for a close, a review of its drafts or a reopen, and your assistant works on that company's books; a close you don't name is the group parent's. Closing one company leaves the others open. See [Work across several companies](working-across-companies.md#several-companies-in-one-graph).
+
 ## Fixing a closed month
 
 A closed month can be reopened to fix a missed or wrong entry. Reopening works backwards one month at a time, starting from the most recent, and each reopen needs a reason, which is kept in the audit trail. Entries that already posted stay posted. To undo one, post a reversing entry, then close the month again. Its statements are saved fresh.

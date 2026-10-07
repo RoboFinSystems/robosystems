@@ -37,7 +37,9 @@ The words RoboLedger and your AI assistant use, in plain terms. Where the techni
 
 **Filing status.** Where a report stands: draft, under review, filed or archived. A filed report is a record and can't be regenerated or deleted, only archived. See [Reports and sharing](reports-and-sharing.md#file-it).
 
-**Graph.** One company's own database: its books, reports, plans and documents. It runs on a dedicated instance, and no other customer's data is in it. See [Graphs, tiers and credits](https://robosystems.ai/docs/guides/graphs-tiers-and-credits).
+**Graph.** One reporting group's own database: its books, reports, plans and documents. Most graphs hold one company; a holding company and its subsidiaries share one. It runs on a dedicated instance, and no other customer's data is in it. See [Graphs, tiers and credits](https://robosystems.ai/docs/guides/graphs-tiers-and-credits).
+
+**Group parent.** The company a graph was created for, and the one your assistant works on when you don't name another. See [Work across several companies](working-across-companies.md#several-companies-in-one-graph).
 
 **Holon.** The complete file of a report, in JSON-LD, and the default download. It opens in the free viewer at [xbrlkit.com](https://xbrlkit.com). See [Reports and sharing](reports-and-sharing.md#download-it). In the technical docs: [holon](https://robosystems.ai/docs/technical/serialization-and-export).
 
@@ -63,6 +65,8 @@ The words RoboLedger and your AI assistant use, in plain terms. Where the techni
 
 **Reporting concept.** A standard line item, such as cash, accounts receivable or cost of revenue, that your accounts map to. See [The reporting library](the-library.md). In the technical docs: [element](https://robosystems.ai/docs/technical/taxonomy-and-frameworks#the-element-atom-and-associations).
 
+**Reporting group.** The companies that share a graph: the group parent and the subsidiaries under it, each with its own books, chart of accounts, calendar and close. See [Work across several companies](working-across-companies.md#several-companies-in-one-graph).
+
 **Reporting style.** How your statements are laid out for your kind of company. The main difference is equity: retained earnings for a corporation, partners' capital for a partnership, members' equity for an LLC. Your assistant can change it. New reports use the new style, and reports already created keep theirs.
 
 **Scenario.** A named set of forecast assumptions, projected forward month by month from your last closed month. See [Plan and forecast with your AI assistant](plan-and-forecast.md). In the technical docs: [forecast block](https://robosystems.ai/docs/technical/forecasting-and-metrics).
@@ -72,6 +76,8 @@ The words RoboLedger and your AI assistant use, in plain terms. Where the techni
 **Statement.** A balance sheet, income statement, cash flow or statement of equity. A live statement is built from the ledger when you ask and moves with every sync; the statements saved at a close and those in a report stay put. See [Ask about your books](ask-about-your-books.md#live-closed-and-reported).
 
 **Subgraph.** A separate workspace inside a graph, for a test or a what-if, that shares its parent's permissions and credits. See [Data lake, subgraphs and backups](https://robosystems.ai/docs/guides/data-lake-and-subgraphs).
+
+**Subsidiary.** A company in a reporting group under the group parent, with the share the parent holds recorded. Its books, chart and close are its own.
 
 **Sync.** Bringing QuickBooks changes into RoboLedger. It happens when you ask, not on a schedule, and a regular sync looks back 60 days. See [Connect your books to your AI assistant](connect-your-books.md#2-connect-quickbooks).
 
