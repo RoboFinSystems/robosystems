@@ -47,9 +47,10 @@ CATALOG_CACHE_CONTROL = "public, max-age=60"
 ROBOTS_CACHE_CONTROL = "public, max-age=3600"
 
 # Filed documents, the text-block fragments and the narrative extracts are
-# served, never indexed — the CDN adds the X-Robots-Tag on the same extensions
-# (cloudformation/s3.yaml). The holon, the Tavi and the catalog stay indexable.
-ROBOTS_TXT = "User-agent: *\nDisallow: /*.htm$\nDisallow: /*.html$\nDisallow: /*.txt$\n"
+# served, never indexed — the CDN adds the X-Robots-Tag on those extensions
+# (cloudformation/s3.yaml). They must stay crawlable: a crawler that may not
+# fetch a URL never sees its noindex, and indexes it bare from inbound links.
+ROBOTS_TXT = "User-agent: *\nAllow: /\n"
 
 REPORT_COLUMNS = [
   "identifier",
@@ -605,15 +606,14 @@ def sec_filing_catalog(
     storage_class=PUBLIC_DATA_STORAGE_CLASS,
   )
 
-  if not writer.object_exists(public_bucket, FILING_ROBOTS_KEY):
-    writer.upload_string(
-      ROBOTS_TXT,
-      public_bucket,
-      FILING_ROBOTS_KEY,
-      content_type="text/plain",
-      cache_control=ROBOTS_CACHE_CONTROL,
-      storage_class=PUBLIC_DATA_STORAGE_CLASS,
-    )
+  writer.upload_string(
+    ROBOTS_TXT,
+    public_bucket,
+    FILING_ROBOTS_KEY,
+    content_type="text/plain",
+    cache_control=ROBOTS_CACHE_CONTROL,
+    storage_class=PUBLIC_DATA_STORAGE_CLASS,
+  )
 
   # The public pages key their indexability off this count.
   renderable_filers = sum(1 for row in index["companies"] if row["renderable"])
