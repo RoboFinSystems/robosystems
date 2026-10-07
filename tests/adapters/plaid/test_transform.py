@@ -160,6 +160,68 @@ class TestTransferLegs:
 
 
 @pytest.mark.unit
+class TestEntities:
+  """Each account books to the entity whose chart it is in: its lines land
+  there, its suggestions resolve on that chart, and its legs pair only with
+  legs on the same entity's books."""
+
+  ENTITIES = {CHECKING_ID: "ent_parent", SAVINGS_ID: "ent_sub", CARD_ID: "ent_parent"}
+
+  def test_each_line_lands_on_its_accounts_entity(self):
+    events = _by_external_id(_run(account_entities=self.ENTITIES))
+    by_account = {
+      e["metadata"]["account_id"]: e.get("entity_id")
+      for e in events.values()
+      if e["event_type"] != "internal_transfer"
+    }
+    assert by_account[CHECKING_ID] == "ent_parent"
+    assert by_account[SAVINGS_ID] == "ent_sub"
+    for event in events.values():
+      CreateEventBlockRequest.model_validate(event)
+
+  def test_without_entities_no_line_names_one(self):
+    assert all("entity_id" not in e for e in _run().events)
+
+  def test_legs_on_two_entities_accounts_do_not_pair(self):
+    # The $500 checking → savings movement pairs when both accounts are the
+    # parent's; across two entities it is intercompany, two lines.
+    same = _by_external_id(
+      _run(account_entities={CHECKING_ID: "ent_p", SAVINGS_ID: "ent_p"})
+    )
+    assert "plaid_xfer_t_xfer_in_t_xfer_out" in same
+    split = _by_external_id(_run(account_entities=self.ENTITIES))
+    assert "plaid_xfer_t_xfer_in_t_xfer_out" not in split
+    assert split["plaid_txn_t_xfer_out"]["entity_id"] == "ent_parent"
+    assert split["plaid_txn_t_xfer_in"]["entity_id"] == "ent_sub"
+
+  def test_a_pair_lands_on_its_entity(self):
+    events = _by_external_id(
+      _run(account_entities={CHECKING_ID: "ent_p", SAVINGS_ID: "ent_p"})
+    )
+    assert events["plaid_xfer_t_xfer_in_t_xfer_out"]["entity_id"] == "ent_p"
+
+  def test_a_suggestion_resolves_on_the_entitys_own_chart(self):
+    fee = _by_external_id(_run())["plaid_txn_t_fee"]
+    name = fee["metadata"]["suggested_account_name"]
+    parent_chart = ChartIndex(by_name={name_key(name): "e_p_fees"})
+    sub_chart = ChartIndex(by_name={name_key(name): "e_s_fees"})
+    on_sub = _by_external_id(
+      _run(
+        chart=parent_chart,
+        account_entities={CHECKING_ID: "ent_sub"},
+        charts_by_entity={"ent_sub": sub_chart},
+      )
+    )
+    assert on_sub["plaid_txn_t_fee"]["metadata"]["suggested_element_id"] == "e_s_fees"
+    # An account with no entity, or one with no chart of its own, resolves
+    # on the default chart.
+    default = _by_external_id(
+      _run(chart=parent_chart, charts_by_entity={"ent_sub": sub_chart})
+    )
+    assert default["plaid_txn_t_fee"]["metadata"]["suggested_element_id"] == "e_p_fees"
+
+
+@pytest.mark.unit
 class TestTransform:
   def test_skips_and_counts(self):
     result = _run(since=date(2026, 1, 1))

@@ -211,6 +211,10 @@ class Leg:
   amount: int
   day: str
   description: str | None
+  # The entity the account books to; two legs pair only within one entity,
+  # since a movement between two entities' accounts is intercompany, not a
+  # transfer inside one set of books.
+  entity_id: str | None = None
 
 
 def pair_legs(
@@ -228,7 +232,7 @@ def pair_legs(
     for in_leg in ins:
       if in_leg.transaction_id in used or in_leg.account_id == out_leg.account_id:
         continue
-      if in_leg.amount != -out_leg.amount:
+      if in_leg.amount != -out_leg.amount or in_leg.entity_id != out_leg.entity_id:
         continue
       gap = abs(days_between(out_leg.day, in_leg.day))
       if gap > window_days:
@@ -295,6 +299,7 @@ def transfer_event(
       "currency": "USD",
       "description": f"Transfer {from_name} to {to_name}"[:200],
       "resource_element_id": in_leg.element_id,
+      "entity_id": in_leg.entity_id,
       "metadata": metadata,
       "apply_handlers": False,
     }
@@ -324,15 +329,22 @@ def transform(
   since: date | None = None,
   exclude: frozenset[str] = frozenset(),
   unpairable: frozenset[str] = frozenset(),
+  account_entities: dict[str, str] | None = None,
+  charts_by_entity: dict[str, ChartIndex] | None = None,
 ) -> TransformResult:
   """Posted transactions → event payloads.
 
   ``exclude`` names transactions already inside a captured transfer pair (they
   emit nothing); ``unpairable`` names ones already captured on their own (they
   emit their single-leg payload, for the hint refresh, and never pair).
+  ``account_entities`` maps a feed account to the entity its chart account
+  belongs to: each event lands on that entity, and its suggestion resolves
+  on that entity's chart (``charts_by_entity``, else ``chart``).
   """
   chart = chart or ChartIndex()
   agent_ids = agent_ids or {}
+  account_entities = account_entities or {}
+  charts_by_entity = charts_by_entity or {}
   by_id = {account.account_id: account for account in accounts}
   result = TransformResult(events=[])
 
@@ -353,7 +365,7 @@ def transform(
     live.append(txn)
 
   candidates = [
-    leg_from_transaction(txn, by_id, account_elements)
+    leg_from_transaction(txn, by_id, account_elements, account_entities)
     for txn in live
     if is_transfer_candidate(txn) and str(txn["transaction_id"]) not in unpairable
   ]
@@ -377,6 +389,8 @@ def transform(
       agent_ids,
       connection_id=connection_id,
       item_id=item_id,
+      account_entities=account_entities,
+      charts_by_entity=charts_by_entity,
     )
     result.classification[classification] += 1
     if event["metadata"].get("suggested_account_name"):
@@ -393,6 +407,7 @@ def leg_from_transaction(
   txn: dict[str, Any],
   accounts: dict[str, BankAccount],
   account_elements: dict[str, str],
+  account_entities: dict[str, str] | None = None,
 ) -> Leg:
   account_id = str(txn.get("account_id"))
   account = accounts.get(account_id)
@@ -404,6 +419,7 @@ def leg_from_transaction(
     amount=cents(txn.get("amount")),
     day=str(txn.get("date") or "")[:10],
     description=txn.get("original_description") or txn.get("name"),
+    entity_id=(account_entities or {}).get(account_id),
   )
 
 
@@ -416,6 +432,8 @@ def bank_event(
   *,
   connection_id: str,
   item_id: str | None,
+  account_entities: dict[str, str] | None = None,
+  charts_by_entity: dict[str, ChartIndex] | None = None,
 ) -> tuple[dict[str, Any], str]:
   """One single-leg event, and how its suggestion was reached."""
   amount = cents(txn.get("amount"))
@@ -452,6 +470,9 @@ def bank_event(
   )
   account_id = str(txn.get("account_id"))
   account = accounts.get(account_id)
+  entity_id = (account_entities or {}).get(account_id)
+  if entity_id and charts_by_entity and entity_id in charts_by_entity:
+    chart = charts_by_entity[entity_id]
   parties = txn.get("counterparties") or []
   party = parties[0] if parties else {}
   merchant = counterparty_name(txn)
@@ -504,6 +525,7 @@ def bank_event(
     "description": str(merchant or bank_description or "Bank transaction")[:200],
     "agent_id": agent_ids.get(agent_key) if agent_key else None,
     "resource_element_id": account_elements.get(account_id),
+    "entity_id": entity_id,
     "metadata": metadata,
     "apply_handlers": False,
   }

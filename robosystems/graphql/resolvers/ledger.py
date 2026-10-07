@@ -29,6 +29,7 @@ from robosystems.graphql.types.ledger import (
   AccountTree,
   AccountTreeNode,
   Agent,
+  BankAccountList,
   BlockedSourceGraphList,
   ChartTemplate,
   ClosingBookStructures,
@@ -83,6 +84,9 @@ from robosystems.operations.roboledger.reads import (
 )
 from robosystems.operations.roboledger.reads import (
   ar_ap as reads_ar_ap,
+)
+from robosystems.operations.roboledger.reads import (
+  bank_accounts as reads_bank_accounts,
 )
 from robosystems.operations.roboledger.reads import (
   blocked_source_graphs as reads_blocked_source_graphs,
@@ -541,6 +545,51 @@ class LedgerQuery:
       roots=[AccountTreeNode.from_pydantic(n) for n in response.roots],
       total_accounts=response.total_accounts,
     )
+
+  @strawberry.field
+  def bank_accounts(
+    self,
+    info: Info[GraphQLContext, None],
+    entity_id: str | None = None,
+  ) -> BankAccountList | None:
+    """The group's bank and card accounts, with what writes to each.
+
+    Every chart account a feed books to, or that a source system types as a
+    bank or card account, with the entity whose chart it is in and the
+    health of the connection that writes to it.
+
+    Args:
+      entity_id: One entity's accounts. Omit for every entity in the group.
+    """
+    import logging
+
+    from robosystems.db.platform import platform_session
+    from robosystems.models.core.connection.connection import Connection
+
+    graph_id = require_graph_id(info)
+    health: dict[str, reads_bank_accounts.ConnectionHealth] = {}
+    try:
+      with platform_session() as platform_db:
+        for conn in Connection.get_all_for_graph(graph_id, platform_db):
+          result = conn.last_sync_result or {}
+          health[str(conn.id)] = reads_bank_accounts.ConnectionHealth(
+            status=conn.status,
+            institution=conn.institution_name or conn.source_name,
+            last_sync_at=conn.last_sync,
+            last_sync_status=result.get("status") if isinstance(result, dict) else None,
+          )
+    except Exception:
+      logging.getLogger(__name__).warning(
+        "Failed to fetch connection health for %s", graph_id, exc_info=True
+      )
+    try:
+      with _open_session(info, "roboledger") as session:
+        response = reads_bank_accounts.list_bank_accounts(
+          session, entity_id=entity_id, connections=health
+        )
+    except (ValueError, ProgrammingError):
+      _raise_ledger_not_initialized()
+    return BankAccountList.from_pydantic(response)
 
   @strawberry.field
   def account_rollups(

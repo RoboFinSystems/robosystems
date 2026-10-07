@@ -17,6 +17,10 @@ from robosystems.middleware.operations import (
 )
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.models.api.common import OPERATION_ERROR_RESPONSES
+from robosystems.models.api.extensions.bank_accounts import (
+  LinkBankAccountRequest,
+  LinkBankAccountResponse,
+)
 from robosystems.models.api.extensions.chart_of_accounts import (
   InitializeChartOfAccountsRequest,
   InitializeChartOfAccountsResponse,
@@ -33,6 +37,16 @@ from robosystems.models.api.extensions.fiscal_calendar import (
   InitializeLedgerResponse,
 )
 from robosystems.models.core import User
+from robosystems.operations.roboledger.commands.bank_accounts import (
+  AccountAlreadyFedError,
+  ChartAccountNotFoundError,
+  ChartRequiredError,
+  FeedAccountNotFoundError,
+  NotAChartAccountError,
+)
+from robosystems.operations.roboledger.commands.bank_accounts import (
+  link_bank_account as cmd_link_bank_account,
+)
 from robosystems.operations.roboledger.commands.chart_of_accounts import (
   ChartAlreadyExistsError,
   ChartTemplateNotFoundError,
@@ -261,5 +275,40 @@ change_reporting_style_op = _registrar.register(
       ReportingStyleInvalidError: 422,
     },
     requires_created_by=False,
+  )
+)
+
+
+link_bank_account_op = _registrar.register(
+  OperationSpec(
+    name="link-bank-account",
+    summary="Link Bank Account",
+    description=(
+      "Point a bank feed's account at a chart account. Name `element_id` for "
+      "an existing active account, or `entity_id` alone to create one in that "
+      "entity's chart. The chart the account is in decides whose books the "
+      "feed's lines go into, so this is also how a feed account is bound to a "
+      "subsidiary. Lines still in the inbox move with it (across an entity "
+      "change their suggestion is resolved again on the new chart, and a "
+      "classification that named the old entity's account is dropped); "
+      "posted entries stay where they were posted. An account another "
+      "connection already feeds is refused. An account the feed created "
+      "and then left stays on its chart as an ordinary account. A sync "
+      "already in flight when the link moves can still land a line or two "
+      "on the old account; running this again moves them. Read the group's "
+      "accounts with the `bankAccounts` GraphQL field."
+    ),
+    command=cmd_link_bank_account,
+    request_model=LinkBankAccountRequest,
+    result_type=LinkBankAccountResponse,
+    error_map={
+      FeedAccountNotFoundError: 404,
+      ChartAccountNotFoundError: 404,
+      EntityNotInGraphError: 404,
+      AccountAlreadyFedError: 409,
+      ChartRequiredError: 422,
+      NotAChartAccountError: 422,
+    },
+    mark_stale_reason="bank_account_linked",
   )
 )

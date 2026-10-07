@@ -7,13 +7,20 @@ TaxonomyBlock envelope, as if the customer had added it.
 The link lives in the element's ``metadata.bank_feed`` — never in its
 ``source`` or its qname — so the chart stays the tenant's. A created element
 also carries ``external_source`` + ``external_id`` for provenance.
+
+The chart the account is in is the entity whose books the feed's lines go
+into. A new account lands in the group parent's chart; ``link-bank-account``
+moves its link to an account in a subsidiary's chart, and from then on the
+feed books there. A link is found wherever it is, so nothing is created twice.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from robosystems.adapters.bank_feed.chart import BankAccount, ChartIndex, name_key
@@ -23,10 +30,11 @@ from robosystems.models.api.taxonomy_block import (
   TaxonomyBlockElementRequest,
   UpdateTaxonomyBlockRequest,
 )
-from robosystems.models.extensions import Element
+from robosystems.models.extensions import Element, Taxonomy
 from robosystems.operations.roboledger.commands.chart_of_accounts import (
   active_chart_id,
 )
+from robosystems.operations.roboledger.reads.accounts import coa_element_clause
 from robosystems.operations.taxonomy_block.chart_of_accounts import (
   update as update_chart_block,
 )
@@ -51,9 +59,10 @@ class AccountLinkResult:
   linked: int
 
 
-def build_chart_index(session: Session) -> ChartIndex:
-  """Every account on the graph's chart, by normalized name and by code."""
-  chart_id = active_chart_id(session)
+def build_chart_index(session: Session, entity_id: str | None = None) -> ChartIndex:
+  """Every account on the entity's chart, default the group parent's, by
+  normalized name and by code."""
+  chart_id = active_chart_id(session, entity_id)
   if chart_id is None:
     return ChartIndex()
   rows = session.execute(
@@ -70,6 +79,45 @@ def build_chart_index(session: Session) -> ChartIndex:
   return index
 
 
+def chart_indexes(session: Session, entity_ids: Iterable[str]) -> dict[str, ChartIndex]:
+  """One chart index per entity, for the suggestions on each entity's lines."""
+  return {
+    entity_id: build_chart_index(session, entity_id)
+    for entity_id in sorted({eid for eid in entity_ids if eid})
+  }
+
+
+_ENTITY_OF_ACCOUNT_SQL = text("""
+  SELECT e.id AS element_id, owner.entity_id
+  FROM elements e
+  LEFT JOIN entity_taxonomies owner
+    ON owner.taxonomy_id = e.taxonomy_id AND owner.basis = 'chart_of_accounts'
+  WHERE e.id = ANY(:element_ids)
+""")
+
+
+def account_entities(
+  session: Session, element_ids: Iterable[str | None], *, parent_id: str | None
+) -> dict[str, str | None]:
+  """The entity each chart account's lines belong to: the owner of its chart,
+  else the group parent (an account in no entity's chart is the parent's)."""
+  ids = sorted({str(eid) for eid in element_ids if eid})
+  if not ids:
+    return {}
+  rows = session.execute(_ENTITY_OF_ACCOUNT_SQL, {"element_ids": ids}).all()
+  return {
+    str(row.element_id): (str(row.entity_id) if row.entity_id else parent_id)
+    for row in rows
+  }
+
+
+def chart_accounts(session: Session) -> list[Element]:
+  """Every account on every chart of the graph."""
+  return list(
+    session.execute(select(Element).where(coa_element_clause())).scalars().all()
+  )
+
+
 def link_bank_accounts(
   session: Session,
   accounts: list[BankAccount],
@@ -79,24 +127,27 @@ def link_bank_accounts(
   created_by: str,
 ) -> AccountLinkResult:
   """Return ``{feed_account_id: element_id}`` for every account, creating
-  the ones nothing on the chart matches. Flushes; the caller commits."""
+  the ones nothing on the chart matches. Flushes; the caller commits.
+
+  A link is honoured in whichever entity's chart it sits; a name match and a
+  new account are the group parent's chart only.
+  """
   chart_id = active_chart_id(session)
   if chart_id is None:
     raise ChartRequiredError(
       "This graph has no chart of accounts; initialize one before syncing a bank feed."
     )
 
-  elements = list(
-    session.execute(select(Element).where(Element.taxonomy_id == chart_id))
-    .scalars()
-    .all()
-  )
+  elements = chart_accounts(session)
+  home = [element for element in elements if element.taxonomy_id == chart_id]
   by_feed: dict[str, Element] = {}
   by_name: dict[str, Element] = {}
   for element in elements:
     link = (element.metadata_ or {}).get(BANK_FEED_KEY) or {}
     if link.get("provider") == provider and link.get("account_id"):
       by_feed[str(link["account_id"])] = element
+  for element in home:
+    link = (element.metadata_ or {}).get(BANK_FEED_KEY) or {}
     # An account another connection feeds is never claimed by name: two
     # feeds sharing one chart account would overwrite each other's link on
     # every sync. The same connection may re-claim its own (a replaced Plaid
@@ -124,10 +175,10 @@ def link_bank_accounts(
       }
 
   if to_create:
-    created = _create_accounts(
+    created = create_chart_accounts(
       session,
       chart_id,
-      elements,
+      home,
       to_create,
       provider=provider,
       connection_id=connection_id,
@@ -150,7 +201,20 @@ def _link(account: BankAccount, provider: str, connection_id: str) -> dict[str, 
   }
 
 
-def _create_accounts(
+def feed_account(link: dict[str, Any], *, balance_type: str) -> BankAccount:
+  """The feed's account as its link records it, for creating its chart
+  account again in another entity's chart."""
+  return BankAccount(
+    account_id=str(link["account_id"]),
+    name=str(link.get("account_name") or link["account_id"]),
+    kind=str(link.get("kind") or "account"),
+    trait="liability" if balance_type == "credit" else "asset",
+    balance_type=balance_type,
+    institution=str(link.get("institution") or "Bank"),
+  )
+
+
+def create_chart_accounts(
   session: Session,
   chart_id: str,
   existing: list[Element],
@@ -160,9 +224,19 @@ def _create_accounts(
   connection_id: str,
   created_by: str,
 ) -> dict[str, str]:
+  """Create one account per feed account on ``chart_id`` through the
+  envelope, codes allocated against ``existing`` (that chart's accounts), and
+  return ``{feed_account_id: element_id}``.
+
+  Qnames take the chart's own prefix (a subsidiary's chart has one of its
+  own) and are unique across the graph, not the chart.
+  """
   uses_codes = any(element.code for element in existing)
   taken_codes = {str(element.code).strip() for element in existing if element.code}
-  taken_qnames = {str(element.qname) for element in existing if element.qname}
+  prefix = chart_qname_prefix(session, chart_id)
+  taken = taken_qnames(session) | {
+    str(element.qname) for element in existing if element.qname
+  }
 
   requests: list[TaxonomyBlockElementRequest] = []
   qname_by_account: dict[str, str] = {}
@@ -175,7 +249,7 @@ def _create_accounts(
       if uses_codes
       else None
     )
-    qname = _unique_qname(taken_qnames, code or slug(account.name))
+    qname = _unique_qname(taken, code or slug(account.name), prefix)
     qname_by_account[account.account_id] = qname
     requests.append(
       TaxonomyBlockElementRequest(
@@ -234,11 +308,30 @@ def _next_code(taken: set[str], base: int) -> str:
   return str(code)
 
 
-def _unique_qname(taken: set[str], token: str) -> str:
-  candidate = f"coa:{token}"
+def chart_qname_prefix(session: Session, chart_id: str) -> str:
+  """The qname prefix the chart's accounts carry: its own namespace, else
+  the plain ``coa`` of the group parent's chart."""
+  standard = session.execute(
+    select(Taxonomy.standard).where(Taxonomy.id == chart_id)
+  ).scalar_one_or_none()
+  return str(standard) if standard else "coa"
+
+
+def taken_qnames(session: Session) -> set[str]:
+  """Every qname on the graph; the index is unique across it."""
+  return {
+    str(qname)
+    for qname in session.execute(
+      select(Element.qname).where(Element.qname.is_not(None))
+    ).scalars()
+  }
+
+
+def _unique_qname(taken: set[str], token: str, prefix: str = "coa") -> str:
+  candidate = f"{prefix}:{token}"
   suffix = 2
   while candidate in taken:
-    candidate = f"coa:{token}{suffix}"
+    candidate = f"{prefix}:{token}{suffix}"
     suffix += 1
   taken.add(candidate)
   return candidate

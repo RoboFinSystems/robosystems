@@ -176,6 +176,64 @@ class TestTransform:
       == "Transfer Mercury Checking ••1234 to Mercury Savings ••5678"
     )
 
+  def test_lines_land_on_their_accounts_entity(self):
+    result = transform(
+      raw_pull(),
+      source="mercury",
+      connection_id="conn_1",
+      account_elements=ELEMENTS,
+      account_entities={CHECKING_ID: "ent_p", SAVINGS_ID: "ent_p", CARD_ID: "ent_s"},
+    )
+    by_id = {event["external_id"]: event for event in result.events}
+    assert by_id["mercury_xfer_txn_xfer_in"]["entity_id"] == "ent_p"
+    singles = {
+      e["metadata"]["account_id"]: e.get("entity_id")
+      for e in result.events
+      if e["event_type"] != "internal_transfer"
+    }
+    assert singles.get(CHECKING_ID) == "ent_p"
+    for event in result.events:
+      CreateEventBlockRequest.model_validate(event)
+
+  def test_legs_on_two_entities_accounts_do_not_pair(self):
+    result = transform(
+      raw_pull(),
+      source="mercury",
+      connection_id="conn_1",
+      account_elements=ELEMENTS,
+      account_entities={CHECKING_ID: "ent_p", SAVINGS_ID: "ent_s", CARD_ID: "ent_p"},
+    )
+    by_id = {event["external_id"]: event for event in result.events}
+    assert "mercury_xfer_txn_xfer_in" not in by_id
+    assert by_id["mercury_txn_txn_xfer_out"]["entity_id"] == "ent_p"
+    assert by_id["mercury_txn_txn_xfer_in"]["entity_id"] == "ent_s"
+    # The card autopay is still the parent's on both sides, so it still pairs.
+    assert by_id["mercury_xfer_txn_autopay_in"]["entity_id"] == "ent_p"
+
+  def test_a_suggestion_resolves_on_the_entitys_own_chart(self):
+    _, by_id = _events()
+    suggested = {
+      e["external_id"]: e["metadata"]["suggested_account_name"]
+      for e in by_id.values()
+      if e["metadata"].get("account_id") == CHECKING_ID
+      and e["metadata"].get("suggested_element_id")
+    }
+    assert suggested, "the fixture carries a resolved line on checking"
+    external_id, name = next(iter(suggested.items()))
+    sub_chart = ChartIndex(by_name={name_key(name): "elem_sub_x"})
+    result = transform(
+      raw_pull(),
+      source="mercury",
+      connection_id="conn_1",
+      account_elements=ELEMENTS,
+      chart=_chart(),
+      account_entities={CHECKING_ID: "ent_s"},
+      charts_by_entity={"ent_s": sub_chart},
+    )
+    moved = {e["external_id"]: e for e in result.events}[external_id]
+    assert moved["metadata"]["suggested_element_id"] == "elem_sub_x"
+    assert moved["entity_id"] == "ent_s"
+
   def test_card_autopay_is_a_transfer_pair_too(self):
     _, by_id = _events()
     autopay = by_id["mercury_xfer_txn_autopay_in"]

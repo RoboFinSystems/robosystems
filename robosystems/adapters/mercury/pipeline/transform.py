@@ -172,11 +172,18 @@ def transform(
   chart: ChartIndex | None = None,
   agent_ids: dict[str, str] | None = None,
   include_treasury: bool = True,
+  account_entities: dict[str, str] | None = None,
+  charts_by_entity: dict[str, ChartIndex] | None = None,
 ) -> TransformResult:
   """``account_elements`` maps a Mercury account id to the chart element
-  linked to it; ``agent_ids`` maps a counterparty key to its agent id."""
+  linked to it; ``agent_ids`` maps a counterparty key to its agent id;
+  ``account_entities`` maps an account to the entity its chart account
+  belongs to, where its events land and whose chart (``charts_by_entity``)
+  its suggestions resolve on."""
   chart = chart or ChartIndex()
   agent_ids = agent_ids or {}
+  account_entities = account_entities or {}
+  charts_by_entity = charts_by_entity or {}
   accounts = {
     account.account_id: account
     for account in bank_accounts(raw, include_treasury=include_treasury)
@@ -196,11 +203,13 @@ def transform(
       continue
     live.append(txn)
 
-  # Pair the two legs of a movement between the org's own accounts.
-  buckets: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
+  # Pair the two legs of a movement between the org's own accounts — within
+  # one entity: a movement between two entities' accounts is intercompany.
+  buckets: dict[tuple[str, int, str | None], list[dict[str, Any]]] = defaultdict(list)
   for txn in live:
     if txn.get("kind") in TRANSFER_KINDS or txn.get("counterpartyName") in own_names:
-      buckets[(_day(txn), abs(cents(txn.get("amount") or 0)))].append(txn)
+      entity = account_entities.get(str(txn.get("accountId")))
+      buckets[(_day(txn), abs(cents(txn.get("amount") or 0)), entity)].append(txn)
   paired: set[str] = set()
   for group in buckets.values():
     debits = [t for t in group if cents(t.get("amount") or 0) < 0]
@@ -209,7 +218,13 @@ def transform(
       paired.update({source_leg["id"], target_leg["id"]})
       result.events.append(
         _transfer_event(
-          source_leg, target_leg, accounts, account_elements, source, connection_id
+          source_leg,
+          target_leg,
+          accounts,
+          account_elements,
+          source,
+          connection_id,
+          account_entities,
         )
       )
       result.classification["transfer"] += 1
@@ -226,6 +241,8 @@ def transform(
       agent_ids,
       source,
       connection_id,
+      account_entities,
+      charts_by_entity,
     )
     result.classification[classification] += 1
     if event["metadata"].get("suggested_account_name"):
@@ -281,6 +298,7 @@ def _transfer_event(
   account_elements: dict[str, str],
   source: str,
   connection_id: str,
+  account_entities: dict[str, str] | None = None,
 ) -> dict[str, Any]:
   from_account = accounts.get(str(source_leg.get("accountId")))
   to_account = accounts.get(str(target_leg.get("accountId")))
@@ -321,6 +339,7 @@ def _transfer_event(
       "currency": "USD",
       "description": f"Transfer {from_name} to {to_name}"[:200],
       "resource_element_id": to_element,
+      "entity_id": (account_entities or {}).get(str(target_leg.get("accountId"))),
       "metadata": metadata,
       "apply_handlers": False,
     }
@@ -336,11 +355,16 @@ def _bank_event(
   agent_ids: dict[str, str],
   source: str,
   connection_id: str,
+  account_entities: dict[str, str] | None = None,
+  charts_by_entity: dict[str, ChartIndex] | None = None,
 ) -> tuple[dict[str, Any], str]:
   amount = cents(txn.get("amount") or 0)
   kind = str(txn.get("kind") or "other")
   name = str(txn.get("counterpartyName") or txn.get("bankDescription") or "Unknown")
   account = accounts.get(str(txn.get("accountId")))
+  entity_id = (account_entities or {}).get(str(txn.get("accountId")))
+  if entity_id and charts_by_entity and entity_id in charts_by_entity:
+    chart = charts_by_entity[entity_id]
   suggested, classification = _suggest(txn)
 
   if kind == "externalTransfer":
@@ -426,6 +450,7 @@ def _bank_event(
     "description": description[:200],
     "agent_id": agent_ids.get(agent_key) if agent_key else None,
     "resource_element_id": account_elements.get(str(txn.get("accountId"))),
+    "entity_id": entity_id,
     "metadata": metadata,
     "apply_handlers": False,
   }

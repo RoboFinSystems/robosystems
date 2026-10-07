@@ -147,7 +147,9 @@ def _sync_item(
   credentials: dict[str, Any],
 ) -> MaterializeResult:
   from robosystems.adapters.bank_feed.accounts import (
+    account_entities,
     build_chart_index,
+    chart_indexes,
     link_bank_accounts,
   )
   from robosystems.adapters.plaid.client import PlaidError
@@ -155,6 +157,7 @@ def _sync_item(
   from robosystems.adapters.plaid.pipeline.transform import bank_accounts
   from robosystems.db.extensions import extensions_session
   from robosystems.operations.providers.plaid_provider import plaid_client
+  from robosystems.operations.roboledger.entity_scope import ensure_entity_id
 
   access_token = credentials.get("access_token")
   if not access_token:
@@ -238,6 +241,16 @@ def _sync_item(
       created_by=config.user_id,
     )
     chart = build_chart_index(session)
+    # Each account books to the entity whose chart it is in; the lines it
+    # captures land there, with suggestions from that entity's chart.
+    entities = account_entities(
+      session, link_result.links.values(), parent_id=ensure_entity_id(session)
+    )
+    by_feed_account = {
+      account_id: entities[element_id]
+      for account_id, element_id in link_result.links.items()
+      if entities.get(element_id)
+    }
     report = load_sync(
       session,
       graph_id=config.graph_id,
@@ -250,6 +263,8 @@ def _sync_item(
       chart=chart,
       since=since,
       rekey_replaced=rekey,
+      account_entities=by_feed_account,
+      charts_by_entity=chart_indexes(session, by_feed_account.values()),
     )
     session.commit()
 

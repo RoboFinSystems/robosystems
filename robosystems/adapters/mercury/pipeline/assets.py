@@ -80,7 +80,9 @@ def _run_mercury_sync(
   context: AssetExecutionContext, config: MercurySyncConfig
 ) -> MaterializeResult:
   from robosystems.adapters.bank_feed.accounts import (
+    account_entities,
     build_chart_index,
+    chart_indexes,
     link_bank_accounts,
   )
   from robosystems.adapters.mercury.client import ConnectionTokenSource, MercuryClient
@@ -90,6 +92,7 @@ def _run_mercury_sync(
   from robosystems.operations.providers.mercury_provider import (
     mercury_oauth_provider,
   )
+  from robosystems.operations.roboledger.entity_scope import ensure_entity_id
 
   context.log.info(
     f"Mercury sync for graph={config.graph_id} connection={config.connection_id} "
@@ -128,6 +131,15 @@ def _run_mercury_sync(
       created_by=config.user_id,
     )
     chart = build_chart_index(session)
+    # Each account books to the entity whose chart it is in.
+    entities = account_entities(
+      session, link_result.links.values(), parent_id=ensure_entity_id(session)
+    )
+    by_feed_account = {
+      account_id: entities[element_id]
+      for account_id, element_id in link_result.links.items()
+      if entities.get(element_id)
+    }
     report = load_feed(
       session,
       graph_id=config.graph_id,
@@ -138,6 +150,8 @@ def _run_mercury_sync(
       account_elements=link_result.links,
       chart=chart,
       include_treasury=include_treasury,
+      account_entities=by_feed_account,
+      charts_by_entity=chart_indexes(session, by_feed_account.values()),
     )
     session.commit()
 
