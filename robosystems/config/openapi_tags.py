@@ -20,7 +20,7 @@ MAIN_API_TAGS = [
   },
   {
     "name": "Schema",
-    "description": "📐 Schema management - Validate and manage custom graph schemas",
+    "description": "📐 Schema - Inspect and export a graph's deployed schema",
   },
   {
     "name": "Subgraphs",

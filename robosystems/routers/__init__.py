@@ -97,10 +97,12 @@ router.include_router(graph_content_ops_router, prefix="/operations")
 router.include_router(files_router)
 
 
-# Schema validation needs no graph, so it gets its own Schema-tagged router
-# (mounted in main.py as POST /v1/graphs/schema/validate) rather than the
-# graph-scoped or Graphs CRUD router, which would double-tag it.
-graph_schema_router_v1 = APIRouter(prefix="/v1/graphs", tags=["Schema"])
+# Schema validation needs no graph — it checks a candidate schema before
+# createGraph — so it is tagged Graphs with the other pre-creation helpers. It
+# gets its own router (mounted in main.py after the Graphs CRUD router, as
+# POST /v1/graphs/schema/validate) because the schema package's router is
+# graph-scoped and tagged Schema, which would double-tag it.
+graph_schema_router_v1 = APIRouter(prefix="/v1/graphs", tags=["Graphs"])
 graph_schema_router_v1.include_router(schema_validate_router)
 
 user_router_v1 = APIRouter(prefix="/v1", tags=[])

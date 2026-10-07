@@ -1,7 +1,7 @@
 """Database backup endpoints. Restore lives in ``restore.py``.
 
 Four backup types:
-- standard: BackupManager flow (ZIP, optional encrypt, S3 upload)
+- standard: BackupManager flow (ZIP, S3 upload)
 - replica: raw .lbug to S3 via OnInstanceBackupService (replica fleet downloads it)
 - duckdb_staging: raw .duckdb to S3 via OnInstanceBackupService
 - r2_download: zstd-compressed .lbug.zst to R2 via OnInstanceBackupService

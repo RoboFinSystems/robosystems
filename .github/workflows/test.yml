@@ -53,8 +53,6 @@ jobs:
       USER_DATA_BUCKET: robosystems-local
       SHARED_RAW_BUCKET: robosystems-local
       SHARED_PROCESSED_BUCKET: robosystems-local
-      # Graph Database Backup Configuration
-      LBUG_BACKUP_ENCRYPTION_KEY: test-encryption-key-dev
       # Queue Management Configuration (from pytest.ini)
       ADMISSION_MEMORY_THRESHOLD: "99.0"
       ADMISSION_CPU_THRESHOLD: "99.0"

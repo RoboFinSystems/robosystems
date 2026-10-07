@@ -16,5 +16,6 @@ router.include_router(info_router)
 router.include_router(export_router)
 
 # validate_router is not graph-scoped (a candidate schema needs no graph); it
-# is mounted at /v1/graphs/schema/validate in robosystems/routers/__init__.py.
+# is mounted at /v1/graphs/schema/validate, tagged Graphs, in
+# robosystems/routers/__init__.py.
 __all__ = ["router", "validate_router"]
