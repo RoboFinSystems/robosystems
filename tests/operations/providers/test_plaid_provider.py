@@ -212,6 +212,57 @@ class TestLinkTokenCache:
       link = await create_link_token("conn_1", "usr_1", MagicMock())
     assert link["link_token"] == "link-1"
 
+  async def test_a_token_is_tied_to_the_user_it_was_minted_for(self, _link_token_cache):
+    from robosystems.operations.providers.plaid_provider import create_link_token
+
+    client = _client()
+    with (
+      patch(f"{MODULE}._credentials", return_value={"sync_config": {}}),
+      patch(f"{MODULE}.plaid_client", return_value=client),
+    ):
+      await create_link_token("conn_1", "usr_1", MagicMock())
+      await create_link_token("conn_1", "usr_2", MagicMock())
+    assert client.create_link_token.call_count == 2
+
+  async def test_a_malformed_cache_entry_is_ignored(self, _link_token_cache):
+    from robosystems.operations.providers.plaid_provider import create_link_token
+
+    client = _client()
+    with (
+      patch(f"{MODULE}._credentials", return_value={"sync_config": {}}),
+      patch(f"{MODULE}.plaid_client", return_value=client),
+    ):
+      for raw in ("not json", '{"link": "a-string"}', "[1, 2]"):
+        _link_token_cache.store["plaid:link_token:conn_1"] = raw
+        link = await create_link_token("conn_1", "usr_1", MagicMock())
+        assert link["link_token"] == "link-1"
+    assert client.create_link_token.call_count == 3
+
+  async def test_the_gone_item_fallback_still_carries_the_redirect(self):
+    from robosystems.adapters.plaid.client import PlaidError
+    from robosystems.operations.providers.plaid_provider import create_link_token
+
+    client = _client()
+    client.create_link_token.side_effect = [
+      PlaidError("gone", code="ITEM_NOT_FOUND"),
+      {"link_token": "link-fresh"},
+    ]
+    with (
+      patch(
+        f"{MODULE}._credentials",
+        return_value={"access_token": "old", "sync_config": {}},
+      ),
+      patch(f"{MODULE}.plaid_client", return_value=client),
+    ):
+      link = await create_link_token(
+        "conn_1", "usr_1", MagicMock(), redirect_uri="https://app/cb"
+      )
+    assert link["link_token"] == "link-fresh"
+    first, second = client.create_link_token.call_args_list
+    assert first.kwargs["redirect_uri"] == "https://app/cb"
+    assert second.kwargs["redirect_uri"] == "https://app/cb"
+    assert "access_token" not in second.kwargs
+
   def test_forgetting_drops_the_token(self, _link_token_cache):
     from robosystems.operations.providers.plaid_provider import forget_link_token
 

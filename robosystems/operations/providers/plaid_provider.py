@@ -157,9 +157,10 @@ def _link_token_ttl(link: dict[str, Any]) -> int:
 
 
 def cached_link_token(
-  connection_id: str, *, redirect_uri: str | None
+  connection_id: str, *, user_id: str, redirect_uri: str | None
 ) -> dict[str, Any] | None:
-  """The connection's live Link token, when it was made for this redirect."""
+  """The connection's live Link token, when it was made for this user and
+  this redirect: a token is tied to the user it was minted for."""
   try:
     raw = create_redis_client(ValkeyDatabase.AUTH).get(_link_token_key(connection_id))
   except Exception as exc:
@@ -171,6 +172,10 @@ def cached_link_token(
     entry = json.loads(raw)
   except (TypeError, ValueError):
     return None
+  if not isinstance(entry, dict):
+    return None
+  if entry.get("user_id") != user_id:
+    return None
   if entry.get("redirect_uri") != (redirect_uri or None):
     return None
   link = entry.get("link")
@@ -178,7 +183,11 @@ def cached_link_token(
 
 
 def cache_link_token(
-  connection_id: str, link: dict[str, Any], *, redirect_uri: str | None
+  connection_id: str,
+  link: dict[str, Any],
+  *,
+  user_id: str,
+  redirect_uri: str | None,
 ) -> None:
   """Keep the token for its life. A cache outage is never a reason for Link
   not to open; it only means an OAuth bank's return cannot resume."""
@@ -186,7 +195,9 @@ def cache_link_token(
     create_redis_client(ValkeyDatabase.AUTH).setex(
       _link_token_key(connection_id),
       _link_token_ttl(link),
-      json.dumps({"link": link, "redirect_uri": redirect_uri or None}),
+      json.dumps(
+        {"link": link, "user_id": user_id, "redirect_uri": redirect_uri or None}
+      ),
     )
   except Exception as exc:
     logger.warning(f"Plaid Link token cache write failed for {connection_id}: {exc}")
@@ -216,7 +227,7 @@ async def create_link_token(
   user back; Plaid requires it on the token, and the app's return there
   asks for the token again, which is why it is kept.
   """
-  cached = cached_link_token(connection_id, redirect_uri=redirect_uri)
+  cached = cached_link_token(connection_id, user_id=user_id, redirect_uri=redirect_uri)
   if cached is not None:
     return cached
   credentials = _credentials(connection_id, db)
@@ -248,7 +259,7 @@ async def create_link_token(
       )
   finally:
     client.close()
-  cache_link_token(connection_id, link, redirect_uri=redirect_uri)
+  cache_link_token(connection_id, link, user_id=user_id, redirect_uri=redirect_uri)
   return link
 
 
