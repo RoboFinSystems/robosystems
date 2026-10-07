@@ -29,6 +29,14 @@ def __dir__():
 
 def __getattr__(name: str):
   if name == "defs":
+    import warnings
+
+    from dagster import BetaWarning
+
+    # Every run process reloads the definitions, and each beta parameter we use
+    # (backfill_policy, owners) would warn again per process.
+    warnings.filterwarnings("ignore", category=BetaWarning)
+
     from robosystems.dagster.definitions import defs
 
     # Cache in module dict so subsequent access is direct
