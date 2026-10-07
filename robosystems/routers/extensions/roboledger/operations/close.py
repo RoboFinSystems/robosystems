@@ -217,6 +217,7 @@ async def set_close_target_op(
           actor_id=str(user.id),
           note=body.note,
           service=_fiscal_svc,
+          entity_id=body.entity_id,
         )
     except InvalidCloseTargetError as e:
       raise HTTPException(status_code=422, detail=str(e))
@@ -298,6 +299,7 @@ async def close_period_op(
           allow_reconciling_items=body.allow_reconciling_items,
           allow_unposted_source_events=body.allow_unposted_source_events,
           allow_unreconciled_accounts=body.allow_unreconciled_accounts,
+          entity_id=body.entity_id,
         )
     except CloseGateFailed as e:
       if e.no_calendar:
@@ -453,6 +455,7 @@ async def reopen_period_op(
           reason=body.reason,
           note=body.note,
           service=_fiscal_svc,
+          entity_id=body.entity_id,
         ).fiscal_calendar
     except RowLockedError as e:
       # A concurrent writer holds the rows; retryable, same 409 as the registrar.
@@ -526,6 +529,7 @@ async def backfill_plan_history_op(
           actor_id=str(user.id),
           service=_fiscal_svc,
           close_service=_close_svc,
+          entity_id=body.entity_id,
         )
     except RowLockedError as e:
       # The internal reopen locks the period; another writer may hold it.

@@ -51,6 +51,7 @@ from robosystems.operations.roboledger.reads.fiscal_calendar import (
 )
 
 from ._errors import database_failure
+from .constants import ENTITY_ID_ARGUMENT
 
 
 def _calendar_dict(session, graph_id: str, calendar, service) -> dict[str, Any]:
@@ -88,7 +89,12 @@ class GetFiscalCalendarTool:
 - Before calling close-period — verify it will succeed (check `closeable_now`)
 - To check catch-up state when a user is behind ("close the books — I'm 3 months behind")
 
+**PARAMETERS:**
+- entity_id (optional): the entity whose calendar to read; omit for the
+  group parent. Each entity of the group closes on its own calendar
+
 **RETURNS:**
+- `entity_id`: the entity this calendar belongs to
 - `closed_through`: latest period actually closed (YYYY-MM) or null if never closed
 - `close_target`: the period the user wants closed through (YYYY-MM)
 - `gap_periods`: number of periods between closed_through and close_target
@@ -131,7 +137,11 @@ class GetFiscalCalendarTool:
 6. If `gap_periods > 1`, the user is behind — acknowledge and plan a catch-up
 
 **NOTES:** Read-only — safe to call repeatedly, no side effects.""",
-      "inputSchema": {"type": "object", "properties": {}, "required": []},
+      "inputSchema": {
+        "type": "object",
+        "properties": {"entity_id": ENTITY_ID_ARGUMENT},
+        "required": [],
+      },
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
@@ -143,7 +153,7 @@ class GetFiscalCalendarTool:
 
     try:
       with extensions_session(graph_id) as session:
-        calendar = svc.get(session, graph_id)
+        calendar = svc.get(session, graph_id, entity_id=arguments.get("entity_id"))
         if calendar is None:
           return {
             "error": "calendar_not_initialized",
@@ -199,6 +209,9 @@ class ClosePeriodTool:
 
 **PARAMETERS:**
 - period (required): YYYY-MM format (e.g., "2026-03")
+- entity_id (optional): the entity whose period to close; omit for the
+  group parent. Each entity closes on its own calendar, so a subsidiary's
+  close leaves its siblings open
 - allow_stale_sync (optional): lifts the sync-current gate, closing on
   QuickBooks data older than the freshness window.
 - allow_stranded_obligations (optional): lifts the stranded-obligation gate,
@@ -278,6 +291,7 @@ The receipt:
             "description": "Fiscal period in YYYY-MM format",
             "pattern": r"^\d{4}-(0[1-9]|1[0-2])$",
           },
+          "entity_id": ENTITY_ID_ARGUMENT,
           "allow_stale_sync": {
             "type": "boolean",
             "description": (
@@ -379,6 +393,7 @@ The receipt:
             arguments.get("allow_unreconciled_accounts", False)
           ),
           "note": arguments.get("note"),
+          "entity_id": arguments.get("entity_id"),
         },
       )
     except Exception as exc:
@@ -478,6 +493,7 @@ The receipt:
           session,
           graph_id,
           period,
+          entity_id=arguments.get("entity_id"),
           has_sync_connection=has_sync,
           last_sync_at=last_sync_at,
           allow_stale_sync=bool(arguments.get("allow_stale_sync", False)),
@@ -546,6 +562,8 @@ class ReopenPeriodTool:
 **PARAMETERS:**
 - period (required): YYYY-MM format
 - reason (required): Why the reopen is needed — captured in the audit log
+- entity_id (optional): the entity whose period to reopen; omit for the
+  group parent
 
 **RETURNS:**
 - Updated fiscal_calendar state
@@ -560,6 +578,7 @@ class ReopenPeriodTool:
             "description": "Period to reopen in YYYY-MM format",
             "pattern": r"^\d{4}-(0[1-9]|1[0-2])$",
           },
+          "entity_id": ENTITY_ID_ARGUMENT,
           "reason": {
             "type": "string",
             "description": "Required reason for the reopen (captured in audit log)",
@@ -607,6 +626,7 @@ class ReopenPeriodTool:
             graph_id,
             period,
             actor_id=actor_id,
+            entity_id=arguments.get("entity_id"),
             reason=reason,
             note=note,
             service=svc,
@@ -696,6 +716,8 @@ class BackfillPlanHistoryTool:
 - The open month and close_target are never touched
 
 **PARAMETERS:**
+- entity_id (optional): the entity whose history to compile; omit for the
+  group parent
 - start_period (optional): YYYY-MM to backfill from. Defaults to the
   earliest month with ledger data; clamped there when set earlier.
 - max_periods (optional, default 12, max 24): months to restamp this call.
@@ -737,6 +759,7 @@ class BackfillPlanHistoryTool:
       "inputSchema": {
         "type": "object",
         "properties": {
+          "entity_id": ENTITY_ID_ARGUMENT,
           "start_period": {
             "type": "string",
             "description": (
@@ -824,6 +847,7 @@ class BackfillPlanHistoryTool:
       return {"error": exc.code, "message": exc.message}
 
     body = BackfillPlanHistoryRequest(
+      entity_id=arguments.get("entity_id"),
       start_period=arguments.get("start_period"),
       max_periods=int(arguments.get("max_periods", 12)),
       allow_stale_sync=bool(arguments.get("allow_stale_sync", False)),
@@ -856,6 +880,7 @@ class BackfillPlanHistoryTool:
           service=svc,
           close_service=close_svc,
           actor_type="agent",
+          entity_id=body.entity_id,
         )
         fc_payload = result.fiscal_calendar.model_dump(mode="json")
         has_sync, _ = qb_sync_state(platform_db, graph_id)

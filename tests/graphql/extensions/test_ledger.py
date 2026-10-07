@@ -1480,7 +1480,101 @@ class TestMappingCandidatesResolver:
     assert suggest.call_args.kwargs["reporting_style_id"] is None
 
 
+class TestCloseReadsNameTheirEntity:
+  """`fiscalCalendar`, `periodCloseStatus` and `periodDrafts` read one
+  entity's books; `entityId` names it and the reads default to the parent."""
+
+  def test_fiscal_calendar(self) -> None:
+    from robosystems.models.api.extensions.fiscal_calendar import (
+      FiscalCalendarResponse,
+    )
+
+    calendar = MagicMock(name="calendar")
+    platform_ctx = MagicMock()
+    platform_ctx.__enter__ = MagicMock(return_value=MagicMock())
+    platform_ctx.__exit__ = MagicMock(return_value=False)
+    with (
+      patch("robosystems.db.platform.platform_session", return_value=platform_ctx),
+      patch(
+        "robosystems.graphql.resolvers.ledger._fiscal_svc.get", return_value=calendar
+      ) as get,
+      patch(f"{_OPS}.fiscal_calendar.qb_sync_state", return_value=(False, None)),
+      patch(
+        f"{_OPS}.fiscal_calendar.build_fiscal_calendar_response",
+        return_value=FiscalCalendarResponse(
+          graph_id="kg0123456789abcdef", entity_id="ent_sub", fiscal_year_start_month=1
+        ),
+      ),
+    ):
+      result = _run('query { fiscalCalendar(entityId: "ent_sub") { entityId } }')
+    assert result.errors is None
+    assert result.data == {"fiscalCalendar": {"entityId": "ent_sub"}}
+    assert get.call_args.kwargs["entity_id"] == "ent_sub"
+
+  def test_period_close_status(self) -> None:
+    from datetime import date
+
+    from robosystems.models.api.extensions.schedules import (
+      PeriodCloseStatusResponse,
+    )
+
+    status = PeriodCloseStatusResponse(
+      fiscal_period_start=date(2026, 1, 1),
+      fiscal_period_end=date(2026, 1, 31),
+      period_status="open",
+      schedules=[],
+      total_draft=0,
+      total_posted=0,
+    )
+    with patch(
+      f"{_OPS}.schedules.get_period_close_status", return_value=status
+    ) as read:
+      result = _run(
+        'query { periodCloseStatus(periodStart: "2026-01-01", '
+        'periodEnd: "2026-01-31", entityId: "ent_sub") { periodStatus } }'
+      )
+    assert result.errors is None
+    assert result.data == {"periodCloseStatus": {"periodStatus": "open"}}
+    assert read.call_args.kwargs["entity_id"] == "ent_sub"
+
+
 class TestPeriodDraftsResolver:
+  def test_names_the_entity(self) -> None:
+    from datetime import date
+
+    from robosystems.models.api.extensions.fiscal_calendar import (
+      PeriodDraftsResponse,
+    )
+
+    drafts = PeriodDraftsResponse(
+      period="2026-03",
+      period_start=date(2026, 3, 1),
+      period_end=date(2026, 3, 31),
+      draft_count=0,
+      total_debit=0,
+      total_credit=0,
+      all_balanced=True,
+      drafts=[],
+    )
+    platform_ctx = MagicMock()
+    platform_ctx.__enter__ = MagicMock(return_value=MagicMock())
+    platform_ctx.__exit__ = MagicMock(return_value=False)
+    with (
+      patch("robosystems.db.platform.platform_session", return_value=platform_ctx),
+      patch(
+        "robosystems.operations.roboledger.fiscal_calendar.qb_writeback."
+        "resolve_writeback_connection",
+        return_value=None,
+      ),
+      patch(f"{_OPS}.period_drafts.list_period_drafts", return_value=drafts) as read,
+    ):
+      result = _run(
+        'query { periodDrafts(period: "2026-03", entityId: "ent_sub") { draftCount } }'
+      )
+    assert result.errors is None
+    assert result.data == {"periodDrafts": {"draftCount": 0}}
+    assert read.call_args.kwargs["entity_id"] == "ent_sub"
+
   def test_lists_drafts_with_the_writeback_connection(self) -> None:
     from datetime import date
 
@@ -1548,7 +1642,7 @@ class TestPeriodDraftsResolver:
       ],
     }
     assert resolve.call_args.args[1] == GRAPH_ID
-    assert read.call_args.kwargs == {"writeback": writeback}
+    assert read.call_args.kwargs == {"writeback": writeback, "entity_id": None}
 
 
 class TestNotInitializedAcrossReads:

@@ -21,6 +21,7 @@ from robosystems.operations.roboledger.reads.schedules import (
 from robosystems.operations.roboledger.schedules import ScheduleService
 
 from ._errors import database_failure
+from .constants import ENTITY_ID_ARGUMENT
 
 # ────────────────────────────────────────────────────────────────────────────
 # get-period-close-status
@@ -47,6 +48,8 @@ class GetPeriodCloseStatusTool:
 
 **PARAMETERS:**
 - period_start / period_end (required): The fiscal period dates
+- entity_id (optional): the entity whose schedules to read; omit for the
+  group parent
 
 **RETURNS:**
 - Period status (open/closed)
@@ -66,6 +69,7 @@ class GetPeriodCloseStatusTool:
             "type": "string",
             "description": "Fiscal period end date (YYYY-MM-DD)",
           },
+          "entity_id": ENTITY_ID_ARGUMENT,
         },
         "required": ["period_start", "period_end"],
       },
@@ -82,7 +86,11 @@ class GetPeriodCloseStatusTool:
     try:
       with extensions_session(graph_id) as session:
         response = ops_get_period_close_status(
-          session, ScheduleService(), period_start, period_end
+          session,
+          ScheduleService(),
+          period_start,
+          period_end,
+          entity_id=arguments.get("entity_id"),
         )
         return {
           "fiscal_period_start": response.fiscal_period_start.isoformat(),
@@ -144,6 +152,8 @@ class ListPeriodDraftsTool:
 
 **PARAMETERS:**
 - period: YYYY-MM format (e.g., "2026-03")
+- entity_id (optional): the entity whose drafts to list; omit for the group
+  parent
 
 **RETURNS:**
 - draft_count, total_debit, total_credit, all_balanced
@@ -165,6 +175,7 @@ class ListPeriodDraftsTool:
             "description": "Fiscal period in YYYY-MM format",
             "pattern": r"^\d{4}-(0[1-9]|1[0-2])$",
           },
+          "entity_id": ENTITY_ID_ARGUMENT,
         },
         "required": ["period"],
       },
@@ -186,7 +197,9 @@ class ListPeriodDraftsTool:
       with platform_session() as platform_db:
         writeback = resolve_writeback_connection(platform_db, graph_id)
       with extensions_session(graph_id) as session:
-        response = list_period_drafts(session, period, writeback=writeback)
+        response = list_period_drafts(
+          session, period, writeback=writeback, entity_id=arguments.get("entity_id")
+        )
         return response.model_dump(mode="json")
     except SQLAlchemyError as exc:
       return database_failure("list-period-drafts", exc)

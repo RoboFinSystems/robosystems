@@ -932,17 +932,19 @@ class LedgerQuery:
     info: Info[GraphQLContext, None],
     period_start: date,
     period_end: date,
+    entity_id: str | None = None,
   ) -> PeriodCloseStatus | None:
-    """Close status for all schedules in a fiscal period.
+    """Close status for an entity's schedules in a fiscal period.
 
     Args:
       period_start: First day of the fiscal period, as `YYYY-MM-DD`.
       period_end: Last day of the fiscal period, as `YYYY-MM-DD`.
+      entity_id: The entity whose schedules to read. Omit for the group parent.
     """
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_schedules.get_period_close_status(
-          session, _schedule_svc, period_start, period_end
+          session, _schedule_svc, period_start, period_end, entity_id=entity_id
         )
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -967,15 +969,23 @@ class LedgerQuery:
   # ── Fiscal calendar ─────────────────────────────────────────────────────
 
   @strawberry.field
-  def fiscal_calendar(self, info: Info[GraphQLContext, None]) -> FiscalCalendar | None:
-    """Current fiscal calendar state — pointers, gap, closeable status."""
+  def fiscal_calendar(
+    self,
+    info: Info[GraphQLContext, None],
+    entity_id: str | None = None,
+  ) -> FiscalCalendar | None:
+    """An entity's fiscal calendar — pointers, gap, closeable status.
+
+    Args:
+      entity_id: The entity whose calendar to read. Omit for the group parent.
+    """
     from robosystems.db.platform import platform_session
 
     graph_id = require_graph_id(info)
 
     try:
       with _open_session(info, "roboledger") as session:
-        calendar = _fiscal_svc.get(session, graph_id)
+        calendar = _fiscal_svc.get(session, graph_id, entity_id=entity_id)
         if calendar is None:
           return None
         with platform_session() as platform_db:
@@ -1001,8 +1011,10 @@ class LedgerQuery:
     self,
     info: Info[GraphQLContext, None],
     period: str,
+    entity_id: str | None = None,
   ) -> PeriodDrafts | None:
-    """All draft entries for a fiscal period, ready for review before close.
+    """An entity's draft entries for a fiscal period, ready for review
+    before close.
 
     The close-review *outbox*: each draft is annotated with its QB
     write-back disposition (`willPublishToQb`) and the response carries
@@ -1011,6 +1023,7 @@ class LedgerQuery:
 
     Args:
       period: The fiscal period, as `YYYY-MM`.
+      entity_id: The entity whose drafts to list. Omit for the group parent.
     """
     from robosystems.db.platform import platform_session
     from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
@@ -1023,7 +1036,7 @@ class LedgerQuery:
         writeback = resolve_writeback_connection(platform_db, graph_id)
       with _open_session(info, "roboledger") as session:
         response = reads_period_drafts.list_period_drafts(
-          session, period, writeback=writeback
+          session, period, writeback=writeback, entity_id=entity_id
         )
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()

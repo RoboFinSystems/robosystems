@@ -133,6 +133,7 @@ def build_fiscal_calendar_response(
 
   return FiscalCalendarResponse(
     graph_id=graph_id,
+    entity_id=entity_id,
     fiscal_year_start_month=calendar.fiscal_year_start_month,
     closed_through=calendar.closed_through_period,
     close_target=calendar.close_target_period,

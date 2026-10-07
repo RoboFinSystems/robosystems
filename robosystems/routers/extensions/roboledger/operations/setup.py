@@ -122,6 +122,7 @@ async def initialize_op(
           body,
           actor_id=str(user.id),
           service=_fiscal_svc,
+          entity_id=body.entity_id,
         )
         return response
     except CalendarAlreadyInitializedError as e:
@@ -147,10 +148,12 @@ initialize_chart_of_accounts_op = _registrar.register(
       "lists them with names and account counts. Creates the chart, its "
       "`coa_mapping` structure and the template's CoA → rs-gaap mapping "
       "associations in one transaction, with the equity rows mapped by the "
-      "entity's legal form (`entity_type`, defaulting to the graph's primary "
-      "entity). One-time: 409 once a chart exists — a chart is never "
-      "replaced. Customize afterwards with update-taxonomy-block; accounts "
-      "that carry activity are never deleted."
+      "entity's legal form (`entity_type`, defaulting to the entity's). "
+      "Each entity of the group keeps its own chart: `entity_id` names a "
+      "subsidiary, omitted means the group parent. One-time per entity: "
+      "409 once that entity has a chart — a chart is never replaced. "
+      "Customize afterwards with update-taxonomy-block; accounts that "
+      "carry activity are never deleted."
     ),
     command=cmd_initialize_chart_of_accounts,
     request_model=InitializeChartOfAccountsRequest,

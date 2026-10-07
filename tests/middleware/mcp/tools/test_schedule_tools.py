@@ -100,7 +100,7 @@ class TestGetPeriodCloseStatusTool:
     tool = GetPeriodCloseStatusTool(mock_graph_client)
     with (
       _patch_session(),
-      patch(f"{MODULE}.ops_get_period_close_status", return_value=response),
+      patch(f"{MODULE}.ops_get_period_close_status", return_value=response) as ops,
     ):
       result = await tool.execute(
         {"period_start": "2026-01-01", "period_end": "2026-01-31"}
@@ -109,6 +109,8 @@ class TestGetPeriodCloseStatusTool:
     assert result["period_status"] == "open"
     assert result["schedules"]["total"] == 1
     assert result["schedules"]["pending"] == 1
+    # Nothing named: the read defaults to the group parent.
+    assert ops.call_args.kwargs["entity_id"] is None
     # An open period has no receipt, and saying so is the answer rather
     # than an omission — this is the key an operator polls after a close
     # hands back `in_progress`.
@@ -258,9 +260,13 @@ class TestListPeriodDraftsTool:
       ],
     )
     tool = ListPeriodDraftsTool(mock_graph_client)
-    with _patch_session(), patch(f"{MODULE}.list_period_drafts", return_value=response):
-      result = await tool.execute({"period": "2026-03"})
+    with (
+      _patch_session(),
+      patch(f"{MODULE}.list_period_drafts", return_value=response) as read,
+    ):
+      result = await tool.execute({"period": "2026-03", "entity_id": "ent_sub"})
 
+    assert read.call_args.kwargs["entity_id"] == "ent_sub"
     assert result["draft_count"] == 1
     assert result["all_balanced"] is True
     assert result["drafts"][0]["entry_id"] == "je_01"

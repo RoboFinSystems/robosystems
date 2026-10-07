@@ -20,9 +20,14 @@ def get_period_close_status(
   service,
   period_start: date,
   period_end: date,
+  *,
+  entity_id: str | None = None,
 ) -> PeriodCloseStatusResponse:
-  """Return close status for all schedules in a fiscal period."""
-  status = service.get_period_close_status(session, period_start, period_end)
+  """Return close status for an entity's schedules in a fiscal period;
+  ``entity_id`` defaults to the group parent."""
+  status = service.get_period_close_status(
+    session, period_start, period_end, entity_id=entity_id
+  )
   return PeriodCloseStatusResponse(
     fiscal_period_start=status.fiscal_period_start,
     fiscal_period_end=status.fiscal_period_end,

@@ -26,9 +26,12 @@ from robosystems.models.api.extensions.entity import (
   UpdateEntityRequest,
 )
 from robosystems.models.api.extensions.fiscal_calendar import (
+  BackfillPlanHistoryResponse,
   ClosePeriodRequest,
   ClosePeriodResponse,
   FiscalCalendarResponse,
+  InitializeLedgerRequest,
+  InitializeLedgerResponse,
 )
 from robosystems.models.api.extensions.journal_entries import (
   DeleteJournalEntryRequest,
@@ -52,23 +55,33 @@ from robosystems.operations.roboledger.commands.entity import (
   EntityTickerTakenError,
   ParentEntityNotFoundError,
 )
+from robosystems.operations.roboledger.commands.fiscal_calendar import (
+  ReopenPeriodResult,
+)
 from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
 from robosystems.routers.extensions.roboledger.operations import (
   AutoMapElementsOperation,
+  BackfillPlanHistoryOperation,
   BlockSourceGraphOperation,
   ClosePeriodOperation,
   RegenerateReportOperation,
+  ReopenPeriodOperation,
   RevokeReportShareOperation,
+  SetCloseTargetOperation,
   ShareReportOperation,
   auto_map_elements_op,
+  backfill_plan_history_op,
   block_source_graph_op,
   close_period_op,
   create_entity_op,
   create_report_op,
   delete_journal_entry_op,
   file_report_op,
+  initialize_op,
   regenerate_report_op,
+  reopen_period_op,
   revoke_report_share_op,
+  set_close_target_op,
   share_report_op,
   transition_filing_status_op,
   update_entity_op,
@@ -2274,3 +2287,86 @@ class TestClosePeriodOp:
       assert kwargs[name] is True, name
     assert kwargs["note"] == "closed after review"
     assert kwargs["actor_id"] == "usr_test123"
+
+
+_CLOSE = "robosystems.routers.extensions.roboledger.operations.close"
+_SETUP = "robosystems.routers.extensions.roboledger.operations.setup"
+
+
+def _calendar(entity_id: str = "ent_sub") -> FiscalCalendarResponse:
+  return FiscalCalendarResponse(
+    graph_id=GRAPH_ID, entity_id=entity_id, fiscal_year_start_month=1
+  )
+
+
+class TestCloseHandlersForwardTheEntity:
+  """Each hand-written close handler names the entity the request names; the
+  kernel defaults to the group parent only when nothing is named."""
+
+  @pytest.mark.asyncio
+  @pytest.mark.parametrize(
+    ("op", "body", "target", "result"),
+    [
+      (
+        initialize_op,
+        InitializeLedgerRequest(entity_id="ent_sub", fiscal_year_start_month=1),
+        f"{_SETUP}.cmd_initialize_ledger",
+        (InitializeLedgerResponse(fiscal_calendar=_calendar()), []),
+      ),
+      (
+        set_close_target_op,
+        SetCloseTargetOperation(period="2026-03", entity_id="ent_sub"),
+        f"{_CLOSE}.cmd_set_close_target",
+        _calendar(),
+      ),
+      (
+        close_period_op,
+        ClosePeriodOperation(period="2026-01", entity_id="ent_sub"),
+        f"{_CLOSE}.cmd_close_period",
+        _make_close_period_response(),
+      ),
+      (
+        reopen_period_op,
+        ReopenPeriodOperation(period="2026-01", reason="fix", entity_id="ent_sub"),
+        f"{_CLOSE}.cmd_reopen_period",
+        ReopenPeriodResult(fiscal_calendar=_calendar(), statement_sets_retracted=0),
+      ),
+      (
+        backfill_plan_history_op,
+        BackfillPlanHistoryOperation(entity_id="ent_sub"),
+        f"{_CLOSE}.cmd_backfill_plan_history",
+        BackfillPlanHistoryResponse(
+          fiscal_calendar=_calendar(),
+          earliest_available_period="2024-07",
+          effective_start_period="2024-07",
+          closed_through="2026-05",
+          period_rows_created=0,
+          processed=[],
+          remaining_periods=[],
+        ),
+      ),
+    ],
+    ids=["initialize", "set-close-target", "close-period", "reopen-period", "backfill"],
+  )
+  async def test_the_named_entity_reaches_the_kernel(
+    self, op, body, target, result
+  ) -> None:
+    module = target.rsplit(".", 1)[0]
+    with (
+      patch(target, return_value=result) as cmd,
+      patch(f"{module}.extensions_session") as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      envelope = await op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+        platform_db=MagicMock(),
+      )
+
+    assert envelope.status == "completed"
+    assert cmd.call_args.kwargs["entity_id"] == "ent_sub"

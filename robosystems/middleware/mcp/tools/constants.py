@@ -1,5 +1,14 @@
 """Guidance text shared across MCP tool descriptions."""
 
+# The optional argument every ledger tool takes on a multi-entity graph.
+ENTITY_ID_ARGUMENT = {
+  "type": "string",
+  "description": (
+    "The entity whose books this acts on, by id (get-graph-info and the "
+    "`entities` GraphQL field list them). Omit for the group parent."
+  ),
+}
+
 QUERY_PATTERN_GUIDANCE = """**⚠️ QUERY PATTERN NOTE:**
 When joining multiple relationships from the same node, use comma-separated patterns
 in a SINGLE MATCH clause (not multiple MATCH clauses):

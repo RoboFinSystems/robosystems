@@ -107,7 +107,12 @@ def charts(tenant):
   body = InitializeChartOfAccountsRequest(template="services")
   with extensions_session(GRAPH) as session:
     parent = initialize_chart_of_accounts(session, body, "usr_1")
-    sub = initialize_chart_of_accounts(session, body, "usr_1", entity_id=SUB)
+    # The request names the entity, the way the operation reaches it.
+    sub = initialize_chart_of_accounts(
+      session,
+      InitializeChartOfAccountsRequest(template="services", entity_id=SUB),
+      "usr_1",
+    )
     return {PARENT: parent.taxonomy_id, SUB: sub.taxonomy_id}
 
 
