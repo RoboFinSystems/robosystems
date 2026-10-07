@@ -266,6 +266,44 @@ class TestLinksAcrossCharts:
     assert update.call_args.args[1].taxonomy_id == "tax_1"
     assert BANK_FEED_KEY not in sibling.metadata_
 
+  def test_accounts_are_created_on_the_feeds_entitys_chart(self):
+    """A feed connected for a subsidiary lands its accounts on that chart."""
+    created = _element(
+      "e2", "Mercury Checking ••1234", qname="coa-sub:MercuryChecking1234"
+    )
+    session = _Session([], [created])
+    with (
+      patch(f"{MODULE}.active_chart_id", return_value="tax_sub") as chart,
+      patch(f"{MODULE}.chart_qname_prefix", return_value="coa-sub"),
+      patch(f"{MODULE}.update_chart_block") as update,
+    ):
+      result = link_bank_accounts(
+        session,
+        [_checking()],
+        provider="mercury",
+        connection_id="conn_1",
+        created_by="u",
+        entity_id="ent_sub",
+      )
+    chart.assert_called_once_with(session, "ent_sub")
+    request = update.call_args.args[1]
+    assert request.taxonomy_id == "tax_sub"
+    # The subsidiary's chart has its own qname prefix.
+    assert request.elements_to_add[0].qname == "coa-sub:MercuryChecking1234"
+    assert result.links == {"acct_1": "e2"}
+
+  def test_an_entity_without_a_chart_is_refused_by_name(self):
+    with patch(f"{MODULE}.active_chart_id", return_value=None):
+      with pytest.raises(ChartRequiredError, match="ent_sub"):
+        link_bank_accounts(
+          _Session(),
+          [_checking()],
+          provider="plaid",
+          connection_id="conn_1",
+          created_by="u",
+          entity_id="ent_sub",
+        )
+
   def test_codes_are_allocated_against_the_parents_chart_only(self):
     sub_taken = _element("e_sub", "Sub checking", code="1010", taxonomy_id="tax_sub")
     created = _element("e2", "Mercury Checking ••1234", qname="coa:MercuryChecking1234")

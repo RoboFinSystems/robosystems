@@ -154,7 +154,11 @@ class TestCreateMercuryConnection:
     }
     assert kwargs["credentials"] == {
       "auth_mode": "oauth",
-      "sync_config": {"since_date": "2026-01-01", "include_treasury": False},
+      "sync_config": {
+        "since_date": "2026-01-01",
+        "include_treasury": False,
+        "entity_id": None,
+      },
     }
 
   @pytest.mark.asyncio
@@ -172,6 +176,7 @@ class TestCreateMercuryConnection:
     assert create.call_args.kwargs["credentials"]["sync_config"] == {
       "since_date": None,
       "include_treasury": True,
+      "entity_id": None,
     }
 
   @pytest.mark.asyncio

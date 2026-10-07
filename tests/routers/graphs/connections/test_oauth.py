@@ -1239,5 +1239,5 @@ class TestInitOAuthBooksGuard:
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail["code"] == "NATIVE_BOOKS_PRESENT"
-    guard.assert_called_once_with(GRAPH_ID, "quickbooks", mock_db)
+    guard.assert_called_once_with(GRAPH_ID, "quickbooks", mock_db, entity_id=None)
     mock_oauth_handler.get_authorization_url.assert_not_called()

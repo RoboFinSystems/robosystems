@@ -453,7 +453,7 @@ class ProviderConflictError(Exception):
   """A provider cannot be connected given the books the graph keeps.
 
   ``code`` is stable for clients: ``QUICKBOOKS_ACTIVE``, ``CHART_REQUIRED``,
-  ``NATIVE_BOOKS_PRESENT``.
+  ``NATIVE_BOOKS_PRESENT``, ``ENTITY_NOT_FOUND``.
   """
 
   def __init__(self, code: str, message: str) -> None:
@@ -462,62 +462,139 @@ class ProviderConflictError(Exception):
     self.message = message
 
 
-def assert_provider_compatible(graph_id: str, provider: str, session: Session) -> None:
-  """Refuse a provider that would mix native and synced books.
+def assert_provider_compatible(
+  graph_id: str, provider: str, session: Session, *, entity_id: str | None = None
+) -> None:
+  """Refuse a provider that would mix native and synced books of one entity.
 
-  - a bank feed while a synced GL is live → ``QUICKBOOKS_ACTIVE``;
-  - a bank feed on a graph with no chart of accounts → ``CHART_REQUIRED``;
-  - a synced GL over native books (posted line items on elements it did not
-    create, or a live bank feed) → ``NATIVE_BOOKS_PRESENT``.
+  A graph is a reporting group; a synced ledger (QuickBooks) keeps the
+  group parent's books and only those, so the rule is per entity:
 
-  Anything else (``external`` sources, a second SEC repo …) passes.
+  - a bank feed whose accounts would land on the parent while a synced GL
+    is live → ``QUICKBOOKS_ACTIVE`` (a subsidiary's feed is fine);
+  - a bank feed for an entity with no chart of accounts → ``CHART_REQUIRED``;
+  - a synced GL when the parent's books are native (posted line items on
+    elements it did not create, a feed account bound to the parent, or a
+    live feed whose accounts land on the parent) → ``NATIVE_BOOKS_PRESENT``;
+  - a feed naming an entity the graph does not have → ``ENTITY_NOT_FOUND``.
+
+  ``entity_id`` is where the feed's accounts land: a subsidiary's id, or
+  None for the group parent. Anything else (``external`` sources, a second
+  SEC repo …) passes.
   """
   wanted = (provider or "").lower()
-  live = {
-    (c.provider or "").lower() for c in Connection.get_all_for_graph(graph_id, session)
-  }
+  connections = list(Connection.get_all_for_graph(graph_id, session))
+  live = {(c.provider or "").lower() for c in connections}
 
   if wanted in BANK_FEED_PROVIDERS:
     blocking = sorted(live & SYNCED_LEDGER_PROVIDERS)
-    if blocking:
+    if blocking and _is_group_parent(graph_id, entity_id):
       raise ProviderConflictError(
         "QUICKBOOKS_ACTIVE",
-        f"Sever the {blocking[0]} connection first — a bank feed is native "
-        "accounting, and while it is connected the synced ledger is the "
-        "source of truth for bank transactions.",
+        f"{blocking[0].capitalize()} keeps the group parent's books, so a bank "
+        "feed cannot book there. Connect the bank for a subsidiary (name it "
+        "when connecting), or sever the synced connection first.",
       )
-    if not _graph_has_chart(graph_id):
+    if not _graph_has_chart(graph_id, entity_id):
       raise ProviderConflictError(
         "CHART_REQUIRED",
-        "Initialize a chart of accounts first (from a template, or by "
-        "severing a synced QuickBooks connection to keep its chart).",
+        "Initialize a chart of accounts for the entity first (from a "
+        "template, or by severing a synced QuickBooks connection to keep its "
+        "chart).",
       )
     return
 
   if wanted in SYNCED_LEDGER_PROVIDERS:
-    if live & BANK_FEED_PROVIDERS or _graph_has_native_books(
-      graph_id, synced_source=wanted
+    feeds = [
+      c for c in connections if (c.provider or "").lower() in BANK_FEED_PROVIDERS
+    ]
+    if (
+      _feed_lands_on_parent(graph_id, feeds, session)
+      or _parent_has_feed_account(graph_id)
+      or _graph_has_native_books(graph_id, synced_source=wanted)
     ):
       raise ProviderConflictError(
         "NATIVE_BOOKS_PRESENT",
-        "This graph keeps its books natively; a synced ledger cannot become "
-        "the source of truth over them.",
+        "The group parent keeps its books natively; a synced ledger cannot "
+        "become the source of truth over them. A subsidiary's native books "
+        "are no bar.",
       )
 
 
-def _graph_has_chart(graph_id: str) -> bool:
+def synced_ledger_live(graph_id: str) -> bool:
+  """Whether a synced ledger (QuickBooks) is connected to the graph, and so
+  keeps the group parent's books. Read on the platform database."""
+  with SessionFactory() as session:
+    return any(
+      (c.provider or "").lower() in SYNCED_LEDGER_PROVIDERS
+      for c in Connection.get_all_for_graph(graph_id, session)
+    )
+
+
+def _is_group_parent(graph_id: str, entity_id: str | None) -> bool:
+  """Whether a feed landing on ``entity_id`` lands on the group parent.
+  None is the parent by definition; a named entity is looked up on the
+  tenant, and one the graph does not have is refused."""
+  from robosystems.operations.roboledger.entity_scope import (
+    EntityNotInGraphError,
+    NoEntityError,
+    is_group_parent,
+    resolve_entity_id,
+  )
+
+  if entity_id is None:
+    return True
+
+  def probe(ext: Session) -> bool:
+    try:
+      return is_group_parent(ext, resolve_entity_id(ext, entity_id))
+    except (EntityNotInGraphError, NoEntityError) as exc:
+      raise ProviderConflictError(
+        "ENTITY_NOT_FOUND", f"Entity {entity_id!r} is not an entity of this graph."
+      ) from exc
+
+  return _probe_books(graph_id, probe)
+
+
+def _feed_lands_on_parent(
+  graph_id: str, feeds: list[Connection], session: Session
+) -> bool:
+  """Whether any live bank feed's accounts land on the group parent: the
+  entity it was connected for, from its connect-time config."""
+  for feed in feeds:
+    creds = ConnectionCredentials.get_by_connection_id(str(feed.id), session)
+    stored = dict(creds.get_credentials()) if creds is not None else {}
+    target = (stored.get("sync_config") or {}).get("entity_id")
+    if _is_group_parent(graph_id, str(target) if target else None):
+      return True
+  return False
+
+
+def _parent_has_feed_account(graph_id: str) -> bool:
+  from robosystems.operations.roboledger.reads.books import entity_has_feed_account
+
+  return _probe_books(graph_id, lambda ext: entity_has_feed_account(ext, None))
+
+
+def _graph_has_chart(graph_id: str, entity_id: str | None = None) -> bool:
   from robosystems.operations.roboledger.reads.books import graph_has_chart
 
-  return _probe_books(graph_id, graph_has_chart)
+  return _probe_books(graph_id, lambda ext: graph_has_chart(ext, entity_id))
 
 
 def _graph_has_native_books(graph_id: str, *, synced_source: str) -> bool:
+  """Native postings in the group parent's books (every book, on a graph
+  with no entity yet)."""
+  from robosystems.operations.roboledger.entity_scope import find_entity_id
   from robosystems.operations.roboledger.reads.books import (
     graph_has_native_line_items,
   )
 
   return _probe_books(
-    graph_id, lambda ext: graph_has_native_line_items(ext, synced_source=synced_source)
+    graph_id,
+    lambda ext: graph_has_native_line_items(
+      ext, synced_source=synced_source, entity_id=find_entity_id(ext)
+    ),
   )
 
 

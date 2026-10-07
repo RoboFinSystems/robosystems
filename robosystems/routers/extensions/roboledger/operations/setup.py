@@ -43,6 +43,7 @@ from robosystems.operations.roboledger.commands.bank_accounts import (
   ChartRequiredError,
   FeedAccountNotFoundError,
   NotAChartAccountError,
+  QuickBooksKeptEntityError,
 )
 from robosystems.operations.roboledger.commands.bank_accounts import (
   link_bank_account as cmd_link_bank_account,
@@ -292,7 +293,9 @@ link_bank_account_op = _registrar.register(
       "change their suggestion is resolved again on the new chart, and a "
       "classification that named the old entity's account is dropped); "
       "posted entries stay where they were posted. An account another "
-      "connection already feeds is refused. An account the feed created "
+      "connection already feeds is refused, as is an entity whose books "
+      "QuickBooks keeps (the group parent, while QuickBooks is connected). "
+      "An account the feed created "
       "and then left stays on its chart as an ordinary account. A sync "
       "already in flight when the link moves can still land a line or two "
       "on the old account; running this again moves them. Read the group's "
@@ -308,7 +311,9 @@ link_bank_account_op = _registrar.register(
       AccountAlreadyFedError: 409,
       ChartRequiredError: 422,
       NotAChartAccountError: 422,
+      QuickBooksKeptEntityError: 422,
     },
     mark_stale_reason="bank_account_linked",
+    requires_graph_id=True,
   )
 )

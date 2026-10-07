@@ -9,6 +9,7 @@ what decides if an account is created twice. Both need the real schema.
 from __future__ import annotations
 
 from datetime import datetime
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import select
@@ -36,6 +37,7 @@ from robosystems.operations.roboledger.commands.bank_accounts import (
   AccountAlreadyFedError,
   FeedAccountNotFoundError,
   NotAChartAccountError,
+  QuickBooksKeptEntityError,
   link_bank_account,
 )
 from tests.ledger_entity import PARENT_ENTITY_ID
@@ -45,6 +47,17 @@ from tests.operations.roboledger.commands.test_reconciling_items_db import (
 )
 
 __all__ = ["_skip_platform_db_checks", "session"]
+
+COMMANDS = "robosystems.operations.roboledger.commands.bank_accounts"
+
+
+@pytest.fixture(autouse=True)
+def _no_synced_ledger():
+  """No QuickBooks on the graph unless a test says so; the platform
+  database is not part of these tests."""
+  with patch(f"{COMMANDS}.synced_ledger_live", return_value=False):
+    yield
+
 
 pytestmark = pytest.mark.unit
 
@@ -231,6 +244,7 @@ def test_moving_an_account_to_a_subsidiary_creates_it_there_and_moves_open_lines
     session,
     LinkBankAccountRequest(connection_id=CONNECTION, account_id=ACCOUNT, entity_id=sub),
     "user_test",
+    graph_id=GRAPH_ID,
   )
 
   assert result.account_created and result.changed
@@ -285,6 +299,7 @@ def test_a_suggestion_present_on_the_new_chart_is_resolved_there(session):
     session,
     LinkBankAccountRequest(connection_id=CONNECTION, account_id=ACCOUNT, entity_id=sub),
     "user_test",
+    graph_id=GRAPH_ID,
   )
 
   assert session.get(Event, captured).metadata_["suggested_element_id"] == sub_supplies
@@ -301,6 +316,7 @@ def test_the_next_sync_finds_the_moved_link_and_creates_nothing(session):
     session,
     LinkBankAccountRequest(connection_id=CONNECTION, account_id=ACCOUNT, entity_id=sub),
     "user_test",
+    graph_id=GRAPH_ID,
   )
   session.flush()
 
@@ -327,6 +343,7 @@ def test_linking_to_an_existing_account_moves_the_link_without_creating(session)
       connection_id=CONNECTION, account_id=ACCOUNT, element_id=rent
     ),
     "user_test",
+    graph_id=GRAPH_ID,
   )
   assert not result.account_created and result.element_id == rent
   assert result.entity_id == sub
@@ -346,6 +363,7 @@ def test_the_same_account_is_a_no_op(session):
       connection_id=CONNECTION, account_id=ACCOUNT, element_id=checking
     ),
     "user_test",
+    graph_id=GRAPH_ID,
   )
   assert not result.changed and result.element_id == checking
   assert (
@@ -370,6 +388,7 @@ def test_an_account_another_connection_feeds_is_refused(session):
         connection_id=CONNECTION, account_id=ACCOUNT, element_id=other
       ),
       "user_test",
+      graph_id=GRAPH_ID,
     )
 
 
@@ -388,6 +407,7 @@ def test_an_entity_without_a_chart_is_refused(session):
         connection_id=CONNECTION, account_id=ACCOUNT, entity_id=sub
       ),
       "user_test",
+      graph_id=GRAPH_ID,
     )
 
 
@@ -403,6 +423,7 @@ def test_an_account_outside_the_named_entitys_chart_is_refused(session):
         entity_id=PARENT_ENTITY_ID,
       ),
       "user_test",
+      graph_id=GRAPH_ID,
     )
 
 
@@ -415,6 +436,7 @@ def test_an_unknown_feed_account_is_refused(session):
         connection_id=CONNECTION, account_id="acc_nope", entity_id=SUB_ENTITY
       ),
       "user_test",
+      graph_id=GRAPH_ID,
     )
 
 
@@ -457,6 +479,7 @@ def test_a_pair_books_on_its_receiving_leg(session):
     session,
     LinkBankAccountRequest(connection_id=CONNECTION, account_id=ACCOUNT, entity_id=sub),
     "user_test",
+    graph_id=GRAPH_ID,
   )
   moved = session.get(Event, str(pair.id))
   assert moved.metadata_["from_element_id"] == result.element_id
@@ -473,9 +496,36 @@ def test_a_pair_books_on_its_receiving_leg(session):
       connection_id=CONNECTION, account_id="acc_sav", entity_id=sub
     ),
     "user_test",
+    graph_id=GRAPH_ID,
   )
   assert whole.pairs_across_entities == 0
   followed = session.get(Event, str(pair.id))
   assert followed.entity_id == sub
   assert followed.metadata_["to_element_id"] == whole.element_id
   assert followed.resource_element_id == whole.element_id
+
+
+def test_an_entity_quickbooks_keeps_is_refused(session):
+  """While QuickBooks is connected the group parent's books are its; a feed
+  account moves to a subsidiary, never back onto the parent."""
+  _chart, _checking, _supplies, sub, _rent = _seed(session)
+  moved = link_bank_account(
+    session,
+    LinkBankAccountRequest(connection_id=CONNECTION, account_id=ACCOUNT, entity_id=sub),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+  with patch(f"{COMMANDS}.synced_ledger_live", return_value=True) as live:
+    with pytest.raises(QuickBooksKeptEntityError):
+      link_bank_account(
+        session,
+        LinkBankAccountRequest(
+          connection_id=CONNECTION, account_id=ACCOUNT, entity_id=PARENT_ENTITY_ID
+        ),
+        "user_test",
+        graph_id=GRAPH_ID,
+      )
+    live.assert_called_once_with(GRAPH_ID)
+  # Still on the subsidiary.
+  link = session.get(Element, moved.element_id).metadata_[BANK_FEED_KEY]
+  assert link["account_id"] == ACCOUNT

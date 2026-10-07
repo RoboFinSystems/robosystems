@@ -239,6 +239,7 @@ def _sync_item(
       provider=SOURCE,
       connection_id=config.connection_id,
       created_by=config.user_id,
+      entity_id=sync_config.get("entity_id") or None,
     )
     chart = build_chart_index(session)
     # Each account books to the entity whose chart it is in; the lines it

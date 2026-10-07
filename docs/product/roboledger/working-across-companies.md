@@ -15,7 +15,7 @@ Each graph is its own subscription on your organization's payment method, with i
 
 ## Several companies in one graph
 
-A graph is one **reporting group**: the group parent, the company the graph was created for, and the subsidiaries under it. Each company in the group keeps its own books, its own chart of accounts and mapping, its own fiscal calendar and its own close, on the group's fiscal year. Counterparties and the reporting library are shared across the group. A subsidiary's books don't come from QuickBooks; your assistant, the API and file-based integrations write them.
+A graph is one **reporting group**: the group parent, the company the graph was created for, and the subsidiaries under it. Each company in the group keeps its own books, its own chart of accounts and mapping, its own fiscal calendar and its own close, on the group's fiscal year. Counterparties and the reporting library are shared across the group. QuickBooks connects the group parent and only the parent; a subsidiary's books come from its own bank accounts, your assistant, the API and file-based integrations.
 
 Ask your assistant to add a subsidiary: its name, its legal form and the share the parent holds. It gets a chart of accounts from a template and a calendar on the group's cadence, and from then on every question or action names the company it's about. When you don't name one, your assistant works on the group parent. In the app, **Entity → All Entities** shows the group and **New Entity** adds a company: its name, legal name, legal form, ticker, the company it's held under and the parent's share. There is no limit on the companies in a group; the graph's tier decides its capacity.
 

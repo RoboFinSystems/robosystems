@@ -283,9 +283,12 @@ async def init_oauth(
       )
 
     # The callback can revive a soft-deleted connection, so the books guard
-    # runs here too.
+    # runs here too, for the entity the feed was connected for.
+    sync_config = (connection.get("credentials") or {}).get("sync_config") or {}
     try:
-      assert_provider_compatible(graph_id, provider, db)
+      assert_provider_compatible(
+        graph_id, provider, db, entity_id=sync_config.get("entity_id") or None
+      )
     except ProviderConflictError as conflict:
       raise create_error_response(
         status_code=status.HTTP_409_CONFLICT,

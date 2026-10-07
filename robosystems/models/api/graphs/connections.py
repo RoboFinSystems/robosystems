@@ -76,15 +76,25 @@ class MercuryConnectionConfig(BaseModel):
       "the api_key credential mode. Omit to connect over OAuth."
     ),
   )
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity whose books the feed's accounts land on: a subsidiary's "
+      "id, or omit for the group parent. Required when QuickBooks keeps the "
+      "parent's books. Each account can be moved to another entity later "
+      "with `link-bank-account`."
+    ),
+  )
 
 
 class PlaidConnectionConfig(BaseModel):
   """Plaid bank-feed connection configuration.
 
-  A bank feed is native accounting: the graph must already have a chart of
-  accounts and no live QuickBooks connection. The connection is created
-  `pending_oauth`; `POST /oauth/init` returns a `link_token` for Plaid
-  Link, and the `public_token` Link hands back completes it through
+  A bank feed is native accounting: the entity its accounts land on must
+  already have a chart of accounts and must not be the one QuickBooks keeps
+  (the group parent, while QuickBooks is connected). The connection is
+  created `pending_oauth`; `POST /oauth/init` returns a `link_token` for
+  Plaid Link, and the `public_token` Link hands back completes it through
   `POST /oauth/callback/plaid` (as `code`). One connection per institution
   login; a graph can hold several.
   """
@@ -95,6 +105,15 @@ class PlaidConnectionConfig(BaseModel):
       "First day of the backfill (ISO 8601), and how much history Plaid is "
       "asked to pull for the new Item (at most two years). Defaults to "
       "1 January of last year."
+    ),
+  )
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity whose books the feed's accounts land on: a subsidiary's "
+      "id, or omit for the group parent. Required when QuickBooks keeps the "
+      "parent's books. Each account can be moved to another entity later "
+      "with `link-bank-account`."
     ),
   )
 

@@ -72,7 +72,12 @@ def _sync_config(config: PlaidConnectionConfig | None) -> dict[str, Any]:
   when asked for nothing, and the window cannot be widened on the Item
   afterwards), and the date does not drift a year every January."""
   since = config.since_date if config is not None else None
-  return {"since_date": (since or default_backfill_start()).isoformat()}
+  return {
+    "since_date": (since or default_backfill_start()).isoformat(),
+    # Where the feed's accounts land: a subsidiary's id, or None for the
+    # group parent. The guard has already refused the parent under QuickBooks.
+    "entity_id": config.entity_id if config is not None else None,
+  }
 
 
 def _window_start(credentials: dict[str, Any]) -> str:
@@ -113,12 +118,18 @@ async def refresh_pending_window(
   connection_id: str, config: PlaidConnectionConfig | None, user_id: str, db: Session
 ) -> None:
   """A second create for a row still waiting on Link carries the newer
-  window; an explicit ``since_date`` replaces the one parked on the row."""
-  if config is None or config.since_date is None:
+  window and entity: an explicit ``since_date`` replaces the one parked on
+  the row, an explicit ``entity_id`` the entity; what is not named stays."""
+  if config is None or (config.since_date is None and config.entity_id is None):
     return
   credentials = _credentials(connection_id, db)
-  wanted = _sync_config(config)
-  if credentials.get("sync_config") == wanted:
+  stored = dict(credentials.get("sync_config") or {})
+  wanted = dict(stored)
+  if config.since_date is not None:
+    wanted["since_date"] = config.since_date.isoformat()
+  if config.entity_id is not None:
+    wanted["entity_id"] = config.entity_id
+  if stored == wanted:
     return
   await ConnectionService.update(
     connection_id=connection_id,
