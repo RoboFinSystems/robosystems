@@ -124,7 +124,7 @@ class LiveFinancialStatementTool(BaseTool):
 
 **PARAMETERS:**
 - `entity_id` (optional) — the entity whose books to render; omit for the group parent
-- `consolidated` (optional, default false) — on the group parent, combine every entity of the group: each one's statement under the parent's Reporting Style, summed per rs-gaap concept, no eliminations; `combined_entity_ids` on the response names who was summed, and an entity with no mapping yet is left out
+- `consolidated` (optional, default false) — on the group parent, a COMBINED statement, not a consolidation: each entity's statement under the parent's Reporting Style, summed per rs-gaap concept, nothing eliminated between them (an intercompany balance is still in); `combined_entity_ids` on the response names who was summed, and an entity with no mapping yet is left out
 - `statement_type` (required) — one of the three below (a statement of equity is not offered here yet: the live path renders equity balances, not a rollforward)
 - income_statement — Revenue, expenses, net income
 - balance_sheet — Assets, liabilities, equity (instant periods)
@@ -174,8 +174,9 @@ Facts with element qnames, names, classifications, and values aligned with `peri
             "type": "boolean",
             "default": False,
             "description": (
-              "Combine every entity of the group, summed per rs-gaap concept "
-              "with no eliminations. Only on the group parent."
+              "A combined statement, not a consolidation: every entity of the "
+              "group summed per rs-gaap concept, nothing eliminated. Only on "
+              "the group parent."
             ),
           },
         },

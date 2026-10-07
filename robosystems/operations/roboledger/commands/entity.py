@@ -3,11 +3,10 @@ subsidiaries under it."""
 
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.entity import (
@@ -16,12 +15,14 @@ from robosystems.models.api.extensions.entity import (
   UpdateEntityRequest,
 )
 from robosystems.models.extensions import Entity
+from robosystems.operations.graph.entity_ticker import derive_ticker
 from robosystems.operations.graph.reporting_style_defaults import default_style_for
 from robosystems.operations.roboledger.commands.reporting_style import (
   require_reporting_style,
 )
 from robosystems.operations.roboledger.entity_scope import (
   find_parent_entity,
+  is_group_parent,
   resolve_entity,
 )
 from robosystems.operations.roboledger.reads.entity import entity_to_response
@@ -37,6 +38,13 @@ __all__ = [
 ]
 
 _TICKER_MAX = 10
+
+# Tickers are unique among a graph's own entities, and the table has no
+# constraint saying so: the check and the insert run under one lock per
+# schema, held to the end of the transaction.
+_TICKER_LOCK_SQL = text(
+  "SELECT pg_advisory_xact_lock(hashtext('entity_ticker'), hashtext(current_schema()))"
+)
 
 
 class ParentEntityNotFoundError(LookupError):
@@ -59,18 +67,20 @@ class EntityTickerTakenError(ValueError):
     )
 
 
-def _is_group_parent(entity: Entity) -> bool:
-  return bool(entity.is_parent) and entity.parent_entity_id is None
-
-
 def _apply_updates(session: Session, entity: Entity, updates: dict[str, Any]):
   """Set ``updates`` on ``entity`` and commit; the response is built before
   the commit expires the row."""
-  if "ownership_pct" in updates and _is_group_parent(entity):
+  if "ownership_pct" in updates and is_group_parent(session, str(entity.id)):
     raise EntityHierarchyError(
       "The group parent has no owner in this graph; ownership_pct applies to "
       "a subsidiary."
     )
+  if "ticker" in updates:
+    session.execute(_TICKER_LOCK_SQL)
+    ticker = str(updates["ticker"]).strip().upper()
+    if _ticker_taken(session, ticker, exclude_id=str(entity.id)):
+      raise EntityTickerTakenError(ticker)
+    updates["ticker"] = ticker
   for field_name, value in updates.items():
     setattr(entity, field_name, value)
 
@@ -124,24 +134,15 @@ def update_entity(
   return result
 
 
-def _initials(name: str) -> str:
-  """The ticker graph creation derives: initials of the name's words, else
-  its first four characters."""
-  words = re.sub(r"[^a-zA-Z0-9\s]", "", name).split()
-  if len(words) >= 2:
-    return "".join(w[0].upper() for w in words if w)[:6]
-  return name[:4].upper().replace(" ", "") or "ENT"
-
-
-def _ticker_taken(session: Session, ticker: str) -> bool:
-  return (
-    session.execute(
-      select(Entity.id)
-      .where(func.lower(Entity.ticker) == ticker.lower(), Entity.source != "linked")
-      .limit(1)
-    ).first()
-    is not None
+def _ticker_taken(
+  session: Session, ticker: str, *, exclude_id: str | None = None
+) -> bool:
+  query = select(Entity.id).where(
+    func.lower(Entity.ticker) == ticker.lower(), Entity.source != "linked"
   )
+  if exclude_id is not None:
+    query = query.where(Entity.id != exclude_id)
+  return session.execute(query.limit(1)).first() is not None
 
 
 def _ticker_for(session: Session, requested: str | None, name: str) -> str:
@@ -152,7 +153,7 @@ def _ticker_for(session: Session, requested: str | None, name: str) -> str:
     if _ticker_taken(session, ticker):
       raise EntityTickerTakenError(ticker)
     return ticker
-  base = _initials(name)
+  base = derive_ticker(name)
   candidate, suffix = base, 1
   while _ticker_taken(session, candidate):
     suffix += 1
@@ -190,6 +191,7 @@ def create_entity(
   else:
     reporting_style_id = default_style_for(body.entity_type)
 
+  session.execute(_TICKER_LOCK_SQL)
   entity_id = generate_prefixed_ulid("ent")
   now = datetime.now(UTC)
   entity = Entity(

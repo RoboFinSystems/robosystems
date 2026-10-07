@@ -643,9 +643,10 @@ class LiveFinancialStatementRequest(BaseModel):
   consolidated: bool = Field(
     False,
     description=(
-      "Combine every entity of the reporting group: each entity's statement "
-      "under the group parent's Reporting Style, summed per rs-gaap concept, "
-      "with no eliminations. Only on the group parent (422 on a subsidiary). "
+      "A combined statement, not a consolidation: every entity of the "
+      "reporting group rendered under the group parent's Reporting Style and "
+      "summed per rs-gaap concept, with nothing eliminated between them. Only "
+      "on the group parent (422 on a subsidiary). "
       "An entity with no CoA mapping yet contributes nothing and is left out "
       "of `combined_entity_ids`."
     ),
@@ -681,7 +682,11 @@ class LiveFinancialStatementResponse(BaseModel):
     None, description="The entity whose books were rendered."
   )
   consolidated: bool = Field(
-    False, description="Whether the group's entities were combined into this."
+    False,
+    description=(
+      "Whether the group's entities were summed into this: a combined "
+      "statement, not a consolidation — nothing is eliminated between them."
+    ),
   )
   combined_entity_ids: list[str] = Field(
     default_factory=list,

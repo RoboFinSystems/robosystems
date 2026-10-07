@@ -402,6 +402,7 @@ class GraphCreationService:
     from robosystems.models.api import EntityCreate
     from robosystems.models.extensions.entity import Entity as LedgerEntity
 
+    from .entity_ticker import derive_ticker
     from .reporting_style_defaults import resolve_reporting_style_id
 
     entity_data = EntityCreate(**config.entity_data)
@@ -414,16 +415,7 @@ class GraphCreationService:
     entity_identifier = f"entity_{graph_id}"
     entity_uri = entity_data.uri or f"https://robosystems.ai/entities#{graph_id}"
 
-    ticker = getattr(entity_data, "ticker", None)
-    if not ticker:
-      import re
-
-      # Initials of the name's words, max 6.
-      words = re.sub(r"[^a-zA-Z0-9\s]", "", entity_data.name).split()
-      if len(words) >= 2:
-        ticker = "".join(w[0].upper() for w in words if w)[:6]
-      else:
-        ticker = entity_data.name[:4].upper().replace(" ", "")
+    ticker = getattr(entity_data, "ticker", None) or derive_ticker(entity_data.name)
 
     with extensions_session(graph_id) as session:
       entity = LedgerEntity(

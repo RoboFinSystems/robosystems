@@ -2,8 +2,10 @@
 
 The expand half (0038) added ``entity_id`` nullable with the group parent as
 each tenant's column DEFAULT, so tasks from the release before it kept
-writing through the deploy. No task from before 0038 is serving any more,
-so the model's shape reaches every existing tenant:
+writing through the deploy. Every writer of the release that carried 0038
+stamps the entity itself; only a task from before it would still write
+through the default, and none serves. So the model's shape reaches every
+existing tenant:
 
 - ``entity_id`` becomes NOT NULL on ``entries``, ``events``,
   ``transactions``, ``fiscal_calendar`` and ``fiscal_periods``, and every
@@ -19,6 +21,12 @@ no ledger row may still be NULL, and a schema with books must have exactly
 one group parent. A schema a task of the previous release provisioned while
 0038 ran has no column at all; it is expanded first, with 0038's own
 function, then contracted like the rest.
+
+``SET NOT NULL`` takes an ACCESS EXCLUSIVE lock and would scan the table
+under it; each table first gets a ``CHECK (entity_id IS NOT NULL)``
+constraint, added ``NOT VALID`` and then validated under a lock that lets
+reads and writes through, so Postgres skips that scan. The check is dropped
+once the column is NOT NULL.
 
 The downgrade relaxes the five back to nullable and restores the per-schema
 defaults; it does not restore the stamp on shared blocks.
@@ -82,14 +90,15 @@ def _has_entity_column(conn: Connection, schema: str, table: str) -> bool:
   )
 
 
-def _null_rows(conn: Connection, schema: str) -> dict[str, int]:
-  counts = {
-    table: conn.execute(
-      text(f'SELECT count(*) FROM "{schema}".{table} WHERE entity_id IS NULL')
-    ).scalar_one()
+def _tables_with_null_rows(conn: Connection, schema: str) -> list[str]:
+  """Stops at the first NULL of each table rather than counting them."""
+  return [
+    table
     for table in LEDGER_TABLES
-  }
-  return {table: count for table, count in counts.items() if count}
+    if conn.execute(
+      text(f'SELECT EXISTS (SELECT 1 FROM "{schema}".{table} WHERE entity_id IS NULL)')
+    ).scalar_one()
+  ]
 
 
 def _has_books(conn: Connection, schema: str) -> bool:
@@ -111,7 +120,7 @@ def _group_parents(conn: Connection, schema: str) -> list[str]:
 
 
 def _preflight(conn: Connection, schema: str) -> None:
-  nulls = _null_rows(conn, schema)
+  nulls = _tables_with_null_rows(conn, schema)
   if nulls:
     raise RuntimeError(
       f"{schema}: entity_id is NULL on {nulls}; stamp those rows with their "
@@ -129,7 +138,6 @@ def _contract(conn: Connection, schema: str) -> None:
   if not _has_entity_column(conn, schema, "entries"):
     _expand_module()._expand(conn, schema)
   _preflight(conn, schema)
-  t = TenantOps(conn, schema)
   conn.execute(
     text(
       f'UPDATE "{schema}".structures SET entity_id = NULL '
@@ -141,7 +149,24 @@ def _contract(conn: Connection, schema: str) -> None:
       text(f'ALTER TABLE "{schema}".{table} ALTER COLUMN entity_id DROP DEFAULT')
     )
   for table in LEDGER_TABLES:
-    t.alter_column_nullable(table, "entity_id", nullable=False)
+    _set_not_null(conn, schema, table)
+
+
+def _set_not_null(conn: Connection, schema: str, table: str) -> None:
+  """NOT NULL without a scan under the ACCESS EXCLUSIVE lock: a validated
+  CHECK proves the column first (Postgres 12+)."""
+  check = f"ck_{table}_entity_id_not_null"
+  qualified = f'"{schema}".{table}'
+  conn.execute(text(f"ALTER TABLE {qualified} DROP CONSTRAINT IF EXISTS {check}"))
+  conn.execute(
+    text(
+      f"ALTER TABLE {qualified} ADD CONSTRAINT {check} "
+      "CHECK (entity_id IS NOT NULL) NOT VALID"
+    )
+  )
+  conn.execute(text(f"ALTER TABLE {qualified} VALIDATE CONSTRAINT {check}"))
+  TenantOps(conn, schema).alter_column_nullable(table, "entity_id", nullable=False)
+  conn.execute(text(f"ALTER TABLE {qualified} DROP CONSTRAINT {check}"))
 
 
 def _relax(conn: Connection, schema: str) -> None:
@@ -162,7 +187,7 @@ def upgrade() -> None:
   conn = op.get_bind()
   # public holds the library and no ledger rows: the shape only.
   for table in LEDGER_TABLES:
-    TenantOps(conn, "public").alter_column_nullable(table, "entity_id", nullable=False)
+    _set_not_null(conn, "public", table)
   for_each_tenant_schema(conn, _contract)
 
 

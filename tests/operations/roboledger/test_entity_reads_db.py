@@ -239,6 +239,20 @@ class TestCommandsTakeTheBodysEntity:
     assert t.session.get(Event, envelope.id).entity_id == t.sub.id
     assert list_event_blocks(t.session) == []
 
+  def test_an_explicit_entity_wins_over_the_body(self, two_entities):
+    """Internal callers name the entity themselves; the body's is for the
+    operation surface and never overrides them."""
+    t = two_entities
+    cash, rent = _account(t.session, "Cash"), _account(t.session, "Rent")
+    envelope = create_event_block(
+      t.session,
+      _recorded_event(cash, rent, entity_id=t.sub.id),
+      "usr_1",
+      graph_id=GRAPH_ID,
+      entity_id=t.parent.id,
+    )
+    assert t.session.get(Event, envelope.id).entity_id == t.parent.id
+
   def test_a_preview_is_checked_against_the_bodys_entity(self, two_entities):
     t = two_entities
     sub_cash, sub_rent = (

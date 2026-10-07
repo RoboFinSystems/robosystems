@@ -125,6 +125,18 @@ class Tenant:
       {"id": row_id},
     ).scalar_one()
 
+  def check_constraints(self, table: str) -> list[str]:
+    return list(
+      self.conn.execute(
+        text(
+          "SELECT conname FROM pg_constraint c JOIN pg_class r ON r.oid = c.conrelid "
+          "JOIN pg_namespace n ON n.oid = r.relnamespace "
+          "WHERE n.nspname = :schema AND r.relname = :table AND c.contype = 'c'"
+        ),
+        {"schema": self.schema, "table": table},
+      ).scalars()
+    )
+
   def shape(self, table: str) -> tuple[str, str | None]:
     """``(is_nullable, column_default)`` of the table's entity column."""
     return self.conn.execute(
@@ -172,6 +184,8 @@ def test_the_column_becomes_not_null_with_no_default(tenant):
 
   for table in contract.LEDGER_TABLES:
     assert tenant.shape(table) == ("NO", None), table
+    # The CHECK that spared the scan is gone once the column is NOT NULL.
+    assert not [c for c in tenant.check_constraints(table) if "entity_id" in c], table
   assert tenant.shape("structures") == ("YES", None)
   # What the default stamped stays stamped; the shared block is cleared.
   assert tenant.column("entries", "je_1") == "ent_parent"

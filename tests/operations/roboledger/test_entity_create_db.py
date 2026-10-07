@@ -151,6 +151,26 @@ class TestTicker:
     assert first.ticker == "MCL"
     assert second.ticker == "MCL2"
 
+  def test_a_rename_onto_a_siblings_ticker_is_refused(self, two_entities):
+    """The rule holds on update too, with the same normalization."""
+    session, parent, sub = two_entities.session, two_entities.parent, two_entities.sub
+    parent.ticker = "HH"
+    session.flush()
+
+    with pytest.raises(EntityTickerTakenError):
+      update_entity(
+        session, UpdateEntityRequest(entity_id=sub.id, ticker="hh"), created_by="u"
+      )
+    renamed = update_entity(
+      session, UpdateEntityRequest(entity_id=sub.id, ticker="mcx"), created_by="u"
+    )
+    assert renamed.ticker == "MCX"
+    # Keeping one's own ticker is not a collision with oneself.
+    kept = update_entity(
+      session, UpdateEntityRequest(entity_id=sub.id, ticker="MCX"), created_by="u"
+    )
+    assert kept.ticker == "MCX"
+
   def test_a_single_word_name_takes_its_first_letters(self, two_entities):
     created = create_entity(
       two_entities.session, CreateEntityRequest(name="Driftline"), created_by="u"

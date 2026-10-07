@@ -218,7 +218,8 @@ update_entity_op = _registrar.register(
       "Update an entity of the graph's reporting group. Only provided "
       "(non-null) fields are updated. Omit `entity_id` to target the group "
       "parent; name a subsidiary's id to edit it. `ownership_pct` is "
-      "refused on the group parent (422)."
+      "refused on the group parent (422), and `ticker` must stay unique in "
+      "the graph (409)."
     ),
     command=cmd_update_entity,
     request_model=UpdateEntityRequest,
@@ -231,6 +232,7 @@ update_entity_op = _registrar.register(
       ParentEntityNotFoundError: 404,
       EntityNotInGraphError: 404,
       EntityHierarchyError: 422,
+      EntityTickerTakenError: 409,
     },
     mark_stale_reason="entity_updated",
   )

@@ -19,7 +19,7 @@ A graph is one **reporting group**: the group parent, the company the graph was 
 
 Ask your assistant to add a subsidiary: its name, its legal form and the share the parent holds. It gets a chart of accounts from a template and a calendar on the group's cadence, and from then on every question or action names the company it's about. When you don't name one, your assistant works on the group parent. There is no limit on the companies in a group; the graph's tier decides its capacity.
 
-The group's combined statements are the sum of every company's own, line by line at the reporting concepts, with no eliminations between them. Ask for the combined balance sheet on the group parent, or for any one company's own.
+The group's combined statements are the sum of every company's own, line by line at the reporting concepts. They are combined, not consolidated: nothing is eliminated between the companies, so a balance one owes another is still in. Ask for the combined balance sheet on the group parent, or for any one company's own.
 
 A reporting group is companies under common control. It is not a way to put several clients in one graph: everyone with access to the graph sees every company in it.
 
