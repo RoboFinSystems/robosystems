@@ -85,6 +85,9 @@ than be asserted in prose:
   statement glows while cash drains into green-coffee inventory and one
   slow-paying wholesale account. The working-capital squeeze emerges
   mechanically from the gap between revenue recognition and cash collection.
+  It also holds **Driftline Café, LLC**, a wholly owned subsidiary in the same
+  graph with its own books, chart and close, so the group's combined balance
+  sheet has two companies in it (`--no-subsidiary` loads the roaster alone).
 - **Cadence Labs** is a seed-funded B2B SaaS startup *burning cash behind a
   deferred-revenue float*. Customers pay annually up front, so the bank balance
   looks like comfortable runway until you net out the service still owed.
