@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class LedgerSummaryResponse(BaseModel):
@@ -16,6 +16,9 @@ class LedgerSummaryResponse(BaseModel):
   """
 
   graph_id: str
+  entity_id: str | None = Field(
+    None, description="The entity whose books were counted; null before one exists."
+  )
   account_count: int
   transaction_count: int
   entry_count: int

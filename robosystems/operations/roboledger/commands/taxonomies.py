@@ -37,7 +37,7 @@ from robosystems.operations.roboledger.commands._guards import (
   LibraryImmutableError,
   assert_not_library_origin,
 )
-from robosystems.operations.roboledger.reads.entity import resolve_parent_entity
+from robosystems.operations.roboledger.entity_scope import resolve_entity
 from robosystems.operations.taxonomy_block.coa_mappings import COA_MAPPING_BLOCK_TYPE
 from robosystems.operations.taxonomy_block.immutability import (
   assert_history_undisturbed,
@@ -325,14 +325,15 @@ class EntityNotFoundError(LookupError):
 def link_entity_taxonomy(
   session: Session, body: LinkEntityTaxonomyRequest
 ) -> EntityTaxonomyResponse:
-  """Link the graph's entity to a taxonomy; idempotent per (entity, taxonomy,
-  basis).
+  """Link an entity to a taxonomy, default the group parent; idempotent per
+  (entity, taxonomy, basis).
 
   Raises `EntityNotFoundError` or `TaxonomyNotFoundError`.
   """
-  entity = resolve_parent_entity(session)
-  if entity is None:
-    raise EntityNotFoundError("No entity found in this graph")
+  try:
+    entity = resolve_entity(session, body.entity_id)
+  except LookupError as exc:
+    raise EntityNotFoundError(str(exc)) from exc
 
   taxonomy = session.execute(
     select(Taxonomy).where(Taxonomy.id == body.taxonomy_id)

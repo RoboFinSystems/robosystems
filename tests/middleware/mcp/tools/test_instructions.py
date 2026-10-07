@@ -210,3 +210,58 @@ class TestInboxRouting:
     assert "INBOX / BANK FEED" in out
     assert "`recall`" not in out
     assert "`preview-event-block`" not in out
+
+
+_PARENT = {"id": "ent_parent", "name": "Harbor Holdings", "is_group_parent": True}
+_SUB = {"id": "ent_sub", "name": "Maple Court LLC", "is_group_parent": False}
+
+
+class TestEntities:
+  def _ledger(self, entities, extra=()):
+    return build_instructions(
+      graph_id="kg_x",
+      tool_names=_LEDGER | set(extra),
+      is_shared_repo=False,
+      read_only=False,
+      entities=entities,
+    )
+
+  def test_a_group_names_its_parent_and_subsidiaries_and_the_rule(self) -> None:
+    out = self._ledger([_PARENT, _SUB], extra={"create-entity", "get-graph-info"})
+    assert out is not None
+    assert "ENTITIES" in out
+    assert "Group parent: `Harbor Holdings` (`ent_parent`)" in out
+    assert "Subsidiaries: `Maple Court LLC` (`ent_sub`)" in out
+    assert "omitted, it acts on the group parent" in out
+    assert "`create-entity` adds one." in out
+    assert "`get-graph-info` lists them." in out
+
+  def test_one_entity_is_named_with_the_way_to_add_another(self) -> None:
+    out = self._ledger([_PARENT], extra={"create-entity"})
+    assert out is not None
+    assert (
+      "One entity so far: `Harbor Holdings` (`ent_parent`), the group parent." in out
+    )
+    assert "`create-entity` adds one." in out
+    assert "Subsidiaries:" not in out
+
+  def test_tools_the_graph_lacks_are_not_named(self) -> None:
+    out = self._ledger([_PARENT, _SUB])
+    assert out is not None
+    assert "create-entity" not in out
+    assert "get-graph-info" not in out
+
+  def test_without_the_group_nothing_is_said(self) -> None:
+    out = self._ledger(None)
+    assert out is not None
+    assert "ENTITIES" not in out
+    assert "ENTITIES" not in (
+      build_instructions(
+        graph_id="kg_x",
+        tool_names=_PORTFOLIO,
+        is_shared_repo=False,
+        read_only=False,
+        entities=[_PARENT],
+      )
+      or ""
+    )

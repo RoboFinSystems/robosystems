@@ -41,6 +41,10 @@ from robosystems.operations.roboledger.fiscal_calendar import (
 )
 from robosystems.operations.roboledger.reads.account_rollups import get_account_rollups
 from robosystems.operations.roboledger.reads.accounts import list_accounts
+from robosystems.operations.roboledger.reads.reports import (
+  CombinedViewOnParentOnlyError,
+  get_live_financial_statement,
+)
 from robosystems.operations.roboledger.reads.taxonomies import (
   list_unmapped_elements,
 )
@@ -107,7 +111,12 @@ def charts(tenant):
   body = InitializeChartOfAccountsRequest(template="services")
   with extensions_session(GRAPH) as session:
     parent = initialize_chart_of_accounts(session, body, "usr_1")
-    sub = initialize_chart_of_accounts(session, body, "usr_1", entity_id=SUB)
+    # The request names the entity, the way the operation reaches it.
+    sub = initialize_chart_of_accounts(
+      session,
+      InitializeChartOfAccountsRequest(template="services", entity_id=SUB),
+      "usr_1",
+    )
     return {PARENT: parent.taxonomy_id, SUB: sub.taxonomy_id}
 
 
@@ -287,3 +296,36 @@ class TestEachEntityStampsItsOwnStatements:
       assert set(self._stamped(session, PARENT, CASH)) == {5000.0}
       # Stamping the parent left the subsidiary's statements as they were.
       assert set(self._stamped(session, SUB, REVENUE)) == {700.0}
+
+  def _live_cash(self, session, **kwargs) -> tuple[float | None, object]:
+    response = get_live_financial_statement(
+      session,
+      graph_id=GRAPH,
+      statement_type="balance_sheet",
+      period_start=date(2026, 7, 1),
+      period_end=JULY_END,
+      **kwargs,
+    )
+    july = next(i for i, p in enumerate(response.periods) if p.end == JULY_END)
+    cash = {fact.qname: fact.values[july] for fact in response.facts}.get(CASH)
+    return cash, response
+
+  def test_the_parents_combined_statement_sums_the_group(self, charts):
+    """The combined view is the one new computation of M1: each entity's
+    statement under the parent's Style, summed at the rs-gaap concepts."""
+    service = FiscalCalendarService()
+    with extensions_session(GRAPH) as session:
+      self._open_books(session, charts, service)
+      self._close(session, service, SUB)
+      self._close(session, service, PARENT)
+
+      alone, _ = self._live_cash(session)
+      combined, response = self._live_cash(session, consolidated=True)
+      sub_alone, _ = self._live_cash(session, entity_id=SUB)
+
+      assert (alone, sub_alone, combined) == (5000.0, 700.0, 5700.0)
+      assert response.consolidated is True
+      assert response.entity_id == PARENT
+      assert response.combined_entity_ids == [PARENT, SUB]
+      with pytest.raises(CombinedViewOnParentOnlyError):
+        self._live_cash(session, entity_id=SUB, consolidated=True)

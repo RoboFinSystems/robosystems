@@ -120,6 +120,16 @@ class ReportHasActiveSharesError(Exception):
     self.target_graph_ids = target_graph_ids
 
 
+class ReportEntityMismatchError(ValueError):
+  """The named entity is not the one whose chart the mapping maps from."""
+
+  def __init__(self, mapping_id: str, entity_id: str) -> None:
+    super().__init__(
+      f"Mapping {mapping_id!r} maps another entity's chart; a report for "
+      f"entity {entity_id!r} needs a mapping of its own chart."
+    )
+
+
 class TaxonomyNotFoundError(LookupError):
   """Raised when `create_report` references a missing taxonomy."""
 
@@ -304,8 +314,23 @@ def create_report(
     body.period_start, body.period_end, body.comparative, body.periods
   )
 
+  # The report is the entity's whose chart the mapping maps from. A named
+  # entity must be that one: its Style's close target decides where derived
+  # cumulative earnings land (RetainedEarnings / PartnersCapital /
+  # MembersEquity by entity form).
+  mapping_entity_id = resolve_entity_id(
+    session, mapping_owner_id(session, body.mapping_id)
+  )
+  if body.entity_id:
+    entity_id = resolve_entity_id(session, body.entity_id)
+    if entity_id != mapping_entity_id:
+      raise ReportEntityMismatchError(body.mapping_id, entity_id)
+  else:
+    entity_id = mapping_entity_id
+
   report_def = Report(
     name=body.name,
+    entity_id=entity_id,
     taxonomy_id=resolved_taxonomy_id,
     mapping_id=body.mapping_id,
     period_type=body.period_type,
@@ -319,10 +344,6 @@ def create_report(
   session.add(report_def)
   session.flush()
 
-  # The report is the entity's whose chart the mapping maps from. Its Style's
-  # close target decides where derived cumulative earnings land
-  # (RetainedEarnings / PartnersCapital / MembersEquity by entity form).
-  entity_id = resolve_entity_id(session, mapping_owner_id(session, body.mapping_id))
   reporting_style_id = load_entity_reporting_style(session, entity_id)
   close_target = load_close_target_concept(session, reporting_style_id)
 

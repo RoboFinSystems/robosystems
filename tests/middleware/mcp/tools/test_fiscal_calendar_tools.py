@@ -25,6 +25,7 @@ from robosystems.middleware.mcp.tools._gate import MCPExtensionGateError
 from robosystems.middleware.mcp.tools.fiscal_calendar_tools import (
   BackfillPlanHistoryTool,
   ClosePeriodTool,
+  GetFiscalCalendarTool,
   ReopenPeriodTool,
 )
 from robosystems.middleware.sse.event_storage import OperationStatus
@@ -206,6 +207,7 @@ class TestClosePeriodToolDispatch:
       await tool.execute(
         {
           "period": "2026-01",
+          "entity_id": "ent_sub",
           "allow_stale_sync": True,
           "allow_reconciling_items": True,
           "note": "verified",
@@ -226,6 +228,8 @@ class TestClosePeriodToolDispatch:
     assert params["allow_reconciling_items"] is True
     assert params["allow_stranded_obligations"] is False
     assert params["note"] == "verified"
+    # The task closes the named entity's period, not the group parent's.
+    assert params["entity_id"] == "ent_sub"
 
   @pytest.mark.asyncio
   async def test_a_refused_close_reaches_the_caller_as_the_task_shaped_it(self):
@@ -404,6 +408,45 @@ class TestReopenPeriodToolResult:
     assert result["statement_sets_retracted"] == 3
     assert result["fiscal_calendar"]["graph_id"] == GRAPH_ID
 
+  @pytest.mark.asyncio
+  async def test_the_named_entity_reaches_the_reopen(self):
+    tool = ReopenPeriodTool(_client(user_id="usr_abc"))
+    result_obj = ReopenPeriodResult(
+      fiscal_calendar=_fc_response(entity_id="ent_sub"), statement_sets_retracted=0
+    )
+    with (
+      _patch_sessions(),
+      patch(f"{MODULE}.ops_reopen_period", return_value=result_obj) as ops,
+    ):
+      result = await tool.execute(
+        {"period": "2026-01", "reason": "missed accrual", "entity_id": "ent_sub"}
+      )
+
+    assert ops.call_args.kwargs["entity_id"] == "ent_sub"
+    assert result["fiscal_calendar"]["entity_id"] == "ent_sub"
+
+
+class TestGetFiscalCalendarTool:
+  @pytest.mark.asyncio
+  async def test_reads_the_named_entitys_calendar(self):
+    tool = GetFiscalCalendarTool(_client(user_id="usr_abc"))
+    svc = MagicMock()
+    svc.get.return_value = MagicMock(name="calendar")
+    with (
+      _patch_sessions(),
+      patch(f"{MODULE}.FiscalCalendarService", return_value=svc),
+      patch(f"{MODULE}._calendar_dict", return_value={"entity_id": "ent_sub"}),
+    ):
+      result = await tool.execute({"entity_id": "ent_sub"})
+
+    assert svc.get.call_args.kwargs["entity_id"] == "ent_sub"
+    assert result == {"entity_id": "ent_sub"}
+
+  def test_the_argument_is_optional(self):
+    defn = GetFiscalCalendarTool(_client()).get_tool_definition()
+    assert "entity_id" in defn["inputSchema"]["properties"]
+    assert defn["inputSchema"]["required"] == []
+
 
 # ────────────────────────────────────────────────────────────────────────────
 # Extension gate — ClosePeriod / ReopenPeriod both reject pre-DB
@@ -504,6 +547,20 @@ class TestBackfillPlanHistoryTool:
     assert result["processed"][0]["period"] == "2024-07"
     assert result["processed"][0]["status"] == "stamped"
     assert result["fiscal_calendar"]["graph_id"] == GRAPH_ID
+
+  @pytest.mark.asyncio
+  async def test_the_named_entity_reaches_the_backfill(self):
+    tool = BackfillPlanHistoryTool(_client(user_id="usr_abc"))
+    with (
+      _patch_sessions(),
+      patch(
+        f"{MODULE}.ops_backfill_plan_history", return_value=_backfill_response()
+      ) as ops,
+    ):
+      await tool.execute({"entity_id": "ent_sub"})
+
+    assert ops.call_args.args[3].entity_id == "ent_sub"
+    assert ops.call_args.kwargs["entity_id"] == "ent_sub"
 
   @pytest.mark.asyncio
   async def test_defaults_apply_when_arguments_empty(self):

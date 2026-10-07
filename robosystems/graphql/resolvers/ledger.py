@@ -67,6 +67,7 @@ from robosystems.graphql.types.report_package import ReportPackage
 from robosystems.models.api.extensions.reports import (
   ReportLifecycle as PydanticReportLifecycle,
 )
+from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
 from robosystems.operations.roboledger.fiscal_calendar import (
   FiscalCalendarService,
   parse_period,
@@ -170,11 +171,22 @@ class LedgerQuery:
   # ── Entity ──────────────────────────────────────────────────────────────
 
   @strawberry.field
-  def entity(self, info: Info[GraphQLContext, None]) -> LedgerEntity | None:
-    """Return the parent ledger entity (company) for a graph."""
+  def entity(
+    self,
+    info: Info[GraphQLContext, None],
+    entity_id: str | None = None,
+  ) -> LedgerEntity | None:
+    """One entity of the graph's reporting group: the named one, else the
+    group parent. Null on a graph with no entity yet.
+
+    Args:
+      entity_id: A subsidiary's id. Omit for the group parent.
+    """
     try:
       with _open_session_for_any(info, _ENTITY_EXTENSIONS) as session:
-        response = reads_entity.get_parent_entity(session)
+        response = reads_entity.get_entity(session, entity_id)
+    except EntityNotInGraphError as exc:
+      raise strawberry.exceptions.StrawberryGraphQLError(str(exc)) from exc
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
     if response is None:
@@ -256,50 +268,69 @@ class LedgerQuery:
   # ── AR / AP open balances ───────────────────────────────────────────────
 
   @strawberry.field
-  def open_receivables(self, info: Info[GraphQLContext, None]) -> OpenBalanceAggregate:
-    """Graph-wide open AR — total + counterparty count + open invoice count.
+  def open_receivables(
+    self, info: Info[GraphQLContext, None], entity_id: str | None = None
+  ) -> OpenBalanceAggregate:
+    """One entity's open AR — total + counterparty count + open invoice count.
 
     Derived from the event duality chain: sum of unsettled
     `invoice_issued` / `sales_receipt_recorded` amounts minus
     discharges pointed at them.
+
+    Args:
+      entity_id: The entity whose books to read. Omit for the group parent.
     """
     try:
       with _open_session(info, "roboledger") as session:
-        response = reads_ar_ap.compute_open_receivables(session)
+        response = reads_ar_ap.compute_open_receivables(session, entity_id)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
     return OpenBalanceAggregate.from_pydantic(response)
 
   @strawberry.field
-  def open_payables(self, info: Info[GraphQLContext, None]) -> OpenBalanceAggregate:
-    """Graph-wide open AP — symmetric to `open_receivables`."""
+  def open_payables(
+    self, info: Info[GraphQLContext, None], entity_id: str | None = None
+  ) -> OpenBalanceAggregate:
+    """One entity's open AP — symmetric to `open_receivables`.
+
+    Args:
+      entity_id: The entity whose books to read. Omit for the group parent.
+    """
     try:
       with _open_session(info, "roboledger") as session:
-        response = reads_ar_ap.compute_open_payables(session)
+        response = reads_ar_ap.compute_open_payables(session, entity_id)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
     return OpenBalanceAggregate.from_pydantic(response)
 
   @strawberry.field
   def open_receivables_by_agent(
-    self, info: Info[GraphQLContext, None]
+    self, info: Info[GraphQLContext, None], entity_id: str | None = None
   ) -> list[OpenBalanceByAgent]:
-    """Per-counterparty open AR rows, ordered by absolute balance descending."""
+    """Per-counterparty open AR rows, ordered by absolute balance descending.
+
+    Args:
+      entity_id: The entity whose books to read. Omit for the group parent.
+    """
     try:
       with _open_session(info, "roboledger") as session:
-        responses = reads_ar_ap.list_open_receivables_by_agent(session)
+        responses = reads_ar_ap.list_open_receivables_by_agent(session, entity_id)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
     return [OpenBalanceByAgent.from_pydantic(r) for r in responses]
 
   @strawberry.field
   def open_payables_by_agent(
-    self, info: Info[GraphQLContext, None]
+    self, info: Info[GraphQLContext, None], entity_id: str | None = None
   ) -> list[OpenBalanceByAgent]:
-    """Per-counterparty open AP rows, ordered by absolute balance descending."""
+    """Per-counterparty open AP rows, ordered by absolute balance descending.
+
+    Args:
+      entity_id: The entity whose books to read. Omit for the group parent.
+    """
     try:
       with _open_session(info, "roboledger") as session:
-        responses = reads_ar_ap.list_open_payables_by_agent(session)
+        responses = reads_ar_ap.list_open_payables_by_agent(session, entity_id)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
     return [OpenBalanceByAgent.from_pydantic(r) for r in responses]
@@ -338,8 +369,9 @@ class LedgerQuery:
     is_reconciling_item: bool | None = None,
     limit: int | None = None,
     offset: int | None = None,
+    entity_id: str | None = None,
   ) -> list[EventBlock]:
-    """List event blocks with optional filters.
+    """List one entity's event blocks with optional filters.
 
     Recent events first (`occurred_at` descending). Filter by `status`
     (`captured` is the unposted queue, `committed` the audit trail),
@@ -357,6 +389,7 @@ class LedgerQuery:
       source: Filter by originating system: `quickbooks`, `schedule` or `manual`.
       is_reconciling_item: True returns the post-sync reconciliation worklist -
         committed events whose upstream payload changed after posting.
+      entity_id: The entity whose books to read. Omit for the group parent.
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=50)
     try:
@@ -371,6 +404,7 @@ class LedgerQuery:
           is_reconciling_item=is_reconciling_item,
           limit=limit,
           offset=offset,
+          entity_id=entity_id,
         )
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -379,13 +413,19 @@ class LedgerQuery:
   # ── Summary ─────────────────────────────────────────────────────────────
 
   @strawberry.field
-  def summary(self, info: Info[GraphQLContext, None]) -> LedgerSummary | None:
-    """Ledger counts + date range + connection metadata.
+  def summary(
+    self, info: Info[GraphQLContext, None], entity_id: str | None = None
+  ) -> LedgerSummary | None:
+    """One entity's ledger counts + date range, with the graph's connection
+    metadata.
 
     Counts and dates come from the ledger itself; the connection fields
     describe the source system feeding it. If connection metadata cannot be
     read the field still resolves, reporting a zero count and a null
     timestamp rather than failing the whole query.
+
+    Args:
+      entity_id: The entity whose books to count. Omit for the group parent.
     """
     # Merges extensions counts with platform-DB connection metadata.
     import logging
@@ -400,7 +440,7 @@ class LedgerQuery:
 
     try:
       with _open_session(info, "roboledger") as session:
-        counts = reads_summary.get_ledger_counts(session)
+        counts = reads_summary.get_ledger_counts(session, entity_id)
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
 
@@ -424,6 +464,7 @@ class LedgerQuery:
 
     response = LedgerSummaryResponse(
       graph_id=graph_id,
+      entity_id=counts.entity_id,
       account_count=counts.account_count,
       transaction_count=counts.transaction_count,
       entry_count=counts.entry_count,
@@ -445,13 +486,15 @@ class LedgerQuery:
     is_active: bool | None = None,
     limit: int | None = None,
     offset: int | None = None,
+    entity_id: str | None = None,
   ) -> AccountList | None:
-    """Paginated Chart of Accounts listing.
+    """Paginated Chart of Accounts listing, one entity's chart.
 
     Args:
       classification: Filter on the account's statement classification, e.g. `asset` or
         `revenue`.
       is_active: Filter on active status. Omit for both.
+      entity_id: The entity whose chart to read. Omit for the group parent.
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=100)
     try:
@@ -462,6 +505,7 @@ class LedgerQuery:
           is_active=is_active,
           limit=limit,
           offset=offset,
+          entity_id=entity_id,
         )
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -472,8 +516,9 @@ class LedgerQuery:
     self,
     info: Info[GraphQLContext, None],
     include_inactive: bool | None = None,
+    entity_id: str | None = None,
   ) -> AccountTree | None:
-    """Chart of Accounts as a recursive tree.
+    """One entity's Chart of Accounts as a recursive tree.
 
     `include_inactive` defaults to `False` so deleted source-system
     accounts (still kept in OLTP for historical journal-line FK integrity)
@@ -483,11 +528,12 @@ class LedgerQuery:
     Args:
       include_inactive: Include accounts deleted upstream but retained for journal-line
         integrity. Defaults to false.
+      entity_id: The entity whose chart to read. Omit for the group parent.
     """
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_accounts.get_account_tree(
-          session, include_inactive=bool(include_inactive)
+          session, include_inactive=bool(include_inactive), entity_id=entity_id
         )
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -503,14 +549,16 @@ class LedgerQuery:
     mapping_id: str | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
+    entity_id: str | None = None,
   ) -> AccountRollups | None:
     """CoA accounts grouped by reporting element with balances.
 
     Args:
-      mapping_id: The mapping whose associations group the accounts. Omit for the active
-        mapping.
+      mapping_id: The mapping whose associations group the accounts. Omit for the
+        entity's active mapping.
       start_date: Start of the balance window (inclusive).
       end_date: End of the balance window (inclusive).
+      entity_id: The entity whose books to read. Omit for the group parent.
     """
     try:
       with _open_session(info, "roboledger") as session:
@@ -519,6 +567,7 @@ class LedgerQuery:
           mapping_id=mapping_id,
           start_date=start_date,
           end_date=end_date,
+          entity_id=entity_id,
         )
     except reads_account_rollups.MappingNotFoundError:
       return None
@@ -530,15 +579,19 @@ class LedgerQuery:
 
   @strawberry.field
   def reconciliations(
-    self, info: Info[GraphQLContext, None], period: str
+    self,
+    info: Info[GraphQLContext, None],
+    period: str,
+    entity_id: str | None = None,
   ) -> ReconciliationList | None:
-    """Every reconciliation's standing at a period end.
+    """Every reconciliation's standing at a period end, for one entity.
 
     A reconciliation not yet compared for the period is `not_started`.
     Comparisons are recorded by the `refresh-reconciliations` operation.
 
     Args:
       period: The period, as YYYY-MM.
+      entity_id: The entity whose books to read. Omit for the group parent.
     """
     try:
       parse_period(period)
@@ -548,7 +601,9 @@ class LedgerQuery:
       ) from exc
     try:
       with _open_session(info, "roboledger") as session:
-        response = reads_reconciliations.list_reconciliations(session, period)
+        response = reads_reconciliations.list_reconciliations(
+          session, period, entity_id=entity_id
+        )
     except ProgrammingError:
       # Only a missing schema means the ledger is not there. A ValueError
       # here is a fault in saved data and must not be reported as that.
@@ -563,17 +618,19 @@ class LedgerQuery:
     info: Info[GraphQLContext, None],
     start_date: date | None = None,
     end_date: date | None = None,
+    entity_id: str | None = None,
   ) -> TrialBalance | None:
-    """Trial balance for posted entries in a date range.
+    """One entity's trial balance for posted entries in a date range.
 
     Args:
       start_date: Start of the posting window (inclusive).
       end_date: End of the posting window (inclusive).
+      entity_id: The entity whose books to read. Omit for the group parent.
     """
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_trial_balance.get_trial_balance(
-          session, start_date=start_date, end_date=end_date
+          session, start_date=start_date, end_date=end_date, entity_id=entity_id
         )
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -590,13 +647,15 @@ class LedgerQuery:
     end_date: date | None = None,
     limit: int | None = None,
     offset: int | None = None,
+    entity_id: str | None = None,
   ) -> LedgerTransactionList | None:
-    """Paginated list of transactions.
+    """Paginated list of one entity's transactions.
 
     Args:
       type: Filter by transaction type.
       start_date: Start of the transaction-date window (inclusive).
       end_date: End of the transaction-date window (inclusive).
+      entity_id: The entity whose books to read. Omit for the group parent.
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=100)
     try:
@@ -608,6 +667,7 @@ class LedgerQuery:
           end_date=end_date,
           limit=limit,
           offset=offset,
+          entity_id=entity_id,
         )
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -647,8 +707,10 @@ class LedgerQuery:
     transaction_id: str | None = None,
     limit: int | None = None,
     offset: int | None = None,
+    entity_id: str | None = None,
   ) -> LedgerJournalEntryList | None:
-    """Paginated journal — entries with their line items, newest first.
+    """Paginated journal — one entity's entries with their line items,
+    newest first.
 
     The entry-centric read. `transactions` lists transactions and hangs
     entries off them, so it cannot show an entry with no parent; the
@@ -669,6 +731,7 @@ class LedgerQuery:
       provenance: Filter by what created the entry; `schedule_derived` is what the close
         posted.
       transaction_id: Filter to entries under one parent transaction.
+      entity_id: The entity whose books to read. Omit for the group parent.
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=100)
     try:
@@ -683,6 +746,7 @@ class LedgerQuery:
           transaction_id=transaction_id,
           limit=limit,
           offset=offset,
+          entity_id=entity_id,
         )
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -920,17 +984,19 @@ class LedgerQuery:
     info: Info[GraphQLContext, None],
     period_start: date,
     period_end: date,
+    entity_id: str | None = None,
   ) -> PeriodCloseStatus | None:
-    """Close status for all schedules in a fiscal period.
+    """Close status for an entity's schedules in a fiscal period.
 
     Args:
       period_start: First day of the fiscal period, as `YYYY-MM-DD`.
       period_end: Last day of the fiscal period, as `YYYY-MM-DD`.
+      entity_id: The entity whose schedules to read. Omit for the group parent.
     """
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_schedules.get_period_close_status(
-          session, _schedule_svc, period_start, period_end
+          session, _schedule_svc, period_start, period_end, entity_id=entity_id
         )
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -955,15 +1021,23 @@ class LedgerQuery:
   # ── Fiscal calendar ─────────────────────────────────────────────────────
 
   @strawberry.field
-  def fiscal_calendar(self, info: Info[GraphQLContext, None]) -> FiscalCalendar | None:
-    """Current fiscal calendar state — pointers, gap, closeable status."""
+  def fiscal_calendar(
+    self,
+    info: Info[GraphQLContext, None],
+    entity_id: str | None = None,
+  ) -> FiscalCalendar | None:
+    """An entity's fiscal calendar — pointers, gap, closeable status.
+
+    Args:
+      entity_id: The entity whose calendar to read. Omit for the group parent.
+    """
     from robosystems.db.platform import platform_session
 
     graph_id = require_graph_id(info)
 
     try:
       with _open_session(info, "roboledger") as session:
-        calendar = _fiscal_svc.get(session, graph_id)
+        calendar = _fiscal_svc.get(session, graph_id, entity_id=entity_id)
         if calendar is None:
           return None
         with platform_session() as platform_db:
@@ -989,8 +1063,10 @@ class LedgerQuery:
     self,
     info: Info[GraphQLContext, None],
     period: str,
+    entity_id: str | None = None,
   ) -> PeriodDrafts | None:
-    """All draft entries for a fiscal period, ready for review before close.
+    """An entity's draft entries for a fiscal period, ready for review
+    before close.
 
     The close-review *outbox*: each draft is annotated with its QB
     write-back disposition (`willPublishToQb`) and the response carries
@@ -999,6 +1075,7 @@ class LedgerQuery:
 
     Args:
       period: The fiscal period, as `YYYY-MM`.
+      entity_id: The entity whose drafts to list. Omit for the group parent.
     """
     from robosystems.db.platform import platform_session
     from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
@@ -1011,7 +1088,7 @@ class LedgerQuery:
         writeback = resolve_writeback_connection(platform_db, graph_id)
       with _open_session(info, "roboledger") as session:
         response = reads_period_drafts.list_period_drafts(
-          session, period, writeback=writeback
+          session, period, writeback=writeback, entity_id=entity_id
         )
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -1021,12 +1098,19 @@ class LedgerQuery:
 
   @strawberry.field
   def closing_book_structures(
-    self, info: Info[GraphQLContext, None]
+    self, info: Info[GraphQLContext, None], entity_id: str | None = None
   ) -> ClosingBookStructures | None:
-    """Closing book sidebar navigation (statements, schedules, rollups, etc.)."""
+    """One entity's closing book sidebar navigation (statements, schedules,
+    rollups, etc.).
+
+    Args:
+      entity_id: The entity whose books to read. Omit for the group parent.
+    """
     try:
       with _open_session(info, "roboledger") as session:
-        response = reads_closing_book.get_closing_book_structures(session)
+        response = reads_closing_book.get_closing_book_structures(
+          session, entity_id=entity_id
+        )
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
     return ClosingBookStructures.from_pydantic(response)
@@ -1039,17 +1123,22 @@ class LedgerQuery:
     self,
     info: Info[GraphQLContext, None],
     lifecycle: ReportLifecycle = ReportLifecycle.CURRENT,
+    entity_id: str | None = None,
   ) -> ReportList | None:
-    """List report definitions for this graph, newest first.
+    """List one entity's report definitions, newest first.
 
     Args:
       lifecycle: `CURRENT` (the default) leaves out archived reports,
         `ARCHIVED` returns only those, `ALL` returns every report.
+      entity_id: The entity whose reports to list. Omit for the group parent,
+        whose list also carries reports shared in from other graphs.
     """
     try:
       with _open_session_for_any(info, _REPORT_EXTENSIONS) as session:
         response = reads_reports.list_reports(
-          session, lifecycle=PydanticReportLifecycle(lifecycle.value)
+          session,
+          lifecycle=PydanticReportLifecycle(lifecycle.value),
+          entity_id=entity_id,
         )
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()

@@ -8,6 +8,9 @@ graph lacks.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from typing import Any
+
 
 def _block(*lines: str) -> str:
   return "\n".join(line for line in lines if line)
@@ -20,8 +23,11 @@ def build_instructions(
   is_shared_repo: bool,
   read_only: bool,
   authored_override: str | None = None,
+  entities: Sequence[Mapping[str, Any]] | None = None,
 ) -> str | None:
-  """`authored_override` is used verbatim. None when there is nothing to say."""
+  """`authored_override` is used verbatim. None when there is nothing to say.
+  `entities` is the ledger graph's reporting group (`mcp.entities`), named so
+  the session knows which books each `entity_id` means."""
   if authored_override and authored_override.strip():
     return authored_override.strip()
 
@@ -54,6 +60,9 @@ def build_instructions(
     )
 
   sections: list[str] = [header]
+
+  if has_ledger and entities:
+    sections.append(_block(*_entity_lines(entities, has)))
 
   # Close / month-end — anchored on the playbook tool.
   if has("get-close-playbook"):
@@ -253,3 +262,37 @@ def build_instructions(
 
   result = "\n\n".join(s for s in sections if s).strip()
   return result or None
+
+
+def _entity_lines(entities: Sequence[Mapping[str, Any]], has) -> list[str]:
+  """The reporting group, and the one rule for naming an entity."""
+
+  def label(entity: Mapping[str, Any]) -> str:
+    return f"`{entity['name']}` (`{entity['id']}`)"
+
+  parents = [e for e in entities if e.get("is_group_parent")]
+  parent = parents[0] if parents else entities[0]
+  subs = [e for e in entities if e is not parent]
+  adds = " `create-entity` adds one." if has("create-entity") else ""
+  lists = " `get-graph-info` lists them." if has("get-graph-info") else ""
+  if not subs:
+    return [
+      "ENTITIES",
+      (
+        f"- One entity so far: {label(parent)}, the group parent.{adds} A "
+        "subsidiary keeps its own books, chart and calendar, and every ledger "
+        "tool then takes `entity_id`, omitted meaning the group parent."
+      ),
+    ]
+  return [
+    "ENTITIES",
+    (
+      f"- This graph is one reporting group. Group parent: {label(parent)}. "
+      "Subsidiaries: " + ", ".join(label(e) for e in subs) + "."
+    ),
+    (
+      "- Every ledger tool takes `entity_id`; omitted, it acts on the group "
+      "parent. A subsidiary's books, chart, calendar and close are its own — "
+      f"name it on every call about it.{adds}{lists}"
+    ),
+  ]

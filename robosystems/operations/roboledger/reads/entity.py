@@ -7,7 +7,11 @@ from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.entity import LedgerEntityResponse
 from robosystems.models.extensions import Entity
-from robosystems.operations.roboledger.entity_scope import find_parent_entity
+from robosystems.operations.roboledger.entity_scope import (
+  NoEntityError,
+  find_parent_entity,
+  resolve_entity,
+)
 
 
 def entity_to_response(entity: Entity) -> LedgerEntityResponse:
@@ -34,6 +38,9 @@ def entity_to_response(entity: Entity) -> LedgerEntityResponse:
     status=entity.status,
     is_parent=entity.is_parent,
     parent_entity_id=entity.parent_entity_id,
+    ownership_pct=(
+      float(entity.ownership_pct) if entity.ownership_pct is not None else None
+    ),
     source=entity.source,
     source_id=entity.source_id,
     source_graph_id=(entity.metadata_ or {}).get("source_graph_id"),
@@ -57,6 +64,19 @@ def get_parent_entity(session: Session) -> LedgerEntityResponse | None:
   """The parent (non-linked) entity, or None if there is none yet."""
   entity = resolve_parent_entity(session)
   if entity is None:
+    return None
+  return entity_to_response(entity)
+
+
+def get_entity(
+  session: Session, entity_id: str | None = None
+) -> LedgerEntityResponse | None:
+  """The named entity, validated in this graph, else the group parent; None
+  on a graph with no entity yet. Raises `EntityNotInGraphError` for an id
+  that is not one of this graph's own entities."""
+  try:
+    entity = resolve_entity(session, entity_id)
+  except NoEntityError:
     return None
   return entity_to_response(entity)
 

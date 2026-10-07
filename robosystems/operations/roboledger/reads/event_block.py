@@ -13,6 +13,7 @@ from robosystems.models.extensions.roboledger.dimension_junctions import (
   event_dimensions,
 )
 from robosystems.models.extensions.roboledger.event import Event
+from robosystems.operations.roboledger.entity_scope import find_entity_id
 
 
 def _load_dimension_ids(session: Session, event_id: str) -> list[str]:
@@ -78,8 +79,13 @@ def list_event_blocks(
   is_reconciling_item: bool | None = None,
   limit: int = 50,
   offset: int = 0,
+  entity_id: str | None = None,
 ) -> list[EventBlockEnvelope]:
+  """One entity's events, default the group parent's, newest first."""
   stmt = select(Event)
+  entity_id = find_entity_id(session, entity_id)
+  if entity_id is not None:
+    stmt = stmt.where(Event.entity_id == entity_id)
   if event_type is not None:
     stmt = stmt.where(Event.event_type == event_type)
   if event_category is not None:

@@ -95,7 +95,7 @@ def initialize_chart_of_accounts(
   if template is None:
     raise ChartTemplateNotFoundError(body.template)
 
-  owner_id = find_entity_id(session, entity_id)
+  owner_id = find_entity_id(session, entity_id or body.entity_id)
   existing = entity_chart_id(session, owner_id)
   if existing is not None:
     raise ChartAlreadyExistsError(existing)

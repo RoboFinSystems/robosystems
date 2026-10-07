@@ -17,6 +17,7 @@ from robosystems.operations.roboledger.reads.reports import (
   ANALYSIS_STATEMENT_TYPES,
   MCP_LIVE_STATEMENT_TYPES,
   CoaMappingNotFoundError,
+  CombinedViewOnParentOnlyError,
   get_live_financial_statement,
   resolve_reporting_window,
 )
@@ -28,6 +29,7 @@ from robosystems.operations.roboledger.views import (
 )
 
 from .base_tool import BaseTool
+from .constants import ENTITY_ID_ARGUMENT
 
 # The columns a filing presents: two balance-sheet instants, three years of
 # flows. Anything more (a 10-K's quarterly note data) is on request.
@@ -121,6 +123,8 @@ class LiveFinancialStatementTool(BaseTool):
 - Only available on RoboLedger tenant entity graphs (not SEC shared repo)
 
 **PARAMETERS:**
+- `entity_id` (optional) — the entity whose books to render; omit for the group parent
+- `consolidated` (optional, default false) — on the group parent, a COMBINED statement, not a consolidation: each entity's statement under the parent's Reporting Style, summed per rs-gaap concept, nothing eliminated between them (an intercompany balance is still in); `combined_entity_ids` on the response names who was summed, and an entity with no mapping yet is left out
 - `statement_type` (required) — one of the three below (a statement of equity is not offered here yet: the live path renders equity balances, not a rollforward)
 - income_statement — Revenue, expenses, net income
 - balance_sheet — Assets, liabilities, equity (instant periods)
@@ -164,6 +168,16 @@ Facts with element qnames, names, classifications, and values aligned with `peri
             "type": "integer",
             "description": "Max fact rows returned (1-1000). Leave at the default for a whole statement; a lower cap cuts rows while subtotals still reflect the full set.",
             "default": 1000,
+          },
+          "entity_id": ENTITY_ID_ARGUMENT,
+          "consolidated": {
+            "type": "boolean",
+            "default": False,
+            "description": (
+              "A combined statement, not a consolidation: every entity of the "
+              "group summed per rs-gaap concept, nothing eliminated. Only on "
+              "the group parent."
+            ),
           },
         },
         "required": ["statement_type"],
@@ -223,8 +237,10 @@ Facts with element qnames, names, classifications, and values aligned with `peri
           period_start=start,
           period_end=end,
           limit=limit,
+          entity_id=arguments.get("entity_id"),
+          consolidated=bool(arguments.get("consolidated", False)),
         )
-      except CoaMappingNotFoundError as exc:
+      except (CoaMappingNotFoundError, CombinedViewOnParentOnlyError) as exc:
         return {
           "error": str(exc),
           "statement_type": statement_type,

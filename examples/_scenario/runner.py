@@ -40,6 +40,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from .drivers import Scenario
+from .subsidiary import Subsidiary, load_subsidiary
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -2227,6 +2228,7 @@ def run_demo(
   custom_metrics: list[dict] | None = None,
   memories: list[dict] | None = None,
   forecast_levers: dict[str, float] | None = None,
+  subsidiary: Subsidiary | None = None,
   argv: list[str] | None = None,
 ) -> None:
   """Provision a graph and load the full company for one showcase episode.
@@ -2245,6 +2247,10 @@ def run_demo(
   ``forecast_levers`` (optional) authors + computes an operating-budget
   forecast scenario after the metric series lands (see
   ``run_forecast_scenario``) — a ``{rs-driver qname: value}`` map.
+  ``subsidiary`` (optional) puts a second entity in the graph beside the
+  company, with its own books and close, and reads the group's combined
+  balance sheet back (see ``subsidiary.load_subsidiary``); ``--no-subsidiary``
+  skips it.
   """
   argv = sys.argv if argv is None else argv
   dry_run = "--dry-run" in argv
@@ -2363,6 +2369,15 @@ def run_demo(
   print("\nClosing monthly history...")
   period_windows = close_monthly_history(graph_id, scenario)
 
+  # A subsidiary in the same graph: its own books, chart and close, and the
+  # group's combined statement on the parent.
+  subsidiary_result = None
+  if subsidiary is not None and period_windows and "--no-subsidiary" not in argv:
+    print(f"\nAdding subsidiary {subsidiary.name}...")
+    subsidiary_result = load_subsidiary(
+      graph_id, subsidiary, config=_client_config(), windows=period_windows
+    )
+
   # Create schedules (derived from the scenario's capex + prepaids)
   print("\nCreating schedules...")
   schedule_count = create_schedules(graph_id, element_lookup, scenario)
@@ -2445,12 +2460,23 @@ def run_demo(
     print(f"  Viewer URL:    /reports/{report_id}?graph={graph_id}")
   if forecast_scenario_id:
     print(f"  Forecast:      /explorer?scenario={forecast_scenario_id}")
+  if subsidiary_result:
+    print(
+      f"  Subsidiary:    {subsidiary_result.name} ({subsidiary_result.entity_id}), "
+      f"{subsidiary_result.months_closed} months closed on its own calendar"
+    )
   print("\n  Run the close (Claude Desktop / MCP):")
   print(f"    1. Switch to workspace: {graph_id}")
   print("    2. Ask: 'Search for month-end close procedures'")
   print(f"    3. Ask: 'Draft all closing entries for {close_label}'")
   print(f"    4. Ask: 'Close the period {close_target}'")
   print("\n  The reveal — turn Claude loose, no script:")
-  for i, prompt in enumerate(reveal_prompts, start=5):
+  prompts = list(reveal_prompts)
+  if subsidiary_result:
+    prompts.append(
+      f"Show me the group's combined balance sheet, then {subsidiary_result.name} on "
+      "its own."
+    )
+  for i, prompt in enumerate(prompts, start=5):
     print(f"    {i}. Ask: '{prompt}'")
   print("=" * 60)

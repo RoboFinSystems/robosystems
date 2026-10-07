@@ -13,7 +13,9 @@ from typing import Any
 _RECURRING_SEQUENCE: list[str] = [
   "get-fiscal-calendar — orient: read closed_through, close_target, "
   "closeable_now, blockers, catch_up_sequence. Confirm the period you intend "
-  "to close is exactly closed_through + 1.",
+  "to close is exactly closed_through + 1. On a graph with subsidiaries, "
+  "pass entity_id here and on every later step: each entity closes on its "
+  "own calendar, and omitted means the group parent.",
   "If blockers include sync_stale: run sync-connection (incremental, no "
   "arguments needed — it auto-resolves the graph's sync connection). The "
   "default incremental window reaches back ~60 days: when the user edited "
@@ -264,6 +266,15 @@ _KEY_RULES: list[str] = [
   "CHECK THE PER-TENANT PROCEDURES DOC FIRST: call search-documents for a "
   "'close procedures' / 'month-end' document before authoring or closing. It "
   "captures this company's specifics and should reference this playbook.",
+  "ENTITIES: a graph is one reporting group — the group parent and the "
+  "subsidiaries under it, each with its own books, chart of accounts, "
+  "calendar and close. Every close tool (get-fiscal-calendar, "
+  "get-period-close-status, list-period-drafts, promote-obligations, "
+  "close-period, reopen-period, backfill-plan-history) and every ledger "
+  "write take entity_id; omitted, they act on the group parent. To close a "
+  "subsidiary, pass its entity_id on EVERY call of the sequence — its "
+  "siblings stay open, and a close with no entity_id closes the parent. "
+  "get-graph-info lists the entities with their ids; create-entity adds one.",
 ]
 
 

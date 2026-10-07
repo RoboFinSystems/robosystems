@@ -13,6 +13,7 @@ from sqlalchemy import (
   ForeignKey,
   Index,
   Integer,
+  Numeric,
   String,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -67,6 +68,9 @@ class Entity(ExtensionsBase):
 
   is_parent = Column(Boolean, nullable=False, default=True)
   parent_entity_id = Column(String, ForeignKey("entities.id"), nullable=True)
+  # The parent's share of this entity, as a percent. Null on the group parent
+  # and on linked counterparties; the treatment it implies is M2 consolidation.
+  ownership_pct = Column(Numeric(7, 4), nullable=True)
 
   source = Column(String, nullable=False, default="native")  # native, quickbooks, xero
   source_id = Column(String)  # realm_id for QB, org_id for Xero

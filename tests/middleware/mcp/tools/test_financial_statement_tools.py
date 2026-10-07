@@ -102,6 +102,45 @@ class TestLiveFinancialStatementToolExecute:
     assert "tip" in result  # empty results trigger the tip
 
   @pytest.mark.unit
+  async def test_the_named_entity_reaches_the_read(self):
+    tool = LiveFinancialStatementTool(_make_client("kg_123"))
+    from robosystems.models.api.extensions.reports import (
+      LiveFinancialStatementResponse,
+    )
+
+    cm = MagicMock()
+    cm.__enter__.return_value = MagicMock()
+    cm.__exit__.return_value = False
+    with (
+      patch(f"{MODULE}.extensions_session", return_value=cm),
+      patch(
+        f"{MODULE}.resolve_reporting_window",
+        return_value=(date(2026, 4, 1), date(2026, 4, 30)),
+      ),
+      patch(
+        f"{MODULE}.get_live_financial_statement",
+        return_value=LiveFinancialStatementResponse(
+          graph_id="kg_123",
+          statement_type="balance_sheet",
+          periods=[],
+          facts=[],
+          fact_count=0,
+          unmapped_count=0,
+        ),
+      ) as read,
+    ):
+      await tool.execute(
+        {
+          "statement_type": "balance_sheet",
+          "entity_id": "ent_sub",
+          "consolidated": True,
+        }
+      )
+
+    assert read.call_args.kwargs["entity_id"] == "ent_sub"
+    assert read.call_args.kwargs["consolidated"] is True
+
+  @pytest.mark.unit
   async def test_validation_rides_the_payload(self):
     """The guard-rail outcome reaches the model verbatim — it is the only
     signal that a returned number does not foot."""

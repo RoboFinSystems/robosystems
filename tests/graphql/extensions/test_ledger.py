@@ -32,6 +32,7 @@ from robosystems.models.api.extensions.accounts import (
 from robosystems.models.api.extensions.agent import LedgerAgentResponse
 from robosystems.models.api.extensions.entity import LedgerEntityResponse
 from robosystems.models.api.extensions.reports import ReportBundleDownloadResponse
+from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
 
 GRAPH_ID = "kg01234567890abcdef"
 
@@ -164,7 +165,7 @@ class TestExtensionGate:
     with (
       _patch_session(),
       patch(
-        "robosystems.operations.roboledger.reads.entity.get_parent_entity",
+        "robosystems.operations.roboledger.reads.entity.get_entity",
         return_value=mock_response,
       ),
     ):
@@ -191,7 +192,7 @@ class TestEntityResolver:
     with (
       _patch_session(),
       patch(
-        "robosystems.operations.roboledger.reads.entity.get_parent_entity",
+        "robosystems.operations.roboledger.reads.entity.get_entity",
         return_value=mock_response,
       ),
     ):
@@ -210,7 +211,7 @@ class TestEntityResolver:
     with (
       _patch_session(),
       patch(
-        "robosystems.operations.roboledger.reads.entity.get_parent_entity",
+        "robosystems.operations.roboledger.reads.entity.get_entity",
         return_value=None,
       ),
     ):
@@ -221,6 +222,51 @@ class TestEntityResolver:
 
     assert result.errors is None
     assert result.data == {"entity": None}
+
+  def test_names_a_subsidiary_by_id(self) -> None:
+    sub = LedgerEntityResponse(
+      id="ent_sub",
+      name="Maple Court LLC",
+      status="active",
+      is_parent=False,
+      parent_entity_id="ent_01",
+      ownership_pct=100.0,
+    )
+    with (
+      _patch_session(),
+      patch(
+        "robosystems.operations.roboledger.reads.entity.get_entity",
+        return_value=sub,
+      ) as get_entity,
+    ):
+      result = schema.execute_sync(
+        'query { entity(entityId: "ent_sub") { id parentEntityId ownershipPct } }',
+        context_value=_ctx(),
+      )
+
+    assert result.errors is None
+    assert result.data == {
+      "entity": {"id": "ent_sub", "parentEntityId": "ent_01", "ownershipPct": 100.0}
+    }
+    assert get_entity.call_args.args[1] == "ent_sub"
+
+  def test_an_id_outside_the_graph_is_its_own_error(self) -> None:
+    """Not `LEDGER_NOT_INITIALIZED`: the ledger is there, the id is not its."""
+    with (
+      _patch_session(),
+      patch(
+        "robosystems.operations.roboledger.reads.entity.get_entity",
+        side_effect=EntityNotInGraphError("Entity 'ent_x' not found in this graph."),
+      ),
+    ):
+      result = schema.execute_sync(
+        'query { entity(entityId: "ent_x") { id } }',
+        context_value=_ctx(),
+      )
+
+    assert result.errors is not None
+    assert "not found in this graph" in result.errors[0].message
+    assert not result.errors[0].extensions
 
   def test_raises_typed_error_when_schema_not_initialized(self) -> None:
     """Schema-missing errors must surface as a typed GraphQL error.
@@ -234,7 +280,7 @@ class TestEntityResolver:
     with (
       _patch_session(),
       patch(
-        "robosystems.operations.roboledger.reads.entity.get_parent_entity",
+        "robosystems.operations.roboledger.reads.entity.get_entity",
         side_effect=ProgrammingError("stmt", {}, Exception("schema missing")),
       ),
     ):
@@ -260,7 +306,7 @@ class TestEntityReadsOnInvestorGraphs:
     with (
       _patch_session(),
       patch(
-        "robosystems.operations.roboledger.reads.entity.get_parent_entity",
+        "robosystems.operations.roboledger.reads.entity.get_entity",
         return_value=fund,
       ),
     ):
@@ -1365,6 +1411,7 @@ class TestAccountRollupsResolver:
       "mapping_id": "map_1",
       "start_date": date(2026, 3, 1),
       "end_date": date(2026, 3, 31),
+      "entity_id": None,
     }
 
   def test_unknown_mapping_is_null(self) -> None:
@@ -1434,7 +1481,101 @@ class TestMappingCandidatesResolver:
     assert suggest.call_args.kwargs["reporting_style_id"] is None
 
 
+class TestCloseReadsNameTheirEntity:
+  """`fiscalCalendar`, `periodCloseStatus` and `periodDrafts` read one
+  entity's books; `entityId` names it and the reads default to the parent."""
+
+  def test_fiscal_calendar(self) -> None:
+    from robosystems.models.api.extensions.fiscal_calendar import (
+      FiscalCalendarResponse,
+    )
+
+    calendar = MagicMock(name="calendar")
+    platform_ctx = MagicMock()
+    platform_ctx.__enter__ = MagicMock(return_value=MagicMock())
+    platform_ctx.__exit__ = MagicMock(return_value=False)
+    with (
+      patch("robosystems.db.platform.platform_session", return_value=platform_ctx),
+      patch(
+        "robosystems.graphql.resolvers.ledger._fiscal_svc.get", return_value=calendar
+      ) as get,
+      patch(f"{_OPS}.fiscal_calendar.qb_sync_state", return_value=(False, None)),
+      patch(
+        f"{_OPS}.fiscal_calendar.build_fiscal_calendar_response",
+        return_value=FiscalCalendarResponse(
+          graph_id="kg0123456789abcdef", entity_id="ent_sub", fiscal_year_start_month=1
+        ),
+      ),
+    ):
+      result = _run('query { fiscalCalendar(entityId: "ent_sub") { entityId } }')
+    assert result.errors is None
+    assert result.data == {"fiscalCalendar": {"entityId": "ent_sub"}}
+    assert get.call_args.kwargs["entity_id"] == "ent_sub"
+
+  def test_period_close_status(self) -> None:
+    from datetime import date
+
+    from robosystems.models.api.extensions.schedules import (
+      PeriodCloseStatusResponse,
+    )
+
+    status = PeriodCloseStatusResponse(
+      fiscal_period_start=date(2026, 1, 1),
+      fiscal_period_end=date(2026, 1, 31),
+      period_status="open",
+      schedules=[],
+      total_draft=0,
+      total_posted=0,
+    )
+    with patch(
+      f"{_OPS}.schedules.get_period_close_status", return_value=status
+    ) as read:
+      result = _run(
+        'query { periodCloseStatus(periodStart: "2026-01-01", '
+        'periodEnd: "2026-01-31", entityId: "ent_sub") { periodStatus } }'
+      )
+    assert result.errors is None
+    assert result.data == {"periodCloseStatus": {"periodStatus": "open"}}
+    assert read.call_args.kwargs["entity_id"] == "ent_sub"
+
+
 class TestPeriodDraftsResolver:
+  def test_names_the_entity(self) -> None:
+    from datetime import date
+
+    from robosystems.models.api.extensions.fiscal_calendar import (
+      PeriodDraftsResponse,
+    )
+
+    drafts = PeriodDraftsResponse(
+      period="2026-03",
+      period_start=date(2026, 3, 1),
+      period_end=date(2026, 3, 31),
+      draft_count=0,
+      total_debit=0,
+      total_credit=0,
+      all_balanced=True,
+      drafts=[],
+    )
+    platform_ctx = MagicMock()
+    platform_ctx.__enter__ = MagicMock(return_value=MagicMock())
+    platform_ctx.__exit__ = MagicMock(return_value=False)
+    with (
+      patch("robosystems.db.platform.platform_session", return_value=platform_ctx),
+      patch(
+        "robosystems.operations.roboledger.fiscal_calendar.qb_writeback."
+        "resolve_writeback_connection",
+        return_value=None,
+      ),
+      patch(f"{_OPS}.period_drafts.list_period_drafts", return_value=drafts) as read,
+    ):
+      result = _run(
+        'query { periodDrafts(period: "2026-03", entityId: "ent_sub") { draftCount } }'
+      )
+    assert result.errors is None
+    assert result.data == {"periodDrafts": {"draftCount": 0}}
+    assert read.call_args.kwargs["entity_id"] == "ent_sub"
+
   def test_lists_drafts_with_the_writeback_connection(self) -> None:
     from datetime import date
 
@@ -1502,7 +1643,7 @@ class TestPeriodDraftsResolver:
       ],
     }
     assert resolve.call_args.args[1] == GRAPH_ID
-    assert read.call_args.kwargs == {"writeback": writeback}
+    assert read.call_args.kwargs == {"writeback": writeback, "entity_id": None}
 
 
 class TestNotInitializedAcrossReads:
@@ -1541,3 +1682,100 @@ class TestNotInitializedAcrossReads:
       result = _run(query)
     assert result.errors is not None
     assert result.errors[0].extensions == {"code": "LEDGER_NOT_INITIALIZED"}
+
+
+class TestBooksReadsNameTheirEntity:
+  """Each books read takes `entityId` and hands it to its read, which
+  defaults to the group parent when nothing is named."""
+
+  @staticmethod
+  def _cases():
+    from robosystems.models.api.common import create_pagination_info
+    from robosystems.models.api.extensions.accounts import AccountTreeResponse
+    from robosystems.models.api.extensions.ar_ap import OpenBalanceAggregate
+    from robosystems.models.api.extensions.closing_book import (
+      ClosingBookStructuresResponse,
+    )
+    from robosystems.models.api.extensions.reports import ReportListResponse
+    from robosystems.models.api.extensions.transactions import (
+      LedgerTransactionListResponse,
+    )
+    from robosystems.operations.roboledger.reads.summary import LedgerCounts
+
+    aggregate = OpenBalanceAggregate(
+      total_open_cents=0, counterparty_count=0, open_event_count=0, currency="USD"
+    )
+    page = create_pagination_info(0, 100, 0)
+    return [
+      (
+        'openReceivables(entityId: "ent_sub") { totalOpenCents }',
+        "ar_ap.compute_open_receivables",
+        aggregate,
+        "arg",
+      ),
+      (
+        'openPayables(entityId: "ent_sub") { totalOpenCents }',
+        "ar_ap.compute_open_payables",
+        aggregate,
+        "arg",
+      ),
+      (
+        'openReceivablesByAgent(entityId: "ent_sub") { agentId }',
+        "ar_ap.list_open_receivables_by_agent",
+        [],
+        "arg",
+      ),
+      (
+        'openPayablesByAgent(entityId: "ent_sub") { agentId }',
+        "ar_ap.list_open_payables_by_agent",
+        [],
+        "arg",
+      ),
+      (
+        'eventBlocks(entityId: "ent_sub") { id }',
+        "event_block.list_event_blocks",
+        [],
+        "kwarg",
+      ),
+      (
+        'summary(entityId: "ent_sub") { entityId }',
+        "summary.get_ledger_counts",
+        LedgerCounts(0, 0, 0, 0, None, None, entity_id="ent_sub"),
+        "arg",
+      ),
+      (
+        'transactions(entityId: "ent_sub") { pagination { total } }',
+        "transactions.list_transactions",
+        LedgerTransactionListResponse(transactions=[], pagination=page),
+        "kwarg",
+      ),
+      (
+        'accountTree(entityId: "ent_sub") { totalAccounts }',
+        "accounts.get_account_tree",
+        AccountTreeResponse(roots=[], total_accounts=0),
+        "kwarg",
+      ),
+      (
+        'closingBookStructures(entityId: "ent_sub") { hasData }',
+        "closing_book.get_closing_book_structures",
+        ClosingBookStructuresResponse(categories=[], has_data=False),
+        "kwarg",
+      ),
+      (
+        'reports(entityId: "ent_sub") { reports { id } }',
+        "reports.list_reports",
+        ReportListResponse(reports=[]),
+        "kwarg",
+      ),
+    ]
+
+  @pytest.mark.parametrize("case", range(10))
+  def test_the_named_entity_reaches_the_read(self, case: int) -> None:
+    field, target, value, how = self._cases()[case]
+    with patch(f"{_OPS}.{target}", return_value=value) as read:
+      result = _run("query { " + field + " }")
+    assert result.errors is None, result.errors
+    if how == "arg":
+      assert read.call_args.args[1] == "ent_sub"
+    else:
+      assert read.call_args.kwargs["entity_id"] == "ent_sub"

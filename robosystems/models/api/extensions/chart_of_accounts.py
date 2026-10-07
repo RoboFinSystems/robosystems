@@ -20,13 +20,21 @@ ChartTemplateKey = Literal["saas", "services", "product"]
 class InitializeChartOfAccountsRequest(BaseModel):
   """Create the graph's chart of accounts from a shipped template.
 
-  Refused (409) when the graph already has an active `chart_of_accounts`
+  Refused (409) when the entity already has an active `chart_of_accounts`
   taxonomy — a QuickBooks-synced tenant never needs this, and a chart is
-  never replaced. The template's equity rows are mapped by the entity's
+  never replaced. Each entity of the group keeps its own chart; omit
+  `entity_id` for the group parent. The template's equity rows are mapped by the entity's
   legal form (`entity_type`: corporation / llc / partnership); omit it
   to use the graph's primary entity, falling back to corporation.
   """
 
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity to give a chart to, by id. Omit for the group parent. A "
+      "sibling already having one is no bar."
+    ),
+  )
   template: ChartTemplateKey = Field(
     ...,
     description=(

@@ -18,6 +18,7 @@ from robosystems.models.api.extensions.ar_ap import (
   OpenBalanceByAgent,
 )
 from robosystems.models.extensions.roboledger.event import Event
+from robosystems.operations.roboledger.entity_scope import find_entity_id
 
 _AR_ORIGINATING_TYPES: tuple[str, ...] = ("invoice_issued", "sales_receipt_recorded")
 
@@ -29,6 +30,7 @@ _OPEN_BALANCE_STATUSES: tuple[str, ...] = ("committed", "fulfilled")
 def _build_open_balance_subquery(
   *,
   originating_types: Iterable[str],
+  entity_id: str | None = None,
 ):
   """``(originating_id, agent_id, open_amount, currency)`` per originating
   event; ``open_amount`` is negative when overpaid.
@@ -39,6 +41,7 @@ def _build_open_balance_subquery(
   """
   originating = Event.__table__
   discharges = Event.__table__.alias("discharges_e")
+  scope = (originating.c.entity_id == entity_id,) if entity_id is not None else ()
   return (
     select(
       originating.c.id.label("originating_id"),
@@ -60,6 +63,7 @@ def _build_open_balance_subquery(
       originating.c.event_type.in_(tuple(originating_types)),
       originating.c.status.in_(_OPEN_BALANCE_STATUSES),
       originating.c.amount.is_not(None),
+      *scope,
     )
     .group_by(
       originating.c.id,
@@ -71,10 +75,11 @@ def _build_open_balance_subquery(
 
 
 def _aggregate(
-  session: Session, *, originating_types: Iterable[str]
+  session: Session, *, originating_types: Iterable[str], entity_id: str | None
 ) -> OpenBalanceAggregate:
   per_event = _build_open_balance_subquery(
-    originating_types=originating_types
+    originating_types=originating_types,
+    entity_id=find_entity_id(session, entity_id),
   ).subquery("per_event")
   nonzero = per_event.c.open_amount != 0
   row = session.execute(
@@ -100,12 +105,14 @@ def _by_agent(
   *,
   originating_types: Iterable[str],
   agent_id: str | None,
+  entity_id: str | None,
 ) -> list[OpenBalanceByAgent]:
   """Nonzero open balances per agent, by absolute balance descending (at most
   one row when ``agent_id`` is set). Events without an agent group under a
   NULL key."""
   per_event = _build_open_balance_subquery(
-    originating_types=originating_types
+    originating_types=originating_types,
+    entity_id=find_entity_id(session, entity_id),
   ).subquery("per_event")
   stmt = (
     select(
@@ -138,39 +145,71 @@ def _by_agent(
 # ---- Public read surface ----------------------------------------------------
 
 
-def compute_open_receivables(session: Session) -> OpenBalanceAggregate:
-  """Graph-wide open AR — total + counterparty count."""
-  return _aggregate(session, originating_types=_AR_ORIGINATING_TYPES)
+def compute_open_receivables(
+  session: Session, entity_id: str | None = None
+) -> OpenBalanceAggregate:
+  """One entity's open AR, default the group parent's — total + counterparty
+  count."""
+  return _aggregate(
+    session, originating_types=_AR_ORIGINATING_TYPES, entity_id=entity_id
+  )
 
 
-def compute_open_payables(session: Session) -> OpenBalanceAggregate:
-  """Graph-wide open AP — total + counterparty count."""
-  return _aggregate(session, originating_types=_AP_ORIGINATING_TYPES)
+def compute_open_payables(
+  session: Session, entity_id: str | None = None
+) -> OpenBalanceAggregate:
+  """One entity's open AP, default the group parent's — total + counterparty
+  count."""
+  return _aggregate(
+    session, originating_types=_AP_ORIGINATING_TYPES, entity_id=entity_id
+  )
 
 
 def list_open_receivables_by_agent(
-  session: Session,
+  session: Session, entity_id: str | None = None
 ) -> list[OpenBalanceByAgent]:
   """Open AR per counterparty, descending by absolute balance."""
-  return _by_agent(session, originating_types=_AR_ORIGINATING_TYPES, agent_id=None)
+  return _by_agent(
+    session,
+    originating_types=_AR_ORIGINATING_TYPES,
+    agent_id=None,
+    entity_id=entity_id,
+  )
 
 
-def list_open_payables_by_agent(session: Session) -> list[OpenBalanceByAgent]:
+def list_open_payables_by_agent(
+  session: Session, entity_id: str | None = None
+) -> list[OpenBalanceByAgent]:
   """Open AP per counterparty, descending by absolute balance."""
-  return _by_agent(session, originating_types=_AP_ORIGINATING_TYPES, agent_id=None)
+  return _by_agent(
+    session,
+    originating_types=_AP_ORIGINATING_TYPES,
+    agent_id=None,
+    entity_id=entity_id,
+  )
 
 
 def get_open_receivable_for_agent(
-  session: Session, agent_id: str
+  session: Session, agent_id: str, entity_id: str | None = None
 ) -> OpenBalanceByAgent | None:
   """One agent's open AR — None when the agent has no open balance."""
-  rows = _by_agent(session, originating_types=_AR_ORIGINATING_TYPES, agent_id=agent_id)
+  rows = _by_agent(
+    session,
+    originating_types=_AR_ORIGINATING_TYPES,
+    agent_id=agent_id,
+    entity_id=entity_id,
+  )
   return rows[0] if rows else None
 
 
 def get_open_payable_for_agent(
-  session: Session, agent_id: str
+  session: Session, agent_id: str, entity_id: str | None = None
 ) -> OpenBalanceByAgent | None:
   """One agent's open AP — None when the agent has no open balance."""
-  rows = _by_agent(session, originating_types=_AP_ORIGINATING_TYPES, agent_id=agent_id)
+  rows = _by_agent(
+    session,
+    originating_types=_AP_ORIGINATING_TYPES,
+    agent_id=agent_id,
+    entity_id=entity_id,
+  )
   return rows[0] if rows else None

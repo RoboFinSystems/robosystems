@@ -121,17 +121,31 @@ def _graph_scope_line(graph_id: str, is_shared_repo: bool) -> str:
 
 def _graph_info_tool_definition(graph_id: str, is_shared_repo: bool) -> dict[str, Any]:
   kind = "shared repository" if is_shared_repo else "private graph"
+  entities = (
+    ""
+    if is_shared_repo
+    else (
+      ", and on a ledger graph its `entities` — the reporting group, the group "
+      "parent first, each with the `entity_id` the ledger tools take"
+    )
+  )
   return {
     "name": "get-graph-info",
     "description": (
       f"Basic facts about {kind} `{graph_id}`: graph id, approximate node "
-      "count, node labels, relationship types, and whether it is read-only.\n\n"
+      f"count, node labels, relationship types, whether it is read-only{entities}."
+      "\n\n"
       "**WHEN TO USE:**\n"
       "- To confirm which graph you are connected to and what it holds before "
       "`get-graph-schema`\n"
       "- To size a query from the node count and label list without reading the "
-      "full schema\n\n"
-      "**RETURNS:** A small JSON object. Takes no arguments."
+      "full schema\n"
+      + (
+        ""
+        if is_shared_repo
+        else "- To learn the entities of the group before naming one\n"
+      )
+      + "\n**RETURNS:** A small JSON object. Takes no arguments."
     ),
     "inputSchema": {"type": "object", "properties": {}},
   }
@@ -271,12 +285,20 @@ class MCPHandler:
 
     read_only = bool(getattr(self.mcp_tools, "read_only", is_shared_repo))
 
+    tool_names = {str(tool["name"]) for tool in tools}
+    entities = None
+    if not is_shared_repo and "get-close-playbook" in tool_names:
+      from robosystems.middleware.mcp.entities import ledger_entities
+
+      entities = ledger_entities(self.graph_id)
+
     return build_instructions(
       graph_id=self.graph_id,
-      tool_names={str(tool["name"]) for tool in tools},
+      tool_names=tool_names,
       is_shared_repo=is_shared_repo,
       read_only=read_only,
       authored_override=authored_override,
+      entities=entities,
     )
 
   async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:

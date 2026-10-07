@@ -17,6 +17,7 @@ from robosystems.operations.roboledger.reads.event_block import (
 )
 
 from ._errors import database_failure
+from .constants import ENTITY_ID_ARGUMENT
 
 
 class GetEventBlockTool:
@@ -120,6 +121,8 @@ class ListEventBlocksTool:
   reconciliation worklist); false → exclude them; omit for all
 - limit (optional, default 50, max 1000)
 - offset (optional, default 0)
+- entity_id (optional): the entity whose inbox to list; omit for the group
+  parent
 - include_metadata (optional, default false): When false, returns a lean
   per-event summary (id, event_type, event_category, status, occurred_at,
   source, agent_id, amount, currency, description, has_discharge_link,
@@ -147,6 +150,7 @@ class ListEventBlocksTool:
           "is_reconciling_item": {"type": "boolean"},
           "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 50},
           "offset": {"type": "integer", "minimum": 0, "default": 0},
+          "entity_id": ENTITY_ID_ARGUMENT,
           "include_metadata": {
             "type": "boolean",
             "default": False,
@@ -190,6 +194,7 @@ class ListEventBlocksTool:
           is_reconciling_item=arguments.get("is_reconciling_item"),
           limit=limit,
           offset=offset,
+          entity_id=arguments.get("entity_id"),
         )
         if include_metadata:
           events = [e.model_dump(mode="json") for e in envelopes]

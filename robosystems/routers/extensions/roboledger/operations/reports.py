@@ -34,6 +34,7 @@ from robosystems.operations.roboledger.commands.reports import (
   InvalidFilingTransitionError,
   NoEntityError,
   NotAuthorizedError,
+  ReportEntityMismatchError,
   ReportHasActiveSharesError,
   ReportNotFiledError,
   ReportNotFoundError,
@@ -129,6 +130,7 @@ create_report_op = _registrar.register(
     error_map={
       TaxonomyNotFoundError: (422, lambda e: f"Taxonomy '{e}' not found."),
       NoEntityError: 422,
+      ReportEntityMismatchError: 422,
       # `_stamp_report_bundle` aborted the publish (S3 unavailable) to keep
       # "every published Report has a stored bundle"; 502 so the client retries.
       BundleUploadError: 502,

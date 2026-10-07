@@ -28,7 +28,10 @@ from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.transaction import Transaction
 from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands._guards import (
+  AccountOutsideEntityChartError,
   ClosedPeriodError,
+  InactiveAccountError,
+  assert_accounts_postable,
   assert_period_not_closed,
 )
 from robosystems.operations.roboledger.commands.journal_entries import (
@@ -440,6 +443,20 @@ def dispatch_preview(
       assert_period_not_closed(session, pd, entity_id=entity_id)
     except (ClosedPeriodError, RowLockedError) as e:
       errors.append(str(e))
+
+  # What commit refuses, the preview reports: a retired account, or one in
+  # another entity's chart.
+  line_items = (
+    [li for e in metadata.entries or [] for li in (e.line_items or [])]
+    if metadata.is_nested
+    else list(metadata.line_items or [])
+  )
+  try:
+    assert_accounts_postable(
+      session, (li.element_id for li in line_items), entity_id=entity_id
+    )
+  except (InactiveAccountError, AccountOutsideEntityChartError) as e:
+    errors.append(str(e))
 
   planned, total_debit, total_credit, balance_errors = _preview_planned_entries(
     metadata

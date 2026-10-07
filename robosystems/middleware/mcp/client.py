@@ -588,7 +588,7 @@ class GraphMCPClient:
       except Exception as e:
         logger.warning(f"Failed to get table info: {e}")
 
-      return {
+      info: dict[str, Any] = {
         "graph_id": self.graph_id,
         "total_nodes": total_nodes,
         "node_labels": node_labels,
@@ -597,11 +597,28 @@ class GraphMCPClient:
         "read_only": api_info.get("read_only", True),
         "uptime_seconds": api_info.get("uptime_seconds", 0),
       }
+      entities = await self._ledger_entities()
+      if entities is not None:
+        info["entities"] = entities
+      return info
 
     except Exception as e:
       logger.error(f"Failed to get graph info: {e}")
       sanitized = self._sanitize_error_message(e, "graph info retrieval")
       raise GraphAPIError(sanitized)
+
+  async def _ledger_entities(self) -> list[dict[str, Any]] | None:
+    """The reporting group of a ledger graph; None on a shared repository or
+    a graph with no ledger."""
+    from robosystems.config.shared_repositories import (
+      is_shared_repository_or_subgraph,
+    )
+    from robosystems.middleware.mcp.entities import ledger_entities
+    from robosystems.middleware.operations import run_off_loop
+
+    if is_shared_repository_or_subgraph(self.graph_id):
+      return None
+    return await run_off_loop(ledger_entities, self.graph_id)
 
   def _sanitize_error_message(
     self, error: Exception, context: str = "operation"

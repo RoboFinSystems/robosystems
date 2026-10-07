@@ -121,6 +121,13 @@ class CreateEventBlockRequest(BaseModel):
     }
   )
 
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity whose books the event lands in, by id; every GL row its "
+      "handler writes follows it. Omit for the group parent."
+    ),
+  )
   event_type: str = Field(
     ...,
     description="Open vocabulary: 'invoice_issued' | 'contract_signed' | 'bank_transaction' | ...",

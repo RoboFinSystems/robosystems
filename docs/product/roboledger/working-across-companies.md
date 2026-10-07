@@ -1,17 +1,27 @@
 ---
 title: Work across several companies
-description: For fractional CFOs, controllers and advisors. One graph per company, a connection for each, and moving between clients in the app and your AI assistant.
+description: For fractional CFOs, controllers and advisors. One graph per client, a group of related companies inside a graph, and moving between them.
 order: 6
 section: Get started
 ---
 
-If you're the finance lead for several companies, as a fractional CFO, controller or advisor, each one is its own graph. Set it up that way from the start, and you and your AI assistant always know which company you're working on.
+If you're the finance lead for several companies, as a fractional CFO, controller or advisor, each unrelated client is its own graph. Companies that belong together, a holding company and the LLCs under it, share one graph as a reporting group. Set it up that way from the start, and you and your AI assistant always know which company you're working on.
 
-## One graph per company
+## One graph per client
 
-A graph holds one company's books: its own QuickBooks connection, chart of accounts and mapping, schedules, closed months, reports and plans. A graph connects to one QuickBooks company, so each client gets a graph of its own. See [Connect your books to your AI assistant](connect-your-books.md).
+A graph holds one reporting group's books: its QuickBooks connection, each company's chart of accounts and mapping, schedules, closed months, reports and plans. Everyone with access to a graph sees everything in it, so two clients never share one. A graph connects to one QuickBooks company, the group parent's, so each client gets a graph of its own. See [Connect your books to your AI assistant](connect-your-books.md).
 
 Each graph is its own subscription on your organization's payment method, with its own tier and its own monthly credits. Nothing crosses from one graph to another unless you share a report.
+
+## Several companies in one graph
+
+A graph is one **reporting group**: the group parent, the company the graph was created for, and the subsidiaries under it. Each company in the group keeps its own books, its own chart of accounts and mapping, its own fiscal calendar and its own close, on the group's fiscal year. Counterparties and the reporting library are shared across the group. A subsidiary's books don't come from QuickBooks; your assistant, the API and file-based integrations write them.
+
+Ask your assistant to add a subsidiary: its name, its legal form and the share the parent holds. It gets a chart of accounts from a template and a calendar on the group's cadence, and from then on every question or action names the company it's about. When you don't name one, your assistant works on the group parent. There is no limit on the companies in a group; the graph's tier decides its capacity.
+
+The group's combined statements are the sum of every company's own, line by line at the reporting concepts. They are combined, not consolidated: nothing is eliminated between the companies, so a balance one owes another is still in. Ask for the combined balance sheet on the group parent, or for any one company's own.
+
+A reporting group is companies under common control. It is not a way to put several clients in one graph: everyone with access to the graph sees every company in it.
 
 ## Who can reach each graph
 
@@ -53,6 +63,9 @@ When a client's investor, lender or board member has a RoboLedger or RoboInvesto
 ## Try asking
 
 - "Which company is this connection on, and when did its QuickBooks last sync?"
+- "Add Maple Court LLC as a wholly owned subsidiary and set up its chart of accounts."
+- "Close September for Maple Court LLC."
+- "Show me the group's combined balance sheet, then Maple Court on its own."
 - "What's blocking the close for this client?"
 - "Using the connections for [client] and [client], compare gross margin for the last quarter."
 - "Create the September report for this client and tell me anything that looks off."

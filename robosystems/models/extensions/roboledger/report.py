@@ -35,6 +35,7 @@ class Report(ExtensionsBase):
     Index("idx_reports_status", "generation_status"),
     Index("idx_reports_filing_status", "filing_status"),
     Index("idx_reports_supersedes", "supersedes_id"),
+    Index("idx_reports_entity", "entity_id"),
     CheckConstraint(
       "filing_status IN ('draft', 'under_review', 'filed', 'archived')",
       name="check_report_filing_status",
@@ -43,6 +44,10 @@ class Report(ExtensionsBase):
 
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("rpt"))
   name = Column(String, nullable=False)
+  # The entity the report is about. Null on a shared-in copy (the sender's
+  # company stands as a linked row) and on reports from before the column,
+  # which read as the group parent's.
+  entity_id = Column(String, nullable=True)
   description = Column(String, nullable=True)
 
   # Determines which structures (IS, BS, CF) are available.

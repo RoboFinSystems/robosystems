@@ -35,6 +35,13 @@ class InitializeLedgerRequest(BaseModel):
     closing toward. Set independently via `set-close-target`.
   """
 
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity whose books this acts on, by id. Omit for the group "
+      "parent — the single-entity default."
+    ),
+  )
   closed_through: str | None = Field(
     None,
     pattern=PERIOD_PATTERN,
@@ -100,6 +107,13 @@ class SetCloseTargetRequest(BaseModel):
   `close-period` for that.
   """
 
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity whose books this acts on, by id. Omit for the group "
+      "parent — the single-entity default."
+    ),
+  )
   period: str = Field(
     ...,
     pattern=PERIOD_PATTERN,
@@ -138,6 +152,13 @@ class ClosePeriodRequest(BaseModel):
   body identifies the period.
   """
 
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity whose books this acts on, by id. Omit for the group "
+      "parent — the single-entity default."
+    ),
+  )
   note: str | None = Field(
     None, description="Free-form note attached to the close event"
   )
@@ -205,6 +226,13 @@ class ReopenPeriodRequest(BaseModel):
   filings).
   """
 
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity whose books this acts on, by id. Omit for the group "
+      "parent — the single-entity default."
+    ),
+  )
   reason: str = Field(
     ...,
     min_length=1,
@@ -233,6 +261,13 @@ class BackfillPlanHistoryRequest(BaseModel):
   `start_period` is clamped to the first month with entries.
   """
 
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity whose books this acts on, by id. Omit for the group "
+      "parent — the single-entity default."
+    ),
+  )
   start_period: str | None = Field(
     None,
     pattern=PERIOD_PATTERN,
@@ -361,9 +396,10 @@ class PendingObligationDetailResponse(BaseModel):
 
 
 class FiscalCalendarResponse(BaseModel):
-  """Current fiscal calendar state for a graph."""
+  """Current fiscal calendar state for one entity of a graph."""
 
   graph_id: str
+  entity_id: str | None = Field(None, description="The entity whose calendar this is.")
   fiscal_year_start_month: int
   closed_through: str | None = Field(
     None, description="Latest closed period (YYYY-MM), or null if nothing closed"
