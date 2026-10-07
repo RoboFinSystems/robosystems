@@ -71,7 +71,7 @@ A few blockers can be closed over on purpose. In the app, **Allow stale sync**, 
 
 ## Closing a subsidiary
 
-Each company in a reporting group closes on its own calendar. Name the company when you ask for a close, a review of its drafts or a reopen, and your assistant works on that company's books; a close you don't name is the group parent's. Closing one company leaves the others open. See [Work across several companies](working-across-companies.md#several-companies-in-one-graph).
+Each company in a reporting group closes on its own calendar. Name the company when you ask for a close, a review of its drafts or a reopen, and your assistant works on that company's books; a close you don't name is the group parent's. Closing one company leaves the others open. In the app, pick the company in the menu at the top right and the Closing Book shows its calendar, its drafts and what's blocking its close; **Entity → All Entities** shows the month each company is closed through. See [Work across several companies](working-across-companies.md#several-companies-in-one-graph).
 
 ## Fixing a closed month
 

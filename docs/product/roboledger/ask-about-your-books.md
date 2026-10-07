@@ -62,7 +62,7 @@ Right after a sync or a close, some answers take a little while to catch up. You
 
 ## In the app
 
-- **Ledger → Statements** shows live statements for any period.
+- **Ledger → Statements** shows live statements for any period, and on a group parent the combined statement across the group.
 - **Ledger → Trial Balance** and **Ledger → Journal** show the detail underneath.
 - **Explorer** opens any statement, note, schedule, set of ratios or scenario as a series over time. Switch between the table, a chart, the facts behind it and the checks it passed, and export to CSV or JSON. See [Explore statements and metrics over time](explorer.md).
 - **Search** finds text across the documents in your graph.
