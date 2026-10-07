@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from robosystems.adapters.sec.pipeline.catalog import (
+  ROBOTS_TXT,
   build_company,
   build_index,
   corpus_partitions,
@@ -355,6 +356,9 @@ class TestDocuments:
   def test_catalog_keys(self):
     assert get_filing_catalog_key("MMM") == "companies/mmm.json"
     assert get_filing_catalog_key(" brk.b ") == "companies/brk.b.json"
+
+  def test_robots_lets_crawlers_reach_the_noindex_header(self):
+    assert "Disallow" not in ROBOTS_TXT
 
 
 @pytest.mark.unit
