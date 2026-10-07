@@ -7,10 +7,11 @@ companies received with a shared report, never a scope of this ledger.
 
 from __future__ import annotations
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from robosystems.logger import logger
 from robosystems.models.extensions import Entity
 
 
@@ -44,13 +45,34 @@ def resolve_entity_id(session: Session, entity_id: str | None = None) -> str:
   return str(row.id)
 
 
+def graph_display_name(graph_id: str) -> str:
+  """The graph's name from its platform record, else its id.
+
+  Best effort, and never a reason for a write to fail: the platform database
+  is a different one, and a test tenant has no graph record at all.
+  """
+  try:
+    from robosystems.db.platform import SessionFactory
+    from robosystems.models.core import Graph
+
+    with SessionFactory() as platform_session:
+      name = platform_session.execute(
+        select(Graph.graph_name).where(Graph.graph_id == graph_id)
+      ).scalar_one_or_none()
+  except Exception as exc:
+    logger.warning(f"Graph name lookup failed for {graph_id}: {exc}")
+    return graph_id
+  return name or graph_id
+
+
 def ensure_entity_id(session: Session, entity_id: str | None = None) -> str:
   """:func:`resolve_entity_id` for a write that starts a ledger's books.
 
   A graph can be created without its entity. Its first ledger write gives it
   the group parent: ``entity_<graph_id>``, the id graph creation gives one,
-  named after the graph until someone renames it. A graph that has entities
-  but no parent among them is not repaired here.
+  carrying the graph's name (its id when the platform record cannot be read)
+  until someone renames it. A graph that has entities but no parent among
+  them is not repaired here.
   """
   try:
     return resolve_entity_id(session, entity_id)
@@ -64,7 +86,7 @@ def ensure_entity_id(session: Session, entity_id: str | None = None) -> str:
     pg_insert(Entity.__table__)
     .values(
       id=parent_id,
-      name=graph_id,
+      name=graph_display_name(graph_id),
       is_parent=True,
       source="native",
       created_by="system",
