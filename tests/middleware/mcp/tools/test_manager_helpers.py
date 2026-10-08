@@ -736,3 +736,44 @@ class TestSubgraphToolGating:
 
   def test_sync_connection_offered_on_parent(self):
     assert self._tools("kg0123456789abcdef").sync_connection_tool is not None
+
+
+class TestValueErrorClassification:
+  """A ValueError is the caller's unless it is a decode or response-model
+  failure, which is ours and must surface at ERROR."""
+
+  @pytest.mark.asyncio
+  async def test_a_plain_value_error_is_the_callers(self, tools):
+    from robosystems.middleware.mcp.exceptions import GraphValidationError
+
+    tools.cypher_tool.execute = AsyncMock(side_effect=ValueError("bad argument"))
+    with (
+      patch("robosystems.middleware.mcp.tools.manager.logger") as log,
+      pytest.raises(GraphValidationError),
+    ):
+      await tools.call_tool(
+        "read-graph-cypher", {"query": "MATCH (n) RETURN n"}, return_raw=True
+      )
+    log.error.assert_not_called()
+
+  @pytest.mark.asyncio
+  async def test_a_decode_failure_is_ours(self, tools):
+    import json
+
+    from robosystems.middleware.mcp.exceptions import (
+      GraphAPIError,
+      GraphValidationError,
+    )
+
+    tools.cypher_tool.execute = AsyncMock(
+      side_effect=json.JSONDecodeError("Expecting value", "", 0)
+    )
+    with (
+      patch("robosystems.middleware.mcp.tools.manager.logger") as log,
+      pytest.raises(GraphAPIError) as raised,
+    ):
+      await tools.call_tool(
+        "read-graph-cypher", {"query": "MATCH (n) RETURN n"}, return_raw=True
+      )
+    assert not isinstance(raised.value, GraphValidationError)
+    log.error.assert_called_once()

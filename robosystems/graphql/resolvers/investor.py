@@ -9,6 +9,7 @@ from sqlalchemy.exc import ProgrammingError
 from strawberry.types import Info
 
 from robosystems.graphql.context import GraphQLContext
+from robosystems.graphql.execution import log_masked_fault
 from robosystems.graphql.resolvers._common import (
   open_extensions_session as _open_session,
 )
@@ -54,6 +55,7 @@ def _raise_investor_not_initialized() -> NoReturn:
   surfaces a chained cause through the `extensions` field, and driver
   output must not reach a client response.
   """
+  log_masked_fault("INVESTOR_NOT_INITIALIZED")
   raise strawberry.exceptions.StrawberryGraphQLError(
     message="Investor module not initialized.",
     extensions={"code": "INVESTOR_NOT_INITIALIZED"},
