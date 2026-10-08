@@ -55,6 +55,15 @@ DISTINCT_DATE_CAP = 10
 
 PLAN_FILE = "cdc_plan.json"
 
+# QuickBooks keeps 30 days of changes. A watermark past this is refused here
+# rather than sent, so the fallback never depends on how the rejection is worded.
+CDC_MAX_AGE = timedelta(days=29)
+
+# The next watermark is taken when CDC is asked, less this margin for clock
+# skew: a change made while the sync runs falls inside the next one's window,
+# and the SyncToken gate dedups the overlap.
+WATERMARK_SKEW = timedelta(minutes=5)
+
 # An event's external_id is ``{tx_type}_{Id}`` with the JournalReport's own
 # label, normalised, while CDC names the entity. Observed on the sandbox
 # sample company on 2026-10-08, one id per label resolved against every
@@ -101,6 +110,8 @@ class CdcPlan:
   checked: bool
   reason: str | None = None
   watermark: str | None = None
+  # Where the next sync asks from; None leaves the watermark where it is.
+  next_watermark: str | None = None
   changed: int = 0
   deletions: list[dict[str, Any]] = field(default_factory=list)
   # ``[start, end]`` ISO dates the JournalReport is pulled again for.
@@ -115,6 +126,7 @@ class CdcPlan:
       checked=bool(data.get("checked")),
       reason=data.get("reason"),
       watermark=data.get("watermark"),
+      next_watermark=data.get("next_watermark"),
       changed=int(data.get("changed") or 0),
       deletions=list(data.get("deletions") or []),
       extra_windows=[list(w) for w in data.get("extra_windows") or []],
@@ -122,27 +134,45 @@ class CdcPlan:
 
 
 def plan_cdc(
-  client: Any, watermark: datetime | None, window_start: str, *, log: Any = None
+  client: Any,
+  watermark: datetime | None,
+  window_start: str,
+  *,
+  log: Any = None,
+  now: datetime | None = None,
 ) -> CdcPlan:
   """Ask CDC what changed since ``watermark`` and plan the follow-up.
 
-  No watermark (a first sync, or one reset) is today's path. A watermark
-  QuickBooks rejects (older than ~30 days) falls through to today's path
-  too, and says so: deletions in the gap are not checked until a full
-  rebuild. Otherwise the deletions are listed, and every changed
-  transaction dated before ``window_start`` names a day to pull again.
+  No watermark (a first sync, or one reset) is today's path. A watermark past
+  QuickBooks' 30 days falls through to today's path too, and says so:
+  deletions in that gap can no longer be detected. Otherwise the deletions
+  are listed, and every changed transaction dated before ``window_start``
+  names a day to pull again. Every plan carries the watermark the next sync
+  asks from, taken before CDC is asked.
   """
+  now = now or datetime.now(UTC)
+  next_watermark = (now - WATERMARK_SKEW).isoformat()
   if watermark is None:
-    return CdcPlan(checked=False, reason="no_watermark")
-  changed, too_old = client.cdc(watermark, list(TXN_ENTITIES))
+    return CdcPlan(checked=False, reason="no_watermark", next_watermark=next_watermark)
+  if watermark.tzinfo is None:
+    watermark = watermark.replace(tzinfo=UTC)
   stamp = watermark.isoformat()
+  too_old = now - watermark > CDC_MAX_AGE
+  changed: dict[str, list[Any]] = {}
+  if not too_old:
+    changed, too_old = client.cdc(watermark, list(TXN_ENTITIES))
   if too_old:
     if log is not None:
       log.warning(
-        f"QuickBooks rejected the CDC watermark {stamp}: deletions since then "
-        "were not checked; a full rebuild catches them"
+        f"The CDC watermark {stamp} is past QuickBooks' 30 days: deletions "
+        "since then can no longer be detected"
       )
-    return CdcPlan(checked=False, reason="watermark_too_old", watermark=stamp)
+    return CdcPlan(
+      checked=False,
+      reason="watermark_too_old",
+      watermark=stamp,
+      next_watermark=next_watermark,
+    )
 
   deletions: list[dict[str, Any]] = []
   old_dates: set[str] = set()
@@ -176,6 +206,7 @@ def plan_cdc(
   return CdcPlan(
     checked=True,
     watermark=stamp,
+    next_watermark=next_watermark,
     changed=count,
     deletions=deletions,
     extra_windows=windows,
@@ -247,7 +278,9 @@ def apply_deletions(
     _retract(event, [key[1]], result, stamp=stamp, published=False)
 
   # A label the map does not list: the id's suffix finds the event, and the
-  # label it carries is learned, unless it belongs to another entity.
+  # label it carries is learned, unless it belongs to another entity. Ids are
+  # unique per type only, so a suffix can name another type's transaction:
+  # it is flagged for review if posted, and never voided.
   for entity, qb_id in sorted(set(wanted) - matched):
     for event in _mirrored_by_suffix(session, qb_id):
       label = str(event.external_id)[: -(len(qb_id) + 1)]
@@ -264,7 +297,7 @@ def apply_deletions(
           entity,
           label,
         )
-      _retract(event, [qb_id], result, stamp=stamp, published=False)
+      _retract(event, [qb_id], result, stamp=stamp, published=False, may_void=False)
 
   deleted_journal_entries = {
     qb_id for (entity, qb_id) in wanted if entity == "JournalEntry"
@@ -377,11 +410,21 @@ def _retract(
   *,
   stamp: str,
   published: bool,
+  may_void: bool = True,
 ) -> None:
   if _already_carries(event, qb_ids):
     result.already_applied += 1
     return
   status = str(event.status)
+  if status in UNPOSTED_STATUSES and not may_void:
+    result.skipped += 1
+    logger.warning(
+      "QuickBooks deletion of id %s matched unposted event %s by suffix only; "
+      "left in place",
+      qb_ids[0],
+      event.id,
+    )
+    return
   if status in UNPOSTED_STATUSES:
     event.status = "voided"
     event.metadata_ = {

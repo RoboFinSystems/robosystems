@@ -44,11 +44,6 @@ def _run_qb_load(
 
   context.log.info(f"Loading QB data for graph={config.graph_id}, duckdb={duckdb_path}")
 
-  # CDC watermark candidate, taken after extract: the next sync re-fetches
-  # anything touched since, and the SyncToken gate dedups the overlap.
-  # Advanced only on success, full rebuilds included.
-  sync_started_at = datetime.now(UTC)
-
   # Books that hold nothing posted yet take the source's history as their
   # baseline: it posts past any calendar already in place.
   baseline = _is_baseline_import(context, config.graph_id)
@@ -75,9 +70,13 @@ def _run_qb_load(
     raise
 
   # After the UPSERT, in its own transaction: a row edited and then deleted
-  # within one window ends deleted. A failure here fails the sync, so the
-  # next one re-reads the plan the extract left.
-  cdc_summary = _apply_cdc(context, config)
+  # within one window ends deleted. A failure here fails the sync, and the
+  # watermark stays put, so the next one asks for the deletions again.
+  try:
+    cdc_summary = _apply_cdc(context, config)
+  except Exception as exc:
+    _record_failed_sync_result(context, config, exc)
+    raise
 
   _update_last_sync(
     context,
@@ -85,7 +84,13 @@ def _run_qb_load(
     _sync_result_summary(config, result, cdc=cdc_summary, baseline=baseline),
   )
 
-  _advance_cdc_watermark(context, config, sync_started_at)
+  # Taken by the extract when it asked CDC, so a change made while this sync
+  # ran is asked about next time. Advanced only on success.
+  next_watermark = _planned_watermark(config)
+  if next_watermark is not None:
+    _advance_cdc_watermark(context, config, next_watermark)
+  else:
+    context.log.warning("No CDC plan from the extract; the watermark stays put")
 
   _bootstrap_fiscal_calendar_if_needed(context, config)
 
@@ -324,6 +329,15 @@ def _apply_cdc(context: AssetExecutionContext, config: QBSyncConfig) -> dict:
       f"QuickBooks CDC label map misses, learned this sync: {applied.observed_labels}"
     )
   return summary
+
+
+def _planned_watermark(config: QBSyncConfig) -> datetime | None:
+  from .cdc import read_plan
+
+  plan = read_plan(get_pipeline_work_dir(config.graph_id) / "extract")
+  if plan is None or not plan.next_watermark:
+    return None
+  return datetime.fromisoformat(plan.next_watermark)
 
 
 def _advance_cdc_watermark(
