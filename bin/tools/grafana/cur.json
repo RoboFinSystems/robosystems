@@ -537,7 +537,7 @@
         "type": "grafana-athena-datasource",
         "uid": "${athena}"
       },
-      "description": "Component cost over time. The top 10 categories by total are drawn; the rest stack as Other. Bucket size follows the Granularity selector; the legend holds the period total and the per-bucket mean.",
+      "description": "Component cost over time. The top 30 categories by total are drawn; the rest stack as Other. Bucket size follows the Granularity selector; the legend holds the period total and the per-bucket mean.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -672,7 +672,7 @@
         "type": "grafana-athena-datasource",
         "uid": "${athena}"
       },
-      "description": "Period total per Environment tag. Account-level services that cannot carry the tag (CloudWatch, VPC, Route 53, commitment fees) show as untagged. Effective cost: Savings Plan and Reserved Instance discounts applied, commitment fees counted only for their unused portion, credits and refunds excluded, RI fees excluded (they book once a month and would distort a running month).",
+      "description": "Period total per Environment tag. Account-level services that cannot carry the tag (CloudWatch, VPC, Route 53, commitment fees) show as shared. Effective cost: Savings Plan and Reserved Instance discounts applied, commitment fees counted only for their unused portion, credits and refunds excluded, RI fees excluded (they book once a month and would distort a running month).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -957,7 +957,7 @@
         "type": "grafana-athena-datasource",
         "uid": "${athena}"
       },
-      "description": "AWS product cost over time. The top 10 categories by total are drawn; the rest stack as Other. Bucket size follows the Granularity selector; the legend holds the period total and the per-bucket mean.",
+      "description": "AWS product cost over time. The top 30 categories by total are drawn; the rest stack as Other. Bucket size follows the Granularity selector; the legend holds the period total and the per-bucket mean.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1167,7 +1167,7 @@
         "type": "grafana-athena-datasource",
         "uid": "${athena}"
       },
-      "description": "Usage type cost over time. The top 10 categories by total are drawn; the rest stack as Other. Bucket size follows the Granularity selector; the legend holds the period total and the per-bucket mean.",
+      "description": "Usage type cost over time. The top 30 categories by total are drawn; the rest stack as Other. Bucket size follows the Granularity selector; the legend holds the period total and the per-bucket mean.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1776,6 +1776,6 @@
   "timezone": "utc",
   "title": "RoboSystems Cost and Usage Dashboard",
   "uid": "depgbcbsbfe2oa",
-  "version": 77,
+  "version": 78,
   "weekStart": ""
 }
