@@ -226,3 +226,92 @@ def test_detach_handles_instance_with_only_root_volume(gvd):
 
   # No data volumes → all_detached stays True → CONTINUE
   assert asg_calls[0]["LifecycleActionResult"] == "CONTINUE"
+
+
+def test_container_is_stopped_and_unmounted_before_the_detach(gvd):
+  """The detach must not run under a live database: the stop-and-unmount
+  command is sent and finished before the volume manager is invoked."""
+  instance_id, volume_id = _create_attached_volume()
+  _seed_instance_registry(instance_id)
+
+  call_order: list[str] = []
+  sent: list[list[str]] = []
+
+  def fake_send(**kwargs):
+    call_order.append("ssm_send")
+    sent.append(kwargs["Parameters"]["commands"])
+    return {"Command": {"CommandId": "cmd-1"}}
+
+  def fake_invocation(**kwargs):
+    call_order.append("ssm_done")
+    return {"Status": "Success"}
+
+  vm_response = MagicMock()
+  vm_response["Payload"].read.return_value = json.dumps({"statusCode": 200}).encode()
+
+  def fake_invoke(**kwargs):
+    call_order.append("vm_invoke")
+    boto3.client("ec2", region_name="us-east-1").detach_volume(
+      VolumeId=volume_id, InstanceId=instance_id
+    )
+    return vm_response
+
+  with (
+    patch.object(gvd.ssm, "send_command", side_effect=fake_send),
+    patch.object(gvd.ssm, "get_command_invocation", side_effect=fake_invocation),
+    patch.object(gvd.lambda_client, "invoke", side_effect=fake_invoke),
+    patch.object(gvd.asg, "complete_lifecycle_action", return_value={}),
+  ):
+    gvd.handler(_make_lifecycle_event(instance_id), context=None)
+
+  assert call_order[:3] == ["ssm_send", "ssm_done", "vm_invoke"]
+  commands = sent[0]
+  stop = next(i for i, c in enumerate(commands) if "docker stop" in c)
+  unmount = next(i for i, c in enumerate(commands) if "umount /mnt/ladybug-data" in c)
+  assert stop < unmount
+
+
+def test_stop_and_unmount_gives_up_at_its_budget(gvd):
+  """A command that never finishes must not hold the hook: the wait is bounded."""
+  clock = iter(range(0, 1000, 10))
+
+  with (
+    patch.object(
+      gvd.ssm, "send_command", return_value={"Command": {"CommandId": "cmd-1"}}
+    ),
+    patch.object(
+      gvd.ssm, "get_command_invocation", return_value={"Status": "InProgress"}
+    ),
+    patch.object(gvd.time, "monotonic", side_effect=lambda: next(clock)),
+    patch.object(gvd.time, "sleep"),
+  ):
+    assert gvd.stop_and_unmount("i-123") == "TimedOut"
+
+
+def test_detach_still_runs_when_the_stop_command_cannot_be_sent(gvd):
+  instance_id, volume_id = _create_attached_volume()
+  _seed_instance_registry(instance_id)
+
+  vm_response = MagicMock()
+  vm_response["Payload"].read.return_value = json.dumps({"statusCode": 200}).encode()
+
+  def fake_invoke(**kwargs):
+    boto3.client("ec2", region_name="us-east-1").detach_volume(
+      VolumeId=volume_id, InstanceId=instance_id
+    )
+    return vm_response
+
+  asg_calls: list[dict] = []
+
+  with (
+    patch.object(gvd.ssm, "send_command", side_effect=Exception("not managed")),
+    patch.object(gvd.lambda_client, "invoke", side_effect=fake_invoke),
+    patch.object(
+      gvd.asg,
+      "complete_lifecycle_action",
+      side_effect=lambda **kw: asg_calls.append(kw) or {},
+    ),
+  ):
+    gvd.handler(_make_lifecycle_event(instance_id), context=None)
+
+  assert asg_calls[0]["LifecycleActionResult"] == "CONTINUE"
