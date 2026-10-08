@@ -152,9 +152,13 @@ def _sync_item(
     chart_indexes,
     link_bank_accounts,
   )
+  from robosystems.adapters.bank_feed.balances import record_feed_balances
   from robosystems.adapters.plaid.client import PlaidError
   from robosystems.adapters.plaid.pipeline.load import load_sync
-  from robosystems.adapters.plaid.pipeline.transform import bank_accounts
+  from robosystems.adapters.plaid.pipeline.transform import (
+    balance_readings,
+    bank_accounts,
+  )
   from robosystems.db.extensions import extensions_session
   from robosystems.operations.providers.plaid_provider import plaid_client
   from robosystems.operations.roboledger.entity_scope import ensure_entity_id
@@ -180,6 +184,7 @@ def _sync_item(
   )
 
   client = plaid_client()
+  pulled_at = datetime.now(UTC)
   try:
     accounts_body = client.get_accounts(access_token)
     sync = sync_or_not_ready(client, access_token, cursor)
@@ -252,6 +257,17 @@ def _sync_item(
       for account_id, element_id in link_result.links.items()
       if entities.get(element_id)
     }
+    # The bank's balances come with its accounts and cannot be asked for
+    # later: each sync keeps the day's reading per account as an observation.
+    balances = record_feed_balances(
+      session,
+      balance_readings(accounts_body.get("accounts") or [], pulled_at=pulled_at),
+      source=SOURCE,
+      connection_id=config.connection_id,
+      account_elements=link_result.links,
+      account_entities=by_feed_account,
+      created_by=config.user_id,
+    )
     report = load_sync(
       session,
       graph_id=config.graph_id,
@@ -295,7 +311,8 @@ def _sync_item(
   )
 
   context.log.info(
-    f"Accounts: {link_result.linked} linked, {link_result.created} created. "
+    f"Accounts: {link_result.linked} linked, {link_result.created} created; "
+    f"balances {balances.recorded} recorded, {balances.unchanged} unchanged. "
     f"Events: {report.events_created} captured, {report.events_existing} existing, "
     f"{report.events_updated} refreshed, {report.events_removed} removed, "
     f"{report.events_rekeyed} re-keyed, {report.transfers_matched} transfers "
@@ -314,6 +331,7 @@ def _sync_item(
     },
     "counts": {
       **report.as_counts(),
+      **balances.as_counts(),
       "accounts_linked": link_result.linked,
       "accounts_created": link_result.created,
     },
@@ -339,6 +357,9 @@ def _sync_item(
       "item_id": item_id or "",
       "accounts_linked": link_result.linked,
       "accounts_created": link_result.created,
+      "balances_recorded": balances.recorded,
+      "balances_unchanged": balances.unchanged,
+      "balances_skipped": balances.skipped,
       "events_captured": report.events_created,
       "events_existing": report.events_existing,
       "events_updated": report.events_updated,

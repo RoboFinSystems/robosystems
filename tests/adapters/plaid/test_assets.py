@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from dagster import Failure, MaterializeResult, build_asset_context
 
+from robosystems.adapters.bank_feed.balances import FeedBalanceReport
 from robosystems.adapters.bank_feed.sync import default_backfill_start
 from robosystems.adapters.plaid.client import PlaidError, TransactionsSync
 from robosystems.adapters.plaid.pipeline.assets import (
@@ -146,6 +147,38 @@ class TestBody:
     assert summary["window"]["full_rebuild"] is False
     assert run.load.call_args.kwargs["rekey_replaced"] is False
     run.bootstrap.assert_called_once()
+
+  def test_the_banks_balances_are_kept_as_the_days_observations(self):
+    accounts = [
+      {
+        "account_id": "a1",
+        "name": "Checking",
+        "mask": "1",
+        "type": "depository",
+        "subtype": "checking",
+        "balances": {
+          "current": 1200.5,
+          "available": 1000.0,
+          "iso_currency_code": "USD",
+          "last_updated_datetime": "2026-10-07T12:00:00Z",
+        },
+      }
+    ]
+    run = _run_body(
+      [_sync("HISTORICAL_UPDATE_COMPLETE", next_cursor="c9")], accounts=accounts
+    )
+    readings = run.balances.call_args.args[1]
+    assert [(r.account_id, r.kind, r.stated_cents) for r in readings] == [
+      ("a1", "bank_current", 120050),
+      ("a1", "bank_available", 100000),
+    ]
+    kwargs = run.balances.call_args.kwargs
+    assert kwargs["source"] == "plaid"
+    assert kwargs["connection_id"] == "conn_1"
+    assert kwargs["created_by"] == "usr_1"
+    summary = run.update.call_args.args[2]
+    assert summary["counts"]["balances_recorded"] == 2
+    assert run.result.metadata["balances_recorded"] == 2
 
   def test_the_body_waits_for_the_historical_pull(self):
     run = _run_body(
@@ -343,7 +376,9 @@ def _sync(status: str, *, next_cursor: str = "", added: int = 0) -> Transactions
   )
 
 
-def _run_body(syncs, *, credentials=None, failed=0, errors=(), expect=None):
+def _run_body(
+  syncs, *, credentials=None, failed=0, errors=(), expect=None, accounts=()
+):
   """Run the body against a mocked Plaid client and tenant session.
 
   ``syncs`` is the sequence ``sync_transactions`` answers, or a callable that
@@ -352,7 +387,7 @@ def _run_body(syncs, *, credentials=None, failed=0, errors=(), expect=None):
   from robosystems.adapters.plaid.pipeline.assets import _run_plaid_sync
 
   client = MagicMock()
-  client.get_accounts.return_value = {"accounts": [], "item": {}}
+  client.get_accounts.return_value = {"accounts": list(accounts), "item": {}}
   client.sync_transactions.side_effect = syncs
   session = MagicMock()
   extensions = MagicMock()
@@ -391,6 +426,12 @@ def _run_body(syncs, *, credentials=None, failed=0, errors=(), expect=None):
     patch(
       "robosystems.adapters.plaid.pipeline.load.load_sync", return_value=report
     ) as load,
+    patch(
+      "robosystems.adapters.bank_feed.balances.record_feed_balances",
+      side_effect=lambda _session, readings, **_kw: FeedBalanceReport(
+        recorded=len(list(readings))
+      ),
+    ) as balances,
     patch(f"{MODULE}.time") as clock,
     patch(f"{MODULE}.store_cursor", return_value=True) as store,
     patch(f"{MODULE}.mark_needs_reauth") as mark,
@@ -400,6 +441,7 @@ def _run_body(syncs, *, credentials=None, failed=0, errors=(), expect=None):
   ):
     run.clock, run.store, run.update, run.mark = clock, store, update, mark
     run.bootstrap, run.stale, run.load = bootstrap, stale, load
+    run.balances = balances
     if expect is None:
       run.result = _run_plaid_sync(build_asset_context(), _config())
     else:
