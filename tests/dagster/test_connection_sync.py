@@ -66,7 +66,9 @@ DAY = timedelta(hours=24)
 class TestDueConnections:
   """Against the shared test database: the selection is the whole point."""
 
-  def _connection(self, db, graph_id, user_id, provider="quickbooks", **fields):
+  def _connection(
+    self, db, graph_id, user_id, provider="quickbooks", stage=None, **fields
+  ):
     status = fields.pop("status", "connected")
     last_sync = fields.pop("last_sync", None)
     deleted = fields.pop("deleted", False)
@@ -84,7 +86,7 @@ class TestDueConnections:
       conn.last_sync_result = {
         "status": "failed",
         "synced_at": failed_at.isoformat(),
-        **({"stage": fields.pop("stage")} if "stage" in fields else {}),
+        **({"stage": stage} if stage else {}),
       }
     if deleted:
       conn.deleted_at = NOW

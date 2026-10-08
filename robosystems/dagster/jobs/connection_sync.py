@@ -15,10 +15,10 @@ again, whatever became of it: a failed sync records its failure on the
 connection without advancing ``last_sync``, a dispatch that failed records
 the same but is tried again within the hour (it started nothing, and its
 cause is usually the platform's), and the run store holds every run a
-dispatch started, so a run
-that died before it could record anything, or one still running past its
-lock, costs one attempt per cadence rather than one per tick. A sync a
-person already started is the expected collision and is logged quietly.
+dispatch started, so a run that died before it could record anything, or
+one still running past its lock, costs one attempt per cadence rather than
+one per tick. A sync a person already started is the expected collision and
+is logged quietly.
 
 A sweep that could dispatch none of its due connections fails, so the
 run-failure alarm says so; one that could dispatch some logs the rest. Its
