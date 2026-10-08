@@ -51,6 +51,14 @@ def stream_error(chunk: dict[str, Any]) -> GraphAPIError:
   return GraphServerError(message, response_data=chunk)
 
 
+def log_stream_failure(stream: str, exc: Exception) -> None:
+  """The caller's query errors at WARNING; anything else is ours, at ERROR."""
+  if isinstance(exc, GraphClientError):
+    logger.warning(f"{stream} streaming query refused: {exc}")
+  else:
+    logger.error(f"{stream} streaming failed: {exc}", exc_info=True)
+
+
 async def execute_query_with_timeout(
   repository: Any, query: str, parameters: dict[str, Any] | None, timeout: int
 ) -> list[dict[str, Any]]:
@@ -195,10 +203,7 @@ async def stream_ndjson_response(
       yield json.dumps(error_chunk) + "\n"
 
       circuit_breaker.record_failure(graph_id, "cypher_query", error=e)
-      if isinstance(e, GraphClientError):
-        logger.warning(f"NDJSON streaming query refused: {e}")
-      else:
-        logger.error(f"NDJSON streaming failed: {e}", exc_info=True)
+      log_stream_failure("NDJSON", e)
 
   return StreamingResponse(
     generate_ndjson(),
@@ -392,7 +397,7 @@ async def stream_sse_response(
         ),
       }
       circuit_breaker.record_failure(graph_id, "cypher_query", error=e)
-      logger.error(f"SSE streaming failed: {e}", exc_info=True)
+      log_stream_failure("SSE", e)
 
   return EventSourceResponse(
     sse_generator(),

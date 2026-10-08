@@ -511,3 +511,22 @@ class TestEngineErrorChunk:
     assert names[-1] == "error"
     assert "complete" not in names
     assert sum(1 for n in names if n == "chunk") == 1
+
+  @pytest.mark.asyncio
+  @pytest.mark.parametrize("stream", [stream_ndjson_response, stream_sse_response])
+  async def test_a_callers_query_error_logs_at_warning(self, stream):
+    with (
+      patch("robosystems.routers.graphs.query.streaming.circuit_breaker"),
+      patch("robosystems.routers.graphs.query.streaming.logger") as log,
+    ):
+      response = await stream(
+        _engine_failing_after_one_chunk("BinderException"),
+        _make_mock_request(),
+        "kg01234567890abcdef",
+        _make_mock_user(),
+        start_time=datetime.now(UTC),
+      )
+      _ = [c async for c in response.body_iterator]
+
+    log.warning.assert_called_once()
+    log.error.assert_not_called()
