@@ -342,6 +342,31 @@ class TestSyncQuickbooksConnection:
     assert run_config["ops"]["qb_extract"]["config"]["since_date"] == ""
 
   @pytest.mark.asyncio
+  async def test_an_unattended_sync_says_so_in_the_run_config(self):
+    from robosystems.operations.providers.quickbooks_provider import (
+      sync_quickbooks_connection,
+    )
+
+    connection = {
+      "connection_id": "conn_1",
+      "user_id": "usr_1",
+      "metadata": {"realm_id": "realm123"},
+    }
+
+    with patch(
+      "robosystems.middleware.sse.dagster_monitor.submit_dagster_job_sync",
+      return_value="run_xyz",
+    ) as mock_submit:
+      await sync_quickbooks_connection(
+        connection=connection,
+        sync_options={"unattended": True},
+        graph_id="kg_test",
+      )
+
+    run_config = mock_submit.call_args.kwargs["run_config"]
+    assert run_config["ops"]["qb_load"]["config"]["unattended"] is True
+
+  @pytest.mark.asyncio
   async def test_passes_since_date_through(self):
     from robosystems.operations.providers.quickbooks_provider import (
       sync_quickbooks_connection,

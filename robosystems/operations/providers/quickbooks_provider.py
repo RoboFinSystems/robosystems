@@ -160,7 +160,8 @@ async def sync_quickbooks_connection(
   """Submit the `qb_sync` Dagster job; returns its run id.
 
   `sync_options` accepts `full_rebuild`, `lookback_days` (default 60),
-  `since_date` (overrides the lookback), and `sync_lock_id`.
+  `since_date` (overrides the lookback), `sync_lock_id`, and `unattended`
+  (a scheduled sync: nothing that spends credits is started).
   """
   from robosystems.middleware.sse.dagster_monitor import submit_dagster_job_sync
 
@@ -190,6 +191,7 @@ async def sync_quickbooks_connection(
     "lookback_days": lookback_days,
     "since_date": since_date,
     "sync_lock_id": sync_lock_id,
+    "unattended": bool(options.get("unattended", False)),
   }
 
   run_config = {

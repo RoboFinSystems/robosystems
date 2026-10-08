@@ -10,11 +10,18 @@ lock, the provider check and the routing are not reimplemented here.
 
 A connection the schedule cannot help is left alone: one still waiting on
 its sign-in, one whose bank revoked the login (``needs_reauth``), one
-disconnected or severed. A failed sync does not advance ``last_sync``, so
-a connection that keeps failing is tried once per cadence, not every tick:
-the failure it recorded is the clock until it is older than the cadence. A
-sync a person already started is the expected collision and is logged
-quietly.
+disconnected or severed. A sync attempted within the cadence is not tried
+again, whatever became of it: a failed sync records its failure on the
+connection without advancing ``last_sync``, a dispatch that failed records
+the same, and the run store holds every run a dispatch started, so a run
+that died before it could record anything, or one still running past its
+lock, costs one attempt per cadence rather than one per tick. A sync a
+person already started is the expected collision and is logged quietly.
+
+A sweep that could dispatch none of its due connections fails, so the
+run-failure alarm says so; one that could dispatch some logs the rest. Its
+syncs are marked unattended: nothing that spends the tenant's credits is
+started on their behalf.
 
 - ``CONNECTION_SYNC_INTERVAL_HOURS`` is the cadence (default daily); the
   tick is hourly, so each connection syncs within an hour of coming due and
@@ -24,12 +31,16 @@ quietly.
 """
 
 import asyncio
+from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from dagster import (
+  DagsterInstance,
   DefaultScheduleStatus,
+  Failure,
   OpExecutionContext,
+  RunsFilter,
   ScheduleDefinition,
   job,
   op,
@@ -106,6 +117,52 @@ def _failed_since(connection: Connection, cutoff: datetime) -> bool:
   return attempted >= cutoff
 
 
+def recently_attempted(
+  instance: DagsterInstance, connection_ids: Iterable[str], *, cutoff: datetime
+) -> set[str]:
+  """The connections a sync run was started for since ``cutoff``, in any
+  state. Every provider tags its sync runs with ``connection_id``, so the
+  run store is the record of attempts, including the runs that died before
+  they could record anything on the connection."""
+  attempted: set[str] = set()
+  for connection_id in connection_ids:
+    records = instance.get_run_records(
+      filters=RunsFilter(tags={"connection_id": connection_id}, created_after=cutoff),
+      limit=1,
+    )
+    if records:
+      attempted.add(connection_id)
+  return attempted
+
+
+def record_dispatch_failure(
+  db: DatabaseResource, connection_id: str, exc: BaseException, *, now: datetime
+) -> None:
+  """A dispatch that failed started no run to record itself, so the sweep
+  records it: the connection shows the failure, and it is the clock that
+  holds the connection until the next cadence."""
+  try:
+    with db.get_session() as session:
+      connection = session.get(Connection, connection_id)
+      if connection is not None:
+        connection.record_sync_result(
+          session,
+          {
+            "status": "failed",
+            "stage": "dispatch",
+            "synced_at": now.isoformat(),
+            "error": {
+              "code": type(exc).__name__,
+              "message": describe_failure(exc, limit=500),
+            },
+          },
+        )
+  except Exception as exc:
+    logger.warning(
+      "Could not record the failed dispatch on connection %s: %s", connection_id, exc
+    )
+
+
 def describe_failure(exc: BaseException, *, limit: int = 600) -> str:
   """The exception and what caused it, innermost last: a wrapped client error
   says which query failed, and only its cause says why."""
@@ -141,13 +198,24 @@ def sweep_connection_syncs(
     return {"skipped": True, "reason": f"{_ENABLED_FLAG} is false"}
 
   interval = timedelta(hours=env.CONNECTION_SYNC_INTERVAL_HOURS)
+  now = datetime.now(UTC)
   with db.get_session() as session:
-    due = [
+    candidates = [
       (c.graph_id, c.id, c.provider)
-      for c in due_connections(session, now=datetime.now(UTC), interval=interval)
+      for c in due_connections(session, now=now, interval=interval)
     ]
+  attempted = recently_attempted(
+    context.instance, [cid for _, cid, _ in candidates], cutoff=now - interval
+  )
+  due = [row for row in candidates if row[1] not in attempted]
 
-  counts = {"due": len(due), "dispatched": 0, "in_progress": 0, "failed": 0}
+  counts = {
+    "due": len(due),
+    "attempted": len(attempted),
+    "dispatched": 0,
+    "in_progress": 0,
+    "failed": 0,
+  }
 
   async def dispatch_all() -> None:
     # One connection at a time: a dispatch only submits a run, so the sweep
@@ -161,6 +229,7 @@ def sweep_connection_syncs(
           # The schedule acts for the platform; the run itself is stamped
           # with the connection's own user.
           user_id=SYSTEM_USER_ID,
+          sync_options={"unattended": True},
         )
       except SyncInProgressError:
         counts["in_progress"] += 1
@@ -168,10 +237,12 @@ def sweep_connection_syncs(
         continue
       except Exception as exc:
         counts["failed"] += 1
+        reason = describe_failure(exc)
         context.log.warning(
           f"Scheduled sync of connection {connection_id} ({provider}) was not "
-          f"dispatched: {describe_failure(exc)}"
+          f"dispatched: {reason}"
         )
+        record_dispatch_failure(db, connection_id, exc, now=now)
         continue
       if result.get("dispatched"):
         counts["dispatched"] += 1
@@ -186,14 +257,26 @@ def sweep_connection_syncs(
   message = (
     f"Scheduled sync sweep: {counts['due']} due, {counts['dispatched']} "
     f"dispatched, {counts['in_progress']} already running, {counts['failed']} "
-    f"not dispatched (cadence {env.CONNECTION_SYNC_INTERVAL_HOURS} h)"
+    f"not dispatched, {counts['attempted']} attempted within the cadence "
+    f"(cadence {env.CONNECTION_SYNC_INTERVAL_HOURS} h)"
   )
   logger.info(message)
   context.log.info(message)
+  if due and counts["failed"] == len(due):
+    # Nothing could be dispatched: the cause is the platform's, not one
+    # connection's, and the run-failure alarm is how it gets heard.
+    raise Failure(description=message, metadata=counts)
   return counts
 
 
-@job(tags={"dagster/priority": "2", "dagster/max_retries": 3})
+@job(
+  tags={
+    "dagster/priority": "2",
+    # A dead worker is retried; a sweep that failed on purpose is not.
+    "dagster/max_retries": 3,
+    "dagster/retry_on_asset_or_op_failure": "false",
+  }
+)
 def scheduled_connection_sync_job():
   """Start the syncs that are due."""
   sweep_connection_syncs()
