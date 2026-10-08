@@ -397,3 +397,23 @@ class TestSyncResultPersistence:
 
     record_failed.assert_called_once()
     update_sync.assert_not_called()
+
+
+@pytest.mark.unit
+class TestAutoMapTrigger:
+  def test_an_unattended_sync_never_enqueues_the_mapping_operator(self):
+    from robosystems.adapters.quickbooks.pipeline.configs import QBSyncConfig
+    from robosystems.adapters.quickbooks.pipeline.load import (
+      _trigger_auto_map_if_needed,
+    )
+
+    config = QBSyncConfig(
+      graph_id="kg_test", connection_id="conn_1", user_id="usr_1", unattended=True
+    )
+    with (
+      patch("robosystems.db.extensions.extensions_session") as session,
+      patch("robosystems.worker.client.enqueue_task") as enqueue,
+    ):
+      _trigger_auto_map_if_needed(build_asset_context(), config)
+    session.assert_not_called()
+    enqueue.assert_not_called()

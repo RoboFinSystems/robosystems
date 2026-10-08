@@ -15,6 +15,7 @@ from robosystems.dagster.jobs.connection_sync import (
   SYNCABLE_STATUSES,
   describe_failure,
   due_connections,
+  recently_attempted,
   scheduled_connection_sync_job,
   scheduled_connection_sync_schedule,
   sweep_connection_syncs,
@@ -33,9 +34,12 @@ class TestDefinition:
       "sweep_connection_syncs"
     }
 
-  def test_job_retries_like_the_other_platform_sweeps(self):
-    assert scheduled_connection_sync_job.tags.get("dagster/max_retries") == "3"
-    assert scheduled_connection_sync_job.tags.get("dagster/priority") == "2"
+  def test_job_retries_a_dead_worker_only(self):
+    tags = scheduled_connection_sync_job.tags
+    assert tags.get("dagster/max_retries") == "3"
+    assert tags.get("dagster/priority") == "2"
+    # A sweep that failed on purpose (nothing dispatched) is not re-run.
+    assert tags.get("dagster/retry_on_asset_or_op_failure") == "false"
 
   def test_ticks_hourly_at_a_quarter_past(self):
     assert scheduled_connection_sync_schedule.cron_schedule == "15 * * * *"
@@ -168,10 +172,39 @@ def _due(*ids):
 
 
 @pytest.mark.unit
+class TestRecentlyAttempted:
+  """The run store is the record of attempts: a run tagged for the
+  connection, in any state, started since the cutoff."""
+
+  def test_a_run_started_since_the_cutoff_is_an_attempt(self):
+    from dagster import DagsterInstance
+
+    instance = DagsterInstance.ephemeral()
+    instance.create_run_for_job(
+      job_def=scheduled_connection_sync_job, tags={"connection_id": "conn_x"}
+    )
+    started = datetime.now(UTC)
+    assert recently_attempted(
+      instance, ["conn_x", "conn_y"], cutoff=started - timedelta(hours=1)
+    ) == {"conn_x"}
+    # Older than the cadence: tried again.
+    assert (
+      recently_attempted(instance, ["conn_x"], cutoff=started + timedelta(seconds=1))
+      == set()
+    )
+
+
+def _counts(**overrides):
+  base = {"due": 0, "attempted": 0, "dispatched": 0, "in_progress": 0, "failed": 0}
+  return {**base, **overrides}
+
+
+@pytest.mark.unit
 class TestSweep:
-  def _run(self, due, dispatch, *, flag="true"):
+  def _run(self, due, dispatch, *, flag="true", attempted=None, session=None):
     with (
       patch(f"{MODULE}.due_connections", return_value=due),
+      patch(f"{MODULE}.recently_attempted", return_value=attempted or set()),
       patch(
         "robosystems.config.parameter_store.get_parameter_value",
         return_value=flag,
@@ -179,24 +212,38 @@ class TestSweep:
       patch(f"{SERVICE}.dispatch_connection_sync", new=dispatch),
       patch(f"{MODULE}.env.CONNECTION_SYNC_INTERVAL_HOURS", 24),
     ):
-      return sweep_connection_syncs(build_op_context(), _db_with(MagicMock()))
+      return sweep_connection_syncs(
+        build_op_context(), _db_with(session or MagicMock())
+      )
 
-  def test_dispatches_each_due_connection_as_the_platform(self):
+  def test_dispatches_each_due_connection_as_the_platform_unattended(self):
     dispatch = AsyncMock(
       return_value={"dispatched": True, "task_id": "run_1", "message": None}
     )
     counts = self._run(_due("conn_a", "conn_b"), dispatch)
-    assert counts == {"due": 2, "dispatched": 2, "in_progress": 0, "failed": 0}
+    assert counts == _counts(due=2, dispatched=2)
     dispatch.assert_any_await(
-      graph_id="kg_conn_a", connection_id="conn_a", user_id="system"
+      graph_id="kg_conn_a",
+      connection_id="conn_a",
+      user_id="system",
+      sync_options={"unattended": True},
     )
+
+  def test_a_connection_attempted_within_the_cadence_is_left_alone(self):
+    dispatch = AsyncMock(
+      return_value={"dispatched": True, "task_id": "run_1", "message": None}
+    )
+    counts = self._run(_due("conn_a", "conn_b"), dispatch, attempted={"conn_a"})
+    assert counts == _counts(due=1, attempted=1, dispatched=1)
+    assert dispatch.await_count == 1
+    assert dispatch.await_args.kwargs["connection_id"] == "conn_b"
 
   def test_a_sync_already_running_is_the_expected_collision(self):
     from robosystems.operations.connection_service import SyncInProgressError
 
     dispatch = AsyncMock(side_effect=SyncInProgressError("conn_a", "holder", 900))
     counts = self._run(_due("conn_a"), dispatch)
-    assert counts == {"due": 1, "dispatched": 0, "in_progress": 1, "failed": 0}
+    assert counts == _counts(due=1, in_progress=1)
 
   def test_one_failure_does_not_stop_the_sweep(self):
     dispatch = AsyncMock(
@@ -205,8 +252,26 @@ class TestSweep:
         {"dispatched": True, "task_id": "run_2", "message": None},
       ]
     )
-    counts = self._run(_due("conn_a", "conn_b"), dispatch)
-    assert counts == {"due": 2, "dispatched": 1, "in_progress": 0, "failed": 1}
+    session = MagicMock()
+    counts = self._run(_due("conn_a", "conn_b"), dispatch, session=session)
+    assert counts == _counts(due=2, dispatched=1, failed=1)
+    # The failed dispatch is recorded on its connection, as the clock.
+    recorded = session.get.return_value.record_sync_result.call_args.args[1]
+    assert recorded["status"] == "failed" and recorded["stage"] == "dispatch"
+    assert recorded["error"] == {
+      "code": "RuntimeError",
+      "message": "RuntimeError: provider down",
+    }
+
+  def test_a_sweep_that_dispatches_nothing_fails_the_run(self):
+    from dagster import Failure
+
+    dispatch = AsyncMock(side_effect=RuntimeError("webserver unreachable"))
+    session = MagicMock()
+    with pytest.raises(Failure) as raised:
+      self._run(_due("conn_a", "conn_b"), dispatch, session=session)
+    assert "2 due, 0 dispatched" in str(raised.value.description)
+    assert session.get.return_value.record_sync_result.call_count == 2
 
   def test_a_no_op_dispatch_is_not_a_run(self):
     dispatch = AsyncMock(

@@ -16,3 +16,6 @@ class QBSyncConfig(Config):
   # Lock token acquired by the API; qb_load releases it. Empty when Valkey
   # was down at acquire time.
   sync_lock_id: str = ""
+  # A scheduled sync nobody asked for: it never enqueues the mapping
+  # operator, which spends the tenant's credits.
+  unattended: bool = False

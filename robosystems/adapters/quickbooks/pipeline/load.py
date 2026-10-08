@@ -376,11 +376,16 @@ def _trigger_auto_map_if_needed(
   context: AssetExecutionContext, config: QBSyncConfig
 ) -> None:
   """Enqueue the MappingOperator when the coa_mapping structure has no
-  associations yet; the worker queue dedups a repeat enqueue.
+  associations yet; the worker queue dedups a repeat enqueue. A scheduled
+  sync never does: the operator spends credits, and nobody asked.
 
   ``asyncio.run`` is safe: ``qb_load`` is a sync asset with no running loop.
   """
   import asyncio
+
+  if config.unattended:
+    context.log.info("Unattended sync: the mapping operator is not enqueued")
+    return
 
   from robosystems.db.extensions import extensions_session
   from robosystems.models.extensions import Association
