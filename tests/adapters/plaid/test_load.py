@@ -67,6 +67,7 @@ def _event(**fields):
     "resource_element_id": "e_card",
     "external_id": "plaid_txn_t_coffee",
     "payload_drift": False,
+    "entity_id": "ent_parent",
     "metadata_": {"connection_id": "conn_1", "transaction_id": "t_coffee"},
   }
   base.update(fields)
@@ -293,6 +294,15 @@ class TestRemovals:
     pair = _event(amount=50000, metadata_={"legs": ["x", "y"]})
     assert survivor_payload(pair, ["x", "y"]) is None
 
+  def test_a_survivor_stays_on_the_pairs_entity(self):
+    pair = _event(
+      amount=50000,
+      entity_id="ent_sub",
+      metadata_={"legs": ["x", "y"], "from_element_id": "e_chk"},
+    )
+    survivor = survivor_payload(pair, ["y"])
+    assert survivor is not None and survivor["entity_id"] == "ent_sub"
+
   def test_nothing_removed_is_a_no_op(self):
     report = PlaidLoadReport()
     with patch(f"{MODULE}.existing_events") as existing:
@@ -345,6 +355,25 @@ class TestTransferLegsAcrossSyncs:
     assert merged["metadata"]["from_element_id"] == "e_chk"
     assert merged["metadata"]["to_element_id"] == "e_sav"
     assert merged["occurred_at"] == "2026-03-19T00:00:00Z"
+
+  def test_a_merged_pair_books_on_its_legs_entity(self):
+    # Two legs from two syncs on a subsidiary's accounts: the pair stays on
+    # the subsidiary's books, never falling to the group parent.
+    waiting = self._waiting()
+    waiting.entity_id = "ent_sub"
+    incoming = {**self._incoming(), "entity_id": "ent_sub"}
+    merged = merge_legs(waiting, incoming, connection_id="conn_1", item_id=ITEM_ID)
+    assert merged["entity_id"] == "ent_sub"
+
+  def test_a_merged_pair_takes_the_waiting_legs_entity_when_the_new_leg_has_none(
+    self,
+  ):
+    waiting = self._waiting()
+    waiting.entity_id = "ent_sub"
+    merged = merge_legs(
+      waiting, self._incoming(), connection_id="conn_1", item_id=ITEM_ID
+    )
+    assert merged["entity_id"] == "ent_sub"
 
   def test_merge_replaces_the_waiting_leg(self):
     report = PlaidLoadReport()
