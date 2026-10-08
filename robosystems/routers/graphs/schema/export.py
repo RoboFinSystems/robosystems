@@ -37,7 +37,7 @@ async def export_graph_schema(
   format: str = Query(
     "json",
     description="Export format: json, yaml, or cypher",
-    regex="^(json|yaml|cypher)$",
+    pattern="^(json|yaml|cypher)$",
     openapi_examples={
       "json": {
         "summary": "JSON Format",

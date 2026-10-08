@@ -979,10 +979,10 @@ class TestCollectMetrics:
 
   @pytest.mark.unit
   def test_no_instances_publishes_only_zero_tenant_slots(self, monitor):
-    """An empty fleet publishes no cluster metrics, but DOES report zero slots.
+    """An empty fleet publishes no composition metrics, but DOES report zero slots.
 
-    The cluster percentages are skipped because total_capacity == 0 has no
-    meaningful ratio. TenantSlotsFree is published anyway, and that asymmetry is
+    The age and tier breakdowns are skipped because there is nothing to break
+    down. TenantSlotsFree is published anyway, and that asymmetry is
     the point: an empty fleet is one on which nothing can be placed, which is
     exactly the state the capacity alarm exists to report. Reporting nothing
     would leave it indistinguishable from a healthy fleet.

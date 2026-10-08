@@ -152,7 +152,7 @@ async def get_credit_transactions(
   transaction_type: str | None = Query(
     None,
     description="Filter by transaction type (allocation, consumption, bonus, refund)",
-    example="consumption",
+    examples=["consumption"],
   ),
   operation_type: str | None = Query(
     None,
