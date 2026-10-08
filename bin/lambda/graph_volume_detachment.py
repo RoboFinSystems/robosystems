@@ -1,15 +1,17 @@
 """
 Detach LadybugDB EBS data volumes when an EC2 instance terminates.
 
-Triggered by an Auto Scaling terminate lifecycle hook (via SNS). Unmounts the
-data volume over SSM, asks the volume manager to detach it, and waits for the
-volume to reach `available` before releasing the hook. Signals CONTINUE only
+Triggered by an Auto Scaling terminate lifecycle hook (via SNS). Stops the
+graph container and unmounts the data volume over SSM, asks the volume manager
+to detach it, and waits for the volume to reach `available` before releasing
+the hook. Signals CONTINUE only
 when every volume detached cleanly; otherwise ABANDON, so the ASG does not
 launch a replacement that races a half-detached volume.
 """
 
 import json
 import os
+import time
 
 import boto3
 
@@ -19,6 +21,22 @@ ssm = boto3.client("ssm")
 asg = boto3.client("autoscaling")
 lambda_client = boto3.client("lambda")
 dynamodb = boto3.client("dynamodb")
+
+# The database must be stopped before its volume is detached: an unmount fails
+# while the container holds the mount, and a detach under a live writer loses
+# whatever it had not flushed. Bounded so the detach and its own 3-minute wait
+# still fit the Lambda and the hook's 300s heartbeat.
+STOP_AND_UNMOUNT_BUDGET_SECONDS = 50
+STOP_AND_UNMOUNT_POLL_SECONDS = 2
+STOP_AND_UNMOUNT_COMMANDS = [
+  "set -a; . /etc/environment; set +a",
+  'CONTAINER="$(/usr/local/bin/run-graph-container.sh --print-container-name)"'
+  ' && docker stop -t 30 "$CONTAINER" || true',
+  "sync",
+  "umount /data 2>/dev/null || true",  # Legacy mount point
+  # Last, so a mount that is still busy fails the command and is logged.
+  "if mountpoint -q /mnt/ladybug-data; then umount /mnt/ladybug-data; fi",
+]
 
 
 def format_missing_field_error(field_name: str, available_keys: list) -> dict:
@@ -86,26 +104,8 @@ def handler(event, context):
           f"Found data volume: {device['Ebs']['VolumeId']} at {device['DeviceName']}"
         )
 
-    # Unmount volumes via SSM (only if instance is still running)
-    if instance.get("State", {}).get("Name") == "running":
-      for volume in volumes:
-        try:
-          print(f"Unmounting volume {volume['VolumeId']} from {volume['Device']}")
-          ssm.send_command(
-            InstanceIds=[instance_id],
-            DocumentName="AWS-RunShellScript",
-            Parameters={
-              "commands": [
-                "# Unmount LadybugDB data volume",
-                "sync",  # Flush any pending writes
-                "umount /mnt/ladybug-data || true",
-                "umount /data || true",  # Legacy mount point
-              ]
-            },
-            TimeoutSeconds=30,
-          )
-        except Exception as e:
-          print(f"Failed to unmount (may be expected if instance is terminating): {e}")
+    if volumes and instance.get("State", {}).get("Name") == "running":
+      stop_and_unmount(instance_id)
 
     # Call Volume Manager to detach volumes and update registry.
     # Track per-volume success: if any detach fails or the volume doesn't reach
@@ -182,6 +182,49 @@ def handler(event, context):
   except Exception as e:
     print(f"Error processing termination: {e}")
     return complete_lifecycle(asg_name, lifecycle_hook, instance_id, "ABANDON")
+
+
+def stop_and_unmount(instance_id: str) -> str:
+  """Stop the graph container and unmount the data volume, waiting for both.
+
+  Returns the SSM command status, or why there is none. A failure is logged
+  and the detach goes ahead regardless: the instance is terminating either way.
+  """
+  try:
+    command_id = ssm.send_command(
+      InstanceIds=[instance_id],
+      DocumentName="AWS-RunShellScript",
+      Parameters={"commands": STOP_AND_UNMOUNT_COMMANDS},
+      TimeoutSeconds=STOP_AND_UNMOUNT_BUDGET_SECONDS,
+    )["Command"]["CommandId"]
+  except Exception as e:
+    print(f"Failed to send stop-and-unmount to {instance_id}: {e}")
+    return "NotSent"
+
+  deadline = time.monotonic() + STOP_AND_UNMOUNT_BUDGET_SECONDS
+  while True:
+    try:
+      invocation = ssm.get_command_invocation(
+        CommandId=command_id, InstanceId=instance_id
+      )
+      status = invocation["Status"]
+      if status not in ("Pending", "InProgress", "Delayed"):
+        print(f"Stop-and-unmount on {instance_id}: {status}")
+        if status != "Success":
+          print(f"stderr: {invocation.get('StandardErrorContent', '')[:1000]}")
+        return status
+    except ssm.exceptions.InvocationDoesNotExist:
+      pass
+    except Exception as e:
+      print(f"Failed to read stop-and-unmount on {instance_id}: {e}")
+      return "Unknown"
+    if time.monotonic() >= deadline:
+      print(
+        f"Stop-and-unmount on {instance_id} not done after "
+        f"{STOP_AND_UNMOUNT_BUDGET_SECONDS}s; detaching anyway"
+      )
+      return "TimedOut"
+    time.sleep(STOP_AND_UNMOUNT_POLL_SECONDS)
 
 
 def complete_lifecycle(asg_name, hook_name, instance_id, result):

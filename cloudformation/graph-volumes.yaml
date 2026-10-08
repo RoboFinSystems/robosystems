@@ -65,7 +65,8 @@ Resources:
   # filtering snapshots every volume in the account regardless of tag filters.
   #
   # Snapshot strategy without DLM:
-  # - Writer data volumes: Final snapshot on termination (graph-lifecycle.sh)
+  # - Writer data volumes: pre_detach snapshot when the volume manager detaches
+  #   them on termination (kept 3 days, pruned by the volume manager)
   # - Shared master data: S3-based backups (tier-based retention)
   # - Shared replicas: No snapshots needed (rebuilt from S3 on boot)
   # - Restore capability: Lambda restore_from_snapshot() still available

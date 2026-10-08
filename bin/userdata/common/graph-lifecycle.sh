@@ -1,7 +1,7 @@
 #!/bin/bash
 # Graph Database Lifecycle Management Script
 # Handles graceful shutdown and database migration for LadybugDB
-# Supports: instance termination, database migration, volume snapshots
+# Supports: instance termination, database migration
 
 set -e
 
@@ -25,9 +25,6 @@ CONTAINER_NAME=$(/usr/local/bin/run-graph-container.sh --print-container-name) |
     echo "ERROR: could not determine container name from run-graph-container.sh" >&2
     exit 1
 }
-GRAPH_API_PORT="8001"
-DRAIN_ENDPOINT="http://localhost:${GRAPH_API_PORT}/admin/drain"
-CONNECTIONS_ENDPOINT="http://localhost:${GRAPH_API_PORT}/admin/connections"
 
 # ==================================================================================
 # LOGGING
@@ -43,26 +40,19 @@ log() {
 handle_termination() {
     log "Starting graceful termination for ${DATABASE_TYPE} instance $INSTANCE_ID"
 
-    # 1. Mark instance as terminating in DynamoDB
+    # 1. Mark instance as terminating in DynamoDB. On an ASG termination the
+    # detachment Lambda has already removed the row; don't recreate it.
     log "Marking instance as terminating in registry..."
     aws dynamodb update-item \
         --table-name "$INSTANCE_REGISTRY_TABLE" \
         --key "{\"instance_id\": {\"S\": \"$INSTANCE_ID\"}}" \
+        --condition-expression "attribute_exists(instance_id)" \
         --update-expression "SET #status = :status, terminating_at = :time" \
         --expression-attribute-names '{"#status": "status"}' \
         --expression-attribute-values "{\":status\": {\"S\": \"terminating\"}, \":time\": {\"S\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}}" \
-        --region "$REGION" || log "WARNING: Failed to update instance status"
+        --region "$REGION" || log "Instance status not updated (no registry row)"
 
-    # 2. Stop accepting new connections through Graph API.
-    # Called from the host (the container publishes its port and no longer ships
-    # curl). Note: the Graph API does not currently expose /admin/drain or
-    # /admin/connections, so both calls fall through to their fallbacks today.
-    log "Draining connections via Graph API..."
-    curl -s -f -X POST ${DRAIN_ENDPOINT} >/dev/null 2>&1 || {
-        log "WARNING: Failed to drain connections via Graph API"
-    }
-
-    # 3. Get all databases on this instance
+    # 2. Get all databases on this instance
     log "Querying databases on this instance..."
     DATABASES=$(aws dynamodb query \
         --table-name "$GRAPH_REGISTRY_TABLE" \
@@ -77,7 +67,7 @@ handle_termination() {
 
     log "Found databases to migrate: ${DATABASES:-none}"
 
-    # 4. Mark each database for migration
+    # 3. Mark each database for migration
     for DB in $DATABASES; do
         if [ -n "$DB" ]; then
             log "Marking database $DB for migration"
@@ -90,52 +80,9 @@ handle_termination() {
         fi
     done
 
-    # 5. Wait for active connections to complete (max 5 minutes)
-    log "Waiting for active connections to close..."
-    TIMEOUT=300
-    ELAPSED=0
-    while [ $ELAPSED -lt $TIMEOUT ]; do
-        ACTIVE_CONNECTIONS=$(curl -s -f ${CONNECTIONS_ENDPOINT} 2>/dev/null | jq '.active_connections // 0' || echo "0")
-
-        if [ "$ACTIVE_CONNECTIONS" = "0" ] || [ "$ACTIVE_CONNECTIONS" -eq 0 ]; then
-            log "All connections closed"
-            break
-        fi
-        log "Waiting for $ACTIVE_CONNECTIONS active connections to close... (${ELAPSED}s/${TIMEOUT}s)"
-        sleep 10
-        ELAPSED=$((ELAPSED + 10))
-    done
-
-    if [ $ELAPSED -ge $TIMEOUT ]; then
-        log "WARNING: Timeout waiting for connections to close, forcing shutdown"
-    fi
-
-    # 6. LadybugDB graceful shutdown (connections already closed above)
-    log "Performing LadybugDB graceful shutdown..."
-
-    # 7. Create final EBS snapshot
-    log "Creating final volume snapshot..."
-    VOLUME_ID=$(aws ec2 describe-instances \
-        --instance-ids "$INSTANCE_ID" \
-        --query 'Reservations[0].Instances[0].BlockDeviceMappings[?DeviceName==`/dev/xvdf`].Ebs.VolumeId' \
-        --output text \
-        --region "$REGION")
-
-    if [ -n "$VOLUME_ID" ] && [ "$VOLUME_ID" != "None" ]; then
-        log "Creating snapshot of volume $VOLUME_ID..."
-        SNAPSHOT_ID=$(aws ec2 create-snapshot \
-            --volume-id "$VOLUME_ID" \
-            --description "Final snapshot before termination of $INSTANCE_ID (${DATABASE_TYPE})" \
-            --tag-specifications "ResourceType=snapshot,Tags=[{Key=Name,Value=${ENVIRONMENT}-${DATABASE_TYPE}-final-${INSTANCE_ID}},{Key=InstanceId,Value=$INSTANCE_ID},{Key=DatabaseType,Value=${DATABASE_TYPE}},{Key=Type,Value=final},{Key=Environment,Value=${ENVIRONMENT}},{Key=AutoDelete,Value=true},{Key=NodeType,Value=${NODE_TYPE}}]" \
-            --query 'SnapshotId' \
-            --output text \
-            --region "$REGION")
-        log "Created snapshot $SNAPSHOT_ID"
-    else
-        log "WARNING: No data volume found, skipping snapshot creation"
-    fi
-
-    # 8. Stop Docker container
+    # 4. Stop Docker container. On an ASG termination the detachment Lambda
+    # has already stopped it, unmounted the volume and detached it (taking the
+    # pre_detach snapshot); this covers a shutdown outside the ASG.
     log "Stopping ${DATABASE_TYPE} container: ${CONTAINER_NAME}"
     docker stop ${CONTAINER_NAME} 2>/dev/null || true
     docker rm ${CONTAINER_NAME} 2>/dev/null || true
@@ -146,17 +93,7 @@ handle_termination() {
         docker compose down || true
     fi
 
-    # 9. Mark instance as terminated in registry
-    log "Marking instance as terminated in registry..."
-    aws dynamodb update-item \
-        --table-name "$INSTANCE_REGISTRY_TABLE" \
-        --key "{\"instance_id\": {\"S\": \"$INSTANCE_ID\"}}" \
-        --update-expression "SET #status = :status, terminated_at = :time" \
-        --expression-attribute-names '{"#status": "status"}' \
-        --expression-attribute-values "{\":status\": {\"S\": \"terminated\"}, \":time\": {\"S\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}}" \
-        --region "$REGION" || log "WARNING: Failed to update final status"
-
-    # 10. Complete lifecycle action (if using lifecycle hooks)
+    # 5. Complete lifecycle action (if using lifecycle hooks)
     if [ -n "$LIFECYCLE_HOOK_NAME" ] && [ -n "$LIFECYCLE_ACTION_TOKEN" ]; then
         log "Completing lifecycle action..."
         ASG_NAME=$(aws ec2 describe-instances \
@@ -189,7 +126,7 @@ fi
 
 # Otherwise, wait for signal
 log "Lifecycle handler started for ${DATABASE_TYPE} (${NODE_TYPE}), waiting for termination signal..."
-log "Container: ${CONTAINER_NAME}, Graph API: ${GRAPH_API_PORT}"
+log "Container: ${CONTAINER_NAME}"
 
 while true; do
     # Check if container is still running
