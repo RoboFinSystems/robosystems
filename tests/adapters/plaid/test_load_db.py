@@ -17,6 +17,7 @@ from robosystems.adapters.bank_feed.chart import BankAccount, ChartIndex
 from robosystems.adapters.plaid.client import TransactionsSync
 from robosystems.adapters.plaid.pipeline.load import load_sync
 from robosystems.models.api.event_block import CreateEventBlockRequest
+from robosystems.models.extensions.entity import Entity
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.operations.event_block.commands import (
   create_event_block_in_session,
@@ -153,3 +154,50 @@ def test_a_leg_posted_to_the_other_bank_account_voids_the_arriving_one(session):
   assert inflow.metadata_["counterpart_status"] == "committed"
   assert str(outflow.id) in inflow.metadata_["voided_reason"]
   assert session.query(Event).filter(Event.source == "plaid").count() == 2
+
+
+def test_a_captured_line_is_stored_on_its_accounts_entity(session):
+  """The transform stamps each line with its account's entity; the stored row
+  must carry it, not fall to the group parent (a subsidiary's bank feed
+  beside a QuickBooks-kept parent)."""
+  elements = _seed_elements(session)
+  session.add(
+    Entity(
+      id="ent_sub",
+      name="Subsidiary LLC",
+      is_parent=False,
+      parent_entity_id="ent_test_parent",
+      created_by="test",
+    )
+  )
+  session.flush()
+  sync = TransactionsSync(
+    added=[
+      txn(
+        "t_fee",
+        SAVINGS,
+        9.50,
+        "2026-07-12",
+        name="MONTHLY SERVICE FEE",
+        primary="BANK_FEES",
+        detailed="BANK_FEES_OTHER_BANK_FEES",
+      )
+    ],
+    next_cursor="c1",
+    update_status="HISTORICAL_UPDATE_COMPLETE",
+  )
+  report = load_sync(
+    session,
+    graph_id=GRAPH_ID,
+    connection_id=CONNECTION,
+    item_id=ITEM,
+    created_by="user_test",
+    accounts=_accounts(),
+    sync=sync,
+    account_elements={CHECKING: elements[CASH], SAVINGS: elements[NEW_EXPENSE]},
+    chart=ChartIndex(),
+    account_entities={SAVINGS: "ent_sub"},
+  )
+  assert report.events_created == 1, report.errors
+  stored = session.query(Event).filter(Event.external_id == "plaid_txn_t_fee").one()
+  assert stored.entity_id == "ent_sub"

@@ -427,7 +427,9 @@ def create_event_block_in_session(
   refuse_reserved_event_type(body.event_type)
   _validate_event_source(body.source, graph_id)
   _validate_routed_connection(body.metadata, graph_id)
-  entity_id = ensure_entity_id(session, entity_id)
+  # The entity the caller names, else the body's (a bank feed stamps each
+  # line with its account's entity), else the group parent.
+  entity_id = ensure_entity_id(session, entity_id or body.entity_id)
   _assert_not_duplicate(session, body)
 
   if body.apply_handlers:
