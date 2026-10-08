@@ -806,9 +806,10 @@ def rebuild_schedule(
   if landed:
     raise ValueError(
       f"Cannot rebuild schedule {structure.id!r}: {landed} posted or shadowed "
-      "closing entries exist. Reopen the affected periods and void those "
-      "entries first — reopening alone leaves entries posted, so it does "
-      "not clear this guard."
+      "closing entries exist. A posted entry clears once its period is "
+      "reopened and the entry voided; reopening alone leaves it posted. A "
+      "shadowed entry is a shadow close's record and is never voided: "
+      "terminate the schedule after the last shadow-closed period instead."
     )
 
   old_schedule_created_event_id = (structure.metadata_ or {}).get(

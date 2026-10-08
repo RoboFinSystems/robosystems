@@ -269,17 +269,18 @@ def _drafted(session, *, as_of: datetime = AS_OF) -> str:
   return structure_id
 
 
-def _close_lands_the_drafts(session, structure_id: str):
+def _close_lands_the_drafts(session, structure_id: str, status: str = "posted"):
   """Stands in for a close that finished just before the caller took the
-  period fence: by the time the fence is held, the drafts are posted."""
+  period fence: by the time the fence is held, the drafts are posted (or
+  shadowed, by a shadow close)."""
 
   def _land(*_args, **_kwargs) -> None:
     session.execute(
       text(
-        "UPDATE entries SET status = 'posted' "
+        "UPDATE entries SET status = :status "
         "WHERE source_structure_id = :sid AND status = 'draft'"
       ),
-      {"sid": structure_id},
+      {"sid": structure_id, "status": status},
     )
 
   return _land
@@ -418,4 +419,33 @@ def test_a_voided_events_draft_is_not_work_a_close_will_post(ext_session):
       session, date(2026, 2, 1), date(2026, 2, 28), entity_id=PARENT_ENTITY_ID
     ).count()
     == 0
+  )
+
+
+def test_truncate_counts_entries_a_shadow_close_left(ext_session):
+  """A shadow close's receipt refers to the shadowed entries as its
+  expectations: truncating under them would delete the facts they stand on."""
+  session = ext_session
+  structure_id = _drafted(session, as_of=datetime(2026, 4, 15, tzinfo=UTC))
+  facts_before = session.query(Fact).filter(Fact.structure_id == structure_id).count()
+
+  with (
+    patch(
+      f"{_SERVICE}.assert_period_not_closed",
+      side_effect=_close_lands_the_drafts(session, structure_id, status="shadowed"),
+    ),
+    pytest.raises(ValueError, match="Cannot truncate"),
+  ):
+    ScheduleService().truncate_schedule(
+      session,
+      structure_id=structure_id,
+      new_end_date=date(2026, 1, 31),
+      reason="Sold",
+      updated_by="usr",
+    )
+  session.rollback()
+
+  assert (
+    session.query(Fact).filter(Fact.structure_id == structure_id).count()
+    == facts_before
   )

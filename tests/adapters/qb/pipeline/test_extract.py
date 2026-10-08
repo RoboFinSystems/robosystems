@@ -1,6 +1,6 @@
 """Tests for QuickBooks extract Dagster asset."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -855,7 +855,7 @@ class TestQbExtractCdc:
       False,
     )
     connection = MagicMock()
-    connection.last_cdc_watermark = datetime(2026, 9, 30, tzinfo=UTC)
+    connection.last_cdc_watermark = datetime.now(UTC) - timedelta(days=1)
 
     with (
       patch(_PATCH_SESSION, return_value=mock_session),
@@ -895,7 +895,7 @@ class TestQbExtractCdc:
     assert result.metadata["cdc_deletions"] == 1
     assert result.metadata["cdc_extra_windows"] == 1
 
-  def test_a_full_rebuild_asks_cdc_nothing(self, tmp_path):
+  def test_a_full_rebuild_still_asks_cdc_for_deletions(self, tmp_path):
     from robosystems.adapters.quickbooks.pipeline.cdc import read_plan
     from robosystems.adapters.quickbooks.pipeline.extract import qb_extract
 
@@ -906,8 +906,12 @@ class TestQbExtractCdc:
     mock_client.get_entity_info.return_value = {}
     mock_client.get_accounts.return_value = []
     mock_client.get_transactions.return_value = {"Rows": {"Row": []}}
+    mock_client.cdc.return_value = (
+      {"Invoice": [{"Id": "42", "status": "Deleted"}]},
+      False,
+    )
     connection = MagicMock()
-    connection.last_cdc_watermark = datetime(2026, 9, 30, tzinfo=UTC)
+    connection.last_cdc_watermark = datetime.now(UTC) - timedelta(days=1)
 
     with (
       patch(_PATCH_SESSION, return_value=mock_session),
@@ -931,6 +935,9 @@ class TestQbExtractCdc:
       MockCreds.get_by_connection_id.return_value.get_credentials.return_value = {}
       qb_extract(build_asset_context(), config)
 
-    mock_client.cdc.assert_not_called()
+    mock_client.cdc.assert_called_once()
     plan = read_plan(work_dir / "extract")
-    assert plan is not None and plan.reason == "full_window"
+    assert plan is not None and plan.checked is True
+    assert plan.deletions == [{"entity": "Invoice", "id": "42", "last_updated": None}]
+    # The window already reaches back to 2000: nothing is pulled again.
+    assert plan.extra_windows == []

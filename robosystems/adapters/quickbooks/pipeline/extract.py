@@ -3,7 +3,7 @@
 import requests
 from dagster import AssetExecutionContext, MaterializeResult, asset
 
-from .cdc import PLAN_FILE, CdcPlan, plan_cdc, write_plan
+from .cdc import PLAN_FILE, plan_cdc, write_plan
 from .configs import QBSyncConfig
 from .load import end_failed_sync
 from .utils import (
@@ -224,11 +224,9 @@ def _run_qb_extract(
     context.log.info(f"Incremental: fetching transactions from {start_date}")
 
   # CDC says what the window pull cannot: deletions, and edits dated before
-  # the window. A full window needs neither.
-  if config.full_rebuild or config.since_date:
-    cdc_plan = CdcPlan(checked=False, reason="full_window")
-  else:
-    cdc_plan = plan_cdc(client, watermark, start_date, log=context.log)
+  # the window. A full window still needs the deletions: a posted event
+  # missing from the report is not inferred deleted.
+  cdc_plan = plan_cdc(client, watermark, start_date, log=context.log)
 
   windows = [(start_date, end_date), *(tuple(w) for w in cdc_plan.extra_windows)]
   journal_entries: list[dict] = []

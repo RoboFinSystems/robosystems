@@ -172,6 +172,23 @@ def test_a_label_the_map_does_not_list_is_found_by_suffix_and_learned(session):
   assert odd.payload_drift is True
 
 
+def test_a_suffix_match_never_voids_an_unposted_event(session):
+  # Ids are unique per type only: Invoice 57 deleted before it synced must
+  # not void an unlisted type's unposted transaction 57.
+  _seed(session)
+  other = _post_synced_event_with_id(session, "Sales Tax Payment_57")
+  other.status = "captured"
+  session.flush()
+
+  result = apply_deletions(
+    session, [{"entity": "Invoice", "id": "57", "last_updated": None}], now=NOW
+  )
+
+  assert (result.voided, result.skipped) == (0, 1)
+  session.refresh(other)
+  assert other.status == "captured"
+
+
 def test_a_plan_applied_twice_applies_once(session):
   posted, unposted, _published = _seed(session)
   deletions = [
