@@ -1581,9 +1581,10 @@ class ScheduleService:
     if overlap and overlap.c:
       raise ValueError(
         f"Cannot truncate: {overlap.c} posted or shadowed entries exist for "
-        f"periods after {new_end_date}. Reopen the affected periods and void those "
-        "entries first — reopening alone leaves entries posted, so it does "
-        "not clear this guard."
+        f"periods after {new_end_date}. A posted entry clears once its period "
+        "is reopened and the entry voided; reopening alone leaves it posted. "
+        "A shadowed entry is a shadow close's record and is never voided: "
+        "end the schedule on or after the last shadow-closed period instead."
       )
 
     session.execute(
