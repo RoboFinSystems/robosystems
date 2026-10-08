@@ -12,6 +12,637 @@
         "iconColor": "rgba(0, 211, 255, 1)",
         "name": "Annotations & Alerts",
         "type": "dashboard"
+      },
+      {
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "${cloudwatch}"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "red",
+        "name": "API ALB 5xx alarm",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            28,
+            29,
+            119
+          ]
+        },
+        "target": {
+          "queryMode": "Annotations",
+          "refId": "Anno",
+          "region": "default",
+          "namespace": "AWS/ApplicationELB",
+          "metricName": "HTTPCode_ELB_5XX_Count",
+          "dimensions": {
+            "LoadBalancer": "$api_alb"
+          },
+          "statistic": "Sum",
+          "period": "300",
+          "prefixMatching": false,
+          "actionPrefix": "",
+          "alarmNamePrefix": ""
+        }
+      },
+      {
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "${cloudwatch}"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "red",
+        "name": "API ALB latency alarm",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            28,
+            29,
+            119
+          ]
+        },
+        "target": {
+          "queryMode": "Annotations",
+          "refId": "Anno",
+          "region": "default",
+          "namespace": "AWS/ApplicationELB",
+          "metricName": "TargetResponseTime",
+          "dimensions": {
+            "LoadBalancer": "$api_alb"
+          },
+          "statistic": "Average",
+          "period": "60",
+          "prefixMatching": false,
+          "actionPrefix": "",
+          "alarmNamePrefix": ""
+        }
+      },
+      {
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "${cloudwatch}"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "yellow",
+        "name": "Worker DLQ alarm",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            113,
+            62
+          ]
+        },
+        "target": {
+          "queryMode": "Annotations",
+          "refId": "Anno",
+          "region": "default",
+          "namespace": "$worker_queue_cloudwatch",
+          "metricName": "",
+          "dimensions": {},
+          "statistic": "Maximum",
+          "period": "",
+          "prefixMatching": true,
+          "actionPrefix": "arn:aws:sns:",
+          "alarmNamePrefix": "robosystems-worker-"
+        }
+      },
+      {
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "${cloudwatch}"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "yellow",
+        "name": "Worker graph-write failures",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            113,
+            62
+          ]
+        },
+        "target": {
+          "queryMode": "Annotations",
+          "refId": "Anno",
+          "region": "default",
+          "namespace": "$worker_queue_cloudwatch",
+          "metricName": "",
+          "dimensions": {},
+          "statistic": "Sum",
+          "period": "",
+          "prefixMatching": true,
+          "actionPrefix": "arn:aws:sns:",
+          "alarmNamePrefix": "robosystems-worker-"
+        }
+      },
+      {
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "${cloudwatch}"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "yellow",
+        "name": "Dagster alarms",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            59,
+            60,
+            62,
+            63
+          ]
+        },
+        "target": {
+          "queryMode": "Annotations",
+          "refId": "Anno",
+          "region": "default",
+          "namespace": "RoboSystems/Dagster/${env}",
+          "metricName": "",
+          "dimensions": {},
+          "statistic": "Sum",
+          "period": "",
+          "prefixMatching": true,
+          "actionPrefix": "arn:aws:sns:",
+          "alarmNamePrefix": "robosystems-dagster-"
+        }
+      },
+      {
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "${cloudwatch}"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "blue",
+        "name": "Writer CPU alarm",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            97
+          ]
+        },
+        "target": {
+          "queryMode": "Annotations",
+          "refId": "Anno",
+          "region": "default",
+          "namespace": "AWS/EC2",
+          "metricName": "CPUUtilization",
+          "dimensions": {
+            "AutoScalingGroupName": "$graph_user_asg"
+          },
+          "statistic": "Average",
+          "period": "300",
+          "prefixMatching": false,
+          "actionPrefix": "",
+          "alarmNamePrefix": ""
+        }
+      },
+      {
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "${cloudwatch}"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "blue",
+        "name": "Writer memory alarm",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            98
+          ]
+        },
+        "target": {
+          "queryMode": "Annotations",
+          "refId": "Anno",
+          "region": "default",
+          "namespace": "RoboSystems/Graph/${env}",
+          "metricName": "mem_used_percent",
+          "dimensions": {
+            "AutoScalingGroupName": "$graph_user_asg"
+          },
+          "statistic": "Average",
+          "period": "300",
+          "prefixMatching": false,
+          "actionPrefix": "",
+          "alarmNamePrefix": ""
+        }
+      },
+      {
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "${cloudwatch}"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "blue",
+        "name": "Shared writer CPU alarm",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            94
+          ]
+        },
+        "target": {
+          "queryMode": "Annotations",
+          "refId": "Anno",
+          "region": "default",
+          "namespace": "AWS/EC2",
+          "metricName": "CPUUtilization",
+          "dimensions": {
+            "AutoScalingGroupName": "$graph_shared_master"
+          },
+          "statistic": "Average",
+          "period": "300",
+          "prefixMatching": false,
+          "actionPrefix": "",
+          "alarmNamePrefix": ""
+        }
+      },
+      {
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "${cloudwatch}"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "blue",
+        "name": "Shared writer memory alarm",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            95
+          ]
+        },
+        "target": {
+          "queryMode": "Annotations",
+          "refId": "Anno",
+          "region": "default",
+          "namespace": "RoboSystems/Graph/${env}",
+          "metricName": "mem_used_percent",
+          "dimensions": {
+            "AutoScalingGroupName": "$graph_shared_master"
+          },
+          "statistic": "Average",
+          "period": "300",
+          "prefixMatching": false,
+          "actionPrefix": "",
+          "alarmNamePrefix": ""
+        }
+      },
+      {
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "${cloudwatch}"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "blue",
+        "name": "Tenant slots alarm",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            122,
+            39
+          ]
+        },
+        "target": {
+          "queryMode": "Annotations",
+          "refId": "Anno",
+          "region": "default",
+          "namespace": "RoboSystems/Graph/${env}",
+          "metricName": "TenantSlotsFree",
+          "dimensions": {
+            "ClusterTier": "ladybug-standard"
+          },
+          "statistic": "Minimum",
+          "period": "300",
+          "prefixMatching": false,
+          "actionPrefix": "",
+          "alarmNamePrefix": ""
+        }
+      },
+      {
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "${cloudwatch}"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "blue",
+        "name": "Database capacity alarm",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            122,
+            39
+          ]
+        },
+        "target": {
+          "queryMode": "Annotations",
+          "refId": "Anno",
+          "region": "default",
+          "namespace": "RoboSystems/Graph/${env}",
+          "metricName": "DatabaseUtilizationPercent",
+          "dimensions": {
+            "NodeType": "writer"
+          },
+          "statistic": "Average",
+          "period": "300",
+          "prefixMatching": false,
+          "actionPrefix": "",
+          "alarmNamePrefix": ""
+        }
+      },
+      {
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "${cloudwatch}"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "blue",
+        "name": "Allocation failures alarm",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            122,
+            39
+          ]
+        },
+        "target": {
+          "queryMode": "Annotations",
+          "refId": "Anno",
+          "region": "default",
+          "namespace": "RoboSystems/Graph/${env}",
+          "metricName": "AllocationFailures",
+          "dimensions": {
+            "Environment": "${env}"
+          },
+          "statistic": "Sum",
+          "period": "300",
+          "prefixMatching": false,
+          "actionPrefix": "",
+          "alarmNamePrefix": ""
+        }
+      },
+      {
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "${cloudwatch}"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "orange",
+        "name": "PostgreSQL CPU alarm",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            16
+          ]
+        },
+        "target": {
+          "queryMode": "Annotations",
+          "refId": "Anno",
+          "region": "default",
+          "namespace": "AWS/RDS",
+          "metricName": "CPUUtilization",
+          "dimensions": {
+            "DBInstanceIdentifier": "$rds_instance"
+          },
+          "statistic": "Average",
+          "period": "300",
+          "prefixMatching": false,
+          "actionPrefix": "",
+          "alarmNamePrefix": ""
+        }
+      },
+      {
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "${cloudwatch}"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "orange",
+        "name": "PostgreSQL connections alarm",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            19
+          ]
+        },
+        "target": {
+          "queryMode": "Annotations",
+          "refId": "Anno",
+          "region": "default",
+          "namespace": "AWS/RDS",
+          "metricName": "DatabaseConnections",
+          "dimensions": {
+            "DBInstanceIdentifier": "$rds_instance"
+          },
+          "statistic": "Maximum",
+          "period": "300",
+          "prefixMatching": false,
+          "actionPrefix": "",
+          "alarmNamePrefix": ""
+        }
+      },
+      {
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "${cloudwatch}"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "orange",
+        "name": "PostgreSQL memory alarm",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            48
+          ]
+        },
+        "target": {
+          "queryMode": "Annotations",
+          "refId": "Anno",
+          "region": "default",
+          "namespace": "AWS/RDS",
+          "metricName": "FreeableMemory",
+          "dimensions": {
+            "DBInstanceIdentifier": "$rds_instance"
+          },
+          "statistic": "Minimum",
+          "period": "300",
+          "prefixMatching": false,
+          "actionPrefix": "",
+          "alarmNamePrefix": ""
+        }
+      },
+      {
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "${cloudwatch}"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "orange",
+        "name": "PostgreSQL storage alarm",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            49
+          ]
+        },
+        "target": {
+          "queryMode": "Annotations",
+          "refId": "Anno",
+          "region": "default",
+          "namespace": "AWS/RDS",
+          "metricName": "FreeStorageSpace",
+          "dimensions": {
+            "DBInstanceIdentifier": "$rds_instance"
+          },
+          "statistic": "Minimum",
+          "period": "60",
+          "prefixMatching": false,
+          "actionPrefix": "",
+          "alarmNamePrefix": ""
+        }
+      },
+      {
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "${cloudwatch}"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "purple",
+        "name": "OpenSearch cluster red",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            111
+          ]
+        },
+        "target": {
+          "queryMode": "Annotations",
+          "refId": "Anno",
+          "region": "default",
+          "namespace": "AWS/ES",
+          "metricName": "ClusterStatus.red",
+          "dimensions": {
+            "DomainName": "$opensearch_domain",
+            "ClientId": "$aws_account_id"
+          },
+          "statistic": "Maximum",
+          "period": "60",
+          "prefixMatching": false,
+          "actionPrefix": "",
+          "alarmNamePrefix": ""
+        }
+      },
+      {
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "${cloudwatch}"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "purple",
+        "name": "OpenSearch JVM pressure alarm",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            83
+          ]
+        },
+        "target": {
+          "queryMode": "Annotations",
+          "refId": "Anno",
+          "region": "default",
+          "namespace": "AWS/ES",
+          "metricName": "JVMMemoryPressure",
+          "dimensions": {
+            "DomainName": "$opensearch_domain",
+            "ClientId": "$aws_account_id"
+          },
+          "statistic": "Maximum",
+          "period": "300",
+          "prefixMatching": false,
+          "actionPrefix": "",
+          "alarmNamePrefix": ""
+        }
+      },
+      {
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "${cloudwatch}"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "purple",
+        "name": "OpenSearch storage alarm",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            43
+          ]
+        },
+        "target": {
+          "queryMode": "Annotations",
+          "refId": "Anno",
+          "region": "default",
+          "namespace": "AWS/ES",
+          "metricName": "FreeStorageSpace",
+          "dimensions": {
+            "DomainName": "$opensearch_domain",
+            "ClientId": "$aws_account_id"
+          },
+          "statistic": "Minimum",
+          "period": "300",
+          "prefixMatching": false,
+          "actionPrefix": "",
+          "alarmNamePrefix": ""
+        }
+      },
+      {
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "${cloudwatch}"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "purple",
+        "name": "OpenSearch writes blocked",
+        "filter": {
+          "exclude": false,
+          "ids": [
+            111,
+            109
+          ]
+        },
+        "target": {
+          "queryMode": "Annotations",
+          "refId": "Anno",
+          "region": "default",
+          "namespace": "AWS/ES",
+          "metricName": "ClusterIndexWritesBlocked",
+          "dimensions": {
+            "DomainName": "$opensearch_domain",
+            "ClientId": "$aws_account_id"
+          },
+          "statistic": "Maximum",
+          "period": "300",
+          "prefixMatching": false,
+          "actionPrefix": "",
+          "alarmNamePrefix": ""
+        }
       }
     ]
   },
@@ -11202,8 +11833,8 @@
       {
         "current": {
           "selected": false,
-          "text": "us-east-1",
-          "value": "us-east-1"
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "cloudwatch",
@@ -11327,13 +11958,9 @@
       },
       {
         "current": {
-          "selected": true,
-          "text": [
-            "All"
-          ],
-          "value": [
-            "$__all"
-          ]
+          "selected": false,
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "prometheus",
@@ -11360,8 +11987,8 @@
       {
         "current": {
           "selected": false,
-          "text": "robosystems-prod",
-          "value": "robosystems-prod"
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "cloudwatch",
@@ -11391,8 +12018,8 @@
       {
         "current": {
           "selected": false,
-          "text": "robosystems-prod-valkey-001",
-          "value": "robosystems-prod-valkey-001"
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "cloudwatch",
@@ -11422,8 +12049,8 @@
       {
         "current": {
           "selected": false,
-          "text": "robosystems-prod",
-          "value": "robosystems-prod"
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "cloudwatch",
@@ -11453,8 +12080,8 @@
       {
         "current": {
           "selected": false,
-          "text": "robosystems-api-prod-cluster",
-          "value": "robosystems-api-prod-cluster"
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "cloudwatch",
@@ -11484,8 +12111,8 @@
       {
         "current": {
           "selected": false,
-          "text": "robosystems-api-prod-service",
-          "value": "robosystems-api-prod-service"
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "cloudwatch",
@@ -11515,8 +12142,40 @@
       {
         "current": {
           "selected": false,
-          "text": "robosystems-dagster-prod-cluster",
-          "value": "robosystems-dagster-prod-cluster"
+          "text": "",
+          "value": ""
+        },
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "${cloudwatch}"
+        },
+        "definition": "",
+        "hide": 2,
+        "includeAll": false,
+        "label": "API Load Balancer",
+        "multi": false,
+        "name": "api_alb",
+        "options": [],
+        "query": {
+          "dimensionFilters": {},
+          "dimensionKey": "LoadBalancer",
+          "metricName": "RequestCount",
+          "namespace": "AWS/ApplicationELB",
+          "queryType": "dimensionValues",
+          "refId": "CloudWatchVariableQueryEditor-VariableQuery",
+          "region": "default"
+        },
+        "refresh": 1,
+        "regex": "app/robosystems-api-${env}-alb/.*",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "cloudwatch",
@@ -11546,8 +12205,8 @@
       {
         "current": {
           "selected": false,
-          "text": "robosystems-dagster-daemon-prod",
-          "value": "robosystems-dagster-daemon-prod"
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "cloudwatch",
@@ -11577,8 +12236,8 @@
       {
         "current": {
           "selected": false,
-          "text": "robosystems-dagster-run-prod",
-          "value": "robosystems-dagster-run-prod"
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "cloudwatch",
@@ -11608,8 +12267,8 @@
       {
         "current": {
           "selected": false,
-          "text": "robosystems-dagster-webserver-prod",
-          "value": "robosystems-dagster-webserver-prod"
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "cloudwatch",
@@ -11640,8 +12299,8 @@
       {
         "current": {
           "selected": false,
-          "text": "robosystems-worker-prod",
-          "value": "robosystems-worker-prod"
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "cloudwatch",
@@ -11693,8 +12352,8 @@
       {
         "current": {
           "selected": false,
-          "text": "AWSACCOUNT",
-          "value": "AWSACCOUNT"
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "cloudwatch",
@@ -11722,13 +12381,9 @@
       },
       {
         "current": {
-          "selected": true,
-          "text": [
-            "robosystems-shared-replicas-prod-asg"
-          ],
-          "value": [
-            "robosystems-shared-replicas-prod-asg"
-          ]
+          "selected": false,
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "cloudwatch",
@@ -11758,13 +12413,9 @@
       },
       {
         "current": {
-          "selected": true,
-          "text": [
-            "robosystems-ladybug-shared-writers-prod-asg"
-          ],
-          "value": [
-            "robosystems-ladybug-shared-writers-prod-asg"
-          ]
+          "selected": false,
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "cloudwatch",
@@ -11794,13 +12445,9 @@
       },
       {
         "current": {
-          "selected": true,
-          "text": [
-            "robosystems-ladybug-standard-writers-prod-asg"
-          ],
-          "value": [
-            "robosystems-ladybug-standard-writers-prod-asg"
-          ]
+          "selected": false,
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "cloudwatch",
@@ -11838,6 +12485,6 @@
   "timezone": "",
   "title": "RoboSystems Platform Observability",
   "uid": "0b9a085a53200598",
-  "version": 240,
+  "version": 242,
   "weekStart": ""
 }
