@@ -20,6 +20,15 @@ class TestQbSyncJob:
     tags = qb_sync_job.tags
     assert tags.get("pipeline") == "quickbooks"
 
+  def test_qb_sync_job_retries_a_dead_worker_only(self):
+    """Like the bank-feed jobs: a run whose worker died is run again, a run
+    that failed in a stage is not — that stage already recorded the failure
+    on the connection."""
+    from robosystems.adapters.quickbooks.pipeline.jobs import qb_sync_job
+
+    assert qb_sync_job.tags.get("dagster/max_retries") == "3"
+    assert qb_sync_job.tags.get("dagster/retry_on_asset_or_op_failure") == "false"
+
   def test_qb_sync_job_is_defined_asset_job(self):
     """Test that qb_sync_job is produced by define_asset_job (UnresolvedAssetJobDefinition)."""
     from dagster._core.definitions.unresolved_asset_job_definition import (

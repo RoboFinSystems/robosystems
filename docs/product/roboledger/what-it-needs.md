@@ -9,7 +9,7 @@ Your AI assistant's answers are only as good as the books behind them. Four thin
 
 ## Books that are current
 
-RoboLedger syncs when you ask it to, not on a schedule. Press **Sync Now** on the QuickBooks card, or ask your assistant to sync, before you ask about recent activity.
+RoboLedger syncs each connection on its own once a day. For anything more recent, press **Sync Now** on the QuickBooks card, or ask your assistant to sync, before you ask about recent activity.
 
 - **Sync Now** asks how far back to go. **Last 60 days** picks up recent changes. If something older changed in QuickBooks, choose **From a specific date** or **Full rebuild**, or ask your assistant to sync from a date.
 - A close is blocked until QuickBooks has synced after the month ended.
