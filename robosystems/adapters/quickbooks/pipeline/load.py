@@ -268,11 +268,18 @@ def _apply_cdc(context: AssetExecutionContext, config: QBSyncConfig) -> dict:
 
   with extensions_session(config.graph_id, statement_timeout_ms=None) as session:
     applied = apply_deletions(session, plan.deletions)
-  summary["deletions"].update(asdict(applied))
+  counts = asdict(applied)
+  summary["observed_labels"] = counts.pop("observed_labels")
+  summary["deletions"].update(counts)
   context.log.info(
     f"QuickBooks deletions: {len(plan.deletions)} found, {applied.voided} voided, "
-    f"{applied.flagged} flagged as reconciling items, {applied.unmatched} never synced"
+    f"{applied.flagged} flagged as reconciling items, {applied.already_applied} "
+    f"already applied, {applied.unmatched} never synced"
   )
+  if applied.observed_labels:
+    context.log.warning(
+      f"QuickBooks CDC label map misses, learned this sync: {applied.observed_labels}"
+    )
   return summary
 
 

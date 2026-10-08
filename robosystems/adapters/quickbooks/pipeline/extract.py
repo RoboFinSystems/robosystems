@@ -3,7 +3,7 @@
 import requests
 from dagster import AssetExecutionContext, MaterializeResult, asset
 
-from .cdc import CdcPlan, plan_cdc, write_plan
+from .cdc import PLAN_FILE, CdcPlan, plan_cdc, write_plan
 from .configs import QBSyncConfig
 from .load import end_failed_sync
 from .utils import (
@@ -190,6 +190,11 @@ def _run_qb_extract(
   if not realm_id:
     raise ValueError("realm_id is required for QuickBooks extraction")
 
+  # A plan is written at the end; the previous sync's must not outlive a
+  # failed extract into the next load.
+  extract_dir = get_pipeline_work_dir(config.graph_id) / "extract"
+  (extract_dir / PLAN_FILE).unlink(missing_ok=True)
+
   client = QBClient(
     realm_id=realm_id,
     qb_credentials=credentials,
@@ -274,7 +279,6 @@ def _run_qb_extract(
     realm_id=realm_id,
   )
 
-  extract_dir = get_pipeline_work_dir(config.graph_id) / "extract"
   write_extract_parquet(
     extract_dir,
     accounts,

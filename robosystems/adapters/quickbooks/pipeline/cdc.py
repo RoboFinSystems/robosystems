@@ -49,7 +49,8 @@ TXN_ENTITIES = (
 )
 
 # Past this many distinct back-dated days, one span from the earliest is
-# cheaper than a pull per day.
+# cheaper than a pull per day: each day costs one JournalReport call and six
+# header calls, so the cap bounds a sync at about seventy extra calls.
 DISTINCT_DATE_CAP = 10
 
 PLAN_FILE = "cdc_plan.json"
@@ -77,6 +78,12 @@ CDC_ENTITY_LABELS: dict[str, tuple[str, ...]] = {
 
 UNPOSTED_STATUSES = ("captured", "classified")
 POSTED_STATUSES = ("committed", "fulfilled")
+VOID_REASON = "deleted_in_quickbooks"
+
+# Every label the map knows, and the entity it belongs to.
+_ENTITY_OF_LABEL: dict[str, str] = {
+  label: entity for entity, labels in CDC_ENTITY_LABELS.items() for label in labels
+}
 
 
 @dataclass
@@ -186,7 +193,10 @@ class CdcApplyResult:
   voided: int = 0
   flagged: int = 0
   skipped: int = 0
+  already_applied: int = 0
   unmatched: int = 0
+  # Entity → the report labels found for it that the map did not list.
+  observed_labels: dict[str, list[str]] = field(default_factory=dict)
 
 
 def apply_deletions(
@@ -196,32 +206,118 @@ def apply_deletions(
 
   Unposted: voided, with the reason. Posted: a reconciling item whose
   accepted payload carries no entry, so restate is refused and catch-up
-  reverses it. Already retracted: nothing. An id with no event was deleted
-  before it ever synced. An entry RoboLedger published to QuickBooks is
-  matched by the QuickBooks ids it recorded, and flagged the same way.
+  reverses it. Already retracted, or already carrying this deletion:
+  nothing, so a plan applied twice applies once. An id with no event was
+  deleted before it ever synced, and is named in the log. An entry
+  RoboLedger published to QuickBooks is a JournalEntry there, so only a
+  JournalEntry deletion can be one of its recorded ids.
+
+  QuickBooks ids are unique per entity type only, so a deletion is matched
+  as ``(entity, id)``: through the label map first, then by the id's suffix
+  for a label the map does not list, which is learned into
+  ``observed_labels`` rather than dropped.
   """
   result = CdcApplyResult()
   if not deletions:
     return result
   stamp = (now or datetime.now(UTC)).isoformat()
 
-  by_external_id: dict[str, str] = {}
+  wanted: dict[tuple[str, str], str] = {}
   for deletion in deletions:
-    qb_id = str(deletion.get("id") or "")
-    if not qb_id:
-      continue
-    labels = CDC_ENTITY_LABELS.get(str(deletion.get("entity")), ())
-    for label in labels or (str(deletion.get("entity")),):
-      by_external_id[f"{label}_{qb_id}"] = qb_id
-  deleted_ids = set(by_external_id.values())
-  matched: set[str] = set()
+    entity, qb_id = str(deletion.get("entity") or ""), str(deletion.get("id") or "")
+    if entity and qb_id:
+      wanted[(entity, qb_id)] = qb_id
+  matched: set[tuple[str, str]] = set()
 
-  mirrored = (
+  by_external_id: dict[str, tuple[str, str]] = {}
+  for entity, qb_id in wanted:
+    for label in CDC_ENTITY_LABELS.get(entity, (entity,)):
+      by_external_id[f"{label}_{qb_id}"] = (entity, qb_id)
+  for event in _mirrored(session, sorted(by_external_id)):
+    key = by_external_id[str(event.external_id)]
+    matched.add(key)
+    _retract(event, [key[1]], result, stamp=stamp, published=False)
+
+  # A label the map does not list: the id's suffix finds the event, and the
+  # label it carries is learned, unless it belongs to another entity.
+  for entity, qb_id in sorted(set(wanted) - matched):
+    for event in _mirrored_by_suffix(session, qb_id):
+      label = str(event.external_id)[: -(len(qb_id) + 1)]
+      owner = _ENTITY_OF_LABEL.get(label)
+      if owner is not None and owner != entity:
+        continue
+      matched.add((entity, qb_id))
+      result.observed_labels.setdefault(entity, [])
+      if label not in result.observed_labels[entity]:
+        result.observed_labels[entity].append(label)
+        logger.warning(
+          "QuickBooks CDC label map miss: entity %s reports as %r in the "
+          "JournalReport; add it to CDC_ENTITY_LABELS",
+          entity,
+          label,
+        )
+      _retract(event, [qb_id], result, stamp=stamp, published=False)
+
+  deleted_journal_entries = {
+    qb_id for (entity, qb_id) in wanted if entity == "JournalEntry"
+  }
+  if deleted_journal_entries:
+    for event in _published(session):
+      recorded = {
+        part
+        for part in str((event.metadata_ or {}).get("qb_external_id") or "").split(",")
+        if part
+      }
+      hit = sorted(recorded & deleted_journal_entries)
+      if not hit:
+        continue
+      matched.update(("JournalEntry", qb_id) for qb_id in hit)
+      _retract(event, hit, result, stamp=stamp, published=True)
+
+  for entity, qb_id in sorted(set(wanted) - matched):
+    result.unmatched += 1
+    logger.warning(
+      "QuickBooks deleted %s %s, which the mirror never held (deleted before "
+      "it synced, or a label the map does not know)",
+      entity,
+      qb_id,
+    )
+  session.flush()
+  logger.info(
+    "QuickBooks deletions applied: %d voided, %d flagged, %d already applied, "
+    "%d already retracted, %d never synced",
+    result.voided,
+    result.flagged,
+    result.already_applied,
+    result.skipped,
+    result.unmatched,
+  )
+  return result
+
+
+def _mirrored(session: Session, external_ids: list[str]) -> list[Event]:
+  if not external_ids:
+    return []
+  return list(
+    session.execute(
+      select(Event)
+      .where(Event.source == "quickbooks", Event.external_id.in_(external_ids))
+      .order_by(Event.id)
+      .with_for_update()
+    )
+    .scalars()
+    .all()
+  )
+
+
+def _mirrored_by_suffix(session: Session, qb_id: str) -> list[Event]:
+  escaped = qb_id.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+  return list(
     session.execute(
       select(Event)
       .where(
         Event.source == "quickbooks",
-        Event.external_id.in_(sorted(by_external_id)),
+        Event.external_id.like(f"%\\_{escaped}", escape="\\"),
       )
       .order_by(Event.id)
       .with_for_update()
@@ -229,13 +325,11 @@ def apply_deletions(
     .scalars()
     .all()
   )
-  for event in mirrored:
-    qb_id = by_external_id[str(event.external_id)]
-    matched.add(qb_id)
-    _retract(event, [qb_id], result, stamp=stamp, published=False)
 
-  # Entries RoboLedger wrote to QuickBooks record the ids QuickBooks gave them.
-  published = (
+
+def _published(session: Session) -> list[Event]:
+  """Entries RoboLedger wrote to QuickBooks, which record the ids it gave them."""
+  return list(
     session.execute(
       select(Event)
       .where(
@@ -248,29 +342,21 @@ def apply_deletions(
     .scalars()
     .all()
   )
-  for event in published:
-    recorded = {
-      part
-      for part in str((event.metadata_ or {}).get("qb_external_id") or "").split(",")
-      if part
-    }
-    hit = sorted(recorded & deleted_ids)
-    if not hit:
-      continue
-    matched.update(hit)
-    _retract(event, hit, result, stamp=stamp, published=True)
 
-  result.unmatched = len(deleted_ids - matched)
-  session.flush()
-  logger.info(
-    "QuickBooks deletions applied: %d voided, %d flagged, %d already retracted, "
-    "%d never synced",
-    result.voided,
-    result.flagged,
-    result.skipped,
-    result.unmatched,
-  )
-  return result
+
+def _already_carries(event: Event, qb_ids: list[str]) -> bool:
+  """Whether this deletion is already on the event: adopted into its live
+  payload by a resolution, pending in its flagged payload, or the reason it
+  was voided."""
+  live = dict(event.metadata_ or {})
+  if live.get("void_reason") == VOID_REASON:
+    return True
+  for store in (live, live.get("drift_payload") or {}):
+    if store.get("source_removed") and set(qb_ids) <= {
+      str(i) for i in store.get("source_removed_transaction_ids") or []
+    }:
+      return True
+  return False
 
 
 def _retract(
@@ -281,12 +367,15 @@ def _retract(
   stamp: str,
   published: bool,
 ) -> None:
+  if _already_carries(event, qb_ids):
+    result.already_applied += 1
+    return
   status = str(event.status)
   if status in UNPOSTED_STATUSES:
     event.status = "voided"
     event.metadata_ = {
       **(event.metadata_ or {}),
-      "void_reason": "deleted_in_quickbooks",
+      "void_reason": VOID_REASON,
       "voided_at": stamp,
       "source_removed_transaction_ids": qb_ids,
     }

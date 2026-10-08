@@ -133,3 +133,80 @@ def test_nothing_to_delete_touches_nothing(session):
   assert (result.voided, result.flagged, result.unmatched) == (0, 0, 0)
   session.refresh(posted)
   assert posted.payload_drift is False
+
+
+def test_ids_are_matched_per_entity_type(session):
+  """QuickBooks ids are unique per entity only: deleting Invoice 900 must not
+  touch the published entry QuickBooks holds as JournalEntry 900, and
+  deleting Bill 1737 must not touch the Expense the report calls 1737."""
+  posted, _unposted, published = _seed(session)
+
+  result = apply_deletions(
+    session,
+    [
+      {"entity": "Invoice", "id": "900", "last_updated": None},
+      {"entity": "Bill", "id": "1737", "last_updated": None},
+    ],
+    now=NOW,
+  )
+
+  assert (result.flagged, result.voided, result.unmatched) == (0, 0, 2)
+  session.refresh(posted)
+  session.refresh(published)
+  assert posted.payload_drift is False and published.payload_drift is False
+
+
+def test_a_label_the_map_does_not_list_is_found_by_suffix_and_learned(session):
+  _seed(session)
+  odd = _post_synced_event_with_id(session, "Bank Deposit_55")
+  session.flush()
+
+  result = apply_deletions(
+    session, [{"entity": "Deposit", "id": "55", "last_updated": None}], now=NOW
+  )
+
+  assert result.flagged == 1 and result.unmatched == 0
+  assert result.observed_labels == {"Deposit": ["Bank Deposit"]}
+  session.refresh(odd)
+  assert odd.payload_drift is True
+
+
+def test_a_plan_applied_twice_applies_once(session):
+  posted, unposted, _published = _seed(session)
+  deletions = [
+    {"entity": "Purchase", "id": "1737", "last_updated": None},
+    {"entity": "Purchase", "id": "1738", "last_updated": None},
+  ]
+  first = apply_deletions(session, deletions, now=NOW)
+  session.flush()
+  session.refresh(posted)
+  stamp = posted.metadata_["drift_detected_at"]
+
+  second = apply_deletions(session, deletions, now=datetime(2026, 10, 9, tzinfo=UTC))
+
+  assert (first.voided, first.flagged) == (1, 1)
+  assert (second.voided, second.flagged, second.already_applied) == (0, 0, 2)
+  session.refresh(posted)
+  session.refresh(unposted)
+  assert posted.metadata_["drift_detected_at"] == stamp
+  assert unposted.status == "voided"
+
+
+def test_a_resolved_deletion_is_never_flagged_again(session):
+  posted, _unposted, _published = _seed(session)
+  deletions = [{"entity": "Purchase", "id": "1737", "last_updated": None}]
+  apply_deletions(session, deletions, now=NOW)
+  session.flush()
+  resolve_reconciling_item(
+    session,
+    ResolveReconcilingItemRequest(event_id=str(posted.id), disposition="catch_up"),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+  session.flush()
+
+  again = apply_deletions(session, deletions, now=datetime(2026, 10, 9, tzinfo=UTC))
+
+  assert again.already_applied == 1 and again.flagged == 0
+  session.refresh(posted)
+  assert posted.payload_drift is False

@@ -474,8 +474,10 @@ class TestApplyCdc:
       "voided": 1,
       "flagged": 0,
       "skipped": 0,
+      "already_applied": 0,
       "unmatched": 0,
     }
+    assert summary["observed_labels"] == {}
 
   def test_the_sync_summary_carries_what_cdc_did(self):
     from robosystems.adapters.quickbooks.pipeline.load import _sync_result_summary
