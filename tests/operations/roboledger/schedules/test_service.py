@@ -2176,7 +2176,7 @@ class TestTruncateSchedule:
       MagicMock(fetchone=MagicMock(return_value=MagicMock(c=2))),  # 2 posted after
     ]
     svc = ScheduleService()
-    with pytest.raises(ValueError, match="posted entries"):
+    with pytest.raises(ValueError, match="posted or shadowed entries"):
       svc.truncate_schedule(
         session,
         structure_id="struct_01",

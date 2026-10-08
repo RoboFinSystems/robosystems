@@ -43,7 +43,7 @@ from robosystems.operations.roboledger.entry_status import (
   PRIMARY_ENTRY_SQL,
   SHADOWED_ENTRY_STATUS,
   TERMINAL_ENTRY_STATUSES,
-  landed_entry_bindparam,
+  terminal_entry_bindparam,
 )
 from robosystems.operations.roboledger.fact_set import create_fact_set
 from robosystems.utils.ulid import generate_prefixed_ulid
@@ -1564,7 +1564,8 @@ class ScheduleService:
     )
 
     # A landed entry (reversed included) after the cutoff is the record of
-    # that period's recognition; truncating under it would orphan it. Counted
+    # that period's recognition, and a shadowed one is what a shadow close's
+    # receipt expected; truncating under either would orphan it. Counted
     # under the fence, so a close posting one of the drafts has either
     # finished, and is counted, or waits.
     overlap = session.execute(
@@ -1572,15 +1573,15 @@ class ScheduleService:
         SELECT COUNT(*) AS c
         FROM entries
         WHERE source_structure_id = :sid
-          AND status IN :landed_entry_statuses
+          AND status IN :terminal_entry_statuses
           AND posting_date > :new_end
-      """).bindparams(landed_entry_bindparam()),
+      """).bindparams(terminal_entry_bindparam()),
       {"sid": structure_id, "new_end": new_end_date},
     ).fetchone()
     if overlap and overlap.c:
       raise ValueError(
-        f"Cannot truncate: {overlap.c} posted entries exist for periods "
-        f"after {new_end_date}. Reopen the affected periods and void those "
+        f"Cannot truncate: {overlap.c} posted or shadowed entries exist for "
+        f"periods after {new_end_date}. Reopen the affected periods and void those "
         "entries first — reopening alone leaves entries posted, so it does "
         "not clear this guard."
       )

@@ -1081,7 +1081,7 @@ class SetWritePolicyTool:
     if write_policy not in ("qb_authoritative", "shadow"):
       return {
         "error": "invalid_arguments",
-        "message": "write_policy must be 'native', 'qb_authoritative' or 'shadow'.",
+        "message": "write_policy must be 'qb_authoritative' or 'shadow'.",
       }
 
     try:
