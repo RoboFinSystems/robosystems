@@ -7,8 +7,14 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from robosystems.graph_api.client.exceptions import (
+  GraphServerError,
+  GraphSyntaxError,
+  GraphTimeoutError,
+)
 from robosystems.routers.graphs.query.streaming import (
   execute_query_with_timeout,
+  stream_error,
   stream_ndjson_response,
   stream_sse_response,
   stream_sse_with_queue,
@@ -438,3 +444,70 @@ class TestQueueStreamLifecycle:
 
     assert [name for name, _ in events] == ["queued", "error"]
     assert "lost" in events[-1][1]["error"]
+
+
+def _engine_failing_after_one_chunk(error_type: str):
+  repo = AsyncMock()
+
+  async def streaming_generator(query, parameters, chunk_size=1000):
+    yield {"columns": ["id"], "rows": [{"id": 1}]}
+    yield {
+      "error": "Query result contains a value that cannot be serialized",
+      "error_type": error_type,
+      "is_last_chunk": True,
+    }
+
+  repo.execute_query_streaming = streaming_generator
+  return repo
+
+
+@pytest.mark.unit
+class TestEngineErrorChunk:
+  """The engine ends a failed stream with an error chunk; it must reach the
+  caller as an error, never as a short result that reports success."""
+
+  def test_the_engines_error_types_map_to_the_clients_exceptions(self):
+    assert isinstance(
+      stream_error({"error": "x", "error_type": "ParserException"}), GraphSyntaxError
+    )
+    assert isinstance(
+      stream_error({"error": "x", "error_type": "QueryTimeout"}), GraphTimeoutError
+    )
+    assert isinstance(
+      stream_error({"error": "x", "error_type": "SerializationError"}), GraphServerError
+    )
+
+  @pytest.mark.asyncio
+  async def test_ndjson_ends_in_an_error_not_a_completion(self):
+    breaker = Mock()
+    with patch("robosystems.routers.graphs.query.streaming.circuit_breaker", breaker):
+      response = await stream_ndjson_response(
+        _engine_failing_after_one_chunk("SerializationError"),
+        _make_mock_request(),
+        "kg01234567890abcdef",
+        _make_mock_user(),
+        start_time=datetime.now(UTC),
+      )
+      chunks = [json.loads(c) async for c in response.body_iterator]
+
+    assert not any(c.get("complete") for c in chunks)
+    assert chunks[-1]["error_type"] == "GraphServerError"
+    breaker.record_failure.assert_called_once()
+    breaker.record_success.assert_not_called()
+
+  @pytest.mark.asyncio
+  async def test_sse_ends_in_an_error_event(self):
+    with patch("robosystems.routers.graphs.query.streaming.circuit_breaker"):
+      response = await stream_sse_response(
+        _engine_failing_after_one_chunk("BinderException"),
+        _make_mock_request(),
+        "kg01234567890abcdef",
+        _make_mock_user(),
+        start_time=datetime.now(UTC),
+      )
+      events = [e async for e in response.body_iterator]
+
+    names = [e.get("event") for e in events if isinstance(e, dict)]
+    assert names[-1] == "error"
+    assert "complete" not in names
+    assert sum(1 for n in names if n == "chunk") == 1

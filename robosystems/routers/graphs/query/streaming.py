@@ -9,6 +9,13 @@ from typing import Any
 from fastapi.responses import StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 
+from robosystems.graph_api.client.exceptions import (
+  GraphAPIError,
+  GraphClientError,
+  GraphServerError,
+  GraphSyntaxError,
+  GraphTimeoutError,
+)
 from robosystems.logger import api_logger, logger
 from robosystems.middleware.graph.query_queue import QueryStatus, get_query_queue
 from robosystems.middleware.robustness import CircuitBreakerManager
@@ -22,6 +29,26 @@ from robosystems.models.core import User
 from robosystems.security.error_handling import safe_error_message
 
 circuit_breaker = CircuitBreakerManager()
+
+
+# The engine's error types that are about the caller's query.
+_CALLER_STREAM_ERRORS = frozenset(
+  {"BinderException", "ParserException", "CatalogException"}
+)
+
+
+def stream_error(chunk: dict[str, Any]) -> GraphAPIError:
+  """The engine ends a stream that failed with an error chunk rather than
+  raising, since its response has already started: raised here as the
+  exception the non-streaming path would have, so the caller gets an error,
+  not a short result that reports success."""
+  message = str(chunk.get("error") or "Query failed")
+  kind = str(chunk.get("error_type") or "")
+  if kind in _CALLER_STREAM_ERRORS:
+    return GraphSyntaxError(message, response_data=chunk)
+  if kind == "QueryTimeout":
+    return GraphTimeoutError(message, response_data=chunk)
+  return GraphServerError(message, response_data=chunk)
 
 
 async def execute_query_with_timeout(
@@ -74,6 +101,9 @@ async def stream_ndjson_response(
             columns = (
               list(chunk[0].keys()) if isinstance(chunk, list) else chunk.get("columns")
             )
+
+          if isinstance(chunk, dict) and chunk.get("error"):
+            raise stream_error(chunk)
 
           if isinstance(chunk, dict):
             rows = chunk.get("rows", chunk.get("data", []))
@@ -165,7 +195,10 @@ async def stream_ndjson_response(
       yield json.dumps(error_chunk) + "\n"
 
       circuit_breaker.record_failure(graph_id, "cypher_query", error=e)
-      logger.error(f"NDJSON streaming failed: {e}", exc_info=True)
+      if isinstance(e, GraphClientError):
+        logger.warning(f"NDJSON streaming query refused: {e}")
+      else:
+        logger.error(f"NDJSON streaming failed: {e}", exc_info=True)
 
   return StreamingResponse(
     generate_ndjson(),
@@ -216,6 +249,9 @@ async def stream_sse_response(
         async for chunk in repository.execute_query_streaming(
           request.query, request.parameters, chunk_size=chunk_size
         ):
+          if isinstance(chunk, dict) and chunk.get("error"):
+            raise stream_error(chunk)
+
           if columns is None and chunk:
             if isinstance(chunk, dict):
               columns = chunk.get("columns")
