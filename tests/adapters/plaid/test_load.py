@@ -303,6 +303,44 @@ class TestRemovals:
     survivor = survivor_payload(pair, ["y"])
     assert survivor is not None and survivor["entity_id"] == "ent_sub"
 
+  def test_a_survivor_books_to_its_own_accounts_entity(self):
+    # The pair landed on the receiving side's entity; the outgoing account
+    # has since moved to another entity's chart.
+    pair = _event(
+      amount=50000,
+      entity_id="ent_sub",
+      metadata_={
+        "legs": ["x", "y"],
+        "from_account_id": "acct_parent_chk",
+        "from_element_id": "e_chk",
+      },
+    )
+    survivor = survivor_payload(pair, ["y"], {"acct_parent_chk": "ent_parent"})
+    assert survivor is not None and survivor["entity_id"] == "ent_parent"
+
+  def test_apply_removed_books_the_survivor_to_its_own_accounts_entity(self):
+    # The pair sits on the savings side's entity; checking has moved to the
+    # parent's chart since.
+    pair = _pair(status="committed")
+    pair.entity_id = "ent_sub"
+    report = PlaidLoadReport()
+    with (
+      patch(f"{MODULE}.existing_events", return_value={}),
+      patch(f"{MODULE}.pair_events_by_leg", return_value={"t_xfer_in": pair}),
+      patch(f"{MODULE}._delete_events"),
+      patch(f"{MODULE}.capture_event") as capture,
+    ):
+      apply_removed(
+        _Session(),
+        report,
+        ["t_xfer_in"],
+        graph_id="kg_1",
+        connection_id="conn_1",
+        created_by="usr_1",
+        account_entities={CHECKING_ID: "ent_parent", SAVINGS_ID: "ent_sub"},
+      )
+    assert capture.call_args.args[1]["entity_id"] == "ent_parent"
+
   def test_nothing_removed_is_a_no_op(self):
     report = PlaidLoadReport()
     with patch(f"{MODULE}.existing_events") as existing:
