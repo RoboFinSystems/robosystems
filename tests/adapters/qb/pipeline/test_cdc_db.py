@@ -47,8 +47,9 @@ def _seed(db):
   published.external_id = "sched_1739"
   published.metadata_ = {
     **dict(published.metadata_ or {}),
-    "qb_external_id": "900,901",
-    "qb_entry_ids": {"e1": "900", "e2": "901"},
+    # The shape write-back records: the external id the synced copy carries.
+    "qb_external_id": "JournalEntry_900,JournalEntry_901",
+    "qb_entry_ids": {"e1": "JournalEntry_900", "e2": "JournalEntry_901"},
   }
   db.flush()
   return posted, unposted, published

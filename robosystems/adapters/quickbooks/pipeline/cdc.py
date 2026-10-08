@@ -56,24 +56,32 @@ DISTINCT_DATE_CAP = 10
 PLAN_FILE = "cdc_plan.json"
 
 # An event's external_id is ``{tx_type}_{Id}`` with the JournalReport's own
-# label, normalised, while CDC names the entity. Seeded from the labels the
-# pipeline normalises and the Purchase payment-type map; the long tail
-# (Deposit, Transfer, CreditMemo, VendorCredit, RefundReceipt) is the report's
-# label as observed so far and is confirmed on a sandbox pull that holds
-# every type.
+# label, normalised, while CDC names the entity. Observed on the sandbox
+# sample company on 2026-10-08, one id per label resolved against every
+# entity type: a credit-card credit is a Purchase the report calls "Credit
+# Card Credit", a refund receipt is "Refund", and a credit-card bill payment
+# keeps the un-normalised "Bill Payment (Credit Card)". Transfer and
+# VendorCredit had no sample and keep the entity name. A label the map does
+# not list is learned at apply time, so a miss is loud, not silent.
 CDC_ENTITY_LABELS: dict[str, tuple[str, ...]] = {
   "JournalEntry": ("JournalEntry",),
   "Invoice": ("Invoice",),
   "Bill": ("Bill",),
   "Payment": ("Payment",),
-  "BillPayment": ("BillPayment",),
+  "BillPayment": ("BillPayment", "Bill Payment (Credit Card)"),
   "SalesReceipt": ("SalesReceipt",),
-  "Purchase": ("Cash Expense", "Expense", "Check", "Credit Card Expense"),
+  "Purchase": (
+    "Cash Expense",
+    "Expense",
+    "Check",
+    "Credit Card Expense",
+    "Credit Card Credit",
+  ),
   "Deposit": ("Deposit",),
   "Transfer": ("Transfer",),
   "CreditMemo": ("CreditMemo",),
   "VendorCredit": ("VendorCredit",),
-  "RefundReceipt": ("RefundReceipt",),
+  "RefundReceipt": ("RefundReceipt", "Refund"),
 }
 
 UNPOSTED_STATUSES = ("captured", "classified")
@@ -263,8 +271,11 @@ def apply_deletions(
   }
   if deleted_journal_entries:
     for event in _published(session):
+      # Write-back records each entry as the external id its synced copy
+      # carries (``JournalEntry_153``), so the round-trip matcher can find
+      # it; a bare id is tolerated for older records.
       recorded = {
-        part
+        part.rsplit("_", 1)[-1]
         for part in str((event.metadata_ or {}).get("qb_external_id") or "").split(",")
         if part
       }
