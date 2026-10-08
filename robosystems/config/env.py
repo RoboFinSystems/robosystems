@@ -541,6 +541,9 @@ class EnvConfig:
   # months: a SOC 2 observation year plus slack. Dedicated deployments set
   # their own.
   OPERATION_AUDIT_RETENTION_DAYS = get_int_env("OPERATION_AUDIT_RETENTION_DAYS", 396)
+  # How old a connection's last sync must be before the hourly sweep syncs it
+  # again (robosystems/dagster/jobs/connection_sync.py). Daily by default.
+  CONNECTION_SYNC_INTERVAL_HOURS = get_int_env("CONNECTION_SYNC_INTERVAL_HOURS", 24)
   # Gates the subgraph write/DDL MCP tools; the main graph stays read-only to
   # raw statements regardless.
   MCP_SUBGRAPH_OPS_ENABLED = get_bool_env(

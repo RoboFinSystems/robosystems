@@ -233,6 +233,9 @@ function create_ssm_feature_flags() {
         # Read per run rather than at import, so flipping it takes effect on
         # the next run.
         "STORAGE_RECLAIM_ENABLED=true"
+        # Kill switch for the hourly sweep that syncs every connection on its
+        # cadence. Read per run, so flipping it takes effect on the next run.
+        "CONNECTION_SCHEDULED_SYNC_ENABLED=true"
         "CONNECTION_EXTERNAL_ENABLED=true"
         "CONNECTION_MERCURY_ENABLED=false"
         "MERCURY_API_KEY_CONNECTIONS_ENABLED=false"

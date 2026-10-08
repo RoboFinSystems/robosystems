@@ -25,7 +25,7 @@ The first sync starts on its own and brings over your full history:
 
 Large companies can take several minutes. The first sync also sets up your fiscal calendar and maps your chart of accounts to standard reporting concepts. That mapping is done by AI, and it's the one step here that uses credits. See [What RoboLedger needs to work well](what-it-needs.md).
 
-After the first sync, syncing is on demand. Press **Sync Now** on the QuickBooks card, or ask your assistant to sync. RoboLedger doesn't sync on a schedule, so sync before you ask about recent activity.
+After the first sync, RoboLedger syncs each connection on its own once a day. For anything more recent, press **Sync Now** on the QuickBooks card, or ask your assistant to sync. The card shows when the last sync ran.
 
 **Sync Now** asks how far back to go. **Last 60 days** picks up recent changes. If something older changed in QuickBooks, choose **From a specific date**, or **Full rebuild** to pull your whole history again. Your assistant can sync from a date too. When a transaction RoboLedger already recorded has been edited, it's flagged for you to settle. See [When QuickBooks changes after a sync](changes-after-sync.md).
 

@@ -38,6 +38,10 @@ from robosystems.dagster.jobs.billing import (
   monthly_usage_report_job,
   monthly_usage_report_schedule,
 )
+from robosystems.dagster.jobs.connection_sync import (
+  scheduled_connection_sync_job,
+  scheduled_connection_sync_schedule,
+)
 from robosystems.dagster.jobs.documents import rebuild_documents_job
 from robosystems.dagster.jobs.graph import (
   backup_graph_job,
@@ -207,6 +211,8 @@ all_jobs = [
   monthly_credit_allocation_job,
   monthly_usage_report_job,
   invoice_subscription_renewal_job,
+  # Platform: Connections (unattended sync of every provider's connections)
+  scheduled_connection_sync_job,
   # Platform: Infrastructure
   daily_audit_retention_job,
   daily_backup_cleanup_job,
@@ -255,6 +261,8 @@ all_schedules = [
   # Platform: Billing
   monthly_credit_allocation_schedule,
   monthly_usage_report_schedule,
+  # Platform: Connections
+  scheduled_connection_sync_schedule,
   # Platform: Infrastructure
   daily_audit_retention_schedule,
   daily_backup_cleanup_schedule,
