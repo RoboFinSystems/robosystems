@@ -449,7 +449,6 @@
         }
       ],
       "title": "Daily Cost",
-      "transformations": [],
       "type": "timeseries",
       "gridPos": {
         "h": 9,
@@ -538,7 +537,7 @@
         "type": "grafana-athena-datasource",
         "uid": "${athena}"
       },
-      "description": "Component cost over time. The top 10 categories by total are drawn; the rest stack as Other. Bucket size follows the Granularity selector; the legend holds the period total and the per-bucket mean.",
+      "description": "Component cost over time. The top 30 categories by total are drawn; the rest stack as Other. Bucket size follows the Granularity selector; the legend holds the period total and the per-bucket mean.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -640,7 +639,7 @@
             "uid": "${athena}"
           },
           "format": 1,
-          "rawSQL": "WITH lines AS (\n  SELECT\n    date_trunc('$granularity', line_item_usage_start_date) AS bucket,\n    CASE\n      WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n      WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n      WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n      ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n    END AS category,\n    CASE\n      WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n      WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n      WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n      WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n      WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n      WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n      ELSE line_item_unblended_cost\n    END AS cost\n  FROM ${cur_table}\n  WHERE DATE(line_item_usage_start_date) BETWEEN DATE($__timeFrom) AND DATE($__timeTo)\n    AND line_item_line_item_type NOT IN ('Credit', 'Refund', 'RIFee')\n    AND ('__all__' IN (${environment:sqlstring}) OR coalesce(nullif(resource_tags_user_environment, ''), 'untagged') IN (${environment:sqlstring}))\n    AND ('__all__' IN (${component:sqlstring}) OR CASE\n          WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n          WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n          WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n          ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n        END IN (${component:sqlstring}))\n    AND ('__all__' IN (${product:sqlstring}) OR regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') IN (${product:sqlstring}))\n    AND ('__all__' IN (${usagetype:sqlstring}) OR line_item_usage_type IN (${usagetype:sqlstring}))\n),\nranked AS (\n  SELECT category, row_number() OVER (ORDER BY sum(cost) DESC) AS rn\n  FROM lines\n  GROUP BY category\n)\nSELECT\n  l.bucket,\n  CASE WHEN r.rn <= 10 THEN l.category ELSE 'Other' END AS component,\n  sum(l.cost) AS cost\nFROM lines l\nJOIN ranked r ON r.category = l.category\nGROUP BY 1, 2\nORDER BY 1, min(CASE WHEN r.rn <= 10 THEN r.rn ELSE 11 END)",
+          "rawSQL": "WITH lines AS (\n  SELECT\n    date_trunc('$granularity', line_item_usage_start_date) AS bucket,\n    CASE\n      WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n      WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n      WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n      ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n    END AS category,\n    CASE\n      WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n      WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n      WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n      WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n      WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n      WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n      ELSE line_item_unblended_cost\n    END AS cost\n  FROM ${cur_table}\n  WHERE DATE(line_item_usage_start_date) BETWEEN DATE($__timeFrom) AND DATE($__timeTo)\n    AND line_item_line_item_type NOT IN ('Credit', 'Refund', 'RIFee')\n    AND ('__all__' IN (${environment:sqlstring}) OR coalesce(nullif(resource_tags_user_environment, ''), 'untagged') IN (${environment:sqlstring}))\n    AND ('__all__' IN (${component:sqlstring}) OR CASE\n          WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n          WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n          WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n          ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n        END IN (${component:sqlstring}))\n    AND ('__all__' IN (${product:sqlstring}) OR regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') IN (${product:sqlstring}))\n    AND ('__all__' IN (${usagetype:sqlstring}) OR line_item_usage_type IN (${usagetype:sqlstring}))\n),\nranked AS (\n  SELECT category, row_number() OVER (ORDER BY sum(cost) DESC) AS rn\n  FROM lines\n  GROUP BY category\n)\nSELECT\n  l.bucket,\n  CASE WHEN r.rn <= 30 THEN l.category ELSE 'Other' END AS component,\n  sum(l.cost) AS cost\nFROM lines l\nJOIN ranked r ON r.category = l.category\nGROUP BY 1, 2\nORDER BY 1, min(CASE WHEN r.rn <= 30 THEN r.rn ELSE 31 END)",
           "refId": "A"
         }
       ],
@@ -673,7 +672,7 @@
         "type": "grafana-athena-datasource",
         "uid": "${athena}"
       },
-      "description": "Period total per Environment tag. Account-level services that cannot carry the tag (CloudWatch, VPC, Route 53, commitment fees) show as untagged. Effective cost: Savings Plan and Reserved Instance discounts applied, commitment fees counted only for their unused portion, credits and refunds excluded, RI fees excluded (they book once a month and would distort a running month).",
+      "description": "Period total per Environment tag. Account-level services that cannot carry the tag (CloudWatch, VPC, Route 53, commitment fees) show as shared. Effective cost: Savings Plan and Reserved Instance discounts applied, commitment fees counted only for their unused portion, credits and refunds excluded, RI fees excluded (they book once a month and would distort a running month).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -730,7 +729,7 @@
             "uid": "${athena}"
           },
           "format": 0,
-          "rawSQL": "SELECT\n  coalesce(nullif(resource_tags_user_environment, ''), 'untagged') AS environment,\n  sum(CASE\n    WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n    WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n    WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n    WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n    WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n    WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n    ELSE line_item_unblended_cost\n  END) AS cost\nFROM ${cur_table}\nWHERE DATE(line_item_usage_start_date) BETWEEN DATE($__timeFrom) AND DATE($__timeTo)\n  AND line_item_line_item_type NOT IN ('Credit', 'Refund', 'RIFee')\n  AND ('__all__' IN (${environment:sqlstring}) OR coalesce(nullif(resource_tags_user_environment, ''), 'untagged') IN (${environment:sqlstring}))\n  AND ('__all__' IN (${component:sqlstring}) OR CASE\n        WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n        WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n        WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n        ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n      END IN (${component:sqlstring}))\n  AND ('__all__' IN (${product:sqlstring}) OR regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') IN (${product:sqlstring}))\n  AND ('__all__' IN (${usagetype:sqlstring}) OR line_item_usage_type IN (${usagetype:sqlstring}))\nGROUP BY 1\nHAVING sum(CASE\n    WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n    WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n    WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n    WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n    WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n    WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n    ELSE line_item_unblended_cost\n  END) > 0\nORDER BY cost DESC",
+          "rawSQL": "SELECT\n  coalesce(nullif(resource_tags_user_environment, ''), 'shared') AS environment,\n  sum(CASE\n    WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n    WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n    WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n    WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n    WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n    WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n    ELSE line_item_unblended_cost\n  END) AS cost\nFROM ${cur_table}\nWHERE DATE(line_item_usage_start_date) BETWEEN DATE($__timeFrom) AND DATE($__timeTo)\n  AND line_item_line_item_type NOT IN ('Credit', 'Refund', 'RIFee')\n  AND ('__all__' IN (${environment:sqlstring}) OR coalesce(nullif(resource_tags_user_environment, ''), 'shared') IN (${environment:sqlstring}))\n  AND ('__all__' IN (${component:sqlstring}) OR CASE\n        WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n        WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n        WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n        ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n      END IN (${component:sqlstring}))\n  AND ('__all__' IN (${product:sqlstring}) OR regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') IN (${product:sqlstring}))\n  AND ('__all__' IN (${usagetype:sqlstring}) OR line_item_usage_type IN (${usagetype:sqlstring}))\nGROUP BY 1\nHAVING sum(CASE\n    WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n    WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n    WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n    WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n    WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n    WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n    ELSE line_item_unblended_cost\n  END) > 0\nORDER BY cost DESC",
           "refId": "A"
         }
       ],
@@ -850,7 +849,7 @@
             "uid": "${athena}"
           },
           "format": 1,
-          "rawSQL": "WITH lines AS (\n  SELECT\n    date_trunc('$granularity', line_item_usage_start_date) AS bucket,\n    coalesce(nullif(resource_tags_user_environment, ''), 'untagged') AS category,\n    CASE\n      WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n      WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n      WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n      WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n      WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n      WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n      ELSE line_item_unblended_cost\n    END AS cost\n  FROM ${cur_table}\n  WHERE DATE(line_item_usage_start_date) BETWEEN DATE($__timeFrom) AND DATE($__timeTo)\n    AND line_item_line_item_type NOT IN ('Credit', 'Refund', 'RIFee')\n    AND ('__all__' IN (${environment:sqlstring}) OR coalesce(nullif(resource_tags_user_environment, ''), 'untagged') IN (${environment:sqlstring}))\n    AND ('__all__' IN (${component:sqlstring}) OR CASE\n          WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n          WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n          WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n          ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n        END IN (${component:sqlstring}))\n    AND ('__all__' IN (${product:sqlstring}) OR regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') IN (${product:sqlstring}))\n    AND ('__all__' IN (${usagetype:sqlstring}) OR line_item_usage_type IN (${usagetype:sqlstring}))\n),\nranked AS (\n  SELECT category, row_number() OVER (ORDER BY sum(cost) DESC) AS rn\n  FROM lines\n  GROUP BY category\n)\nSELECT\n  l.bucket,\n  CASE WHEN r.rn <= 10 THEN l.category ELSE 'Other' END AS environment,\n  sum(l.cost) AS cost\nFROM lines l\nJOIN ranked r ON r.category = l.category\nGROUP BY 1, 2\nORDER BY 1, min(CASE WHEN r.rn <= 10 THEN r.rn ELSE 11 END)",
+          "rawSQL": "WITH lines AS (\n  SELECT\n    date_trunc('$granularity', line_item_usage_start_date) AS bucket,\n    coalesce(nullif(resource_tags_user_environment, ''), 'shared') AS category,\n    CASE\n      WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n      WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n      WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n      WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n      WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n      WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n      ELSE line_item_unblended_cost\n    END AS cost\n  FROM ${cur_table}\n  WHERE DATE(line_item_usage_start_date) BETWEEN DATE($__timeFrom) AND DATE($__timeTo)\n    AND line_item_line_item_type NOT IN ('Credit', 'Refund', 'RIFee')\n    AND ('__all__' IN (${environment:sqlstring}) OR coalesce(nullif(resource_tags_user_environment, ''), 'shared') IN (${environment:sqlstring}))\n    AND ('__all__' IN (${component:sqlstring}) OR CASE\n          WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n          WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n          WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n          ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n        END IN (${component:sqlstring}))\n    AND ('__all__' IN (${product:sqlstring}) OR regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') IN (${product:sqlstring}))\n    AND ('__all__' IN (${usagetype:sqlstring}) OR line_item_usage_type IN (${usagetype:sqlstring}))\n),\nranked AS (\n  SELECT category, row_number() OVER (ORDER BY sum(cost) DESC) AS rn\n  FROM lines\n  GROUP BY category\n)\nSELECT\n  l.bucket,\n  CASE WHEN r.rn <= 10 THEN l.category ELSE 'Other' END AS environment,\n  sum(l.cost) AS cost\nFROM lines l\nJOIN ranked r ON r.category = l.category\nGROUP BY 1, 2\nORDER BY 1, min(CASE WHEN r.rn <= 10 THEN r.rn ELSE 11 END)",
           "refId": "A"
         }
       ],
@@ -958,7 +957,7 @@
         "type": "grafana-athena-datasource",
         "uid": "${athena}"
       },
-      "description": "AWS product cost over time. The top 10 categories by total are drawn; the rest stack as Other. Bucket size follows the Granularity selector; the legend holds the period total and the per-bucket mean.",
+      "description": "AWS product cost over time. The top 30 categories by total are drawn; the rest stack as Other. Bucket size follows the Granularity selector; the legend holds the period total and the per-bucket mean.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1060,7 +1059,7 @@
             "uid": "${athena}"
           },
           "format": 1,
-          "rawSQL": "WITH lines AS (\n  SELECT\n    date_trunc('$granularity', line_item_usage_start_date) AS bucket,\n    regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') AS category,\n    CASE\n      WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n      WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n      WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n      WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n      WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n      WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n      ELSE line_item_unblended_cost\n    END AS cost\n  FROM ${cur_table}\n  WHERE DATE(line_item_usage_start_date) BETWEEN DATE($__timeFrom) AND DATE($__timeTo)\n    AND line_item_line_item_type NOT IN ('Credit', 'Refund', 'RIFee')\n    AND ('__all__' IN (${environment:sqlstring}) OR coalesce(nullif(resource_tags_user_environment, ''), 'untagged') IN (${environment:sqlstring}))\n    AND ('__all__' IN (${component:sqlstring}) OR CASE\n          WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n          WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n          WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n          ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n        END IN (${component:sqlstring}))\n    AND ('__all__' IN (${product:sqlstring}) OR regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') IN (${product:sqlstring}))\n    AND ('__all__' IN (${usagetype:sqlstring}) OR line_item_usage_type IN (${usagetype:sqlstring}))\n),\nranked AS (\n  SELECT category, row_number() OVER (ORDER BY sum(cost) DESC) AS rn\n  FROM lines\n  GROUP BY category\n)\nSELECT\n  l.bucket,\n  CASE WHEN r.rn <= 10 THEN l.category ELSE 'Other' END AS product,\n  sum(l.cost) AS cost\nFROM lines l\nJOIN ranked r ON r.category = l.category\nGROUP BY 1, 2\nORDER BY 1, min(CASE WHEN r.rn <= 10 THEN r.rn ELSE 11 END)",
+          "rawSQL": "WITH lines AS (\n  SELECT\n    date_trunc('$granularity', line_item_usage_start_date) AS bucket,\n    regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') AS category,\n    CASE\n      WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n      WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n      WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n      WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n      WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n      WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n      ELSE line_item_unblended_cost\n    END AS cost\n  FROM ${cur_table}\n  WHERE DATE(line_item_usage_start_date) BETWEEN DATE($__timeFrom) AND DATE($__timeTo)\n    AND line_item_line_item_type NOT IN ('Credit', 'Refund', 'RIFee')\n    AND ('__all__' IN (${environment:sqlstring}) OR coalesce(nullif(resource_tags_user_environment, ''), 'untagged') IN (${environment:sqlstring}))\n    AND ('__all__' IN (${component:sqlstring}) OR CASE\n          WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n          WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n          WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n          ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n        END IN (${component:sqlstring}))\n    AND ('__all__' IN (${product:sqlstring}) OR regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') IN (${product:sqlstring}))\n    AND ('__all__' IN (${usagetype:sqlstring}) OR line_item_usage_type IN (${usagetype:sqlstring}))\n),\nranked AS (\n  SELECT category, row_number() OVER (ORDER BY sum(cost) DESC) AS rn\n  FROM lines\n  GROUP BY category\n)\nSELECT\n  l.bucket,\n  CASE WHEN r.rn <= 30 THEN l.category ELSE 'Other' END AS product,\n  sum(l.cost) AS cost\nFROM lines l\nJOIN ranked r ON r.category = l.category\nGROUP BY 1, 2\nORDER BY 1, min(CASE WHEN r.rn <= 30 THEN r.rn ELSE 31 END)",
           "refId": "A"
         }
       ],
@@ -1168,7 +1167,7 @@
         "type": "grafana-athena-datasource",
         "uid": "${athena}"
       },
-      "description": "Usage type cost over time. The top 10 categories by total are drawn; the rest stack as Other. Bucket size follows the Granularity selector; the legend holds the period total and the per-bucket mean.",
+      "description": "Usage type cost over time. The top 30 categories by total are drawn; the rest stack as Other. Bucket size follows the Granularity selector; the legend holds the period total and the per-bucket mean.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1270,7 +1269,7 @@
             "uid": "${athena}"
           },
           "format": 1,
-          "rawSQL": "WITH lines AS (\n  SELECT\n    date_trunc('$granularity', line_item_usage_start_date) AS bucket,\n    line_item_usage_type AS category,\n    CASE\n      WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n      WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n      WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n      WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n      WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n      WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n      ELSE line_item_unblended_cost\n    END AS cost\n  FROM ${cur_table}\n  WHERE DATE(line_item_usage_start_date) BETWEEN DATE($__timeFrom) AND DATE($__timeTo)\n    AND line_item_line_item_type NOT IN ('Credit', 'Refund', 'RIFee')\n    AND ('__all__' IN (${environment:sqlstring}) OR coalesce(nullif(resource_tags_user_environment, ''), 'untagged') IN (${environment:sqlstring}))\n    AND ('__all__' IN (${component:sqlstring}) OR CASE\n          WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n          WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n          WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n          ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n        END IN (${component:sqlstring}))\n    AND ('__all__' IN (${product:sqlstring}) OR regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') IN (${product:sqlstring}))\n    AND ('__all__' IN (${usagetype:sqlstring}) OR line_item_usage_type IN (${usagetype:sqlstring}))\n),\nranked AS (\n  SELECT category, row_number() OVER (ORDER BY sum(cost) DESC) AS rn\n  FROM lines\n  GROUP BY category\n)\nSELECT\n  l.bucket,\n  CASE WHEN r.rn <= 10 THEN l.category ELSE 'Other' END AS usage_type,\n  sum(l.cost) AS cost\nFROM lines l\nJOIN ranked r ON r.category = l.category\nGROUP BY 1, 2\nORDER BY 1, min(CASE WHEN r.rn <= 10 THEN r.rn ELSE 11 END)",
+          "rawSQL": "WITH lines AS (\n  SELECT\n    date_trunc('$granularity', line_item_usage_start_date) AS bucket,\n    line_item_usage_type AS category,\n    CASE\n      WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage' THEN savings_plan_savings_plan_effective_cost\n      WHEN line_item_line_item_type = 'SavingsPlanRecurringFee' THEN savings_plan_total_commitment_to_date - savings_plan_used_commitment\n      WHEN line_item_line_item_type IN ('SavingsPlanNegation', 'SavingsPlanUpfrontFee') THEN 0\n      WHEN line_item_line_item_type = 'DiscountedUsage' THEN reservation_effective_cost\n      WHEN line_item_line_item_type = 'RIFee' THEN reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee\n      WHEN line_item_line_item_type = 'Fee' AND reservation_reservation_a_r_n <> '' THEN 0\n      ELSE line_item_unblended_cost\n    END AS cost\n  FROM ${cur_table}\n  WHERE DATE(line_item_usage_start_date) BETWEEN DATE($__timeFrom) AND DATE($__timeTo)\n    AND line_item_line_item_type NOT IN ('Credit', 'Refund', 'RIFee')\n    AND ('__all__' IN (${environment:sqlstring}) OR coalesce(nullif(resource_tags_user_environment, ''), 'untagged') IN (${environment:sqlstring}))\n    AND ('__all__' IN (${component:sqlstring}) OR CASE\n          WHEN resource_tags_user_component <> '' THEN resource_tags_user_component\n          WHEN product_product_name = 'Amazon Virtual Private Cloud' THEN 'VPC'\n          WHEN line_item_usage_type = 'EBS:SnapshotUsage' THEN 'EBSSnapshots'\n          ELSE coalesce(nullif(replace(regexp_replace(product_product_name, '^(Amazon|AWS) ?', ''), ' ', ''), ''), 'Other')\n        END IN (${component:sqlstring}))\n    AND ('__all__' IN (${product:sqlstring}) OR regexp_replace(product_product_name, '^(Amazon|AWS) ?', '') IN (${product:sqlstring}))\n    AND ('__all__' IN (${usagetype:sqlstring}) OR line_item_usage_type IN (${usagetype:sqlstring}))\n),\nranked AS (\n  SELECT category, row_number() OVER (ORDER BY sum(cost) DESC) AS rn\n  FROM lines\n  GROUP BY category\n)\nSELECT\n  l.bucket,\n  CASE WHEN r.rn <= 30 THEN l.category ELSE 'Other' END AS usage_type,\n  sum(l.cost) AS cost\nFROM lines l\nJOIN ranked r ON r.category = l.category\nGROUP BY 1, 2\nORDER BY 1, min(CASE WHEN r.rn <= 30 THEN r.rn ELSE 31 END)",
           "refId": "A"
         }
       ],
@@ -1540,13 +1539,9 @@
       {
         "allValue": "'__all__'",
         "current": {
-          "selected": true,
-          "text": [
-            "All"
-          ],
-          "value": [
-            "$__all"
-          ]
+          "selected": false,
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "grafana-athena-datasource",
@@ -1579,13 +1574,9 @@
       {
         "allValue": "'__all__'",
         "current": {
-          "selected": true,
-          "text": [
-            "All"
-          ],
-          "value": [
-            "$__all"
-          ]
+          "selected": false,
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "grafana-athena-datasource",
@@ -1618,13 +1609,9 @@
       {
         "allValue": "'__all__'",
         "current": {
-          "selected": true,
-          "text": [
-            "All"
-          ],
-          "value": [
-            "$__all"
-          ]
+          "selected": false,
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "grafana-athena-datasource",
@@ -1657,13 +1644,9 @@
       {
         "allValue": "'__all__'",
         "current": {
-          "selected": true,
-          "text": [
-            "All"
-          ],
-          "value": [
-            "$__all"
-          ]
+          "selected": false,
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "grafana-athena-datasource",
@@ -1793,6 +1776,6 @@
   "timezone": "utc",
   "title": "RoboSystems Cost and Usage Dashboard",
   "uid": "depgbcbsbfe2oa",
-  "version": 68,
+  "version": 78,
   "weekStart": ""
 }

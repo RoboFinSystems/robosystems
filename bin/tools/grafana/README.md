@@ -23,6 +23,7 @@ Dashboards use Grafana template variables for datasources and environment select
 | `${level}` | Custom | logs | `ERROR`, `WARNING`, `INFO` or All, applied to the log panels |
 | `${search}` | Textbox | logs | Regular expression matched against each line in the log panels |
 | `${log_groups}`, `${log_group_names}` | Query | logs | Hidden: the log groups under `/robosystems/${env}/`, as ARNs for Logs Insights and as names for the ingest metrics |
+| `${rds_instance}`, `${api_alb}`, … | Query | ops | Hidden: resource lookups scoped by `${env}` and `${graph_tier}` (RDS instance, API load balancer, ECS clusters and services, OpenSearch domain, graph ASGs); the panels and alarm annotations read their dimensions from these |
 | `${cur_table}` | Constant | cur | Athena table the CUR is crawled into (hidden; set once after import) |
 | `${granularity}` | Custom | cur | Bucket size for the cost time series: daily, weekly or monthly |
 
@@ -68,7 +69,27 @@ Ensure AWS resources are tagged for the dashboard filters:
 - `user:environment` - Environment name (e.g., `prod`, `staging`)
 
 Lines without a tag are not dropped: untagged spend is attributed to the AWS product that
-billed it (component) or shown as `untagged` (environment).
+billed it (component) or shown as `shared` (environment).
+
+## Alarm Annotations (ops)
+
+`ops.json` carries CloudWatch alarm state changes as dashboard annotations, so an alarm
+transition draws a marker on the panels that graph the metric it watches. They need only the
+CloudWatch datasource; its role must allow `cloudwatch:DescribeAlarms`,
+`DescribeAlarmsForMetric` and `DescribeAlarmHistory` (the Grafana stack grants these).
+
+- Alarms with dimensions (RDS, OpenSearch, graph writers, the API load balancer, the graph
+  fleet) are matched exactly: namespace, metric, dimensions, statistic and period must equal
+  the alarm's definition, with the dimension values coming from the hidden lookup variables.
+- Dimension-less alarms in custom namespaces (Worker, Dagster) use prefix matching on the alarm
+  name, filtered by the `${env}`-scoped namespace and statistic. The SNS action prefix keeps
+  autoscaling alarms, which rest in ALARM by design, out of the set. Grafana never substitutes
+  variables in the name prefix itself, so a prefix must not embed the environment.
+- The annotation toggles are hidden to keep the header clean; enable, disable or show them under
+  Dashboard settings, Annotations. CloudWatch keeps 30 days of alarm history, and each transition
+  renders twice (the state change and the notification action).
+- Alarms built on metric math (the volume disk alarms) and the security alarms, whose names put
+  the environment before the prefix, have no annotation.
 
 ## Logs Setup
 
@@ -102,3 +123,11 @@ When exporting updated dashboards from Grafana:
 
 1. Open dashboard > Settings (gear icon) > JSON Model
 2. Copy JSON and save to this directory
+3. Clear the cached selections of every query variable so account resource names and the
+   account id stay out of the template; they are re-resolved on dashboard load:
+
+   ```bash
+   jq '.id = null
+       | (.templating.list[] | select(.type == "query") | .current) = {selected: false, text: "", value: ""}
+       | (.templating.list[] | select(.type == "query") | .options) = []' ops.json > ops.tmp && mv ops.tmp ops.json
+   ```
