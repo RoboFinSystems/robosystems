@@ -613,7 +613,9 @@ class QBClient:
         ts = changed_since.replace(tzinfo=UTC)
       else:
         ts = changed_since.astimezone(UTC)
-      changed_since_iso = ts.strftime("%Y-%m-%dT%H:%M:%S%z")
+      # ISO 8601 with a colon in the offset: QuickBooks rejects ``+0000``
+      # (sandbox, 2026-10-08: "not valid for property MetaData.LastUpdatedTime").
+      changed_since_iso = ts.replace(microsecond=0).isoformat()
     else:
       changed_since_iso = str(changed_since)
 
@@ -653,7 +655,12 @@ class QBClient:
           messages[:200],
         )
         return {}, True
-      resp.raise_for_status()
+      # Any other 400 is a real fault; its message is the useful part.
+      raise requests.exceptions.HTTPError(
+        f"QB CDC rejected the request for realm {self.realm_id}: "
+        f"{messages[:300] or resp.text[:300]}",
+        response=resp,
+      )
     resp.raise_for_status()
 
     data = resp.json()

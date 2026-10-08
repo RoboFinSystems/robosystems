@@ -97,10 +97,14 @@ class TestLabelMap:
   def test_every_requested_entity_has_report_labels(self):
     assert set(CDC_ENTITY_LABELS) == set(TXN_ENTITIES)
 
-  def test_a_purchase_matches_every_label_the_report_may_use(self):
+  def test_the_labels_observed_on_the_sandbox_are_listed(self):
+    # One id per label resolved against every entity type, 2026-10-08.
     assert set(CDC_ENTITY_LABELS["Purchase"]) == {
       "Cash Expense",
       "Expense",
       "Check",
       "Credit Card Expense",
+      "Credit Card Credit",
     }
+    assert "Refund" in CDC_ENTITY_LABELS["RefundReceipt"]
+    assert "Bill Payment (Credit Card)" in CDC_ENTITY_LABELS["BillPayment"]
