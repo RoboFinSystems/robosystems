@@ -220,6 +220,68 @@ class TestDatabaseQueryRouter:
     assert seen_during_stream == [1, 1]
     assert admission._connections_per_db.get("kg1a2b3c4d5", 0) == 0
 
+  def _stream(self, client, mock_query_request, chunks):
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
+
+    mock_service = client.app.dependency_overrides[get_ladybug_service]()
+    mock_service.execute_query_streaming.return_value = chunks
+
+    with patch(
+      "robosystems.graph_api.routers.databases.query.get_admission_controller"
+    ) as mock_get_admission:
+      mock_admission = MagicMock()
+      mock_admission.check_admission.return_value = (AdmissionDecision.ACCEPT, "OK")
+      mock_get_admission.return_value = mock_admission
+      response = client.post(
+        "/databases/kg1a2b3c4d5/query?streaming=true", json=mock_query_request
+      )
+
+    assert response.status_code == status.HTTP_200_OK
+    return [json.loads(line) for line in response.text.strip().split("\n")]
+
+  def test_streaming_encodes_engine_types_like_non_streaming(
+    self, client, mock_query_request
+  ):
+    from datetime import date, timedelta
+    from decimal import Decimal
+    from uuid import UUID
+
+    uid = UUID("12345678-1234-5678-1234-567812345678")
+    row = {
+      "d": Decimal("1.50"),
+      "u": uid,
+      "t": timedelta(seconds=90),
+      "day": date(2026, 10, 8),
+    }
+
+    lines = self._stream(
+      client, mock_query_request, [{"data": [row], "is_last_chunk": True}]
+    )
+
+    assert lines == [
+      {
+        "data": [{"d": "1.50", "u": str(uid), "t": "PT1M30S", "day": "2026-10-08"}],
+        "is_last_chunk": True,
+      }
+    ]
+
+  def test_streaming_unserializable_value_ends_with_error_chunk(
+    self, client, mock_query_request
+  ):
+    lines = self._stream(
+      client,
+      mock_query_request,
+      [
+        {"data": [{"n": 1}], "is_last_chunk": False},
+        {"data": [{"n": object()}], "is_last_chunk": True},
+      ],
+    )
+
+    assert lines[0] == {"data": [{"n": 1}], "is_last_chunk": False}
+    assert lines[1]["error_type"] == "SerializationError"
+    assert lines[1]["is_last_chunk"] is True
+    assert len(lines) == 2
+
   def test_execute_query_empty_result(self, client):
     """Test query with empty result set."""
     empty_query = {
