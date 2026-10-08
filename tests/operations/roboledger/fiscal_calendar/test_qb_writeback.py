@@ -10,13 +10,17 @@ from __future__ import annotations
 
 from datetime import date
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+  SHADOW_WRITE_POLICY,
   WRITEBACK_EXCLUDED_EVENT_STATUSES,
+  WRITEBACK_WRITE_POLICIES,
   WritebackConnection,
   resolve_writeback_connection,
   select_writeback_eligible_entries,
+  shadow_close_for_entity,
+  shadow_ledger,
   writeback_eligible_entry_ids,
 )
 
@@ -28,6 +32,39 @@ def _platform_session_returning(candidate):
   session = MagicMock()
   session.query.return_value.filter.return_value.order_by.return_value.first.return_value = candidate
   return session
+
+
+def _platform_session_with_policy(policy):
+  """Mock platform session whose write_policy scalar query resolves to
+  ``policy``."""
+  session = MagicMock()
+  chain = session.query.return_value.filter.return_value.order_by.return_value
+  chain.limit.return_value.scalar.return_value = policy
+  return session
+
+
+class TestShadowLedger:
+  def test_a_shadow_connection_is_a_shadow_ledger(self):
+    assert shadow_ledger(_platform_session_with_policy("shadow"), GRAPH_ID) is True
+
+  def test_other_policies_and_no_connection_are_not(self):
+    assert (
+      shadow_ledger(_platform_session_with_policy("qb_authoritative"), GRAPH_ID)
+      is False
+    )
+    assert shadow_ledger(_platform_session_with_policy(None), GRAPH_ID) is False
+
+  def test_shadow_is_never_a_writeback_policy(self):
+    assert SHADOW_WRITE_POLICY not in WRITEBACK_WRITE_POLICIES
+
+  def test_only_the_group_parents_close_shadows(self):
+    platform = _platform_session_with_policy("shadow")
+    module = "robosystems.operations.roboledger.entity_scope.is_group_parent"
+    with patch(module, return_value=True):
+      assert shadow_close_for_entity(MagicMock(), platform, GRAPH_ID, "ent_p")
+    with patch(module, return_value=False):
+      assert not shadow_close_for_entity(MagicMock(), platform, GRAPH_ID, "ent_s")
+    assert not shadow_close_for_entity(MagicMock(), platform, GRAPH_ID, None)
 
 
 class TestResolveWritebackConnection:

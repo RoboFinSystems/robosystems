@@ -152,6 +152,127 @@ def _mock_session_with_fp(fp, debit: int = 0, credit: int = 0, updated: int = 0)
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# Shadow close
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class TestShadowClose:
+  """Under a shadow connection the close observes: nothing publishes,
+  nothing posts, the drafts are shadowed, and the gates it would have
+  refused on come back as findings."""
+
+  def _close(self, svc, session, **kwargs):
+    return svc.close(
+      session,
+      GRAPH_ID,
+      "2026-01",
+      actor_id="usr_1",
+      has_sync_connection=True,
+      last_sync_at=None,
+      shadow=True,
+      **kwargs,
+    )
+
+  def test_gates_become_findings_and_drafts_are_shadowed(self):
+    gate = CloseableGateResult(
+      is_closeable=False,
+      blockers=[
+        CloseableGateResult.SYNC_STALE,
+        CloseableGateResult.RECONCILING_ITEMS,
+      ],
+      sync_stale_days=4,
+      reconciling_item_count=2,
+    )
+    fcs = _mock_fcs(gate_result=gate)
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
+    session = _mock_session_with_fp(
+      _fp(status="open"), debit=5000, credit=5000, updated=3
+    )
+
+    with patch.object(svc, "_publish_drafts_to_qb") as publish:
+      result = self._close(svc, session)
+
+    publish.assert_not_called()
+    assert result.shadow is True
+    assert result.entries_shadowed == 3
+    assert result.entries_posted == 0 and result.entries_posted_locally == 0
+    assert result.gate_findings == ("sync_stale", "reconciling_items")
+    assert result.gate_finding_counts == {"sync_stale": 4, "reconciling_items": 2}
+    # The in-window drafts moved to `shadowed`, never `posted`.
+    update = session.query.side_effect(MagicMock(__name__="Entry"))
+    kwargs = update.filter.return_value.update.call_args.args[0]
+    assert list(kwargs.values()) == ["shadowed"]
+    fcs.advance_closed_through.assert_called_once()
+    note = fcs.advance_closed_through.call_args.kwargs["note"]
+    assert note.startswith("[shadow close — nothing posted or published; findings: ")
+    assert "sync_stale, reconciling_items" in note
+
+  def test_a_structural_blocker_still_refuses(self):
+    fcs = _mock_fcs(
+      gate_result=CloseableGateResult(
+        is_closeable=False,
+        blockers=[CloseableGateResult.SEQUENCE, CloseableGateResult.SYNC_STALE],
+      )
+    )
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
+
+    with pytest.raises(CloseGateFailed) as exc_info:
+      self._close(svc, MagicMock())
+    # Only the structural one is a refusal; the finding is not listed.
+    assert exc_info.value.blockers == [CloseableGateResult.SEQUENCE]
+
+  def test_a_clean_shadow_close_records_no_findings(self):
+    fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
+    session = _mock_session_with_fp(
+      _fp(status="open"), debit=5000, credit=5000, updated=0
+    )
+
+    result = self._close(svc, session)
+
+    assert result.gate_findings == () and result.gate_finding_counts == {}
+    note = fcs.advance_closed_through.call_args.kwargs["note"]
+    assert note.endswith("findings: none]")
+
+  def test_the_receipt_carries_the_shadow_fields(self):
+    fcs = _mock_fcs(
+      gate_result=CloseableGateResult(
+        is_closeable=False,
+        blockers=[CloseableGateResult.UNRECONCILED_ACCOUNTS],
+        unreconciled_account_count=1,
+      )
+    )
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
+    fp = _fp(status="open")
+    session = _mock_session_with_fp(fp, debit=0, credit=0, updated=2)
+
+    self._close(svc, session)
+
+    receipt = fp.close_receipt
+    assert receipt["version"] == 2
+    assert receipt["shadow"] is True and receipt["entries_shadowed"] == 2
+    assert receipt["gate_findings"] == ["unreconciled_accounts"]
+    assert receipt["gate_finding_counts"] == {"unreconciled_accounts": 1}
+
+  def test_outside_shadow_the_gate_still_blocks(self):
+    fcs = _mock_fcs(
+      gate_result=CloseableGateResult(
+        is_closeable=False, blockers=[CloseableGateResult.SYNC_STALE]
+      )
+    )
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
+    with pytest.raises(CloseGateFailed):
+      svc.close(
+        MagicMock(),
+        GRAPH_ID,
+        "2026-01",
+        actor_id="usr_1",
+        has_sync_connection=True,
+        last_sync_at=None,
+      )
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # Happy path
 # ────────────────────────────────────────────────────────────────────────────
 

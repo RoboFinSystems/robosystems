@@ -177,6 +177,41 @@ class TestExecuteEventBlockNativeFastPath:
     assert result.qb_external_id is None
     assert evt.status == "classified"
 
+  def test_shadow_policy_connection_never_writes_to_qb(self):
+    from robosystems.models.api.event_block import ExecuteEventBlockRequest
+    from robosystems.operations.event_block.commands import execute_event_block
+
+    evt = _make_event()
+    session = _make_session(evt)
+
+    mock_connection = MagicMock()
+    mock_connection.graph_id = GRAPH_ID
+    mock_connection.write_policy = "shadow"
+    mock_connection.provider = "quickbooks"
+    mock_platform_session = MagicMock()
+    mock_platform_session.__enter__ = MagicMock(return_value=mock_platform_session)
+    mock_platform_session.__exit__ = MagicMock(return_value=False)
+
+    with (
+      patch("robosystems.database.SessionFactory", return_value=mock_platform_session),
+      patch(
+        "robosystems.models.core.connection.connection.Connection.get_by_id",
+        return_value=mock_connection,
+      ),
+      patch(
+        "robosystems.models.core.connection.ConnectionCredentials.get_by_connection_id"
+      ) as credentials,
+    ):
+      result = execute_event_block(
+        session,
+        ExecuteEventBlockRequest(event_id="evt_test_abc"),
+        created_by="user_1",
+        graph_id=GRAPH_ID,
+      )
+
+    credentials.assert_not_called()
+    assert result.qb_external_id is None and result.qb_error is None
+
   def test_a_connection_from_another_graph_is_refused_before_any_qb_client(self):
     """The override and the routing id are both caller-controlled and
     connection ids are platform-wide, so the publish must join the connection

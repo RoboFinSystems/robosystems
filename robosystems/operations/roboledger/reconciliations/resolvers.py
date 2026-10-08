@@ -66,6 +66,9 @@ class ReconciliationWindow:
   fiscal_year_start: date
   # Whose books the window is over; None reads every entity's.
   entity_id: str | None = None
+  # A shadow close posts no draft, so the ledger side is what has landed:
+  # the comparison is exactly schedule versus source ledger.
+  shadow: bool = False
 
 
 @dataclass(frozen=True)

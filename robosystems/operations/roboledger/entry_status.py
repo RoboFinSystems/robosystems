@@ -17,6 +17,16 @@ from sqlalchemy import BindParameter, bindparam
 
 LANDED_ENTRY_STATUSES: frozenset[str] = frozenset({"posted", "reversed"})
 
+# A draft a shadow close took: never posted, never published, never
+# redrafted or deleted. It is the expectation the close compares with what
+# the source ledger holds, so it is terminal without being in the books.
+SHADOWED_ENTRY_STATUS = "shadowed"
+
+# Statuses a schedule never drafts over again: landed, or shadowed.
+TERMINAL_ENTRY_STATUSES: frozenset[str] = LANDED_ENTRY_STATUSES | {
+  SHADOWED_ENTRY_STATUS
+}
+
 # SQL fragment for string-built SQL without bind parameters (the materializer).
 # Sorted for stable output; literals from this module only, never caller input.
 LANDED_ENTRY_SQL: str = "({})".format(
@@ -32,6 +42,17 @@ def landed_entry_bindparam() -> BindParameter:
   """The `:landed_entry_statuses` IN-list, ready to `.bindparams()` onto a read."""
   return bindparam(
     LANDED_ENTRY_PARAM, value=sorted(LANDED_ENTRY_STATUSES), expanding=True
+  )
+
+
+TERMINAL_ENTRY_PARAM = "terminal_entry_statuses"
+
+
+def terminal_entry_bindparam() -> BindParameter:
+  """The `:terminal_entry_statuses` IN-list: the entries a schedule is the
+  support of, landed or shadowed."""
+  return bindparam(
+    TERMINAL_ENTRY_PARAM, value=sorted(TERMINAL_ENTRY_STATUSES), expanding=True
   )
 
 

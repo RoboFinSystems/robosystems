@@ -40,8 +40,9 @@ from robosystems.operations.roboledger.entity_scope import (
 )
 from robosystems.operations.roboledger.entry_status import (
   GENERATED_REVERSAL_SQL,
-  LANDED_ENTRY_STATUSES,
   PRIMARY_ENTRY_SQL,
+  SHADOWED_ENTRY_STATUS,
+  TERMINAL_ENTRY_STATUSES,
   landed_entry_bindparam,
 )
 from robosystems.operations.roboledger.fact_set import create_fact_set
@@ -1041,6 +1042,8 @@ class ScheduleService:
       elif row.entry_status == "draft":
         status = "drafted"
         total_draft += 1
+      elif row.entry_status == SHADOWED_ENTRY_STATUS:
+        status = "shadowed"
       else:
         status = "pending"
 
@@ -1151,11 +1154,13 @@ class ScheduleService:
     ).fetchone()
 
     existing_entry_id: str | None = existing_row.id if existing_row else None
-    # Any landed status, including `reversed`, which regenerate would delete.
-    if existing_row and existing_row.status in LANDED_ENTRY_STATUSES:
+    # Any landed status, including `reversed`, which regenerate would delete;
+    # and a shadowed one, which stands as the expectation a shadow close took.
+    if existing_row and existing_row.status in TERMINAL_ENTRY_STATUSES:
       raise ValueError(
         f"Closing entry for schedule '{structure_id}' in period "
-        f"{period_start} to {period_end} has already been posted "
+        f"{period_start} to {period_end} has already been "
+        f"{'shadowed' if existing_row.status == SHADOWED_ENTRY_STATUS else 'posted'} "
         f"(status: {existing_row.status}). Use the reopen flow to modify it."
       )
 

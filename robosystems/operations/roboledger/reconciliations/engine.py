@@ -39,7 +39,11 @@ _RETAINED_EARNINGS_SUB_TYPE = "RetainedEarnings"
 
 
 def reconciliation_window(
-  period: str, fiscal_year_start_month: int, entity_id: str | None = None
+  period: str,
+  fiscal_year_start_month: int,
+  entity_id: str | None = None,
+  *,
+  shadow: bool = False,
 ) -> ReconciliationWindow:
   """The period's last day and the first day of the fiscal year holding it,
   over one entity's books."""
@@ -52,6 +56,7 @@ def reconciliation_window(
     period_end=period_end,
     fiscal_year_start=date(year, fiscal_year_start_month, 1),
     entity_id=entity_id,
+    shadow=shadow,
   )
 
 
@@ -229,10 +234,16 @@ def _compute_account_scope(
     d: get_net_balances_cents(session, None, d, entity_id=window.entity_id)
     for d in dates
   }
+  # Under shadow nothing awaiting the close will ever post: the ledger side
+  # is what has landed, and the comparison is schedule versus source ledger.
   awaiting_close = {
     d: (
-      _draft_balances(session, d, window.entity_id),
-      _undrafted_schedule_balances(session, d, window.entity_id),
+      ({}, {})
+      if window.shadow
+      else (
+        _draft_balances(session, d, window.entity_id),
+        _undrafted_schedule_balances(session, d, window.entity_id),
+      )
     )
     for d in dates
   }

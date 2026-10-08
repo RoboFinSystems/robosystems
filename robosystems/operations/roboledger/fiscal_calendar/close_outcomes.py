@@ -57,6 +57,10 @@ def close_success_payload(
     "statement_stamp_note": result.statement_stamp_note,
     "stamped_statement_sets": dict(result.stamped_statement_sets),
     "statement_rule_summary": result.statement_rule_summary,
+    "shadow": result.shadow,
+    "entries_shadowed": result.entries_shadowed,
+    "gate_findings": list(result.gate_findings),
+    "gate_finding_counts": dict(result.gate_finding_counts),
   }
 
 

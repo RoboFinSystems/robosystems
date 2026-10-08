@@ -138,12 +138,20 @@ def _explicit_write_members(graph_id: str) -> set[str]:
     return GraphUser.explicit_write_member_ids(graph_id, platform_session)
 
 
-def _window(session: Session, period: str) -> ReconciliationWindow:
+def _window(session: Session, graph_id: str, period: str) -> ReconciliationWindow:
   """The period's window over the group parent's books: the reconciliation
   suite compares one entity's ledger, and until it takes an entity that is
-  the parent's."""
+  the parent's. Under a shadow connection the ledger side is landed only."""
+  from robosystems.database import SessionFactory
+  from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+    shadow_close_for_entity,
+  )
+
+  entity_id = find_entity_id(session)
+  with SessionFactory() as platform_session:
+    shadow = shadow_close_for_entity(session, platform_session, graph_id, entity_id)
   return reconciliation_window(
-    period, get_fiscal_year_start_month(session), find_entity_id(session)
+    period, get_fiscal_year_start_month(session), entity_id, shadow=shadow
   )
 
 
@@ -176,7 +184,7 @@ def preview_reconciliations(
   raises `NoSourceLedgerError` when the graph has no synced ledger, and the
   QuickBooks client's own errors.
   """
-  window = _window(session, body.period)
+  window = _window(session, graph_id, body.period)
   if body.method == "schedule_register":
     side = _schedule_register_side(session, window)
   elif body.method == "statement":
@@ -271,7 +279,7 @@ def refresh_reconciliations(
   ``RowLockedError`` when another refresh of this graph is in flight.
   """
   create = compared_via == "operation"
-  window = _window(session, body.period)
+  window = _window(session, graph_id, body.period)
 
   # The source is read before the write lock, so a slow report holds nothing.
   mirror = None
@@ -394,7 +402,7 @@ def record_statement_balance(
     raise StatementDocumentNotFoundError(body.document_id)
 
   period = body.as_of.strftime("%Y-%m")
-  window = _window(session, period)
+  window = _window(session, graph_id, period)
   lock_reconciliation_writes(session, graph_id)
   record_statement_observation(
     session,
@@ -485,7 +493,7 @@ def sign_off_reconciliation(
   `NotAGraphMemberError`, `SeparateReviewerError`, and ``ValueError`` on a
   malformed period.
   """
-  window = _window(session, body.period)
+  window = _window(session, graph_id, body.period)
   # A refresh in flight would replace the comparison being signed.
   lock_reconciliation_writes(session, graph_id)
   structure = _load_reconciliation(session, body.structure_id)

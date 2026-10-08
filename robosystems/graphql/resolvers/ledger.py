@@ -1129,15 +1129,17 @@ class LedgerQuery:
     from robosystems.db.platform import platform_session
     from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
       resolve_writeback_connection,
+      shadow_ledger,
     )
 
     graph_id = require_graph_id(info)
     try:
       with platform_session() as platform_db:
         writeback = resolve_writeback_connection(platform_db, graph_id)
+        shadow = shadow_ledger(platform_db, graph_id)
       with _open_session(info, "roboledger") as session:
         response = reads_period_drafts.list_period_drafts(
-          session, period, writeback=writeback, entity_id=entity_id
+          session, period, writeback=writeback, entity_id=entity_id, shadow=shadow
         )
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()

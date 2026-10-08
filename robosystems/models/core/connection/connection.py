@@ -40,11 +40,16 @@ class WritePolicy(str, Enum):
   - ``QB_AUTHORITATIVE``: entries publish to QuickBooks via
     ``execute-event-block`` and stay DRAFT locally until QB accepts.
     Round-tripped entries are matched by ``metadata.qb_external_id``.
+  - ``SHADOW``: QuickBooks is the book of record and RoboSystems only
+    observes it. Nothing publishes and the close posts nothing locally:
+    its drafts become ``shadowed`` expectations compared with what
+    QuickBooks holds, and its gates are recorded as findings.
   - ``HYBRID``: reserved, not implemented.
   """
 
   NATIVE = "native"
   QB_AUTHORITATIVE = "qb_authoritative"
+  SHADOW = "shadow"
   HYBRID = "hybrid"
 
 
@@ -365,7 +370,11 @@ class Connection(Model):
 
   def set_write_policy(self, session: Session, write_policy: str) -> None:
     """Set the outbound write policy. ``HYBRID`` is rejected (not implemented)."""
-    allowed = {WritePolicy.NATIVE.value, WritePolicy.QB_AUTHORITATIVE.value}
+    allowed = {
+      WritePolicy.NATIVE.value,
+      WritePolicy.QB_AUTHORITATIVE.value,
+      WritePolicy.SHADOW.value,
+    }
     if write_policy not in allowed:
       raise ValueError(
         f"Unsupported write_policy '{write_policy}'. Allowed: {sorted(allowed)}."

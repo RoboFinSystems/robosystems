@@ -222,7 +222,8 @@ class PeriodCloseItemResponse(BaseModel):
   """One schedule's contribution to a period close — drafted closing
   entry plus its reversal (when `auto_reverse=True`).
 
-  `status` is the closing entry's draft/posted lifecycle. The
+  `status` is the closing entry's draft/posted lifecycle (`shadowed` when a
+  shadow close took the draft as an expectation and posted nothing). The
   reversal mirrors the same shape with `reversal_*` fields.
   """
 
@@ -250,7 +251,10 @@ class CloseReceiptResponse(BaseModel):
   """
 
   version: int = Field(
-    ..., description="Receipt schema version; 1 is the first shipped shape"
+    ...,
+    description=(
+      "Receipt schema version; 1 is the first shipped shape, 2 adds the shadow fields"
+    ),
   )
   period: str = Field(..., description="Period this receipt is for (YYYY-MM)")
   closed_at: datetime
@@ -281,6 +285,21 @@ class CloseReceiptResponse(BaseModel):
     default_factory=dict, description="structure_id -> minted fact_set_id"
   )
   statement_rule_summary: dict[str, int] | None = None
+  shadow: bool = Field(
+    False,
+    description=(
+      "The close ran in shadow: nothing written to QuickBooks, nothing "
+      "posted, the drafts shadowed, the gates recorded as findings"
+    ),
+  )
+  entries_shadowed: int = 0
+  gate_findings: list[str] = Field(
+    default_factory=list,
+    description="Blocker codes a shadow close recorded instead of enforcing",
+  )
+  gate_finding_counts: dict[str, int] | None = Field(
+    None, description="Each finding's size: days stale, or a count"
+  )
 
 
 class PeriodCloseStatusResponse(BaseModel):

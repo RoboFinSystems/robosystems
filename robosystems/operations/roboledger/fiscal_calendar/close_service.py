@@ -5,7 +5,7 @@ Callers translate the domain exceptions here into their own error formats.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
@@ -23,6 +23,7 @@ from robosystems.operations.roboledger.entity_scope import (
   is_group_parent,
   resolve_entity_id,
 )
+from robosystems.operations.roboledger.entry_status import SHADOWED_ENTRY_STATUS
 
 from .periods import period_date_range
 from .qb_writeback import WRITEBACK_EXCLUDED_EVENT_STATUSES
@@ -51,6 +52,32 @@ class CloseGateFailed(PeriodCloseError):
     self.gate = gate
     self.blockers = gate.blockers
     self.no_calendar = CloseableGateResult.NO_CALENDAR in gate.blockers
+
+
+# The gates a shadow close records rather than enforces: each is an opinion
+# about the books, which under shadow are QuickBooks'. The structural gates
+# (calendar, sequence, already closed, period incomplete) still refuse.
+SHADOW_FINDING_BLOCKERS = (
+  CloseableGateResult.SYNC_STALE,
+  CloseableGateResult.PENDING_OBLIGATIONS,
+  CloseableGateResult.STRANDED_OBLIGATIONS,
+  CloseableGateResult.RECONCILING_ITEMS,
+  CloseableGateResult.UNPOSTED_SOURCE_EVENTS,
+  CloseableGateResult.UNRECONCILED_ACCOUNTS,
+)
+
+
+def gate_finding_counts(gate: CloseableGateResult) -> dict[str, int]:
+  """Each finding's size, from the gate's own detail fields."""
+  counts = {
+    CloseableGateResult.SYNC_STALE: gate.sync_stale_days or 0,
+    CloseableGateResult.PENDING_OBLIGATIONS: gate.pending_obligation_count,
+    CloseableGateResult.STRANDED_OBLIGATIONS: gate.stranded_obligation_count,
+    CloseableGateResult.RECONCILING_ITEMS: gate.reconciling_item_count,
+    CloseableGateResult.UNPOSTED_SOURCE_EVENTS: gate.unposted_source_event_count,
+    CloseableGateResult.UNRECONCILED_ACCOUNTS: gate.unreconciled_account_count,
+  }
+  return {code: counts[code] for code in gate.blockers if code in counts}
 
 
 class PeriodNotFoundError(PeriodCloseError):
@@ -141,11 +168,18 @@ class PeriodCloseResult:
   statement_stamp_note: str | None = None
   stamped_statement_sets: dict[str, str] = dataclass_field(default_factory=dict)
   statement_rule_summary: dict[str, int] | None = None
+  # A shadow close: nothing published, nothing posted; the in-window drafts
+  # were shadowed, and the gates it would have refused on are findings.
+  shadow: bool = False
+  entries_shadowed: int = 0
+  gate_findings: tuple[str, ...] = ()
+  gate_finding_counts: dict[str, int] = dataclass_field(default_factory=dict)
 
 
 # Bump when the receipt's shape changes so a reader can tell an old receipt
 # from a new one rather than inferring it from which keys are present.
-CLOSE_RECEIPT_VERSION = 1
+# 2: the shadow fields.
+CLOSE_RECEIPT_VERSION = 2
 
 
 def _build_close_receipt(
@@ -176,6 +210,10 @@ def _build_close_receipt(
     "statement_stamp_note": result.statement_stamp_note,
     "stamped_statement_sets": dict(result.stamped_statement_sets),
     "statement_rule_summary": result.statement_rule_summary,
+    "shadow": result.shadow,
+    "entries_shadowed": result.entries_shadowed,
+    "gate_findings": list(result.gate_findings),
+    "gate_finding_counts": dict(result.gate_finding_counts),
   }
 
 
@@ -213,7 +251,12 @@ class PeriodCloseService:
     allow_unreconciled_accounts: bool = False,
     note: str | None = None,
     entity_id: str | None = None,
+    shadow: bool = False,
   ) -> PeriodCloseResult:
+    """``shadow`` runs the close as an observation: the structural gates
+    still refuse, the rest are recorded as findings; nothing publishes and
+    nothing posts, the in-window drafts are shadowed, and the statements
+    stamp from what has landed, which is the source ledger's."""
     gate = self._fcs.closeable_gate(
       session,
       graph_id,
@@ -227,7 +270,13 @@ class PeriodCloseService:
       allow_unreconciled_accounts=allow_unreconciled_accounts,
       entity_id=entity_id,
     )
-    if not gate.is_closeable:
+    findings: tuple[str, ...] = ()
+    if shadow:
+      findings = tuple(b for b in gate.blockers if b in SHADOW_FINDING_BLOCKERS)
+      hard = [b for b in gate.blockers if b not in SHADOW_FINDING_BLOCKERS]
+      if hard:
+        raise CloseGateFailed(replace(gate, is_closeable=False, blockers=hard))
+    elif not gate.is_closeable:
       raise CloseGateFailed(gate)
     # A closeable gate found the entity's calendar, so the entity resolves.
     entity_id = entity_id or resolve_entity_id(session)
@@ -247,13 +296,18 @@ class PeriodCloseService:
     # Draft + posted together, before anything mutates.
     self._preflight_bs_check(session, period_start, period_end, entity_id)
 
-    published_to_qb = self._publish_drafts_to_qb(
-      session,
-      graph_id,
-      period_start,
-      period_end,
-      actor_id=actor_id,
-      entity_id=entity_id,
+    # Shadow writes nothing to QuickBooks, whatever the resolver would say.
+    published_to_qb = (
+      0
+      if shadow
+      else self._publish_drafts_to_qb(
+        session,
+        graph_id,
+        period_start,
+        period_end,
+        actor_id=actor_id,
+        entity_id=entity_id,
+      )
     )
 
     # The caller's session-scoped period fence serializes the whole close
@@ -283,14 +337,24 @@ class PeriodCloseService:
       raise PeriodAlreadyClosedError(period)
     is_reclose = fp.status == "closing"
 
-    # Drafts the pre-publish step published are already posted.
+    # Drafts the pre-publish step published are already posted. Under
+    # shadow the drafts are taken as expectations instead: shadowed, never
+    # posted, so a later policy change can never post or publish them.
     now = datetime.now(UTC)
-    posted_locally = drafts_close_posts(
+    in_window = drafts_close_posts(
       session, period_start, period_end, entity_id=entity_id
-    ).update(
-      {Entry.status: "posted", Entry.posted_at: now},
-      synchronize_session=False,
     )
+    if shadow:
+      shadowed = in_window.update(
+        {Entry.status: SHADOWED_ENTRY_STATUS}, synchronize_session=False
+      )
+      posted_locally = 0
+    else:
+      shadowed = 0
+      posted_locally = in_window.update(
+        {Entry.status: "posted", Entry.posted_at: now},
+        synchronize_session=False,
+      )
     entries_posted = posted_locally + published_to_qb
     session.flush()
 
@@ -315,6 +379,7 @@ class PeriodCloseService:
       unreconciled_overridden_count=(
         gate.unreconciled_account_count if allow_unreconciled_accounts else 0
       ),
+      shadow_findings=findings if shadow else None,
     )
 
     if is_reclose and not self._fcs.is_latest_sequential_close(
@@ -379,6 +444,7 @@ class PeriodCloseService:
       f"Period {period} closed for graph {graph_id} entity {entity_id}: "
       f"entries_posted={entries_posted} "
       f"(published_to_qb={published_to_qb} posted_locally={posted_locally}) "
+      f"shadow={shadow} shadowed={shadowed} findings={list(findings)} "
       f"reclose={is_reclose} "
       f"target_auto_advanced={target_auto_advanced} "
       f"statements_stamped={stamp.stamped} "
@@ -400,6 +466,10 @@ class PeriodCloseService:
       statement_stamp_note=stamp.note,
       stamped_statement_sets=stamp.fact_set_ids,
       statement_rule_summary=stamp.rule_summary,
+      shadow=shadow,
+      entries_shadowed=shadowed,
+      gate_findings=findings,
+      gate_finding_counts=gate_finding_counts(gate) if shadow else {},
     )
 
     # Same transaction as the status flip, so a close and its receipt
@@ -668,9 +738,16 @@ class PeriodCloseService:
     reconciling_overridden_count: int = 0,
     unposted_overridden_count: int = 0,
     unreconciled_overridden_count: int = 0,
+    shadow_findings: tuple[str, ...] | None = None,
   ) -> str | None:
-    """Append a marker to the audit note for each overridden close gate."""
+    """Append a marker to the audit note for each overridden close gate, or
+    for a shadow close, which overrides none and enforces none."""
     suffixes: list[str] = []
+    if shadow_findings is not None:
+      listed = ", ".join(shadow_findings) if shadow_findings else "none"
+      suffixes.append(
+        f"[shadow close — nothing posted or published; findings: {listed}]"
+      )
     if allow_stale_sync:
       suffixes.append("[sync gate overridden — allow_stale_sync=true]")
     if stranded_overridden_count > 0:
@@ -702,6 +779,7 @@ class PeriodCloseService:
 
 
 __all__ = [
+  "SHADOW_FINDING_BLOCKERS",
   "CloseGateFailed",
   "PeriodAlreadyClosedError",
   "PeriodCloseError",

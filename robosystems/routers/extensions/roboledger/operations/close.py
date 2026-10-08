@@ -250,7 +250,11 @@ async def set_close_target_op(
     "sequence violations return 422 with structured `blockers`. Common "
     "blockers: `sync_stale` (override with `allow_stale_sync=true` "
     "after manual verification), `period_incomplete` (draft entries "
-    "unbalanced), `sequence_violation` (out-of-order)."
+    "unbalanced), `sequence_violation` (out-of-order). Under a QuickBooks "
+    "connection whose write_policy is `shadow`, the close observes instead: "
+    "nothing is written to QuickBooks or posted, the drafts become "
+    "`shadowed` expectations (`entries_shadowed`), and the gates that would "
+    "have blocked are returned as `gate_findings` rather than enforced."
   ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],

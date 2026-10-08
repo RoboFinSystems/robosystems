@@ -417,8 +417,11 @@ async def get_connection(
     "'qb_authoritative' makes QuickBooks the source of truth — "
     "RoboSystems-originated entries (manual JEs, schedule drafts) publish "
     "to QuickBooks when executed or at close. 'native' keeps RoboSystems "
-    "authoritative with no write-back. This is the explicit operator opt-in "
-    "for writing to your books of record."
+    "authoritative with no write-back. 'shadow' keeps QuickBooks the book of "
+    "record and writes nothing to it: the close posts nothing locally either, "
+    "its drafts become shadowed expectations compared with what QuickBooks "
+    "holds, and its gates are recorded as findings. This is the explicit "
+    "operator opt-in for writing to your books of record."
   ),
   responses={**RESOURCE_ERROR_RESPONSES},
 )

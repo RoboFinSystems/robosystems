@@ -688,6 +688,7 @@ class CloseReceipt:
   rule_summary: strawberry.scalars.JSON | None
   stamped_statement_sets: strawberry.scalars.JSON
   statement_rule_summary: strawberry.scalars.JSON | None
+  gate_finding_counts: strawberry.scalars.JSON | None
 
 
 @pydantic_type(model=PydanticPeriodCloseStatusResponse, all_fields=True)

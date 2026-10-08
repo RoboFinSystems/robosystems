@@ -769,6 +769,7 @@ class TestSetWritePolicyDefinition:
     assert defn["inputSchema"]["properties"]["write_policy"]["enum"] == [
       "native",
       "qb_authoritative",
+      "shadow",
     ]
 
 

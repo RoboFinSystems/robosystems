@@ -18,6 +18,7 @@ from robosystems.operations.roboledger.entity_scope import (
 )
 from robosystems.operations.roboledger.fiscal_calendar import period_date_range
 from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+  SHADOW_WRITE_POLICY,
   WritebackConnection,
   writeback_eligible_entry_ids,
 )
@@ -33,14 +34,16 @@ def list_period_drafts(
   writeback: WritebackConnection | None = None,
   *,
   entity_id: str | None = None,
+  shadow: bool = False,
 ) -> PeriodDraftsResponse:
   """Return an entity's draft entries for review within a given YYYY-MM
   period. ``entity_id`` defaults to the group parent.
 
   With a ``writeback`` connection, each draft carries ``will_publish_to_qb``
   from the same predicate close uses (``qb_writeback.py``); without one, every
-  draft is local-only. The connection is the group parent's: a subsidiary's
-  drafts never publish to it.
+  draft is local-only. Under ``shadow`` none publishes or posts: the close
+  takes each as an expectation. The connection is the group parent's: a
+  subsidiary's drafts never publish to it, and never shadow.
   """
   period_start, period_end = period_date_range(period)
 
@@ -48,6 +51,7 @@ def list_period_drafts(
   entity_id = find_entity_id(session, entity_id)
   if entity_id is None or not (defaulted or is_group_parent(session, entity_id)):
     writeback = None
+    shadow = False
   has_writeback = writeback is not None
   eligible_ids = (
     writeback_eligible_entry_ids(session, period_start, period_end, entity_id=entity_id)
@@ -92,6 +96,7 @@ def list_period_drafts(
     will_publish = has_writeback and entry.entry_id in eligible_ids
     if will_publish:
       qb_publish_count += 1
+    disposition = "shadow" if shadow else ("publish" if will_publish else "post")
     drafts.append(
       DraftEntryResponse(
         entry_id=entry.entry_id,
@@ -106,6 +111,7 @@ def list_period_drafts(
         total_credit=entry_credit,
         balanced=balanced,
         will_publish_to_qb=will_publish,
+        close_disposition=disposition,
       )
     )
 
@@ -118,8 +124,12 @@ def list_period_drafts(
     total_credit=total_credit,
     all_balanced=all_balanced,
     qb_writeback_connection_id=writeback.connection_id if writeback else None,
-    qb_write_policy=writeback.write_policy if writeback else None,
+    qb_write_policy=(
+      SHADOW_WRITE_POLICY if shadow else (writeback.write_policy if writeback else None)
+    ),
     qb_publish_count=qb_publish_count,
-    local_only_count=len(drafts) - qb_publish_count,
+    local_only_count=0 if shadow else len(drafts) - qb_publish_count,
+    shadow=shadow,
+    shadowed_count=len(drafts) if shadow else 0,
     drafts=drafts,
   )

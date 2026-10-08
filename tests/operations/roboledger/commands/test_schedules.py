@@ -182,6 +182,39 @@ def test_delete_schedule_refuses_when_entries_have_landed() -> None:
   session.commit.assert_not_called()
 
 
+def test_delete_schedule_counts_shadowed_entries_as_its_support() -> None:
+  """A shadow close's expectations rest on the schedule's facts exactly as
+  posted entries do: the guard asks for landed or shadowed, and refuses."""
+  from unittest.mock import patch
+
+  import pytest
+
+  structure = MagicMock()
+  structure.id = "struct_sched"
+  structure.block_type = "schedule"
+
+  session = MagicMock()
+  session.get.return_value = structure
+  session.execute.side_effect = _delete_executes(landed=1)
+
+  with (
+    patch(
+      "robosystems.operations.roboledger.commands.schedules."
+      "ScheduleService.void_pending_obligations",
+      return_value=0,
+    ),
+    pytest.raises(ValueError, match="posted or shadowed"),
+  ):
+    delete_schedule(session, DeleteScheduleRequest(structure_id="struct_sched"))
+
+  guard = session.execute.call_args_list[2].args[0]
+  assert set(guard.compile().params["terminal_entry_statuses"]) == {
+    "posted",
+    "reversed",
+    "shadowed",
+  }
+
+
 def test_delete_schedule_deletes_drafts_after_fencing_their_periods() -> None:
   from datetime import date
   from unittest.mock import patch

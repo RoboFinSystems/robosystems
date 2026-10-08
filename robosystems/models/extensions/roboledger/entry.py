@@ -50,7 +50,7 @@ class Entry(ExtensionsBase):
       postgresql_where="triggered_by_event_id IS NOT NULL",
     ),
     CheckConstraint(
-      "status IN ('draft', 'posted', 'reversed')",
+      "status IN ('draft', 'posted', 'reversed', 'shadowed')",
       name="check_entry_status",
     ),
     # An entry is reversed at most once. `reverse_journal_entry` also locks the

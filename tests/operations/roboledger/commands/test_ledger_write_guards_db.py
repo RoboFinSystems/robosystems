@@ -363,7 +363,7 @@ def test_rebuild_counts_entries_a_close_landed_before_the_fence(ext_session):
       f"{_COMMANDS}._fence_draft_periods",
       side_effect=_close_lands_the_drafts(session, structure_id),
     ),
-    pytest.raises(ValueError, match="posted closing entries exist"),
+    pytest.raises(ValueError, match="posted or shadowed closing entries exist"),
   ):
     rebuild_schedule(session, RebuildScheduleRequest(structure_id=structure_id))
   session.rollback()
