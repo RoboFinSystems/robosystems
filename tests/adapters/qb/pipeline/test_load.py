@@ -584,13 +584,17 @@ class TestApplyCdc:
 @pytest.mark.unit
 class TestFiscalYearStart:
   def _company_info(self, tmp_path, month):
+    import io
+
     import pandas as pd
 
     extract = tmp_path / "extract"
     extract.mkdir(parents=True)
+    buffer = io.BytesIO()
     pd.DataFrame([{"Id": "1", "FiscalYearStartMonth": month}]).to_parquet(
-      extract / "raw_company_info.parquet", index=False
+      buffer, index=False
     )
+    (extract / "raw_company_info.parquet").write_bytes(buffer.getvalue())
     return extract
 
   def test_the_month_name_quickbooks_stores_becomes_a_number(self, tmp_path):

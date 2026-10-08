@@ -1,10 +1,13 @@
 """QuickBooks load asset: dbt DuckDB output → extensions PostgreSQL via OLTPLoader."""
 
+import io
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
 from dagster import AssetExecutionContext, MaterializeResult, asset
+
+from robosystems.logger import logger
 
 from .configs import QBSyncConfig
 from .utils import get_pipeline_work_dir
@@ -405,8 +408,13 @@ def fiscal_year_start_month(extract_dir: Path) -> int:
   try:
     import pandas as pd
 
-    frame = pd.read_parquet(path, columns=["FiscalYearStartMonth"])
+    # Bytes, not a path: pyarrow's lazy filesystem registration can collide,
+    # and the fallback below would hide it as a January year.
+    frame = pd.read_parquet(
+      io.BytesIO(path.read_bytes()), columns=["FiscalYearStartMonth"]
+    )
   except Exception:
+    logger.warning("Could not read the fiscal year start from %s", path, exc_info=True)
     return 1
   if frame.empty:
     return 1
