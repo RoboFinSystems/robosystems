@@ -13,6 +13,7 @@ from dagster import JobDefinition, build_op_context
 
 from robosystems.dagster.jobs.connection_sync import (
   SYNCABLE_STATUSES,
+  describe_failure,
   due_connections,
   scheduled_connection_sync_job,
   scheduled_connection_sync_schedule,
@@ -219,3 +220,22 @@ class TestSweep:
     result = self._run(_due("conn_a"), dispatch, flag="false")
     assert result["skipped"] is True
     dispatch.assert_not_awaited()
+
+
+@pytest.mark.unit
+class TestDescribeFailure:
+  def test_names_the_cause_behind_a_wrapped_client_error(self):
+    try:
+      try:
+        raise ConnectionError("Name or service not known: dagster-webserver")
+      except ConnectionError as inner:
+        raise RuntimeError("Exception occured during execution of query ...") from inner
+    except RuntimeError as exc:
+      text = describe_failure(exc)
+    assert text.startswith("RuntimeError: Exception occured")
+    assert text.endswith(
+      "ConnectionError: Name or service not known: dagster-webserver"
+    )
+
+  def test_a_bare_exception_is_just_itself(self):
+    assert describe_failure(ValueError("x")) == "ValueError: x"

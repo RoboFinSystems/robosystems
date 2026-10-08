@@ -106,6 +106,22 @@ def _failed_since(connection: Connection, cutoff: datetime) -> bool:
   return attempted >= cutoff
 
 
+def describe_failure(exc: BaseException, *, limit: int = 600) -> str:
+  """The exception and what caused it, innermost last: a wrapped client error
+  says which query failed, and only its cause says why."""
+  parts: list[str] = []
+  seen: set[int] = set()
+  cursor: BaseException | None = exc
+  while cursor is not None and id(cursor) not in seen:
+    seen.add(id(cursor))
+    text = " ".join(str(cursor).split())
+    parts.append(
+      f"{type(cursor).__name__}: {text[:200]}" if text else type(cursor).__name__
+    )
+    cursor = cursor.__cause__ or cursor.__context__
+  return " <- ".join(parts)[:limit]
+
+
 @op
 def sweep_connection_syncs(
   context: OpExecutionContext, db: DatabaseResource
@@ -154,7 +170,7 @@ def sweep_connection_syncs(
         counts["failed"] += 1
         context.log.warning(
           f"Scheduled sync of connection {connection_id} ({provider}) was not "
-          f"dispatched: {type(exc).__name__}: {exc}"
+          f"dispatched: {describe_failure(exc)}"
         )
         continue
       if result.get("dispatched"):
