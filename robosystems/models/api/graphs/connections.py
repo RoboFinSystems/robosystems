@@ -49,8 +49,9 @@ class QuickBooksConnectionConfig(BaseModel):
 class MercuryConnectionConfig(BaseModel):
   """Mercury bank-feed connection configuration.
 
-  A bank feed is native accounting: the graph must already have a chart of
-  accounts and no live QuickBooks connection. Over OAuth (the hosted
+  A bank feed is native accounting: the entity its accounts land on must
+  already have a chart of accounts and must not be the one QuickBooks keeps
+  (the group parent, while QuickBooks is connected). Over OAuth (the hosted
   default) the connection is created `pending_oauth` and activated by the
   callback. `api_key` — a personal **read-only** Mercury token — connects
   at once without a browser round-trip, but only on deployments that turn

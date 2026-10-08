@@ -78,8 +78,9 @@ async def get_connection_options(
         description=(
           "Capture every posted bank transaction from Mercury into the "
           "ledger inbox with an account suggestion attached. A bank feed "
-          "is native accounting: it needs a chart of accounts and cannot "
-          "sit beside a live QuickBooks connection."
+          "is native accounting: the company it books to needs a chart of "
+          "accounts, and cannot be the one QuickBooks keeps (the group "
+          "parent, while QuickBooks is connected)."
         ),
         auth_type="oauth",
         auth_flow=(
@@ -124,8 +125,9 @@ async def get_connection_options(
         description=(
           "Capture every posted transaction from nearly any US bank or card "
           "into the ledger inbox with an account suggestion attached. A bank "
-          "feed is native accounting: it needs a chart of accounts and cannot "
-          "sit beside a live QuickBooks connection."
+          "feed is native accounting: the company it books to needs a chart "
+          "of accounts, and cannot be the one QuickBooks keeps (the group "
+          "parent, while QuickBooks is connected)."
         ),
         auth_type="link",
         auth_flow=(
