@@ -9,6 +9,10 @@ and introspection stay inline.
 `MaskUnexpectedErrors`: a non-deliberate exception would reach the client as
 `str(exc)`, naming tables and constraints. Those are replaced with a fixed
 message; a statement timeout gets its own code so a client can retry.
+
+`ExtensionsSchema`: Strawberry logs every error at ERROR. A caller's mistake
+(parse, validation, a deliberate refusal) is logged at WARNING instead, so
+ERROR stays the server's faults.
 """
 
 from __future__ import annotations
@@ -18,10 +22,13 @@ from collections.abc import Callable, Iterator
 from functools import partial
 from typing import Any
 
+import strawberry
 from graphql import GraphQLError, GraphQLResolveInfo
 from strawberry.extensions import SchemaExtension
 from strawberry.extensions.utils import is_introspection_field
 from strawberry.schema.schema_converter import GraphQLCoreConverter
+from strawberry.types import ExecutionContext
+from strawberry.utils.logging import StrawberryLogger
 
 from robosystems.db.extensions import is_statement_timeout
 from robosystems.middleware.extensions import STATEMENT_TIMEOUT_DETAIL
@@ -145,10 +152,26 @@ class MaskUnexpectedErrors(SchemaExtension):
       self._process_result(result.initial_result)
 
 
+class ExtensionsSchema(strawberry.Schema):
+  """Logs a caller's mistakes at WARNING, the server's faults at ERROR."""
+
+  def process_errors(
+    self,
+    errors: list[GraphQLError],
+    execution_context: ExecutionContext | None = None,
+  ) -> None:
+    for error in errors:
+      if _is_deliberate(error):
+        StrawberryLogger.logger.warning(error)
+      else:
+        StrawberryLogger.error(error, execution_context)
+
+
 __all__ = [
   "INTERNAL_ERROR_CODE",
   "INTERNAL_ERROR_MESSAGE",
   "STATEMENT_TIMEOUT_CODE",
+  "ExtensionsSchema",
   "MaskUnexpectedErrors",
   "OffloadSyncResolvers",
 ]

@@ -73,6 +73,7 @@ class XBRLSchemaAdapter:
     # ASSOCIATION_HAS_CLASSIFICATION → AssociationHasClassification
     "AssociationHasClassification": "ASSOCIATION_HAS_CLASSIFICATION",
     "StructureHasFactSet": "STRUCTURE_HAS_FACT_SET",
+    "ReportHasFactSet": "REPORT_HAS_FACT_SET",
     "FactSetContainsFact": "FACT_SET_CONTAINS_FACT",
     "Factset": "FactSet",  # title() lowercases the S
   }

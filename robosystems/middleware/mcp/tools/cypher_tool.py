@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 from robosystems.logger import logger
 
-from ..exceptions import GraphAPIError
+from ..exceptions import GraphAPIError, GraphValidationError
 from .base_tool import BaseTool
 from .constants import (
   INVESTOR_AMOUNT_GUIDANCE,
@@ -129,15 +129,19 @@ RETURN DISTINCT labels(a)[0] AS from_type, type(r) AS rel_type, labels(b)[0] AS 
 
     self._validate_read_only(query)
 
+    # Advice for the caller about their query, not a server warning.
     for warning in validation_result.warnings:
-      logger.warning(f"Query warnings: {warning}")
+      logger.info(f"Query warnings: {warning}")
 
     try:
       result = await self.client.execute_query(query, parameters)
       return result
     except Exception as e:
       error_message = self._sanitize_error_message(str(e))
-      raise GraphAPIError(f"Query execution failed: {error_message}")
+      error_cls = (
+        GraphValidationError if isinstance(e, GraphValidationError) else GraphAPIError
+      )
+      raise error_cls(f"Query execution failed: {error_message}") from e
 
   def _sanitize_error_message(self, error_msg: str) -> str:
     sensitive_patterns = [

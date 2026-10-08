@@ -206,6 +206,19 @@ def get_logging_config(environment: str | None = None) -> dict[str, Any]:
         "handlers": ["critical"] if env != "dev" else ["console"],
         "propagate": False,
       },
+      # GraphQL errors: a caller's mistake at WARNING, a server fault at ERROR.
+      "strawberry.execution": {
+        "level": "WARNING",
+        "handlers": ["critical", "operational"] if env != "dev" else ["console"],
+        "propagate": False,
+      },
+      # Arelle logs a filer's own XBRL defects at ERROR and keeps them in its
+      # log buffer; a load that actually fails raises. Arelle resets this
+      # logger's level on every controller, so only propagation can be set.
+      "arelle": {
+        "handlers": [],
+        "propagate": False,
+      },
       # Suppress OpenTelemetry export errors
       "opentelemetry.exporter.otlp": {
         "level": "CRITICAL",  # Only show critical errors, suppresses ERROR level

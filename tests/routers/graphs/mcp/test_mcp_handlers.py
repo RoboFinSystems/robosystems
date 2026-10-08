@@ -485,6 +485,41 @@ class TestMCPHandler:
         await handler.close()
 
   @pytest.mark.asyncio
+  async def test_call_tool_rejected_query_is_a_constraint_not_backend(self):
+    """A caller's bad query must not count against the per-graph breaker."""
+    from robosystems.middleware.mcp import GraphValidationError
+
+    repo = _make_mock_repository()
+    mock_client = AsyncMock()
+    mock_client.close = AsyncMock()
+
+    mock_mcp_tools = AsyncMock()
+    mock_mcp_tools.call_tool = AsyncMock(
+      side_effect=GraphValidationError("Query execution failed: Query syntax error")
+    )
+
+    with patch(
+      "robosystems.routers.graphs.mcp.handlers.create_graph_mcp_client",
+      new_callable=AsyncMock,
+      return_value=mock_client,
+    ):
+      with patch(
+        "robosystems.middleware.mcp.tools.manager.resolve_schema_extensions",
+        return_value=[],
+      ):
+        handler = MCPHandler(repo, "kg01234567890abcdef", _make_mock_user())
+        await handler._ensure_initialized()
+        handler.mcp_tools = mock_mcp_tools
+
+        result = await handler.call_tool("read-graph-cypher", {"query": "MATCH"})
+
+        assert result["is_error"] is True
+        assert result["error_kind"] == "constraint"
+        assert "Query syntax error" in result["text"]
+
+        await handler.close()
+
+  @pytest.mark.asyncio
   async def test_call_tool_regular_tool_uses_mcp_tools(self):
     """Test call_tool delegates regular tools to execute_mcp_query_with_timeout."""
     repo = _make_mock_repository()

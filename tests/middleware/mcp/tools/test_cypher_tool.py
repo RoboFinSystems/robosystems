@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from robosystems.middleware.mcp.exceptions import GraphAPIError, GraphValidationError
 from robosystems.middleware.mcp.tools.constants import (
   INVESTOR_AMOUNT_GUIDANCE,
   LEDGER_AMOUNT_GUIDANCE,
@@ -170,3 +171,27 @@ class TestInvestorAmountGuidance:
     assert INVESTOR_AMOUNT_GUIDANCE not in self._description(
       "sec", ("roboledger", "roboinvestor")
     )
+
+
+class TestExecuteErrorClass:
+  """The rewrapped error keeps telling a caller's mistake from a fault."""
+
+  @pytest.mark.asyncio
+  @pytest.mark.parametrize(
+    ("raised", "expected"),
+    [
+      (GraphValidationError("Binder exception"), GraphValidationError),
+      (GraphAPIError("Server error"), GraphAPIError),
+    ],
+  )
+  async def test_error_class_survives(self, raised, expected):
+    async def fail(*_args, **_kwargs):
+      raise raised
+
+    tool = CypherTool(
+      SimpleNamespace(graph_id="kg1a0b70352e2fdcc071f1", execute_query=fail)
+    )
+    with pytest.raises(GraphAPIError) as excinfo:
+      await tool.execute({"query": "MATCH (n) RETURN n LIMIT 1"})
+    assert type(excinfo.value) is expected
+    assert str(excinfo.value).startswith("Query execution failed: ")
