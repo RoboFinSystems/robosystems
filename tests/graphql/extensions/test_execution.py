@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 import strawberry
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 from strawberry.exceptions import StrawberryGraphQLError
 
 from robosystems.graphql.execution import (
@@ -20,6 +20,7 @@ from robosystems.graphql.execution import (
   ExtensionsSchema,
   MaskUnexpectedErrors,
   OffloadSyncResolvers,
+  log_masked_fault,
 )
 
 _LEAKY_SQL = 'INSERT INTO "kg00000000000000aa".entities (id) VALUES (%(id)s)'
@@ -164,3 +165,51 @@ class TestExtensionsSchemaLogging:
     records = [r for r in caplog.records if r.name == "strawberry.execution"]
     assert [r.levelno for r in records] == [logging.ERROR]
     assert records[0].exc_info is not None
+
+
+def _pydantic_error() -> Exception:
+  import pydantic
+
+  try:
+    pydantic.TypeAdapter(int).validate_python("x")
+  except pydantic.ValidationError as exc:
+    return exc
+  raise AssertionError("unreachable")
+
+
+class TestLogMaskedFault:
+  """A "not initialized" refusal drops its cause; the cause is logged at
+  ERROR when it is ours."""
+
+  def _levels_for(self, exc: Exception, caplog: pytest.LogCaptureFixture) -> list[int]:
+    with caplog.at_level(logging.INFO, logger="strawberry.execution"):
+      try:
+        raise exc
+      except Exception:
+        log_masked_fault("LEDGER_NOT_INITIALIZED")
+    return _strawberry_levels(caplog)
+
+  @pytest.mark.parametrize("pgcode", ["42P01", "3F000"])
+  def test_an_unprovisioned_schema_is_the_callers(
+    self, pgcode: str, caplog: pytest.LogCaptureFixture
+  ) -> None:
+    exc = ProgrammingError(_LEAKY_SQL, {}, MagicMock(pgcode=pgcode))
+    assert self._levels_for(exc, caplog) == []
+
+  def test_a_domain_refusal_is_the_callers(
+    self, caplog: pytest.LogCaptureFixture
+  ) -> None:
+    assert self._levels_for(ValueError("bad period"), caplog) == []
+
+  @pytest.mark.parametrize(
+    "exc",
+    [
+      ProgrammingError(_LEAKY_SQL, {}, MagicMock(pgcode="42703")),
+      _pydantic_error(),
+    ],
+    ids=["undefined-column", "response-model"],
+  )
+  def test_a_fault_of_ours_logs_at_error(
+    self, exc: Exception, caplog: pytest.LogCaptureFixture
+  ) -> None:
+    assert self._levels_for(exc, caplog) == [logging.ERROR]

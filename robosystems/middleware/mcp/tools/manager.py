@@ -9,6 +9,8 @@ import json
 import time
 from typing import TYPE_CHECKING, Any
 
+import pydantic
+
 from robosystems.config import env
 from robosystems.logger import logger
 from robosystems.middleware.mcp.query_validator import GraphQueryValidator
@@ -107,6 +109,11 @@ ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS = frozenset(
     "delete-taxonomy-block",
   }
 )
+
+
+# ValueErrors that are never the caller's: a response model rejecting a row,
+# or a body that will not decode. Argument validation catches its own.
+_FAULT_VALUE_ERRORS = (pydantic.ValidationError, json.JSONDecodeError, UnicodeError)
 
 
 def resolve_schema_extensions(graph_id: str) -> list[str]:
@@ -1478,6 +1485,8 @@ class GraphMCPTools:
       return f"Error: {enhanced_msg}"
 
     except ValueError as e:
+      if isinstance(e, _FAULT_VALUE_ERRORS):
+        return self._tool_failed(name, arguments, e, return_raw=return_raw)
       error_msg = str(e)
       if "Query parameter" in error_msg or "argument" in error_msg.lower():
         error_msg = f"Invalid argument in tool '{name}': {error_msg}"
@@ -1490,19 +1499,30 @@ class GraphMCPTools:
       return f"Validation Error: {error_msg}"
 
     except Exception as e:
-      error_context = self._build_error_context(name, arguments, e)
-      error_msg = self._sanitize_error_message(str(e))
+      return self._tool_failed(name, arguments, e, return_raw=return_raw)
 
-      # The caller gets the sanitized message; the server log keeps the cause.
-      logger.error(
-        f"Tool execution failed for '{name}': {error_msg}",
-        extra={"error_context": error_context, "exception_type": type(e).__name__},
-        exc_info=True,
-      )
+  def _tool_failed(
+    self,
+    name: str,
+    arguments: dict[str, Any],
+    e: Exception,
+    *,
+    return_raw: bool,
+  ) -> str:
+    """A fault of ours: logged at ERROR with the cause."""
+    error_context = self._build_error_context(name, arguments, e)
+    error_msg = self._sanitize_error_message(str(e))
 
-      if return_raw:
-        raise GraphAPIError(f"Tool execution failed: {error_msg}")
-      return f"Error: {error_msg}"
+    # The caller gets the sanitized message; the server log keeps the cause.
+    logger.error(
+      f"Tool execution failed for '{name}': {error_msg}",
+      extra={"error_context": error_context, "exception_type": type(e).__name__},
+      exc_info=e,
+    )
+
+    if return_raw:
+      raise GraphAPIError(f"Tool execution failed: {error_msg}") from e
+    return f"Error: {error_msg}"
 
   def _build_error_context(
     self, tool_name: str, arguments: dict[str, Any], exception: Exception

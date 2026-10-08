@@ -14,6 +14,7 @@ from sqlalchemy.exc import ProgrammingError
 from strawberry.types import Info
 
 from robosystems.graphql.context import GraphQLContext, require_graph_id
+from robosystems.graphql.execution import log_masked_fault
 from robosystems.graphql.resolvers._common import (
   open_extensions_session as _open_session,
 )
@@ -158,6 +159,7 @@ def _raise_ledger_not_initialized() -> NoReturn:
   `from None` drops the chained driver exception, which Strawberry would
   otherwise surface in the client-facing `extensions`.
   """
+  log_masked_fault("LEDGER_NOT_INITIALIZED")
   raise strawberry.exceptions.StrawberryGraphQLError(
     message="Ledger not initialized. Connect a data source first.",
     extensions={"code": "LEDGER_NOT_INITIALIZED"},

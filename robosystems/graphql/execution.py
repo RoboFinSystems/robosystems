@@ -12,18 +12,23 @@ message; a statement timeout gets its own code so a client can retry.
 
 `ExtensionsSchema`: Strawberry logs every error at ERROR. A caller's mistake
 (parse, validation, a deliberate refusal) is logged at WARNING instead, so
-ERROR stays the server's faults.
+ERROR stays the server's faults. `log_masked_fault` keeps a fault behind a
+deliberate "not initialized" refusal at ERROR too.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
+import sys
 from collections.abc import Callable, Iterator
 from functools import partial
 from typing import Any
 
+import pydantic
 import strawberry
 from graphql import GraphQLError, GraphQLResolveInfo
+from sqlalchemy.exc import ProgrammingError
 from strawberry.extensions import SchemaExtension
 from strawberry.extensions.utils import is_introspection_field
 from strawberry.schema.schema_converter import GraphQLCoreConverter
@@ -103,6 +108,30 @@ def _is_deliberate(error: GraphQLError) -> bool:
   return original is None or isinstance(original, GraphQLError)
 
 
+# A missing tenant schema or table: the domain was never provisioned for the
+# graph, which is what "not initialized" means.
+_UNPROVISIONED_SQLSTATES = frozenset({"42P01", "3F000"})
+_FAULT_VALUE_ERRORS = (pydantic.ValidationError, json.JSONDecodeError, UnicodeError)
+
+
+def log_masked_fault(code: str) -> None:
+  """Called from the ``except`` that turns a read failure into ``code``. The
+  refusal drops its cause and is logged as the caller's, so a cause that is
+  ours (any other SQL error, a response model rejecting a row) is logged
+  here at ERROR, with its traceback."""
+  exc = sys.exception()
+  if exc is None:
+    return
+  if isinstance(exc, ProgrammingError):
+    if getattr(exc.orig, "pgcode", None) in _UNPROVISIONED_SQLSTATES:
+      return
+  elif not isinstance(exc, _FAULT_VALUE_ERRORS):
+    return
+  StrawberryLogger.logger.error(
+    f"{code} returned for a fault: {type(exc).__name__}", exc_info=exc
+  )
+
+
 class MaskUnexpectedErrors(SchemaExtension):
   """Replace unintended resolver exceptions with a fixed message.
 
@@ -174,4 +203,5 @@ __all__ = [
   "ExtensionsSchema",
   "MaskUnexpectedErrors",
   "OffloadSyncResolvers",
+  "log_masked_fault",
 ]
