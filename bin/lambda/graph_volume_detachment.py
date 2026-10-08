@@ -158,6 +158,8 @@ def handler(event, context):
             f"will signal ABANDON so the next launch doesn't race"
           )
           all_detached = False
+        else:
+          request_park(volume_id)
 
       except Exception as e:
         print(f"Failed to detach volume {volume_id}: {e}")
@@ -188,6 +190,22 @@ def handler(event, context):
   except Exception as e:
     print(f"Error processing termination: {e}")
     return complete_lifecycle(asg_name, lifecycle_hook, instance_id, "ABANDON")
+
+
+def request_park(volume_id: str) -> None:
+  """Ask the volume manager to lower the detached volume to its idle spec.
+
+  Asynchronous, so the lifecycle hook never waits on it; the volume manager
+  decides whether the volume's tier parks at all.
+  """
+  try:
+    lambda_client.invoke(
+      FunctionName=os.environ["VOLUME_MANAGER_FUNCTION_ARN"],
+      InvocationType="Event",
+      Payload=json.dumps({"action": "park_volume", "volume_id": volume_id}),
+    )
+  except Exception as e:
+    print(f"Failed to request park for {volume_id}: {e}")
 
 
 def stop_and_unmount(instance_id: str) -> str:

@@ -10,7 +10,7 @@ Covers the four robustness fixes from the 2026-05-08 incident:
 """
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import boto3
 import pytest
@@ -1102,6 +1102,101 @@ def test_shared_master_launch_still_attaches_when_reconcile_is_deferred(gvm):
   assert result["volume_id"] == volume_id
   assert _registry_item(volume_id)["status"] == "attached"
   assert _volume_perf(volume_id) == (3000, 125)
+
+
+# ---------------------------------------------------------------------------
+# Parking: a tier with an idle spec is lowered on detach, so gp3's provisioned
+# performance is billed only while a run can use it.
+# ---------------------------------------------------------------------------
+
+
+def test_park_lowers_shared_volume_to_idle_spec(gvm):
+  volume_id = _create_test_volume_with_perf(12000, 500)
+  _seed_sec_volume(volume_id)
+
+  result = gvm.handler({"action": "park_volume", "volume_id": volume_id}, None)
+
+  spec = gvm.TIER_VOLUME_SPEC["ladybug-shared"]
+  assert result["parked"] is True
+  assert _volume_perf(volume_id) == (spec["idle_iops"], spec["idle_throughput"])
+  item = _registry_item(volume_id)
+  assert int(item["iops"]) == spec["idle_iops"]
+  assert int(item["throughput"]) == spec["idle_throughput"]
+  assert "last_performance_park" in item
+
+
+def test_park_then_attach_restores_the_run_spec(gvm):
+  """The round trip the nightly rebuild makes: parked on detach, raised on the
+  next wake."""
+  instance_id = _create_test_instance()
+  volume_id = _create_test_volume_with_perf(12000, 500)
+  _seed_sec_volume(volume_id)
+
+  gvm.park_volume({"volume_id": volume_id})
+  gvm.handle_instance_launch(
+    {"instance_id": instance_id, "node_type": "shared_master", "tier": "ladybug-shared"}
+  )
+
+  spec = gvm.TIER_VOLUME_SPEC["ladybug-shared"]
+  assert _volume_perf(volume_id) == (spec["iops"], spec["throughput"])
+
+
+def test_park_leaves_tiers_without_an_idle_spec_alone(gvm):
+  """A dedicated writer detaches only on instance replacement and reattaches
+  within minutes; lowering it would spend modifications for nothing, and
+  would clamp a hand-raised volume the raise never brings back."""
+  volume_id = _create_test_volume_with_perf(6000, 250)
+  _seed_registry("test-volume-registry", volume_id, ["kg_a"], tier="ladybug-large")
+
+  result = gvm.park_volume({"volume_id": volume_id})
+
+  assert result["reason"] == "no_idle_spec"
+  assert _volume_perf(volume_id) == (6000, 250)
+
+
+def test_park_is_a_noop_for_a_volume_already_idle(gvm):
+  volume_id = _create_test_volume_with_perf(3000, 125)
+  _seed_sec_volume(volume_id)
+
+  with patch.object(gvm.ec2, "modify_volume") as modify:
+    result = gvm.park_volume({"volume_id": volume_id})
+
+  assert result["reason"] == "at_or_below_idle"
+  modify.assert_not_called()
+
+
+def test_park_defers_while_the_raise_is_still_optimizing(gvm):
+  """EBS refuses a modification until the previous one completes; the park
+  steps aside and the volume stays at full speed."""
+  volume_id = _create_test_volume_with_perf(12000, 500)
+  _seed_sec_volume(volume_id)
+  err = ClientError(
+    {"Error": {"Code": "IncorrectModificationState", "Message": "optimizing"}},
+    "ModifyVolume",
+  )
+
+  with patch.object(gvm.ec2, "modify_volume", side_effect=err):
+    result = gvm.park_volume({"volume_id": volume_id})
+
+  assert result["parked"] is False
+  assert result["reason"] == "IncorrectModificationState"
+  assert _volume_perf(volume_id) == (12000, 500)
+
+
+def test_park_steps_aside_when_the_volume_never_becomes_available(gvm):
+  volume_id = _create_test_volume_with_perf(12000, 500)
+  _seed_sec_volume(volume_id)
+  stuck = MagicMock()
+  stuck.wait.side_effect = Exception("Waiter timed out")
+
+  with (
+    patch.object(gvm.ec2, "get_waiter", return_value=stuck),
+    patch.object(gvm.ec2, "modify_volume") as modify,
+  ):
+    result = gvm.park_volume({"volume_id": volume_id})
+
+  assert result["reason"] == "not_available"
+  modify.assert_not_called()
 
 
 def _create_tagged_shared_volume(database: str = "sec", size: int = 300) -> str:

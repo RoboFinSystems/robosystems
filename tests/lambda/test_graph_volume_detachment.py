@@ -93,6 +93,8 @@ def test_detach_waits_for_volume_available_before_continue(gvd):
   vm_response["Payload"].read.return_value = json.dumps({"statusCode": 200}).encode()
 
   def fake_invoke(**kwargs):
+    if kwargs.get("InvocationType") == "Event":  # the async park request
+      return {}
     call_order.append("vm_invoke")
     # Simulate the volume-manager's API-level detach.
     # Pass InstanceId explicitly: moto's detach_volume crashes on len(None)
@@ -177,6 +179,67 @@ def test_detach_returns_abandon_when_volume_does_not_become_available(gvd):
   assert asg_calls[0]["LifecycleActionResult"] == "ABANDON"
 
 
+def test_detach_requests_park_once_the_volume_is_available(gvd):
+  """The park is fired asynchronously after the detach settles, so the
+  lifecycle hook never waits on a volume modification."""
+  instance_id, volume_id = _create_attached_volume()
+  _seed_instance_registry(instance_id)
+
+  call_order: list[str] = []
+  invokes: list[dict] = []
+  real_get_waiter = gvd.ec2.get_waiter
+
+  def tracking_get_waiter(name):
+    call_order.append(f"waiter:{name}")
+    return real_get_waiter(name)
+
+  vm_response = MagicMock()
+  vm_response["Payload"].read.return_value = json.dumps({"statusCode": 200}).encode()
+
+  def fake_invoke(**kwargs):
+    invokes.append(kwargs)
+    if kwargs.get("InvocationType") == "Event":
+      call_order.append("park")
+      return {}
+    call_order.append("detach")
+    boto3.client("ec2", region_name="us-east-1").detach_volume(
+      VolumeId=volume_id, InstanceId=instance_id
+    )
+    return vm_response
+
+  with (
+    patch.object(gvd.ec2, "get_waiter", side_effect=tracking_get_waiter),
+    patch.object(gvd.lambda_client, "invoke", side_effect=fake_invoke),
+    patch.object(gvd.asg, "complete_lifecycle_action", return_value={}),
+  ):
+    gvd.handler(_make_lifecycle_event(instance_id), context=None)
+
+  assert call_order == ["detach", "waiter:volume_available", "park"]
+  assert json.loads(invokes[1]["Payload"]) == {
+    "action": "park_volume",
+    "volume_id": volume_id,
+  }
+
+
+def test_no_park_when_the_volume_does_not_become_available(gvd):
+  instance_id, _volume_id = _create_attached_volume()
+  _seed_instance_registry(instance_id)
+
+  fake_waiter = MagicMock()
+  fake_waiter.wait.side_effect = Exception("Waiter timed out")
+  vm_response = MagicMock()
+  vm_response["Payload"].read.return_value = json.dumps({"statusCode": 200}).encode()
+
+  with (
+    patch.object(gvd.ec2, "get_waiter", return_value=fake_waiter),
+    patch.object(gvd.lambda_client, "invoke", return_value=vm_response) as invoke,
+    patch.object(gvd.asg, "complete_lifecycle_action", return_value={}),
+  ):
+    gvd.handler(_make_lifecycle_event(instance_id), context=None)
+
+  assert invoke.call_count == 1
+
+
 def test_detach_cleans_instance_registry(gvd):
   """The terminating instance's row must be deleted from instance-registry."""
   instance_id, volume_id = _create_attached_volume()
@@ -186,6 +249,8 @@ def test_detach_cleans_instance_registry(gvd):
   vm_response["Payload"].read.return_value = json.dumps({"statusCode": 200}).encode()
 
   def fake_invoke(**kwargs):
+    if kwargs.get("InvocationType") == "Event":  # the async park request
+      return {}
     # Pass InstanceId explicitly: moto's detach_volume crashes on len(None)
     # when InstanceId is omitted, even though real AWS allows it.
     boto3.client("ec2", region_name="us-east-1").detach_volume(
@@ -250,6 +315,8 @@ def test_container_is_stopped_and_unmounted_before_the_detach(gvd):
   vm_response["Payload"].read.return_value = json.dumps({"statusCode": 200}).encode()
 
   def fake_invoke(**kwargs):
+    if kwargs.get("InvocationType") == "Event":  # the async park request
+      return {}
     call_order.append("vm_invoke")
     boto3.client("ec2", region_name="us-east-1").detach_volume(
       VolumeId=volume_id, InstanceId=instance_id
@@ -304,6 +371,8 @@ def test_detach_still_runs_when_the_stop_command_cannot_be_sent(gvd):
   vm_response["Payload"].read.return_value = json.dumps({"statusCode": 200}).encode()
 
   def fake_invoke(**kwargs):
+    if kwargs.get("InvocationType") == "Event":  # the async park request
+      return {}
     boto3.client("ec2", region_name="us-east-1").detach_volume(
       VolumeId=volume_id, InstanceId=instance_id
     )
