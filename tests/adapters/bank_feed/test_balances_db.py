@@ -142,6 +142,38 @@ class TestRecordFeedBalances:
       4200,
     )
 
+  def test_an_older_stamp_arriving_late_does_not_replace_the_newer(self, session):
+    checking = _element(session, "Checking")
+    _record(
+      session,
+      [_reading("chk", BANK_CURRENT, 4200, observed_at=EVENING)],
+      {"chk": checking},
+    )
+    report = _record(
+      session,
+      [_reading("chk", BANK_CURRENT, 5000, observed_at=NOON)],
+      {"chk": checking},
+    )
+    assert (report.recorded, report.unchanged) == (0, 1)
+    (event,) = _observations(session, checking)
+    assert (event.status, event.amount) == ("committed", 4200)
+
+  def test_a_superseded_reading_replayed_is_not_a_collision(self, session):
+    checking = _element(session, "Checking")
+    first = _reading("chk", BANK_CURRENT, 5000)
+    _record(session, [first], {"chk": checking})
+    _record(
+      session,
+      [_reading("chk", BANK_CURRENT, 4200, observed_at=EVENING)],
+      {"chk": checking},
+    )
+    report = _record(session, [first], {"chk": checking})
+    assert (report.recorded, report.unchanged) == (0, 1)
+    assert [e.status for e in _observations(session, checking)] == [
+      "superseded",
+      "committed",
+    ]
+
   def test_a_new_day_is_a_new_reading_beside_the_old(self, session):
     checking = _element(session, "Checking")
     _record(session, [_reading("chk", BANK_CURRENT, 5000)], {"chk": checking})

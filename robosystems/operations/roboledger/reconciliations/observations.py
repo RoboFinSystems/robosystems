@@ -177,6 +177,11 @@ def _live_feed_reading(source: str, kind: str, element_id: str, as_of: date):
   )
 
 
+def _as_utc(stamp: datetime) -> datetime:
+  """A stored timestamp (naive, UTC wall time) made comparable."""
+  return stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)
+
+
 def record_feed_balance(
   session: Session,
   *,
@@ -191,23 +196,27 @@ def record_feed_balance(
 
   One observation per account, kind and day: a later reading of the same
   day with a different figure supersedes the earlier one, so the day keeps
-  the reading closest to its close; an unchanged figure is returned as it
-  stands. The event belongs to the entity whose books the account keeps.
+  the reading closest to its close; an unchanged figure, or one no newer
+  than the reading already kept (a bank's stamp delivered out of order, a
+  replay of a superseded reading), is returned as it stands. The event
+  belongs to the entity whose books the account keeps.
   """
   if reading.kind not in FEED_BALANCE_KINDS:
     raise ValueError(f"not a feed balance kind: {reading.kind!r}")
   amount = (
     reading.stated_cents if element.balance_type == "debit" else -reading.stated_cents
   )
+  observed_at = reading.observed_at.astimezone(UTC)
   live = session.execute(
     _live_feed_reading(source, reading.kind, str(element.id), reading.as_of)
   ).scalar_one_or_none()
-  if live is not None and int(live.amount or 0) == amount:
+  if live is not None and (
+    int(live.amount or 0) == amount or observed_at <= _as_utc(live.occurred_at)
+  ):
     return _observation(live), "unchanged"
   if live is not None:
     live.status = "superseded"
 
-  observed_at = reading.observed_at.astimezone(UTC)
   label = "available" if reading.kind == BANK_AVAILABLE else "current"
   event = Event(
     entity_id=entity_id,

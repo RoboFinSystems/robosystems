@@ -358,6 +358,8 @@ def _sync_item(
       "accounts_linked": link_result.linked,
       "accounts_created": link_result.created,
       "balances_recorded": balances.recorded,
+      "balances_unchanged": balances.unchanged,
+      "balances_skipped": balances.skipped,
       "events_captured": report.events_created,
       "events_existing": report.events_existing,
       "events_updated": report.events_updated,
