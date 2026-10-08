@@ -94,6 +94,18 @@ class TestAmountsAndAccounts:
     assert booked[SAVINGS_ID].kind == "savings"
     assert booked[CHECKING_ID].institution == INSTITUTION
 
+  def test_an_account_in_another_currency_is_not_booked(self):
+    raw = accounts()
+    raw[0]["balances"]["iso_currency_code"] = "CAD"
+    raw[1]["balances"] = {
+      "current": 1.0,
+      "iso_currency_code": None,
+      "unofficial_currency_code": "BTC",
+    }
+    raw[2]["balances"]["iso_currency_code"] = "usd"
+    booked = {a.account_id for a in bank_accounts(raw, institution=INSTITUTION)}
+    assert booked == {CARD_ID}
+
   def test_names_carry_the_institution_once_and_the_mask(self):
     booked = {a.account_id: a.name for a in _booked()}
     assert booked[CHECKING_ID] == "Harborline Bank Business Checking ••1234"
@@ -234,6 +246,20 @@ class TestTransform:
     }
     assert result.classification["transfer"] == 2
     assert len(result.events) == 7
+
+  def test_a_line_in_another_currency_is_skipped_on_any_account(self):
+    rows = transactions()
+    coffee = next(row for row in rows if row["transaction_id"] == "t_coffee")
+    coffee["iso_currency_code"] = "EUR"
+    fee = next(row for row in rows if row["transaction_id"] == "t_fee")
+    fee["iso_currency_code"] = None
+    fee["unofficial_currency_code"] = "BTC"
+    result = _run(transactions=rows)
+    assert result.skipped["foreign_currency"] == 2
+    emitted = _by_external_id(result)
+    assert "plaid_txn_t_coffee" not in emitted
+    assert "plaid_txn_t_fee" not in emitted
+    assert {event["currency"] for event in result.events} == {"USD"}
 
   def test_every_payload_is_a_valid_event_block_request(self):
     for event in _run().events:

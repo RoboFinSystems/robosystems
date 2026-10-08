@@ -64,6 +64,10 @@ MOVEMENT_PRIMARIES = frozenset({"LOAN_PAYMENTS", "LOAN_DISBURSEMENTS"})
 TREASURY_DETAILED = frozenset({"INCOME_INTEREST_EARNED", "INCOME_DIVIDENDS"})
 INCOME_PRIMARY = "INCOME"
 TRANSFER_WINDOW_DAYS = 3
+# The ledger keeps its books in one currency, and every amount it holds is in
+# it. A line in any other currency would post at face value, so an account in
+# another currency is not booked and a line in one is skipped.
+BOOKED_CURRENCY = "USD"
 
 
 def cents(amount: float | int | str | None) -> int:
@@ -85,14 +89,27 @@ def pair_external_id(first: str, second: str) -> str:
 # ── Accounts and counterparties ─────────────────────────────────────────────
 
 
+def currency_of(record: dict[str, Any]) -> str:
+  """A transaction's or balance's currency: Plaid sets one of the two codes,
+  ``unofficial_currency_code`` for one with no ISO code (crypto, some cards)."""
+  return str(
+    record.get("iso_currency_code")
+    or record.get("unofficial_currency_code")
+    or BOOKED_CURRENCY
+  ).upper()
+
+
 def bank_accounts(
   accounts: list[dict[str, Any]], *, institution: str
 ) -> list[BankAccount]:
-  """The Item's cash and card accounts, named the way the chart will show them."""
+  """The Item's cash and card accounts in the ledger's currency, named the
+  way the chart will show them."""
   booked: list[BankAccount] = []
   for acct in accounts:
     kind = str(acct.get("type") or "")
     if kind not in BOOKED_ACCOUNT_TYPES:
+      continue
+    if currency_of(acct.get("balances") or {}) != BOOKED_CURRENCY:
       continue
     subtype = str(acct.get("subtype") or kind)
     booked.append(
@@ -360,7 +377,7 @@ def transfer_event(
       "source": SOURCE,
       "external_id": pair_external_id(out_leg.transaction_id, in_leg.transaction_id),
       "amount": abs(in_leg.amount),
-      "currency": "USD",
+      "currency": BOOKED_CURRENCY,
       "description": f"Transfer {from_name} to {to_name}"[:200],
       "resource_element_id": in_leg.element_id,
       "entity_id": in_leg.entity_id,
@@ -416,6 +433,9 @@ def transform(
   for txn in transactions:
     if txn.get("pending"):
       result.skipped["pending"] += 1
+      continue
+    if currency_of(txn) != BOOKED_CURRENCY:
+      result.skipped["foreign_currency"] += 1
       continue
     if str(txn.get("account_id")) not in by_id:
       result.skipped["excluded_account"] += 1
@@ -583,9 +603,7 @@ def bank_event(
     "source": SOURCE,
     "external_id": txn_external_id(str(txn["transaction_id"])),
     "amount": amount,
-    "currency": txn.get("iso_currency_code")
-    or txn.get("unofficial_currency_code")
-    or "USD",
+    "currency": currency_of(txn),
     "description": str(merchant or bank_description or "Bank transaction")[:200],
     "agent_id": agent_ids.get(agent_key) if agent_key else None,
     "resource_element_id": account_elements.get(account_id),
