@@ -356,6 +356,65 @@ def test_linking_to_an_existing_account_moves_the_link_without_creating(session)
   assert session.get(Element, rent).external_source is None
 
 
+def test_a_rerun_moves_lines_a_sync_landed_on_the_old_account(session):
+  """A sync in flight during the move lands its lines on the old account;
+  asking again for the account the link is on moves them after it."""
+  _chart, checking, supplies, sub, _rent = _seed(session)
+  moved = link_bank_account(
+    session,
+    LinkBankAccountRequest(connection_id=CONNECTION, account_id=ACCOUNT, entity_id=sub),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+  session.flush()
+  straggler = _line(
+    session, checking, external_id="plaid_txn_s", contra=supplies, classified=True
+  )
+
+  again = link_bank_account(
+    session,
+    LinkBankAccountRequest(
+      connection_id=CONNECTION, account_id=ACCOUNT, element_id=moved.element_id
+    ),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+
+  assert again.changed and not again.account_created
+  assert again.element_id == moved.element_id
+  assert (again.events_repointed, again.events_unclassified) == (1, 1)
+  line = session.get(Event, straggler)
+  assert line.resource_element_id == moved.element_id and line.entity_id == sub
+  assert line.status == "captured" and "classified_element_id" not in line.metadata_
+  # The link and the feed's provenance stay where they were.
+  new = session.get(Element, moved.element_id)
+  assert new.metadata_[BANK_FEED_KEY]["account_id"] == ACCOUNT
+  assert (new.external_source, new.external_id) == ("plaid", ACCOUNT)
+
+
+def test_moving_to_the_entity_the_account_is_in_creates_nothing(session):
+  _chart, _checking, _supplies, sub, _rent = _seed(session)
+  moved = link_bank_account(
+    session,
+    LinkBankAccountRequest(connection_id=CONNECTION, account_id=ACCOUNT, entity_id=sub),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+  session.flush()
+  before = session.execute(select(Element.id)).scalars().all()
+
+  again = link_bank_account(
+    session,
+    LinkBankAccountRequest(connection_id=CONNECTION, account_id=ACCOUNT, entity_id=sub),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+
+  assert not again.changed and not again.account_created
+  assert again.element_id == moved.element_id and again.entity_id == sub
+  assert session.execute(select(Element.id)).scalars().all() == before
+
+
 def test_the_same_account_is_a_no_op(session):
   _chart, checking, _supplies, _sub, _rent = _seed(session)
   result = link_bank_account(
