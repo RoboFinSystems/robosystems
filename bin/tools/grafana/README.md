@@ -69,7 +69,7 @@ Ensure AWS resources are tagged for the dashboard filters:
 - `user:environment` - Environment name (e.g., `prod`, `staging`)
 
 Lines without a tag are not dropped: untagged spend is attributed to the AWS product that
-billed it (component) or shown as `untagged` (environment).
+billed it (component) or shown as `shared` (environment).
 
 ## Alarm Annotations (ops)
 
