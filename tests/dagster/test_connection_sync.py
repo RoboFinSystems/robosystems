@@ -81,7 +81,11 @@ class TestDueConnections:
     )
     conn.last_sync = last_sync
     if failed_at is not None:
-      conn.last_sync_result = {"status": "failed", "synced_at": failed_at.isoformat()}
+      conn.last_sync_result = {
+        "status": "failed",
+        "synced_at": failed_at.isoformat(),
+        **({"stage": fields.pop("stage")} if "stage" in fields else {}),
+      }
     if deleted:
       conn.deleted_at = NOW
     db.commit()
@@ -129,7 +133,31 @@ class TestDueConnections:
         last_sync=NOW - timedelta(days=3),
         failed_at=NOW - timedelta(hours=25),
       )
+      # A dispatch that failed started nothing: tried again within the hour.
+      dispatch_failed = self._connection(
+        test_db,
+        g,
+        u,
+        last_sync=NOW - timedelta(days=4),
+        failed_at=NOW - timedelta(hours=2),
+        stage="dispatch",
+      )
+      dispatch_just_failed = self._connection(
+        test_db,
+        g,
+        u,
+        last_sync=NOW - timedelta(days=4),
+        failed_at=NOW - timedelta(minutes=10),
+        stage="dispatch",
+      )
+      # Push-only: nothing to pull, never due.
+      pushed = self._connection(
+        test_db, g, u, provider="external", last_sync=NOW - timedelta(days=9)
+      )
       made = [
+        dispatch_failed,
+        dispatch_just_failed,
+        pushed,
         never,
         stale,
         failed,
@@ -150,7 +178,13 @@ class TestDueConnections:
 
       ids = [c.id for c in due if c.graph_id == g]
       # Never synced first, then the oldest sync.
-      assert ids == [never.id, failed_a_while_ago.id, failed.id, stale.id]
+      assert ids == [
+        never.id,
+        dispatch_failed.id,
+        failed_a_while_ago.id,
+        failed.id,
+        stale.id,
+      ]
     finally:
       for conn in made:
         test_db.delete(conn)
@@ -195,7 +229,14 @@ class TestRecentlyAttempted:
 
 
 def _counts(**overrides):
-  base = {"due": 0, "attempted": 0, "dispatched": 0, "in_progress": 0, "failed": 0}
+  base = {
+    "due": 0,
+    "attempted": 0,
+    "dispatched": 0,
+    "in_progress": 0,
+    "no_op": 0,
+    "failed": 0,
+  }
   return {**base, **overrides}
 
 
@@ -278,7 +319,19 @@ class TestSweep:
       return_value={"dispatched": False, "task_id": None, "message": "nothing"}
     )
     counts = self._run(_due("conn_a"), dispatch)
-    assert counts["dispatched"] == 0
+    assert counts == _counts(due=1, no_op=1)
+
+  def test_a_no_op_cannot_mask_a_sweep_that_dispatched_nothing(self):
+    from dagster import Failure
+
+    dispatch = AsyncMock(
+      side_effect=[
+        {"dispatched": False, "task_id": None, "message": "nothing"},
+        RuntimeError("webserver unreachable"),
+      ]
+    )
+    with pytest.raises(Failure):
+      self._run(_due("conn_a", "conn_b"), dispatch)
 
   def test_the_kill_switch_skips_the_sweep(self):
     dispatch = AsyncMock()

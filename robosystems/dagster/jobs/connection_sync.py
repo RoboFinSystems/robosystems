@@ -13,7 +13,9 @@ its sign-in, one whose bank revoked the login (``needs_reauth``), one
 disconnected or severed. A sync attempted within the cadence is not tried
 again, whatever became of it: a failed sync records its failure on the
 connection without advancing ``last_sync``, a dispatch that failed records
-the same, and the run store holds every run a dispatch started, so a run
+the same but is tried again within the hour (it started nothing, and its
+cause is usually the platform's), and the run store holds every run a
+dispatch started, so a run
 that died before it could record anything, or one still running past its
 lock, costs one attempt per cadence rather than one per tick. A sync a
 person already started is the expected collision and is logged quietly.
@@ -45,7 +47,7 @@ from dagster import (
   job,
   op,
 )
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from robosystems.config import env
@@ -59,6 +61,16 @@ _ENABLED_FLAG = "CONNECTION_SCHEDULED_SYNC_ENABLED"
 # source. A failed last sync is retried once the failure is a cadence old; a
 # revoked login is not retried, since only the customer can mend it.
 SYNCABLE_STATUSES = ("connected", "error")
+
+# Providers whose data is pushed to us: there is nothing to pull, so they are
+# never due, and a no-op dispatch can never stand in for a working one.
+PUSH_ONLY_PROVIDERS = ("external",)
+
+# A dispatch that failed started no run, so it is tried again within the
+# hour rather than a cadence later: the cause is usually the platform's (the
+# webserver restarting under a deploy), and one bad tick must not cost every
+# due connection a day.
+DISPATCH_RETRY = timedelta(hours=1)
 
 _SCHEDULE_STATUS = (
   DefaultScheduleStatus.RUNNING
@@ -86,6 +98,7 @@ def due_connections(
     .filter(
       Connection.deleted_at.is_(None),
       Connection.auto_sync_enabled.is_(True),
+      func.lower(Connection.provider).notin_(PUSH_ONLY_PROVIDERS),
       Connection.status.in_(SYNCABLE_STATUSES),
       Graph.status == GraphStatus.ACTIVE.value,
       or_(Connection.last_sync.is_(None), Connection.last_sync < cutoff),
@@ -97,17 +110,24 @@ def due_connections(
     c
     for c in rows
     if provider_registry.is_enabled((c.provider or "").lower())
-    and not _failed_since(c, cutoff)
+    and not _failed_since(c, now=now, interval=interval)
   ]
 
 
-def _failed_since(connection: Connection, cutoff: datetime) -> bool:
-  """Whether the connection's last recorded attempt was a failure newer than
-  ``cutoff``. A failed sync leaves ``last_sync`` alone and writes the outcome
-  to ``last_sync_result`` with its ``synced_at``."""
+def _failed_since(
+  connection: Connection, *, now: datetime, interval: timedelta
+) -> bool:
+  """Whether the connection's last recorded attempt is a failure still being
+  waited out: a cadence for a sync that failed, an hour for a dispatch that
+  never started one. A failed sync leaves ``last_sync`` alone and writes the
+  outcome to ``last_sync_result`` with its ``synced_at``."""
   result = connection.last_sync_result or {}
   if result.get("status") != "failed":
     return False
+  hold = (
+    min(interval, DISPATCH_RETRY) if result.get("stage") == "dispatch" else interval
+  )
+  cutoff = now - hold
   try:
     attempted = datetime.fromisoformat(str(result.get("synced_at") or ""))
   except ValueError:
@@ -214,6 +234,7 @@ def sweep_connection_syncs(
     "attempted": len(attempted),
     "dispatched": 0,
     "in_progress": 0,
+    "no_op": 0,
     "failed": 0,
   }
 
@@ -247,6 +268,7 @@ def sweep_connection_syncs(
       if result.get("dispatched"):
         counts["dispatched"] += 1
       else:
+        counts["no_op"] += 1
         context.log.info(
           f"Scheduled sync of connection {connection_id} ({provider}) was a "
           f"no-op: {result.get('message')}"
@@ -256,13 +278,14 @@ def sweep_connection_syncs(
 
   message = (
     f"Scheduled sync sweep: {counts['due']} due, {counts['dispatched']} "
-    f"dispatched, {counts['in_progress']} already running, {counts['failed']} "
+    f"dispatched, {counts['in_progress']} already running, {counts['no_op']} "
+    f"with nothing to sync, {counts['failed']} "
     f"not dispatched, {counts['attempted']} attempted within the cadence "
     f"(cadence {env.CONNECTION_SYNC_INTERVAL_HOURS} h)"
   )
   logger.info(message)
   context.log.info(message)
-  if due and counts["failed"] == len(due):
+  if counts["failed"] and counts["failed"] == len(due) - counts["no_op"]:
     # Nothing could be dispatched: the cause is the platform's, not one
     # connection's, and the run-failure alarm is how it gets heard.
     raise Failure(description=message, metadata=counts)
