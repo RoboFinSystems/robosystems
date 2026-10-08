@@ -65,6 +65,7 @@ class TestDueConnections:
     status = fields.pop("status", "connected")
     last_sync = fields.pop("last_sync", None)
     deleted = fields.pop("deleted", False)
+    failed_at = fields.pop("failed_at", None)
     conn = Connection.create(
       graph_id,
       user_id,
@@ -74,6 +75,8 @@ class TestDueConnections:
       auto_sync_enabled=fields.pop("auto_sync_enabled", True),
     )
     conn.last_sync = last_sync
+    if failed_at is not None:
+      conn.last_sync_result = {"status": "failed", "synced_at": failed_at.isoformat()}
     if deleted:
       conn.deleted_at = NOW
     db.commit()
@@ -106,7 +109,34 @@ class TestDueConnections:
       dark = self._connection(
         test_db, g, u, provider="mercury", last_sync=NOW - timedelta(days=9)
       )
-      made = [never, stale, failed, fresh, off, reauth, pending, gone, dark]
+      # Failing every attempt: tried once per cadence, not every tick.
+      just_failed = self._connection(
+        test_db,
+        g,
+        u,
+        last_sync=NOW - timedelta(days=3),
+        failed_at=NOW - timedelta(hours=2),
+      )
+      failed_a_while_ago = self._connection(
+        test_db,
+        g,
+        u,
+        last_sync=NOW - timedelta(days=3),
+        failed_at=NOW - timedelta(hours=25),
+      )
+      made = [
+        never,
+        stale,
+        failed,
+        fresh,
+        off,
+        reauth,
+        pending,
+        gone,
+        dark,
+        just_failed,
+        failed_a_while_ago,
+      ]
 
       with patch.object(
         provider_registry, "is_enabled", side_effect=lambda p: p != "mercury"
@@ -115,7 +145,7 @@ class TestDueConnections:
 
       ids = [c.id for c in due if c.graph_id == g]
       # Never synced first, then the oldest sync.
-      assert ids == [never.id, failed.id, stale.id]
+      assert ids == [never.id, failed_a_while_ago.id, failed.id, stale.id]
     finally:
       for conn in made:
         test_db.delete(conn)
