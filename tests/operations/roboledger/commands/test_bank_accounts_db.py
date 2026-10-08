@@ -544,6 +544,8 @@ def test_a_pair_books_on_its_receiving_leg(session):
   moved = session.get(Event, str(pair.id))
   assert moved.metadata_["from_element_id"] == result.element_id
   assert moved.metadata_["to_element_id"] == savings
+  # Moving the sending leg leaves the pair booked on the receiving account.
+  assert moved.resource_element_id == savings
   # The receiving account stayed on the parent, so the pair still books
   # there — and it is now a pair across two entities, which is reported.
   assert moved.entity_id == PARENT_ENTITY_ID

@@ -22,6 +22,7 @@ from robosystems.adapters.bank_feed.accounts import (
   create_chart_accounts,
   feed_account,
 )
+from robosystems.adapters.bank_feed.chart import ChartIndex
 from robosystems.logger import logger
 from robosystems.models.api.extensions.bank_accounts import (
   LinkBankAccountRequest,
@@ -313,7 +314,7 @@ def _repoint_open_lines(
     .scalars()
     .all()
   )
-  chart: Any = None
+  chart: ChartIndex | None = None
   repointed = unclassified = split = 0
   for event in rows:
     meta = dict(event.metadata_ or {})
@@ -332,9 +333,13 @@ def _repoint_open_lines(
       pair_entity = owners.get(str(legs[1])) or entity_id
       if owners.get(str(legs[0])) != owners.get(str(legs[1])):
         split += 1
-      changed = meta != (event.metadata_ or {}) or event.entity_id != pair_entity
-      if legs[1]:
-        event.resource_element_id = str(legs[1])
+      receiving = str(legs[1]) if legs[1] else event.resource_element_id
+      changed = (
+        meta != (event.metadata_ or {})
+        or event.entity_id != pair_entity
+        or event.resource_element_id != receiving
+      )
+      event.resource_element_id = receiving
       event.entity_id = pair_entity
     else:
       changed = event.resource_element_id != new or event.entity_id != entity_id
@@ -354,7 +359,7 @@ def _repoint_open_lines(
 
 def _reclassify(
   meta: dict[str, Any],
-  chart: Any,
+  chart: ChartIndex,
   session: Session,
   entity_id: str,
   parent_id: str,
