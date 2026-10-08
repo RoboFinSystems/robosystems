@@ -45,6 +45,17 @@ def landed_entry_bindparam() -> BindParameter:
   )
 
 
+TERMINAL_ENTRY_PARAM = "terminal_entry_statuses"
+
+
+def terminal_entry_bindparam() -> BindParameter:
+  """The `:terminal_entry_statuses` IN-list: the entries a schedule is the
+  support of, landed or shadowed."""
+  return bindparam(
+    TERMINAL_ENTRY_PARAM, value=sorted(TERMINAL_ENTRY_STATUSES), expanding=True
+  )
+
+
 # `is_live` on materialized Entry and LineItem means exactly "in the books".
 def landed_is_live_sql(status_column: str) -> str:
   """`is_live` for a column holding an entry status."""

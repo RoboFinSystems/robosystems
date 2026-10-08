@@ -41,7 +41,7 @@ from robosystems.operations.roboledger.entity_scope import (
   owner_entity_id,
 )
 from robosystems.operations.roboledger.entry_status import (
-  landed_entry_bindparam,
+  terminal_entry_bindparam,
 )
 from robosystems.operations.roboledger.schedules import ScheduleService
 from robosystems.operations.roboledger.schedules.service import (
@@ -405,12 +405,14 @@ def update_schedule(
   )
 
 
-def _landed_entry_count(session: Session, structure_id: str) -> int:
+def _terminal_entry_count(session: Session, structure_id: str) -> int:
+  """The schedule's entries that stand on its facts: landed, or shadowed by
+  a shadow close, whose receipt refers to them as its expectations."""
   row = session.execute(
     text(
       "SELECT COUNT(*) AS c FROM entries "
-      "WHERE source_structure_id = :sid AND status IN :landed_entry_statuses"
-    ).bindparams(landed_entry_bindparam()),
+      "WHERE source_structure_id = :sid AND status IN :terminal_entry_statuses"
+    ).bindparams(terminal_entry_bindparam()),
     {"sid": structure_id},
   ).fetchone()
   return int(row.c) if row and row.c else 0
@@ -475,11 +477,11 @@ def delete_schedule(session: Session, body: DeleteScheduleRequest) -> dict:
   # Fence, then count: a close that posts one of these drafts either finished
   # before the fence, and is counted, or waits behind it.
   _fence_draft_periods(session, structure)
-  landed = _landed_entry_count(session, structure.id)
+  landed = _terminal_entry_count(session, structure.id)
   if landed:
     raise ValueError(
-      f"Cannot delete schedule {structure.id!r}: {landed} posted closing "
-      "entries exist, and the schedule is their support. Use "
+      f"Cannot delete schedule {structure.id!r}: {landed} posted or shadowed "
+      "closing entries exist, and the schedule is their support. Use "
       "terminate-schedule to stop it and keep its history."
     )
 
@@ -800,10 +802,10 @@ def rebuild_schedule(
   # count: a close that posts one of these drafts either finished before the
   # fence, and is counted, or waits behind it.
   _fence_draft_periods(session, structure)
-  landed = _landed_entry_count(session, structure.id)
+  landed = _terminal_entry_count(session, structure.id)
   if landed:
     raise ValueError(
-      f"Cannot rebuild schedule {structure.id!r}: {landed} posted "
+      f"Cannot rebuild schedule {structure.id!r}: {landed} posted or shadowed "
       "closing entries exist. Reopen the affected periods and void those "
       "entries first — reopening alone leaves entries posted, so it does "
       "not clear this guard."

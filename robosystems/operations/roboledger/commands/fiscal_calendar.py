@@ -47,6 +47,7 @@ from robosystems.operations.roboledger.fiscal_calendar import (
   previous_period,
 )
 from robosystems.operations.roboledger.fiscal_calendar.close_service import (
+  PeriodCloseResult,
   WritebackFailed,
   drafts_close_posts,
 )
@@ -290,7 +291,9 @@ def close_period(
   return _close_response(fc_response, result)
 
 
-def _close_response(fc_response, result) -> ClosePeriodResponse:
+def _close_response(
+  fc_response: FiscalCalendarResponse, result: PeriodCloseResult
+) -> ClosePeriodResponse:
   return ClosePeriodResponse(
     fiscal_calendar=fc_response,
     period=result.period,
