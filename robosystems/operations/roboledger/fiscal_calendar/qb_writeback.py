@@ -8,6 +8,12 @@ QB, and the event publishes. ``metadata.publish_to_source`` decides that
 when present; otherwise ``Event.source`` does. The explicit flag exists so an
 entry mirroring a change already made upstream can stay local instead of
 applying twice.
+
+A ``shadow`` connection is the third answer, read here too: nothing
+publishes and the close posts nothing locally. QuickBooks keeps the books;
+the close's drafts become ``shadowed`` expectations, and the gates it would
+have refused on are findings. The predicate is per entity through the
+connection, which books for the group parent only.
 """
 
 from __future__ import annotations
@@ -28,8 +34,10 @@ WRITEBACK_EVENT_SOURCES = ("schedule", "manual")
 # nor posts them, and the schedule commands' period fence skips them.
 WRITEBACK_EXCLUDED_EVENT_STATUSES = ("voided", "superseded")
 
-# ``native`` is absent: there RoboSystems is the system of record.
+# ``native`` is absent: there RoboSystems is the system of record. So is
+# ``shadow``: there QuickBooks is, and RoboSystems never writes to it.
 WRITEBACK_WRITE_POLICIES = ("qb_authoritative", "hybrid")
+SHADOW_WRITE_POLICY = "shadow"
 
 # Explicit publish decision on the event, overriding the source default
 # either way.
@@ -80,6 +88,43 @@ def resolve_writeback_connection(
     connection_id=str(candidate.id),
     write_policy=str(candidate.write_policy),
   )
+
+
+def shadow_ledger(platform_session: Session, graph_id: str) -> bool:
+  """Whether the graph's live QuickBooks connection runs in shadow. Newest
+  live connection wins, as the write-back resolver's does."""
+  from robosystems.models.core.connection.connection import (
+    Connection,
+    ConnectionStatus,
+  )
+
+  policy = (
+    platform_session.query(Connection.write_policy)
+    .filter(
+      Connection.graph_id == graph_id,
+      Connection.provider == "quickbooks",
+      Connection.deleted_at.is_(None),
+      Connection.status.notin_(
+        [ConnectionStatus.DISCONNECTED.value, ConnectionStatus.SEVERED.value]
+      ),
+    )
+    .order_by(Connection.created_at.desc())
+    .limit(1)
+    .scalar()
+  )
+  return policy == SHADOW_WRITE_POLICY
+
+
+def shadow_close_for_entity(
+  session: Session, platform_session: Session, graph_id: str, entity_id: str | None
+) -> bool:
+  """Whether this entity's close runs in shadow: only the group parent's
+  books are QuickBooks', so only its close can be."""
+  from robosystems.operations.roboledger.entity_scope import is_group_parent
+
+  if entity_id is None or not is_group_parent(session, entity_id):
+    return False
+  return shadow_ledger(platform_session, graph_id)
 
 
 def _entry_not_yet_in_qb() -> ColumnElement[bool]:

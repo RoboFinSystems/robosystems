@@ -437,6 +437,15 @@ class TestConnectionSetWritePolicy:
       conn.set_write_policy(session, "hybrid")
     session.commit.assert_not_called()
 
+  def test_accepts_shadow(self):
+    session = MagicMock()
+    conn = Connection(graph_id="kg_test", user_id="usr_1", provider="quickbooks")
+
+    conn.set_write_policy(session, "shadow")
+
+    assert conn.write_policy == "shadow"
+    session.commit.assert_called_once()
+
   def test_rejects_unknown_value(self):
     session = MagicMock()
     conn = Connection(graph_id="kg_test", user_id="usr_1", provider="quickbooks")

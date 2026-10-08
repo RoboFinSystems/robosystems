@@ -1047,8 +1047,12 @@ class SetWritePolicyTool:
           },
           "write_policy": {
             "type": "string",
-            "enum": ["native", "qb_authoritative"],
-            "description": "New write policy.",
+            "enum": ["native", "qb_authoritative", "shadow"],
+            "description": (
+              "New write policy. 'shadow' keeps QuickBooks the book of record "
+              "with nothing written to it: the close posts nothing, its drafts "
+              "become shadowed expectations, and its gates are findings."
+            ),
           },
         },
         "required": ["connection_id", "write_policy"],
@@ -1072,10 +1076,10 @@ class SetWritePolicyTool:
     write_policy = arguments.get("write_policy") or ""
     if not connection_id:
       return {"error": "invalid_arguments", "message": "connection_id is required."}
-    if write_policy not in ("native", "qb_authoritative"):
+    if write_policy not in ("native", "qb_authoritative", "shadow"):
       return {
         "error": "invalid_arguments",
-        "message": "write_policy must be 'native' or 'qb_authoritative'.",
+        "message": "write_policy must be 'native', 'qb_authoritative' or 'shadow'.",
       }
 
     try:

@@ -1102,7 +1102,12 @@ def execute_event_block(
         f"Connection {connection_id!r} is not registered on this graph."
       )
 
-    if connection.write_policy == "native":
+    from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+      WRITEBACK_WRITE_POLICIES,
+    )
+
+    # ``native`` and ``shadow`` alike: nothing is written to QuickBooks.
+    if connection.write_policy not in WRITEBACK_WRITE_POLICIES:
       return ExecuteEventBlockResponse(
         event_id=str(event.id),
         status=str(event.status),
