@@ -71,11 +71,21 @@ DEFAULT_THROUGHPUT = 125  # MB/s
 # attach by reconcile_volume_performance (volumes outlive instances); it only
 # ever raises a volume. The shared tier's nightly SEC rebuild is bound by small
 # random reads, hence 12000 IOPS / 500 MB/s there.
+#
+# `idle_iops` / `idle_throughput` are what park_volume_performance lowers a
+# volume to on detach. gp3 bills provisioned performance whether or not the
+# volume is attached, and the shared master is attached a few hours a night.
 TIER_VOLUME_SPEC: dict[str, dict[str, int]] = {
   "ladybug-standard": {"size": 20, "iops": 3000, "throughput": 125},
   "ladybug-large": {"size": 50, "iops": 3000, "throughput": 125},
   "ladybug-xlarge": {"size": 50, "iops": 3000, "throughput": 125},
-  "ladybug-shared": {"size": 200, "iops": 12000, "throughput": 500},
+  "ladybug-shared": {
+    "size": 200,
+    "iops": 12000,
+    "throughput": 500,
+    "idle_iops": DEFAULT_IOPS,
+    "idle_throughput": DEFAULT_THROUGHPUT,
+  },
 }
 
 
@@ -104,6 +114,8 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
       return attach_volume(event)
     elif action == "detach_volume":
       return detach_volume(event)
+    elif action == "park_volume":
+      return park_volume(event)
     elif action == "expand_volume":
       return expand_volume(event)
     elif action == "cleanup_orphaned":
@@ -697,9 +709,10 @@ def reconcile_volume_performance(volume_id: str, tier: str) -> dict[str, Any]:
     response = ec2.modify_volume(VolumeId=volume_id, **target)
   except ClientError as e:
     code = e.response.get("Error", {}).get("Code", "")
-    # IncorrectModificationState: another modification is still in flight
-    # (a size expansion from the volume monitor, or an earlier change inside
-    # EBS's six-hour cooldown). Nothing to do but try again next launch.
+    # IncorrectModificationState: another modification has not completed yet
+    # (a size expansion from the volume monitor, or the last detach's park), or
+    # the volume has used its four modifications in a rolling 24 hours.
+    # Nothing to do but try again next launch.
     logger.warning(
       f"Performance reconcile for {volume_id} ({tier}) deferred: {code or e}"
     )
@@ -710,25 +723,95 @@ def reconcile_volume_performance(volume_id: str, tier: str) -> dict[str, Any]:
     f"Raised {volume_id} ({tier}) to spec {target} from "
     f"iops={current_iops} throughput={current_throughput} (state={state})"
   )
+  _record_volume_performance(
+    volume_id,
+    target.get("Iops", current_iops),
+    target.get("Throughput", current_throughput),
+    "last_performance_reconcile",
+  )
+
+  return {"reconciled": True, "modification_state": state, **target}
+
+
+def park_volume_performance(volume_id: str, tier: str) -> dict[str, Any]:
+  """Lower a detached volume to its tier's idle IOPS/throughput.
+
+  The counterpart of reconcile_volume_performance, for tiers that declare an
+  idle spec; the next attach raises the volume again. EBS modifies only an
+  `available` or `in-use` volume, so a volume still detaching gets a short
+  wait. Like the raise, every failure is logged and swallowed: a refused park
+  leaves the volume at full speed, which costs money but never breaks the next
+  run.
+  """
+  spec = volume_spec_for_tier(tier)
+  if "idle_iops" not in spec:
+    return {"parked": False, "reason": "no_idle_spec"}
+
+  try:
+    ec2.get_waiter("volume_available").wait(
+      VolumeIds=[volume_id], WaiterConfig={"Delay": 5, "MaxAttempts": 12}
+    )
+    volume = ec2.describe_volumes(VolumeIds=[volume_id])["Volumes"][0]
+  except Exception as e:
+    logger.warning(f"Could not park {volume_id} ({tier}): {e}")
+    return {"parked": False, "reason": "not_available"}
+
+  if volume.get("VolumeType") != DEFAULT_TYPE:
+    return {"parked": False, "reason": f"volume_type_{volume.get('VolumeType')}"}
+
+  current_iops = int(volume.get("Iops") or 0)
+  current_throughput = int(volume.get("Throughput") or 0)
+  target: dict[str, int] = {}
+  if current_iops > spec["idle_iops"]:
+    target["Iops"] = spec["idle_iops"]
+  if current_throughput > spec["idle_throughput"]:
+    target["Throughput"] = spec["idle_throughput"]
+  if not target:
+    return {"parked": False, "reason": "at_or_below_idle"}
+
+  try:
+    response = ec2.modify_volume(VolumeId=volume_id, **target)
+  except ClientError as e:
+    # Most often the attach's raise is still optimizing (it took ~50 minutes on
+    # the 300 GiB SEC volume), or the volume is out of modifications for the day.
+    code = e.response.get("Error", {}).get("Code", "")
+    logger.warning(f"Park of {volume_id} ({tier}) deferred: {code or e}")
+    return {"parked": False, "reason": code or "modify_failed"}
+
+  state = response.get("VolumeModification", {}).get("ModificationState")
+  logger.info(
+    f"Parked {volume_id} ({tier}) at {target} from "
+    f"iops={current_iops} throughput={current_throughput} (state={state})"
+  )
+  _record_volume_performance(
+    volume_id,
+    target.get("Iops", current_iops),
+    target.get("Throughput", current_throughput),
+    "last_performance_park",
+  )
+
+  return {"parked": True, "modification_state": state, **target}
+
+
+def _record_volume_performance(
+  volume_id: str, iops: int, throughput: int, timestamp_field: str
+) -> None:
   try:
     table.update_item(
       Key={"volume_id": volume_id},
       UpdateExpression=(
-        "SET iops = :iops, #throughput = :throughput, "
-        "last_performance_reconcile = :timestamp"
+        f"SET iops = :iops, #throughput = :throughput, {timestamp_field} = :timestamp"
       ),
       # `throughput` is a DynamoDB reserved word.
       ExpressionAttributeNames={"#throughput": "throughput"},
       ExpressionAttributeValues={
-        ":iops": target.get("Iops", current_iops),
-        ":throughput": target.get("Throughput", current_throughput),
+        ":iops": iops,
+        ":throughput": throughput,
         ":timestamp": datetime.now(UTC).isoformat(),
       },
     )
   except ClientError as e:
-    logger.warning(f"Could not record performance reconcile for {volume_id}: {e}")
-
-  return {"reconciled": True, "modification_state": state, **target}
+    logger.warning(f"Could not record performance change for {volume_id}: {e}")
 
 
 def attach_and_register_volume(
@@ -1000,6 +1083,19 @@ def detach_volume(event: dict[str, Any]) -> dict[str, Any]:
   logger.info(f"Volume {volume_id} detached, preserving databases: {databases}")
 
   return {"statusCode": 200, "volume_id": volume_id, "databases": databases}
+
+
+def park_volume(event: dict[str, Any]) -> dict[str, Any]:
+  """Lower a detached volume to its tier's idle performance.
+
+  Its own action, invoked asynchronously by the detachment Lambda once the
+  volume is `available`: detach_volume is called synchronously under a 60s
+  client timeout, too tight to also wait out the detach.
+  """
+  volume_id = event["volume_id"]
+  item = table.get_item(Key={"volume_id": volume_id}).get("Item", {})
+  result = park_volume_performance(volume_id, item.get("tier", ""))
+  return {"statusCode": 200, "volume_id": volume_id, **result}
 
 
 def _maybe_snapshot_pre_detach(
