@@ -893,6 +893,14 @@ Resources:
               Value: !Ref DatabasePort
             - Name: DAGSTER_HOME
               Value: /app/dagster_home
+            # Address of the Dagster webserver's GraphQL API, for a run that
+            # submits other runs (the scheduled connection sweep dispatches each
+            # sync through the same path the API uses). Without these the run
+            # falls back to env.py's compose default ("dagster-webserver").
+            - Name: DAGSTER_HOST
+              Value: !Sub webserver.dagster.${Environment}.robosystems.local
+            - Name: DAGSTER_PORT
+              Value: "3000"
             - Name: DAGSTER_POSTGRES_HOST
               Value: !Ref DatabaseEndpoint
             - Name: DAGSTER_POSTGRES_PORT
