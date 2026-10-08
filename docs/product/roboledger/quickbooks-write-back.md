@@ -24,9 +24,9 @@ If QuickBooks rejects an entry during a close, the close reports it. Entries tha
 
 A connected QuickBooks company is the book of record. RoboLedger mirrors it on every sync, and the entries RoboLedger posts are written back to it, so the two ledgers never drift apart. That's the **QuickBooks authoritative — write back on close** setting on the QuickBooks card under **Entity → Connections**, and it's the default.
 
-The same card offers **Native — RoboLedger only, no write-back**. That setting is for books kept in RoboLedger itself. While QuickBooks is connected, leave it on QuickBooks authoritative: the sync keeps mirroring QuickBooks, and entries that stay only in RoboLedger leave the two ledgers apart.
+The other setting is **Shadow — observe only, write nothing**. QuickBooks stays the book of record and RoboLedger never writes to it, not at a close and not for a single entry. The close still runs: its drafts become expectations compared with what QuickBooks holds, and what would have blocked it is reported instead of enforced. It is the setting for running RoboLedger's close beside the one you already do, until you are ready to let it post. See [Close the month](month-end-close.md).
 
-The third setting is **Shadow — observe only, write nothing**. QuickBooks stays the book of record and RoboLedger never writes to it, not at a close and not for a single entry. The close still runs: its drafts become expectations compared with what QuickBooks holds, and what would have blocked it is reported instead of enforced. It is the setting for running RoboLedger's close beside the one you already do, until you are ready to let it post. See [Close the month](month-end-close.md).
+Native books, kept in RoboLedger with nothing written anywhere else, aren't a setting you pick while QuickBooks is connected. They are what severing the connection leaves you with, below.
 
 ## Disconnecting QuickBooks
 

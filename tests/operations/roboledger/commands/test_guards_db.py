@@ -22,6 +22,7 @@ from robosystems.operations.locking import RowLockedError, exclusive_period_fenc
 from robosystems.operations.roboledger.commands._guards import (
   ClosedPeriodError,
   assert_period_not_closed,
+  baseline_import,
 )
 from robosystems.operations.roboledger.commands.reconciling_items import (
   _closed_period_names,
@@ -101,6 +102,17 @@ def test_a_month_before_the_first_row_is_closed(posting_date):
 
 def test_a_closed_row_is_closed():
   with extensions_session(GRAPH) as session:
+    with pytest.raises(ClosedPeriodError):
+      assert_period_not_closed(session, date(2026, 7, 10))
+
+
+def test_a_baseline_import_passes_closed_months_and_only_it_does():
+  """A source's history onto books that hold nothing posted yet is the books,
+  not a change to them: the fence stands aside inside the waiver and nowhere
+  else."""
+  with extensions_session(GRAPH) as session:
+    with baseline_import():
+      assert_period_not_closed(session, date(2026, 7, 10), date(2019, 1, 1))
     with pytest.raises(ClosedPeriodError):
       assert_period_not_closed(session, date(2026, 7, 10))
 

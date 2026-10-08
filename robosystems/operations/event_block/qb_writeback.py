@@ -73,8 +73,15 @@ def _validated_cents(value: Any, field: str) -> int:
   return value
 
 
-def _resolve_qb_account_id(session: Session, element_id: str) -> str:
-  """Local element_id → QB Account.Id (the element's `external_id`)."""
+def _resolve_qb_account_id(
+  session: Session, element_id: str, *, connection_id: str | None = None
+) -> str:
+  """Local element_id → QB Account.Id (the element's `external_id`).
+
+  With ``connection_id``, an account another connection created is refused:
+  its external id names an account in that connection's company file, and
+  posting it through this one would land in the wrong books.
+  """
   element = session.query(Element).filter(Element.id == element_id).first()
   if element is None:
     raise QBWritebackError(
@@ -94,12 +101,30 @@ def _resolve_qb_account_id(session: Session, element_id: str) -> str:
         ),
       }
     )
+  if (
+    connection_id
+    and element.connection_id
+    and str(element.connection_id) != str(connection_id)
+  ):
+    raise QBWritebackError(
+      {
+        "code": "element_not_on_connection",
+        "message": (
+          f"Element {element_id} (code={element.code}, name={element.name}) "
+          f"belongs to QuickBooks connection {element.connection_id}, not "
+          f"{connection_id}; its account id would post into another "
+          f"company file."
+        ),
+      }
+    )
   return str(element.external_id)
 
 
 def _build_qb_line(
   session: Session,
   line_item: dict[str, Any],
+  *,
+  connection_id: str | None = None,
 ) -> JournalEntryLine:
   """Translate one line_item dict (amounts in cents) into a QB JournalEntryLine."""
   debit = _validated_cents(line_item.get("debit_amount"), "debit_amount")
@@ -127,7 +152,9 @@ def _build_qb_line(
         "message": "Line is missing element_id — unresolved external_id?",
       }
     )
-  qb_account_id = _resolve_qb_account_id(session, str(element_id))
+  qb_account_id = _resolve_qb_account_id(
+    session, str(element_id), connection_id=connection_id
+  )
 
   qb_line = JournalEntryLine()
   # Amounts in QB are dollars (float); RL stores cents (int).
@@ -149,6 +176,7 @@ def _build_qb_journal_entry(
   posting_date,
   memo: str | None,
   line_items: list[dict[str, Any]],
+  connection_id: str | None = None,
 ) -> QBJournalEntry:
   """Build one QB JournalEntry from (posting_date, memo, line_items)."""
   je = QBJournalEntry()
@@ -158,7 +186,9 @@ def _build_qb_journal_entry(
     else str(posting_date)
   )
   je.PrivateNote = memo or ""
-  je.Line = [_build_qb_line(session, li) for li in line_items]
+  je.Line = [
+    _build_qb_line(session, li, connection_id=connection_id) for li in line_items
+  ]
   return je
 
 
@@ -210,6 +240,7 @@ def post_event_to_qb(
   qb_client,
   *,
   entry_ids: list[str] | None = None,
+  connection_id: str | None = None,
 ) -> dict[str, str]:
   """Post the event's unpublished draft entries to QB, one JournalEntry each.
 
@@ -240,6 +271,7 @@ def post_event_to_qb(
         posting_date=entry.get("posting_date"),
         memo=entry.get("memo"),
         line_items=entry.get("line_items") or [],
+        connection_id=connection_id,
       ),
     )
     for entry_id, entry in pending

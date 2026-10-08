@@ -15,7 +15,7 @@ After a sync, your AI assistant tells you how many transactions changed at the s
 
 For each one, your assistant can show you what RoboLedger posted, what QuickBooks says now, and the difference for each account.
 
-A regular sync looks back 60 days. If someone edited something older than that, ask your assistant to sync from a date that covers it, or choose **From a specific date** or **Full rebuild** when you sync from the QuickBooks card. Otherwise the change is missed.
+A regular sync re-reads the last 60 days and asks QuickBooks what changed since the previous sync, so an edit to something older is fetched on its own. A transaction deleted in QuickBooks shows up here too, as a change with nothing left on the QuickBooks side. For a deletion, restate isn't offered, since it would recreate what QuickBooks removed; catch up reverses it, and mark as handled records that you already did. **Full rebuild** on the QuickBooks card still re-reads everything from the start.
 
 ## Three ways to settle it
 

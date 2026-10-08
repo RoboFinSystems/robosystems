@@ -1178,7 +1178,11 @@ def execute_event_block(
   error_payload: dict[str, Any] | None = None
   try:
     newly_published = post_event_to_qb(
-      session, event, qb_client.client, entry_ids=entry_ids
+      session,
+      event,
+      qb_client.client,
+      entry_ids=entry_ids,
+      connection_id=str(connection_id),
     )
   except QBWritebackError as e:
     newly_published = e.published

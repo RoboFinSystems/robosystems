@@ -412,8 +412,8 @@ class ConnectionService:
     The connection must belong to `graph_id` (the authorized URL scope), so a
     guessed id can't flip another graph into write-back; any write-role member
     may set it (the router enforces role). Returns None when missing or out of
-    scope; raises ValueError for a value other than 'native' or
-    'qb_authoritative'.
+    scope. Raises ValueError for 'native', which only disconnect and sever
+    set, or a value the model refuses.
     """
     session = db_session or SessionFactory()
     session_created = db_session is None
@@ -429,6 +429,11 @@ class ConnectionService:
         )
         return None
 
+      if write_policy == WritePolicy.NATIVE.value:
+        raise ValueError(
+          "'native' is what disconnecting or severing leaves; a live "
+          "connection chooses 'qb_authoritative' or 'shadow'."
+        )
       conn.set_write_policy(session, write_policy)
       logger.info("Set write_policy=%s on connection %s", write_policy, connection_id)
       return conn.to_dict()

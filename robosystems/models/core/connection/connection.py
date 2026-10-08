@@ -35,8 +35,8 @@ class ConnectionStatus(str, Enum):
 class WritePolicy(str, Enum):
   """Whether RoboSystems-originated entries write back to an external GL.
 
-  - ``NATIVE``: RoboSystems is the source of truth; GL rows are written
-    locally, nothing is published.
+  - ``NATIVE``: books kept in RoboSystems with no external GL to write to,
+    what disconnect and sever leave. Not a choice for a live connection.
   - ``QB_AUTHORITATIVE``: entries publish to QuickBooks via
     ``execute-event-block`` and stay DRAFT locally until QB accepts.
     Round-tripped entries are matched by ``metadata.qb_external_id``.

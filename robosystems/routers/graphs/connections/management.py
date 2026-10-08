@@ -413,14 +413,15 @@ async def get_connection(
   summary="Set Connection Write Policy",
   operation_id="setConnectionWritePolicy",
   description=(
-    "Opt a connection into or out of outbound write-back. "
-    "'qb_authoritative' makes QuickBooks the source of truth — "
+    "Choose how a live connection and RoboSystems share the books. "
+    "'qb_authoritative', the default, makes QuickBooks the book of record: "
     "RoboSystems-originated entries (manual JEs, schedule drafts) publish "
-    "to QuickBooks when executed or at close. 'native' keeps RoboSystems "
-    "authoritative with no write-back. 'shadow' keeps QuickBooks the book of "
-    "record and writes nothing to it: the close posts nothing locally either, "
-    "its drafts become shadowed expectations compared with what QuickBooks "
-    "holds, and its gates are recorded as findings. This is the explicit "
+    "to QuickBooks when executed or at close. 'shadow' keeps QuickBooks the "
+    "book of record and writes nothing to it: the close posts nothing locally "
+    "either, its drafts become shadowed expectations compared with what "
+    "QuickBooks holds, and its gates are recorded as findings. 'native' is "
+    "not a choice here: it is what disconnecting or severing leaves, books "
+    "kept in RoboSystems with no connection to write to. This is the explicit "
     "operator opt-in for writing to your books of record."
   ),
   responses={**RESOURCE_ERROR_RESPONSES},
@@ -475,6 +476,12 @@ async def set_connection_write_policy(
 
   except HTTPException:
     raise
+  except ValueError as exc:
+    raise create_error_response(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail=str(exc),
+      code=ErrorCode.INVALID_INPUT,
+    )
   except Exception:
     logger.error("Failed to set connection write policy", exc_info=True)
     raise create_error_response(

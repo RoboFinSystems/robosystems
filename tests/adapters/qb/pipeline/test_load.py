@@ -9,6 +9,7 @@ _PATCH_LOAD_WORK_DIR = (
   "robosystems.adapters.quickbooks.pipeline.load.get_pipeline_work_dir"
 )
 _PATCH_OLTP_LOADER = "robosystems.operations.extensions.loader.OLTPLoader"
+_PATCH_BASELINE = "robosystems.adapters.quickbooks.pipeline.load._is_baseline_import"
 _PATCH_CONN_SVC = "robosystems.operations.connection_service.ConnectionService"
 
 
@@ -68,6 +69,11 @@ def _make_load_result(
 class TestQbLoadAsset:
   """Tests for the qb_load Dagster asset."""
 
+  @pytest.fixture(autouse=True)
+  def _books_already_posted(self):
+    with patch(_PATCH_BASELINE, return_value=False):
+      yield
+
   def test_load_calls_oltp_loader(self, tmp_path):
     """Test that qb_load creates an OLTPLoader and calls load()."""
     from dagster import MaterializeResult
@@ -106,7 +112,36 @@ class TestQbLoadAsset:
       # full_rebuild=False so the loader skips the pre-sync wipe.
       full_rebuild=False,
       since_date=None,
+      baseline=False,
     )
+
+  def test_a_baseline_import_is_passed_to_the_loader(self, tmp_path):
+    """Books with nothing posted yet take the history past the period fence,
+    and the sync summary says so."""
+    from robosystems.adapters.quickbooks.pipeline.load import qb_load
+
+    config = _make_config()
+    work_dir = tmp_path / "qb_pipeline" / config.graph_id
+    work_dir.mkdir(parents=True)
+
+    mock_loader = MagicMock()
+    mock_loader.load.return_value = _make_load_result()
+
+    with (
+      patch(_PATCH_BASELINE, return_value=True),
+      patch(_PATCH_LOAD_WORK_DIR, return_value=work_dir),
+      patch(_PATCH_OLTP_LOADER, return_value=mock_loader),
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.load._update_last_sync",
+      ) as mock_sync,
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.load._advance_cdc_watermark",
+      ),
+    ):
+      qb_load(build_asset_context(), config)
+
+    assert mock_loader.load.call_args.kwargs["baseline"] is True
+    assert mock_sync.call_args.args[2]["baseline"] is True
 
   def test_load_returns_row_counts_in_metadata(self, tmp_path):
     """Metadata: elements/dimensions structural + event counters."""
@@ -486,3 +521,51 @@ class TestApplyCdc:
       _make_config(), _make_load_result(), cdc={"checked": True, "reason": None}
     )
     assert summary["cdc"] == {"checked": True, "reason": None}
+
+
+@pytest.mark.unit
+class TestFiscalYearStart:
+  def _company_info(self, tmp_path, month):
+    import pandas as pd
+
+    extract = tmp_path / "extract"
+    extract.mkdir(parents=True)
+    pd.DataFrame([{"Id": "1", "FiscalYearStartMonth": month}]).to_parquet(
+      extract / "raw_company_info.parquet", index=False
+    )
+    return extract
+
+  def test_the_month_name_quickbooks_stores_becomes_a_number(self, tmp_path):
+    from robosystems.adapters.quickbooks.pipeline.load import fiscal_year_start_month
+
+    assert fiscal_year_start_month(self._company_info(tmp_path, "July")) == 7
+    assert fiscal_year_start_month(self._company_info(tmp_path / "b", "")) == 1
+    assert fiscal_year_start_month(tmp_path / "missing") == 1
+
+  def test_the_first_sync_initializes_the_calendar_on_the_companys_year(self, tmp_path):
+    from robosystems.adapters.quickbooks.pipeline.load import (
+      _bootstrap_fiscal_calendar_if_needed,
+    )
+
+    self._company_info(tmp_path, "April")
+    session = MagicMock()
+    session_cm = MagicMock()
+    session_cm.__enter__ = Mock(return_value=session)
+    session_cm.__exit__ = Mock(return_value=False)
+    service = MagicMock()
+    service.get.return_value = None
+    service.ensure_fiscal_periods.return_value = 3
+    with (
+      patch("robosystems.db.extensions.extensions_session", return_value=session_cm),
+      patch(
+        "robosystems.operations.roboledger.fiscal_calendar.FiscalCalendarService",
+        return_value=service,
+      ),
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.load.get_pipeline_work_dir",
+        return_value=tmp_path,
+      ),
+    ):
+      _bootstrap_fiscal_calendar_if_needed(build_asset_context(), _make_config())
+
+    assert service.initialize.call_args.kwargs["fiscal_year_start_month"] == 4

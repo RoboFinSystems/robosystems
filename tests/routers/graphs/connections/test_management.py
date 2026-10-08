@@ -1221,7 +1221,7 @@ class TestSetConnectionWritePolicy:
         await set_connection_write_policy(
           graph_id=GRAPH_ID,
           connection_id="nonexistent",
-          request=self._request("native"),
+          request=self._request("shadow"),
           current_user=mock_user,
           db=mock_db,
           _rate_limit=None,
@@ -1251,6 +1251,29 @@ class TestSetConnectionWritePolicy:
         )
 
     assert exc_info.value.status_code == 500
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_a_refused_policy_raises_400(self):
+    mock_user = _make_mock_user()
+    mock_db = MagicMock()
+
+    with patch(
+      f"{MANAGEMENT_MODULE}.ConnectionService.set_write_policy",
+      new_callable=AsyncMock,
+      side_effect=ValueError("'native' is what disconnecting or severing leaves"),
+    ):
+      with pytest.raises(HTTPException) as exc_info:
+        await set_connection_write_policy(
+          graph_id=GRAPH_ID,
+          connection_id=CONNECTION_ID,
+          request=self._request(),
+          current_user=mock_user,
+          db=mock_db,
+          _rate_limit=None,
+        )
+
+    assert exc_info.value.status_code == 400
 
 
 # ---------------------------------------------------------------------------

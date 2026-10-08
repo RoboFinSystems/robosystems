@@ -1042,6 +1042,42 @@ class TestCaptureAutoCommit:
     assert _SOURCE_AUTO_COMMITS.get("manual") is None
 
 
+class TestBaselineDispatch:
+  """A baseline load dispatches its handlers inside the fence waiver; an
+  ordinary load does not, and the waiver never outlives the load."""
+
+  def _capture(self, loader, *, baseline: bool) -> None:
+    session = MagicMock()
+    _stub_existing_lookup(session, [])
+    loader._capture_transactions_as_events(
+      session,
+      TestCaptureAutoCommit._dbt_data(self),  # type: ignore[arg-type]
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+      baseline=baseline,
+    )
+
+  def test_the_waiver_covers_a_baseline_load_only(self):
+    from robosystems.operations.extensions.loader import OLTPLoader
+    from robosystems.operations.roboledger.commands._guards import (
+      in_baseline_import,
+    )
+
+    seen: list[bool] = []
+    loader = OLTPLoader()
+    with patch(
+      "robosystems.operations.extensions.loader.fire_handler_on_commit",
+      side_effect=lambda *a, **k: seen.append(in_baseline_import()),
+    ):
+      self._capture(loader, baseline=True)
+      self._capture(loader, baseline=False)
+
+    assert seen == [True, False]
+    assert in_baseline_import() is False
+
+
 class TestInboundAutoCommitDecoupledFromWritePolicy:
   """Inbound auto-commit is a property of the SOURCE, not the
   connection's ``write_policy``. ``write_policy`` governs the OUTBOUND

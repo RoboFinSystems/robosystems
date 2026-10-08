@@ -1027,15 +1027,17 @@ class SetWritePolicyTool:
         "Set whether a connection writes back to its source system — the "
         "explicit opt-in for outbound write-back.\n\n"
         "**NOTES:**\n"
-        "- `native`: RoboSystems is the source of truth. No write-back; "
-        "RoboSystems-originated entries (manual JEs, schedule drafts) post "
-        "locally only.\n"
-        "- `qb_authoritative`: QuickBooks is the source of truth. "
+        "- `qb_authoritative` (the default): QuickBooks is the book of record. "
         "RoboSystems-originated entries publish to QuickBooks when executed "
-        "(`execute-event-block`) or at period close, then post locally.\n\n"
-        "**WHEN TO USE:** Flip a QuickBooks connection to `qb_authoritative` "
-        "before relying on write-back so drafts round-trip into QB; flip "
-        "back to `native` to disable write-back.\n\n"
+        "(`execute-event-block`) or at period close, then post locally.\n"
+        "- `shadow`: QuickBooks is the book of record and nothing is written "
+        "to it; the close posts nothing locally either, its drafts become "
+        "shadowed expectations and its gates are findings.\n"
+        "- `native` is not a choice here: it is what disconnecting or severing "
+        "leaves, books kept in RoboSystems with no connection to write to.\n\n"
+        "**WHEN TO USE:** Flip a QuickBooks connection to `shadow` to run the "
+        "close beside the customer's own without posting; back to "
+        "`qb_authoritative` when it may post.\n\n"
         "**RETURNS:** the updated connection (including `write_policy`)."
       ),
       "inputSchema": {
@@ -1047,7 +1049,7 @@ class SetWritePolicyTool:
           },
           "write_policy": {
             "type": "string",
-            "enum": ["native", "qb_authoritative", "shadow"],
+            "enum": ["qb_authoritative", "shadow"],
             "description": (
               "New write policy. 'shadow' keeps QuickBooks the book of record "
               "with nothing written to it: the close posts nothing, its drafts "
@@ -1076,7 +1078,7 @@ class SetWritePolicyTool:
     write_policy = arguments.get("write_policy") or ""
     if not connection_id:
       return {"error": "invalid_arguments", "message": "connection_id is required."}
-    if write_policy not in ("native", "qb_authoritative", "shadow"):
+    if write_policy not in ("qb_authoritative", "shadow"):
       return {
         "error": "invalid_arguments",
         "message": "write_policy must be 'native', 'qb_authoritative' or 'shadow'.",
