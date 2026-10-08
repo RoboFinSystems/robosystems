@@ -486,3 +486,51 @@ class TestApplyCdc:
       _make_config(), _make_load_result(), cdc={"checked": True, "reason": None}
     )
     assert summary["cdc"] == {"checked": True, "reason": None}
+
+
+@pytest.mark.unit
+class TestFiscalYearStart:
+  def _company_info(self, tmp_path, month):
+    import pandas as pd
+
+    extract = tmp_path / "extract"
+    extract.mkdir(parents=True)
+    pd.DataFrame([{"Id": "1", "FiscalYearStartMonth": month}]).to_parquet(
+      extract / "raw_company_info.parquet", index=False
+    )
+    return extract
+
+  def test_the_month_name_quickbooks_stores_becomes_a_number(self, tmp_path):
+    from robosystems.adapters.quickbooks.pipeline.load import fiscal_year_start_month
+
+    assert fiscal_year_start_month(self._company_info(tmp_path, "July")) == 7
+    assert fiscal_year_start_month(self._company_info(tmp_path / "b", "")) == 1
+    assert fiscal_year_start_month(tmp_path / "missing") == 1
+
+  def test_the_first_sync_initializes_the_calendar_on_the_companys_year(self, tmp_path):
+    from robosystems.adapters.quickbooks.pipeline.load import (
+      _bootstrap_fiscal_calendar_if_needed,
+    )
+
+    self._company_info(tmp_path, "April")
+    session = MagicMock()
+    session_cm = MagicMock()
+    session_cm.__enter__ = Mock(return_value=session)
+    session_cm.__exit__ = Mock(return_value=False)
+    service = MagicMock()
+    service.get.return_value = None
+    service.ensure_fiscal_periods.return_value = 3
+    with (
+      patch("robosystems.db.extensions.extensions_session", return_value=session_cm),
+      patch(
+        "robosystems.operations.roboledger.fiscal_calendar.FiscalCalendarService",
+        return_value=service,
+      ),
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.load.get_pipeline_work_dir",
+        return_value=tmp_path,
+      ),
+    ):
+      _bootstrap_fiscal_calendar_if_needed(build_asset_context(), _make_config())
+
+    assert service.initialize.call_args.kwargs["fiscal_year_start_month"] == 4

@@ -143,7 +143,7 @@ def _publish(session, event: Event, **kwargs) -> tuple[list[dict], dict[str, str
   """Run the publish with the QB boundary faked; return payloads and ids."""
   built: list[dict] = []
 
-  def _fake_build(session_, *, posting_date, memo, line_items):
+  def _fake_build(session_, *, posting_date, memo, line_items, connection_id=None):
     built.append({"posting_date": posting_date, "memo": memo, "line_items": line_items})
     return object()
 
@@ -294,4 +294,31 @@ def test_a_mapping_error_posts_nothing(ext_session):
   ):
     post_event_to_qb(ext_session, event, qb_client=object())
 
+  save.assert_not_called()
+
+
+def test_an_account_of_another_connection_is_refused(ext_session):
+  """An element another connection created names an account in that
+  connection's company file; publishing through this one posts nothing."""
+  from robosystems.operations.event_block.qb_writeback import QBWritebackError
+
+  event = _event(ext_session, with_capture=False)
+  other = ext_session.get(Element, "elem_cash")
+  other.external_id = "35"
+  other.external_source = "quickbooks"
+  other.connection_id = "conn_other"
+  rev = ext_session.get(Element, "elem_rev")
+  rev.external_id = "15"
+  rev.external_source = "quickbooks"
+  rev.connection_id = "conn_qb"
+  _corrected_rows(ext_session, event)
+  ext_session.commit()
+
+  with (
+    patch(f"{_MODULE}._save_with_retry") as save,
+    pytest.raises(QBWritebackError) as raised,
+  ):
+    post_event_to_qb(ext_session, event, qb_client=object(), connection_id="conn_qb")
+
+  assert raised.value.payload["code"] == "element_not_on_connection"
   save.assert_not_called()

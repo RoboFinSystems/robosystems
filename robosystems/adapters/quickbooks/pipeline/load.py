@@ -2,6 +2,7 @@
 
 from dataclasses import asdict
 from datetime import UTC, datetime
+from pathlib import Path
 
 from dagster import AssetExecutionContext, MaterializeResult, asset
 
@@ -316,6 +317,47 @@ def _advance_cdc_watermark(
     )
 
 
+_MONTH_NUMBERS = {
+  name: number
+  for number, name in enumerate(
+    (
+      "january",
+      "february",
+      "march",
+      "april",
+      "may",
+      "june",
+      "july",
+      "august",
+      "september",
+      "october",
+      "november",
+      "december",
+    ),
+    start=1,
+  )
+}
+
+
+def fiscal_year_start_month(extract_dir: Path) -> int:
+  """The company's fiscal year start, 1..12, from the CompanyInfo the extract
+  wrote (QuickBooks stores it as a month name). January when the file or
+  the field is missing, which is today's default."""
+  path = extract_dir / "raw_company_info.parquet"
+  if not path.exists():
+    return 1
+  try:
+    import pandas as pd
+
+    frame = pd.read_parquet(path, columns=["FiscalYearStartMonth"])
+  except Exception:
+    return 1
+  if frame.empty:
+    return 1
+  name = str(frame.iloc[0]["FiscalYearStartMonth"] or "").strip().lower()
+  return _MONTH_NUMBERS.get(name, 1)
+
+
 def _bootstrap_fiscal_calendar_if_needed(
   context: AssetExecutionContext, config: QBSyncConfig
 ) -> None:
@@ -365,10 +407,16 @@ def _bootstrap_fiscal_calendar_if_needed(
         return
 
       closed_through = previous_period(previous_period(current_month_period()))
+      # The company's own fiscal year, so the trial-balance read and the
+      # fiscal-year-to-date windows start where QuickBooks starts them.
+      start_month = fiscal_year_start_month(
+        get_pipeline_work_dir(config.graph_id) / "extract"
+      )
       service.initialize(
         session,
         config.graph_id,
         closed_through=closed_through,
+        fiscal_year_start_month=start_month,
         actor_id=config.user_id,
         actor_type="system",
         note="Auto-initialized on first QB sync",
@@ -387,6 +435,7 @@ def _bootstrap_fiscal_calendar_if_needed(
       session.commit()
       context.log.info(
         f"Initialized fiscal calendar on first sync: closed_through={closed_through} "
+        f"fiscal_year_start_month={start_month} "
         f"({inserted} FiscalPeriod rows seeded {start} → {current})"
       )
   except CalendarAlreadyInitializedError:
