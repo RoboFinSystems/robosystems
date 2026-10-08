@@ -20,7 +20,36 @@ from .exceptions import (
   GraphAPIError,
   GraphQueryComplexityError,
   GraphQueryTimeoutError,
+  GraphValidationError,
 )
+
+# The engine's words for a query it rejected: the caller's mistake.
+_CALLER_QUERY_ERROR_PATTERNS = (
+  "Parser exception",
+  "Binder exception",
+  "Cannot find property",
+  "Invalid input",
+  "Syntax error",
+  "Unknown function",
+  "Property not found",
+  "Label not found",
+  "Table .* does not exist",
+  "Catalog exception",
+)
+# Hidden from users in production like the rest, but not provably the
+# caller's: a missing database also "does not exist".
+_QUERY_ERROR_PATTERNS = (
+  *_CALLER_QUERY_ERROR_PATTERNS,
+  "does not exist",
+  "Runtime exception",
+)
+
+
+def _is_caller_query_error(error_str: str) -> bool:
+  return any(
+    re.search(pattern, error_str, re.IGNORECASE)
+    for pattern in _CALLER_QUERY_ERROR_PATTERNS
+  )
 
 
 class GraphMCPClient:
@@ -295,8 +324,10 @@ class GraphMCPClient:
       raise GraphAPIError(user_msg)
 
     except Exception as e:
-      logger.error(f"Unexpected error executing query: {e}")
       user_msg = self._sanitize_error_message(e, "query execution")
+      if _is_caller_query_error(str(e)):
+        raise GraphValidationError(user_msg) from e
+      logger.error(f"Unexpected error executing query: {e}")
       raise GraphAPIError(user_msg)
 
   async def get_schema(self) -> list[dict[str, Any]]:
@@ -626,37 +657,21 @@ class GraphMCPClient:
     """Strip internal details; query errors pass through outside production."""
     error_str = str(error)
 
-    query_error_patterns = [
-      "Parser exception",
-      "Binder exception",
-      "does not exist",
-      "Cannot find property",
-      "Invalid input",
-      "Syntax error",
-      "Unknown function",
-      "Property not found",
-      "Label not found",
-      "Table .* does not exist",
-      "Catalog exception",
-      "Runtime exception",
-    ]
-
-    import re
-
     from robosystems.config import env
 
     # Production hides query errors to avoid leaking schema.
     if env.ENVIRONMENT in ("dev", "staging"):
-      for pattern in query_error_patterns:
+      for pattern in _QUERY_ERROR_PATTERNS:
         if re.search(pattern, error_str, re.IGNORECASE):
           sanitized = re.sub(r"/[\w/]+\.(py|cpp|h)", "[internal]", error_str)
           sanitized = re.sub(r"\bline \d+", "", sanitized)
           logger.debug(f"Preserving query error for MCP: {sanitized}")
           return sanitized
     else:
-      for pattern in query_error_patterns:
+      for pattern in _QUERY_ERROR_PATTERNS:
         if re.search(pattern, error_str, re.IGNORECASE):
-          logger.error(f"Query error in production (hidden from user): {error_str}")
+          log = logger.warning if _is_caller_query_error(error_str) else logger.error
+          log(f"Query error in production (hidden from user): {error_str}")
           return "Query validation failed. Please check your query syntax."
 
     error_mappings = {

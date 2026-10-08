@@ -73,6 +73,9 @@ run_launcher:
       env: DAGSTER_ECS_RUN_TASK_DEFINITION
     # Container name in the task definition
     container_name: dagster-run
+    # The default ("dagster") lists Secrets Manager by tag on every launch.
+    # Run tasks get their secrets from the task definition instead.
+    secrets_tag: null
     run_task_kwargs:
       cluster:
         env: DAGSTER_ECS_CLUSTER

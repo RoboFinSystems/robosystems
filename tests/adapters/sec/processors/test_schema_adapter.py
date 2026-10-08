@@ -572,3 +572,32 @@ class TestXBRLTableMapping:
     assert XBRLSchemaAdapter.XBRL_TABLE_MAPPING["EntityReports"] == "ENTITY_HAS_REPORT"
     assert XBRLSchemaAdapter.XBRL_TABLE_MAPPING["ReportFacts"] == "REPORT_HAS_FACT"
     assert XBRLSchemaAdapter.XBRL_TABLE_MAPPING["FactElements"] == "FACT_HAS_ELEMENT"
+
+
+def test_every_table_xbrl_graph_writes_by_filename_has_a_schema():
+  """`write_dataframe` derives the table name from the file stem; a stem with no
+  schema skips the column-completeness pass that positional COPY relies on."""
+  import re
+  from pathlib import Path
+
+  import robosystems.adapters.sec.processors.xbrl_graph as xbrl_graph
+
+  source = Path(xbrl_graph.__file__).read_text()
+  stems = re.findall(r'"(?:nodes|relationships)/([A-Za-z_]+)\.parquet"', source)
+  assert stems
+
+  adapter = XBRLSchemaAdapter(
+    {
+      "name": "SEC",
+      "description": "SEC",
+      "base_schema": "base",
+      "extensions": ["roboledger"],
+    }
+  )
+  unresolved = [
+    stem
+    for stem in stems
+    if adapter.get_schema_info(stem.replace("_", " ").title().replace(" ", ""))["type"]
+    == "unknown"
+  ]
+  assert unresolved == []

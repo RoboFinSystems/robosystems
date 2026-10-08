@@ -1450,7 +1450,7 @@ class GraphMCPTools:
         score = e.details["complexity_score"]
         error_msg += f"\n💡 Complexity score: {score}. Consider simplifying the query."
 
-      logger.error(
+      logger.warning(
         f"Query complexity error in tool '{name}': {error_msg}",
         extra={"error_context": error_context},
       )
@@ -1461,7 +1461,9 @@ class GraphMCPTools:
     except GraphAPIError as e:
       error_msg = str(e)
       error_context = self._build_error_context(name, arguments, e)
-      logger.error(
+      # A query the engine rejected is the caller's mistake, not a fault.
+      log = logger.warning if isinstance(e, GraphValidationError) else logger.error
+      log(
         f"Graph API error in tool '{name}': {error_msg}",
         extra={"error_context": error_context},
       )
@@ -1482,7 +1484,7 @@ class GraphMCPTools:
         if arguments:
           error_msg += f"\nProvided arguments: {list(arguments.keys())}"
 
-      logger.error(f"Argument validation error in tool '{name}': {error_msg}")
+      logger.warning(f"Argument validation error in tool '{name}': {error_msg}")
       if return_raw:
         raise GraphValidationError(error_msg, validation_errors=[error_msg])
       return f"Validation Error: {error_msg}"

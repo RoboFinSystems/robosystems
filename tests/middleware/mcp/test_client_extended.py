@@ -591,6 +591,45 @@ class TestCloseMethod:
         await client.execute_query("MATCH (n) RETURN n LIMIT 1")
 
   @pytest.mark.asyncio
+  async def test_execute_query_rejected_query_is_a_validation_error(self):
+    """A query the engine refuses is the caller's mistake, not a backend fault."""
+    from robosystems.middleware.mcp.exceptions import GraphValidationError
+
+    mock_graph = AsyncMock()
+    mock_graph.query = AsyncMock(
+      side_effect=RuntimeError(
+        "Query binding error: Binder exception: In WITH clause, ORDER BY must "
+        "be followed by SKIP or LIMIT."
+      )
+    )
+
+    with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
+      client = _create_client()
+      client.graph_client = mock_graph
+
+      with pytest.raises(GraphValidationError):
+        await client.execute_query("MATCH (n) WITH n ORDER BY n.x RETURN n")
+
+  @pytest.mark.asyncio
+  async def test_execute_query_engine_fault_is_not_a_validation_error(self):
+    from robosystems.middleware.mcp.exceptions import GraphValidationError
+
+    mock_graph = AsyncMock()
+    mock_graph.query = AsyncMock(
+      side_effect=RuntimeError(
+        "Query execution error: Buffer manager exception: Unable to allocate memory!"
+      )
+    )
+
+    with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
+      client = _create_client()
+      client.graph_client = mock_graph
+
+      with pytest.raises(GraphAPIError) as excinfo:
+        await client.execute_query("MATCH (n) RETURN n LIMIT 1")
+      assert not isinstance(excinfo.value, GraphValidationError)
+
+  @pytest.mark.asyncio
   async def test_execute_query_non_dict_result(self):
     """Test that non-dict result raises GraphAPIError (sanitized)."""
     mock_graph = AsyncMock()

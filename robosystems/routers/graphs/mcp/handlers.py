@@ -13,6 +13,7 @@ from robosystems.middleware.mcp import (
   GraphAPIError,
   GraphQueryComplexityError,
   GraphQueryTimeoutError,
+  GraphValidationError,
   create_graph_mcp_client,
 )
 from robosystems.middleware.mcp import (
@@ -352,6 +353,10 @@ class MCPHandler:
       logger.warning(f"Query constraint violation for {name}: {e}")
       return tool_error_result(f"Query Error: {e!s}", "constraint")
 
+    except GraphValidationError as e:
+      logger.warning(f"Query rejected for {name}: {e}")
+      return tool_error_result(str(e), "constraint")
+
     except GraphAPIError as e:
       logger.error(f"Graph API error in tool '{name}': {e}")
       return tool_error_result(str(e), "backend")
@@ -508,14 +513,7 @@ async def execute_mcp_query_with_timeout(
   if tool_timeout and tool_name == "read-graph-cypher":
     arguments = {**arguments, "timeout": int(tool_timeout)}
 
-  try:
-    result = await asyncio.wait_for(
-      mcp_tools.call_tool(tool_name, arguments, return_raw=True), timeout=timeout
-    )
-    return result
-  except TimeoutError:
-    logger.error(f"MCP tool {tool_name} timed out after {timeout} seconds")
-    raise
-  except Exception as e:
-    logger.error(f"MCP tool {tool_name} failed: {e}")
-    raise
+  # No logging here: the caller, `MCPHandler.call_tool`, logs every outcome.
+  return await asyncio.wait_for(
+    mcp_tools.call_tool(tool_name, arguments, return_raw=True), timeout=timeout
+  )

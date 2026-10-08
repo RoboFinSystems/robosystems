@@ -21,7 +21,11 @@ from strawberry.types import Info
 
 from robosystems.config import env
 from robosystems.graphql.context import GraphQLContext, require_user
-from robosystems.graphql.execution import MaskUnexpectedErrors, OffloadSyncResolvers
+from robosystems.graphql.execution import (
+  ExtensionsSchema,
+  MaskUnexpectedErrors,
+  OffloadSyncResolvers,
+)
 from robosystems.graphql.resolvers._common import (
   _MAX_LIMIT,
   _MIN_LIMIT,
@@ -165,7 +169,7 @@ Query = _build_query_type()
 # The Sync OTel variant is required because the async one breaks
 # `execute_sync`. `OffloadSyncResolvers` must come after it: the last extension
 # is outermost, and the resolver span has to open inside the worker thread.
-schema = strawberry.Schema(
+schema = ExtensionsSchema(
   query=Query,
   extensions=[
     lambda: QueryDepthLimiter(max_depth=env.EXTENSIONS_GRAPHQL_MAX_DEPTH),

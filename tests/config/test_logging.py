@@ -159,6 +159,16 @@ def test_get_logging_config_prod_has_expected_handlers(monkeypatch):
   assert config["loggers"]["robosystems"]["handlers"] == ["critical", "operational"]
 
 
+def test_get_logging_config_routes_graphql_warnings_and_drops_arelle(monkeypatch):
+  monkeypatch.setattr(EnvConfig, "LOG_LEVEL", "INFO")
+  config = get_logging_config("prod")
+
+  graphql = config["loggers"]["strawberry.execution"]
+  assert graphql["handlers"] == ["critical", "operational"]
+  assert graphql["propagate"] is False
+  assert config["loggers"]["arelle"] == {"handlers": [], "propagate": False}
+
+
 def test_get_logging_config_staging_adds_debug_handler(monkeypatch):
   monkeypatch.setattr(EnvConfig, "LOG_LEVEL", "INFO")
   config = get_logging_config("staging")

@@ -3,6 +3,7 @@ deliberate errors reach ``errors[]`` verbatim."""
 
 from __future__ import annotations
 
+import logging
 import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -16,6 +17,7 @@ from robosystems.graphql.execution import (
   INTERNAL_ERROR_CODE,
   INTERNAL_ERROR_MESSAGE,
   STATEMENT_TIMEOUT_CODE,
+  ExtensionsSchema,
   MaskUnexpectedErrors,
   OffloadSyncResolvers,
 )
@@ -135,3 +137,30 @@ class TestMaskUnexpectedErrors:
   async def test_masking_applies_on_the_async_path_too(self) -> None:
     result = await schema.execute("{ integrity }", context_value=_ctx())
     assert result.errors[0].message == INTERNAL_ERROR_MESSAGE
+
+
+logged_schema = ExtensionsSchema(query=Query, extensions=[MaskUnexpectedErrors])
+
+
+def _strawberry_levels(caplog: pytest.LogCaptureFixture) -> list[int]:
+  return [r.levelno for r in caplog.records if r.name == "strawberry.execution"]
+
+
+class TestExtensionsSchemaLogging:
+  @pytest.mark.parametrize("query", ["{ deliberate }", "{ noSuchField }", "{ leaf"])
+  def test_a_callers_mistake_logs_at_warning(
+    self, query: str, caplog: pytest.LogCaptureFixture
+  ) -> None:
+    with caplog.at_level(logging.INFO, logger="strawberry.execution"):
+      logged_schema.execute_sync(query, context_value=_ctx())
+    assert _strawberry_levels(caplog) == [logging.WARNING]
+
+  def test_a_server_fault_logs_at_error_with_its_traceback(
+    self, caplog: pytest.LogCaptureFixture
+  ) -> None:
+    with caplog.at_level(logging.INFO, logger="strawberry.execution"):
+      result = logged_schema.execute_sync("{ plainPython }", context_value=_ctx())
+    assert result.errors[0].message == INTERNAL_ERROR_MESSAGE
+    records = [r for r in caplog.records if r.name == "strawberry.execution"]
+    assert [r.levelno for r in records] == [logging.ERROR]
+    assert records[0].exc_info is not None
