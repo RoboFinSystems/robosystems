@@ -235,11 +235,11 @@ def test_container_is_stopped_and_unmounted_before_the_detach(gvd):
   _seed_instance_registry(instance_id)
 
   call_order: list[str] = []
-  sent: list[list[str]] = []
+  sent: list[dict] = []
 
   def fake_send(**kwargs):
     call_order.append("ssm_send")
-    sent.append(kwargs["Parameters"]["commands"])
+    sent.append(kwargs["Parameters"])
     return {"Command": {"CommandId": "cmd-1"}}
 
   def fake_invocation(**kwargs):
@@ -265,10 +265,18 @@ def test_container_is_stopped_and_unmounted_before_the_detach(gvd):
     gvd.handler(_make_lifecycle_event(instance_id), context=None)
 
   assert call_order[:3] == ["ssm_send", "ssm_done", "vm_invoke"]
-  commands = sent[0]
-  stop = next(i for i, c in enumerate(commands) if "docker stop" in c)
-  unmount = next(i for i, c in enumerate(commands) if "umount /mnt/ladybug-data" in c)
-  assert stop < unmount
+  commands = sent[0]["commands"]
+
+  def at(fragment: str) -> int:
+    return next(i for i, c in enumerate(commands) if fragment in c)
+
+  # The health check cannot restart the container, and nothing still holds
+  # the mount, by the time it is unmounted.
+  assert at("stop crond") < at("docker stop") < at("umount /mnt/ladybug-data")
+  assert at("stop amazon-cloudwatch-agent") < at("umount /mnt/ladybug-data")
+  # SSM bounds the script inside the poll's budget, not at its one-hour default.
+  timeout = int(sent[0]["executionTimeout"][0])
+  assert timeout < gvd.STOP_AND_UNMOUNT_BUDGET_SECONDS
 
 
 def test_stop_and_unmount_gives_up_at_its_budget(gvd):

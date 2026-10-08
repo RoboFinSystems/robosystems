@@ -4,9 +4,9 @@ Detach LadybugDB EBS data volumes when an EC2 instance terminates.
 Triggered by an Auto Scaling terminate lifecycle hook (via SNS). Stops the
 graph container and unmounts the data volume over SSM, asks the volume manager
 to detach it, and waits for the volume to reach `available` before releasing
-the hook. Signals CONTINUE only
-when every volume detached cleanly; otherwise ABANDON, so the ASG does not
-launch a replacement that races a half-detached volume.
+the hook. Signals CONTINUE when every volume detached cleanly, otherwise
+ABANDON. On a termination hook both let the instance terminate and its
+replacement launch; ABANDON only skips any other termination hooks.
 """
 
 import json
@@ -28,10 +28,16 @@ dynamodb = boto3.client("dynamodb")
 # still fit the Lambda and the hook's 300s heartbeat.
 STOP_AND_UNMOUNT_BUDGET_SECONDS = 50
 STOP_AND_UNMOUNT_POLL_SECONDS = 2
+# SSM's own limit on the script, inside the poll's budget: unset, it is an hour.
+STOP_AND_UNMOUNT_EXECUTION_TIMEOUT_SECONDS = 45
 STOP_AND_UNMOUNT_COMMANDS = [
   "set -a; . /etc/environment; set +a",
+  # First, so the health check cannot start the container again mid-detach.
+  "systemctl stop crond || true",
   'CONTAINER="$(/usr/local/bin/run-graph-container.sh --print-container-name)"'
   ' && docker stop -t 30 "$CONTAINER" || true',
+  # The agent tails the database's logs on the volume, which holds the mount.
+  "systemctl stop amazon-cloudwatch-agent || true",
   "sync",
   "umount /data 2>/dev/null || true",  # Legacy mount point
   # Last, so a mount that is still busy fails the command and is logged.
@@ -194,7 +200,10 @@ def stop_and_unmount(instance_id: str) -> str:
     command_id = ssm.send_command(
       InstanceIds=[instance_id],
       DocumentName="AWS-RunShellScript",
-      Parameters={"commands": STOP_AND_UNMOUNT_COMMANDS},
+      Parameters={
+        "commands": STOP_AND_UNMOUNT_COMMANDS,
+        "executionTimeout": [str(STOP_AND_UNMOUNT_EXECUTION_TIMEOUT_SECONDS)],
+      },
       TimeoutSeconds=STOP_AND_UNMOUNT_BUDGET_SECONDS,
     )["Command"]["CommandId"]
   except Exception as e:
