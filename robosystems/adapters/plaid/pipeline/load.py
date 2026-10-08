@@ -152,6 +152,7 @@ def load_sync(
     graph_id=graph_id,
     connection_id=connection_id,
     created_by=created_by,
+    account_entities=account_entities,
   )
 
   # The later record of a transaction wins: a ``modified`` row supersedes the
@@ -271,6 +272,7 @@ def apply_removed(
   graph_id: str,
   connection_id: str,
   created_by: str,
+  account_entities: dict[str, str] | None = None,
 ) -> set[str]:
   """Apply the bank's retractions; returns the ids of events deleted."""
   consumed: set[str] = set()
@@ -291,7 +293,7 @@ def apply_removed(
   for event in {str(e.id): e for e in pairs.values()}.values():
     legs = [str(leg) for leg in (event.metadata_ or {}).get("legs") or []]
     gone = [leg for leg in legs if leg in removed]
-    survivor = survivor_payload(event, gone)
+    survivor = survivor_payload(event, gone, account_entities)
     if event.status in UNPOSTED_STATUSES:
       to_delete.append(str(event.id))
       if survivor is not None:
@@ -324,9 +326,12 @@ def apply_removed(
   return consumed
 
 
-def survivor_payload(pair: Event, gone: list[str]) -> dict[str, Any] | None:
+def survivor_payload(
+  pair: Event, gone: list[str], account_entities: dict[str, str] | None = None
+) -> dict[str, Any] | None:
   """The single-leg event for the leg a removal leaves behind, or ``None``
-  when both legs are gone."""
+  when both legs are gone. It books to its own account's entity: a pair
+  can span two once one of its accounts moves."""
   metadata = dict(pair.metadata_ or {})
   legs = [str(leg) for leg in metadata.get("legs") or []]
   remaining = [leg for leg in legs if leg not in gone]
@@ -351,8 +356,8 @@ def survivor_payload(pair: Event, gone: list[str]) -> dict[str, Any] | None:
     "currency": pair.currency or "USD",
     "description": str(metadata.get("bank_description") or "Transfer")[:200],
     "resource_element_id": metadata.get(f"{side}_element_id"),
-    # The leg stays on the books the pair was on.
-    "entity_id": pair.entity_id,
+    "entity_id": (account_entities or {}).get(str(metadata.get(f"{side}_account_id")))
+    or pair.entity_id,
     "metadata": {
       key: value
       for key, value in {
@@ -910,7 +915,7 @@ def reconcile_pairs(
           out.append(event)
         else:
           single = survivor_payload(
-            pair, [other for other in current if other != leg_id]
+            pair, [other for other in current if other != leg_id], account_entities
           )
           if single is not None:
             out.append(single)

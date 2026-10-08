@@ -303,6 +303,21 @@ class TestRemovals:
     survivor = survivor_payload(pair, ["y"])
     assert survivor is not None and survivor["entity_id"] == "ent_sub"
 
+  def test_a_survivor_books_to_its_own_accounts_entity(self):
+    # The pair landed on the receiving side's entity; the outgoing account
+    # has since moved to another entity's chart.
+    pair = _event(
+      amount=50000,
+      entity_id="ent_sub",
+      metadata_={
+        "legs": ["x", "y"],
+        "from_account_id": "acct_parent_chk",
+        "from_element_id": "e_chk",
+      },
+    )
+    survivor = survivor_payload(pair, ["y"], {"acct_parent_chk": "ent_parent"})
+    assert survivor is not None and survivor["entity_id"] == "ent_parent"
+
   def test_nothing_removed_is_a_no_op(self):
     report = PlaidLoadReport()
     with patch(f"{MODULE}.existing_events") as existing:
