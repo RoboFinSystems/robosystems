@@ -3,6 +3,7 @@
 import requests
 from dagster import AssetExecutionContext, MaterializeResult, asset
 
+from .cdc import CdcPlan, plan_cdc, write_plan
 from .configs import QBSyncConfig
 from .load import end_failed_sync
 from .utils import (
@@ -76,6 +77,39 @@ def fetch_journal_report(client, start_date: str, end_date: str, log=None) -> di
   return {"Rows": {"Row": rows}}
 
 
+_HEADER_KEYS = (
+  "invoice_headers",
+  "bill_headers",
+  "payment_headers",
+  "bill_payment_headers",
+  "sales_receipt_headers",
+  "purchase_headers",
+)
+
+
+def _fetch_headers(client, start_date: str, end_date: str) -> dict[str, list[dict]]:
+  """The transaction headers for one window; they carry the agent refs the
+  JournalReport flattens away."""
+  return {
+    "invoice_headers": flatten_invoice_headers(
+      client.get_invoices(start_date, end_date)
+    ),
+    "bill_headers": flatten_bill_headers(client.get_bills(start_date, end_date)),
+    "payment_headers": flatten_payment_headers(
+      client.get_payments(start_date, end_date)
+    ),
+    "bill_payment_headers": flatten_bill_payment_headers(
+      client.get_bill_payments(start_date, end_date)
+    ),
+    "sales_receipt_headers": flatten_sales_receipt_headers(
+      client.get_sales_receipts(start_date, end_date)
+    ),
+    "purchase_headers": flatten_purchase_headers(
+      client.get_purchases(start_date, end_date)
+    ),
+  }
+
+
 class MultiCurrencyNotSupportedError(Exception):
   """The dbt mart (transactions.sql, elements.sql) hardcodes USD, so a
   non-USD realm would load silently wrong; refuse it."""
@@ -142,11 +176,15 @@ def _run_qb_extract(
     f"full_rebuild={config.full_rebuild}"
   )
 
+  from robosystems.models.core.connection.connection import Connection
+
   with SessionFactory() as session:
     creds = ConnectionCredentials.get_by_connection_id(config.connection_id, session)
     if not creds:
       raise ValueError(f"No credentials found for connection {config.connection_id}")
     credentials = creds.get_credentials()
+    connection = Connection.get_by_id(config.connection_id, session)
+    watermark = connection.last_cdc_watermark if connection is not None else None
 
   realm_id = config.realm_id
   if not realm_id:
@@ -180,14 +218,31 @@ def _run_qb_extract(
     )
     context.log.info(f"Incremental: fetching transactions from {start_date}")
 
-  report = fetch_journal_report(client, start_date, end_date, log=context.log)
-  journal_entries, journal_lines = parse_journal_report(report)
+  # CDC says what the window pull cannot: deletions, and edits dated before
+  # the window. A full window needs neither.
+  if config.full_rebuild or config.since_date:
+    cdc_plan = CdcPlan(checked=False, reason="full_window")
+  else:
+    cdc_plan = plan_cdc(client, watermark, start_date, log=context.log)
+
+  windows = [(start_date, end_date), *(tuple(w) for w in cdc_plan.extra_windows)]
+  journal_entries: list[dict] = []
+  journal_lines: list[dict] = []
+  headers: dict[str, list[dict]] = {key: [] for key in _HEADER_KEYS}
+  for lo, hi in windows:
+    report = fetch_journal_report(client, lo, hi, log=context.log)
+    entries, lines = parse_journal_report(report)
+    journal_entries.extend(entries)
+    journal_lines.extend(lines)
+    for key, rows in _fetch_headers(client, lo, hi).items():
+      headers[key].extend(rows)
 
   context.log.info(
-    f"Parsed: {len(journal_entries)} transactions, {len(journal_lines)} lines"
+    f"Parsed: {len(journal_entries)} transactions, {len(journal_lines)} lines "
+    f"over {len(windows)} window(s)"
   )
 
-  # Parties are a full snapshot; headers below use the JournalReport window.
+  # Parties are a full snapshot; headers use the JournalReport windows.
   customers = flatten_customers(client.get_customers())
   vendors = flatten_vendors(client.get_vendors())
   employees = flatten_employees(client.get_employees())
@@ -196,19 +251,12 @@ def _run_qb_extract(
     f"{len(employees)} employees"
   )
 
-  # Headers carry the agent refs JournalReport flattens away.
-  invoice_headers = flatten_invoice_headers(client.get_invoices(start_date, end_date))
-  bill_headers = flatten_bill_headers(client.get_bills(start_date, end_date))
-  payment_headers = flatten_payment_headers(client.get_payments(start_date, end_date))
-  bill_payment_headers = flatten_bill_payment_headers(
-    client.get_bill_payments(start_date, end_date)
-  )
-  sales_receipt_headers = flatten_sales_receipt_headers(
-    client.get_sales_receipts(start_date, end_date)
-  )
-  purchase_headers = flatten_purchase_headers(
-    client.get_purchases(start_date, end_date)
-  )
+  invoice_headers = headers["invoice_headers"]
+  bill_headers = headers["bill_headers"]
+  payment_headers = headers["payment_headers"]
+  bill_payment_headers = headers["bill_payment_headers"]
+  sales_receipt_headers = headers["sales_receipt_headers"]
+  purchase_headers = headers["purchase_headers"]
   context.log.info(
     f"Fetched headers: {len(invoice_headers)} invoices, {len(bill_headers)} bills, "
     f"{len(payment_headers)} payments, {len(bill_payment_headers)} bill payments, "
@@ -244,6 +292,8 @@ def _run_qb_extract(
     purchase_headers=purchase_headers,
   )
 
+  write_plan(extract_dir, cdc_plan)
+
   context.log.info(f"Extract complete → {extract_dir}")
 
   return MaterializeResult(
@@ -251,6 +301,10 @@ def _run_qb_extract(
       "extract_path": str(extract_dir),
       "graph_id": config.graph_id,
       "realm_id": realm_id,
+      "cdc_checked": cdc_plan.checked,
+      "cdc_reason": cdc_plan.reason or "",
+      "cdc_deletions": len(cdc_plan.deletions),
+      "cdc_extra_windows": len(cdc_plan.extra_windows),
       "accounts": len(accounts),
       "journal_entries": len(journal_entries),
       "journal_lines": len(journal_lines),

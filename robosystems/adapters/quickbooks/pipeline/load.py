@@ -1,5 +1,6 @@
 """QuickBooks load asset: dbt DuckDB output → extensions PostgreSQL via OLTPLoader."""
 
+from dataclasses import asdict
 from datetime import UTC, datetime
 
 from dagster import AssetExecutionContext, MaterializeResult, asset
@@ -63,7 +64,14 @@ def _run_qb_load(
     _record_failed_sync_result(context, config, exc)
     raise
 
-  _update_last_sync(context, config, _sync_result_summary(config, result))
+  # After the UPSERT, in its own transaction: a row edited and then deleted
+  # within one window ends deleted. A failure here fails the sync, so the
+  # next one re-reads the plan the extract left.
+  cdc_summary = _apply_cdc(context, config)
+
+  _update_last_sync(
+    context, config, _sync_result_summary(config, result, cdc=cdc_summary)
+  )
 
   _advance_cdc_watermark(context, config, sync_started_at)
 
@@ -153,7 +161,7 @@ def _release_sync_lock(context: AssetExecutionContext, config: QBSyncConfig) -> 
     )
 
 
-def _sync_result_summary(config: QBSyncConfig, result) -> dict:
+def _sync_result_summary(config: QBSyncConfig, result, cdc: dict | None = None) -> dict:
   """Shape a LoadResult into the Connection.last_sync_result payload."""
   return {
     "status": "succeeded",
@@ -162,6 +170,7 @@ def _sync_result_summary(config: QBSyncConfig, result) -> dict:
       "since_date": config.since_date or None,
       "full_rebuild": bool(config.full_rebuild),
     },
+    "cdc": cdc,
     "counts": {
       "events_captured": result.events_captured,
       "events_updated": result.events_updated,
@@ -235,6 +244,36 @@ def _update_last_sync(
       session.close()
   except Exception as e:
     context.log.warning(f"Failed to update last_sync (non-fatal): {e}")
+
+
+def _apply_cdc(context: AssetExecutionContext, config: QBSyncConfig) -> dict:
+  """Finish what the extract's CDC plan started: apply QuickBooks' deletions
+  to the mirror. Returns the summary the connection records."""
+  from .cdc import apply_deletions, read_plan
+
+  plan = read_plan(get_pipeline_work_dir(config.graph_id) / "extract")
+  if plan is None:
+    return {"checked": False, "reason": "no_plan"}
+  summary: dict = {
+    "checked": plan.checked,
+    "reason": plan.reason,
+    "watermark": plan.watermark,
+    "changed": plan.changed,
+    "old_edit_windows": len(plan.extra_windows),
+    "deletions": {"found": len(plan.deletions)},
+  }
+  if not plan.deletions:
+    return summary
+  from robosystems.db.extensions import extensions_session
+
+  with extensions_session(config.graph_id, statement_timeout_ms=None) as session:
+    applied = apply_deletions(session, plan.deletions)
+  summary["deletions"].update(asdict(applied))
+  context.log.info(
+    f"QuickBooks deletions: {len(plan.deletions)} found, {applied.voided} voided, "
+    f"{applied.flagged} flagged as reconciling items, {applied.unmatched} never synced"
+  )
+  return summary
 
 
 def _advance_cdc_watermark(

@@ -1,5 +1,6 @@
 """Tests for QuickBooks extract Dagster asset."""
 
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -53,6 +54,17 @@ _PATCH_FLATTEN_SALES_RECEIPTS = (
 _PATCH_FLATTEN_PURCHASES = (
   "robosystems.adapters.quickbooks.pipeline.extract.flatten_purchase_headers"
 )
+
+
+_PATCH_CONNECTION = "robosystems.models.core.connection.connection.Connection.get_by_id"
+
+
+@pytest.fixture(autouse=True)
+def _no_cdc_watermark():
+  """A connection with no CDC watermark takes today's path; the CDC tests
+  patch their own."""
+  with patch(_PATCH_CONNECTION, return_value=None):
+    yield
 
 
 def _wire_phase2_client_methods(mock_client):
@@ -813,3 +825,112 @@ class TestMultiCurrencyGuard:
       [{"tx_id": "1"}, {"currency": None, "tx_id": "2"}],
       realm_id="9999",
     )  # no exception
+
+
+@pytest.mark.unit
+class TestQbExtractCdc:
+  """With a watermark the extract asks CDC, pulls the back-dated days again,
+  and leaves the deletions for the load."""
+
+  def test_cdc_plans_extra_windows_and_writes_the_deletions(self, tmp_path):
+    from datetime import UTC, datetime
+
+    from robosystems.adapters.quickbooks.pipeline.cdc import read_plan
+    from robosystems.adapters.quickbooks.pipeline.extract import qb_extract
+
+    config = _make_config(lookback_days=60)
+    work_dir = tmp_path / "work"
+    mock_session = _make_mock_session()
+    mock_client = _wire_phase2_client_methods(MagicMock())
+    mock_client.get_entity_info.return_value = {}
+    mock_client.get_accounts.return_value = []
+    mock_client.get_transactions.return_value = {"Rows": {"Row": []}}
+    mock_client.cdc.return_value = (
+      {
+        "Invoice": [
+          {"Id": "42", "status": "Deleted"},
+          {"Id": "7", "TxnDate": "2025-01-15"},
+        ]
+      },
+      False,
+    )
+    connection = MagicMock()
+    connection.last_cdc_watermark = datetime(2026, 9, 30, tzinfo=UTC)
+
+    with (
+      patch(_PATCH_SESSION, return_value=mock_session),
+      patch(_PATCH_CREDS) as MockCreds,
+      patch(_PATCH_CONNECTION, return_value=connection),
+      patch(_PATCH_QB_CLIENT, return_value=mock_client),
+      patch(_PATCH_FLATTEN_CO, return_value=[]),
+      patch(_PATCH_PARSE_JR, return_value=([], [])),
+      patch(_PATCH_FLATTEN_CUSTOMERS, return_value=[]),
+      patch(_PATCH_FLATTEN_VENDORS, return_value=[]),
+      patch(_PATCH_FLATTEN_EMPLOYEES, return_value=[]),
+      patch(_PATCH_FLATTEN_INVOICES, return_value=[]),
+      patch(_PATCH_FLATTEN_BILLS, return_value=[]),
+      patch(_PATCH_FLATTEN_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_BILL_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_SALES_RECEIPTS, return_value=[]),
+      patch(_PATCH_FLATTEN_PURCHASES, return_value=[]),
+      patch(_PATCH_WORK_DIR, return_value=work_dir),
+      patch(_PATCH_WRITE),
+    ):
+      MockCreds.get_by_connection_id.return_value.get_credentials.return_value = {}
+      result = qb_extract(build_asset_context(), config)
+
+    mock_client.cdc.assert_called_once()
+    # The main window, then the back-dated day on its own.
+    starts = [
+      c.kwargs["start_date"] for c in mock_client.get_transactions.call_args_list
+    ]
+    assert len(starts) == 2 and starts[1] == "2025-01-15"
+    assert mock_client.get_invoices.call_args_list[1].args == (
+      "2025-01-15",
+      "2025-01-15",
+    )
+    plan = read_plan(work_dir / "extract")
+    assert plan is not None and plan.checked is True
+    assert plan.deletions == [{"entity": "Invoice", "id": "42", "last_updated": None}]
+    assert result.metadata["cdc_deletions"] == 1
+    assert result.metadata["cdc_extra_windows"] == 1
+
+  def test_a_full_rebuild_asks_cdc_nothing(self, tmp_path):
+    from robosystems.adapters.quickbooks.pipeline.cdc import read_plan
+    from robosystems.adapters.quickbooks.pipeline.extract import qb_extract
+
+    config = _make_config(full_rebuild=True)
+    work_dir = tmp_path / "work"
+    mock_session = _make_mock_session()
+    mock_client = _wire_phase2_client_methods(MagicMock())
+    mock_client.get_entity_info.return_value = {}
+    mock_client.get_accounts.return_value = []
+    mock_client.get_transactions.return_value = {"Rows": {"Row": []}}
+    connection = MagicMock()
+    connection.last_cdc_watermark = datetime(2026, 9, 30, tzinfo=UTC)
+
+    with (
+      patch(_PATCH_SESSION, return_value=mock_session),
+      patch(_PATCH_CREDS) as MockCreds,
+      patch(_PATCH_CONNECTION, return_value=connection),
+      patch(_PATCH_QB_CLIENT, return_value=mock_client),
+      patch(_PATCH_FLATTEN_CO, return_value=[]),
+      patch(_PATCH_PARSE_JR, return_value=([], [])),
+      patch(_PATCH_FLATTEN_CUSTOMERS, return_value=[]),
+      patch(_PATCH_FLATTEN_VENDORS, return_value=[]),
+      patch(_PATCH_FLATTEN_EMPLOYEES, return_value=[]),
+      patch(_PATCH_FLATTEN_INVOICES, return_value=[]),
+      patch(_PATCH_FLATTEN_BILLS, return_value=[]),
+      patch(_PATCH_FLATTEN_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_BILL_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_SALES_RECEIPTS, return_value=[]),
+      patch(_PATCH_FLATTEN_PURCHASES, return_value=[]),
+      patch(_PATCH_WORK_DIR, return_value=work_dir),
+      patch(_PATCH_WRITE),
+    ):
+      MockCreds.get_by_connection_id.return_value.get_credentials.return_value = {}
+      qb_extract(build_asset_context(), config)
+
+    mock_client.cdc.assert_not_called()
+    plan = read_plan(work_dir / "extract")
+    assert plan is not None and plan.reason == "full_window"
