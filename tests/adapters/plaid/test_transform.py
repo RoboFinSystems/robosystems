@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -10,6 +10,8 @@ from robosystems.adapters.bank_feed.chart import ChartIndex, name_key
 from robosystems.adapters.plaid.pipeline.transform import (
   Leg,
   account_display_name,
+  balance_cents,
+  balance_readings,
   bank_accounts,
   cents,
   counterparties,
@@ -417,3 +419,72 @@ class TestNatureNotDirection:
     assert account_display_name({"name": account, "mask": "1234"}, institution) == (
       expected
     )
+
+
+@pytest.mark.unit
+class TestBalances:
+  PULLED = datetime(2026, 10, 7, 23, 30, tzinfo=UTC)
+
+  def _acct(self, account_id, type_, balances):
+    return {
+      "account_id": account_id,
+      "name": "A",
+      "mask": "1",
+      "type": type_,
+      "subtype": "checking" if type_ == "depository" else "credit card",
+      "balances": balances,
+    }
+
+  def test_cash_keeps_current_and_available_a_card_only_current(self):
+    readings = balance_readings(
+      [
+        self._acct(
+          "chk",
+          "depository",
+          {"current": 1200.5, "available": 1000.0, "iso_currency_code": "USD"},
+        ),
+        self._acct("card", "credit", {"current": 350.25, "available": 4649.75}),
+      ],
+      pulled_at=self.PULLED,
+    )
+    assert [(r.account_id, r.kind, r.stated_cents, r.currency) for r in readings] == [
+      ("chk", "bank_current", 120050, "USD"),
+      ("chk", "bank_available", 100000, "USD"),
+      ("card", "bank_current", 35025, None),
+    ]
+
+  def test_a_figure_the_bank_did_not_give_is_not_a_reading(self):
+    readings = balance_readings(
+      [self._acct("chk", "depository", {"current": None, "available": 5.0})],
+      pulled_at=self.PULLED,
+    )
+    assert [r.kind for r in readings] == ["bank_available"]
+
+  def test_loans_and_investments_are_left_out(self):
+    readings = balance_readings(
+      [self._acct("loan", "loan", {"current": 9000.0})], pulled_at=self.PULLED
+    )
+    assert readings == []
+
+  def test_the_day_is_when_the_banks_figure_was_current_in_utc(self):
+    readings = balance_readings(
+      [
+        self._acct(
+          "chk",
+          "depository",
+          {"current": 1.0, "last_updated_datetime": "2026-10-06T19:15:00-05:00"},
+        ),
+        self._acct("sav", "depository", {"current": 2.0}),
+      ],
+      pulled_at=self.PULLED,
+    )
+    assert readings[0].as_of == date(2026, 10, 7)
+    assert readings[0].observed_at == datetime(2026, 10, 7, 0, 15, tzinfo=UTC)
+    # No stamp from Plaid: the pull time dates the reading.
+    assert readings[1].as_of == date(2026, 10, 7)
+    assert readings[1].observed_at == self.PULLED
+
+  def test_balance_cents_keeps_the_banks_sign(self):
+    assert balance_cents(12.345) == 1235
+    assert balance_cents(-3.5) == -350
+    assert balance_cents(None) == 0

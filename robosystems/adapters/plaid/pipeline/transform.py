@@ -32,10 +32,15 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
+from robosystems.adapters.bank_feed.balances import (
+  BANK_AVAILABLE,
+  BANK_CURRENT,
+  FeedBalance,
+)
 from robosystems.adapters.bank_feed.chart import BankAccount, ChartIndex, name_key
 from robosystems.adapters.bank_feed.hints import HINTS, AccountHint
 from robosystems.adapters.plaid.pipeline.tier0 import (
@@ -101,6 +106,65 @@ def bank_accounts(
       )
     )
   return booked
+
+
+def balance_cents(amount: float | int | str | None) -> int:
+  """A balance as the bank states it, in cents — no flip: a depository
+  figure is funds held, a credit figure is the amount owed."""
+  value = Decimal(str(amount or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+  return int(value * 100)
+
+
+def balance_readings(
+  accounts: list[dict[str, Any]], *, pulled_at: datetime
+) -> list[FeedBalance]:
+  """The balances ``/accounts/get`` reports for the Item's cash and card
+  accounts, dated by when the bank's figure was current (``pulled_at`` when
+  Plaid does not say). ``available`` is kept for cash accounts only: on a
+  card it is the unused limit."""
+  readings: list[FeedBalance] = []
+  for acct in accounts:
+    kind = str(acct.get("type") or "")
+    if kind not in BOOKED_ACCOUNT_TYPES:
+      continue
+    balances = acct.get("balances") or {}
+    observed_at = _observed_at(balances.get("last_updated_datetime"), pulled_at)
+    currency = balances.get("iso_currency_code") or balances.get(
+      "unofficial_currency_code"
+    )
+    figures = [(BANK_CURRENT, balances.get("current"))]
+    if kind == "depository":
+      figures.append((BANK_AVAILABLE, balances.get("available")))
+    for reading_kind, figure in figures:
+      if figure is None:
+        continue
+      readings.append(
+        FeedBalance(
+          account_id=str(acct["account_id"]),
+          kind=reading_kind,
+          as_of=observed_at.date(),
+          stated_cents=balance_cents(figure),
+          observed_at=observed_at,
+          currency=str(currency) if currency else None,
+        )
+      )
+  return readings
+
+
+def _observed_at(stamp: Any, fallback: datetime) -> datetime:
+  """Plaid's ``last_updated_datetime`` as an aware UTC datetime, else the
+  pull time; a day boundary is the UTC one."""
+  if stamp:
+    try:
+      parsed = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+      if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+      return parsed.astimezone(UTC)
+    except ValueError:
+      pass
+  if fallback.tzinfo is None:
+    fallback = fallback.replace(tzinfo=UTC)
+  return fallback.astimezone(UTC)
 
 
 def account_display_name(acct: dict[str, Any], institution: str) -> str:
