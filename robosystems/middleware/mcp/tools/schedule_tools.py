@@ -188,6 +188,7 @@ class ListPeriodDraftsTool:
     from robosystems.db.platform import platform_session
     from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
       resolve_writeback_connection,
+      shadow_ledger,
     )
 
     graph_id = self.client.graph_id
@@ -196,9 +197,14 @@ class ListPeriodDraftsTool:
     try:
       with platform_session() as platform_db:
         writeback = resolve_writeback_connection(platform_db, graph_id)
+        shadow = shadow_ledger(platform_db, graph_id)
       with extensions_session(graph_id) as session:
         response = list_period_drafts(
-          session, period, writeback=writeback, entity_id=arguments.get("entity_id")
+          session,
+          period,
+          writeback=writeback,
+          entity_id=arguments.get("entity_id"),
+          shadow=shadow,
         )
         return response.model_dump(mode="json")
     except SQLAlchemyError as exc:

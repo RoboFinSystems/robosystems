@@ -1643,7 +1643,11 @@ class TestPeriodDraftsResolver:
       ],
     }
     assert resolve.call_args.args[1] == GRAPH_ID
-    assert read.call_args.kwargs == {"writeback": writeback, "entity_id": None}
+    assert read.call_args.kwargs == {
+      "writeback": writeback,
+      "entity_id": None,
+      "shadow": False,
+    }
 
 
 class TestNotInitializedAcrossReads:

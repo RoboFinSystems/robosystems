@@ -49,6 +49,10 @@ ChatGPT asks you to allow the close before it runs. Then the receipt: five entri
 5. **You approve, and your assistant closes the month.** Posting the entries, checking that the balance sheet balances, and marking the month closed happen in one step.
 6. **Your assistant reads you the receipt.** How many entries posted, how many went to QuickBooks, and whether the month's statements were saved and passed their checks.
 
+### Running the close in shadow
+
+If you keep closing from a spreadsheet for now and want to see how RoboLedger's close would have gone before you change anything, set the QuickBooks connection to **shadow**. Everything above still happens, with one difference: nothing is written to QuickBooks and nothing is posted. You book your own entries in QuickBooks as you always have; they sync down. Then your assistant runs the close. Each drafted entry becomes an expectation rather than a posting, and the receipt lists what would have blocked the close, such as an account that didn't reconcile or an accrual with no entry, instead of refusing. The month's statements are saved from what QuickBooks holds. When you trust it, switch the connection to QuickBooks authoritative and the next close posts for real.
+
 A busy month can take longer to close than your assistant's call waits for. The close keeps running, and your assistant checks back until the receipt is ready. It never needs to be started twice.
 
 The close playbook tells your assistant to show you the drafts and wait for your explicit approval before it closes. Your MCP client may also ask you to allow the call. RoboLedger marks every tool that changes your books as a write, so a client set to ask before making changes, such as ChatGPT's **Allow read-only tools**, asks every time. ChatGPT's default setting approves some writes it judges low-risk without asking.

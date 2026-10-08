@@ -96,6 +96,30 @@ class TestPeriodDraftsDisposition:
     assert resp.qb_writeback_connection_id == "conn-1"
     assert resp.qb_write_policy == "qb_authoritative"
 
+  def test_shadow_takes_every_draft_as_an_expectation(self):
+    session = _two_balanced_entries_session(eligible_entry_ids={"e1"})
+
+    resp = list_period_drafts(session, "2026-01", writeback=None, shadow=True)
+
+    assert resp.shadow is True and resp.shadowed_count == 2
+    assert all(d.close_disposition == "shadow" for d in resp.drafts)
+    assert all(not d.will_publish_to_qb for d in resp.drafts)
+    assert resp.qb_publish_count == 0 and resp.local_only_count == 0
+    assert resp.qb_write_policy == "shadow"
+
+  def test_dispositions_name_what_the_close_does(self):
+    session = _two_balanced_entries_session(eligible_entry_ids={"e1"})
+    writeback = WritebackConnection(
+      connection_id="conn-1", write_policy="qb_authoritative"
+    )
+
+    resp = list_period_drafts(session, "2026-01", writeback=writeback)
+
+    drafts = _by_id(resp)
+    assert drafts["e1"].close_disposition == "publish"
+    assert drafts["e2"].close_disposition == "post"
+    assert resp.shadow is False and resp.shadowed_count == 0
+
   def test_no_writeback_connection_is_all_local_only(self):
     # Even though e1 is eligibility-wise a write-back draft, with no
     # write-back connection NOTHING publishes — close posts locally only.
