@@ -417,3 +417,72 @@ class TestAutoMapTrigger:
       _trigger_auto_map_if_needed(build_asset_context(), config)
     session.assert_not_called()
     enqueue.assert_not_called()
+
+
+@pytest.mark.unit
+class TestApplyCdc:
+  def test_no_plan_is_reported_as_unchecked(self, tmp_path):
+    from robosystems.adapters.quickbooks.pipeline.load import _apply_cdc
+
+    with patch(
+      "robosystems.adapters.quickbooks.pipeline.load.get_pipeline_work_dir",
+      return_value=tmp_path,
+    ):
+      summary = _apply_cdc(build_asset_context(), _make_config())
+    assert summary == {"checked": False, "reason": "no_plan"}
+
+  def test_deletions_are_applied_in_the_graphs_session(self, tmp_path):
+    from robosystems.adapters.quickbooks.pipeline.cdc import (
+      CdcApplyResult,
+      CdcPlan,
+      write_plan,
+    )
+    from robosystems.adapters.quickbooks.pipeline.load import _apply_cdc
+
+    write_plan(
+      tmp_path / "extract",
+      CdcPlan(
+        checked=True,
+        watermark="2026-09-30T00:00:00+00:00",
+        changed=3,
+        deletions=[{"entity": "Invoice", "id": "42", "last_updated": None}],
+        extra_windows=[["2025-01-15", "2025-01-15"]],
+      ),
+    )
+    session = MagicMock()
+    session_cm = MagicMock()
+    session_cm.__enter__ = Mock(return_value=session)
+    session_cm.__exit__ = Mock(return_value=False)
+    with (
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.load.get_pipeline_work_dir",
+        return_value=tmp_path,
+      ),
+      patch("robosystems.db.extensions.extensions_session", return_value=session_cm),
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.cdc.apply_deletions",
+        return_value=CdcApplyResult(voided=1),
+      ) as apply,
+    ):
+      summary = _apply_cdc(build_asset_context(), _make_config(graph_id="kg_x"))
+
+    apply.assert_called_once()
+    assert apply.call_args.args[0] is session
+    assert summary["checked"] is True and summary["old_edit_windows"] == 1
+    assert summary["deletions"] == {
+      "found": 1,
+      "voided": 1,
+      "flagged": 0,
+      "skipped": 0,
+      "already_applied": 0,
+      "unmatched": 0,
+    }
+    assert summary["observed_labels"] == {}
+
+  def test_the_sync_summary_carries_what_cdc_did(self):
+    from robosystems.adapters.quickbooks.pipeline.load import _sync_result_summary
+
+    summary = _sync_result_summary(
+      _make_config(), _make_load_result(), cdc={"checked": True, "reason": None}
+    )
+    assert summary["cdc"] == {"checked": True, "reason": None}
