@@ -97,7 +97,10 @@ _RECURRING_SEQUENCE: list[str] = [
   "is queued behind a busy worker; the instruction is the same.",
   "Post-close verification — read the receipt back to the user, don't "
   "assume: entries_posted should equal the reviewed draft count "
-  "(entries_published_to_qb / entries_posted_locally carry the split); "
+  "(entries_published_to_qb / entries_posted_locally carry the split; a "
+  "shadow close reports shadow=true, entries_shadowed instead, and its "
+  "gate_findings are what would have blocked it — read them out, nothing "
+  "was posted or written); "
   "statements_stamped=true with statement_rule_summary passing; "
   "get-period-close-status shows every schedule posted. The close marks "
   "the graph stale and the rebuild pipeline picks it up — poll "

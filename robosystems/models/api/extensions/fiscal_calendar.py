@@ -611,6 +611,37 @@ class ClosePeriodResponse(BaseModel):
       "set up reporting yet — see statement_stamp_note."
     ),
   )
+  shadow: bool = Field(
+    False,
+    description=(
+      "True when the close ran in shadow (the QuickBooks connection's "
+      "write_policy is 'shadow'): nothing was written to QuickBooks, nothing "
+      "posted, the in-window drafts were shadowed, and the gates that would "
+      "have blocked the close are in gate_findings."
+    ),
+  )
+  entries_shadowed: int = Field(
+    0,
+    description=(
+      "Drafts a shadow close took as expectations (status 'shadowed') "
+      "instead of posting. Always 0 outside shadow."
+    ),
+  )
+  gate_findings: list[str] = Field(
+    default_factory=list,
+    description=(
+      "Blocker codes a shadow close recorded instead of enforcing: "
+      "sync_stale, pending_obligations, stranded_obligations, "
+      "reconciling_items, unposted_source_events, unreconciled_accounts. "
+      "Empty outside shadow."
+    ),
+  )
+  gate_finding_counts: dict[str, int] = Field(
+    default_factory=dict,
+    description=(
+      "Each finding's size: days stale for sync_stale, a count for the rest."
+    ),
+  )
   statement_stamp_note: str | None = Field(
     None,
     description=(
@@ -754,6 +785,14 @@ class DraftEntryResponse(BaseModel):
       "means it posts locally only."
     ),
   )
+  close_disposition: str = Field(
+    "post",
+    description=(
+      "What the close does with this draft: 'publish' writes it to "
+      "QuickBooks, 'post' posts it locally, 'shadow' takes it as an "
+      "expectation with nothing written or posted (a shadow connection)."
+    ),
+  )
 
 
 class PeriodDraftsResponse(BaseModel):
@@ -780,7 +819,8 @@ class PeriodDraftsResponse(BaseModel):
     None,
     description=(
       "write_policy of the publishing QB connection ('qb_authoritative' / "
-      "'hybrid'), or null when there is no write-back connection."
+      "'hybrid'), 'shadow' when the connection runs in shadow, or null when "
+      "there is no write-back connection."
     ),
   )
   qb_publish_count: int = Field(
@@ -790,5 +830,16 @@ class PeriodDraftsResponse(BaseModel):
   local_only_count: int = Field(
     0,
     description="Number of drafts that post locally only (no QB write-back).",
+  )
+  shadow: bool = Field(
+    False,
+    description=(
+      "True when the connection runs in shadow: the close writes nothing to "
+      "QuickBooks and posts nothing; every draft becomes a shadowed "
+      "expectation compared with what QuickBooks holds."
+    ),
+  )
+  shadowed_count: int = Field(
+    0, description="Number of drafts the close will shadow (all of them, in shadow)."
   )
   drafts: list[DraftEntryResponse]

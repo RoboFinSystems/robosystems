@@ -50,6 +50,9 @@ from robosystems.operations.roboledger.fiscal_calendar.close_service import (
   WritebackFailed,
   drafts_close_posts,
 )
+from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+  shadow_close_for_entity,
+)
 from robosystems.operations.roboledger.reads.fiscal_calendar import (
   build_fiscal_calendar_response,
   entity_sync_state,
@@ -256,6 +259,7 @@ def close_period(
     has_sync, last_sync_at = entity_sync_state(
       session, platform_db, graph_id, entity_id
     )
+    shadow = shadow_close_for_entity(session, platform_db, graph_id, entity_id)
     result = close_service.close(
       session,
       graph_id,
@@ -271,6 +275,7 @@ def close_period(
       allow_unreconciled_accounts=allow_unreconciled_accounts,
       note=note,
       entity_id=entity_id,
+      shadow=shadow,
     )
     session.commit()
 
@@ -282,6 +287,10 @@ def close_period(
   fc_response = build_fiscal_calendar_response(
     session, graph_id, result.calendar, has_sync, last_sync_at, service
   )
+  return _close_response(fc_response, result)
+
+
+def _close_response(fc_response, result) -> ClosePeriodResponse:
   return ClosePeriodResponse(
     fiscal_calendar=fc_response,
     period=result.period,
@@ -295,6 +304,10 @@ def close_period(
     statement_stamp_note=result.statement_stamp_note,
     stamped_statement_sets=dict(result.stamped_statement_sets),
     statement_rule_summary=result.statement_rule_summary,
+    shadow=result.shadow,
+    entries_shadowed=result.entries_shadowed,
+    gate_findings=list(result.gate_findings),
+    gate_finding_counts=dict(result.gate_finding_counts),
   )
 
 
@@ -653,6 +666,7 @@ def _restamp_closed_period(
   Any failure rolls the reopen back with it.
   """
   has_sync, last_sync_at = entity_sync_state(session, platform_db, graph_id, entity_id)
+  shadow = shadow_close_for_entity(session, platform_db, graph_id, entity_id)
   with exclusive_period_fence(graph_id, period, detail=_fence_detail(period)):
     _reopen_under_fence(
       session,
@@ -681,6 +695,7 @@ def _restamp_closed_period(
       allow_unreconciled_accounts=allow_unreconciled_accounts,
       note=note,
       entity_id=entity_id,
+      shadow=shadow,
     )
     session.commit()
 
@@ -691,17 +706,4 @@ def _restamp_closed_period(
   fc_response = build_fiscal_calendar_response(
     session, graph_id, result.calendar, has_sync, last_sync_at, service
   )
-  return ClosePeriodResponse(
-    fiscal_calendar=fc_response,
-    period=result.period,
-    entries_posted=result.entries_posted,
-    entries_published_to_qb=result.entries_published_to_qb,
-    entries_posted_locally=result.entries_posted_locally,
-    target_auto_advanced=result.target_auto_advanced,
-    rule_summary=result.rule_summary,
-    evaluated_structure_ids=list(result.evaluated_structure_ids),
-    statements_stamped=result.statements_stamped,
-    statement_stamp_note=result.statement_stamp_note,
-    stamped_statement_sets=dict(result.stamped_statement_sets),
-    statement_rule_summary=result.statement_rule_summary,
-  )
+  return _close_response(fc_response, result)

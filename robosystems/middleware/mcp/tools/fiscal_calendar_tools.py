@@ -192,6 +192,9 @@ class ClosePeriodTool:
 **WHAT IT DOES (atomic):**
 1. Validates closeable gates (sequence, period complete, sync current)
 2. Bulk-transitions all draft entries in the period to status='posted'
+   (under a 'shadow' QuickBooks connection: to 'shadowed' instead — nothing
+   posts or publishes, and the gates that would have blocked are returned
+   as gate_findings rather than enforced)
 3. Validates the BS equation balances for the period
 4. Transitions the FiscalPeriod from open → closed
 5. Advances closed_through; auto-advances close_target if reached

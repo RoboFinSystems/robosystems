@@ -66,6 +66,10 @@ def _close_response() -> SimpleNamespace:
     statement_stamp_note=None,
     stamped_statement_sets={"struct_bs": "fs_1"},
     statement_rule_summary={"pass": 20, "fail": 0},
+    shadow=False,
+    entries_shadowed=0,
+    gate_findings=[],
+    gate_finding_counts={},
   )
 
 
