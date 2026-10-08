@@ -351,6 +351,8 @@ def survivor_payload(pair: Event, gone: list[str]) -> dict[str, Any] | None:
     "currency": pair.currency or "USD",
     "description": str(metadata.get("bank_description") or "Transfer")[:200],
     "resource_element_id": metadata.get(f"{side}_element_id"),
+    # The leg stays on the books the pair was on.
+    "entity_id": pair.entity_id,
     "metadata": {
       key: value
       for key, value in {
@@ -1206,6 +1208,9 @@ def merge_legs(
   """One ``internal_transfer`` from a waiting event and the new leg."""
   metadata = payload["metadata"]
   waiting_meta = dict(waiting.metadata_ or {})
+  # The pair books on its legs' entity; `find_waiting_leg` only offers a leg
+  # on the new leg's, so the waiting leg's stands in when the new leg has none.
+  entity_id = payload.get("entity_id") or waiting.entity_id
   new_leg = Leg(
     transaction_id=str(metadata.get("transaction_id")),
     account_id=str(metadata.get("account_id")),
@@ -1214,6 +1219,7 @@ def merge_legs(
     amount=int(payload["amount"]),
     day=str(payload["occurred_at"])[:10],
     description=metadata.get("bank_description"),
+    entity_id=entity_id,
   )
   old_leg = Leg(
     transaction_id=str(waiting_meta.get("transaction_id")),
@@ -1223,6 +1229,7 @@ def merge_legs(
     amount=int(waiting.amount or 0),
     day=_iso(waiting.occurred_at)[:10],
     description=waiting_meta.get("bank_description"),
+    entity_id=waiting.entity_id,
   )
   out_leg, in_leg = (new_leg, old_leg) if new_leg.amount < 0 else (old_leg, new_leg)
   return transfer_event(out_leg, in_leg, connection_id=connection_id, item_id=item_id)

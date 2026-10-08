@@ -22,6 +22,7 @@ from robosystems.adapters.bank_feed.accounts import (
   create_chart_accounts,
   feed_account,
 )
+from robosystems.adapters.bank_feed.chart import ChartIndex
 from robosystems.logger import logger
 from robosystems.models.api.extensions.bank_accounts import (
   LinkBankAccountRequest,
@@ -130,84 +131,91 @@ def link_bank_account(
         f"Account {body.element_id!r} is not in entity {body.entity_id!r}'s chart."
       )
     # Checked after `_assert_linkable`, which the current account passes by
-    # construction (its own link is this one): a no-op is still a valid ask.
-    if str(target.id) == str(current.id):
-      return _response(
-        body, provider, current, current, str(target_entity), changed=False
-      )
-    _assert_not_synced(session, graph_id, str(target_entity))
+    # construction (its own link is this one): asking for the account the
+    # link is on is valid, and still sweeps lines a sync landed elsewhere.
+    same = str(target.id) == str(current.id)
+    if not same:
+      _assert_not_synced(session, graph_id, str(target_entity))
   else:
     target_entity = resolve_entity_id(session, body.entity_id)
-    _assert_not_synced(session, graph_id, target_entity)
-    chart_id = entity_chart_id(session, target_entity)
-    if chart_id is None:
-      raise ChartRequiredError(
-        f"Entity {target_entity!r} has no chart of accounts; initialize one first."
+    # The account already books there: nothing to create, the link stays.
+    same = previous_entity == target_entity
+    if same:
+      target = current
+    else:
+      _assert_not_synced(session, graph_id, target_entity)
+      chart_id = entity_chart_id(session, target_entity)
+      if chart_id is None:
+        raise ChartRequiredError(
+          f"Entity {target_entity!r} has no chart of accounts; initialize one first."
+        )
+      # The created account carries the feed's provenance, so the old one
+      # must give it up before the row exists (the triple is unique).
+      _release_provenance(current, provider, body.account_id)
+      session.flush()
+      home = list(
+        session.execute(select(Element).where(Element.taxonomy_id == chart_id))
+        .scalars()
+        .all()
       )
-    # The created account carries the feed's provenance, so the old one
-    # must give it up before the row exists (the triple is unique).
-    _release_provenance(current, provider, body.account_id)
-    session.flush()
-    home = list(
-      session.execute(select(Element).where(Element.taxonomy_id == chart_id))
-      .scalars()
-      .all()
-    )
-    ids = create_chart_accounts(
-      session,
-      chart_id,
-      home,
-      [feed_account(link, balance_type=str(current.balance_type or "debit"))],
-      provider=provider,
-      connection_id=body.connection_id,
-      created_by=created_by,
-    )
-    target = session.get(Element, ids[body.account_id])
-    if target is None:
-      raise RuntimeError(
-        f"Chart account for {provider} account {body.account_id} was not created"
+      ids = create_chart_accounts(
+        session,
+        chart_id,
+        home,
+        [feed_account(link, balance_type=str(current.balance_type or "debit"))],
+        provider=provider,
+        connection_id=body.connection_id,
+        created_by=created_by,
       )
-    created = True
+      target = session.get(Element, ids[body.account_id])
+      if target is None:
+        raise RuntimeError(
+          f"Chart account for {provider} account {body.account_id} was not created"
+        )
+      created = True
 
-  if not created:
-    # The create path gave it up before the new row existed.
-    _release_provenance(current, provider, body.account_id)
-  current.metadata_ = {
-    key: value
-    for key, value in (current.metadata_ or {}).items()
-    if key != BANK_FEED_KEY
-  }
-  if not created:
-    target.metadata_ = {**(target.metadata_ or {}), BANK_FEED_KEY: link}
+  if not same:
+    if not created:
+      # The create path gave it up before the new row existed.
+      _release_provenance(current, provider, body.account_id)
+    current.metadata_ = {
+      key: value
+      for key, value in (current.metadata_ or {}).items()
+      if key != BANK_FEED_KEY
+    }
+    if not created:
+      target.metadata_ = {**(target.metadata_ or {}), BANK_FEED_KEY: link}
 
   repointed, unclassified, split = _repoint_open_lines(
     session,
     provider=provider,
     connection_id=body.connection_id,
+    account_id=body.account_id,
     old=str(current.id),
     new=str(target.id),
     entity_id=str(target_entity),
-    entity_changed=previous_entity != target_entity,
     parent_id=parent_id,
   )
   session.flush()
-  logger.info(
-    "Bank feed account %s (%s) moved from element %s to %s in entity %s: "
-    "%d open lines moved, %d unclassified",
-    body.account_id,
-    provider,
-    current.id,
-    target.id,
-    target_entity,
-    repointed,
-    unclassified,
-  )
+  if not same or repointed:
+    logger.info(
+      "Bank feed account %s (%s) moved from element %s to %s in entity %s: "
+      "%d open lines moved, %d unclassified",
+      body.account_id,
+      provider,
+      current.id,
+      target.id,
+      target_entity,
+      repointed,
+      unclassified,
+    )
   return _response(
     body,
     provider,
     current,
     target,
     str(target_entity),
+    changed=not same or repointed > 0,
     created=created,
     repointed=repointed,
     unclassified=unclassified,
@@ -266,16 +274,19 @@ def _repoint_open_lines(
   *,
   provider: str,
   connection_id: str,
+  account_id: str,
   old: str,
   new: str,
   entity_id: str,
-  entity_changed: bool,
   parent_id: str,
 ) -> tuple[int, int, int]:
-  """Move the feed's still-open lines to the new account and entity.
+  """Move the feed account's still-open lines to its chart account and entity.
 
-  Across an entity change the suggestion is resolved again, by name, on the
-  new entity's chart, and a classification that named an account in the old
+  A line is the account's by the chart account it sits on or by the feed
+  account it names, so a run after a sync that was in flight during the
+  move picks up the stragglers that sync landed on the old account. A line
+  crossing an entity has its suggestion resolved again, by name, on the new
+  entity's chart, and a classification that named an account in the old
   chart is dropped: the line goes back to the inbox rather than post into
   another entity's books. Returns the lines moved, the lines unclassified,
   and the pairs whose two legs now sit on two entities.
@@ -292,6 +303,9 @@ def _repoint_open_lines(
           Event.resource_element_id == old,
           link["from_element_id"].astext == old,
           link["to_element_id"].astext == old,
+          link["account_id"].astext == account_id,
+          link["from_account_id"].astext == account_id,
+          link["to_account_id"].astext == account_id,
         ),
       )
       .order_by(Event.id)
@@ -300,30 +314,44 @@ def _repoint_open_lines(
     .scalars()
     .all()
   )
-  chart = build_chart_index(session, entity_id) if entity_changed else None
+  chart: ChartIndex | None = None
   repointed = unclassified = split = 0
   for event in rows:
     meta = dict(event.metadata_ or {})
-    if event.resource_element_id == old:
-      event.resource_element_id = new
-    for key in ("from_element_id", "to_element_id"):
-      if meta.get(key) == old:
-        meta[key] = new
     if meta.get("kind") == "internal_transfer":
+      for side in ("from", "to"):
+        if meta.get(f"{side}_element_id") == old or (
+          meta.get(f"{side}_account_id") == account_id
+        ):
+          meta[f"{side}_element_id"] = new
       # A pair books on the receiving side. When only one leg moved, the
       # pair now crosses two entities — intercompany, which the books do
       # not tie yet; it is counted so the caller can say so, and the commit
       # guard refuses it until its other leg follows or it is dissolved.
-      legs = [str(meta.get("from_element_id")), str(meta.get("to_element_id"))]
+      legs = [meta.get("from_element_id"), meta.get("to_element_id")]
       owners = account_entities(session, legs, parent_id=parent_id)
-      event.entity_id = owners.get(legs[1]) or entity_id
-      if owners.get(legs[0]) != owners.get(legs[1]):
+      pair_entity = owners.get(str(legs[1])) or entity_id
+      if owners.get(str(legs[0])) != owners.get(str(legs[1])):
         split += 1
+      receiving = str(legs[1]) if legs[1] else event.resource_element_id
+      changed = (
+        meta != (event.metadata_ or {})
+        or event.entity_id != pair_entity
+        or event.resource_element_id != receiving
+      )
+      event.resource_element_id = receiving
+      event.entity_id = pair_entity
     else:
-      event.entity_id = entity_id
-      if chart is not None and _reclassify(meta, chart, session, entity_id, parent_id):
-        event.status = "captured"
-        unclassified += 1
+      changed = event.resource_element_id != new or event.entity_id != entity_id
+      event.resource_element_id = new
+      if event.entity_id != entity_id:
+        chart = chart or build_chart_index(session, entity_id)
+        event.entity_id = entity_id
+        if _reclassify(meta, chart, session, entity_id, parent_id):
+          event.status = "captured"
+          unclassified += 1
+    if not changed:
+      continue
     event.metadata_ = meta
     repointed += 1
   return repointed, unclassified, split
@@ -331,7 +359,7 @@ def _repoint_open_lines(
 
 def _reclassify(
   meta: dict[str, Any],
-  chart: Any,
+  chart: ChartIndex,
   session: Session,
   entity_id: str,
   parent_id: str,

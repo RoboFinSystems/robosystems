@@ -128,4 +128,6 @@ class LinkBankAccountResponse(BaseModel):
       "them until the other leg follows."
     ),
   )
-  changed: bool = Field(True, description="False when the link already stood.")
+  changed: bool = Field(
+    True, description="False when the link already stood and no line moved."
+  )
