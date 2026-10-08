@@ -1,11 +1,10 @@
 """Cypher query execution against a LadybugDB database, under admission control."""
 
-import json
 import os
 import time
 from contextlib import contextmanager
-from datetime import date, datetime
 
+import pydantic_core
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from fastapi.responses import StreamingResponse
 
@@ -143,17 +142,27 @@ def execute_query(
     with track_connection(admission_controller, graph_id):
       return service.execute_query(query_request)
 
-  def _json_default(obj: object) -> str:
-    if isinstance(obj, (date, datetime)):
-      return obj.isoformat()
-    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
-
   # The handler returns before the body is produced, so a stream is counted
-  # from inside its generator for as long as it runs.
+  # from inside its generator for as long as it runs. Chunks encode the way the
+  # non-streaming response does; one that cannot ends the stream with an error
+  # chunk, so the caller sees a query error rather than a cut-off stream.
   def generate_stream():
     with track_connection(admission_controller, graph_id):
       for chunk in service.execute_query_streaming(query_request, chunk_size=1000):
-        yield json.dumps(chunk, default=_json_default) + "\n"
+        try:
+          line = pydantic_core.to_json(chunk)
+        except pydantic_core.PydanticSerializationError:
+          logger.exception(f"Unserializable value in streaming result on {graph_id}")
+          line = pydantic_core.to_json(
+            {
+              "error": "Query result contains a value that cannot be serialized",
+              "error_type": "SerializationError",
+              "is_last_chunk": True,
+            }
+          )
+          yield line + b"\n"
+          return
+        yield line + b"\n"
 
   return StreamingResponse(
     generate_stream(),
