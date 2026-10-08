@@ -260,14 +260,15 @@ class SetWritePolicyRequest(BaseModel):
   The explicit operator opt-in for outbound write-back. `hybrid` is omitted
   until its code path ships."""
 
-  write_policy: Literal["native", "qb_authoritative", "shadow"] = Field(
+  write_policy: Literal["qb_authoritative", "shadow"] = Field(
     ...,
     description=(
-      "'native' = RoboSystems authoritative, no write-back; "
       "'qb_authoritative' = QuickBooks authoritative, entries publish to QB; "
       "'shadow' = QuickBooks authoritative and RoboSystems only observes: "
       "nothing is written to QuickBooks, the close posts nothing locally, "
-      "its drafts become shadowed expectations and its gates are findings."
+      "its drafts become shadowed expectations and its gates are findings. "
+      "'native', books kept in RoboSystems with no write-back, is what "
+      "disconnecting or severing leaves, not a choice for a live connection."
     ),
   )
 

@@ -365,6 +365,7 @@ class OLTPLoader:
     *,
     full_rebuild: bool = False,
     since_date: str | None = None,
+    baseline: bool = False,
   ) -> LoadResult:
     """Load dbt OLTP output into the extensions tenant schema, in one transaction.
 
@@ -710,6 +711,7 @@ class OLTPLoader:
         created_by=created_by,
         now=now,
         agent_lookup=agent_capture.external_to_id,
+        baseline=baseline,
       )
       result.events_captured = capture_result.inserted
       result.events_updated = capture_result.updated
@@ -1067,6 +1069,7 @@ class OLTPLoader:
     created_by: str,
     now: datetime,
     agent_lookup: dict[str, str] | None = None,
+    baseline: bool = False,
   ) -> _CaptureResult:
     """Capture each dbt-staged transaction as one Event, entries packed into metadata.
 
@@ -1383,6 +1386,15 @@ class OLTPLoader:
     # event doesn't roll back the rest; a failure stays ``captured`` for the
     # inbox.
     if _source_auto_commits_on_sync(source):
+      # A baseline (the source's history onto books that hold nothing posted
+      # yet) posts past any calendar already in place; see `baseline_import`.
+      from contextlib import nullcontext
+
+      from robosystems.operations.roboledger.commands._guards import (
+        baseline_import,
+      )
+
+      fence = baseline_import() if baseline else nullcontext()
       events_to_commit: list[Event] = list(new_events)
       # Retry existing captured events too (e.g. a previous failed dispatch).
       for evt in existing.values():
@@ -1391,32 +1403,33 @@ class OLTPLoader:
         ):
           events_to_commit.append(evt)
 
-      for evt in events_to_commit:
-        try:
-          with session.begin_nested():
-            prev_status = evt.status
-            fire_handler_on_commit(session, evt, created_by)
-            # Respect a status the handler set itself (e.g. 'fulfilled').
-            if evt.status == prev_status:
-              evt.status = "committed"
-          out.handler_dispatched += 1
-        except Exception as e:
-          # Outside the rolled-back SAVEPOINT, so it commits with the outer
-          # transaction.
-          _stamp_dispatch_error(evt, e, now)
-          logger.warning(
-            "Auto-commit failed for event %s (type=%s, ext_id=%s): %s — "
-            "event left at status='captured' with dispatch_error stamped "
-            "for inbox review (attempt %d)",
-            evt.id,
-            evt.event_type,
-            evt.external_id,
-            e,
-            (evt.metadata_ or {}).get("dispatch_attempts", 1),
-          )
-          out.dispatch_failed += 1
+      with fence:
+        for evt in events_to_commit:
+          try:
+            with session.begin_nested():
+              prev_status = evt.status
+              fire_handler_on_commit(session, evt, created_by)
+              # Respect a status the handler set itself (e.g. 'fulfilled').
+              if evt.status == prev_status:
+                evt.status = "committed"
+            out.handler_dispatched += 1
+          except Exception as e:
+            # Outside the rolled-back SAVEPOINT, so it commits with the outer
+            # transaction.
+            _stamp_dispatch_error(evt, e, now)
+            logger.warning(
+              "Auto-commit failed for event %s (type=%s, ext_id=%s): %s — "
+              "event left at status='captured' with dispatch_error stamped "
+              "for inbox review (attempt %d)",
+              evt.id,
+              evt.event_type,
+              evt.external_id,
+              e,
+              (evt.metadata_ or {}).get("dispatch_attempts", 1),
+            )
+            out.dispatch_failed += 1
 
-      session.flush()
+        session.flush()
 
     return out
 

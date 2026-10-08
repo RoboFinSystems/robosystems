@@ -767,7 +767,6 @@ class TestSetWritePolicyDefinition:
     assert "connection_id" in required
     assert "write_policy" in required
     assert defn["inputSchema"]["properties"]["write_policy"]["enum"] == [
-      "native",
       "qb_authoritative",
       "shadow",
     ]
@@ -779,7 +778,7 @@ class TestSetWritePolicyExecute:
     client = _client()
     client.user = None
     result = await SetWritePolicyTool(client).execute(
-      {"connection_id": "conn_1", "write_policy": "native"}
+      {"connection_id": "conn_1", "write_policy": "shadow"}
     )
     assert result["error"] == "authentication_required"
 
@@ -791,8 +790,15 @@ class TestSetWritePolicyExecute:
     assert result["error"] == "invalid_arguments"
 
   @pytest.mark.asyncio
+  async def test_native_is_refused_pre_service(self) -> None:
+    result = await SetWritePolicyTool(_client()).execute(
+      {"connection_id": "conn_1", "write_policy": "native"}
+    )
+    assert result["error"] == "invalid_arguments"
+
+  @pytest.mark.asyncio
   async def test_missing_connection_id(self) -> None:
-    result = await SetWritePolicyTool(_client()).execute({"write_policy": "native"})
+    result = await SetWritePolicyTool(_client()).execute({"write_policy": "shadow"})
     assert result["error"] == "invalid_arguments"
 
   @pytest.mark.asyncio
@@ -824,7 +830,7 @@ class TestSetWritePolicyExecute:
       new=AsyncMock(return_value=None),
     ):
       result = await SetWritePolicyTool(_client()).execute(
-        {"connection_id": "conn_x", "write_policy": "native"}
+        {"connection_id": "conn_x", "write_policy": "shadow"}
       )
     assert result["error"] == "connection_not_found"
 

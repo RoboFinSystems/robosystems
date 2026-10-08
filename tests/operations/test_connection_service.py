@@ -930,7 +930,7 @@ class TestSetWritePolicy:
       MockConn.get_by_id.return_value = None
       result = await ConnectionService.set_write_policy(
         connection_id="missing",
-        write_policy="native",
+        write_policy="shadow",
         user_id="usr_123",
         graph_id="kg_test",
         db_session=mock_session,
@@ -971,14 +971,34 @@ class TestSetWritePolicy:
       MockConn.get_by_id.return_value = mock_conn
       result = await ConnectionService.set_write_policy(
         connection_id="conn_test123",
-        write_policy="native",
+        write_policy="shadow",
         user_id="usr_123",
         graph_id="kg_test",
         db_session=mock_session,
       )
 
     assert result is not None
-    mock_conn.set_write_policy.assert_called_once_with(mock_session, "native")
+    mock_conn.set_write_policy.assert_called_once_with(mock_session, "shadow")
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_native_is_not_a_choice_for_a_live_connection(self):
+    """`native` is what disconnect and sever leave; the setter refuses it."""
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection(graph_id="kg_test", user_id="usr_123")
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = mock_conn
+      with pytest.raises(ValueError, match="native"):
+        await ConnectionService.set_write_policy(
+          connection_id="conn_test123",
+          write_policy="native",
+          user_id="usr_123",
+          graph_id="kg_test",
+          db_session=mock_session,
+        )
+
+    mock_conn.set_write_policy.assert_not_called()
 
   @pytest.mark.asyncio
   @pytest.mark.unit

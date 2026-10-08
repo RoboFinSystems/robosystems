@@ -3,7 +3,9 @@ session, unlike OperationSpec ``pre_validate`` hooks."""
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import date
 from typing import Any
 
@@ -86,11 +88,33 @@ def _period_covering(session: Session, entity_id: str, posting_date: date):
   ).fetchone()
 
 
+# A baseline import: a source ledger's own history landing on books that
+# hold nothing posted yet. The fence guards what RoboLedger originates and
+# what arrives after the books are set; the baseline is the books, so it
+# posts past any calendar already in place (SL10, decided 2026-10-08).
+_BASELINE_IMPORT: ContextVar[bool] = ContextVar("baseline_import", default=False)
+
+
+@contextmanager
+def baseline_import() -> Iterator[None]:
+  """Within this block the closed-period fence lets history through."""
+  token = _BASELINE_IMPORT.set(True)
+  try:
+    yield
+  finally:
+    _BASELINE_IMPORT.reset(token)
+
+
+def in_baseline_import() -> bool:
+  return _BASELINE_IMPORT.get()
+
+
 def assert_period_not_closed(
   session: Session, *posting_dates: date, entity_id: str | None = None
 ) -> None:
   """Raise `ClosedPeriodError` if any of the dates falls in a period that is
-  closed in ``entity_id``'s books (default the group parent's).
+  closed in ``entity_id``'s books (default the group parent's). A baseline
+  import (``baseline_import()``) is let through: it is the books themselves.
 
   A date is closed when its month is on or before that entity's
   ``closed_through_period``, or its ``FiscalPeriod`` row says ``closed``. A
@@ -105,7 +129,7 @@ def assert_period_not_closed(
   holds a sibling's writers out of the same month.
   """
   dates = [d for d in posting_dates if d is not None]
-  if not dates:
+  if not dates or _BASELINE_IMPORT.get():
     return
   ledger = session.execute(
     text(

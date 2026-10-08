@@ -9,6 +9,7 @@ _PATCH_LOAD_WORK_DIR = (
   "robosystems.adapters.quickbooks.pipeline.load.get_pipeline_work_dir"
 )
 _PATCH_OLTP_LOADER = "robosystems.operations.extensions.loader.OLTPLoader"
+_PATCH_BASELINE = "robosystems.adapters.quickbooks.pipeline.load._is_baseline_import"
 _PATCH_CONN_SVC = "robosystems.operations.connection_service.ConnectionService"
 
 
@@ -68,6 +69,11 @@ def _make_load_result(
 class TestQbLoadAsset:
   """Tests for the qb_load Dagster asset."""
 
+  @pytest.fixture(autouse=True)
+  def _books_already_posted(self):
+    with patch(_PATCH_BASELINE, return_value=False):
+      yield
+
   def test_load_calls_oltp_loader(self, tmp_path):
     """Test that qb_load creates an OLTPLoader and calls load()."""
     from dagster import MaterializeResult
@@ -106,7 +112,36 @@ class TestQbLoadAsset:
       # full_rebuild=False so the loader skips the pre-sync wipe.
       full_rebuild=False,
       since_date=None,
+      baseline=False,
     )
+
+  def test_a_baseline_import_is_passed_to_the_loader(self, tmp_path):
+    """Books with nothing posted yet take the history past the period fence,
+    and the sync summary says so."""
+    from robosystems.adapters.quickbooks.pipeline.load import qb_load
+
+    config = _make_config()
+    work_dir = tmp_path / "qb_pipeline" / config.graph_id
+    work_dir.mkdir(parents=True)
+
+    mock_loader = MagicMock()
+    mock_loader.load.return_value = _make_load_result()
+
+    with (
+      patch(_PATCH_BASELINE, return_value=True),
+      patch(_PATCH_LOAD_WORK_DIR, return_value=work_dir),
+      patch(_PATCH_OLTP_LOADER, return_value=mock_loader),
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.load._update_last_sync",
+      ) as mock_sync,
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.load._advance_cdc_watermark",
+      ),
+    ):
+      qb_load(build_asset_context(), config)
+
+    assert mock_loader.load.call_args.kwargs["baseline"] is True
+    assert mock_sync.call_args.args[2]["baseline"] is True
 
   def test_load_returns_row_counts_in_metadata(self, tmp_path):
     """Metadata: elements/dimensions structural + event counters."""

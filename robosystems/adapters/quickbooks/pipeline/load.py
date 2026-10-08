@@ -49,6 +49,14 @@ def _run_qb_load(
   # Advanced only on success, full rebuilds included.
   sync_started_at = datetime.now(UTC)
 
+  # Books that hold nothing posted yet take the source's history as their
+  # baseline: it posts past any calendar already in place.
+  baseline = _is_baseline_import(context, config.graph_id)
+  if baseline:
+    context.log.info(
+      "Baseline import: no posted entry yet, history posts past the period fence"
+    )
+
   loader = OLTPLoader()
   try:
     result = loader.load(
@@ -59,6 +67,7 @@ def _run_qb_load(
       created_by=config.user_id,
       full_rebuild=config.full_rebuild,
       since_date=config.since_date or None,
+      baseline=baseline,
     )
   except Exception as exc:
     # last_sync is not advanced: the close gate reads it.
@@ -71,7 +80,9 @@ def _run_qb_load(
   cdc_summary = _apply_cdc(context, config)
 
   _update_last_sync(
-    context, config, _sync_result_summary(config, result, cdc=cdc_summary)
+    context,
+    config,
+    _sync_result_summary(config, result, cdc=cdc_summary, baseline=baseline),
   )
 
   _advance_cdc_watermark(context, config, sync_started_at)
@@ -162,7 +173,37 @@ def _release_sync_lock(context: AssetExecutionContext, config: QBSyncConfig) -> 
     )
 
 
-def _sync_result_summary(config: QBSyncConfig, result, cdc: dict | None = None) -> dict:
+def _is_baseline_import(context: AssetExecutionContext, graph_id: str) -> bool:
+  """True while the group parent's books hold no posted entry: the source's
+  history is then the books themselves, not a change to them, and it posts
+  past any calendar already in place. A failure to tell keeps the fence."""
+  from robosystems.db.extensions import extensions_session
+  from robosystems.models.extensions.roboledger.entry import Entry
+  from robosystems.operations.roboledger.entity_scope import (
+    NoEntityError,
+    resolve_entity_id,
+  )
+
+  try:
+    with extensions_session(graph_id, statement_timeout_ms=None) as session:
+      try:
+        entity_id = resolve_entity_id(session)
+      except NoEntityError:
+        return True
+      posted = (
+        session.query(Entry.id)
+        .filter(Entry.entity_id == entity_id, Entry.status == "posted")
+        .first()
+      )
+      return posted is None
+  except Exception as exc:
+    context.log.warning(f"Could not tell whether this is a baseline import: {exc}")
+    return False
+
+
+def _sync_result_summary(
+  config: QBSyncConfig, result, cdc: dict | None = None, baseline: bool = False
+) -> dict:
   """Shape a LoadResult into the Connection.last_sync_result payload."""
   return {
     "status": "succeeded",
@@ -172,6 +213,7 @@ def _sync_result_summary(config: QBSyncConfig, result, cdc: dict | None = None) 
       "full_rebuild": bool(config.full_rebuild),
     },
     "cdc": cdc,
+    "baseline": baseline,
     "counts": {
       "events_captured": result.events_captured,
       "events_updated": result.events_updated,
