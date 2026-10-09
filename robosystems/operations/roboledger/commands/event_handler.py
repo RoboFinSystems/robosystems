@@ -12,6 +12,7 @@ from robosystems.models.api.event_handler import (
   UpdateEventHandlerRequest,
 )
 from robosystems.models.extensions.roboledger.event_handler import EventHandler
+from robosystems.operations.event_block.reserved import refuse_reserved_event_type
 from robosystems.operations.roboledger.reads.event_handler import handler_to_response
 
 
@@ -61,6 +62,10 @@ def create_event_handler(
 ) -> EventHandlerResponse:
   template_dict = body.transaction_template.model_dump()
   _validate_template(template_dict)
+  # A reserved type is written by its own operation and never dispatched, so
+  # a handler on one could never fire.
+  if body.event_type:
+    refuse_reserved_event_type(body.event_type)
 
   handler = EventHandler(
     name=body.name,

@@ -52,6 +52,12 @@ What `is_live` means per node (the equivalent `status` filter, if you need finer
 - `Event.is_live` ⇔ `status NOT IN ('voided','superseded')` (∈ {captured, classified,
   committed, pending, fulfilled, voided, superseded}). It KEEPS open obligations
   (pending/committed/fulfilled) — for a specific realized set, filter `status` explicitly.
+  It also keeps **support events** (`event_class = 'support'`): evidence about the
+  books, not activity in them — a bank feed's daily balance readings and statement
+  balances (`event_type = 'balance_observed'`, whose `amount` is the account's BALANCE
+  on that day, not a movement) and reconciliation sign-offs. When counting or summing
+  activity, add `ev.event_class <> 'support'`, or an account's daily balances are
+  added to its flows.
 - `Transaction.is_live` ⇔ `status <> 'void'`. (The `pending` boolean is also still exposed.)
 - `Fact` nodes (the XBRL hypercube / published statements) have NO status and are already
   filtered at generation time — always safe to aggregate. This note applies ONLY to the

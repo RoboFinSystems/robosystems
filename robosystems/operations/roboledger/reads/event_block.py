@@ -73,6 +73,7 @@ def list_event_blocks(
   *,
   event_type: str | None = None,
   event_category: str | None = None,
+  event_class: str | None = None,
   status: str | None = None,
   agent_id: str | None = None,
   source: str | None = None,
@@ -90,6 +91,8 @@ def list_event_blocks(
     stmt = stmt.where(Event.event_type == event_type)
   if event_category is not None:
     stmt = stmt.where(Event.event_category == event_category)
+  if event_class is not None:
+    stmt = stmt.where(Event.event_class == event_class)
   if status is not None:
     stmt = stmt.where(Event.status == status)
   if agent_id is not None:

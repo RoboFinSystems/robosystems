@@ -220,10 +220,10 @@ ORDER BY debits DESC LIMIT 25""",
               "category": "ledger",
               "description": "Count / sum live events (excludes voided & superseded)",
               "query": """MATCH (ev:Event)
-WHERE ev.is_live
+WHERE ev.is_live AND ev.event_class <> 'support'
 RETURN ev.event_type, count(ev) AS count, sum(ev.amount) AS total
 ORDER BY count DESC LIMIT 25""",
-              "explanation": "`ev.is_live` ⇔ status NOT IN ('voided','superseded') — the graph keeps cancelled/replaced events for audit. It keeps open obligations; for a specific realized set, filter `status` explicitly (e.g. status IN ['committed','fulfilled','pending']).",
+              "explanation": "`ev.is_live` ⇔ status NOT IN ('voided','superseded') — the graph keeps cancelled/replaced events for audit. It keeps open obligations; for a specific realized set, filter `status` explicitly (e.g. status IN ['committed','fulfilled','pending']). `event_class <> 'support'` leaves out evidence events — a `balance_observed` amount is a balance on a day, not a flow, and summing it with activity double-counts the account.",
             },
             {
               "category": "ledger",

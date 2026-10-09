@@ -101,7 +101,8 @@ class ListEventBlocksTool:
 - To review events by status (e.g., all captured events awaiting classification)
 - To see a counterparty's event history (filter by agent_id)
 - To audit events from a specific source (quickbooks, plaid, etc.)
-- Close workflow: find unposted events (status=captured or committed)
+- Close workflow: find unposted bank and source lines (status=captured or
+  classified). Committed events are already posted or are evidence, not work
 - Post-sync reconciliation: is_reconciling_item=true lists reconciling
   items — committed events whose upstream payload changed after posting,
   so the local GL no longer mirrors the source. Each awaits an explicit
@@ -114,6 +115,11 @@ class ListEventBlocksTool:
 **PARAMETERS:**
 - event_type (optional): e.g., 'invoice_issued', 'contract_signed', 'bank_transaction'
 - event_category (optional): 'sales' | 'purchase' | 'financing' | 'payroll' | 'treasury' | 'adjustment' | 'recognition' | 'other'
+- event_class (optional): 'economic' (business activity) | 'support'
+  (evidence: a bank feed's daily balance readings, statement balances,
+  reconciliation sign-offs) | 'operational' (schedule obligations). A
+  `balance_observed` event's amount is the account's balance, not a flow, so
+  pass event_class='economic' when listing activity on a bank feed
 - status (optional): 'captured' | 'classified' | 'committed' | 'pending' | 'fulfilled' | 'voided' | 'superseded'
 - agent_id (optional): Filter to a specific counterparty
 - source (optional): 'manual' | 'schedule' | 'system', a connected provider name, or a registered external source_name
@@ -144,6 +150,10 @@ class ListEventBlocksTool:
         "properties": {
           "event_type": {"type": "string"},
           "event_category": {"type": "string"},
+          "event_class": {
+            "type": "string",
+            "enum": ["economic", "support", "operational"],
+          },
           "status": {"type": "string"},
           "agent_id": {"type": "string"},
           "source": {"type": "string"},
@@ -188,6 +198,7 @@ class ListEventBlocksTool:
           session,
           event_type=arguments.get("event_type"),
           event_category=arguments.get("event_category"),
+          event_class=arguments.get("event_class"),
           status=arguments.get("status"),
           agent_id=arguments.get("agent_id"),
           source=arguments.get("source"),
