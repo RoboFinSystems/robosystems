@@ -598,10 +598,12 @@ def rekey_replaced_events(
 def _replay_candidates(
   session: Session, element_ids: set[str], lo: date, hi: date
 ) -> list[Event]:
-  """This feed's events on the batch's chart accounts around its dates.
+  """This feed's lines on the batch's chart accounts around its dates.
 
   Source and chart account are not indexed together; the date index carries
-  the scan, and a replay is rare (a re-Link, a full rebuild).
+  the scan, and a replay is rare (a re-Link, a full rebuild). Only economic
+  events are lines: a balance reading sits on the same account and day, and a
+  deposit equal to it would otherwise be matched to it.
   """
   if not element_ids:
     return []
@@ -610,6 +612,7 @@ def _replay_candidates(
     session.execute(
       select(Event).where(
         Event.source == SOURCE,
+        Event.event_class == "economic",
         Event.resource_element_id.in_(sorted(element_ids)),
         Event.occurred_at >= datetime.combine(lo - slack, time.min),
         Event.occurred_at < datetime.combine(hi + slack + timedelta(days=1), time.min),
