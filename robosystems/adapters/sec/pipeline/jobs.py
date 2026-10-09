@@ -54,7 +54,15 @@ sec_download_job = define_asset_job(
   selection=AssetSelection.assets(
     sec_raw_filings,
   ),
-  tags={"pipeline": "sec", "phase": "download", **EDGAR_PULL_TAGS},
+  tags={
+    "pipeline": "sec",
+    "phase": "download",
+    **EDGAR_PULL_TAGS,
+    # Like sec_process: a run that never starts or loses its worker would end
+    # the chain. A retry skips the ZIPs already stored (`skip_existing`).
+    "dagster/max_retries": "3",
+    "dagster/retry_on_asset_or_op_failure": "false",
+  },
   partitions_def=sec_quarter_partitions,
 )
 
@@ -76,7 +84,7 @@ sec_filing_documents_job = define_asset_job(
 )
 
 
-# One batch per run; the sensor re-triggers while pending files remain.
+# One batch per run; the chain sensor re-triggers while pending files remain.
 # 4 vCPU / 16 GB for embedding enrichment. Spot is safe: completed filings
 # are restored from the S3 cache on the next run.
 sec_process_job = define_asset_job(
@@ -89,11 +97,12 @@ sec_process_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "process",
-    # No dagster/max_retries on purpose: the processing sensor is the single
-    # recovery path, and Dagster's auto-retry races its active-run guard
-    # (which sees only STARTED/QUEUED), producing a second run for the quarter
-    # and duplicate part files. The `quarter` tag_concurrency_limit in
-    # dagster_prod.yaml is the backstop.
+    # Retried when the run never starts (no capacity) or its worker dies (a
+    # Spot kill): the chain sensor advances only on success, so nothing else
+    # picks the chain back up. A step failure is not retried. The retry keeps
+    # the `quarter` tag, whose concurrency limit queues any second run.
+    "dagster/max_retries": "3",
+    "dagster/retry_on_asset_or_op_failure": "false",
     "ecs/cpu": "4096",
     "ecs/memory": "16384",
     "ecs/ephemeral_storage": "50",
