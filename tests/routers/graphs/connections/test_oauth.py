@@ -1239,7 +1239,9 @@ class TestInitOAuthBooksGuard:
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail["code"] == "NATIVE_BOOKS_PRESENT"
-    guard.assert_called_once_with(GRAPH_ID, "quickbooks", mock_db, entity_id=None)
+    guard.assert_called_once_with(
+      GRAPH_ID, "quickbooks", mock_db, entity_id=None, resuming=False
+    )
     mock_oauth_handler.get_authorization_url.assert_not_called()
 
   @pytest.mark.unit
@@ -1278,4 +1280,45 @@ class TestInitOAuthBooksGuard:
 
     assert exc_info.value.status_code == 404
     assert exc_info.value.detail["code"] == "ENTITY_NOT_FOUND"
-    guard.assert_called_once_with(GRAPH_ID, "plaid", mock_db, entity_id="gone")
+    guard.assert_called_once_with(
+      GRAPH_ID, "plaid", mock_db, entity_id="gone", resuming=False
+    )
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_a_reconnect_is_judged_as_one(self):
+    """A live QuickBooks row past its first OAuth is re-authorizing the books
+    it already keeps; the guard is told so and the authorize URL is minted."""
+    mock_user = _make_mock_user()
+    mock_db = MagicMock()
+    request = _make_oauth_init_request()
+    connection_dict = _make_connection_dict(
+      provider="quickbooks", status="needs_reauth"
+    )
+    mock_oauth_handler = MagicMock()
+    mock_oauth_handler.get_authorization_url.return_value = ("https://qb", "state")
+
+    with (
+      patch(
+        f"{OAUTH_MODULE}.ConnectionService.get_connection",
+        new_callable=AsyncMock,
+        return_value=connection_dict,
+      ),
+      patch(f"{OAUTH_MODULE}.assert_provider_compatible") as guard,
+      patch(
+        "robosystems.operations.providers.quickbooks_provider.quickbooks_oauth_handler",
+        mock_oauth_handler,
+      ),
+    ):
+      await init_oauth(
+        graph_id=GRAPH_ID,
+        request=request,
+        current_user=mock_user,
+        db=mock_db,
+        _rate_limit=None,
+      )
+
+    guard.assert_called_once_with(
+      GRAPH_ID, "quickbooks", mock_db, entity_id=None, resuming=True
+    )
+    mock_oauth_handler.get_authorization_url.assert_called_once()

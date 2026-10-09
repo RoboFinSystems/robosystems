@@ -478,7 +478,12 @@ class ProviderConflictError(Exception):
 
 
 def assert_provider_compatible(
-  graph_id: str, provider: str, session: Session, *, entity_id: str | None = None
+  graph_id: str,
+  provider: str,
+  session: Session,
+  *,
+  entity_id: str | None = None,
+  resuming: bool = False,
 ) -> None:
   """Refuse a provider that would mix native and synced books of one entity.
 
@@ -489,13 +494,16 @@ def assert_provider_compatible(
     is live → ``QUICKBOOKS_ACTIVE`` (a subsidiary's feed is fine);
   - a bank feed for an entity with no chart of accounts → ``CHART_REQUIRED``;
   - a synced GL when the parent's books are native (posted line items on
-    elements it did not create, a feed account bound to the parent, or a
-    live feed whose accounts land on the parent) → ``NATIVE_BOOKS_PRESENT``;
+    elements it did not create, a chart it did not build, a feed account
+    bound to the parent, or a live feed whose accounts land on the parent)
+    → ``NATIVE_BOOKS_PRESENT``;
   - a feed naming an entity the graph does not have → ``ENTITY_NOT_FOUND``.
 
   ``entity_id`` is where the feed's accounts land: a subsidiary's id, or
-  None for the group parent. Anything else (``external`` sources, a second
-  SEC repo …) passes.
+  None for the group parent. ``resuming`` is a live synced connection
+  re-authorizing: it already keeps the parent's books, so accounts added
+  beside it since are not books it would take over. Anything else
+  (``external`` sources, a second SEC repo …) passes.
   """
   wanted = (provider or "").lower()
   connections = list(Connection.get_all_for_graph(graph_id, session))
@@ -523,6 +531,8 @@ def assert_provider_compatible(
     return
 
   if wanted in SYNCED_LEDGER_PROVIDERS:
+    if resuming:
+      return
     feeds = [
       c for c in connections if (c.provider or "").lower() in BANK_FEED_PROVIDERS
     ]
@@ -530,6 +540,7 @@ def assert_provider_compatible(
       _feed_lands_on_parent(graph_id, feeds, session)
       or _parent_has_feed_account(graph_id)
       or _graph_has_native_books(graph_id, synced_source=wanted)
+      or _parent_chart_built_elsewhere(graph_id, synced_source=wanted)
     ):
       raise ProviderConflictError(
         "NATIVE_BOOKS_PRESENT",
@@ -639,6 +650,14 @@ def _graph_has_native_books(graph_id: str, *, synced_source: str) -> bool:
     lambda ext: graph_has_native_line_items(
       ext, synced_source=synced_source, entity_id=find_entity_id(ext)
     ),
+  )
+
+
+def _parent_chart_built_elsewhere(graph_id: str, *, synced_source: str) -> bool:
+  from robosystems.operations.roboledger.reads.books import chart_built_elsewhere
+
+  return _probe_books(
+    graph_id, lambda ext: chart_built_elsewhere(ext, synced_source=synced_source)
   )
 
 
