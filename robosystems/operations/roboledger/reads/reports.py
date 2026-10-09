@@ -746,7 +746,8 @@ def get_statement(
 
   Returns `None` when the report doesn't exist. Raises
   `StatementStructureNotFoundError` when the block_type isn't in the report's
-  taxonomy. ``reporting_style_id`` defaults to the primary entity's Style.
+  taxonomy. ``reporting_style_id`` defaults to the Style of the entity the
+  report is about (the group parent's for a report with none recorded).
   """
   if block_type not in VALID_BLOCK_TYPES:
     raise ValueError(
@@ -825,7 +826,11 @@ def get_statement(
     )
 
   if reporting_style_id is None:
-    reporting_style_id = load_primary_reporting_style(session)
+    reporting_style_id = (
+      load_entity_reporting_style(session, report_def.entity_id)
+      if report_def.entity_id
+      else load_primary_reporting_style(session)
+    )
   grid = render_structure_view(
     session=session,
     facts=facts,

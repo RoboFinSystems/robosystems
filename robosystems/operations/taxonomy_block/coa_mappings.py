@@ -186,6 +186,25 @@ def mapping_owner_id(session: Session, mapping_id: str) -> str | None:
   ).scalar_one_or_none()
 
 
+def mapping_owner_ids(session: Session, mapping_ids: list[str]) -> dict[str, str]:
+  """:func:`mapping_owner_id` for several mappings in one query. A mapping
+  absent from the result maps a chart no entity owns."""
+  if not mapping_ids:
+    return {}
+  rows = session.execute(
+    select(Structure.id, EntityTaxonomy.entity_id)
+    .join(Taxonomy, Structure.taxonomy_id == Taxonomy.id)
+    .join(EntityTaxonomy, Taxonomy.source_taxonomy_id == EntityTaxonomy.taxonomy_id)
+    .where(
+      Structure.id.in_(mapping_ids),
+      EntityTaxonomy.basis == CHART_LINK_BASIS,
+    )
+    .order_by(EntityTaxonomy.created_at.desc())
+  ).all()
+  # Newest first, so the earliest link wins, as in mapping_owner_id.
+  return {str(mapping_id): str(entity_id) for mapping_id, entity_id in rows}
+
+
 def find_entity_mapping(
   session: Session, entity_id: str | None, framework: str = BOOK_FRAMEWORK
 ) -> Structure | None:

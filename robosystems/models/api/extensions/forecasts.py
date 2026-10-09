@@ -286,8 +286,8 @@ class CreateForecastRequest(BaseModel):
   entity_id: str | None = Field(
     None,
     description=(
-      "Entity the scenario belongs to. Defaults to the graph's "
-      "earliest-created entity (single-entity convention)."
+      "The entity the scenario belongs to, by id: its history and its "
+      "computed months are that entity's books. Omit for the group parent."
     ),
   )
 

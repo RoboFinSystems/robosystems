@@ -49,7 +49,9 @@ def create(
     create_schedule as cmd_create_schedule,
   )
 
-  response = cmd_create_schedule(session, payload, created_by=created_by)
+  response = cmd_create_schedule(
+    session, payload, created_by=created_by, entity_id=payload.entity_id
+  )
   return response.structure_id
 
 

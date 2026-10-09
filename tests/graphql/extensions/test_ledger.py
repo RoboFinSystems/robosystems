@@ -1446,12 +1446,16 @@ class TestMappingCandidatesResolver:
       is_active=True,
     )
 
-  def test_narrows_to_the_primary_reporting_style(self) -> None:
+  def test_narrows_to_the_parents_reporting_style(self) -> None:
     with (
       patch(
-        "robosystems.graphql.resolvers.ledger.load_primary_reporting_style",
+        "robosystems.graphql.resolvers.ledger.resolve_entity_id",
+        return_value="ent_parent",
+      ) as resolve,
+      patch(
+        "robosystems.graphql.resolvers.ledger.load_entity_reporting_style",
         return_value="style_1",
-      ),
+      ) as style,
       patch(
         f"{_OPS}.taxonomies.suggest_mapping_candidates",
         return_value=[self._candidate()],
@@ -1460,16 +1464,55 @@ class TestMappingCandidatesResolver:
       result = _run('query { mappingCandidates(classification: "asset") { qname } }')
     assert result.errors is None
     assert result.data == {"mappingCandidates": [{"qname": "rs-gaap:Cash"}]}
+    assert resolve.call_args.args[1] is None
+    assert style.call_args.args[1] == "ent_parent"
     assert suggest.call_args.kwargs == {
       "trait": "asset",
       "reporting_style_id": "style_1",
     }
 
-  def test_without_an_entity_falls_back_to_no_style(self) -> None:
+  def test_narrows_to_a_named_entitys_reporting_style(self) -> None:
     with (
       patch(
-        "robosystems.graphql.resolvers.ledger.load_primary_reporting_style",
-        side_effect=LookupError("no entity"),
+        "robosystems.graphql.resolvers.ledger.resolve_entity_id",
+        return_value="ent_sub",
+      ) as resolve,
+      patch(
+        "robosystems.graphql.resolvers.ledger.load_entity_reporting_style",
+        return_value="style_llc",
+      ),
+      patch(
+        f"{_OPS}.taxonomies.suggest_mapping_candidates", return_value=[]
+      ) as suggest,
+    ):
+      result = _run(
+        'query { mappingCandidates(classification: "asset", entityId: "ent_sub") '
+        "{ qname } }"
+      )
+    assert result.errors is None
+    assert resolve.call_args.args[1] == "ent_sub"
+    assert suggest.call_args.kwargs["reporting_style_id"] == "style_llc"
+
+  def test_an_entity_outside_the_graph_is_an_error(self) -> None:
+    from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
+
+    with patch(
+      "robosystems.graphql.resolvers.ledger.resolve_entity_id",
+      side_effect=EntityNotInGraphError("Entity 'x' not found in this graph."),
+    ):
+      result = _run(
+        'query { mappingCandidates(classification: "asset", entityId: "x") { qname } }'
+      )
+    assert result.errors is not None
+    assert "not found in this graph" in result.errors[0].message
+
+  def test_without_an_entity_falls_back_to_no_style(self) -> None:
+    from robosystems.operations.roboledger.entity_scope import NoEntityError
+
+    with (
+      patch(
+        "robosystems.graphql.resolvers.ledger.resolve_entity_id",
+        side_effect=NoEntityError("no entity"),
       ),
       patch(
         f"{_OPS}.taxonomies.suggest_mapping_candidates", return_value=[]
@@ -1678,7 +1721,11 @@ class TestNotInitializedAcrossReads:
   def test_schema_missing_is_a_typed_error(self, target, query) -> None:
     with (
       patch(
-        "robosystems.graphql.resolvers.ledger.load_primary_reporting_style",
+        "robosystems.graphql.resolvers.ledger.resolve_entity_id",
+        return_value="ent_parent",
+      ),
+      patch(
+        "robosystems.graphql.resolvers.ledger.load_entity_reporting_style",
         return_value=None,
       ),
       patch(f"{_OPS}.{target}", side_effect=_SCHEMA_MISSING),

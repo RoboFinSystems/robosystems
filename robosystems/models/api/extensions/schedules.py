@@ -103,6 +103,14 @@ MAX_SCHEDULE_MONTHS = 600
 
 class CreateScheduleRequest(BaseModel):
   name: str = Field(..., description="Schedule name")
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity whose books the schedule belongs to, by id. Omit for the "
+      "group parent. Its facts, obligations and closing entries land in "
+      "that entity's books, against that entity's own accounts."
+    ),
+  )
   taxonomy_id: str | None = Field(
     None, description="Taxonomy ID (auto-creates if omitted)"
   )

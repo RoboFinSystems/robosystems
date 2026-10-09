@@ -103,6 +103,23 @@ class TestCreate:
     assert args[0] is session
     assert args[1] is not None
     assert kwargs.get("created_by") == "usr_test"
+    assert kwargs.get("entity_id") is None
+
+  def test_a_named_entity_reaches_the_command(self) -> None:
+    """The body's entity is the schedule's: without it every schedule made
+    through create-information-block landed on the group parent."""
+    expected = ScheduleCreatedResponse(
+      structure_id="struct_abc",
+      name="Equipment Depreciation",
+      taxonomy_id="tax_01",
+      total_periods=3,
+      total_facts=6,
+    )
+    body = _body().model_copy(update={"entity_id": "ent_sub"})
+    with patch(f"{COMMANDS}.create_schedule", return_value=expected) as mock_cmd:
+      schedule_handlers.create(MagicMock(), body, "usr_test")
+
+    assert mock_cmd.call_args.kwargs["entity_id"] == "ent_sub"
 
 
 class TestUpdate:

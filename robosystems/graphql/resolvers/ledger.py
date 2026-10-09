@@ -69,7 +69,11 @@ from robosystems.graphql.types.report_package import ReportPackage
 from robosystems.models.api.extensions.reports import (
   ReportLifecycle as PydanticReportLifecycle,
 )
-from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
+from robosystems.operations.roboledger.entity_scope import (
+  EntityNotInGraphError,
+  NoEntityError,
+  resolve_entity_id,
+)
 from robosystems.operations.roboledger.fiscal_calendar import (
   FiscalCalendarService,
   parse_period,
@@ -135,7 +139,7 @@ from robosystems.operations.roboledger.reads import (
   trial_balance as reads_trial_balance,
 )
 from robosystems.operations.roboledger.reports.network_picker import (
-  load_primary_reporting_style,
+  load_entity_reporting_style,
 )
 from robosystems.operations.roboledger.schedules import ScheduleService
 from robosystems.operations.taxonomy_block.chart_templates import (
@@ -885,32 +889,38 @@ class LedgerQuery:
     self,
     info: Info[GraphQLContext, None],
     classification: str,
+    entity_id: str | None = None,
   ) -> list[Element]:
     """The rs-gaap concepts a chart-of-accounts element may map to.
 
-    Limited to concepts that actually render under the active Reporting Style
-    — falling back to the rs-gaap-presentation set when no Style is seeded —
-    with statement-level subtotals excluded. It is the same candidate set the
-    mapping operator picks from, so a target that would land a fact on an
-    unreachable branch is never offered.
+    Limited to concepts that actually render under the entity's Reporting
+    Style — falling back to the rs-gaap-presentation set when no Style is
+    seeded — with statement-level subtotals excluded. It is the same candidate
+    set the mapping operator picks from, so a target that would land a fact on
+    an unreachable branch is never offered.
 
     Args:
       classification: The CoA element's EFS classification - asset, liability, equity,
         revenue, expense, gain or loss - whose eligible rs-gaap targets to return.
+      entity_id: The entity whose chart is being mapped. Omit for the group parent.
     """
     # Narrow to what the entity's Reporting Style renders, so the picker matches
     # the renderer; with no entity, the rs-gaap-presentation set is used.
     try:
       with _open_session(info, "roboledger") as session:
         try:
-          reporting_style_id = load_primary_reporting_style(session)
-        except LookupError:
+          reporting_style_id = load_entity_reporting_style(
+            session, resolve_entity_id(session, entity_id)
+          )
+        except NoEntityError:
           reporting_style_id = None
         rows = reads_taxonomies.suggest_mapping_candidates(
           session,
           trait=classification,
           reporting_style_id=reporting_style_id,
         )
+    except EntityNotInGraphError as exc:
+      raise strawberry.exceptions.StrawberryGraphQLError(str(exc)) from exc
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
     return [Element.from_pydantic(r) for r in rows]
@@ -960,11 +970,20 @@ class LedgerQuery:
     return StructureList.from_pydantic(response)
 
   @strawberry.field
-  def mappings(self, info: Info[GraphQLContext, None]) -> StructureList | None:
-    """List all active mapping structures."""
+  def mappings(
+    self, info: Info[GraphQLContext, None], entity_id: str | None = None
+  ) -> StructureList | None:
+    """List the active mapping structures, each naming the entity whose chart
+    it maps from.
+
+    Args:
+      entity_id: Keep only this entity's mappings. Omit for every entity's.
+    """
     try:
       with _open_session(info, "roboledger") as session:
-        response = reads_taxonomies.list_mappings(session)
+        response = reads_taxonomies.list_mappings(session, entity_id)
+    except EntityNotInGraphError as exc:
+      raise strawberry.exceptions.StrawberryGraphQLError(str(exc)) from exc
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
     return StructureList.from_pydantic(response)
@@ -1327,7 +1346,7 @@ class LedgerQuery:
     graph_id = require_graph_id(info)
     try:
       with _open_session(info, "roboledger") as session:
-        # get_statement resolves the primary entity's Reporting Style from
+        # get_statement resolves the report entity's Reporting Style from
         # this same session — no hop to the platform DB.
         response = reads_reports.get_statement(
           session,

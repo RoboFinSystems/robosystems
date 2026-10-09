@@ -308,10 +308,7 @@ class ChangeReportingStyleRequest(BaseModel):
   )
   entity_id: str | None = Field(
     None,
-    description=(
-      "Target entity. Omit to target the graph's primary "
-      "(earliest-created) entity — the single-entity default."
-    ),
+    description=("The entity whose style to change, by id. Omit for the group parent."),
   )
 
   model_config = ConfigDict(

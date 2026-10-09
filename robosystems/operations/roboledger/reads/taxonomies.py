@@ -35,6 +35,10 @@ from robosystems.operations.library.reads import (
   efs_trait_by_element,
   liquidity_by_element,
 )
+from robosystems.operations.roboledger.entity_scope import (
+  find_entity_id,
+  resolve_entity_id,
+)
 from robosystems.operations.roboledger.entry_status import (
   landed_entry_bindparam,
 )
@@ -47,6 +51,7 @@ from robosystems.operations.taxonomy_block.coa_mappings import (
   BOOK_FRAMEWORK,
   in_block,
   mapping_frameworks,
+  mapping_owner_ids,
 )
 
 
@@ -520,7 +525,7 @@ def _load_rs_gaap_presentation_set(session: Session) -> set[str]:
 
 
 def _structure_to_response(
-  row: Structure, framework: str | None = None
+  row: Structure, framework: str | None = None, entity_id: str | None = None
 ) -> StructureResponse:
   return StructureResponse(
     id=row.id,
@@ -530,6 +535,7 @@ def _structure_to_response(
     taxonomy_id=row.taxonomy_id,
     is_active=row.is_active,
     framework=framework,
+    entity_id=entity_id,
   )
 
 
@@ -558,8 +564,13 @@ def list_structures(
 # ── Mappings ──────────────────────────────────────────────────────────────
 
 
-def list_mappings(session: Session) -> StructureListResponse:
-  """List active ``coa_mapping`` structures, the book mapping first."""
+def list_mappings(
+  session: Session, entity_id: str | None = None
+) -> StructureListResponse:
+  """List active ``coa_mapping`` structures, the book mapping first, each with
+  the entity whose chart it maps from. ``entity_id`` keeps that entity's
+  mappings only; a named entity outside the graph raises
+  :class:`EntityNotInGraphError`."""
   rows = (
     session.execute(
       select(Structure)
@@ -572,10 +583,21 @@ def list_mappings(session: Session) -> StructureListResponse:
     .scalars()
     .all()
   )
-  frameworks = mapping_frameworks(session, [str(r.id) for r in rows])
+  mapping_ids = [str(r.id) for r in rows]
+  frameworks = mapping_frameworks(session, mapping_ids)
+  # A chart no entity owns is the group parent's.
+  parent_id = find_entity_id(session)
+  owners = mapping_owner_ids(session, mapping_ids)
+  owner_of = {mid: owners.get(mid, parent_id) for mid in mapping_ids}
+  if entity_id:
+    wanted = resolve_entity_id(session, entity_id)
+    rows = [r for r in rows if owner_of[str(r.id)] == wanted]
   ordered = sorted(rows, key=lambda r: frameworks.get(str(r.id)) != BOOK_FRAMEWORK)
   return StructureListResponse(
-    structures=[_structure_to_response(r, frameworks.get(str(r.id))) for r in ordered]
+    structures=[
+      _structure_to_response(r, frameworks.get(str(r.id)), owner_of[str(r.id)])
+      for r in ordered
+    ]
   )
 
 

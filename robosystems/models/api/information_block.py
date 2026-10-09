@@ -1871,8 +1871,7 @@ class ComputeMetricsRequest(BaseModel):
   entity_id: str | None = Field(
     None,
     description=(
-      "Entity to compute for. Defaults to the graph's earliest-created "
-      "entity (the primary entity for single-entity graphs)."
+      "The entity whose metrics to compute, by id. Omit for the group parent."
     ),
   )
   scenario_id: str | None = Field(
@@ -1990,8 +1989,7 @@ class AssertMetricsRequest(BaseModel):
   entity_id: str | None = Field(
     None,
     description=(
-      "Entity to assert for. Defaults to the graph's earliest-created "
-      "entity (the primary entity for single-entity graphs)."
+      "The entity the asserted values belong to, by id. Omit for the group parent."
     ),
   )
   source_system: str = Field(
