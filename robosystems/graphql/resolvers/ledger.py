@@ -1092,8 +1092,8 @@ class LedgerQuery:
         if calendar is None:
           return None
         with platform_session() as platform_db:
-          has_sync, last_sync_at = reads_fiscal_calendar.qb_sync_state(
-            platform_db, graph_id
+          has_sync, last_sync_at = reads_fiscal_calendar.entity_sync_state(
+            session, platform_db, graph_id, str(calendar.entity_id)
           )
         response = reads_fiscal_calendar.build_fiscal_calendar_response(
           session,

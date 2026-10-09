@@ -76,7 +76,7 @@ def _patch_sessions():
   with (
     patch(f"{MODULE}.extensions_session", return_value=ext_cm),
     patch(f"{MODULE}._platform_session", return_value=plat_cm),
-    patch(f"{MODULE}.qb_sync_state", return_value=(False, None)),
+    patch(f"{MODULE}.entity_sync_state", return_value=(False, None)),
     patch(f"{MODULE}.require_graph_extension_mcp", return_value=MagicMock()),
   ):
     yield
