@@ -1698,6 +1698,7 @@ class TestSeverConnection:
         "robosystems.operations.roboledger.commands.connections.sever_synced_chart",
         return_value=7,
       ) as stamp,
+      patch("robosystems.operations.extensions.staleness.mark_graph_stale") as stale,
     ):
       MockConn.get_by_id.return_value = mock_conn
       ext_session.return_value.__enter__.return_value = ext
@@ -1710,6 +1711,7 @@ class TestSeverConnection:
     stamp.assert_called_once_with(ext, "conn_1", source="quickbooks")
     assert mock_conn.set_write_policy.call_args.args[1] == "native"
     assert mock_conn.update_status.call_args.args[0] == "severed"
+    stale.assert_called_once_with("kg_test", "connection_severed")
     assert result == {
       "connection_id": "conn_1",
       "provider": "quickbooks",

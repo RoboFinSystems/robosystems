@@ -30,6 +30,7 @@ from robosystems.adapters.bank_feed.load import (
   earliest_plausible,
   ensure_agents,
   existing_events,
+  in_closed_months,
   refresh_hints,
 )
 from robosystems.adapters.plaid.client import TransactionsSync
@@ -232,11 +233,18 @@ def load_sync(
     )
   )
 
+  closed = in_closed_months(
+    session,
+    [p for p in result.events if str(p["external_id"]) not in singles],
+  )
   for payload in result.events:
     prior = singles.get(str(payload["external_id"]))
     if prior is not None:
       if str(prior.id) not in consumed:
         reconcile_existing(prior, payload, report)
+      continue
+    if str(payload["external_id"]) in closed:
+      report.skipped["closed_period"] += 1
       continue
     if payload["metadata"].get("transfer_candidate"):
       other = find_waiting_leg(

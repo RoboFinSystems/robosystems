@@ -23,6 +23,7 @@ from robosystems.adapters.bank_feed.load import (
   earliest_plausible,
   ensure_agents,
   existing_events,
+  in_closed_months,
   refresh_hints,
 )
 from robosystems.adapters.mercury.pipeline.transform import (
@@ -92,6 +93,10 @@ def load_feed(
   existing = existing_events(
     session, source, [str(event["external_id"]) for event in result.events]
   )
+  closed = in_closed_months(
+    session,
+    [p for p in result.events if str(p["external_id"]) not in existing],
+  )
   for payload in result.events:
     prior = existing.get(str(payload["external_id"]))
     if prior is not None:
@@ -101,6 +106,9 @@ def load_feed(
         report.events_updated += 1
       else:
         report.events_existing += 1
+      continue
+    if str(payload["external_id"]) in closed:
+      report.skipped["closed_period"] += 1
       continue
     capture_event(
       session, payload, graph_id=graph_id, created_by=created_by, report=report

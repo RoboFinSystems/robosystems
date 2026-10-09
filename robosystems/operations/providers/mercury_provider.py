@@ -310,16 +310,18 @@ async def cleanup_mercury_connection(connection: dict[str, Any], graph_id: str) 
     except Exception as exc:
       logger.warning(f"Mercury token revocation errored for {connection_id}: {exc}")
 
-  purged = purge_bank_feed_connection(
-    graph_id, provider=PROVIDER, connection_id=connection_id
-  )
-
+  # Revoked before the purge: a sync that reaches its write after this point
+  # sees it and writes nothing.
   with platform_session() as db:
     creds = ConnectionCredentials.get_by_connection_id(connection_id, db)
     if creds:
       creds.update_credentials(
         {"auth_mode": auth_mode, "revoked_at": datetime.now(UTC).isoformat()}, db
       )
+
+  purged = purge_bank_feed_connection(
+    graph_id, provider=PROVIDER, connection_id=connection_id
+  )
 
   record_bank_feed_purged(
     provider=PROVIDER,

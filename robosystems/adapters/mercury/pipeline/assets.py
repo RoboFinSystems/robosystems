@@ -19,11 +19,13 @@ from dagster import (
 from robosystems.adapters.bank_feed.sync import (
   BankFeedSyncConfig,
   bootstrap_fiscal_calendar_if_needed,
+  connection_removed,
   default_backfill_start,
   last_sync,
   mark_graph_stale,
   record_failed_sync_result,
   release_sync_lock,
+  removed_during_sync,
   update_last_sync,
 )
 
@@ -123,6 +125,8 @@ def _run_mercury_sync(
   )
 
   with extensions_session(config.graph_id, statement_timeout_ms=None) as session:
+    if connection_removed(config.connection_id):
+      raise removed_during_sync(SOURCE_LABEL)
     link_result = link_bank_accounts(
       session,
       accounts,
@@ -210,8 +214,8 @@ def _since_date(
   """The pull window's start.
 
   An explicit ``since_date`` wins. A full rebuild — or a connection that has
-  never synced — starts at the connect-time ``since_date`` (default: the first
-  of January of last year). An incremental sync looks back ``lookback_days``,
+  never synced — starts at the connect-time ``since_date`` (default: two
+  years back). An incremental sync looks back ``lookback_days``,
   never earlier than the connect-time start.
   """
   if config.since_date:

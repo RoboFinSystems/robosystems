@@ -4,7 +4,8 @@ The module-level functions are the sync dispatch kernel shared by the REST
 sync endpoint and the `sync-connection` MCP tool.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import date
 from typing import Any
 
@@ -273,6 +274,7 @@ class ConnectionService:
         raise SeverNotSupportedError(provider)
 
       from robosystems.db.extensions import extensions_session
+      from robosystems.operations.extensions.staleness import mark_graph_stale
       from robosystems.operations.roboledger.commands.connections import (
         sever_synced_chart,
       )
@@ -283,6 +285,8 @@ class ConnectionService:
 
       conn.set_write_policy(session, WritePolicy.NATIVE.value)
       conn.update_status(ConnectionStatus.SEVERED.value, session)
+      # The stamp renames the severed accounts in the graph's projection.
+      mark_graph_stale(target_graph_id, "connection_severed")
       logger.info(
         "Severed connection %s (%s) on graph %s: %d elements now native",
         connection_id,
@@ -755,6 +759,60 @@ async def resolve_sync_connection(
   return pool[0]
 
 
+def _acquire_sync_lock(connection_id: str) -> str:
+  """Take the per-connection sync lock; returns its id, or "" when Valkey is
+  degraded (fails open). Raises `SyncInProgressError` while a sync holds it."""
+  from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
+  from robosystems.middleware.auth.distributed_lock import DistributedLock
+
+  try:
+    redis_client = create_redis_client(ValkeyDatabase.LOCKS)
+    sync_lock = DistributedLock(
+      redis_client, f"qb_sync:{connection_id}", ttl_seconds=1800
+    )
+    lock_result = sync_lock.acquire(blocking=False)
+    if not lock_result.acquired:
+      # `acquire` reports Redis failures as `acquired=False`. A degraded
+      # Valkey fails open (proceed unlocked) rather than 409 every sync.
+      if isinstance(
+        lock_result.error_message, str
+      ) and lock_result.error_message.startswith("Redis error"):
+        raise RuntimeError(f"lock backend degraded: {lock_result.error_message}")
+      raise SyncInProgressError(
+        connection_id, lock_result.holder_id, lock_result.ttl_remaining
+      )
+    return lock_result.lock_id or ""
+  except SyncInProgressError:
+    raise
+  except Exception as e:
+    # Fails open; dashboards watch `lock_skipped=true` for the race risk.
+    logger.warning(
+      "Could not acquire sync lock for connection %s: %s; "
+      "proceeding without lock (concurrent-sync race still possible)",
+      connection_id,
+      e,
+      extra={
+        "connection_id": connection_id,
+        "lock_skipped": True,
+        "lock_skip_reason": type(e).__name__,
+      },
+    )
+    return ""
+
+
+@contextmanager
+def sync_fence(connection_id: str) -> Iterator[None]:
+  """Hold the per-connection sync lock across a disconnect, so no sync runs
+  beside its cleanup and none starts until the row is gone. Raises
+  `SyncInProgressError` while a sync runs."""
+  lock_id = _acquire_sync_lock(connection_id)
+  try:
+    yield
+  finally:
+    if lock_id:
+      _release_sync_lock(connection_id, lock_id)
+
+
 def _release_sync_lock(connection_id: str, sync_lock_id: str) -> None:
   """Best-effort release; never raises (the lock's TTL is the fallback)."""
   try:
@@ -821,8 +879,6 @@ async def dispatch_connection_sync(
   """
   import asyncio
 
-  from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
-  from robosystems.middleware.auth.distributed_lock import DistributedLock
   from robosystems.operations.providers.registry import provider_registry
 
   connection = await ConnectionService.get_connection(
@@ -840,39 +896,7 @@ async def dispatch_connection_sync(
   # Concurrent syncs of one connection race on the UPSERT path. The pipeline
   # releases the lock via `sync_lock_id` when the sync ends, failed or not;
   # the 30-min TTL only bounds a crashed run.
-  sync_lock_id: str = ""
-  try:
-    redis_client = create_redis_client(ValkeyDatabase.LOCKS)
-    sync_lock = DistributedLock(
-      redis_client, f"qb_sync:{connection_id}", ttl_seconds=1800
-    )
-    lock_result = sync_lock.acquire(blocking=False)
-    if not lock_result.acquired:
-      # `acquire` reports Redis failures as `acquired=False`. A degraded
-      # Valkey fails open (proceed unlocked) rather than 409 every sync.
-      if isinstance(
-        lock_result.error_message, str
-      ) and lock_result.error_message.startswith("Redis error"):
-        raise RuntimeError(f"lock backend degraded: {lock_result.error_message}")
-      raise SyncInProgressError(
-        connection_id, lock_result.holder_id, lock_result.ttl_remaining
-      )
-    sync_lock_id = lock_result.lock_id or ""
-  except SyncInProgressError:
-    raise
-  except Exception as e:
-    # Fails open; dashboards watch `lock_skipped=true` for the race risk.
-    logger.warning(
-      "Could not acquire sync lock for connection %s: %s; "
-      "proceeding without lock (concurrent-sync race still possible)",
-      connection_id,
-      e,
-      extra={
-        "connection_id": connection_id,
-        "lock_skipped": True,
-        "lock_skip_reason": type(e).__name__,
-      },
-    )
+  sync_lock_id = _acquire_sync_lock(connection_id)
 
   effective_options: dict[str, object] = dict(sync_options or {})
   if full_rebuild:
