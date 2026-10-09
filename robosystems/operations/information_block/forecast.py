@@ -48,6 +48,7 @@ from robosystems.operations.information_block.envelope import (
   window_month_axis,
 )
 from robosystems.operations.information_block.forecast_history import (
+  LeverHistory,
   back_solve_lever_history,
 )
 from robosystems.operations.information_block.metrics import (
@@ -754,6 +755,7 @@ def build_envelope(
   series: bool = False,
   series_history: int | None = None,
   series_forecast: int | None = None,
+  entity_id: str | None = None,
 ) -> InformationBlockEnvelope | None:
   """Reload a forecast Structure and pack its envelope as the assumptions grid.
 
@@ -806,7 +808,15 @@ def build_envelope(
   horizon_months = [
     add_months(mechanics.base_period, i) for i in range(1, mechanics.horizon_months + 1)
   ]
-  history = back_solve_lever_history(session, mechanics)
+  # A scenario is its entity's own: its history is that entity's books,
+  # whichever entity the caller is looking at.
+  lever_set = _load_lever_fact_set(session, structure_id)
+  owner_entity_id = lever_set.entity_id if lever_set is not None else entity_id
+  history = (
+    back_solve_lever_history(session, mechanics, owner_entity_id)
+    if owner_entity_id
+    else LeverHistory()
+  )
   actual_months = set(history.months)
   months = sorted(actual_months | set(horizon_months))
   forecast_months = {month for month in horizon_months if month not in actual_months}
@@ -899,7 +909,6 @@ def build_envelope(
     unmapped_count=0,
   )
 
-  lever_set = _load_lever_fact_set(session, structure_id)
   facts: list[Fact] = []
   if lever_set is not None:
     facts = list(

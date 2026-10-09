@@ -38,6 +38,7 @@ def build_envelope(
   series: bool = False,
   series_history: int | None = None,
   series_forecast: int | None = None,
+  entity_id: str | None = None,
 ) -> InformationBlockEnvelope | None:
   """Pack the envelope for a disclosure-note structure.
 
@@ -48,8 +49,10 @@ def build_envelope(
   if structure is None or structure.block_type != DISCLOSURE_BLOCK_TYPE:
     return None
   if (structure.concept_arrangement or "") in TEXT_BLOCK_CAPS:
-    return build_text_block_envelope(session, structure_id, fact_set_id)
-  envelope = _build_disclosure_envelope(session, structure_id, fact_set_id)
+    return build_text_block_envelope(session, structure_id, fact_set_id, entity_id)
+  envelope = _build_disclosure_envelope(
+    session, structure_id, fact_set_id, entity_id=entity_id
+  )
   if envelope is None or not envelope.connections:
     return None
   return envelope

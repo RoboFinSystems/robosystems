@@ -39,10 +39,12 @@ def build_text_block_envelope(
   session: Session,
   structure_id: str,
   fact_set_id: str | None = None,
+  entity_id: str | None = None,
 ) -> InformationBlockEnvelope | None:
   """Pack the envelope for a text-block disclosure structure.
 
-  Facts come from ``fact_set_id`` when pinned, else the latest FactSet.
+  Facts come from ``fact_set_id`` when pinned, else the latest FactSet
+  (of ``entity_id``, when named).
   ``None`` when the structure is missing, isn't a ``regulatory_disclosure``,
   or has neither content nor arcs; an unbound note renders empty.
   """
@@ -51,6 +53,7 @@ def build_text_block_envelope(
     structure_id,
     expected_block_type=DISCLOSURE_BLOCK_TYPE,
     fact_set_id=fact_set_id,
+    entity_id=entity_id,
   )
   if atoms is None:
     return None

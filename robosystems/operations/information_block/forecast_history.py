@@ -95,15 +95,19 @@ def numeric_facts(session: Session, fact_set_id: str) -> list[Fact]:
   )
 
 
-def newest_actual_structure_id(session: Session, block_type: str) -> str | None:
-  """Structure behind the newest actual report set of a block type (not by
-  name: reporting styles have several variants per block type)."""
+def newest_actual_structure_id(
+  session: Session, block_type: str, entity_id: str
+) -> str | None:
+  """Structure behind an entity's newest actual report set of a block type
+  (not by name: reporting styles have several variants per block type, and
+  the group's entities can each use a different one)."""
   return session.execute(
     select(FactSet.structure_id)
     .join(Structure, FactSet.structure_id == Structure.id)
     .where(
       FactSet.factset_type == "report",
       FactSet.scenario_id.is_(None),
+      FactSet.entity_id == entity_id,
       Structure.block_type == block_type,
     )
     .order_by(FactSet.created_at.desc())
@@ -148,9 +152,10 @@ class _SolvableRule:
 
 
 def back_solve_lever_history(
-  session: Session, mechanics: ForecastMechanics
+  session: Session, mechanics: ForecastMechanics, entity_id: str
 ) -> LeverHistory:
-  """Realized lever values for every closed month, by rule inversion.
+  """Realized lever values for every closed month of the entity's books, by
+  rule inversion.
 
   Returns an empty history when the tenant has no actual statement sets,
   no rs-driver rules, or nothing to solve; callers then render the
@@ -181,7 +186,7 @@ def back_solve_lever_history(
     needed_element_ids.update(rule.operand_element_ids.values())
     needed_element_ids.update(rule.prior_element_ids.values())
 
-  months, actuals = _actual_monthly_values(session, needed_element_ids)
+  months, actuals = _actual_monthly_values(session, needed_element_ids, entity_id)
   if not months:
     return LeverHistory()
 
@@ -322,9 +327,10 @@ def _back_solve(
 
 
 def _actual_monthly_values(
-  session: Session, element_ids: set[str]
+  session: Session, element_ids: set[str], entity_id: str
 ) -> tuple[list[str], dict[str, dict[str, float]]]:
-  """Actual values per closed month for exactly the elements asked for.
+  """One entity's actual values per closed month for exactly the elements
+  asked for.
 
   Months come from the FactSet series, not the facts, so a month with no
   value is still a (blank) column.
@@ -335,11 +341,11 @@ def _actual_monthly_values(
     return [], by_month
 
   for block_type in _ACTUAL_BLOCK_TYPES:
-    structure_id = newest_actual_structure_id(session, block_type)
+    structure_id = newest_actual_structure_id(session, block_type, entity_id)
     if structure_id is None:
       continue
     # Same loader as the statement columns, so months line up.
-    series = load_statement_fact_set_series(session, structure_id, None)
+    series = load_statement_fact_set_series(session, structure_id, None, entity_id)
     if not series:
       continue
     month_by_set = {

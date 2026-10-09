@@ -141,7 +141,7 @@ class TestDisclosureDispatch:
     ) as text_builder:
       result = disclosure_handlers.build_envelope(session, "struct_policy", "fs_pin")
 
-    text_builder.assert_called_once_with(session, "struct_policy", "fs_pin")
+    text_builder.assert_called_once_with(session, "struct_policy", "fs_pin", None)
     assert result is sentinel
 
   def test_level1_textblock_cap_routes_to_text_builder(self) -> None:

@@ -22,6 +22,7 @@ from robosystems.operations.information_block import (
   get_information_block,
   list_information_blocks,
 )
+from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
 
 
 @strawberry.type
@@ -46,6 +47,7 @@ class InformationBlockQuery:
     series: bool | None = None,
     series_history: int | None = None,
     series_forecast: int | None = None,
+    entity_id: str | None = None,
   ) -> InformationBlock | None:
     """Fetch a single Information Block envelope by id.
 
@@ -65,6 +67,12 @@ class InformationBlockQuery:
     forecast columns; omitted = unbounded. Pass the visible window so
     the envelope scales with the screen, not the ledger's age.
 
+    `entityId` picks whose books a block shared by the group reads
+    (statements, metrics, disclosures); omitted = the scenario's entity,
+    else the group parent. A schedule, reconciliation or forecast is one
+    entity's own and always reads its owner's. `entityId` on the envelope
+    names the entity it read.
+
     Args:
       id: The block's structure id.
       scenario_id: A forecast block's structure id. Omit for actuals.
@@ -73,17 +81,25 @@ class InformationBlockQuery:
       series_history: Cap the series at the last N actual columns. Omit for unbounded.
       series_forecast: Cap the series at the first N forecast columns. Omit for
         unbounded.
+      entity_id: The entity whose books a shared block reads. Omit for the group
+        parent.
     """
-    with _open_session(info) as session:
-      envelope = get_information_block(
-        session,
-        str(id),
-        scenario_id=scenario_id,
-        series=bool(series),
-        series_history=series_history,
-        series_forecast=series_forecast,
-      )
-      return InformationBlock.from_pydantic(envelope) if envelope else None
+    graph_id = require_graph_id(info)
+    try:
+      with _open_session(info) as session:
+        envelope = get_information_block(
+          session,
+          str(id),
+          scenario_id=scenario_id,
+          series=bool(series),
+          series_history=series_history,
+          series_forecast=series_forecast,
+          entity_id=entity_id,
+          library_sentinel=(graph_id == LIBRARY_GRAPH_ID),
+        )
+    except EntityNotInGraphError as exc:
+      raise strawberry.exceptions.StrawberryGraphQLError(str(exc)) from exc
+    return InformationBlock.from_pydantic(envelope) if envelope else None
 
   @strawberry.field
   def information_blocks(
@@ -94,6 +110,7 @@ class InformationBlockQuery:
     limit: int | None = None,
     offset: int | None = None,
     scenario_id: str | None = None,
+    entity_id: str | None = None,
   ) -> list[InformationBlock]:
     """List Information Blocks with optional block_type + category filters.
 
@@ -103,26 +120,37 @@ class InformationBlockQuery:
     `scenarioId` threads into each envelope's FactSet binding (the
     Structure list itself is scenario-independent).
 
+    `entityId` (omitted = the scenario's entity, else the group parent)
+    lists the blocks shared by the group plus that entity's own schedules,
+    reconciliations and forecasts, never another entity's; shared blocks
+    read its books.
+
     Args:
       block_type: Filter to one registered block type, e.g. `schedule`.
       category: Filter on the registry entry's category label, e.g. `Close` or
         `Reporting`.
       scenario_id: A forecast block's structure id, threaded into each envelope's
         FactSet binding.
+      entity_id: The entity whose blocks and books to list. Omit for the group
+        parent.
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=50)
     graph_id = require_graph_id(info)
-    with _open_session(info) as session:
-      rows = list_information_blocks(
-        session,
-        block_type=block_type,
-        category=category,
-        limit=limit,
-        offset=offset,
-        library_sentinel=(graph_id == LIBRARY_GRAPH_ID),
-        scenario_id=scenario_id,
-      )
-      return [InformationBlock.from_pydantic(r) for r in rows]
+    try:
+      with _open_session(info) as session:
+        rows = list_information_blocks(
+          session,
+          block_type=block_type,
+          category=category,
+          limit=limit,
+          offset=offset,
+          library_sentinel=(graph_id == LIBRARY_GRAPH_ID),
+          scenario_id=scenario_id,
+          entity_id=entity_id,
+        )
+    except EntityNotInGraphError as exc:
+      raise strawberry.exceptions.StrawberryGraphQLError(str(exc)) from exc
+    return [InformationBlock.from_pydantic(r) for r in rows]
 
 
 __all__ = [

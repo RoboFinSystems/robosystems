@@ -16,8 +16,10 @@ from robosystems.operations.information_block import (
 from robosystems.operations.information_block import (
   list_information_blocks as ops_list_information_blocks,
 )
+from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
 
 from ._errors import database_failure
+from .constants import ENTITY_ID_ARGUMENT
 
 # ────────────────────────────────────────────────────────────────────────────
 # get-information-block
@@ -54,6 +56,10 @@ class GetInformationBlockTool:
   seam-adjacent columns — the last N actual columns and the first N
   forecast columns. Omitted = unbounded. Prefer a window on deep-history
   tenants: an unbounded series envelope grows with the ledger's age
+- entity_id (optional): Whose books a block shared by the group reads
+  (statements, metrics, disclosures). Omitted = the scenario's entity, else
+  the group parent. A schedule, reconciliation or forecast always reads its
+  own entity's; the envelope's entity_id names the entity it read
 
 **RETURNS:**
 A typed envelope with:
@@ -109,6 +115,7 @@ included.""",
               "(nearest the seam). Omitted = the full horizon."
             ),
           },
+          "entity_id": ENTITY_ID_ARGUMENT,
         },
         "required": ["id"],
       },
@@ -134,6 +141,8 @@ included.""",
           series=series,
           series_history=int(series_history) if series_history is not None else None,
           series_forecast=int(series_forecast) if series_forecast is not None else None,
+          entity_id=arguments.get("entity_id"),
+          library_sentinel=(graph_id == LIBRARY_GRAPH_ID),
         )
         if envelope is None:
           return {
@@ -141,6 +150,8 @@ included.""",
             "message": f"Information Block not found: {block_id}",
           }
         return envelope.model_dump(mode="json")
+    except EntityNotInGraphError as exc:
+      return {"error": "entity_not_found", "message": str(exc)}
     except SQLAlchemyError as exc:
       return database_failure("get-information-block", exc)
     except Exception as exc:
@@ -177,6 +188,10 @@ class ListInformationBlocksTool:
 - scenario_id (optional): A forecast block's structure id — each
   envelope binds that scenario's FactSet slice instead of actuals
   (list blocks with block_type='forecast' to discover scenarios)
+- entity_id (optional): List the blocks shared by the group plus this
+  entity's own schedules, reconciliations and forecasts, never another
+  entity's; shared blocks read its books. Omitted = the scenario's entity,
+  else the group parent
 - include_atoms (optional, default false): When false, returns a lean
   summary per block (id, type, name, display_name, category, taxonomy_id,
   taxonomy_name, disclosure_id, element_count, fact_count, rule_count).
@@ -234,6 +249,7 @@ class ListInformationBlocksTool:
               "scenario's FactSet slice instead of actuals."
             ),
           },
+          "entity_id": ENTITY_ID_ARGUMENT,
         },
         "required": [],
       },
@@ -274,6 +290,7 @@ class ListInformationBlocksTool:
           offset=offset,
           library_sentinel=(graph_id == LIBRARY_GRAPH_ID),
           scenario_id=scenario_id,
+          entity_id=arguments.get("entity_id"),
         )
         if include_atoms:
           blocks = [e.model_dump(mode="json") for e in envelopes]
@@ -286,6 +303,8 @@ class ListInformationBlocksTool:
           "block_count": len(blocks),
           "blocks": blocks,
         }
+    except EntityNotInGraphError as exc:
+      return {"error": "entity_not_found", "message": str(exc)}
     except ValueError as exc:
       # Unknown block_type.
       return {"error": "invalid_arguments", "message": str(exc)}
@@ -307,6 +326,7 @@ def _summarize_information_block(envelope) -> dict[str, Any]:
     "taxonomy_id": envelope.taxonomy_id,
     "taxonomy_name": envelope.taxonomy_name,
     "disclosure_id": envelope.disclosure_id,
+    "entity_id": envelope.entity_id,
     "element_count": len(envelope.elements or []),
     "connection_count": len(envelope.connections or []),
     "fact_count": len(envelope.facts or []),

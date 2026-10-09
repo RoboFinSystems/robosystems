@@ -320,7 +320,7 @@ def _run(
   structure = _structure(mechanics)
   recorder = _Recorder()
 
-  def _structures(session: Any, block_type: str) -> str | None:
+  def _structures(session: Any, block_type: str, entity_id: str) -> str | None:
     return {"income_statement": "struct_is", "balance_sheet": bs_structure}.get(
       block_type
     )

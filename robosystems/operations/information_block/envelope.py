@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.information_block import (
@@ -192,19 +192,25 @@ def verification_result_to_lite(row: VerificationResult) -> VerificationResultLi
 
 
 def load_verification_results_for_structure(
-  session: Session, structure_id: str, scenario_id: str | None = None
+  session: Session,
+  structure_id: str,
+  scenario_id: str | None = None,
+  entity_id: str | None = None,
 ) -> list[VerificationResultLite]:
   """Verification results for a Structure, newest first, scoped to a slice.
 
   compute-forecast verifies scenario months against the statement
   structures, so results pinned to a set are filtered by that set's
-  scenario (``None`` = actuals). Unpinned results always appear.
+  scenario (``None`` = actuals) and, given ``entity_id``, by its entity.
+  Unpinned results always appear.
   """
   scenario_predicate = (
     FactSet.scenario_id.is_(None)
     if scenario_id is None
     else FactSet.scenario_id == scenario_id
   )
+  if entity_id is not None:
+    scenario_predicate = and_(scenario_predicate, FactSet.entity_id == entity_id)
   rows = (
     session.execute(
       select(VerificationResult)
@@ -275,15 +281,24 @@ def build_verification_summary(
   )
 
 
+def _entity_filter(entity_id: str | None) -> tuple:
+  """``FactSet.entity_id == entity_id`` when one is named, else nothing."""
+  return () if entity_id is None else (FactSet.entity_id == entity_id,)
+
+
 def load_latest_fact_set_for_structure(
-  session: Session, structure_id: str, scenario_id: str | None = None
+  session: Session,
+  structure_id: str,
+  scenario_id: str | None = None,
+  entity_id: str | None = None,
 ) -> FactSetLite | None:
   """Fetch the latest FactSet (by ``period_end``) for a Structure, if any.
 
   ``scenario_id=None`` pins actuals; this is load-bearing, since scenario
-  sets sit at future period_ends and would otherwise win. At equal
-  ``period_end``, canonical sets (``report_id IS NULL``) beat publication
-  snapshots, then newest first.
+  sets sit at future period_ends and would otherwise win. ``entity_id``
+  keeps one entity's sets: statement structures are shared by the group.
+  At equal ``period_end``, canonical sets (``report_id IS NULL``) beat
+  publication snapshots, then newest first.
   """
   row = session.execute(
     select(FactSet)
@@ -292,6 +307,7 @@ def load_latest_fact_set_for_structure(
       FactSet.scenario_id.is_(None)
       if scenario_id is None
       else FactSet.scenario_id == scenario_id,
+      *_entity_filter(entity_id),
     )
     .order_by(
       FactSet.period_end.desc(),
@@ -304,13 +320,16 @@ def load_latest_fact_set_for_structure(
 
 
 def load_statement_fact_set_series(
-  session: Session, structure_id: str, scenario_id: str | None = None
+  session: Session,
+  structure_id: str,
+  scenario_id: str | None = None,
+  entity_id: str | None = None,
 ) -> list[FactSetLite]:
   """The report-set series for a statement structure, one per period_end,
   ascending.
 
   ``scenario_id=None`` loads actuals; a scenario id adds that scenario's
-  sets. Sets whose window strictly contains another's (an annual over its
+  sets. ``entity_id`` keeps one entity's sets. Sets whose window strictly contains another's (an annual over its
   months) are dropped first. Then per ``period_end``: actual beats
   forecast, canonical beats publication snapshot, narrower window beats
   wider, newest wins.
@@ -327,6 +346,7 @@ def load_statement_fact_set_series(
         FactSet.structure_id == structure_id,
         FactSet.factset_type == "report",
         scenario_predicate,
+        *_entity_filter(entity_id),
       )
       .order_by(
         FactSet.period_end.asc(),
@@ -519,13 +539,14 @@ def load_base_envelope_atoms(
   expected_block_type: str,
   fact_set_id: str | None = None,
   scenario_id: str | None = None,
+  entity_id: str | None = None,
 ) -> BaseEnvelopeAtoms | None:
   """Load every atom shared by Information Block envelope builders.
 
   ``None`` when the Structure is missing, isn't ``expected_block_type``, or
   a ``fact_set_id`` pin doesn't belong to it. A pin overrides
-  ``scenario_id``; without one, ``scenario_id`` selects the slice (``None``
-  = actuals).
+  ``scenario_id`` and ``entity_id``; without one, ``scenario_id`` selects
+  the slice (``None`` = actuals) and ``entity_id`` whose sets.
   """
   from robosystems.models.extensions import Taxonomy
 
@@ -538,7 +559,9 @@ def load_base_envelope_atoms(
     if fact_set is None:
       return None
   else:
-    fact_set = load_latest_fact_set_for_structure(session, structure_id, scenario_id)
+    fact_set = load_latest_fact_set_for_structure(
+      session, structure_id, scenario_id, entity_id
+    )
 
   taxonomy_name = session.execute(
     select(Taxonomy.name).where(Taxonomy.id == structure.taxonomy_id)
@@ -574,11 +597,12 @@ def load_base_envelope_atoms(
     session, [a.id for a in associations]
   )
 
-  # A pinned set scopes results by its own scenario.
+  # A pinned set scopes results by its own scenario and entity.
   verification_results = load_verification_results_for_structure(
     session,
     structure_id,
     scenario_id=fact_set.scenario_id if fact_set is not None else scenario_id,
+    entity_id=fact_set.entity_id if fact_set is not None else entity_id,
   )
 
   return BaseEnvelopeAtoms(

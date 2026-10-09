@@ -1067,6 +1067,7 @@ class TestBuildEnvelope:
         "struct_budget_01",
         series_history=series_history,
         series_forecast=series_forecast,
+        entity_id="ent_1",
       )
 
   def test_realized_months_extend_the_grid_behind_the_seam(self) -> None:

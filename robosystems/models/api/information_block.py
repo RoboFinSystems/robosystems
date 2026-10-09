@@ -1141,6 +1141,17 @@ class InformationBlockEnvelope(BaseModel):
     ),
   )
 
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity whose books the envelope reads. A schedule, "
+      "reconciliation or forecast is one entity's own and always reads its "
+      "owner's; a block shared by the group (statements, metrics) reads "
+      "the entity asked for, else the group parent. Null on the library "
+      "and on a graph with no entity yet."
+    ),
+  )
+
   information_model: InformationModelResponse
   artifact: ArtifactResponse
 
