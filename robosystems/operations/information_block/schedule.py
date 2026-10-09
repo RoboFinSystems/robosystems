@@ -49,7 +49,9 @@ def create(
     create_schedule as cmd_create_schedule,
   )
 
-  response = cmd_create_schedule(session, payload, created_by=created_by)
+  response = cmd_create_schedule(
+    session, payload, created_by=created_by, entity_id=payload.entity_id
+  )
   return response.structure_id
 
 
@@ -132,6 +134,7 @@ def build_envelope(
   series: bool = False,
   series_history: int | None = None,
   series_forecast: int | None = None,
+  entity_id: str | None = None,
 ) -> InformationBlockEnvelope | None:
   """Reload a schedule Structure and pack its Information Block envelope.
 
@@ -144,6 +147,7 @@ def build_envelope(
     structure_id,
     expected_block_type=SCHEDULE_BLOCK_TYPE,
     fact_set_id=fact_set_id,
+    entity_id=entity_id,
   )
   if atoms is None:
     return None

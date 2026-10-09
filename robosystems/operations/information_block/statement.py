@@ -79,6 +79,7 @@ def _build_statement_envelope(
   series: bool = False,
   series_history: int | None = None,
   series_forecast: int | None = None,
+  entity_id: str | None = None,
   *,
   block_type: str,
 ) -> InformationBlockEnvelope | None:
@@ -101,6 +102,7 @@ def _build_statement_envelope(
     expected_block_type=block_type,
     fact_set_id=fact_set_id,
     scenario_id=scenario_id,
+    entity_id=entity_id,
   )
   if atoms is None:
     return None
@@ -112,7 +114,9 @@ def _build_statement_envelope(
   forecast_period_ends: set[date] = set()
   facts: list[Fact] = []
   if element_ids and series_mode:
-    series_sets = load_statement_fact_set_series(session, structure_id, scenario_id)
+    series_sets = load_statement_fact_set_series(
+      session, structure_id, scenario_id, entity_id
+    )
     series_sets = window_series_sets(series_sets, series_history, series_forecast)
     forecast_period_ends = {
       fs.period_end for fs in series_sets if fs.scenario_id is not None

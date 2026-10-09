@@ -1141,6 +1141,17 @@ class InformationBlockEnvelope(BaseModel):
     ),
   )
 
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity whose books the envelope reads. A schedule, "
+      "reconciliation or forecast is one entity's own and always reads its "
+      "owner's; a block shared by the group (statements, metrics) reads "
+      "the entity asked for, else the group parent. Null on the library "
+      "and on a graph with no entity yet."
+    ),
+  )
+
   information_model: InformationModelResponse
   artifact: ArtifactResponse
 
@@ -1860,8 +1871,7 @@ class ComputeMetricsRequest(BaseModel):
   entity_id: str | None = Field(
     None,
     description=(
-      "Entity to compute for. Defaults to the graph's earliest-created "
-      "entity (the primary entity for single-entity graphs)."
+      "The entity whose metrics to compute, by id. Omit for the group parent."
     ),
   )
   scenario_id: str | None = Field(
@@ -1979,8 +1989,7 @@ class AssertMetricsRequest(BaseModel):
   entity_id: str | None = Field(
     None,
     description=(
-      "Entity to assert for. Defaults to the graph's earliest-created "
-      "entity (the primary entity for single-entity graphs)."
+      "The entity the asserted values belong to, by id. Omit for the group parent."
     ),
   )
   source_system: str = Field(

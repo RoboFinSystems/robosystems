@@ -68,6 +68,13 @@ class StructureResponse(BaseModel):
       "into (e.g. `rs-gaap`). A chart holds one mapping per framework."
     ),
   )
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "`coa_mapping` only, in the mappings list: the entity whose chart the "
+      "mapping maps from, so whose reports it can produce."
+    ),
+  )
 
 
 class StructureListResponse(BaseModel):

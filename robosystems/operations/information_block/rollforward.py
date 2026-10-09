@@ -202,6 +202,7 @@ def build_envelope(
   series: bool = False,
   series_history: int | None = None,
   series_forecast: int | None = None,
+  entity_id: str | None = None,
 ) -> InformationBlockEnvelope | None:
   """Reload a rollforward Structure and pack its envelope (no facts;
   ``scenario_id`` is ignored). ``None`` when not found or not a rollforward.
@@ -211,6 +212,7 @@ def build_envelope(
     structure_id,
     expected_block_type=ROLLFORWARD_BLOCK_TYPE,
     fact_set_id=fact_set_id,
+    entity_id=entity_id,
   )
   if atoms is None:
     return None

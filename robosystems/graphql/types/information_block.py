@@ -232,6 +232,13 @@ class InformationBlock:
   taxonomy_id: str | None
   taxonomy_name: str | None
   disclosure_id: str | None
+  entity_id: str | None = strawberry.field(
+    description=(
+      "The entity whose books the envelope reads: a schedule, reconciliation "
+      "or forecast reads its owner's; a shared block (statements, metrics) "
+      "the entity asked for, else the group parent."
+    )
+  )
 
   information_model: InformationModel
   artifact: Artifact
@@ -259,6 +266,7 @@ class InformationBlock:
       taxonomy_id=envelope.taxonomy_id,
       taxonomy_name=envelope.taxonomy_name,
       disclosure_id=envelope.disclosure_id,
+      entity_id=envelope.entity_id,
       information_model=InformationModel.from_pydantic(envelope.information_model),
       artifact=Artifact.from_pydantic(envelope.artifact),
       elements=[InformationBlockElement.from_pydantic(e) for e in envelope.elements],

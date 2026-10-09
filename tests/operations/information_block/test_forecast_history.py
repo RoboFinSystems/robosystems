@@ -129,7 +129,7 @@ def _run(
     patch.object(fh, "_lookup_element", lambda _s, qname: BY_QNAME.get(qname)),
     patch.object(fh, "_actual_monthly_values", return_value=(months, actuals)),
   ):
-    return fh.back_solve_lever_history(_session(), mechanics)
+    return fh.back_solve_lever_history(_session(), mechanics, "ent_1")
 
 
 class TestBackSolve:
@@ -274,7 +274,7 @@ class TestActualMonthlyValues:
       patch.object(fh, "newest_actual_structure_id", side_effect=["struct_is", None]),
       patch.object(fh, "load_statement_fact_set_series", return_value=series),
     ):
-      months, actuals = fh._actual_monthly_values(session, {"el_rev"})
+      months, actuals = fh._actual_monthly_values(session, {"el_rev"}, "ent_1")
 
     assert months == ["2026-04", "2026-05"]
     assert actuals == {"2026-04": {"el_rev": 100.0}, "2026-05": {"el_rev": 104.0}}
@@ -295,13 +295,13 @@ class TestActualMonthlyValues:
       patch.object(fh, "newest_actual_structure_id", side_effect=["struct_is", None]),
       patch.object(fh, "load_statement_fact_set_series", return_value=series),
     ):
-      months, actuals = fh._actual_monthly_values(session, {"el_rev"})
+      months, actuals = fh._actual_monthly_values(session, {"el_rev"}, "ent_1")
 
     assert months == ["2026-04", "2026-05"]
     assert "2026-05" not in actuals
 
   def test_no_actual_structures_means_no_months(self) -> None:
     with patch.object(fh, "newest_actual_structure_id", return_value=None):
-      months, actuals = fh._actual_monthly_values(MagicMock(), {"el_rev"})
+      months, actuals = fh._actual_monthly_values(MagicMock(), {"el_rev"}, "ent_1")
     assert months == []
     assert actuals == {}

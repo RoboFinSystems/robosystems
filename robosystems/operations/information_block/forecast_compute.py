@@ -342,7 +342,7 @@ def cmd_compute_forecast(
       assertion_values.setdefault(fact.element_id, {})[month] = float(fact.value)
 
   # ── Resolve the actual structures + seed month ────────────────────────
-  is_structure_id = newest_actual_structure_id(session, "income_statement")
+  is_structure_id = newest_actual_structure_id(session, "income_statement", entity_id)
   if is_structure_id is None:
     raise ValueError(
       "No actual income-statement sets exist to project from — close at "
@@ -350,7 +350,7 @@ def cmd_compute_forecast(
       "sets). If months are already closed without statements, set up "
       "the CoA mapping and reporting style, then reclose."
     )
-  bs_structure_id = newest_actual_structure_id(session, "balance_sheet")
+  bs_structure_id = newest_actual_structure_id(session, "balance_sheet", entity_id)
 
   anchor_period = mechanics.base_period
   if mechanics.base_anchor == "seam":
@@ -547,7 +547,9 @@ def cmd_compute_forecast(
       mapping_id = prov.get("mapping_id")
       if mapping_id:
         break
-  cf_structure_id = newest_actual_structure_id(session, "cash_flow_statement")
+  cf_structure_id = newest_actual_structure_id(
+    session, "cash_flow_statement", entity_id
+  )
 
   diagnostics: list[str] = []
 

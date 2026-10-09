@@ -81,7 +81,7 @@ hash used as the drift signal.
           },
           "entity_id": {
             "type": "string",
-            "description": "Optional entity id; defaults to the primary entity",
+            "description": "Optional entity id; omit for the group parent",
           },
         },
         "required": ["document_id", "structure_id", "period_start", "period_end"],

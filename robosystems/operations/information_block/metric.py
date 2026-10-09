@@ -43,12 +43,14 @@ def _load_metric_fact_sets(
   structure_id: str,
   fact_set_id: str | None,
   scenario_id: str | None = None,
+  entity_id: str | None = None,
 ) -> list[FactSet]:
   """The structure's standing metric FactSets, one per period_end, oldest
   first (or just ``fact_set_id`` when pinned).
 
-  A ``scenario_id`` adds that scenario's sets; actuals win at a shared
-  period_end, then newest.
+  ``entity_id`` keeps one entity's sets: the metric catalog is shared by
+  the group. A ``scenario_id`` adds that scenario's sets; actuals win at a
+  shared period_end, then newest.
   """
   if fact_set_id is not None:
     row = session.get(FactSet, fact_set_id)
@@ -62,6 +64,7 @@ def _load_metric_fact_sets(
         FactSet.scenario_id.is_(None)
         if scenario_id is None
         else FactSet.scenario_id.is_(None) | (FactSet.scenario_id == scenario_id),
+        *((FactSet.entity_id == entity_id,) if entity_id is not None else ()),
       )
       .order_by(
         FactSet.period_end.asc(),
@@ -86,6 +89,7 @@ def build_envelope(
   series: bool = False,
   series_history: int | None = None,
   series_forecast: int | None = None,
+  entity_id: str | None = None,
 ) -> InformationBlockEnvelope | None:
   """Pack a metric Structure + its standing time series into the envelope.
 
@@ -99,12 +103,15 @@ def build_envelope(
     expected_block_type=METRIC_BLOCK_TYPE,
     fact_set_id=fact_set_id,
     scenario_id=scenario_id,
+    entity_id=entity_id,
   )
   if atoms is None:
     return None
   structure = atoms.structure
 
-  fact_sets = _load_metric_fact_sets(session, structure_id, fact_set_id, scenario_id)
+  fact_sets = _load_metric_fact_sets(
+    session, structure_id, fact_set_id, scenario_id, entity_id
+  )
 
   facts: list[Fact] = []
   if fact_sets:

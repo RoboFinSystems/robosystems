@@ -52,7 +52,7 @@ class BindTextBlockRequest(BaseModel):
   period_end: date = Field(..., description="Reporting period end.")
   entity_id: str | None = Field(
     None,
-    description="Entity the fact belongs to; defaults to the primary entity.",
+    description="Entity the fact belongs to, by id; omit for the group parent.",
   )
 
   @model_validator(mode="after")

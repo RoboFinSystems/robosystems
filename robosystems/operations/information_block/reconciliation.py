@@ -52,10 +52,13 @@ def own_rule_id(structure_id: Any) -> Any:
 
 
 def standing_fact_sets(
-  session: Session, structure_id: str, fact_set_id: str | None = None
+  session: Session,
+  structure_id: str,
+  fact_set_id: str | None = None,
+  entity_id: str | None = None,
 ) -> list[FactSet]:
   """The block's standing comparison per period_end, oldest first (or just
-  ``fact_set_id`` when pinned)."""
+  ``fact_set_id`` when pinned), of ``entity_id`` when named."""
   if fact_set_id is not None:
     row = session.get(FactSet, fact_set_id)
     return [row] if row is not None else []
@@ -66,6 +69,7 @@ def standing_fact_sets(
         FactSet.structure_id == structure_id,
         FactSet.factset_type == RECONCILIATION_FACTSET_TYPE,
         FactSet.scenario_id.is_(None),
+        *((FactSet.entity_id == entity_id,) if entity_id is not None else ()),
       )
       .order_by(FactSet.period_end.asc(), FactSet.created_at.desc())
     )
@@ -86,6 +90,7 @@ def build_envelope(
   series: bool = False,
   series_history: int | None = None,
   series_forecast: int | None = None,
+  entity_id: str | None = None,
 ) -> InformationBlockEnvelope | None:
   """Pack a reconciliation Structure and its period-by-period comparisons.
 
@@ -97,12 +102,13 @@ def build_envelope(
     structure_id,
     expected_block_type=RECONCILIATION_BLOCK_TYPE,
     fact_set_id=fact_set_id,
+    entity_id=entity_id,
   )
   if atoms is None:
     return None
   structure = atoms.structure
 
-  fact_sets = standing_fact_sets(session, structure_id, fact_set_id)
+  fact_sets = standing_fact_sets(session, structure_id, fact_set_id, entity_id)
   facts: list[Fact] = []
   if fact_sets:
     facts = list(

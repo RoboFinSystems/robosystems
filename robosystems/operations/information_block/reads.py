@@ -3,7 +3,7 @@ the MCP tools."""
 
 from __future__ import annotations
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.information_block import InformationBlockEnvelope
@@ -11,6 +11,57 @@ from robosystems.models.extensions import Association, Structure
 from robosystems.models.extensions.roboledger import FactSet
 from robosystems.operations.information_block import registry as registry_module
 from robosystems.operations.information_block.envelope import DISCLOSURE_BLOCK_TYPE
+from robosystems.operations.roboledger.entity_scope import find_entity_id
+
+
+def _owner_entity_id_column():
+  """The entity a block is its own, as a column over ``Structure``.
+
+  Schedules and reconciliations carry it on the row; a forecast's is its
+  lever set's (the ``custom`` set whose scenario is the block itself). NULL
+  for a block shared by the group: the statements, the metric catalog, the
+  library.
+  """
+  lever_entity = (
+    select(FactSet.entity_id)
+    .where(
+      FactSet.structure_id == Structure.id,
+      FactSet.factset_type == "custom",
+      FactSet.scenario_id == Structure.id,
+    )
+    .order_by(FactSet.created_at.desc())
+    .limit(1)
+    .correlate(Structure)
+    .scalar_subquery()
+  )
+  return func.coalesce(Structure.entity_id, lever_entity)
+
+
+def owner_entity_id(session: Session, structure_id: str) -> str | None:
+  """The entity whose own block this is, or None for a shared block."""
+  return session.execute(
+    select(_owner_entity_id_column()).where(Structure.id == structure_id)
+  ).scalar()
+
+
+def _requested_entity_id(
+  session: Session,
+  entity_id: str | None,
+  scenario_id: str | None,
+  library_sentinel: bool,
+) -> str | None:
+  """The entity a read asks for: the named one (validated), else the
+  scenario's own, else the group parent. None on the library and on a graph
+  with no entity yet, where no set is anyone's to filter."""
+  if library_sentinel:
+    return None
+  if entity_id:
+    return find_entity_id(session, entity_id)
+  if scenario_id:
+    scenario_owner = owner_entity_id(session, scenario_id)
+    if scenario_owner is not None:
+      return scenario_owner
+  return find_entity_id(session)
 
 
 def get_information_block(
@@ -21,6 +72,8 @@ def get_information_block(
   series: bool = False,
   series_history: int | None = None,
   series_forecast: int | None = None,
+  entity_id: str | None = None,
+  library_sentinel: bool = False,
 ) -> InformationBlockEnvelope | None:
   """Fetch one block by id, dispatching via the structure's block_type.
 
@@ -28,6 +81,11 @@ def get_information_block(
   A ``fact_set_id`` pin overrides ``scenario_id`` and ``series``.
   ``scenario_id`` (a forecast block's id; ``None`` = actuals) and the
   ``series*`` options are ignored by block types they don't apply to.
+
+  ``entity_id`` picks whose sets a block shared by the group shows; omitted,
+  the scenario's entity, else the group parent. A block that is one
+  entity's own always shows its owner's. A named entity outside the graph
+  raises :class:`EntityNotInGraphError`.
   """
   structure = session.get(Structure, structure_id)
   if structure is None:
@@ -36,7 +94,10 @@ def get_information_block(
     entry = registry_module.get(structure.block_type)
   except KeyError:
     return None
-  return entry.dispatch_build_envelope(
+  scope = _requested_entity_id(session, entity_id, scenario_id, library_sentinel)
+  if not library_sentinel:
+    scope = owner_entity_id(session, structure_id) or scope
+  envelope = entry.dispatch_build_envelope(
     session,
     structure_id,
     fact_set_id,
@@ -44,7 +105,21 @@ def get_information_block(
     series=series,
     series_history=series_history,
     series_forecast=series_forecast,
+    entity_id=scope,
   )
+  return _stamp_entity(envelope, scope)
+
+
+def _stamp_entity(
+  envelope: InformationBlockEnvelope | None, entity_id: str | None
+) -> InformationBlockEnvelope | None:
+  """Name the entity whose books the envelope read; a pinned set names its
+  own."""
+  if envelope is None:
+    return None
+  if envelope.fact_set is not None and envelope.fact_set.entity_id:
+    entity_id = envelope.fact_set.entity_id
+  return envelope.model_copy(update={"entity_id": entity_id})
 
 
 def get_information_block_for_fact_set(
@@ -66,12 +141,18 @@ def list_information_blocks(
   offset: int = 0,
   library_sentinel: bool = False,
   scenario_id: str | None = None,
+  entity_id: str | None = None,
 ) -> list[InformationBlockEnvelope]:
   """List blocks with optional block_type + category filters.
 
   ``library_sentinel`` (the ``library`` graph) restricts results to block
   types with ``surfaces_in_library``. ``scenario_id`` affects each
   envelope's binding, not which structures are listed.
+
+  ``entity_id`` (omitted: the scenario's entity, else the group parent)
+  lists the blocks shared by the group plus that entity's own, never another
+  entity's schedules, reconciliations or forecasts; shared blocks show its
+  sets.
   """
   if block_type is not None:
     try:
@@ -103,8 +184,10 @@ def list_information_blocks(
     .where(Association.association_type == "presentation")
     .exists()
   )
+  scope = _requested_entity_id(session, entity_id, scenario_id, library_sentinel)
+  owner = _owner_entity_id_column()
   query = (
-    select(Structure)
+    select(Structure, owner)
     .where(Structure.block_type.in_(candidate_ids))
     .where(Structure.is_active.is_(True))
     .where(or_(Structure.block_type != DISCLOSURE_BLOCK_TYPE, has_presentation_arc))
@@ -116,16 +199,22 @@ def list_information_blocks(
     .limit(limit)
     .offset(offset)
   )
-  rows = session.execute(query).scalars().all()
+  if scope is not None:
+    query = query.where(or_(owner.is_(None), owner == scope))
+  rows = session.execute(query).all()
 
   envelopes: list[InformationBlockEnvelope] = []
-  for structure in rows:
+  for structure, owner_id in rows:
     try:
       entry = registry_module.get(structure.block_type)
     except KeyError:
       continue
-    envelope = entry.dispatch_build_envelope(
-      session, structure.id, None, scenario_id=scenario_id
+    block_scope = owner_id or scope
+    envelope = _stamp_entity(
+      entry.dispatch_build_envelope(
+        session, structure.id, None, scenario_id=scenario_id, entity_id=block_scope
+      ),
+      block_scope,
     )
     if envelope is not None:
       envelopes.append(envelope)
@@ -136,4 +225,5 @@ __all__ = [
   "get_information_block",
   "get_information_block_for_fact_set",
   "list_information_blocks",
+  "owner_entity_id",
 ]

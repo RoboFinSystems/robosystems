@@ -460,3 +460,48 @@ class TestMigration0037:
     assert empty is not None
     empty_anchor = ext_session.get(Taxonomy, empty.taxonomy_id)
     assert empty_anchor is not None and empty_anchor.is_active is False
+
+
+class TestMappingsNameTheirEntity:
+  """Each entity keeps its own chart, so a mapping is one entity's: the list
+  says whose, and keeps one entity's when asked."""
+
+  def _group(self, ext_session) -> tuple[str, str]:
+    from robosystems.models.extensions import Entity
+    from tests.ledger_entity import seed_parent_entity
+
+    parent = seed_parent_entity(ext_session)
+    ext_session.add(
+      Entity(
+        id="ent_sub",
+        name="Sub LLC",
+        ticker="SUB",
+        is_parent=False,
+        parent_entity_id=parent,
+        source="native",
+        created_by="test",
+      )
+    )
+    ext_session.flush()
+    chart_block.create(ext_session, _chart_payload(_mapping(GAAP_MAPPING)), "u")
+    sub_chart = _chart_payload(_mapping("Sub to US GAAP Mapping"))
+    for element in sub_chart.elements:
+      element.qname = element.qname.replace("coa:", "coa-sub:")
+    chart_block.create(ext_session, sub_chart, "u", entity_id="ent_sub")
+    return parent, "ent_sub"
+
+  def test_each_mapping_names_the_entity_whose_chart_it_maps(
+    self, ext_session, library
+  ):
+    parent, sub = self._group(ext_session)
+
+    listed = {s.name: s.entity_id for s in list_mappings(ext_session).structures}
+
+    assert listed == {GAAP_MAPPING: parent, "Sub to US GAAP Mapping": sub}
+
+  def test_one_entitys_mappings(self, ext_session, library):
+    _, sub = self._group(ext_session)
+
+    listed = list_mappings(ext_session, sub).structures
+
+    assert [(s.name, s.entity_id) for s in listed] == [("Sub to US GAAP Mapping", sub)]

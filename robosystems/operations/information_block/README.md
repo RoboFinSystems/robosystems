@@ -67,6 +67,8 @@ Eleven block types are registered. Not all of them are authored through `create-
 
 Each `build_envelope` follows the same pattern: load the structure, count runtime state, load atoms, call the helpers, assemble the envelope.
 
+**Entity scope.** A graph is a reporting group, and statement structures come from the reporting style, so the group's entities write sets against the same structure. Every set loader therefore takes `entity_id`, and `reads.py` decides it once per read: a schedule, reconciliation or forecast is one entity's own (`Structure.entity_id`, or a forecast's lever set) and reads its owner's sets; a shared block reads the entity asked for, else the scenario's, else the group parent. The list leaves out other entities' own blocks, and the envelope's `entity_id` names the entity it read. Forecast history and `compute-forecast` pick the newest actual structure per entity, since each entity can be on a different style.
+
 **N+1 note**: `list_information_blocks` calls `build_envelope` per row (roughly nine queries per block). Fine at current graph sizes; this is the path to batch before dozens of blocks per graph.
 
 ## Rule evaluation engine

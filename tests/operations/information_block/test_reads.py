@@ -47,6 +47,25 @@ def _schedule_entry_with_build(mock_build: MagicMock):
   return dataclasses.replace(SCHEDULE_BLOCK, dispatch_build_envelope=mock_build)
 
 
+READS_PATH = "robosystems.operations.information_block.reads"
+PARENT = "ent_parent"
+
+
+@pytest.fixture(autouse=True)
+def _entity_scope():
+  """Mocked sessions answer no entity queries: the group parent is
+  ``PARENT`` and no block is one entity's own."""
+  with (
+    patch(f"{READS_PATH}.find_entity_id", return_value=PARENT),
+    patch(f"{READS_PATH}.owner_entity_id", return_value=None),
+  ):
+    yield
+
+
+def _stamped(envelope: InformationBlockEnvelope) -> InformationBlockEnvelope:
+  return envelope.model_copy(update={"entity_id": PARENT})
+
+
 # ── get_information_block ──────────────────────────────────────────────────
 
 
@@ -76,7 +95,7 @@ class TestGetInformationBlock:
     patched = _schedule_entry_with_build(mock_build)
     with patch.dict(REGISTRY_PATH, {"schedule": patched}):
       result = get_information_block(session, "struct_1")
-    assert result is expected
+    assert result == _stamped(expected)
     mock_build.assert_called_once_with(
       session,
       "struct_1",
@@ -85,6 +104,7 @@ class TestGetInformationBlock:
       series=False,
       series_history=None,
       series_forecast=None,
+      entity_id=PARENT,
     )
 
   def test_series_threads_through_dispatch(self) -> None:
@@ -113,6 +133,7 @@ class TestGetInformationBlock:
       series=True,
       series_history=12,
       series_forecast=6,
+      entity_id=PARENT,
     )
 
 
@@ -144,7 +165,7 @@ class TestListInformationBlocks:
     opt-in types and skip the rest."""
     session = MagicMock()
     # No library structures seeded in this unit test → empty result.
-    session.execute.return_value.scalars.return_value.all.return_value = []
+    session.execute.return_value.all.return_value = []
     result = list_information_blocks(session, library_sentinel=True)
     assert result == []
     # One query attempted — against the 4 statement block types only.
@@ -157,7 +178,7 @@ class TestListInformationBlocks:
     structure = MagicMock()
     structure.id = "struct_1"
     structure.block_type = "schedule"
-    session.execute.return_value.scalars.return_value.all.return_value = [structure]
+    session.execute.return_value.all.return_value = [(structure, None)]
     expected = _envelope("struct_1")
     mock_build = MagicMock(return_value=expected)
     patched = _schedule_entry_with_build(mock_build)
@@ -166,7 +187,7 @@ class TestListInformationBlocks:
 
     session.execute.assert_called_once()
     assert len(result) == 1
-    assert result[0] is expected
+    assert result[0] == _stamped(expected)
 
   def test_listing_query_guards_arcless_disclosure_rows(self) -> None:
     """The listing query excludes regulatory_disclosure structures with no
@@ -178,7 +199,7 @@ class TestListInformationBlocks:
     def _execute(stmt, *args, **kwargs):
       captured.append(str(stmt))
       result = MagicMock()
-      result.scalars.return_value.all.return_value = []
+      result.all.return_value = []
       return result
 
     session.execute.side_effect = _execute
@@ -221,9 +242,9 @@ class TestListInformationBlocks:
     coa_row = MagicMock()
     coa_row.id = "struct_coa"
     coa_row.block_type = "chart_of_accounts"  # not in registry yet
-    session.execute.return_value.scalars.return_value.all.return_value = [
-      schedule_row,
-      coa_row,
+    session.execute.return_value.all.return_value = [
+      (schedule_row, None),
+      (coa_row, None),
     ]
     expected = _envelope("struct_s")
     mock_build = MagicMock(return_value=expected)
@@ -239,7 +260,7 @@ class TestListInformationBlocks:
     """When ``block_type='balance_sheet'`` is supplied on the sentinel,
     ``surfaces_in_library=True`` → query runs, scoped to the one type."""
     session = MagicMock()
-    session.execute.return_value.scalars.return_value.all.return_value = []
+    session.execute.return_value.all.return_value = []
     result = list_information_blocks(
       session, block_type="balance_sheet", library_sentinel=True
     )
@@ -257,7 +278,7 @@ class TestListInformationBlocks:
     bs_row = MagicMock()
     bs_row.id = "struct_balance_sheet"
     bs_row.block_type = "balance_sheet"
-    session.execute.return_value.scalars.return_value.all.return_value = [bs_row]
+    session.execute.return_value.all.return_value = [(bs_row, None)]
 
     expected = InformationBlockEnvelope(
       id="struct_balance_sheet",
@@ -338,7 +359,7 @@ class TestGetInformationBlockForFactSet:
     with patch.dict(REGISTRY_PATH, {"schedule": patched}):
       result = get_information_block_for_fact_set(session, "fs_01")
 
-    assert result is expected
+    assert result == _stamped(expected)
     mock_build.assert_called_once_with(
       session,
       "struct_1",
@@ -347,4 +368,5 @@ class TestGetInformationBlockForFactSet:
       series=False,
       series_history=None,
       series_forecast=None,
+      entity_id=PARENT,
     )

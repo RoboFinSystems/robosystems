@@ -180,6 +180,7 @@ class TestListInformationBlocksTool:
       offset=5,
       library_sentinel=False,
       scenario_id=None,
+      entity_id=None,
     )
 
   @pytest.mark.asyncio
@@ -200,4 +201,5 @@ class TestListInformationBlocksTool:
       offset=0,
       library_sentinel=True,
       scenario_id=None,
+      entity_id=None,
     )

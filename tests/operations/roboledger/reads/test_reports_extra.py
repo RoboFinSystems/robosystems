@@ -463,6 +463,69 @@ class TestLiveCashFlowRendersEveryColumn:
     assert resp.facts[0].values == [500.0, 450.0]
 
 
+class TestGetStatementStyle:
+  """A saved report renders in the reporting style of the entity it is
+  about, not the group parent's: a subsidiary can be on another style."""
+
+  def _render(self, report_entity_id: str | None):
+    from types import SimpleNamespace
+
+    from robosystems.operations.roboledger.reads.reports import (
+      StatementStructureNotFoundError,
+    )
+
+    report = MagicMock()
+    report.id = "rpt_01"
+    report.entity_id = report_entity_id
+    report.period_start = date(2026, 7, 1)
+    report.period_end = date(2026, 7, 31)
+    report.comparative = False
+    report.periods = None
+    session = MagicMock()
+    session.get.return_value = report
+    session.execute.return_value = iter(
+      [
+        SimpleNamespace(
+          element_id="e_cash",
+          value=1.0,
+          period_start=None,
+          period_end=date(2026, 7, 31),
+          period_type="instant",
+          qname="rs-gaap:Cash",
+          name="Cash",
+          trait="asset",
+          balance_type="debit",
+        )
+      ]
+    )
+    module = "robosystems.operations.roboledger.reads.reports"
+    with (
+      patch(f"{module}.load_entity_reporting_style", return_value="style_llc") as own,
+      patch(f"{module}.load_primary_reporting_style", return_value="style_corp"),
+      patch(
+        f"{module}.render_structure_view",
+        return_value=MagicMock(structure_id=""),
+      ) as render,
+      pytest.raises(StatementStructureNotFoundError),
+    ):
+      get_statement(
+        session, graph_id="kg_test", report_id="rpt_01", block_type="balance_sheet"
+      )
+    return render.call_args.kwargs["reporting_style_id"], own
+
+  @pytest.mark.unit
+  def test_renders_in_the_report_entitys_style(self):
+    style, own = self._render("ent_sub")
+    assert style == "style_llc"
+    own.assert_called_once()
+    assert own.call_args.args[1] == "ent_sub"
+
+  @pytest.mark.unit
+  def test_a_report_with_no_entity_reads_as_the_parents(self):
+    style, _ = self._render(None)
+    assert style == "style_corp"
+
+
 class TestSavedComparativeStatements:
   """``get_statement`` on a comparative report renders every column; each
   column's cash flow is derived from its own opening balances."""
