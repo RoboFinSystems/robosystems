@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.fiscal_calendar import (
@@ -60,14 +61,61 @@ def qb_sync_state(platform_db: Session, graph_id: str) -> tuple[bool, datetime |
   return (True, connection.last_sync)
 
 
+def _feed_connection_ids(session: Session, entity_id: str) -> list[str]:
+  """The bank feeds with an account on one of ``entity_id``'s charts."""
+  from robosystems.adapters.bank_feed.accounts import BANK_FEED_KEY
+  from robosystems.models.extensions.element import Element
+  from robosystems.operations.taxonomy_block.coa_mappings import entity_charts
+
+  connection_id = Element.metadata_[BANK_FEED_KEY]["connection_id"].astext
+  return list(
+    session.execute(
+      select(connection_id)
+      .where(
+        connection_id.isnot(None),
+        entity_charts(session, entity_id, Element.taxonomy_id),
+      )
+      .distinct()
+    )
+    .scalars()
+    .all()
+  )
+
+
 def entity_sync_state(
   session: Session, platform_db: Session, graph_id: str, entity_id: str | None
 ) -> tuple[bool, datetime | None]:
-  """`qb_sync_state` for one entity. The graph's QuickBooks connection books
-  for the group parent, so a subsidiary has no sync its close waits on."""
-  if entity_id is None or not is_group_parent(session, entity_id):
+  """`(has_connection, last_sync_at)` over every source that books for one
+  entity: the graph's QuickBooks connection for the group parent, and each
+  live bank feed with an account on the entity's chart. The stalest of them is
+  the one the close waits on, and one never synced makes the whole `None`."""
+  if entity_id is None:
     return (False, None)
-  return qb_sync_state(platform_db, graph_id)
+  syncs: list[datetime | None] = []
+  if is_group_parent(session, entity_id):
+    has_qb, qb_last_sync = qb_sync_state(platform_db, graph_id)
+    if has_qb:
+      syncs.append(qb_last_sync)
+  feed_ids = _feed_connection_ids(session, entity_id)
+  if feed_ids:
+    feeds = (
+      platform_db.query(Connection)
+      .filter(
+        Connection.id.in_(feed_ids),
+        Connection.graph_id == graph_id,
+        Connection.deleted_at.is_(None),
+        Connection.status.notin_(
+          [ConnectionStatus.DISCONNECTED.value, ConnectionStatus.SEVERED.value]
+        ),
+      )
+      .all()
+    )
+    syncs.extend(feed.last_sync for feed in feeds)
+  if not syncs:
+    return (False, None)
+  if any(last_sync is None for last_sync in syncs):
+    return (True, None)
+  return (True, min(s for s in syncs if s is not None))
 
 
 def build_fiscal_calendar_response(

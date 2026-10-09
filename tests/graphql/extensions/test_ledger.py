@@ -1499,7 +1499,7 @@ class TestCloseReadsNameTheirEntity:
       patch(
         "robosystems.graphql.resolvers.ledger._fiscal_svc.get", return_value=calendar
       ) as get,
-      patch(f"{_OPS}.fiscal_calendar.qb_sync_state", return_value=(False, None)),
+      patch(f"{_OPS}.fiscal_calendar.entity_sync_state", return_value=(False, None)),
       patch(
         f"{_OPS}.fiscal_calendar.build_fiscal_calendar_response",
         return_value=FiscalCalendarResponse(
