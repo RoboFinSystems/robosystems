@@ -275,3 +275,13 @@ class TestEdgarPullJobs:
     config = yaml.safe_load((root / path).read_text())
     limits = config["run_coordinator"]["config"]["tag_concurrency_limits"]
     assert {"key": "edgar", "limit": 1} in limits
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("job", [sec_download_job, sec_process_job])
+def test_the_chain_entry_jobs_retry_infrastructure_failures_only(job):
+  """The chain sensor advances only on success, so a run that never starts
+  (no capacity) or loses its worker (a Spot kill) is recovered by its retry
+  or by nothing. A step failure is not retried: it would fail again."""
+  assert job.tags.get("dagster/max_retries") == "3"
+  assert job.tags.get("dagster/retry_on_asset_or_op_failure") == "false"
