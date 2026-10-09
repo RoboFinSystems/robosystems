@@ -167,3 +167,17 @@ def test_a_bank_feed_takes_no_new_line_into_a_closed_month():
       ],
     )
   assert closed == {"before_rows", "closed_row"}
+
+
+def test_a_line_with_no_readable_date_is_left_to_capture():
+  from robosystems.adapters.bank_feed.load import in_closed_months
+
+  with extensions_session(GRAPH) as session:
+    closed = in_closed_months(
+      session,
+      [
+        {"external_id": "undated", "occurred_at": "None", "entity_id": None},
+        {"external_id": "closed", "occurred_at": "2026-07-10T00:00:00Z"},
+      ],
+    )
+  assert closed == {"closed"}

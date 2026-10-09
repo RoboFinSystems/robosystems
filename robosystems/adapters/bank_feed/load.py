@@ -72,10 +72,16 @@ def in_closed_months(session: Session, payloads: Iterable[dict[str, Any]]) -> se
     by_entity.setdefault(payload.get("entity_id") or None, []).append(payload)
   closed: set[str] = set()
   for entity_id, rows in by_entity.items():
-    dates = {
-      str(row["external_id"]): date.fromisoformat(str(row["occurred_at"])[:10])
-      for row in rows
-    }
+    dates: dict[str, date] = {}
+    for row in rows:
+      # A line with no readable date is left to capture, which refuses it
+      # on its own rather than failing the whole run here.
+      try:
+        dates[str(row["external_id"])] = date.fromisoformat(
+          str(row["occurred_at"])[:10]
+        )
+      except ValueError:
+        continue
     months = {
       month for month, _ in closed_periods(session, dates.values(), entity_id=entity_id)
     }

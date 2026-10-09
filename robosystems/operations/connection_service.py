@@ -804,7 +804,8 @@ def _acquire_sync_lock(connection_id: str) -> str:
 def sync_fence(connection_id: str) -> Iterator[None]:
   """Hold the per-connection sync lock across a disconnect, so no sync runs
   beside its cleanup and none starts until the row is gone. Raises
-  `SyncInProgressError` while a sync runs."""
+  `SyncInProgressError` while a sync runs. Fails open with Valkey, as
+  dispatch does; a feed run's `connection_removed` check is the backstop."""
   lock_id = _acquire_sync_lock(connection_id)
   try:
     yield
