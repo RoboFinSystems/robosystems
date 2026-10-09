@@ -369,6 +369,7 @@ class LedgerQuery:
     info: Info[GraphQLContext, None],
     event_type: str | None = None,
     event_category: str | None = None,
+    event_class: str | None = None,
     status: str | None = None,
     agent_id: str | None = None,
     source: str | None = None,
@@ -389,6 +390,9 @@ class LedgerQuery:
     Args:
       event_type: Filter to one event type, e.g. `invoice_issued`.
       event_category: Filter on the event's category label.
+      event_class: `economic` for business activity, `support` for evidence about
+        it (balance readings, reconciliation sign-offs), `operational` for schedule
+        obligations. A balance reading's amount is a balance, not a flow.
       status: Filter by lifecycle state: `captured` is the unposted queue, `committed`
         the audit trail.
       agent_id: Filter to events involving one counterparty.
@@ -404,6 +408,7 @@ class LedgerQuery:
           session,
           event_type=event_type,
           event_category=event_category,
+          event_class=event_class,
           status=status,
           agent_id=agent_id,
           source=source,

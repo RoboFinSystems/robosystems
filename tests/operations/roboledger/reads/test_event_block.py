@@ -77,3 +77,20 @@ class TestListDriftFilter:
     # The column always appears in the SELECT list; only the predicate
     # must be absent.
     assert "payload_drift IS" not in _captured_list_stmt(session)
+
+
+class TestListClassFilter:
+  def _session(self) -> MagicMock:
+    session = MagicMock()
+    session.execute.return_value.scalars.return_value.all.return_value = []
+    return session
+
+  def test_class_filter_composes_the_predicate(self) -> None:
+    session = self._session()
+    list_event_blocks(session, event_class="economic")
+    assert "events.event_class = :event_class_1" in _captured_list_stmt(session)
+
+  def test_omitted_class_filter_leaves_it_out(self) -> None:
+    session = self._session()
+    list_event_blocks(session)
+    assert "events.event_class =" not in _captured_list_stmt(session)
