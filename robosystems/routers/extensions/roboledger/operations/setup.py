@@ -33,10 +33,13 @@ from robosystems.models.api.extensions.entity import (
   UpdateEntityRequest,
 )
 from robosystems.models.api.extensions.fiscal_calendar import (
+  ChangeCalendarStartRequest,
+  ChangeCalendarStartResponse,
   InitializeLedgerRequest,
   InitializeLedgerResponse,
 )
 from robosystems.models.core import User
+from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands.bank_accounts import (
   AccountAlreadyFedError,
   ChartAccountNotFoundError,
@@ -67,6 +70,9 @@ from robosystems.operations.roboledger.commands.entity import (
   update_entity as cmd_update_entity,
 )
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
+  change_calendar_start as cmd_change_calendar_start,
+)
+from robosystems.operations.roboledger.commands.fiscal_calendar import (
   initialize_ledger as cmd_initialize_ledger,
 )
 from robosystems.operations.roboledger.commands.reporting_style import (
@@ -79,6 +85,9 @@ from robosystems.operations.roboledger.commands.reporting_style import (
 from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
 from robosystems.operations.roboledger.fiscal_calendar.service import (
   CalendarAlreadyInitializedError,
+  CalendarStartBlockedError,
+  CalendarStartLockedError,
+  FiscalCalendarError,
   InvalidCloseTargetError,
 )
 from robosystems.routers.extensions.roboledger._common import (
@@ -144,6 +153,64 @@ async def initialize_op(
       raise HTTPException(status_code=409, detail=str(e))
     except InvalidCloseTargetError as e:
       raise HTTPException(status_code=422, detail=str(e))
+
+  return await _dispatch(ctx, _runner, cache)
+
+
+@router.post(
+  "/change-calendar-start",
+  response_model=OperationEnvelope[ChangeCalendarStartResponse],
+  operation_id="changeCalendarStart",
+  summary="Change Calendar Start",
+  description=(
+    "Move where an entity's fiscal calendar starts, allowed only before its "
+    "first close. Earlier adds open months back to `first_open_period`, for "
+    "history that predates the start; later removes empty leading months. "
+    "Refused once any month has closed (409), and when moving later would "
+    "drop months that hold entries or unposted source lines (409)."
+  ),
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/change-calendar-start",
+  method="POST",
+  business_event_type="ledger_change_calendar_start",
+)
+async def change_calendar_start_op(
+  body: ChangeCalendarStartRequest,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(_require_roboledger_write),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+  platform_db: Session = Depends(get_db_session),
+) -> OperationEnvelope:
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=str(user.id),
+    op="change-calendar-start",
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+
+  def _runner():
+    try:
+      with extensions_session(graph_id) as session:
+        return cmd_change_calendar_start(
+          session,
+          platform_db,
+          graph_id,
+          body,
+          actor_id=str(user.id),
+          service=_fiscal_svc,
+        )
+    except InvalidCloseTargetError as e:
+      raise HTTPException(status_code=422, detail=str(e))
+    except (CalendarStartLockedError, CalendarStartBlockedError, RowLockedError) as e:
+      raise HTTPException(status_code=409, detail=str(e))
+    except FiscalCalendarError as e:
+      raise HTTPException(status_code=404, detail=str(e))
 
   return await _dispatch(ctx, _runner, cache)
 

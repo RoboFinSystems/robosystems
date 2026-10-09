@@ -27,6 +27,8 @@ from robosystems.models.api.extensions.entity import (
 )
 from robosystems.models.api.extensions.fiscal_calendar import (
   BackfillPlanHistoryResponse,
+  ChangeCalendarStartRequest,
+  ChangeCalendarStartResponse,
   ClosePeriodRequest,
   ClosePeriodResponse,
   FiscalCalendarResponse,
@@ -59,6 +61,11 @@ from robosystems.operations.roboledger.commands.fiscal_calendar import (
   ReopenPeriodResult,
 )
 from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
+from robosystems.operations.roboledger.fiscal_calendar.service import (
+  CalendarStartBlockedError,
+  CalendarStartLockedError,
+  InvalidCloseTargetError,
+)
 from robosystems.routers.extensions.roboledger.operations import (
   AutoMapElementsOperation,
   BackfillPlanHistoryOperation,
@@ -72,6 +79,7 @@ from robosystems.routers.extensions.roboledger.operations import (
   auto_map_elements_op,
   backfill_plan_history_op,
   block_source_graph_op,
+  change_calendar_start_op,
   close_period_op,
   create_entity_op,
   create_report_op,
@@ -2370,3 +2378,51 @@ class TestCloseHandlersForwardTheEntity:
 
     assert envelope.status == "completed"
     assert cmd.call_args.kwargs["entity_id"] == "ent_sub"
+
+
+class TestChangeCalendarStartOperation:
+  @staticmethod
+  async def _call(side_effect=None):
+    body = ChangeCalendarStartRequest(entity_id="ent_sub", first_open_period="2026-02")
+    result = ChangeCalendarStartResponse(fiscal_calendar=_calendar(), periods_created=7)
+    with (
+      patch(
+        f"{_SETUP}.cmd_change_calendar_start",
+        return_value=result,
+        side_effect=side_effect,
+      ) as cmd,
+      patch(f"{_SETUP}.extensions_session") as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+      envelope = await change_calendar_start_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+        platform_db=MagicMock(),
+      )
+    return envelope, cmd
+
+  @pytest.mark.asyncio
+  async def test_the_body_reaches_the_kernel(self) -> None:
+    envelope, cmd = await self._call()
+    assert envelope.status == "completed"
+    assert cmd.call_args.args[3].entity_id == "ent_sub"
+    assert cmd.call_args.args[3].first_open_period == "2026-02"
+
+  @pytest.mark.asyncio
+  @pytest.mark.parametrize(
+    ("error", "status"),
+    [
+      (CalendarStartLockedError("closed"), 409),
+      (CalendarStartBlockedError("2026-09", 1, 0), 409),
+      (InvalidCloseTargetError("future"), 422),
+    ],
+    ids=["locked", "blocked", "invalid"],
+  )
+  async def test_refusals_map_to_status_codes(self, error, status) -> None:
+    with pytest.raises(HTTPException) as raised:
+      await self._call(side_effect=error)
+    assert raised.value.status_code == status

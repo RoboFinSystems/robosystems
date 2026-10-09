@@ -97,6 +97,33 @@ class InitializeLedgerRequest(BaseModel):
   )
 
 
+class ChangeCalendarStartRequest(BaseModel):
+  """Move where an entity's calendar starts, before its first close.
+
+  Earlier adds open months back to `first_open_period`, for history that
+  predates the start (a bank feed's backfill, a cutover moved earlier).
+  Later removes empty leading months. Refused once any month has closed,
+  and when moving later would drop months that hold entries or unposted
+  source lines.
+  """
+
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity whose books this acts on, by id. Omit for the group "
+      "parent — the single-entity default."
+    ),
+  )
+  first_open_period: str = Field(
+    ...,
+    pattern=PERIOD_PATTERN,
+    description="YYYY-MM: the new first month of the calendar, open.",
+  )
+  note: str | None = Field(
+    None, description="Free-form note attached to the audit event"
+  )
+
+
 class SetCloseTargetRequest(BaseModel):
   """Set the user-controlled goal period the books should close through.
 
@@ -553,6 +580,16 @@ class InitializeLedgerResponse(BaseModel):
   warnings: list[str] = Field(
     default_factory=list,
     description="Non-fatal warnings (e.g., auto_seed_schedules not implemented)",
+  )
+
+
+class ChangeCalendarStartResponse(BaseModel):
+  fiscal_calendar: FiscalCalendarResponse
+  periods_created: int = Field(
+    0, description="Open FiscalPeriod rows added by moving the start earlier"
+  )
+  periods_removed: int = Field(
+    0, description="Empty FiscalPeriod rows removed by moving the start later"
   )
 
 

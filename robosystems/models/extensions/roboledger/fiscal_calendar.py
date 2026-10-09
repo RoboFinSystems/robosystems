@@ -88,7 +88,7 @@ class FiscalCalendarEvent(ExtensionsBase):
     CheckConstraint(
       "event_type IN ("
       "'initialized', 'target_changed', 'period_closed', 'period_reopened', "
-      "'target_advanced_auto'"
+      "'target_advanced_auto', 'start_changed'"
       ")",
       name="ck_fiscal_calendar_events_event_type",
     ),

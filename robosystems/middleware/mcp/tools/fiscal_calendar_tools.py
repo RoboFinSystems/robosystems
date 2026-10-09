@@ -1,5 +1,5 @@
 """Fiscal calendar MCP tools: get-fiscal-calendar, initialize-fiscal-calendar,
-close-period, reopen-period, backfill-plan-history.
+change-calendar-start, close-period, reopen-period, backfill-plan-history.
 
 Set-close-target stays REST-only: auto-advance makes it unnecessary in a
 normal close.
@@ -20,6 +20,7 @@ from robosystems.middleware.mcp.tools._gate import (
 from robosystems.middleware.operations import run_off_loop
 from robosystems.models.api.extensions.fiscal_calendar import (
   BackfillPlanHistoryRequest,
+  ChangeCalendarStartRequest,
   InitializeLedgerRequest,
 )
 from robosystems.operations.locking import RowLockedError
@@ -31,6 +32,9 @@ from robosystems.operations.roboledger.commands.fiscal_calendar import (
 )
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
   backfill_plan_history as ops_backfill_plan_history,
+)
+from robosystems.operations.roboledger.commands.fiscal_calendar import (
+  change_calendar_start as ops_change_calendar_start,
 )
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
   initialize_ledger as ops_initialize_ledger,
@@ -56,6 +60,8 @@ from robosystems.operations.roboledger.fiscal_calendar.close_service import (
 )
 from robosystems.operations.roboledger.fiscal_calendar.service import (
   CalendarAlreadyInitializedError,
+  CalendarStartBlockedError,
+  CalendarStartLockedError,
   InvalidCloseTargetError,
 )
 from robosystems.operations.roboledger.reads.fiscal_calendar import (
@@ -234,8 +240,8 @@ class InitializeFiscalCalendarTool:
 `periods_created`.
 
 **NOTES:** One-time — a second call returns `already_initialized` with the
-existing calendar. It cannot be re-run to move the start, so confirm the
-month with the user before calling.""",
+existing calendar. To move the start afterwards, before the first close, use
+change-calendar-start. Confirm the month with the user before calling.""",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -344,6 +350,125 @@ month with the user before calling.""",
       return {"error": "calendar_error", "message": str(exc)}
     except SQLAlchemyError as exc:
       return database_failure("initialize-fiscal-calendar", exc)
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# change-calendar-start
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class ChangeCalendarStartTool:
+  """Move an entity's calendar start before its first close."""
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "change-calendar-start",
+      "description": """Move where an entity's fiscal calendar starts — allowed only before its first close.
+
+**WHEN TO USE:**
+- Bank-feed or imported history predates the calendar's first month: its
+  lines can only post through a close of their month, so the calendar has to
+  reach back to them. Move the start earlier, then close forward in order
+- The calendar was set up starting too early and its leading months are
+  empty: move the start later
+
+**PARAMETERS:**
+- first_open_period (required): YYYY-MM, the new first month (open)
+- entity_id (optional): the entity whose calendar to move; omit for the group
+  parent
+- note (optional): kept on the audit event
+
+**RETURNS:** the calendar (same shape as get-fiscal-calendar) with
+`periods_created` and `periods_removed`.
+
+**NOTES:**
+- Earlier adds open months from `first_open_period` up to the current start;
+  later removes the leading months before it, refused when they hold any
+  journal entry (drafts included) or unposted source line. Each move records
+  a `start_changed` audit event
+- Refused once any month of the calendar has closed (`calendar_start_locked`
+  — history behind the close boundary is reopen-period / backfill-plan-history
+  territory), when moving later would drop activity (`calendar_start_blocked`,
+  with the counts), and for a future month (`invalid_period`)""",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "first_open_period": {
+            "type": "string",
+            "description": "YYYY-MM: the new first month of the calendar.",
+            "pattern": _PERIOD_ARGUMENT_PATTERN,
+          },
+          "entity_id": ENTITY_ID_ARGUMENT,
+          "note": {
+            "type": "string",
+            "description": "Optional note captured in the audit event",
+          },
+        },
+        "required": ["first_open_period"],
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
+    graph_id = self.client.graph_id
+
+    try:
+      require_graph_extension_mcp("roboledger", graph_id)
+    except MCPExtensionGateError as exc:
+      return {"error": exc.code, "message": exc.message}
+
+    body = ChangeCalendarStartRequest(
+      entity_id=arguments.get("entity_id"),
+      first_open_period=arguments["first_open_period"],
+      note=arguments.get("note"),
+    )
+    actor_id = getattr(self.client, "user_id", None) or f"mcp:{graph_id}"
+
+    try:
+      with extensions_session(graph_id) as session, _platform_session() as platform_db:
+        response = ops_change_calendar_start(
+          session,
+          platform_db,
+          graph_id,
+          body,
+          actor_id=actor_id,
+          service=FiscalCalendarService(),
+          actor_type="agent",
+        )
+        fc_payload = response.fiscal_calendar.model_dump(mode="json")
+        has_sync, _ = entity_sync_state(
+          session, platform_db, graph_id, fc_payload["entity_id"]
+        )
+        fc_payload["has_sync_connection"] = has_sync
+        return {
+          "periods_created": response.periods_created,
+          "periods_removed": response.periods_removed,
+          "fiscal_calendar": fc_payload,
+        }
+    except InvalidCloseTargetError as exc:
+      return {"error": "invalid_period", "message": str(exc)}
+    except CalendarStartLockedError as exc:
+      return {"error": "calendar_start_locked", "message": str(exc)}
+    except CalendarStartBlockedError as exc:
+      return {
+        "error": "calendar_start_blocked",
+        "message": str(exc),
+        "entries": exc.entries,
+        "unposted_source_lines": exc.unposted,
+      }
+    except RowLockedError as exc:
+      return {"error": "row_locked", "message": str(exc)}
+    except (EntityNotInGraphError, NoEntityError) as exc:
+      return {"error": "entity_not_found", "message": str(exc)}
+    except FiscalCalendarError as exc:
+      return {"error": "calendar_error", "message": str(exc)}
+    except SQLAlchemyError as exc:
+      return database_failure("change-calendar-start", exc)
 
 
 # ────────────────────────────────────────────────────────────────────────────

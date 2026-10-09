@@ -15,6 +15,8 @@ from robosystems.models.api.extensions.fiscal_calendar import (
   BackfillPeriodOutcome,
   BackfillPlanHistoryRequest,
   BackfillPlanHistoryResponse,
+  ChangeCalendarStartRequest,
+  ChangeCalendarStartResponse,
   ClosePeriodResponse,
   FiscalCalendarResponse,
   InitializeLedgerRequest,
@@ -193,6 +195,42 @@ def initialize_ledger(
     warnings=warnings,
   )
   return response, warnings
+
+
+def change_calendar_start(
+  session: Session,
+  platform_db: Session,
+  graph_id: str,
+  body: ChangeCalendarStartRequest,
+  actor_id: str,
+  service: FiscalCalendarService,
+  *,
+  actor_type: str = "user",
+) -> ChangeCalendarStartResponse:
+  """Move an entity's calendar start before its first close, and commit.
+
+  Raises `CalendarStartLockedError`, `CalendarStartBlockedError`,
+  `InvalidCloseTargetError` and `FiscalCalendarError` (no calendar).
+  """
+  entity_id = find_entity_id(session, body.entity_id)
+  calendar, created, removed = service.change_start(
+    session,
+    graph_id,
+    body.first_open_period,
+    actor_id=actor_id,
+    actor_type=actor_type,
+    note=body.note,
+    entity_id=entity_id,
+  )
+  session.commit()
+  has_sync, last_sync_at = entity_sync_state(session, platform_db, graph_id, entity_id)
+  return ChangeCalendarStartResponse(
+    fiscal_calendar=build_fiscal_calendar_response(
+      session, graph_id, calendar, has_sync, last_sync_at, service
+    ),
+    periods_created=created,
+    periods_removed=removed,
+  )
 
 
 def set_close_target(

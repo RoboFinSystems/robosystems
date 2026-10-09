@@ -134,6 +134,10 @@ _HAND_WRITTEN_EXEMPT: dict[str, str] = {
     "Writes fiscal_calendars + fiscal_periods. Neither table is scanned by "
     "materialize.py — the fiscal calendar has no graph node."
   ),
+  "change-calendar-start": (
+    "Writes fiscal_periods + fiscal_calendar_events. Neither table is scanned "
+    "by materialize.py — the fiscal calendar has no graph node."
+  ),
   "set-close-target": (
     "Writes fiscal_calendars.close_target — a scheduling intent, not ledger "
     "content, and the table is not scanned by materialize.py."

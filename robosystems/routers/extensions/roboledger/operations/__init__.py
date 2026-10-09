@@ -206,6 +206,9 @@ from robosystems.routers.extensions.roboledger.operations.reports import (
 # Re-exported so `...roboledger.operations.<name>` still resolves; tests and
 # tool adapters bind to these names.
 from robosystems.routers.extensions.roboledger.operations.setup import (
+  change_calendar_start_op as change_calendar_start_op,
+)
+from robosystems.routers.extensions.roboledger.operations.setup import (
   change_reporting_style_op as change_reporting_style_op,
 )
 from robosystems.routers.extensions.roboledger.operations.setup import (

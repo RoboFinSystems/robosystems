@@ -30,6 +30,7 @@ from robosystems.operations.roboledger.entity_scope import (
 )
 
 from .periods import (
+  current_month_period,
   last_completed_period,
   next_period,
   parse_period,
@@ -104,6 +105,24 @@ class CalendarAlreadyInitializedError(FiscalCalendarError):
 
 class InvalidCloseTargetError(FiscalCalendarError):
   """Raised when set_close_target() receives a value that fails validation."""
+
+
+class CalendarStartLockedError(FiscalCalendarError):
+  """The calendar's start cannot move once any of its months has closed."""
+
+
+class CalendarStartBlockedError(FiscalCalendarError):
+  """Moving the start later would drop months that still hold activity."""
+
+  def __init__(self, first_open_period: str, entries: int, unposted: int) -> None:
+    super().__init__(
+      f"Cannot start the calendar at {first_open_period}: the months before it "
+      f"hold {entries} journal entries and {unposted} unposted source lines "
+      "(bank lines or source transactions). Post, move or void them first, or "
+      "start the calendar earlier."
+    )
+    self.entries = entries
+    self.unposted = unposted
 
 
 class AdvanceSequenceError(FiscalCalendarError):
@@ -325,6 +344,117 @@ class FiscalCalendarService:
       f"closed_through={closed_through} target={calendar.close_target_period}"
     )
     return calendar
+
+  def change_start(
+    self,
+    session: Session,
+    graph_id: str,
+    first_open_period: str,
+    *,
+    actor_id: str | None = None,
+    actor_type: str = "user",
+    note: str | None = None,
+    entity_id: str | None = None,
+  ) -> tuple[FiscalCalendar, int, int]:
+    """Move the entity's first period, allowed only before its first close.
+
+    Earlier seeds open months back to `first_open_period`. Later removes the
+    leading months, which must hold no entries (drafts included) and no
+    unposted source lines, or they would be stranded outside the calendar.
+    Returns the calendar and the counts of period rows created and removed.
+
+    Raises `CalendarStartLockedError` once any month has closed or is
+    closing, `CalendarStartBlockedError` when moving later would drop
+    activity, and `InvalidCloseTargetError` for a malformed or future month.
+    """
+    try:
+      parse_period(first_open_period)
+    except ValueError as e:
+      raise InvalidCloseTargetError(str(e)) from e
+    current = current_month_period()
+    if first_open_period > current:
+      raise InvalidCloseTargetError(
+        f"first_open_period={first_open_period!r} is in the future. "
+        f"Maximum allowed: {current} (the current month)."
+      )
+
+    entity_id = _scope(session, entity_id)
+    calendar = self.require_locked(session, graph_id, entity_id=entity_id)
+    periods = session.query(FiscalPeriod).filter(
+      FiscalPeriod.graph_id == graph_id, FiscalPeriod.entity_id == entity_id
+    )
+    if (
+      calendar.closed_through_period
+      or periods.filter(FiscalPeriod.status != "open").first() is not None
+    ):
+      raise CalendarStartLockedError(
+        "The calendar's start can only change before its first close; months "
+        "of this calendar have closed. Reopen and backfill-plan-history cover "
+        "history behind the close boundary."
+      )
+
+    earliest = periods.with_entities(func.min(FiscalPeriod.name)).scalar()
+    if earliest == first_open_period:
+      return calendar, 0, 0
+
+    created = removed = 0
+    if earliest is None or first_open_period < earliest:
+      created = self.ensure_fiscal_periods(
+        session,
+        graph_id,
+        start_period=first_open_period,
+        end_period=current,
+        entity_id=entity_id,
+      )
+    else:
+      start, _ = period_date_range(first_open_period)
+      from robosystems.models.extensions.roboledger.entry import Entry
+
+      entries = (
+        session.query(func.count(Entry.id))
+        .filter(Entry.entity_id == entity_id, Entry.posting_date < start)
+        .scalar()
+      )
+      posting_date = func.date(func.coalesce(Event.effective_at, Event.occurred_at))
+      unposted = (
+        session.query(func.count(Event.id))
+        .filter(
+          Event.entity_id == entity_id,
+          Event.status.in_(("captured", "classified")),
+          Event.event_type != "schedule_entry_due",
+          posting_date < start,
+        )
+        .scalar()
+      )
+      if entries or unposted:
+        raise CalendarStartBlockedError(first_open_period, entries, unposted)
+      removed = periods.filter(FiscalPeriod.name < first_open_period).delete(
+        synchronize_session=False
+      )
+      if (
+        calendar.close_target_period
+        and calendar.close_target_period < first_open_period
+      ):
+        calendar.close_target_period = None
+
+    calendar.updated_by = actor_id
+    session.flush()
+    self.record_event(
+      session,
+      calendar,
+      event_type="start_changed",
+      from_value=earliest,
+      to_value=first_open_period,
+      actor_id=actor_id,
+      actor_type=actor_type,
+      note=note,
+    )
+    logger.info(
+      f"Moved fiscal calendar start for graph {graph_id} entity {entity_id} "
+      f"from {earliest} to {first_open_period} "
+      f"({created} periods created, {removed} removed)"
+    )
+    return calendar, created, removed
 
   def set_close_target(
     self,
