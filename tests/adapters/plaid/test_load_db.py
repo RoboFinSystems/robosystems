@@ -201,3 +201,65 @@ def test_a_captured_line_is_stored_on_its_accounts_entity(session):
   assert report.events_created == 1, report.errors
   stored = session.query(Event).filter(Event.external_id == "plaid_txn_t_fee").one()
   assert stored.entity_id == "ent_sub"
+
+
+def test_a_replay_never_rekeys_a_balance_reading_as_a_line(session):
+  """A first sync records the day's balance before it loads the lines. A
+  deposit equal to that balance (a new account's first) must be captured, not
+  matched to the reading by account, day and amount."""
+  elements = _seed_elements(session)
+  reading = Event(
+    entity_id="ent_test_parent",
+    event_type="balance_observed",
+    event_category="reconciliation",
+    event_class="support",
+    resource_type="money",
+    resource_element_id=elements[CASH],
+    occurred_at=datetime(2026, 7, 12, 18, 0),
+    effective_at=datetime(2026, 7, 12),
+    status="committed",
+    source="plaid",
+    external_id="plaid_balance_bank_current_acc_chk_20260712T180000Z",
+    amount=50000,
+    metadata_={
+      "kind": "bank_current",
+      "as_of": "2026-07-12",
+      "account_id": CHECKING,
+      "connection_id": CONNECTION,
+    },
+    created_by="user_test",
+  )
+  session.add(reading)
+  session.flush()
+  sync = TransactionsSync(
+    added=[
+      txn(
+        "t_first",
+        CHECKING,
+        -500.00,
+        "2026-07-12",
+        name="OPENING DEPOSIT",
+        primary="TRANSFER_IN",
+        detailed="TRANSFER_IN_DEPOSIT",
+      )
+    ],
+    next_cursor="c1",
+    update_status="HISTORICAL_UPDATE_COMPLETE",
+  )
+  report = load_sync(
+    session,
+    graph_id=GRAPH_ID,
+    connection_id=CONNECTION,
+    item_id=ITEM,
+    created_by="user_test",
+    accounts=_accounts(),
+    sync=sync,
+    account_elements={CHECKING: elements[CASH], SAVINGS: elements[NEW_EXPENSE]},
+    chart=ChartIndex(),
+    rekey_replaced=True,
+  )
+  assert report.events_rekeyed == 0
+  assert report.events_created == 1, report.errors
+  session.refresh(reading)
+  assert reading.external_id == "plaid_balance_bank_current_acc_chk_20260712T180000Z"
+  assert "rekeyed_from" not in reading.metadata_
