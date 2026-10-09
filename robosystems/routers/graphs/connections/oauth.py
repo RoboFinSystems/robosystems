@@ -24,7 +24,7 @@ from robosystems.models.api.oauth import (
   OAuthInitRequest,
   OAuthInitResponse,
 )
-from robosystems.models.core import User
+from robosystems.models.core import ConnectionStatus, User
 from robosystems.operations.connection_service import (
   ConnectionService,
   ProviderConflictError,
@@ -283,11 +283,16 @@ async def init_oauth(
       )
 
     # The callback can revive a soft-deleted connection, so the books guard
-    # runs here too, for the entity the feed was connected for.
+    # runs here too, for the entity the feed was connected for. A live row
+    # past its first OAuth is a reconnect.
     sync_config = (connection.get("credentials") or {}).get("sync_config") or {}
     try:
       assert_provider_compatible(
-        graph_id, provider, db, entity_id=sync_config.get("entity_id") or None
+        graph_id,
+        provider,
+        db,
+        entity_id=sync_config.get("entity_id") or None,
+        resuming=connection.get("status") != ConnectionStatus.PENDING_OAUTH.value,
       )
     except ProviderConflictError as conflict:
       raise create_error_response(

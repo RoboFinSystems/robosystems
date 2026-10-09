@@ -1435,8 +1435,9 @@ class OLTPLoader:
 
   # Adopts whatever active chart_of_accounts taxonomy exists, or creates one.
   # Never runs over natively-kept books: `assert_provider_compatible` refuses
-  # a synced GL on a graph with posted lines on non-provider elements, and a
-  # severed chart's elements leave the upsert key.
+  # a synced GL on a graph with posted lines on non-provider elements or a
+  # chart the provider did not build, and a severed chart's elements leave
+  # the upsert key.
   def _ensure_mapping_structure(
     self,
     graph_id: str,

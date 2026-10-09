@@ -1546,6 +1546,7 @@ class TestProviderCompatibility:
       patch(f"{MODULE}._any_is_group_parent", return_value=False) as parent,
       patch(f"{MODULE}._parent_has_feed_account", return_value=False),
       patch(f"{MODULE}._graph_has_native_books", return_value=False),
+      patch(f"{MODULE}._parent_chart_built_elsewhere", return_value=False),
     ):
       MockConn.get_all_for_graph.return_value = self._live("plaid")
       MockCreds.get_by_connection_id.return_value.get_credentials.return_value = {
@@ -1606,9 +1607,66 @@ class TestProviderCompatibility:
       patch(f"{MODULE}.Connection") as MockConn,
       patch(f"{MODULE}._parent_has_feed_account", return_value=False),
       patch(f"{MODULE}._graph_has_native_books", return_value=False),
+      patch(f"{MODULE}._parent_chart_built_elsewhere", return_value=False) as chart,
     ):
       MockConn.get_all_for_graph.return_value = []
       assert_provider_compatible("kg_test", "quickbooks", MagicMock())
+    chart.assert_called_once_with("kg_test", synced_source="quickbooks")
+
+  @pytest.mark.unit
+  def test_quickbooks_refused_over_a_chart_it_did_not_build(self):
+    """A template chart with nothing posted: the first sync would adopt it
+    and merge QuickBooks' accounts into it."""
+    from robosystems.operations.connection_service import (
+      ProviderConflictError,
+      assert_provider_compatible,
+    )
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}._parent_has_feed_account", return_value=False),
+      patch(f"{MODULE}._graph_has_native_books", return_value=False),
+      patch(f"{MODULE}._parent_chart_built_elsewhere", return_value=True),
+    ):
+      MockConn.get_all_for_graph.return_value = []
+      with pytest.raises(ProviderConflictError) as exc:
+        assert_provider_compatible("kg_test", "quickbooks", MagicMock())
+    assert exc.value.code == "NATIVE_BOOKS_PRESENT"
+
+  @pytest.mark.unit
+  def test_a_reconnecting_quickbooks_skips_the_books_probes(self):
+    """QuickBooks already keeps the parent's books; an account added beside
+    it, and a schedule drafting to that account, are not books it would take
+    over."""
+    from robosystems.operations.connection_service import assert_provider_compatible
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}._parent_has_feed_account") as feed,
+      patch(f"{MODULE}._graph_has_native_books", return_value=True) as native,
+      patch(f"{MODULE}._parent_chart_built_elsewhere") as chart,
+    ):
+      MockConn.get_all_for_graph.return_value = self._live("quickbooks")
+      assert_provider_compatible("kg_test", "quickbooks", MagicMock(), resuming=True)
+    feed.assert_not_called()
+    native.assert_not_called()
+    chart.assert_not_called()
+
+  @pytest.mark.unit
+  def test_a_reconnecting_bank_feed_is_still_checked(self):
+    from robosystems.operations.connection_service import (
+      ProviderConflictError,
+      assert_provider_compatible,
+    )
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}._is_group_parent", return_value=True),
+    ):
+      MockConn.get_all_for_graph.return_value = self._live("quickbooks")
+      with pytest.raises(ProviderConflictError) as exc:
+        assert_provider_compatible("kg_test", "plaid", MagicMock(), resuming=True)
+    assert exc.value.code == "QUICKBOOKS_ACTIVE"
 
   @pytest.mark.unit
   def test_other_providers_pass_without_touching_the_graph(self):
