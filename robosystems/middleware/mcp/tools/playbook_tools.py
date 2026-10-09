@@ -121,6 +121,14 @@ _RECURRING_SEQUENCE: list[str] = [
 ]
 
 _INITIATE_SEQUENCE: list[str] = [
+  "NO CALENDAR YET — get-fiscal-calendar returns calendar_not_initialized "
+  "(a new graph, or a new subsidiary): set it up with "
+  "initialize-fiscal-calendar, deciding with the user where these books "
+  "start. New or cut-over books pass first_open_period, the first month "
+  "they close (a cutover's opening entry goes in that month, so it must be "
+  "open); books whose history was closed in another system pass "
+  "closed_through, the last month closed there. One-time and not "
+  "re-runnable, so confirm the month before calling.",
   "ORIENT FIRST — call get-fiscal-calendar and read `closed_through` (the "
   "watermark) and `close_target`. `closed_through` may be a BASELINE set at "
   "initialization (e.g. '2026-05') even when those months were never closed "
@@ -225,7 +233,8 @@ _KEY_RULES: list[str] = [
   "CLOSE BLOCKERS: sequence_violation (close in order), period_incomplete "
   "(month not over yet), sync_stale (QuickBooks sync older than period end "
   "— run sync-connection and poll get-fiscal-calendar until it clears), "
-  "calendar_not_initialized, pending_obligations (matured "
+  "calendar_not_initialized (run initialize-fiscal-calendar), "
+  "pending_obligations (matured "
   "schedule_entry_due events still 'pending' at/before the period — run "
   "promote-obligations to draft them, or, if they belong to a "
   "pre-watermark month that should never close, the schedule's "
@@ -272,7 +281,7 @@ _KEY_RULES: list[str] = [
   "ENTITIES: a graph is one reporting group — the group parent and the "
   "subsidiaries under it, each with its own books, chart of accounts, "
   "calendar and close. Every close tool (get-fiscal-calendar, "
-  "get-period-close-status, list-period-drafts, promote-obligations, "
+  "initialize-fiscal-calendar, get-period-close-status, list-period-drafts, promote-obligations, "
   "close-period, reopen-period, backfill-plan-history) and every ledger "
   "write take entity_id; omitted, they act on the group parent. To close a "
   "subsidiary, pass its entity_id on EVERY call of the sequence — its "
@@ -307,6 +316,7 @@ def _build_playbook(mode: str) -> dict[str, Any]:
   payload["key_rules"] = _KEY_RULES
   payload["related_tools"] = [
     "get-fiscal-calendar",
+    "initialize-fiscal-calendar",
     "get-period-close-status",
     "create-information-block",
     "promote-obligations",

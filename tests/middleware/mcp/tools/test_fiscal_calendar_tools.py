@@ -26,6 +26,7 @@ from robosystems.middleware.mcp.tools.fiscal_calendar_tools import (
   BackfillPlanHistoryTool,
   ClosePeriodTool,
   GetFiscalCalendarTool,
+  InitializeFiscalCalendarTool,
   ReopenPeriodTool,
 )
 from robosystems.middleware.sse.event_storage import OperationStatus
@@ -34,10 +35,15 @@ from robosystems.models.api.extensions.fiscal_calendar import (
   BackfillPlanHistoryResponse,
   ClosePeriodResponse,
   FiscalCalendarResponse,
+  InitializeLedgerResponse,
 )
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
   BackfillPreconditionError,
   ReopenPeriodResult,
+)
+from robosystems.operations.roboledger.fiscal_calendar.service import (
+  CalendarAlreadyInitializedError,
+  InvalidCloseTargetError,
 )
 
 MODULE = "robosystems.middleware.mcp.tools.fiscal_calendar_tools"
@@ -424,6 +430,115 @@ class TestReopenPeriodToolResult:
 
     assert ops.call_args.kwargs["entity_id"] == "ent_sub"
     assert result["fiscal_calendar"]["entity_id"] == "ent_sub"
+
+
+class TestInitializeFiscalCalendarTool:
+  @staticmethod
+  def _response(**overrides) -> InitializeLedgerResponse:
+    return InitializeLedgerResponse(
+      fiscal_calendar=_fc_response(entity_id="ent_sub", **overrides),
+      periods_created=2,
+    )
+
+  @pytest.mark.asyncio
+  async def test_first_open_period_seeds_open_books_from_that_month(self):
+    tool = InitializeFiscalCalendarTool(_client(user_id="usr_abc"))
+    with (
+      _patch_sessions(),
+      patch(
+        f"{MODULE}.ops_initialize_ledger", return_value=(self._response(), [])
+      ) as ops,
+    ):
+      result = await tool.execute(
+        {"entity_id": "ent_sub", "first_open_period": "2026-09"}
+      )
+
+    body = ops.call_args.args[3]
+    assert body.earliest_data_period == "2026-09"
+    assert body.closed_through is None
+    assert ops.call_args.kwargs["entity_id"] == "ent_sub"
+    assert result["periods_created"] == 2
+    assert result["fiscal_calendar"]["entity_id"] == "ent_sub"
+
+  @pytest.mark.asyncio
+  async def test_closed_through_marks_history_closed_elsewhere(self):
+    tool = InitializeFiscalCalendarTool(_client(user_id="usr_abc"))
+    with (
+      _patch_sessions(),
+      patch(
+        f"{MODULE}.ops_initialize_ledger", return_value=(self._response(), [])
+      ) as ops,
+    ):
+      await tool.execute({"closed_through": "2026-08", "fiscal_year_start_month": 7})
+
+    body = ops.call_args.args[3]
+    assert body.closed_through == "2026-08"
+    assert body.earliest_data_period is None
+    assert body.fiscal_year_start_month == 7
+
+  @pytest.mark.parametrize(
+    "arguments",
+    [{}, {"first_open_period": "2026-09", "closed_through": "2026-08"}],
+    ids=["neither", "both"],
+  )
+  @pytest.mark.asyncio
+  async def test_the_start_must_be_one_explicit_choice(self, arguments):
+    tool = InitializeFiscalCalendarTool(_client(user_id="usr_abc"))
+    with _patch_sessions(), patch(f"{MODULE}.ops_initialize_ledger") as ops:
+      result = await tool.execute(arguments)
+
+    assert result["error"] == "start_required"
+    ops.assert_not_called()
+
+  @pytest.mark.asyncio
+  async def test_a_second_call_returns_the_existing_calendar(self):
+    tool = InitializeFiscalCalendarTool(_client(user_id="usr_abc"))
+    with (
+      _patch_sessions(),
+      patch(
+        f"{MODULE}.ops_initialize_ledger",
+        side_effect=CalendarAlreadyInitializedError("already initialized"),
+      ),
+      patch(f"{MODULE}._calendar_dict", return_value={"entity_id": "ent_sub"}),
+    ):
+      result = await tool.execute(
+        {"entity_id": "ent_sub", "first_open_period": "2026-09"}
+      )
+
+    assert result["error"] == "already_initialized"
+    assert result["fiscal_calendar"] == {"entity_id": "ent_sub"}
+
+  @pytest.mark.asyncio
+  async def test_a_future_month_is_an_invalid_period(self):
+    tool = InitializeFiscalCalendarTool(_client(user_id="usr_abc"))
+    with (
+      _patch_sessions(),
+      patch(
+        f"{MODULE}.ops_initialize_ledger",
+        side_effect=InvalidCloseTargetError("in the future"),
+      ),
+    ):
+      result = await tool.execute({"first_open_period": "2099-01"})
+
+    assert result["error"] == "invalid_period"
+
+  @pytest.mark.asyncio
+  async def test_rejects_on_repo_graph_before_ops(self):
+    tool = InitializeFiscalCalendarTool(_client(user_id="usr_abc"))
+    with (
+      patch(
+        f"{MODULE}.require_graph_extension_mcp",
+        side_effect=MCPExtensionGateError(
+          "repository_write_forbidden",
+          "roboledger commands are not available on repository graphs",
+        ),
+      ),
+      patch(f"{MODULE}.ops_initialize_ledger") as ops,
+    ):
+      result = await tool.execute({"first_open_period": "2026-09"})
+
+    assert result["error"] == "repository_write_forbidden"
+    ops.assert_not_called()
 
 
 class TestGetFiscalCalendarTool:

@@ -17,6 +17,7 @@ import pytest
 from robosystems.models.api.extensions.fiscal_calendar import (
   BackfillPlanHistoryRequest,
   FiscalCalendarResponse,
+  InitializeLedgerRequest,
 )
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
@@ -28,11 +29,15 @@ from robosystems.operations.roboledger.commands.fiscal_calendar import (
   ReopenPeriodResult,
   backfill_plan_history,
   close_period,
+  initialize_ledger,
   reopen_period,
 )
 from robosystems.operations.roboledger.fiscal_calendar import (
   PeriodCloseResult,
   UnbalancedLedgerError,
+)
+from robosystems.operations.roboledger.fiscal_calendar.service import (
+  InvalidCloseTargetError,
 )
 
 GRAPH_ID = "kg01234567890abcdef"
@@ -101,6 +106,44 @@ def _stub_period_lock(session, fp):
   q.populate_existing.return_value = q
   q.with_for_update.return_value = q
   q.one_or_none.return_value = fp
+
+
+class TestInitializeLedgerStart:
+  def test_a_future_first_month_is_refused_before_anything_is_written(self):
+    service = MagicMock()
+    body = InitializeLedgerRequest(earliest_data_period="2026-11")
+    with (
+      patch(f"{_MOD}.current_month_period", return_value="2026-10"),
+      pytest.raises(InvalidCloseTargetError, match="in the future"),
+    ):
+      initialize_ledger(
+        MagicMock(), MagicMock(), GRAPH_ID, body, actor_id="u", service=service
+      )
+    service.initialize.assert_not_called()
+
+  def test_the_first_month_seeds_through_the_current_month_open(self):
+    service = MagicMock()
+    service.ensure_fiscal_periods.return_value = 2
+    body = InitializeLedgerRequest(earliest_data_period="2026-09")
+    with (
+      patch(f"{_MOD}.current_month_period", return_value="2026-10"),
+      patch(f"{_MOD}.entity_sync_state", return_value=(False, None)),
+      patch(f"{_MOD}.build_fiscal_calendar_response", return_value=_fc_response()),
+    ):
+      response, _ = initialize_ledger(
+        MagicMock(),
+        MagicMock(),
+        GRAPH_ID,
+        body,
+        actor_id="u",
+        service=service,
+        entity_id="ent_sub",
+      )
+    assert service.initialize.call_args.kwargs["closed_through"] is None
+    seeded = service.ensure_fiscal_periods.call_args.kwargs
+    assert (seeded["start_period"], seeded["end_period"]) == ("2026-09", "2026-10")
+    assert seeded["entity_id"] == "ent_sub"
+    assert response.periods_created == 2
 
 
 class TestCloseWaitsForTheFenceFirst:

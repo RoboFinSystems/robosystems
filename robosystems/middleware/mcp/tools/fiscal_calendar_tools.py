@@ -1,8 +1,8 @@
-"""Fiscal calendar MCP tools: get-fiscal-calendar, close-period, reopen-period,
-backfill-plan-history.
+"""Fiscal calendar MCP tools: get-fiscal-calendar, initialize-fiscal-calendar,
+close-period, reopen-period, backfill-plan-history.
 
-Initialize and set-close-target stay REST-only: one is onboarding, and
-auto-advance makes the other unnecessary in a normal close.
+Set-close-target stays REST-only: auto-advance makes it unnecessary in a
+normal close.
 """
 
 import asyncio
@@ -20,6 +20,7 @@ from robosystems.middleware.mcp.tools._gate import (
 from robosystems.middleware.operations import run_off_loop
 from robosystems.models.api.extensions.fiscal_calendar import (
   BackfillPlanHistoryRequest,
+  InitializeLedgerRequest,
 )
 from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
@@ -32,9 +33,16 @@ from robosystems.operations.roboledger.commands.fiscal_calendar import (
   backfill_plan_history as ops_backfill_plan_history,
 )
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
+  initialize_ledger as ops_initialize_ledger,
+)
+from robosystems.operations.roboledger.commands.fiscal_calendar import (
   reopen_period as ops_reopen_period,
 )
-from robosystems.operations.roboledger.entity_scope import find_entity_id
+from robosystems.operations.roboledger.entity_scope import (
+  EntityNotInGraphError,
+  NoEntityError,
+  find_entity_id,
+)
 from robosystems.operations.roboledger.fiscal_calendar import (
   CloseGateFailed,
   FiscalCalendarError,
@@ -45,6 +53,10 @@ from robosystems.operations.roboledger.fiscal_calendar.close_outcomes import (
 )
 from robosystems.operations.roboledger.fiscal_calendar.close_service import (
   PeriodCloseService,
+)
+from robosystems.operations.roboledger.fiscal_calendar.service import (
+  CalendarAlreadyInitializedError,
+  InvalidCloseTargetError,
 )
 from robosystems.operations.roboledger.reads.fiscal_calendar import (
   build_fiscal_calendar_response,
@@ -162,7 +174,8 @@ class GetFiscalCalendarTool:
             "error": "calendar_not_initialized",
             "message": (
               f"Fiscal calendar not initialized for graph {graph_id}. "
-              "Use the initialize-ledger REST endpoint or UI to set it up first."
+              "Set it up with initialize-fiscal-calendar (same entity_id) "
+              "first."
             ),
           }
         return _calendar_dict(session, graph_id, calendar, svc)
@@ -171,6 +184,166 @@ class GetFiscalCalendarTool:
     except Exception as exc:
       logger.warning(f"get-fiscal-calendar failed: {exc}")
       return {"error": str(exc)}
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# initialize-fiscal-calendar
+# ────────────────────────────────────────────────────────────────────────────
+
+_PERIOD_ARGUMENT_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
+
+
+class InitializeFiscalCalendarTool:
+  """Set up an entity's fiscal calendar: where its books start."""
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "initialize-fiscal-calendar",
+      "description": """Set up an entity's fiscal calendar — the one-time step before its first close.
+
+**WHEN TO USE:**
+- get-fiscal-calendar returns `calendar_not_initialized` for the entity
+- A new subsidiary (create-entity) is about to keep books: after its chart
+  (initialize-chart-of-accounts), before posting its opening entry
+
+**THE DECISION — pass exactly one (ask the user if it is not clear):**
+- `first_open_period`: the first month THESE books will close. Every month
+  from it through the current month is created open, and the first close is
+  that month. Use for new books, and for books cut over from another system
+  at a month-end: the cutover month holds the opening entry, so it must be
+  open (e.g. opening balances as of 2026-09-30 → first_open_period
+  '2026-09'). Never earlier than needed: every open month before the one
+  you want to close must be closed first, in order.
+- `closed_through`: the last month already closed ELSEWHERE (QuickBooks, a
+  prior system). Months on or before it are created closed — nothing can
+  post into them — and the first close is the month after. Use when history
+  is already in the ledger and was closed outside RoboLedger.
+
+**PARAMETERS:**
+- entity_id (optional): the entity whose calendar to set up; omit for the
+  group parent. Each entity keeps its own calendar
+- first_open_period / closed_through: YYYY-MM, exactly one (above)
+- fiscal_year_start_month (optional, 1-12, default 1): every entity of a
+  graph shares the group's month; a mismatch is refused
+- note (optional): kept on the audit event
+
+**RETURNS:** the new calendar (same shape as get-fiscal-calendar) and
+`periods_created`.
+
+**NOTES:** One-time — a second call returns `already_initialized` with the
+existing calendar. It cannot be re-run to move the start, so confirm the
+month with the user before calling.""",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entity_id": ENTITY_ID_ARGUMENT,
+          "first_open_period": {
+            "type": "string",
+            "description": (
+              "YYYY-MM: the first month these books close (new or cut-over "
+              "books). Exclusive with closed_through."
+            ),
+            "pattern": _PERIOD_ARGUMENT_PATTERN,
+          },
+          "closed_through": {
+            "type": "string",
+            "description": (
+              "YYYY-MM: the last month already closed in another system. "
+              "Exclusive with first_open_period."
+            ),
+            "pattern": _PERIOD_ARGUMENT_PATTERN,
+          },
+          "fiscal_year_start_month": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12,
+            "description": "Fiscal year start month (default 1, January).",
+          },
+          "note": {
+            "type": "string",
+            "description": "Optional note captured in the audit event",
+          },
+        },
+        "required": [],
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
+    graph_id = self.client.graph_id
+
+    try:
+      require_graph_extension_mcp("roboledger", graph_id)
+    except MCPExtensionGateError as exc:
+      return {"error": exc.code, "message": exc.message}
+
+    first_open = arguments.get("first_open_period")
+    closed_through = arguments.get("closed_through")
+    if bool(first_open) == bool(closed_through):
+      return {
+        "error": "start_required",
+        "message": (
+          "Pass exactly one of first_open_period (the first month these "
+          "books close) or closed_through (the last month closed in another "
+          "system). Ask the user which, and the month."
+        ),
+      }
+
+    entity_id = arguments.get("entity_id")
+    body = InitializeLedgerRequest(
+      entity_id=entity_id,
+      closed_through=closed_through,
+      earliest_data_period=first_open,
+      fiscal_year_start_month=int(arguments.get("fiscal_year_start_month", 1)),
+      note=arguments.get("note"),
+    )
+    actor_id = getattr(self.client, "user_id", None) or f"mcp:{graph_id}"
+    svc = FiscalCalendarService()
+
+    try:
+      with extensions_session(graph_id) as session, _platform_session() as platform_db:
+        try:
+          response, _warnings = ops_initialize_ledger(
+            session,
+            platform_db,
+            graph_id,
+            body,
+            actor_id=actor_id,
+            service=svc,
+            entity_id=entity_id,
+          )
+        except CalendarAlreadyInitializedError as exc:
+          session.rollback()
+          existing = svc.get(session, graph_id, entity_id=entity_id)
+          return {
+            "error": "already_initialized",
+            "message": str(exc),
+            "fiscal_calendar": (
+              _calendar_dict(session, graph_id, existing, svc) if existing else None
+            ),
+          }
+        fc_payload = response.fiscal_calendar.model_dump(mode="json")
+        has_sync, _ = entity_sync_state(
+          session, platform_db, graph_id, fc_payload["entity_id"]
+        )
+        fc_payload["has_sync_connection"] = has_sync
+        return {
+          "periods_created": response.periods_created,
+          "fiscal_calendar": fc_payload,
+        }
+    except InvalidCloseTargetError as exc:
+      return {"error": "invalid_period", "message": str(exc)}
+    except (EntityNotInGraphError, NoEntityError) as exc:
+      return {"error": "entity_not_found", "message": str(exc)}
+    except FiscalCalendarError as exc:
+      return {"error": "calendar_error", "message": str(exc)}
+    except SQLAlchemyError as exc:
+      return database_failure("initialize-fiscal-calendar", exc)
 
 
 # ────────────────────────────────────────────────────────────────────────────
