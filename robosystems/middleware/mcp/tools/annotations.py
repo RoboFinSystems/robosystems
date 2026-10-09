@@ -59,6 +59,7 @@ _REPLACES_ONCE_PER_STATE = _write(destructive=True, idempotent=False)
 WRITE_TOOL_HINTS: dict[str, ToolHints] = {
   # Period close. close-period publishes opted-in drafts to QuickBooks.
   "close-period": _write(destructive=True, idempotent=False, open_world=True),
+  "initialize-fiscal-calendar": _ADDS_ONCE,
   "reopen-period": _REPLACES_ONCE_PER_STATE,
   # Pulls from the user's QuickBooks / bank connection; full_rebuild resets
   # captured state.

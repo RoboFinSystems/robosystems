@@ -54,6 +54,9 @@ from robosystems.operations.roboledger.fiscal_calendar.close_service import (
 from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
   shadow_close_for_entity,
 )
+from robosystems.operations.roboledger.fiscal_calendar.service import (
+  InvalidCloseTargetError,
+)
 from robosystems.operations.roboledger.reads.fiscal_calendar import (
   build_fiscal_calendar_response,
   entity_sync_state,
@@ -146,6 +149,13 @@ def initialize_ledger(
       "(block_type='schedule'). Automated seeding will be added in a follow-up."
     )
 
+  current = current_month_period()
+  if body.earliest_data_period and body.earliest_data_period > current:
+    raise InvalidCloseTargetError(
+      f"earliest_data_period={body.earliest_data_period!r} is in the future. "
+      f"Maximum allowed: {current} (the current month)."
+    )
+
   calendar = service.initialize(
     session,
     graph_id,
@@ -157,7 +167,6 @@ def initialize_ledger(
     entity_id=entity_id,
   )
 
-  current = current_month_period()
   default_start = add_months(current, -23)
   start_period = body.earliest_data_period or default_start
   if body.closed_through and body.closed_through < start_period:
