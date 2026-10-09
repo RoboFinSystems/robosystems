@@ -495,6 +495,7 @@ class TestLoadSync:
     replay=False,
     old_events=(),
     since=None,
+    closed=frozenset(),
   ):
     captured: list[dict] = []
     session = _Session()
@@ -509,6 +510,7 @@ class TestLoadSync:
       patch(f"{MODULE}.find_waiting_leg", return_value=waiting),
       patch(f"{MODULE}._merge_into_pair", return_value=True) as merge,
       patch(f"{MODULE}._replay_candidates", return_value=list(old_events)),
+      patch(f"{MODULE}.in_closed_months", return_value=set(closed)) as fence,
       patch(
         f"{MODULE}.capture_event",
         side_effect=lambda s, payload, **kw: captured.append(payload) or True,
@@ -528,6 +530,7 @@ class TestLoadSync:
         since=since,
       )
     session.agent_specs = agents.call_args.args[1]
+    session.fenced = fence.call_args.args[1]
     return report, captured, removals, merge, session
 
   def test_fresh_item_captures_every_event(self):
@@ -538,6 +541,28 @@ class TestLoadSync:
     removals.assert_called_once()
     merge.assert_not_called()
     assert session.flushes == 1
+
+  def test_a_new_line_in_a_closed_month_is_not_captured(self):
+    report, captured, *_ = self._load(closed={"plaid_txn_t_coffee"})
+    assert "plaid_txn_t_coffee" not in {p["external_id"] for p in captured}
+    assert len(captured) == 7
+    assert report.skipped["closed_period"] == 1
+
+  def test_the_closed_month_fence_reads_only_new_lines(self):
+    existing = {"plaid_txn_t_coffee": _event()}
+    report, _captured, *_rest, session = self._load(
+      existing=existing, closed={"plaid_txn_t_coffee"}
+    )
+    # A line already held is reconciled as before, wherever its month is.
+    assert "plaid_txn_t_coffee" not in {p["external_id"] for p in session.fenced}
+    assert report.events_updated == 1
+    assert report.skipped["closed_period"] == 0
+
+  def test_a_closed_month_leg_is_never_merged_into_a_waiting_one(self):
+    _report, _captured, _removals, merge, _session = self._load(
+      waiting=_event(), closed={"plaid_txn_t_owner_draw"}
+    )
+    merge.assert_not_called()
 
   def test_existing_events_are_reconciled_not_captured(self):
     existing = {"plaid_txn_t_coffee": _event()}

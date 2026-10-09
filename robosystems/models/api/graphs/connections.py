@@ -62,8 +62,9 @@ class MercuryConnectionConfig(BaseModel):
   since_date: date | None = Field(
     None,
     description=(
-      "First day of the backfill (ISO 8601). Defaults to 1 January of last "
-      "year. Incremental syncs never look back before it."
+      "First day of the backfill (ISO 8601). Defaults to two years back. "
+      "Incremental syncs never look back before it, and lines dated in a "
+      "closed period are never captured."
     ),
   )
   include_treasury: bool = Field(
@@ -104,8 +105,9 @@ class PlaidConnectionConfig(BaseModel):
     None,
     description=(
       "First day of the backfill (ISO 8601), and how much history Plaid is "
-      "asked to pull for the new Item (at most two years). Defaults to "
-      "1 January of last year."
+      "asked to pull for the new Item (at most two years). Defaults to as "
+      "far back as Plaid goes. Lines dated in a closed period are never "
+      "captured, whatever the window."
     ),
   )
   entity_id: str | None = Field(

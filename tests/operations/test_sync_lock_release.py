@@ -88,3 +88,45 @@ async def test_an_async_provider_keeps_the_lock_for_its_run(_lock):
   sync race the run this one just started."""
   await _dispatch("quickbooks", SyncOutcome(status="dispatched", task_id="run-xyz"))
   assert not _lock.called
+
+
+@pytest.mark.unit
+class TestSyncFence:
+  """A disconnect holds the lock a sync takes, so neither runs beside the other."""
+
+  def test_the_fence_holds_the_lock_and_releases_it(self, _lock):
+    from robosystems.operations.connection_service import sync_fence
+
+    with sync_fence("conn123"):
+      assert not _lock.called
+    _lock.assert_called_once()
+    assert _lock.call_args.kwargs == {
+      "lock_key": "qb_sync:conn123",
+      "lock_id": "lock-abc",
+    }
+
+  def test_the_fence_releases_the_lock_when_the_work_fails(self, _lock):
+    from robosystems.operations.connection_service import sync_fence
+
+    with pytest.raises(RuntimeError), sync_fence("conn123"):
+      raise RuntimeError("cleanup failed")
+    _lock.assert_called_once()
+
+  def test_a_running_sync_refuses_the_fence(self):
+    from robosystems.operations.connection_service import (
+      SyncInProgressError,
+      sync_fence,
+    )
+
+    held = MagicMock(
+      acquired=False, holder_id="run-1", ttl_remaining=900, error_message=None
+    )
+    with (
+      patch(f"{VALKEY}.create_redis_client"),
+      patch(f"{LOCKS}.DistributedLock") as lock_cls,
+      patch(f"{LOCKS}.release_lock_by_id") as release,
+    ):
+      lock_cls.return_value.acquire.return_value = held
+      with pytest.raises(SyncInProgressError), sync_fence("conn123"):
+        pytest.fail("the fenced work must not run while a sync holds the lock")
+    release.assert_not_called()

@@ -61,6 +61,14 @@ class _Session:
     yield
 
 
+@pytest.fixture(autouse=True)
+def _no_closed_months():
+  with patch(
+    "robosystems.adapters.mercury.pipeline.load.in_closed_months", return_value=set()
+  ) as fence:
+    yield fence
+
+
 def _run(session, **kwargs):
   with patch(KERNEL) as create:
     report = load_feed(
@@ -94,6 +102,16 @@ class TestLoadFeed:
     assert create.call_args.kwargs["graph_id"] == "kg_test"
     assert session.nested == 9
     assert report.earliest_occurred_at == "2026-03-14T15:04:05Z"
+
+  def test_a_new_line_in_a_closed_month_is_not_captured(self, _no_closed_months):
+    session = _Session()
+    _report, create = _run(session)
+    first = create.call_args_list[0].args[1].external_id
+    _no_closed_months.return_value = {first}
+    report, create = _run(_Session())
+    assert report.events_created == 8
+    assert report.skipped["closed_period"] == 1
+    assert first not in {call.args[1].external_id for call in create.call_args_list}
 
   def test_earliest_posting_ignores_placeholder_dates(self):
     session = _Session()

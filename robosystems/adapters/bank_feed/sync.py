@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from dagster import AssetExecutionContext, Config
+from dagster import AssetExecutionContext, Config, Failure
 
 from robosystems.adapters.bank_feed.window import (
   default_backfill_start as default_backfill_start,
@@ -42,6 +42,32 @@ def last_sync(connection_id: str) -> datetime | None:
   with SessionFactory() as session:
     conn = Connection.get_by_id(connection_id, session)
     return conn.last_sync if conn is not None else None
+
+
+def connection_removed(connection_id: str) -> bool:
+  """Whether the connection was disconnected after the run started: the row
+  is soft-deleted or its credentials revoked. A run that finds it so writes
+  nothing, so the purge stays complete."""
+  from robosystems.database import SessionFactory
+  from robosystems.models.core.connection.connection import Connection
+  from robosystems.models.core.connection.connection_credentials import (
+    ConnectionCredentials,
+  )
+
+  with SessionFactory() as session:
+    if Connection.get_by_id(connection_id, session) is None:
+      return True
+    creds = ConnectionCredentials.get_by_connection_id(connection_id, session)
+    return creds is not None and bool(creds.get_credentials().get("revoked_at"))
+
+
+def removed_during_sync(source_label: str) -> Failure:
+  return Failure(
+    description=(
+      f"This {source_label} connection was disconnected during the sync; "
+      "nothing was written."
+    )
+  )
 
 
 def release_sync_lock(

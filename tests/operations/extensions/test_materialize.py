@@ -110,6 +110,14 @@ class TestStagingSql:
     assert "COALESCE(e.qname, e.code)" in sql
     assert "NOT IN ('native', 'import', 'system')" in sql
 
+  def test_a_severed_quickbooks_account_keeps_its_qname(self):
+    # Sever keeps the stored qb: qname on a now-native row; the graph must not
+    # rename it rl:<code> while OLTP still says qb:<code>.
+    sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["Element"]
+    severed = "WHEN e.source = 'native' AND e.qname LIKE 'qb:%' THEN e.qname"
+    assert severed in sql
+    assert sql.index(severed) < sql.index("ELSE 'rl:' || e.code")
+
   def test_element_reads_from_elements(self):
     tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
     assert "'elements'" in tables["Element"]

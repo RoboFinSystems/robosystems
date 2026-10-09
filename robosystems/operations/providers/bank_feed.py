@@ -62,6 +62,7 @@ def purge_bank_feed_connection(
 
   from ...db.extensions import extensions_session
   from ...middleware.extensions import is_schema_missing
+  from ...operations.extensions.staleness import mark_graph_stale
   from ...operations.roboledger.commands.connections import purge_bank_feed
 
   try:
@@ -72,6 +73,8 @@ def purge_bank_feed_connection(
     if is_schema_missing(exc):
       return {"events_deleted": 0, "events_scrubbed": 0, "agents_deleted": 0}
     raise
+  # The graph projects the purged rows until it is rebuilt.
+  mark_graph_stale(graph_id, "bank_feed_purged")
   logger.info(
     "Purged %s feed on graph %s for connection %s: %s",
     provider,

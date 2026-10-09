@@ -560,17 +560,19 @@ async def cleanup_plaid_connection(connection: dict[str, Any], graph_id: str) ->
     finally:
       client.close()
 
-  purged = purge_bank_feed_connection(
-    graph_id, provider=PROVIDER, connection_id=connection_id
-  )
-  forget_link_token(connection_id)
-
+  # Revoked before the purge: a sync that reaches its write after this point
+  # sees it and writes nothing.
   with platform_session() as db:
     creds = ConnectionCredentials.get_by_connection_id(connection_id, db)
     if creds:
       creds.update_credentials(
         {"auth_mode": AUTH_MODE, "revoked_at": datetime.now(UTC).isoformat()}, db
       )
+  forget_link_token(connection_id)
+
+  purged = purge_bank_feed_connection(
+    graph_id, provider=PROVIDER, connection_id=connection_id
+  )
 
   record_bank_feed_purged(
     provider=PROVIDER,

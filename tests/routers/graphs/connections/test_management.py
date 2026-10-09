@@ -870,6 +870,87 @@ class TestDeleteConnection:
     ):
       yield
 
+  @pytest.fixture(autouse=True)
+  def _fence(self):
+    with patch(f"{MANAGEMENT_MODULE}.sync_fence") as fence:
+      yield fence
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_a_running_sync_refuses_the_disconnect_and_touches_nothing(
+    self, _fence
+  ):
+    from robosystems.operations.connection_service import SyncInProgressError
+
+    _fence.return_value.__enter__.side_effect = SyncInProgressError(
+      CONNECTION_ID, "holder", 600
+    )
+    with (
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.get_connection",
+        new_callable=AsyncMock,
+        return_value=_make_connection_dict(),
+      ),
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.delete_connection",
+        new_callable=AsyncMock,
+      ) as mock_delete,
+      patch(f"{MANAGEMENT_MODULE}.provider_registry") as mock_registry,
+      pytest.raises(HTTPException) as exc_info,
+    ):
+      mock_registry.cleanup_connection = AsyncMock()
+      await delete_connection(
+        graph_id=GRAPH_ID,
+        connection_id=CONNECTION_ID,
+        current_user=_make_mock_user(),
+        db=MagicMock(),
+        _rate_limit=None,
+      )
+
+    assert exc_info.value.status_code == 409
+    _fence.assert_called_once_with(CONNECTION_ID)
+    mock_registry.cleanup_connection.assert_not_awaited()
+    mock_delete.assert_not_awaited()
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_cleanup_and_delete_run_inside_the_fence(self, _fence):
+    order: list[str] = []
+    _fence.return_value.__enter__.side_effect = lambda: order.append("fence")
+    _fence.return_value.__exit__.side_effect = lambda *_: order.append("release")
+
+    async def cleanup(*_args, **_kwargs):
+      order.append("cleanup")
+
+    async def delete(*_args, **_kwargs):
+      order.append("delete")
+      return True
+
+    with (
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.get_connection",
+        new_callable=AsyncMock,
+        return_value=_make_connection_dict(),
+      ),
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.delete_connection",
+        new_callable=AsyncMock,
+        side_effect=delete,
+      ),
+      patch(f"{MANAGEMENT_MODULE}.provider_registry") as mock_registry,
+    ):
+      mock_registry.get_provider = MagicMock(return_value=MagicMock())
+      mock_registry.cleanup_connection = AsyncMock(side_effect=cleanup)
+      await delete_connection(
+        graph_id=GRAPH_ID,
+        connection_id=CONNECTION_ID,
+        current_user=_make_mock_user(),
+        db=MagicMock(),
+        _rate_limit=None,
+      )
+
+    assert order == ["fence", "cleanup", "delete", "release"]
+
   @pytest.mark.unit
   @pytest.mark.asyncio
   async def test_delete_connection_requires_admin_role(self):
@@ -1408,9 +1489,12 @@ class TestCreateConnectionBooksGuard:
 class TestDeleteConnectionSever:
   @pytest.fixture(autouse=True)
   def _grant_graph_admin(self):
-    with patch(
-      f"{MANAGEMENT_MODULE}.GraphUser.user_has_admin_access",
-      return_value=True,
+    with (
+      patch(
+        f"{MANAGEMENT_MODULE}.GraphUser.user_has_admin_access",
+        return_value=True,
+      ),
+      patch(f"{MANAGEMENT_MODULE}.sync_fence"),
     ):
       yield
 

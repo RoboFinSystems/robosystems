@@ -14,6 +14,7 @@ from robosystems.operations.providers.bank_feed import (
 )
 
 AUDIT = "robosystems.security.audit_logger.SecurityAuditLogger.log_security_event"
+STALE = "robosystems.operations.extensions.staleness.mark_graph_stale"
 
 
 @pytest.mark.unit
@@ -29,6 +30,7 @@ class TestPurge:
         "robosystems.operations.roboledger.commands.connections.purge_bank_feed",
         return_value={"events_deleted": 2},
       ) as purge,
+      patch(STALE) as stale,
     ):
       result = purge_bank_feed_connection(
         "kg_test", provider="plaid", connection_id="conn_1"
@@ -36,16 +38,20 @@ class TestPurge:
     assert result == {"events_deleted": 2}
     purge.assert_called_once_with(ext, source="plaid", connection_id="conn_1")
     ext.commit.assert_called_once()
+    # The graph still projects the purged rows until it is rebuilt.
+    stale.assert_called_once_with("kg_test", "bank_feed_purged")
 
   def test_a_missing_schema_is_nothing_to_do(self):
     exc = ProgrammingError("stmt", {}, Exception("schema"))
     with (
       patch("robosystems.db.extensions.extensions_session", side_effect=exc),
       patch("robosystems.middleware.extensions.is_schema_missing", return_value=True),
+      patch(STALE) as stale,
     ):
       assert purge_bank_feed_connection(
         "kg_test", provider="plaid", connection_id="conn_1"
       ) == {"events_deleted": 0, "events_scrubbed": 0, "agents_deleted": 0}
+    stale.assert_not_called()
 
   def test_other_errors_surface(self):
     exc = ProgrammingError("stmt", {}, Exception("other"))

@@ -440,6 +440,9 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
         WHEN e.external_source = 'quickbooks' THEN COALESCE(e.qname, 'qb:' || e.code)
         WHEN e.external_source = 'xero' THEN COALESCE(e.qname, 'xero:' || e.code)
         WHEN e.external_source = 'plaid' THEN COALESCE(e.qname, 'plaid:' || e.code)
+        -- A severed QuickBooks account turns native but keeps its stored
+        -- qname (sever_synced_chart), so the graph keeps it too.
+        WHEN e.source = 'native' AND e.qname LIKE 'qb:%' THEN e.qname
         -- Library/taxonomy concepts (rs-gaap, fac, us-gaap, cm, disclosures,
         -- styles, …) already carry a canonical namespaced qname; emit it
         -- verbatim. Re-prefixing would yield rl:rs-gaap:X, which no canonical

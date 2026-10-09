@@ -31,10 +31,12 @@ from dagster import (
 from robosystems.adapters.bank_feed.sync import (
   BankFeedSyncConfig,
   bootstrap_fiscal_calendar_if_needed,
+  connection_removed,
   default_backfill_start,
   mark_graph_stale,
   record_failed_sync_result,
   release_sync_lock,
+  removed_during_sync,
   update_last_sync,
 )
 from robosystems.logger import logger
@@ -238,6 +240,8 @@ def _sync_item(
   )
 
   with extensions_session(config.graph_id, statement_timeout_ms=None) as session:
+    if connection_removed(config.connection_id):
+      raise removed_during_sync(SOURCE_LABEL)
     link_result = link_bank_accounts(
       session,
       accounts,
@@ -413,7 +417,7 @@ def settle_after_history(
 
 def since_date(config: PlaidSyncConfig, sync_config: dict[str, Any]) -> date:
   """The earliest posting date captured: an explicit ``since_date`` for this
-  run, else the connect-time one, else 1 January of last year."""
+  run, else the connect-time one, else as far back as Plaid goes."""
   if config.since_date:
     return date.fromisoformat(config.since_date)
   stored = sync_config.get("since_date")

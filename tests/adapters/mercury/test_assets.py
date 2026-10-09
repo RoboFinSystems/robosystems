@@ -37,9 +37,8 @@ class TestSinceDate:
       2025, 6, 1
     )
 
-  def test_first_sync_default_is_january_of_last_year(self):
+  def test_first_sync_default_is_the_default_backfill_start(self):
     assert _since_date(_config(), {}, None) == default_backfill_start()
-    assert default_backfill_start(date(2026, 9, 12)) == date(2025, 1, 1)
 
   def test_full_rebuild_ignores_last_sync(self):
     cfg = _config(full_rebuild=True)

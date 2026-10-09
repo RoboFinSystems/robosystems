@@ -31,7 +31,9 @@ from robosystems.operations.connection_service import (
   ConnectionService,
   ProviderConflictError,
   SeverNotSupportedError,
+  SyncInProgressError,
   assert_provider_compatible,
+  sync_fence,
 )
 from robosystems.security.audit_logger import SecurityAuditLogger, SecurityEventType
 
@@ -545,55 +547,67 @@ async def delete_connection(
 
     provider = connection["provider"].lower()
 
-    # Sever first: stamping the chart is the one step that must not be lost
-    # if a later step fails. Nothing below it is destructive to the books.
-    elements_severed: int | None = None
-    if disposition == "sever":
-      try:
-        severed = await ConnectionService.sever_connection(
+    # No sync may run beside the cleanup, nor start before the row is gone:
+    # it would write back what the cleanup removes.
+    try:
+      with sync_fence(connection_id):
+        # Sever first: stamping the chart is the one step that must not be lost
+        # if a later step fails. Nothing below it is destructive to the books.
+        elements_severed: int | None = None
+        if disposition == "sever":
+          try:
+            severed = await ConnectionService.sever_connection(
+              connection_id, current_user.id, graph_id
+            )
+          except SeverNotSupportedError as exc:
+            raise create_error_response(
+              status_code=status.HTTP_400_BAD_REQUEST,
+              detail=str(exc),
+              code=ErrorCode.INVALID_INPUT,
+            )
+          elements_severed = int(severed["elements_severed"])
+          SecurityAuditLogger.log_security_event(
+            event_type=SecurityEventType.CONNECTION_SEVERED,
+            user_id=str(current_user.id),
+            endpoint="/v1/graphs/{graph_id}/connections/{connection_id}",
+            details={
+              "graph_id": graph_id,
+              "connection_id": connection_id,
+              "provider": provider,
+              "elements_severed": elements_severed,
+            },
+            risk_level="medium",
+          )
+
+        # Provider cleanup (e.g. revoking OAuth tokens) before deletion.
+        try:
+          provider_registry.get_provider(provider)
+          await provider_registry.cleanup_connection(provider, connection, graph_id)
+        except ValueError:
+          # Provider disabled — skip cleanup, still allow deletion
+          logger.warning(
+            "Provider %s disabled, skipping cleanup for connection %s",
+            provider,
+            connection_id,
+          )
+
+        success = await ConnectionService.delete_connection(
           connection_id, current_user.id, graph_id
         )
-      except SeverNotSupportedError as exc:
-        raise create_error_response(
-          status_code=status.HTTP_400_BAD_REQUEST,
-          detail=str(exc),
-          code=ErrorCode.INVALID_INPUT,
-        )
-      elements_severed = int(severed["elements_severed"])
-      SecurityAuditLogger.log_security_event(
-        event_type=SecurityEventType.CONNECTION_SEVERED,
-        user_id=str(current_user.id),
-        endpoint="/v1/graphs/{graph_id}/connections/{connection_id}",
-        details={
-          "graph_id": graph_id,
-          "connection_id": connection_id,
-          "provider": provider,
-          "elements_severed": elements_severed,
-        },
-        risk_level="medium",
-      )
 
-    # Provider cleanup (e.g. revoking OAuth tokens) before deletion.
-    try:
-      provider_registry.get_provider(provider)
-      await provider_registry.cleanup_connection(provider, connection, graph_id)
-    except ValueError:
-      # Provider disabled — skip cleanup, still allow deletion
-      logger.warning(
-        "Provider %s disabled, skipping cleanup for connection %s",
-        provider,
-        connection_id,
-      )
-
-    success = await ConnectionService.delete_connection(
-      connection_id, current_user.id, graph_id
-    )
-
-    if not success:
+        if not success:
+          raise create_error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete connection",
+            code=ErrorCode.INTERNAL_ERROR,
+          )
+    except SyncInProgressError:
       raise create_error_response(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail="Failed to delete connection",
-        code=ErrorCode.INTERNAL_ERROR,
+        status_code=status.HTTP_409_CONFLICT,
+        detail=(
+          "A sync is running for this connection. Disconnect it once the sync finishes."
+        ),
+        code=ErrorCode.OPERATION_FAILED,
       )
 
     logger.info(f"Connection {connection_id} deleted successfully")

@@ -358,6 +358,18 @@ class TestBody:
     run.update.assert_not_called()
     run.stale.assert_called_once()
 
+  def test_a_connection_disconnected_mid_run_writes_nothing(self):
+    run = _run_body(
+      [_sync("HISTORICAL_UPDATE_COMPLETE", next_cursor="c9")],
+      removed=True,
+      expect=Failure,
+    )
+    assert "disconnected during the sync" in str(run.error)
+    run.load.assert_not_called()
+    run.balances.assert_not_called()
+    run.session.commit.assert_not_called()
+    run.store.assert_not_called()
+
 
 SEEN = {
   "access_token": "access-1",
@@ -377,7 +389,14 @@ def _sync(status: str, *, next_cursor: str = "", added: int = 0) -> Transactions
 
 
 def _run_body(
-  syncs, *, credentials=None, failed=0, errors=(), expect=None, accounts=()
+  syncs,
+  *,
+  credentials=None,
+  failed=0,
+  errors=(),
+  expect=None,
+  accounts=(),
+  removed=False,
 ):
   """Run the body against a mocked Plaid client and tenant session.
 
@@ -438,6 +457,7 @@ def _run_body(
     patch(f"{MODULE}.update_last_sync") as update,
     patch(f"{MODULE}.bootstrap_fiscal_calendar_if_needed") as bootstrap,
     patch(f"{MODULE}.mark_graph_stale") as stale,
+    patch(f"{MODULE}.connection_removed", return_value=removed),
   ):
     run.clock, run.store, run.update, run.mark = clock, store, update, mark
     run.bootstrap, run.stale, run.load = bootstrap, stale, load

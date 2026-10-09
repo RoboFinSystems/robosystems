@@ -143,3 +143,41 @@ def test_the_reconciling_item_plan_uses_the_same_rule():
       [date(2019, 5, 1), date(2026, 7, 3), date(2026, 8, 20)],
       PARENT_ENTITY_ID,
     ) == ["2019-05", "2026-07"]
+
+
+def test_a_bank_feed_takes_no_new_line_into_a_closed_month():
+  from robosystems.adapters.bank_feed.load import in_closed_months
+
+  def line(external_id, day, entity_id=None):
+    return {
+      "external_id": external_id,
+      "occurred_at": f"{day}T00:00:00Z",
+      "entity_id": entity_id,
+    }
+
+  with extensions_session(GRAPH) as session:
+    closed = in_closed_months(
+      session,
+      [
+        line("before_rows", "2025-03-15"),
+        line("closed_row", "2026-07-31", PARENT_ENTITY_ID),
+        line("open_row", "2026-08-01"),
+        # Another entity's books, never closed: the parent's close is not its.
+        line("sibling", "2026-07-10", "ent_test_sibling"),
+      ],
+    )
+  assert closed == {"before_rows", "closed_row"}
+
+
+def test_a_line_with_no_readable_date_is_left_to_capture():
+  from robosystems.adapters.bank_feed.load import in_closed_months
+
+  with extensions_session(GRAPH) as session:
+    closed = in_closed_months(
+      session,
+      [
+        {"external_id": "undated", "occurred_at": "None", "entity_id": None},
+        {"external_id": "closed", "occurred_at": "2026-07-10T00:00:00Z"},
+      ],
+    )
+  assert closed == {"closed"}

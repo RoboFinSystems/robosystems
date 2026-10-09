@@ -24,8 +24,9 @@ def _config(**overrides) -> BankFeedSyncConfig:
 
 
 @pytest.mark.unit
-def test_default_backfill_start_is_january_of_last_year():
-  assert default_backfill_start(date(2026, 9, 12)) == date(2025, 1, 1)
+def test_default_backfill_start_is_as_far_back_as_plaid_goes():
+  # 730 days, the start day included: what Plaid's days_requested caps at.
+  assert default_backfill_start(date(2026, 9, 12)) == date(2024, 9, 13)
 
 
 @pytest.mark.unit
@@ -173,3 +174,36 @@ class TestBookkeeping:
     assert result["error"] == {"code": "RuntimeError", "message": "bank down"}
     assert result["window"]["full_rebuild"] is True
     conn.update_last_sync.assert_not_called()
+
+
+@pytest.mark.unit
+class TestConnectionRemoved:
+  def _removed(self, connection, credentials):
+    creds = None
+    if credentials is not None:
+      creds = MagicMock()
+      creds.get_credentials.return_value = credentials
+    with (
+      patch("robosystems.database.SessionFactory"),
+      patch(
+        "robosystems.models.core.connection.connection.Connection.get_by_id",
+        return_value=connection,
+      ),
+      patch(
+        "robosystems.models.core.connection.connection_credentials."
+        "ConnectionCredentials.get_by_connection_id",
+        return_value=creds,
+      ),
+    ):
+      from robosystems.adapters.bank_feed.sync import connection_removed
+
+      return connection_removed("conn_1")
+
+  def test_a_live_connection_is_not_removed(self):
+    assert not self._removed(MagicMock(), {"access_token": "a"})
+
+  def test_a_soft_deleted_connection_is_removed(self):
+    assert self._removed(None, {"access_token": "a"})
+
+  def test_revoked_credentials_are_removed(self):
+    assert self._removed(MagicMock(), {"revoked_at": "2026-10-09T00:00:00+00:00"})

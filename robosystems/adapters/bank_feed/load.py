@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -56,6 +56,37 @@ class LoadReport:
       "classified": dict(self.classification),
       "suggestions": dict(self.resolved),
     }
+
+
+def in_closed_months(session: Session, payloads: Iterable[dict[str, Any]]) -> set[str]:
+  """The external ids of lines dated in a month their entity has closed.
+
+  A closed month takes no new bank lines: they could never post there, and
+  the books it closed on would change under the receipt. To bring one in,
+  reopen the month and sync again from its first day.
+  """
+  from robosystems.operations.roboledger.commands._guards import closed_periods
+
+  by_entity: dict[str | None, list[dict[str, Any]]] = {}
+  for payload in payloads:
+    by_entity.setdefault(payload.get("entity_id") or None, []).append(payload)
+  closed: set[str] = set()
+  for entity_id, rows in by_entity.items():
+    dates: dict[str, date] = {}
+    for row in rows:
+      # A line with no readable date is left to capture, which refuses it
+      # on its own rather than failing the whole run here.
+      try:
+        dates[str(row["external_id"])] = date.fromisoformat(
+          str(row["occurred_at"])[:10]
+        )
+      except ValueError:
+        continue
+    months = {
+      month for month, _ in closed_periods(session, dates.values(), entity_id=entity_id)
+    }
+    closed.update(eid for eid, day in dates.items() if f"{day:%Y-%m}" in months)
+  return closed
 
 
 def earliest_plausible(events: Iterable[dict[str, Any]]) -> str | None:

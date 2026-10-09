@@ -893,7 +893,10 @@ class SyncConnectionTool:
         "`last_sync_at` advances past the dispatch time (and any "
         "`sync_stale` blocker clears) before proceeding with a close. A "
         "`sync_in_progress` error means a sync is already running — wait "
-        "and poll rather than retrying."
+        "and poll rather than retrying. A bank feed never captures a line "
+        "dated in a closed period; `last_sync_result` counts them under "
+        "`skipped.closed_period`. To bring one in, reopen the period, then "
+        "sync with `since_date` set to its first day."
       ),
       "inputSchema": {
         "type": "object",
