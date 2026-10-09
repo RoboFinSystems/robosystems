@@ -294,6 +294,7 @@ class GraphMCPTools:
     self.list_period_drafts_tool = None
     self.get_fiscal_calendar_tool = None
     self.initialize_fiscal_calendar_tool = None
+    self.change_calendar_start_tool = None
     self.get_report_bundle_tool = None
     self.close_period_tool = None
     self.reopen_period_tool = None
@@ -307,6 +308,7 @@ class GraphMCPTools:
     ):
       from .fiscal_calendar_tools import (
         BackfillPlanHistoryTool,
+        ChangeCalendarStartTool,
         ClosePeriodTool,
         GetFiscalCalendarTool,
         InitializeFiscalCalendarTool,
@@ -327,6 +329,7 @@ class GraphMCPTools:
         self.initialize_fiscal_calendar_tool = InitializeFiscalCalendarTool(
           graph_client
         )
+        self.change_calendar_start_tool = ChangeCalendarStartTool(graph_client)
         self.close_period_tool = ClosePeriodTool(graph_client)
         self.reopen_period_tool = ReopenPeriodTool(graph_client)
         self.backfill_plan_history_tool = BackfillPlanHistoryTool(graph_client)
@@ -669,6 +672,8 @@ class GraphMCPTools:
       tools.append(self.get_report_bundle_tool.get_tool_definition())
     if self.initialize_fiscal_calendar_tool is not None:
       tools.append(self.initialize_fiscal_calendar_tool.get_tool_definition())
+    if self.change_calendar_start_tool is not None:
+      tools.append(self.change_calendar_start_tool.get_tool_definition())
     if self.close_period_tool is not None:
       tools.append(self.close_period_tool.get_tool_definition())
     if self.reopen_period_tool is not None:
@@ -1300,6 +1305,15 @@ class GraphMCPTools:
             "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.initialize_fiscal_calendar_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "change-calendar-start":
+        if self.change_calendar_start_tool is None:
+          raise ValueError(
+            "change-calendar-start tool is not available. "
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
+          )
+        result = await self.change_calendar_start_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "close-period":

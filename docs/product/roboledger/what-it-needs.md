@@ -35,12 +35,12 @@ Ask: "Which accounts aren't mapped yet? Suggest where each one belongs."
 
 The calendar records which months are closed and which month you're working towards. The first sync sets it up with the month two months back marked as the last one closed, and last month as the next to close. The fiscal year starts in January.
 
-A company with no calendar shows **Set up calendar** on the **Entities** page. Setting one up asks where that company's books start, and that choice can't be changed later:
+A company with no calendar shows **Set up calendar** on the **Entities** page. Setting one up asks where that company's books start:
 
 - **New books, or moving over at a month-end:** pick the first month these books close. It starts open, so a cutover's opening balances go in it.
 - **History already closed in another system:** pick the last month closed there. It and every month before it are locked, and the first close is the month after.
 
-The dialog shows the first close before you confirm. If it's months back, every month from there has to close in order. A subsidiary follows the group's fiscal year. Your assistant can set the calendar up too, once you tell it which of the two applies and the month. If QuickBooks hasn't finished its first sync, wait for it instead: the sync sets the calendar up with last month as the next to close.
+The dialog shows the first close before you confirm. If it's months back, every month from there has to close in order. Until the company's first close, your assistant can move the start: earlier, to take in history the bank feed brought, or later, to drop empty months. A subsidiary follows the group's fiscal year. Your assistant can set the calendar up too, once you tell it which of the two applies and the month. If QuickBooks hasn't finished its first sync, wait for it instead: the sync sets the calendar up with last month as the next to close.
 
 Ask: "Where does our fiscal calendar stand, and what's blocking the next close?"
 

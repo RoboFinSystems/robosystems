@@ -60,6 +60,8 @@ WRITE_TOOL_HINTS: dict[str, ToolHints] = {
   # Period close. close-period publishes opted-in drafts to QuickBooks.
   "close-period": _write(destructive=True, idempotent=False, open_world=True),
   "initialize-fiscal-calendar": _ADDS_ONCE,
+  # Moves the calendar's first month; repeating with the same month is a no-op.
+  "change-calendar-start": _REPLACES,
   "reopen-period": _REPLACES_ONCE_PER_STATE,
   # Pulls from the user's QuickBooks / bank connection; full_rebuild resets
   # captured state.

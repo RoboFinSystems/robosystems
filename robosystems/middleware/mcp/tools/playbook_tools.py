@@ -127,8 +127,9 @@ _INITIATE_SEQUENCE: list[str] = [
   "start. New or cut-over books pass first_open_period, the first month "
   "they close (a cutover's opening entry goes in that month, so it must be "
   "open); books whose history was closed in another system pass "
-  "closed_through, the last month closed there. One-time and not "
-  "re-runnable, so confirm the month before calling.",
+  "closed_through, the last month closed there. One-time; until the first "
+  "close, change-calendar-start moves the start (earlier for history that "
+  "predates it, later to drop empty months).",
   "ORIENT FIRST — call get-fiscal-calendar and read `closed_through` (the "
   "watermark) and `close_target`. `closed_through` may be a BASELINE set at "
   "initialization (e.g. '2026-05') even when those months were never closed "
@@ -317,6 +318,7 @@ def _build_playbook(mode: str) -> dict[str, Any]:
   payload["related_tools"] = [
     "get-fiscal-calendar",
     "initialize-fiscal-calendar",
+    "change-calendar-start",
     "get-period-close-status",
     "create-information-block",
     "promote-obligations",

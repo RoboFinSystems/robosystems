@@ -24,6 +24,7 @@ import pytest
 from robosystems.middleware.mcp.tools._gate import MCPExtensionGateError
 from robosystems.middleware.mcp.tools.fiscal_calendar_tools import (
   BackfillPlanHistoryTool,
+  ChangeCalendarStartTool,
   ClosePeriodTool,
   GetFiscalCalendarTool,
   InitializeFiscalCalendarTool,
@@ -33,6 +34,7 @@ from robosystems.middleware.sse.event_storage import OperationStatus
 from robosystems.models.api.extensions.fiscal_calendar import (
   BackfillPeriodOutcome,
   BackfillPlanHistoryResponse,
+  ChangeCalendarStartResponse,
   ClosePeriodResponse,
   FiscalCalendarResponse,
   InitializeLedgerResponse,
@@ -43,6 +45,8 @@ from robosystems.operations.roboledger.commands.fiscal_calendar import (
 )
 from robosystems.operations.roboledger.fiscal_calendar.service import (
   CalendarAlreadyInitializedError,
+  CalendarStartBlockedError,
+  CalendarStartLockedError,
   InvalidCloseTargetError,
 )
 
@@ -536,6 +540,68 @@ class TestInitializeFiscalCalendarTool:
       patch(f"{MODULE}.ops_initialize_ledger") as ops,
     ):
       result = await tool.execute({"first_open_period": "2026-09"})
+
+    assert result["error"] == "repository_write_forbidden"
+    ops.assert_not_called()
+
+
+class TestChangeCalendarStartTool:
+  @pytest.mark.asyncio
+  async def test_the_new_start_and_entity_reach_the_command(self):
+    tool = ChangeCalendarStartTool(_client(user_id="usr_abc"))
+    response = ChangeCalendarStartResponse(
+      fiscal_calendar=_fc_response(entity_id="ent_sub"), periods_created=7
+    )
+    with (
+      _patch_sessions(),
+      patch(f"{MODULE}.ops_change_calendar_start", return_value=response) as ops,
+    ):
+      result = await tool.execute(
+        {"entity_id": "ent_sub", "first_open_period": "2026-02"}
+      )
+
+    body = ops.call_args.args[3]
+    assert (body.entity_id, body.first_open_period) == ("ent_sub", "2026-02")
+    assert ops.call_args.kwargs["actor_type"] == "agent"
+    assert result["periods_created"] == 7
+    assert result["fiscal_calendar"]["entity_id"] == "ent_sub"
+
+  @pytest.mark.parametrize(
+    ("error", "code"),
+    [
+      (CalendarStartLockedError("closed"), "calendar_start_locked"),
+      (CalendarStartBlockedError("2026-09", 2, 3), "calendar_start_blocked"),
+      (InvalidCloseTargetError("future"), "invalid_period"),
+    ],
+    ids=["locked", "blocked", "invalid"],
+  )
+  @pytest.mark.asyncio
+  async def test_refusals_come_back_as_codes(self, error, code):
+    tool = ChangeCalendarStartTool(_client(user_id="usr_abc"))
+    with (
+      _patch_sessions(),
+      patch(f"{MODULE}.ops_change_calendar_start", side_effect=error),
+    ):
+      result = await tool.execute({"first_open_period": "2026-02"})
+
+    assert result["error"] == code
+    if code == "calendar_start_blocked":
+      assert (result["entries"], result["unposted_source_lines"]) == (2, 3)
+
+  @pytest.mark.asyncio
+  async def test_rejects_on_repo_graph_before_ops(self):
+    tool = ChangeCalendarStartTool(_client(user_id="usr_abc"))
+    with (
+      patch(
+        f"{MODULE}.require_graph_extension_mcp",
+        side_effect=MCPExtensionGateError(
+          "repository_write_forbidden",
+          "roboledger commands are not available on repository graphs",
+        ),
+      ),
+      patch(f"{MODULE}.ops_change_calendar_start") as ops,
+    ):
+      result = await tool.execute({"first_open_period": "2026-02"})
 
     assert result["error"] == "repository_write_forbidden"
     ops.assert_not_called()

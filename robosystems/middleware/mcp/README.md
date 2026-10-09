@@ -158,6 +158,7 @@ delegates to `robosystems.operations.roboledger.{reads,commands}.*`.
 |------|--------------|
 | `get-fiscal-calendar` | `reads/fiscal_calendar.build_fiscal_calendar_response` |
 | `initialize-fiscal-calendar` | `commands/fiscal_calendar.initialize_ledger` |
+| `change-calendar-start` | `commands/fiscal_calendar.change_calendar_start` |
 | `close-period` | `commands/fiscal_calendar.close_period` |
 | `reopen-period` | `commands/fiscal_calendar.reopen_period` |
 | `backfill-plan-history` | `commands/fiscal_calendar.backfill_plan_history` |
