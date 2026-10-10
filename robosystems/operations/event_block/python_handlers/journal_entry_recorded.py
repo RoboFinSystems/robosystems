@@ -34,10 +34,15 @@ from robosystems.operations.roboledger.commands._guards import (
   assert_accounts_postable,
   assert_period_not_closed,
 )
+from robosystems.operations.roboledger.commands.connections import SEVERABLE_SOURCES
 from robosystems.operations.roboledger.commands.journal_entries import (
   UnbalancedJournalEntryError,
   create_journal_entry,
   validate_and_normalize_lines,
+)
+from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+  ShadowLedgerPostingError,
+  assert_local_posting_allowed,
 )
 
 from .types import (
@@ -253,6 +258,12 @@ def _link_entry_and_txn(
     transaction_ids.append(transaction_id)
 
 
+def _mirrors_source(event: Event) -> bool:
+  """A catch-up entry: it posts the difference an upstream edit made, so the
+  ledger follows the source rather than departing from it."""
+  return bool((event.metadata_ or {}).get("reconciles_event_id"))
+
+
 def _dispatch_flat(
   session: Session,
   event: Event,
@@ -271,7 +282,13 @@ def _dispatch_flat(
     # Keep the originating kind (bill_paid, ...) rather than ``journal_entry``.
     transaction_type=event.event_type,
   )
-  response = create_journal_entry(session, body, created_by, entity_id=event.entity_id)
+  response = create_journal_entry(
+    session,
+    body,
+    created_by,
+    entity_id=event.entity_id,
+    mirrors_source=_mirrors_source(event),
+  )
 
   entry_ids: list[str] = []
   transaction_ids: list[str] = []
@@ -327,7 +344,11 @@ def _dispatch_nested(
       transaction_type=event.event_type,
     )
     response = create_journal_entry(
-      session, body, created_by, entity_id=event.entity_id
+      session,
+      body,
+      created_by,
+      entity_id=event.entity_id,
+      mirrors_source=_mirrors_source(event),
     )
     if shared_txn_id is None:
       shared_txn_id = response.transaction_id
@@ -461,6 +482,14 @@ def dispatch_preview(
     )
   except (InactiveAccountError, AccountOutsideEntityChartError) as e:
     errors.append(str(e))
+
+  synced = (body.source or "").lower() in SEVERABLE_SOURCES
+  mirrors = bool((body.metadata or {}).get("reconciles_event_id"))
+  if metadata.status == "posted" and not synced and not mirrors:
+    try:
+      assert_local_posting_allowed(session, entity_id, "Posting this journal entry")
+    except ShadowLedgerPostingError as e:
+      errors.append(str(e))
 
   planned, total_debit, total_credit, balance_errors = _preview_planned_entries(
     metadata
