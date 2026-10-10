@@ -24,6 +24,12 @@ Each row shows the date, the event (an invoice issued, a bill paid, a check writ
 
 Open a row to see the event and, for a QuickBooks transaction, its journal lines. **Preview** checks whether it can post, flagging a closed month or an entry that doesn't balance, and summarizes each entry's debit and credit. **Approve** records it in the ledger. **Reject** asks you to confirm, then voids it, and a voided event never posts.
 
+## Attach the document behind an event
+
+An event can keep the document it rests on: the bill, the receipt or the invoice. Open the event and, under **Document**, attach a PDF or a photo (PNG or JPEG) up to 25 MB. Once it's attached, **Download** gets it back and **Detach** unlinks it; the document itself stays stored.
+
+You can attach one to any event that hasn't been rejected or replaced, so a bill that's already posted or paid can still get its receipt. A stored document can't be deleted while an event still rests on it, and it isn't searchable.
+
 ## Statuses
 
 The Inbox opens on **Captured**. Change the status filter to see the rest.

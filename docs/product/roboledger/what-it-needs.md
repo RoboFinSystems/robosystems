@@ -40,7 +40,7 @@ A company with no calendar shows **Set up calendar** on the **Entities** page. S
 - **New books, or moving over at a month-end:** pick the first month these books close. It starts open, so a cutover's opening balances go in it.
 - **History already closed in another system:** pick the last month closed there. It and every month before it are locked, and the first close is the month after.
 
-The dialog shows the first close before you confirm. If it's months back, every month from there has to close in order. Until the company's first close, your assistant can move the start: earlier, to take in history the bank feed brought, or later, to drop empty months. A subsidiary follows the group's fiscal year. Your assistant can set the calendar up too, once you tell it which of the two applies and the month. If QuickBooks hasn't finished its first sync, wait for it instead: the sync sets the calendar up with last month as the next to close.
+The dialog shows the first close before you confirm. If it's months back, every month from there has to close in order. Until the company's first close, the start can still move: earlier, to take in history the bank feed brought, or later, to drop empty months. Choose **Change start** beside the company on the **Entities** page, or ask your assistant. Moving it later is refused while the months it would drop hold any entry. A subsidiary follows the group's fiscal year. Your assistant can set the calendar up too, once you tell it which of the two applies and the month. If QuickBooks hasn't finished its first sync, wait for it instead: the sync sets the calendar up with last month as the next to close.
 
 Ask: "Where does our fiscal calendar stand, and what's blocking the next close?"
 

@@ -29,9 +29,11 @@ Materiality is zero unless you set one, so the two sides have to agree to the ce
 
 ## Record a statement balance
 
-Choose **Record statement**, pick the account, and enter the **Statement ending date** and the **Ending balance** as the statement shows it. An amount owed on a loan or a card is a positive number. Only balance-sheet accounts can be reconciled to a statement.
+Choose **Record statement**, pick the account, and enter the **Statement ending date** and the **Ending balance** as the statement shows it. An amount owed on a loan or a card is a positive number. Only balance-sheet accounts can be reconciled to a statement. In a reporting group, the balance is recorded for the company you have selected, against its own accounts.
 
-A statement that ends mid-month is compared with the ledger at its own date. Recording the same account and date again replaces the earlier balance. Your assistant can also keep the statement itself with the balance as evidence.
+Attach the statement itself as a PDF, or a photo of it as a PNG or JPEG, up to 25 MB. It is kept with the balance as the evidence for it, and a reconciliation that rests on a statement offers **Download statement** beside it. A stored statement isn't searchable, and it can't be deleted while a balance still rests on it.
+
+A statement that ends mid-month is compared with the ledger at its own date. Recording the same account and date again replaces the earlier balance.
 
 ## When the close waits on one
 
@@ -61,6 +63,7 @@ If a reconciliation can't be cleared before the close, the close can still run w
 - "Run August's reconciliations and tell me what doesn't tie."
 - "Compare the ledger with QuickBooks at August 31 without recording anything."
 - "The checking account statement ends August 31 at 18,250.75. Record it and reconcile."
+- "I've uploaded September's checking statement. Read its ending balance and reconcile the account to it."
 - "Set a $25 materiality on the synced-books reconciliation."
 - "Which reconciliations are holding the September close, and why?"
 - "Require a separate reviewer on the bank reconciliations."

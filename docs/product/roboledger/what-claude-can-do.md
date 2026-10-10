@@ -53,6 +53,7 @@ Your assistant can tie your balances to something outside the ledger: QuickBooks
 
 - "Reconcile September and tell me what doesn't tie."
 - "The bank statement for checking ended September at $48,210.55. Does the ledger agree?"
+- "I've uploaded the September statement for checking. Read it and reconcile the account to it."
 
 ## Close the month
 
