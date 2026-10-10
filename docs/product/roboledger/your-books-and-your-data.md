@@ -21,7 +21,7 @@ RoboLedger never sees your QuickBooks password. The access Intuit grants it is e
 
 ## What your AI assistant sees
 
-Your assistant reads what it needs to answer, through RoboLedger's tools, and those answers go to its model provider under your AI client's terms. **Ask about this report**, the Console and account mapping run instead on RoboSystems' own AI: Claude models hosted in AWS Bedrock, with inference kept in the United States. RoboSystems' AI doesn't use your data to train models. See [Security and your data](https://robosystems.ai/docs/guides/security-and-your-data).
+Your assistant reads what it needs to answer, through RoboLedger's tools, and those answers go to its model provider under your AI client's terms. **Ask about this report**, the Console and account mapping run instead on RoboSystems' own AI: Claude models hosted in AWS Bedrock, with inference kept in the United States. A change you ask the Console to make runs on Claude Opus, the most capable of them; questions, report answers and mapping run on Claude Sonnet. RoboSystems' AI doesn't use your data to train models. See [Security and your data](https://robosystems.ai/docs/guides/security-and-your-data).
 
 ## Taking it with you
 

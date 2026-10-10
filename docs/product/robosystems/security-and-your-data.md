@@ -35,7 +35,7 @@ See [Sign-in and graph access](oauth-and-graph-scope.md).
 
 ## AI that runs inside RoboSystems
 
-Some features use RoboSystems' own AI rather than your client's: the **Console**, **Ask about this report** in RoboLedger, and chart-of-accounts mapping (automatic when a QuickBooks company has no mappings yet, and the **Auto-Map** button). They run on Claude models hosted in AWS Bedrock, with inference kept in the United States. RoboSystems' AI does not use your data to train models, ours or the model provider's. What your own AI client's provider does with what it reads is governed by that client's terms. These features use credits; see [Graphs, tiers and credits](graphs-tiers-and-credits.md).
+Some features use RoboSystems' own AI rather than your client's: the **Console**, **Ask about this report** in RoboLedger, and chart-of-accounts mapping (automatic when a QuickBooks company has no mappings yet, and the **Auto-Map** button). They run on Claude models hosted in AWS Bedrock, with inference kept in the United States, and each kind of work goes to the model that fits it. A change made through the Console's `/do` runs on Claude Opus, the most capable of them, because a wrong change costs more than a wrong answer. Questions, report answers and account mapping run on Claude Sonnet. RoboSystems' AI does not use your data to train models, ours or the model provider's. What your own AI client's provider does with what it reads is governed by that client's terms. These features use credits; see [Graphs, tiers and credits](graphs-tiers-and-credits.md).
 
 ## Signing in
 

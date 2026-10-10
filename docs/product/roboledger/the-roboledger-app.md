@@ -73,7 +73,7 @@ The reporting concepts your accounts map to, with their definitions and how they
 
 ## Console
 
-Ask questions about your books inside the app, from the Console bar at the bottom of every page. Start a request with `/do` to have it make a change: add a metric block or run a forecast, add or update a customer or vendor, remember something, draft a report, or draft the schedule entries that are due. It lists what it changed, and Plan and Explorer refresh to show it. Filing or sharing a report, closing a period, posting entries and deleting stay out of the Console. The Console runs on RoboLedger's own AI, so questions and changes use credits from your plan's monthly allowance. Claude, ChatGPT and other clients you connect yourself don't use credits.
+Ask questions about your books inside the app, from the Console bar at the bottom of every page. Start a request with `/do` to have it make a change: add a metric block or run a forecast, add or update a customer or vendor, remember something, draft a report, draft the schedule entries that are due, or sort bank-feed lines in the **Inbox** into accounts. It lists what it changed, and Plan and Explorer refresh to show it. A line it sorts posts only when someone commits it. Filing or sharing a report, closing a period, posting entries and deleting stay out of the Console. The Console runs on RoboLedger's own AI, so questions and changes use credits from your plan's monthly allowance. A change runs on a more capable model than a question, because a wrong change costs more than a wrong answer, so it usually uses more. Claude, ChatGPT and other clients you connect yourself don't use credits.
 
 ## Search
 

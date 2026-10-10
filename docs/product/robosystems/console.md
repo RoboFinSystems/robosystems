@@ -26,9 +26,9 @@ When it queries the graph, it shows the **Generated Cypher** so you can check th
 
 ## Asking it to make a change
 
-A plain question only reads. To have the Console change something, start the request with `/do`, for example "/do add a gross margin metric block". It makes changes that can be undone or that wait for a person: metric and forecast blocks, counterparties, memories, a draft report, and the month's pending schedule entries, drafted. When it finishes, it lists each change it made. In RoboLedger, Plan and Explorer refresh to show them. Changes use credits like questions do, and need write access to the graph.
+A plain question only reads. To have the Console change something, start the request with `/do`, for example "/do add a gross margin metric block". It makes changes that can be undone or that wait for a person: metric and forecast blocks, counterparties, memories, a draft report, the month's pending schedule entries, drafted, and bank-feed lines in the **Inbox**, sorted into accounts. When it finishes, it lists each change it made. In RoboLedger, Plan and Explorer refresh to show them. Changes use credits like questions do, and need write access to the graph. A change runs on a more capable model than a question, because a wrong change costs more than a wrong answer, so it usually uses more credits; see [Security and your data](security-and-your-data.md#ai-that-runs-inside-robosystems).
 
-What it drafts stays a draft. Filing or sharing a report it created is done by a person in RoboLedger, and a schedule entry it drafts posts only when someone closes the month.
+What it drafts stays a draft. Filing or sharing a report it created is done by a person in RoboLedger, a bank-feed line it sorts posts only when someone commits it, and a schedule entry it drafts posts only when someone closes the month.
 
 Some work stays out of the Console on purpose: posting and editing journal entries, closing or reopening a period, and deleting anything. Do those in the RoboLedger app or through your own AI assistant.
 
