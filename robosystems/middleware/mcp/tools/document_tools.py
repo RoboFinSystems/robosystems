@@ -4,7 +4,7 @@ Free-form notes are documents with ``folder="memory"``; search is
 search-documents.
 """
 
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -109,16 +109,15 @@ def _check_graph_access(graph_id: str, require_write: bool = False) -> dict | No
 
 
 def _file_summary(doc) -> dict | None:
-  """A stored file's identity, for a document that is one: its bytes are
-  downloaded in the app, never through a tool."""
+  """A stored file's identity, for a document that is one. Its text is read
+  with read-document-file; its bytes are downloaded in the app."""
   if not doc.is_file:
     return None
   return {
     "file_name": doc.file_name,
     "content_type": doc.file_content_type,
-    "size_bytes": doc.file_size_bytes if doc.file_sha256 else None,
+    "size_bytes": doc.file_size_bytes,
     "sha256": doc.file_sha256,
-    "status": doc.file_status,
   }
 
 
@@ -630,5 +629,314 @@ class ListDocumentsTool:
         "message": safe_error_message(e)
         or "list-documents failed on a backend error; see server logs",
       }
+    finally:
+      session.close()
+
+
+# ── Document files ─────────────────────────────────────────────────────────
+# The bytes never pass through the model: an agent with a shell uploads them
+# with the command create-document-upload returns. A client without one (a
+# chat) cannot, and sends the user to the RoboLedger app to upload instead.
+
+_PATH_PLACEHOLDER = "<path-to-file>"
+
+
+class CreateDocumentUploadTool:
+  """Presign the upload of a document file, such as a statement PDF."""
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "create-document-upload",
+      "description": """Start uploading a file to keep as a document: a bank statement, an invoice or a receipt.
+
+**WHEN TO USE:** You can run shell commands and the file is on the local disk
+(Claude Code, an agent). Without a shell — a chat with the PDF attached — you
+cannot send its bytes: ask the user to upload it in the RoboLedger app, then
+find it with list-documents.
+
+**WORKFLOW:**
+1. Call this with the file's name (and its local path, to get a ready command).
+2. Run the returned `upload_command`. It PUTs the file; nothing passes through you.
+3. Call complete-document-upload with the `upload_id` and a title.
+
+**RETURNS:** `upload_id`, `upload_url`, `expires_in` and `upload_command`.
+
+**NOTES:** A PDF, PNG or JPEG, at most 25 MB; the type is taken from the
+file's extension. Nothing is recorded until the upload completes, and an
+upload never completed expires. Stored files are not indexed for search.""",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file_name": {
+            "type": "string",
+            "description": (
+              "The file's name, ending in .pdf, .png, .jpg or .jpeg "
+              "(e.g. 'checking-2026-09.pdf')"
+            ),
+          },
+          "file_path": {
+            "type": "string",
+            "description": (
+              "The file's local path, used only to write upload_command; the "
+              "server never reads it"
+            ),
+          },
+        },
+        "required": ["file_name"],
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
+    import shlex
+
+    from robosystems.config.constants import PRESIGNED_URL_EXPIRY_SECONDS
+    from robosystems.models.api.graphs.operations import (
+      CreateDocumentUploadOp,
+      DocumentFileContentType,
+    )
+    from robosystems.operations.document_service import (
+      DocumentFileError,
+      DocumentService,
+      document_content_type,
+    )
+
+    graph_id = self.client.graph_id
+    blocked = _block_shared_repository(graph_id)
+    if blocked:
+      return blocked
+    access_error = _check_graph_access(graph_id, require_write=True)
+    if access_error:
+      return access_error
+
+    session = _get_platform_session()
+    try:
+      file_name = arguments["file_name"]
+      request = CreateDocumentUploadOp(
+        file_name=file_name,
+        content_type=cast(DocumentFileContentType, document_content_type(file_name)),
+      )
+      upload_id, url = DocumentService(session).begin_file_upload(graph_id, request)
+    except (DocumentFileError, ValueError) as e:
+      return {"error": "invalid_input", "message": str(e)}
+    finally:
+      session.close()
+
+    path = arguments.get("file_path")
+    target = shlex.quote(path) if path else _PATH_PLACEHOLDER
+    return {
+      "upload_id": upload_id,
+      "upload_url": url,
+      "expires_in": PRESIGNED_URL_EXPIRY_SECONDS,
+      "upload_command": (
+        f"curl -sSf -X PUT -H {shlex.quote('Content-Type: ' + request.content_type)} "
+        f"--data-binary @{target} {shlex.quote(url)}"
+      ),
+      "next": "Run upload_command, then call complete-document-upload with upload_id.",
+    }
+
+
+class CompleteDocumentUploadTool:
+  """Store an uploaded file as a document."""
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "complete-document-upload",
+      "description": """Store a file uploaded with create-document-upload as a document.
+
+**WHEN TO USE:** After the upload command succeeded.
+
+**RETURNS:** The new document's id, title, folder and its stored file (name,
+size, SHA-256). Pass `document_id` to record-statement-balance as the
+statement's evidence; read the file's text with read-document-file.
+
+**NOTES:** The file is checked (a real PDF, within the size cap) and hashed; a
+file that fails is discarded. Completing the same upload twice returns the
+same document. A stored file is not searchable with search-documents.""",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "upload_id": {
+            "type": "string",
+            "description": "The upload_id create-document-upload returned",
+          },
+          "title": {
+            "type": "string",
+            "description": "Document title (e.g. 'Operating Checking statement, Sept 2026')",
+          },
+          "folder": {
+            "type": "string",
+            "description": "Folder for organization (e.g. 'statements')",
+          },
+          "tags": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Tags for filtering",
+          },
+        },
+        "required": ["upload_id", "title"],
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
+    from pydantic import ValidationError
+
+    from robosystems.models.api.graphs.operations import CompleteDocumentUploadOp
+    from robosystems.operations.document_service import (
+      DocumentFileError,
+      DocumentFileNotUploadedError,
+      DocumentService,
+    )
+
+    graph_id = self.client.graph_id
+    blocked = _block_shared_repository(graph_id)
+    if blocked:
+      return blocked
+    access_error = _check_graph_access(graph_id, require_write=True)
+    if access_error:
+      return access_error
+    owner_id = _resolve_acting_user(self.client, graph_id)
+    if not owner_id:
+      return {"error": "access_denied", "message": "No user to record the file as."}
+
+    session = _get_platform_session()
+    try:
+      request = CompleteDocumentUploadOp(
+        upload_id=arguments["upload_id"],
+        title=arguments["title"],
+        folder=arguments.get("folder"),
+        tags=arguments.get("tags"),
+      )
+      doc = DocumentService(session).complete_file_upload(graph_id, owner_id, request)
+      return {
+        "success": True,
+        "document_id": doc.id,
+        "title": doc.title,
+        "folder": doc.folder,
+        "file": _file_summary(doc),
+      }
+    except ValidationError as e:
+      return {"error": "invalid_input", "message": str(e)}
+    except DocumentFileNotUploadedError as e:
+      return {"error": "not_uploaded", "message": str(e)}
+    except DocumentFileError as e:
+      return {"error": "invalid_file", "message": str(e)}
+    except SQLAlchemyError as e:
+      return database_failure(
+        "complete-document-upload", e, not_initialized_message=None
+      )
+    finally:
+      session.close()
+
+
+# One call returns at most this much text, so a long statement is read in pages.
+_MAX_PAGES_PER_READ = 10
+
+
+class ReadDocumentFileTool:
+  """Read the text of a stored document file."""
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "read-document-file",
+      "description": f"""Read the text of a stored document file, such as a bank statement PDF, page by page.
+
+**WHEN TO USE:** To read a statement's ending balance, closing date and lines
+before recording it with record-statement-balance. Find file documents with
+list-documents (they carry a `file` object).
+
+**RETURNS:** `page_count` and the requested `pages` as text, at most
+{_MAX_PAGES_PER_READ} per call; read further with `first_page`.
+
+**NOTES:** Reads a PDF's text layer. A statement a bank generates has one; a
+scanned PDF does not, and its pages come back empty, and a photo (PNG, JPEG)
+has none to read — ask the user for the figures then. For a text document use
+get-document.""",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "description": "The file document's id",
+          },
+          "first_page": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1,
+            "description": "First page to read (1-based)",
+          },
+          "max_pages": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": _MAX_PAGES_PER_READ,
+            "default": 3,
+            "description": f"Pages to read, at most {_MAX_PAGES_PER_READ}",
+          },
+        },
+        "required": ["document_id"],
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
+    from robosystems.operations.document_service import (
+      DocumentFileError,
+      DocumentService,
+    )
+
+    graph_id = self.client.graph_id
+    blocked = _block_shared_repository(graph_id)
+    if blocked:
+      return blocked
+    access_error = _check_graph_access(graph_id)
+    if access_error:
+      return access_error
+
+    document_id = arguments["document_id"]
+    try:
+      first_page = max(1, int(arguments.get("first_page") or 1))
+      max_pages = min(_MAX_PAGES_PER_READ, max(1, int(arguments.get("max_pages") or 3)))
+    except (TypeError, ValueError):
+      return {
+        "error": "invalid_input",
+        "message": "first_page and max_pages must be whole numbers.",
+      }
+
+    session = _get_platform_session()
+    try:
+      text = DocumentService(session).read_file_text(
+        graph_id, document_id, first_page=first_page, max_pages=max_pages
+      )
+      last = text.pages[-1][0] if text.pages else first_page - 1
+      return {
+        "document_id": document_id,
+        "title": text.document.title,
+        "file_name": text.document.file_name,
+        "page_count": text.page_count,
+        "pages": [{"page": n, "text": body} for n, body in text.pages],
+        "more_pages": last < text.page_count,
+      }
+    except KeyError:
+      return {"error": "not_found", "message": f"Document '{document_id}' not found"}
+    except DocumentFileError as e:
+      return {"error": "not_a_file", "message": str(e)}
+    except SQLAlchemyError as e:
+      return database_failure("read-document-file", e, not_initialized_message=None)
     finally:
       session.close()

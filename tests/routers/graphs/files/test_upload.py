@@ -53,13 +53,8 @@ def _patch_universal_repo(return_value=_SENTINEL):
 
 
 def _patch_s3_client(presigned_url="https://s3.example.com/presigned"):
-  mock_s3 = Mock()
-  mock_s3.s3_client.generate_presigned_url = Mock(return_value=presigned_url)
-  mock_s3.s3_client.head_object = Mock(return_value={"ContentLength": 1024})
-  mock_s3.s3_client.get_object = Mock(
-    return_value={"Body": Mock(read=Mock(return_value=b"[]"))}
-  )
-  return patch.object(upload_module, "S3Client", return_value=mock_s3), mock_s3
+  presign = Mock(return_value=presigned_url)
+  return patch.object(upload_module, "presign_upload", presign), presign
 
 
 @pytest.mark.unit
@@ -368,7 +363,7 @@ class TestCreateFileUploadPresignedURL:
       ),
       patch.object(upload_module.GraphFile, "create", return_value=mock_file),
     ):
-      p, mock_s3 = _patch_s3_client("https://bucket.s3.aws.com/signed")
+      p, presign = _patch_s3_client("https://bucket.s3.aws.com/signed")
       with p:
         result = await upload_module.create_file_upload_cmd(
           graph_id="kg01234567890abcdef",
@@ -377,7 +372,7 @@ class TestCreateFileUploadPresignedURL:
           db=Mock(),
         )
         assert result.upload_url == "https://bucket.s3.aws.com/signed"
-        mock_s3.s3_client.generate_presigned_url.assert_called_once()
+        presign.assert_called_once()
 
   @pytest.mark.asyncio
   async def test_s3_key_includes_user_graph_table_file(self):

@@ -525,11 +525,20 @@ class GraphDeprovisionService:
     """Delete the tenant's whole ``documents/{graph_id}/`` prefix: stored
     document files, such as bank statements. Like report bundles they are a
     system of record with no lifecycle rule, so teardown is what removes them.
+    Uploads still waiting under ``documents-incoming/{graph_id}/`` go too,
+    rather than wait the day their expiry rule takes.
     """
-    from ...config.storage.graph import get_document_file_prefix
+    from ...config.storage.graph import (
+      get_document_file_prefix,
+      get_document_upload_prefix,
+    )
 
-    result.document_files_deleted = self._purge_prefix(
-      graph_id, get_document_file_prefix(graph_id), "Document file", result
+    result.document_files_deleted = sum(
+      self._purge_prefix(graph_id, prefix, "Document file", result)
+      for prefix in (
+        get_document_file_prefix(graph_id),
+        get_document_upload_prefix(graph_id),
+      )
     )
 
   @staticmethod

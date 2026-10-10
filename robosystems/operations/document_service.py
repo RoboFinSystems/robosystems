@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import logging
 from collections.abc import Sequence
-from datetime import UTC, datetime, timedelta
-from pathlib import PurePosixPath
+from dataclasses import dataclass
 from urllib.parse import quote
 
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from robosystems.config.constants import (
@@ -18,25 +19,37 @@ from robosystems.config.constants import (
   MAX_DOCUMENT_FILES_PER_GRAPH,
   PRESIGNED_URL_EXPIRY_SECONDS,
 )
-from robosystems.models.api.graphs.operations import CreateDocumentUploadOp
+from robosystems.models.api.graphs.operations import (
+  CompleteDocumentUploadOp,
+  CreateDocumentUploadOp,
+)
 from robosystems.models.api.search import (
   DocumentUploadRequest,
   DocumentUploadResponse,
 )
 from robosystems.models.core.document import (
-  FILE_PENDING,
   FILE_SOURCE_TYPE,
   FILE_STORED,
   Document,
 )
+from robosystems.operations.uploads import (
+  UploadNameError,
+  check_upload_file_name,
+  presign_upload,
+)
+from robosystems.utils.ulid import generate_prefixed_ulid
 
 logger = logging.getLogger(__name__)
 
-# Media type -> (extension, the bytes every such file starts with).
-_FILE_TYPES = {"application/pdf": (".pdf", b"%PDF-")}
+# Media type -> (its extensions, the bytes every such file starts with).
+# Statements arrive as PDFs; receipts and invoices as PDFs or photos.
+_FILE_TYPES: dict[str, tuple[tuple[str, ...], bytes]] = {
+  "application/pdf": ((".pdf",), b"%PDF-"),
+  "image/png": ((".png",), b"\x89PNG\r\n\x1a\n"),
+  "image/jpeg": ((".jpg", ".jpeg"), b"\xff\xd8\xff"),
+}
+PDF = "application/pdf"
 _MAX_FILE_BYTES = MAX_DOCUMENT_FILE_MB * 1024 * 1024
-# Far past the upload URL's expiry, so nothing still uploading is reaped.
-_ABANDONED_AFTER = timedelta(days=1)
 
 
 class DocumentFileError(ValueError):
@@ -44,7 +57,8 @@ class DocumentFileError(ValueError):
 
 
 class DocumentFileNotUploadedError(Exception):
-  """Nothing has been uploaded to the document's URL yet."""
+  """Nothing has been uploaded for the upload yet, or it changed while being
+  checked."""
 
 
 class DocumentInUseError(Exception):
@@ -171,159 +185,150 @@ class DocumentService:
     return Document.count_by_graph(graph_id, self.session, source_type, folder)
 
   def begin_file_upload(
-    self, graph_id: str, user_id: str, request: CreateDocumentUploadOp
-  ) -> tuple[Document, str]:
-    """A pending file document and the presigned URL to PUT its bytes to.
+    self, graph_id: str, request: CreateDocumentUploadOp
+  ) -> tuple[str, str]:
+    """An upload id and the presigned URL to PUT a file's bytes to.
 
-    The declared type and size are signed into the URL, which points at an
-    upload key, never the stored file's. Nothing is indexed and the tier's
-    document limit does not apply: that limit counts the sections a search
-    index pays for, and a stored file has none; files have a count of their
-    own. Raises `DocumentFileError` for a name or type that cannot be
-    stored, or a graph at its file limit.
+    Nothing is recorded: the document is created when the upload completes,
+    and an upload never completed expires with its storage prefix. The URL
+    reaches an upload key, never a stored file's. Raises `DocumentFileError`
+    for a name or type that cannot be stored, or a graph at its file limit.
     """
+    from robosystems.config.storage.graph import get_document_upload_key
+
+    _check_file_name(request.file_name, request.content_type)
+    self._check_file_limit(graph_id)
+    upload_id = generate_prefixed_ulid("upl")
+    url = presign_upload(
+      get_document_upload_key(graph_id, upload_id, request.file_name),
+      content_type=request.content_type,
+      size_bytes=request.file_size_bytes,
+      expires_in=PRESIGNED_URL_EXPIRY_SECONDS,
+    )
+    return upload_id, url
+
+  def complete_file_upload(
+    self, graph_id: str, user_id: str, request: CompleteDocumentUploadOp
+  ) -> Document:
+    """Check an uploaded file and store it as a document.
+
+    The upload is read whole: it must fit the size cap and start with its
+    type's bytes, and its SHA-256 is taken from it. The checked bytes are
+    copied to the stored file's key, on the condition that the upload has not
+    changed since it was read, and the upload is removed. A file that fails
+    the check is discarded. Completing the same upload again returns its
+    document. Nothing is indexed, and the plan's document limit does not
+    apply: that limit counts the sections a search index pays for, and a
+    stored file has none; files have a count of their own.
+
+    Raises `DocumentFileNotUploadedError` before anything has been uploaded
+    or when the upload changed while being checked, and `DocumentFileError`
+    for bytes that are not the file named or a graph at its file limit.
+    """
+    from botocore.exceptions import ClientError
+
     from robosystems.config import env
     from robosystems.config.storage.graph import (
       get_document_file_key,
-      get_document_upload_key,
+      get_document_upload_prefix,
     )
     from robosystems.operations.aws.s3 import S3Client
 
-    extension, _magic = _FILE_TYPES[request.content_type]
-    name = request.file_name
-    # It is a key segment and, on download, a quoted header value.
-    if (
-      PurePosixPath(name).name != name
-      or name.startswith(".")
-      or any(ch in '"\\' or ord(ch) < 32 or ord(ch) == 127 for ch in name)
-    ):
+    done = self._completed(graph_id, request.upload_id)
+    if done is not None:
+      return done
+
+    client = S3Client()
+    s3 = client.s3_client
+    bucket = env.USER_DATA_BUCKET
+    prefix = get_document_upload_prefix(graph_id, request.upload_id)
+    # The URL was signed for one key, so a PUT can land nowhere else.
+    keys = list(client.iter_object_keys(bucket, prefix=prefix))
+    if not keys:
+      return self._completed_or_not_uploaded(graph_id, request.upload_id)
+    if len(keys) > 1:
       raise DocumentFileError(
-        "The file name must be a plain name: no path, quotes, backslashes or "
-        "control characters."
+        f"The upload {request.upload_id} holds more than one file."
       )
-    if not name.lower().endswith(extension):
-      raise DocumentFileError(
-        f"A {request.content_type} file's name must end in {extension}."
+    (upload_key,) = keys
+    file_name = upload_key.removeprefix(prefix)
+    content_type, magic = _file_type_of(file_name)
+
+    # From here, a missing upload means a concurrent completion of the same
+    # upload finished first and removed it.
+    try:
+      obj = s3.get_object(Bucket=bucket, Key=upload_key)
+    except s3.exceptions.NoSuchKey:
+      return self._completed_or_not_uploaded(graph_id, request.upload_id)
+    problem = None
+    body = b""
+    try:
+      if obj["ContentLength"] > _MAX_FILE_BYTES:
+        problem = f"The upload is larger than {MAX_DOCUMENT_FILE_MB} MB."
+      else:
+        body = obj["Body"].read(_MAX_FILE_BYTES + 1)
+        if len(body) != obj["ContentLength"]:
+          problem = "The upload could not be read whole."
+        elif not body.startswith(magic):
+          problem = f"The upload is not a {content_type} file."
+    finally:
+      obj["Body"].close()
+    if problem is not None:
+      s3.delete_object(Bucket=bucket, Key=upload_key)
+      raise DocumentFileError(f"{problem} It was discarded; upload it again.")
+    self._check_file_limit(graph_id)
+
+    document_id = generate_prefixed_ulid("doc")
+    stored_key = get_document_file_key(graph_id, document_id, file_name)
+    try:
+      s3.copy_object(
+        Bucket=bucket,
+        Key=stored_key,
+        CopySource={"Bucket": bucket, "Key": upload_key},
+        CopySourceIfMatch=obj["ETag"],
       )
-    self._reap_abandoned_uploads(graph_id)
-    stored = Document.count_by_graph(graph_id, self.session, FILE_SOURCE_TYPE)
-    if stored >= MAX_DOCUMENT_FILES_PER_GRAPH:
-      raise DocumentFileError(
-        f"This graph holds {stored} document files, the most it can. Delete "
-        "files no longer needed first."
-      )
+    except ClientError as exc:
+      code = exc.response.get("Error", {}).get("Code")
+      if code in ("NoSuchKey", "404"):
+        return self._completed_or_not_uploaded(graph_id, request.upload_id)
+      if code != "PreconditionFailed":
+        raise
+      raise DocumentFileNotUploadedError(
+        f"The upload {request.upload_id} changed while it was being checked. "
+        "Complete the upload again."
+      ) from exc
 
     doc = Document(
+      id=document_id,
       graph_id=graph_id,
       user_id=user_id,
       title=request.title,
       content="",
       tags=request.tags,
       folder=request.folder,
+      # The upload it came from: completing that upload again finds it.
+      external_id=request.upload_id,
       source_type=FILE_SOURCE_TYPE,
       sections_indexed=0,
-      file_name=name,
-      file_content_type=request.content_type,
-      file_status=FILE_PENDING,
+      file_s3_key=stored_key,
+      file_name=file_name,
+      file_content_type=content_type,
+      file_size_bytes=len(body),
+      file_sha256=hashlib.sha256(body).hexdigest(),
+      file_status=FILE_STORED,
     )
     self.session.add(doc)
-    self.session.flush()
-    doc.file_s3_key = get_document_file_key(graph_id, str(doc.id), name)
-    # Declared now so the object is checked against it; the stored size is
-    # measured when the upload completes.
-    doc.file_size_bytes = request.file_size_bytes
-    self.session.commit()
-
-    upload_url = S3Client().generate_presigned_put_url(
-      env.USER_DATA_BUCKET,
-      get_document_upload_key(graph_id, str(doc.id), name),
-      content_type=request.content_type,
-      content_length=request.file_size_bytes,
-      expires_in=PRESIGNED_URL_EXPIRY_SECONDS,
-    )
-    return doc, upload_url
-
-  def complete_file_upload(self, graph_id: str, document_id: str) -> Document:
-    """Check the uploaded bytes and store them as the document's file.
-
-    The upload is read whole: its size must be the declared one and its
-    first bytes its type's, and its SHA-256 is taken from it. The checked
-    bytes are then copied to the stored file's key, on the condition that
-    the upload has not changed since it was read, and the upload is removed.
-    A file that fails the check is discarded with its document. Completing a
-    stored file again returns it unchanged.
-
-    Raises KeyError when the document is not in this graph,
-    `DocumentFileNotUploadedError` before anything has been uploaded or when
-    the upload changed while being checked, and `DocumentFileError` for a
-    document that is not a file or bytes that are not the file declared.
-    """
-    from botocore.exceptions import ClientError
-
-    from robosystems.config import env
-    from robosystems.config.storage.graph import get_document_upload_key
-    from robosystems.operations.aws.s3 import S3Client
-
-    doc = Document.get_by_id_and_graph(document_id, graph_id, self.session)
-    if doc is None:
-      raise KeyError(f"Document {document_id} not found in graph {graph_id}")
-    if not doc.is_file:
-      raise DocumentFileError(f"Document {document_id} is not a file upload.")
-    if doc.file_status == FILE_STORED:
-      return doc
-
-    s3 = S3Client().s3_client
-    bucket = env.USER_DATA_BUCKET
-    upload_key = get_document_upload_key(graph_id, str(doc.id), str(doc.file_name))
     try:
-      obj = s3.get_object(Bucket=bucket, Key=upload_key)
-    except s3.exceptions.NoSuchKey as exc:
-      raise DocumentFileNotUploadedError(
-        f"Nothing has been uploaded for document {document_id} yet. PUT the "
-        "file to the upload URL, then complete the upload."
-      ) from exc
-
-    _extension, magic = _FILE_TYPES[str(doc.file_content_type)]
-    problem = None
-    body = b""
-    try:
-      if obj["ContentLength"] != doc.file_size_bytes:
-        problem = (
-          f"The upload is {obj['ContentLength']} bytes, not the "
-          f"{doc.file_size_bytes} declared."
-        )
-      else:
-        body = obj["Body"].read(_MAX_FILE_BYTES + 1)
-        if len(body) != doc.file_size_bytes:
-          problem = f"The upload is not the {doc.file_size_bytes} bytes declared."
-        elif not body.startswith(magic):
-          problem = f"The upload is not a {doc.file_content_type} file."
-    finally:
-      obj["Body"].close()
-    if problem is not None:
-      s3.delete_object(Bucket=bucket, Key=upload_key)
-      doc.delete(self.session)
-      raise DocumentFileError(f"{problem} It was discarded; upload it again.")
-
-    try:
-      s3.copy_object(
-        Bucket=bucket,
-        Key=str(doc.file_s3_key),
-        CopySource={"Bucket": bucket, "Key": upload_key},
-        CopySourceIfMatch=obj["ETag"],
-      )
-    except ClientError as exc:
-      if exc.response.get("Error", {}).get("Code") != "PreconditionFailed":
+      self.session.commit()
+    except IntegrityError:
+      # Another completion of the same upload stored it first.
+      self.session.rollback()
+      s3.delete_object(Bucket=bucket, Key=stored_key)
+      done = self._completed(graph_id, request.upload_id)
+      if done is None:
         raise
-      raise DocumentFileNotUploadedError(
-        f"The upload for document {document_id} changed while it was being "
-        "checked. Complete the upload again."
-      ) from exc
+      return done
     s3.delete_object(Bucket=bucket, Key=upload_key)
-
-    doc.file_sha256 = hashlib.sha256(body).hexdigest()
-    doc.file_status = FILE_STORED
-    doc.update(self.session)
     return doc
 
   def file_download_url(self, graph_id: str, document_id: str) -> tuple[Document, str]:
@@ -335,11 +340,7 @@ class DocumentService:
     from robosystems.config import env
     from robosystems.operations.aws.s3 import S3Client
 
-    doc = Document.get_by_id_and_graph(document_id, graph_id, self.session)
-    if doc is None:
-      raise KeyError(f"Document {document_id} not found in graph {graph_id}")
-    if not doc.is_file or doc.file_status != FILE_STORED:
-      raise DocumentFileError(f"Document {document_id} has no stored file.")
+    doc = self._stored_file(graph_id, document_id)
     url = S3Client().generate_presigned_url(
       bucket=env.USER_DATA_BUCKET,
       key=str(doc.file_s3_key),
@@ -350,6 +351,85 @@ class DocumentService:
     if url is None:
       raise RuntimeError(f"The file behind document {document_id} could not be signed.")
     return doc, url
+
+  def read_file_text(
+    self, graph_id: str, document_id: str, *, first_page: int, max_pages: int
+  ) -> FileText:
+    """The text of a stored PDF's pages, from ``first_page`` (1-based).
+
+    The text layer only: a statement a bank generates carries one, a scan
+    does not, and its pages come back empty. A photo has no text layer at
+    all; reading one is the extraction step's (OCR), not this. Raises
+    KeyError when the document is not in this graph, and `DocumentFileError`
+    when it is not a stored PDF or cannot be read as one.
+    """
+    from pypdf import PdfReader
+    from pypdf.errors import PdfReadError
+
+    from robosystems.config import env
+    from robosystems.operations.aws.s3 import S3Client
+
+    doc = self._stored_file(graph_id, document_id)
+    if doc.file_content_type != PDF:
+      raise DocumentFileError(
+        f"Document {document_id} is a {doc.file_content_type} image, which has "
+        "no text layer to read."
+      )
+    obj = S3Client().s3_client.get_object(
+      Bucket=env.USER_DATA_BUCKET, Key=str(doc.file_s3_key)
+    )
+    try:
+      data = obj["Body"].read(_MAX_FILE_BYTES + 1)
+    finally:
+      obj["Body"].close()
+    try:
+      reader = PdfReader(io.BytesIO(data))
+      page_count = len(reader.pages)
+      last = min(page_count, first_page + max_pages - 1)
+      pages = [
+        (number, reader.pages[number - 1].extract_text() or "")
+        for number in range(first_page, last + 1)
+      ]
+    # A malformed PDF fails in more ways than PdfReadError (a bad xref, a
+    # cyclic object, a broken font map); every one means the same thing here.
+    except (PdfReadError, ValueError, KeyError, TypeError, RecursionError) as exc:
+      logger.warning(f"Document {document_id} could not be read as a PDF: {exc!r}")
+      raise DocumentFileError(
+        f"Document {document_id} could not be read as a PDF."
+      ) from exc
+    return FileText(document=doc, page_count=page_count, pages=pages)
+
+  def _stored_file(self, graph_id: str, document_id: str) -> Document:
+    doc = Document.get_by_id_and_graph(document_id, graph_id, self.session)
+    if doc is None:
+      raise KeyError(f"Document {document_id} not found in graph {graph_id}")
+    if not doc.is_file:
+      raise DocumentFileError(f"Document {document_id} has no stored file.")
+    return doc
+
+  def _completed(self, graph_id: str, upload_id: str) -> Document | None:
+    """The document an upload already became, if it did."""
+    done = Document.get_by_external_id(graph_id, upload_id, self.session)
+    return done if done is not None and done.is_file else None
+
+  def _completed_or_not_uploaded(self, graph_id: str, upload_id: str) -> Document:
+    done = self._completed(graph_id, upload_id)
+    if done is not None:
+      return done
+    raise DocumentFileNotUploadedError(
+      f"Nothing has been uploaded for {upload_id} yet. PUT the file to the "
+      "upload URL, then complete the upload."
+    )
+
+  def _check_file_limit(self, graph_id: str) -> None:
+    # Advisory: concurrent completions can pass it together and overshoot
+    # by a few files, which a storage bound tolerates.
+    stored = Document.count_by_graph(graph_id, self.session, FILE_SOURCE_TYPE)
+    if stored >= MAX_DOCUMENT_FILES_PER_GRAPH:
+      raise DocumentFileError(
+        f"This graph holds {stored} document files, the most it can. Delete "
+        "files no longer needed first."
+      )
 
   def update_document(
     self,
@@ -422,38 +502,12 @@ class DocumentService:
     return True
 
   def _delete_file(self, doc: Document) -> None:
-    """The stored file and any upload left beside it. Best effort: the row
-    is already gone."""
+    """The stored file. Best effort: the row is already gone."""
     from robosystems.config import env
-    from robosystems.config.storage.graph import get_document_upload_key
     from robosystems.operations.aws.s3 import S3Client
 
-    s3 = S3Client()
-    upload_key = get_document_upload_key(
-      str(doc.graph_id), str(doc.id), str(doc.file_name)
-    )
-    for key in (str(doc.file_s3_key), upload_key):
-      if not s3.delete_object(env.USER_DATA_BUCKET, key):
-        logger.warning(f"Left s3 object {key} behind deleted document {doc.id}")
-
-  def _reap_abandoned_uploads(self, graph_id: str) -> None:
-    """Delete the graph's uploads begun more than a day ago and never
-    completed, with any bytes they left, so they stop counting toward the
-    file limit. The upload URL expired long before."""
-    cutoff = datetime.now(UTC).replace(tzinfo=None) - _ABANDONED_AFTER
-    abandoned = (
-      self.session.query(Document)
-      .filter(
-        Document.graph_id == graph_id,
-        Document.source_type == FILE_SOURCE_TYPE,
-        Document.file_status == FILE_PENDING,
-        Document.created_at < cutoff,
-      )
-      .all()
-    )
-    for doc in abandoned:
-      doc.delete(self.session)
-      self._delete_file(doc)
+    if not S3Client().delete_object(env.USER_DATA_BUCKET, str(doc.file_s3_key)):
+      logger.warning(f"Left the file behind deleted document {doc.id}")
 
   def _check_tier_limit(self, graph_id: str, tier: str) -> None:
     from robosystems.config.billing.core import get_tier_max_documents
@@ -528,6 +582,44 @@ class DocumentService:
 
     os_doc_id = f"udoc_{document_id}"
     service.delete_document(graph_id, os_doc_id)
+
+
+@dataclass(frozen=True)
+class FileText:
+  """Pages of a stored file's text, numbered from 1."""
+
+  document: Document
+  page_count: int
+  pages: list[tuple[int, str]]
+
+
+def _check_file_name(file_name: str, content_type: str) -> None:
+  """A plain name ending in its type's extension. Raises `DocumentFileError`."""
+  try:
+    check_upload_file_name(file_name)
+  except UploadNameError as exc:
+    raise DocumentFileError(str(exc)) from exc
+  extensions, _magic = _FILE_TYPES[content_type]
+  if not file_name.lower().endswith(extensions):
+    raise DocumentFileError(
+      f"A {content_type} file's name must end in {' or '.join(extensions)}."
+    )
+
+
+def document_content_type(file_name: str) -> str:
+  """The media type a file of this name is stored as. Raises
+  `DocumentFileError` for a name no stored type has."""
+  for content_type, (extensions, _magic) in _FILE_TYPES.items():
+    if file_name.lower().endswith(extensions):
+      return content_type
+  kinds = ", ".join(e for extensions, _ in _FILE_TYPES.values() for e in extensions)
+  raise DocumentFileError(f"{file_name!r} is not a file that can be stored ({kinds}).")
+
+
+def _file_type_of(file_name: str) -> tuple[str, bytes]:
+  """The media type an uploaded file was signed for, and its leading bytes."""
+  content_type = document_content_type(file_name)
+  return content_type, _FILE_TYPES[content_type][1]
 
 
 def _attachment(file_name: str) -> str:

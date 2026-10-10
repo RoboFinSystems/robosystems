@@ -286,38 +286,48 @@ class DeleteDocumentOp(BaseModel):
   document_id: str = Field(..., min_length=1, description="Document id to delete")
 
 
-class CreateDocumentUploadOp(BaseModel):
-  """Body for create-document-upload: a document that is a stored file."""
+# A document file is a PDF (a statement, an invoice) or a photo (a receipt).
+DocumentFileContentType = Literal["application/pdf", "image/png", "image/jpeg"]
 
-  title: str = Field(..., min_length=1, max_length=500, description="Document title")
+
+class CreateDocumentUploadOp(BaseModel):
+  """Body for create-document-upload: where to upload a document's file."""
+
   file_name: str = Field(
     ...,
     min_length=1,
     max_length=255,
-    description="The file's name, ending in its type's extension (`.pdf`).",
+    description=(
+      "The file's name, ending in its type's extension (`.pdf`, `.png`, "
+      "`.jpg` or `.jpeg`)."
+    ),
   )
-  content_type: Literal["application/pdf"] = Field(
+  content_type: DocumentFileContentType = Field(
     default="application/pdf", description="The file's media type."
   )
-  file_size_bytes: int = Field(
-    ...,
+  file_size_bytes: int | None = Field(
+    default=None,
     gt=0,
     le=MAX_DOCUMENT_FILE_MB * 1024 * 1024,
     description=(
-      f"The file's exact size in bytes, at most {MAX_DOCUMENT_FILE_MB} MB. It "
-      "is signed into the upload URL, so an upload of any other size fails."
+      f"The file's exact size in bytes, at most {MAX_DOCUMENT_FILE_MB} MB. "
+      "When given it is signed into the upload URL, so an upload of any other "
+      "size fails. Completing the upload checks the size either way."
     ),
   )
-  tags: list[str] | None = Field(default=None, description="Optional labels")
-  folder: str | None = Field(default=None, description="Optional folder")
 
 
 class CompleteDocumentUploadOp(BaseModel):
-  """Body for complete-document-upload."""
+  """Body for complete-document-upload: store the uploaded file as a document."""
 
-  document_id: str = Field(
-    ..., min_length=1, description="The document create-document-upload returned"
+  upload_id: str = Field(
+    ...,
+    pattern=r"^upl_[0-9A-Za-z]{26}$",
+    description="The upload create-document-upload returned.",
   )
+  title: str = Field(..., min_length=1, max_length=500, description="Document title")
+  tags: list[str] | None = Field(default=None, description="Optional labels")
+  folder: str | None = Field(default=None, description="Optional folder")
 
 
 class IngestFileOp(BaseModel):

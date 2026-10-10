@@ -456,12 +456,14 @@ async def delete_document_op(
   response_model=OperationEnvelope,
   operation_id="createDocumentUpload",
   summary="Presign a Document File Upload",
-  description="Start a document that is a stored file, such as a bank statement "
-  "PDF kept as evidence for a recorded balance. Returns the document's id and a "
-  "presigned URL: PUT the file there with the declared Content-Type and "
-  "Content-Length, then call `complete-document-upload`. A stored file is not "
-  "indexed for search, does not count toward the plan's document limit, and "
-  "never changes once stored.",
+  description="Start uploading a document file: a PDF (a bank statement kept as "
+  "evidence for a recorded balance, an invoice) or a PNG or JPEG photo (a "
+  "receipt). Returns an upload id and a "
+  "presigned URL: PUT the file there with the same Content-Type (and "
+  "Content-Length, if declared), then call `complete-document-upload`, which "
+  "creates the document. Nothing is recorded until then, and an upload never "
+  "completed expires. A stored file is not indexed for search, does not count "
+  "toward the plan's document limit, and never changes once stored.",
   tags=[_CONTENT_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
@@ -504,15 +506,15 @@ async def create_document_upload_op(
   async def _runner():
     session = SessionFactory()
     try:
-      doc, upload_url = DocumentService(session).begin_file_upload(
-        graph_id=graph_id, user_id=str(user.id), request=body
+      upload_id, upload_url = DocumentService(session).begin_file_upload(
+        graph_id=graph_id, request=body
       )
     except DocumentFileError as e:
       raise HTTPException(status_code=422, detail=str(e))
     finally:
       session.close()
     return DocumentFileUploadResponse(
-      document_id=str(doc.id),
+      upload_id=upload_id,
       upload_url=upload_url,
       expires_in=PRESIGNED_URL_EXPIRY_SECONDS,
     ).model_dump(mode="json")
@@ -525,10 +527,10 @@ async def create_document_upload_op(
   response_model=OperationEnvelope,
   operation_id="completeDocumentUpload",
   summary="Complete a Document File Upload",
-  description="Store the file uploaded for a document. The uploaded bytes are "
-  "checked against the declared size and type and hashed (SHA-256); a file "
-  "that fails the check is discarded with its document. Completing a stored "
-  "file again returns it unchanged. Returns the document.",
+  description="Store an uploaded file as a document. The uploaded bytes are "
+  "checked against the file's type and size cap and hashed (SHA-256); a file "
+  "that fails the check is discarded. Completing the same upload again "
+  "returns the document it created. Returns the document.",
   tags=[_CONTENT_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
@@ -572,11 +574,9 @@ async def complete_document_upload_op(
     try:
       # Reads and hashes up to the file cap, so not on the event loop.
       doc = await run_off_loop(
-        DocumentService(session).complete_file_upload, graph_id, body.document_id
+        DocumentService(session).complete_file_upload, graph_id, str(user.id), body
       )
       return document_to_detail(doc).model_dump(mode="json")
-    except KeyError:
-      raise HTTPException(status_code=404, detail="Document not found")
     except DocumentFileNotUploadedError as e:
       raise HTTPException(status_code=409, detail=str(e))
     except DocumentFileError as e:

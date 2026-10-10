@@ -384,21 +384,22 @@ class S3Client:
     key: str,
     *,
     content_type: str,
-    content_length: int,
+    content_length: int | None,
     expires_in: int,
   ) -> str:
-    """Sign a time-limited upload URL for exactly this type and size: both
-    are signed headers, so a PUT of anything else fails at S3. Raises on a
-    signing failure, since an upload cannot proceed without the URL."""
+    """Sign a time-limited upload URL for this type and, when given, this
+    size: both are signed headers, so a PUT of anything else fails at S3.
+    Raises on a signing failure, since an upload cannot proceed without the
+    URL."""
+    params: dict[str, Any] = {
+      "Bucket": bucket,
+      "Key": key,
+      "ContentType": content_type,
+    }
+    if content_length is not None:
+      params["ContentLength"] = content_length
     return self._presign_client.generate_presigned_url(
-      "put_object",
-      Params={
-        "Bucket": bucket,
-        "Key": key,
-        "ContentType": content_type,
-        "ContentLength": content_length,
-      },
-      ExpiresIn=expires_in,
+      "put_object", Params=params, ExpiresIn=expires_in
     )
 
   def list_objects(

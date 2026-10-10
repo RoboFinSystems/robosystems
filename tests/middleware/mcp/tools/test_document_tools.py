@@ -7,10 +7,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from robosystems.middleware.mcp.tools.document_tools import (
+  CompleteDocumentUploadTool,
   CreateDocumentTool,
+  CreateDocumentUploadTool,
   DeleteDocumentTool,
   GetDocumentTool,
   ListDocumentsTool,
+  ReadDocumentFileTool,
   UpdateDocumentTool,
 )
 
@@ -434,7 +437,6 @@ class TestDocumentFiles:
     doc.file_content_type = "application/pdf"
     doc.file_size_bytes = 2048
     doc.file_sha256 = "ef" * 32
-    doc.file_status = "stored"
     mock_service = MagicMock()
     mock_service.get_document.return_value = doc
 
@@ -449,7 +451,6 @@ class TestDocumentFiles:
       "content_type": "application/pdf",
       "size_bytes": 2048,
       "sha256": "ef" * 32,
-      "status": "stored",
     }
 
   @pytest.mark.asyncio
@@ -494,3 +495,195 @@ class TestDocumentFiles:
       )
 
     assert result == {"error": "invalid_input", "message": "cannot be edited"}
+
+
+class TestDocumentFileTools:
+  """An agent with a shell uploads the bytes itself, with the command the
+  first tool hands back; a stored statement then reads as text."""
+
+  def _patches(self, mock_service):
+    return (
+      patch(f"{DOC_MODULE}._get_platform_session", return_value=MagicMock()),
+      patch(f"{DOC_MODULE}._block_shared_repository", return_value=None),
+      patch(f"{DOC_MODULE}._check_graph_access", return_value=None),
+      patch(DOC_SVC, return_value=mock_service),
+    )
+
+  @pytest.mark.asyncio
+  async def test_create_upload_hands_back_the_command_to_run(self, mock_graph_client):
+    mock_service = MagicMock()
+    mock_service.begin_file_upload.return_value = (
+      "upl_01M4HXRVFZ66AF7CYHHF85AFRR",
+      "https://s3.example/put?X-Amz-Signature=abc&b=c",
+    )
+
+    p1, p2, p3, p4 = self._patches(mock_service)
+    with p1, p2, p3, p4:
+      result = await CreateDocumentUploadTool(mock_graph_client).execute(
+        {"file_name": "sep.pdf", "file_path": "/Users/me/Bank Statements/sep.pdf"}
+      )
+
+    assert result["upload_id"] == "upl_01M4HXRVFZ66AF7CYHHF85AFRR"
+    # Shell-quoted: a space in the path and the URL's & survive the shell.
+    assert result["upload_command"] == (
+      "curl -sSf -X PUT -H 'Content-Type: application/pdf' "
+      "--data-binary @'/Users/me/Bank Statements/sep.pdf' "
+      "'https://s3.example/put?X-Amz-Signature=abc&b=c'"
+    )
+
+  @pytest.mark.asyncio
+  async def test_create_upload_without_a_path_leaves_a_placeholder(
+    self, mock_graph_client
+  ):
+    mock_service = MagicMock()
+    mock_service.begin_file_upload.return_value = ("upl_x", "https://s3.example/put")
+
+    p1, p2, p3, p4 = self._patches(mock_service)
+    with p1, p2, p3, p4:
+      result = await CreateDocumentUploadTool(mock_graph_client).execute(
+        {"file_name": "sep.pdf"}
+      )
+
+    assert "@<path-to-file>" in result["upload_command"]
+
+  @pytest.mark.asyncio
+  async def test_create_upload_takes_the_type_from_the_name(self, mock_graph_client):
+    mock_service = MagicMock()
+    mock_service.begin_file_upload.return_value = ("upl_x", "https://s3.example/put")
+
+    p1, p2, p3, p4 = self._patches(mock_service)
+    with p1, p2, p3, p4:
+      result = await CreateDocumentUploadTool(mock_graph_client).execute(
+        {"file_name": "receipt.jpeg"}
+      )
+
+    (_graph, request), _ = mock_service.begin_file_upload.call_args
+    assert request.content_type == "image/jpeg"
+    assert "Content-Type: image/jpeg" in result["upload_command"]
+
+  @pytest.mark.asyncio
+  async def test_create_upload_refuses_a_bad_name(self, mock_graph_client):
+
+    mock_service = MagicMock()
+
+    p1, p2, p3, p4 = self._patches(mock_service)
+    with p1, p2, p3, p4:
+      result = await CreateDocumentUploadTool(mock_graph_client).execute(
+        {"file_name": "sep.txt"}
+      )
+
+    assert result["error"] == "invalid_input"
+    assert "not a file that can be stored" in result["message"]
+    mock_service.begin_file_upload.assert_not_called()
+
+  @pytest.mark.asyncio
+  @pytest.mark.parametrize(
+    ("raised", "code"),
+    [("not-uploaded", "not_uploaded"), ("bad-file", "invalid_file")],
+  )
+  async def test_complete_upload_reports_why_it_did_not_store(
+    self, mock_graph_client, raised, code
+  ):
+    from robosystems.operations.document_service import (
+      DocumentFileError,
+      DocumentFileNotUploadedError,
+    )
+
+    mock_service = MagicMock()
+    mock_service.complete_file_upload.side_effect = {
+      "not-uploaded": DocumentFileNotUploadedError("nothing yet"),
+      "bad-file": DocumentFileError("not a pdf"),
+    }[raised]
+
+    p1, p2, p3, p4 = self._patches(mock_service)
+    with (
+      p1,
+      p2,
+      p3,
+      p4,
+      patch(f"{DOC_MODULE}._resolve_acting_user", return_value="usr_1"),
+    ):
+      result = await CompleteDocumentUploadTool(mock_graph_client).execute(
+        {"upload_id": "upl_01M4HXRVFZ66AF7CYHHF85AFRR", "title": "Sept"}
+      )
+
+    assert result["error"] == code
+
+  @pytest.mark.asyncio
+  async def test_complete_upload_refuses_an_id_it_did_not_issue(
+    self, mock_graph_client
+  ):
+    mock_service = MagicMock()
+    p1, p2, p3, p4 = self._patches(mock_service)
+    with (
+      p1,
+      p2,
+      p3,
+      p4,
+      patch(f"{DOC_MODULE}._resolve_acting_user", return_value="usr_1"),
+    ):
+      result = await CompleteDocumentUploadTool(mock_graph_client).execute(
+        {"upload_id": "../kgOther/upl_x", "title": "Sept"}
+      )
+
+    assert result["error"] == "invalid_input"
+    mock_service.complete_file_upload.assert_not_called()
+
+  @pytest.mark.asyncio
+  async def test_read_returns_pages_and_says_when_more_remain(self, mock_graph_client):
+    from robosystems.operations.document_service import FileText
+
+    doc = MagicMock()
+    doc.title = "Sept"
+    doc.file_name = "sep.pdf"
+    mock_service = MagicMock()
+    mock_service.read_file_text.return_value = FileText(
+      document=doc, page_count=4, pages=[(1, "Ending balance 3,204.88"), (2, "Lines")]
+    )
+
+    p1, p2, p3, p4 = self._patches(mock_service)
+    with p1, p2, p3, p4:
+      result = await ReadDocumentFileTool(mock_graph_client).execute(
+        {"document_id": "doc_1", "max_pages": 50}
+      )
+
+    # The page cap holds whatever was asked.
+    assert mock_service.read_file_text.call_args.kwargs == {
+      "first_page": 1,
+      "max_pages": 10,
+    }
+    assert result["page_count"] == 4
+    assert result["pages"][0] == {"page": 1, "text": "Ending balance 3,204.88"}
+    assert result["more_pages"] is True
+
+  @pytest.mark.asyncio
+  async def test_read_of_a_text_document_points_elsewhere(self, mock_graph_client):
+    from robosystems.operations.document_service import DocumentFileError
+
+    mock_service = MagicMock()
+    mock_service.read_file_text.side_effect = DocumentFileError("has no stored file")
+
+    p1, p2, p3, p4 = self._patches(mock_service)
+    with p1, p2, p3, p4:
+      result = await ReadDocumentFileTool(mock_graph_client).execute(
+        {"document_id": "doc_1"}
+      )
+
+    assert result["error"] == "not_a_file"
+
+
+@pytest.mark.asyncio
+async def test_read_refuses_page_numbers_that_are_not_numbers(mock_graph_client):
+  mock_service = MagicMock()
+  with (
+    patch(f"{DOC_MODULE}._get_platform_session", return_value=MagicMock()),
+    patch(f"{DOC_MODULE}._block_shared_repository", return_value=None),
+    patch(f"{DOC_MODULE}._check_graph_access", return_value=None),
+    patch(DOC_SVC, return_value=mock_service),
+  ):
+    result = await ReadDocumentFileTool(mock_graph_client).execute(
+      {"document_id": "doc_1", "max_pages": "all"}
+    )
+
+  assert result["error"] == "invalid_input"
+  mock_service.read_file_text.assert_not_called()

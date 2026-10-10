@@ -53,6 +53,7 @@ READ_ONLY_MCP_TOOLS: frozenset[str] = frozenset(
     # Document / memory reads
     "get-document",
     "list-documents",
+    "read-document-file",
     "get-document-section",
     "search-documents",
     "recall",

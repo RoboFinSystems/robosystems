@@ -98,6 +98,7 @@ dependencies = [
     "psutil>=7.2.1,<8.0",
     "pydantic[email]>=2.13.4,<3.0",
     "pyjwt>=2.10.0,<3.0",
+    "pypdf>=6.20.0,<7.0",  # statement PDFs: text layer only, for read-document-file
     "python-multipart>=0.0.27,<1.0",
     "python-ulid>=3.0.0,<4.0",  # hold: 4.0 only reworks generation customization; we use ULID()/from_str/.timestamp/.bytes
     "pyyaml>=6.0.0,<7.0",

@@ -66,9 +66,8 @@ def _stored_file(doc: Document) -> DocumentFileInfo:
   return DocumentFileInfo(
     file_name=str(doc.file_name),
     content_type=str(doc.file_content_type),
-    size_bytes=doc.file_size_bytes if doc.file_sha256 else None,
-    sha256=doc.file_sha256,
-    status=doc.file_status,  # type: ignore[arg-type]
+    size_bytes=int(doc.file_size_bytes or 0),
+    sha256=str(doc.file_sha256),
   )
 
 

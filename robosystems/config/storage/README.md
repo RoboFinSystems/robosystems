@@ -45,6 +45,7 @@ Each storage type owns a top-level prefix, declared once in `GRAPH_STORAGE`:
 | `BACKUPS` | `graph-backups/` | Application-level backups via the API |
 | `REPORT_BUNDLES` | `report-bundles/` | Per-Report serialization bundles |
 | `DOCUMENTS` | `documents/` | Stored document files (bank statements kept as evidence) |
+| `DOCUMENT_UPLOADS` | `documents-incoming/` | Document uploads awaiting their check (expire after a day) |
 | `SHARED_REPO_DATABASES` | `shared-repositories/databases/` | Published shared-repository snapshots |
 | `SHARED_REPO_BACKUPS` | `shared-repositories/backups/` | Compressed subscriber downloads |
 | `R2_DOWNLOADS` | `downloads/` | Uncompressed files on R2 for zero-egress downloads |
@@ -74,7 +75,7 @@ graph.get_document_file_key("kg456", "doc_01K8", "statement.pdf")
 
 Report bundles are versioned by `Report.generation_count` (the `g` prefix reads as "generation"), so regenerating a report leaves prior generations addressable for restatement audit trails.
 
-Document files are a system of record, like report bundles: the prefix has no lifecycle rule, a stored file never changes, and graph teardown deletes the graph's whole `documents/{graph_id}/` prefix.
+Document files are a system of record, like report bundles: the prefix has no lifecycle rule, a stored file never changes, and graph teardown deletes the graph's whole `documents/{graph_id}/` prefix. A client uploads to `documents-incoming/` instead; completing the upload checks the bytes and copies them into `documents/`, and an upload never completed expires after a day.
 
 ## Key structure
 
@@ -121,8 +122,11 @@ s3://robosystems-user-{env}/
     {graph_id}/{report_id}/g{generation}.holon.jsonld # the anchor, stamped at publish
     {graph_id}/{report_id}/g{generation}.tavi.json    # derived on first download (so is .zip)
 
-  documents/                     # Stored document files
+  documents/                     # Stored document files, written only by the server
     {graph_id}/{document_id}/{file_name}
+
+  documents-incoming/            # Document uploads before their check (1-day expiry)
+    {graph_id}/{upload_id}/{file_name}
 ```
 
 ### Public data bucket

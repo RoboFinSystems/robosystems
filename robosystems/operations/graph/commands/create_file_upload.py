@@ -9,12 +9,10 @@ to stage the result.
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path as PathLib
-from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from robosystems.config import env
 from robosystems.config.constants import MAX_FILE_SIZE_MB, PRESIGNED_URL_EXPIRY_SECONDS
 from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 from robosystems.logger import api_logger, logger
@@ -27,7 +25,11 @@ from robosystems.models.api.graphs.tables import (
   FileUploadStatus,
 )
 from robosystems.models.core import GraphFile, GraphTable, User
-from robosystems.operations.aws.s3 import S3Client
+from robosystems.operations.uploads import (
+  UploadNameError,
+  check_upload_file_name,
+  presign_upload,
+)
 
 _OPS_ENDPOINT = "/v1/graphs/{graph_id}/operations/create-file-upload"
 
@@ -129,19 +131,10 @@ async def create_file_upload_cmd(
         detail=f"File extension '.{file_extension}' does not match content type '{request.content_type}'. Expected '.{expected_ext}'",
       )
 
-    if not request.file_name or len(request.file_name) > 255:
-      raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="File name must be between 1 and 255 characters",
-      )
-
-    if (
-      ".." in request.file_name or "/" in request.file_name or "\\" in request.file_name
-    ):
-      raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="File name contains invalid characters",
-      )
+    try:
+      check_upload_file_name(request.file_name)
+    except UploadNameError as e:
+      raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     # Advisory: spares an upload already known to be rejected. `ingest-file`
     # measures the real object and is authoritative.
@@ -164,23 +157,13 @@ async def create_file_upload_cmd(
     file_id = str(uuid.uuid4())
     s3_key = f"user-staging/{current_user.id}/{graph_id}/{table_name}/{file_id}/{request.file_name}"
 
-    s3_client = S3Client()
-    bucket = env.USER_DATA_BUCKET
-
-    presign_params: dict[str, Any] = {
-      "Bucket": bucket,
-      "Key": s3_key,
-      "ContentType": request.content_type,
-    }
-    # A declared size is signed in (Content-Length is a SigV4 signed header), so
-    # a PUT of any other length fails at S3. Optional for undeclared clients.
-    if request.file_size_bytes is not None:
-      presign_params["ContentLength"] = request.file_size_bytes
-
-    upload_url = s3_client.s3_client.generate_presigned_url(
-      "put_object",
-      Params=presign_params,
-      ExpiresIn=PRESIGNED_URL_EXPIRY_SECONDS,
+    # A declared size is signed in, so a PUT of any other length fails at S3.
+    # Optional for undeclared clients.
+    upload_url = presign_upload(
+      s3_key,
+      content_type=request.content_type,
+      size_bytes=request.file_size_bytes,
+      expires_in=PRESIGNED_URL_EXPIRY_SECONDS,
     )
 
     file_format_map = {

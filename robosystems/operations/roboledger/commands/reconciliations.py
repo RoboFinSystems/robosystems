@@ -126,10 +126,6 @@ class StatementDocumentNotFoundError(Exception):
     self.document_id = document_id
 
 
-class StatementDocumentPendingError(ValueError):
-  """The statement's file has not finished uploading."""
-
-
 class NotAGraphMemberError(Exception):
   """The reviewer has no membership of their own on the graph."""
 
@@ -417,20 +413,14 @@ def refresh_reconciliations(
 
 
 def _check_statement_document(graph_id: str, document_id: str) -> None:
-  """The document exists on this graph and, when it is a file, is stored."""
+  """The document exists on this graph. A file document exists only once its
+  upload completed, so there is no half-uploaded statement to refuse."""
   from robosystems.database import SessionFactory
   from robosystems.models.core import Document
-  from robosystems.models.core.document import FILE_STORED
 
   with SessionFactory() as platform_session:
-    doc = Document.get_by_id_and_graph(document_id, graph_id, platform_session)
-    if doc is None:
+    if Document.get_by_id_and_graph(document_id, graph_id, platform_session) is None:
       raise StatementDocumentNotFoundError(document_id)
-    if doc.is_file and doc.file_status != FILE_STORED:
-      raise StatementDocumentPendingError(
-        f"Document {document_id!r} is a file whose upload is not complete; "
-        "call complete-document-upload first."
-      )
 
 
 def _in_entity_chart(session: Session, element: Element, entity_id: str) -> bool:
@@ -463,9 +453,8 @@ def record_statement_balance(
 
   Raises `StatementAccountNotFoundError`, `StatementAccountError` when the
   account is not a balance-sheet account in the entity's chart,
-  `EntityNotInGraphError`, `StatementDocumentNotFoundError`,
-  `StatementDocumentPendingError` for a file whose upload is not complete,
-  and ``RowLockedError`` when another reconciliation write is in flight.
+  `EntityNotInGraphError`, `StatementDocumentNotFoundError`, and
+  ``RowLockedError`` when another reconciliation write is in flight.
   """
   element = session.get(Element, body.element_id)
   if element is None:

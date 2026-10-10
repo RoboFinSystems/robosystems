@@ -463,22 +463,31 @@ class GraphMCPTools:
     self.delete_document_tool = None
     self.get_document_tool = None
     self.list_documents_tool = None
+    self.read_document_file_tool = None
+    self.create_document_upload_tool = None
+    self.complete_document_upload_tool = None
     if env.SEMANTIC_SEARCH_ENABLED and not self._is_shared_repository():
       from .document_tools import (
+        CompleteDocumentUploadTool,
         CreateDocumentTool,
+        CreateDocumentUploadTool,
         DeleteDocumentTool,
         GetDocumentTool,
         ListDocumentsTool,
+        ReadDocumentFileTool,
         UpdateDocumentTool,
       )
 
       self.get_document_tool = GetDocumentTool(graph_client)
       self.list_documents_tool = ListDocumentsTool(graph_client)
+      self.read_document_file_tool = ReadDocumentFileTool(graph_client)
 
       if not read_only:
         self.create_document_tool = CreateDocumentTool(graph_client)
         self.update_document_tool = UpdateDocumentTool(graph_client)
         self.delete_document_tool = DeleteDocumentTool(graph_client)
+        self.create_document_upload_tool = CreateDocumentUploadTool(graph_client)
+        self.complete_document_upload_tool = CompleteDocumentUploadTool(graph_client)
 
     # Hand-written: needs both the platform and the tenant extensions session,
     # which the registrar runner doesn't pass.
@@ -815,6 +824,12 @@ class GraphMCPTools:
       tools.append(self.get_document_tool.get_tool_definition())
     if self.list_documents_tool is not None:
       tools.append(self.list_documents_tool.get_tool_definition())
+    if self.read_document_file_tool is not None:
+      tools.append(self.read_document_file_tool.get_tool_definition())
+    if self.create_document_upload_tool is not None:
+      tools.append(self.create_document_upload_tool.get_tool_definition())
+    if self.complete_document_upload_tool is not None:
+      tools.append(self.complete_document_upload_tool.get_tool_definition())
     if self.bind_text_block_tool is not None:
       tools.append(self.bind_text_block_tool.get_tool_definition())
     if self.delete_report_tool is not None:
@@ -1453,6 +1468,23 @@ class GraphMCPTools:
             self._tool_unavailable_reason("list-documents", "SEMANTIC_SEARCH_ENABLED")
           )
         result = await self.list_documents_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name in (
+        "read-document-file",
+        "create-document-upload",
+        "complete-document-upload",
+      ):
+        file_tool = {
+          "read-document-file": self.read_document_file_tool,
+          "create-document-upload": self.create_document_upload_tool,
+          "complete-document-upload": self.complete_document_upload_tool,
+        }[name]
+        if file_tool is None:
+          raise ValueError(
+            self._tool_unavailable_reason(name, "SEMANTIC_SEARCH_ENABLED")
+          )
+        result = await file_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       else:

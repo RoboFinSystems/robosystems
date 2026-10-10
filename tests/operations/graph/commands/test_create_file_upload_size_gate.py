@@ -95,8 +95,9 @@ async def _presign_params(file_size_bytes: int | None) -> dict:
   """Run the command with S3 stubbed and return the Params it presigned."""
   graph = MagicMock()
   graph.graph_type = "generic"
+  # The boto client the shared upload helper presigns with.
   s3 = MagicMock()
-  s3.s3_client.generate_presigned_url.return_value = "https://s3/put"
+  s3.generate_presigned_url.return_value = "https://s3/put"
 
   with (
     patch(
@@ -108,7 +109,7 @@ async def _presign_params(file_size_bytes: int | None) -> dict:
       return_value=MagicMock(),
     ),
     patch(
-      "robosystems.operations.graph.commands.create_file_upload.S3Client",
+      "robosystems.operations.aws.s3.S3Client._build_client",
       return_value=s3,
     ),
     patch("robosystems.models.core.GraphTable.get_by_name", return_value=MagicMock()),
@@ -128,8 +129,8 @@ async def _presign_params(file_size_bytes: int | None) -> dict:
       db=MagicMock(),
     )
 
-  s3.s3_client.generate_presigned_url.assert_called_once()
-  call = s3.s3_client.generate_presigned_url.call_args
+  s3.generate_presigned_url.assert_called_once()
+  call = s3.generate_presigned_url.call_args
   assert call.args[0] == "put_object"
   return call.kwargs["Params"]
 

@@ -32,7 +32,6 @@ from robosystems.database import Model
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 FILE_SOURCE_TYPE = "uploaded_file"
-FILE_PENDING = "pending"
 FILE_STORED = "stored"
 
 
@@ -71,6 +70,7 @@ class Document(Model):
   file_size_bytes = Column(BigInteger, nullable=True)
   # Hex SHA-256 of the bytes, taken from the stored object, not the client.
   file_sha256 = Column(String(64), nullable=True)
+  # `stored` for every file today; room for a state a later step adds.
   file_status = Column(String(20), nullable=True)
   created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
