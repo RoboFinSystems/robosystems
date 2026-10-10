@@ -30,12 +30,16 @@ from robosystems.models.api.event_block import CreateEventBlockRequest
 from robosystems.models.api.extensions.reconciling_items import (
   ResolveReconcilingItemRequest,
 )
+from robosystems.models.extensions import Entity
 from robosystems.models.extensions.element import Element
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
 from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.operations.event_block.commands import create_event_block_in_session
+from robosystems.operations.event_block.python_handlers.types import (
+  HandlerMetadataValidationError,
+)
 from robosystems.operations.extensions.loader import comparable_payload
 from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands._guards import ClosedPeriodError
@@ -49,7 +53,7 @@ from robosystems.operations.roboledger.commands.reconciling_items import (
 from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
   select_writeback_eligible_entries,
 )
-from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
+from tests.ledger_entity import PARENT_ENTITY_ID, entity_account, seed_parent_entity
 
 pytestmark = pytest.mark.unit
 
@@ -515,6 +519,132 @@ def test_acknowledge_records_the_reference_and_writes_no_entries(session):
   assert event.metadata_["reconciliation_history"][0]["reference_event_id"] == str(
     reference.id
   )
+
+
+def _alignment_entry(
+  session, debit, credit, item_ids, *, entity_id=None, apply_handlers=True
+):
+  return create_event_block_in_session(
+    session,
+    CreateEventBlockRequest(
+      event_type="journal_entry_recorded",
+      event_category="adjustment",
+      source="system",
+      entity_id=entity_id,
+      occurred_at=datetime(2026, 8, 31),
+      apply_handlers=apply_handlers,
+      metadata={
+        "posting_date": "2026-08-31",
+        "memo": "Catch-up: reclass made in the source system for July",
+        "publish_to_source": False,
+        "line_items": [
+          {"element_id": debit, "debit_amount": AMOUNT},
+          {"element_id": credit, "credit_amount": AMOUNT},
+        ],
+        "resolves_reconciling_items": item_ids,
+      },
+    ),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+
+
+def _alignments(session) -> int:
+  return (
+    session.query(Event).filter(Event.event_type == "journal_entry_recorded").count()
+  )
+
+
+def test_an_alignment_entry_that_names_its_item_acknowledges_it(session):
+  elements, event, _accepted = _setup(session)
+
+  alignment, _envelope = _alignment_entry(
+    session, elements[NEW_EXPENSE], elements[OLD_EXPENSE], [str(event.id)]
+  )
+  session.flush()
+
+  session.refresh(event)
+  assert event.payload_drift is False
+  (trail,) = event.metadata_["reconciliation_history"]
+  assert trail["disposition"] == "acknowledge"
+  assert trail["reference_event_id"] == str(alignment.id)
+  # The item no longer reads as open, so nothing can catch it up again.
+  with pytest.raises(NotAReconcilingItemError):
+    plan_reconciling_item(session, str(event.id), graph_id=GRAPH_ID)
+
+
+def test_naming_an_event_that_is_not_a_reconciling_item_refuses_the_entry(session):
+  elements = _seed_elements(session)
+  _seed_periods(session)
+  settled = _post_synced_event(session)
+
+  with pytest.raises(HandlerMetadataValidationError, match="resolves_reconciling"):
+    _alignment_entry(
+      session, elements[NEW_EXPENSE], elements[OLD_EXPENSE], [str(settled.id)]
+    )
+
+
+def test_one_refused_item_settles_none_of_them(session):
+  elements, event, _accepted = _setup(session)
+  settled = Event(
+    entity_id=PARENT_ENTITY_ID,
+    event_type="expense",
+    event_category="purchase",
+    source="manual",
+    status="captured",
+    occurred_at=datetime(2026, 7, 20),
+    created_by="user_test",
+  )
+  session.add(settled)
+  session.flush()
+  before = _alignments(session)
+
+  savepoint = session.begin_nested()
+  with pytest.raises(HandlerMetadataValidationError):
+    _alignment_entry(
+      session,
+      elements[NEW_EXPENSE],
+      elements[OLD_EXPENSE],
+      [str(event.id), str(settled.id)],
+    )
+  savepoint.rollback()
+
+  session.refresh(event)
+  assert event.payload_drift is True
+  assert _alignments(session) == before
+
+
+def test_another_entitys_entry_cannot_settle_the_item(session):
+  _elements, event, _accepted = _setup(session)
+  session.add(
+    Entity(
+      id="ent_test_sub",
+      name="Sub LLC",
+      is_parent=False,
+      parent_entity_id=PARENT_ENTITY_ID,
+      source="native",
+      created_by="test",
+    )
+  )
+  session.flush()
+  debit = entity_account(session, "ent_test_sub", "Cost of Goods Sold")
+  credit = entity_account(session, "ent_test_sub", "Cloud Services")
+
+  with pytest.raises(HandlerMetadataValidationError, match="this entity's books"):
+    _alignment_entry(session, debit, credit, [str(event.id)], entity_id="ent_test_sub")
+
+
+def test_the_field_is_refused_where_nothing_would_act_on_it(session):
+  elements, event, _accepted = _setup(session)
+
+  with pytest.raises(HandlerMetadataValidationError, match="apply_handlers=true"):
+    _alignment_entry(
+      session,
+      elements[NEW_EXPENSE],
+      elements[OLD_EXPENSE],
+      [str(event.id)],
+      apply_handlers=False,
+    )
 
 
 # ───────────────────────────────────────────────────────────────────────────

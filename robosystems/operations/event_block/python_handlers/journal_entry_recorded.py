@@ -98,6 +98,10 @@ class JournalEntryRecordedMetadata(BaseModel):
   # in SQL; a lax ``"yes"`` would match neither branch.
   publish_to_source: StrictBool | None = None
 
+  # Reconciling items this entry settles (an alignment authored by hand):
+  # each is acknowledged against it, so none is caught up a second time.
+  resolves_reconciling_items: list[str] | None = Field(None, max_length=200)
+
   # Nested shape
   entries: list[NestedJournalEntrySpec] | None = None
 
