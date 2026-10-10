@@ -47,6 +47,14 @@ class PreviewReconciliationsRequest(BaseModel):
       "the work, and the counts cover the rest."
     ),
   )
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity whose books to compare, by id. Omit for the group parent. "
+      "`source_ledger` applies to the group parent only: QuickBooks keeps "
+      "its books, not a subsidiary's."
+    ),
+  )
 
 
 class ReconciliationComponent(BaseModel):
@@ -209,6 +217,13 @@ class RefreshReconciliationsRequest(BaseModel):
     description="Period to reconcile at its last day, as YYYY-MM.",
     examples=["2026-08"],
   )
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity whose books to reconcile, by id. Omit for the group parent. "
+      "Each entity's reconciliations, and the close they hold, are its own."
+    ),
+  )
 
 
 class SetReconciliationPolicyRequest(BaseModel):
@@ -251,6 +266,13 @@ class RecordStatementBalanceRequest(BaseModel):
     ...,
     description=(
       "The balance-sheet account the statement is for (a chart-of-accounts element id)."
+    ),
+  )
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity whose books the account is in, by id. Omit for the group "
+      "parent. The account must be in that entity's chart."
     ),
   )
   as_of: date = Field(

@@ -41,10 +41,7 @@ from robosystems.operations.information_block.rules.engine import (
   evaluate_rules_for_structure,
 )
 from robosystems.operations.locking import bounded_lock_wait
-from robosystems.operations.roboledger.entity_scope import (
-  ensure_entity_id,
-  owner_entity_id,
-)
+from robosystems.operations.roboledger.entity_scope import owner_entity_id
 from robosystems.operations.roboledger.fact_set import create_fact_set
 
 from .resolvers import IndependentSide, ReconciliationWindow
@@ -182,11 +179,14 @@ def ensure_reconciliation_concepts(
   )
 
 
-def has_reconciliations(session: Session) -> bool:
+def has_reconciliations(session: Session, entity_id: str) -> bool:
   return (
     session.execute(
       select(Structure.id)
-      .where(Structure.block_type == RECONCILIATION_BLOCK_TYPE)
+      .where(
+        Structure.block_type == RECONCILIATION_BLOCK_TYPE,
+        Structure.entity_id == entity_id,
+      )
       .limit(1)
     ).scalar()
     is not None
@@ -194,12 +194,13 @@ def has_reconciliations(session: Session) -> bool:
 
 
 def find_ledger_reconciliation(
-  session: Session, method: ReconciliationMethod
+  session: Session, method: ReconciliationMethod, entity_id: str
 ) -> Structure | None:
   return session.execute(
     select(Structure)
     .where(
       Structure.block_type == RECONCILIATION_BLOCK_TYPE,
+      Structure.entity_id == entity_id,
       Structure.artifact_mechanics["scope"].astext == "ledger",
       Structure.artifact_mechanics["method"].astext == method,
     )
@@ -213,11 +214,12 @@ def ensure_ledger_reconciliation(
   *,
   method: ReconciliationMethod,
   source: str,
+  entity_id: str,
   created_by: str,
 ) -> Structure:
-  """The ledger-scope block for ``method``, created with its concepts and its
-  rule on first use. The caller holds `lock_reconciliation_writes`."""
-  structure = find_ledger_reconciliation(session, method)
+  """The entity's ledger-scope block for ``method``, created with its concepts
+  and its rule on first use. The caller holds `lock_reconciliation_writes`."""
+  structure = find_ledger_reconciliation(session, method, entity_id)
   if structure is not None:
     return structure
 
@@ -225,6 +227,7 @@ def ensure_ledger_reconciliation(
   return _create_block(
     session,
     mechanics=ReconciliationMechanics(scope="ledger", method=method),
+    entity_id=entity_id,
     name=f"Source ledger ({source_name})",
     description=(
       f"The ledger's account balances against {source_name}'s own trial "
@@ -248,13 +251,15 @@ _ACCOUNT_BLOCK_DESCRIPTIONS = {
 
 
 def account_reconciliations(
-  session: Session, method: ReconciliationMethod
+  session: Session, method: ReconciliationMethod, entity_id: str
 ) -> dict[str, Structure]:
-  """The account-scope blocks for ``method``, by the account they reconcile."""
+  """The entity's account-scope blocks for ``method``, by the account they
+  reconcile."""
   rows = session.execute(
     select(Structure)
     .where(
       Structure.block_type == RECONCILIATION_BLOCK_TYPE,
+      Structure.entity_id == entity_id,
       Structure.is_active.is_(True),
       Structure.artifact_mechanics["scope"].astext == "account",
       Structure.artifact_mechanics["method"].astext == method,
@@ -273,11 +278,13 @@ def create_account_reconciliation(
   method: ReconciliationMethod,
   element_id: str,
   account_name: str,
+  entity_id: str,
   required_for_close: bool,
   created_by: str,
 ) -> Structure:
-  """A new account-scope block. The caller holds `lock_reconciliation_writes`
-  and has checked that the account has none for ``method``."""
+  """A new account-scope block on the entity's books. The caller holds
+  `lock_reconciliation_writes` and has checked that the account has none for
+  ``method``."""
   return _create_block(
     session,
     mechanics=ReconciliationMechanics(
@@ -286,6 +293,7 @@ def create_account_reconciliation(
       element_id=element_id,
       required_for_close=required_for_close,
     ),
+    entity_id=entity_id,
     name=f"{account_name} ({_ACCOUNT_BLOCK_LABELS[method]})",
     description=_ACCOUNT_BLOCK_DESCRIPTIONS[method],
     presents=_ACCOUNT_CONCEPTS,
@@ -297,6 +305,7 @@ def _create_block(
   session: Session,
   *,
   mechanics: ReconciliationMechanics,
+  entity_id: str,
   name: str,
   description: str,
   presents: tuple[str, ...],
@@ -308,7 +317,7 @@ def _create_block(
     name=name,
     description=description,
     block_type=RECONCILIATION_BLOCK_TYPE,
-    entity_id=ensure_entity_id(session),
+    entity_id=entity_id,
     taxonomy_id=concepts.taxonomy_id,
     concept_arrangement="set",
     member_arrangement=None,

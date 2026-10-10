@@ -18,7 +18,6 @@ from sqlalchemy.orm import Session
 
 from robosystems.models.extensions.element import Element
 from robosystems.models.extensions.roboledger import Event
-from robosystems.operations.roboledger.entity_scope import ensure_entity_id
 
 BALANCE_OBSERVED_EVENT_TYPE = "balance_observed"
 STATEMENT_ENDING = "statement_ending"
@@ -88,13 +87,15 @@ def record_statement_observation(
   session: Session,
   *,
   element: Element,
+  entity_id: str,
   as_of: date,
   stated_cents: int,
   document_id: str | None,
   note: str | None,
   created_by: str,
 ) -> BalanceObservation:
-  """Record a statement's ending balance for an account. Flushes.
+  """Record a statement's ending balance for an account, on the books of the
+  entity whose chart it is in. Flushes.
 
   ``stated_cents`` is the balance as the statement shows it, positive in the
   account's normal direction. Recording the same account and date again
@@ -115,7 +116,7 @@ def record_statement_observation(
     live.status = "superseded"
 
   event = Event(
-    entity_id=ensure_entity_id(session),
+    entity_id=entity_id,
     event_type=BALANCE_OBSERVED_EVENT_TYPE,
     event_category="reconciliation",
     event_class="support",
