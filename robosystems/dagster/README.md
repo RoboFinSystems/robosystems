@@ -87,7 +87,7 @@ The instance-monitoring schedules are auto-enabled in staging and production onl
 
 | Sensor | Watches for |
 | ------ | ----------- |
-| `stale_graph_materialization_sensor` | Graphs marked stale; batches writes within a window to avoid excessive rebuilds |
+| `stale_graph_materialization_sensor` | Graphs marked stale; batches writes within a window to avoid excessive rebuilds (window and max wait: SSM `tuning/materialization/`) |
 | `expired_graph_subscription_sensor` | Graphs whose subscription lapsed |
 | `suspended_graph_deprovisioning_sensor` | Suspended graphs past their retention window |
 | `stalled_provisioning_sensor` | Subscriptions left in `provisioning` past the staleness window — the state no other sensor looks at |

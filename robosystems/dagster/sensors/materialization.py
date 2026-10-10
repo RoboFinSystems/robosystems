@@ -13,18 +13,12 @@ from dagster import (
 from dateutil import parser as date_parser
 from sqlalchemy import or_
 
+from robosystems.config.tuning import TuningConfig
 from robosystems.dagster.jobs.extensions import extensions_materialize_job
 from robosystems.database import session as db_session_factory
 from robosystems.logger import get_logger
 
 logger = get_logger(__name__)
-
-# Batch window: don't materialize after every single OLTP write.
-_MIN_STALE_AGE_SECONDS = 30
-
-# A graph written more often than the batch window still refreshes this soon
-# after its oldest unmaterialized write.
-_MAX_STALE_WAIT_SECONDS = 300
 
 # A run submitted for a staleness event that left the graph stale (it failed)
 # is retried after this long, unless a newer write comes first.
@@ -33,6 +27,19 @@ _FAILED_RUN_RETRY_SECONDS = 7200  # 2 hours
 
 def _now() -> datetime:
   return datetime.now(UTC)
+
+
+def _stale_windows() -> tuple[int, int]:
+  """(min stale age, max stale wait) in seconds, read from SSM tuning each tick.
+
+  The batch window keeps a burst of writes to one rebuild; the max wait still
+  refreshes a graph written more often than the window. Both are raised on a
+  dedicated deployment whose full rebuild is too long for the managed cadence.
+  """
+  return (
+    TuningConfig.get_materialization_min_stale_age(),
+    TuningConfig.get_materialization_max_stale_wait(),
+  )
 
 
 def _graphs_being_written(
@@ -115,7 +122,8 @@ def stale_graph_materialization_sensor(context: SensorEvaluationContext):
   db = db_session_factory()
   try:
     now = _now()
-    cutoff = now - timedelta(seconds=_MIN_STALE_AGE_SECONDS)
+    min_stale_age, max_stale_wait = _stale_windows()
+    cutoff = now - timedelta(seconds=min_stale_age)
 
     # Cursor: {graph_id: {"stale_at", "submitted_at"}}, the staleness event
     # last submitted for each graph and when.
@@ -139,7 +147,7 @@ def stale_graph_materialization_sensor(context: SensorEvaluationContext):
         or_(
           Graph.graph_stale_at < cutoff,  # type: ignore[operator]
           Graph.graph_stale_since  # type: ignore[operator]
-          < now - timedelta(seconds=_MAX_STALE_WAIT_SECONDS),
+          < now - timedelta(seconds=max_stale_wait),
         ),
         Graph.graph_type == "entity",
         Graph.status == "active",

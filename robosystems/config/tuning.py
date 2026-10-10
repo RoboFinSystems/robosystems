@@ -15,6 +15,7 @@ from .defaults import (
   DatabaseDefaults,
   LimitsDefaults,
   LoadSheddingDefaults,
+  MaterializationDefaults,
   MCPDefaults,
   QueueDefaults,
   SSEDefaults,
@@ -326,6 +327,24 @@ class TuningConfig:
   def get_org_graphs_default_limit(cls) -> int:
     """Get default maximum graphs per organization."""
     return cls.get_int("limits/ORG_GRAPHS_DEFAULT", LimitsDefaults.ORG_GRAPHS_DEFAULT)
+
+  # =========================================================================
+  # MATERIALIZATION ACCESSORS
+  # =========================================================================
+
+  @classmethod
+  def get_materialization_min_stale_age(cls) -> int:
+    """Seconds without a write before a stale graph is rebuilt."""
+    return cls.get_int(
+      "materialization/MIN_STALE_AGE", MaterializationDefaults.MIN_STALE_AGE
+    )
+
+  @classmethod
+  def get_materialization_max_stale_wait(cls) -> int:
+    """Seconds stale after which a graph is rebuilt despite ongoing writes."""
+    return cls.get_int(
+      "materialization/MAX_STALE_WAIT", MaterializationDefaults.MAX_STALE_WAIT
+    )
 
   # =========================================================================
   # UTILITY METHODS

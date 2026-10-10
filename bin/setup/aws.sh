@@ -384,6 +384,10 @@ function create_ssm_tuning_parameters() {
         # Limits
         "limits/ORG_GRAPHS_DEFAULT=10"
 
+        # Materialization cadence (seconds) - raised on dedicated deployments
+        "materialization/MIN_STALE_AGE=30"
+        "materialization/MAX_STALE_WAIT=300"
+
         # Database Connection Pool
         "database/POOL_SIZE=5"
         "database/MAX_OVERFLOW=10"

@@ -7,8 +7,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from dagster import build_sensor_context
 
+from robosystems.config.defaults import MaterializationDefaults
 from robosystems.dagster.sensors.materialization import (
   _graphs_being_written,
+  _stale_windows,
   stale_graph_materialization_sensor,
 )
 
@@ -258,3 +260,18 @@ class TestGraphsBeingWritten:
       busy = _graphs_being_written(self._context([]), ["kg1", "kg2"])
 
     assert busy == {"kg1", "kg2"}
+
+
+class TestStaleWindows:
+  def test_defaults_are_the_managed_cadence(self, monkeypatch):
+    monkeypatch.delenv("TUNING_MATERIALIZATION_MIN_STALE_AGE", raising=False)
+    monkeypatch.delenv("TUNING_MATERIALIZATION_MAX_STALE_WAIT", raising=False)
+    assert _stale_windows() == (
+      MaterializationDefaults.MIN_STALE_AGE,
+      MaterializationDefaults.MAX_STALE_WAIT,
+    )
+
+  def test_a_tuning_override_is_read_on_the_tick(self, monkeypatch):
+    monkeypatch.setenv("TUNING_MATERIALIZATION_MIN_STALE_AGE", "3600")
+    monkeypatch.setenv("TUNING_MATERIALIZATION_MAX_STALE_WAIT", "86400")
+    assert _stale_windows() == (3600, 86400)

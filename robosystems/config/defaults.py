@@ -152,6 +152,17 @@ class LimitsDefaults:
   ORG_GRAPHS_DEFAULT = 1  # Default max graphs per organization
 
 
+class MaterializationDefaults:
+  """Cadence of the stale-graph sensor's extensions rebuilds (seconds).
+
+  Every rebuild is a full one, so a dedicated deployment whose ledger is too
+  large to rebuild every few minutes raises these. An operator lever only.
+  """
+
+  MIN_STALE_AGE = 30  # Rebuild once a graph has gone this long without a write
+  MAX_STALE_WAIT = 300  # Rebuild anyway once a graph has been stale this long
+
+
 # SSM paths (under tuning/) that tuning.py reads overrides from.
 SSM_TUNING_PATHS = {
   # Cache TTLs
@@ -191,6 +202,9 @@ SSM_TUNING_PATHS = {
   "sse/QUEUE_SIZE": SSEDefaults.QUEUE_SIZE,
   # Limits
   "limits/ORG_GRAPHS_DEFAULT": LimitsDefaults.ORG_GRAPHS_DEFAULT,
+  # Materialization cadence
+  "materialization/MIN_STALE_AGE": MaterializationDefaults.MIN_STALE_AGE,
+  "materialization/MAX_STALE_WAIT": MaterializationDefaults.MAX_STALE_WAIT,
   # Database Pool
   "database/POOL_SIZE": DatabaseDefaults.POOL_SIZE,
   "database/MAX_OVERFLOW": DatabaseDefaults.MAX_OVERFLOW,
