@@ -359,6 +359,15 @@ Resources:
                   - ec2:DescribeInstances
                   - ec2:DescribeTags
                 Resource: "*"
+              # Lower the root volume to baseline performance after the boot download
+              - Effect: Allow
+                Action:
+                  - ec2:ModifyVolume
+                Resource: !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:volume/*
+                Condition:
+                  StringEquals:
+                    "aws:ResourceTag/Component": !Ref ComponentTag
+                    "aws:ResourceTag/Environment": !Ref Environment
               # CloudFormation for shared replica ALB discovery
               - Effect: Allow
                 Action:
@@ -406,13 +415,16 @@ Resources:
           - !Ref ValkeyClientSecurityGroupId
         # Root volume only - databases are downloaded from S3 to local disk during startup
         # Size must accommodate OS (~10GB) + downloaded database files
+        # Provisioned high for the boot download, which is disk-bound; the replica
+        # lowers its own volume to the gp3 baseline once the download finishes
+        # (ladybug-replica.sh), so steady state pays for no extra performance.
         BlockDeviceMappings:
           - DeviceName: /dev/xvda
             Ebs:
               VolumeSize: !Ref RootVolumeSize
               VolumeType: gp3
-              Iops: 3000
-              Throughput: 250
+              Iops: 4000
+              Throughput: 1000
               Encrypted: true
               DeleteOnTermination: true
         TagSpecifications:
@@ -584,7 +596,9 @@ Resources:
     CreationPolicy:
       ResourceSignal:
         Count: !If [HasMinInstances, !Ref MinInstances, 0]
-        # Cold boot is ~15-20 min, dominated by the sec.lbug S3 download.
+        # Cold boot is dominated by the sec.lbug S3 download (~11 min total at a
+        # 250 MiB/s root volume, 2026-10); left at PT30M until the boot-provisioned
+        # volume's boot is measured.
         Timeout: PT30M
     UpdatePolicy:
       AutoScalingRollingUpdate:
