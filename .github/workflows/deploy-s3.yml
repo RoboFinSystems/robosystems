@@ -45,7 +45,7 @@ on:
         type: string
         default: ""
       user_upload_cors_origin:
-        description: "App origin allowed to PUT browser uploads to the user bucket"
+        description: "App origins allowed to PUT browser uploads to the user bucket, separated by semicolons"
         required: false
         type: string
         default: ""
