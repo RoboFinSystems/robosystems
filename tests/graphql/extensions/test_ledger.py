@@ -504,6 +504,7 @@ class TestEventBlockResolvers:
     status: str = "captured",
     source: str = "quickbooks",
     metadata: dict | None = None,
+    document_id: str | None = None,
   ) -> EventBlockEnvelope:
     return EventBlockEnvelope(
       id=id,
@@ -528,6 +529,7 @@ class TestEventBlockResolvers:
       replaces_event_id=None,
       obligated_by_event_id=None,
       discharges_event_id=None,
+      document_id=document_id,
       created_at=datetime(2026, 4, 16, 9, tzinfo=UTC),
       created_by="system",
     )
@@ -576,6 +578,22 @@ class TestEventBlockResolvers:
     assert block["metadata"] == {"qb_txn_type": "Invoice", "lines": []}
     assert block["dimensionIds"] == ["dim_class_a"]
     assert block["agentId"] == "agt_customer_1"
+
+  def test_names_the_document_the_event_rests_on(self) -> None:
+    with (
+      _patch_session(),
+      patch(
+        "robosystems.operations.roboledger.reads.event_block.get_event_block",
+        return_value=self._event(document_id="doc_bill_1"),
+      ),
+    ):
+      result = schema.execute_sync(
+        'query { eventBlock(id: "evt_01") { id documentId } }',
+        context_value=_ctx(),
+      )
+
+    assert result.errors is None
+    assert result.data == {"eventBlock": {"id": "evt_01", "documentId": "doc_bill_1"}}
 
   def test_returns_null_when_event_missing(self) -> None:
     with (
