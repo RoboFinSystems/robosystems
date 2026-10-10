@@ -369,6 +369,8 @@ class EventBlock:
   replaces_event_id: str | None
   obligated_by_event_id: str | None
   discharges_event_id: str | None
+  # The stored document this event rests on: a bill, a receipt, a statement.
+  document_id: str | None
   created_at: datetime
   created_by: str
 
@@ -398,6 +400,7 @@ class EventBlock:
       replaces_event_id=row.replaces_event_id,
       obligated_by_event_id=row.obligated_by_event_id,
       discharges_event_id=row.discharges_event_id,
+      document_id=row.document_id,
       created_at=row.created_at,
       created_by=row.created_by,
     )
