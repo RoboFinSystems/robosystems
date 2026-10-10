@@ -392,7 +392,7 @@ class TestAnAccountBelongsToOneEntity:
     assert disposal.one().entity_id == t.sub.id
 
 
-def test_a_reconciliation_block_belongs_to_the_parent(two_entities):
+def test_a_reconciliation_block_belongs_to_the_entity_it_is_made_for(two_entities):
   t = two_entities
   cash = _account(t.session, "Cash")
 
@@ -401,8 +401,9 @@ def test_a_reconciliation_block_belongs_to_the_parent(two_entities):
     method="statement",
     element_id=cash,
     account_name="Cash",
+    entity_id=t.sub.id,
     required_for_close=False,
     created_by="usr_1",
   )
 
-  assert structure.entity_id == t.parent.id
+  assert structure.entity_id == t.sub.id
