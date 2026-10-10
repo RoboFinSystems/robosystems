@@ -384,7 +384,10 @@ Resources:
         BlockDeviceMappings:
           - DeviceName: /dev/xvda
             Ebs:
-              VolumeSize: 30
+              # OS + one container image (~4.5 GB used) with room for a second
+              # image during a refresh; graph data and temp files are on the
+              # data volume.
+              VolumeSize: 16
               VolumeType: gp3
               Encrypted: true
               DeleteOnTermination: true

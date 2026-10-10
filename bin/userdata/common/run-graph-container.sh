@@ -59,6 +59,14 @@ echo "Stopping existing container if present..."
 docker stop ${CONTAINER_NAME} 2>/dev/null || true
 docker rm ${CONTAINER_NAME} 2>/dev/null || true
 
+# The container's temp files go on the data volume rather than its /tmp, which is
+# the root disk: backup and restore stage whole databases there. Cleared on each
+# start, since with the old container stopped anything left is from a killed run.
+TMP_MOUNT_SOURCE="${DATA_MOUNT_SOURCE:?}/tmp"
+rm -rf "${TMP_MOUNT_SOURCE}"
+mkdir -p "${TMP_MOUNT_SOURCE}"
+chown 1000:1000 "${TMP_MOUNT_SOURCE}"
+
 # Use unified log group for all Graph API instances
 # The unified log group should be created by graph-infra CloudFormation stack
 UNIFIED_LOG_GROUP="/robosystems/${ENVIRONMENT}/graph-api"
@@ -97,6 +105,7 @@ EXTRA_ENV_VARS="-e LBUG_NODE_TYPE=${NODE_TYPE} \
     -e REPOSITORY_TYPE=${REPOSITORY_TYPE:-shared} \
     -e SHARED_REPOSITORIES=${SHARED_REPOSITORIES:-} \
     -e LBUG_DATABASE_PATH=${DATA_MOUNT_TARGET}/lbug-dbs \
+    -e TMPDIR=${DATA_MOUNT_TARGET}/tmp \
     -e LBUG_PORT=${CONTAINER_PORT} \
     -e LBUG_ROLE=$(if [ "${NODE_TYPE}" = "shared_replica" ]; then echo "replica"; else echo "master"; fi) \
     -e LBUG_ACCESS_PATTERN=api_writer"
