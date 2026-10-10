@@ -487,11 +487,13 @@ class DocumentService:
     if doc is None:
       return False
 
-    if _cited_as_evidence(graph_id, str(doc.id)):
+    citing = events_citing(graph_id, str(doc.id), limit=1)
+    if citing:
       raise DocumentInUseError(
-        f"Document {document_id} is the evidence for a live event on the "
-        "books (get-document lists them). Point the event at another "
-        "document, or void it, first."
+        f"Document {document_id} is the evidence for live event "
+        f"{citing[0].event_id} ({citing[0].event_type}), among any others "
+        "get-document lists. Point the event at another document, or void "
+        "it, first."
       )
     if not doc.is_file:
       self._delete_from_opensearch(graph_id, doc.id)
@@ -659,11 +661,6 @@ def document_exists(graph_id: str, document_id: str) -> bool:
     return (
       Document.get_by_id_and_graph(document_id, graph_id, platform_session) is not None
     )
-
-
-def _cited_as_evidence(graph_id: str, document_id: str) -> bool:
-  """Whether a live event on the graph's books names the document."""
-  return bool(events_citing(graph_id, document_id, limit=1))
 
 
 def events_citing(

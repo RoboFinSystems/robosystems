@@ -226,3 +226,26 @@ def test_a_statement_balance_names_its_document_the_same_way(session):
     session.commit()
     assert events_citing(GRAPH_ID, "doc_invoice") == []
     assert len(events_citing(GRAPH_ID, "doc_other")) == 1
+
+
+def test_a_bill_still_in_the_inbox_keeps_its_document(session):
+  """Before events could cite documents, only a committed statement balance
+  held one; now a captured bill does too, and the refusal names it."""
+  from unittest.mock import MagicMock
+
+  from robosystems.models.core.document import Document
+  from robosystems.operations.document_service import (
+    DocumentInUseError,
+    DocumentService,
+  )
+
+  bill, _ = _create(session, document_id="doc_bill", event_type="bill_received")
+  stored = MagicMock(id="doc_bill", is_file=True)
+
+  with (
+    _ledger(session),
+    patch.object(Document, "get_by_id_and_graph", return_value=stored),
+    pytest.raises(DocumentInUseError, match=bill),
+  ):
+    DocumentService(MagicMock()).delete_document(GRAPH_ID, "doc_bill")
+  stored.delete.assert_not_called()

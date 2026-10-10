@@ -690,6 +690,8 @@ def update_event_block(
     raise EventNotFoundError(f"Event not found: {body.event_id}")
   refuse_reserved_event_type(str(peek.event_type))
   _refuse_system_metadata(body.metadata_patch)
+  # Before the row lock: it reads the platform database.
+  _check_event_document(graph_id, body.document_id)
   # Period fence before the event row lock, matching close's order. A commit
   # fences its current date; a re-date fences the date it moves to and the
   # rows it already wrote, but not the date it leaves, so an event with no rows
@@ -807,8 +809,7 @@ def update_event_block(
     event.discharges_event_id = body.discharges_event_id
 
   if body.document_id is not None:
-    # An empty string detaches the document.
-    _check_event_document(graph_id, body.document_id)
+    # Checked before the lock; an empty string detaches the document.
     event.document_id = body.document_id or None
 
   if body.event_action is not None:

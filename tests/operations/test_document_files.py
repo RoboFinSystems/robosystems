@@ -22,6 +22,7 @@ from robosystems.models.api.graphs.operations import (
 )
 from robosystems.models.core.document import FILE_STORED, Document
 from robosystems.operations.document_service import (
+  DocumentCitation,
   DocumentFileError,
   DocumentFileNotUploadedError,
   DocumentInUseError,
@@ -406,13 +407,14 @@ def test_a_document_cited_by_a_recorded_balance_cannot_be_deleted(files):
       graph_id, user_id, DocumentUploadRequest(title="Statement", content="# Sept")
     )
 
-  with patch(f"{_SERVICE}._cited_as_evidence", return_value=True):
+  cited = [DocumentCitation("evt_1", "invoice_issued", "committed", "2026-09-30")]
+  with patch(f"{_SERVICE}.events_citing", return_value=cited):
     for cited in (doc, text_doc):
       with pytest.raises(DocumentInUseError):
         service.delete_document(graph_id, str(cited.id))
   assert _objects(s3) == [doc.file_s3_key]
 
-  with patch(f"{_SERVICE}._cited_as_evidence", return_value=False):
+  with patch(f"{_SERVICE}.events_citing", return_value=[]):
     assert service.delete_document(graph_id, str(doc.id)) is True
   assert _objects(s3) == []
   assert service.get_document(graph_id, str(doc.id)) is None

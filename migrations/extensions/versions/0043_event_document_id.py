@@ -51,7 +51,9 @@ def _add(conn: Connection, schema: str) -> None:
 
 def _drop(conn: Connection, schema: str) -> None:
   # Statement balances recorded after the upgrade name their document only
-  # here; put it back where the earlier code reads it.
+  # here; put it back where the earlier code reads it. The column wins over a
+  # metadata value it disagrees with: it is what the balance was last
+  # recorded against.
   conn.execute(
     text(
       f'UPDATE "{schema}".events '
