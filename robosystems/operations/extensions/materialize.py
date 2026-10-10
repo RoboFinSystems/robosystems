@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     MaterializationLock,
   )
 
+from robosystems.config.tuning import TuningConfig
 from robosystems.logger import logger
 from robosystems.operations.roboledger.entry_status import landed_is_live_sql
 from robosystems.security.error_handling import redact_connection_secrets
@@ -1580,8 +1581,16 @@ class ExtensionsMaterializer:
     """
     if lock is None:
       return
+    # The TTL must outlive the longest single step, or a table that is still
+    # legitimately copying lets the lock lapse under it.
+    step_seconds = max(
+      TuningConfig.get_materialization_stage_timeout(),
+      TuningConfig.get_materialization_copy_timeout(),
+    )
     try:
-      still_held = await lock.extend()
+      still_held = await lock.extend(
+        ttl_seconds=max(lock.ttl_seconds, step_seconds + 300)
+      )
     except Exception as e:
       logger.warning(f"Materialization lock extend failed for {lock.lock_key}: {e}")
       return
@@ -1821,7 +1830,11 @@ class ExtensionsMaterializer:
         logger.info(f"Staging {table_name} from PostgreSQL → DuckDB")
         # Must be the internal write path: the read-only /tables/query surface
         # rejects DDL and has postgres_scanner disabled.
-        await client.execute_write(graph_id, sql.strip(), timeout=120.0)
+        await client.execute_write(
+          graph_id,
+          sql.strip(),
+          timeout=float(TuningConfig.get_materialization_stage_timeout()),
+        )
         result.tables_staged.append(table_name)
       except Exception as e:
         # Error text derived from the staging SQL is scrubbed before it
@@ -1871,7 +1884,11 @@ class ExtensionsMaterializer:
         f'OR NOT EXISTS (SELECT 1 FROM "{to_node}" n WHERE n.identifier = r.dst)'
       )
       try:
-        response = await client.execute_write(graph_id, sql, timeout=120.0)
+        response = await client.execute_write(
+          graph_id,
+          sql,
+          timeout=float(TuningConfig.get_materialization_stage_timeout()),
+        )
       except Exception as e:
         logger.warning(
           redact_connection_secrets(f"Could not prune {table_name}: {e!s}")
@@ -1913,7 +1930,7 @@ class ExtensionsMaterializer:
         response = await client.materialize_table(
           graph_id=graph_id,
           table_name=table_name,
-          timeout=300.0,
+          timeout=float(TuningConfig.get_materialization_copy_timeout()),
           source_graph_id=source_graph_id,
         )
         rows = response.get("rows_ingested", 0)

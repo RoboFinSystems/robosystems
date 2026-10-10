@@ -12,6 +12,7 @@ from robosystems.config.defaults import (
   CacheDefaults,
   CircuitBreakerDefaults,
   LoadSheddingDefaults,
+  MaterializationDefaults,
   MCPDefaults,
   QueueDefaults,
   RateLimitDefaults,
@@ -272,6 +273,33 @@ class TestSSMTuningPaths:
     """Verify MCP tuning paths are defined."""
     assert "mcp/MAX_RESULT_ROWS" in SSM_TUNING_PATHS
     assert "mcp/MAX_RESULT_SIZE_MB" in SSM_TUNING_PATHS
+
+  def test_materialization_paths_exist(self):
+    """Verify materialization cadence tuning paths are defined."""
+    assert (
+      SSM_TUNING_PATHS["materialization/MIN_STALE_AGE"]
+      == MaterializationDefaults.MIN_STALE_AGE
+    )
+    assert (
+      SSM_TUNING_PATHS["materialization/MAX_STALE_WAIT"]
+      == MaterializationDefaults.MAX_STALE_WAIT
+    )
+    assert (
+      SSM_TUNING_PATHS["materialization/STAGE_TIMEOUT"]
+      == MaterializationDefaults.STAGE_TIMEOUT
+    )
+    assert (
+      SSM_TUNING_PATHS["materialization/COPY_TIMEOUT"]
+      == MaterializationDefaults.COPY_TIMEOUT
+    )
+    assert (
+      SSM_TUNING_PATHS["materialization/ENGINE_COPY_TIMEOUT"]
+      == MaterializationDefaults.ENGINE_COPY_TIMEOUT
+    )
+    assert (
+      SSM_TUNING_PATHS["timeouts/GRAPH_ENGINE_QUERY"]
+      == TimeoutDefaults.GRAPH_ENGINE_QUERY
+    )
 
   def test_paths_match_defaults(self):
     """Verify SSM paths have matching default values."""

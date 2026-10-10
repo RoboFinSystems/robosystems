@@ -15,6 +15,7 @@ from .defaults import (
   DatabaseDefaults,
   LimitsDefaults,
   LoadSheddingDefaults,
+  MaterializationDefaults,
   MCPDefaults,
   QueueDefaults,
   SSEDefaults,
@@ -249,6 +250,13 @@ class TuningConfig:
     """Get Graph query execution timeout (seconds)."""
     return cls.get_int("timeouts/GRAPH_QUERY", TimeoutDefaults.GRAPH_QUERY)
 
+  @classmethod
+  def get_graph_engine_query_timeout(cls) -> int:
+    """LadybugDB's per-query ceiling (seconds), set on each new connection."""
+    return cls.get_int(
+      "timeouts/GRAPH_ENGINE_QUERY", TimeoutDefaults.GRAPH_ENGINE_QUERY
+    )
+
   # =========================================================================
   # SSE ACCESSORS
   # =========================================================================
@@ -326,6 +334,46 @@ class TuningConfig:
   def get_org_graphs_default_limit(cls) -> int:
     """Get default maximum graphs per organization."""
     return cls.get_int("limits/ORG_GRAPHS_DEFAULT", LimitsDefaults.ORG_GRAPHS_DEFAULT)
+
+  # =========================================================================
+  # MATERIALIZATION ACCESSORS
+  # =========================================================================
+
+  @classmethod
+  def get_materialization_min_stale_age(cls) -> int:
+    """Seconds without a write before a stale graph is rebuilt."""
+    return cls.get_int(
+      "materialization/MIN_STALE_AGE", MaterializationDefaults.MIN_STALE_AGE
+    )
+
+  @classmethod
+  def get_materialization_max_stale_wait(cls) -> int:
+    """Seconds stale after which a graph is rebuilt despite ongoing writes."""
+    return cls.get_int(
+      "materialization/MAX_STALE_WAIT", MaterializationDefaults.MAX_STALE_WAIT
+    )
+
+  @classmethod
+  def get_materialization_stage_timeout(cls) -> int:
+    """Seconds allowed per table to stage from PostgreSQL into DuckDB."""
+    return cls.get_int(
+      "materialization/STAGE_TIMEOUT", MaterializationDefaults.STAGE_TIMEOUT
+    )
+
+  @classmethod
+  def get_materialization_copy_timeout(cls) -> int:
+    """Seconds a build waits per table for the COPY into the graph."""
+    return cls.get_int(
+      "materialization/COPY_TIMEOUT", MaterializationDefaults.COPY_TIMEOUT
+    )
+
+  @classmethod
+  def get_materialization_engine_copy_timeout(cls) -> int:
+    """LadybugDB's own per-table ceiling on a materialization COPY (seconds)."""
+    return cls.get_int(
+      "materialization/ENGINE_COPY_TIMEOUT",
+      MaterializationDefaults.ENGINE_COPY_TIMEOUT,
+    )
 
   # =========================================================================
   # UTILITY METHODS
