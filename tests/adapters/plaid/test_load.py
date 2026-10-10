@@ -34,6 +34,7 @@ from tests.adapters.plaid.fixtures import (
   SAVINGS_ID,
   accounts,
   transactions,
+  txn,
 )
 
 MODULE = "robosystems.adapters.plaid.pipeline.load"
@@ -579,6 +580,25 @@ class TestLoadSync:
     # The one unpaired transfer candidate (the owner draw) went to the merge.
     assert merge.call_count == 1
     assert "plaid_txn_t_owner_draw" not in {p["external_id"] for p in captured}
+
+  def test_a_bank_fee_naming_an_own_account_merges_with_its_waiting_side(self):
+    # The checking side of a card autopay that Plaid filed under bank fees,
+    # arriving after the card side was captured on its own.
+    autopay = txn(
+      "t_autopay_out",
+      CHECKING_ID,
+      0.95,
+      "2026-03-20",
+      name="IO AUTOPAY",
+      primary="BANK_FEES",
+      detailed="BANK_FEES_OTHER_BANK_FEES",
+      merchant="Harborline Bank Business Card",
+    )
+    _report, captured, _removals, merge, _session = self._load(
+      waiting=_event(), modified=[autopay]
+    )
+    assert merge.call_count == 2
+    assert "plaid_txn_t_autopay_out" not in {p["external_id"] for p in captured}
 
   def test_a_modified_row_supersedes_its_added_row(self):
     changed = transactions()[0]

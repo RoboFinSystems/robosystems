@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -205,12 +206,42 @@ _GENERIC_INSTITUTION_WORDS = re.compile(
 )
 
 
-def is_transfer_candidate(txn: dict[str, Any]) -> bool:
-  """A line whose other side may be on another of the Item's accounts."""
+_MASK = re.compile(r"\s*••\S*$")
+
+
+def own_account_keys(accounts: Iterable[BankAccount]) -> dict[str, frozenset[str]]:
+  """Account id → the names a line on another account uses for it: the
+  display name, with and without its mask."""
+  keys: dict[str, frozenset[str]] = {}
+  for account in accounts:
+    names = {name_key(account.name), name_key(_MASK.sub("", account.name))}
+    keys[account.account_id] = frozenset(n for n in names if n)
+  return keys
+
+
+def is_transfer_candidate(
+  txn: dict[str, Any], own_accounts: dict[str, frozenset[str]] | None = None
+) -> bool:
+  """A line whose other side may be on another of the Item's accounts: one
+  Plaid calls a transfer or card payment, or one whose merchant is another of
+  the Item's own accounts — a card autopay Plaid filed under bank fees."""
   primary, detailed, _confidence = category(txn)
   if detailed in NOT_A_TRANSFER_DETAILED:
     return False
-  return primary in TRANSFER_PRIMARIES or detailed == CARD_PAYMENT
+  if primary in TRANSFER_PRIMARIES or detailed == CARD_PAYMENT:
+    return True
+  return names_own_account(txn, own_accounts)
+
+
+def names_own_account(
+  txn: dict[str, Any], own_accounts: dict[str, frozenset[str]] | None
+) -> bool:
+  name = counterparty_name(txn)
+  if not own_accounts or not name:
+    return False
+  key = name_key(name)
+  account_id = str(txn.get("account_id"))
+  return any(key in keys for other, keys in own_accounts.items() if other != account_id)
 
 
 def counterparty_key(txn: dict[str, Any]) -> str | None:
@@ -235,7 +266,11 @@ def counterparty_name(txn: dict[str, Any]) -> str | None:
 
 
 def counterparties(
-  transactions: list[dict[str, Any]], *, account_ids: set[str], source: str
+  transactions: list[dict[str, Any]],
+  *,
+  account_ids: set[str],
+  source: str,
+  own_accounts: dict[str, frozenset[str]] | None = None,
 ) -> list[dict[str, Any]]:
   """One agent per distinct third party the booked accounts transact with."""
   by_key: dict[str, dict[str, Any]] = {}
@@ -243,7 +278,7 @@ def counterparties(
     if txn.get("pending") or str(txn.get("account_id")) not in account_ids:
       continue
     primary, detailed, _confidence = category(txn)
-    if is_transfer_candidate(txn) or primary in MOVEMENT_PRIMARIES:
+    if is_transfer_candidate(txn, own_accounts) or primary in MOVEMENT_PRIMARIES:
       continue
     key = counterparty_key(txn)
     name = counterparty_name(txn)
@@ -427,6 +462,7 @@ def transform(
   account_entities = account_entities or {}
   charts_by_entity = charts_by_entity or {}
   by_id = {account.account_id: account for account in accounts}
+  own_accounts = own_account_keys(accounts)
   result = TransformResult(events=[])
 
   live: list[dict[str, Any]] = []
@@ -451,7 +487,8 @@ def transform(
   candidates = [
     leg_from_transaction(txn, by_id, account_elements, account_entities)
     for txn in live
-    if is_transfer_candidate(txn) and str(txn["transaction_id"]) not in unpairable
+    if is_transfer_candidate(txn, own_accounts)
+    and str(txn["transaction_id"]) not in unpairable
   ]
   pairs, _unpaired = pair_legs(candidates)
   paired: set[str] = set()
@@ -475,6 +512,7 @@ def transform(
       item_id=item_id,
       account_entities=account_entities,
       charts_by_entity=charts_by_entity,
+      own_accounts=own_accounts,
     )
     result.classification[classification] += 1
     if event["metadata"].get("suggested_account_name"):
@@ -518,13 +556,16 @@ def bank_event(
   item_id: str | None,
   account_entities: dict[str, str] | None = None,
   charts_by_entity: dict[str, ChartIndex] | None = None,
+  own_accounts: dict[str, frozenset[str]] | None = None,
 ) -> tuple[dict[str, Any], str]:
   """One single-leg event, and how its suggestion was reached."""
   amount = cents(txn.get("amount"))
   primary, detailed, confidence = category(txn)
   suggested, known = hint_for_category(primary, detailed)
   classification = "plaid_category" if known else "none"
-  transfer_candidate = is_transfer_candidate(txn)
+  if own_accounts is None:
+    own_accounts = own_account_keys(accounts.values())
+  transfer_candidate = is_transfer_candidate(txn, own_accounts)
 
   if transfer_candidate:
     event_type, event_category = "external_transfer", "treasury"

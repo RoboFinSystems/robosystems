@@ -42,6 +42,7 @@ from robosystems.adapters.plaid.pipeline.transform import (
   counterparties,
   days_between,
   leg_from_transaction,
+  own_account_keys,
   transfer_event,
   transform,
   txn_external_id,
@@ -178,7 +179,12 @@ def load_sync(
   ]
   agent_ids, report.agents_created = ensure_agents(
     session,
-    counterparties(in_window, account_ids=set(by_account), source=SOURCE),
+    counterparties(
+      in_window,
+      account_ids=set(by_account),
+      source=SOURCE,
+      own_accounts=own_account_keys(accounts),
+    ),
     source=SOURCE,
     connection_id=connection_id,
     created_by=created_by,

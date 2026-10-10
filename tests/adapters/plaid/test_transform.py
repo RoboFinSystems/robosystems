@@ -16,6 +16,7 @@ from robosystems.adapters.plaid.pipeline.transform import (
   cents,
   counterparties,
   is_transfer_candidate,
+  own_account_keys,
   pair_legs,
   transform,
 )
@@ -329,6 +330,71 @@ class TestTransform:
       assert event["event_type"] == "bank_transaction"
       assert "transfer_candidate" not in event["metadata"]
       assert "suggested_account_name" not in event["metadata"]
+
+  def _autopay(self, fee_merchant: str):
+    return [
+      txn(
+        "t_autopay_out",
+        CHECKING_ID,
+        0.95,
+        "2026-03-20",
+        name="IO AUTOPAY",
+        primary="BANK_FEES",
+        detailed="BANK_FEES_OTHER_BANK_FEES",
+        merchant=fee_merchant,
+      ),
+      txn(
+        "t_autopay_in",
+        CARD_ID,
+        -0.95,
+        "2026-03-20",
+        name="IO AUTOPAY",
+        primary="TRANSFER_IN",
+        detailed="TRANSFER_IN_ACCOUNT_TRANSFER",
+        merchant="Harborline Bank Business Checking ••1234",
+      ),
+    ]
+
+  @pytest.mark.parametrize(
+    "fee_merchant",
+    ["Harborline Bank Business Card", "Harborline Bank Business Card ••9012"],
+  )
+  def test_a_card_autopay_filed_as_a_bank_fee_pairs_by_the_account_it_names(
+    self, fee_merchant
+  ):
+    result = _run(transactions=self._autopay(fee_merchant))
+    (event,) = result.events
+    assert event["event_type"] == "internal_transfer"
+    assert event["metadata"]["from_element_id"] == "e_chk"
+    assert event["metadata"]["to_element_id"] == "e_card"
+
+  def test_a_bank_fee_that_names_no_own_account_stays_a_bank_fee(self):
+    fee, _card_leg = self._autopay("Harborline Bank")
+    (event,) = _run(transactions=[fee]).events
+    assert event["event_type"] == "bank_fee"
+
+  def test_a_line_naming_its_own_account_is_not_a_transfer(self):
+    own = own_account_keys(_booked())
+    line = txn(
+      "t_self",
+      CARD_ID,
+      12.00,
+      "2026-03-20",
+      name="CARD FEE",
+      primary="BANK_FEES",
+      detailed="BANK_FEES_OTHER_BANK_FEES",
+      merchant="Harborline Bank Business Card",
+    )
+    assert is_transfer_candidate(line, own) is False
+
+  def test_an_autopay_naming_an_own_account_makes_no_agent(self):
+    agents = counterparties(
+      self._autopay("Harborline Bank Business Card"),
+      account_ids={CHECKING_ID, CARD_ID},
+      source="plaid",
+      own_accounts=own_account_keys(_booked()),
+    )
+    assert agents == []
 
   def test_a_transfer_with_no_second_leg_is_an_external_transfer_candidate(self):
     draw = _by_external_id(_run())["plaid_txn_t_owner_draw"]
