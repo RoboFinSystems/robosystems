@@ -8,6 +8,7 @@ from robosystems.operations.locking import RowLockedError
 
 from .commands import (
   DuplicateEventError,
+  EventDocumentNotFoundError,
   EventEffectsAlreadyLandedError,
   EventNotFoundError,
   EventNotPublishableError,
@@ -20,6 +21,7 @@ from .commands import (
 
 __all__ = [
   "DuplicateEventError",
+  "EventDocumentNotFoundError",
   "EventEffectsAlreadyLandedError",
   "EventNotFoundError",
   "EventNotPublishableError",

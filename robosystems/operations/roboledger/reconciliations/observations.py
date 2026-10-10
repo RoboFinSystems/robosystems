@@ -48,7 +48,7 @@ def _observation(event: Event) -> BalanceObservation:
     element_id=str(event.resource_element_id),
     as_of=date.fromisoformat(metadata["as_of"]),
     amount_cents=int(event.amount or 0),
-    document_id=metadata.get("document_id"),
+    document_id=event.document_id,
     note=metadata.get("note"),
     recorded_by=str(event.created_by),
   )
@@ -129,11 +129,11 @@ def record_statement_observation(
     amount=amount,
     description=f"Statement balance: {element.name}, {as_of.isoformat()}",
     replaces_event_id=live.id if live is not None else None,
+    document_id=document_id,
     metadata_={
       "kind": STATEMENT_ENDING,
       "as_of": as_of.isoformat(),
       "stated_balance_cents": stated_cents,
-      "document_id": document_id,
       "note": note,
     },
     created_by=created_by,

@@ -59,6 +59,7 @@ from robosystems.models.api.extensions.reconciling_items import (
 )
 from robosystems.operations.event_block import (
   DuplicateEventError,
+  EventDocumentNotFoundError,
   EventEffectsAlreadyLandedError,
   EventNotFoundError,
   EventNotPublishableError,
@@ -234,6 +235,7 @@ create_event_block_op = _registrar.register(
     request_model=CreateEventBlockRequest,
     result_type=EventBlockEnvelope,
     error_map={
+      EventDocumentNotFoundError: 404,
       # Ahead of the broad `ValueError: 422` so a repeat delivery is a conflict.
       DuplicateEventError: (
         409,
@@ -285,6 +287,7 @@ update_event_block_op = _registrar.register(
     request_model=UpdateEventBlockRequest,
     result_type=EventBlockEnvelope,
     error_map={
+      EventDocumentNotFoundError: 404,
       EventNotFoundError: 404,
       ReservedEventTypeError: 422,
       InvalidEventTransitionError: 422,

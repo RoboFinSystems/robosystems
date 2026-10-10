@@ -413,14 +413,11 @@ def refresh_reconciliations(
 
 
 def _check_statement_document(graph_id: str, document_id: str) -> None:
-  """The document exists on this graph. A file document exists only once its
-  upload completed, so there is no half-uploaded statement to refuse."""
-  from robosystems.database import SessionFactory
-  from robosystems.models.core import Document
+  """The document exists on this graph."""
+  from robosystems.operations.document_service import document_exists
 
-  with SessionFactory() as platform_session:
-    if Document.get_by_id_and_graph(document_id, graph_id, platform_session) is None:
-      raise StatementDocumentNotFoundError(document_id)
+  if not document_exists(graph_id, document_id):
+    raise StatementDocumentNotFoundError(document_id)
 
 
 def _in_entity_chart(session: Session, element: Element, entity_id: str) -> bool:

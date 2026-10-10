@@ -80,6 +80,11 @@ class Event(ExtensionsBase):
     Index("idx_events_obligated_by", "obligated_by_event_id"),
     Index("idx_events_discharges", "discharges_event_id"),
     Index(
+      "idx_events_document",
+      "document_id",
+      postgresql_where=text("document_id IS NOT NULL"),
+    ),
+    Index(
       "idx_events_source_external",
       "source",
       "external_id",
@@ -171,6 +176,13 @@ class Event(ExtensionsBase):
   # cash_received pointing at sale_invoiced).
   obligated_by_event_id = Column(String, nullable=True)
   discharges_event_id = Column(String, nullable=True)
+
+  # The stored document the event rests on (an invoice, a vendor bill, a
+  # receipt, a statement), by its platform `documents` id. Across databases,
+  # so checked on write instead of by a foreign key, and a document a live
+  # event names cannot be deleted. A column, not metadata: a source sync owns
+  # metadata and would drop it.
+  document_id = Column(String, nullable=True)
 
   amount = Column(BigInteger, nullable=True)  # signed cents
   currency = Column(String, nullable=False, default="USD")

@@ -55,6 +55,7 @@ def _event(event_id: str, status: str = "classified") -> SimpleNamespace:
     replaces_event_id=None,
     obligated_by_event_id=None,
     discharges_event_id=None,
+    document_id=None,
     created_at=datetime(2026, 3, 1, tzinfo=UTC),
     created_by="usr_test",
   )

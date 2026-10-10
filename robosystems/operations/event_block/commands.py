@@ -81,6 +81,23 @@ class EventNotFoundError(Exception):
   pass
 
 
+class EventDocumentNotFoundError(LookupError):
+  """The document an event names is not one of this graph's."""
+
+  def __init__(self, document_id: str) -> None:
+    super().__init__(f"Document {document_id!r} not found on this graph.")
+    self.document_id = document_id
+
+
+def _check_event_document(graph_id: str, document_id: str | None) -> None:
+  """An event can only name a document on its own graph: they live in two
+  databases, so this check is all that holds the reference."""
+  from robosystems.operations.document_service import document_exists
+
+  if document_id and not document_exists(graph_id, document_id):
+    raise EventDocumentNotFoundError(document_id)
+
+
 class InvalidEventTransitionError(Exception):
   pass
 
@@ -375,6 +392,7 @@ def _build_event_row(
     status=status,
     obligated_by_event_id=body.obligated_by_event_id,
     discharges_event_id=body.discharges_event_id,
+    document_id=body.document_id,
     created_at=datetime.now(UTC),
     created_by=created_by,
   )
@@ -483,6 +501,7 @@ def create_event_block_in_session(
     )
   _validate_event_source(body.source, graph_id)
   _validate_routed_connection(body.metadata, graph_id)
+  _check_event_document(graph_id, body.document_id)
   # The entity the caller names, else the body's (a bank feed stamps each
   # line with its account's entity), else the group parent.
   entity_id = ensure_entity_id(session, entity_id or body.entity_id)
@@ -643,6 +662,7 @@ def _has_field_corrections(body: UpdateEventBlockRequest) -> bool:
       body.metadata_patch or None,
       body.obligated_by_event_id,
       body.discharges_event_id,
+      body.document_id,
       body.event_action,
     )
   )
@@ -670,6 +690,8 @@ def update_event_block(
     raise EventNotFoundError(f"Event not found: {body.event_id}")
   refuse_reserved_event_type(str(peek.event_type))
   _refuse_system_metadata(body.metadata_patch)
+  # Before the row lock: it reads the platform database.
+  _check_event_document(graph_id, body.document_id)
   # Period fence before the event row lock, matching close's order. A commit
   # fences its current date; a re-date fences the date it moves to and the
   # rows it already wrote, but not the date it leaves, so an event with no rows
@@ -785,6 +807,10 @@ def update_event_block(
 
   if body.discharges_event_id is not None:
     event.discharges_event_id = body.discharges_event_id
+
+  if body.document_id is not None:
+    # Checked before the lock; an empty string detaches the document.
+    event.document_id = body.document_id or None
 
   if body.event_action is not None:
     event.event_action = body.event_action

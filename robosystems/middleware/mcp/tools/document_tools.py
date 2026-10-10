@@ -392,7 +392,9 @@ class GetDocumentTool:
 - To review a document before updating it
 - When you know the document ID (from list-documents or a previous interaction)
 
-**RETURNS:** The full document — content, title, tags, folder and metadata.
+**RETURNS:** The full document — content, title, tags, folder and metadata;
+for a stored file its `file` (name, type, size, SHA-256) and `evidence_for`,
+the live events (an invoice, a bill, a statement balance) that name it.
 
 **RELATED TOOLS:**
 - get-document-section returns one search-indexed section from OpenSearch; use
@@ -414,7 +416,10 @@ class GetDocumentTool:
     return await run_off_loop(self._execute_sync, arguments)
 
   def _execute_sync(self, arguments: dict[str, Any]) -> Any:
-    from robosystems.operations.document_service import DocumentService
+    from robosystems.operations.document_service import (
+      DocumentService,
+      events_citing,
+    )
 
     graph_id = self.client.graph_id
     document_id = arguments["document_id"]
@@ -444,6 +449,9 @@ class GetDocumentTool:
         "source_type": doc.source_type,
         "sections_indexed": doc.sections_indexed,
         "file": _file_summary(doc),
+        "evidence_for": [
+          citation.__dict__ for citation in events_citing(graph_id, str(doc.id))
+        ],
         "created_at": str(doc.created_at),
         "updated_at": str(doc.updated_at),
       }
@@ -755,8 +763,10 @@ class CompleteDocumentUploadTool:
 **WHEN TO USE:** After the upload command succeeded.
 
 **RETURNS:** The new document's id, title, folder and its stored file (name,
-size, SHA-256). Pass `document_id` to record-statement-balance as the
-statement's evidence; read the file's text with read-document-file.
+size, SHA-256). Name it as an event's evidence by passing `document_id` to
+create-event-block (an invoice, a vendor bill, a receipt) or
+record-statement-balance (a statement); read the file's text with
+read-document-file.
 
 **NOTES:** The file is checked (a real PDF, within the size cap) and hashed; a
 file that fails is discarded. Completing the same upload twice returns the
