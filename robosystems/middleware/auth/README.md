@@ -80,7 +80,9 @@ resolves the token to an `OAuthPrincipal`; the MCP dependency then checks the
 token for `/v1/mcp` is refused at `/v1/graphs/{g}/mcp` and vice versa — and
 runs the same live graph-access check every carriage runs. Invalid, expired
 and revoked tokens answer **401 `invalid_token`** (clients refresh); a valid
-token whose user lost access answers **403 `insufficient_scope`**. Password
+token whose user lost access answers **403 `insufficient_scope`**. Deleting the
+graph (or subgraph) revokes the grants on it, so a client bound to a graph
+that is gone gets 401 and authorizes again rather than a 403 on every call. Password
 change, deactivation and any other `session_version` bump revoke the user's
 OAuth tokens outright (`User._revoke_oauth_tokens`), since like API keys they
 carry no session version. A user revokes one connection at a time through the
