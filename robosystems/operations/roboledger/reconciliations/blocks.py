@@ -376,14 +376,26 @@ def balance_digest(comparison: ReconciliationPreviewResponse) -> str:
   Two comparisons with the same digest saw the same figures. A sign-off pins
   it, so any later change to a balance at that period end lapses the review.
   A statement's document is part of what was compared: one recorded with
-  another document lapses it too. A row with no document fingerprints as it
-  always has, so no standing sign-off lapses by this rule's arrival.
+  another document lapses it too, and so does a change to the lines left
+  outstanding or to the carried period-end balance. A row with none of them
+  fingerprints as it always has, so no standing sign-off lapses by these
+  rules' arrival.
   """
   lines = sorted(
     f"{row.element_id or ''}|{row.source_account_id or ''}|"
     f"{round(row.ledger_balance * 100)}|{round(row.independent_balance * 100)}"
     + (f"|{row.as_of.isoformat()}" if row.as_of else "")
     + "".join(f"|doc:{c.document_id}" for c in row.components if c.document_id)
+    + "".join(
+      f"|out:{c.entry_id}:{round(c.amount * 100)}"
+      for c in row.components
+      if c.kind == "outstanding"
+    )
+    + (
+      f"|carried:{round(row.roll_forward.bank_balance * 100)}"
+      if row.roll_forward is not None
+      else ""
+    )
     for row in comparison.rows
   )
   return hashlib.sha256("\n".join(lines).encode()).hexdigest()[:32]
@@ -466,6 +478,8 @@ def record_reconciliation(
     ]
     metadata["balance_as_of"] = (row.as_of or window.period_end).isoformat()
     metadata["prepared_by"] = side.prepared_by.get(str(row.element_id))
+    if row.roll_forward is not None:
+      metadata["roll_forward"] = row.roll_forward.model_dump(mode="json")
 
   standing = session.execute(
     select(FactSet)

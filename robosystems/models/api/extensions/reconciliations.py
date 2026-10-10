@@ -18,6 +18,14 @@ from pydantic import BaseModel, Field, PrivateAttr
 # `statement` is the ending balance of a statement recorded for the account.
 ReconciliationMethod = Literal["source_ledger", "schedule_register", "statement"]
 
+# How often an account's statement is issued. A period is covered by the
+# latest statement ending within the cycle that ends with the period.
+StatementCycle = Literal["monthly", "quarterly", "annual"]
+
+# What a part of an account's independent balance is. `outstanding` is a
+# ledger cash line the bank had not seen by the statement's date.
+ReconciliationComponentKind = Literal["schedule", "statement", "outstanding"]
+
 # Far above any real balance; keeps a typo or a non-number out of the books.
 _MAX_AMOUNT = 1e13
 
@@ -37,7 +45,8 @@ class PreviewReconciliationsRequest(BaseModel):
       "the synced accounting system's own trial balance. `schedule_register` "
       "compares each asset account a schedule carries a balance on with what "
       "its schedules say it holds. `statement` compares each account that "
-      "has a statement balance recorded in the period with that balance."
+      "has a statement covering the period with that balance, adjusted on a "
+      "bank-fed account by the lines the bank had not cleared."
     ),
   )
   include_tied: bool = Field(
@@ -59,19 +68,42 @@ class PreviewReconciliationsRequest(BaseModel):
 
 class ReconciliationComponent(BaseModel):
   """One part of an account's independent balance: what a single schedule
-  says the account carries, or a recorded statement balance."""
+  says the account carries, a recorded statement balance, or a ledger line
+  outstanding at the statement's date."""
 
   name: str = Field(
-    ..., description="The schedule's name, or the statement and its date."
+    ...,
+    description=(
+      "The schedule's name, the statement and its date, or the outstanding "
+      "line's description."
+    ),
   )
   amount: float = Field(
     ..., description="What this part says the account holds, debit-positive."
+  )
+  kind: str | None = Field(
+    None,
+    description=(
+      "`schedule`, `statement`, or `outstanding`: a ledger line on a "
+      "bank-fed account that did not come from the feed, dated on or before "
+      "the statement, so the bank had not cleared it."
+    ),
+  )
+  posting_date: date | None = Field(
+    None, description="An `outstanding` line's posting date."
+  )
+  entry_id: str | None = Field(
+    None, description="The journal entry an `outstanding` line belongs to."
   )
   structure_id: str | None = Field(
     None, description="The schedule, for a `schedule_register` part."
   )
   event_id: str | None = Field(
-    None, description="The recorded balance, for a `statement` part."
+    None,
+    description=(
+      "The recorded balance, for a `statement` part; the event behind an "
+      "`outstanding` line, when it has one."
+    ),
   )
   document_id: str | None = Field(
     None, description="The statement document given as evidence, when one was."
@@ -82,6 +114,53 @@ class ReconciliationComponent(BaseModel):
       "Why a schedule carries nothing (disposed of, or ended early), or the "
       "note recorded with a statement balance."
     ),
+  )
+
+
+class ReconciliationRollForward(BaseModel):
+  """A statement carried from its ending date to the period's last day on a
+  bank-fed account, where every line the feed brought is the bank's own."""
+
+  statement_as_of: date = Field(..., description="The statement's ending date.")
+  through: date = Field(..., description="The period's last day.")
+  bank_lines: int = Field(
+    ..., description="Booked feed lines dated after the statement, to the period end."
+  )
+  bank_activity: float = Field(
+    ..., description="Their net effect on the account, debit-positive."
+  )
+  bank_balance: float = Field(
+    ...,
+    description=(
+      "The statement balance carried to the period end by those lines: what "
+      "the bank held then, debit-positive."
+    ),
+  )
+  ledger_balance: float = Field(
+    ...,
+    description=(
+      "The ledger's balance at the period end, as the close will leave it, "
+      "debit-positive."
+    ),
+  )
+  outstanding: float = Field(
+    ...,
+    description=(
+      "Ledger lines not from the feed and dated on or before the period end, "
+      "net: the ledger minus the carried bank balance."
+    ),
+  )
+  feed_balance: float | None = Field(
+    None,
+    description=(
+      "A cross-check, never the figure reconciled: the bank feed's own "
+      "balance from the first reading on or after the period end, less the "
+      "booked feed lines between the period end and that reading. Null when "
+      "the feed has no reading within ten days."
+    ),
+  )
+  feed_balance_read_on: date | None = Field(
+    None, description="The day of the feed reading `feed_balance` starts from."
   )
 
 
@@ -119,7 +198,11 @@ class ReconciliationRow(BaseModel):
     ),
   )
   independent_balance: float = Field(
-    ..., description="What the independent source says."
+    ...,
+    description=(
+      "What the independent source says. For a `statement` on a bank-fed "
+      "account, the statement balance adjusted by its outstanding lines."
+    ),
   )
   difference: float = Field(..., description="Ledger minus independent.")
   status: str = Field(
@@ -144,7 +227,14 @@ class ReconciliationRow(BaseModel):
     description=(
       "Account-scope methods only: what makes up the independent balance. "
       "One entry per schedule for `schedule_register`; the recorded "
-      "statement for `statement`."
+      "statement for `statement`, then each outstanding line."
+    ),
+  )
+  roll_forward: ReconciliationRollForward | None = Field(
+    None,
+    description=(
+      "`statement` on a bank-fed account whose statement ends before the "
+      "period's last day: the statement carried to it by the feed's lines."
     ),
   )
 
@@ -257,6 +347,15 @@ class SetReconciliationPolicyRequest(BaseModel):
       "graph has at least two members who can write. Omit to keep."
     ),
   )
+  statement_cycle: StatementCycle | None = Field(
+    None,
+    description=(
+      "`statement` blocks only: how often the account's statement is "
+      "issued. A period is covered by the latest statement ending within "
+      "the cycle that ends with it, so a quarterly statement covers the two "
+      "months before the next one. Omit to keep."
+    ),
+  )
 
 
 class RecordStatementBalanceRequest(BaseModel):
@@ -323,6 +422,9 @@ class ReconciliationPolicyResponse(BaseModel):
   materiality: float
   review_required: bool
   separate_reviewer: bool
+  statement_cycle: StatementCycle | None = Field(
+    None, description="`statement` blocks only: how often the statement is issued."
+  )
 
 
 class ReconciliationSummary(BaseModel):
@@ -354,6 +456,13 @@ class ReconciliationSummary(BaseModel):
   )
   materiality: float = Field(
     ..., description="A difference up to this amount still counts as reconciled."
+  )
+  statement_cycle: str | None = Field(
+    None,
+    description=(
+      "`statement` blocks only: how often the account's statement is "
+      "issued, `monthly`, `quarterly` or `annual`."
+    ),
   )
   period: str = Field(..., description="The period, as YYYY-MM.")
   as_of: date = Field(..., description="The period's last day.")
@@ -400,7 +509,7 @@ class ReconciliationSummary(BaseModel):
     None,
     description=(
       "Account-scope only: the date the two balances are stated at. The "
-      "period's last day, unless a statement ended earlier in the period."
+      "period's last day, unless the statement covering it ended earlier."
     ),
   )
   components: list[ReconciliationComponent] = Field(
@@ -408,7 +517,14 @@ class ReconciliationSummary(BaseModel):
     description=(
       "Account-scope only: what makes up the independent balance. One entry "
       "per schedule for `schedule_register`; the recorded statement for "
-      "`statement`."
+      "`statement`, then each outstanding line."
+    ),
+  )
+  roll_forward: ReconciliationRollForward | None = Field(
+    None,
+    description=(
+      "`statement` on a bank-fed account whose statement ends before the "
+      "period's last day: the statement carried to it by the feed's lines."
     ),
   )
   source: str | None = Field(

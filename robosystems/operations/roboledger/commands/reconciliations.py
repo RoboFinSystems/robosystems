@@ -627,12 +627,14 @@ def set_reconciliation_policy(
   created_by: str,
 ) -> ReconciliationPolicyResponse:
   """Change a reconciliation's policy: whether the close waits on it, its
-  materiality, and whether it needs a review and a separate reviewer.
+  materiality, whether it needs a review and a separate reviewer, and for a
+  statement block how often its statement is issued.
 
   The next comparison uses the new materiality; results already recorded are
-  not re-judged. Raises `ReconciliationNotFoundError`, and
+  not re-judged. Raises `ReconciliationNotFoundError`,
   `SeparateReviewerError` when a separate reviewer is asked for on a graph
-  with fewer than two members who can write.
+  with fewer than two members who can write, and ``ValueError`` for a
+  statement cycle on a block that is not a statement's.
   """
   structure = _load_reconciliation(session, body.structure_id)
 
@@ -651,6 +653,13 @@ def set_reconciliation_policy(
           f"can write; this graph has {members}. Add a member first."
         )
     mechanics.separate_reviewer = body.separate_reviewer
+  if body.statement_cycle is not None:
+    if mechanics.method != "statement":
+      raise ValueError(
+        f"{structure.name!r} is not a statement reconciliation; only a "
+        "statement block has a statement cycle."
+      )
+    mechanics.statement_cycle = body.statement_cycle
   if body.materiality is not None:
     mechanics.materiality = body.materiality
     rule = reconciliation_rule(session, str(structure.id))
@@ -676,4 +685,9 @@ def set_reconciliation_policy(
     materiality=mechanics.materiality,
     review_required=mechanics.review_required,
     separate_reviewer=mechanics.separate_reviewer,
+    statement_cycle=(
+      mechanics.statement_cycle or "monthly"
+      if mechanics.method == "statement"
+      else None
+    ),
   )

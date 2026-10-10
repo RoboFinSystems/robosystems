@@ -69,6 +69,27 @@ def _live_statements(element_ids: set[str], start: date, end: date):
   )
 
 
+def first_feed_reading(
+  session: Session, element_id: str, kind: str, start: date, end: date
+) -> BalanceObservation | None:
+  """The feed's earliest reading of ``kind`` for the account on a day from
+  ``start`` to ``end``."""
+  event = session.execute(
+    select(Event)
+    .where(
+      Event.event_type == BALANCE_OBSERVED_EVENT_TYPE,
+      Event.status == "committed",
+      Event.metadata_["kind"].astext == kind,
+      Event.resource_element_id == element_id,
+      Event.effective_at >= datetime.combine(start, time.min),
+      Event.effective_at < datetime.combine(end + timedelta(days=1), time.min),
+    )
+    .order_by(Event.effective_at.asc(), Event.occurred_at.desc(), Event.id.desc())
+    .limit(1)
+  ).scalar_one_or_none()
+  return _observation(event) if event is not None else None
+
+
 def statement_observations(
   session: Session, element_ids: frozenset[str], start: date, end: date
 ) -> dict[str, BalanceObservation]:

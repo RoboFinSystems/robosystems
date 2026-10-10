@@ -21,7 +21,10 @@ from robosystems.models.api.extensions.forecasts import (
   DeleteForecastRequest,
   UpdateForecastRequest,
 )
-from robosystems.models.api.extensions.reconciliations import ReconciliationMethod
+from robosystems.models.api.extensions.reconciliations import (
+  ReconciliationMethod,
+  StatementCycle,
+)
 from robosystems.models.api.extensions.rollforward import (
   AttributionFilter,
   CreateRollforwardRequest,
@@ -850,6 +853,14 @@ class ReconciliationMechanics(BaseModel):
     description=(
       "Whether the person who signs off must be someone other than the "
       "person who ran the comparison."
+    ),
+  )
+  statement_cycle: StatementCycle | None = Field(
+    None,
+    description=(
+      "`statement` blocks only: how often the account's statement is "
+      "issued; unset is monthly. A period is covered by the latest "
+      "statement ending within the cycle that ends with it."
     ),
   )
 
