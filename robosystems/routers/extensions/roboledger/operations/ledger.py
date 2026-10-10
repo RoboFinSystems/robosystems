@@ -286,7 +286,7 @@ update_event_block_op = _registrar.register(
       "flow on the cash flow and equity statements: patch "
       "`classified_flow_qname` (or `flow_qname` on each "
       "`classified_allocations` part) with an rs-gaap flow concept such as "
-      "`rs-gaap:ProceedsFromNotesPayable`. On a line that has already posted, "
+      "`rs-gaap:ProceedsFromIssuanceOfLongTermDebt`. On a line that has already posted, "
       "this re-tags its lines in place, in a closed month too, since no "
       "balance moves; an empty string clears it."
     ),

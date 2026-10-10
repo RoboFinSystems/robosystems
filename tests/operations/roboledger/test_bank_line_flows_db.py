@@ -22,8 +22,8 @@ from tests.ledger_entity import entity_account
 pytestmark = pytest.mark.unit
 
 GRAPH_ID = "kg0123456789abcdef0d"
-NOTE_PROCEEDS = "rs-gaap:ProceedsFromNotesPayable"
-CONTRIBUTIONS = "rs-gaap:ProceedsFromContributedCapital"
+NOTE_PROCEEDS = "rs-gaap:ProceedsFromIssuanceOfLongTermDebt"
+CONTRIBUTIONS = "rs-gaap:ProceedsFromPartnershipContribution"
 
 
 def _flow_concept(session, qname: str, activity: str) -> str:

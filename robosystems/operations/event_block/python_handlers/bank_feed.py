@@ -511,7 +511,7 @@ def resolve_flows(session: Session, qnames: set[str]) -> dict[str, str]:
   if missing:
     raise HandlerMetadataValidationError(
       f"No flow concept named {', '.join(missing)}. Use an rs-gaap flow "
-      "qname such as rs-gaap:ProceedsFromNotesPayable."
+      "qname such as rs-gaap:ProceedsFromIssuanceOfLongTermDebt."
     )
   not_flows = sorted(q for q, (_id, is_flow) in found.items() if not is_flow)
   if not_flows:

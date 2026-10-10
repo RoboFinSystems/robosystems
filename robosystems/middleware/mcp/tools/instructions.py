@@ -129,7 +129,7 @@ def build_instructions(
       (
         "- A line that is a financing or investing flow (a loan drawn, a "
         "capital contribution, an equipment purchase) also gets "
-        "`classified_flow_qname` (e.g. `rs-gaap:ProceedsFromNotesPayable`), "
+        "`classified_flow_qname` (e.g. `rs-gaap:ProceedsFromIssuanceOfLongTermDebt`), "
         "the override of the account's default flow that the cash flow and "
         "equity statements read. It can be set on a posted line too: that "
         "re-tags it in place."
