@@ -295,8 +295,8 @@ class OnInstanceBackupService:
     if s3_client is None:
       s3_client = self._get_r2_client()
 
-    # EBS-backed, not /tmp: /tmp is tmpfs (RAM) and too small to hold a
-    # compressed multi-GB database.
+    # On the data volume, not the container's /tmp (the root disk), which is too
+    # small to hold a compressed multi-GB database.
     ebs_temp_dir = Path(env.LBUG_DATABASE_PATH).parent / "backup-tmp"
     ebs_temp_dir.mkdir(parents=True, exist_ok=True)
     self._cleanup_stale_temp_dirs(ebs_temp_dir, max_age_hours=24)
