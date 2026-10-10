@@ -35,6 +35,18 @@ Attach the statement itself as a PDF, or a photo of it as a PNG or JPEG, up to 2
 
 A statement that ends mid-month is compared with the ledger at its own date. Recording the same account and date again replaces the earlier balance.
 
+## Statements that don't end at the month end
+
+Not every statement ends on the last day of the month. A card's cycle might end on the 17th, and a savings account may only be statemented once a quarter. Open a statement reconciliation and set **Statement issued** to *Monthly*, *Quarterly* or *Annual*. A month is covered by the latest statement that ends within the cycle ending with that month. A monthly statement covers the month it ends in. A quarterly one also covers the two months before the next statement arrives. The close never waits for a statement that hasn't been issued yet.
+
+## Bank accounts on a bank feed
+
+When a bank feed keeps an account, every line the feed brought in is the bank's own record, so it has already cleared. The lines that may not have cleared are the ones that didn't come from the feed, such as a payment you recorded against a bill or a journal entry. Those dated on or before the statement are listed under **Not yet cleared by the bank** and explain the gap between the statement and the ledger. Only a difference nothing explains keeps the reconciliation from tying. Lines dated before the feed started, such as an opening balance, count as cleared.
+
+A statement that ends before the month end is carried forward to it by the feed's lines after the statement. That gives the bank balance at the month end, set beside the ledger's balance. The bank feed's own reported balance is shown next to it as a check. If the two disagree, a line may be missing or dated differently. It's a check only: the statement is what you reconcile and sign off.
+
+Signing off pins the uncleared lines as well as the balances. If one of them changes, the sign-off lapses.
+
 ## When the close waits on one
 
 A reconciliation with **Holds the close** ticked must be **Reconciled** before its month can close, or **Reviewed** if it needs a review. One that hasn't been run for the month holds the close too. Untick the box to release it.
@@ -65,6 +77,8 @@ If a reconciliation can't be cleared before the close, the close can still run w
 - "The checking account statement ends August 31 at 18,250.75. Record it and reconcile."
 - "I've uploaded September's checking statement. Read its ending balance and reconcile the account to it."
 - "Set a $25 materiality on the synced-books reconciliation."
+- "The savings account is only statemented quarterly. Set that on its reconciliation."
+- "What's not yet cleared by the bank on checking at September 30?"
 - "Which reconciliations are holding the September close, and why?"
 - "Require a separate reviewer on the bank reconciliations."
 
