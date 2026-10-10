@@ -27,6 +27,7 @@ def _mock_document(**overrides):
     "folder": "reports",
     "external_id": None,
     "source_type": "uploaded_doc",
+    "is_file": False,
     "source_provider": None,
     "sections_indexed": 0,
     "created_at": NOW,

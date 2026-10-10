@@ -1,6 +1,8 @@
-"""Document upload, listing, editing, and deletion for user graph documents.
+"""Document reads for user graph documents: list, detail, and a stored
+document file's download link.
 
-Source of truth is PostgreSQL. Content is synced to OpenSearch for search.
+Source of truth is PostgreSQL. Content is synced to OpenSearch for search; a
+stored file lives in the user-data bucket and is not indexed.
 """
 
 import logging
@@ -14,6 +16,8 @@ from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dep
 from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.search import (
   DocumentDetailResponse,
+  DocumentFileDownloadResponse,
+  DocumentFileInfo,
   DocumentListItem,
   DocumentListResponse,
 )
@@ -54,6 +58,20 @@ def _enforce_graph_access(graph_id: str, require_write: bool = False) -> None:
     session.close()
 
 
+def _file_info(doc: Document) -> DocumentFileInfo | None:
+  return _stored_file(doc) if doc.is_file else None
+
+
+def _stored_file(doc: Document) -> DocumentFileInfo:
+  return DocumentFileInfo(
+    file_name=str(doc.file_name),
+    content_type=str(doc.file_content_type),
+    size_bytes=doc.file_size_bytes if doc.file_sha256 else None,
+    sha256=doc.file_sha256,
+    status=doc.file_status,  # type: ignore[arg-type]
+  )
+
+
 def _document_to_list_item(doc: Document) -> DocumentListItem:
   """Convert a Document model to a DocumentListItem."""
   return DocumentListItem(
@@ -63,12 +81,13 @@ def _document_to_list_item(doc: Document) -> DocumentListItem:
     source_type=doc.source_type,
     folder=doc.folder,
     tags=doc.tags,
+    file=_file_info(doc),
     created_at=doc.created_at.isoformat() if doc.created_at else "",
     updated_at=doc.updated_at.isoformat() if doc.updated_at else "",
   )
 
 
-def _document_to_detail(doc: Document) -> DocumentDetailResponse:
+def document_to_detail(doc: Document) -> DocumentDetailResponse:
   """Convert a Document model to a DocumentDetailResponse."""
   return DocumentDetailResponse(
     id=doc.id,
@@ -82,6 +101,7 @@ def _document_to_detail(doc: Document) -> DocumentDetailResponse:
     source_type=doc.source_type,
     source_provider=doc.source_provider,
     sections_indexed=doc.sections_indexed,
+    file=_file_info(doc),
     created_at=doc.created_at.isoformat() if doc.created_at else "",
     updated_at=doc.updated_at.isoformat() if doc.updated_at else "",
   )
@@ -132,6 +152,41 @@ async def get_document(
     doc = service.get_document(graph_id, document_id)
     if doc is None:
       raise HTTPException(status_code=404, detail="Document not found")
-    return _document_to_detail(doc)
+    return document_to_detail(doc)
+  finally:
+    session.close()
+
+
+@router.get(
+  "/{document_id}/file",
+  summary="Download Document File",
+  operation_id="getDocumentFile",
+  description="A short-lived link to a document's stored file, such as the "
+  "statement PDF behind a recorded balance.",
+  responses={**RESOURCE_ERROR_RESPONSES},
+)
+async def get_document_file(
+  graph_id: str,
+  document_id: str,
+  current_user: User = Depends(get_current_user_with_graph),
+) -> DocumentFileDownloadResponse:
+  from robosystems.config.constants import DOCUMENT_DOWNLOAD_EXPIRY_SECONDS
+  from robosystems.operations.document_service import DocumentFileError
+
+  _block_shared_repository(graph_id)
+  _enforce_graph_access(graph_id)
+  session = SessionFactory()
+  try:
+    doc, url = DocumentService(session).file_download_url(graph_id, document_id)
+    return DocumentFileDownloadResponse(
+      document_id=str(doc.id),
+      download_url=url,
+      expires_in=DOCUMENT_DOWNLOAD_EXPIRY_SECONDS,
+      file=_stored_file(doc),
+    )
+  except KeyError:
+    raise HTTPException(status_code=404, detail="Document not found")
+  except DocumentFileError as e:
+    raise HTTPException(status_code=404, detail=str(e))
   finally:
     session.close()

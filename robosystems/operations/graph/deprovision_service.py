@@ -39,6 +39,7 @@ class DeprovisionResult:
   connections_deleted: int = 0
   search_purged: bool = False
   report_bundles_deleted: int = 0
+  document_files_deleted: int = 0
   staged_objects_deleted: int = 0
   errors: list[str] = field(default_factory=list)
 
@@ -54,6 +55,8 @@ class DeprovisionResult:
         redone.append("search index purged")
       if self.report_bundles_deleted:
         redone.append(f"{self.report_bundles_deleted} report bundle(s) deleted")
+      if self.document_files_deleted:
+        redone.append(f"{self.document_files_deleted} document file(s) deleted")
       suffix = (
         f"; residual data disposal re-run ({', '.join(redone)})" if redone else ""
       )
@@ -228,6 +231,7 @@ class GraphDeprovisionService:
         "connections_deleted": result.connections_deleted,
         "search_purged": result.search_purged,
         "report_bundles_deleted": result.report_bundles_deleted,
+        "document_files_deleted": result.document_files_deleted,
         "errors": result.errors,
       },
     )
@@ -466,10 +470,11 @@ class GraphDeprovisionService:
     session.commit()
 
   def _dispose_residual_data(self, graph_id: str, result: DeprovisionResult) -> None:
-    """The three data-disposal steps that are safe to repeat."""
+    """The data-disposal steps that are safe to repeat."""
     self._drop_extensions_schema(graph_id, result)
     self._purge_search_index(graph_id, result)
     self._purge_report_bundles(graph_id, result)
+    self._purge_document_files(graph_id, result)
 
   def _drop_extensions_schema(self, graph_id: str, result: DeprovisionResult) -> None:
     """Drop the tenant's extensions OLTP schema; a no-op for subgraphs and
@@ -510,16 +515,39 @@ class GraphDeprovisionService:
     teardown is the only thing that removes it. An object that fails to delete
     is recorded as an error.
     """
+    from ...config.storage.graph import get_report_bundle_prefix
+
+    result.report_bundles_deleted = self._purge_prefix(
+      graph_id, get_report_bundle_prefix(graph_id), "Report bundle", result
+    )
+
+  def _purge_document_files(self, graph_id: str, result: DeprovisionResult) -> None:
+    """Delete the tenant's whole ``documents/{graph_id}/`` prefix: stored
+    document files, such as bank statements. Like report bundles they are a
+    system of record with no lifecycle rule, so teardown is what removes them.
+    """
+    from ...config.storage.graph import get_document_file_prefix
+
+    result.document_files_deleted = self._purge_prefix(
+      graph_id, get_document_file_prefix(graph_id), "Document file", result
+    )
+
+  @staticmethod
+  def _purge_prefix(
+    graph_id: str, prefix: str, label: str, result: DeprovisionResult
+  ) -> int:
+    """Delete every object under one of the graph's prefixes; the count deleted.
+
+    An object that fails to delete, or a listing that fails, is recorded as
+    an error rather than raised, so teardown carries on.
+    """
+    deleted = 0
     try:
       from ...config import env
-      from ...config.storage.graph import get_report_bundle_prefix
       from ..aws.s3 import S3Client
 
       bucket = env.USER_DATA_BUCKET
-      prefix = get_report_bundle_prefix(graph_id)
       s3 = S3Client()
-
-      deleted = 0
       failed = 0
       # Not ``list_objects``: it reads an S3 error or a truncated listing as
       # an empty prefix. ``iter_object_keys`` paginates and raises.
@@ -529,24 +557,22 @@ class GraphDeprovisionService:
         else:
           failed += 1
           logger.warning(
-            f"Failed to delete report artifact s3://{bucket}/{key}",
-            extra={"graph_id": graph_id},
+            f"Failed to delete s3://{bucket}/{key}", extra={"graph_id": graph_id}
           )
 
-      result.report_bundles_deleted = deleted
       if failed:
         result.errors.append(
-          f"Report bundle purge incomplete: {failed} object(s) not deleted"
+          f"{label} purge incomplete: {failed} object(s) not deleted"
         )
       elif deleted:
         logger.info(
-          f"Purged {deleted} report artifact(s) for graph {graph_id}",
-          extra={"graph_id": graph_id},
+          f"Purged {deleted} object(s) under {prefix}", extra={"graph_id": graph_id}
         )
     except Exception as e:
-      error_msg = f"Report bundle purge failed: {e}"
+      error_msg = f"{label} purge failed: {e}"
       result.errors.append(error_msg)
       logger.warning(error_msg, extra={"graph_id": graph_id})
+    return deleted
 
   async def _deallocate_registry(
     self, graph_id: str, result: DeprovisionResult

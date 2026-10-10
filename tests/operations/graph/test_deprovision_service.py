@@ -1272,6 +1272,47 @@ class TestProviderGrantRevocationAtTeardown:
     assert self._credential_rows(db_session, connection_id) == 0
 
 
+def _keys_under(keys: list[str]):
+  """An ``iter_object_keys`` stand-in that lists only the keys under the
+  prefix asked for, as S3 does."""
+  return lambda bucket, prefix: [k for k in keys if k.startswith(prefix)]
+
+
+class TestDocumentFilePurge:
+  """Stored document files (statement PDFs) must not outlive the tenant: like
+  report bundles their prefix has no lifecycle rule, so teardown removes them."""
+
+  @pytest.mark.asyncio
+  async def test_document_files_are_deleted_under_the_graph_prefix(
+    self, service, db_session, test_graph, stub_bundle_purge
+  ):
+    gid = test_graph.graph_id
+    stub_bundle_purge.iter_object_keys.side_effect = _keys_under(
+      [
+        f"documents/{gid}/doc_a/statement.pdf",
+        f"documents/{gid}/doc_b/statement.pdf",
+        f"documents/{gid}x/doc_c/other-tenant.pdf",
+      ]
+    )
+
+    with (
+      patch(
+        "robosystems.graph_api.client.factory.get_graph_client",
+        new_callable=AsyncMock,
+      ),
+      patch("robosystems.middleware.graph.allocation_manager.LadybugAllocationManager"),
+    ):
+      result = await service.deprovision_graph(gid, db_session, create_backup=False)
+
+    deleted = [c.args[1] for c in stub_bundle_purge.delete_object.mock_calls]
+    assert deleted == [
+      f"documents/{gid}/doc_a/statement.pdf",
+      f"documents/{gid}/doc_b/statement.pdf",
+    ]
+    assert result.document_files_deleted == 2
+    assert not [e for e in result.errors if "Document file" in e]
+
+
 class TestReportBundlePurge:
   """Published report artifacts must not outlive the tenant.
 
@@ -1292,7 +1333,7 @@ class TestReportBundlePurge:
       f"report-bundles/{test_graph.graph_id}/rpt_a/g1.holon.jsonld",
       f"report-bundles/{test_graph.graph_id}/rpt_b/g2.zip",
     ]
-    stub_bundle_purge.iter_object_keys.return_value = keys
+    stub_bundle_purge.iter_object_keys.side_effect = _keys_under(keys)
 
     with (
       patch(
@@ -1306,8 +1347,10 @@ class TestReportBundlePurge:
       )
 
     # Scoped to this graph's prefix — never the whole bucket.
-    _, kwargs = stub_bundle_purge.iter_object_keys.call_args
-    assert kwargs["prefix"] == f"report-bundles/{test_graph.graph_id}/"
+    prefixes = [
+      c.kwargs["prefix"] for c in stub_bundle_purge.iter_object_keys.mock_calls
+    ]
+    assert f"report-bundles/{test_graph.graph_id}/" in prefixes
 
     assert stub_bundle_purge.delete_object.call_count == 3
     assert result.report_bundles_deleted == 3
@@ -1320,10 +1363,12 @@ class TestReportBundlePurge:
     """Incomplete disposal is the one outcome this step exists to prevent, so a
     surviving object degrades the teardown to `partial` rather than passing
     quietly. This is deliberately stricter than the sibling purges."""
-    stub_bundle_purge.iter_object_keys.return_value = [
-      f"report-bundles/{test_graph.graph_id}/rpt_a/g1.jsonld",
-      f"report-bundles/{test_graph.graph_id}/rpt_b/g1.jsonld",
-    ]
+    stub_bundle_purge.iter_object_keys.side_effect = _keys_under(
+      [
+        f"report-bundles/{test_graph.graph_id}/rpt_a/g1.jsonld",
+        f"report-bundles/{test_graph.graph_id}/rpt_b/g1.jsonld",
+      ]
+    )
     stub_bundle_purge.delete_object.side_effect = [True, False]
 
     with (

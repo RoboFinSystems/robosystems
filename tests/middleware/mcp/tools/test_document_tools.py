@@ -412,3 +412,85 @@ class TestListDocumentsTool:
     )
     assert result["total"] == 1
     assert result["documents"][0]["title"] == "Policy"
+
+
+class TestDocumentFiles:
+  """A stored file (a statement PDF) reads as its identity, never its bytes,
+  and cannot be deleted while a recorded balance cites it."""
+
+  def _patches(self, mock_service):
+    return (
+      patch(f"{DOC_MODULE}._get_platform_session", return_value=MagicMock()),
+      patch(f"{DOC_MODULE}._block_shared_repository", return_value=None),
+      patch(f"{DOC_MODULE}._check_graph_access", return_value=None),
+      patch(DOC_SVC, return_value=mock_service),
+    )
+
+  @pytest.mark.asyncio
+  async def test_get_document_names_the_stored_file(self, mock_graph_client):
+    doc = MagicMock()
+    doc.is_file = True
+    doc.file_name = "sep-2026.pdf"
+    doc.file_content_type = "application/pdf"
+    doc.file_size_bytes = 2048
+    doc.file_sha256 = "ef" * 32
+    doc.file_status = "stored"
+    mock_service = MagicMock()
+    mock_service.get_document.return_value = doc
+
+    p1, p2, p3, p4 = self._patches(mock_service)
+    with p1, p2, p3, p4:
+      result = await GetDocumentTool(mock_graph_client).execute(
+        {"document_id": "doc_1"}
+      )
+
+    assert result["file"] == {
+      "file_name": "sep-2026.pdf",
+      "content_type": "application/pdf",
+      "size_bytes": 2048,
+      "sha256": "ef" * 32,
+      "status": "stored",
+    }
+
+  @pytest.mark.asyncio
+  async def test_a_text_document_has_no_file(self, mock_graph_client):
+    doc = MagicMock()
+    doc.is_file = False
+    mock_service = MagicMock()
+    mock_service.list_documents.return_value = [doc]
+
+    p1, p2, p3, p4 = self._patches(mock_service)
+    with p1, p2, p3, p4:
+      result = await ListDocumentsTool(mock_graph_client).execute({})
+
+    assert result["documents"][0]["file"] is None
+
+  @pytest.mark.asyncio
+  async def test_delete_is_refused_while_a_balance_cites_it(self, mock_graph_client):
+    from robosystems.operations.document_service import DocumentInUseError
+
+    mock_service = MagicMock()
+    mock_service.delete_document.side_effect = DocumentInUseError("cited")
+
+    p1, p2, p3, p4 = self._patches(mock_service)
+    with p1, p2, p3, p4:
+      result = await DeleteDocumentTool(mock_graph_client).execute(
+        {"document_id": "doc_1"}
+      )
+
+    assert result == {"error": "in_use", "message": "cited"}
+
+  @pytest.mark.asyncio
+  async def test_editing_a_stored_files_content_is_refused(self, mock_graph_client):
+    from robosystems.operations.document_service import DocumentFileError
+
+    mock_service = MagicMock()
+    mock_service.update_document.side_effect = DocumentFileError("cannot be edited")
+
+    p1, p2, p3, p4 = self._patches(mock_service)
+    with p1, p2, p3, p4:
+      result = await UpdateDocumentTool(mock_graph_client).execute(
+        {"document_id": "doc_1", "content": "# replaced"}
+      )
+
+    assert result == {"error": "invalid_input", "message": "cannot be edited"}

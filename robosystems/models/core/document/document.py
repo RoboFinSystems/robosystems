@@ -3,6 +3,10 @@
 Documents represent user-uploaded or connection-synced text content stored
 in PostgreSQL as the source of truth. Content is synced to OpenSearch for
 full-text and semantic search.
+
+A document can instead be a stored file (a bank statement PDF): the bytes
+live in the user-data bucket under the graph's prefix, the row carries what
+identifies them, and nothing is indexed. A stored file never changes.
 """
 
 from collections.abc import Sequence
@@ -10,6 +14,7 @@ from datetime import UTC, datetime
 from typing import Optional
 
 from sqlalchemy import (
+  BigInteger,
   Column,
   DateTime,
   ForeignKey,
@@ -26,9 +31,13 @@ from sqlalchemy.orm import Session
 from robosystems.database import Model
 from robosystems.utils.ulid import generate_prefixed_ulid
 
+FILE_SOURCE_TYPE = "uploaded_file"
+FILE_PENDING = "pending"
+FILE_STORED = "stored"
+
 
 class Document(Model):
-  """User graph document with raw markdown content."""
+  """User graph document: raw markdown content, or a stored file."""
 
   __tablename__ = "documents"
   __table_args__ = (
@@ -55,6 +64,14 @@ class Document(Model):
   source_type = Column(String, nullable=False, default="uploaded_doc")
   source_provider = Column(String, nullable=True)
   sections_indexed = Column(Integer, nullable=False, default=0)
+  # A stored file; all null on a text document.
+  file_s3_key = Column(String, nullable=True)
+  file_name = Column(String(255), nullable=True)
+  file_content_type = Column(String(100), nullable=True)
+  file_size_bytes = Column(BigInteger, nullable=True)
+  # Hex SHA-256 of the bytes, taken from the stored object, not the client.
+  file_sha256 = Column(String(64), nullable=True)
+  file_status = Column(String(20), nullable=True)
   created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
@@ -64,6 +81,10 @@ class Document(Model):
 
   def __repr__(self) -> str:
     return f"<Document {self.id} title={self.title!r} graph={self.graph_id}>"
+
+  @property
+  def is_file(self) -> bool:
+    return self.source_type == FILE_SOURCE_TYPE
 
   @classmethod
   def create(

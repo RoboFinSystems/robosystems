@@ -34,6 +34,8 @@ from robosystems.middleware.operations import (
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.models.api.common import OPERATION_ERROR_RESPONSES
 from robosystems.models.api.graphs.operations import (
+  CompleteDocumentUploadOp,
+  CreateDocumentUploadOp,
   DeleteDocumentOp,
   DeleteFileOp,
   ForgetOp,
@@ -50,6 +52,7 @@ from robosystems.routers.graphs.operations import (
   _AUDIT_EVENT,
   _GRAPH_OPS_PATH,
   _RATE_LIMIT,
+  _SUBGRAPH_NO_DOCUMENT_FILES,
   _SUBGRAPH_NO_MEMORY,
   _SUBGRAPH_NO_STAGING,
   _block_subgraph,
@@ -412,7 +415,10 @@ async def delete_document_op(
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
   from robosystems.database import SessionFactory
-  from robosystems.operations.document_service import DocumentService
+  from robosystems.operations.document_service import (
+    DocumentInUseError,
+    DocumentService,
+  )
 
   _require_search_enabled()
   _block_shared_repo(graph_id)
@@ -432,10 +438,149 @@ async def delete_document_op(
     session = SessionFactory()
     try:
       service = DocumentService(session)
-      deleted = service.delete_document(graph_id, body.document_id)
+      try:
+        deleted = service.delete_document(graph_id, body.document_id)
+      except DocumentInUseError as e:
+        raise HTTPException(status_code=409, detail=str(e))
       if not deleted:
         raise HTTPException(status_code=404, detail="Document not found")
       return {"document_id": body.document_id, "deleted": True}
+    finally:
+      session.close()
+
+  return await _dispatch(ctx, _runner, cache)
+
+
+@router.post(
+  "/create-document-upload",
+  response_model=OperationEnvelope,
+  operation_id="createDocumentUpload",
+  summary="Presign a Document File Upload",
+  description="Start a document that is a stored file, such as a bank statement "
+  "PDF kept as evidence for a recorded balance. Returns the document's id and a "
+  "presigned URL: PUT the file there with the declared Content-Type and "
+  "Content-Length, then call `complete-document-upload`. A stored file is not "
+  "indexed for search, does not count toward the plan's document limit, and "
+  "never changes once stored.",
+  tags=[_CONTENT_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  f"{_GRAPH_OPS_PATH}/create-document-upload",
+  method="POST",
+  business_event_type="graph_create_document_upload",
+)
+async def create_document_upload_op(
+  body: CreateDocumentUploadOp,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  from robosystems.config.constants import PRESIGNED_URL_EXPIRY_SECONDS
+  from robosystems.database import SessionFactory
+  from robosystems.models.api.search import DocumentFileUploadResponse
+  from robosystems.operations.document_service import (
+    DocumentFileError,
+    DocumentService,
+  )
+
+  # Files are read, listed and deleted through the document surface, which
+  # the search flag mounts; a file it could not reach must not be stored.
+  _require_search_enabled()
+  _block_shared_repo(graph_id)
+  _block_subgraph(graph_id, _SUBGRAPH_NO_DOCUMENT_FILES)
+  _require_graph_write_access(graph_id, str(user.id))
+
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=str(user.id),
+    op="create-document-upload",
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+
+  async def _runner():
+    session = SessionFactory()
+    try:
+      doc, upload_url = DocumentService(session).begin_file_upload(
+        graph_id=graph_id, user_id=str(user.id), request=body
+      )
+    except DocumentFileError as e:
+      raise HTTPException(status_code=422, detail=str(e))
+    finally:
+      session.close()
+    return DocumentFileUploadResponse(
+      document_id=str(doc.id),
+      upload_url=upload_url,
+      expires_in=PRESIGNED_URL_EXPIRY_SECONDS,
+    ).model_dump(mode="json")
+
+  return await _dispatch(ctx, _runner, cache)
+
+
+@router.post(
+  "/complete-document-upload",
+  response_model=OperationEnvelope,
+  operation_id="completeDocumentUpload",
+  summary="Complete a Document File Upload",
+  description="Store the file uploaded for a document. The uploaded bytes are "
+  "checked against the declared size and type and hashed (SHA-256); a file "
+  "that fails the check is discarded with its document. Completing a stored "
+  "file again returns it unchanged. Returns the document.",
+  tags=[_CONTENT_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  f"{_GRAPH_OPS_PATH}/complete-document-upload",
+  method="POST",
+  business_event_type="graph_complete_document_upload",
+)
+async def complete_document_upload_op(
+  body: CompleteDocumentUploadOp,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  from robosystems.database import SessionFactory
+  from robosystems.middleware.operations import run_off_loop
+  from robosystems.operations.document_service import (
+    DocumentFileError,
+    DocumentFileNotUploadedError,
+    DocumentService,
+  )
+  from robosystems.routers.graphs.documents import document_to_detail
+
+  _require_search_enabled()
+  _block_shared_repo(graph_id)
+  _block_subgraph(graph_id, _SUBGRAPH_NO_DOCUMENT_FILES)
+  _require_graph_write_access(graph_id, str(user.id))
+
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=str(user.id),
+    op="complete-document-upload",
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+
+  async def _runner():
+    session = SessionFactory()
+    try:
+      # Reads and hashes up to the file cap, so not on the event loop.
+      doc = await run_off_loop(
+        DocumentService(session).complete_file_upload, graph_id, body.document_id
+      )
+      return document_to_detail(doc).model_dump(mode="json")
+    except KeyError:
+      raise HTTPException(status_code=404, detail="Document not found")
+    except DocumentFileNotUploadedError as e:
+      raise HTTPException(status_code=409, detail=str(e))
+    except DocumentFileError as e:
+      raise HTTPException(status_code=422, detail=str(e))
     finally:
       session.close()
 
