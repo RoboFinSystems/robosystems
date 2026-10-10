@@ -263,3 +263,72 @@ def test_a_replay_never_rekeys_a_balance_reading_as_a_line(session):
   session.refresh(reading)
   assert reading.external_id == "plaid_balance_bank_current_acc_chk_20260712T180000Z"
   assert "rekeyed_from" not in reading.metadata_
+
+
+def _merchant_sync(transaction_id: str, day: str) -> TransactionsSync:
+  return TransactionsSync(
+    added=[
+      txn(
+        transaction_id,
+        CHECKING,
+        1200.00,
+        day,
+        name="GUSTO PAYROLL",
+        primary="GENERAL_SERVICES",
+        detailed="GENERAL_SERVICES_OTHER_GENERAL_SERVICES",
+        merchant="Gusto",
+        entity_id="ent_gusto",
+      )
+    ],
+    next_cursor=f"c_{transaction_id}",
+    update_status="HISTORICAL_UPDATE_COMPLETE",
+  )
+
+
+def test_a_committed_line_teaches_the_next_line_from_its_counterparty(session):
+  from robosystems.models.api.event_block import UpdateEventBlockRequest
+  from robosystems.operations.event_block.commands import update_event_block
+
+  elements = _seed_elements(session)
+
+  def pull(transaction_id: str, day: str) -> Event:
+    report = load_sync(
+      session,
+      graph_id=GRAPH_ID,
+      connection_id=CONNECTION,
+      item_id=ITEM,
+      created_by="user_test",
+      accounts=_accounts(),
+      sync=_merchant_sync(transaction_id, day),
+      account_elements={CHECKING: elements[CASH], SAVINGS: elements[NEW_EXPENSE]},
+      chart=ChartIndex(),
+    )
+    assert report.events_created == 1, report.errors
+    session.flush()
+    return (
+      session.query(Event)
+      .filter(Event.external_id == f"plaid_txn_{transaction_id}")
+      .one()
+    )
+
+  first = pull("t_g1", "2026-07-02")
+  assert first.agent_id is not None
+  update_event_block(
+    session,
+    UpdateEventBlockRequest(
+      event_id=str(first.id),
+      transition_to="committed",
+      metadata_patch={"classified_element_id": elements[NEW_EXPENSE]},
+    ),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+
+  second = pull("t_g2", "2026-07-16")
+  assert second.agent_id == first.agent_id
+  assert second.metadata_["suggested_element_id"] == elements[NEW_EXPENSE]
+  assert second.metadata_["suggestion_source"] == "agent_default"
+  assert session.get(Event, str(first.id)).metadata_["suggestion_outcome"] in (
+    "none",
+    "overridden",
+  )

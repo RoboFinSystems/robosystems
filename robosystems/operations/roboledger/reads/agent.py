@@ -7,12 +7,36 @@ from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.agent import (
   AgentActivityResponse,
+  AgentClassification,
   LedgerAgentResponse,
   TransactionSummary,
 )
 from robosystems.models.extensions.roboledger.agent import Agent
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.transaction import Transaction
+
+
+def _classification(agent: Agent) -> AgentClassification | None:
+  from sqlalchemy.orm import object_session
+
+  from robosystems.models.extensions.element import Element
+  from robosystems.operations.roboledger.classification import read_default
+
+  default = read_default(agent.metadata_)
+  if default is None:
+    return None
+  session = object_session(agent)
+  element = session.get(Element, default.element_id) if session is not None else None
+  return AgentClassification(
+    element_id=default.element_id,
+    account_name=element.name if element is not None else None,
+    mode=default.mode,
+    confirmations=default.confirmations,
+    overrides=default.overrides,
+    set_by=default.set_by,
+    set_at=default.set_at,
+    learned_from=default.learned_from,
+  )
 
 
 def agent_to_response(agent: Agent) -> LedgerAgentResponse:
@@ -32,6 +56,7 @@ def agent_to_response(agent: Agent) -> LedgerAgentResponse:
     external_id=agent.external_id,
     is_active=agent.is_active,
     is_1099_recipient=agent.is_1099_recipient,
+    classification=_classification(agent),
     created_at=agent.created_at,
     updated_at=agent.updated_at,
     created_by=agent.created_by,

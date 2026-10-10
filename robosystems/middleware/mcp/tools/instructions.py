@@ -116,6 +116,14 @@ def build_instructions(
         "`list-event-blocks(source='mercury' or 'plaid', status='captured')`."
       ),
       (
+        "- `metadata.suggestion_source` says where a suggestion came from: "
+        "`agent_default` is the counterparty's own default, learned from the "
+        "lines committed before it (`suggestion_basis` says how often it held), "
+        "so trust it; `tier0` is only the bank's category. Every commit "
+        "teaches the default; to move it to the account you chose instead, add "
+        "`remember_classification: true` to the commit's `metadata_patch`."
+      ),
+      (
         "- Classify one → `update-event-block(event_id, "
         "transition_to='classified', metadata_patch={classified_element_id, "
         "classified_by: 'ai', basis})`. A split: `classified_allocations: "
@@ -136,9 +144,16 @@ def build_instructions(
     ]
     if has("recall") and has("remember"):
       inbox_lines.append(
-        "- `recall` the counterparty before deciding, and `remember` each "
-        "decision ('Stripe payouts → Subscription revenue') so the next line "
-        "from that counterparty classifies itself."
+        "- `recall` the counterparty only when overriding its default or when "
+        "the line has none, and `remember` the why behind an exception "
+        "('Gusto is payroll, except the annual fee: professional fees'). The "
+        "default holds the what."
+      )
+    if has("learn-classification-defaults"):
+      inbox_lines.append(
+        "- Books classified before defaults were learned → "
+        "`learn-classification-defaults` once seeds each counterparty from its "
+        "committed lines."
       )
     if has("preview-event-block"):
       inbox_lines.append(
