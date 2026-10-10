@@ -122,6 +122,11 @@ SHARED_DATABASE_S3_PREFIX="${LBUG_S3_ATTACH_PREFIX:?"LBUG_S3_ATTACH_PREFIX must 
 
 mkdir -p /mnt/ladybug-data/{logs,cache,databases/lbug-dbs,databases/staging,databases/lance}
 
+# The CRT transfer client keeps the boot-provisioned root volume saturated; the
+# default Python client tops out well below it. Scoped to the download only.
+S3_CRT_CONFIG=/tmp/aws-s3-crt.config
+printf '[default]\ns3 =\n  preferred_transfer_client = crt\n' > "${S3_CRT_CONFIG}"
+
 IFS=',' read -ra REPOS <<< "${SHARED_REPOSITORIES}"
 for REPO in "${REPOS[@]}"; do
   REPO=$(echo "$REPO" | tr -d ' ')
@@ -129,14 +134,32 @@ for REPO in "${REPOS[@]}"; do
   LOCAL_PATH="/mnt/ladybug-data/databases/lbug-dbs/${REPO}.lbug"
   echo "Downloading ${REPO}: ${S3_URI} -> ${LOCAL_PATH}"
   START_TIME=$(date +%s)
-  aws s3 cp "${S3_URI}" "${LOCAL_PATH}" --region "${AWS_REGION}" --only-show-errors || {
-    echo "ERROR: Failed to download ${REPO} from ${S3_URI}"
-    exit 1
+  AWS_CONFIG_FILE="${S3_CRT_CONFIG}" aws s3 cp "${S3_URI}" "${LOCAL_PATH}" --region "${AWS_REGION}" --only-show-errors || {
+    echo "WARNING: CRT download of ${REPO} failed, retrying with the default transfer client"
+    aws s3 cp "${S3_URI}" "${LOCAL_PATH}" --region "${AWS_REGION}" --only-show-errors || {
+      echo "ERROR: Failed to download ${REPO} from ${S3_URI}"
+      exit 1
+    }
   }
   ELAPSED=$(( $(date +%s) - START_TIME ))
   FILE_SIZE_MB=$(( $(stat -c%s "${LOCAL_PATH}" 2>/dev/null || stat -f%z "${LOCAL_PATH}") / 1048576 ))
   echo "Downloaded ${REPO}: ${FILE_SIZE_MB}MB in ${ELAPSED}s"
 done
+
+# The root volume launches with boot-download performance (the launch template);
+# drop it to the gp3 baseline now that the download is done. Non-fatal: a failure
+# only leaves the volume billed at the higher rate.
+ROOT_VOLUME_ID=$(aws ec2 describe-instances --instance-ids "${INSTANCE_ID}" --region "${AWS_REGION}" \
+  --query "Reservations[0].Instances[0].BlockDeviceMappings[?DeviceName=='/dev/xvda'].Ebs.VolumeId | [0]" \
+  --output text) || ROOT_VOLUME_ID=""
+if [ -n "${ROOT_VOLUME_ID}" ] && [ "${ROOT_VOLUME_ID}" != "None" ]; then
+  aws ec2 modify-volume --volume-id "${ROOT_VOLUME_ID}" --iops 3000 --throughput 125 \
+    --region "${AWS_REGION}" --output text --query 'VolumeModification.ModificationState' \
+    && echo "Lowered root volume ${ROOT_VOLUME_ID} to baseline performance" \
+    || echo "WARNING: could not lower root volume ${ROOT_VOLUME_ID} to baseline performance"
+else
+  echo "WARNING: root volume not found; leaving its performance as launched"
+fi
 
 chown -R 1000:1000 /mnt/ladybug-data
 chmod -R 755 /mnt/ladybug-data
