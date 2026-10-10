@@ -411,6 +411,53 @@ def create_event_block(
   return envelope
 
 
+def _acknowledge_settled_items(
+  session: Session,
+  event: Event,
+  metadata: Any,
+  created_by: str,
+  *,
+  graph_id: str,
+) -> None:
+  """Acknowledge each reconciling item the entry names against it. Anything
+  that is not an open reconciling item on this entity's books refuses the
+  whole write."""
+  item_ids = getattr(metadata, "resolves_reconciling_items", None) or []
+  if not item_ids:
+    return
+  from robosystems.models.api.extensions.reconciling_items import (
+    ResolveReconcilingItemRequest,
+  )
+  from robosystems.operations.roboledger.commands.reconciling_items import (
+    NotAReconcilingItemError,
+    ReconcilingItemNotFoundError,
+    resolve_reconciling_item,
+  )
+
+  for item_id in dict.fromkeys(item_ids):
+    item = session.get(Event, item_id)
+    if item is None or str(item.entity_id) != str(event.entity_id):
+      raise HandlerMetadataValidationError(
+        f"resolves_reconciling_items: {item_id} is not an event on this entity's books."
+      )
+    try:
+      resolve_reconciling_item(
+        session,
+        ResolveReconcilingItemRequest(
+          event_id=item_id,
+          disposition="acknowledge",
+          reference_event_id=str(event.id),
+          note=f"Settled by {event.id}",
+        ),
+        created_by,
+        graph_id=graph_id,
+      )
+    except (NotAReconcilingItemError, ReconcilingItemNotFoundError) as exc:
+      raise HandlerMetadataValidationError(
+        f"resolves_reconciling_items: {item_id}: {exc}"
+      ) from exc
+
+
 def create_event_block_in_session(
   session: Session,
   body: CreateEventBlockRequest,
@@ -455,6 +502,9 @@ def create_event_block_in_session(
         )
 
       python_handler.dispatch(session, event, typed_metadata, created_by)
+      _acknowledge_settled_items(
+        session, event, typed_metadata, created_by, graph_id=graph_id
+      )
 
       envelope = _to_envelope(event, body.dimension_ids)
       return event, envelope

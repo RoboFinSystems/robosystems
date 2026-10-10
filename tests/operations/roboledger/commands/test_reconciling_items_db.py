@@ -36,6 +36,9 @@ from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
 from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.operations.event_block.commands import create_event_block_in_session
+from robosystems.operations.event_block.python_handlers.types import (
+  HandlerMetadataValidationError,
+)
 from robosystems.operations.extensions.loader import comparable_payload
 from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands._guards import ClosedPeriodError
@@ -515,6 +518,56 @@ def test_acknowledge_records_the_reference_and_writes_no_entries(session):
   assert event.metadata_["reconciliation_history"][0]["reference_event_id"] == str(
     reference.id
   )
+
+
+def _alignment_entry(session, elements, item_ids):
+  return create_event_block_in_session(
+    session,
+    CreateEventBlockRequest(
+      event_type="journal_entry_recorded",
+      event_category="adjustment",
+      source="system",
+      occurred_at=datetime(2026, 8, 31),
+      apply_handlers=True,
+      metadata={
+        "posting_date": "2026-08-31",
+        "memo": "Catch-up: reclass made in the source system for July",
+        "publish_to_source": False,
+        "line_items": [
+          {"element_id": elements[NEW_EXPENSE], "debit_amount": AMOUNT},
+          {"element_id": elements[OLD_EXPENSE], "credit_amount": AMOUNT},
+        ],
+        "resolves_reconciling_items": item_ids,
+      },
+    ),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+
+
+def test_an_alignment_entry_that_names_its_item_acknowledges_it(session):
+  elements, event, _accepted = _setup(session)
+
+  alignment, _envelope = _alignment_entry(session, elements, [str(event.id)])
+  session.flush()
+
+  session.refresh(event)
+  assert event.payload_drift is False
+  (trail,) = event.metadata_["reconciliation_history"]
+  assert trail["disposition"] == "acknowledge"
+  assert trail["reference_event_id"] == str(alignment.id)
+  # The item no longer reads as open, so nothing can catch it up again.
+  with pytest.raises(NotAReconcilingItemError):
+    plan_reconciling_item(session, str(event.id), graph_id=GRAPH_ID)
+
+
+def test_naming_an_event_that_is_not_a_reconciling_item_refuses_the_entry(session):
+  elements = _seed_elements(session)
+  _seed_periods(session)
+  settled = _post_synced_event(session)
+
+  with pytest.raises(HandlerMetadataValidationError, match="resolves_reconciling"):
+    _alignment_entry(session, elements, [str(settled.id)])
 
 
 # ───────────────────────────────────────────────────────────────────────────
