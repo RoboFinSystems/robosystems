@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from robosystems.models.api.extensions.reconciliations import (
   ReconciliationComponent,
   ReconciliationListResponse,
+  ReconciliationRollForward,
   ReconciliationRow,
   ReconciliationStatus,
   ReconciliationSummary,
@@ -251,6 +252,11 @@ def list_reconciliations(
         element_id=mechanics.element_id,
         required_for_close=mechanics.required_for_close,
         materiality=mechanics.materiality,
+        statement_cycle=(
+          mechanics.statement_cycle or "monthly"
+          if mechanics.method == "statement"
+          else None
+        ),
         period=period,
         as_of=as_of,
         status=_status(results.get(fact_set_id), review, stale=is_stale),
@@ -264,6 +270,11 @@ def list_reconciliations(
           ReconciliationComponent.model_validate(component)
           for component in metadata.get("components") or []
         ],
+        roll_forward=(
+          ReconciliationRollForward.model_validate(metadata["roll_forward"])
+          if metadata.get("roll_forward")
+          else None
+        ),
         source=(provenance or {}).get("source"),
         compared_at=_observed_at(provenance),
         fact_set_id=fact_set_id or None,

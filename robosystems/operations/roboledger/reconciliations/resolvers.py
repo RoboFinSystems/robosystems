@@ -8,7 +8,7 @@ knows nothing about where it came from, so a new source is a new resolver.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Literal, Protocol
 
 from sqlalchemy import func, select, text
@@ -18,13 +18,21 @@ from robosystems.adapters.quickbooks.reports import (
   TrialBalanceReport,
   parse_trial_balance_report,
 )
-from robosystems.models.api.extensions.reconciliations import ReconciliationMethod
+from robosystems.models.api.extensions.reconciliations import (
+  ReconciliationComponentKind,
+  ReconciliationMethod,
+  StatementCycle,
+)
 from robosystems.models.extensions import ElementTrait, Structure, Trait
 from robosystems.models.extensions.element import Element
 from robosystems.models.extensions.roboledger import Event
+from robosystems.operations.information_block.reconciliation import (
+  RECONCILIATION_BLOCK_TYPE,
+)
 from robosystems.operations.roboledger.reads.fiscal_calendar import live_qb_connection
 
-from .observations import statement_observations
+from .cleared import AccountLines, account_lines
+from .observations import BANK_CURRENT, first_feed_reading, statement_observations
 
 _QUICKBOOKS = "quickbooks"
 _SCHEDULES = "schedules"
@@ -86,10 +94,28 @@ class IndependentComponent:
 
   name: str
   amount_cents: int
+  kind: ReconciliationComponentKind | None = None
+  posting_date: date | None = None
+  entry_id: str | None = None
   structure_id: str | None = None
   event_id: str | None = None
   document_id: str | None = None
   note: str | None = None
+
+
+@dataclass(frozen=True)
+class RollForward:
+  """A statement carried to the period end by the feed's own lines, in
+  debit-positive cents."""
+
+  statement_as_of: date
+  through: date
+  bank_lines: int
+  bank_activity_cents: int
+  bank_balance_cents: int
+  ledger_balance_cents: int
+  feed_balance_cents: int | None = None
+  feed_balance_read_on: date | None = None
 
 
 @dataclass(frozen=True)
@@ -114,6 +140,7 @@ class IndependentSide:
   as_of: dict[str, date] = field(default_factory=dict)
   # Who supplied an account's independent balance, when a person did.
   prepared_by: dict[str, str] = field(default_factory=dict)
+  roll_forward: dict[str, RollForward] = field(default_factory=dict)
   basis: str | None = None
   connection_id: str | None = None
   last_sync_at: datetime | None = None
@@ -303,6 +330,7 @@ class ScheduleRegisterResolver:
           structure_id=str(schedule.id),
           name=schedule.name,
           amount_cents=cents,
+          kind="schedule",
           note=note,
         )
       )
@@ -477,43 +505,161 @@ def _primary_traits(session: Session, element_ids: set[str]) -> dict[str, str]:
   return {str(element_id): str(identifier) for element_id, identifier in rows}
 
 
-class StatementResolver:
-  """The ending balance of each account's statement in the period.
+_CYCLE_MONTHS: dict[str, int] = {"monthly": 1, "quarterly": 3, "annual": 12}
+# How far past the period end a feed reading may be and still cross-check it.
+_FEED_READING_DAYS = 10
 
-  An account is covered for a period once a statement ending in it has been
-  recorded; the latest one stands. A statement that ends before the period's
-  last day is compared with the ledger at the statement's own date.
+
+def cycle_start(period_end: date, cycle: StatementCycle) -> date:
+  """The first day of the cycle that ends with the period: a statement
+  ending from this day to the period end covers it."""
+  months = period_end.year * 12 + period_end.month - _CYCLE_MONTHS[cycle]
+  return date(months // 12, months % 12 + 1, 1)
+
+
+def statement_cycles(
+  session: Session, element_ids: frozenset[str], entity_id: str | None
+) -> dict[str, StatementCycle]:
+  """Each account's statement cycle, from its block; monthly without one."""
+  cycles: dict[str, StatementCycle] = dict.fromkeys(element_ids, "monthly")
+  if not element_ids or entity_id is None:
+    return cycles
+  for mechanics in session.execute(
+    select(Structure.artifact_mechanics).where(
+      Structure.block_type == RECONCILIATION_BLOCK_TYPE,
+      Structure.entity_id == entity_id,
+      Structure.is_active.is_(True),
+      Structure.artifact_mechanics["method"].astext == _STATEMENT,
+      Structure.artifact_mechanics["element_id"].astext.in_(sorted(element_ids)),
+    )
+  ).scalars():
+    cycle = (mechanics or {}).get("statement_cycle")
+    if cycle in _CYCLE_MONTHS:
+      cycles[str(mechanics["element_id"])] = cycle
+  return cycles
+
+
+class StatementResolver:
+  """The ending balance of each account's statement covering the period.
+
+  An account is covered for a period by the latest statement recorded within
+  its cycle that ends with the period: the period itself for a monthly
+  statement, the last three months for a quarterly one. The statement is
+  compared with the ledger at its own date.
+
+  On a bank-fed account the statement balance is adjusted by the lines the
+  bank had not cleared by that date (`cleared`), so what is left is what
+  nothing explains. A statement that ends before the period's last day is
+  carried to it by the feed's own lines, as a roll-forward beside the
+  comparison.
   """
 
   def __init__(self, element_ids: frozenset[str]) -> None:
     self.element_ids = element_ids
 
   def resolve(self, session: Session, window: ReconciliationWindow) -> IndependentSide:
-    observations = statement_observations(
-      session, self.element_ids, window.period_end.replace(day=1), window.period_end
-    )
+    cycles = statement_cycles(session, self.element_ids, window.entity_id)
+    observations = {}
+    for cycle in set(cycles.values()):
+      observations.update(
+        statement_observations(
+          session,
+          frozenset(eid for eid, c in cycles.items() if c == cycle),
+          cycle_start(window.period_end, cycle),
+          window.period_end,
+        )
+      )
+
+    balances: dict[str, int] = {}
+    components: dict[str, list[IndependentComponent]] = {}
+    roll_forward: dict[str, RollForward] = {}
+    for eid, obs in observations.items():
+      parts = [
+        IndependentComponent(
+          name=f"Statement ending {obs.as_of.isoformat()}",
+          amount_cents=obs.amount_cents,
+          kind="statement",
+          event_id=obs.event_id,
+          document_id=obs.document_id,
+          note=obs.note,
+        )
+      ]
+      lines = account_lines(
+        session,
+        eid,
+        window.period_end,
+        entity_id=window.entity_id,
+        landed_only=window.shadow,
+      )
+      parts.extend(
+        IndependentComponent(
+          name=line.description,
+          amount_cents=line.net_cents,
+          kind="outstanding",
+          posting_date=line.posting_date,
+          entry_id=line.entry_id,
+          event_id=line.event_id,
+        )
+        for line in lines.outstanding(obs.as_of)
+      )
+      components[eid] = parts
+      balances[eid] = sum(part.amount_cents for part in parts)
+      if lines.feed_start is not None and obs.as_of < window.period_end:
+        roll_forward[eid] = _roll_forward(
+          session, eid, obs.as_of, obs.amount_cents, lines, window
+        )
+
     return IndependentSide(
       method="statement",
       source=_STATEMENT,
       scope="account",
-      balances={eid: obs.amount_cents for eid, obs in observations.items()},
+      balances=balances,
       covered_element_ids=frozenset(observations),
-      components={
-        eid: [
-          IndependentComponent(
-            name=f"Statement ending {obs.as_of.isoformat()}",
-            amount_cents=obs.amount_cents,
-            event_id=obs.event_id,
-            document_id=obs.document_id,
-            note=obs.note,
-          )
-        ]
-        for eid, obs in observations.items()
-      },
+      components=components,
       as_of={
         eid: obs.as_of
         for eid, obs in observations.items()
         if obs.as_of != window.period_end
       },
       prepared_by={eid: obs.recorded_by for eid, obs in observations.items()},
+      roll_forward=roll_forward,
     )
+
+
+def _roll_forward(
+  session: Session,
+  element_id: str,
+  statement_as_of: date,
+  statement_cents: int,
+  lines: AccountLines,
+  window: ReconciliationWindow,
+) -> RollForward:
+  count, activity = lines.feed_activity(statement_as_of, window.period_end)
+  reading = first_feed_reading(
+    session,
+    element_id,
+    BANK_CURRENT,
+    window.period_end,
+    window.period_end + timedelta(days=_FEED_READING_DAYS),
+  )
+  feed_balance = None
+  if reading is not None:
+    after = account_lines(
+      session,
+      element_id,
+      reading.as_of,
+      entity_id=window.entity_id,
+      landed_only=window.shadow,
+    )
+    _, since = after.feed_activity(window.period_end, reading.as_of)
+    feed_balance = reading.amount_cents - since
+  return RollForward(
+    statement_as_of=statement_as_of,
+    through=window.period_end,
+    bank_lines=count,
+    bank_activity_cents=activity,
+    bank_balance_cents=statement_cents + activity,
+    ledger_balance_cents=lines.balance(window.period_end),
+    feed_balance_cents=feed_balance,
+    feed_balance_read_on=reading.as_of if reading is not None else None,
+  )

@@ -109,6 +109,9 @@ from robosystems.models.api.extensions.reconciliations import (
   ReconciliationListResponse as PydanticReconciliationListResponse,
 )
 from robosystems.models.api.extensions.reconciliations import (
+  ReconciliationRollForward as PydanticReconciliationRollForward,
+)
+from robosystems.models.api.extensions.reconciliations import (
   ReconciliationRow as PydanticReconciliationRow,
 )
 from robosystems.models.api.extensions.reconciliations import (
@@ -504,7 +507,13 @@ class AccountRollups:
 
 @pydantic_type(model=PydanticReconciliationComponent, all_fields=True)
 class ReconciliationComponent:
-  """One schedule's part of an account's independent balance."""
+  """One part of an account's independent balance: a schedule, a statement,
+  or a line the bank had not cleared."""
+
+
+@pydantic_type(model=PydanticReconciliationRollForward, all_fields=True)
+class ReconciliationRollForward:
+  """A statement carried to the period end by the bank feed's own lines."""
 
 
 @pydantic_type(model=PydanticReconciliationRow, all_fields=True)

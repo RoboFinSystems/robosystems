@@ -124,6 +124,7 @@ def test_the_block_is_made_of_existing_parts(ledger):
     "materiality": 0.0,
     "review_required": False,
     "separate_reviewer": False,
+    "statement_cycle": None,
   }
   arcs = (
     ledger.execute(select(Association).where(Association.structure_id == structure.id))

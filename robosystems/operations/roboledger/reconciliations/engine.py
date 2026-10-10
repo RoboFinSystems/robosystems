@@ -24,6 +24,7 @@ from robosystems.models.api.extensions import cents_to_dollars
 from robosystems.models.api.extensions.reconciliations import (
   ReconciliationComponent,
   ReconciliationPreviewResponse,
+  ReconciliationRollForward,
   ReconciliationRow,
 )
 from robosystems.models.extensions.element import Element
@@ -33,7 +34,7 @@ from robosystems.operations.roboledger.reads.trial_balance import (
   get_net_balances_cents,
 )
 
-from .resolvers import IndependentSide, ReconciliationWindow
+from .resolvers import IndependentSide, ReconciliationWindow, RollForward
 
 _RETAINED_EARNINGS_SUB_TYPE = "RetainedEarnings"
 
@@ -212,8 +213,11 @@ _ACCOUNT_METHOD_NOTES = {
   ),
   "statement": (
     "Each account's balance is compared with the ending balance of its "
-    "statement, at the statement's own date. A difference is activity on "
-    "one side the other does not have yet, or an error on either."
+    "statement, at the statement's own date. On a bank-fed account the "
+    "statement is adjusted by the ledger lines that did not come from the "
+    "feed and that the bank had not cleared by then. What is left is "
+    "activity one side has and the other does not yet, or an error on "
+    "either."
   ),
 }
 
@@ -279,6 +283,9 @@ def _compute_account_scope(
       ReconciliationComponent(
         name=component.name,
         amount=cents_to_dollars(component.amount_cents),
+        kind=component.kind,
+        posting_date=component.posting_date,
+        entry_id=component.entry_id,
         structure_id=component.structure_id,
         event_id=component.event_id,
         document_id=component.document_id,
@@ -286,6 +293,9 @@ def _compute_account_scope(
       )
       for component in side.components.get(element_id, [])
     ]
+    carried = side.roll_forward.get(element_id)
+    if carried is not None:
+      row.roll_forward = _roll_forward_model(carried)
     (tied if status == "tied" else open_rows).append(row)
     total_difference_cents += abs(ledger_cents - independent_cents)
 
@@ -314,6 +324,26 @@ def _compute_account_scope(
     total_difference=cents_to_dollars(total_difference_cents),
     rows=open_rows + (tied if include_tied else []),
     notes=notes,
+  )
+
+
+def _roll_forward_model(carried: RollForward) -> ReconciliationRollForward:
+  return ReconciliationRollForward(
+    statement_as_of=carried.statement_as_of,
+    through=carried.through,
+    bank_lines=carried.bank_lines,
+    bank_activity=cents_to_dollars(carried.bank_activity_cents),
+    bank_balance=cents_to_dollars(carried.bank_balance_cents),
+    ledger_balance=cents_to_dollars(carried.ledger_balance_cents),
+    outstanding=cents_to_dollars(
+      carried.ledger_balance_cents - carried.bank_balance_cents
+    ),
+    feed_balance=(
+      cents_to_dollars(carried.feed_balance_cents)
+      if carried.feed_balance_cents is not None
+      else None
+    ),
+    feed_balance_read_on=carried.feed_balance_read_on,
   )
 
 
