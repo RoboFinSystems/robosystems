@@ -472,6 +472,15 @@ def create_event_block_in_session(
   reading attributes afterwards can raise on a write that succeeded.
   """
   refuse_reserved_event_type(body.event_type)
+  # Only a journal entry's handler acts on it; anywhere else the items would
+  # stay flagged while the author believed them settled.
+  if (body.metadata or {}).get("resolves_reconciling_items") and not (
+    body.apply_handlers and body.event_type == "journal_entry_recorded"
+  ):
+    raise HandlerMetadataValidationError(
+      "resolves_reconciling_items is acted on only by a journal_entry_recorded "
+      "event created with apply_handlers=true."
+    )
   _validate_event_source(body.source, graph_id)
   _validate_routed_connection(body.metadata, graph_id)
   # The entity the caller names, else the body's (a bank feed stamps each

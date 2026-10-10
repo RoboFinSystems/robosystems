@@ -100,7 +100,7 @@ class JournalEntryRecordedMetadata(BaseModel):
 
   # Reconciling items this entry settles (an alignment authored by hand):
   # each is acknowledged against it, so none is caught up a second time.
-  resolves_reconciling_items: list[str] | None = None
+  resolves_reconciling_items: list[str] | None = Field(None, max_length=200)
 
   # Nested shape
   entries: list[NestedJournalEntrySpec] | None = None
