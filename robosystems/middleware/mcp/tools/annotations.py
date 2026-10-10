@@ -124,6 +124,10 @@ WRITE_TOOL_HINTS: dict[str, ToolHints] = {
   "bind-text-block": _REPLACES,
   # Documents and memory.
   "create-document": _ADDS,
+  # Signs an upload URL and records nothing; each call a new upload.
+  "create-document-upload": _ADDS,
+  # One document per upload: completing it again returns the same one.
+  "complete-document-upload": _ADDS_ONCE,
   "update-document": _REPLACES,
   "delete-document": _REPLACES,
   "remember": _ADDS,

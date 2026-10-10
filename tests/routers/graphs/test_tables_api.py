@@ -174,14 +174,9 @@ async def test_get_upload_url_success(monkeypatch):
     classmethod(lambda cls, **kwargs: SimpleNamespace(id="file-123")),
   )
 
-  class FakeS3Client:
-    def __init__(self):
-      self.s3_client = SimpleNamespace(
-        generate_presigned_url=lambda *args, **kwargs: "https://upload.test"
-      )
-
-  monkeypatch.setattr(files_upload, "S3Client", FakeS3Client)
-  monkeypatch.setattr(files_upload.env, "USER_DATA_BUCKET", "bucket")
+  monkeypatch.setattr(
+    files_upload, "presign_upload", lambda *args, **kwargs: "https://upload.test"
+  )
 
   class _StubUUID:
     def __str__(self):

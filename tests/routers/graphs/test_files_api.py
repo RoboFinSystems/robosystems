@@ -266,15 +266,9 @@ async def test_create_file_upload_generates_presigned_url(monkeypatch):
   )
 
   with patch(
-    "robosystems.operations.graph.commands.create_file_upload.S3Client"
-  ) as mock_s3_class:
-    mock_s3_instance = SimpleNamespace()
-    mock_s3_instance.s3_client = SimpleNamespace()
-    mock_s3_instance.s3_client.generate_presigned_url = lambda *args, **kwargs: (
-      "https://s3.url"
-    )
-    mock_s3_class.return_value = mock_s3_instance
-
+    "robosystems.operations.graph.commands.create_file_upload.presign_upload",
+    return_value="https://s3.url",
+  ):
     request = FileUploadRequest(
       file_name="data.parquet",
       content_type="application/x-parquet",

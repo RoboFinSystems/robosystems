@@ -236,8 +236,16 @@ Resources:
             Status: Enabled
             Prefix: user-staging/
             ExpirationInDays: 30
+          # Document uploads wait here for complete-document-upload, which
+          # copies the checked bytes into documents/. One never completed is
+          # reclaimed the next day; the upload URL expired long before.
+          - Id: ExpireDocumentUploads
+            Status: Enabled
+            Prefix: documents-incoming/
+            ExpirationInDays: 1
           # report-bundles/ deliberately has no expiration rule: they are live
           # publications, deleted explicitly when a report is withdrawn.
+          # Nor does documents/: a stored document file is a system of record.
           # Graph backups expire after 90 days (max tier retention)
           - Id: ExpireGraphBackups
             Status: Enabled

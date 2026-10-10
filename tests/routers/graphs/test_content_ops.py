@@ -545,9 +545,14 @@ async def _run(op, body):
 
 
 def _upload_body():
-  return CreateDocumentUploadOp(
-    title="Checking, Sept", file_name="sep.pdf", file_size_bytes=2048
-  )
+  return CreateDocumentUploadOp(file_name="sep.pdf", file_size_bytes=2048)
+
+
+_UPLOAD_ID = "upl_01M4HXRVFZ66AF7CYHHF85AFRR"
+
+
+def _complete_body():
+  return CompleteDocumentUploadOp(upload_id=_UPLOAD_ID, title="Checking, Sept")
 
 
 async def test_create_document_upload_returns_the_url_to_put_to():
@@ -560,14 +565,14 @@ async def test_create_document_upload_returns_the_url_to_put_to():
     patch(_SERVICE) as svc,
   ):
     svc.return_value.begin_file_upload.return_value = (
-      _stored_file(),
+      _UPLOAD_ID,
       "https://s3.example/put",
     )
     env = await _run(create_document_upload_op, _upload_body())
 
   assert env.status == "completed"
   assert env.result == {
-    "document_id": "doc_1",
+    "upload_id": _UPLOAD_ID,
     "upload_url": "https://s3.example/put",
     "expires_in": 3600,
   }
@@ -625,13 +630,14 @@ def test_an_upload_larger_than_the_cap_is_refused_before_any_url():
   from pydantic import ValidationError
 
   with pytest.raises(ValidationError):
-    CreateDocumentUploadOp(
-      title="T", file_name="big.pdf", file_size_bytes=26 * 1024 * 1024
-    )
+    CreateDocumentUploadOp(file_name="big.pdf", file_size_bytes=26 * 1024 * 1024)
   with pytest.raises(ValidationError):
     CreateDocumentUploadOp(
-      title="T", file_name="x.pdf", file_size_bytes=10, content_type="text/html"
+      file_name="x.pdf", file_size_bytes=10, content_type="text/html"
     )
+  # The upload id is the server's, so a key outside the graph cannot be named.
+  with pytest.raises(ValidationError):
+    CompleteDocumentUploadOp(upload_id="../kgOther/upl_x", title="T")
 
 
 async def test_complete_document_upload_returns_the_stored_document():
@@ -644,22 +650,19 @@ async def test_complete_document_upload_returns_the_stored_document():
     patch(_SERVICE) as svc,
   ):
     svc.return_value.complete_file_upload.return_value = _stored_file()
-    env = await _run(
-      complete_document_upload_op, CompleteDocumentUploadOp(document_id="doc_1")
-    )
+    env = await _run(complete_document_upload_op, _complete_body())
 
   assert env.result["file"] == {
     "file_name": "sep.pdf",
     "content_type": "application/pdf",
     "size_bytes": 2048,
     "sha256": "cd" * 32,
-    "status": "stored",
   }
 
 
 @pytest.mark.parametrize(
   ("raised", "status"),
-  [("missing", 404), ("not-uploaded", 409), ("bad-file", 422)],
+  [("not-uploaded", 409), ("bad-file", 422)],
 )
 async def test_complete_document_upload_errors(raised, status):
   from robosystems.operations.document_service import (
@@ -668,7 +671,6 @@ async def test_complete_document_upload_errors(raised, status):
   )
 
   error = {
-    "missing": KeyError("doc_1"),
     "not-uploaded": DocumentFileNotUploadedError("not yet"),
     "bad-file": DocumentFileError("not a pdf"),
   }[raised]
@@ -682,9 +684,7 @@ async def test_complete_document_upload_errors(raised, status):
   ):
     svc.return_value.complete_file_upload.side_effect = error
     with pytest.raises(HTTPException) as e:
-      await _run(
-        complete_document_upload_op, CompleteDocumentUploadOp(document_id="doc_1")
-      )
+      await _run(complete_document_upload_op, _complete_body())
 
   assert e.value.status_code == status
 

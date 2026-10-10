@@ -1,7 +1,5 @@
 """Search request/response models for full-text document search."""
 
-from typing import Literal
-
 from pydantic import BaseModel, Field
 
 
@@ -178,21 +176,12 @@ class DocumentFileInfo(BaseModel):
 
   file_name: str = Field(..., description="The file's name as uploaded.")
   content_type: str = Field(..., description="The file's media type.")
-  size_bytes: int | None = Field(
-    None, description="The stored file's size, once its upload is complete."
-  )
-  sha256: str | None = Field(
-    None,
+  size_bytes: int = Field(..., description="The stored file's size.")
+  sha256: str = Field(
+    ...,
     description=(
       "Hex SHA-256 of the stored bytes, taken when the upload completed. "
       "A stored file never changes, so this identifies it."
-    ),
-  )
-  status: Literal["pending", "stored"] = Field(
-    ...,
-    description=(
-      "`pending` until complete-document-upload checks the uploaded bytes; "
-      "`stored` after."
     ),
   )
 
@@ -249,13 +238,15 @@ class DocumentDetailResponse(BaseModel):
 class DocumentFileUploadResponse(BaseModel):
   """Where to upload a document's file."""
 
-  document_id: str = Field(..., description="The document the file will be.")
+  upload_id: str = Field(
+    ..., description="Pass to complete-document-upload once the file is uploaded."
+  )
   upload_url: str = Field(
     ...,
     description=(
       "Presigned URL: PUT the file's bytes here with the same Content-Type "
-      "and Content-Length the upload was created with, then call "
-      "complete-document-upload."
+      "(and Content-Length, when one was declared), then call "
+      "complete-document-upload. Nothing is recorded until then."
     ),
   )
   expires_in: int = Field(..., description="Seconds until the URL expires.")

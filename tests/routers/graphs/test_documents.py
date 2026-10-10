@@ -177,7 +177,7 @@ class TestDocumentFiles:
       MockService.return_value.get_document.return_value = _mock_file()
       MockService.return_value.list_documents.return_value = [
         _mock_document(),
-        _mock_file(file_status="pending", file_sha256=None),
+        _mock_file(),
       ]
       detail = await get_document(
         graph_id="kg_test", document_id="doc_abc123", current_user=_mock_user()
@@ -185,16 +185,14 @@ class TestDocumentFiles:
       listed = await list_documents(graph_id="kg_test", current_user=_mock_user())
 
     assert detail.file is not None
-    assert (detail.file.file_name, detail.file.status, detail.file.size_bytes) == (
+    assert (detail.file.file_name, detail.file.size_bytes, detail.file.sha256) == (
       "sep-2026.pdf",
-      "stored",
       1024,
+      "ab" * 32,
     )
-    text_doc, pending = listed.documents
+    text_doc, file_doc = listed.documents
     assert text_doc.file is None
-    # The declared size is not reported until the bytes are checked.
-    assert pending.file is not None
-    assert (pending.file.status, pending.file.size_bytes) == ("pending", None)
+    assert file_doc.file is not None
 
   @pytest.mark.asyncio
   @patch(f"{MODULE}.SessionFactory")
