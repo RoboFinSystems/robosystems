@@ -168,9 +168,25 @@ def existing_events(
 
 
 def refresh_hints(event: Event, metadata: dict[str, Any], keys: Iterable[str]) -> bool:
-  """Merge the current pull's hint keys into a captured event; True if changed."""
-  current = dict(event.metadata_ or {})
-  changed = False
+  """Merge the current pull's hint keys into a captured event; True if changed.
+
+  On a classifiable line the pull's suggestion is the feed's hint: it is kept
+  as such and the ladder runs again, so a learned default stays on top.
+  """
+  from sqlalchemy.orm import object_session
+  from sqlalchemy.orm.exc import UnmappedInstanceError
+
+  from robosystems.operations.roboledger.classification import (
+    FEED_SUGGESTED_ACCOUNT_NAME,
+    FEED_SUGGESTED_ELEMENT_ID,
+    LEARNED_EVENT_TYPES,
+    SUGGESTED_ACCOUNT_NAME,
+    SUGGESTED_ELEMENT_ID,
+    apply_ladder,
+  )
+
+  before = dict(event.metadata_ or {})
+  current = dict(before)
   for key in keys:
     new_value = metadata.get(key)
     if current.get(key) != new_value:
@@ -178,10 +194,18 @@ def refresh_hints(event: Event, metadata: dict[str, Any], keys: Iterable[str]) -
         current.pop(key, None)
       else:
         current[key] = new_value
-      changed = True
-  if changed:
-    event.metadata_ = current
-  return changed
+  try:
+    session = object_session(event)
+  except UnmappedInstanceError:
+    session = None
+  if session is not None and event.event_type in LEARNED_EVENT_TYPES:
+    current[FEED_SUGGESTED_ELEMENT_ID] = metadata.get(SUGGESTED_ELEMENT_ID)
+    current[FEED_SUGGESTED_ACCOUNT_NAME] = metadata.get(SUGGESTED_ACCOUNT_NAME)
+    current = apply_ladder(session, current, event.agent_id)
+  if current == before:
+    return False
+  event.metadata_ = current
+  return True
 
 
 def capture_event(
@@ -192,7 +216,20 @@ def capture_event(
   created_by: str,
   report: LoadReport,
 ) -> bool:
-  """Capture one event in its own savepoint; a bad row never stops the batch."""
+  """Capture one event in its own savepoint; a bad row never stops the batch.
+  A classifiable line gets the highest suggestion the ladder has for it."""
+  from robosystems.operations.roboledger.classification import (
+    LEARNED_EVENT_TYPES,
+    apply_ladder,
+  )
+
+  if payload.get("event_type") in LEARNED_EVENT_TYPES:
+    payload = {
+      **payload,
+      "metadata": apply_ladder(
+        session, dict(payload.get("metadata") or {}), payload.get("agent_id")
+      ),
+    }
   try:
     with session.begin_nested():
       create_event_block_in_session(

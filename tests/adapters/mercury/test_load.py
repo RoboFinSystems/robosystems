@@ -52,6 +52,11 @@ class _Session:
     obj.id = f"agt_{len(self.added) + 1}"
     self.added.append(obj)
 
+  def get(self, model, ident):
+    # The suggestion ladder looks the counterparty up; new agents carry no
+    # default yet.
+    return None
+
   def flush(self):
     self.flushes += 1
 

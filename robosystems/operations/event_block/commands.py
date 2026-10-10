@@ -643,6 +643,12 @@ def _refuse_system_metadata(patch: dict | None) -> None:
     "drift_detected_at",
     "drift_payload",
     "reconciliation_history",
+    # The suggestion ladder's and the commit's own record.
+    "suggestion_source",
+    "suggestion_basis",
+    "suggestion_outcome",
+    "feed_suggested_element_id",
+    "feed_suggested_account_name",
   }
   reserved = sorted(
     key for key in (patch or {}) if key in system_keys or key.startswith("dispatch_")
@@ -821,6 +827,11 @@ def update_event_block(
   if fire_handler:
     # After the metadata patch so the handler sees the final shape.
     fire_handler_on_commit(session, event, created_by)
+
+  if body.transition_to == "committed":
+    from robosystems.operations.roboledger.classification import learn_from_commit
+
+    learn_from_commit(session, event, created_by)
 
   # Before commit, which expires `event`.
   envelope = _to_envelope(event, _load_dimension_ids(session, event.id))

@@ -40,6 +40,9 @@ from robosystems.models.api.extensions.accounts import (
   AccountTreeNode as PydanticAccountTreeNode,
 )
 from robosystems.models.api.extensions.agent import (
+  AgentClassification as PydanticAgentClassification,
+)
+from robosystems.models.api.extensions.agent import (
   LedgerAgentResponse as PydanticAgentResponse,
 )
 from robosystems.models.api.extensions.ar_ap import (
@@ -234,6 +237,12 @@ class LedgerEntity:
 # ── Agents ────────────────────────────────────────────────────────────────
 
 
+@pydantic_type(model=PydanticAgentClassification, all_fields=True)
+class AgentClassification:
+  """A counterparty's default account, learned from committed lines or set by
+  hand."""
+
+
 @strawberry.type
 class Agent:
   """A counterparty (customer, vendor, employee, etc.) referenced by events.
@@ -257,6 +266,7 @@ class Agent:
   external_id: str | None
   is_active: bool
   is_1099_recipient: bool
+  classification: AgentClassification | None
   created_at: datetime | None
   updated_at: datetime | None
   created_by: str | None
@@ -279,6 +289,11 @@ class Agent:
       external_id=row.external_id,
       is_active=row.is_active,
       is_1099_recipient=row.is_1099_recipient,
+      classification=(
+        AgentClassification.from_pydantic(row.classification)
+        if row.classification is not None
+        else None
+      ),
       created_at=row.created_at,
       updated_at=row.updated_at,
       created_by=row.created_by,

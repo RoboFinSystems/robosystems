@@ -32,6 +32,8 @@ from robosystems.models.api.event_handler import (
 )
 from robosystems.models.api.extensions.agent import (
   CreateAgentRequest,
+  LearnClassificationDefaultsRequest,
+  LearnClassificationDefaultsResponse,
   LedgerAgentResponse,
   UpdateAgentRequest,
 )
@@ -101,6 +103,9 @@ from robosystems.operations.roboledger.commands.agent import (
 )
 from robosystems.operations.roboledger.commands.agent import (
   create_agent as cmd_create_agent,
+)
+from robosystems.operations.roboledger.commands.agent import (
+  learn_classification_defaults as cmd_learn_classification_defaults,
 )
 from robosystems.operations.roboledger.commands.agent import (
   update_agent as cmd_update_agent,
@@ -202,13 +207,41 @@ update_agent_op = _registrar.register(
     description=(
       "Patch counterparty fields. Only supplied fields are updated. "
       "Set is_active=false to deactivate (agents are never deleted — they are "
-      "reference data referenced by events and transactions)."
+      "reference data referenced by events and transactions). "
+      "`classification_element_id` sets the account this counterparty's bank "
+      "lines are suggested (an empty string clears it), and "
+      "`classification_mode='always_ask'` stops suggesting one for a "
+      "counterparty whose lines go to different accounts; its still-open "
+      "lines are re-suggested at once. A default is also learned as lines "
+      "are committed, so set one by hand only to correct it."
     ),
     command=cmd_update_agent,
     request_model=UpdateAgentRequest,
     result_type=LedgerAgentResponse,
     error_map={AgentNotFoundError: 404, RowLockedError: 409, ValueError: 422},
     mark_stale_reason="agent_updated",
+  )
+)
+
+learn_classification_defaults_op = _registrar.register(
+  OperationSpec(
+    name="learn-classification-defaults",
+    summary="Learn Classification Defaults",
+    description=(
+      "Seed each counterparty's default account from the bank lines already "
+      "committed to the books: the account most of its lines went to becomes "
+      "its default, with the lines that agreed counted as confirmations. A "
+      "counterparty that already has a default keeps it. Its still-open lines "
+      "are then suggested from the default. Run it once on books that were "
+      "classified before defaults were learned; after that, every commit "
+      "teaches the default by itself. `dry_run` reports what would be learned "
+      "without writing it."
+    ),
+    command=cmd_learn_classification_defaults,
+    request_model=LearnClassificationDefaultsRequest,
+    result_type=LearnClassificationDefaultsResponse,
+    error_map={RowLockedError: 409},
+    mark_stale_reason="classification_defaults_learned",
   )
 )
 

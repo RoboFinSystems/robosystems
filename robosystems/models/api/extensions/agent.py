@@ -6,13 +6,15 @@ are referenced by transactions, events, and 1099 reporting. They carry
 identity (legal name, tax ID, DUNS, LEI) and contact details, plus
 source-system linkage for sync from QuickBooks / Xero / Plaid.
 
-Agents stay agnostic of the GL — they don't have a balance and aren't
-elements. They're the "with whom" dimension on Transactions.
+Agents have no balance and aren't elements: they're the "with whom"
+dimension on Transactions. A counterparty can carry a default account,
+which suggests where its bank lines go; it never posts by itself.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -139,9 +141,27 @@ class UpdateAgentRequest(BaseModel):
     description="Toggle activation. Inactive agents are hidden from new-transaction pickers.",
   )
   is_1099_recipient: bool | None = None
+  classification_element_id: str | None = Field(
+    None,
+    description=(
+      "The chart account this counterparty's bank lines are usually "
+      "classified to, suggested on each new line. An empty string clears "
+      "it. Its still-open lines are re-suggested at once. Omit to keep."
+    ),
+  )
+  classification_mode: Literal["suggest", "always_ask"] | None = Field(
+    None,
+    description=(
+      "`suggest` offers the default on each line; `always_ask` offers none, "
+      "for a counterparty whose lines go to different accounts. Omit to keep."
+    ),
+  )
   metadata_patch: dict = Field(
     default_factory=dict,
-    description="Deep-merged into agent.metadata. Pass `{}` to leave unchanged.",
+    description=(
+      "Deep-merged into agent.metadata. Pass `{}` to leave unchanged. The "
+      "default classification is set with the fields above, not here."
+    ),
   )
 
   model_config = ConfigDict(
@@ -159,6 +179,55 @@ class UpdateAgentRequest(BaseModel):
       ]
     }
   )
+
+
+class AgentClassification(BaseModel):
+  """A counterparty's default account, learned from committed lines or set by
+  hand."""
+
+  element_id: str = Field(..., description="The default chart account.")
+  account_name: str | None = Field(None, description="The account's name.")
+  mode: str = Field(
+    ...,
+    description=("`suggest`: offered on each new line. `always_ask`: never offered."),
+  )
+  confirmations: int = Field(
+    ..., description="Committed lines that went to this account."
+  )
+  overrides: int = Field(
+    ..., description="Committed lines that went elsewhere while it was the default."
+  )
+  set_by: str | None = Field(None, description="Who set or last moved it.")
+  set_at: str | None = Field(None, description="When it was set or last moved.")
+  learned_from: str | None = Field(
+    None, description="The committed line it was learned from, when it was."
+  )
+
+
+class LearnClassificationDefaultsRequest(BaseModel):
+  """Seed counterparty defaults from the bank lines already committed."""
+
+  dry_run: bool = Field(
+    False, description="Report what would be learned without writing it."
+  )
+
+
+class LearnClassificationDefaultsResponse(BaseModel):
+  """What seeding the defaults learned."""
+
+  agents_learned: int = Field(
+    ..., description="Counterparties given a default from their committed lines."
+  )
+  agents_kept: int = Field(
+    ..., description="Counterparties that already had a default, left as they were."
+  )
+  lines_read: int = Field(
+    ..., description="Committed lines classified to a single account that were read."
+  )
+  open_lines_resuggested: int = Field(
+    ..., description="Still-open lines whose suggestion changed as a result."
+  )
+  dry_run: bool
 
 
 class LedgerAgentResponse(BaseModel):
@@ -183,6 +252,9 @@ class LedgerAgentResponse(BaseModel):
 
   is_active: bool
   is_1099_recipient: bool
+  classification: AgentClassification | None = Field(
+    None, description="The default account its bank lines are suggested."
+  )
 
   created_at: datetime | None = None
   updated_at: datetime | None = None

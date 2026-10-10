@@ -9,10 +9,17 @@ from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.agent import (
   CreateAgentRequest,
+  LearnClassificationDefaultsRequest,
+  LearnClassificationDefaultsResponse,
   LedgerAgentResponse,
   UpdateAgentRequest,
 )
 from robosystems.models.extensions.roboledger.agent import Agent
+from robosystems.operations.roboledger.classification import (
+  CLASSIFICATION_KEY,
+  learn_from_history,
+  set_default,
+)
 from robosystems.operations.roboledger.reads.agent import agent_to_response
 
 
@@ -104,11 +111,46 @@ def update_agent(
       setattr(agent, field, value)
 
   if body.metadata_patch:
+    if CLASSIFICATION_KEY in body.metadata_patch:
+      raise ValueError(
+        "Set the default classification with classification_element_id and "
+        "classification_mode, not metadata_patch."
+      )
     merged = dict(agent.metadata_ or {})
     merged.update(body.metadata_patch)
     agent.metadata_ = merged
+
+  if body.classification_element_id is not None or body.classification_mode:
+    set_default(
+      session,
+      agent,
+      element_id=body.classification_element_id,
+      mode=body.classification_mode,
+      set_by=created_by,
+    )
 
   agent.updated_at = datetime.now(UTC)
   session.commit()
   session.refresh(agent)
   return agent_to_response(agent)
+
+
+def learn_classification_defaults(
+  session: Session,
+  body: LearnClassificationDefaultsRequest,
+  created_by: str,
+) -> LearnClassificationDefaultsResponse:
+  """Give each counterparty with committed bank lines and no default the
+  account most of its lines went to, and re-suggest its open lines."""
+  learned = learn_from_history(session, created_by, dry_run=body.dry_run)
+  if body.dry_run:
+    session.rollback()
+  else:
+    session.commit()
+  return LearnClassificationDefaultsResponse(
+    agents_learned=learned.agents_learned,
+    agents_kept=learned.agents_kept,
+    lines_read=learned.lines_read,
+    open_lines_resuggested=learned.open_lines_resuggested,
+    dry_run=body.dry_run,
+  )
