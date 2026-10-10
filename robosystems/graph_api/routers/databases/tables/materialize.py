@@ -15,6 +15,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Path
 from fastapi import status as http_status
 
 from robosystems.config import env
+from robosystems.config.tuning import TuningConfig
 from robosystems.graph_api.core.duckdb import quote_identifier
 from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.graph_api.core.ladybug.results import result_rows
@@ -31,6 +32,17 @@ from robosystems.middleware.graph.instance_busy import (
   OP_KIND_MATERIALIZATION,
   instance_busy,
 )
+
+
+def _copy_timeout_call() -> str:
+  """Raise LadybugDB's per-query ceiling for the length of one table COPY."""
+  return f"CALL timeout={TuningConfig.get_materialization_engine_copy_timeout() * 1000}"
+
+
+def _query_timeout_call() -> str:
+  """Restore the per-query ceiling every pooled connection carries."""
+  return f"CALL timeout={TuningConfig.get_graph_engine_query_timeout() * 1000}"
+
 
 # Rows per Arrow record batch, and so per LadybugDB COPY. Sized above the
 # callers' own batch sizes so each call is ONE COPY: cost scales with COPY
@@ -100,11 +112,11 @@ def _export_incremental_keyset(
   else:
     query = f"MATCH (n:{table_name}) RETURN n.identifier AS identifier"
   with ladybug_service.db_manager.connection_pool.get_connection(graph_id) as conn:
-    conn.execute("CALL timeout=3600000")  # 60 min: large rel traversals
+    conn.execute(_copy_timeout_call())
     try:
       conn.execute(f"COPY ({query}) TO '{esc_path}'")
     finally:
-      conn.execute("CALL timeout=120000")  # reset to 2 minutes
+      conn.execute(_query_timeout_call())
 
 
 _LBUG_TO_DUCK_TYPE = {
@@ -549,7 +561,7 @@ async def _materialize_table_impl(
         ) as conn:
           # Extended timeout: large tables (Fact) can take minutes per batch.
           try:
-            conn.execute("CALL timeout=3600000")  # 60 minutes
+            conn.execute(_copy_timeout_call())
             for arrow_batch in arrow_reader:
               # LadybugDB resolves `copy_batch` BY NAME from this frame (a
               # replacement scan), so the name must match the COPY statement.
@@ -560,7 +572,7 @@ async def _materialize_table_impl(
               result = conn.execute(f"COPY {table_name} FROM copy_batch")
               rows_ingested += _copy_result_rows(result, arrow_batch.num_rows)
           finally:
-            conn.execute("CALL timeout=120000")  # reset to 2 minutes
+            conn.execute(_query_timeout_call())
 
     except Exception as err:
       logger.error(f"Could not materialize DuckDB table {table_name}: {err}")
@@ -761,7 +773,7 @@ async def _fork_from_parent_duckdb_impl(
           table_rows = 0
           logger.info(f"Copying {table_name} from parent to subgraph")
           try:
-            conn.execute("CALL timeout=3600000")  # 60 minutes
+            conn.execute(_copy_timeout_call())
             for arrow_batch in arrow_reader:
               # Resolved by name from this frame; see materialize_table.
               copy_batch = _restore_fixed_arrays(arrow_batch, array_casts)  # noqa: F841
@@ -774,7 +786,7 @@ async def _fork_from_parent_duckdb_impl(
             logger.error(f"Failed to copy {table_name}: {table_err}")
             raise
           finally:
-            conn.execute("CALL timeout=120000")  # reset to 2 minutes
+            conn.execute(_query_timeout_call())
 
           total_rows += table_rows
           tables_copied.append(table_name)

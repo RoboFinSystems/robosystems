@@ -20,6 +20,7 @@ from typing import Any
 
 import ladybug as lbug
 
+from robosystems.config.tuning import TuningConfig
 from robosystems.logger import logger
 
 
@@ -301,9 +302,9 @@ class LadybugConnectionPool:
 
           conn.execute("CALL progress_bar=false;")
 
-          # Per-query ceiling. Ingestion raises this to 30 minutes for the
-          # duration of a load.
-          conn.execute("CALL timeout=120000;")
+          # Per-query ceiling. Ingestion raises it for the duration of a load.
+          timeout_ms = TuningConfig.get_graph_engine_query_timeout() * 1000
+          conn.execute(f"CALL timeout={timeout_ms};")
 
           conn.execute("CALL enable_semi_mask=true;")
 
@@ -314,7 +315,7 @@ class LadybugConnectionPool:
           conn.execute("CALL spill_to_disk=true;")
 
           logger.info(
-            f"Applied connection configuration for {database_name} (home_dir={home_dir}, progress_bar=false, timeout=120000ms, semi_mask=true, warning_limit=1024, spill_to_disk=true)"
+            f"Applied connection configuration for {database_name} (home_dir={home_dir}, progress_bar=false, timeout={timeout_ms}ms, semi_mask=true, warning_limit=1024, spill_to_disk=true)"
           )
         except Exception as config_error:
           logger.debug(

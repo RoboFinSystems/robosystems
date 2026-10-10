@@ -918,12 +918,48 @@ class TestPartialStatusAndSwapGate:
     # The second table never COPYs once the lock is known to be gone.
     assert client.materialize_table.await_count == 1
 
+  @pytest.mark.asyncio
+  async def test_tuned_copy_timeout_reaches_the_copy_and_the_lock(self, monkeypatch):
+    """A dedicated deployment raises the per-table timeout; the lock TTL must
+    then outlive the longer COPY or it lapses under a healthy run."""
+    monkeypatch.setenv("TUNING_MATERIALIZATION_COPY_TIMEOUT", "7200")
+    materializer = self._materializer()
+    result = MaterializeResult(graph_id=GRAPH_ID)
+    result.tables_staged = ["Entity"]
+    lock = _held_lock()
+
+    client = AsyncMock()
+    client.materialize_table.return_value = {"rows_ingested": 1}
+
+    await materializer._materialize_tables(client, GRAPH_ID, result, lock=lock)
+
+    assert client.materialize_table.await_args.kwargs["timeout"] == 7200.0
+    lock.extend.assert_awaited_with(ttl_seconds=7500)
+
+  @pytest.mark.asyncio
+  async def test_default_timeouts_keep_the_lock_ttl(self, monkeypatch):
+    monkeypatch.delenv("TUNING_MATERIALIZATION_COPY_TIMEOUT", raising=False)
+    monkeypatch.delenv("TUNING_MATERIALIZATION_STAGE_TIMEOUT", raising=False)
+    materializer = self._materializer()
+    result = MaterializeResult(graph_id=GRAPH_ID)
+    result.tables_staged = ["Entity"]
+    lock = _held_lock()
+
+    client = AsyncMock()
+    client.materialize_table.return_value = {"rows_ingested": 1}
+
+    await materializer._materialize_tables(client, GRAPH_ID, result, lock=lock)
+
+    assert client.materialize_table.await_args.kwargs["timeout"] == 300.0
+    lock.extend.assert_awaited_with(ttl_seconds=3600)
+
 
 def _held_lock(token: str = "tok"):
   """A MaterializationLock stand-in that is held and extends cleanly."""
   lock = AsyncMock()
   lock.token = token
   lock.lock_key = f"materialize_lock:{GRAPH_ID}"
+  lock.ttl_seconds = 3600
   lock.acquired = True
   lock.acquire.return_value = True
   lock.extend.return_value = True

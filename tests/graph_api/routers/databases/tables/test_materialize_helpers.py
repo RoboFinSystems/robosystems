@@ -336,6 +336,19 @@ class TestExportIncrementalKeyset:
     assert calls[0] == "CALL timeout=3600000"
     assert calls[-1] == "CALL timeout=120000"
 
+  def test_tuned_timeouts_are_applied(self, tmp_path, monkeypatch):
+    monkeypatch.setenv("TUNING_MATERIALIZATION_ENGINE_COPY_TIMEOUT", "14400")
+    monkeypatch.setenv("TUNING_TIMEOUTS_GRAPH_ENGINE_QUERY", "600")
+    service, conn = self._service()
+
+    _export_incremental_keyset(
+      service, "kg1", "Fact", is_rel=False, snapshot_path=tmp_path / "k.parquet"
+    )
+
+    calls = [c.args[0] for c in conn.execute.call_args_list]
+    assert calls[0] == "CALL timeout=14400000"
+    assert calls[-1] == "CALL timeout=600000"
+
   def test_timeout_is_reset_even_when_copy_fails(self, tmp_path):
     service, conn = self._service()
     conn.execute.side_effect = lambda sql: (

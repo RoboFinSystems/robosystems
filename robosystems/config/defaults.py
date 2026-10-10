@@ -60,6 +60,8 @@ class TimeoutDefaults:
   # Graph API timeouts
   GRAPH_HTTP = 30  # Graph API HTTP request timeout
   GRAPH_QUERY = 30  # Graph query execution timeout
+  # LadybugDB's own per-query ceiling (CALL timeout), set on every connection
+  GRAPH_ENGINE_QUERY = 120
 
 
 class AdmissionDefaults:
@@ -153,14 +155,18 @@ class LimitsDefaults:
 
 
 class MaterializationDefaults:
-  """Cadence of the stale-graph sensor's extensions rebuilds (seconds).
+  """Cadence and per-table timeouts of extensions rebuilds (seconds).
 
   Every rebuild is a full one, so a dedicated deployment whose ledger is too
-  large to rebuild every few minutes raises these. An operator lever only.
+  large to rebuild every few minutes, or whose tables outgrow these timeouts,
+  raises them. An operator lever only.
   """
 
   MIN_STALE_AGE = 30  # Rebuild once a graph has gone this long without a write
   MAX_STALE_WAIT = 300  # Rebuild anyway once a graph has been stale this long
+  STAGE_TIMEOUT = 120  # Per table: PostgreSQL -> DuckDB staging, edge pruning
+  COPY_TIMEOUT = 300  # Per table: the build's wait on a DuckDB -> graph COPY
+  ENGINE_COPY_TIMEOUT = 3600  # Per table: LadybugDB's own ceiling on that COPY
 
 
 # SSM paths (under tuning/) that tuning.py reads overrides from.
@@ -197,6 +203,7 @@ SSM_TUNING_PATHS = {
   # Timeouts
   "timeouts/GRAPH_HTTP": TimeoutDefaults.GRAPH_HTTP,
   "timeouts/GRAPH_QUERY": TimeoutDefaults.GRAPH_QUERY,
+  "timeouts/GRAPH_ENGINE_QUERY": TimeoutDefaults.GRAPH_ENGINE_QUERY,
   # SSE
   "sse/MAX_CONNECTIONS_PER_USER": SSEDefaults.MAX_CONNECTIONS_PER_USER,
   "sse/QUEUE_SIZE": SSEDefaults.QUEUE_SIZE,
@@ -205,6 +212,9 @@ SSM_TUNING_PATHS = {
   # Materialization cadence
   "materialization/MIN_STALE_AGE": MaterializationDefaults.MIN_STALE_AGE,
   "materialization/MAX_STALE_WAIT": MaterializationDefaults.MAX_STALE_WAIT,
+  "materialization/STAGE_TIMEOUT": MaterializationDefaults.STAGE_TIMEOUT,
+  "materialization/COPY_TIMEOUT": MaterializationDefaults.COPY_TIMEOUT,
+  "materialization/ENGINE_COPY_TIMEOUT": MaterializationDefaults.ENGINE_COPY_TIMEOUT,
   # Database Pool
   "database/POOL_SIZE": DatabaseDefaults.POOL_SIZE,
   "database/MAX_OVERFLOW": DatabaseDefaults.MAX_OVERFLOW,

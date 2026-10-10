@@ -376,6 +376,7 @@ function create_ssm_tuning_parameters() {
         # Timeout Configuration
         "timeouts/GRAPH_HTTP=30"
         "timeouts/GRAPH_QUERY=30"
+        "timeouts/GRAPH_ENGINE_QUERY=120"
 
         # SSE Configuration
         "sse/MAX_CONNECTIONS_PER_USER=5"
@@ -387,6 +388,9 @@ function create_ssm_tuning_parameters() {
         # Materialization cadence (seconds) - raised on dedicated deployments
         "materialization/MIN_STALE_AGE=30"
         "materialization/MAX_STALE_WAIT=300"
+        "materialization/STAGE_TIMEOUT=120"
+        "materialization/COPY_TIMEOUT=300"
+        "materialization/ENGINE_COPY_TIMEOUT=3600"
 
         # Database Connection Pool
         "database/POOL_SIZE=5"

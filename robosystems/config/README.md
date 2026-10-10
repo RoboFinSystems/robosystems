@@ -92,7 +92,7 @@ tuning/
   circuits/          # Circuit breakers (THRESHOLD, TIMEOUT)
   load_shedding/     # START_PRESSURE, STOP_PRESSURE
   mcp/               # MAX_RESULT_ROWS, MAX_RESULT_SIZE_MB
-  materialization/   # MIN_STALE_AGE, MAX_STALE_WAIT (stale-graph rebuild cadence)
+  materialization/   # Rebuild cadence + per-table timeouts (MIN_STALE_AGE, COPY_TIMEOUT, ...)
 ```
 
 The `{NAME}` segment is UPPER_SNAKE_CASE, identical to the env var name.
