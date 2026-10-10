@@ -16,6 +16,7 @@ from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dep
 from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.search import (
   DocumentDetailResponse,
+  DocumentEvidence,
   DocumentFileDownloadResponse,
   DocumentFileInfo,
   DocumentListItem,
@@ -86,7 +87,9 @@ def _document_to_list_item(doc: Document) -> DocumentListItem:
   )
 
 
-def document_to_detail(doc: Document) -> DocumentDetailResponse:
+def document_to_detail(
+  doc: Document, evidence_for: list[DocumentEvidence] | None = None
+) -> DocumentDetailResponse:
   """Convert a Document model to a DocumentDetailResponse."""
   return DocumentDetailResponse(
     id=doc.id,
@@ -101,9 +104,19 @@ def document_to_detail(doc: Document) -> DocumentDetailResponse:
     source_provider=doc.source_provider,
     sections_indexed=doc.sections_indexed,
     file=_file_info(doc),
+    evidence_for=evidence_for or [],
     created_at=doc.created_at.isoformat() if doc.created_at else "",
     updated_at=doc.updated_at.isoformat() if doc.updated_at else "",
   )
+
+
+def _evidence_for(graph_id: str, document_id: str) -> list[DocumentEvidence]:
+  from robosystems.operations.document_service import events_citing
+
+  return [
+    DocumentEvidence(**citation.__dict__)
+    for citation in events_citing(graph_id, document_id)
+  ]
 
 
 @router.get(
@@ -151,7 +164,7 @@ async def get_document(
     doc = service.get_document(graph_id, document_id)
     if doc is None:
       raise HTTPException(status_code=404, detail="Document not found")
-    return document_to_detail(doc)
+    return document_to_detail(doc, _evidence_for(graph_id, str(doc.id)))
   finally:
     session.close()
 

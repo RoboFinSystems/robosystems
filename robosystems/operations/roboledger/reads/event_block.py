@@ -56,6 +56,7 @@ def _to_envelope(event: Event, dimension_ids: list[str]) -> EventBlockEnvelope:
     replaces_event_id=event.replaces_event_id,
     obligated_by_event_id=event.obligated_by_event_id,
     discharges_event_id=event.discharges_event_id,
+    document_id=event.document_id,
     created_at=event.created_at,
     created_by=event.created_by,
   )

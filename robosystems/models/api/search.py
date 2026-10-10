@@ -186,6 +186,15 @@ class DocumentFileInfo(BaseModel):
   )
 
 
+class DocumentEvidence(BaseModel):
+  """A live event on the books that names the document as its evidence."""
+
+  event_id: str
+  event_type: str
+  status: str
+  occurred_at: str
+
+
 class DocumentListItem(BaseModel):
   """A document in the document list."""
 
@@ -229,6 +238,14 @@ class DocumentDetailResponse(BaseModel):
     description=(
       "The stored file, for a document that is one; its `content` is empty. "
       "Download it from `GET /documents/{document_id}/file`."
+    ),
+  )
+  evidence_for: list[DocumentEvidence] = Field(
+    default_factory=list,
+    description=(
+      "The live events that name this document as their evidence (an "
+      "invoice, a bill, a statement balance), newest first, at most 50. "
+      "While any are listed, the document cannot be deleted."
     ),
   )
   created_at: str

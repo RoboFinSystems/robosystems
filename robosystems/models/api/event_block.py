@@ -271,6 +271,16 @@ class CreateEventBlockRequest(BaseModel):
       "cash_received pointing at the originating sale_invoiced)."
     ),
   )
+  document_id: str | None = Field(
+    None,
+    description=(
+      "The stored document this event rests on, as evidence: the invoice "
+      "PDF, the vendor bill, the receipt photo (upload it with "
+      "create-document-upload and complete-document-upload). Must be a "
+      "document on this graph. While the event is live, the document "
+      "cannot be deleted."
+    ),
+  )
 
   apply_handlers: bool = Field(
     False,
@@ -449,6 +459,13 @@ class EventBlockEnvelope(BaseModel):
       "`cash_received` pointing at the originating `sale_invoiced`)."
     ),
   )
+  document_id: str | None = Field(
+    None,
+    description=(
+      "The stored document the event rests on (an invoice, a bill, a "
+      "receipt, a statement); read it with get-document."
+    ),
+  )
 
   created_at: datetime = Field(..., description="Row creation timestamp (UTC).")
   created_by: str = Field(
@@ -558,6 +575,14 @@ class UpdateEventBlockRequest(BaseModel):
   )
   discharges_event_id: str | None = Field(
     None, description="Set/update the settlement link."
+  )
+  document_id: str | None = Field(
+    None,
+    description=(
+      "Set or replace the stored document the event rests on; an empty "
+      "string detaches it. Must be a document on this graph. Unset = "
+      "unchanged."
+    ),
   )
 
 

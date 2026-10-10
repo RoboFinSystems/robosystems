@@ -479,9 +479,9 @@ class DocumentService:
   def delete_document(self, graph_id: str, document_id: str) -> bool:
     """Delete a document from PG and OpenSearch, and a stored file's bytes.
 
-    Raises `DocumentInUseError` for a document that a recorded statement
-    balance cites as its evidence: the balance would be left pointing at
-    nothing.
+    Raises `DocumentInUseError` for a document a live event names as its
+    evidence (an invoice, a bill, a statement balance): the event would be
+    left pointing at nothing.
     """
     doc = Document.get_by_id_and_graph(document_id, graph_id, self.session)
     if doc is None:
@@ -489,8 +489,9 @@ class DocumentService:
 
     if _cited_as_evidence(graph_id, str(doc.id)):
       raise DocumentInUseError(
-        f"Document {document_id} is the statement behind a recorded balance. "
-        "Record that balance again with another document first."
+        f"Document {document_id} is the evidence for a live event on the "
+        "books (get-document lists them). Point the event at another "
+        "document, or void it, first."
       )
     if not doc.is_file:
       self._delete_from_opensearch(graph_id, doc.id)
@@ -631,20 +632,64 @@ def _attachment(file_name: str) -> str:
   return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(file_name)}"
 
 
+# An event that still stands. A voided or superseded one no longer rests on
+# anything, so its document can go.
+_LIVE_EVENT_SQL = "status NOT IN ('voided', 'superseded')"
+# What get-document lists of the events a document backs.
+_MAX_CITATIONS = 50
+
+
+@dataclass(frozen=True)
+class DocumentCitation:
+  """A live event that names a document as its evidence."""
+
+  event_id: str
+  event_type: str
+  status: str
+  occurred_at: str
+
+
+def document_exists(graph_id: str, document_id: str) -> bool:
+  """Whether the document is one of this graph's. The check a ledger write
+  makes before naming a document: the two live in different databases, so
+  nothing else holds the reference."""
+  from robosystems.database import SessionFactory
+
+  with SessionFactory() as platform_session:
+    return (
+      Document.get_by_id_and_graph(document_id, graph_id, platform_session) is not None
+    )
+
+
 def _cited_as_evidence(graph_id: str, document_id: str) -> bool:
-  """Whether a live statement balance on the graph's books names the document."""
+  """Whether a live event on the graph's books names the document."""
+  return bool(events_citing(graph_id, document_id, limit=1))
+
+
+def events_citing(
+  graph_id: str, document_id: str, *, limit: int = _MAX_CITATIONS
+) -> list[DocumentCitation]:
+  """The live events on the graph's books that name the document, newest
+  first; none on a graph with no ledger."""
   from robosystems.db.extensions import extensions_session, tenant_schema_exists
 
   if not tenant_schema_exists(graph_id):
-    return False
+    return []
   with extensions_session(graph_id) as session:
-    return (
-      session.execute(
-        text(
-          "SELECT 1 FROM events WHERE event_type = 'balance_observed' "
-          "AND status = 'committed' AND metadata->>'document_id' = :doc LIMIT 1"
-        ),
-        {"doc": document_id},
-      ).first()
-      is not None
+    rows = session.execute(
+      text(
+        "SELECT id, event_type, status, occurred_at FROM events "
+        f"WHERE document_id = :doc AND {_LIVE_EVENT_SQL} "
+        "ORDER BY occurred_at DESC, id DESC LIMIT :limit"
+      ),
+      {"doc": document_id, "limit": limit},
+    ).all()
+  return [
+    DocumentCitation(
+      event_id=str(row.id),
+      event_type=str(row.event_type),
+      status=str(row.status),
+      occurred_at=row.occurred_at.isoformat(),
     )
+    for row in rows
+  ]
