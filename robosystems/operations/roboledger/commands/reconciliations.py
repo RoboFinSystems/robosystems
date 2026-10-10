@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from decimal import ROUND_HALF_UP, Decimal
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -12,6 +13,7 @@ from robosystems.adapters.quickbooks.reports import TrialBalanceReportError
 from robosystems.models.api.extensions.reconciliations import (
   PreviewReconciliationsRequest,
   ReconciliationListResponse,
+  ReconciliationMethod,
   ReconciliationPolicyResponse,
   ReconciliationPreviewResponse,
   ReconciliationSummary,
@@ -27,10 +29,19 @@ from robosystems.operations.information_block.reconciliation import (
   RECONCILIATION_BLOCK_TYPE,
 )
 from robosystems.operations.locking import lock_by_id
-from robosystems.operations.roboledger.entity_scope import find_entity_id
+from robosystems.operations.roboledger.entity_scope import (
+  ensure_entity_id,
+  find_entity_id,
+  is_group_parent,
+  owner_entity_id,
+)
 from robosystems.operations.roboledger.fiscal_calendar import (
   FiscalCalendarService,
   next_period,
+)
+from robosystems.operations.roboledger.reads.accounts import (
+  account_scope,
+  entity_accounts_clause,
 )
 from robosystems.operations.roboledger.reads.fiscal_calendar import (
   get_fiscal_year_start_month,
@@ -142,16 +153,16 @@ def _explicit_write_members(graph_id: str) -> set[str]:
     return GraphUser.explicit_write_member_ids(graph_id, platform_session)
 
 
-def _window(session: Session, graph_id: str, period: str) -> ReconciliationWindow:
-  """The period's window over the group parent's books: the reconciliation
-  suite compares one entity's ledger, and until it takes an entity that is
-  the parent's. Under a shadow connection the ledger side is landed only."""
+def _window(
+  session: Session, graph_id: str, period: str, entity_id: str | None
+) -> ReconciliationWindow:
+  """The period's window over one entity's books. Under a shadow connection
+  the ledger side is landed only."""
   from robosystems.database import SessionFactory
   from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
     shadow_close_for_entity,
   )
 
-  entity_id = find_entity_id(session)
   with SessionFactory() as platform_session:
     shadow = shadow_close_for_entity(session, platform_session, graph_id, entity_id)
   return reconciliation_window(
@@ -172,8 +183,12 @@ def _load_reconciliation(session: Session, structure_id: str) -> Structure:
   return structure
 
 
-def _summary(session: Session, structure_id: str, period: str) -> ReconciliationSummary:
-  for rec in list_reconciliations(session, period).reconciliations:
+def _summary(
+  session: Session, structure: Structure, period: str
+) -> ReconciliationSummary:
+  structure_id = str(structure.id)
+  entity_id = owner_entity_id(session, structure)
+  for rec in list_reconciliations(session, period, entity_id=entity_id).reconciliations:
     if rec.structure_id == structure_id:
       return rec
   raise ReconciliationNotFoundError(structure_id)
@@ -182,33 +197,60 @@ def _summary(session: Session, structure_id: str, period: str) -> Reconciliation
 def preview_reconciliations(
   session: Session, body: PreviewReconciliationsRequest, *, graph_id: str
 ) -> ReconciliationPreviewResponse:
-  """Compare the ledger at a period end by one method. Writes nothing.
+  """Compare one entity's ledger at a period end by one method. Writes nothing.
 
-  Raises ``ValueError`` on a malformed period. For ``source_ledger`` it also
-  raises `NoSourceLedgerError` when the graph has no synced ledger, and the
-  QuickBooks client's own errors.
+  Raises ``ValueError`` on a malformed period and `EntityNotInGraphError` for
+  an entity not in this graph. For ``source_ledger`` it also raises
+  `NoSourceLedgerError` when the graph has no synced ledger or the entity is
+  not the one it keeps, and the QuickBooks client's own errors.
   """
-  window = _window(session, graph_id, body.period)
+  entity_id = find_entity_id(session, body.entity_id)
+  window = _window(session, graph_id, body.period, entity_id)
   if body.method == "schedule_register":
     side = _schedule_register_side(session, window)
   elif body.method == "statement":
     side = _statement_side(session, window)
   else:
+    _require_source_ledger_entity(session, entity_id)
     side = SourceLedgerResolver(graph_id).resolve(session, window)
   return compute_reconciliations(
     session, window=window, side=side, include_tied=body.include_tied
   )
 
 
+def _source_ledger_entity(session: Session, entity_id: str | None) -> bool:
+  """Whether the synced source ledger keeps this entity's books: only the
+  group parent's are QuickBooks'."""
+  return entity_id is None or is_group_parent(session, entity_id)
+
+
+def _require_source_ledger_entity(session: Session, entity_id: str | None) -> None:
+  if not _source_ledger_entity(session, entity_id):
+    raise NoSourceLedgerError(
+      "The source_ledger check compares a synced ledger with the books it was "
+      "synced from, and only the group parent's books are synced. This "
+      "entity's books are kept here, so there is no source ledger to compare."
+    )
+
+
+def _reconciled_accounts(
+  session: Session, method: ReconciliationMethod, window: ReconciliationWindow
+) -> frozenset[str]:
+  # A graph with no entity yet has no blocks.
+  if window.entity_id is None:
+    return frozenset()
+  return frozenset(account_reconciliations(session, method, window.entity_id))
+
+
 def _schedule_register_side(session: Session, window: ReconciliationWindow):
   # An account that once had a schedule keeps its block, and compares against
   # zero once no schedule reaches it.
-  reconciled = frozenset(account_reconciliations(session, "schedule_register"))
+  reconciled = _reconciled_accounts(session, "schedule_register", window)
   return ScheduleRegisterResolver(also_cover=reconciled).resolve(session, window)
 
 
 def _statement_side(session: Session, window: ReconciliationWindow):
-  reconciled = frozenset(account_reconciliations(session, "statement"))
+  reconciled = _reconciled_accounts(session, "statement", window)
   return StatementResolver(reconciled).resolve(session, window)
 
 
@@ -217,6 +259,7 @@ def _record_account_side(
   side,
   *,
   window: ReconciliationWindow,
+  entity_id: str,
   created_by: str,
   compared_via: ComparedVia,
   create: bool,
@@ -232,7 +275,7 @@ def _record_account_side(
   comparison = compute_reconciliations(
     session, window=window, side=side, include_tied=True
   )
-  blocks = account_reconciliations(session, side.method)
+  blocks = account_reconciliations(session, side.method, entity_id)
   for row in sorted(
     comparison.rows, key=lambda r: (r.account_code or "", r.account_name)
   ):
@@ -245,6 +288,7 @@ def _record_account_side(
         method=side.method,
         element_id=str(row.element_id),
         account_name=row.account_name,
+        entity_id=entity_id,
         required_for_close=row.status == "tied",
         created_by=created_by,
       )
@@ -267,10 +311,11 @@ def refresh_reconciliations(
   created_by: str,
   compared_via: ComparedVia = "operation",
 ) -> ReconciliationListResponse:
-  """Run every check that applies at the period end and record each result
-  on its block. Flushes; the caller owns the commit.
+  """Run every check that applies to one entity's books at the period end
+  and record each result on its block. Flushes; the caller owns the commit.
 
-  A synced ledger is compared with its source, on one ledger-wide block.
+  A synced ledger (the group parent's) is compared with its source, on one
+  ledger-wide block.
   Each asset account a schedule carries a balance on is compared with its
   schedules, and each account with a statement recorded in the period with
   that statement, on a block of its own. Run as an ``operation``, a missing
@@ -278,19 +323,21 @@ def refresh_reconciliations(
   ties, so a difference found on first contact is reported without holding
   the close. Run by a ``sync``, only existing blocks are refreshed.
 
-  Raises ``ValueError`` on a malformed period, `NothingToReconcileError`
-  when no check applies, the QuickBooks client's own errors, and
-  ``RowLockedError`` when another refresh of this graph is in flight.
+  Raises ``ValueError`` on a malformed period, `EntityNotInGraphError` for an
+  entity not in this graph, `NothingToReconcileError` when no check applies,
+  the QuickBooks client's own errors, and ``RowLockedError`` when another
+  refresh of this graph is in flight.
   """
   create = compared_via == "operation"
-  window = _window(session, graph_id, body.period)
+  entity_id = ensure_entity_id(session, body.entity_id)
+  window = _window(session, graph_id, body.period, entity_id)
 
   # The source is read before the write lock, so a slow report holds nothing.
   mirror = None
   source_failure: Exception | None = None
   skipped: list[str] = []
-  mirror_block = find_ledger_reconciliation(session, "source_ledger")
-  if create or mirror_block is not None:
+  mirror_block = find_ledger_reconciliation(session, "source_ledger", entity_id)
+  if _source_ledger_entity(session, entity_id) and (create or mirror_block is not None):
     try:
       mirror = SourceLedgerResolver(graph_id).resolve(session, window)
     except NoSourceLedgerError:
@@ -331,7 +378,11 @@ def refresh_reconciliations(
     record_reconciliation(
       session,
       ensure_ledger_reconciliation(
-        session, method=mirror.method, source=mirror.source, created_by=created_by
+        session,
+        method=mirror.method,
+        source=mirror.source,
+        entity_id=entity_id,
+        created_by=created_by,
       ),
       window=window,
       side=mirror,
@@ -344,6 +395,7 @@ def refresh_reconciliations(
     session,
     register,
     window=window,
+    entity_id=entity_id,
     created_by=created_by,
     compared_via=compared_via,
     create=create,
@@ -354,11 +406,12 @@ def refresh_reconciliations(
     session,
     statements,
     window=window,
+    entity_id=entity_id,
     created_by=created_by,
     compared_via=compared_via,
     create=False,
   )
-  response = list_reconciliations(session, body.period)
+  response = list_reconciliations(session, body.period, entity_id=entity_id)
   response.notes = skipped
   return response
 
@@ -380,6 +433,18 @@ def _check_statement_document(graph_id: str, document_id: str) -> None:
       )
 
 
+def _in_entity_chart(session: Session, element: Element, entity_id: str) -> bool:
+  return (
+    session.execute(
+      select(Element.id).where(
+        Element.id == element.id,
+        entity_accounts_clause(account_scope(session, entity_id)),
+      )
+    ).first()
+    is not None
+  )
+
+
 def record_statement_balance(
   session: Session,
   body: RecordStatementBalanceRequest,
@@ -387,9 +452,9 @@ def record_statement_balance(
   graph_id: str,
   created_by: str,
 ) -> ReconciliationSummary:
-  """Record a statement's ending balance for an account and reconcile the
-  account to it for the period the statement ends in. Flushes; the caller
-  owns the commit.
+  """Record a statement's ending balance for an account in one entity's
+  chart and reconcile the account to it for the period the statement ends in.
+  Flushes; the caller owns the commit.
 
   The first statement recorded for an account creates its ``statement``
   block, which does not hold the close until `set_reconciliation_policy`
@@ -397,7 +462,8 @@ def record_statement_balance(
   the same account and date again replaces the earlier balance.
 
   Raises `StatementAccountNotFoundError`, `StatementAccountError` when the
-  account is not a balance-sheet chart account, `StatementDocumentNotFoundError`,
+  account is not a balance-sheet account in the entity's chart,
+  `EntityNotInGraphError`, `StatementDocumentNotFoundError`,
   `StatementDocumentPendingError` for a file whose upload is not complete,
   and ``RowLockedError`` when another reconciliation write is in flight.
   """
@@ -410,15 +476,22 @@ def record_statement_balance(
       "accounts. A statement states a balance, so only an asset, liability "
       "or equity account can be reconciled to one."
     )
+  entity_id = ensure_entity_id(session, body.entity_id)
+  if not _in_entity_chart(session, element, entity_id):
+    raise StatementAccountError(
+      f"{element.name!r} is not in this entity's chart of accounts. Pass the "
+      "entity_id of the entity whose books the account is in."
+    )
   if body.document_id:
     _check_statement_document(graph_id, body.document_id)
 
   period = body.as_of.strftime("%Y-%m")
-  window = _window(session, graph_id, period)
+  window = _window(session, graph_id, period, entity_id)
   lock_reconciliation_writes(session, graph_id)
   record_statement_observation(
     session,
     element=element,
+    entity_id=entity_id,
     as_of=body.as_of,
     # Through the decimal text, so the cents are the ones the caller typed.
     stated_cents=int(
@@ -430,13 +503,14 @@ def record_statement_balance(
   )
 
   element_id = str(element.id)
-  structure = account_reconciliations(session, "statement").get(element_id)
+  structure = account_reconciliations(session, "statement", entity_id).get(element_id)
   if structure is None:
     structure = create_account_reconciliation(
       session,
       method="statement",
       element_id=element_id,
       account_name=element.name,
+      entity_id=entity_id,
       required_for_close=False,
       created_by=created_by,
     )
@@ -453,20 +527,22 @@ def record_statement_balance(
     comparison=account_comparison(comparison, row),
     created_by=created_by,
   )
-  return _summary(session, str(structure.id), period)
+  return _summary(session, structure, period)
 
 
 def refresh_next_period(
   session: Session, *, graph_id: str, created_by: str
 ) -> str | None:
-  """Refresh the next period to close, on a ledger that already reconciles.
+  """Refresh the group parent's next period to close, on a ledger that
+  already reconciles.
 
-  Called after a sync so the close gate is not a step someone has to
-  remember. A ledger with no reconciliation block is left alone (returns
-  ``None``): the first refresh is a person's decision. Raises as
-  `refresh_reconciliations` does.
+  Called after a source sync, which books for the group parent, so the close
+  gate is not a step someone has to remember. A ledger with no
+  reconciliation block is left alone (returns ``None``): the first refresh is
+  a person's decision. Raises as `refresh_reconciliations` does.
   """
-  if not has_reconciliations(session):
+  entity_id = find_entity_id(session)
+  if entity_id is None or not has_reconciliations(session, entity_id):
     return None
   calendar = FiscalCalendarService().get(session, graph_id)
   if calendar is None or not calendar.closed_through_period:
@@ -505,15 +581,15 @@ def sign_off_reconciliation(
   `NotAGraphMemberError`, `SeparateReviewerError`, and ``ValueError`` on a
   malformed period.
   """
-  window = _window(session, graph_id, body.period)
   # A refresh in flight would replace the comparison being signed.
   lock_reconciliation_writes(session, graph_id)
   structure = _load_reconciliation(session, body.structure_id)
+  window = _window(session, graph_id, body.period, owner_entity_id(session, structure))
   members = _explicit_write_members(graph_id)
   if created_by not in members:
     raise NotAGraphMemberError()
 
-  rec = _summary(session, str(structure.id), body.period)
+  rec = _summary(session, structure, body.period)
   if rec.status == "reviewed":
     return rec
   if rec.status != "reconciled":
@@ -554,7 +630,7 @@ def sign_off_reconciliation(
     reviewer_id=created_by,
     note=body.note,
   )
-  return _summary(session, str(structure.id), body.period)
+  return _summary(session, structure, body.period)
 
 
 def set_reconciliation_policy(

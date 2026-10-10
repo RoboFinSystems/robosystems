@@ -162,6 +162,7 @@ from robosystems.operations.roboledger.commands.reconciling_items import (
 from robosystems.operations.roboledger.commands.reconciling_items import (
   resolve_reconciling_item as cmd_resolve_reconciling_item,
 )
+from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
 from robosystems.operations.roboledger.reconciliations import (
   NoSourceLedgerError,
   SourceLedgerUnavailableError,
@@ -511,6 +512,7 @@ preview_reconciliations_op = _registrar.register(
     requires_created_by=False,
     requires_graph_id=True,
     error_map={
+      EntityNotInGraphError: 404,
       NoSourceLedgerError: 409,
       SourceLedgerUnavailableError: 503,
       # Intuit unreachable or busy; the connection is fine. Before the base.
@@ -550,6 +552,7 @@ refresh_reconciliations_op = _registrar.register(
     result_type=ReconciliationListResponse,
     requires_graph_id=True,
     error_map={
+      EntityNotInGraphError: 404,
       NoSourceLedgerError: 409,
       RowLockedError: 409,
       SourceLedgerUnavailableError: 503,
@@ -595,6 +598,7 @@ record_statement_balance_op = _registrar.register(
     result_type=ReconciliationSummary,
     requires_graph_id=True,
     error_map={
+      EntityNotInGraphError: 404,
       StatementAccountNotFoundError: 404,
       StatementDocumentNotFoundError: 404,
       RowLockedError: 409,
