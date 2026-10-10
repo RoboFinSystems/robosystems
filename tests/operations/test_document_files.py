@@ -325,3 +325,24 @@ def test_a_text_document_cited_by_a_balance_cannot_be_deleted_either(files):
     pytest.raises(DocumentInUseError),
   ):
     service.delete_document(graph_id, str(doc.id))
+
+
+def test_an_upload_abandoned_for_a_day_is_reaped(files):
+  """A begun upload that never completes stops counting toward the file
+  limit, and its bytes go with it; a recent one is still in flight."""
+  from datetime import UTC, datetime, timedelta
+
+  service, graph_id, user_id, s3 = files
+  stale, _url = _begin(service, graph_id, user_id, name="stale.pdf")
+  stale_upload = _upload(s3, stale)
+  stale.created_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=2)
+  recent, _url = _begin(service, graph_id, user_id, name="recent.pdf")
+  service.session.commit()
+  stale_id, recent_id = str(stale.id), str(recent.id)
+
+  with patch(f"{_SERVICE}.MAX_DOCUMENT_FILES_PER_GRAPH", 2):
+    _begin(service, graph_id, user_id, name="next.pdf")
+
+  assert service.get_document(graph_id, stale_id) is None
+  assert stale_upload not in _objects(s3)
+  assert service.get_document(graph_id, recent_id).file_status == FILE_PENDING

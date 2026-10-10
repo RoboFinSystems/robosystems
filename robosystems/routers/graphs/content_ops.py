@@ -556,6 +556,7 @@ async def complete_document_upload_op(
 
   _require_search_enabled()
   _block_shared_repo(graph_id)
+  _block_subgraph(graph_id, _SUBGRAPH_NO_DOCUMENT_FILES)
   _require_graph_write_access(graph_id, str(user.id))
 
   ctx = _ctx(

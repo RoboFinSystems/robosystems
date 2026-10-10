@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 from urllib.parse import quote
 
@@ -34,6 +35,8 @@ logger = logging.getLogger(__name__)
 # Media type -> (extension, the bytes every such file starts with).
 _FILE_TYPES = {"application/pdf": (".pdf", b"%PDF-")}
 _MAX_FILE_BYTES = MAX_DOCUMENT_FILE_MB * 1024 * 1024
+# Far past the upload URL's expiry, so nothing still uploading is reaped.
+_ABANDONED_AFTER = timedelta(days=1)
 
 
 class DocumentFileError(ValueError):
@@ -202,6 +205,7 @@ class DocumentService:
       raise DocumentFileError(
         f"A {request.content_type} file's name must end in {extension}."
       )
+    self._reap_abandoned_uploads(graph_id)
     stored = Document.count_by_graph(graph_id, self.session, FILE_SOURCE_TYPE)
     if stored >= MAX_DOCUMENT_FILES_PER_GRAPH:
       raise DocumentFileError(
@@ -282,18 +286,20 @@ class DocumentService:
     _extension, magic = _FILE_TYPES[str(doc.file_content_type)]
     problem = None
     body = b""
-    if obj["ContentLength"] != doc.file_size_bytes:
-      problem = (
-        f"The upload is {obj['ContentLength']} bytes, not the "
-        f"{doc.file_size_bytes} declared."
-      )
-    else:
-      body = obj["Body"].read(_MAX_FILE_BYTES + 1)
-      if len(body) != doc.file_size_bytes:
-        problem = f"The upload is not the {doc.file_size_bytes} bytes declared."
-      elif not body.startswith(magic):
-        problem = f"The upload is not a {doc.file_content_type} file."
-    obj["Body"].close()
+    try:
+      if obj["ContentLength"] != doc.file_size_bytes:
+        problem = (
+          f"The upload is {obj['ContentLength']} bytes, not the "
+          f"{doc.file_size_bytes} declared."
+        )
+      else:
+        body = obj["Body"].read(_MAX_FILE_BYTES + 1)
+        if len(body) != doc.file_size_bytes:
+          problem = f"The upload is not the {doc.file_size_bytes} bytes declared."
+        elif not body.startswith(magic):
+          problem = f"The upload is not a {doc.file_content_type} file."
+    finally:
+      obj["Body"].close()
     if problem is not None:
       s3.delete_object(Bucket=bucket, Key=upload_key)
       doc.delete(self.session)
@@ -406,16 +412,18 @@ class DocumentService:
         f"Document {document_id} is the statement behind a recorded balance. "
         "Record that balance again with another document first."
       )
+    if not doc.is_file:
+      self._delete_from_opensearch(graph_id, doc.id)
+    doc.delete(self.session)
+    # After the row: a failure here leaves bytes nothing points at, which
+    # teardown's prefix purge removes, never a stored document with none.
     if doc.is_file:
       self._delete_file(doc)
-    else:
-      self._delete_from_opensearch(graph_id, doc.id)
-
-    doc.delete(self.session)
     return True
 
   def _delete_file(self, doc: Document) -> None:
-    """The stored file and any upload left beside it."""
+    """The stored file and any upload left beside it. Best effort: the row
+    is already gone."""
     from robosystems.config import env
     from robosystems.config.storage.graph import get_document_upload_key
     from robosystems.operations.aws.s3 import S3Client
@@ -426,7 +434,26 @@ class DocumentService:
     )
     for key in (str(doc.file_s3_key), upload_key):
       if not s3.delete_object(env.USER_DATA_BUCKET, key):
-        raise RuntimeError(f"The file behind document {doc.id} could not be deleted.")
+        logger.warning(f"Left s3 object {key} behind deleted document {doc.id}")
+
+  def _reap_abandoned_uploads(self, graph_id: str) -> None:
+    """Delete the graph's uploads begun more than a day ago and never
+    completed, with any bytes they left, so they stop counting toward the
+    file limit. The upload URL expired long before."""
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - _ABANDONED_AFTER
+    abandoned = (
+      self.session.query(Document)
+      .filter(
+        Document.graph_id == graph_id,
+        Document.source_type == FILE_SOURCE_TYPE,
+        Document.file_status == FILE_PENDING,
+        Document.created_at < cutoff,
+      )
+      .all()
+    )
+    for doc in abandoned:
+      doc.delete(self.session)
+      self._delete_file(doc)
 
   def _check_tier_limit(self, graph_id: str, tier: str) -> None:
     from robosystems.config.billing.core import get_tier_max_documents
