@@ -37,6 +37,8 @@ class DeprovisionResult:
   documents_deleted: int = 0
   connections_revoked: int = 0
   connections_deleted: int = 0
+  oauth_grants_revoked: int = 0
+  oauth_tokens_revoked: int = 0
   search_purged: bool = False
   report_bundles_deleted: int = 0
   document_files_deleted: int = 0
@@ -175,6 +177,8 @@ class GraphDeprovisionService:
     # partial run still reads as unfinished.
     graph.deleted_at = datetime.now(UTC)
     session.commit()
+
+    self._revoke_oauth_grants(graph_id, session, result, include_subgraphs=True)
 
     if create_backup and not skip_backup_check:
       await self._create_final_backup(graph, session, result)
@@ -384,6 +388,8 @@ class GraphDeprovisionService:
     parent's teardown runs has to come first. Flushes; the caller commits.
     """
     result = DeprovisionResult(status="success", graph_id=subgraph_id)
+    # First: revocation commits, and nothing else may be pending when it does.
+    self._revoke_oauth_grants(subgraph_id, session, result)
     await self._release_subgraph(subgraph_id, session, result)
     if result.errors:
       result.status = "partial"
@@ -651,6 +657,37 @@ class GraphDeprovisionService:
         logger.info(f"Purged {deleted} staged upload object(s) for graph {graph_id}")
     except Exception as e:
       error_msg = f"Staged upload purge failed: {e}"
+      result.errors.append(error_msg)
+      logger.warning(error_msg, extra={"graph_id": graph_id})
+
+  @staticmethod
+  def _revoke_oauth_grants(
+    graph_id: str,
+    session: Session,
+    result: DeprovisionResult,
+    *,
+    include_subgraphs: bool = False,
+  ) -> None:
+    """Revoke the MCP clients' grants on this graph and their tokens.
+
+    A grant names one graph and has no foreign key to it, so without this a
+    connected client keeps a valid token that every call refuses with 403, and
+    is never asked to authorize again. Revoked, its next call answers 401.
+    """
+    from ...models.core.user.oauth_grant import OAuthGrant
+
+    try:
+      bound = OAuthGrant.graph_id == graph_id
+      if include_subgraphs:
+        bound = bound | OAuthGrant.graph_id.startswith(f"{graph_id}_", autoescape=True)
+      grants = (
+        session.query(OAuthGrant).filter(bound, OAuthGrant.revoked_at.is_(None)).all()
+      )
+      for grant in grants:
+        result.oauth_tokens_revoked += grant.revoke(session, reason="graph_deleted")
+      result.oauth_grants_revoked += len(grants)
+    except Exception as e:
+      error_msg = f"OAuth grant revocation failed: {e}"
       result.errors.append(error_msg)
       logger.warning(error_msg, extra={"graph_id": graph_id})
 
