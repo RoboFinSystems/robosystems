@@ -10,6 +10,8 @@ import pytest
 from fastapi import HTTPException
 
 from robosystems.models.api.graphs.operations import (
+  CompleteDocumentUploadOp,
+  CreateDocumentUploadOp,
   DeleteDocumentOp,
   DeleteFileOp,
   IndexDocumentOp,
@@ -23,6 +25,8 @@ from robosystems.models.api.graphs.tables import (
 )
 from robosystems.models.api.search import DocumentUploadResponse
 from robosystems.routers.graphs.content_ops import (
+  complete_document_upload_op,
+  create_document_upload_op,
   create_file_upload_op,
   delete_document_op,
   delete_file_op,
@@ -496,3 +500,208 @@ async def test_parent_graph_is_unaffected():
       db=MagicMock(),
     )
   assert env.status == "completed"
+
+
+# ── Document files ─────────────────────────────────────────────────────────
+
+_SERVICE = "robosystems.operations.document_service.DocumentService"
+
+
+def _stored_file():
+  from datetime import UTC, datetime
+
+  from robosystems.models.core.document import Document
+
+  doc = MagicMock(spec=Document)
+  for k, v in {
+    "id": "doc_1",
+    "graph_id": "kg_test",
+    "user_id": "usr_1",
+    "title": "Checking, Sept",
+    "content": "",
+    "tags": None,
+    "folder": "statements",
+    "external_id": None,
+    "source_type": "uploaded_file",
+    "source_provider": None,
+    "sections_indexed": 0,
+    "is_file": True,
+    "file_name": "sep.pdf",
+    "file_content_type": "application/pdf",
+    "file_size_bytes": 2048,
+    "file_sha256": "cd" * 32,
+    "file_status": "stored",
+    "created_at": datetime(2026, 10, 9, tzinfo=UTC),
+    "updated_at": datetime(2026, 10, 9, tzinfo=UTC),
+  }.items():
+    setattr(doc, k, v)
+  return doc
+
+
+async def _run(op, body):
+  return await op(
+    body, graph_id="kg_test", user=_user(), idempotency_key=None, cache=MagicMock()
+  )
+
+
+def _upload_body():
+  return CreateDocumentUploadOp(
+    title="Checking, Sept", file_name="sep.pdf", file_size_bytes=2048
+  )
+
+
+async def test_create_document_upload_returns_the_url_to_put_to():
+  g1, g2, g3 = _guards()
+  with (
+    g1,
+    g2,
+    g3,
+    patch("robosystems.database.SessionFactory", return_value=MagicMock()),
+    patch(_SERVICE) as svc,
+  ):
+    svc.return_value.begin_file_upload.return_value = (
+      _stored_file(),
+      "https://s3.example/put",
+    )
+    env = await _run(create_document_upload_op, _upload_body())
+
+  assert env.status == "completed"
+  assert env.result == {
+    "document_id": "doc_1",
+    "upload_url": "https://s3.example/put",
+    "expires_in": 3600,
+  }
+
+
+async def test_create_document_upload_is_gated_on_the_document_surface():
+  """Files are read and deleted through the document routes the search flag
+  mounts, so the same flag gates storing one."""
+  with (
+    patch(
+      f"{MODULE}._require_search_enabled",
+      side_effect=HTTPException(status_code=503, detail="off"),
+    ),
+    patch(_SERVICE) as svc,
+  ):
+    with pytest.raises(HTTPException) as e:
+      await _run(create_document_upload_op, _upload_body())
+  assert e.value.status_code == 503
+  svc.return_value.begin_file_upload.assert_not_called()
+
+
+async def test_create_document_upload_is_refused_on_a_subgraph():
+  g1, g2, g3 = _guards()
+  with g1, g2, g3, patch(_SERVICE) as svc:
+    with pytest.raises(HTTPException) as e:
+      await create_document_upload_op(
+        _upload_body(),
+        graph_id="kg1234567890abcdef_dev",
+        user=_user(),
+        idempotency_key=None,
+        cache=MagicMock(),
+      )
+  assert e.value.status_code == 403
+  svc.return_value.begin_file_upload.assert_not_called()
+
+
+async def test_create_document_upload_needs_write_access():
+  with (
+    patch(f"{MODULE}._require_search_enabled"),
+    patch(f"{MODULE}._block_shared_repo"),
+    patch(
+      f"{MODULE}._require_graph_write_access",
+      side_effect=HTTPException(status_code=403, detail="read only"),
+    ),
+    patch(_SERVICE) as svc,
+  ):
+    with pytest.raises(HTTPException) as e:
+      await _run(create_document_upload_op, _upload_body())
+
+  assert e.value.status_code == 403
+  svc.return_value.begin_file_upload.assert_not_called()
+
+
+def test_an_upload_larger_than_the_cap_is_refused_before_any_url():
+  from pydantic import ValidationError
+
+  with pytest.raises(ValidationError):
+    CreateDocumentUploadOp(
+      title="T", file_name="big.pdf", file_size_bytes=26 * 1024 * 1024
+    )
+  with pytest.raises(ValidationError):
+    CreateDocumentUploadOp(
+      title="T", file_name="x.pdf", file_size_bytes=10, content_type="text/html"
+    )
+
+
+async def test_complete_document_upload_returns_the_stored_document():
+  g1, g2, g3 = _guards()
+  with (
+    g1,
+    g2,
+    g3,
+    patch("robosystems.database.SessionFactory", return_value=MagicMock()),
+    patch(_SERVICE) as svc,
+  ):
+    svc.return_value.complete_file_upload.return_value = _stored_file()
+    env = await _run(
+      complete_document_upload_op, CompleteDocumentUploadOp(document_id="doc_1")
+    )
+
+  assert env.result["file"] == {
+    "file_name": "sep.pdf",
+    "content_type": "application/pdf",
+    "size_bytes": 2048,
+    "sha256": "cd" * 32,
+    "status": "stored",
+  }
+
+
+@pytest.mark.parametrize(
+  ("raised", "status"),
+  [("missing", 404), ("not-uploaded", 409), ("bad-file", 422)],
+)
+async def test_complete_document_upload_errors(raised, status):
+  from robosystems.operations.document_service import (
+    DocumentFileError,
+    DocumentFileNotUploadedError,
+  )
+
+  error = {
+    "missing": KeyError("doc_1"),
+    "not-uploaded": DocumentFileNotUploadedError("not yet"),
+    "bad-file": DocumentFileError("not a pdf"),
+  }[raised]
+  g1, g2, g3 = _guards()
+  with (
+    g1,
+    g2,
+    g3,
+    patch("robosystems.database.SessionFactory", return_value=MagicMock()),
+    patch(_SERVICE) as svc,
+  ):
+    svc.return_value.complete_file_upload.side_effect = error
+    with pytest.raises(HTTPException) as e:
+      await _run(
+        complete_document_upload_op, CompleteDocumentUploadOp(document_id="doc_1")
+      )
+
+  assert e.value.status_code == status
+
+
+async def test_delete_document_409_when_a_balance_cites_it():
+  from robosystems.operations.document_service import DocumentInUseError
+
+  g1, g2, g3 = _guards()
+  with (
+    g1,
+    g2,
+    g3,
+    patch("robosystems.database.SessionFactory", return_value=MagicMock()),
+    patch(_SERVICE) as svc,
+  ):
+    svc.return_value.delete_document.side_effect = DocumentInUseError("cited")
+    with pytest.raises(HTTPException) as e:
+      await _run(delete_document_op, DeleteDocumentOp(document_id="doc_1"))
+
+  assert e.value.status_code == 409

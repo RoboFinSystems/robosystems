@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from robosystems.config.constants import MAX_DOCUMENT_FILE_MB
+
 
 class DeleteSubgraphOp(BaseModel):
   """Body for the delete-subgraph operation."""
@@ -282,6 +284,40 @@ class DeleteDocumentOp(BaseModel):
   """Body for delete-document (corpus content-op)."""
 
   document_id: str = Field(..., min_length=1, description="Document id to delete")
+
+
+class CreateDocumentUploadOp(BaseModel):
+  """Body for create-document-upload: a document that is a stored file."""
+
+  title: str = Field(..., min_length=1, max_length=500, description="Document title")
+  file_name: str = Field(
+    ...,
+    min_length=1,
+    max_length=255,
+    description="The file's name, ending in its type's extension (`.pdf`).",
+  )
+  content_type: Literal["application/pdf"] = Field(
+    default="application/pdf", description="The file's media type."
+  )
+  file_size_bytes: int = Field(
+    ...,
+    gt=0,
+    le=MAX_DOCUMENT_FILE_MB * 1024 * 1024,
+    description=(
+      f"The file's exact size in bytes, at most {MAX_DOCUMENT_FILE_MB} MB. It "
+      "is signed into the upload URL, so an upload of any other size fails."
+    ),
+  )
+  tags: list[str] | None = Field(default=None, description="Optional labels")
+  folder: str | None = Field(default=None, description="Optional folder")
+
+
+class CompleteDocumentUploadOp(BaseModel):
+  """Body for complete-document-upload."""
+
+  document_id: str = Field(
+    ..., min_length=1, description="The document create-document-upload returned"
+  )
 
 
 class IngestFileOp(BaseModel):

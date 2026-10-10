@@ -44,6 +44,7 @@ Each storage type owns a top-level prefix, declared once in `GRAPH_STORAGE`:
 | `USER_STAGING` | `user-staging/` | Pre-ingestion file uploads |
 | `BACKUPS` | `graph-backups/` | Application-level backups via the API |
 | `REPORT_BUNDLES` | `report-bundles/` | Per-Report serialization bundles |
+| `DOCUMENTS` | `documents/` | Stored document files (bank statements kept as evidence) |
 | `SHARED_REPO_DATABASES` | `shared-repositories/databases/` | Published shared-repository snapshots |
 | `SHARED_REPO_BACKUPS` | `shared-repositories/backups/` | Compressed subscriber downloads |
 | `R2_DOWNLOADS` | `downloads/` | Uncompressed files on R2 for zero-egress downloads |
@@ -66,9 +67,14 @@ graph.get_backup_metadata_key("kg456", ts)
 
 graph.get_report_bundle_key("kg456", "rpt_01K8", 1)
 # 'report-bundles/kg456/rpt_01K8/g1.holon.jsonld'
+
+graph.get_document_file_key("kg456", "doc_01K8", "statement.pdf")
+# 'documents/kg456/doc_01K8/statement.pdf'
 ```
 
 Report bundles are versioned by `Report.generation_count` (the `g` prefix reads as "generation"), so regenerating a report leaves prior generations addressable for restatement audit trails.
+
+Document files are a system of record, like report bundles: the prefix has no lifecycle rule, a stored file never changes, and graph teardown deletes the graph's whole `documents/{graph_id}/` prefix.
 
 ## Key structure
 
@@ -114,6 +120,9 @@ s3://robosystems-user-{env}/
   report-bundles/                # Per-Report serialization bundles
     {graph_id}/{report_id}/g{generation}.holon.jsonld # the anchor, stamped at publish
     {graph_id}/{report_id}/g{generation}.tavi.json    # derived on first download (so is .zip)
+
+  documents/                     # Stored document files
+    {graph_id}/{document_id}/{file_name}
 ```
 
 ### Public data bucket

@@ -48,7 +48,9 @@ def test_indexed_tags_stay_bounded_for_a_second_frontmatter_block(throwaway_sear
   )
 
   def fake_create(**kw):
-    return types.SimpleNamespace(id="doc1", update=lambda *a, **k: None, **kw)
+    return types.SimpleNamespace(
+      id="doc1", is_file=False, update=lambda *a, **k: None, **kw
+    )
 
   with (
     mock.patch.object(ds.Document, "create", side_effect=fake_create),

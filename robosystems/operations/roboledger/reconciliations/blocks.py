@@ -366,11 +366,15 @@ def balance_digest(comparison: ReconciliationPreviewResponse) -> str:
 
   Two comparisons with the same digest saw the same figures. A sign-off pins
   it, so any later change to a balance at that period end lapses the review.
+  A statement's document is part of what was compared: one recorded with
+  another document lapses it too. A row with no document fingerprints as it
+  always has, so no standing sign-off lapses by this rule's arrival.
   """
   lines = sorted(
     f"{row.element_id or ''}|{row.source_account_id or ''}|"
     f"{round(row.ledger_balance * 100)}|{round(row.independent_balance * 100)}"
     + (f"|{row.as_of.isoformat()}" if row.as_of else "")
+    + "".join(f"|doc:{c.document_id}" for c in row.components if c.document_id)
     for row in comparison.rows
   )
   return hashlib.sha256("\n".join(lines).encode()).hexdigest()[:32]

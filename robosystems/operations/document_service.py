@@ -2,18 +2,50 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections.abc import Sequence
+from pathlib import PurePosixPath
+from urllib.parse import quote
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from robosystems.config.constants import (
+  DOCUMENT_DOWNLOAD_EXPIRY_SECONDS,
+  MAX_DOCUMENT_FILE_MB,
+  MAX_DOCUMENT_FILES_PER_GRAPH,
+  PRESIGNED_URL_EXPIRY_SECONDS,
+)
+from robosystems.models.api.graphs.operations import CreateDocumentUploadOp
 from robosystems.models.api.search import (
   DocumentUploadRequest,
   DocumentUploadResponse,
 )
-from robosystems.models.core.document import Document
+from robosystems.models.core.document import (
+  FILE_PENDING,
+  FILE_SOURCE_TYPE,
+  FILE_STORED,
+  Document,
+)
 
 logger = logging.getLogger(__name__)
+
+# Media type -> (extension, the bytes every such file starts with).
+_FILE_TYPES = {"application/pdf": (".pdf", b"%PDF-")}
+_MAX_FILE_BYTES = MAX_DOCUMENT_FILE_MB * 1024 * 1024
+
+
+class DocumentFileError(ValueError):
+  """The file cannot be stored as given."""
+
+
+class DocumentFileNotUploadedError(Exception):
+  """Nothing has been uploaded to the document's URL yet."""
+
+
+class DocumentInUseError(Exception):
+  """The document is evidence for a recorded balance."""
 
 
 def _apply_frontmatter(
@@ -135,6 +167,184 @@ class DocumentService:
     """Count documents for a graph, optionally filtered by source type and/or folder."""
     return Document.count_by_graph(graph_id, self.session, source_type, folder)
 
+  def begin_file_upload(
+    self, graph_id: str, user_id: str, request: CreateDocumentUploadOp
+  ) -> tuple[Document, str]:
+    """A pending file document and the presigned URL to PUT its bytes to.
+
+    The declared type and size are signed into the URL, which points at an
+    upload key, never the stored file's. Nothing is indexed and the tier's
+    document limit does not apply: that limit counts the sections a search
+    index pays for, and a stored file has none; files have a count of their
+    own. Raises `DocumentFileError` for a name or type that cannot be
+    stored, or a graph at its file limit.
+    """
+    from robosystems.config import env
+    from robosystems.config.storage.graph import (
+      get_document_file_key,
+      get_document_upload_key,
+    )
+    from robosystems.operations.aws.s3 import S3Client
+
+    extension, _magic = _FILE_TYPES[request.content_type]
+    name = request.file_name
+    # It is a key segment and, on download, a quoted header value.
+    if (
+      PurePosixPath(name).name != name
+      or name.startswith(".")
+      or any(ch in '"\\' or ord(ch) < 32 or ord(ch) == 127 for ch in name)
+    ):
+      raise DocumentFileError(
+        "The file name must be a plain name: no path, quotes, backslashes or "
+        "control characters."
+      )
+    if not name.lower().endswith(extension):
+      raise DocumentFileError(
+        f"A {request.content_type} file's name must end in {extension}."
+      )
+    stored = Document.count_by_graph(graph_id, self.session, FILE_SOURCE_TYPE)
+    if stored >= MAX_DOCUMENT_FILES_PER_GRAPH:
+      raise DocumentFileError(
+        f"This graph holds {stored} document files, the most it can. Delete "
+        "files no longer needed first."
+      )
+
+    doc = Document(
+      graph_id=graph_id,
+      user_id=user_id,
+      title=request.title,
+      content="",
+      tags=request.tags,
+      folder=request.folder,
+      source_type=FILE_SOURCE_TYPE,
+      sections_indexed=0,
+      file_name=name,
+      file_content_type=request.content_type,
+      file_status=FILE_PENDING,
+    )
+    self.session.add(doc)
+    self.session.flush()
+    doc.file_s3_key = get_document_file_key(graph_id, str(doc.id), name)
+    # Declared now so the object is checked against it; the stored size is
+    # measured when the upload completes.
+    doc.file_size_bytes = request.file_size_bytes
+    self.session.commit()
+
+    upload_url = S3Client().generate_presigned_put_url(
+      env.USER_DATA_BUCKET,
+      get_document_upload_key(graph_id, str(doc.id), name),
+      content_type=request.content_type,
+      content_length=request.file_size_bytes,
+      expires_in=PRESIGNED_URL_EXPIRY_SECONDS,
+    )
+    return doc, upload_url
+
+  def complete_file_upload(self, graph_id: str, document_id: str) -> Document:
+    """Check the uploaded bytes and store them as the document's file.
+
+    The upload is read whole: its size must be the declared one and its
+    first bytes its type's, and its SHA-256 is taken from it. The checked
+    bytes are then copied to the stored file's key, on the condition that
+    the upload has not changed since it was read, and the upload is removed.
+    A file that fails the check is discarded with its document. Completing a
+    stored file again returns it unchanged.
+
+    Raises KeyError when the document is not in this graph,
+    `DocumentFileNotUploadedError` before anything has been uploaded or when
+    the upload changed while being checked, and `DocumentFileError` for a
+    document that is not a file or bytes that are not the file declared.
+    """
+    from botocore.exceptions import ClientError
+
+    from robosystems.config import env
+    from robosystems.config.storage.graph import get_document_upload_key
+    from robosystems.operations.aws.s3 import S3Client
+
+    doc = Document.get_by_id_and_graph(document_id, graph_id, self.session)
+    if doc is None:
+      raise KeyError(f"Document {document_id} not found in graph {graph_id}")
+    if not doc.is_file:
+      raise DocumentFileError(f"Document {document_id} is not a file upload.")
+    if doc.file_status == FILE_STORED:
+      return doc
+
+    s3 = S3Client().s3_client
+    bucket = env.USER_DATA_BUCKET
+    upload_key = get_document_upload_key(graph_id, str(doc.id), str(doc.file_name))
+    try:
+      obj = s3.get_object(Bucket=bucket, Key=upload_key)
+    except s3.exceptions.NoSuchKey as exc:
+      raise DocumentFileNotUploadedError(
+        f"Nothing has been uploaded for document {document_id} yet. PUT the "
+        "file to the upload URL, then complete the upload."
+      ) from exc
+
+    _extension, magic = _FILE_TYPES[str(doc.file_content_type)]
+    problem = None
+    body = b""
+    if obj["ContentLength"] != doc.file_size_bytes:
+      problem = (
+        f"The upload is {obj['ContentLength']} bytes, not the "
+        f"{doc.file_size_bytes} declared."
+      )
+    else:
+      body = obj["Body"].read(_MAX_FILE_BYTES + 1)
+      if len(body) != doc.file_size_bytes:
+        problem = f"The upload is not the {doc.file_size_bytes} bytes declared."
+      elif not body.startswith(magic):
+        problem = f"The upload is not a {doc.file_content_type} file."
+    obj["Body"].close()
+    if problem is not None:
+      s3.delete_object(Bucket=bucket, Key=upload_key)
+      doc.delete(self.session)
+      raise DocumentFileError(f"{problem} It was discarded; upload it again.")
+
+    try:
+      s3.copy_object(
+        Bucket=bucket,
+        Key=str(doc.file_s3_key),
+        CopySource={"Bucket": bucket, "Key": upload_key},
+        CopySourceIfMatch=obj["ETag"],
+      )
+    except ClientError as exc:
+      if exc.response.get("Error", {}).get("Code") != "PreconditionFailed":
+        raise
+      raise DocumentFileNotUploadedError(
+        f"The upload for document {document_id} changed while it was being "
+        "checked. Complete the upload again."
+      ) from exc
+    s3.delete_object(Bucket=bucket, Key=upload_key)
+
+    doc.file_sha256 = hashlib.sha256(body).hexdigest()
+    doc.file_status = FILE_STORED
+    doc.update(self.session)
+    return doc
+
+  def file_download_url(self, graph_id: str, document_id: str) -> tuple[Document, str]:
+    """A short-lived link to a stored file.
+
+    Raises KeyError when the document is not in this graph, and
+    `DocumentFileError` when it is not a stored file.
+    """
+    from robosystems.config import env
+    from robosystems.operations.aws.s3 import S3Client
+
+    doc = Document.get_by_id_and_graph(document_id, graph_id, self.session)
+    if doc is None:
+      raise KeyError(f"Document {document_id} not found in graph {graph_id}")
+    if not doc.is_file or doc.file_status != FILE_STORED:
+      raise DocumentFileError(f"Document {document_id} has no stored file.")
+    url = S3Client().generate_presigned_url(
+      bucket=env.USER_DATA_BUCKET,
+      key=str(doc.file_s3_key),
+      expires_in=DOCUMENT_DOWNLOAD_EXPIRY_SECONDS,
+      response_content_type=str(doc.file_content_type),
+      response_content_disposition=_attachment(str(doc.file_name)),
+    )
+    if url is None:
+      raise RuntimeError(f"The file behind document {document_id} could not be signed.")
+    return doc, url
+
   def update_document(
     self,
     graph_id: str,
@@ -152,6 +362,10 @@ class DocumentService:
     doc = Document.get_by_id_and_graph(document_id, graph_id, self.session)
     if doc is None:
       raise KeyError(f"Document {document_id} not found in graph {graph_id}")
+    if doc.is_file and content is not None:
+      raise DocumentFileError(
+        "A stored file cannot be edited. Upload the new file as a new document."
+      )
 
     # The MCP `update-document` tool bypasses the Pydantic cap, so enforce it here.
     if content is not None and len(content) > 500_000:
@@ -177,15 +391,42 @@ class DocumentService:
     return doc, upload_response
 
   def delete_document(self, graph_id: str, document_id: str) -> bool:
-    """Delete a document from PG and OpenSearch."""
+    """Delete a document from PG and OpenSearch, and a stored file's bytes.
+
+    Raises `DocumentInUseError` for a document that a recorded statement
+    balance cites as its evidence: the balance would be left pointing at
+    nothing.
+    """
     doc = Document.get_by_id_and_graph(document_id, graph_id, self.session)
     if doc is None:
       return False
 
-    self._delete_from_opensearch(graph_id, doc.id)
+    if _cited_as_evidence(graph_id, str(doc.id)):
+      raise DocumentInUseError(
+        f"Document {document_id} is the statement behind a recorded balance. "
+        "Record that balance again with another document first."
+      )
+    if doc.is_file:
+      self._delete_file(doc)
+    else:
+      self._delete_from_opensearch(graph_id, doc.id)
 
     doc.delete(self.session)
     return True
+
+  def _delete_file(self, doc: Document) -> None:
+    """The stored file and any upload left beside it."""
+    from robosystems.config import env
+    from robosystems.config.storage.graph import get_document_upload_key
+    from robosystems.operations.aws.s3 import S3Client
+
+    s3 = S3Client()
+    upload_key = get_document_upload_key(
+      str(doc.graph_id), str(doc.id), str(doc.file_name)
+    )
+    for key in (str(doc.file_s3_key), upload_key):
+      if not s3.delete_object(env.USER_DATA_BUCKET, key):
+        raise RuntimeError(f"The file behind document {doc.id} could not be deleted.")
 
   def _check_tier_limit(self, graph_id: str, tier: str) -> None:
     from robosystems.config.billing.core import get_tier_max_documents
@@ -204,8 +445,17 @@ class DocumentService:
   def resync_document(self, doc: Document) -> DocumentUploadResponse:
     """Re-section, re-embed and re-index one document from its PostgreSQL row.
 
-    The primitive behind create, update, and ``rebuild_documents_job``.
+    The primitive behind create, update, and ``rebuild_documents_job``. A
+    stored file has no text to index.
     """
+    if doc.is_file:
+      return DocumentUploadResponse(
+        id=doc.id,
+        document_id=f"udoc_{doc.id}",
+        sections_indexed=0,
+        total_content_length=0,
+        section_ids=[],
+      )
     upload_response = self._sync_to_opensearch(doc)
     doc.update(self.session, sections_indexed=upload_response.sections_indexed)
     return upload_response
@@ -251,3 +501,31 @@ class DocumentService:
 
     os_doc_id = f"udoc_{document_id}"
     service.delete_document(graph_id, os_doc_id)
+
+
+def _attachment(file_name: str) -> str:
+  """A Content-Disposition naming the file: plain when the name is ASCII,
+  with an ASCII fallback beside the UTF-8 form when it is not."""
+  if file_name.isascii():
+    return f'attachment; filename="{file_name}"'
+  fallback = file_name.encode("ascii", "replace").decode().replace("?", "_")
+  return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(file_name)}"
+
+
+def _cited_as_evidence(graph_id: str, document_id: str) -> bool:
+  """Whether a live statement balance on the graph's books names the document."""
+  from robosystems.db.extensions import extensions_session, tenant_schema_exists
+
+  if not tenant_schema_exists(graph_id):
+    return False
+  with extensions_session(graph_id) as session:
+    return (
+      session.execute(
+        text(
+          "SELECT 1 FROM events WHERE event_type = 'balance_observed' "
+          "AND status = 'committed' AND metadata->>'document_id' = :doc LIMIT 1"
+        ),
+        {"doc": document_id},
+      ).first()
+      is not None
+    )

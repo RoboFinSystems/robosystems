@@ -233,16 +233,42 @@ def test_the_statement_document_must_be_on_the_graph(books):
   session, accounts = books
 
   with (
-    patch(f"{_COMMANDS}._statement_document_exists", return_value=False),
+    patch(
+      f"{_COMMANDS}._check_statement_document",
+      side_effect=StatementDocumentNotFoundError("doc_missing"),
+    ),
     pytest.raises(StatementDocumentNotFoundError),
   ):
     _record(session, accounts["cash"], 4_800.00, document_id="doc_missing")
   session.rollback()
 
-  with patch(f"{_COMMANDS}._statement_document_exists", return_value=True):
+  with patch(f"{_COMMANDS}._check_statement_document"):
     rec = _record(session, accounts["cash"], 4_800.00, document_id="doc_stmt")
 
   assert rec.components[0].document_id == "doc_stmt"
+
+
+def test_the_same_balance_with_another_statement_lapses_the_sign_off(books):
+  """The sign-off was of the balance and the statement behind it. Swapping
+  the statement for another, at the same figure, is a different comparison;
+  putting the first back restores the review."""
+  session, accounts = books
+  with patch(f"{_COMMANDS}._check_statement_document"):
+    rec = _record(session, accounts["loan"], 4_800.00, document_id="doc_sept")
+    with patch(f"{_COMMANDS}._explicit_write_members", return_value={"usr"}):
+      sign_off_reconciliation(
+        session,
+        SignOffReconciliationRequest(structure_id=rec.structure_id, period="2026-08"),
+        graph_id=GRAPH_ID,
+        created_by="usr",
+      )
+    session.commit()
+
+    swapped = _record(session, accounts["loan"], 4_800.00, document_id="doc_other")
+    restored = _record(session, accounts["loan"], 4_800.00, document_id="doc_sept")
+
+  assert (swapped.status, swapped.reviewed_by) == ("reconciled", None)
+  assert (restored.status, restored.reviewed_by) == ("reviewed", "usr")
 
 
 def test_a_refresh_compares_the_statement_with_the_ledger_as_it_now_stands(books):

@@ -33,6 +33,14 @@ MAX_FILES_PER_TASK = 1000
 MAX_FILE_SIZE_MB = 100
 PRESIGNED_URL_EXPIRY_SECONDS = 3600
 
+# Stored document files (a bank statement kept as evidence). Read whole on
+# completion to be hashed and checked, so the cap stays small.
+MAX_DOCUMENT_FILE_MB = 25
+# Statements run a few a month per account; this bounds storage, not use.
+MAX_DOCUMENT_FILES_PER_GRAPH = 2000
+# A download link is fetched when the file is opened, not kept.
+DOCUMENT_DOWNLOAD_EXPIRY_SECONDS = 300
+
 # Below this, files stage inline in the request; above it, via Dagster.
 SMALL_FILE_STAGING_THRESHOLD_MB = 50
 

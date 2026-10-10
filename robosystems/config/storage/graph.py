@@ -20,6 +20,12 @@ Every storage type lives in USER_DATA_BUCKET under a fixed prefix. The
         {graph_id}/
           backup-{timestamp}.json
 
+    documents/                       # Stored document files (statement PDFs)
+      {graph_id}/
+        {document_id}/
+          {filename}                 # the stored file, written only by the server
+          incoming/{filename}        # the upload, before it is checked
+
     report-bundles/                  # Per-Report serialization artifacts
       {graph_id}/
         {report_id}/
@@ -46,6 +52,7 @@ class GraphStorageType(Enum):
   USER_STAGING = "user-staging"  # Pre-ingestion file uploads
   BACKUPS = "graph-backups"  # Application-level backups
   REPORT_BUNDLES = "report-bundles"  # Per-Report serialization artifacts
+  DOCUMENTS = "documents"  # Stored document files
   SHARED_REPO_DATABASES = "shared-repositories/databases"  # Published snapshots
   SHARED_REPO_BACKUPS = "shared-repositories/backups"  # Subscriber backups
   R2_DOWNLOADS = "downloads"  # R2 zero-egress subscriber downloads
@@ -76,6 +83,11 @@ GRAPH_STORAGE: dict[GraphStorageType, GraphStorageConfig] = {
     storage_type=GraphStorageType.REPORT_BUNDLES,
     prefix="report-bundles/",
     description="Per-Report serialization bundles (JSON-LD) stamped at publish",
+  ),
+  GraphStorageType.DOCUMENTS: GraphStorageConfig(
+    storage_type=GraphStorageType.DOCUMENTS,
+    prefix="documents/",
+    description="Stored document files, such as bank statements, kept as evidence",
   ),
   GraphStorageType.SHARED_REPO_DATABASES: GraphStorageConfig(
     storage_type=GraphStorageType.SHARED_REPO_DATABASES,
@@ -269,6 +281,47 @@ def get_report_bundle_prefix(
     if report_id:
       prefix += f"{report_id}/"
   return prefix
+
+
+# =============================================================================
+# Document File Helpers
+# =============================================================================
+
+
+def get_document_file_key(graph_id: str, document_id: str, file_name: str) -> str:
+  """Build S3 key for a stored document file.
+
+  Example:
+      >>> get_document_file_key("kg456", "doc_01K8", "statement.pdf")
+      'documents/kg456/doc_01K8/statement.pdf'
+  """
+  config = GRAPH_STORAGE[GraphStorageType.DOCUMENTS]
+  return f"{config.prefix}{graph_id}/{document_id}/{file_name}"
+
+
+def get_document_upload_key(graph_id: str, document_id: str, file_name: str) -> str:
+  """Build S3 key a document file is uploaded to, before it is checked.
+
+  Never the stored file's key: completing the upload copies the checked
+  bytes across, so a client holding the upload URL can never reach them.
+
+  Example:
+      >>> get_document_upload_key("kg456", "doc_01K8", "statement.pdf")
+      'documents/kg456/doc_01K8/incoming/statement.pdf'
+  """
+  config = GRAPH_STORAGE[GraphStorageType.DOCUMENTS]
+  return f"{config.prefix}{graph_id}/{document_id}/incoming/{file_name}"
+
+
+def get_document_file_prefix(graph_id: str | None = None) -> str:
+  """Build S3 prefix for listing stored document files.
+
+  Example:
+      >>> get_document_file_prefix("kg456")
+      'documents/kg456/'
+  """
+  config = GRAPH_STORAGE[GraphStorageType.DOCUMENTS]
+  return f"{config.prefix}{graph_id}/" if graph_id else config.prefix
 
 
 # =============================================================================

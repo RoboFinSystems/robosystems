@@ -75,6 +75,11 @@ _SUBGRAPH_NO_STAGING = (
 
 # A subgraph is cheap and disposable; its own memory store would just be a
 # second store to keep in step with the parent's.
+_SUBGRAPH_NO_DOCUMENT_FILES = (
+  "Document files are not available on subgraphs. A subgraph keeps no ledger, "
+  "so there is no balance for a file to evidence; upload to the parent graph."
+)
+
 _SUBGRAPH_NO_MEMORY = (
   "Semantic memory is not available on subgraphs. Store memories on the parent "
   "graph, or keep the data in the subgraph itself as nodes."

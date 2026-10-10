@@ -108,6 +108,20 @@ def _check_graph_access(graph_id: str, require_write: bool = False) -> dict | No
   return None
 
 
+def _file_summary(doc) -> dict | None:
+  """A stored file's identity, for a document that is one: its bytes are
+  downloaded in the app, never through a tool."""
+  if not doc.is_file:
+    return None
+  return {
+    "file_name": doc.file_name,
+    "content_type": doc.file_content_type,
+    "size_bytes": doc.file_size_bytes if doc.file_sha256 else None,
+    "sha256": doc.file_sha256,
+    "status": doc.file_status,
+  }
+
+
 class CreateDocumentTool:
   """Create a markdown document in the graph."""
 
@@ -296,7 +310,10 @@ change. Content changes are re-indexed in OpenSearch.""",
     return await run_off_loop(self._execute_sync, arguments)
 
   def _execute_sync(self, arguments: dict[str, Any]) -> Any:
-    from robosystems.operations.document_service import DocumentService
+    from robosystems.operations.document_service import (
+      DocumentFileError,
+      DocumentService,
+    )
 
     graph_id = self.client.graph_id
 
@@ -343,6 +360,8 @@ change. Content changes are re-indexed in OpenSearch.""",
       }
     except KeyError as e:
       return {"error": "not_found", "message": str(e)}
+    except DocumentFileError as e:
+      return {"error": "invalid_input", "message": str(e)}
     except SQLAlchemyError as e:
       return database_failure("update-document", e, not_initialized_message=None)
     except Exception as e:
@@ -425,6 +444,7 @@ class GetDocumentTool:
         "tags": doc.tags,
         "source_type": doc.source_type,
         "sections_indexed": doc.sections_indexed,
+        "file": _file_summary(doc),
         "created_at": str(doc.created_at),
         "updated_at": str(doc.updated_at),
       }
@@ -476,7 +496,10 @@ OpenSearch. Permanent — read it with get-document first.""",
     return await run_off_loop(self._execute_sync, arguments)
 
   def _execute_sync(self, arguments: dict[str, Any]) -> Any:
-    from robosystems.operations.document_service import DocumentService
+    from robosystems.operations.document_service import (
+      DocumentInUseError,
+      DocumentService,
+    )
 
     graph_id = self.client.graph_id
 
@@ -500,8 +523,10 @@ OpenSearch. Permanent — read it with get-document first.""",
         "success": True,
         "document_id": document_id,
         "deleted": True,
-        "message": "Document deleted from PostgreSQL and OpenSearch",
+        "message": "Document deleted",
       }
+    except DocumentInUseError as e:
+      return {"error": "in_use", "message": str(e)}
     except SQLAlchemyError as e:
       return database_failure("delete-document", e, not_initialized_message=None)
     except Exception as e:
@@ -589,6 +614,7 @@ class ListDocumentsTool:
             "tags": d.tags,
             "source_type": d.source_type,
             "sections_indexed": d.sections_indexed,
+            "file": _file_summary(d),
             "created_at": str(d.created_at),
             "updated_at": str(d.updated_at),
           }

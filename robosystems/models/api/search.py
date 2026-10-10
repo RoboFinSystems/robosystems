@@ -1,5 +1,7 @@
 """Search request/response models for full-text document search."""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -171,6 +173,30 @@ class DocumentUploadResponse(BaseModel):
   section_ids: list[str]
 
 
+class DocumentFileInfo(BaseModel):
+  """The stored file behind a document, when it is one."""
+
+  file_name: str = Field(..., description="The file's name as uploaded.")
+  content_type: str = Field(..., description="The file's media type.")
+  size_bytes: int | None = Field(
+    None, description="The stored file's size, once its upload is complete."
+  )
+  sha256: str | None = Field(
+    None,
+    description=(
+      "Hex SHA-256 of the stored bytes, taken when the upload completed. "
+      "A stored file never changes, so this identifies it."
+    ),
+  )
+  status: Literal["pending", "stored"] = Field(
+    ...,
+    description=(
+      "`pending` until complete-document-upload checks the uploaded bytes; "
+      "`stored` after."
+    ),
+  )
+
+
 class DocumentListItem(BaseModel):
   """A document in the document list."""
 
@@ -180,6 +206,9 @@ class DocumentListItem(BaseModel):
   source_type: str
   folder: str | None = None
   tags: list[str] | None = None
+  file: DocumentFileInfo | None = Field(
+    None, description="The stored file, for a document that is one."
+  )
   created_at: str
   updated_at: str
 
@@ -206,5 +235,36 @@ class DocumentDetailResponse(BaseModel):
   source_type: str
   source_provider: str | None = None
   sections_indexed: int
+  file: DocumentFileInfo | None = Field(
+    None,
+    description=(
+      "The stored file, for a document that is one; its `content` is empty. "
+      "Download it from `GET /documents/{document_id}/file`."
+    ),
+  )
   created_at: str
   updated_at: str
+
+
+class DocumentFileUploadResponse(BaseModel):
+  """Where to upload a document's file."""
+
+  document_id: str = Field(..., description="The document the file will be.")
+  upload_url: str = Field(
+    ...,
+    description=(
+      "Presigned URL: PUT the file's bytes here with the same Content-Type "
+      "and Content-Length the upload was created with, then call "
+      "complete-document-upload."
+    ),
+  )
+  expires_in: int = Field(..., description="Seconds until the URL expires.")
+
+
+class DocumentFileDownloadResponse(BaseModel):
+  """A short-lived link to a stored document file."""
+
+  document_id: str
+  download_url: str = Field(..., description="Presigned URL to GET the file.")
+  expires_in: int = Field(..., description="Seconds until the URL expires.")
+  file: DocumentFileInfo
