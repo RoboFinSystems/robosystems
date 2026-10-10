@@ -192,18 +192,24 @@ def rate_limit_dependency(request: Request):
 def auth_rate_limit_dependency(request: Request):
   """Strict rate limiting for authentication endpoints."""
   client_ip = request.client.host if request.client else "unknown"
-  identifier = f"auth_ip:{client_ip}"
 
   path = request.url.path
   if "/login" in path:
+    bucket = "login"
     limit = BURST_LIMITS["login_attempts"]
     window = BURST_LIMITS["login_window"]
   elif "/register" in path:
+    bucket = "register"
     limit = BURST_LIMITS["register_attempts"]
     window = BURST_LIMITS["register_window"]
   else:
+    bucket = "auth"
     limit = BURST_LIMITS["auth_attempts"]
     window = BURST_LIMITS["auth_window"]
+
+  # One counter per bucket: a shared one let the sign-up page's password
+  # checks spend the register budget before the form was ever submitted.
+  identifier = f"auth_ip:{bucket}:{client_ip}"
 
   # Fail closed: brute-force protection must not vanish with the backend.
   allowed, remaining = rate_limit_cache.check_rate_limit(

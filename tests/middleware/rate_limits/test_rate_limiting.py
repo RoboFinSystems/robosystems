@@ -311,6 +311,47 @@ class TestAuthRateLimitDependency:
       mock_cache.check_rate_limit.return_value = (True, 8)
       auth_rate_limit_dependency(request)
 
+  def test_password_checks_do_not_spend_the_register_budget(self):
+    """The sign-up page checks the password as it is typed, then registers."""
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      auth_rate_limit_dependency,
+    )
+
+    counts: dict[str, int] = {}
+
+    def check_rate_limit(identifier, limit, window, fail_closed=False):
+      counts[identifier] = counts.get(identifier, 0) + 1
+      used = counts[identifier]
+      return used <= limit, max(limit - used, 0)
+
+    with patch(f"{MODULE}.rate_limit_cache") as mock_cache:
+      mock_cache.check_rate_limit.side_effect = check_rate_limit
+      for _ in range(6):
+        auth_rate_limit_dependency(_make_request(path="/v1/auth/password/check"))
+      auth_rate_limit_dependency(_make_request(path="/v1/auth/register"))
+
+    assert len(counts) == 2
+    assert all(key.startswith("auth_ip:") for key in counts)
+
+  @pytest.mark.parametrize(
+    "path,bucket",
+    [
+      ("/v1/auth/login", "login"),
+      ("/v1/auth/register", "register"),
+      ("/v1/auth/password/check", "auth"),
+    ],
+  )
+  def test_each_bucket_has_its_own_counter(self, path, bucket):
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      auth_rate_limit_dependency,
+    )
+
+    with patch(f"{MODULE}.rate_limit_cache") as mock_cache:
+      mock_cache.check_rate_limit.return_value = (True, 1)
+      auth_rate_limit_dependency(_make_request(path=path))
+      identifier = mock_cache.check_rate_limit.call_args.args[0]
+    assert identifier.startswith(f"auth_ip:{bucket}:")
+
 
 @pytest.mark.unit
 class TestBillingRateLimitDependency:
