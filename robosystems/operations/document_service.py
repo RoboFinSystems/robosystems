@@ -234,24 +234,32 @@ class DocumentService:
     )
     from robosystems.operations.aws.s3 import S3Client
 
-    done = Document.get_by_external_id(graph_id, request.upload_id, self.session)
-    if done is not None and done.is_file:
+    done = self._completed(graph_id, request.upload_id)
+    if done is not None:
       return done
 
     client = S3Client()
     s3 = client.s3_client
     bucket = env.USER_DATA_BUCKET
     prefix = get_document_upload_prefix(graph_id, request.upload_id)
-    upload_key = next(iter(client.iter_object_keys(bucket, prefix=prefix)), None)
-    if upload_key is None:
-      raise DocumentFileNotUploadedError(
-        f"Nothing has been uploaded for {request.upload_id} yet. PUT the file "
-        "to the upload URL, then complete the upload."
+    # The URL was signed for one key, so a PUT can land nowhere else.
+    keys = list(client.iter_object_keys(bucket, prefix=prefix))
+    if not keys:
+      return self._completed_or_not_uploaded(graph_id, request.upload_id)
+    if len(keys) > 1:
+      raise DocumentFileError(
+        f"The upload {request.upload_id} holds more than one file."
       )
+    (upload_key,) = keys
     file_name = upload_key.removeprefix(prefix)
     content_type, magic = _file_type_of(file_name)
 
-    obj = s3.get_object(Bucket=bucket, Key=upload_key)
+    # From here, a missing upload means a concurrent completion of the same
+    # upload finished first and removed it.
+    try:
+      obj = s3.get_object(Bucket=bucket, Key=upload_key)
+    except s3.exceptions.NoSuchKey:
+      return self._completed_or_not_uploaded(graph_id, request.upload_id)
     problem = None
     body = b""
     try:
@@ -280,7 +288,10 @@ class DocumentService:
         CopySourceIfMatch=obj["ETag"],
       )
     except ClientError as exc:
-      if exc.response.get("Error", {}).get("Code") != "PreconditionFailed":
+      code = exc.response.get("Error", {}).get("Code")
+      if code in ("NoSuchKey", "404"):
+        return self._completed_or_not_uploaded(graph_id, request.upload_id)
+      if code != "PreconditionFailed":
         raise
       raise DocumentFileNotUploadedError(
         f"The upload {request.upload_id} changed while it was being checked. "
@@ -313,7 +324,7 @@ class DocumentService:
       # Another completion of the same upload stored it first.
       self.session.rollback()
       s3.delete_object(Bucket=bucket, Key=stored_key)
-      done = Document.get_by_external_id(graph_id, request.upload_id, self.session)
+      done = self._completed(graph_id, request.upload_id)
       if done is None:
         raise
       return done
@@ -379,7 +390,10 @@ class DocumentService:
         (number, reader.pages[number - 1].extract_text() or "")
         for number in range(first_page, last + 1)
       ]
-    except PdfReadError as exc:
+    # A malformed PDF fails in more ways than PdfReadError (a bad xref, a
+    # cyclic object, a broken font map); every one means the same thing here.
+    except (PdfReadError, ValueError, KeyError, TypeError, RecursionError) as exc:
+      logger.warning(f"Document {document_id} could not be read as a PDF: {exc!r}")
       raise DocumentFileError(
         f"Document {document_id} could not be read as a PDF."
       ) from exc
@@ -393,7 +407,23 @@ class DocumentService:
       raise DocumentFileError(f"Document {document_id} has no stored file.")
     return doc
 
+  def _completed(self, graph_id: str, upload_id: str) -> Document | None:
+    """The document an upload already became, if it did."""
+    done = Document.get_by_external_id(graph_id, upload_id, self.session)
+    return done if done is not None and done.is_file else None
+
+  def _completed_or_not_uploaded(self, graph_id: str, upload_id: str) -> Document:
+    done = self._completed(graph_id, upload_id)
+    if done is not None:
+      return done
+    raise DocumentFileNotUploadedError(
+      f"Nothing has been uploaded for {upload_id} yet. PUT the file to the "
+      "upload URL, then complete the upload."
+    )
+
   def _check_file_limit(self, graph_id: str) -> None:
+    # Advisory: concurrent completions can pass it together and overshoot
+    # by a few files, which a storage bound tolerates.
     stored = Document.count_by_graph(graph_id, self.session, FILE_SOURCE_TYPE)
     if stored >= MAX_DOCUMENT_FILES_PER_GRAPH:
       raise DocumentFileError(

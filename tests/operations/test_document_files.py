@@ -489,3 +489,67 @@ def test_a_name_must_match_its_declared_type(files):
       graph_id,
       CreateDocumentUploadOp(file_name="receipt.png", content_type="image/jpeg"),
     )
+
+
+def _raced(service, graph_id, user_id, s3):
+  """A first completion that finished, and an upload put back, as a second
+  completion would find it if it started before the first one ended."""
+  upload_id, _url = _begin(service, graph_id)
+  _upload(s3, graph_id, upload_id)
+  first = _complete(service, graph_id, user_id, upload_id)
+  return upload_id, str(first.id)
+
+
+def _unseen_first(graph_id, upload_id, session):
+  """The second completion's opening check runs before the first commits."""
+  real = Document.get_by_external_id(graph_id, upload_id, session)
+  return patch.object(Document, "get_by_external_id", side_effect=[None, real])
+
+
+def test_a_completion_that_finds_the_upload_gone_returns_the_winners_document(files):
+  service, graph_id, user_id, s3 = files
+  upload_id, first_id = _raced(service, graph_id, user_id, s3)
+
+  with _unseen_first(graph_id, upload_id, service.session):
+    second = _complete(service, graph_id, user_id, upload_id)
+
+  assert str(second.id) == first_id
+
+
+@pytest.mark.parametrize("step", ["read", "copy"])
+def test_an_upload_removed_mid_completion_returns_the_winners_document(files, step):
+  """Listed, then gone by the time it is read or copied: the winner removed it."""
+  from botocore.exceptions import ClientError
+
+  service, graph_id, user_id, s3 = files
+  upload_id, first_id = _raced(service, graph_id, user_id, s3)
+  _upload(s3, graph_id, upload_id)
+  gone = ClientError({"Error": {"Code": "NoSuchKey", "Message": "gone"}}, "op")
+  failing = (
+    patch.object(
+      s3, "get_object", side_effect=s3.exceptions.NoSuchKey(gone.response, "GetObject")
+    )
+    if step == "read"
+    else patch.object(s3, "copy_object", side_effect=gone)
+  )
+
+  with (
+    patch("robosystems.operations.aws.s3.S3Client._build_client", return_value=s3),
+    failing,
+    _unseen_first(graph_id, upload_id, service.session),
+  ):
+    second = _complete(service, graph_id, user_id, upload_id)
+
+  assert str(second.id) == first_id
+  assert _files(service, graph_id) == 1
+
+
+def test_a_pdf_that_breaks_the_parser_any_way_is_unreadable_not_an_error(files):
+  service, graph_id, user_id, s3 = files
+  doc = _store(service, graph_id, user_id, s3)
+
+  with (
+    patch("pypdf.PdfReader", side_effect=RecursionError("cyclic object")),
+    pytest.raises(DocumentFileError, match="could not be read"),
+  ):
+    service.read_file_text(graph_id, str(doc.id), first_page=1, max_pages=1)

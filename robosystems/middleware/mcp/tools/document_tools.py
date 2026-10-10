@@ -734,7 +734,7 @@ upload never completed expires. Stored files are not indexed for search.""",
       "upload_url": url,
       "expires_in": PRESIGNED_URL_EXPIRY_SECONDS,
       "upload_command": (
-        f"curl -sSf -X PUT -H 'Content-Type: {request.content_type}' "
+        f"curl -sSf -X PUT -H {shlex.quote('Content-Type: ' + request.content_type)} "
         f"--data-binary @{target} {shlex.quote(url)}"
       ),
       "next": "Run upload_command, then call complete-document-upload with upload_id.",
@@ -909,8 +909,14 @@ get-document.""",
       return access_error
 
     document_id = arguments["document_id"]
-    first_page = max(1, int(arguments.get("first_page") or 1))
-    max_pages = min(_MAX_PAGES_PER_READ, max(1, int(arguments.get("max_pages") or 3)))
+    try:
+      first_page = max(1, int(arguments.get("first_page") or 1))
+      max_pages = min(_MAX_PAGES_PER_READ, max(1, int(arguments.get("max_pages") or 3)))
+    except (TypeError, ValueError):
+      return {
+        "error": "invalid_input",
+        "message": "first_page and max_pages must be whole numbers.",
+      }
 
     session = _get_platform_session()
     try:

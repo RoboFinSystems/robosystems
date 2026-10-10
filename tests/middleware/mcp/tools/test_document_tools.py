@@ -670,3 +670,20 @@ class TestDocumentFileTools:
       )
 
     assert result["error"] == "not_a_file"
+
+
+@pytest.mark.asyncio
+async def test_read_refuses_page_numbers_that_are_not_numbers(mock_graph_client):
+  mock_service = MagicMock()
+  with (
+    patch(f"{DOC_MODULE}._get_platform_session", return_value=MagicMock()),
+    patch(f"{DOC_MODULE}._block_shared_repository", return_value=None),
+    patch(f"{DOC_MODULE}._check_graph_access", return_value=None),
+    patch(DOC_SVC, return_value=mock_service),
+  ):
+    result = await ReadDocumentFileTool(mock_graph_client).execute(
+      {"document_id": "doc_1", "max_pages": "all"}
+    )
+
+  assert result["error"] == "invalid_input"
+  mock_service.read_file_text.assert_not_called()
