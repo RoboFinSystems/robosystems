@@ -25,6 +25,10 @@ from robosystems.operations.roboledger.commands._guards import (
 from robosystems.operations.roboledger.commands.journal_entries import (
   reverse_journal_entry,
 )
+from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+  ShadowLedgerPostingError,
+  assert_local_posting_allowed,
+)
 
 from .types import (
   EventBlockPythonHandler,
@@ -132,6 +136,13 @@ def dispatch_preview(
       f"Journal entry {metadata.entry_id} already has a reversing entry "
       f"({existing_reversal}); an entry is reversed at most once."
     )
+
+  try:
+    assert_local_posting_allowed(
+      session, str(original.entity_id), "Reversing this journal entry"
+    )
+  except ShadowLedgerPostingError as e:
+    errors.append(str(e))
 
   posting_date = metadata.posting_date or body.occurred_at.date()
   try:

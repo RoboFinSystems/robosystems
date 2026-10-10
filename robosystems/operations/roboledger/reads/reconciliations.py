@@ -103,8 +103,17 @@ def _stale_blocks(
   ).scalar()
   if closed_through and period <= closed_through:
     return set()
+  from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+    shadow_books,
+  )
+
+  # The comparison was made under the books' policy, so it is recomputed
+  # under it too: under shadow the ledger side is landed only.
   window = reconciliation_window(
-    period, get_fiscal_year_start_month(session), entity_id
+    period,
+    get_fiscal_year_start_month(session),
+    entity_id,
+    shadow=shadow_books(session, entity_id),
   )
 
   def _account_digests(method: str) -> dict[str, str]:

@@ -33,7 +33,11 @@ from robosystems.operations.roboledger.commands._guards import (
   assert_accounts_postable,
   assert_period_not_closed,
 )
+from robosystems.operations.roboledger.commands.connections import SEVERABLE_SOURCES
 from robosystems.operations.roboledger.entity_scope import ensure_entity_id
+from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+  assert_local_posting_allowed,
+)
 
 
 class JournalEntryNotFoundError(LookupError):
@@ -308,6 +312,7 @@ def create_journal_entry(
   created_by: str,
   *,
   entity_id: str | None = None,
+  mirrors_source: bool = False,
 ) -> JournalEntryResponse:
   """Create a journal entry with balanced line items in one entity's books.
 
@@ -315,15 +320,23 @@ def create_journal_entry(
   import) posts immediately, bypassing the draft-review-close workflow. Either
   status is refused in a closed period.
 
+  On books a shadow close keeps, a posted entry is refused unless it keeps
+  the ledger equal to QuickBooks: synced history (a synced ``source``), or
+  ``mirrors_source``, a catch-up that follows an upstream edit.
+
   Raises:
     `ClosedPeriodError`, `UnbalancedJournalEntryError`, `ValueError` for a
       malformed line.
     `InactiveAccountError` if a line names a retired account, except for a
       synced ledger's replayed history (a synced `source` with `status='posted'`).
     `EntityNotInGraphError` if the named entity is not this graph's.
+    `ShadowLedgerPostingError` for a posted entry authored on shadow books.
   """
   entity_id = ensure_entity_id(session, entity_id)
   assert_period_not_closed(session, body.posting_date, entity_id=entity_id)
+  synced = (body.source or "").lower() in SEVERABLE_SOURCES
+  if body.status == "posted" and not synced and not mirrors_source:
+    assert_local_posting_allowed(session, entity_id, "Posting this journal entry")
 
   normalized, total_debit, _total_credit = validate_and_normalize_lines(body.line_items)
   # Only posted (replayed) history carries the source into the exemption; a
@@ -534,11 +547,15 @@ def reverse_journal_entry(
     `JournalEntryNotFoundError`, `JournalEntryNotPostedError`,
     `JournalEntryAlreadyReversedError`.
     `ClosedPeriodError` if the original's or the reversal's date is closed.
+    `ShadowLedgerPostingError` on books a shadow close keeps.
   """
   # Fence first, then the row: close takes the fence and then updates entries.
   peek = session.get(Entry, body.entry_id)
   if peek is None:
     raise JournalEntryNotFoundError(body.entry_id)
+  assert_local_posting_allowed(
+    session, str(peek.entity_id), "Reversing this journal entry"
+  )
   posting_date = body.posting_date or datetime.now(UTC).date()
   assert_period_not_closed(
     session, peek.posting_date, posting_date, entity_id=peek.entity_id

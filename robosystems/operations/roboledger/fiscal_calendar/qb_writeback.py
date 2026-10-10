@@ -127,6 +127,66 @@ def shadow_close_for_entity(
   return shadow_ledger(platform_session, graph_id)
 
 
+class ShadowLedgerPostingError(ValueError):
+  """Something would post to books a shadow close keeps."""
+
+  def __init__(self, action: str) -> None:
+    super().__init__(
+      f"{action} would post to books that run a shadow close beside "
+      "QuickBooks, where nothing posts here: these books mirror QuickBooks. "
+      "Record it as a draft, which the close keeps as an expectation, or "
+      "make the change in QuickBooks."
+    )
+
+
+def shadow_books(session: Session, entity_id: str | None) -> bool:
+  """Whether this entity's books run a shadow close, for a session opened on
+  a graph (`extensions_session` records which). A session that names no
+  graph has no QuickBooks connection to consult, so it is never shadow."""
+  graph_id = session.info.get("graph_id")
+  if not isinstance(graph_id, str) or not graph_id:
+    return False
+  from robosystems.database import SessionFactory
+
+  with SessionFactory() as platform_session:
+    return shadow_close_for_entity(session, platform_session, graph_id, entity_id)
+
+
+def closed_under_shadow(
+  session: Session, period: str, entity_id: str | None
+) -> bool | None:
+  """Whether a closed period's close ran in shadow, as its receipt records.
+  None while the period is open, or for a receipt from before shadow existed:
+  the live policy decides then."""
+  from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
+
+  if entity_id is None:
+    return None
+  receipt = (
+    session.query(FiscalPeriod.close_receipt)
+    .filter(
+      FiscalPeriod.entity_id == entity_id,
+      FiscalPeriod.name == period,
+      FiscalPeriod.status == "closed",
+    )
+    .limit(1)
+    .scalar()
+  )
+  if not receipt or "shadow" not in receipt:
+    return None
+  return bool(receipt["shadow"])
+
+
+def assert_local_posting_allowed(
+  session: Session, entity_id: str | None, action: str
+) -> None:
+  """Refuse to post to books a shadow close keeps. Under shadow the ledger
+  mirrors QuickBooks: only the sync lands entries, and the close keeps every
+  draft as an expectation rather than posting it."""
+  if shadow_books(session, entity_id):
+    raise ShadowLedgerPostingError(action)
+
+
 def _entry_not_yet_in_qb() -> ColumnElement[bool]:
   """The entry has no recorded QuickBooks id.
 

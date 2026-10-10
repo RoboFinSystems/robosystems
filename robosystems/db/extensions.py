@@ -221,6 +221,9 @@ def extensions_session(
     tenant_schema=tenant_schema,
     statement_timeout_ms=statement_timeout_ms,
   )
+  # For the checks that need the platform's view of this graph, such as
+  # whether its QuickBooks connection runs a shadow close.
+  session.info["graph_id"] = tenant_schema
   try:
     yield session
     session.commit()

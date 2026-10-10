@@ -153,14 +153,18 @@ def _window(
   session: Session, graph_id: str, period: str, entity_id: str | None
 ) -> ReconciliationWindow:
   """The period's window over one entity's books. Under a shadow connection
-  the ledger side is landed only."""
+  the ledger side is landed only. A closed period keeps the policy it was
+  closed under, so a later policy change does not reread its comparisons."""
   from robosystems.database import SessionFactory
   from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+    closed_under_shadow,
     shadow_close_for_entity,
   )
 
-  with SessionFactory() as platform_session:
-    shadow = shadow_close_for_entity(session, platform_session, graph_id, entity_id)
+  shadow = closed_under_shadow(session, period, entity_id)
+  if shadow is None:
+    with SessionFactory() as platform_session:
+      shadow = shadow_close_for_entity(session, platform_session, graph_id, entity_id)
   return reconciliation_window(
     period, get_fiscal_year_start_month(session), entity_id, shadow=shadow
   )
