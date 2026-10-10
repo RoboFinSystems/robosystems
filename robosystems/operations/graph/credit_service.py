@@ -880,7 +880,10 @@ class CreditService:
     from ...config import AIBillingConfig, OperatorConfig
 
     pricing_key = OperatorConfig.pricing_key_for(model)
-    pricing = AIBillingConfig.TOKEN_PRICING[pricing_key]
+    pricing = AIBillingConfig.rates_for(
+      pricing_key,
+      input_tokens + cache_read_input_tokens + cache_creation_input_tokens,
+    )
 
     input_cost = (Decimal(input_tokens) / 1000) * pricing["input"]
     output_cost = (Decimal(output_tokens) / 1000) * pricing["output"]

@@ -49,7 +49,7 @@ class OperatorModel(Enum):
   SONNET_4 = "claude-sonnet-4-20250514"  # Last resort fallback
   OPUS_5 = "claude-opus-5"
   OPUS_5_5 = "claude-opus-5-5"
-  GPT_5_6_LUNA = "gpt-5.6-luna"
+  HAIKU_5_5 = "claude-haiku-5-5"
   # The deployment's self-hosted model, registered only when enabled.
   OPENAI_COMPAT = "openai-compat"
 
@@ -70,12 +70,10 @@ class ModelSpec:
   # Key into AIBillingConfig.TOKEN_PRICING. Validated against the rate card
   # by validate_configuration(); the meter raises on a miss.
   pricing_key: str
-  # Emit explicit `cachePoint` blocks (system prefix + trailing turn). Claude
-  # accepts them; GPT-5.6 rejects them over Converse but caches implicitly
-  # and still reports cache reads in usage, so the meter is unaffected.
+  # Emit explicit `cachePoint` blocks (system prefix + trailing turn).
   cache_points: bool
-  # Whether `temperature` is accepted. The Claude 5 family and GPT-5.6 both
-  # reject it with a 400.
+  # Whether `temperature` is accepted. The Claude 5 family rejects it with a
+  # 400.
   accepts_sampling_params: bool
   # Hard output cap when below what the execution profiles ask; None = none.
   max_output_tokens: int | None = None
@@ -96,13 +94,14 @@ _CLAUDE_5_REQUEST_FIELDS: dict[str, Any] = {"thinking": {"type": "disabled"}}
 
 # Opus 5.5 and Sonnet 5.5 reject disabled thinking at every effort level
 # (verified over Converse 2026-09-27 and 2026-10-04); effort is their only
-# depth control.
+# depth control. Haiku 5.5 accepts disabled thinking up to effort high but
+# runs adaptive like its tiers above (verified 2026-10-09).
 _ADAPTIVE_THINKING_REQUEST_FIELDS: dict[str, Any] = {"thinking": {"type": "adaptive"}}
 
 
-# Wire ids: Bedrock publishes the Claude 5 family and GPT-5.6 unversioned (no
-# `-v1:0`); the 4.x rows keep the versioned form. Both are correct — do not
-# "fix" one to match the other.
+# Wire ids: Bedrock publishes the Claude 5 family unversioned (no `-v1:0`);
+# the 4.x rows keep the versioned form. Both are correct — do not "fix" one
+# to match the other.
 _BEDROCK_MODELS: dict[OperatorModel, ModelSpec] = {
   # Same list price as Sonnet 5, so it bills under the same key.
   OperatorModel.SONNET_5_5: ModelSpec(
@@ -153,18 +152,19 @@ _BEDROCK_MODELS: dict[OperatorModel, ModelSpec] = {
     additional_request_fields=_ADAPTIVE_THINKING_REQUEST_FIELDS,
     supports_effort=True,
   ),
-  # The `us.` profile is its only regional address (not available In-Region).
-  OperatorModel.GPT_5_6_LUNA: ModelSpec(
-    model_id="us.openai.gpt-5.6-luna",
-    pricing_key="openai_gpt_5_6_luna",
-    cache_points=False,
+  OperatorModel.HAIKU_5_5: ModelSpec(
+    model_id="us.anthropic.claude-haiku-5-5",
+    pricing_key="anthropic_claude_5_5_haiku",
+    cache_points=True,
     accepts_sampling_params=False,
+    additional_request_fields=_ADAPTIVE_THINKING_REQUEST_FIELDS,
+    supports_effort=True,
   ),
 }
 
 # Profile → model, platform-wide.
 _PLATFORM_PROFILE_MODELS: dict[ModelProfile, OperatorModel] = {
-  ModelProfile.ECONOMY: OperatorModel.GPT_5_6_LUNA,
+  ModelProfile.ECONOMY: OperatorModel.HAIKU_5_5,
   ModelProfile.BALANCED: OperatorModel.SONNET_5_5,
   ModelProfile.QUALITY: OperatorModel.OPUS_5_5,
 }

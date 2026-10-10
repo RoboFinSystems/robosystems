@@ -4,7 +4,9 @@ credits).
 Rates are credits per 1K tokens at exact cost passthrough (1 credit ~ $0.001),
 indexed on what Bedrock bills for the ``us.*`` regional profiles (10% over
 list). Cache rates pass Bedrock's per-model rates through: write is 1.25x
-input for every family, read is 0.1x except Opus 5.5 (0.05x).
+input for every family, read is 0.1x except Opus 5.5 (0.05x). A model priced
+by prompt length also has a LONG_CONTEXT_PRICING entry; `rates_for` picks the
+card per call.
 
 A model bills under its registry ``pricing_key`` (config/operators.py); an
 unregistered model raises at billing time. Never add a silent default entry.
@@ -75,18 +77,41 @@ class AIBillingConfig:
       "cache_read": Decimal("0.22"),
       "cache_write": Decimal("5.5"),
     },
-    "openai_gpt_5_6_luna": {
-      "input": Decimal("0.22"),
-      "output": Decimal("1.32"),
-      "cache_read": Decimal("0.022"),
-      "cache_write": Decimal("0.275"),
+    # AWS Pricing API, us-east-1 regional, read 2026-10-09.
+    "anthropic_claude_5_5_haiku": {
+      "input": Decimal("0.11"),
+      "output": Decimal("0.55"),
+      "cache_read": Decimal("0.011"),
+      "cache_write": Decimal("0.1375"),
     },
+  }
+
+  # Rates for a call whose prompt (uncached + cache read + cache write)
+  # exceeds the threshold. Same source and date as the base row.
+  LONG_CONTEXT_PRICING: dict[str, tuple[int, dict[str, Decimal]]] = {
+    "anthropic_claude_5_5_haiku": (
+      100_000,
+      {
+        "input": Decimal("0.55"),
+        "output": Decimal("2.75"),
+        "cache_read": Decimal("0.055"),
+        "cache_write": Decimal("0.6875"),
+      },
+    ),
   }
   if env.OPENAI_COMPAT_ENABLED:
     TOKEN_PRICING["openai_compat"] = self_hosted_rates(
       env.OPENAI_COMPAT_CREDITS_PER_1K_INPUT,
       env.OPENAI_COMPAT_CREDITS_PER_1K_OUTPUT,
     )
+
+  @classmethod
+  def rates_for(cls, pricing_key: str, prompt_tokens: int) -> dict[str, Decimal]:
+    """The rate card for one call, by its total prompt size."""
+    long_context = cls.LONG_CONTEXT_PRICING.get(pricing_key)
+    if long_context is not None and prompt_tokens > long_context[0]:
+      return long_context[1]
+    return cls.TOKEN_PRICING[pricing_key]
 
   @classmethod
   def apply_minimum_charge(cls, cost: Decimal) -> Decimal:

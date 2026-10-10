@@ -75,7 +75,11 @@ class TestModelRegistry:
       for model, spec in OperatorConfig.MODEL_REGISTRY.items()
       if spec.supports_effort
     }
-    assert takes_effort == {OperatorModel.SONNET_5_5, OperatorModel.OPUS_5_5}
+    assert takes_effort == {
+      OperatorModel.SONNET_5_5,
+      OperatorModel.OPUS_5_5,
+      OperatorModel.HAIKU_5_5,
+    }
 
   def test_execution_modes_map_to_effort(self):
     efforts = {
@@ -99,15 +103,16 @@ class TestModelRegistry:
       assert spec.accepts_sampling_params is True
       assert spec.additional_request_fields == {}
 
-  def test_luna_takes_no_cache_points_and_no_sampling_params(self):
-    """Verified over Converse 2026-09-15: explicit cachePoint blocks and
-    `temperature` are both rejected; implicit caching reports through usage."""
-    spec = OperatorConfig.MODEL_REGISTRY[OperatorModel.GPT_5_6_LUNA]
-    assert spec.model_id == "us.openai.gpt-5.6-luna"
-    assert spec.cache_points is False
+  def test_haiku_5_5_runs_adaptive_with_cache_points(self):
+    """Verified over Converse 2026-10-09: explicit cachePoint blocks are read
+    back, adaptive thinking takes effort, and `temperature` 0 is a 400."""
+    spec = OperatorConfig.MODEL_REGISTRY[OperatorModel.HAIKU_5_5]
+    assert spec.model_id == "us.anthropic.claude-haiku-5-5"
+    assert spec.cache_points is True
     assert spec.accepts_sampling_params is False
-    assert spec.additional_request_fields == {}
-    assert spec.pricing_key == "openai_gpt_5_6_luna"
+    assert spec.additional_request_fields == {"thinking": {"type": "adaptive"}}
+    assert spec.supports_effort is True
+    assert spec.pricing_key == "anthropic_claude_5_5_haiku"
 
 
 class TestSelfHostedModel:
@@ -213,7 +218,7 @@ class TestProfiles:
   def test_quality_and_economy_targets(self):
     assert OperatorConfig.PROFILE_MODELS[ModelProfile.QUALITY] == OperatorModel.OPUS_5_5
     assert (
-      OperatorConfig.PROFILE_MODELS[ModelProfile.ECONOMY] == OperatorModel.GPT_5_6_LUNA
+      OperatorConfig.PROFILE_MODELS[ModelProfile.ECONOMY] == OperatorModel.HAIKU_5_5
     )
 
 
@@ -240,7 +245,7 @@ class TestResolveModel:
 
   def test_explicit_profile_by_enum_and_by_name(self):
     assert OperatorConfig.resolve_model(ModelProfile.ECONOMY).model_id == (
-      "us.openai.gpt-5.6-luna"
+      "us.anthropic.claude-haiku-5-5"
     )
     assert OperatorConfig.resolve_model("quality").model_id == (
       "us.anthropic.claude-opus-5-5"
@@ -257,7 +262,7 @@ class TestResolveModel:
       OperatorConfig.OPERATOR_MODEL_OVERRIDES, "test_agent", ModelProfile.ECONOMY
     )
     assert OperatorConfig.get_bedrock_model_id(operator_type="test_agent") == (
-      "us.openai.gpt-5.6-luna"
+      "us.anthropic.claude-haiku-5-5"
     )
 
   def test_explicit_choice_beats_operator_override(self, monkeypatch):
@@ -282,8 +287,8 @@ class TestPricingKeyFor:
     assert OperatorConfig.pricing_key_for("claude-sonnet-4-6") == (
       "anthropic_claude_4_sonnet"
     )
-    assert OperatorConfig.pricing_key_for("us.openai.gpt-5.6-luna") == (
-      "openai_gpt_5_6_luna"
+    assert OperatorConfig.pricing_key_for("us.anthropic.claude-haiku-5-5") == (
+      "anthropic_claude_5_5_haiku"
     )
 
   def test_unregistered_model_raises(self):
@@ -425,7 +430,7 @@ class TestGetAllConfig:
       m.value for m in OperatorConfig.MODEL_REGISTRY
     }
     assert "openai-compat" not in models["available_models"]
-    assert models["profiles"]["economy"] == "us.openai.gpt-5.6-luna"
+    assert models["profiles"]["economy"] == "us.anthropic.claude-haiku-5-5"
 
   def test_execution_profiles_section(self):
     config = OperatorConfig.get_all_config()
