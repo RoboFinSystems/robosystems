@@ -796,6 +796,7 @@ def update_event_block(
   if body.effective_at is not None:
     event.effective_at = body.effective_at
 
+  before_patch = dict(event.metadata_ or {})
   if body.metadata_patch:
     _validate_routed_connection(body.metadata_patch, graph_id)
     merged = dict(event.metadata_ or {})
@@ -817,6 +818,18 @@ def update_event_block(
 
   if body.transition_to == "classified":
     _validate_classification(event)
+
+  if body.metadata_patch:
+    from robosystems.operations.event_block.python_handlers.bank_feed import (
+      BANK_EVENT_TYPES,
+      FLOW_KEYS,
+      apply_flow_patch,
+    )
+
+    if event.event_type in BANK_EVENT_TYPES and any(
+      key in body.metadata_patch for key in FLOW_KEYS
+    ):
+      apply_flow_patch(session, event, before_patch, created_by)
 
   if fire_handler:
     # After the metadata patch so the handler sees the final shape.

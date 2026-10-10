@@ -127,6 +127,14 @@ def build_instructions(
         "account is refused there, with the reason."
       ),
       (
+        "- A line that is a financing or investing flow (a loan drawn, a "
+        "capital contribution, an equipment purchase) also gets "
+        "`classified_flow_qname` (e.g. `rs-gaap:ProceedsFromNotesPayable`), "
+        "the override of the account's default flow that the cash flow and "
+        "equity statements read. It can be set on a posted line too: that "
+        "re-tags it in place."
+      ),
+      (
         "- Post it → `transition_to='committed'` (a person, or you when "
         "asked): the handler writes DR/CR against the linked bank account as "
         "a draft that close posts. An unclassified bank line is refused at "
