@@ -18,8 +18,6 @@ def test_token_pricing_matches_bedrock_us_profile_cost():
   assert pricing["anthropic_claude_5_sonnet"]["output"] == Decimal("11")
   assert pricing["anthropic_claude_5_opus"]["input"] == Decimal("5.5")
   assert pricing["anthropic_claude_5_opus"]["output"] == Decimal("27.5")
-  assert pricing["openai_gpt_5_6_luna"]["input"] == Decimal("0.22")
-  assert pricing["openai_gpt_5_6_luna"]["output"] == Decimal("1.32")
 
 
 # AWS Pricing API (AmazonBedrockFoundationModels, us-east-1 regional
@@ -31,6 +29,8 @@ BEDROCK_US_EAST_1 = {
   "anthropic_claude_5_sonnet": ("2.2", "11", "0.22", "2.75"),
   "anthropic_claude_5_opus": ("5.5", "27.5", "0.55", "6.875"),
   "anthropic_claude_5_5_opus": ("4.4", "22", "0.22", "5.5"),
+  # Read 2026-10-09.
+  "anthropic_claude_5_5_haiku": ("0.11", "0.55", "0.011", "0.1375"),
 }
 
 
@@ -52,7 +52,7 @@ def test_token_pricing_only_has_registered_families():
     "anthropic_claude_5_sonnet",
     "anthropic_claude_5_opus",
     "anthropic_claude_5_5_opus",
-    "openai_gpt_5_6_luna",
+    "anthropic_claude_5_5_haiku",
   }
 
 
@@ -104,3 +104,28 @@ class TestSelfHostedRates:
   def test_malformed_rate_fails(self, inp, out):
     with pytest.raises(ValueError):
       self_hosted_rates(inp, out)
+
+
+def test_long_context_rates_apply_only_above_the_threshold():
+  base = AIBillingConfig.TOKEN_PRICING["anthropic_claude_5_5_haiku"]
+  threshold, long_rates = AIBillingConfig.LONG_CONTEXT_PRICING[
+    "anthropic_claude_5_5_haiku"
+  ]
+  assert threshold == 100_000
+  assert AIBillingConfig.rates_for("anthropic_claude_5_5_haiku", 100_000) is base
+  assert AIBillingConfig.rates_for("anthropic_claude_5_5_haiku", 100_001) is long_rates
+  assert long_rates["input"] == Decimal("0.55")
+  assert long_rates["output"] == Decimal("2.75")
+  assert long_rates["cache_read"] == Decimal("0.055")
+  assert long_rates["cache_write"] == Decimal("0.6875")
+
+
+def test_models_without_long_context_rates_keep_one_card():
+  assert (
+    AIBillingConfig.rates_for("anthropic_claude_5_sonnet", 900_000)
+    is AIBillingConfig.TOKEN_PRICING["anthropic_claude_5_sonnet"]
+  )
+
+
+def test_long_context_rates_extend_registered_keys():
+  assert set(AIBillingConfig.LONG_CONTEXT_PRICING) <= set(AIBillingConfig.TOKEN_PRICING)

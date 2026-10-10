@@ -238,8 +238,8 @@ class TestCreditServiceFlow:
   def test_consume_ai_tokens_prices_each_registered_model_at_its_own_rate(
     self, test_db, test_graph_with_credits
   ):
-    """Opus 5 and GPT-5.6 Luna bill under their own keys (5.5/27.5 and
-    0.22/1.32 per 1K) — a 25x spread that the old single-key map collapsed."""
+    """Opus 5 and Haiku 5.5 bill under their own keys (5.5/27.5 and
+    0.11/0.55 per 1K) — a 50x spread that the old single-key map collapsed."""
     graph = test_graph_with_credits["graph"]
     credits = test_graph_with_credits["credits"]
 
@@ -254,12 +254,42 @@ class TestCreditServiceFlow:
     )
     assert float(opus["credits_consumed"]) == pytest.approx(33.0)
 
-    luna = service.consume_ai_tokens(
+    haiku = service.consume_ai_tokens(
       graph_id=graph.graph_id,
-      input_tokens=1000,
-      output_tokens=1000,
-      model="us.openai.gpt-5.6-luna",
-      operation_description="Luna pricing test",
+      input_tokens=10_000,
+      output_tokens=10_000,
+      model="us.anthropic.claude-haiku-5-5",
+      operation_description="Haiku 5.5 pricing test",
       user_id=str(credits.user_id),
     )
-    assert float(luna["credits_consumed"]) == pytest.approx(1.54)
+    assert float(haiku["credits_consumed"]) == pytest.approx(6.6)
+
+  def test_consume_ai_tokens_bills_a_long_prompt_at_the_long_context_rate(
+    self, test_db, test_graph_with_credits
+  ):
+    """Haiku 5.5 bills 5x once a call's whole prompt (uncached + cache read
+    + cache write) passes 100K tokens; at exactly 100K it is still base."""
+    graph = test_graph_with_credits["graph"]
+    credits = test_graph_with_credits["credits"]
+    service = CreditService(test_db)
+
+    at_threshold = service.consume_ai_tokens(
+      graph_id=graph.graph_id,
+      input_tokens=100_000,
+      output_tokens=1000,
+      model="us.anthropic.claude-haiku-5-5",
+      operation_description="Haiku 5.5 at the threshold",
+      user_id=str(credits.user_id),
+    )
+    assert float(at_threshold["credits_consumed"]) == pytest.approx(11.55)
+
+    over = service.consume_ai_tokens(
+      graph_id=graph.graph_id,
+      input_tokens=90_000,
+      output_tokens=1000,
+      model="us.anthropic.claude-haiku-5-5",
+      operation_description="Haiku 5.5 over the threshold",
+      user_id=str(credits.user_id),
+      cache_read_input_tokens=20_000,
+    )
+    assert float(over["credits_consumed"]) == pytest.approx(53.35)

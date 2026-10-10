@@ -40,9 +40,10 @@ Monthly allocations by tier, from `config/billing/core.py`
 | `ladybug-xlarge`   | 100,000       |
 
 Token pricing is in `config/billing/ai.py` (`AIBillingConfig.TOKEN_PRICING`),
-which is authoritative. Today it holds a single tier — `anthropic_claude_4_sonnet`
-at 3 credits per 1K input tokens and 15 per 1K output tokens — with a minimum
-charge applied per operation via `apply_minimum_charge()`.
+which is authoritative: one rate card per model family, keyed by the registry's
+`pricing_key`, with a minimum charge applied per call via `apply_minimum_charge()`.
+A family priced by prompt length (Haiku 5.5) also has a `LONG_CONTEXT_PRICING`
+entry, and `rates_for()` picks the card per call from the call's whole prompt.
 
 Consumption happens *after* the AI call, from the response's real token counts:
 

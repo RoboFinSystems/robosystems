@@ -598,11 +598,42 @@ class TestAIClientCreateMessage:
     assert spec.additional_request_fields == {"thinking": {"type": "adaptive"}}
 
   @pytest.mark.unit
-  async def test_luna_sends_no_cache_points_no_temperature_no_extra_fields(self):
-    """GPT-5.6 over Converse rejects explicit cache points and `temperature`
-    (verified live 2026-09-15); it caches implicitly and reports the reads."""
+  async def test_economy_runs_haiku_5_5_adaptive_with_effort(self):
     client, mock_bedrock = _make_ai_client()
     from robosystems.operations.operators.ai_client import AIMessage
+
+    mock_bedrock.converse.return_value = _text_response("hi")
+    await client.create_message(
+      messages=[AIMessage(role="user", content="hi")],
+      model=ModelProfile.ECONOMY,
+      temperature=0.3,
+      effort="low",
+    )
+    request = mock_bedrock.converse.call_args.kwargs
+    assert request["modelId"] == "us.anthropic.claude-haiku-5-5"
+    assert request["inferenceConfig"] == {"maxTokens": 4000}
+    assert request["additionalModelRequestFields"] == {
+      "thinking": {"type": "adaptive"},
+      "output_config": {"effort": "low"},
+    }
+
+  @pytest.mark.unit
+  async def test_row_without_cache_points_sends_none(self, monkeypatch):
+    """A model that caches implicitly gets no cachePoint blocks, and its
+    cache reads still reach the meter through usage."""
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    monkeypatch.setitem(
+      OperatorConfig.MODEL_REGISTRY,
+      OperatorModel.HAIKU_5_5,
+      replace(
+        OperatorConfig.MODEL_REGISTRY[OperatorModel.HAIKU_5_5],
+        cache_points=False,
+        additional_request_fields={},
+        supports_effort=False,
+      ),
+    )
 
     mock_bedrock.converse.return_value = _text_response(
       "42",
@@ -621,7 +652,7 @@ class TestAIClientCreateMessage:
       cache_conversation=True,
     )
     request = mock_bedrock.converse.call_args.kwargs
-    assert request["modelId"] == "us.openai.gpt-5.6-luna"
+    assert request["modelId"] == "us.anthropic.claude-haiku-5-5"
     assert request["system"] == [{"text": "s" * 10}]
     assert request["messages"][-1]["content"] == [{"text": "hi"}]
     assert request["inferenceConfig"] == {"maxTokens": 4000}
@@ -689,7 +720,7 @@ class TestAIClientCreateMessage:
     result = await client.create_message(
       messages=[AIMessage(role="user", content="hi")], operator_type="financial"
     )
-    assert result.model == "us.openai.gpt-5.6-luna"
+    assert result.model == "us.anthropic.claude-haiku-5-5"
 
   @pytest.mark.unit
   async def test_max_output_tokens_clamps_the_request(self, monkeypatch):
