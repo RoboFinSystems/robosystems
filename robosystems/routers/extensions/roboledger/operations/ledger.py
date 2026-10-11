@@ -314,7 +314,14 @@ update_event_block_op = _registrar.register(
       "line with no account chosen and no matching rule is refused. Errors "
       "from the handler (validation, element resolution, closed period, "
       "unbalanced lines) surface as 422 here so the inbox UI can display "
-      "the failure reason without retry."
+      "the failure reason without retry. A bank line's flow is a second "
+      "classification beside its account, overriding the account's default "
+      "flow on the cash flow and equity statements: patch "
+      "`classified_flow_qname` (or `flow_qname` on each "
+      "`classified_allocations` part) with an rs-gaap flow concept such as "
+      "`rs-gaap:ProceedsFromIssuanceOfLongTermDebt`. On a line that has already posted, "
+      "this re-tags its lines in place, in a closed month too, since no "
+      "balance moves; an empty string clears it."
     ),
     command=cmd_update_event_block,
     request_model=UpdateEventBlockRequest,

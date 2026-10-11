@@ -15,11 +15,11 @@ tenant's DSL rules and refuses to commit when none matches.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
@@ -29,6 +29,7 @@ from robosystems.models.api.extensions.journal_entries import (
 )
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
+from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.operations.event_block.engine import (
   apply_handler,
   posting_date_for_event,
@@ -69,6 +70,14 @@ class BankEventNotClassifiedError(HandlerMetadataValidationError):
 class BankAllocation(BaseModel):
   element_id: str = Field(..., min_length=1)
   amount: int = Field(..., gt=0, description="Cents; shares the line's direction.")
+  flow_qname: str | None = Field(
+    None,
+    description=(
+      "The flow concept this part is, when it is not the account's default "
+      "(proceeds from a note, a capital contribution): it tags the part's "
+      "lines for the cash flow and equity statements."
+    ),
+  )
 
 
 class BankFeedMetadata(BaseModel):
@@ -78,6 +87,8 @@ class BankFeedMetadata(BaseModel):
 
   classified_element_id: str | None = None
   classified_allocations: list[BankAllocation] | None = None
+  # The flow a single-account line is, overriding the account's default.
+  classified_flow_qname: str | None = None
   accept_suggestion: bool = False
   suggested_element_id: str | None = None
   suggested_account_name: str | None = None
@@ -114,7 +125,13 @@ def contra_allocations(
     element_id = metadata.suggested_element_id
   if not element_id:
     return None
-  return [BankAllocation(element_id=element_id, amount=magnitude)]
+  return [
+    BankAllocation(
+      element_id=element_id,
+      amount=magnitude,
+      flow_qname=metadata.classified_flow_qname or None,
+    )
+  ]
 
 
 def unclassified_reason(metadata: BankFeedMetadata) -> str:
@@ -193,20 +210,38 @@ def plan_lines(
     )
 
   money_in = amount > 0
-  bank_line = JournalEntryLineItemInput(
-    element_id=resource_element_id,
-    debit_amount=magnitude if money_in else 0,
-    credit_amount=0 if money_in else magnitude,
-  )
   contra_lines = [
     JournalEntryLineItemInput(
       element_id=allocation.element_id,
       debit_amount=0 if money_in else allocation.amount,
       credit_amount=allocation.amount if money_in else 0,
+      metadata=_flow_tag(allocation.flow_qname),
     )
     for allocation in contras
   ]
-  return [bank_line, *contra_lines] if money_in else [*contra_lines, bank_line]
+  # The cash flow reads the flow off the cash line, so a tagged part gets a
+  # cash line of its own; untagged, the bank leg stays one line.
+  bank_parts = (
+    [(a.amount, a.flow_qname) for a in contras]
+    if any(a.flow_qname for a in contras)
+    else [(magnitude, None)]
+  )
+  bank_lines = [
+    JournalEntryLineItemInput(
+      element_id=resource_element_id,
+      debit_amount=part if money_in else 0,
+      credit_amount=0 if money_in else part,
+      metadata=_flow_tag(flow),
+    )
+    for part, flow in bank_parts
+  ]
+  return [*bank_lines, *contra_lines] if money_in else [*contra_lines, *bank_lines]
+
+
+def _flow_tag(flow_qname: str | None) -> dict[str, Any] | None:
+  # `transaction_description_code` is the key journal entries resolve into
+  # the line's `flow_element_id`.
+  return {"transaction_description_code": flow_qname} if flow_qname else None
 
 
 def _journal_metadata(
@@ -436,6 +471,156 @@ def validate_classification(event: Event, metadata: BankFeedMetadata) -> None:
       f"Bank event {event.id} cannot be marked classified: "
       f"{unclassified_reason(metadata)}"
     )
+
+
+FLOW_KEYS = ("classified_flow_qname", "classified_allocations")
+
+
+def _flow_qnames(metadata: BankFeedMetadata) -> set[str]:
+  qnames = {a.flow_qname for a in metadata.classified_allocations or [] if a.flow_qname}
+  if metadata.classified_flow_qname:
+    qnames.add(metadata.classified_flow_qname)
+  return qnames
+
+
+def resolve_flows(session: Session, qnames: set[str]) -> dict[str, str]:
+  """``{qname: element_id}`` for flow concepts. Raises when one names no
+  element, or one that is not a flow (no ``activityType`` trait): an
+  unresolved tag would silently leave the line on its default flow."""
+  if not qnames:
+    return {}
+  rows = session.execute(
+    text(
+      """
+      SELECT e.qname, e.id,
+             EXISTS (
+               SELECT 1 FROM element_traits et
+               JOIN traits t ON t.id = et.trait_id
+               WHERE et.element_id = e.id AND t.category = 'activityType'
+             ) AS is_flow
+      FROM elements e
+      WHERE e.qname = ANY(:qnames)
+      """
+    ),
+    {"qnames": sorted(qnames)},
+  ).all()
+  found = {
+    str(qname): (str(element_id), bool(is_flow)) for qname, element_id, is_flow in rows
+  }
+  missing = sorted(q for q in qnames if q not in found)
+  if missing:
+    raise HandlerMetadataValidationError(
+      f"No flow concept named {', '.join(missing)}. Use an rs-gaap flow "
+      "qname such as rs-gaap:ProceedsFromIssuanceOfLongTermDebt."
+    )
+  not_flows = sorted(q for q, (_id, is_flow) in found.items() if not is_flow)
+  if not_flows:
+    raise HandlerMetadataValidationError(
+      f"{', '.join(not_flows)} is not a flow concept (it has no operating, "
+      "investing or financing activity), so it cannot classify a flow."
+    )
+  return {qname: element_id for qname, (element_id, _f) in found.items()}
+
+
+def _without_flows(metadata: dict[str, Any]) -> tuple[Any, ...]:
+  allocations = [
+    (a.get("element_id"), a.get("amount"))
+    for a in metadata.get("classified_allocations") or []
+  ]
+  return (metadata.get("classified_element_id"), tuple(allocations))
+
+
+def apply_flow_patch(
+  session: Session, event: Event, before: dict[str, Any], created_by: str
+) -> None:
+  """Validate a bank line's flows and, once it has posted, re-tag its lines.
+
+  A flow is a second classification beside the account: it overrides the
+  account's default flow on the cash flow and equity statements. Changing
+  it moves no balance, so a posted line is re-tagged in place, closed month
+  or not, and the change is recorded on the event. Changing the account
+  itself on a posted line is refused here: that is a reversal.
+  """
+  metadata = BankFeedMetadata.model_validate(dict(event.metadata_ or {}))
+  flows = resolve_flows(session, _flow_qnames(metadata))
+  entries = (
+    session.execute(
+      select(Entry).where(
+        Entry.triggered_by_event_id == event.id,
+        Entry.reversal_of.is_(None),
+        Entry.status.in_(("draft", "posted", "shadowed")),
+      )
+    )
+    .scalars()
+    .all()
+  )
+  if not entries:
+    return
+  if _without_flows(dict(event.metadata_ or {})) != _without_flows(before):
+    raise HandlerMetadataValidationError(
+      f"Bank event {event.id} has posted, so only its flows can change here; "
+      "reverse the entry to change the account or the split."
+    )
+  contras = contra_allocations(
+    metadata, amount=source_amount(metadata, event.amount) or 0
+  )
+  if contras is None:
+    return
+  by_account: dict[str, str | None] = {}
+  for allocation in contras:
+    flow = allocation.flow_qname or None
+    if by_account.get(allocation.element_id, flow) != flow:
+      raise HandlerMetadataValidationError(
+        "Two parts of this split go to the same account with different flows; "
+        "give them one flow."
+      )
+    by_account[allocation.element_id] = flow
+
+  retagged: list[str] = []
+  for entry in entries:
+    lines = (
+      session.execute(
+        select(LineItem)
+        .where(LineItem.entry_id == entry.id)
+        .order_by(LineItem.line_order, LineItem.id)
+      )
+      .scalars()
+      .all()
+    )
+    cash = [li for li in lines if li.element_id == event.resource_element_id]
+    for line in lines:
+      if line.element_id != event.resource_element_id:
+        flow = by_account.get(str(line.element_id))
+        line.flow_element_id = flows.get(flow) if flow else None
+    if len(cash) == len(contras) > 1:
+      for line, allocation in zip(cash, contras, strict=True):
+        line.flow_element_id = (
+          flows.get(allocation.flow_qname) if allocation.flow_qname else None
+        )
+    else:
+      distinct = {a.flow_qname or None for a in contras}
+      if len(distinct) > 1:
+        raise HandlerMetadataValidationError(
+          "This split's parts have different flows, but its bank leg posted "
+          "as one line; give every part the same flow, or reverse the entry "
+          "and enter it again."
+        )
+      (flow,) = distinct
+      for line in cash:
+        line.flow_element_id = flows.get(flow) if flow else None
+    retagged.append(str(entry.id))
+
+  history = list((event.metadata_ or {}).get("flow_retags") or [])
+  history.append(
+    {
+      "at": datetime.now(UTC).isoformat(),
+      "by": created_by,
+      "entry_ids": retagged,
+      "flows": sorted({a.flow_qname for a in contras if a.flow_qname}),
+    }
+  )
+  event.metadata_ = {**(event.metadata_ or {}), "flow_retags": history}
+  session.flush()
 
 
 def _handler(event_type: str, display_name: str) -> EventBlockPythonHandler:
