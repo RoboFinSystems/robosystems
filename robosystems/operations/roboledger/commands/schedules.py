@@ -45,6 +45,7 @@ from robosystems.operations.roboledger.entry_status import (
 )
 from robosystems.operations.roboledger.schedules import ScheduleService
 from robosystems.operations.roboledger.schedules.service import (
+  BEFORE_CALENDAR,
   EntryTemplate,
   ScheduleMetadata,
 )
@@ -54,6 +55,35 @@ class ScheduleNotFoundError(LookupError):
   def __init__(self, structure_id: str) -> None:
     super().__init__(f"Schedule not found: {structure_id}")
     self.structure_id = structure_id
+
+
+def _calendar_bounds(
+  session: Session, entity_id: str
+) -> tuple[date | None, date | None]:
+  """The end of the entity's ``closed_through_period`` and the start of its
+  first fiscal period; each None when there is none."""
+  from robosystems.models.extensions.roboledger.fiscal_calendar import (
+    FiscalCalendar,
+  )
+  from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
+  from robosystems.operations.roboledger.fiscal_calendar import (
+    period_date_range,
+  )
+
+  cal = (
+    session.query(FiscalCalendar).filter(FiscalCalendar.entity_id == entity_id).first()
+  )
+  closed_end = (
+    period_date_range(str(cal.closed_through_period))[1]
+    if cal is not None and cal.closed_through_period
+    else None
+  )
+  first_start = (
+    session.query(func.min(FiscalPeriod.start_date))
+    .filter(FiscalPeriod.entity_id == entity_id)
+    .scalar()
+  )
+  return closed_end, first_start
 
 
 def _calendar_history_end(session: Session, entity_id: str) -> date | None:
@@ -66,36 +96,57 @@ def _calendar_history_end(session: Session, entity_id: str) -> date | None:
   """
   from datetime import timedelta
 
-  from robosystems.models.extensions.roboledger.fiscal_calendar import (
-    FiscalCalendar,
-  )
-  from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
-  from robosystems.operations.roboledger.fiscal_calendar import (
-    period_date_range,
-  )
-
-  ends: list[date] = []
-  cal = (
-    session.query(FiscalCalendar).filter(FiscalCalendar.entity_id == entity_id).first()
-  )
-  if cal is not None and cal.closed_through_period:
-    ends.append(period_date_range(str(cal.closed_through_period))[1])
-  first_start = (
-    session.query(func.min(FiscalPeriod.start_date))
-    .filter(FiscalPeriod.entity_id == entity_id)
-    .scalar()
-  )
+  closed_end, first_start = _calendar_bounds(session, entity_id)
+  ends = [d for d in (closed_end,) if d is not None]
   if first_start is not None:
     ends.append(first_start - timedelta(days=1))
   return max(ends) if ends else None
 
 
-def retire_schedule_history(session: Session, entity_id: str, *, before: date) -> int:
+def _calendar_open_start(session: Session, entity_id: str) -> date | None:
+  """The first day of the entity's calendar while none of it has closed, the
+  only time its start can move; None otherwise."""
+  closed_end, first_start = _calendar_bounds(session, entity_id)
+  return first_start if closed_end is None else None
+
+
+def _schedule_drafts_before(
+  session: Session, entity_id: str, before: date
+) -> list[str]:
+  """The entity's schedule-written draft entries dated before ``before``, and
+  the draft auto-reversals of them (dated the month after, so possibly not)."""
+  return list(
+    session.execute(
+      text(
+        """
+        WITH early AS (
+          SELECT e.id FROM entries e
+          JOIN structures s ON s.id = e.source_structure_id
+          WHERE s.block_type = 'schedule'
+            AND e.entity_id = :entity_id
+            AND e.status = 'draft'
+            AND e.posting_date < :before
+        )
+        SELECT id FROM early
+        UNION
+        SELECT id FROM entries
+        WHERE status = 'draft' AND reversal_of IN (SELECT id FROM early)
+        """
+      ),
+      {"entity_id": entity_id, "before": before},
+    ).scalars()
+  )
+
+
+def retire_schedule_history(
+  session: Session, entity_id: str, *, before: date, void_reason: str
+) -> int:
   """Retire the entity's schedule months ending before ``before`` as history,
   as `create_schedule` does for months on or before the calendar's history
-  end: pending obligations voided (``void_reason='historical'``), facts
-  stamped ``historical``. For a calendar set up after its schedules. Returns
-  the obligations voided.
+  end, for a calendar set up after its schedules: obligations still to post
+  (``pending``, or ``classified`` by a sweep that ran with no calendar)
+  voided and marked with ``void_reason``, the drafts written for them
+  deleted, facts stamped ``historical``. Returns the obligations voided.
   """
   schedule_ids = {
     sid
@@ -103,7 +154,7 @@ def retire_schedule_history(session: Session, entity_id: str, *, before: date) -
     .filter(
       Event.entity_id == entity_id,
       Event.event_type == "schedule_entry_due",
-      Event.status == "pending",
+      Event.status.in_(("pending", "classified")),
       Event.metadata_["period_end"].astext < before.isoformat(),
     )
     .distinct()
@@ -119,8 +170,21 @@ def retire_schedule_history(session: Session, entity_id: str, *, before: date) -
     voided += service.void_pending_obligations(
       session,
       structure=structure,
-      void_reason="historical",
+      void_reason=void_reason,
       period_end_before=before,
+      include_classified=True,
+      mark_obligations=True,
+    )
+  drafts = _schedule_drafts_before(session, entity_id, before)
+  if drafts:
+    ids = bindparam("ids", expanding=True)
+    session.execute(
+      text("DELETE FROM line_items WHERE entry_id IN :ids").bindparams(ids),
+      {"ids": drafts},
+    )
+    session.execute(
+      text("DELETE FROM entries WHERE id IN :ids").bindparams(ids),
+      {"ids": drafts},
     )
   session.execute(
     text(
@@ -138,6 +202,101 @@ def retire_schedule_history(session: Session, entity_id: str, *, before: date) -
     {"entity_id": entity_id, "before": before},
   )
   return voided
+
+
+def restore_schedule_history(session: Session, entity_id: str, *, since: date) -> int:
+  """Give back the schedule months a calendar's start had retired, once it
+  moves earlier to ``since``: each obligation voided as ``before_calendar``
+  and ending on or after it returns to ``pending``, and its month's facts to
+  ``in_scope``, so the close drafts them. Obligations voided for any other
+  reason (a user's void, booked history, a rebuild, a deletion, a
+  termination's truncated months) stay as they are. Returns the count.
+  """
+  rows = session.execute(
+    text(
+      """
+      SELECT ob.id, ob.obligated_by_event_id AS originator_id,
+             ob.metadata->>'schedule_id' AS structure_id,
+             ob.metadata->>'period_start' AS period_start,
+             ob.metadata->>'period_end' AS period_end
+      FROM events ob
+      JOIN events origin
+        ON origin.id = ob.obligated_by_event_id AND origin.status = 'committed'
+      JOIN structures s ON s.id = ob.metadata->>'schedule_id'
+      WHERE ob.entity_id = :entity_id
+        AND ob.event_type = 'schedule_entry_due'
+        AND ob.status = 'voided'
+        AND ob.replaced_by_event_id IS NULL
+        AND ob.metadata->>'void_reason' = :reason
+        AND ob.metadata->>'period_end' >= :since
+        AND EXISTS (
+          SELECT 1 FROM facts f
+          WHERE f.structure_id = s.id
+            AND f.period_type = 'duration'
+            AND f.period_end = (ob.metadata->>'period_end')::date
+        )
+      ORDER BY ob.id
+      FOR UPDATE OF ob
+      """
+    ),
+    {"entity_id": entity_id, "reason": BEFORE_CALENDAR, "since": since.isoformat()},
+  ).all()
+  if not rows:
+    return 0
+
+  session.execute(
+    text(
+      "UPDATE events SET status = 'pending', metadata = metadata - 'void_reason' "
+      "WHERE id IN :ids AND status = 'voided'"
+    ).bindparams(bindparam("ids", expanding=True)),
+    {"ids": [row.id for row in rows]},
+  )
+
+  by_structure: dict[str, list] = {}
+  by_originator: dict[str, int] = {}
+  for row in rows:
+    by_structure.setdefault(row.structure_id, []).append(row)
+    by_originator[row.originator_id] = by_originator.get(row.originator_id, 0) + 1
+  for structure_id, months in by_structure.items():
+    # A month's duration and month-end facts end on its last day; the
+    # schedule's opening instants sit on its first month's first day.
+    session.execute(
+      text(
+        """
+        UPDATE facts SET fact_scope = 'in_scope'
+        WHERE fact_scope = 'historical'
+          AND structure_id = :sid
+          AND (
+            period_end IN :ends
+            OR (period_type = 'instant' AND period_end IN :starts)
+          )
+        """
+      ).bindparams(
+        bindparam("ends", expanding=True), bindparam("starts", expanding=True)
+      ),
+      {
+        "sid": structure_id,
+        "ends": [date.fromisoformat(m.period_end) for m in months],
+        "starts": [date.fromisoformat(m.period_start) for m in months],
+      },
+    )
+  now = datetime.now(UTC).isoformat()
+  for originator_id, restored in by_originator.items():
+    originator = session.get(Event, originator_id)
+    if originator is None:
+      continue
+    meta = dict(originator.metadata_ or {})
+    meta["pending_event_count"] = int(meta.get("pending_event_count", 0)) + restored
+    meta.setdefault("void_history", []).append(
+      {
+        "restored_count": restored,
+        "restore_reason": "calendar_start_moved_earlier",
+        "restored_at": now,
+      }
+    )
+    originator.metadata_ = meta
+    flag_modified(originator, "metadata_")
+  return len(rows)
 
 
 def reinstate_reopened_schedule_scopes(session: Session, entity_id: str) -> int:
@@ -244,6 +403,8 @@ def create_schedule(
 
   structure = service.create_schedule(
     session,
+    calendar_start=_calendar_open_start(session, entity_id),
+    booked_through=body.closed_through,
     name=body.name,
     taxonomy_id=body.taxonomy_id,
     element_ids=body.element_ids,
@@ -840,6 +1001,29 @@ def _reconstruct_schedule_definition(
   )
 
 
+def _before_calendar_note(session: Session, structure_id: str) -> str:
+  """For a refused rebuild: where the schedule's months before the calendar
+  went, since a rebuild is not the way back for them. Empty when it has none."""
+  first, count = session.execute(
+    select(func.min(Event.metadata_["period_end"].astext), func.count(Event.id)).where(
+      Event.event_type == "schedule_entry_due",
+      Event.status == "voided",
+      Event.metadata_["schedule_id"].astext == structure_id,
+      Event.metadata_["void_reason"].astext == BEFORE_CALENDAR,
+    )
+  ).one()
+  if not count:
+    return ""
+  return (
+    f" Its {count} month{'s' if count != 1 else ''} from {first[:7]}, before "
+    "the calendar's first month, "
+    "are retired, not lost: moving the calendar's start earlier "
+    "(change-calendar-start) returns them to post, which only a calendar with "
+    "no month closed allows; once one has, book them with a journal entry "
+    "instead."
+  )
+
+
 def rebuild_schedule(
   session: Session,
   body: RebuildScheduleRequest,
@@ -876,13 +1060,15 @@ def rebuild_schedule(
       "reopened and the entry voided; reopening alone leaves it posted. A "
       "shadowed entry is a shadow close's record and is never voided: "
       "terminate the schedule after the last shadow-closed period instead."
+      + _before_calendar_note(session, structure.id)
     )
 
   old_schedule_created_event_id = (structure.metadata_ or {}).get(
     "schedule_created_event_id"
   )
 
-  closed_through = _calendar_history_end(session, owner_entity_id(session, structure))
+  owner = owner_entity_id(session, structure)
+  closed_through = _calendar_history_end(session, owner)
 
   service = ScheduleService()
 
@@ -940,6 +1126,7 @@ def rebuild_schedule(
     schedule_metadata=schedule_metadata,
     created_by=created_by,
     closed_through=closed_through,
+    calendar_start=_calendar_open_start(session, owner),
     existing_structure=structure,
     source_transaction_id=source_transaction_id,
   )

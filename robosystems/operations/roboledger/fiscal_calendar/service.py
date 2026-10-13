@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -202,10 +202,12 @@ def _activity_before(
   Events still to post are ``pending``, ``captured`` and ``classified``.
   ``at_opening`` is the count made when the calendar is first set up, where
   three things differ from moving an existing start: posted entries before
-  it are the books' history, not activity; a schedule's pending obligations
-  are retired as history (`retire_schedule_history`); and a synced ledger's
-  mirror lines post on that ledger's next sync, never through a close.
+  it are the books' history, not activity; a schedule's obligations still to
+  post, and the drafts a sweep wrote for them, are retired as history
+  (`retire_schedule_history`); and a synced ledger's mirror lines post on
+  that ledger's next sync, never through a close.
   """
+  from robosystems.models.extensions import Structure
   from robosystems.models.extensions.roboledger.entry import Entry
   from robosystems.operations.roboledger.commands.connections import (
     SEVERABLE_SOURCES,
@@ -214,6 +216,14 @@ def _activity_before(
   entry_filters = [Entry.entity_id == entity_id, Entry.posting_date < start]
   if at_opening:
     entry_filters.append(Entry.status == "draft")
+    entry_filters.append(
+      or_(
+        Entry.source_structure_id.is_(None),
+        Entry.source_structure_id.notin_(
+          select(Structure.id).where(Structure.block_type == "schedule")
+        ),
+      )
+    )
   entries, earliest_entry = (
     session.query(func.count(Entry.id), func.min(Entry.posting_date))
     .filter(*entry_filters)
@@ -228,7 +238,10 @@ def _activity_before(
   ]
   if at_opening:
     event_filters.append(
-      ~((Event.event_type == "schedule_entry_due") & (Event.status == "pending"))
+      ~(
+        (Event.event_type == "schedule_entry_due")
+        & Event.status.in_(("pending", "classified"))
+      )
     )
     event_filters.append(
       func.coalesce(Event.source, "").notin_(tuple(SEVERABLE_SOURCES))
@@ -476,6 +489,9 @@ class FiscalCalendarService:
     from robosystems.operations.roboledger.commands.schedules import (
       retire_schedule_history,
     )
+    from robosystems.operations.roboledger.schedules.service import (
+      BEFORE_CALENDAR,
+    )
 
     entity_id = _scope(session, entity_id)
     start, _ = period_date_range(first_open_period)
@@ -484,12 +500,21 @@ class FiscalCalendarService:
     )
     if earliest is not None:
       raise CalendarOpeningBlockedError(first_open_period, entries, unposted, earliest)
+    calendar = self.get(session, graph_id, entity_id=entity_id)
+    # Months a closed_through covers are booked; the rest of what precedes
+    # the first open month is only outside the calendar, until it moves.
+    booked = calendar is not None and calendar.closed_through_period
     with bounded_lock_wait(
       session,
       "A schedule's obligations are being written by another process. Retry "
       "in a moment.",
     ):
-      return retire_schedule_history(session, entity_id, before=start)
+      return retire_schedule_history(
+        session,
+        entity_id,
+        before=start,
+        void_reason="historical" if booked else BEFORE_CALENDAR,
+      )
 
   def change_start(
     self,
@@ -550,7 +575,7 @@ class FiscalCalendarService:
     if earliest == first_open_period:
       return calendar, 0, 0
 
-    created = removed = 0
+    created = removed = restored = 0
     if earliest is None or first_open_period < earliest:
       created = self.ensure_fiscal_periods(
         session,
@@ -559,6 +584,20 @@ class FiscalCalendarService:
         end_period=current,
         entity_id=entity_id,
       )
+      # The schedule months the old start retired are inside the calendar now.
+      from robosystems.operations.locking import bounded_lock_wait
+      from robosystems.operations.roboledger.commands.schedules import (
+        restore_schedule_history,
+      )
+
+      with bounded_lock_wait(
+        session,
+        "A schedule's obligations are being written by another process. Retry "
+        "in a moment.",
+      ):
+        restored = restore_schedule_history(
+          session, entity_id, since=period_date_range(first_open_period)[0]
+        )
     else:
       # Re-fenced from the locked read: a no-op unless the start moved
       # earlier in between.
@@ -591,7 +630,8 @@ class FiscalCalendarService:
     logger.info(
       f"Moved fiscal calendar start for graph {graph_id} entity {entity_id} "
       f"from {earliest} to {first_open_period} "
-      f"({created} periods created, {removed} removed)"
+      f"({created} periods created, {removed} removed, "
+      f"{restored} schedule obligations restored)"
     )
     return calendar, created, removed
 

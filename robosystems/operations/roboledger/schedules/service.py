@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 
-from sqlalchemy import bindparam, select, text, update
+from sqlalchemy import bindparam, func, select, text, update
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
@@ -53,6 +53,10 @@ from robosystems.utils.ulid import generate_prefixed_ulid
 # arcrole. A cm:Debit / cm:Credit ─has-part→ CoA-element arc declares that
 # element as the debit / credit leg of a schedule's posting template.
 CM_HAS_PART_ARCROLE = "https://github.com/seattlemethod/universal/cm/arcrole/has-part"
+
+# The ``void_reason`` of an obligation whose month precedes a calendar with
+# nothing closed: retired only while the calendar's start is after it.
+BEFORE_CALENDAR = "before_calendar"
 
 
 @dataclass
@@ -291,6 +295,8 @@ class ScheduleService:
     schedule_metadata: ScheduleMetadata | None = None,
     created_by: str,
     closed_through: date | None = None,
+    calendar_start: date | None = None,
+    booked_through: date | None = None,
     source_transaction_id: str | None = None,
     existing_structure: Structure | None = None,
     entity_id: str | None = None,
@@ -308,6 +314,12 @@ class ScheduleService:
     ``period_end <= closed_through`` are tagged ``fact_scope='historical'``
     (already reflected in opening balances, ignored by the close workflow),
     the rest ``in_scope``. ``None`` makes every fact in_scope.
+
+    ``calendar_start`` is the first day of a calendar no month of which has
+    closed. A historical month ending before it, and after ``booked_through``
+    (months the caller says are already booked), is history only because the
+    calendar does not reach it: its obligation is voided with
+    ``void_reason='before_calendar'``, which moving the start earlier undoes.
 
     ``existing_structure`` regenerates facts + the obligation chain **in
     place** on that Structure instead of creating a new one: the structure,
@@ -631,6 +643,8 @@ class ScheduleService:
         monthly_amount=monthly_amount,
         periods=periods,
         closed_through=closed_through,
+        calendar_start=calendar_start,
+        booked_through=booked_through,
         created_by=created_by,
         entity_id=entity_id,
       )
@@ -666,6 +680,8 @@ class ScheduleService:
     created_by: str,
     entity_id: str,
     closed_through: date | None = None,
+    calendar_start: date | None = None,
+    booked_through: date | None = None,
   ) -> tuple[str, int]:
     """Emit `schedule_created` + one `schedule_entry_due` per period.
 
@@ -721,7 +737,14 @@ class ScheduleService:
       if is_historical:
         # Kept as an audit record; the close gate and promotion sensor both
         # filter on status='pending'.
-        event_metadata["void_reason"] = "historical"
+        before_calendar = (
+          calendar_start is not None
+          and p_end < calendar_start
+          and (booked_through is None or p_end > booked_through)
+        )
+        event_metadata["void_reason"] = (
+          BEFORE_CALENDAR if before_calendar else "historical"
+        )
       session.add(
         Event(
           id=generate_prefixed_ulid("evt"),
@@ -773,6 +796,7 @@ class ScheduleService:
     period_start_after: date | None = None,
     period_end_before: date | None = None,
     include_classified: bool = False,
+    mark_obligations: bool = False,
   ) -> int:
     """Void a schedule's pending schedule_entry_due events; returns the count.
 
@@ -784,7 +808,9 @@ class ScheduleService:
       strictly after it) and ``include_classified=True`` to retire
       matured-but-undrafted strays past the cutoff.
     - A calendar set up after the schedule passes ``period_end_before`` (only
-      obligations ending strictly before it), its first open month's start.
+      obligations ending strictly before it), its first open month's start,
+      and ``mark_obligations=True``: each voided row carries ``void_reason``
+      in its own metadata, so the months can be told apart and given back.
 
     Also decrements the originator's ``metadata.pending_event_count``.
     """
@@ -830,6 +856,10 @@ class ScheduleService:
     update_values: dict[str, object] = {"status": "voided"}
     if voided_by_event_id is not None:
       update_values["replaced_by_event_id"] = voided_by_event_id
+    if mark_obligations:
+      update_values["metadata_"] = Event.metadata_.op("||")(
+        func.jsonb_build_object("void_reason", void_reason)
+      )
 
     result = session.execute(
       update(Event)

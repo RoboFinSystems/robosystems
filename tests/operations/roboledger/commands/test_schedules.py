@@ -777,6 +777,10 @@ def test_rebuild_schedule_guards_posted_entries() -> None:
 
   with (
     patch(
+      "robosystems.operations.roboledger.commands.schedules._before_calendar_note",
+      return_value="",
+    ),
+    patch(
       "robosystems.operations.roboledger.commands.schedules."
       "ScheduleService.void_pending_obligations",
       return_value=0,

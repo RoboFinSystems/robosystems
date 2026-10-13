@@ -35,6 +35,7 @@ from robosystems.models.api.extensions.journal_entries import (
 from robosystems.models.api.extensions.schedules import (
   CreateScheduleRequest,
   EntryTemplateRequest,
+  RebuildScheduleRequest,
 )
 from robosystems.models.extensions.element import Element
 from robosystems.models.extensions.roboledger.entry import Entry
@@ -56,7 +57,10 @@ from robosystems.operations.roboledger.commands.fiscal_calendar import (
 from robosystems.operations.roboledger.commands.journal_entries import (
   create_journal_entry,
 )
-from robosystems.operations.roboledger.commands.schedules import create_schedule
+from robosystems.operations.roboledger.commands.schedules import (
+  create_schedule,
+  rebuild_schedule,
+)
 from robosystems.operations.roboledger.fiscal_calendar import FiscalCalendarService
 from robosystems.operations.roboledger.fiscal_calendar.service import (
   CalendarStartBlockedError,
@@ -476,3 +480,210 @@ def test_an_event_dated_inside_that_posts_before_the_calendar_is_refused_by_both
   assert not preview_event_block(ledger.session, body, "usr").would_succeed
   with pytest.raises(BeforeCalendarStartError):
     _commit(ledger, body)
+
+
+# ── R2-1: moving the start earlier gives back the months it retired ──────
+
+
+def _promote(ledger: Ledger, *, dispatch: bool = True):
+  result = promote_pending_obligations(
+    ledger.session,
+    ledger.graph_id,
+    as_of=datetime(2026, 10, 2, tzinfo=UTC),
+    dispatch_handlers=dispatch,
+  )
+  ledger.session.commit()
+  assert result.errors == []
+  return result
+
+
+def _drafted(session: Session, structure_id: str) -> list[date]:
+  return sorted(
+    d
+    for (d,) in session.query(Entry.posting_date).filter(
+      Entry.source_structure_id == structure_id
+    )
+  )
+
+
+def _scopes(session: Session, structure_id: str) -> dict[date, str]:
+  return {
+    fact.period_end: fact.fact_scope
+    for fact in session.query(Fact).filter(
+      Fact.structure_id == structure_id, Fact.period_start.isnot(None)
+    )
+  }
+
+
+def _move_start(ledger: Ledger, first_open_period: str) -> None:
+  FiscalCalendarService().change_start(
+    ledger.session, ledger.graph_id, first_open_period, actor_id="usr_1"
+  )
+  ledger.session.commit()
+
+
+def _void(ledger: Ledger, structure_id: str, month: str) -> None:
+  (obligation,) = [
+    row
+    for row in ledger.session.query(Event).filter(
+      Event.event_type == "schedule_entry_due",
+      Event.metadata_["schedule_id"].astext == structure_id,
+    )
+    if row.metadata_["period_end"].startswith(month)
+  ]
+  update_event_block(
+    ledger.session,
+    UpdateEventBlockRequest(event_id=str(obligation.id), transition_to="voided"),
+    "usr",
+    graph_id=ledger.graph_id,
+  )
+  ledger.session.commit()
+
+
+def test_moving_the_start_earlier_returns_months_setup_retired(ledger):
+  structure_id = _schedule(ledger.session, date(2026, 6, 1))
+  ledger.session.commit()
+  _void(ledger, structure_id, "2026-07")  # the user's own void
+  ledger.set_up(earliest_data_period="2026-09")
+  assert _obligations(ledger.session, structure_id)["2026-08"] == "voided"
+
+  _move_start(ledger, "2026-06")
+
+  obligations = _obligations(ledger.session, structure_id)
+  assert [obligations[m] for m in ("2026-06", "2026-07", "2026-08")] == [
+    "pending",
+    "voided",
+    "pending",
+  ]
+  scopes = _scopes(ledger.session, structure_id)
+  assert scopes[date(2026, 6, 30)] == scopes[date(2026, 8, 31)] == "in_scope"
+  assert scopes[date(2026, 7, 31)] == "historical"
+  # The close drafts what the moved calendar now holds.
+  _promote(ledger)
+  assert _drafted(ledger.session, structure_id) == [
+    date(2026, 6, 30),
+    date(2026, 8, 31),
+    date(2026, 9, 30),
+  ]
+  assert "pending_obligations" not in _first_close_gate(ledger, "2026-06").blockers
+
+
+def test_moving_the_start_earlier_returns_months_a_new_schedule_retired(ledger):
+  ledger.set_up(earliest_data_period="2026-09")
+  structure_id = _schedule(ledger.session, date(2026, 6, 1))
+  ledger.session.commit()
+  assert _obligations(ledger.session, structure_id)["2026-06"] == "voided"
+
+  _move_start(ledger, "2026-07")
+
+  obligations = _obligations(ledger.session, structure_id)
+  assert [obligations[m] for m in ("2026-06", "2026-07", "2026-08")] == [
+    "voided",
+    "pending",
+    "pending",
+  ]
+  _promote(ledger)
+  assert _drafted(ledger.session, structure_id) == [
+    date(2026, 7, 31),
+    date(2026, 8, 31),
+    date(2026, 9, 30),
+  ]
+
+
+def test_months_booked_by_an_explicit_closed_through_stay_history(ledger):
+  """A month the caller said is already booked is not "before the calendar":
+  moving the start earlier leaves it voided."""
+  ledger.set_up(earliest_data_period="2026-09")
+  expense, prepaid = _accounts(ledger.session)
+  structure_id = create_schedule(
+    ledger.session,
+    CreateScheduleRequest(
+      name="Booked through June",
+      element_ids=[expense, prepaid],
+      period_start=date(2026, 6, 1),
+      period_end=date(2027, 5, 31),
+      monthly_amount=10_000,
+      entry_template=EntryTemplateRequest(
+        debit_element_id=expense, credit_element_id=prepaid
+      ),
+      closed_through=date(2026, 6, 30),
+    ),
+    created_by="usr",
+  ).structure_id
+  ledger.session.commit()
+
+  _move_start(ledger, "2026-06")
+
+  obligations = _obligations(ledger.session, structure_id)
+  assert [obligations[m] for m in ("2026-06", "2026-07", "2026-08")] == [
+    "voided",
+    "pending",
+    "pending",
+  ]
+
+
+def test_a_rebuild_refused_after_a_close_names_where_the_retired_months_went(ledger):
+  ledger.set_up(earliest_data_period="2026-09")
+  structure_id = _schedule(ledger.session, date(2026, 6, 1))
+  ledger.session.commit()
+  _promote(ledger)
+  ledger.session.execute(
+    text("UPDATE entries SET status = 'posted' WHERE source_structure_id = :sid"),
+    {"sid": structure_id},
+  )
+  ledger.session.commit()
+
+  with pytest.raises(ValueError) as refused:
+    rebuild_schedule(
+      ledger.session, RebuildScheduleRequest(structure_id=structure_id), "usr"
+    )
+  ledger.session.rollback()
+
+  assert "change-calendar-start" in str(refused.value)
+  assert "2026-06" in str(refused.value)
+
+
+# ── R2-2: setup retires a schedule the sweep already touched ─────────────
+
+
+@pytest.mark.parametrize("dispatch", [False, True])
+def test_setup_retires_promoted_obligations_and_their_drafts(ledger, dispatch):
+  structure_id = _schedule(ledger.session, date(2026, 6, 1))
+  ledger.session.commit()
+  _promote(ledger, dispatch=dispatch)  # no calendar yet: the sweep still runs
+  assert _obligations(ledger.session, structure_id)["2026-06"] == "classified"
+
+  ledger.set_up(earliest_data_period="2026-09")
+
+  obligations = _obligations(ledger.session, structure_id)
+  assert [obligations[m] for m in ("2026-06", "2026-07", "2026-08")] == ["voided"] * 3
+  assert obligations["2026-09"] == "classified"
+  assert _drafted(ledger.session, structure_id) == (
+    [date(2026, 9, 30)] if dispatch else []
+  )
+
+  # And they come back with the start.
+  _move_start(ledger, "2026-06")
+  assert _obligations(ledger.session, structure_id)["2026-06"] == "pending"
+  _promote(ledger)
+  assert _drafted(ledger.session, structure_id) == [
+    date(2026, 6, 30),
+    date(2026, 7, 31),
+    date(2026, 8, 31),
+    date(2026, 9, 30),
+  ]
+
+
+def test_setup_still_refuses_on_a_draft_the_schedule_did_not_write(ledger):
+  """Only a schedule's own rows are its history; the refusal names the rest."""
+  structure_id = _schedule(ledger.session, date(2026, 6, 1))
+  _draft(ledger.session, date(2026, 8, 15), _accounts(ledger.session))
+  ledger.session.commit()
+  _promote(ledger)
+
+  with pytest.raises(CalendarStartBlockedError) as refused:
+    ledger.set_up(earliest_data_period="2026-09")
+  ledger.session.rollback()
+
+  assert (refused.value.entries, refused.value.unposted) == (1, 0)
+  assert _obligations(ledger.session, structure_id)["2026-06"] == "classified"
