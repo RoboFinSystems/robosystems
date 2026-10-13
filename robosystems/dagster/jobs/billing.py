@@ -72,7 +72,9 @@ async def _handle_checkout_completed(
     context.log.error(f"Customer not found for subscription: {subscription.id}")
     return
 
-  if payment_status == "paid":
+  # A free first period (a 100%-off code) completes with no payment, and still
+  # opens a Stripe subscription that cancels and tier changes must reach.
+  if payment_status in ("paid", "no_payment_required"):
     from robosystems.models.core.billing import BillingAuditLog, BillingEventType
     from robosystems.models.core.billing.subscription import (
       TERMINAL_SUBSCRIPTION_STATUSES,
@@ -115,7 +117,8 @@ async def _handle_checkout_completed(
         f"subscription {subscription.id}; reopened for provisioning"
       )
 
-    customer.has_payment_method = True
+    if payment_status == "paid":
+      customer.has_payment_method = True
 
     if not customer.stripe_customer_id:
       customer.stripe_customer_id = customer_id
@@ -174,6 +177,24 @@ def _stripe_confirms_reactivation(stripe_subscription_id: str | None, context) -
       f"Ignoring stale reactivation for {stripe_subscription_id}: live state {live}"
     )
   return confirmed
+
+
+def _stripe_still_says(
+  stripe_subscription_id: str | None, status: str, context
+) -> bool:
+  """Whether Stripe's live subscription is still in ``status``: a downgrade
+  redelivered after the payment that cleared it must not be applied."""
+  if not stripe_subscription_id:
+    return False
+  from robosystems.operations.providers.payment_provider import get_payment_provider
+
+  live = get_payment_provider("stripe").get_subscription_state(stripe_subscription_id)
+  if live.get("status") != status:
+    context.log.warning(
+      f"Ignoring stale {status!r} for {stripe_subscription_id}: live state {live}"
+    )
+    return False
+  return True
 
 
 def _extract_stripe_subscription_id(data: dict) -> str | None:
@@ -480,6 +501,12 @@ async def _handle_payment_succeeded(
     },
   )
 
+  if subscription.status == "unpaid" and not subscription.resource_id:
+    # The first invoice failed, then the retry was paid: back to the checkout
+    # state the provisioning claim accepts.
+    subscription.status = "pending_payment"
+    db_session.commit()
+
   if subscription.status in ["pending_payment", "provisioning"]:
     await _trigger_resource_provisioning(subscription, db_session, context)
 
@@ -495,9 +522,26 @@ async def _handle_payment_failed(
   missed ``customer.subscription.updated`` can't leave it ``active`` while
   Stripe duns. ``updated`` alone restores ``active`` after a successful retry.
   """
-  from robosystems.models.core.billing import BillingAuditLog, BillingEventType
+  from robosystems.models.core.billing import (
+    BillingAuditLog,
+    BillingEventType,
+    BillingInvoice,
+  )
 
   subscription = _resolve_subscription(invoice_data, db_session, context)
+
+  # Stripe retries a failure delivery for days: by then the invoice may be paid.
+  invoice = (
+    db_session.query(BillingInvoice)
+    .filter(BillingInvoice.stripe_invoice_id == invoice_data.get("id"))
+    .first()
+  )
+  if invoice is not None and invoice.status in ("paid", "void"):
+    context.log.warning(
+      f"Ignoring payment failure for {invoice_data.get('id')}: invoice is "
+      f"{invoice.status}"
+    )
+    return
 
   if subscription.status in ("pending_payment", "active"):
     subscription.status = (
@@ -782,6 +826,25 @@ async def _apply_subscription_updated(
       f"Ignoring Stripe status {status!r} for terminal subscription "
       f"{subscription.id} ({subscription.status})"
     )
+    db_session.commit()
+    return
+
+  # A checkout becomes active only through the provisioning claim, which
+  # refuses an active row: applied first, the row would never be provisioned.
+  if subscription.status in ("pending_payment", "provisioning") and new_status == (
+    "active"
+  ):
+    context.log.info(
+      f"Leaving checkout {subscription.id} {subscription.status} for provisioning"
+    )
+    db_session.commit()
+    return
+
+  if (
+    subscription.status == "active"
+    and new_status in ("past_due", "unpaid")
+    and not _stripe_still_says(subscription_data.get("id"), status, context)
+  ):
     db_session.commit()
     return
 

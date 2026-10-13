@@ -11,11 +11,15 @@ from stripe import StripeObject
 
 from robosystems.dagster.jobs.billing import (
   _handle_charge_refunded,
+  _handle_checkout_completed,
   _handle_invoice_updated,
+  _handle_payment_failed,
+  _handle_payment_succeeded,
   _handle_subscription_updated,
 )
 from robosystems.models.core import Org, OrgType
 from robosystems.models.core.billing import (
+  BillingCustomer,
   BillingInvoice,
   BillingInvoiceLineItem,
   BillingSubscription,
@@ -172,15 +176,17 @@ class TestChargeRefunded:
 def _subscription(session, status: str, **fields) -> BillingSubscription:
   org = _org(session)
   sub = BillingSubscription(
-    org_id=org.id,
-    resource_type="graph",
-    resource_id=f"kg{uuid.uuid4().hex[:16]}",
-    plan_name="ladybug-standard",
-    base_price_cents=9900,
-    status=status,
-    stripe_subscription_id=f"sub_test_{uuid.uuid4().hex[:10]}",
-    subscription_metadata={},
-    **fields,
+    **{
+      "org_id": org.id,
+      "resource_type": "graph",
+      "resource_id": f"kg{uuid.uuid4().hex[:16]}",
+      "plan_name": "ladybug-standard",
+      "base_price_cents": 9900,
+      "status": status,
+      "stripe_subscription_id": f"sub_test_{uuid.uuid4().hex[:10]}",
+      "subscription_metadata": {},
+      **fields,
+    }
   )
   session.add(sub)
   session.commit()
@@ -328,3 +334,139 @@ class TestPortalReactivation:
     fresh = test_db.get(BillingSubscription, sub.id)
     assert fresh.status == "active"
     assert fresh.ends_at is None
+
+
+def _checkout_row(session, status: str = "pending_payment") -> BillingSubscription:
+  """A checkout not yet provisioned: no resource, no Stripe subscription id."""
+  sub = _subscription(session, status, resource_id=None, stripe_subscription_id=None)
+  sub.provider_subscription_id = f"cs_test_{uuid.uuid4().hex[:10]}"
+  session.commit()
+  return sub
+
+
+@pytest.mark.unit
+class TestAnEventMovesARowOnlyToWhatIsStillTrue:
+  @pytest.mark.asyncio
+  @pytest.mark.parametrize("status", ["pending_payment", "provisioning"])
+  async def test_a_checkout_becomes_active_only_through_provisioning(
+    self, test_db, status
+  ):
+    """`subscription.updated(active)` can land before the provisioning claim:
+    the claim refuses an active row, so the checkout would never provision."""
+    sub = _checkout_row(test_db, status)
+    data = subscription_updated(sub, "active")
+    data["id"] = f"sub_test_{uuid.uuid4().hex[:10]}"
+    data["metadata"] = {"subscription_id": sub.id}
+
+    await _handle_subscription_updated(data, test_db, MagicMock())
+
+    test_db.expire_all()
+    assert test_db.get(BillingSubscription, sub.id).status == status
+
+  @pytest.mark.asyncio
+  async def test_a_first_invoice_paid_after_a_failed_attempt_provisions(self, test_db):
+    sub = _checkout_row(test_db, "unpaid")
+    with patch(
+      "robosystems.dagster.jobs.billing._trigger_resource_provisioning"
+    ) as provision:
+      await _handle_payment_succeeded(
+        {
+          "id": f"in_test_{uuid.uuid4().hex[:10]}",
+          "object": "invoice",
+          "customer": "cus_test_none",
+          "status": "paid",
+          "amount_paid": 9900,
+          "lines": {"data": []},
+          "parent": {"subscription_details": {"metadata": {"subscription_id": sub.id}}},
+        },
+        test_db,
+        MagicMock(),
+      )
+
+    test_db.expire_all()
+    assert test_db.get(BillingSubscription, sub.id).status == "pending_payment"
+    provision.assert_awaited_once()
+
+  @pytest.mark.asyncio
+  async def test_a_free_first_period_still_links_the_stripe_subscription(self, test_db):
+    """A 100%-off first invoice completes with `no_payment_required`: without
+    the id, cancel and tier changes would never reach Stripe."""
+    sub = _checkout_row(test_db)
+    test_db.add(BillingCustomer(org_id=sub.org_id))
+    test_db.commit()
+    stripe_sub = f"sub_test_{uuid.uuid4().hex[:10]}"
+
+    with patch(
+      "robosystems.dagster.jobs.billing._trigger_resource_provisioning"
+    ) as provision:
+      await _handle_checkout_completed(
+        {
+          "id": sub.provider_subscription_id,
+          "object": "checkout.session",
+          "customer": "cus_test_free",
+          "subscription": stripe_sub,
+          "payment_status": "no_payment_required",
+          "status": "complete",
+          "metadata": {"subscription_id": sub.id},
+        },
+        test_db,
+        MagicMock(),
+      )
+
+    test_db.expire_all()
+    fresh = test_db.get(BillingSubscription, sub.id)
+    assert fresh.stripe_subscription_id == stripe_sub
+    assert fresh.provider_subscription_id == stripe_sub
+    provision.assert_awaited_once()
+
+  @pytest.mark.asyncio
+  async def test_a_late_failure_for_a_paid_invoice_is_ignored(self, test_db):
+    sub = _subscription(test_db, "active")
+    stripe_invoice = f"in_test_{uuid.uuid4().hex[:10]}"
+    _paid_invoice(test_db, sub.org_id, stripe_invoice)
+
+    await _handle_payment_failed(
+      {
+        "id": stripe_invoice,
+        "object": "invoice",
+        "subscription": sub.stripe_subscription_id,
+        "attempt_count": 1,
+      },
+      test_db,
+      MagicMock(),
+    )
+
+    test_db.expire_all()
+    assert test_db.get(BillingSubscription, sub.id).status == "active"
+
+  @pytest.mark.asyncio
+  async def test_a_late_past_due_is_ignored_when_stripe_says_active(self, test_db):
+    sub = _subscription(test_db, "active")
+
+    with patch(
+      "stripe.Subscription.retrieve",
+      return_value=_stripe_object({"status": "active", "cancel_at_period_end": False}),
+    ):
+      await _handle_subscription_updated(
+        subscription_updated(sub, "past_due"), test_db, MagicMock()
+      )
+
+    test_db.expire_all()
+    assert test_db.get(BillingSubscription, sub.id).status == "active"
+
+  @pytest.mark.asyncio
+  async def test_a_past_due_stripe_confirms_is_applied(self, test_db):
+    sub = _subscription(test_db, "active")
+
+    with patch(
+      "stripe.Subscription.retrieve",
+      return_value=_stripe_object(
+        {"status": "past_due", "cancel_at_period_end": False}
+      ),
+    ):
+      await _handle_subscription_updated(
+        subscription_updated(sub, "past_due"), test_db, MagicMock()
+      )
+
+    test_db.expire_all()
+    assert test_db.get(BillingSubscription, sub.id).status == "past_due"
