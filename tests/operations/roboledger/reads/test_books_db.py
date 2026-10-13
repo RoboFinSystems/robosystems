@@ -25,6 +25,7 @@ from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.operations.roboledger.reads.books import (
   chart_built_elsewhere,
   graph_has_native_line_items,
+  synced_books_connection_ids,
 )
 from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
 
@@ -69,11 +70,12 @@ def _chart(session) -> Taxonomy:
   return chart
 
 
-def _account(session, *, name, source, chart=None) -> Element:
+def _account(session, *, name, source, chart=None, connection_id=None) -> Element:
   element = Element(
     name=name,
     balance_type="debit",
     source=source,
+    connection_id=connection_id,
     taxonomy_id=chart.id if chart is not None else None,
   )
   session.add(element)
@@ -157,3 +159,31 @@ def test_no_accounts_is_nothing_to_merge_into(ext_session, with_empty_chart):
     _chart(ext_session)
 
   assert not chart_built_elsewhere(ext_session, synced_source=QB)
+
+
+def test_the_books_name_the_connections_that_built_them(ext_session):
+  """Each provider account names its connection, and so does the parent the
+  provider last renamed. A severed account is native and names none."""
+  from robosystems.models.extensions import Entity
+
+  chart = _chart(ext_session)
+  _account(ext_session, name="Cash", source=QB, chart=chart, connection_id="conn_a")
+  _account(ext_session, name="Sales", source=QB, chart=chart, connection_id="conn_b")
+  _account(ext_session, name="Equipment", source="native", chart=chart)
+  _account(ext_session, name="Legacy", source=QB, chart=chart)
+  parent = ext_session.get(Entity, PARENT_ENTITY_ID)
+  parent.source, parent.connection_id = QB, "conn_c"
+  ext_session.flush()
+
+  assert synced_books_connection_ids(ext_session, synced_source=QB) == {
+    "conn_a",
+    "conn_b",
+    "conn_c",
+  }
+
+
+def test_native_books_name_no_synced_connection(ext_session):
+  chart = _chart(ext_session)
+  _account(ext_session, name="Cash", source="native", chart=chart)
+
+  assert synced_books_connection_ids(ext_session, synced_source=QB) == set()

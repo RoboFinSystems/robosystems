@@ -29,7 +29,9 @@ from robosystems.operations.connection_service import (
   ConnectionService,
   ProviderConflictError,
   assert_provider_compatible,
+  assert_same_company,
   dispatch_first_sync,
+  withdraw_pending_connection,
 )
 
 router = APIRouter()
@@ -293,6 +295,7 @@ async def init_oauth(
         db,
         entity_id=sync_config.get("entity_id") or None,
         resuming=connection.get("status") != ConnectionStatus.PENDING_OAUTH.value,
+        realm_id=(connection.get("metadata") or {}).get("realm_id") or None,
       )
     except ProviderConflictError as conflict:
       raise create_error_response(
@@ -335,7 +338,7 @@ async def init_oauth(
 @router.post(
   "/oauth/callback/{provider}",
   summary="OAuth Callback",
-  description="Completes the OAuth authorization flow after provider redirect. Exchanges the authorization code for tokens, stores them, and triggers an initial sync. This is a redirect target — not typically called directly. Plaid: pass Link's public_token as `code`; a bank already connected to the graph is refused (409 DUPLICATE_BANK_CONNECTION).",
+  description="Completes the OAuth authorization flow after provider redirect. Exchanges the authorization code for tokens, stores them, and triggers an initial sync. This is a redirect target — not typically called directly. QuickBooks: only the company that built the graph's books may connect to them; another company is refused (409 OTHER_COMPANY_BOOKS) before any token is issued. Plaid: pass Link's public_token as `code`; a bank already connected to the graph is refused (409 DUPLICATE_BANK_CONNECTION).",
   operation_id="oauthCallback",
   response_model=OAuthCallbackResponse,
   responses={**RESOURCE_ERROR_RESPONSES},
@@ -406,10 +409,6 @@ async def oauth_callback(
         quickbooks_oauth_provider,
       )
 
-      tokens = await quickbooks_oauth_handler.exchange_code_for_tokens(
-        request.code, redirect_uri
-      )
-
       provider_data = quickbooks_oauth_provider.extract_provider_data(
         {"realmId": request.realm_id}
       )
@@ -428,6 +427,23 @@ async def oauth_callback(
           code=ErrorCode.INVALID_INPUT,
         )
       is_pending = connection.get("status") == "pending_oauth"
+
+      # Only the company that built the books may attach to them, revived
+      # or new. Refused before the code is exchanged, so no token exists.
+      if is_pending:
+        try:
+          assert_same_company(graph_id, "quickbooks", returned_realm_id, db)
+        except ProviderConflictError as conflict:
+          withdraw_pending_connection(connection_id, db)
+          raise create_error_response(
+            status_code=conflict.http_status,
+            detail=conflict.message,
+            code=conflict.code,
+          )
+
+      tokens = await quickbooks_oauth_handler.exchange_code_for_tokens(
+        request.code, redirect_uri
+      )
 
       # Revive a soft-deleted connection for this graph+provider+realm in
       # place, keeping its connection_id so tenant-side data scoped to it
