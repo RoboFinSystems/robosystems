@@ -7,10 +7,13 @@ import json
 import logging
 import subprocess
 import sys
+import tempfile
 import threading
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import IO
 from urllib.parse import quote
 
 from sqlalchemy import text
@@ -61,7 +64,7 @@ _FILE_TYPES: dict[str, tuple[tuple[str, ...], bytes]] = {
 PDF = "application/pdf"
 _MAX_FILE_BYTES = MAX_DOCUMENT_FILE_MB * 1024 * 1024
 _PDF_TEXT_READER = Path(__file__).with_name("pdf_text.py")
-_PDF_READS = threading.BoundedSemaphore(DOCUMENT_READS_PER_PROCESS)
+_DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 
 
 class DocumentFileError(ValueError):
@@ -75,6 +78,41 @@ class DocumentFileNotUploadedError(Exception):
 
 class DocumentInUseError(Exception):
   """The document is evidence for a recorded balance."""
+
+
+class DocumentReadBusyError(Exception):
+  """Every read of a stored file is taken, or this graph's is; try again."""
+
+
+class _ReadSlots:
+  """Reads of stored files running in this process: at most ``total``, and
+  one per graph (a subgraph shares its parent's)."""
+
+  def __init__(self, total: int) -> None:
+    self._total = total
+    self._lock = threading.Lock()
+    self._graphs: set[str] = set()
+
+  @contextmanager
+  def take(self, graph_id: str) -> Iterator[None]:
+    from robosystems.middleware.graph.utils import parse_subgraph_id
+
+    subgraph = parse_subgraph_id(graph_id)
+    key = subgraph.parent_graph_id if subgraph else graph_id
+    with self._lock:
+      if key in self._graphs or len(self._graphs) >= self._total:
+        raise DocumentReadBusyError(
+          "Another document is being read; try again in a few seconds."
+        )
+      self._graphs.add(key)
+    try:
+      yield
+    finally:
+      with self._lock:
+        self._graphs.discard(key)
+
+
+_READ_SLOTS = _ReadSlots(DOCUMENT_READS_PER_PROCESS)
 
 
 def _apply_frontmatter(
@@ -372,28 +410,26 @@ class DocumentService:
     The text layer only: a statement a bank generates carries one, a scan
     does not, and its pages come back empty. A photo has no text layer at
     all; reading one is the extraction step's (OCR), not this. Raises
-    KeyError when the document is not in this graph, and `DocumentFileError`
-    when it is not a stored PDF or cannot be read as one.
-    """
-    from robosystems.config import env
-    from robosystems.operations.aws.s3 import S3Client
+    KeyError when the document is not in this graph, `DocumentFileError`
+    when it is not a stored PDF or cannot be read as one, and
+    `DocumentReadBusyError` when no read can start now.
 
+    Closes the session once the document is found: the read holds no
+    database connection.
+    """
     doc = self._stored_file(graph_id, document_id)
     if doc.file_content_type != PDF:
       raise DocumentFileError(
         f"Document {document_id} is a {doc.file_content_type} image, which has "
         "no text layer to read."
       )
-    obj = S3Client().s3_client.get_object(
-      Bucket=env.USER_DATA_BUCKET, Key=str(doc.file_s3_key)
-    )
-    try:
-      data = obj["Body"].read(_MAX_FILE_BYTES + 1)
-    finally:
-      obj["Body"].close()
-    page_count, pages = _read_pdf_pages(
-      document_id, data, first_page=first_page, max_pages=max_pages
-    )
+    key = str(doc.file_s3_key)
+    self.session.close()
+    with _READ_SLOTS.take(graph_id), tempfile.TemporaryFile() as pdf:
+      _download(key, pdf)
+      page_count, pages = _read_pdf_pages(
+        document_id, pdf, first_page=first_page, max_pages=max_pages
+      )
     return FileText(document=doc, page_count=page_count, pages=pages)
 
   def _stored_file(self, graph_id: str, document_id: str) -> Document:
@@ -584,8 +620,27 @@ class DocumentService:
     service.delete_document(graph_id, os_doc_id)
 
 
+def _download(key: str, into: IO[bytes]) -> None:
+  """A stored file's bytes, up to one past the size cap, written to ``into``."""
+  from robosystems.config import env
+  from robosystems.operations.aws.s3 import S3Client
+
+  obj = S3Client().s3_client.get_object(Bucket=env.USER_DATA_BUCKET, Key=key)
+  remaining = _MAX_FILE_BYTES + 1
+  try:
+    while remaining > 0:
+      chunk = obj["Body"].read(min(_DOWNLOAD_CHUNK_BYTES, remaining))
+      if not chunk:
+        break
+      into.write(chunk)
+      remaining -= len(chunk)
+  finally:
+    obj["Body"].close()
+  into.seek(0)
+
+
 def _read_pdf_pages(
-  document_id: str, data: bytes, *, first_page: int, max_pages: int
+  document_id: str, pdf: IO[bytes], *, first_page: int, max_pages: int
 ) -> tuple[int, list[tuple[int, str]]]:
   """Pages of a PDF's text, read in a child process held to the read bounds.
 
@@ -600,12 +655,10 @@ def _read_pdf_pages(
     "chars_per_read": DOCUMENT_READ_CHARS_PER_CALL,
   }
   unreadable = DocumentFileError(f"Document {document_id} could not be read as a PDF.")
-  if not _PDF_READS.acquire(timeout=DOCUMENT_READ_TIMEOUT_SECONDS):
-    raise DocumentFileError("Documents are busy being read; try again shortly.")
   try:
     done = subprocess.run(
       [sys.executable, "-I", str(_PDF_TEXT_READER), json.dumps(request)],
-      input=data,
+      stdin=pdf,
       capture_output=True,
       timeout=DOCUMENT_READ_TIMEOUT_SECONDS,
       check=False,
@@ -613,16 +666,18 @@ def _read_pdf_pages(
   except subprocess.TimeoutExpired as exc:
     logger.warning(f"Document {document_id} timed out being read as a PDF")
     raise unreadable from exc
-  finally:
-    _PDF_READS.release()
   if done.returncode != 0:
     logger.warning(
       f"Document {document_id} could not be read as a PDF "
       f"(exit {done.returncode}): {done.stderr[:500]!r}"
     )
     raise unreadable
-  result = json.loads(done.stdout)
-  return result["page_count"], [(number, text) for number, text in result["pages"]]
+  try:
+    result = json.loads(done.stdout)
+    return result["page_count"], [(number, text) for number, text in result["pages"]]
+  except (ValueError, KeyError, TypeError) as exc:
+    logger.warning(f"Document {document_id} read back malformed text: {exc!r}")
+    raise unreadable from exc
 
 
 @dataclass(frozen=True)

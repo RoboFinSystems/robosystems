@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import os
 import resource
 import sys
 import warnings
@@ -23,6 +24,14 @@ def cap_memory(memory_bytes: int) -> None:
   try:
     resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
   except (ValueError, OSError):
+    pass
+
+
+def lower_priority() -> None:
+  """Yield the CPU to the process that started this one."""
+  try:
+    os.nice(10)
+  except OSError:
     pass
 
 
@@ -73,4 +82,5 @@ if __name__ == "__main__":
   warnings.simplefilter("ignore")
   _request = json.loads(sys.argv[1])
   cap_memory(_request["memory_bytes"])
+  lower_priority()
   sys.exit(serve(_request, sys.stdin.buffer, sys.stdout))

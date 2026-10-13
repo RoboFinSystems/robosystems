@@ -671,6 +671,21 @@ class TestDocumentFileTools:
 
     assert result["error"] == "not_a_file"
 
+  @pytest.mark.asyncio
+  async def test_a_read_that_cannot_start_now_says_to_retry(self, mock_graph_client):
+    from robosystems.operations.document_service import DocumentReadBusyError
+
+    mock_service = MagicMock()
+    mock_service.read_file_text.side_effect = DocumentReadBusyError("try again")
+
+    p1, p2, p3, p4 = self._patches(mock_service)
+    with p1, p2, p3, p4:
+      result = await ReadDocumentFileTool(mock_graph_client).execute(
+        {"document_id": "doc_1"}
+      )
+
+    assert (result["error"], result["retryable"]) == ("busy", True)
+
 
 @pytest.mark.asyncio
 async def test_read_refuses_page_numbers_that_are_not_numbers(mock_graph_client):
