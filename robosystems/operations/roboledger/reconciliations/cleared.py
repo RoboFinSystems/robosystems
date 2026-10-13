@@ -27,7 +27,9 @@ from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
 # line is the feed's business too. So is a line that settles a change the
 # feed reported, whichever door settled it: a catch-up names the feed line it
 # levels, and an alignment is named on that line's trail. The bank already
-# holds the change.
+# holds the change. The settlement lookup is an uncorrelated IN, which the
+# planner hashes once; a join on it was planned as a nested loop over every
+# cash line.
 _CASH_LINES_SQL = text("""
   WITH feed_settlements AS (
     SELECT DISTINCT record->>'reference_event_id' AS event_id
@@ -48,7 +50,8 @@ _CASH_LINES_SQL = text("""
          COALESCE(li.debit_amount, 0) - COALESCE(li.credit_amount, 0) AS net,
          src.id AS event_id,
          COALESCE(COALESCE(levelled.source, src.source) IN :feed_sources, FALSE)
-           OR settles.event_id IS NOT NULL AS from_feed,
+           OR COALESCE(src.id IN (SELECT event_id FROM feed_settlements), FALSE)
+           AS from_feed,
          COALESCE(NULLIF(li.description, ''), NULLIF(e.memo, ''),
                   src.description, 'Journal entry') AS description
   FROM line_items li
@@ -57,7 +60,6 @@ _CASH_LINES_SQL = text("""
   LEFT JOIN events src
     ON src.id = COALESCE(e.triggered_by_event_id, original.triggered_by_event_id)
   LEFT JOIN events levelled ON levelled.id = src.metadata->>'reconciles_event_id'
-  LEFT JOIN feed_settlements settles ON settles.event_id = src.id
   WHERE li.element_id = :element_id
     AND (:entity_id IS NULL OR e.entity_id = :entity_id)
     AND e.posting_date <= :through
