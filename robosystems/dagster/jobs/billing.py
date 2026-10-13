@@ -117,6 +117,11 @@ async def _handle_checkout_completed(
         f"subscription {subscription.id}; reopened for provisioning"
       )
 
+    if subscription.status == "unpaid" and not subscription.resource_id:
+      # The first payment was declined and the retry paid: back to the
+      # checkout state the provisioning claim accepts.
+      subscription.status = "pending_payment"
+
     if payment_status == "paid":
       customer.has_payment_method = True
 
@@ -829,10 +834,12 @@ async def _apply_subscription_updated(
     db_session.commit()
     return
 
-  # A checkout becomes active only through the provisioning claim, which
+  # A checkout (no resource yet, including one whose first payment was
+  # declined) becomes active only through the provisioning claim, which
   # refuses an active row: applied first, the row would never be provisioned.
-  if subscription.status in ("pending_payment", "provisioning") and new_status == (
-    "active"
+  if new_status == "active" and (
+    subscription.status in ("pending_payment", "provisioning")
+    or not subscription.resource_id
   ):
     context.log.info(
       f"Leaving checkout {subscription.id} {subscription.status} for provisioning"

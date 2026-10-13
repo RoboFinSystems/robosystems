@@ -347,7 +347,7 @@ def _checkout_row(session, status: str = "pending_payment") -> BillingSubscripti
 @pytest.mark.unit
 class TestAnEventMovesARowOnlyToWhatIsStillTrue:
   @pytest.mark.asyncio
-  @pytest.mark.parametrize("status", ["pending_payment", "provisioning"])
+  @pytest.mark.parametrize("status", ["pending_payment", "provisioning", "unpaid"])
   async def test_a_checkout_becomes_active_only_through_provisioning(
     self, test_db, status
   ):
@@ -378,6 +378,37 @@ class TestAnEventMovesARowOnlyToWhatIsStillTrue:
           "amount_paid": 9900,
           "lines": {"data": []},
           "parent": {"subscription_details": {"metadata": {"subscription_id": sub.id}}},
+        },
+        test_db,
+        MagicMock(),
+      )
+
+    test_db.expire_all()
+    assert test_db.get(BillingSubscription, sub.id).status == "pending_payment"
+    provision.assert_awaited_once()
+
+  @pytest.mark.asyncio
+  async def test_a_declined_first_payment_paid_on_retry_provisions_at_checkout(
+    self, test_db
+  ):
+    """Whichever event lands first, a paid checkout of a declined row reaches
+    the provisioning claim."""
+    sub = _checkout_row(test_db, "unpaid")
+    test_db.add(BillingCustomer(org_id=sub.org_id))
+    test_db.commit()
+
+    with patch(
+      "robosystems.dagster.jobs.billing._trigger_resource_provisioning"
+    ) as provision:
+      await _handle_checkout_completed(
+        {
+          "id": sub.provider_subscription_id,
+          "object": "checkout.session",
+          "customer": "cus_test_retry",
+          "subscription": f"sub_test_{uuid.uuid4().hex[:10]}",
+          "payment_status": "paid",
+          "status": "complete",
+          "metadata": {"subscription_id": sub.id},
         },
         test_db,
         MagicMock(),
