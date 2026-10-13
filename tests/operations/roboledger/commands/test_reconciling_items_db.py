@@ -480,7 +480,7 @@ def test_catch_up_entry_never_publishes_back_to_the_source(session):
 
 
 def test_acknowledge_records_the_reference_and_writes_no_entries(session):
-  _elements, event, _accepted = _setup(session)
+  elements, event, _accepted = _setup(session)
   reference, _envelope = create_event_block_in_session(
     session,
     CreateEventBlockRequest(
@@ -490,8 +490,15 @@ def test_acknowledge_records_the_reference_and_writes_no_entries(session):
       event_action="transfer",
       source="system",
       occurred_at=datetime(2026, 7, 31),
-      apply_handlers=False,
-      metadata={"note": "hand-authored alignment"},
+      apply_handlers=True,
+      metadata={
+        "posting_date": "2026-07-31",
+        "memo": "hand-authored alignment",
+        "line_items": [
+          {"element_id": elements[NEW_EXPENSE], "debit_amount": AMOUNT},
+          {"element_id": elements[OLD_EXPENSE], "credit_amount": AMOUNT},
+        ],
+      },
     ),
     "user_test",
     graph_id=GRAPH_ID,
@@ -1640,3 +1647,497 @@ def test_naming_items_on_an_update_that_posts_nothing_is_refused(session):
     )
   session.rollback()
   assert _qb_item(session).payload_drift is True
+
+
+# Round 2: every door that books an item's change ─────────────────────────
+
+
+def _repairs_books(db, ids) -> int:
+  """Repairs as the close will leave it: landed entries, plus the drafts of
+  events still standing."""
+  return int(
+    db.execute(
+      text(
+        "SELECT COALESCE(SUM(li.debit_amount - li.credit_amount), 0) "
+        "FROM line_items li JOIN entries e ON e.id = li.entry_id "
+        "LEFT JOIN events ev ON ev.id = e.triggered_by_event_id "
+        "WHERE li.element_id = :element_id AND (e.status IN ('posted', 'reversed') "
+        "OR (e.status = 'draft' AND (ev.id IS NULL "
+        "OR ev.status NOT IN ('voided', 'superseded'))))"
+      ),
+      {"element_id": ids["Repairs"]},
+    ).scalar_one()
+  )
+
+
+def _supersede(db, event_id: str, successor_id: str) -> None:
+  from robosystems.models.api.event_block import UpdateEventBlockRequest
+  from robosystems.operations.event_block.commands import update_event_block
+
+  update_event_block(
+    db,
+    UpdateEventBlockRequest(
+      event_id=event_id,
+      transition_to="superseded",
+      superseded_by_id=successor_id,
+    ),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+
+
+def _plain_entry(db, ids, cents: int, *, metadata: dict | None = None) -> Event:
+  """A hand entry that names no item, publishing by its source's default."""
+  event, _envelope = create_event_block_in_session(
+    db,
+    CreateEventBlockRequest(
+      event_type="journal_entry_recorded",
+      event_category="adjustment",
+      source="manual",
+      occurred_at=datetime(2026, 8, 31),
+      apply_handlers=True,
+      metadata={
+        "posting_date": "2026-08-31",
+        "memo": "Corrected alignment",
+        "status": "draft",
+        "line_items": [
+          {"element_id": ids["Repairs"], "debit_amount": cents},
+          {"element_id": ids["Checking"], "credit_amount": cents},
+        ],
+        **(metadata or {}),
+      },
+    ),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+  db.flush()
+  return event
+
+
+def _publishes_at_close(db, event_id: str) -> bool:
+  eligible = select_writeback_eligible_entries(
+    db, OPEN_START, OPEN_END, entity_id=PARENT_ENTITY_ID
+  )
+  return any(str(event.id) == event_id for _entry, event in eligible)
+
+
+def _catch_up(db, item_id: str, *, status: str = "draft") -> str:
+  result = resolve_reconciling_item(
+    db,
+    ResolveReconcilingItemRequest(
+      event_id=item_id,
+      expected_drift_detected_at=_previewed(db, item_id),
+      disposition="catch_up",
+      posting_date=OPEN_END,
+      status=status,
+    ),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+  db.flush()
+  assert result.catch_up is not None
+  return result.catch_up.event_id
+
+
+def test_superseding_an_alignment_moves_its_settlement_to_the_successor(session):
+  """A-R1-1: the documented correction. The successor books the same +500,
+  so the item stays settled, now by the successor, and the books equal
+  QuickBooks. The successor settles a QuickBooks change, so it stays local."""
+  ids, item = _flagged_at_1500(session)
+  first = _hand_alignment(session, ids, 500, [_named(item, session)])
+  successor = _plain_entry(session, ids, 500)
+  session.commit()
+
+  _supersede(session, str(first.id), str(successor.id))
+
+  item = _qb_item(session)
+  assert item.payload_drift is False
+  record = item.metadata_["reconciliation_history"][-1]
+  assert record["disposition"] == "acknowledge"
+  assert record["reference_event_id"] == str(successor.id)
+  assert record["superseded_event_id"] == str(first.id)
+  assert _repairs_books(session, ids) == 1500
+  assert not _publishes_at_close(session, str(successor.id))
+
+  # The successor counts toward the next change, as the original did.
+  _qb_sync(session, 1800, "2")
+  item = _qb_item(session)
+  assert _repairs_delta(session, ids, str(item.id)) == 300
+  _catch_up(session, str(item.id))
+  assert _repairs_books(session, ids) == 1800
+
+
+def test_voiding_the_successor_reopens_the_item_it_took_over(session):
+  ids, item = _flagged_at_1500(session)
+  first = _hand_alignment(session, ids, 500, [_named(item, session)])
+  successor = _plain_entry(session, ids, 500)
+  session.commit()
+  _supersede(session, str(first.id), str(successor.id))
+  session.commit()
+
+  _void(session, str(successor.id))
+
+  item = _qb_item(session)
+  assert item.payload_drift is True
+  assert _repairs_delta(session, ids, str(item.id)) == 500
+
+
+def test_a_successor_booking_a_different_amount_cannot_take_the_settlement(session):
+  """The settlement counts the +500 the item's preview named. A successor
+  booking +600 would be counted at a figure it does not book, and re-opening
+  would leave it uncounted: the supersede is refused, and nothing moves."""
+  ids, item = _flagged_at_1500(session)
+  first = _hand_alignment(session, ids, 500, [_named(item, session)])
+  successor = _plain_entry(session, ids, 600)
+  session.commit()
+
+  with pytest.raises(ValueError, match="different amount"):
+    _supersede(session, str(first.id), str(successor.id))
+  session.rollback()
+
+  item = _qb_item(session)
+  assert item.payload_drift is False
+  assert session.get(Event, str(first.id)).status != "superseded"
+
+
+def test_voiding_a_catch_up_reopens_its_item(session):
+  """A-R1-2: the catch-up draft is voided at review. The difference it
+  booked is owed again, through the next sync too."""
+  ids, item = _flagged_at_1500(session)
+  catch_up = _catch_up(session, str(item.id))
+  session.commit()
+
+  _void(session, catch_up)
+
+  item = _qb_item(session)
+  assert item.payload_drift is True
+  assert item.metadata_["reconciliation_history"][-1]["disposition"] == "reopened"
+  assert _repairs_delta(session, ids, str(item.id)) == 500
+  _qb_sync(session, 1500, "2")
+  item = _qb_item(session)
+  assert item.payload_drift is True
+  assert _repairs_delta(session, ids, str(item.id)) == 500
+
+
+def test_reversing_a_posted_catch_up_reopens_its_item(session):
+  from robosystems.models.api.extensions.journal_entries import (
+    ReverseJournalEntryRequest,
+  )
+  from robosystems.operations.roboledger.commands.journal_entries import (
+    reverse_journal_entry,
+  )
+
+  ids, item = _flagged_at_1500(session)
+  catch_up = _catch_up(session, str(item.id), status="posted")
+  (entry,) = session.query(Entry).filter(Entry.triggered_by_event_id == catch_up)
+
+  reverse_journal_entry(
+    session,
+    ReverseJournalEntryRequest(entry_id=str(entry.id), posting_date=OPEN_END),
+    "user_test",
+  )
+  session.flush()
+
+  item = _qb_item(session)
+  assert item.payload_drift is True
+  assert _repairs_delta(session, ids, str(item.id)) == 500
+  _catch_up(session, str(item.id))
+  assert _repairs_books(session, ids) == 1500
+
+
+def test_voiding_a_catch_up_restores_a_round_trip_items_baseline(session):
+  """A catch-up on an entry written back and edited in QuickBooks moves its
+  baseline like an acknowledgement does, so voiding it moves it back."""
+  from robosystems.operations.event_block.qb_writeback import ROUND_TRIP_BASELINE_KEY
+
+  ids = _qb_accounts(session)
+  baseline = {
+    "posting_dates": ["2026-07-09"],
+    "lines": [[QB_CASH, 0, 1000], [QB_REPAIRS, 1000, 0]],
+  }
+  edited = {
+    "posting_dates": ["2026-07-09"],
+    "lines": [[QB_CASH, 0, 1500], [QB_REPAIRS, 1500, 0]],
+  }
+  written_back = Event(
+    entity_id=PARENT_ENTITY_ID,
+    event_type="journal_entry_recorded",
+    event_category="adjustment",
+    source="manual",
+    status="fulfilled",
+    occurred_at=datetime(2026, 7, 9),
+    created_by="user_test",
+    payload_drift=True,
+    metadata_={
+      "qb_external_id": "302",
+      ROUND_TRIP_BASELINE_KEY: {"302": baseline},
+      "drift_payload": {
+        "round_trip": {
+          "qb_id": "302",
+          "entry_ids": [],
+          "baseline": baseline,
+          "accepted": edited,
+        },
+        "entries": [],
+        "connection_id": CONNECTION_ID,
+      },
+      "drift_detected_at": "2026-08-20T03:32:00+00:00",
+    },
+  )
+  session.add(written_back)
+  session.flush()
+  catch_up = _catch_up(session, str(written_back.id))
+  session.refresh(written_back)
+  assert written_back.metadata_[ROUND_TRIP_BASELINE_KEY]["302"] == edited
+  session.commit()
+
+  _void(session, catch_up)
+
+  session.refresh(written_back)
+  assert written_back.payload_drift is True
+  assert written_back.metadata_[ROUND_TRIP_BASELINE_KEY]["302"] == baseline
+  assert _repairs_delta(session, ids, str(written_back.id)) == 500
+
+
+def test_an_alignment_naming_a_quickbooks_item_never_publishes(session):
+  """A-R1-3: QuickBooks already holds the change the alignment books, so the
+  close must not write it back, whether or not the author said so."""
+  ids, item = _flagged_at_1500(session)
+  alignment = _plain_entry(
+    session, ids, 500, metadata={"resolves_reconciling_items": [_named(item, session)]}
+  )
+
+  assert _qb_item(session).payload_drift is False
+  assert alignment.metadata_["publish_to_source"] is False
+  assert not _publishes_at_close(session, str(alignment.id))
+
+
+def test_an_alignment_committed_from_capture_never_publishes(session):
+  from robosystems.models.api.event_block import UpdateEventBlockRequest
+  from robosystems.operations.event_block.commands import update_event_block
+
+  ids, item = _flagged_at_1500(session)
+  captured, _envelope = create_event_block_in_session(
+    session,
+    CreateEventBlockRequest(
+      event_type="journal_entry_recorded",
+      event_category="adjustment",
+      source="manual",
+      occurred_at=datetime(2026, 8, 31),
+      apply_handlers=False,
+      metadata={
+        "posting_date": "2026-08-31",
+        "memo": "Alignment",
+        "line_items": [
+          {"element_id": ids["Repairs"], "debit_amount": 500},
+          {"element_id": ids["Checking"], "credit_amount": 500},
+        ],
+      },
+    ),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+  named = _named(item, session)
+  session.commit()
+
+  update_event_block(
+    session,
+    UpdateEventBlockRequest(
+      event_id=str(captured.id),
+      transition_to="committed",
+      metadata_patch={"resolves_reconciling_items": [named]},
+    ),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+
+  assert _qb_item(session).payload_drift is False
+  assert not _publishes_at_close(session, str(captured.id))
+
+
+def test_an_acknowledgement_keeps_its_entry_local(session):
+  """The REST acknowledge naming the entry that booked a QuickBooks change is
+  the same settlement, so that entry stays local too."""
+  ids, item = _flagged_at_1500(session)
+  entry = _plain_entry(session, ids, 500)
+  assert _publishes_at_close(session, str(entry.id))
+
+  resolve_reconciling_item(
+    session,
+    ResolveReconcilingItemRequest(
+      event_id=str(item.id),
+      expected_drift_detected_at=_previewed(session, str(item.id)),
+      disposition="acknowledge",
+      note="booked by hand",
+      reference_event_id=str(entry.id),
+    ),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+  session.flush()
+
+  assert not _publishes_at_close(session, str(entry.id))
+
+
+def test_an_alignment_asking_to_publish_a_quickbooks_change_is_refused(session):
+  ids, item = _flagged_at_1500(session)
+
+  savepoint = session.begin_nested()
+  with pytest.raises(HandlerMetadataValidationError, match="publish"):
+    _plain_entry(
+      session,
+      ids,
+      500,
+      metadata={
+        "publish_to_source": True,
+        "resolves_reconciling_items": [_named(item, session)],
+      },
+    )
+  savepoint.rollback()
+  assert _qb_item(session).payload_drift is True
+
+
+@pytest.mark.parametrize(
+  "reference", ["the_item", "its_catch_up", "voided", "captured", "other_entity"]
+)
+def test_an_acknowledgement_must_name_an_entry_that_booked_it(session, reference):
+  """A-R1-4: a reference is counted as the booking of the difference while it
+  stands, so it has to be one: a standing entry on the item's books, other
+  than the item and the catch-up already counted for it."""
+  ids, item = _flagged_at_1500(session)
+  if reference == "the_item":
+    reference_id = str(item.id)
+  elif reference == "its_catch_up":
+    reference_id = _catch_up(session, str(item.id), status="posted")
+    _qb_sync(session, 1800, "2")
+  elif reference == "voided":
+    voided = _plain_entry(session, ids, 500, metadata={"publish_to_source": False})
+    session.commit()
+    _void(session, str(voided.id))
+    reference_id = str(voided.id)
+  elif reference == "captured":
+    captured, _envelope = create_event_block_in_session(
+      session,
+      CreateEventBlockRequest(
+        event_type="journal_entry_recorded",
+        event_category="adjustment",
+        source="manual",
+        occurred_at=datetime(2026, 8, 31),
+        apply_handlers=False,
+        metadata={"note": "nothing booked"},
+      ),
+      "user_test",
+      graph_id=GRAPH_ID,
+    )
+    session.flush()
+    reference_id = str(captured.id)
+  else:
+    session.add(
+      Entity(
+        id="ent_test_sub",
+        name="Sub LLC",
+        is_parent=False,
+        parent_entity_id=PARENT_ENTITY_ID,
+        source="native",
+        created_by="test",
+      )
+    )
+    session.flush()
+    debit = entity_account(session, "ent_test_sub", "Repairs")
+    credit = entity_account(session, "ent_test_sub", "Checking")
+    foreign, _envelope = create_event_block_in_session(
+      session,
+      CreateEventBlockRequest(
+        event_type="journal_entry_recorded",
+        event_category="adjustment",
+        source="manual",
+        entity_id="ent_test_sub",
+        occurred_at=datetime(2026, 8, 31),
+        apply_handlers=True,
+        metadata={
+          "posting_date": "2026-08-31",
+          "memo": "Sub's entry",
+          "status": "draft",
+          "publish_to_source": False,
+          "line_items": [
+            {"element_id": debit, "debit_amount": 500},
+            {"element_id": credit, "credit_amount": 500},
+          ],
+        },
+      ),
+      "user_test",
+      graph_id=GRAPH_ID,
+    )
+    session.flush()
+    reference_id = str(foreign.id)
+  item = _qb_item(session)
+  assert item.payload_drift is True
+
+  savepoint = session.begin_nested()
+  with pytest.raises(ValueError, match="cannot settle"):
+    resolve_reconciling_item(
+      session,
+      ResolveReconcilingItemRequest(
+        event_id=str(item.id),
+        expected_drift_detected_at=_previewed(session, str(item.id)),
+        disposition="acknowledge",
+        note="handled",
+        reference_event_id=reference_id,
+      ),
+      "user_test",
+      graph_id=GRAPH_ID,
+    )
+  savepoint.rollback()
+  assert _qb_item(session).payload_drift is True
+
+
+def test_deleting_one_draft_of_an_alignment_that_settled_items_is_refused(session):
+  """A-R1-5: the settlement counts the whole alignment; deleting one of its
+  drafts would leave it counted at what it no longer books."""
+  from robosystems.models.api.extensions.journal_entries import (
+    DeleteJournalEntryRequest,
+  )
+  from robosystems.operations.roboledger.commands.journal_entries import (
+    delete_journal_entry,
+  )
+
+  ids, item = _flagged_at_1500(session)
+  alignment, _envelope = create_event_block_in_session(
+    session,
+    CreateEventBlockRequest(
+      event_type="journal_entry_recorded",
+      event_category="adjustment",
+      source="manual",
+      occurred_at=datetime(2026, 8, 31),
+      apply_handlers=True,
+      metadata={
+        "status": "draft",
+        "publish_to_source": False,
+        "entries": [
+          {
+            "posting_date": "2026-08-31",
+            "memo": f"part {cents}",
+            "line_items": [
+              {"element_id": ids["Repairs"], "debit_amount": cents},
+              {"element_id": ids["Checking"], "credit_amount": cents},
+            ],
+          }
+          for cents in (300, 200)
+        ],
+        "resolves_reconciling_items": [_named(item, session)],
+      },
+    ),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+  session.flush()
+  first = (
+    session.query(Entry)
+    .filter(Entry.triggered_by_event_id == str(alignment.id))
+    .order_by(Entry.id)
+    .first()
+  )
+
+  with pytest.raises(ValueError, match="settled"):
+    delete_journal_entry(session, DeleteJournalEntryRequest(entry_id=str(first.id)))
+  assert _repairs_books(session, ids) == 1500

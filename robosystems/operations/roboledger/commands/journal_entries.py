@@ -111,6 +111,21 @@ def _lock_owning_event(session: Session, entry: Entry) -> Event | None:
   )
 
 
+class JournalEntrySettlesItemsError(ValueError):
+  """One draft of an event that settled reconciling items: the settlement
+  counts the whole event, so the draft cannot go alone."""
+
+  def __init__(self, entry_id: str, event_id: str, item_ids: list[str]) -> None:
+    super().__init__(
+      f"Journal entry {entry_id} is part of event {event_id}, which settled "
+      f"reconciling item(s) {', '.join(item_ids)}. Void the event instead, "
+      "which flags them again."
+    )
+    self.entry_id = entry_id
+    self.event_id = event_id
+    self.item_ids = item_ids
+
+
 class JournalEntryNotPostedError(ValueError):
   def __init__(self, entry_id: str, status: str) -> None:
     super().__init__(
@@ -494,6 +509,7 @@ def delete_journal_entry(session: Session, body: DeleteJournalEntryRequest) -> d
   Raises:
     `JournalEntryNotFoundError`, `JournalEntryNotDraftError`,
     `ClosedPeriodError`, `JournalEntryOwnedByEventError`.
+    `JournalEntrySettlesItemsError` if its event settled reconciling items.
     `RowLockedError` if another writer holds the entry or its date moved.
   """
   peek = _load_entry_or_404(session, body.entry_id)
@@ -525,6 +541,13 @@ def delete_journal_entry(session: Session, body: DeleteJournalEntryRequest) -> d
       raise JournalEntryOwnedByEventError(
         str(entry.id), str(owner.id), str(owner.status)
       )
+    from robosystems.operations.roboledger.commands.reconciling_items import (
+      items_settled_by,
+    )
+
+    settled = items_settled_by(session, owner)
+    if settled:
+      raise JournalEntrySettlesItemsError(str(entry.id), str(owner.id), settled)
 
   session.delete(entry)
   session.flush()

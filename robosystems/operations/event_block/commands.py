@@ -447,6 +447,7 @@ def _acknowledge_settled_items(
     ResolveReconcilingItemRequest,
   )
   from robosystems.operations.roboledger.commands.reconciling_items import (
+    InvalidSettlementReferenceError,
     NotAReconcilingItemError,
     ReconcilingItemNotFoundError,
     resolve_reconciling_item,
@@ -492,7 +493,11 @@ def _acknowledge_settled_items(
         created_by,
         graph_id=graph_id,
       )
-    except (NotAReconcilingItemError, ReconcilingItemNotFoundError) as exc:
+    except (
+      NotAReconcilingItemError,
+      ReconcilingItemNotFoundError,
+      InvalidSettlementReferenceError,
+    ) as exc:
       raise HandlerMetadataValidationError(
         f"resolves_reconciling_items: {item_id}: {exc}"
       ) from exc
@@ -834,12 +839,19 @@ def update_event_block(
 
   if body.transition_to in _RETRACTED_STATUSES:
     from robosystems.operations.roboledger.commands.reconciling_items import (
+      move_items_settled_by,
       reopen_items_settled_by,
     )
 
-    reopen_items_settled_by(
-      session, str(event.id), created_by, reason=str(body.transition_to)
-    )
+    if body.transition_to == "superseded" and body.superseded_by_id:
+      # A correction: the successor carries what this entry settled.
+      move_items_settled_by(
+        session, str(event.id), str(body.superseded_by_id), created_by
+      )
+    else:
+      reopen_items_settled_by(
+        session, str(event.id), created_by, reason=str(body.transition_to)
+      )
 
   if body.description is not None:
     event.description = body.description
