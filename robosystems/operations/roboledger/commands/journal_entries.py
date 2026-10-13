@@ -4,7 +4,8 @@ Posted entries are immutable and corrected only by reversal, which posts a new
 entry with flipped lines and marks the original ``reversed``. An entry created
 without a ``transaction_id`` gets a synthetic ``journal_entry`` Transaction so
 the graph keeps its Entity → Transaction → Entry path. Every write takes the
-closed-period fence (``_guards.assert_period_not_closed``).
+closed-period fence (``_guards.assert_period_not_closed``), and no row lands
+dated before the entity's calendar (``_guards.assert_within_calendar``).
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ from robosystems.operations.locking import RowLockedError, lock_by_id
 from robosystems.operations.roboledger.commands._guards import (
   assert_accounts_postable,
   assert_period_not_closed,
+  assert_within_calendar,
 )
 from robosystems.operations.roboledger.commands.connections import SEVERABLE_SOURCES
 from robosystems.operations.roboledger.entity_scope import ensure_entity_id
@@ -349,6 +351,7 @@ def create_journal_entry(
   """
   entity_id = ensure_entity_id(session, entity_id)
   assert_period_not_closed(session, body.posting_date, entity_id=entity_id)
+  assert_within_calendar(session, body.posting_date, entity_id=entity_id)
   synced = (body.source or "").lower() in SEVERABLE_SOURCES
   if body.status == "posted" and not synced and not mirrors_source:
     assert_local_posting_allowed(session, entity_id, "Posting this journal entry")
@@ -441,6 +444,11 @@ def update_journal_entry(
   if body.posting_date is not None:
     dates.append(body.posting_date)
   assert_period_not_closed(session, *dates, entity_id=peek.entity_id)
+  # The date the draft ends on, not the one it leaves: a draft stranded
+  # before the calendar can be moved into it.
+  assert_within_calendar(
+    session, body.posting_date or peeked_date, entity_id=peek.entity_id
+  )
 
   _lock_owning_event(session, peek)
   entry = lock_by_id(
@@ -585,6 +593,7 @@ def reverse_journal_entry(
   assert_period_not_closed(
     session, peek.posting_date, posting_date, entity_id=peek.entity_id
   )
+  assert_within_calendar(session, posting_date, entity_id=peek.entity_id)
 
   # Locked so two concurrent reversals cannot both see 'posted' and reverse
   # twice (balanced, so the trial balance would not catch it).

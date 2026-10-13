@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -145,3 +145,27 @@ def test_a_drafted_manual_journal_entry_does_not_block(session):
   gate = _gate(session)
   assert BLOCKER not in gate.blockers
   assert gate.unposted_source_event_count == 0
+
+
+def _september_gate(session, last_sync_at):
+  return FiscalCalendarService().closeable_gate(
+    session,
+    GRAPH_ID,
+    "2026-09",
+    today=date(2026, 10, 1),
+    has_sync_connection=True,
+    last_sync_at=last_sync_at,
+  )
+
+
+def test_a_sync_on_the_months_last_day_is_stale_for_it(session):
+  """Lines can still post during the last day, so a sync made that day has
+  not seen the whole month."""
+  gate = _september_gate(session, datetime(2026, 9, 30, 10, 0, tzinfo=UTC))
+  assert CloseableGateResult.SYNC_STALE in gate.blockers
+  assert gate.sync_stale_days == 1
+
+
+def test_a_sync_after_the_month_ended_is_fresh_for_it(session):
+  gate = _september_gate(session, datetime(2026, 10, 1, 6, 0, tzinfo=UTC))
+  assert CloseableGateResult.SYNC_STALE not in gate.blockers

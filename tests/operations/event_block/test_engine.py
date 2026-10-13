@@ -29,6 +29,14 @@ def _period_gate_open():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _calendar_start_open():
+  """Mock sessions cannot answer the calendar-start check either; it runs
+  against a real database in test_change_start_db.py."""
+  with patch("robosystems.operations.event_block.engine.assert_within_calendar"):
+    yield
+
+
 def test_apply_handler_links_entry_and_transaction_to_originating_event() -> None:
   session = MagicMock()
   added: list[object] = []

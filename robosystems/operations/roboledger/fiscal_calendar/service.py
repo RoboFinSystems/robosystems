@@ -114,15 +114,51 @@ class CalendarStartLockedError(FiscalCalendarError):
 class CalendarStartBlockedError(FiscalCalendarError):
   """Moving the start later would drop months that still hold activity."""
 
-  def __init__(self, first_open_period: str, entries: int, unposted: int) -> None:
+  def __init__(
+    self,
+    first_open_period: str,
+    entries: int,
+    unposted: int,
+    *,
+    message: str | None = None,
+  ) -> None:
     super().__init__(
-      f"Cannot start the calendar at {first_open_period}: the months before it "
-      f"hold {entries} journal entries and {unposted} unposted source lines "
-      "(bank lines or source transactions). Post, move or void them first, or "
-      "start the calendar earlier."
+      message
+      or (
+        f"Cannot start the calendar at {first_open_period}: the months before "
+        f"it hold {entries} journal entries and {unposted} events not yet "
+        "posted (bank lines, source transactions or schedule obligations). "
+        "Re-date or delete the draft entries and void the events "
+        "(update-event-block) first, or keep the calendar's start where it is. "
+        "A schedule's obligations can instead go with the schedule: delete it, "
+        "move the start, and create it again."
+      )
     )
     self.entries = entries
     self.unposted = unposted
+
+
+class CalendarOpeningBlockedError(CalendarStartBlockedError):
+  """Setting up a calendar would leave drafts or unposted events before its
+  first open month, where no close ever posts them."""
+
+  def __init__(
+    self, first_open_period: str, entries: int, unposted: int, earliest: date
+  ) -> None:
+    super().__init__(
+      first_open_period,
+      entries,
+      unposted,
+      message=(
+        f"Cannot open the books at {first_open_period}: {entries} draft "
+        f"entries and {unposted} events not yet posted are dated before it, "
+        f"the earliest {earliest}, and no close would ever post them. Open the "
+        f"books at {earliest:%Y-%m} or earlier (first_open_period, or "
+        "closed_through before that month), or re-date or delete the drafts "
+        "and void the events (update-event-block) first."
+      ),
+    )
+    self.earliest = earliest
 
 
 class AdvanceSequenceError(FiscalCalendarError):
@@ -133,6 +169,90 @@ def _scope(session: Session, entity_id: str | None) -> str:
   """The entity a calendar is being set up for: the one named, else the group
   parent, which a graph created without an entity gets here."""
   return entity_id or ensure_entity_id(session)
+
+
+def _fence_months(
+  session: Session, graph_id: str, earliest: str | None, before: str
+) -> None:
+  """Hold the exclusive period fence on each month from ``earliest`` up to,
+  not including, ``before``, ascending as every writer fences."""
+  from robosystems.operations.locking import acquire_exclusive_period_fence_xact
+
+  month = earliest
+  while month is not None and month < before:
+    acquire_exclusive_period_fence_xact(
+      session,
+      graph_id,
+      month,
+      detail=(
+        f"Period {month} is being written, closed or reopened by another "
+        "process. Retry in a moment."
+      ),
+    )
+    month = next_period(month)
+
+
+def _activity_before(
+  session: Session, entity_id: str, start: date, *, at_opening: bool = False
+) -> tuple[int, int, date | None]:
+  """Entries and events still to post dated before ``start`` in one entity's
+  books, and the earliest such date: what a calendar starting there would
+  strand, since no close ever posts a row dated before its first month.
+
+  Events still to post are ``pending``, ``captured`` and ``classified``.
+  ``at_opening`` is the count made when the calendar is first set up, where
+  three things differ from moving an existing start: posted entries before
+  it are the books' history, not activity; a schedule's obligations still to
+  post, and the drafts a sweep wrote for them, are retired as history
+  (`retire_schedule_history`); and a synced ledger's mirror lines post on
+  that ledger's next sync, never through a close.
+  """
+  from robosystems.models.extensions.roboledger.entry import Entry
+  from robosystems.operations.roboledger.commands.connections import (
+    SEVERABLE_SOURCES,
+  )
+  from robosystems.operations.roboledger.commands.schedules import (
+    drafts_written_for,
+    retirable_obligations,
+  )
+
+  entry_filters = [Entry.entity_id == entity_id, Entry.posting_date < start]
+  if at_opening:
+    entry_filters.append(Entry.status == "draft")
+    # The same drafts `retire_schedule_history` deletes, and no others.
+    entry_filters.append(
+      Entry.id.notin_(drafts_written_for(retirable_obligations(entity_id, start)))
+    )
+  entries, earliest_entry = (
+    session.query(func.count(Entry.id), func.min(Entry.posting_date))
+    .filter(*entry_filters)
+    .one()
+  )
+
+  posting_date = func.date(func.coalesce(Event.effective_at, Event.occurred_at))
+  event_filters = [
+    Event.entity_id == entity_id,
+    Event.status.in_(("pending", "captured", "classified")),
+    posting_date < start,
+  ]
+  if at_opening:
+    event_filters.append(
+      ~(
+        (Event.event_type == "schedule_entry_due")
+        & Event.status.in_(("pending", "classified"))
+      )
+    )
+    event_filters.append(
+      func.coalesce(Event.source, "").notin_(tuple(SEVERABLE_SOURCES))
+    )
+  unposted, earliest_event = (
+    session.query(func.count(Event.id), func.min(posting_date))
+    .filter(*event_filters)
+    .one()
+  )
+
+  dates = [d for d in (earliest_entry, earliest_event) if d is not None]
+  return int(entries or 0), int(unposted or 0), min(dates) if dates else None
 
 
 class FiscalCalendarService:
@@ -345,6 +465,56 @@ class FiscalCalendarService:
     )
     return calendar
 
+  def open_books_at(
+    self,
+    session: Session,
+    graph_id: str,
+    first_open_period: str,
+    *,
+    entity_id: str | None = None,
+  ) -> int:
+    """Hold a calendar being set up to the rule `change_start` keeps: nothing
+    still to post may be dated before its first open month.
+
+    Refuses with `CalendarOpeningBlockedError` when drafts or events still to
+    post are dated before ``first_open_period`` (the month after
+    ``closed_through``, or the first month of a fresh calendar). Otherwise
+    retires the entity's schedule months before it as history, the way the
+    generator treats months on or before ``closed_through``, and returns the
+    number of obligations voided. Runs in the setup's transaction, before it
+    commits.
+    """
+    from robosystems.operations.locking import bounded_lock_wait
+    from robosystems.operations.roboledger.commands.schedules import (
+      retire_schedule_history,
+    )
+    from robosystems.operations.roboledger.schedules.service import (
+      BEFORE_CALENDAR,
+    )
+
+    entity_id = _scope(session, entity_id)
+    start, _ = period_date_range(first_open_period)
+    entries, unposted, earliest = _activity_before(
+      session, entity_id, start, at_opening=True
+    )
+    if earliest is not None:
+      raise CalendarOpeningBlockedError(first_open_period, entries, unposted, earliest)
+    calendar = self.get(session, graph_id, entity_id=entity_id)
+    # Months a closed_through covers are booked; the rest of what precedes
+    # the first open month is only outside the calendar, until it moves.
+    booked = calendar is not None and calendar.closed_through_period
+    with bounded_lock_wait(
+      session,
+      "A schedule's obligations are being written by another process. Retry "
+      "in a moment.",
+    ):
+      return retire_schedule_history(
+        session,
+        entity_id,
+        before=start,
+        void_reason="historical" if booked else BEFORE_CALENDAR,
+      )
+
   def change_start(
     self,
     session: Session,
@@ -359,8 +529,9 @@ class FiscalCalendarService:
     """Move the entity's first period, allowed only before its first close.
 
     Earlier seeds open months back to `first_open_period`. Later removes the
-    leading months, which must hold no entries (drafts included) and no
-    unposted source lines, or they would be stranded outside the calendar.
+    leading months, which must hold no entries (drafts included) and no event
+    still to post (a pending schedule obligation included), or they would be
+    stranded outside the calendar.
     Returns the calendar and the counts of period rows created and removed.
 
     Raises `CalendarStartLockedError` once any month has closed or is
@@ -379,10 +550,16 @@ class FiscalCalendarService:
       )
 
     entity_id = _scope(session, entity_id)
-    calendar = self.require_locked(session, graph_id, entity_id=entity_id)
     periods = session.query(FiscalPeriod).filter(
       FiscalPeriod.graph_id == graph_id, FiscalPeriod.entity_id == entity_id
     )
+    # A later start removes months. The fence comes first, as for every
+    # writer and close: a draft already past the guards into one of them
+    # commits before the count below, and a later one waits and re-reads the
+    # new start.
+    seen_earliest = periods.with_entities(func.min(FiscalPeriod.name)).scalar()
+    _fence_months(session, graph_id, seen_earliest, first_open_period)
+    calendar = self.require_locked(session, graph_id, entity_id=entity_id)
     if (
       calendar.closed_through_period
       or periods.filter(FiscalPeriod.status != "open").first() is not None
@@ -397,7 +574,7 @@ class FiscalCalendarService:
     if earliest == first_open_period:
       return calendar, 0, 0
 
-    created = removed = 0
+    created = removed = restored = 0
     if earliest is None or first_open_period < earliest:
       created = self.ensure_fiscal_periods(
         session,
@@ -406,26 +583,26 @@ class FiscalCalendarService:
         end_period=current,
         entity_id=entity_id,
       )
-    else:
-      start, _ = period_date_range(first_open_period)
-      from robosystems.models.extensions.roboledger.entry import Entry
+      # The schedule months the old start retired are inside the calendar now.
+      from robosystems.operations.locking import bounded_lock_wait
+      from robosystems.operations.roboledger.commands.schedules import (
+        restore_schedule_history,
+      )
 
-      entries = (
-        session.query(func.count(Entry.id))
-        .filter(Entry.entity_id == entity_id, Entry.posting_date < start)
-        .scalar()
-      )
-      posting_date = func.date(func.coalesce(Event.effective_at, Event.occurred_at))
-      unposted = (
-        session.query(func.count(Event.id))
-        .filter(
-          Event.entity_id == entity_id,
-          Event.status.in_(("captured", "classified")),
-          Event.event_type != "schedule_entry_due",
-          posting_date < start,
+      with bounded_lock_wait(
+        session,
+        "A schedule's obligations are being written by another process. Retry "
+        "in a moment.",
+      ):
+        restored = restore_schedule_history(
+          session, entity_id, since=period_date_range(first_open_period)[0]
         )
-        .scalar()
-      )
+    else:
+      # Re-fenced from the locked read: a no-op unless the start moved
+      # earlier in between.
+      _fence_months(session, graph_id, earliest, first_open_period)
+      start, _ = period_date_range(first_open_period)
+      entries, unposted, _ = _activity_before(session, entity_id, start)
       if entries or unposted:
         raise CalendarStartBlockedError(first_open_period, entries, unposted)
       removed = periods.filter(FiscalPeriod.name < first_open_period).delete(
@@ -452,7 +629,8 @@ class FiscalCalendarService:
     logger.info(
       f"Moved fiscal calendar start for graph {graph_id} entity {entity_id} "
       f"from {earliest} to {first_open_period} "
-      f"({created} periods created, {removed} removed)"
+      f"({created} periods created, {removed} removed, "
+      f"{restored} schedule obligations restored)"
     )
     return calendar, created, removed
 
@@ -797,6 +975,8 @@ class FiscalCalendarService:
     if period_end >= today:
       blockers.append(CloseableGateResult.PERIOD_INCOMPLETE)
 
+    # For the same reason a sync is current only once it ran after the
+    # period's last day: one made that day has not seen the rest of it.
     sync_stale_days: int | None = None
     if not allow_stale_sync and has_sync_connection:
       if last_sync_at is None:
@@ -805,9 +985,9 @@ class FiscalCalendarService:
         last_sync_date = (
           last_sync_at.date() if hasattr(last_sync_at, "date") else last_sync_at
         )
-        if last_sync_date < period_end:
+        if last_sync_date <= period_end:
           blockers.append(CloseableGateResult.SYNC_STALE)
-          sync_stale_days = (period_end - last_sync_date).days
+          sync_stale_days = max(1, (period_end - last_sync_date).days)
 
     # Matured schedule obligations still pending: promote or void them.
     period_end_dt = datetime.combine(period_end, time(23, 59, 59), tzinfo=UTC)

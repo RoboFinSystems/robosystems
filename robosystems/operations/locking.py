@@ -109,6 +109,25 @@ def acquire_shared_period_fence(
     )
 
 
+def acquire_exclusive_period_fence_xact(
+  session: Session, graph_id: str, period: str, *, detail: str
+) -> None:
+  """Take a transaction-scoped exclusive fence on ``(graph_id, period)``.
+
+  For a change made in one transaction (moving the calendar's start): it
+  waits for writers holding the shared side to commit, and holds new ones
+  out until this transaction ends. Bounded like the shared side.
+  """
+  with bounded_lock_wait(session, detail):
+    session.execute(
+      text("SELECT pg_advisory_xact_lock(:classid, hashtext(:ident))"),
+      {
+        "classid": _PERIOD_FENCE_CLASS,
+        "ident": period_fence_ident(graph_id, period),
+      },
+    )
+
+
 @contextmanager
 def exclusive_period_fence(
   graph_id: str, period: str, *, detail: str, wait_ms: int | None = None
@@ -167,6 +186,7 @@ def exclusive_period_fence(
 
 __all__ = [
   "RowLockedError",
+  "acquire_exclusive_period_fence_xact",
   "acquire_shared_period_fence",
   "bounded_lock_wait",
   "exclusive_period_fence",

@@ -585,8 +585,9 @@ def _rebuild_session(
     9. count facts → fetchone
     10. count distinct periods → fetchone
   query().filter().delete() captures the deleted models in order.
-  _calendar_closed_through_date uses
-  session.query(FiscalCalendar).filter(...).first().
+  _calendar_history_end uses
+  session.query(FiscalCalendar).filter(...).first() and
+  session.query(min(FiscalPeriod.start_date)).filter(...).scalar().
 
   session.get is now shared: `lock_by_id` fetches the locked schedule
   `Structure` through it, and the supersede path fetches the old `Event`. It
@@ -617,13 +618,14 @@ def _rebuild_session(
 
   session.get.side_effect = _get
 
-  # session.query(...) is used both by _calendar_closed_through_date
-  # (FiscalCalendar.filter().first() → None) and by the cascade deletes
-  # (.filter().delete()).
+  # session.query(...) is used both by _calendar_history_end (no calendar,
+  # no periods → None) and by the cascade deletes (.filter().delete()).
   def _query(model):
-    if model.__name__ == "FiscalCalendar":
+    name = getattr(model, "__name__", None)
+    if name is None or name == "FiscalCalendar":
       q = MagicMock()
       q.filter.return_value.first.return_value = None
+      q.filter.return_value.scalar.return_value = None
       return q
     return _Query(model, deleted_models)
 
@@ -774,6 +776,10 @@ def test_rebuild_schedule_guards_posted_entries() -> None:
   session, _ = _rebuild_session(structure, posted_count=2)
 
   with (
+    patch(
+      "robosystems.operations.roboledger.commands.schedules._before_calendar_note",
+      return_value="",
+    ),
     patch(
       "robosystems.operations.roboledger.commands.schedules."
       "ScheduleService.void_pending_obligations",
@@ -967,7 +973,7 @@ def test_reinstate_reopened_schedule_scopes_promotes_now_open_facts() -> None:
   session.execute.return_value = exec_result
 
   with patch.object(
-    sched_cmds, "_calendar_closed_through_date", return_value=date(2026, 2, 28)
+    sched_cmds, "_calendar_history_end", return_value=date(2026, 2, 28)
   ):
     n = sched_cmds.reinstate_reopened_schedule_scopes(session, "ent_1")
 
@@ -993,7 +999,7 @@ def test_reinstate_reopened_schedule_scopes_handles_null_boundary() -> None:
   exec_result.rowcount = 5
   session.execute.return_value = exec_result
 
-  with patch.object(sched_cmds, "_calendar_closed_through_date", return_value=None):
+  with patch.object(sched_cmds, "_calendar_history_end", return_value=None):
     n = sched_cmds.reinstate_reopened_schedule_scopes(session, "ent_1")
 
   assert n == 5

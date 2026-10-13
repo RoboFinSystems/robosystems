@@ -33,6 +33,7 @@ from robosystems.operations.roboledger.commands._guards import (
   InactiveAccountError,
   assert_accounts_postable,
   assert_period_not_closed,
+  assert_within_calendar,
 )
 from robosystems.operations.roboledger.commands.connections import SEVERABLE_SOURCES
 from robosystems.operations.roboledger.commands.journal_entries import (
@@ -484,6 +485,7 @@ def dispatch_preview(
   for pd in posting_dates:
     try:
       assert_period_not_closed(session, pd, entity_id=entity_id)
+      assert_within_calendar(session, pd, entity_id=entity_id)
     except (ClosedPeriodError, RowLockedError) as e:
       errors.append(str(e))
 

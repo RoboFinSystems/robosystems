@@ -16,6 +16,7 @@ builds.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -45,6 +46,7 @@ from robosystems.operations.roboledger.commands.fiscal_calendar import (
 )
 from robosystems.operations.roboledger.fiscal_calendar.service import (
   CalendarAlreadyInitializedError,
+  CalendarOpeningBlockedError,
   CalendarStartBlockedError,
   CalendarStartLockedError,
   InvalidCloseTargetError,
@@ -525,6 +527,22 @@ class TestInitializeFiscalCalendarTool:
       result = await tool.execute({"first_open_period": "2099-01"})
 
     assert result["error"] == "invalid_period"
+
+  @pytest.mark.asyncio
+  async def test_drafts_before_the_start_refuse_with_the_counts(self):
+    tool = InitializeFiscalCalendarTool(_client(user_id="usr_abc"))
+    with (
+      _patch_sessions(),
+      patch(
+        f"{MODULE}.ops_initialize_ledger",
+        side_effect=CalendarOpeningBlockedError("2026-09", 2, 1, date(2026, 6, 3)),
+      ),
+    ):
+      result = await tool.execute({"first_open_period": "2026-09"})
+
+    assert result["error"] == "calendar_start_blocked"
+    assert (result["entries"], result["unposted_source_lines"]) == (2, 1)
+    assert "2026-06 or earlier" in result["message"]
 
   @pytest.mark.asyncio
   async def test_rejects_on_repo_graph_before_ops(self):
