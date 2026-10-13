@@ -151,8 +151,8 @@ lambda = [
 [tool.uv]
 # No required-version: Dependabot bundles its own uv and refuses to parse a manifest that
 # pins one, so every Python update job dies and security updates go silent. Pin uv where it
-# runs instead — setup-uv in test.yml + create-release.yml, the ghcr.io/astral-sh/uv tag in
-# Dockerfile (twice) and Dockerfile.lambda — and move those together.
+# runs instead — setup-uv in test.yml, create-release.yml and publish-docs.yml, the
+# ghcr.io/astral-sh/uv tag in Dockerfile (twice) and Dockerfile.lambda — and move those together.
 
 [tool.setuptools]
 packages = ["robosystems"]
