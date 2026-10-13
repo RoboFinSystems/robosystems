@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -1072,3 +1072,571 @@ def test_a_retracted_bank_line_is_reversed_never_restated(session):
   }
   assert result.catch_up is not None
   assert not event.payload_drift
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# An acknowledgement is a booking: an alignment entry that names an item is
+# pinned to the preview, counted while it stands, and re-opens the item when
+# it is retracted. Driven through the real QuickBooks loader drift branch.
+# ───────────────────────────────────────────────────────────────────────────
+
+QB_CASH = "1000"
+QB_REPAIRS = "5000"
+QB_TXN = "Expense_77"
+
+
+def _qb_accounts(db) -> dict[str, str]:
+  ids: dict[str, str] = {}
+  for external_id, code, name in (
+    (QB_CASH, "1000", "Checking"),
+    (QB_REPAIRS, "6100", "Repairs"),
+  ):
+    element = Element(
+      name=name,
+      code=code,
+      external_id=external_id,
+      external_source="quickbooks",
+      connection_id=CONNECTION_ID,
+      created_by="test",
+    )
+    db.add(element)
+    db.flush()
+    ids[name] = str(element.id)
+  _seed_periods(db)
+  return ids
+
+
+def _qb_expense(amount: int, sync_token: str) -> dict:
+  """One QuickBooks expense, as the extract hands it to the loader."""
+  return {
+    "transactions": [
+      {
+        "external_id": QB_TXN,
+        "external_source": "quickbooks",
+        "number": "77",
+        "type": "Expense",
+        "category": None,
+        "amount": amount,
+        "currency": "USD",
+        "date": date(2026, 7, 9),
+        "due_date": None,
+        "merchant_name": "Fixit Co",
+        "reference_number": None,
+        "description": "Repairs",
+        "source_id": QB_TXN,
+        "status": "posted",
+        "sync_token": sync_token,
+      }
+    ],
+    "entries": [
+      {
+        "external_id": QB_TXN,
+        "external_transaction_id": QB_TXN,
+        "external_source": "quickbooks",
+        "number": "77",
+        "type": "standard",
+        "posting_date": date(2026, 7, 9),
+        "memo": "Repairs",
+        "status": "posted",
+      }
+    ],
+    "line_items": [
+      {
+        "entry_external_id": QB_TXN,
+        "element_external_id": QB_REPAIRS,
+        "debit_amount": amount,
+        "credit_amount": 0,
+        "description": "Repairs",
+        "line_order": 1,
+      },
+      {
+        "entry_external_id": QB_TXN,
+        "element_external_id": QB_CASH,
+        "debit_amount": 0,
+        "credit_amount": amount,
+        "description": "Cash",
+        "line_order": 2,
+      },
+    ],
+  }
+
+
+def _qb_sync(db, amount: int, sync_token: str) -> None:
+  from robosystems.operations.extensions.loader import OLTPLoader
+
+  OLTPLoader()._capture_transactions_as_events(
+    db,
+    _qb_expense(amount, sync_token),
+    source="quickbooks",
+    connection_id=CONNECTION_ID,
+    created_by="sync",
+    now=datetime.now(UTC),
+  )
+  db.flush()
+
+
+def _qb_item(db) -> Event:
+  event = db.query(Event).filter(Event.external_id == QB_TXN).one()
+  db.refresh(event)
+  return event
+
+
+def _repairs_delta(db, ids, event_id: str) -> int | None:
+  plan = plan_reconciling_item(db, event_id, graph_id=GRAPH_ID)
+  deltas = {line.element_id: line.delta for line in plan.delta}
+  return deltas.get(ids["Repairs"])
+
+
+def _repairs_ledger(db, ids) -> int:
+  return int(
+    db.execute(
+      text(
+        "SELECT COALESCE(SUM(li.debit_amount - li.credit_amount), 0) "
+        "FROM line_items li JOIN entries e ON e.id = li.entry_id "
+        "WHERE li.element_id = :element_id AND e.status <> 'reversed' "
+        "AND e.reversal_of IS NULL"
+      ),
+      {"element_id": ids["Repairs"]},
+    ).scalar_one()
+  )
+
+
+def _named(item: Event, db, *, stamp: bool = True):
+  """How an alignment names the item: with the stamp of the preview it was
+  written from, the way the preview hands it over."""
+  if not stamp:
+    return str(item.id)
+  plan = plan_reconciling_item(db, str(item.id), graph_id=GRAPH_ID)
+  assert plan.drift_detected_at is not None
+  return {
+    "event_id": str(item.id),
+    "expected_drift_detected_at": plan.drift_detected_at.isoformat(),
+  }
+
+
+def _hand_alignment(db, ids, cents: int, named: list, *, status: str = "draft"):
+  event, _envelope = create_event_block_in_session(
+    db,
+    CreateEventBlockRequest(
+      event_type="journal_entry_recorded",
+      event_category="adjustment",
+      source="manual",
+      occurred_at=datetime(2026, 8, 31),
+      apply_handlers=True,
+      metadata={
+        "posting_date": "2026-08-31",
+        "memo": "Alignment: QuickBooks edit to July repairs",
+        "publish_to_source": False,
+        "status": status,
+        "line_items": [
+          {"element_id": ids["Repairs"], "debit_amount": cents},
+          {"element_id": ids["Checking"], "credit_amount": cents},
+        ],
+        "resolves_reconciling_items": named,
+      },
+    ),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+  db.flush()
+  return event
+
+
+def _flagged_at_1500(db) -> tuple[dict[str, str], Event]:
+  ids = _qb_accounts(db)
+  _qb_sync(db, 1000, "0")
+  _qb_sync(db, 1500, "1")
+  item = _qb_item(db)
+  assert item.payload_drift is True
+  return ids, item
+
+
+# Pinned ───────────────────────────────────────────────────────────────────
+
+
+def test_an_alignment_from_a_preview_the_item_has_moved_past_is_refused(session):
+  """The alignment was written from the +500 preview; a sync re-flagged the
+  item at 2,000 before it was recorded. It must not settle the newer payload."""
+  ids, item = _flagged_at_1500(session)
+  named = _named(item, session)
+  _qb_sync(session, 2000, "2")
+
+  savepoint = session.begin_nested()
+  with pytest.raises(RowLockedError, match="re-flagged"):
+    _hand_alignment(session, ids, 500, [named])
+  savepoint.rollback()
+
+  item = _qb_item(session)
+  assert item.payload_drift is True
+  assert _repairs_delta(session, ids, str(item.id)) == 1000
+
+
+def test_an_alignment_carrying_the_previewed_stamp_settles_the_item(session):
+  ids, item = _flagged_at_1500(session)
+
+  alignment = _hand_alignment(session, ids, 500, [_named(item, session)])
+
+  item = _qb_item(session)
+  assert item.payload_drift is False
+  (record,) = item.metadata_["reconciliation_history"]
+  assert record["reference_event_id"] == str(alignment.id)
+
+
+def test_one_item_named_twice_with_different_stamps_is_refused(session):
+  ids, item = _flagged_at_1500(session)
+  named = _named(item, session)
+
+  with pytest.raises(HandlerMetadataValidationError, match="twice"):
+    _hand_alignment(
+      session,
+      ids,
+      500,
+      [named, {**named, "expected_drift_detected_at": "2026-01-01T00:00:00+00:00"}],
+    )
+
+
+# Counted ──────────────────────────────────────────────────────────────────
+
+
+def test_a_second_edit_after_an_alignment_posts_only_its_own_change(session):
+  """RC1: QuickBooks 1,000 → 1,500, settled by a +500 alignment, then 1,800.
+  The alignment already booked 500 of it, so the next change is +300."""
+  ids, item = _flagged_at_1500(session)
+  _hand_alignment(session, ids, 500, [_named(item, session)])
+
+  _qb_sync(session, 1800, "2")
+  item = _qb_item(session)
+  assert item.payload_drift is True
+  assert _repairs_delta(session, ids, str(item.id)) == 300
+
+  resolve_reconciling_item(
+    session,
+    ResolveReconcilingItemRequest(
+      event_id=str(item.id),
+      expected_drift_detected_at=_previewed(session, str(item.id)),
+      disposition="catch_up",
+      posting_date=OPEN_END,
+    ),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+  session.flush()
+  assert _repairs_ledger(session, ids) == 1800
+
+
+def test_restate_is_blocked_while_an_alignment_levels_the_item(session):
+  """Restating rebuilds the event's own entries at the new figure; with the
+  alignment still standing, its 500 would be counted twice."""
+  ids, item = _flagged_at_1500(session)
+  _hand_alignment(session, ids, 500, [_named(item, session)])
+  _qb_sync(session, 1800, "2")
+  item = _qb_item(session)
+
+  plan = plan_reconciling_item(session, str(item.id), graph_id=GRAPH_ID)
+  assert plan.default_disposition == "catch_up"
+  assert any("alignment" in blocker for blocker in plan.restate_blockers)
+
+
+def test_a_plain_acknowledge_naming_its_entry_is_counted_too(session):
+  """The REST acknowledge that names the entry which handled the difference
+  is the same booking as an alignment that names the item."""
+  ids, item = _flagged_at_1500(session)
+  alignment = _hand_alignment(session, ids, 500, [])
+  resolve_reconciling_item(
+    session,
+    ResolveReconcilingItemRequest(
+      event_id=str(item.id),
+      expected_drift_detected_at=_previewed(session, str(item.id)),
+      disposition="acknowledge",
+      note="booked by hand",
+      reference_event_id=str(alignment.id),
+    ),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+  session.flush()
+
+  _qb_sync(session, 1800, "2")
+  assert _repairs_delta(session, ids, str(_qb_item(session).id)) == 300
+
+
+def test_a_reverted_edit_after_an_alignment_re_raises_the_difference(session):
+  """RC3: the alignment booked +500; QuickBooks then went back to 1,000. The
+  re-raised item must ask for the 500 back, not read as no change."""
+  ids, item = _flagged_at_1500(session)
+  _hand_alignment(session, ids, 500, [_named(item, session)])
+
+  _qb_sync(session, 1000, "2")
+  item = _qb_item(session)
+  assert item.payload_drift is True
+  assert _repairs_delta(session, ids, str(item.id)) == -500
+
+
+def test_an_edit_reverted_before_anyone_settles_it_clears_the_flag(session):
+  """P1: 1,000 → 1,500 → 1,000 before anyone settled it. QuickBooks is back
+  at the figure the ledger holds, so nothing is owed."""
+  _ids, _item = _flagged_at_1500(session)
+
+  _qb_sync(session, 1000, "2")
+
+  item = _qb_item(session)
+  assert item.payload_drift is False
+  assert "drift_payload" not in item.metadata_
+  assert "drift_detected_at" not in item.metadata_
+  assert item.metadata_["qb_sync_token"] == "2"
+
+
+# Re-opens ─────────────────────────────────────────────────────────────────
+
+
+def _void(db, event_id: str) -> None:
+  from robosystems.models.api.event_block import UpdateEventBlockRequest
+  from robosystems.operations.event_block.commands import update_event_block
+
+  update_event_block(
+    db,
+    UpdateEventBlockRequest(event_id=event_id, transition_to="voided"),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+
+
+def test_voiding_an_alignment_reopens_the_items_it_settled(session):
+  """RC8: the alignment draft is voided before the close posts it. The item
+  owes the books its +500 again, and the next sync does not clear it."""
+  ids, item = _flagged_at_1500(session)
+  alignment = _hand_alignment(session, ids, 500, [_named(item, session)])
+  session.commit()
+
+  _void(session, str(alignment.id))
+
+  item = _qb_item(session)
+  assert item.payload_drift is True
+  assert _repairs_delta(session, ids, str(item.id)) == 500
+  assert item.metadata_["reconciliation_history"][-1]["disposition"] == "reopened"
+
+  _qb_sync(session, 1500, "2")
+  item = _qb_item(session)
+  assert item.payload_drift is True
+  assert _repairs_delta(session, ids, str(item.id)) == 500
+
+
+def test_reversing_an_alignment_reopens_the_items_it_settled(session):
+  from robosystems.models.api.extensions.journal_entries import (
+    ReverseJournalEntryRequest,
+  )
+  from robosystems.operations.roboledger.commands.journal_entries import (
+    reverse_journal_entry,
+  )
+
+  ids, item = _flagged_at_1500(session)
+  alignment = _hand_alignment(
+    session, ids, 500, [_named(item, session)], status="posted"
+  )
+  (entry,) = session.query(Entry).filter(
+    Entry.triggered_by_event_id == str(alignment.id)
+  )
+
+  reverse_journal_entry(
+    session,
+    ReverseJournalEntryRequest(entry_id=str(entry.id), posting_date=OPEN_END),
+    "user_test",
+  )
+  session.flush()
+
+  item = _qb_item(session)
+  assert item.payload_drift is True
+  assert _repairs_delta(session, ids, str(item.id)) == 500
+
+
+def test_a_reopened_item_stays_owed_through_an_edit_and_its_revert(session):
+  """Re-opened at the accepted 1,500 (the ledger holds 1,000). QuickBooks
+  then moves to 1,800 and back to 1,500: still 500 owed, never cleared."""
+  ids, item = _flagged_at_1500(session)
+  alignment = _hand_alignment(session, ids, 500, [_named(item, session)])
+  session.commit()
+  _void(session, str(alignment.id))
+
+  _qb_sync(session, 1800, "2")
+  assert _repairs_delta(session, ids, str(_qb_item(session).id)) == 800
+  _qb_sync(session, 1500, "3")
+
+  item = _qb_item(session)
+  assert item.payload_drift is True
+  assert _repairs_delta(session, ids, str(item.id)) == 500
+
+
+def test_a_preview_taken_before_the_reopen_is_refused(session):
+  """The plan changed when the alignment stopped counting; a resolution
+  decided on the earlier preview must be previewed again."""
+  ids, item = _flagged_at_1500(session)
+  alignment = _hand_alignment(session, ids, 500, [_named(item, session)])
+  _qb_sync(session, 1800, "2")
+  item = _qb_item(session)
+  seen = _previewed(session, str(item.id))
+  session.commit()
+  _void(session, str(alignment.id))
+
+  with pytest.raises(RowLockedError, match="re-flagged"):
+    resolve_reconciling_item(
+      session,
+      ResolveReconcilingItemRequest(
+        event_id=str(item.id),
+        expected_drift_detected_at=seen,
+        disposition="catch_up",
+        posting_date=OPEN_END,
+      ),
+      "user_test",
+      graph_id=GRAPH_ID,
+    )
+  assert _repairs_delta(session, ids, str(_qb_item(session).id)) == 800
+
+
+def test_voiding_an_alignment_restores_a_round_trip_items_baseline(session):
+  """An entry written back to QuickBooks and edited there is measured from a
+  stored baseline; acknowledging moves it, so re-opening must move it back."""
+  from robosystems.operations.event_block.qb_writeback import ROUND_TRIP_BASELINE_KEY
+  from robosystems.operations.extensions.loader import _round_trip_update
+
+  ids = _qb_accounts(session)
+  baseline = {
+    "posting_dates": ["2026-07-09"],
+    "lines": [[QB_CASH, 0, 1000], [QB_REPAIRS, 1000, 0]],
+  }
+  edited = {
+    "posting_dates": ["2026-07-09"],
+    "lines": [[QB_CASH, 0, 1500], [QB_REPAIRS, 1500, 0]],
+  }
+  written_back = Event(
+    entity_id=PARENT_ENTITY_ID,
+    event_type="journal_entry_recorded",
+    event_category="adjustment",
+    source="manual",
+    status="fulfilled",
+    occurred_at=datetime(2026, 7, 9),
+    created_by="user_test",
+    payload_drift=True,
+    metadata_={
+      "qb_external_id": "301",
+      "qb_sync_confirmed_at": "2026-07-10T00:00:00+00:00",
+      ROUND_TRIP_BASELINE_KEY: {"301": baseline},
+      "drift_payload": {
+        "round_trip": {
+          "qb_id": "301",
+          "entry_ids": [],
+          "baseline": baseline,
+          "accepted": edited,
+        },
+        "entries": [],
+        "connection_id": CONNECTION_ID,
+      },
+      "drift_detected_at": "2026-08-20T03:32:00+00:00",
+    },
+  )
+  session.add(written_back)
+  session.flush()
+  assert _repairs_delta(session, ids, str(written_back.id)) == 500
+
+  alignment = _hand_alignment(session, ids, 500, [_named(written_back, session)])
+  session.refresh(written_back)
+  assert written_back.metadata_[ROUND_TRIP_BASELINE_KEY]["301"] == edited
+  session.commit()
+
+  _void(session, str(alignment.id))
+
+  session.refresh(written_back)
+  assert written_back.payload_drift is True
+  assert written_back.metadata_[ROUND_TRIP_BASELINE_KEY]["301"] == baseline
+  assert _repairs_delta(session, ids, str(written_back.id)) == 500
+
+  # QuickBooks still holds the edit: the next sync leaves the item owed.
+  qb_entries = [
+    {
+      "posting_date": date(2026, 7, 9),
+      "line_items": [
+        {"element_external_id": QB_CASH, "debit_amount": 0, "credit_amount": 1500},
+        {"element_external_id": QB_REPAIRS, "debit_amount": 1500, "credit_amount": 0},
+      ],
+    }
+  ]
+  _meta, change = _round_trip_update(
+    written_back,
+    {"301": {"entries": qb_entries}},
+    session,
+    connection_id=CONNECTION_ID,
+    now=datetime.now(UTC),
+  )
+  assert change != "clear"
+
+
+# The capture-then-commit door ─────────────────────────────────────────────
+
+
+def test_an_alignment_committed_from_capture_settles_the_items_it_names(session):
+  """RC9: a journal entry captured first and committed with the items named
+  in the commit's patch settles them, pinned like the create."""
+  from robosystems.models.api.event_block import UpdateEventBlockRequest
+  from robosystems.operations.event_block.commands import update_event_block
+
+  ids, item = _flagged_at_1500(session)
+  captured, _envelope = create_event_block_in_session(
+    session,
+    CreateEventBlockRequest(
+      event_type="journal_entry_recorded",
+      event_category="adjustment",
+      source="manual",
+      occurred_at=datetime(2026, 8, 31),
+      apply_handlers=False,
+      metadata={
+        "posting_date": "2026-08-31",
+        "memo": "Alignment: QuickBooks edit to July repairs",
+        "publish_to_source": False,
+        "line_items": [
+          {"element_id": ids["Repairs"], "debit_amount": 500},
+          {"element_id": ids["Checking"], "credit_amount": 500},
+        ],
+      },
+    ),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+  named = _named(item, session)
+  session.commit()
+
+  update_event_block(
+    session,
+    UpdateEventBlockRequest(
+      event_id=str(captured.id),
+      transition_to="committed",
+      metadata_patch={"resolves_reconciling_items": [named]},
+    ),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+
+  item = _qb_item(session)
+  assert item.payload_drift is False
+  record = item.metadata_["reconciliation_history"][-1]
+  assert record["reference_event_id"] == str(captured.id)
+
+
+def test_naming_items_on_an_update_that_posts_nothing_is_refused(session):
+  from robosystems.models.api.event_block import UpdateEventBlockRequest
+  from robosystems.operations.event_block.commands import update_event_block
+
+  ids, item = _flagged_at_1500(session)
+  alignment = _hand_alignment(session, ids, 500, [])
+  session.commit()
+
+  with pytest.raises(HandlerMetadataValidationError, match="resolves_reconciling"):
+    update_event_block(
+      session,
+      UpdateEventBlockRequest(
+        event_id=str(alignment.id),
+        metadata_patch={"resolves_reconciling_items": [str(item.id)]},
+      ),
+      "user_test",
+      graph_id=GRAPH_ID,
+    )
+  session.rollback()
+  assert _qb_item(session).payload_drift is True

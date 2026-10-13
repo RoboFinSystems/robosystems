@@ -9,7 +9,7 @@ may carry ``element_external_id`` resolved at dispatch). The event ends
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, StrictBool, model_validator
@@ -84,6 +84,20 @@ class NestedJournalEntrySpec(BaseModel):
   external_id: str | None = None
 
 
+class SettledReconcilingItem(BaseModel):
+  """A reconciling item an entry settles, pinned to the preview it was
+  written from."""
+
+  event_id: str
+  expected_drift_detected_at: datetime | None = Field(
+    None,
+    description=(
+      "The preview's `drift_detected_at`. The entry is refused if the item "
+      "has been flagged again since."
+    ),
+  )
+
+
 class JournalEntryRecordedMetadata(BaseModel):
   """Metadata for a journal_entry_recorded event: flat or nested, never both."""
 
@@ -104,8 +118,12 @@ class JournalEntryRecordedMetadata(BaseModel):
   publish_to_source: StrictBool | None = None
 
   # Reconciling items this entry settles (an alignment authored by hand):
-  # each is acknowledged against it, so none is caught up a second time.
-  resolves_reconciling_items: list[str] | None = Field(None, max_length=200)
+  # each is acknowledged against it, so none is caught up a second time. A
+  # bare id is accepted; the stamped form refuses an item flagged again since
+  # its preview.
+  resolves_reconciling_items: list[str | SettledReconcilingItem] | None = Field(
+    None, max_length=200
+  )
 
   # Nested shape
   entries: list[NestedJournalEntrySpec] | None = None

@@ -548,6 +548,8 @@ def reverse_journal_entry(
     `JournalEntryAlreadyReversedError`.
     `ClosedPeriodError` if the original's or the reversal's date is closed.
     `ShadowLedgerPostingError` on books a shadow close keeps.
+    `SettlementNotReopenableError` if it settled a QuickBooks round trip that
+    has moved on since.
   """
   # Fence first, then the row: close takes the fence and then updates entries.
   peek = session.get(Entry, body.entry_id)
@@ -624,6 +626,16 @@ def reverse_journal_entry(
 
   original.status = "reversed"
   session.flush()
+
+  if original.triggered_by_event_id is not None:
+    # An alignment that settled reconciling items no longer books them.
+    from robosystems.operations.roboledger.commands.reconciling_items import (
+      reopen_items_settled_by,
+    )
+
+    reopen_items_settled_by(
+      session, str(original.triggered_by_event_id), created_by, reason="reversed"
+    )
 
   reversing_lines = _load_line_items(session, reversing_entry.id)
   return _entry_to_response(reversing_entry, reversing_lines)

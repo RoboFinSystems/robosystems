@@ -438,10 +438,10 @@ def _acknowledge_settled_items(
   graph_id: str,
 ) -> None:
   """Acknowledge each reconciling item the entry names against it. Anything
-  that is not an open reconciling item on this entity's books refuses the
-  whole write."""
-  item_ids = getattr(metadata, "resolves_reconciling_items", None) or []
-  if not item_ids:
+  that is not an open reconciling item on this entity's books, or one flagged
+  again since the preview its stamp names, refuses the whole write."""
+  named = getattr(metadata, "resolves_reconciling_items", None) or []
+  if not named:
     return
   from robosystems.models.api.extensions.reconciling_items import (
     ResolveReconcilingItemRequest,
@@ -452,12 +452,33 @@ def _acknowledge_settled_items(
     resolve_reconciling_item,
   )
 
-  for item_id in dict.fromkeys(item_ids):
+  item_ids: list[str] = []
+  stamps: dict[str, Any] = {}
+  for entry in named:
+    if isinstance(entry, str):
+      item_id = entry
+    else:
+      item_id = entry.event_id
+      if "expected_drift_detected_at" in entry.model_fields_set:
+        stamp = entry.expected_drift_detected_at
+        if item_id in stamps and stamps[item_id] != stamp:
+          raise HandlerMetadataValidationError(
+            f"resolves_reconciling_items: {item_id} is named twice with "
+            "different stamps."
+          )
+        stamps[item_id] = stamp
+    if item_id not in item_ids:
+      item_ids.append(item_id)
+
+  for item_id in item_ids:
     item = session.get(Event, item_id)
     if item is None or str(item.entity_id) != str(event.entity_id):
       raise HandlerMetadataValidationError(
         f"resolves_reconciling_items: {item_id} is not an event on this entity's books."
       )
+    pinned = (
+      {"expected_drift_detected_at": stamps[item_id]} if item_id in stamps else {}
+    )
     try:
       resolve_reconciling_item(
         session,
@@ -466,6 +487,7 @@ def _acknowledge_settled_items(
           disposition="acknowledge",
           reference_event_id=str(event.id),
           note=f"Settled by {event.id}",
+          **pinned,
         ),
         created_by,
         graph_id=graph_id,
@@ -581,8 +603,9 @@ def fire_handler_on_commit(
   session: Session,
   event: Event,
   created_by: str,
-) -> None:
-  """Fire the event's Python handler against its captured metadata.
+) -> Any:
+  """Fire the event's Python handler against its captured metadata, and
+  return that metadata as the handler typed it.
 
   Called on ``captured``/``classified`` → ``committed``. Event types with no
   Python handler are a silent no-op. Errors propagate so the transaction
@@ -590,7 +613,7 @@ def fire_handler_on_commit(
   """
   python_handler = get_python_handler(event.event_type)
   if python_handler is None:
-    return
+    return None
 
   raw_metadata = dict(event.metadata_ or {})
   try:
@@ -602,6 +625,7 @@ def fire_handler_on_commit(
     )
 
   python_handler.dispatch(session, event, typed_metadata, created_by)
+  return typed_metadata
 
 
 def _validate_classification(event: Event) -> None:
@@ -796,6 +820,27 @@ def update_event_block(
 
     event.status = body.transition_to
 
+  # Only the commit that fires a journal entry's handler acts on the items it
+  # names; on any other update they would stay flagged while the author
+  # believed them settled.
+  names_items = bool((body.metadata_patch or {}).get("resolves_reconciling_items"))
+  if names_items and not (
+    fire_handler and event.event_type == "journal_entry_recorded"
+  ):
+    raise HandlerMetadataValidationError(
+      "resolves_reconciling_items is acted on only by the update that commits "
+      "a captured journal_entry_recorded event."
+    )
+
+  if body.transition_to in _RETRACTED_STATUSES:
+    from robosystems.operations.roboledger.commands.reconciling_items import (
+      reopen_items_settled_by,
+    )
+
+    reopen_items_settled_by(
+      session, str(event.id), created_by, reason=str(body.transition_to)
+    )
+
   if body.description is not None:
     event.description = body.description
 
@@ -839,7 +884,11 @@ def update_event_block(
 
   if fire_handler:
     # After the metadata patch so the handler sees the final shape.
-    fire_handler_on_commit(session, event, created_by)
+    typed_metadata = fire_handler_on_commit(session, event, created_by)
+    if names_items:
+      _acknowledge_settled_items(
+        session, event, typed_metadata, created_by, graph_id=graph_id
+      )
 
   if body.transition_to == "committed":
     from robosystems.operations.roboledger.classification import learn_from_commit
