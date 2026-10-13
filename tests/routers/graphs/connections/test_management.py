@@ -914,6 +914,38 @@ class TestDeleteConnection:
 
   @pytest.mark.unit
   @pytest.mark.asyncio
+  async def test_a_purge_waiting_on_held_lines_refuses_with_a_retryable_409(self):
+    from robosystems.operations.locking import RowLockedError
+
+    with (
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.get_connection",
+        new_callable=AsyncMock,
+        return_value=_make_connection_dict(),
+      ),
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.delete_connection",
+        new_callable=AsyncMock,
+      ) as mock_delete,
+      patch(f"{MANAGEMENT_MODULE}.provider_registry") as mock_registry,
+      pytest.raises(HTTPException) as exc_info,
+    ):
+      mock_registry.cleanup_connection = AsyncMock(
+        side_effect=RowLockedError("feed lines are held")
+      )
+      await delete_connection(
+        graph_id=GRAPH_ID,
+        connection_id=CONNECTION_ID,
+        current_user=_make_mock_user(),
+        db=MagicMock(),
+        _rate_limit=None,
+      )
+
+    assert exc_info.value.status_code == 409
+    mock_delete.assert_not_awaited()
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
   async def test_cleanup_and_delete_run_inside_the_fence(self, _fence):
     order: list[str] = []
     _fence.return_value.__enter__.side_effect = lambda: order.append("fence")
@@ -1476,7 +1508,9 @@ class TestCreateConnectionBooksGuard:
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail["code"] == "NATIVE_BOOKS_PRESENT"
     assert exc_info.value.detail["detail"] == "native books"
-    guard.assert_called_once_with(GRAPH_ID, "quickbooks", mock_db, entity_id=None)
+    guard.assert_called_once_with(
+      GRAPH_ID, "quickbooks", mock_db, entity_id=None, realm_id=None
+    )
     mock_list.assert_not_awaited()
     mock_registry.create_connection.assert_not_awaited()
 
@@ -1759,7 +1793,7 @@ class TestCreateMercuryConnection:
       )
     assert result.provider == "plaid"
     assert guard.call_args.args[1] == "plaid"
-    assert guard.call_args.kwargs == {"entity_id": "ent_sub"}
+    assert guard.call_args.kwargs == {"entity_id": "ent_sub", "realm_id": None}
 
   @pytest.mark.unit
   @pytest.mark.asyncio

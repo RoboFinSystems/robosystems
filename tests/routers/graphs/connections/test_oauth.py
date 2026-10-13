@@ -318,7 +318,12 @@ class TestOAuthCallback:
     """These tests use synthetic users with no GraphUser row, so the write-role
     + lifecycle gate would 403 before reaching handler logic. The deny path is
     covered in tests/routers/graphs/test_write_role_gates.py; bypass it here."""
-    with patch(f"{OAUTH_MODULE}.require_graph_write_role"):
+    with (
+      patch(f"{OAUTH_MODULE}.require_graph_write_role"),
+      # The same-company guard reads the tenant's books; it runs against
+      # real SQL in TestOnlyTheBuildingCompanyReconnects below.
+      patch(f"{OAUTH_MODULE}.assert_same_company"),
+    ):
       yield
 
   @pytest.mark.unit
@@ -1240,7 +1245,7 @@ class TestInitOAuthBooksGuard:
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail["code"] == "NATIVE_BOOKS_PRESENT"
     guard.assert_called_once_with(
-      GRAPH_ID, "quickbooks", mock_db, entity_id=None, resuming=False
+      GRAPH_ID, "quickbooks", mock_db, entity_id=None, resuming=False, realm_id=None
     )
     mock_oauth_handler.get_authorization_url.assert_not_called()
 
@@ -1281,7 +1286,7 @@ class TestInitOAuthBooksGuard:
     assert exc_info.value.status_code == 404
     assert exc_info.value.detail["code"] == "ENTITY_NOT_FOUND"
     guard.assert_called_once_with(
-      GRAPH_ID, "plaid", mock_db, entity_id="gone", resuming=False
+      GRAPH_ID, "plaid", mock_db, entity_id="gone", resuming=False, realm_id=None
     )
 
   @pytest.mark.unit
@@ -1319,6 +1324,381 @@ class TestInitOAuthBooksGuard:
       )
 
     guard.assert_called_once_with(
-      GRAPH_ID, "quickbooks", mock_db, entity_id=None, resuming=True
+      GRAPH_ID, "quickbooks", mock_db, entity_id=None, resuming=True, realm_id=None
     )
     mock_oauth_handler.get_authorization_url.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Only the company that built the books reconnects to them — real SQL
+# ---------------------------------------------------------------------------
+
+REALM_A = "9130000000000000001"
+REALM_B = "9130000000000000002"
+QB_REDIRECT = "http://localhost:3001/connections/qb-callback"
+
+
+@pytest.fixture()
+def tenant_books():
+  """An extensions schema on the test database standing in for the graph's
+  tenant: every books probe opens its session here."""
+  import os
+  import uuid
+  from contextlib import contextmanager
+
+  from sqlalchemy import create_engine, text
+  from sqlalchemy.orm import sessionmaker
+
+  import robosystems.models.extensions  # noqa: F401  (register models)
+  from robosystems.db.extensions import ExtensionsBase
+
+  database_url = os.environ.get("TEST_DATABASE_URL")
+  if not database_url:
+    pytest.skip("TEST_DATABASE_URL not configured")
+
+  schema = f"ext_oauth_{uuid.uuid4().hex[:12]}"
+  admin = create_engine(database_url)
+  with admin.begin() as conn:
+    conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+  engine = create_engine(
+    database_url, connect_args={"options": f"-csearch_path={schema}"}
+  )
+  ExtensionsBase.metadata.create_all(bind=engine)
+  make_session = sessionmaker(bind=engine)
+
+  @contextmanager
+  def tenant_session(graph_id, **_kwargs):
+    session = make_session()
+    try:
+      yield session
+    finally:
+      session.close()
+
+  try:
+    with patch("robosystems.db.extensions.extensions_session", tenant_session):
+      yield make_session
+  finally:
+    engine.dispose()
+    with admin.begin() as conn:
+      conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+    admin.dispose()
+
+
+def _seed_books_built_by(session, connection_id: str, *, tag: str) -> None:
+  """The chart and a posted entry a QuickBooks sync of ``connection_id``
+  leaves behind, on the group parent it renamed."""
+  from datetime import date
+
+  from robosystems.models.extensions import (
+    Element,
+    Entity,
+    EntityTaxonomy,
+    LineItem,
+    Taxonomy,
+  )
+  from robosystems.models.extensions.roboledger.entry import Entry
+
+  parent = session.query(Entity).filter(Entity.is_parent.is_(True)).first()
+  if parent is None:
+    parent = Entity(id="ent_parent", name="Company A", is_parent=True, created_by="t")
+    session.add(parent)
+    chart = Taxonomy(
+      id="tax_qb",
+      name="Quickbooks Chart of Accounts",
+      taxonomy_type="chart_of_accounts",
+      is_active=True,
+      created_by="t",
+    )
+    session.add(chart)
+    session.flush()
+    session.add(
+      EntityTaxonomy(
+        entity_id=parent.id,
+        taxonomy_id=chart.id,
+        is_primary=True,
+        basis="chart_of_accounts",
+        adoption_context="voluntary",
+      )
+    )
+  parent.source = "quickbooks"
+  parent.connection_id = connection_id
+  accounts = []
+  for i, (name, balance) in enumerate([("Checking", "debit"), ("Sales", "credit")]):
+    element = Element(
+      id=f"elem_{tag}_{i}",
+      code=f"{tag}{i}",
+      name=name,
+      qname=f"qb:{tag}{i}",
+      balance_type=balance,
+      source="quickbooks",
+      external_source="quickbooks",
+      external_id=str(i + 1),
+      connection_id=connection_id,
+      taxonomy_id="tax_qb",
+      element_type="concept",
+      period_type="instant" if balance == "debit" else "duration",
+      is_abstract=False,
+      is_monetary=True,
+      item_type="monetary",
+    )
+    session.add(element)
+    accounts.append(element)
+  session.flush()
+  entry = Entry(
+    id=f"je_{tag}",
+    entity_id=parent.id,
+    type="standard",
+    status="posted",
+    posting_date=date(2026, 7, 15),
+    memo=f"{tag} invoice",
+    created_by="t",
+  )
+  session.add(entry)
+  session.flush()
+  session.add_all(
+    [
+      LineItem(
+        id=f"li_{tag}_dr",
+        entry_id=entry.id,
+        element_id=accounts[0].id,
+        debit_amount=100,
+        credit_amount=0,
+      ),
+      LineItem(
+        id=f"li_{tag}_cr",
+        entry_id=entry.id,
+        element_id=accounts[1].id,
+        debit_amount=0,
+        credit_amount=100,
+      ),
+    ]
+  )
+  session.commit()
+
+
+def _disconnected_quickbooks(test_db, graph_id: str, user_id: str, realm: str):
+  """A QuickBooks connection after the app's default Disconnect: soft-deleted,
+  revivable by the same realm."""
+  from robosystems.models.core.connection.connection import Connection
+
+  conn = Connection.create(
+    graph_id=graph_id,
+    user_id=user_id,
+    provider="quickbooks",
+    session=test_db,
+    status="connected",
+    realm_id=realm,
+    write_policy="native",
+  )
+  conn.soft_delete(test_db)
+  return conn
+
+
+def _pending_quickbooks(test_db, graph_id: str, user_id: str, realm=None):
+  from robosystems.models.core.connection.connection import Connection
+
+  return Connection.create(
+    graph_id=graph_id,
+    user_id=user_id,
+    provider="quickbooks",
+    session=test_db,
+    realm_id=realm,
+  )
+
+
+async def _quickbooks_callback(db, user, graph_id: str, connection_id: str, realm):
+  """Run the callback for ``realm`` with Intuit stubbed out. Returns the
+  result, or the HTTPException, with the token-exchange and sync mocks."""
+  from robosystems.operations.providers.quickbooks_provider import (
+    quickbooks_oauth_handler,
+    quickbooks_oauth_provider,
+  )
+
+  exchange = AsyncMock(
+    return_value={"access_token": "access_new", "refresh_token": "refresh_new"}
+  )
+  sync = AsyncMock(return_value="run_1")
+  with (
+    patch(f"{OAUTH_MODULE}.require_graph_write_role"),
+    patch(
+      "robosystems.operations.providers.oauth_handler.OAuthState.validate",
+      return_value={
+        "user_id": str(user.id),
+        "connection_id": connection_id,
+        "redirect_uri": QB_REDIRECT,
+      },
+    ),
+    patch.object(quickbooks_oauth_handler, "exchange_code_for_tokens", exchange),
+    patch.object(
+      quickbooks_oauth_provider, "validate_connection", AsyncMock(return_value=True)
+    ),
+    patch(f"{OAUTH_MODULE}.dispatch_first_sync", sync),
+  ):
+    try:
+      outcome = await oauth_callback(
+        provider="quickbooks",
+        graph_id=graph_id,
+        request=_make_oauth_callback_request(realm_id=realm),
+        current_user=user,
+        db=db,
+        _rate_limit=None,
+      )
+    except HTTPException as refused:
+      outcome = refused
+  return outcome, exchange, sync
+
+
+class TestOnlyTheBuildingCompanyReconnects:
+  """After a plain disconnect of QuickBooks company A, the chart and books A
+  built stay on the graph. Company B, picked in Intuit's chooser, would be
+  merged into them by its first full sync — so only A may reattach."""
+
+  @pytest.fixture(autouse=True)
+  def _credential_key(self):
+    """Tokens are stored for real here; the suite's key is not a Fernet key."""
+    from cryptography.fernet import Fernet
+
+    from robosystems.config import env
+
+    with patch.object(
+      env, "CONNECTION_CREDENTIALS_KEY", Fernet.generate_key().decode()
+    ):
+      yield
+
+  @pytest.mark.unit
+  @pytest.mark.parametrize(
+    "path",
+    ["callback_fresh_pending", "callback_pending_named_realm", "init_named_realm"],
+  )
+  async def test_another_company_is_refused(
+    self, path, test_db, test_user, sample_graph, tenant_books
+  ):
+    from robosystems.models.core.connection.connection import Connection
+    from robosystems.models.core.connection.connection_credentials import (
+      ConnectionCredentials,
+    )
+
+    graph_id = sample_graph.graph_id
+    with tenant_books() as ext:
+      conn_a = _disconnected_quickbooks(test_db, graph_id, test_user.id, REALM_A)
+      _seed_books_built_by(ext, conn_a.id, tag="a")
+    named = None if path == "callback_fresh_pending" else REALM_B
+    pending = _pending_quickbooks(test_db, graph_id, test_user.id, realm=named)
+    pending_id = pending.id
+
+    if path == "init_named_realm":
+      authorize = MagicMock(return_value=("https://intuit", "state"))
+      with (
+        patch(f"{OAUTH_MODULE}.require_graph_write_role"),
+        patch(
+          "robosystems.operations.providers.quickbooks_provider."
+          "quickbooks_oauth_handler.get_authorization_url",
+          authorize,
+        ),
+        pytest.raises(HTTPException) as refused,
+      ):
+        await init_oauth(
+          graph_id=graph_id,
+          request=_make_oauth_init_request(connection_id=pending_id),
+          current_user=test_user,
+          db=test_db,
+          _rate_limit=None,
+        )
+      assert refused.value.status_code == 409
+      assert refused.value.detail["code"] == "OTHER_COMPANY_BOOKS"
+      authorize.assert_not_called()
+      return
+
+    outcome, exchange, sync = await _quickbooks_callback(
+      test_db, test_user, graph_id, pending_id, REALM_B
+    )
+
+    assert isinstance(outcome, HTTPException), outcome
+    assert outcome.status_code == 409
+    assert outcome.detail["code"] == "OTHER_COMPANY_BOOKS"
+    assert "different QuickBooks company" in outcome.detail["detail"]
+    # Refused before Intuit mints a token: nothing to store or revoke.
+    exchange.assert_not_called()
+    sync.assert_not_called()
+    test_db.expire_all()
+    assert ConnectionCredentials.get_by_connection_id(pending_id, test_db) is None
+    assert Connection.get_by_id(pending_id, test_db, include_deleted=True) is None
+    assert Connection.get_by_id(conn_a.id, test_db) is None  # still disconnected
+    with tenant_books() as ext:
+      from robosystems.models.extensions import Element, Entity
+
+      parent = ext.query(Entity).filter(Entity.is_parent.is_(True)).one()
+      assert (parent.name, parent.connection_id) == ("Company A", conn_a.id)
+      assert {e.connection_id for e in ext.query(Element)} == {conn_a.id}
+
+  @pytest.mark.unit
+  async def test_the_same_company_revives_its_connection(
+    self, test_db, test_user, sample_graph, tenant_books
+  ):
+    from robosystems.models.core.connection.connection import Connection
+    from robosystems.models.core.connection.connection_credentials import (
+      ConnectionCredentials,
+    )
+
+    graph_id = sample_graph.graph_id
+    with tenant_books() as ext:
+      conn_a = _disconnected_quickbooks(test_db, graph_id, test_user.id, REALM_A)
+      _seed_books_built_by(ext, conn_a.id, tag="a")
+    pending_id = _pending_quickbooks(test_db, graph_id, test_user.id).id
+
+    outcome, exchange, sync = await _quickbooks_callback(
+      test_db, test_user, graph_id, pending_id, REALM_A
+    )
+
+    assert not isinstance(outcome, HTTPException), outcome.detail
+    assert outcome["connection_id"] == conn_a.id
+    exchange.assert_called_once()
+    assert sync.call_args.kwargs["connection_id"] == conn_a.id
+    test_db.expire_all()
+    revived = Connection.get_by_id(conn_a.id, test_db)
+    assert revived is not None and revived.status == "connected"
+    assert Connection.get_by_id(pending_id, test_db, include_deleted=True) is None
+    assert ConnectionCredentials.get_by_connection_id(conn_a.id, test_db) is not None
+
+  @pytest.mark.unit
+  async def test_a_revival_over_books_another_company_also_built_is_refused(
+    self, test_db, test_user, sample_graph, tenant_books
+  ):
+    """Books already holding a second company's accounts are no longer the
+    first company's alone; reviving it would sync over a mixed chart."""
+    graph_id = sample_graph.graph_id
+    with tenant_books() as ext:
+      conn_a = _disconnected_quickbooks(test_db, graph_id, test_user.id, REALM_A)
+      _seed_books_built_by(ext, conn_a.id, tag="a")
+      conn_b = _disconnected_quickbooks(test_db, graph_id, test_user.id, REALM_B)
+      _seed_books_built_by(ext, conn_b.id, tag="b")
+    pending_id = _pending_quickbooks(test_db, graph_id, test_user.id).id
+
+    outcome, exchange, sync = await _quickbooks_callback(
+      test_db, test_user, graph_id, pending_id, REALM_A
+    )
+
+    assert isinstance(outcome, HTTPException), outcome
+    assert outcome.status_code == 409
+    exchange.assert_not_called()
+    sync.assert_not_called()
+
+  @pytest.mark.unit
+  def test_a_connection_naming_another_company_at_create_is_refused(
+    self, test_db, test_user, sample_graph, tenant_books
+  ):
+    from robosystems.operations.connection_service import (
+      ProviderConflictError,
+      assert_provider_compatible,
+    )
+
+    graph_id = sample_graph.graph_id
+    with tenant_books() as ext:
+      conn_a = _disconnected_quickbooks(test_db, graph_id, test_user.id, REALM_A)
+      _seed_books_built_by(ext, conn_a.id, tag="a")
+
+    with pytest.raises(ProviderConflictError) as refused:
+      assert_provider_compatible(graph_id, "quickbooks", test_db, realm_id=REALM_B)
+    assert refused.value.code == "OTHER_COMPANY_BOOKS"
+    assert_provider_compatible(graph_id, "quickbooks", test_db, realm_id=REALM_A)
+    assert_provider_compatible(graph_id, "quickbooks", test_db)

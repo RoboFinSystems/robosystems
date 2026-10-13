@@ -1050,6 +1050,10 @@ def find_waiting_leg(
   same_entity = (
     [Event.entity_id == str(payload["entity_id"])] if payload.get("entity_id") else []
   )
+  # Locked until the run commits, like `existing_events`: the status settled
+  # on is the one the merge deletes on, so a commit in flight lands first and
+  # the leg is then treated as posted.
+  session.flush()
   rows = (
     session.execute(
       select(Event)
@@ -1065,11 +1069,14 @@ def find_waiting_leg(
         Event.metadata_["transfer_candidate"].astext == "true",
         Event.metadata_["account_id"].astext != account_id,
       )
-      .order_by(Event.occurred_at)
+      .order_by(Event.id)
+      .with_for_update()
+      .execution_options(populate_existing=True)
     )
     .scalars()
     .all()
   )
+  rows.sort(key=lambda event: event.occurred_at)
   candidates = [event for event in rows if str(event.id) not in consumed]
   if not candidates:
     return None
@@ -1211,7 +1218,8 @@ def _merge_into_pair(
   errors_before = list(report.errors)
   try:
     with session.begin_nested():
-      _delete_events(session, [str(waiting.id)])
+      if not _delete_events(session, [str(waiting.id)]):
+        raise _MergeFailed
       if not capture_event(
         session, merged, graph_id=graph_id, created_by=created_by, report=report
       ):
@@ -1257,11 +1265,21 @@ def merge_legs(
   return transfer_event(out_leg, in_leg, connection_id=connection_id, item_id=item_id)
 
 
-def _delete_events(session: Session, event_ids: list[str]) -> None:
+def _delete_events(session: Session, event_ids: list[str]) -> list[str]:
+  """Delete the events still unposted; returns the ids deleted. A line that
+  has been posted owns ledger rows and is never deleted."""
+  unposted = (Event.id.in_(event_ids), Event.status.in_(sorted(UNPOSTED_STATUSES)))
   session.execute(
-    delete(event_dimensions).where(event_dimensions.c.event_id.in_(event_ids))
+    delete(event_dimensions).where(
+      event_dimensions.c.event_id.in_(select(Event.id).where(*unposted))
+    )
   )
-  session.execute(delete(Event).where(Event.id.in_(event_ids)))
+  return [
+    str(event_id)
+    for event_id in session.execute(
+      delete(Event).where(*unposted).returning(Event.id)
+    ).scalars()
+  ]
 
 
 def _parse(value: str) -> datetime:

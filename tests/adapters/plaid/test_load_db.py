@@ -9,21 +9,39 @@ model either; these run them against ``robosystems_test``.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 import pytest
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from robosystems.adapters.bank_feed.chart import BankAccount, ChartIndex
 from robosystems.adapters.plaid.client import TransactionsSync
 from robosystems.adapters.plaid.pipeline.load import load_sync
-from robosystems.models.api.event_block import CreateEventBlockRequest
+from robosystems.models.api.event_block import (
+  CreateEventBlockRequest,
+  UpdateEventBlockRequest,
+)
 from robosystems.models.extensions.entity import Entity
+from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
+from robosystems.models.extensions.roboledger.transaction import Transaction
 from robosystems.operations.event_block.commands import (
+  EventNotFoundError,
   create_event_block_in_session,
   fire_handler_on_commit,
+  update_event_block,
+)
+from robosystems.operations.roboledger.fiscal_calendar.close_service import (
+  drafts_close_posts,
 )
 from tests.adapters.plaid.fixtures import txn
+from tests.ledger_entity import PARENT_ENTITY_ID
+from tests.operations.roboledger.commands.test_connections_purge_db import (
+  InThread,
+  held_open,
+  wait_until_blocked,
+)
 from tests.operations.roboledger.commands.test_reconciling_items_db import (
   CASH,
   GRAPH_ID,
@@ -332,3 +350,88 @@ def test_a_committed_line_teaches_the_next_line_from_its_counterparty(session):
     "none",
     "overridden",
   )
+
+
+# ── a commit racing the merge ────────────────────────────────────────────────
+#
+# A sync that finds a transfer's waiting leg merges it into a pair, deleting
+# the single leg. An operator committing that leg at the same moment must
+# either land first (the sync then sees it posted and voids the arriving leg
+# against it) or find it already merged. A committed leg deleted under its
+# draft hands that draft to the close.
+
+JULY = (date(2026, 7, 1), date(2026, 7, 31))
+
+
+def _commit_leg(db, event_id: str):
+  return update_event_block(
+    db,
+    UpdateEventBlockRequest(event_id=event_id, transition_to="committed"),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+
+
+def _dangling(db, model) -> int:
+  return db.execute(
+    select(func.count())
+    .select_from(model)
+    .outerjoin(Event, Event.id == model.triggered_by_event_id)
+    .where(model.triggered_by_event_id.is_not(None), Event.id.is_(None))
+  ).scalar_one()
+
+
+def _waiting_leg(tenant) -> tuple[dict[str, str], str]:
+  with tenant() as db:
+    elements = _seed_elements(db)
+    outflow_id = str(_outflow(db, elements, status="captured").id)
+    db.commit()
+  return elements, outflow_id
+
+
+def test_a_commit_holding_the_waiting_leg_lands_before_the_merge(tenant):
+  elements, outflow_id = _waiting_leg(tenant)
+  operator = held_open(tenant())
+  try:
+    _commit_leg(operator, outflow_id)  # the leg's row lock is held from here
+    sync = InThread(tenant, lambda db: _load(db, elements)).start()
+    assert wait_until_blocked(tenant, sync.pid), "the sync never waited"
+    Session.commit(operator)
+  finally:
+    operator.close()
+  sync.join()
+
+  assert sync.error is None, sync.error
+  assert sync.result.transfers_matched == 0 and sync.result.legs_voided == 1
+  with tenant() as db:
+    outflow = db.get(Event, outflow_id)
+    assert outflow is not None, "the sync deleted a committed leg"
+    assert outflow.status == "committed"
+    assert _dangling(db, Entry) == 0 and _dangling(db, Transaction) == 0
+    posts = drafts_close_posts(db, *JULY, entity_id=PARENT_ENTITY_ID).all()
+    assert [str(e.triggered_by_event_id) for e in posts] == [outflow_id]
+    inflow = db.query(Event).filter(Event.external_id == "plaid_txn_t_in").one()
+    assert inflow.status == "voided"
+    assert db.query(Event).filter(Event.event_type == "internal_transfer").count() == 0
+
+
+def test_a_commit_arriving_while_the_merge_holds_the_leg_finds_it_gone(tenant):
+  elements, outflow_id = _waiting_leg(tenant)
+  syncing = tenant()
+  try:
+    report = _load(syncing, elements)  # held open
+    assert report.transfers_matched == 1
+    operator = InThread(tenant, lambda db: _commit_leg(db, outflow_id)).start()
+    assert wait_until_blocked(tenant, operator.pid), "the commit never waited"
+    syncing.commit()
+  finally:
+    syncing.close()
+  operator.join()
+
+  assert isinstance(operator.error, EventNotFoundError), operator.error
+  with tenant() as db:
+    assert db.get(Event, outflow_id) is None
+    assert _dangling(db, Entry) == 0 and _dangling(db, Transaction) == 0
+    assert drafts_close_posts(db, *JULY, entity_id=PARENT_ENTITY_ID).all() == []
+    pair = db.query(Event).filter(Event.event_type == "internal_transfer").one()
+    assert pair.status == "captured"
