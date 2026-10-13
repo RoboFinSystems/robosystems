@@ -273,12 +273,12 @@ class TestTransform:
     pair = events["plaid_xfer_t_xfer_in_t_xfer_out"]
     assert pair["event_type"] == "internal_transfer"
     assert pair["amount"] == 50000
-    assert pair["occurred_at"] == "2026-03-19T00:00:00Z"
+    # Booked the day the money left; savings clears it on its own leg's date.
+    assert pair["occurred_at"] == "2026-03-17T00:00:00Z"
     assert pair["resource_element_id"] == "e_sav"
     meta = pair["metadata"]
     assert (meta["from_element_id"], meta["to_element_id"]) == ("e_chk", "e_sav")
     assert meta["legs"] == ["t_xfer_out", "t_xfer_in"]
-    # Each leg keeps its own date, for the leg that outlives the pair.
     assert (meta["from_date"], meta["to_date"]) == ("2026-03-17", "2026-03-19")
     assert meta["item_id"] == ITEM_ID
     assert "plaid_txn_t_xfer_out" not in events

@@ -378,11 +378,11 @@ def _leg_order(leg: Leg) -> tuple[str, str]:
 def transfer_event(
   out_leg: Leg, in_leg: Leg, *, connection_id: str, item_id: str | None
 ) -> dict[str, Any]:
-  """One ``internal_transfer`` for both legs — money arrives on the later
-  date; each leg's own date rides along, for the leg that outlives the pair."""
+  """One ``internal_transfer`` for both legs, dated the day the money left.
+  The receiving account clears it on its own leg's date, which rides along
+  with the sending leg's, as an item in transit until then."""
   from_name = out_leg.account_name or "account"
   to_name = in_leg.account_name or "account"
-  later = max(out_leg.day, in_leg.day)
   metadata = _prune(
     {
       "connection_id": connection_id,
@@ -408,7 +408,7 @@ def transfer_event(
       "event_class": "economic",
       "event_action": "move",
       "resource_type": "money",
-      "occurred_at": f"{later}T00:00:00Z",
+      "occurred_at": f"{out_leg.day}T00:00:00Z",
       "source": SOURCE,
       "external_id": pair_external_id(out_leg.transaction_id, in_leg.transaction_id),
       "amount": abs(in_leg.amount),
