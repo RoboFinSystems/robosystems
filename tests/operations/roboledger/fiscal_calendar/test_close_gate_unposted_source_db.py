@@ -167,5 +167,11 @@ def test_a_sync_on_the_months_last_day_is_stale_for_it(session):
 
 
 def test_a_sync_after_the_month_ended_is_fresh_for_it(session):
-  gate = _september_gate(session, datetime(2026, 10, 1, 6, 0, tzinfo=UTC))
+  gate = _september_gate(session, datetime(2026, 10, 1, 13, 0, tzinfo=UTC))
   assert CloseableGateResult.SYNC_STALE not in gate.blockers
+
+
+def test_a_sync_on_the_last_evening_in_the_us_is_stale(session):
+  """03:18 UTC on the 1st is 23:18 ET on the 30th: the bank's day isn't over."""
+  gate = _september_gate(session, datetime(2026, 10, 1, 3, 18, tzinfo=UTC))
+  assert CloseableGateResult.SYNC_STALE in gate.blockers

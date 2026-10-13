@@ -10,7 +10,7 @@ lives in the close-period operation.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -253,6 +253,19 @@ def _activity_before(
 
   dates = [d for d in (earliest_entry, earliest_event) if d is not None]
   return int(entries or 0), int(unposted or 0), min(dates) if dates else None
+
+
+# The last sync is stored in UTC and the bank posts on its own day: the
+# period's last day has ended everywhere a US bank posts by noon UTC after it.
+SYNC_DAY_END_MARGIN = timedelta(hours=12)
+
+
+def _synced_after_day_end(last_sync_at: datetime | date, period_end: date) -> bool:
+  if not isinstance(last_sync_at, datetime):
+    return last_sync_at > period_end
+  synced = last_sync_at if last_sync_at.tzinfo else last_sync_at.replace(tzinfo=UTC)
+  day_after = datetime.combine(period_end + timedelta(days=1), time(0), tzinfo=UTC)
+  return synced >= day_after + SYNC_DAY_END_MARGIN
 
 
 class FiscalCalendarService:
@@ -985,7 +998,9 @@ class FiscalCalendarService:
         last_sync_date = (
           last_sync_at.date() if hasattr(last_sync_at, "date") else last_sync_at
         )
-        if last_sync_date <= period_end:
+        if last_sync_date <= period_end or not _synced_after_day_end(
+          last_sync_at, period_end
+        ):
           blockers.append(CloseableGateResult.SYNC_STALE)
           sync_stale_days = max(1, (period_end - last_sync_date).days)
 

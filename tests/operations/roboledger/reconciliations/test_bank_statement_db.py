@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
+from robosystems.adapters.plaid.pipeline.transform import Leg, transfer_event
 from robosystems.models.api.extensions.reconciliations import (
   RecordStatementBalanceRequest,
   RefreshReconciliationsRequest,
@@ -86,14 +87,22 @@ def _feed_line(session, posting_date: date, debit: str, credit: str, cents: int)
 
 def _transfer(session, from_element, to_element, cents, sent: date, arrived: date):
   """A transfer between two fed accounts, committed: one entry on the day the
-  money left, each leg's own date on the event."""
+  feed books it, each leg's own date on the event."""
+  booked = date.fromisoformat(
+    transfer_event(
+      Leg("t_out", "acc_out", "Checking", from_element, -cents, sent.isoformat(), None),
+      Leg("t_in", "acc_in", "Savings", to_element, cents, arrived.isoformat(), None),
+      connection_id="conn_test",
+      item_id=None,
+    )["occurred_at"][:10]
+  )
   event = Event(
     entity_id=PARENT_ENTITY_ID,
     event_type="internal_transfer",
     event_category="treasury",
     event_class="economic",
     resource_type="money",
-    occurred_at=datetime.combine(sent, datetime.min.time()),
+    occurred_at=datetime.combine(booked, datetime.min.time()),
     status="committed",
     source="plaid",
     amount=cents,
@@ -112,7 +121,7 @@ def _transfer(session, from_element, to_element, cents, sent: date, arrived: dat
   session.flush()
   row = Entry(
     entity_id=PARENT_ENTITY_ID,
-    posting_date=sent,
+    posting_date=booked,
     status="posted",
     type="standard",
     provenance="event_handler",
@@ -315,6 +324,40 @@ def test_a_transfer_clears_on_the_receiver_at_its_leg_date(in_transit):
   assert lines.outstanding(date(2026, 10, 1)) != []
   assert lines.outstanding(date(2026, 10, 2)) == []
   assert lines.feed_activity(date(2026, 9, 30), date(2026, 10, 31)) == (1, 20_000)
+
+
+@pytest.fixture()
+def arrives_first(bank):
+  """200.00 that savings receives on 09-30 and checking only debits on 10-02
+  (a card crediting an autopay before the bank sends it)."""
+  session, accounts = bank
+  savings = classified_account(session, "Savings", "asset")
+  _feed_line(session, date(2026, 9, 3), savings, accounts["revenue"], 10_000)
+  _transfer(
+    session, accounts["cash"], savings, 20_000, date(2026, 10, 2), date(2026, 9, 30)
+  )
+  session.commit()
+  return session, accounts, savings
+
+
+def test_a_transfer_received_first_reconciles_the_receiver(arrives_first):
+  """Savings' 09-30 statement shows the 200.00 in, and so does the ledger."""
+  session, _accounts, savings = arrives_first
+
+  rec = _record(session, savings, 300.00)
+
+  assert rec.status == "reconciled"
+
+
+def test_a_transfer_received_first_is_in_transit_on_the_sender(arrives_first):
+  """Checking's 09-30 statement has not seen the 200.00 leave; the ledger
+  has, so it is outstanding there until its leg's date."""
+  session, accounts, _savings = arrives_first
+
+  rec = _record(session, accounts["cash"], 1_300.00)
+
+  assert rec.status == "reconciled"
+  assert ("outstanding", -200.00) in [(c.kind, c.amount) for c in rec.components]
 
 
 def test_an_account_no_feed_keeps_is_compared_as_before(bank):

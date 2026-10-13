@@ -402,3 +402,21 @@ class TestSkipWhileARunIsUnfinished:
       list(sensor_fn(context))
 
     mock_db.assert_called_once()
+
+
+@pytest.mark.parametrize(
+  "job_name",
+  [
+    "suspend_expired_graphs_job",
+    "deprovision_suspended_graphs_job",
+    "reap_stalled_provisioning_job",
+  ],
+)
+def test_a_lifecycle_run_cannot_hang_forever(job_name):
+  """Each sensor holds off while its job has a run unfinished, and prod run
+  monitoring sets no default limit: without its own, one hung run would stop
+  that lifecycle for good."""
+  from robosystems.dagster.jobs import graph_lifecycle
+
+  job = getattr(graph_lifecycle, job_name)
+  assert int(job.tags["dagster/max_runtime"]) > 0

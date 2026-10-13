@@ -783,6 +783,27 @@ class TestCloseableGate:
     )
     assert result.is_closeable
 
+  @pytest.mark.parametrize(
+    ("synced", "stale"),
+    [
+      # 20:00 EDT on the last day: already the 1st in UTC, the bank's day isn't over.
+      (datetime(2026, 2, 1, 0, 0, tzinfo=UTC), True),
+      (datetime(2026, 2, 1, 7, 30, tzinfo=UTC), True),
+      (datetime(2026, 2, 1, 12, 0, tzinfo=UTC), False),
+    ],
+  )
+  def test_a_sync_counts_only_once_the_last_day_has_ended(self, synced, stale):
+    svc, session = self._init()
+    result = svc.closeable_gate(
+      session,
+      GRAPH_ID,
+      "2026-01",
+      today=date(2026, 2, 2),
+      has_sync_connection=True,
+      last_sync_at=synced,
+    )
+    assert (CloseableGateResult.SYNC_STALE in result.blockers) is stale
+
   def test_fresh_sync_passes(self):
     svc, session = self._init()
     fresh = datetime(2026, 2, 5, tzinfo=UTC)  # after Jan 31 period end
