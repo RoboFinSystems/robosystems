@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import hashlib
-import io
+import json
 import logging
+import subprocess
+import sys
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import quote
 
 from sqlalchemy import text
@@ -15,6 +19,12 @@ from sqlalchemy.orm import Session
 
 from robosystems.config.constants import (
   DOCUMENT_DOWNLOAD_EXPIRY_SECONDS,
+  DOCUMENT_READ_CHARS_PER_CALL,
+  DOCUMENT_READ_CHARS_PER_PAGE,
+  DOCUMENT_READ_MEMORY_MB,
+  DOCUMENT_READ_STREAM_MB,
+  DOCUMENT_READ_TIMEOUT_SECONDS,
+  DOCUMENT_READS_PER_PROCESS,
   MAX_DOCUMENT_FILE_MB,
   MAX_DOCUMENT_FILES_PER_GRAPH,
   PRESIGNED_URL_EXPIRY_SECONDS,
@@ -50,6 +60,8 @@ _FILE_TYPES: dict[str, tuple[tuple[str, ...], bytes]] = {
 }
 PDF = "application/pdf"
 _MAX_FILE_BYTES = MAX_DOCUMENT_FILE_MB * 1024 * 1024
+_PDF_TEXT_READER = Path(__file__).with_name("pdf_text.py")
+_PDF_READS = threading.BoundedSemaphore(DOCUMENT_READS_PER_PROCESS)
 
 
 class DocumentFileError(ValueError):
@@ -363,9 +375,6 @@ class DocumentService:
     KeyError when the document is not in this graph, and `DocumentFileError`
     when it is not a stored PDF or cannot be read as one.
     """
-    from pypdf import PdfReader
-    from pypdf.errors import PdfReadError
-
     from robosystems.config import env
     from robosystems.operations.aws.s3 import S3Client
 
@@ -382,21 +391,9 @@ class DocumentService:
       data = obj["Body"].read(_MAX_FILE_BYTES + 1)
     finally:
       obj["Body"].close()
-    try:
-      reader = PdfReader(io.BytesIO(data))
-      page_count = len(reader.pages)
-      last = min(page_count, first_page + max_pages - 1)
-      pages = [
-        (number, reader.pages[number - 1].extract_text() or "")
-        for number in range(first_page, last + 1)
-      ]
-    # A malformed PDF fails in more ways than PdfReadError (a bad xref, a
-    # cyclic object, a broken font map); every one means the same thing here.
-    except (PdfReadError, ValueError, KeyError, TypeError, RecursionError) as exc:
-      logger.warning(f"Document {document_id} could not be read as a PDF: {exc!r}")
-      raise DocumentFileError(
-        f"Document {document_id} could not be read as a PDF."
-      ) from exc
+    page_count, pages = _read_pdf_pages(
+      document_id, data, first_page=first_page, max_pages=max_pages
+    )
     return FileText(document=doc, page_count=page_count, pages=pages)
 
   def _stored_file(self, graph_id: str, document_id: str) -> Document:
@@ -585,6 +582,47 @@ class DocumentService:
 
     os_doc_id = f"udoc_{document_id}"
     service.delete_document(graph_id, os_doc_id)
+
+
+def _read_pdf_pages(
+  document_id: str, data: bytes, *, first_page: int, max_pages: int
+) -> tuple[int, list[tuple[int, str]]]:
+  """Pages of a PDF's text, read in a child process held to the read bounds.
+
+  Raises `DocumentFileError` when the PDF cannot be read within them.
+  """
+  request = {
+    "first_page": first_page,
+    "max_pages": max_pages,
+    "memory_bytes": DOCUMENT_READ_MEMORY_MB * 1024 * 1024,
+    "stream_bytes": DOCUMENT_READ_STREAM_MB * 1024 * 1024,
+    "chars_per_page": DOCUMENT_READ_CHARS_PER_PAGE,
+    "chars_per_read": DOCUMENT_READ_CHARS_PER_CALL,
+  }
+  unreadable = DocumentFileError(f"Document {document_id} could not be read as a PDF.")
+  if not _PDF_READS.acquire(timeout=DOCUMENT_READ_TIMEOUT_SECONDS):
+    raise DocumentFileError("Documents are busy being read; try again shortly.")
+  try:
+    done = subprocess.run(
+      [sys.executable, "-I", str(_PDF_TEXT_READER), json.dumps(request)],
+      input=data,
+      capture_output=True,
+      timeout=DOCUMENT_READ_TIMEOUT_SECONDS,
+      check=False,
+    )
+  except subprocess.TimeoutExpired as exc:
+    logger.warning(f"Document {document_id} timed out being read as a PDF")
+    raise unreadable from exc
+  finally:
+    _PDF_READS.release()
+  if done.returncode != 0:
+    logger.warning(
+      f"Document {document_id} could not be read as a PDF "
+      f"(exit {done.returncode}): {done.stderr[:500]!r}"
+    )
+    raise unreadable
+  result = json.loads(done.stdout)
+  return result["page_count"], [(number, text) for number, text in result["pages"]]
 
 
 @dataclass(frozen=True)

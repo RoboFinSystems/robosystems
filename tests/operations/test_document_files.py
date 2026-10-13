@@ -6,11 +6,15 @@ with the graph.
 from __future__ import annotations
 
 import hashlib
+import threading
+import time
+import zlib
 from contextlib import nullcontext
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 import boto3
+import psutil
 import pytest
 from moto import mock_aws
 
@@ -76,6 +80,60 @@ def _pdf(*pages: str) -> bytes:
 
 
 PDF = _pdf("Operating Checking ending balance 3,204.88", "Page two")
+
+
+def _pdf_with_shared_content(decoded_bytes: int, pages: int = 1) -> bytes:
+  """A PDF whose pages all draw one compressed content stream."""
+  op = b"BT /F1 1 Tf 0 0 Td (x) Tj ET\n"
+  content = zlib.compress(op * (decoded_bytes // len(op)), 9)
+  objects = [
+    b"<< /Type /Catalog /Pages 2 0 R >>",
+    f"<< /Type /Pages /Kids [{' '.join(f'{5 + i} 0 R' for i in range(pages))}] "
+    f"/Count {pages} >>".encode(),
+    b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    f"<< /Length {len(content)} /Filter /FlateDecode >>\nstream\n".encode()
+    + content
+    + b"\nendstream",
+  ]
+  objects += [
+    b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+    b"/Resources << /Font << /F1 3 0 R >> >> /Contents 4 0 R >>"
+  ] * pages
+  out = b"%PDF-1.4\n"
+  offsets = []
+  for number, body in enumerate(objects, 1):
+    offsets.append(len(out))
+    out += f"{number} 0 obj\n".encode() + body + b"\nendobj\n"
+  xref = len(out)
+  out += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode()
+  out += b"".join(f"{offset:010d} 00000 n \n".encode() for offset in offsets)
+  out += (
+    f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n"
+  ).encode()
+  return out
+
+
+class _PeakRss:
+  """This process's peak resident memory above where it started."""
+
+  def __init__(self) -> None:
+    self._process = psutil.Process()
+    self._stop = threading.Event()
+    self.growth = 0
+
+  def _sample(self, start: int) -> None:
+    while not self._stop.wait(0.01):
+      self.growth = max(self.growth, self._process.memory_info().rss - start)
+
+  def __enter__(self) -> _PeakRss:
+    start = self._process.memory_info().rss
+    self._thread = threading.Thread(target=self._sample, args=(start,), daemon=True)
+    self._thread.start()
+    return self
+
+  def __exit__(self, *exc) -> None:
+    self._stop.set()
+    self._thread.join()
 
 
 @pytest.fixture()
@@ -397,6 +455,28 @@ def test_only_a_readable_stored_file_reads_as_text(files):
     service.read_file_text(graph_id, str(broken.id), first_page=1, max_pages=1)
 
 
+def test_reading_a_stored_pdf_bounds_extraction_work(files):
+  service, graph_id, user_id, s3 = files
+  doc = _store(
+    service,
+    graph_id,
+    user_id,
+    s3,
+    name="dense.pdf",
+    body=_pdf_with_shared_content(20 * 1024 * 1024),
+  )
+
+  started = time.monotonic()
+  with (
+    _PeakRss() as rss,
+    pytest.raises(DocumentFileError, match="could not be read"),
+  ):
+    service.read_file_text(graph_id, str(doc.id), first_page=1, max_pages=1)
+
+  assert time.monotonic() - started < 10
+  assert rss.growth < 200 * 1024 * 1024
+
+
 def test_a_document_cited_by_a_recorded_balance_cannot_be_deleted(files):
   from robosystems.models.api.search import DocumentUploadRequest
 
@@ -546,12 +626,46 @@ def test_an_upload_removed_mid_completion_returns_the_winners_document(files, st
   assert _files(service, graph_id) == 1
 
 
-def test_a_pdf_that_breaks_the_parser_any_way_is_unreadable_not_an_error(files):
+def test_a_pdf_that_breaks_the_parser_any_way_is_unreadable_not_an_error():
+  import io
+
+  from robosystems.operations import pdf_text
+
+  request = {
+    "first_page": 1,
+    "max_pages": 1,
+    "stream_bytes": 1024 * 1024,
+    "chars_per_page": 100,
+    "chars_per_read": 100,
+  }
+  out = io.StringIO()
+  with patch("pypdf.PdfReader", side_effect=RecursionError("cyclic object")):
+    code = pdf_text.serve(request, io.BytesIO(PDF), out)
+
+  assert (code, out.getvalue()) == (pdf_text.UNREADABLE, "")
+
+
+def test_a_read_is_held_to_its_character_budget(files):
   service, graph_id, user_id, s3 = files
   doc = _store(service, graph_id, user_id, s3)
 
   with (
-    patch("pypdf.PdfReader", side_effect=RecursionError("cyclic object")),
+    patch(f"{_SERVICE}.DOCUMENT_READ_CHARS_PER_PAGE", 10),
+    patch(f"{_SERVICE}.DOCUMENT_READ_CHARS_PER_CALL", 10),
+  ):
+    text = service.read_file_text(graph_id, str(doc.id), first_page=1, max_pages=2)
+
+  # The budget is spent on page one; reading goes on from page two.
+  assert text.page_count == 2
+  assert text.pages == [(1, "Operating ")]
+
+
+def test_a_read_that_runs_past_its_time_is_unreadable(files):
+  service, graph_id, user_id, s3 = files
+  doc = _store(service, graph_id, user_id, s3)
+
+  with (
+    patch(f"{_SERVICE}.DOCUMENT_READ_TIMEOUT_SECONDS", 0.001),
     pytest.raises(DocumentFileError, match="could not be read"),
   ):
     service.read_file_text(graph_id, str(doc.id), first_page=1, max_pages=1)
