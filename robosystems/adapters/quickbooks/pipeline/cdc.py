@@ -203,7 +203,8 @@ def plan_cdc(
             "voided": True,
           }
         )
-        continue
+      # A void keeps its row, so its day is pulled like any other old edit:
+      # that is where the round-trip matcher sees an entry RoboLedger published.
       txn_date = str(row.get("TxnDate") or "")[:10]
       if txn_date and txn_date < window_start:
         old_dates.add(txn_date)
@@ -348,6 +349,7 @@ def apply_deletions(
     for (entity, qb_id) in wanted
     if entity == "JournalEntry" and (entity, qb_id) not in voided
   }
+  matched.update(key for key in voided if key[0] == "JournalEntry")
   if deleted_journal_entries:
     for event in _published(session):
       # Write-back records each entry as the external id its synced copy

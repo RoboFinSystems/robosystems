@@ -350,7 +350,7 @@ def test_cdc_plans_a_voided_row_as_a_retraction():
               "PrivateNote": "Voided",
               "MetaData": {"LastUpdatedTime": "2026-10-08T03:00:00Z"},
             },
-            {"Id": "78", "TxnDate": "2026-07-09", "TotalAmt": 0},
+            {"Id": "78", "TxnDate": "2026-09-01", "TotalAmt": 0},
           ],
         },
         False,
@@ -366,6 +366,9 @@ def test_cdc_plans_a_voided_row_as_a_retraction():
       "voided": True,
     }
   ]
+  # Its day is pulled too: a voided entry RoboLedger published is retracted
+  # by the round-trip matcher, which only sees the days the report covers.
+  assert plan.extra_windows == [["2026-07-09", "2026-07-09"]]
 
 
 def test_a_void_from_cdc_and_from_the_report_applies_once(session):
