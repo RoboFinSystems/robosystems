@@ -380,3 +380,19 @@ def test_a_void_from_cdc_and_from_the_report_applies_once(session):
   )
 
   assert (result.flagged, result.already_applied) == (0, 1)
+
+
+def test_a_voided_published_entry_is_left_to_the_round_trip_matcher(session):
+  """The voided entry keeps its row in the JournalReport, where the matcher
+  retracts it; CDC retracting it too would reverse it twice."""
+  _posted, _unposted, published = _seed(session)
+
+  result = apply_deletions(
+    session,
+    [{"entity": "JournalEntry", "id": "901", "last_updated": None, "voided": True}],
+    now=NOW,
+  )
+
+  assert (result.flagged, result.voided) == (0, 0)
+  session.refresh(published)
+  assert published.payload_drift is False

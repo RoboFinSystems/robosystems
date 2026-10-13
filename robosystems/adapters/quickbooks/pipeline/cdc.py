@@ -235,7 +235,7 @@ def _is_void(row: dict[str, Any]) -> bool:
     zeroed = amount is not None and float(amount) == 0
   except (TypeError, ValueError):
     return False
-  return zeroed and "voided" in str(row.get("PrivateNote") or "").lower()
+  return zeroed and str(row.get("PrivateNote") or "").lower().startswith("voided")
 
 
 def write_plan(extract_dir: Path, plan: CdcPlan) -> Path:
@@ -341,8 +341,12 @@ def apply_deletions(
         void_reason=reason((entity, qb_id)),
       )
 
+  # A voided entry RoboLedger published keeps its row in the JournalReport,
+  # where the round-trip matcher retracts it once; only a deletion is ours.
   deleted_journal_entries = {
-    qb_id for (entity, qb_id) in wanted if entity == "JournalEntry"
+    qb_id
+    for (entity, qb_id) in wanted
+    if entity == "JournalEntry" and (entity, qb_id) not in voided
   }
   if deleted_journal_entries:
     for event in _published(session):
