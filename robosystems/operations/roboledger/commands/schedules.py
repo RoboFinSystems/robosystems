@@ -366,20 +366,23 @@ def _validate_element_references(session: Session, body: CreateScheduleRequest) 
     )
 
 
-def _assert_posting_accounts(
-  session: Session,
-  entity_id: str,
-  template: dict | None,
-  schedule_metadata: dict | None,
-) -> None:
-  """The accounts a schedule posts to are open and its own entity's: a
-  schedule on another entity's accounts could never draft its entries."""
-  accounts = [
+def _posting_accounts(
+  template: dict | None, schedule_metadata: dict | None
+) -> set[str]:
+  accounts = (
     (template or {}).get("debit_element_id"),
     (template or {}).get("credit_element_id"),
     (schedule_metadata or {}).get("asset_element_id"),
-  ]
-  assert_accounts_postable(session, [a for a in accounts if a], entity_id=entity_id)
+  )
+  return {str(a) for a in accounts if a}
+
+
+def _assert_posting_accounts(
+  session: Session, entity_id: str, accounts: set[str]
+) -> None:
+  """The accounts a schedule posts to are open and its own entity's: a
+  schedule on another entity's accounts could never draft its entries."""
+  assert_accounts_postable(session, sorted(accounts), entity_id=entity_id)
 
 
 def create_schedule(
@@ -398,8 +401,10 @@ def create_schedule(
   _assert_posting_accounts(
     session,
     entity_id,
-    body.entry_template.model_dump(),
-    body.schedule_metadata.model_dump() if body.schedule_metadata else None,
+    _posting_accounts(
+      body.entry_template.model_dump(),
+      body.schedule_metadata.model_dump() if body.schedule_metadata else None,
+    ),
   )
   service = ScheduleService()
   et = EntryTemplate(
@@ -596,11 +601,17 @@ def update_schedule(
     }
 
   if body.entry_template is not None or body.schedule_metadata is not None:
+    # Only the accounts this edit names: a finished schedule whose account
+    # has since been retired can still be renamed or re-dated.
     _assert_posting_accounts(
       session,
       owner_entity_id(session, structure),
-      metadata.get("entry_template"),
-      metadata.get("schedule_metadata"),
+      _posting_accounts(
+        metadata.get("entry_template"), metadata.get("schedule_metadata")
+      )
+      - _posting_accounts(
+        existing_template, (structure.metadata_ or {}).get("schedule_metadata")
+      ),
     )
 
   structure.metadata_ = metadata

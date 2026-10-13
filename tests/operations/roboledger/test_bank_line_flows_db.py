@@ -294,3 +294,21 @@ def test_a_subsidiarys_line_classified_to_the_parents_account_is_refused(books):
     metadata_patch={"classified_element_id": sub_rent},
   )
   assert event.status == "classified"
+
+
+def test_a_classified_line_repointed_to_the_parents_account_is_refused(books):
+  sub_cash = entity_account(books.session, books.sub.id, "Checking")
+  sub_rent = entity_account(books.session, books.sub.id, "Rent Income")
+  event = _deposit(books)
+  event.entity_id = books.sub.id
+  event.resource_element_id = sub_cash
+  books.session.commit()
+  _update(
+    books,
+    event,
+    transition_to="classified",
+    metadata_patch={"classified_element_id": sub_rent},
+  )
+
+  with pytest.raises(AccountOutsideEntityChartError):
+    _update(books, event, metadata_patch={"classified_element_id": books.note})

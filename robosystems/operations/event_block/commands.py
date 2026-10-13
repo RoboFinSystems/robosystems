@@ -908,7 +908,11 @@ def update_event_block(
   if body.event_action is not None:
     event.event_action = body.event_action
 
-  if body.transition_to == "classified":
+  # Classified → classified is no transition, so a line already classified is
+  # re-pointed by a bare patch, and is checked the same way.
+  if body.transition_to == "classified" or (
+    body.transition_to is None and body.metadata_patch and event.status == "classified"
+  ):
     _validate_classification(session, event)
 
   if body.metadata_patch:

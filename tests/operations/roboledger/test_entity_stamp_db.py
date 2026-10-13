@@ -367,6 +367,25 @@ class TestSchedules:
         ),
       )
 
+  def test_a_schedule_on_a_retired_account_can_still_be_redated(self, two_entities):
+    """Only the accounts an edit names are checked: a finished schedule whose
+    expense account was retired keeps its other edits."""
+    t = two_entities
+    structure_id = _depreciation(t.session, entity_id=t.sub.id)
+    structure = t.session.get(Structure, structure_id)
+    template = structure.metadata_["entry_template"]
+    retired = t.session.get(Element, template["debit_element_id"])
+    retired.is_active = False
+    t.session.flush()
+
+    update_schedule(
+      t.session,
+      UpdateScheduleRequest(
+        structure_id=structure_id,
+        schedule_metadata=ScheduleMetadataRequest(useful_life_months=36),
+      ),
+    )
+
   def test_a_manual_closing_entry_lands_where_it_is_sent(self, two_entities):
     t = two_entities
     service = ScheduleService()
