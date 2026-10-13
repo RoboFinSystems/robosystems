@@ -1627,6 +1627,60 @@ def test_an_alignment_committed_from_capture_settles_the_items_it_names(session)
   assert record["reference_event_id"] == str(captured.id)
 
 
+def test_an_alignment_committed_from_a_preview_the_item_has_moved_past_is_refused(
+  session,
+):
+  """The commit door pins like the create: a sync re-flagged the item after
+  the preview the alignment was written from, so the commit must not settle
+  the newer payload."""
+  from robosystems.models.api.event_block import UpdateEventBlockRequest
+  from robosystems.operations.event_block.commands import update_event_block
+
+  ids, item = _flagged_at_1500(session)
+  captured, _envelope = create_event_block_in_session(
+    session,
+    CreateEventBlockRequest(
+      event_type="journal_entry_recorded",
+      event_category="adjustment",
+      source="manual",
+      occurred_at=datetime(2026, 8, 31),
+      apply_handlers=False,
+      metadata={
+        "posting_date": "2026-08-31",
+        "memo": "Alignment: QuickBooks edit to July repairs",
+        "publish_to_source": False,
+        "line_items": [
+          {"element_id": ids["Repairs"], "debit_amount": 500},
+          {"element_id": ids["Checking"], "credit_amount": 500},
+        ],
+      },
+    ),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+  named = _named(item, session)
+  session.commit()
+  _qb_sync(session, 2000, "2")
+
+  savepoint = session.begin_nested()
+  with pytest.raises(RowLockedError, match="re-flagged"):
+    update_event_block(
+      session,
+      UpdateEventBlockRequest(
+        event_id=str(captured.id),
+        transition_to="committed",
+        metadata_patch={"resolves_reconciling_items": [named]},
+      ),
+      "user_test",
+      graph_id=GRAPH_ID,
+    )
+  savepoint.rollback()
+
+  item = _qb_item(session)
+  assert item.payload_drift is True
+  assert _repairs_delta(session, ids, str(item.id)) == 1000
+
+
 def test_naming_items_on_an_update_that_posts_nothing_is_refused(session):
   from robosystems.models.api.event_block import UpdateEventBlockRequest
   from robosystems.operations.event_block.commands import update_event_block
