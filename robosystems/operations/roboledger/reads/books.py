@@ -80,6 +80,27 @@ def chart_built_elsewhere(
   return bool(session.execute(select(holds_foreign & ~holds_synced)).scalar())
 
 
+def synced_books_connection_ids(session: Session, *, synced_source: str) -> set[str]:
+  """The connections whose syncs built the books: each ``synced_source``
+  account's, and the group parent's when the provider last wrote it. A
+  synced ledger keeps only the parent's books, so these are the parent's;
+  a severed account is native and names none.
+  """
+  from robosystems.operations.roboledger.reads.entity import resolve_parent_entity
+
+  built_by = set(
+    session.execute(
+      select(Element.connection_id)
+      .where(Element.source == synced_source, Element.connection_id.is_not(None))
+      .distinct()
+    ).scalars()
+  )
+  parent = resolve_parent_entity(session)
+  if parent is not None and parent.source == synced_source and parent.connection_id:
+    built_by.add(parent.connection_id)
+  return built_by
+
+
 def entity_has_feed_account(session: Session, entity_id: str | None) -> bool:
   """True when a bank feed books to an account in ``entity_id``'s chart
   (default the group parent's): the link on ``Element.metadata.bank_feed``."""

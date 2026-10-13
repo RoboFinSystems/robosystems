@@ -134,6 +134,7 @@ async def create_connection(
         request.provider,
         db,
         entity_id=getattr(config, "entity_id", None) or None,
+        realm_id=getattr(config, "realm_id", None) or None,
       )
     except ProviderConflictError as conflict:
       raise create_error_response(

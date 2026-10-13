@@ -462,7 +462,7 @@ class ProviderConflictError(Exception):
   """A provider cannot be connected given the books the graph keeps.
 
   ``code`` is stable for clients: ``QUICKBOOKS_ACTIVE``, ``CHART_REQUIRED``,
-  ``NATIVE_BOOKS_PRESENT``, ``ENTITY_NOT_FOUND``.
+  ``NATIVE_BOOKS_PRESENT``, ``OTHER_COMPANY_BOOKS``, ``ENTITY_NOT_FOUND``.
   """
 
   def __init__(self, code: str, message: str) -> None:
@@ -484,6 +484,7 @@ def assert_provider_compatible(
   *,
   entity_id: str | None = None,
   resuming: bool = False,
+  realm_id: str | None = None,
 ) -> None:
   """Refuse a provider that would mix native and synced books of one entity.
 
@@ -497,13 +498,16 @@ def assert_provider_compatible(
     elements it did not create, a chart it did not build, a feed account
     bound to the parent, or a live feed whose accounts land on the parent)
     → ``NATIVE_BOOKS_PRESENT``;
+  - a synced GL naming a company other than the one that built the parent's
+    synced books → ``OTHER_COMPANY_BOOKS`` (see `assert_same_company`);
   - a feed naming an entity the graph does not have → ``ENTITY_NOT_FOUND``.
 
   ``entity_id`` is where the feed's accounts land: a subsidiary's id, or
   None for the group parent. ``resuming`` is a live synced connection
   re-authorizing: it already keeps the parent's books, so accounts added
-  beside it since are not books it would take over. Anything else
-  (``external`` sources, a second SEC repo …) passes.
+  beside it since are not books it would take over. ``realm_id`` is the
+  company a synced connection names before its callback, when it names one.
+  Anything else (``external`` sources, a second SEC repo …) passes.
   """
   wanted = (provider or "").lower()
   connections = list(Connection.get_all_for_graph(graph_id, session))
@@ -548,6 +552,62 @@ def assert_provider_compatible(
         "become the source of truth over them. A subsidiary's native books "
         "are no bar.",
       )
+    if realm_id:
+      assert_same_company(graph_id, wanted, realm_id, session)
+
+
+def assert_same_company(
+  graph_id: str, provider: str, realm_id: str | None, session: Session
+) -> None:
+  """Only the company that built the group parent's synced books attaches to them.
+
+  A plain disconnect leaves the chart and history a QuickBooks company built
+  in place, revivable by that company. Another company's first full sync
+  would merge its chart and events into them and rename the parent, so the
+  company (realm) being authorized must be the one every connection that
+  built those books belongs to. Raises ``OTHER_COMPANY_BOOKS``.
+  """
+  wanted = (provider or "").lower()
+  if wanted not in SYNCED_LEDGER_PROVIDERS:
+    return
+  from robosystems.operations.roboledger.reads.books import (
+    synced_books_connection_ids,
+  )
+
+  built_by = _read_books(
+    graph_id,
+    lambda ext: synced_books_connection_ids(ext, synced_source=wanted),
+    missing=set(),
+  )
+  if not built_by:
+    return
+  realms = {
+    str(c.id): c.realm_id
+    for c in Connection.get_all_for_graph(graph_id, session, include_deleted=True)
+  }
+  if realm_id and all(realms.get(conn_id) == realm_id for conn_id in built_by):
+    return
+  raise ProviderConflictError(
+    "OTHER_COMPANY_BOOKS",
+    "This graph's books were built from a different QuickBooks company. "
+    "Reconnect the company that built them, or connect this company to a "
+    "new graph.",
+  )
+
+
+def withdraw_pending_connection(connection_id: str, session: Session) -> None:
+  """Remove a connection refused before its first authorization completed.
+
+  It holds no tenant data and no tokens, so nothing is kept for a revival.
+  A connection past ``pending_oauth`` is left alone.
+  """
+  conn = Connection.get_by_id(connection_id, session)
+  if conn is None or conn.status != ConnectionStatus.PENDING_OAUTH.value:
+    return
+  cred = ConnectionCredentials.get_by_connection_id(connection_id, session)
+  if cred is not None:
+    cred.deactivate(session)
+  conn.delete(session)
 
 
 def synced_ledger_live(graph_id: str) -> bool:
@@ -662,20 +722,26 @@ def _parent_chart_built_elsewhere(graph_id: str, *, synced_source: str) -> bool:
 
 
 def _probe_books(graph_id: str, predicate: Callable[[Session], bool]) -> bool:
-  """Run a books predicate on the graph's extensions schema.
+  """Run a books predicate on the graph's extensions schema; no schema is
+  no books (see `_read_books`)."""
+  return _read_books(graph_id, predicate, missing=False)
+
+
+def _read_books[T](graph_id: str, read: Callable[[Session], T], *, missing: T) -> T:
+  """Run a books read on the graph's extensions schema.
 
   A graph with no tenant schema yet (subgraphs get theirs on first sync) or
-  already torn down reads as ``False``; any other `ProgrammingError` raises.
+  already torn down reads as ``missing``; any other `ProgrammingError` raises.
   """
   from robosystems.db.extensions import extensions_session
   from robosystems.middleware.extensions import is_schema_missing
 
   try:
     with extensions_session(graph_id) as ext:
-      return predicate(ext)
+      return read(ext)
   except ProgrammingError as exc:
     if is_schema_missing(exc):
-      return False
+      return missing
     raise
 
 
