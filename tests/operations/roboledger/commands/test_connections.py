@@ -73,6 +73,7 @@ class _PurgeSession:
   executes."""
 
   def __init__(self, events, referenced, agents, elements, owners=None):
+    self._events = events
     self._reads = [events, *([owners] if owners is not None else [])]
     self._reads += [referenced, agents, elements]
     self.statements = []
@@ -82,6 +83,17 @@ class _PurgeSession:
     self.statements.append(statement)
     result = MagicMock()
     sql = _compiled(statement)
+    if sql.startswith("SET LOCAL"):
+      return result
+    if sql.startswith("DELETE FROM events"):
+      # The status predicate is the database's to apply; under the lock it
+      # matches what the purge read.
+      result.scalars.return_value = [
+        e.id
+        for e in self._events
+        if f"'{e.id}'" in sql and e.status in ("captured", "classified", "voided")
+      ]
+      return result
     if sql.startswith("DELETE"):
       result.rowcount = 0
       return result
@@ -173,6 +185,9 @@ class TestPurgeBankFeed:
     ]
     # Every read is scoped to this connection, never to the provider alone.
     assert "events.source = 'mercury'" in selects[0]
+    # The feed's lines are locked when read, in the order every batch lock
+    # over events takes them.
+    assert selects[0].endswith("ORDER BY events.id FOR UPDATE")
     assert "(events.metadata ->> 'connection_id') = 'conn_1'" in selects[0]
     assert "'bank_feed'" in selects[4] and "'provider') = 'mercury'" in selects[4]
     assert "'connection_id') = 'conn_1'" in selects[4]
@@ -185,13 +200,17 @@ class TestPurgeBankFeed:
     assert "entries.status = 'draft'" in deletes[0]
     assert deletes[1].startswith("DELETE FROM transactions")
     assert any(
-      "FROM events" in d and "'evt_c'" in d and "'evt_k'" in d for d in deletes
+      "FROM events" in d
+      and "'evt_c'" in d
+      and "'evt_k'" in d
+      and "events.status IN ('captured', 'classified', 'voided')" in d
+      for d in deletes
     )
     assert any(
       "FROM agents" in d and "'agt_drop'" in d and "'agt_keep'" not in d
       for d in deletes
     )
-    assert session.flushes == 2
+    assert session.flushes == 3
 
   def test_nested_payloads_are_scrubbed_too(self):
     from robosystems.operations.roboledger.commands.connections import (

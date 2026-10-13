@@ -180,32 +180,59 @@ def purge_bank_feed(
   from robosystems.models.extensions.roboledger.dimension_junctions import (
     event_dimensions,
   )
+  from robosystems.operations.locking import bounded_lock_wait, ordered_lock_column
 
-  feed_events = list(
-    session.execute(
-      select(Event).where(
-        Event.source == source,
-        Event.metadata_["connection_id"].astext == connection_id,
+  # Locked until the purge commits, so the statuses decided on are the ones
+  # deleted on: a commit in flight lands first and its line is kept, one
+  # arriving later finds the line gone. Ordered by id, as every batch lock
+  # over events is.
+  session.flush()
+  with bounded_lock_wait(
+    session,
+    f"The {source} feed's lines are being written by another process. "
+    "Retry the disconnect in a moment.",
+  ):
+    feed_events = list(
+      session.execute(
+        select(Event)
+        .where(
+          Event.source == source,
+          Event.metadata_["connection_id"].astext == connection_id,
+        )
+        .order_by(ordered_lock_column())
+        .with_for_update()
+        .execution_options(populate_existing=True)
       )
+      .scalars()
+      .all()
     )
-    .scalars()
-    .all()
-  )
   # An event that still owns ledger rows once its drafts are gone has landed
   # history: it is scrubbed below like any posted line, never deleted.
   unposted_ids, drafts_deleted = _release_unposted_effects(
     session,
     [str(event.id) for event in feed_events if event.status in _UNPOSTED_STATUSES],
   )
+  deleted: set[str] = set()
   if unposted_ids:
-    session.execute(
-      delete(event_dimensions).where(event_dimensions.c.event_id.in_(unposted_ids))
+    still_unposted = (
+      Event.id.in_(unposted_ids),
+      Event.status.in_(_UNPOSTED_STATUSES),
     )
-    session.execute(delete(Event).where(Event.id.in_(unposted_ids)))
+    session.execute(
+      delete(event_dimensions).where(
+        event_dimensions.c.event_id.in_(select(Event.id).where(*still_unposted))
+      )
+    )
+    deleted = {
+      str(event_id)
+      for event_id in session.execute(
+        delete(Event).where(*still_unposted).returning(Event.id)
+      ).scalars()
+    }
 
   scrubbed = 0
   for event in feed_events:
-    if str(event.id) in unposted_ids:
+    if str(event.id) in deleted:
       continue
     metadata = dict(event.metadata_ or {})
     kept = scrub_payload_keys(metadata)
@@ -255,7 +282,7 @@ def purge_bank_feed(
   session.flush()
 
   return {
-    "events_deleted": len(unposted_ids),
+    "events_deleted": len(deleted),
     "drafts_deleted": drafts_deleted,
     "events_scrubbed": scrubbed,
     "agents_deleted": len(removable),
