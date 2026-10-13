@@ -47,6 +47,9 @@ DOCUMENT_READ_STREAM_MB = 2
 DOCUMENT_READ_CHARS_PER_PAGE = 20_000
 DOCUMENT_READ_CHARS_PER_CALL = 100_000
 DOCUMENT_READS_PER_PROCESS = 2
+# A read starts only while the container has this much to spare beyond the
+# memory of every read running, its own included.
+DOCUMENT_READ_MEMORY_MARGIN_MB = 128
 
 # Below this, files stage inline in the request; above it, via Dagster.
 SMALL_FILE_STAGING_THRESHOLD_MB = 50

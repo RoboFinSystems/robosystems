@@ -24,6 +24,7 @@ from robosystems.config.constants import (
   DOCUMENT_DOWNLOAD_EXPIRY_SECONDS,
   DOCUMENT_READ_CHARS_PER_CALL,
   DOCUMENT_READ_CHARS_PER_PAGE,
+  DOCUMENT_READ_MEMORY_MARGIN_MB,
   DOCUMENT_READ_MEMORY_MB,
   DOCUMENT_READ_STREAM_MB,
   DOCUMENT_READ_TIMEOUT_SECONDS,
@@ -65,6 +66,8 @@ PDF = "application/pdf"
 _MAX_FILE_BYTES = MAX_DOCUMENT_FILE_MB * 1024 * 1024
 _PDF_TEXT_READER = Path(__file__).with_name("pdf_text.py")
 _DOWNLOAD_CHUNK_BYTES = 1024 * 1024
+_CGROUP = Path("/sys/fs/cgroup")
+_NO_LIMIT = 1 << 60
 
 
 class DocumentFileError(ValueError):
@@ -85,8 +88,9 @@ class DocumentReadBusyError(Exception):
 
 
 class _ReadSlots:
-  """Reads of stored files running in this process: at most ``total``, and
-  one per graph (a subgraph shares its parent's)."""
+  """Reads of stored files running in this process: at most ``total``, one
+  per graph (a subgraph shares its parent's), and only while the container
+  has memory to spare for every read running plus this one."""
 
   def __init__(self, total: int) -> None:
     self._total = total
@@ -100,9 +104,13 @@ class _ReadSlots:
     subgraph = parse_subgraph_id(graph_id)
     key = subgraph.parent_graph_id if subgraph else graph_id
     with self._lock:
-      if key in self._graphs or len(self._graphs) >= self._total:
+      if (
+        key in self._graphs
+        or len(self._graphs) >= self._total
+        or not _has_room_for(len(self._graphs) + 1)
+      ):
         raise DocumentReadBusyError(
-          "Another document is being read; try again in a few seconds."
+          "No document read can start now; try again in a few seconds."
         )
       self._graphs.add(key)
     try:
@@ -110,6 +118,63 @@ class _ReadSlots:
     finally:
       with self._lock:
         self._graphs.discard(key)
+
+
+def _has_room_for(reads: int) -> bool:
+  spare = _memory_to_spare()
+  if spare is None:
+    return True
+  needed = reads * DOCUMENT_READ_MEMORY_MB + DOCUMENT_READ_MEMORY_MARGIN_MB
+  return spare >= needed * 1024 * 1024
+
+
+def _memory_to_spare() -> int | None:
+  """Bytes this container can still take before its memory limit, not
+  counting file cache the kernel reclaims; None when it has no limit we can
+  read."""
+  usage = _cgroup_value(_CGROUP / "memory.current")
+  if usage is not None:
+    limit = _cgroup_value(_CGROUP / "memory.max")
+    reclaimable = _cgroup_stat(_CGROUP / "memory.stat").get("inactive_file", 0)
+  else:
+    v1 = _CGROUP / "memory"
+    usage = _cgroup_value(v1 / "memory.usage_in_bytes")
+    stat = _cgroup_stat(v1 / "memory.stat")
+    limits = [_cgroup_value(v1 / "memory.limit_in_bytes")]
+    # The limit set above this cgroup, which is where the binding one sits
+    # when only the enclosing group is sized.
+    limits.append(stat.get("hierarchical_memory_limit"))
+    limit = min((value for value in limits if value), default=None)
+    reclaimable = stat.get("total_inactive_file", 0)
+  if usage is None or limit is None or limit >= _NO_LIMIT:
+    return None
+  return limit - (usage - reclaimable)
+
+
+def _cgroup_value(path: Path) -> int | None:
+  try:
+    value = path.read_text().strip()
+  except OSError:
+    return None
+  if value == "max":
+    return _NO_LIMIT
+  try:
+    return int(value)
+  except ValueError:
+    return None
+
+
+def _cgroup_stat(path: Path) -> dict[str, int]:
+  try:
+    lines = path.read_text().splitlines()
+  except OSError:
+    return {}
+  stat: dict[str, int] = {}
+  for line in lines:
+    name, _, value = line.partition(" ")
+    if value.strip().isdigit():
+      stat[name] = int(value)
+  return stat
 
 
 _READ_SLOTS = _ReadSlots(DOCUMENT_READS_PER_PROCESS)
@@ -412,7 +477,7 @@ class DocumentService:
     all; reading one is the extraction step's (OCR), not this. Raises
     KeyError when the document is not in this graph, `DocumentFileError`
     when it is not a stored PDF or cannot be read as one, and
-    `DocumentReadBusyError` when no read can start now.
+    `DocumentReadBusyError` when no read can start or finish now.
 
     Closes the session once the document is found: the read holds no
     database connection.
@@ -644,7 +709,8 @@ def _read_pdf_pages(
 ) -> tuple[int, list[tuple[int, str]]]:
   """Pages of a PDF's text, read in a child process held to the read bounds.
 
-  Raises `DocumentFileError` when the PDF cannot be read within them.
+  Raises `DocumentFileError` when the PDF cannot be read within them, and
+  `DocumentReadBusyError` when the read runs out of time.
   """
   request = {
     "first_page": first_page,
@@ -665,7 +731,9 @@ def _read_pdf_pages(
     )
   except subprocess.TimeoutExpired as exc:
     logger.warning(f"Document {document_id} timed out being read as a PDF")
-    raise unreadable from exc
+    raise DocumentReadBusyError(
+      f"Document {document_id} took too long to read; try again in a few seconds."
+    ) from exc
   if done.returncode != 0:
     logger.warning(
       f"Document {document_id} could not be read as a PDF "
