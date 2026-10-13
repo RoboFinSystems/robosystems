@@ -967,3 +967,57 @@ class TestRetryBehavior:
       always_503()
     # Bounded by stop_max_attempt_number=5.
     assert call_count["n"] == 5
+
+
+def _sdk_fault(status: int, body: str):
+  """What python-quickbooks raises for a response, through its own parser."""
+  from unittest.mock import MagicMock
+
+  from quickbooks import QuickBooks
+
+  qb = QuickBooks.__new__(QuickBooks)
+  qb.use_decimal = False
+  qb.process_request = MagicMock(return_value=MagicMock(status_code=status, text=body))
+  try:
+    qb.make_request("GET", "https://quickbooks.api.intuit.com/v3/company/1/query")
+  except Exception as exc:
+    return exc
+  raise AssertionError("the SDK raised nothing")
+
+
+class TestRetryOnTheFaultsIntuitSends:
+  """The SDK parses Intuit's faults before the predicate sees them: a throttle
+  is a Fault with code 3001, a system error a Fault with code 10000, and a
+  gateway page is not JSON at all."""
+
+  @pytest.mark.parametrize(
+    ("status", "body"),
+    [
+      (
+        429,
+        '{"Fault":{"Error":[{"Message":"message=ThrottleExceeded; '
+        'errorCode=003001; statusCode=429","code":"3001"}],"type":"SERVICE"}}',
+      ),
+      (
+        500,
+        '{"Fault":{"Error":[{"Message":"An application error has occurred",'
+        '"code":"10000"}],"type":"SystemFault"}}',
+      ),
+      (503, "<html><body>Service Unavailable</body></html>"),
+      (504, ""),
+    ],
+  )
+  def test_a_transient_fault_is_retried(self, status, body):
+    from robosystems.adapters.quickbooks.client.api import _is_retryable_qb_error
+
+    assert _is_retryable_qb_error(_sdk_fault(status, body)) is True
+
+  def test_a_validation_fault_is_not_retried(self):
+    from robosystems.adapters.quickbooks.client.api import _is_retryable_qb_error
+
+    fault = _sdk_fault(
+      400,
+      '{"Fault":{"Error":[{"Message":"Invalid Reference Id","code":"2500"}],'
+      '"type":"ValidationFault"}}',
+    )
+    assert _is_retryable_qb_error(fault) is False

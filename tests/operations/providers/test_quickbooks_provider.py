@@ -324,6 +324,7 @@ class TestSyncQuickbooksConnection:
       "connection_id": "conn_1",
       "user_id": "usr_1",
       "metadata": {"realm_id": "realm123"},
+      "last_sync": "2026-10-01T00:00:00+00:00",
     }
 
     with patch(
@@ -340,6 +341,34 @@ class TestSyncQuickbooksConnection:
     assert run_config["ops"]["qb_extract"]["config"]["full_rebuild"] is False
     assert run_config["ops"]["qb_extract"]["config"]["lookback_days"] == 60
     assert run_config["ops"]["qb_extract"]["config"]["since_date"] == ""
+
+  @pytest.mark.asyncio
+  async def test_a_connection_never_synced_imports_its_whole_history(self):
+    """The scheduled sync after a failed first one: it must import the
+    company's history, not the lookback window."""
+    from robosystems.operations.providers.quickbooks_provider import (
+      sync_quickbooks_connection,
+    )
+
+    connection = {
+      "connection_id": "conn_1",
+      "user_id": "usr_1",
+      "metadata": {"realm_id": "realm123"},
+      "last_sync": None,
+    }
+
+    with patch(
+      "robosystems.middleware.sse.dagster_monitor.submit_dagster_job_sync",
+      return_value="run_xyz",
+    ) as mock_submit:
+      await sync_quickbooks_connection(
+        connection=connection,
+        sync_options={"unattended": True},
+        graph_id="kg_test",
+      )
+
+    run_config = mock_submit.call_args.kwargs["run_config"]
+    assert run_config["ops"]["qb_extract"]["config"]["full_rebuild"] is True
 
   @pytest.mark.asyncio
   async def test_an_unattended_sync_says_so_in_the_run_config(self):
@@ -376,6 +405,7 @@ class TestSyncQuickbooksConnection:
       "connection_id": "conn_1",
       "user_id": "usr_1",
       "metadata": {"realm_id": "realm123"},
+      "last_sync": "2026-10-01T00:00:00+00:00",
     }
 
     with patch(
