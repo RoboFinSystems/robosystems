@@ -797,6 +797,8 @@ class FiscalCalendarService:
     if period_end >= today:
       blockers.append(CloseableGateResult.PERIOD_INCOMPLETE)
 
+    # For the same reason a sync is current only once it ran after the
+    # period's last day: one made that day has not seen the rest of it.
     sync_stale_days: int | None = None
     if not allow_stale_sync and has_sync_connection:
       if last_sync_at is None:
@@ -805,9 +807,9 @@ class FiscalCalendarService:
         last_sync_date = (
           last_sync_at.date() if hasattr(last_sync_at, "date") else last_sync_at
         )
-        if last_sync_date < period_end:
+        if last_sync_date <= period_end:
           blockers.append(CloseableGateResult.SYNC_STALE)
-          sync_stale_days = (period_end - last_sync_date).days
+          sync_stale_days = max(1, (period_end - last_sync_date).days)
 
     # Matured schedule obligations still pending: promote or void them.
     period_end_dt = datetime.combine(period_end, time(23, 59, 59), tzinfo=UTC)
