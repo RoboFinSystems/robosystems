@@ -40,6 +40,7 @@ from robosystems.operations.roboledger.commands._guards import (
   InactiveAccountError,
   assert_accounts_postable,
   assert_period_not_closed,
+  assert_within_calendar,
 )
 from robosystems.operations.roboledger.entity_scope import (
   ensure_entity_id,
@@ -720,6 +721,16 @@ def update_event_block(
     fence_dates.update(_retraction_fence_dates(session, peek.id))
   if fence_dates:
     assert_period_not_closed(session, *sorted(fence_dates), entity_id=peek.entity_id)
+  # Nothing is committed, or moved, to a date before the entity's calendar.
+  if body.transition_to == "committed" or body.effective_at is not None:
+    assert_within_calendar(
+      session,
+      posting_date_for_event(
+        effective_at=body.effective_at or peek.effective_at,
+        occurred_at=peek.occurred_at,
+      ),
+      entity_id=peek.entity_id,
+    )
   # Retraction fence (see `_assert_retractable`), on the rows' own posting
   # dates: an event with no ledger rows stays retractable in a closed period.
   if body.transition_to in _RETRACTED_STATUSES:
@@ -960,14 +971,12 @@ def preview_event_block(
     )
 
   try:
-    assert_period_not_closed(
-      session,
-      posting_date_for_event(
-        effective_at=body.effective_at,
-        occurred_at=body.occurred_at,
-      ),
-      entity_id=entity_id,
+    preview_date = posting_date_for_event(
+      effective_at=body.effective_at,
+      occurred_at=body.occurred_at,
     )
+    assert_period_not_closed(session, preview_date, entity_id=entity_id)
+    assert_within_calendar(session, preview_date, entity_id=entity_id)
   except (ClosedPeriodError, RowLockedError) as e:
     errors.append(str(e))
 

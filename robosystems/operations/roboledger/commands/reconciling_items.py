@@ -51,6 +51,7 @@ from robosystems.operations.event_block.qb_writeback import ROUND_TRIP_BASELINE_
 from robosystems.operations.locking import RowLockedError, bounded_lock_wait
 from robosystems.operations.roboledger.commands._guards import (
   assert_period_not_closed,
+  assert_within_calendar,
   closed_periods,
 )
 from robosystems.operations.roboledger.entity_scope import owner_entity_id
@@ -705,6 +706,8 @@ def resolve_reconciling_item(
     assert_period_not_closed(session, *fence_dates, entity_id=entity_id)
   elif catch_up_date is not None:
     assert_period_not_closed(session, catch_up_date, entity_id=entity_id)
+  if catch_up_date is not None:
+    assert_within_calendar(session, catch_up_date, entity_id=entity_id)
 
   with bounded_lock_wait(
     session,

@@ -72,6 +72,23 @@ class ClosedPeriodError(ValueError):
     self.posting_date = posting_date
 
 
+class BeforeCalendarStartError(ClosedPeriodError):
+  """A write is dated before the entity's first fiscal period. No close ever
+  covers that month, so a draft there would never post."""
+
+  def __init__(self, first_period: str, posting_date: date) -> None:
+    ValueError.__init__(
+      self,
+      f"Cannot write dated {posting_date}: the calendar starts at "
+      f"{first_period!r}, and no close posts anything dated before it. Date it "
+      f"in {first_period} or later, or move the calendar's start earlier "
+      "(change-calendar-start).",
+    )
+    self.period_name = first_period
+    self.first_period = first_period
+    self.posting_date = posting_date
+
+
 _PERIOD_COVERING_DATE = """
   SELECT graph_id, name, status
   FROM fiscal_periods
@@ -159,6 +176,34 @@ def assert_period_not_closed(
   if closed:
     month, posting_date = closed[0]
     raise ClosedPeriodError(month, posting_date)
+
+
+def assert_within_calendar(
+  session: Session, *posting_dates: date, entity_id: str | None = None
+) -> None:
+  """Raise `BeforeCalendarStartError` if a row about to be written is dated
+  before ``entity_id``'s first fiscal period (default the group parent's).
+
+  For the dates a write lands on, not the ones it leaves: deleting or
+  retracting a row stranded there stays possible. An entity with no periods
+  yet has no start to hold to, and a baseline import is let through, as
+  `assert_period_not_closed` lets it through.
+  """
+  dates = [d for d in posting_dates if d is not None]
+  if not dates or _BASELINE_IMPORT.get():
+    return
+  entity_id = entity_id or find_entity_id(session)
+  if entity_id is None:
+    return
+  first_start = session.execute(
+    text("SELECT min(start_date) FROM fiscal_periods WHERE entity_id = :entity_id"),
+    {"entity_id": entity_id},
+  ).scalar()
+  if first_start is None:
+    return
+  earliest = min(dates)
+  if earliest < first_start:
+    raise BeforeCalendarStartError(f"{first_start:%Y-%m}", earliest)
 
 
 def closed_periods(

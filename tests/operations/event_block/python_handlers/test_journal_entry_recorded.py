@@ -21,6 +21,16 @@ from robosystems.operations.event_block.python_handlers.journal_entry_recorded i
 )
 
 
+@pytest.fixture(autouse=True)
+def _calendar_start_open():
+  """Mock sessions cannot answer the calendar-start check either; it runs
+  against a real database in test_change_start_db.py."""
+  with patch(
+    "robosystems.operations.event_block.python_handlers.journal_entry_recorded.assert_within_calendar"
+  ):
+    yield
+
+
 def _make_event():
   event = MagicMock()
   event.id = "evt_test"

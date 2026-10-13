@@ -21,6 +21,7 @@ from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands._guards import (
   ClosedPeriodError,
   assert_period_not_closed,
+  assert_within_calendar,
 )
 from robosystems.operations.roboledger.commands.journal_entries import (
   reverse_journal_entry,
@@ -151,6 +152,7 @@ def dispatch_preview(
     assert_period_not_closed(
       session, original.posting_date, posting_date, entity_id=original.entity_id
     )
+    assert_within_calendar(session, posting_date, entity_id=original.entity_id)
   except (ClosedPeriodError, RowLockedError) as e:
     errors.append(str(e))
 

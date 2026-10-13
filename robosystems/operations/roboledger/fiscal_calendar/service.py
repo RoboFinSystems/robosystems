@@ -117,9 +117,10 @@ class CalendarStartBlockedError(FiscalCalendarError):
   def __init__(self, first_open_period: str, entries: int, unposted: int) -> None:
     super().__init__(
       f"Cannot start the calendar at {first_open_period}: the months before it "
-      f"hold {entries} journal entries and {unposted} unposted source lines "
-      "(bank lines or source transactions). Post, move or void them first, or "
-      "start the calendar earlier."
+      f"hold {entries} journal entries and {unposted} events not yet posted "
+      "(bank lines, source transactions or schedule obligations). Post, move "
+      "or void them first (a schedule by moving its start), or start the "
+      "calendar earlier."
     )
     self.entries = entries
     self.unposted = unposted
@@ -359,8 +360,9 @@ class FiscalCalendarService:
     """Move the entity's first period, allowed only before its first close.
 
     Earlier seeds open months back to `first_open_period`. Later removes the
-    leading months, which must hold no entries (drafts included) and no
-    unposted source lines, or they would be stranded outside the calendar.
+    leading months, which must hold no entries (drafts included) and no event
+    still to post (a pending schedule obligation included), or they would be
+    stranded outside the calendar.
     Returns the calendar and the counts of period rows created and removed.
 
     Raises `CalendarStartLockedError` once any month has closed or is
@@ -415,13 +417,14 @@ class FiscalCalendarService:
         .filter(Entry.entity_id == entity_id, Entry.posting_date < start)
         .scalar()
       )
+      # Every event still to write a row: bank lines, source transactions and
+      # schedule obligations alike. A pending obligation has no entry yet.
       posting_date = func.date(func.coalesce(Event.effective_at, Event.occurred_at))
       unposted = (
         session.query(func.count(Event.id))
         .filter(
           Event.entity_id == entity_id,
-          Event.status.in_(("captured", "classified")),
-          Event.event_type != "schedule_entry_due",
+          Event.status.in_(("pending", "captured", "classified")),
           posting_date < start,
         )
         .scalar()

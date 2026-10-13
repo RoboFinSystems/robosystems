@@ -204,7 +204,7 @@ def _classify_dispatch_error(exc: BaseException) -> str:
   # Matched by name so this module need not import the handler types.
   if exc_type == "ElementResolutionError":
     return "element_unmapped"
-  if exc_type == "ClosedPeriodError":
+  if exc_type in ("ClosedPeriodError", "BeforeCalendarStartError"):
     return "closed_period"
   if exc_type == "UnbalancedJournalEntryError":
     return "unbalanced_entry"

@@ -182,6 +182,7 @@ def dispatch_preview(
   from robosystems.operations.roboledger.commands._guards import (
     ClosedPeriodError,
     assert_period_not_closed,
+    assert_within_calendar,
   )
 
   try:
@@ -193,11 +194,14 @@ def dispatch_preview(
       proceeds_element_id=metadata.proceeds_element_id,
       gain_loss_element_id=metadata.gain_loss_element_id,
     )
-    # dispatch posts on the disposal date and refuses a closed period.
+    # dispatch posts on the disposal date and refuses a closed period, or
+    # one before the calendar.
+    disposal_entity_id = _schedule_entity_id(session, metadata.schedule_id)
     assert_period_not_closed(
-      session,
-      body.occurred_at.date(),
-      entity_id=_schedule_entity_id(session, metadata.schedule_id),
+      session, body.occurred_at.date(), entity_id=disposal_entity_id
+    )
+    assert_within_calendar(
+      session, body.occurred_at.date(), entity_id=disposal_entity_id
     )
   except (ValueError, ClosedPeriodError, RowLockedError, ScheduleNotFoundError) as e:
     return HandlerPreview(

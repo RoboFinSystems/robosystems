@@ -21,6 +21,7 @@ from robosystems.models.extensions.roboledger.transaction import Transaction
 from robosystems.operations.roboledger.commands._guards import (
   assert_accounts_postable,
   assert_period_not_closed,
+  assert_within_calendar,
 )
 
 from .template import (
@@ -119,6 +120,7 @@ def apply_handler(
   # Same fence journal-entry commands take. Without it a DSL handler can
   # mint a draft while close is publishing, or after statements are stamped.
   assert_period_not_closed(session, posting_date, entity_id=event.entity_id)
+  assert_within_calendar(session, posting_date, entity_id=event.entity_id)
 
   # One timestamp shared by every row this invocation writes.
   now = datetime.now(UTC)

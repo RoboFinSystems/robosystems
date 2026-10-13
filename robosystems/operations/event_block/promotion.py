@@ -31,8 +31,10 @@ from robosystems.operations.event_block.python_handlers.types import (
 )
 from robosystems.operations.locking import RowLockedError, ordered_lock_column
 from robosystems.operations.roboledger.commands._guards import (
+  BeforeCalendarStartError,
   ClosedPeriodError,
   assert_period_not_closed,
+  assert_within_calendar,
 )
 
 
@@ -166,8 +168,9 @@ def _preview_write_set(
 def _fence_write_set(session: Session, write_set: list[Event]) -> list[tuple[str, str]]:
   """Take the shared period fence for every obligation autopilot will write.
 
-  Returns ``(event_id, reason)`` for obligations in closed periods. A fence
-  held exclusively by a closer propagates as retryable ``RowLockedError``.
+  Returns ``(event_id, reason)`` for obligations in closed periods or dated
+  before their entity's calendar. A fence held exclusively by a closer
+  propagates as retryable ``RowLockedError``.
   """
   # Each obligation is checked against its own entity's calendar. Months
   # ascending, as every writer fences them.
@@ -184,9 +187,15 @@ def _fence_write_set(session: Session, write_set: list[Event]) -> list[tuple[str
     try:
       # No entity on the row: the guard reads the group parent's calendar.
       assert_period_not_closed(session, posting_date, entity_id=entity_id or None)
+      assert_within_calendar(session, posting_date, entity_id=entity_id or None)
     except ClosedPeriodError as e:
+      label = (
+        "before the calendar"
+        if isinstance(e, BeforeCalendarStartError)
+        else "closed period"
+      )
       closed.extend(
-        (evt.id, f"closed period: {e}") for evt in by_date[(posting_date, entity_id)]
+        (evt.id, f"{label}: {e}") for evt in by_date[(posting_date, entity_id)]
       )
   return closed
 
@@ -215,7 +224,8 @@ def promote_pending_obligations(
   preview_pending, preview_stranded = _preview_write_set(session, candidate_filter)
   write_set = preview_pending + preview_stranded
   # Autopilot writes GL: fence before the row locks, matching close's order.
-  # Obligations in closed periods are skipped and reported.
+  # Obligations in closed periods, or before the calendar, are skipped and
+  # reported.
   if dispatch_handlers and write_set:
     closed = _fence_write_set(session, write_set)
     if closed:

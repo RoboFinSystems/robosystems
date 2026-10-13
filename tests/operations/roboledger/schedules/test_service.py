@@ -29,6 +29,16 @@ def _period_gate_open():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _calendar_start_open():
+  """Mock sessions cannot answer the calendar-start check either; it runs
+  against a real database in test_change_start_db.py."""
+  with patch(
+    "robosystems.operations.roboledger.schedules.service.assert_within_calendar"
+  ):
+    yield
+
+
 # ── Utility tests ────────────────────────────────────────────────────────
 
 

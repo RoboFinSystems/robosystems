@@ -32,6 +32,7 @@ from robosystems.models.extensions.trait import Trait
 from robosystems.operations.roboledger.commands._guards import (
   assert_accounts_postable,
   assert_period_not_closed,
+  assert_within_calendar,
 )
 from robosystems.operations.roboledger.entity_scope import (
   ensure_entity_id,
@@ -1200,10 +1201,11 @@ class ScheduleService:
       )
 
     # Before the staleness check: an unchanged draft on a retired account
-    # would still post at close.
+    # would still post at close, and one dated before the calendar never would.
     assert_accounts_postable(
       session, (debit_element_id, credit_element_id), entity_id=entity_id
     )
+    assert_within_calendar(session, *fence_dates, entity_id=entity_id)
 
     amount_dollars = fact_row.value
     amount_cents = round(amount_dollars * 100)
@@ -1418,8 +1420,9 @@ class ScheduleService:
       )
 
     entity_id = ensure_entity_id(session, entity_id)
-    # A draft in a closed period could never be posted.
+    # A draft in a closed period, or before the calendar, could never be posted.
     assert_period_not_closed(session, posting_date, entity_id=entity_id)
+    assert_within_calendar(session, posting_date, entity_id=entity_id)
     assert_accounts_postable(
       session, (li["element_id"] for li in normalized), entity_id=entity_id
     )
