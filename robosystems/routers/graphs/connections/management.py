@@ -35,6 +35,7 @@ from robosystems.operations.connection_service import (
   assert_provider_compatible,
   sync_fence,
 )
+from robosystems.operations.locking import RowLockedError
 from robosystems.security.audit_logger import SecurityAuditLogger, SecurityEventType
 
 from .utils import (
@@ -608,6 +609,12 @@ async def delete_connection(
         detail=(
           "A sync is running for this connection. Disconnect it once the sync finishes."
         ),
+        code=ErrorCode.OPERATION_FAILED,
+      )
+    except RowLockedError:
+      raise create_error_response(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=("The feed's lines are being written. Disconnect again in a moment."),
         code=ErrorCode.OPERATION_FAILED,
       )
 
