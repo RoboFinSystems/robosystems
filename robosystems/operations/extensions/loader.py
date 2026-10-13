@@ -272,6 +272,43 @@ def _compare_sync_tokens(existing: str | None, incoming: str | None) -> str:
   return "stale"
 
 
+def _retract_quickbooks_void(
+  evt, ext_id: str, txn: dict, now: datetime, out: _CaptureResult
+) -> None:
+  """Retract the event a voided QuickBooks transaction belongs to, the way a
+  deletion is retracted: an unposted event is voided, a posted one becomes a
+  reconciling item that only catch-up resolves."""
+  from robosystems.adapters.quickbooks.pipeline.cdc import (
+    VOIDED_REASON,
+    CdcApplyResult,
+    _retract,
+  )
+
+  sync_token = str(txn["sync_token"]) if txn.get("sync_token") else None
+  freshness = _compare_sync_tokens(
+    (evt.metadata_ or {}).get("qb_sync_token"), sync_token
+  )
+  if freshness == "stale":
+    out.skipped_stale_sync_token += 1
+    return
+  if freshness == "same":
+    out.skipped_same_sync_token += 1
+    return
+  applied = CdcApplyResult()
+  _retract(
+    evt,
+    [ext_id.rsplit("_", 1)[-1]],
+    applied,
+    stamp=now.isoformat(),
+    published=False,
+    void_reason=VOIDED_REASON,
+  )
+  out.updated += applied.voided
+  out.drift_detected += applied.flagged
+  if sync_token is not None:
+    evt.metadata_ = {**(evt.metadata_ or {}), "qb_sync_token": sync_token}
+
+
 def _stamp_dispatch_error(evt, exc: BaseException, now: datetime) -> None:
   """Record dispatch failure detail beside the payload and bump ``dispatch_attempts``.
 
@@ -1213,6 +1250,15 @@ class OLTPLoader:
             ext_id,
             agent_ext_id,
           )
+
+      if (
+        source == "quickbooks"
+        and ext_id in existing
+        and not any(e.get("line_items") for e in txn["entries"])
+      ):
+        # A void: QuickBooks keeps the transaction and zeroes every line.
+        _retract_quickbooks_void(existing[ext_id], ext_id, txn, now, out)
+        continue
 
       hardened_entries: list[dict] = []
       for e in txn["entries"]:

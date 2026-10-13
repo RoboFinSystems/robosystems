@@ -7,6 +7,10 @@ turns the answer into a plan (the deletions, and the dates to pull again); the
 load applies the deletions after the UPSERT, so a row edited and then deleted
 within one window ends deleted.
 
+A void is the same retraction: QuickBooks keeps a voided transaction, zeroes
+its amounts and marks its private note, so CDC reports it as changed and the
+JournalReport carries it with no line.
+
 A deletion never voids a posted entry by itself. An unposted event is voided;
 a posted one becomes a reconciling item whose accepted payload carries no
 entry, so restate is refused and catch-up reverses it — the same convention
@@ -96,6 +100,7 @@ CDC_ENTITY_LABELS: dict[str, tuple[str, ...]] = {
 UNPOSTED_STATUSES = ("captured", "classified")
 POSTED_STATUSES = ("committed", "fulfilled")
 VOID_REASON = "deleted_in_quickbooks"
+VOIDED_REASON = "voided_in_quickbooks"
 
 # Every label the map knows, and the entity it belongs to.
 _ENTITY_OF_LABEL: dict[str, str] = {
@@ -189,6 +194,16 @@ def plan_cdc(
           }
         )
         continue
+      if _is_void(row):
+        deletions.append(
+          {
+            "entity": entity,
+            "id": str(row.get("Id") or ""),
+            "last_updated": (row.get("MetaData") or {}).get("LastUpdatedTime"),
+            "voided": True,
+          }
+        )
+        continue
       txn_date = str(row.get("TxnDate") or "")[:10]
       if txn_date and txn_date < window_start:
         old_dates.add(txn_date)
@@ -211,6 +226,16 @@ def plan_cdc(
     deletions=deletions,
     extra_windows=windows,
   )
+
+
+def _is_void(row: dict[str, Any]) -> bool:
+  """QuickBooks' void: the amount zeroed and "Voided" written into the note."""
+  amount = row.get("TotalAmt", row.get("Amount"))
+  try:
+    zeroed = amount is not None and float(amount) == 0
+  except (TypeError, ValueError):
+    return False
+  return zeroed and "voided" in str(row.get("PrivateNote") or "").lower()
 
 
 def write_plan(extract_dir: Path, plan: CdcPlan) -> Path:
@@ -262,10 +287,17 @@ def apply_deletions(
   stamp = (now or datetime.now(UTC)).isoformat()
 
   wanted: dict[tuple[str, str], str] = {}
+  voided: set[tuple[str, str]] = set()
   for deletion in deletions:
     entity, qb_id = str(deletion.get("entity") or ""), str(deletion.get("id") or "")
     if entity and qb_id:
       wanted[(entity, qb_id)] = qb_id
+      if deletion.get("voided"):
+        voided.add((entity, qb_id))
+
+  def reason(key: tuple[str, str]) -> str:
+    return VOIDED_REASON if key in voided else VOID_REASON
+
   matched: set[tuple[str, str]] = set()
 
   by_external_id: dict[str, tuple[str, str]] = {}
@@ -275,7 +307,9 @@ def apply_deletions(
   for event in _mirrored(session, sorted(by_external_id)):
     key = by_external_id[str(event.external_id)]
     matched.add(key)
-    _retract(event, [key[1]], result, stamp=stamp, published=False)
+    _retract(
+      event, [key[1]], result, stamp=stamp, published=False, void_reason=reason(key)
+    )
 
   # A label the map does not list: the id's suffix finds the event, and the
   # label it carries is learned, unless it belongs to another entity. Ids are
@@ -297,7 +331,15 @@ def apply_deletions(
           entity,
           label,
         )
-      _retract(event, [qb_id], result, stamp=stamp, published=False, may_void=False)
+      _retract(
+        event,
+        [qb_id],
+        result,
+        stamp=stamp,
+        published=False,
+        may_void=False,
+        void_reason=reason((entity, qb_id)),
+      )
 
   deleted_journal_entries = {
     qb_id for (entity, qb_id) in wanted if entity == "JournalEntry"
@@ -393,7 +435,7 @@ def _already_carries(event: Event, qb_ids: list[str]) -> bool:
   payload by a resolution, pending in its flagged payload, or the reason it
   was voided."""
   live = dict(event.metadata_ or {})
-  if live.get("void_reason") == VOID_REASON:
+  if live.get("void_reason") in (VOID_REASON, VOIDED_REASON):
     return True
   for store in (live, live.get("drift_payload") or {}):
     if store.get("source_removed") and set(qb_ids) <= {
@@ -411,6 +453,7 @@ def _retract(
   stamp: str,
   published: bool,
   may_void: bool = True,
+  void_reason: str = VOID_REASON,
 ) -> None:
   if _already_carries(event, qb_ids):
     result.already_applied += 1
@@ -429,7 +472,7 @@ def _retract(
     event.status = "voided"
     event.metadata_ = {
       **(event.metadata_ or {}),
-      "void_reason": VOID_REASON,
+      "void_reason": void_reason,
       "voided_at": stamp,
       "source_removed_transaction_ids": qb_ids,
     }
@@ -442,7 +485,10 @@ def _retract(
   accepted["entries"] = []
   accepted["source_removed"] = True
   accepted["source_removed_transaction_ids"] = qb_ids
-  accepted["deleted_upstream"] = True
+  if void_reason == VOIDED_REASON:
+    accepted["voided_upstream"] = True
+  else:
+    accepted["deleted_upstream"] = True
   if published:
     accepted["published_entry_deleted"] = True
   metadata = dict(event.metadata_ or {})
