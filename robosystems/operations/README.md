@@ -44,6 +44,7 @@ Every operation on the platform is one of four shapes, and the shape determines 
 | `providers/` | External provider integrations and the provider registry |
 | `aws/` | S3 and SES helpers |
 | `connection_service.py`, `document_service.py` | Connection and document lifecycle |
+| `pdf_text.py` | A stored PDF's text layer, read in a bounded child process for `document_service.py` |
 | `oidc.py` | OIDC login kernel: connection config, flow state, ID-token validation, link-only user resolution |
 | `user_provisioning.py` | Account-creation kernel shared by registration and IdP-driven (SCIM) provisioning |
 | `passkeys.py` | WebAuthn kernel: registration and assertion challenges, credential storage, recovery codes |

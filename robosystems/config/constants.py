@@ -40,6 +40,16 @@ MAX_DOCUMENT_FILE_MB = 25
 MAX_DOCUMENT_FILES_PER_GRAPH = 2000
 # A download link is fetched when the file is opened, not kept.
 DOCUMENT_DOWNLOAD_EXPIRY_SECONDS = 300
+# Reading a stored PDF's text runs in a child process within these bounds.
+DOCUMENT_READ_TIMEOUT_SECONDS = 15
+DOCUMENT_READ_MEMORY_MB = 192
+DOCUMENT_READ_STREAM_MB = 2
+DOCUMENT_READ_CHARS_PER_PAGE = 20_000
+DOCUMENT_READ_CHARS_PER_CALL = 100_000
+DOCUMENT_READS_PER_PROCESS = 2
+# A read starts only while the container has this much to spare beyond the
+# memory of every read running, its own included.
+DOCUMENT_READ_MEMORY_MARGIN_MB = 128
 
 # Below this, files stage inline in the request; above it, via Dagster.
 SMALL_FILE_STAGING_THRESHOLD_MB = 50

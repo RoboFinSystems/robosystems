@@ -257,7 +257,7 @@ function setup_full_config() {
 
     # API Fargate Task Sizing
     gh variable set API_CPU_PROD --body "512"
-    gh variable set API_MEMORY_PROD --body "1024"
+    gh variable set API_MEMORY_PROD --body "2048"
     if $setup_staging; then
         gh variable set API_CPU_STAGING --body "512"
         gh variable set API_MEMORY_STAGING --body "1024"

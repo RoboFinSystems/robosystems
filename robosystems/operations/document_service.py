@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import hashlib
-import io
+import json
 import logging
-from collections.abc import Sequence
+import subprocess
+import sys
+import tempfile
+import threading
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
+from typing import IO
 from urllib.parse import quote
 
 from sqlalchemy import text
@@ -15,6 +22,13 @@ from sqlalchemy.orm import Session
 
 from robosystems.config.constants import (
   DOCUMENT_DOWNLOAD_EXPIRY_SECONDS,
+  DOCUMENT_READ_CHARS_PER_CALL,
+  DOCUMENT_READ_CHARS_PER_PAGE,
+  DOCUMENT_READ_MEMORY_MARGIN_MB,
+  DOCUMENT_READ_MEMORY_MB,
+  DOCUMENT_READ_STREAM_MB,
+  DOCUMENT_READ_TIMEOUT_SECONDS,
+  DOCUMENT_READS_PER_PROCESS,
   MAX_DOCUMENT_FILE_MB,
   MAX_DOCUMENT_FILES_PER_GRAPH,
   PRESIGNED_URL_EXPIRY_SECONDS,
@@ -50,6 +64,10 @@ _FILE_TYPES: dict[str, tuple[tuple[str, ...], bytes]] = {
 }
 PDF = "application/pdf"
 _MAX_FILE_BYTES = MAX_DOCUMENT_FILE_MB * 1024 * 1024
+_PDF_TEXT_READER = Path(__file__).with_name("pdf_text.py")
+_DOWNLOAD_CHUNK_BYTES = 1024 * 1024
+_CGROUP = Path("/sys/fs/cgroup")
+_NO_LIMIT = 1 << 60
 
 
 class DocumentFileError(ValueError):
@@ -63,6 +81,103 @@ class DocumentFileNotUploadedError(Exception):
 
 class DocumentInUseError(Exception):
   """The document is evidence for a recorded balance."""
+
+
+class DocumentReadBusyError(Exception):
+  """Every read of a stored file is taken, or this graph's is; try again."""
+
+
+class _ReadSlots:
+  """Reads of stored files running in this process: at most ``total``, one
+  per graph (a subgraph shares its parent's), and only while the container
+  has memory to spare for every read running plus this one."""
+
+  def __init__(self, total: int) -> None:
+    self._total = total
+    self._lock = threading.Lock()
+    self._graphs: set[str] = set()
+
+  @contextmanager
+  def take(self, graph_id: str) -> Iterator[None]:
+    from robosystems.middleware.graph.utils import parse_subgraph_id
+
+    subgraph = parse_subgraph_id(graph_id)
+    key = subgraph.parent_graph_id if subgraph else graph_id
+    with self._lock:
+      if (
+        key in self._graphs
+        or len(self._graphs) >= self._total
+        or not _has_room_for(len(self._graphs) + 1)
+      ):
+        raise DocumentReadBusyError(
+          "No document read can start now; try again in a few seconds."
+        )
+      self._graphs.add(key)
+    try:
+      yield
+    finally:
+      with self._lock:
+        self._graphs.discard(key)
+
+
+def _has_room_for(reads: int) -> bool:
+  spare = _memory_to_spare()
+  if spare is None:
+    return True
+  needed = reads * DOCUMENT_READ_MEMORY_MB + DOCUMENT_READ_MEMORY_MARGIN_MB
+  return spare >= needed * 1024 * 1024
+
+
+def _memory_to_spare() -> int | None:
+  """Bytes this container can still take before its memory limit, not
+  counting file cache the kernel reclaims; None when it has no limit we can
+  read."""
+  usage = _cgroup_value(_CGROUP / "memory.current")
+  if usage is not None:
+    limit = _cgroup_value(_CGROUP / "memory.max")
+    reclaimable = _cgroup_stat(_CGROUP / "memory.stat").get("inactive_file", 0)
+  else:
+    v1 = _CGROUP / "memory"
+    usage = _cgroup_value(v1 / "memory.usage_in_bytes")
+    stat = _cgroup_stat(v1 / "memory.stat")
+    limits = [_cgroup_value(v1 / "memory.limit_in_bytes")]
+    # The limit set above this cgroup, which is where the binding one sits
+    # when only the enclosing group is sized.
+    limits.append(stat.get("hierarchical_memory_limit"))
+    limit = min((value for value in limits if value), default=None)
+    reclaimable = stat.get("total_inactive_file", 0)
+  if usage is None or limit is None or limit >= _NO_LIMIT:
+    return None
+  return limit - (usage - reclaimable)
+
+
+def _cgroup_value(path: Path) -> int | None:
+  try:
+    value = path.read_text().strip()
+  except OSError:
+    return None
+  if value == "max":
+    return _NO_LIMIT
+  try:
+    return int(value)
+  except ValueError:
+    return None
+
+
+def _cgroup_stat(path: Path) -> dict[str, int]:
+  try:
+    lines = path.read_text().splitlines()
+  except OSError:
+    return {}
+  stat: dict[str, int] = {}
+  for line in lines:
+    name, _, value = line.partition(" ")
+    if value.strip().isdigit():
+      stat[name] = int(value)
+  return stat
+
+
+_READ_SLOTS = _ReadSlots(DOCUMENT_READS_PER_PROCESS)
 
 
 def _apply_frontmatter(
@@ -360,43 +475,26 @@ class DocumentService:
     The text layer only: a statement a bank generates carries one, a scan
     does not, and its pages come back empty. A photo has no text layer at
     all; reading one is the extraction step's (OCR), not this. Raises
-    KeyError when the document is not in this graph, and `DocumentFileError`
-    when it is not a stored PDF or cannot be read as one.
+    KeyError when the document is not in this graph, `DocumentFileError`
+    when it is not a stored PDF or cannot be read as one, and
+    `DocumentReadBusyError` when no read can start or finish now.
+
+    Closes the session once the document is found: the read holds no
+    database connection.
     """
-    from pypdf import PdfReader
-    from pypdf.errors import PdfReadError
-
-    from robosystems.config import env
-    from robosystems.operations.aws.s3 import S3Client
-
     doc = self._stored_file(graph_id, document_id)
     if doc.file_content_type != PDF:
       raise DocumentFileError(
         f"Document {document_id} is a {doc.file_content_type} image, which has "
         "no text layer to read."
       )
-    obj = S3Client().s3_client.get_object(
-      Bucket=env.USER_DATA_BUCKET, Key=str(doc.file_s3_key)
-    )
-    try:
-      data = obj["Body"].read(_MAX_FILE_BYTES + 1)
-    finally:
-      obj["Body"].close()
-    try:
-      reader = PdfReader(io.BytesIO(data))
-      page_count = len(reader.pages)
-      last = min(page_count, first_page + max_pages - 1)
-      pages = [
-        (number, reader.pages[number - 1].extract_text() or "")
-        for number in range(first_page, last + 1)
-      ]
-    # A malformed PDF fails in more ways than PdfReadError (a bad xref, a
-    # cyclic object, a broken font map); every one means the same thing here.
-    except (PdfReadError, ValueError, KeyError, TypeError, RecursionError) as exc:
-      logger.warning(f"Document {document_id} could not be read as a PDF: {exc!r}")
-      raise DocumentFileError(
-        f"Document {document_id} could not be read as a PDF."
-      ) from exc
+    key = str(doc.file_s3_key)
+    self.session.close()
+    with _READ_SLOTS.take(graph_id), tempfile.TemporaryFile() as pdf:
+      _download(key, pdf)
+      page_count, pages = _read_pdf_pages(
+        document_id, pdf, first_page=first_page, max_pages=max_pages
+      )
     return FileText(document=doc, page_count=page_count, pages=pages)
 
   def _stored_file(self, graph_id: str, document_id: str) -> Document:
@@ -585,6 +683,69 @@ class DocumentService:
 
     os_doc_id = f"udoc_{document_id}"
     service.delete_document(graph_id, os_doc_id)
+
+
+def _download(key: str, into: IO[bytes]) -> None:
+  """A stored file's bytes, up to one past the size cap, written to ``into``."""
+  from robosystems.config import env
+  from robosystems.operations.aws.s3 import S3Client
+
+  obj = S3Client().s3_client.get_object(Bucket=env.USER_DATA_BUCKET, Key=key)
+  remaining = _MAX_FILE_BYTES + 1
+  try:
+    while remaining > 0:
+      chunk = obj["Body"].read(min(_DOWNLOAD_CHUNK_BYTES, remaining))
+      if not chunk:
+        break
+      into.write(chunk)
+      remaining -= len(chunk)
+  finally:
+    obj["Body"].close()
+  into.seek(0)
+
+
+def _read_pdf_pages(
+  document_id: str, pdf: IO[bytes], *, first_page: int, max_pages: int
+) -> tuple[int, list[tuple[int, str]]]:
+  """Pages of a PDF's text, read in a child process held to the read bounds.
+
+  Raises `DocumentFileError` when the PDF cannot be read within them, and
+  `DocumentReadBusyError` when the read runs out of time.
+  """
+  request = {
+    "first_page": first_page,
+    "max_pages": max_pages,
+    "memory_bytes": DOCUMENT_READ_MEMORY_MB * 1024 * 1024,
+    "stream_bytes": DOCUMENT_READ_STREAM_MB * 1024 * 1024,
+    "chars_per_page": DOCUMENT_READ_CHARS_PER_PAGE,
+    "chars_per_read": DOCUMENT_READ_CHARS_PER_CALL,
+  }
+  unreadable = DocumentFileError(f"Document {document_id} could not be read as a PDF.")
+  try:
+    done = subprocess.run(
+      [sys.executable, "-I", str(_PDF_TEXT_READER), json.dumps(request)],
+      stdin=pdf,
+      capture_output=True,
+      timeout=DOCUMENT_READ_TIMEOUT_SECONDS,
+      check=False,
+    )
+  except subprocess.TimeoutExpired as exc:
+    logger.warning(f"Document {document_id} timed out being read as a PDF")
+    raise DocumentReadBusyError(
+      f"Document {document_id} took too long to read; try again in a few seconds."
+    ) from exc
+  if done.returncode != 0:
+    logger.warning(
+      f"Document {document_id} could not be read as a PDF "
+      f"(exit {done.returncode}): {done.stderr[:500]!r}"
+    )
+    raise unreadable
+  try:
+    result = json.loads(done.stdout)
+    return result["page_count"], [(number, text) for number, text in result["pages"]]
+  except (ValueError, KeyError, TypeError) as exc:
+    logger.warning(f"Document {document_id} read back malformed text: {exc!r}")
+    raise unreadable from exc
 
 
 @dataclass(frozen=True)

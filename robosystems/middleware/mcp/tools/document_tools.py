@@ -907,6 +907,7 @@ get-document.""",
   def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     from robosystems.operations.document_service import (
       DocumentFileError,
+      DocumentReadBusyError,
       DocumentService,
     )
 
@@ -946,6 +947,8 @@ get-document.""",
       return {"error": "not_found", "message": f"Document '{document_id}' not found"}
     except DocumentFileError as e:
       return {"error": "not_a_file", "message": str(e)}
+    except DocumentReadBusyError as e:
+      return {"error": "busy", "message": str(e), "retryable": True}
     except SQLAlchemyError as e:
       return database_failure("read-document-file", e, not_initialized_message=None)
     finally:

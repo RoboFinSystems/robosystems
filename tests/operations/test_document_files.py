@@ -6,15 +6,27 @@ with the graph.
 from __future__ import annotations
 
 import hashlib
-from contextlib import nullcontext
+import sys
+import tempfile
+import threading
+import time
+import uuid
+import zlib
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager, nullcontext
+from dataclasses import dataclass, field
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 import boto3
+import psutil
 import pytest
 from moto import mock_aws
+from sqlalchemy.orm import Session
 
 from robosystems.config import env
+from robosystems.config.constants import DOCUMENT_READS_PER_PROCESS
 from robosystems.config.storage.graph import get_document_upload_key
 from robosystems.models.api.graphs.operations import (
   CompleteDocumentUploadOp,
@@ -26,6 +38,7 @@ from robosystems.operations.document_service import (
   DocumentFileError,
   DocumentFileNotUploadedError,
   DocumentInUseError,
+  DocumentReadBusyError,
   DocumentService,
 )
 
@@ -76,6 +89,140 @@ def _pdf(*pages: str) -> bytes:
 
 
 PDF = _pdf("Operating Checking ending balance 3,204.88", "Page two")
+
+
+def _pdf_with_shared_content(decoded_bytes: int, pages: int = 1) -> bytes:
+  """A PDF whose pages all draw one compressed content stream."""
+  op = b"BT /F1 1 Tf 0 0 Td (x) Tj ET\n"
+  content = zlib.compress(op * (decoded_bytes // len(op)), 9)
+  objects = [
+    b"<< /Type /Catalog /Pages 2 0 R >>",
+    f"<< /Type /Pages /Kids [{' '.join(f'{5 + i} 0 R' for i in range(pages))}] "
+    f"/Count {pages} >>".encode(),
+    b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    f"<< /Length {len(content)} /Filter /FlateDecode >>\nstream\n".encode()
+    + content
+    + b"\nendstream",
+  ]
+  objects += [
+    b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+    b"/Resources << /Font << /F1 3 0 R >> >> /Contents 4 0 R >>"
+  ] * pages
+  out = b"%PDF-1.4\n"
+  offsets = []
+  for number, body in enumerate(objects, 1):
+    offsets.append(len(out))
+    out += f"{number} 0 obj\n".encode() + body + b"\nendobj\n"
+  xref = len(out)
+  out += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode()
+  out += b"".join(f"{offset:010d} 00000 n \n".encode() for offset in offsets)
+  out += (
+    f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n"
+  ).encode()
+  return out
+
+
+class _PeakRss:
+  """This process's peak resident memory above where it started."""
+
+  def __init__(self) -> None:
+    self._process = psutil.Process()
+    self._stop = threading.Event()
+    self.growth = 0
+
+  def _sample(self, start: int) -> None:
+    while not self._stop.wait(0.01):
+      self.growth = max(self.growth, self._process.memory_info().rss - start)
+
+  def __enter__(self) -> _PeakRss:
+    start = self._process.memory_info().rss
+    self._thread = threading.Thread(target=self._sample, args=(start,), daemon=True)
+    self._thread.start()
+    return self
+
+  def __exit__(self, *exc) -> None:
+    self._stop.set()
+    self._thread.join()
+
+
+@dataclass
+class _Reads:
+  """Reads that reached their parse step and are held there, and every
+  download made."""
+
+  held: threading.Semaphore = field(default_factory=lambda: threading.Semaphore(0))
+  release: threading.Event = field(default_factory=threading.Event)
+  downloads: list[str] = field(default_factory=list)
+
+
+@contextmanager
+def _held_reads(hold: set[str]) -> Iterator[_Reads]:
+  """Hold the reads of the documents in ``hold`` at their parse step until
+  released; read the others as usual."""
+  from robosystems.operations import document_service
+
+  reads = _Reads()
+  lock = threading.Lock()
+  real_download = document_service._download
+  real_read = document_service._read_pdf_pages
+
+  def download(key, into):
+    with lock:
+      reads.downloads.append(key)
+    real_download(key, into)
+
+  def read(document_id, pdf, **kwargs):
+    if document_id not in hold:
+      return real_read(document_id, pdf, **kwargs)
+    reads.held.release()
+    reads.release.wait(30)
+    return 1, [(1, "held")]
+
+  try:
+    with (
+      patch.object(document_service, "_download", download),
+      patch.object(document_service, "_read_pdf_pages", read),
+    ):
+      yield reads
+  finally:
+    reads.release.set()
+
+
+def _graph(session, org) -> str:
+  from robosystems.config.graph_tier import GraphTier
+  from robosystems.models.core import Graph
+
+  unique = uuid.uuid4().hex[:8]
+  return Graph.create(
+    graph_id=f"kg{unique}{unique}",
+    graph_name="Another graph",
+    graph_type="entity",
+    org_id=org.id,
+    session=session,
+    base_schema="base",
+    schema_extensions=["roboledger"],
+    graph_tier=GraphTier.LADYBUG_STANDARD,
+  ).graph_id
+
+
+def _read(engine, graph_id: str, document_id: str) -> tuple[str, float]:
+  """One read on its own session, as a request makes it: how it ended, and
+  how long it took."""
+  service = DocumentService(Session(bind=engine))
+  started = time.monotonic()
+  try:
+    service.read_file_text(graph_id, document_id, first_page=1, max_pages=10)
+    outcome = "read"
+  except Exception as exc:
+    outcome = type(exc).__name__
+  finally:
+    service.session.close()
+  return outcome, time.monotonic() - started
+
+
+@pytest.fixture(autouse=True)
+def no_memory_limit(tmp_path, monkeypatch):
+  monkeypatch.setattr(f"{_SERVICE}._CGROUP", tmp_path / "no-cgroup")
 
 
 @pytest.fixture()
@@ -397,6 +544,28 @@ def test_only_a_readable_stored_file_reads_as_text(files):
     service.read_file_text(graph_id, str(broken.id), first_page=1, max_pages=1)
 
 
+def test_reading_a_stored_pdf_bounds_extraction_work(files):
+  service, graph_id, user_id, s3 = files
+  doc = _store(
+    service,
+    graph_id,
+    user_id,
+    s3,
+    name="dense.pdf",
+    body=_pdf_with_shared_content(20 * 1024 * 1024),
+  )
+
+  started = time.monotonic()
+  with (
+    _PeakRss() as rss,
+    pytest.raises(DocumentFileError, match="could not be read"),
+  ):
+    service.read_file_text(graph_id, str(doc.id), first_page=1, max_pages=1)
+
+  assert time.monotonic() - started < 10
+  assert rss.growth < 200 * 1024 * 1024
+
+
 def test_a_document_cited_by_a_recorded_balance_cannot_be_deleted(files):
   from robosystems.models.api.search import DocumentUploadRequest
 
@@ -546,12 +715,194 @@ def test_an_upload_removed_mid_completion_returns_the_winners_document(files, st
   assert _files(service, graph_id) == 1
 
 
-def test_a_pdf_that_breaks_the_parser_any_way_is_unreadable_not_an_error(files):
+def test_a_pdf_that_breaks_the_parser_any_way_is_unreadable_not_an_error():
+  import io
+
+  from robosystems.operations import pdf_text
+
+  request = {
+    "first_page": 1,
+    "max_pages": 1,
+    "stream_bytes": 1024 * 1024,
+    "chars_per_page": 100,
+    "chars_per_read": 100,
+  }
+  out = io.StringIO()
+  with patch("pypdf.PdfReader", side_effect=RecursionError("cyclic object")):
+    code = pdf_text.serve(request, io.BytesIO(PDF), out)
+
+  assert (code, out.getvalue()) == (pdf_text.UNREADABLE, "")
+
+
+def test_a_read_is_held_to_its_character_budget(files):
   service, graph_id, user_id, s3 = files
   doc = _store(service, graph_id, user_id, s3)
 
   with (
-    patch("pypdf.PdfReader", side_effect=RecursionError("cyclic object")),
-    pytest.raises(DocumentFileError, match="could not be read"),
+    patch(f"{_SERVICE}.DOCUMENT_READ_CHARS_PER_PAGE", 10),
+    patch(f"{_SERVICE}.DOCUMENT_READ_CHARS_PER_CALL", 10),
+  ):
+    text = service.read_file_text(graph_id, str(doc.id), first_page=1, max_pages=2)
+
+  # The budget is spent on page one; reading goes on from page two.
+  assert text.page_count == 2
+  assert text.pages == [(1, "Operating ")]
+
+
+def test_a_read_that_runs_past_its_time_says_to_retry(files):
+  service, graph_id, user_id, s3 = files
+  doc = _store(service, graph_id, user_id, s3)
+
+  with (
+    patch(f"{_SERVICE}.DOCUMENT_READ_TIMEOUT_SECONDS", 0.001),
+    pytest.raises(DocumentReadBusyError, match="try again"),
   ):
     service.read_file_text(graph_id, str(doc.id), first_page=1, max_pages=1)
+
+
+def test_reads_are_held_to_their_slots(files, db_session, test_org):
+  service, graph_id, user_id, s3 = files
+  graphs = [graph_id] + [_graph(db_session, test_org) for _ in range(5)]
+  docs = [str(_store(service, g, user_id, s3).id) for g in graphs]
+  engine = db_session.get_bind()
+  refusals = len(graphs) - DOCUMENT_READS_PER_PROCESS
+
+  with _held_reads(set(docs)) as reads, ThreadPoolExecutor(len(graphs)) as pool:
+    outcomes = [
+      pool.submit(_read, engine, g, d) for g, d in zip(graphs, docs, strict=True)
+    ]
+    for _ in range(DOCUMENT_READS_PER_PROCESS):
+      assert reads.held.acquire(timeout=30)
+    deadline = time.monotonic() + 30
+    while sum(o.done() for o in outcomes) < refusals and time.monotonic() < deadline:
+      time.sleep(0.01)
+    # Turned away while every slot is still held: a refusal never waits.
+    refused = [o for o in outcomes if o.done()]
+    downloads = list(reads.downloads)
+    reads.release.set()
+    turned_away = [o.result() for o in refused]
+    admitted = [o.result(timeout=30)[0] for o in outcomes if o not in refused]
+
+  assert [outcome for outcome, _took in turned_away] == [
+    "DocumentReadBusyError"
+  ] * refusals
+  assert max(took for _outcome, took in turned_away) < 5
+  assert len(downloads) == DOCUMENT_READS_PER_PROCESS
+  assert admitted == ["read"] * DOCUMENT_READS_PER_PROCESS
+
+
+def test_a_graph_reads_one_file_at_a_time(files, db_session, test_org):
+  service, graph_id, user_id, s3 = files
+  held = str(_store(service, graph_id, user_id, s3, name="first.pdf").id)
+  same_graph = str(_store(service, graph_id, user_id, s3).id)
+  other_graph = _graph(db_session, test_org)
+  other = str(_store(service, other_graph, user_id, s3).id)
+  engine = db_session.get_bind()
+
+  with _held_reads({held}) as reads, ThreadPoolExecutor(1) as pool:
+    first = pool.submit(_read, engine, graph_id, held)
+    assert reads.held.acquire(timeout=30)
+    again, _took = _read(engine, graph_id, same_graph)
+    elsewhere, _took = _read(engine, other_graph, other)
+    still_held = not first.done()
+    reads.release.set()
+    first_outcome, _took = first.result(timeout=30)
+
+  assert still_held
+  assert (again, elsewhere, first_outcome) == ("DocumentReadBusyError", "read", "read")
+
+
+_MiB = 1024 * 1024
+
+
+def _cgroup(root, files: dict[str, str]):
+  for name, value in files.items():
+    path = root / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(value)
+  return root
+
+
+_FULL = {
+  "cgroup v2": {
+    "memory.max": f"{1024 * _MiB}\n",
+    "memory.current": f"{900 * _MiB}\n",
+    "memory.stat": f"anon {880 * _MiB}\ninactive_file {10 * _MiB}\n",
+  },
+  "cgroup v1, sized above the container": {
+    "memory/memory.limit_in_bytes": "9223372036854771712\n",
+    "memory/memory.usage_in_bytes": f"{900 * _MiB}\n",
+    "memory/memory.stat": (
+      f"hierarchical_memory_limit {1024 * _MiB}\ntotal_inactive_file {10 * _MiB}\n"
+    ),
+  },
+}
+
+
+@pytest.mark.parametrize("cgroup", list(_FULL.values()), ids=list(_FULL))
+def test_a_read_starts_only_with_memory_to_spare(files, tmp_path, monkeypatch, cgroup):
+  service, graph_id, user_id, s3 = files
+  doc = _store(service, graph_id, user_id, s3)
+  monkeypatch.setattr(f"{_SERVICE}._CGROUP", _cgroup(tmp_path / "cg", cgroup))
+
+  started = time.monotonic()
+  with (
+    _held_reads(set()) as reads,
+    patch(f"{_SERVICE}.subprocess.run") as spawn,
+    pytest.raises(DocumentReadBusyError, match="try again"),
+  ):
+    service.read_file_text(graph_id, str(doc.id), first_page=1, max_pages=1)
+
+  assert time.monotonic() - started < 5
+  assert not spawn.called
+  assert reads.downloads == []
+
+
+_ROOMY = {
+  "no limit to read": {},
+  "cgroup v2, unlimited": {
+    "memory.max": "max\n",
+    "memory.current": f"{900 * _MiB}\n",
+  },
+  "cgroup v2, the rest is file cache": {
+    "memory.max": f"{1024 * _MiB}\n",
+    "memory.current": f"{900 * _MiB}\n",
+    "memory.stat": f"anon {300 * _MiB}\ninactive_file {600 * _MiB}\n",
+  },
+  "cgroup v1, unlimited": {
+    "memory/memory.limit_in_bytes": "9223372036854771712\n",
+    "memory/memory.usage_in_bytes": f"{900 * _MiB}\n",
+    "memory/memory.stat": "hierarchical_memory_limit 9223372036854771712\n",
+  },
+}
+
+
+@pytest.mark.parametrize("cgroup", list(_ROOMY.values()), ids=list(_ROOMY))
+def test_a_read_with_memory_to_spare_starts(files, tmp_path, monkeypatch, cgroup):
+  service, graph_id, user_id, s3 = files
+  doc = _store(service, graph_id, user_id, s3)
+  monkeypatch.setattr(f"{_SERVICE}._CGROUP", _cgroup(tmp_path / "cg", cgroup))
+
+  text = service.read_file_text(graph_id, str(doc.id), first_page=1, max_pages=1)
+
+  assert text.pages[0][1].startswith("Operating Checking")
+
+
+@pytest.mark.skipif(
+  sys.platform != "linux",
+  reason="the address-space limit is enforced by Linux only; macOS ignores it",
+)
+def test_the_reader_runs_within_its_memory():
+  from robosystems.operations import document_service
+
+  with (
+    tempfile.TemporaryFile() as pdf,
+    patch(f"{_SERVICE}.DOCUMENT_READ_STREAM_MB", 64),
+    patch.object(document_service.logger, "warning") as warning,
+    pytest.raises(DocumentFileError, match="could not be read"),
+  ):
+    pdf.write(_pdf_with_shared_content(20 * 1024 * 1024))
+    pdf.seek(0)
+    document_service._read_pdf_pages("doc", pdf, first_page=1, max_pages=1)
+
+  assert "MemoryError" in str(warning.call_args)
