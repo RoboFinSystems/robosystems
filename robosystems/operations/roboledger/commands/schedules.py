@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
-from sqlalchemy import bindparam, func, or_, select, text
+from sqlalchemy import Select, bindparam, func, or_, select, text
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -110,31 +110,27 @@ def _calendar_open_start(session: Session, entity_id: str) -> date | None:
   return first_start if closed_end is None else None
 
 
-def _schedule_drafts_before(
-  session: Session, entity_id: str, before: date
-) -> list[str]:
-  """The entity's schedule-written draft entries dated before ``before``, and
-  the draft auto-reversals of them (dated the month after, so possibly not)."""
-  return list(
-    session.execute(
-      text(
-        """
-        WITH early AS (
-          SELECT e.id FROM entries e
-          JOIN structures s ON s.id = e.source_structure_id
-          WHERE s.block_type = 'schedule'
-            AND e.entity_id = :entity_id
-            AND e.status = 'draft'
-            AND e.posting_date < :before
-        )
-        SELECT id FROM early
-        UNION
-        SELECT id FROM entries
-        WHERE status = 'draft' AND reversal_of IN (SELECT id FROM early)
-        """
-      ),
-      {"entity_id": entity_id, "before": before},
-    ).scalars()
+def retirable_obligations(entity_id: str, before: date) -> Select:
+  """Ids of the entity's schedule obligations a calendar set up at ``before``
+  retires: still to post (``pending``, or ``classified`` by a sweep that ran
+  with no calendar) and ending before it."""
+  return select(Event.id).where(
+    Event.entity_id == entity_id,
+    Event.event_type == "schedule_entry_due",
+    Event.status.in_(("pending", "classified")),
+    Event.metadata_["period_end"].astext < before.isoformat(),
+  )
+
+
+def drafts_written_for(obligation_ids: Select | list[str]) -> Select:
+  """Ids of the draft entries those obligations' handlers wrote, with their
+  draft auto-reversals."""
+  from robosystems.models.extensions.roboledger.entry import Entry
+
+  written = select(Entry.id).where(Entry.triggered_by_event_id.in_(obligation_ids))
+  return select(Entry.id).where(
+    Entry.status == "draft",
+    or_(Entry.id.in_(written), Entry.reversal_of.in_(written)),
   )
 
 
@@ -148,15 +144,11 @@ def retire_schedule_history(
   voided and marked with ``void_reason``, the drafts written for them
   deleted, facts stamped ``historical``. Returns the obligations voided.
   """
+  retirable = list(session.execute(retirable_obligations(entity_id, before)).scalars())
   schedule_ids = {
     sid
     for (sid,) in session.query(Event.metadata_["schedule_id"].astext)
-    .filter(
-      Event.entity_id == entity_id,
-      Event.event_type == "schedule_entry_due",
-      Event.status.in_(("pending", "classified")),
-      Event.metadata_["period_end"].astext < before.isoformat(),
-    )
+    .filter(Event.id.in_(retirable))
     .distinct()
     if sid
   }
@@ -175,7 +167,18 @@ def retire_schedule_history(
       include_classified=True,
       mark_obligations=True,
     )
-  drafts = _schedule_drafts_before(session, entity_id, before)
+  # Only what was voided here: an obligation already committed or fulfilled
+  # keeps its draft, which the setup's count refused on.
+  voided_ids = list(
+    session.execute(
+      select(Event.id).where(Event.id.in_(retirable), Event.status == "voided")
+    ).scalars()
+  )
+  drafts = (
+    list(session.execute(drafts_written_for(voided_ids)).scalars())
+    if voided_ids
+    else []
+  )
   if drafts:
     ids = bindparam("ids", expanding=True)
     session.execute(
@@ -1033,7 +1036,8 @@ def rebuild_schedule(
 
   Keeps the structure id, associations and taxonomy; replaces facts, rules,
   drafts and the obligation chain. Scope is re-derived from the current
-  calendar's history end (`_calendar_history_end`). Raises
+  calendar's history end (`_calendar_history_end`) and the ``closed_through``
+  the schedule was created with. Raises
   ``ScheduleNotFoundError``, or ``ValueError`` when the definition can't be
   reconstructed or landed entries exist.
   """
@@ -1068,7 +1072,18 @@ def rebuild_schedule(
   )
 
   owner = owner_entity_id(session, structure)
-  closed_through = _calendar_history_end(session, owner)
+  # As create_schedule does: the later of the months the caller said were
+  # booked and the calendar's own history end.
+  booked_iso = (structure.metadata_ or {}).get("booked_through")
+  booked_through = date.fromisoformat(booked_iso) if booked_iso else None
+  closed_through = max(
+    (
+      d
+      for d in (booked_through, _calendar_history_end(session, owner))
+      if d is not None
+    ),
+    default=None,
+  )
 
   service = ScheduleService()
 
@@ -1127,6 +1142,7 @@ def rebuild_schedule(
     created_by=created_by,
     closed_through=closed_through,
     calendar_start=_calendar_open_start(session, owner),
+    booked_through=booked_through,
     existing_structure=structure,
     source_transaction_id=source_transaction_id,
   )

@@ -687,3 +687,125 @@ def test_setup_still_refuses_on_a_draft_the_schedule_did_not_write(ledger):
 
   assert (refused.value.entries, refused.value.unposted) == (1, 0)
   assert _obligations(ledger.session, structure_id)["2026-06"] == "classified"
+
+
+# ── R3-1: setup deletes only the drafts of obligations it retires ────────
+
+
+def _transition(ledger: Ledger, structure_id: str, month: str, to: str) -> None:
+  (obligation,) = [
+    row
+    for row in ledger.session.query(Event).filter(
+      Event.event_type == "schedule_entry_due",
+      Event.metadata_["schedule_id"].astext == structure_id,
+    )
+    if row.metadata_["period_end"].startswith(month)
+  ]
+  update_event_block(
+    ledger.session,
+    UpdateEventBlockRequest(event_id=str(obligation.id), transition_to=to),
+    "usr",
+    graph_id=ledger.graph_id,
+  )
+  ledger.session.commit()
+
+
+@pytest.mark.parametrize(
+  ("dispatch", "posted_as"),
+  [(True, "committed"), (False, "committed"), (True, "fulfilled")],
+)
+def test_setup_refuses_on_the_draft_of_an_obligation_already_posted(
+  ledger, dispatch, posted_as
+):
+  """An obligation committed or fulfilled before the calendar is not retired,
+  so its draft is not history: it counts, and setup refuses rather than
+  deleting the month's only entry."""
+  structure_id = _schedule(ledger.session, date(2026, 6, 1))
+  ledger.session.commit()
+  _promote(ledger, dispatch=dispatch)
+  _transition(ledger, structure_id, "2026-06", posted_as)
+  assert date(2026, 6, 30) in _drafted(ledger.session, structure_id)
+
+  with pytest.raises(CalendarStartBlockedError) as refused:
+    ledger.set_up(earliest_data_period="2026-09")
+  ledger.session.rollback()
+
+  assert (refused.value.entries, refused.value.unposted) == (1, 0)
+  assert "2026-06" in str(refused.value)
+  assert not _calendar_initialized(ledger.session)
+  assert date(2026, 6, 30) in _drafted(ledger.session, structure_id)
+  assert _obligations(ledger.session, structure_id)["2026-06"] == posted_as
+
+  # Opened at the month instead, nothing is lost and June still posts.
+  ledger.set_up(earliest_data_period="2026-06")
+  ledger.session.commit()
+  _promote(ledger)
+  assert _drafted(ledger.session, structure_id) == [
+    date(2026, 6, 30),
+    date(2026, 7, 31),
+    date(2026, 8, 31),
+    date(2026, 9, 30),
+  ]
+
+
+# ── R3-2: a rebuild keeps the months the caller said were booked ─────────
+
+
+def _booked_schedule(ledger: Ledger, closed_through: date) -> str:
+  expense, prepaid = _accounts(ledger.session)
+  structure_id = create_schedule(
+    ledger.session,
+    CreateScheduleRequest(
+      name="Booked in the prior system",
+      element_ids=[expense, prepaid],
+      period_start=date(2026, 6, 1),
+      period_end=date(2027, 5, 31),
+      monthly_amount=10_000,
+      entry_template=EntryTemplateRequest(
+        debit_element_id=expense, credit_element_id=prepaid
+      ),
+      closed_through=closed_through,
+    ),
+    created_by="usr",
+  ).structure_id
+  ledger.session.commit()
+  return structure_id
+
+
+def test_a_rebuild_keeps_the_months_booked_before_the_calendar(ledger):
+  ledger.set_up(earliest_data_period="2026-09")
+  structure_id = _booked_schedule(ledger, date(2026, 6, 30))
+
+  rebuild_schedule(
+    ledger.session, RebuildScheduleRequest(structure_id=structure_id), "usr"
+  )
+  _move_start(ledger, "2026-06")
+  _promote(ledger)
+
+  # June was booked: moving the start earlier drafts it no second time.
+  assert _drafted(ledger.session, structure_id) == [
+    date(2026, 7, 31),
+    date(2026, 8, 31),
+    date(2026, 9, 30),
+  ]
+
+
+def test_a_rebuild_keeps_a_booked_month_inside_the_calendar(ledger):
+  ledger.set_up(earliest_data_period="2026-09")
+  structure_id = _booked_schedule(ledger, date(2026, 9, 30))
+  assert _obligations(ledger.session, structure_id)["2026-09"] == "voided"
+
+  rebuild_schedule(
+    ledger.session, RebuildScheduleRequest(structure_id=structure_id), "usr"
+  )
+
+  live = {
+    row.metadata_["period_end"][:7]
+    for row in ledger.session.query(Event).filter(
+      Event.event_type == "schedule_entry_due",
+      Event.metadata_["schedule_id"].astext == structure_id,
+      Event.status == "pending",
+    )
+  }
+  assert "2026-09" not in live
+  assert "2026-10" in live

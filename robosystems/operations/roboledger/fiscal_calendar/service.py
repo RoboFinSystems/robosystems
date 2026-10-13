@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -207,22 +207,21 @@ def _activity_before(
   (`retire_schedule_history`); and a synced ledger's mirror lines post on
   that ledger's next sync, never through a close.
   """
-  from robosystems.models.extensions import Structure
   from robosystems.models.extensions.roboledger.entry import Entry
   from robosystems.operations.roboledger.commands.connections import (
     SEVERABLE_SOURCES,
+  )
+  from robosystems.operations.roboledger.commands.schedules import (
+    drafts_written_for,
+    retirable_obligations,
   )
 
   entry_filters = [Entry.entity_id == entity_id, Entry.posting_date < start]
   if at_opening:
     entry_filters.append(Entry.status == "draft")
+    # The same drafts `retire_schedule_history` deletes, and no others.
     entry_filters.append(
-      or_(
-        Entry.source_structure_id.is_(None),
-        Entry.source_structure_id.notin_(
-          select(Structure.id).where(Structure.block_type == "schedule")
-        ),
-      )
+      Entry.id.notin_(drafts_written_for(retirable_obligations(entity_id, start)))
     )
   entries, earliest_entry = (
     session.query(func.count(Entry.id), func.min(Entry.posting_date))

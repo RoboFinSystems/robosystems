@@ -149,6 +149,7 @@ class ScheduleService:
     created_by: str,
     source_transaction_id: str | None,
     entity_id: str,
+    booked_through: date | None = None,
   ) -> tuple[Structure, dict, dict, str]:
     """Create the Structure, its element associations, and the
     cm:Debit/cm:Credit has-part posting arcs. Not called on rebuild, which
@@ -165,6 +166,7 @@ class ScheduleService:
       entry_template=entry_template,
       schedule_metadata=schedule_metadata,
       source_transaction_id=source_transaction_id,
+      booked_through=booked_through,
     )
 
     structure = Structure(
@@ -236,6 +238,7 @@ class ScheduleService:
     entry_template: EntryTemplate,
     schedule_metadata: ScheduleMetadata | None,
     source_transaction_id: str | None,
+    booked_through: date | None = None,
   ) -> tuple[dict, dict]:
     """Build the ``metadata_`` and ``artifact_mechanics`` blobs, which carry
     every generation input so ``rebuild_schedule`` needs nothing from facts.
@@ -252,6 +255,10 @@ class ScheduleService:
       "period_start": period_start.isoformat(),
       "period_end": period_end.isoformat(),
     }
+    if booked_through is not None:
+      # The caller's own watermark (months already booked elsewhere), which
+      # a rebuild applies again.
+      metadata["booked_through"] = booked_through.isoformat()
     if schedule_metadata:
       metadata["schedule_metadata"] = {
         "method": schedule_metadata.method,
@@ -340,6 +347,7 @@ class ScheduleService:
         entry_template=entry_template,
         schedule_metadata=schedule_metadata,
         source_transaction_id=source_transaction_id,
+        booked_through=booked_through,
       )
       structure.metadata_ = metadata
       structure.artifact_mechanics = artifact_mechanics
@@ -360,6 +368,7 @@ class ScheduleService:
           created_by=created_by,
           source_transaction_id=source_transaction_id,
           entity_id=entity_id,
+          booked_through=booked_through,
         )
       )
 
