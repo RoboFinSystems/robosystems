@@ -643,7 +643,7 @@ def fire_handler_on_commit(
   return typed_metadata
 
 
-def _validate_classification(event: Event) -> None:
+def _validate_classification(session: Session, event: Event) -> None:
   """Let the event's Python handler refuse a ``classified`` it could not post.
 
   Runs after the metadata patch, so the handler sees the caller's choice.
@@ -660,7 +660,7 @@ def _validate_classification(event: Event) -> None:
       f"Event {event.id} (type={event.event_type}): metadata fails handler "
       f"validation — cannot classify. {e}"
     )
-  python_handler.validate_classification(event, typed_metadata)
+  python_handler.validate_classification(session, event, typed_metadata)
 
 
 def _refuse_system_metadata(patch: dict | None) -> None:
@@ -909,7 +909,7 @@ def update_event_block(
     event.event_action = body.event_action
 
   if body.transition_to == "classified":
-    _validate_classification(event)
+    _validate_classification(session, event)
 
   if body.metadata_patch:
     from robosystems.operations.event_block.python_handlers.bank_feed import (

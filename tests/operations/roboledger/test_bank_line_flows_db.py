@@ -17,6 +17,9 @@ from robosystems.operations.event_block.commands import update_event_block
 from robosystems.operations.event_block.python_handlers.types import (
   HandlerMetadataValidationError,
 )
+from robosystems.operations.roboledger.commands._guards import (
+  AccountOutsideEntityChartError,
+)
 from tests.ledger_entity import entity_account
 
 pytestmark = pytest.mark.unit
@@ -263,3 +266,31 @@ def test_a_split_posted_as_one_cash_line_cannot_take_two_flows(books):
         ]
       },
     )
+
+
+def test_a_subsidiarys_line_classified_to_the_parents_account_is_refused(books):
+  """Classify refuses what commit would: an account outside the line's own
+  entity's chart."""
+  sub_cash = entity_account(books.session, books.sub.id, "Checking")
+  sub_rent = entity_account(books.session, books.sub.id, "Rent Income")
+  event = _deposit(books)
+  event.entity_id = books.sub.id
+  event.resource_element_id = sub_cash
+  books.session.commit()
+
+  with pytest.raises(AccountOutsideEntityChartError):
+    _update(
+      books,
+      event,
+      transition_to="classified",
+      metadata_patch={"classified_element_id": books.note},
+    )
+  books.session.rollback()
+
+  _update(
+    books,
+    event,
+    transition_to="classified",
+    metadata_patch={"classified_element_id": sub_rent},
+  )
+  assert event.status == "classified"

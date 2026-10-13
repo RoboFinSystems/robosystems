@@ -34,6 +34,9 @@ from robosystems.operations.information_block.rules.engine import (
   evaluate_rules_for_structure,
 )
 from robosystems.operations.roboledger.commands._guards import (
+  assert_accounts_postable,
+)
+from robosystems.operations.roboledger.commands._guards import (
   rule_summary as _rule_summary,
 )
 from robosystems.operations.roboledger.entity_scope import (
@@ -363,6 +366,22 @@ def _validate_element_references(session: Session, body: CreateScheduleRequest) 
     )
 
 
+def _assert_posting_accounts(
+  session: Session,
+  entity_id: str,
+  template: dict | None,
+  schedule_metadata: dict | None,
+) -> None:
+  """The accounts a schedule posts to are open and its own entity's: a
+  schedule on another entity's accounts could never draft its entries."""
+  accounts = [
+    (template or {}).get("debit_element_id"),
+    (template or {}).get("credit_element_id"),
+    (schedule_metadata or {}).get("asset_element_id"),
+  ]
+  assert_accounts_postable(session, [a for a in accounts if a], entity_id=entity_id)
+
+
 def create_schedule(
   session: Session,
   body: CreateScheduleRequest,
@@ -376,6 +395,12 @@ def create_schedule(
   """
   entity_id = ensure_entity_id(session, entity_id)
   _validate_element_references(session, body)
+  _assert_posting_accounts(
+    session,
+    entity_id,
+    body.entry_template.model_dump(),
+    body.schedule_metadata.model_dump() if body.schedule_metadata else None,
+  )
   service = ScheduleService()
   et = EntryTemplate(
     debit_element_id=body.entry_template.debit_element_id,
@@ -569,6 +594,14 @@ def update_schedule(
         mode="json", include=body.schedule_metadata.model_fields_set
       ),
     }
+
+  if body.entry_template is not None or body.schedule_metadata is not None:
+    _assert_posting_accounts(
+      session,
+      owner_entity_id(session, structure),
+      metadata.get("entry_template"),
+      metadata.get("schedule_metadata"),
+    )
 
   structure.metadata_ = metadata
   # Both columns are written; see ScheduleService._build_schedule_definition_blobs.

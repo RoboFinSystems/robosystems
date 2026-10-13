@@ -358,6 +358,10 @@ def test_update_schedule_template_change_triggers_supersession() -> None:
       "robosystems.operations.roboledger.commands.schedules.evaluate_rules_for_structure",
       return_value=[],
     ) as eval_rules,
+    # The entity-chart check runs on real Postgres in test_entity_stamp_db.py.
+    patch(
+      "robosystems.operations.roboledger.commands.schedules._assert_posting_accounts"
+    ),
   ):
     update_schedule(
       session,
@@ -460,10 +464,15 @@ def test_update_schedule_identical_template_skips_supersession() -> None:
     _exec_result(fetchone_row=MagicMock(cnt=1)),
   ]
 
-  with patch(
-    "robosystems.operations.roboledger.commands.schedules."
-    "ScheduleService.supersede_pending_obligations",
-  ) as supersede:
+  with (
+    patch(
+      "robosystems.operations.roboledger.commands.schedules."
+      "ScheduleService.supersede_pending_obligations",
+    ) as supersede,
+    patch(
+      "robosystems.operations.roboledger.commands.schedules._assert_posting_accounts"
+    ),
+  ):
     update_schedule(
       session,
       UpdateScheduleRequest(

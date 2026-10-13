@@ -49,7 +49,7 @@ class EventBlockPythonHandler:
   dispatch_preview: Callable[
     [Session, CreateEventBlockRequest, BaseModel, str | None], HandlerPreview
   ]
-  validate_classification: Callable[[Event, BaseModel], None] | None = None
+  validate_classification: Callable[[Session, Event, BaseModel], None] | None = None
 
 
 class HandlerMetadataValidationError(Exception):

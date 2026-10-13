@@ -40,6 +40,10 @@ from robosystems.operations.event_block.registry import (
   HandlerNotFoundError,
   resolve_handler,
 )
+from robosystems.operations.roboledger.commands._guards import (
+  assert_accounts_postable,
+)
+from robosystems.operations.roboledger.entity_scope import owner_entity_id
 
 from .journal_entry_recorded import JournalEntryRecordedMetadata
 from .journal_entry_recorded import dispatch as journal_dispatch
@@ -458,8 +462,12 @@ def dispatch_preview(
   return preview
 
 
-def validate_classification(event: Event, metadata: BankFeedMetadata) -> None:
-  """Refuse ``captured → classified`` when the commit could not post it."""
+def validate_classification(
+  session: Session, event: Event, metadata: BankFeedMetadata
+) -> None:
+  """Refuse ``captured → classified`` when the commit could not post it,
+  including to an account outside the line's own entity's chart."""
+
   lines = plan_lines(
     event_type=event.event_type,
     resource_element_id=event.resource_element_id,
@@ -471,6 +479,11 @@ def validate_classification(event: Event, metadata: BankFeedMetadata) -> None:
       f"Bank event {event.id} cannot be marked classified: "
       f"{unclassified_reason(metadata)}"
     )
+  assert_accounts_postable(
+    session,
+    [line.element_id for line in lines],
+    entity_id=owner_entity_id(session, event),
+  )
 
 
 FLOW_KEYS = ("classified_flow_qname", "classified_allocations")
