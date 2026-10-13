@@ -435,6 +435,7 @@ def _bootstrap_fiscal_calendar_if_needed(
     FiscalCalendarService,
     add_months,
     current_month_period,
+    next_period,
     previous_period,
   )
   from robosystems.operations.roboledger.fiscal_calendar.service import (
@@ -485,6 +486,9 @@ def _bootstrap_fiscal_calendar_if_needed(
         actor_type="system",
         note="Auto-initialized on first QB sync",
       )
+      # QuickBooks' own lines are its sync's to post, never a close's, so only
+      # rows written before any calendar can refuse this.
+      service.open_books_at(session, config.graph_id, next_period(closed_through))
       current = current_month_period()
       start = add_months(current, -23)
       if closed_through < start:

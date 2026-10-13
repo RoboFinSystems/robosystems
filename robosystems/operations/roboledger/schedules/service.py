@@ -771,6 +771,7 @@ class ScheduleService:
     void_reason: str,
     voided_by_event_id: str | None = None,
     period_start_after: date | None = None,
+    period_end_before: date | None = None,
     include_classified: bool = False,
   ) -> int:
     """Void a schedule's pending schedule_entry_due events; returns the count.
@@ -782,6 +783,8 @@ class ScheduleService:
     - Termination passes ``period_start_after`` (only obligations starting
       strictly after it) and ``include_classified=True`` to retire
       matured-but-undrafted strays past the cutoff.
+    - A calendar set up after the schedule passes ``period_end_before`` (only
+      obligations ending strictly before it), its first open month's start.
 
     Also decrements the originator's ``metadata.pending_event_count``.
     """
@@ -808,6 +811,10 @@ class ScheduleService:
       # ISO date strings, so lexicographic order is date order.
       select_filters.append(
         Event.metadata_["period_start"].astext > period_start_after.isoformat()
+      )
+    if period_end_before is not None:
+      select_filters.append(
+        Event.metadata_["period_end"].astext < period_end_before.isoformat()
       )
     pending_ids = list(
       session.execute(

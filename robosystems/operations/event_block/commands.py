@@ -721,12 +721,15 @@ def update_event_block(
     fence_dates.update(_retraction_fence_dates(session, peek.id))
   if fence_dates:
     assert_period_not_closed(session, *sorted(fence_dates), entity_id=peek.entity_id)
-  # Nothing is committed, or moved, to a date before the entity's calendar.
-  if body.transition_to == "committed" or body.effective_at is not None:
+  # Nothing is moved to a date before the entity's calendar. A commit is
+  # checked where its rows are written, on the date the entry posts on, which
+  # can differ from the event's own (`metadata.posting_date`, a bank's
+  # restated date); the preview checks that same date.
+  if body.effective_at is not None:
     assert_within_calendar(
       session,
       posting_date_for_event(
-        effective_at=body.effective_at or peek.effective_at,
+        effective_at=body.effective_at,
         occurred_at=peek.occurred_at,
       ),
       entity_id=peek.entity_id,

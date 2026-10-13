@@ -133,12 +133,11 @@ class CreateScheduleRequest(BaseModel):
       "Watermark for onboarding. Facts with period_end ≤ this date are "
       "flagged 'historical' and their schedule_entry_due obligations are "
       "emitted 'voided', so the close workflow starts drafting at the first "
-      "open period. Set this to the last day of the fiscal calendar's "
-      "closed_through month (calendar '2026-05' → '2026-05-31') whether "
-      "those months were actually closed in RoboLedger or just "
-      "baseline-watermarked at initialization. Omitting it (when prior "
-      "periods exist) leaves pre-watermark periods as 'pending' obligations "
-      "that block the first close."
+      "open period. Defaults to the calendar's history end: the last day of "
+      "its closed_through month (calendar '2026-05' → '2026-05-31'), or the "
+      "day before its first month when nothing has closed yet. An earlier "
+      "date is raised to it, since an obligation there could never post; "
+      "set a later one only to treat more months as already booked."
     ),
   )
   source_transaction_id: str | None = Field(
@@ -444,8 +443,9 @@ class RebuildScheduleRequest(BaseModel):
   monthly_amount / period bounds on the Structure's metadata).
 
   The historical-vs-in-scope split is re-derived from the CURRENT fiscal
-  calendar `closed_through`, so a rebuild re-scopes the schedule to
-  today's close state. Use this to pick up a fixed generator (e.g. the
+  calendar (months through its `closed_through`, or before its first
+  month, are history), so a rebuild re-scopes the schedule to today's
+  close state. Use this to pick up a fixed generator (e.g. the
   roll-forward direction fix) without orphaning obligations.
   """
 

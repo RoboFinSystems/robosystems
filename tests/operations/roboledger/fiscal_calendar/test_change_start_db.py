@@ -306,9 +306,25 @@ def _reverse_a_posted_entry(session, posting_date: date) -> None:
   )
 
 
+def _as_generated_before_the_calendar_rule(session, structure_id: str) -> None:
+  """A schedule generated before months ahead of the calendar were history:
+  its facts in scope and its obligations pending there. A schedule made now
+  retires those months; the write-time guard still covers rows like these."""
+  session.execute(
+    text(
+      "UPDATE facts SET fact_scope = 'in_scope' WHERE structure_id = :sid; "
+      "UPDATE events SET status = 'pending' "
+      "WHERE event_type = 'schedule_entry_due' "
+      "AND metadata->>'schedule_id' = :sid"
+    ),
+    {"sid": structure_id},
+  )
+
+
 def _schedule_entry(session, posting_date: date) -> None:
   month_start = posting_date.replace(day=1)
   structure_id = _schedule(session, month_start, posting_date)
+  _as_generated_before_the_calendar_rule(session, structure_id)
   ScheduleService().create_closing_entry(
     session,
     structure_id=structure_id,
@@ -430,6 +446,7 @@ def test_the_same_write_inside_the_calendar_lands(session, write):
 
 def test_the_promoter_skips_an_obligation_dated_before_the_first_period(session):
   structure_id = _schedule(session, date(2026, 8, 1), date(2026, 9, 30))
+  _as_generated_before_the_calendar_rule(session, structure_id)
   session.commit()
 
   result = promote_pending_obligations(

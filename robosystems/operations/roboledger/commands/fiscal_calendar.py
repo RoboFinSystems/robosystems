@@ -140,7 +140,9 @@ def initialize_ledger(
 ) -> tuple[InitializeLedgerResponse, list[str]]:
   """Initialize an entity's fiscal calendar and seed its fiscal periods.
 
-  Raises `CalendarAlreadyInitializedError` / `InvalidCloseTargetError`.
+  Raises `CalendarAlreadyInitializedError` / `InvalidCloseTargetError`, and
+  `CalendarOpeningBlockedError` when drafts or events still to post are
+  dated before the first open month.
   """
   entity_id = ensure_entity_id(session, entity_id)
   warnings: list[str] = []
@@ -173,6 +175,12 @@ def initialize_ledger(
   start_period = body.earliest_data_period or default_start
   if body.closed_through and body.closed_through < start_period:
     start_period = body.closed_through
+  service.open_books_at(
+    session,
+    graph_id,
+    next_period(body.closed_through) if body.closed_through else start_period,
+    entity_id=entity_id,
+  )
 
   periods_created = service.ensure_fiscal_periods(
     session,

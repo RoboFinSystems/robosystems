@@ -188,14 +188,18 @@ def _fence_write_set(session: Session, write_set: list[Event]) -> list[tuple[str
       # No entity on the row: the guard reads the group parent's calendar.
       assert_period_not_closed(session, posting_date, entity_id=entity_id or None)
       assert_within_calendar(session, posting_date, entity_id=entity_id or None)
-    except ClosedPeriodError as e:
-      label = (
-        "before the calendar"
-        if isinstance(e, BeforeCalendarStartError)
-        else "closed period"
+    except BeforeCalendarStartError as e:
+      # An obligation can't be re-dated: its month is history to retire.
+      reason = (
+        f"before the calendar: {posting_date} precedes its first month, "
+        f"{e.first_period}, and no close posts it. Rebuild the schedule "
+        "(rebuild-schedule) to retire its months before then as history, or "
+        "void the obligation (update-event-block)."
       )
+      closed.extend((evt.id, reason) for evt in by_date[(posting_date, entity_id)])
+    except ClosedPeriodError as e:
       closed.extend(
-        (evt.id, f"{label}: {e}") for evt in by_date[(posting_date, entity_id)]
+        (evt.id, f"closed period: {e}") for evt in by_date[(posting_date, entity_id)]
       )
   return closed
 

@@ -344,6 +344,15 @@ change-calendar-start. Confirm the month with the user before calling.""",
         }
     except InvalidCloseTargetError as exc:
       return {"error": "invalid_period", "message": str(exc)}
+    except CalendarStartBlockedError as exc:
+      return {
+        "error": "calendar_start_blocked",
+        "message": str(exc),
+        "entries": exc.entries,
+        "unposted_source_lines": exc.unposted,
+      }
+    except RowLockedError as exc:
+      return {"error": "row_locked", "message": str(exc)}
     except (EntityNotInGraphError, NoEntityError) as exc:
       return {"error": "entity_not_found", "message": str(exc)}
     except FiscalCalendarError as exc:

@@ -110,7 +110,11 @@ _registrar = make_registrar(router, _OP_TAG)
   response_model=OperationEnvelope[InitializeLedgerResponse],
   operation_id="initializeLedger",
   summary="Initialize Ledger",
-  description="One-time setup: creates the fiscal calendar and seeds periods. Returns 409 if already initialized.",
+  description=(
+    "One-time setup: creates the fiscal calendar and seeds periods. Returns "
+    "409 if already initialized, or if draft entries or unposted events are "
+    "dated before the first open month, where no close would post them."
+  ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
@@ -149,7 +153,11 @@ async def initialize_op(
           entity_id=body.entity_id,
         )
         return response
-    except CalendarAlreadyInitializedError as e:
+    except (
+      CalendarAlreadyInitializedError,
+      CalendarStartBlockedError,
+      RowLockedError,
+    ) as e:
       raise HTTPException(status_code=409, detail=str(e))
     except InvalidCloseTargetError as e:
       raise HTTPException(status_code=422, detail=str(e))

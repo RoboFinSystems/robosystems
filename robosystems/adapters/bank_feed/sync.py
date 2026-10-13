@@ -165,6 +165,7 @@ def bootstrap_fiscal_calendar_if_needed(
     FiscalCalendarService,
     add_months,
     current_month_period,
+    next_period,
     previous_period,
   )
   from robosystems.operations.roboledger.fiscal_calendar.service import (
@@ -192,6 +193,9 @@ def bootstrap_fiscal_calendar_if_needed(
         actor_type="system",
         note=f"Auto-initialized on first {source_label} sync",
       )
+      # The books open at the month of this sync's earliest line, so none of
+      # its own lines falls before them; only rows written before any calendar.
+      service.open_books_at(session, config.graph_id, next_period(closed_through))
       start = min(closed_through, add_months(current, -23))
       inserted = service.ensure_fiscal_periods(
         session,

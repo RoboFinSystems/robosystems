@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
-from sqlalchemy import bindparam, or_, select, text
+from sqlalchemy import bindparam, func, or_, select, text
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -56,23 +56,88 @@ class ScheduleNotFoundError(LookupError):
     self.structure_id = structure_id
 
 
-def _calendar_closed_through_date(session: Session, entity_id: str):
-  """End date of the entity's `closed_through_period`; None when it has no
-  calendar or nothing is closed."""
+def _calendar_history_end(session: Session, entity_id: str) -> date | None:
+  """The last day of the entity's history: nothing dated on or before it
+  posts through a close. The later of its ``closed_through_period``'s end
+  and the day before its first fiscal period; None with no calendar yet.
+
+  A schedule's months up to it are history (facts ``historical``,
+  obligations voided), whichever side of the calendar they fall on.
+  """
+  from datetime import timedelta
+
   from robosystems.models.extensions.roboledger.fiscal_calendar import (
     FiscalCalendar,
   )
+  from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
   from robosystems.operations.roboledger.fiscal_calendar import (
     period_date_range,
   )
 
+  ends: list[date] = []
   cal = (
     session.query(FiscalCalendar).filter(FiscalCalendar.entity_id == entity_id).first()
   )
-  if cal is None or not cal.closed_through_period:
-    return None
-  _, period_end = period_date_range(str(cal.closed_through_period))
-  return period_end
+  if cal is not None and cal.closed_through_period:
+    ends.append(period_date_range(str(cal.closed_through_period))[1])
+  first_start = (
+    session.query(func.min(FiscalPeriod.start_date))
+    .filter(FiscalPeriod.entity_id == entity_id)
+    .scalar()
+  )
+  if first_start is not None:
+    ends.append(first_start - timedelta(days=1))
+  return max(ends) if ends else None
+
+
+def retire_schedule_history(session: Session, entity_id: str, *, before: date) -> int:
+  """Retire the entity's schedule months ending before ``before`` as history,
+  as `create_schedule` does for months on or before the calendar's history
+  end: pending obligations voided (``void_reason='historical'``), facts
+  stamped ``historical``. For a calendar set up after its schedules. Returns
+  the obligations voided.
+  """
+  schedule_ids = {
+    sid
+    for (sid,) in session.query(Event.metadata_["schedule_id"].astext)
+    .filter(
+      Event.entity_id == entity_id,
+      Event.event_type == "schedule_entry_due",
+      Event.status == "pending",
+      Event.metadata_["period_end"].astext < before.isoformat(),
+    )
+    .distinct()
+    if sid
+  }
+  service = ScheduleService()
+  voided = 0
+  for structure in (
+    session.query(Structure)
+    .filter(Structure.id.in_(schedule_ids))
+    .order_by(Structure.id)
+  ):
+    voided += service.void_pending_obligations(
+      session,
+      structure=structure,
+      void_reason="historical",
+      period_end_before=before,
+    )
+  session.execute(
+    text(
+      """
+      UPDATE facts
+      SET fact_scope = 'historical'
+      WHERE fact_scope = 'in_scope'
+        AND entity_id = :entity_id
+        AND structure_id IN (
+          SELECT id FROM structures WHERE block_type = 'schedule'
+        )
+        AND period_end < :before
+      """
+    ),
+    {"entity_id": entity_id, "before": before},
+  )
+  return voided
 
 
 def reinstate_reopened_schedule_scopes(session: Session, entity_id: str) -> int:
@@ -86,7 +151,7 @@ def reinstate_reopened_schedule_scopes(session: Session, entity_id: str) -> int:
   """
   from sqlalchemy import text
 
-  closed_through = _calendar_closed_through_date(session, entity_id)
+  closed_through = _calendar_history_end(session, entity_id)
   result = session.execute(
     text(
       """
@@ -170,11 +235,12 @@ def create_schedule(
       booked_on=body.schedule_metadata.booked_on,
     )
 
-  # Default to the calendar's boundary: pending obligations inside an
-  # already-closed range would block close-period forever.
-  effective_closed_through = body.closed_through
-  if effective_closed_through is None:
-    effective_closed_through = _calendar_closed_through_date(session, entity_id)
+  # Never earlier than the calendar's history end: a pending obligation in a
+  # closed month, or one before the calendar, would block close-period forever.
+  history_end = _calendar_history_end(session, entity_id)
+  effective_closed_through = max(
+    (d for d in (body.closed_through, history_end) if d is not None), default=None
+  )
 
   structure = service.create_schedule(
     session,
@@ -783,9 +849,9 @@ def rebuild_schedule(
 
   Keeps the structure id, associations and taxonomy; replaces facts, rules,
   drafts and the obligation chain. Scope is re-derived from the current
-  calendar's ``closed_through``. Raises ``ScheduleNotFoundError``, or
-  ``ValueError`` when the definition can't be reconstructed or landed
-  entries exist.
+  calendar's history end (`_calendar_history_end`). Raises
+  ``ScheduleNotFoundError``, or ``ValueError`` when the definition can't be
+  reconstructed or landed entries exist.
   """
   structure = _load_schedule_or_404(session, body.structure_id)
 
@@ -816,9 +882,7 @@ def rebuild_schedule(
     "schedule_created_event_id"
   )
 
-  closed_through = _calendar_closed_through_date(
-    session, owner_entity_id(session, structure)
-  )
+  closed_through = _calendar_history_end(session, owner_entity_id(session, structure))
 
   service = ScheduleService()
 
