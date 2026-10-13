@@ -759,6 +759,28 @@ class TestReconcilePairs:
     assert released == [] and report.events_updated == 1
     assert pair.occurred_at == datetime(2026, 3, 17)
 
+  def test_an_unposted_pair_whose_receiver_moves_first_takes_its_day(self):
+    pair = _pair()
+    released, report, _delete = self._run(pair, _legs(t_xfer_in={"date": "2026-03-16"}))
+    assert released == [] and report.events_updated == 1
+    assert pair.occurred_at == datetime(2026, 3, 16)
+    assert (pair.metadata_["from_date"], pair.metadata_["to_date"]) == (
+      "2026-03-17",
+      "2026-03-16",
+    )
+
+  def test_a_posted_pair_received_first_plans_the_earlier_day(self):
+    pair = _pair(status="committed")
+    released, report, _delete = self._run(
+      pair,
+      _legs(
+        t_xfer_out={"amount": 600.0},
+        t_xfer_in={"amount": -600.0, "date": "2026-03-16"},
+      ),
+    )
+    assert released == [] and report.reconciling_items == 1
+    assert pair.metadata_["drift_payload"]["source_posted_date"] == "2026-03-16"
+
   def test_an_unposted_pair_whose_legs_part_dissolves(self):
     pair = _pair()
     consumed: set[str] = set()
