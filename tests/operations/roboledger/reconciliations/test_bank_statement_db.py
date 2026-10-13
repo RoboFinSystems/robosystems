@@ -350,3 +350,141 @@ def test_only_a_statement_block_takes_a_cycle(bank):
       graph_id=GRAPH_ID,
       created_by="usr",
     )
+
+
+# ── a bank change settled after its month closed ─────────────────────────────
+
+
+@pytest.fixture()
+def revised_line(ext_session, monkeypatch):
+  """Opening 1,000.00 entered by hand on 08-01; the feed brought -100.00 on
+  08-20 and +50.00 on 09-05. August is closed. The bank then revised the
+  08-20 line to -120.00, which flags it: the bank holds 930.00 at 09-30."""
+  from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
+
+  monkeypatch.setattr(
+    "robosystems.operations.event_block.commands._validate_event_source",
+    lambda source, graph_id: None,
+  )
+  session = ext_session
+  accounts = {
+    "cash": classified_account(session, "Checking", "asset"),
+    "equity": classified_account(
+      session, "Members Equity", "equity", balance_type="credit"
+    ),
+    "revenue": classified_account(session, "Revenue", "revenue", balance_type="credit"),
+    "supplies": classified_account(session, "Supplies", "expense"),
+  }
+  for name, start, end, status in (
+    ("2026-08", date(2026, 8, 1), date(2026, 8, 31), "closed"),
+    ("2026-09", date(2026, 9, 1), date(2026, 9, 30), "open"),
+  ):
+    session.add(
+      FiscalPeriod(
+        entity_id=PARENT_ENTITY_ID,
+        graph_id=GRAPH_ID,
+        name=name,
+        start_date=start,
+        end_date=end,
+        period_type="month",
+        status=status,
+      )
+    )
+  entry(session, date(2026, 8, 1), accounts["cash"], accounts["equity"], 100_000)
+  revised = _feed_line(
+    session, date(2026, 8, 20), accounts["supplies"], accounts["cash"], 10_000
+  )
+  _feed_line(session, date(2026, 9, 5), accounts["cash"], accounts["revenue"], 5_000)
+  item = session.get(Event, revised.triggered_by_event_id)
+  bank_says = {
+    "status": "posted",
+    "source_amount": 12_000,
+    "source_posted_date": "2026-08-20",
+    "posting_date": "2026-08-20",
+    "memo": "Bank line",
+    "line_items": [
+      {"element_id": accounts["supplies"], "debit_amount": 12_000, "credit_amount": 0},
+      {"element_id": accounts["cash"], "debit_amount": 0, "credit_amount": 12_000},
+    ],
+  }
+  item.metadata_ = {
+    **(item.metadata_ or {}),
+    "drift_payload": bank_says,
+    "drift_detected_at": "2026-09-03T10:00:00+00:00",
+  }
+  item.payload_drift = True
+  session.commit()
+  return session, accounts, item
+
+
+def test_a_catch_up_of_a_bank_change_is_the_feeds_business(revised_line):
+  """The catch-up puts -20.00 on Checking. The bank already holds that change,
+  so the line is not one it has yet to clear."""
+  from robosystems.models.api.extensions.reconciling_items import (
+    ResolveReconcilingItemRequest,
+  )
+  from robosystems.operations.roboledger.commands.reconciling_items import (
+    plan_reconciling_item,
+    resolve_reconciling_item,
+  )
+
+  session, accounts, item = revised_line
+  plan = plan_reconciling_item(session, str(item.id), graph_id=GRAPH_ID)
+  assert plan.default_disposition == "catch_up"
+  resolve_reconciling_item(
+    session,
+    ResolveReconcilingItemRequest(
+      event_id=str(item.id),
+      expected_drift_detected_at=plan.drift_detected_at,
+      posting_date=date(2026, 9, 30),
+    ),
+    "usr",
+    graph_id=GRAPH_ID,
+  )
+  session.commit()
+
+  rec = _record(session, accounts["cash"], 930.00)
+
+  assert rec.status == "reconciled"
+  assert [c.kind for c in rec.components] == ["statement"]
+
+
+def test_an_alignment_that_settles_a_bank_change_is_the_feeds_business(revised_line):
+  """The same change settled by a hand alignment that names the line: its
+  Checking line is the feed's business too, whichever door settled it."""
+  from robosystems.models.api.event_block import CreateEventBlockRequest
+  from robosystems.operations.event_block.commands import create_event_block_in_session
+  from robosystems.operations.roboledger.commands.reconciling_items import (
+    plan_reconciling_item,
+  )
+
+  session, accounts, item = revised_line
+  plan = plan_reconciling_item(session, str(item.id), graph_id=GRAPH_ID)
+  assert plan.drift_detected_at is not None
+  create_event_block_in_session(
+    session,
+    CreateEventBlockRequest(
+      event_type="journal_entry_recorded",
+      event_category="adjustment",
+      source="manual",
+      occurred_at=datetime(2026, 9, 30),
+      apply_handlers=True,
+      metadata={
+        "posting_date": "2026-09-30",
+        "memo": "The bank revised the 08-20 supplies line",
+        "line_items": [
+          {"element_id": accounts["supplies"], "debit_amount": 2_000},
+          {"element_id": accounts["cash"], "credit_amount": 2_000},
+        ],
+        "resolves_reconciling_items": [str(item.id)],
+      },
+    ),
+    "usr",
+    graph_id=GRAPH_ID,
+  )
+  session.commit()
+
+  rec = _record(session, accounts["cash"], 930.00)
+
+  assert rec.status == "reconciled"
+  assert [c.kind for c in rec.components] == ["statement"]

@@ -242,6 +242,16 @@ def comparable_payload(metadata: dict | None) -> dict:
   }
 
 
+def _reopened(metadata: dict) -> bool:
+  """Whether the item was re-opened (its settling entry retracted) and not
+  resolved since."""
+  history = metadata.get("reconciliation_history")
+  if not isinstance(history, list) or not history:
+    return False
+  last = history[-1]
+  return isinstance(last, dict) and last.get("disposition") == "reopened"
+
+
 def _compare_sync_tokens(existing: str | None, incoming: str | None) -> str:
   """SyncToken freshness for the UPSERT gate: fresh, same, stale, or no_info.
 
@@ -1338,6 +1348,20 @@ class OLTPLoader:
             new_meta["drift_payload"] = metadata_blob
             new_meta["drift_detected_at"] = now.isoformat()
             out.drift_detected += 1
+            meta_changed = True
+          elif evt.payload_drift and (
+            comparable_payload(new_meta.get("drift_payload")) != incoming_payload
+          ):
+            if _reopened(new_meta):
+              # The entry that booked the accepted payload was retracted:
+              # the books still owe it, whatever QuickBooks did in between.
+              new_meta["drift_payload"] = metadata_blob
+              new_meta["drift_detected_at"] = now.isoformat()
+            else:
+              # Reverted in QuickBooks before anyone resolved it.
+              new_meta.pop("drift_payload", None)
+              new_meta.pop("drift_detected_at", None)
+              evt.payload_drift = False
             meta_changed = True
           # Bookkeeping, not payload: advance the SyncToken so the next
           # gate comparison is accurate.

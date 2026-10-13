@@ -18,7 +18,7 @@ from collections import defaultdict
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import Select, or_, select
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.event_block import CreateEventBlockRequest
@@ -48,21 +48,30 @@ from robosystems.operations.event_block.commands import (
   fire_handler_on_commit,
 )
 from robosystems.operations.event_block.qb_writeback import ROUND_TRIP_BASELINE_KEY
-from robosystems.operations.locking import RowLockedError, bounded_lock_wait
+from robosystems.operations.locking import (
+  RowLockedError,
+  bounded_lock_wait,
+  ordered_lock_column,
+)
 from robosystems.operations.roboledger.commands._guards import (
   assert_period_not_closed,
   closed_periods,
 )
+from robosystems.operations.roboledger.commands.connections import SEVERABLE_SOURCES
 from robosystems.operations.roboledger.entity_scope import owner_entity_id
 from robosystems.operations.roboledger.fiscal_calendar.periods import period_date_range
 from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
   PUBLISH_TO_SOURCE_KEY,
+  WRITEBACK_EVENT_SOURCES,
 )
 from robosystems.operations.roboledger.fiscal_calendar.service import (
   FiscalCalendarService,
 )
 
 RECONCILIATION_HISTORY_KEY = "reconciliation_history"
+# The trail record an item gets when the entry that settled it is retracted.
+REOPENED = "reopened"
+_RETRACTED_EVENT_STATUSES = ("voided", "superseded")
 
 
 class ReconcilingItemNotFoundError(LookupError):
@@ -91,6 +100,53 @@ class NotAReconcilingItemError(ValueError):
     )
     self.event_id = event_id
     self.last_disposition = last_disposition
+
+
+class SettlementNotReopenableError(ValueError):
+  """Retracting this entry would leave an item it settled unbooked, and the
+  item cannot be put back as it was."""
+
+  def __init__(self, event_id: str, item_id: str) -> None:
+    super().__init__(
+      f"Event {event_id} settled reconciling item {item_id}, a QuickBooks round "
+      "trip that has moved on since, so retracting it would leave that "
+      "difference unbooked with no item to show it. Post the correction as a "
+      "new entry with publish_to_source: false instead: QuickBooks holds the "
+      "change, so the correction stays local as the settlement did."
+    )
+    self.event_id = event_id
+    self.item_id = item_id
+
+
+class InvalidSettlementReferenceError(ValueError):
+  """The event named as the booking of an item's difference cannot be one."""
+
+  def __init__(self, item_id: str, reference_id: str, reason: str) -> None:
+    super().__init__(
+      f"Event {reference_id} cannot settle reconciling item {item_id}: {reason}."
+    )
+    self.item_id = item_id
+    self.reference_id = reference_id
+    self.reason = reason
+
+
+class SettlementNotMovableError(ValueError):
+  """The event superseding an entry cannot carry the items that entry settled."""
+
+  def __init__(
+    self, event_id: str, successor_id: str, item_id: str, reason: str
+  ) -> None:
+    super().__init__(
+      f"Event {event_id} settled reconciling item {item_id}, and {successor_id} "
+      f"cannot take that over: {reason}. Supersede it with an entry that books "
+      "exactly the item's difference (with publish_to_source: false where "
+      "QuickBooks holds the change), or void it, which flags the item again, "
+      "and settle the item against the correction."
+    )
+    self.event_id = event_id
+    self.successor_id = successor_id
+    self.item_id = item_id
+    self.reason = reason
 
 
 class RestateBlockedError(ValueError):
@@ -183,6 +239,328 @@ def _catch_up_entry_ids(session: Session, event_id: str) -> list[str]:
     ).scalars()
   )
   return sorted(str(i) for i in ids)
+
+
+def _acknowledgements(metadata: dict) -> list[dict]:
+  """The trail's acknowledgements that name the entry which booked them."""
+  history = metadata.get(RECONCILIATION_HISTORY_KEY)
+  return [
+    record
+    for record in (history if isinstance(history, list) else [])
+    if isinstance(record, dict)
+    and record.get("disposition") == "acknowledge"
+    and record.get("reference_event_id")
+  ]
+
+
+def _standing_events(session: Session, event_ids: set[str]) -> set[str]:
+  """The events still on the books: not voided or superseded, and none of
+  their entries reversed."""
+  if not event_ids:
+    return set()
+  live = {
+    str(event_id)
+    for event_id in session.execute(
+      select(Event.id).where(
+        Event.id.in_(event_ids), Event.status.notin_(_RETRACTED_EVENT_STATUSES)
+      )
+    ).scalars()
+  }
+  if not live:
+    return live
+  reversed_ = {
+    str(event_id)
+    for event_id in session.execute(
+      select(Entry.triggered_by_event_id).where(
+        Entry.triggered_by_event_id.in_(live), Entry.status == "reversed"
+      )
+    ).scalars()
+  }
+  return live - reversed_
+
+
+def _standing_acknowledgements(session: Session, metadata: dict) -> list[dict]:
+  """Acknowledgements whose entry still stands: what they booked is on the
+  books, the way a catch-up's entry is."""
+  records = _acknowledgements(metadata)
+  standing = _standing_events(
+    session, {str(record["reference_event_id"]) for record in records}
+  )
+  return [r for r in records if str(r["reference_event_id"]) in standing]
+
+
+def _acknowledged_nets(
+  records: list[dict],
+) -> dict[tuple[str | None, str | None], int]:
+  """Net the delta each acknowledgement recorded, per account."""
+  nets: dict[tuple[str | None, str | None], int] = defaultdict(int)
+  for record in records:
+    for line in record.get("delta") or []:
+      if not isinstance(line, dict):
+        continue
+      element_id = line.get("element_id")
+      key = (
+        (element_id, None) if element_id else (None, line.get("element_external_id"))
+      )
+      nets[key] += int(line.get("delta") or 0)
+  return nets
+
+
+def _settles_by(record: Any, event_id: str) -> bool:
+  """Whether a trail record is a settlement by ``event_id``: an
+  acknowledgement naming it, or the catch-up it is."""
+  if not isinstance(record, dict):
+    return False
+  disposition = record.get("disposition")
+  return (
+    disposition == "acknowledge" and record.get("reference_event_id") == event_id
+  ) or (disposition == "catch_up" and record.get("catch_up_event_id") == event_id)
+
+
+def _settling_record(history: list, event_id: str) -> tuple[int, dict] | None:
+  """The latest trail record that ``event_id`` settled the item by."""
+  for position in range(len(history) - 1, -1, -1):
+    if _settles_by(history[position], event_id):
+      return position, history[position]
+  return None
+
+
+def _settlement_start(history: list, position: int, record: dict) -> set[int]:
+  """The positions of a settlement's records back to the one it began with:
+  a supersede hands the settlement on in a new record, but it was decided
+  where the first one sits."""
+  positions = {position}
+  while record.get("superseded_event_id"):
+    found = _settling_record(history[:position], str(record["superseded_event_id"]))
+    if found is None:
+      break
+    position, record = found
+    positions.add(position)
+  return positions
+
+
+def _handed_on(history: list, event_id: str) -> bool:
+  """Whether the settlement by ``event_id`` already ended: re-opened, or moved
+  to the event that superseded it."""
+  return any(
+    isinstance(r, dict)
+    and (
+      (r.get("disposition") == REOPENED and r.get("reference_event_id") == event_id)
+      or r.get("superseded_event_id") == event_id
+    )
+    for r in history
+  )
+
+
+def _items_settled_by_query(
+  settling: Event | None, event_id: str
+) -> Select[tuple[Event]]:
+  """Events that ``event_id`` may have settled: named by an acknowledgement,
+  or levelled by it as a catch-up."""
+  needle = {
+    RECONCILIATION_HISTORY_KEY: [
+      {"disposition": "acknowledge", "reference_event_id": event_id}
+    ]
+  }
+  levelled = (settling.metadata_ or {}).get("reconciles_event_id") if settling else None
+  match = Event.metadata_.contains(needle)
+  if levelled:
+    match = or_(match, Event.id == str(levelled))
+  return select(Event).where(match)
+
+
+def _items_settled(session: Session, settling: Event) -> list[tuple[Event, list[dict]]]:
+  """Each reconciling item ``settling`` still counts toward, with the trail
+  records it settled the item by."""
+  event_id = str(settling.id)
+  session.flush()
+  settled: list[tuple[Event, list[dict]]] = []
+  for item in session.execute(_items_settled_by_query(settling, event_id)).scalars():
+    history = list((item.metadata_ or {}).get(RECONCILIATION_HISTORY_KEY) or [])
+    records = [r for r in history if _settles_by(r, event_id)]
+    if records and not _handed_on(history, event_id):
+      settled.append((item, records))
+  return settled
+
+
+def items_settled_by(session: Session, settling: Event) -> list[str]:
+  """The reconciling items ``settling`` settles and still counts toward."""
+  return [str(item.id) for item, _records in _items_settled(session, settling)]
+
+
+_Nets = dict[tuple[str | None, str | None], int]
+
+
+def _delta_nets(lines: Any) -> _Nets:
+  """A recorded difference per mapped account, keyed as posted lines are."""
+  nets: _Nets = defaultdict(int)
+  for line in lines or []:
+    if isinstance(line, dict) and line.get("element_id") and line.get("delta"):
+      nets[(str(line["element_id"]), None)] += int(line["delta"])
+  return nets
+
+
+def _counted_against(session: Session, settling: Event) -> tuple[_Nets, list[str]]:
+  """What is already counted against ``settling``: the difference of every
+  settlement it still stands for, per account, and the items they settle."""
+  nets: _Nets = defaultdict(int)
+  items: list[str] = []
+  for item, records in _items_settled(session, settling):
+    items.append(str(item.id))
+    for record in records:
+      for key, cents in _delta_nets(record.get("delta")).items():
+        nets[key] += cents
+  return nets, items
+
+
+def _covers(booked: int, counted: int) -> bool:
+  """Whether ``booked`` on an account is enough to be counted as ``counted``."""
+  return counted == 0 or (booked * counted > 0 and abs(booked) >= abs(counted))
+
+
+def _account_label(session: Session, key: tuple[str | None, str | None]) -> str:
+  element = session.get(Element, key[0]) if key[0] else None
+  if element is None:
+    return str(key[0] or key[1])
+  return str(element.name or element.code or element.id)
+
+
+def _would_publish(event: Event) -> bool:
+  """Whether the close writes the event back to QuickBooks: its explicit
+  ``publish_to_source``, else its source's default."""
+  flag = (event.metadata_ or {}).get(PUBLISH_TO_SOURCE_KEY)
+  if flag is not None:
+    return flag is True
+  return str(event.source) in WRITEBACK_EVENT_SOURCES
+
+
+_PUBLISHES = (
+  "it would publish to QuickBooks, which already holds the change "
+  "(create the entry with publish_to_source: false)"
+)
+
+
+def _already_counted(
+  session: Session, booked: _Nets, counted: _Nets, items: list[str], adding: _Nets
+) -> str | None:
+  """Why what an entry books cannot also be counted as ``adding``: part of it
+  is counted for something else already."""
+  for key, cents in adding.items():
+    if counted.get(key) and not _covers(booked.get(key, 0), counted[key] + cents):
+      return (
+        f"what it books on {_account_label(session, key)} is already counted "
+        f"toward reconciling item(s) {', '.join(items)}"
+      )
+  return None
+
+
+def _books_beyond(session: Session, booked: _Nets, counted: _Nets) -> str | None:
+  """Why an entry settling a QuickBooks change books more than the
+  differences it is counted for, if it does: it has to stay local, and
+  nothing else it books may stay local with it."""
+  for key, cents in booked.items():
+    if cents and not _covers(counted.get(key, 0), cents):
+      return (
+        "it books more than the difference it settles (on "
+        f"{_account_label(session, key)}): split it, so the entry that settles "
+        "the item books only the difference"
+      )
+  return None
+
+
+def settlement_scope_refusal(session: Session, settling: Event) -> str | None:
+  """Why ``settling`` cannot stand for the items it settles, counted all
+  together: one settling a QuickBooks change books only those differences."""
+  settled = _items_settled(session, settling)
+  if not any(_held_upstream(item) for item, _records in settled):
+    return None
+  counted, _items = _counted_against(session, settling)
+  return _books_beyond(session, _event_nets(session, str(settling.id)), counted)
+
+
+def refuse_publishing_a_settlement(session: Session, event: Event) -> None:
+  """An entry that settles a change QuickBooks already holds stays local for
+  as long as it settles it."""
+  if not _would_publish(event):
+    return
+  for item, _records in _items_settled(session, event):
+    if _held_upstream(item):
+      raise InvalidSettlementReferenceError(str(item.id), str(event.id), _PUBLISHES)
+
+
+def _lock_items_settled_by(session: Session, event_id: str) -> list[Event]:
+  with bounded_lock_wait(
+    session,
+    f"A reconciling item settled by {event_id} is being written by another "
+    "process. Retry in a moment.",
+  ):
+    return list(
+      session.execute(
+        _items_settled_by_query(session.get(Event, event_id), event_id)
+        .order_by(ordered_lock_column())
+        .with_for_update()
+        .execution_options(populate_existing=True)
+      )
+      .scalars()
+      .all()
+    )
+
+
+def _held_upstream(item: Event) -> bool:
+  """Whether QuickBooks already holds the change the item reports: a synced
+  transaction, or an entry written back and edited there."""
+  return str(item.source).lower() in SEVERABLE_SOURCES or bool(
+    (item.metadata_ or {}).get("qb_external_id")
+  )
+
+
+def _reference_refusal(
+  session: Session, item: Event, reference: Event | None, reference_id: str
+) -> str | None:
+  """Why ``reference`` cannot be the booking of the item's difference, if it
+  cannot. What it books is counted toward the item while it stands."""
+  if reference_id == str(item.id):
+    return "it is the item itself"
+  if reference is None:
+    raise ReconcilingItemNotFoundError(reference_id)
+  if (reference.metadata_ or {}).get("reconciles_event_id") == str(item.id):
+    return "it is the item's own catch-up, which is already counted"
+  if owner_entity_id(session, reference) != owner_entity_id(session, item):
+    return "it is on another entity's books"
+  session.flush()
+  if not _standing_events(session, {reference_id}):
+    return "it is voided, superseded or reversed"
+  if not session.execute(
+    select(Entry.id).where(Entry.triggered_by_event_id == reference_id).limit(1)
+  ).first():
+    return "it books no journal entry"
+  return None
+
+
+def _fit_refusal(
+  session: Session,
+  item: Event,
+  reference: Event,
+  delta_lines: list,
+  *,
+  check_scope: bool,
+) -> str | None:
+  """Why ``reference`` cannot be counted as booking the item's difference:
+  what it books is counted for something else already, or the change is in
+  QuickBooks and the entry would publish it again, or books more than it."""
+  booked = _event_nets(session, str(reference.id))
+  counted, items = _counted_against(session, reference)
+  adding = _delta_nets(delta_lines)
+  refusal = _already_counted(session, booked, counted, items, adding)
+  if refusal or not _held_upstream(item):
+    return refusal
+  if _would_publish(reference):
+    return _PUBLISHES
+  if not check_scope:
+    return None
+  for key, cents in adding.items():
+    counted[key] += cents
+  return _books_beyond(session, booked, counted)
 
 
 def _resolve_element_labels(
@@ -329,6 +707,14 @@ def _restate_blockers(
     blockers.append(
       "an earlier catch-up entry levels this event, and restating would leave "
       "it counted twice — catch up instead"
+    )
+  elif any(
+    record.get("delta")
+    for record in _standing_acknowledgements(session, dict(event.metadata_ or {}))
+  ):
+    blockers.append(
+      "an alignment entry already books part of this change, and restating "
+      "would count it twice — catch up instead"
     )
 
   # The handler never downgrades `fulfilled`, so drafting its entries would
@@ -506,9 +892,15 @@ def _plan_with_stamp(
     prior_nets = _net_shape_lines(round_trip.get("baseline"))
     accepted_nets = _net_shape_lines(round_trip.get("accepted"))
   else:
+    # Everything already booked against this event: its own entries, earlier
+    # catch-ups, and what each standing acknowledgement's entry booked.
     prior_nets = _net_posted_lines(
       session, entry_ids + _catch_up_entry_ids(session, str(event.id))
     )
+    for key, net in _acknowledged_nets(
+      _standing_acknowledgements(session, metadata)
+    ).items():
+      prior_nets[key] += net
     accepted_nets = _net_accepted_lines(accepted)
 
   labels, by_external = _resolve_element_labels(
@@ -665,10 +1057,14 @@ def resolve_reconciling_item(
   created_by: str,
   *,
   graph_id: str,
+  check_scope: bool = True,
 ) -> ResolveReconcilingItemResponse:
   """Dispose of one reconciling item and clear its flag. Does not commit.
 
   Takes the period fence before any row lock (the order close uses).
+  ``check_scope=False`` leaves to the caller the check that the reference
+  books no more than it settles, for an entry settling several items that
+  is checked once all of them are counted (`settlement_scope_refusal`).
   """
   plan, planned_stamp = _plan_with_stamp(session, body.event_id, graph_id=graph_id)
   # The preview the operator decided on, not only the one this request built.
@@ -812,18 +1208,29 @@ def resolve_reconciling_item(
         status=body.status,
       )
       record["catch_up_event_id"] = str(catch_up_event.id)
+      if _round_trip(accepted) is not None:
+        record["settled_payload"] = accepted
     else:
       record["catch_up_event_id"] = None
     event.metadata_ = _accepted_metadata(live=live, accepted=accepted, record=record)
 
   else:  # acknowledge
     if body.reference_event_id is not None:
-      reference = (
-        session.query(Event.id).filter(Event.id == body.reference_event_id).first()
-      )
-      if reference is None:
-        raise ReconcilingItemNotFoundError(body.reference_event_id)
+      reference = session.get(Event, body.reference_event_id)
+      refusal = _reference_refusal(session, event, reference, body.reference_event_id)
+      if refusal is None and reference is not None:
+        refusal = _fit_refusal(
+          session, event, reference, record["delta"], check_scope=check_scope
+        )
+      if refusal:
+        raise InvalidSettlementReferenceError(
+          str(event.id), body.reference_event_id, refusal
+        )
       record["reference_event_id"] = body.reference_event_id
+      if _round_trip(accepted) is not None:
+        # Accepting moves the round trip's baseline; retracting the entry
+        # has to move it back (`reopen_items_settled_by`).
+        record["settled_payload"] = accepted
     event.metadata_ = _accepted_metadata(live=live, accepted=accepted, record=record)
 
   event.payload_drift = False
@@ -842,6 +1249,196 @@ def resolve_reconciling_item(
     resolved_at=now,
     resolved_by=created_by,
   )
+
+
+def reopen_items_settled_by(
+  session: Session, event_id: str, reopened_by: str, *, reason: str
+) -> list[str]:
+  """Flag again every reconciling item ``event_id`` settled, as an
+  acknowledged entry or as a catch-up, now that it is voided or reversed.
+  Does not commit.
+
+  The settlement stops counting once its entry is retracted, so an item
+  flagged with the payload it accepted plans the difference that entry had
+  booked. The stamp moves either way, so a preview taken while it still
+  counted is refused. A ``reopened`` record ends the trail until the item is
+  resolved again; the sync reads it as a difference still owed.
+  """
+  items = _lock_items_settled_by(session, event_id)
+
+  now = datetime.now(UTC).isoformat()
+  reopened: list[str] = []
+  for item in items:
+    live = dict(item.metadata_ or {})
+    history = list(live.get(RECONCILIATION_HISTORY_KEY) or [])
+    found = _settling_record(history, event_id)
+    if found is None or _handed_on(history, event_id):
+      continue
+    position, record = found
+
+    if live.get("qb_external_id"):
+      # A round trip is measured from a stored baseline, which accepting
+      # moved: put it back. Exact only while nothing has been decided since
+      # the settlement began, whichever entry carries it now.
+      settled = record.get("settled_payload")
+      trip = settled.get("round_trip") if isinstance(settled, dict) else None
+      chain = _settlement_start(history, position, record)
+      decided_since = any(
+        isinstance(r, dict) and r.get("disposition") != REOPENED
+        for i, r in enumerate(history)
+        if i > min(chain) and i not in chain
+      )
+      if not isinstance(trip, dict) or decided_since:
+        raise SettlementNotReopenableError(event_id, str(item.id))
+      qb_id = str(trip["qb_id"])
+      baselines = dict(live.get(ROUND_TRIP_BASELINE_KEY) or {})
+      baselines[qb_id] = trip.get("baseline")
+      live[ROUND_TRIP_BASELINE_KEY] = baselines
+      pending = live.get("drift_payload") if item.payload_drift else None
+      if pending is None:
+        live["drift_payload"] = settled
+      else:
+        pending_trip = pending.get("round_trip") if isinstance(pending, dict) else None
+        if (
+          not isinstance(pending_trip, dict) or str(pending_trip.get("qb_id")) != qb_id
+        ):
+          raise SettlementNotReopenableError(event_id, str(item.id))
+        live["drift_payload"] = {
+          **pending,
+          "round_trip": {**pending_trip, "baseline": trip.get("baseline")},
+        }
+    elif not item.payload_drift:
+      live["drift_payload"] = {
+        k: v
+        for k, v in live.items()
+        if k not in ("drift_payload", "drift_detected_at", RECONCILIATION_HISTORY_KEY)
+      }
+
+    history.append(
+      {
+        "disposition": REOPENED,
+        "reopened_at": now,
+        "reopened_by": reopened_by,
+        "reference_event_id": event_id,
+        "reason": reason,
+      }
+    )
+    live[RECONCILIATION_HISTORY_KEY] = history
+    live["drift_detected_at"] = now
+    item.metadata_ = live
+    item.payload_drift = True
+    reopened.append(str(item.id))
+
+  session.flush()
+  return reopened
+
+
+def _event_nets(
+  session: Session, event_id: str
+) -> dict[tuple[str | None, str | None], int]:
+  return _net_posted_lines(
+    session,
+    [
+      str(entry_id)
+      for entry_id in session.execute(
+        select(Entry.id).where(Entry.triggered_by_event_id == event_id)
+      ).scalars()
+    ],
+  )
+
+
+def move_items_settled_by(
+  session: Session, event_id: str, successor_id: str, moved_by: str
+) -> list[str]:
+  """Hand every reconciling item ``event_id`` settled to ``successor_id``, the
+  event superseding it. Does not commit.
+
+  The successor is counted toward each item from here on, so it has to book
+  exactly the differences it takes over, on top of what it is already
+  counted for, and nothing beside them; one that settles a QuickBooks change
+  has to stay local. Anything else refuses the supersede rather than count
+  the successor at a figure it does not book.
+  """
+  items = _lock_items_settled_by(session, event_id)
+  if not items:
+    return []
+  successor = session.get(Event, successor_id)
+
+  moving: list[tuple[Event, list, dict]] = []
+  adding: _Nets = defaultdict(int)
+  for item in items:
+    history = list((item.metadata_ or {}).get(RECONCILIATION_HISTORY_KEY) or [])
+    found = _settling_record(history, event_id)
+    if found is None or _handed_on(history, event_id):
+      continue
+    _position, record = found
+    refusal = _reference_refusal(session, item, successor, successor_id)
+    if refusal is None and _held_upstream(item) and successor is not None:
+      refusal = _PUBLISHES if _would_publish(successor) else None
+    if refusal:
+      raise SettlementNotMovableError(event_id, successor_id, str(item.id), refusal)
+    for key, cents in _delta_nets(record.get("delta")).items():
+      adding[key] += cents
+    moving.append((item, history, record))
+  if not moving or successor is None:
+    return []
+
+  booked = _event_nets(session, successor_id)
+  counted, counted_items = _counted_against(session, successor)
+  refusal = _already_counted(session, booked, counted, counted_items, adding)
+  target: _Nets = defaultdict(int, counted)
+  for key, cents in adding.items():
+    target[key] += cents
+  if refusal is None:
+    refusal = next(
+      (
+        f"it books a different amount on {_account_label(session, key)}"
+        for key, cents in target.items()
+        if booked.get(key, 0) != cents
+      ),
+      None,
+    )
+  if refusal is None:
+    refusal = next(
+      (
+        f"it books {_account_label(session, key)}, beyond the difference it "
+        "would take over"
+        for key, cents in booked.items()
+        if cents and key not in target
+      ),
+      None,
+    )
+  if refusal:
+    raise SettlementNotMovableError(
+      event_id, successor_id, str(moving[0][0].id), refusal
+    )
+
+  now = datetime.now(UTC).isoformat()
+  moved: list[str] = []
+  for item, history, record in moving:
+    history.append(
+      {
+        **{
+          key: record[key]
+          for key in ("drift_detected_at", "delta", "prior_entries", "settled_payload")
+          if key in record
+        },
+        "disposition": "acknowledge",
+        "resolved_at": now,
+        "resolved_by": moved_by,
+        "note": f"Settled by {successor_id}, which superseded {event_id}",
+        "reference_event_id": successor_id,
+        "superseded_event_id": event_id,
+      }
+    )
+    item.metadata_ = {
+      **(item.metadata_ or {}),
+      RECONCILIATION_HISTORY_KEY: history,
+    }
+    moved.append(str(item.id))
+
+  session.flush()
+  return moved
 
 
 def _catch_up_request(
