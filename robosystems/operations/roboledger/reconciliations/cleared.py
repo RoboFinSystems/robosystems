@@ -5,6 +5,10 @@ own record, so it has cleared by construction. The lines that did not come
 from the feed (a payment recorded against a bill, a manual journal entry)
 are what the bank may not have seen yet. Cleared is derived, never ticked.
 
+A transfer between two fed accounts books once, on the day the money left;
+the receiving account's line clears on its own leg's date, and until then it
+is in transit there.
+
 Lines dated before the feed's first line are history the feed started from
 (an opening balance, months kept elsewhere) and count as cleared.
 """
@@ -53,7 +57,17 @@ _CASH_LINES_SQL = text("""
            OR COALESCE(src.id IN (SELECT event_id FROM feed_settlements), FALSE)
            AS from_feed,
          COALESCE(NULLIF(li.description, ''), NULLIF(e.memo, ''),
-                  src.description, 'Journal entry') AS description
+                  src.description, 'Journal entry') AS description,
+         CASE
+           WHEN e.reversal_of IS NULL AND src.event_type = 'internal_transfer'
+           THEN GREATEST(e.posting_date, CASE li.element_id
+             WHEN src.metadata->>'from_element_id'
+               THEN (src.metadata->>'from_date')::date
+             WHEN COALESCE(src.metadata->>'to_element_id', src.resource_element_id)
+               THEN (src.metadata->>'to_date')::date
+           END)
+           ELSE e.posting_date
+         END AS cleared_on
   FROM line_items li
   JOIN entries e ON e.id = li.entry_id
   LEFT JOIN entries original ON original.id = e.reversal_of
@@ -91,6 +105,10 @@ class CashLine:
   event_id: str | None
   from_feed: bool
   description: str
+  cleared_on: date
+
+  def cleared(self, through: date) -> bool:
+    return self.from_feed and self.cleared_on <= through
 
 
 @dataclass(frozen=True)
@@ -109,26 +127,27 @@ class AccountLines:
     return sum(line.net_cents for line in self.lines if line.posting_date <= through)
 
   def feed_activity(self, after: date, through: date) -> tuple[int, int]:
-    """The booked feed lines dated after ``after``, to ``through``: how many,
-    and their net."""
+    """The booked feed lines the bank cleared after ``after``, to
+    ``through``: how many, and their net."""
     lines = [
       line
       for line in self.lines
-      if line.from_feed and after < line.posting_date <= through
+      if line.from_feed and after < line.cleared_on <= through
     ]
     return len(lines), sum(line.net_cents for line in lines)
 
   def outstanding(self, through: date) -> list[CashLine]:
-    """The lines the bank had not cleared by ``through``: not from the feed,
-    dated from the feed's first day to ``through``. An entry and its
-    reversal both inside that span cancel and are left out."""
+    """The lines the bank had not cleared by ``through``, dated from the
+    feed's first day to ``through``: not from the feed, or a transfer still
+    in transit. An entry and its reversal both inside that span cancel and
+    are left out."""
     start = self.feed_start
     if start is None:
       return []
     candidates = [
       line
       for line in self.lines
-      if not line.from_feed and start <= line.posting_date <= through
+      if not line.cleared(through) and start <= line.posting_date <= through
     ]
     entry_ids = {line.entry_id for line in candidates}
     cancelled = {
@@ -170,6 +189,7 @@ def account_lines(
         event_id=str(row.event_id) if row.event_id else None,
         from_feed=bool(row.from_feed),
         description=str(row.description),
+        cleared_on=row.cleared_on,
       )
       for row in rows
     ]

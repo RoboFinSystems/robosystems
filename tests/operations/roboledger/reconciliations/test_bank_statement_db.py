@@ -30,6 +30,7 @@ from robosystems.operations.roboledger.reconciliations import (
   NothingToReconcileError,
   SourceLedgerResolver,
 )
+from robosystems.operations.roboledger.reconciliations.cleared import account_lines
 from robosystems.operations.roboledger.reconciliations.observations import (
   BANK_CURRENT,
   FeedBalance,
@@ -81,6 +82,54 @@ def _feed_line(session, posting_date: date, debit: str, credit: str, cents: int)
   )
   session.flush()
   return row
+
+
+def _transfer(session, from_element, to_element, cents, sent: date, arrived: date):
+  """A transfer between two fed accounts, committed: one entry on the day the
+  money left, each leg's own date on the event."""
+  event = Event(
+    entity_id=PARENT_ENTITY_ID,
+    event_type="internal_transfer",
+    event_category="treasury",
+    event_class="economic",
+    resource_type="money",
+    occurred_at=datetime.combine(sent, datetime.min.time()),
+    status="committed",
+    source="plaid",
+    amount=cents,
+    resource_element_id=to_element,
+    description="Transfer Checking to Savings",
+    metadata_={
+      "kind": "internal_transfer",
+      "from_element_id": from_element,
+      "to_element_id": to_element,
+      "from_date": sent.isoformat(),
+      "to_date": arrived.isoformat(),
+    },
+    created_by="test",
+  )
+  session.add(event)
+  session.flush()
+  row = Entry(
+    entity_id=PARENT_ENTITY_ID,
+    posting_date=sent,
+    status="posted",
+    type="standard",
+    provenance="event_handler",
+    triggered_by_event_id=event.id,
+    created_by="test",
+  )
+  session.add(row)
+  session.flush()
+  session.add(
+    LineItem(entry_id=row.id, element_id=to_element, debit_amount=cents, line_order=1)
+  )
+  session.add(
+    LineItem(
+      entry_id=row.id, element_id=from_element, credit_amount=cents, line_order=2
+    )
+  )
+  session.flush()
 
 
 @pytest.fixture()
@@ -208,6 +257,64 @@ def test_a_payment_and_its_reversal_cancel(bank):
 
   assert rec.status == "reconciled"
   assert [c.kind for c in rec.components] == ["statement"]
+
+
+@pytest.fixture()
+def in_transit(bank):
+  """Savings, fed since a +100.00 line on 09-03, and 200.00 sent from
+  checking on 09-30 that savings receives on 10-02."""
+  session, accounts = bank
+  savings = classified_account(session, "Savings", "asset")
+  _feed_line(session, date(2026, 9, 3), savings, accounts["revenue"], 10_000)
+  _transfer(
+    session, accounts["cash"], savings, 20_000, date(2026, 9, 30), date(2026, 10, 2)
+  )
+  session.commit()
+  return session, accounts, savings
+
+
+def test_a_transfer_books_the_day_it_left_and_reconciles_the_sender(in_transit):
+  """Checking's statement shows the 200.00 gone on 09-30, as the ledger does;
+  only the hand-recorded payment lies between them."""
+  session, accounts, _savings = in_transit
+
+  rec = _record(session, accounts["cash"], 1_100.00)
+
+  assert rec.status == "reconciled"
+  assert [(c.kind, c.amount) for c in rec.components] == [
+    ("statement", 1_100.00),
+    ("outstanding", -50.00),
+  ]
+
+
+def test_a_transfer_is_in_transit_on_the_receiver_until_its_leg_date(in_transit):
+  """Savings' statement at 09-30 has not seen the 200.00; the ledger has, so
+  it is outstanding there, dated the day it was sent."""
+  session, _accounts, savings = in_transit
+
+  rec = _record(session, savings, 100.00)
+
+  assert rec.status == "reconciled"
+  assert (rec.ledger_balance, rec.independent_balance) == (300.00, 300.00)
+  statement, transit = rec.components
+  assert (statement.kind, statement.amount) == ("statement", 100.00)
+  assert (transit.kind, transit.amount, transit.posting_date) == (
+    "outstanding",
+    200.00,
+    date(2026, 9, 30),
+  )
+
+
+def test_a_transfer_clears_on_the_receiver_at_its_leg_date(in_transit):
+  session, _accounts, savings = in_transit
+
+  lines = account_lines(
+    session, savings, date(2026, 10, 31), entity_id=PARENT_ENTITY_ID
+  )
+
+  assert lines.outstanding(date(2026, 10, 1)) != []
+  assert lines.outstanding(date(2026, 10, 2)) == []
+  assert lines.feed_activity(date(2026, 9, 30), date(2026, 10, 31)) == (1, 20_000)
 
 
 def test_an_account_no_feed_keeps_is_compared_as_before(bank):

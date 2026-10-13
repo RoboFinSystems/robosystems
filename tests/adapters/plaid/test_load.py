@@ -393,7 +393,7 @@ class TestTransferLegsAcrossSyncs:
     assert merged["metadata"]["legs"] == ["t_out", "t_in"]
     assert merged["metadata"]["from_element_id"] == "e_chk"
     assert merged["metadata"]["to_element_id"] == "e_sav"
-    assert merged["occurred_at"] == "2026-03-19T00:00:00Z"
+    assert merged["occurred_at"] == "2026-03-17T00:00:00Z"
 
   def test_a_merged_pair_books_on_its_legs_entity(self):
     # Two legs from two syncs on a subsidiary's accounts: the pair stays on
@@ -673,7 +673,7 @@ def _pair(status="captured", **meta):
     status=status,
     event_type="internal_transfer",
     amount=50000,
-    occurred_at=datetime(2026, 3, 19),
+    occurred_at=datetime(2026, 3, 17),
     resource_element_id="e_sav",
     external_id="plaid_xfer_t_xfer_in",
     description="Transfer Checking to Savings",
@@ -741,7 +741,7 @@ class TestReconcilePairs:
     assert released == [] and report.events_updated == 1
     delete.assert_not_called()
     assert pair.amount == 60000
-    assert pair.occurred_at == datetime(2026, 3, 20)
+    assert pair.occurred_at == datetime(2026, 3, 17)
     assert (pair.metadata_["from_date"], pair.metadata_["to_date"]) == (
       "2026-03-17",
       "2026-03-20",
@@ -751,6 +751,13 @@ class TestReconcilePairs:
     released, report, delete = self._run(_pair(), _legs())
     assert released == [] and report.events_existing == 1
     delete.assert_not_called()
+
+  def test_an_unposted_pair_dated_by_its_in_leg_moves_to_the_out_leg(self):
+    pair = _pair()
+    pair.occurred_at = datetime(2026, 3, 19)
+    released, report, _delete = self._run(pair, _legs())
+    assert released == [] and report.events_updated == 1
+    assert pair.occurred_at == datetime(2026, 3, 17)
 
   def test_an_unposted_pair_whose_legs_part_dissolves(self):
     pair = _pair()
@@ -780,9 +787,9 @@ class TestReconcilePairs:
     assert pair.payload_drift is True and pair.amount == 50000  # books untouched
     accepted = pair.metadata_["drift_payload"]
     assert accepted["source_amount"] == 60000
-    assert accepted["source_posted_date"] == "2026-03-19"
+    assert accepted["source_posted_date"] == "2026-03-17"
     assert [leg["amount"] for leg in accepted["source_legs"]] == [-60000, 60000]
-    assert accepted["posting_date"] == "2026-03-19"
+    assert accepted["posting_date"] == "2026-03-17"
     assert accepted["line_items"] == [
       {"element_id": "e_sav", "debit_amount": 60000, "credit_amount": 0},
       {"element_id": "e_chk", "debit_amount": 0, "credit_amount": 60000},

@@ -976,12 +976,11 @@ def _update_pair(pair: Event, out_leg: Leg, in_leg: Leg) -> bool:
   """An unposted pair takes its legs' new amount and dates; True if changed."""
   changed = False
   magnitude = abs(in_leg.amount)
-  later = max(out_leg.day, in_leg.day)
   if int(pair.amount or 0) != magnitude:
     pair.amount = magnitude
     changed = True
-  if pair.occurred_at is None or _iso(pair.occurred_at)[:10] != later:
-    pair.occurred_at = _parse(f"{later}T00:00:00Z")
+  if pair.occurred_at is None or _iso(pair.occurred_at)[:10] != out_leg.day:
+    pair.occurred_at = _parse(f"{out_leg.day}T00:00:00Z")
     changed = True
   metadata = dict(pair.metadata_ or {})
   for key, value in (("from_date", out_leg.day), ("to_date", in_leg.day)):
@@ -1001,14 +1000,13 @@ def _flag_pair_changed(pair: Event, out_leg: Leg, in_leg: Leg) -> None:
   """A posted pair whose legs moved together: a reconciling item carrying the
   transfer it should now be."""
   magnitude = abs(in_leg.amount)
-  later = max(out_leg.day, in_leg.day)
   accepted = _accepted_payload(pair)
   accepted["source_legs"] = [_leg_record(out_leg), _leg_record(in_leg)]
   accepted["source_amount"] = magnitude
-  accepted["source_posted_date"] = later
+  accepted["source_posted_date"] = out_leg.day
   accepted["from_date"] = out_leg.day
   accepted["to_date"] = in_leg.day
-  accepted.update(_planned_entry(pair, magnitude, later))
+  accepted.update(_planned_entry(pair, magnitude, out_leg.day))
   _flag(pair, accepted)
 
 
