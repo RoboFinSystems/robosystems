@@ -174,7 +174,7 @@ async def sync_quickbooks_connection(
   # Until a sync has succeeded the company's history has not arrived, so the
   # next one imports it whoever starts it: a first sync that failed is
   # followed by a scheduled one, which would otherwise pull only the lookback.
-  full_rebuild = options.get("full_rebuild", False) or not connection.get("last_sync")
+  full_rebuild = options.get("full_rebuild", False) or not metadata.get("last_sync")
   lookback_days = options.get("lookback_days", 60)
   since_date = options.get("since_date", "") or ""
 
