@@ -451,6 +451,7 @@ def _acknowledge_settled_items(
     NotAReconcilingItemError,
     ReconcilingItemNotFoundError,
     resolve_reconciling_item,
+    settlement_scope_refusal,
   )
 
   item_ids: list[str] = []
@@ -492,6 +493,7 @@ def _acknowledge_settled_items(
         ),
         created_by,
         graph_id=graph_id,
+        check_scope=False,
       )
     except (
       NotAReconcilingItemError,
@@ -501,6 +503,13 @@ def _acknowledge_settled_items(
       raise HandlerMetadataValidationError(
         f"resolves_reconciling_items: {item_id}: {exc}"
       ) from exc
+
+  # Once every named item is counted: one entry may settle several.
+  refusal = settlement_scope_refusal(session, event)
+  if refusal:
+    raise HandlerMetadataValidationError(
+      f"resolves_reconciling_items: Event {event.id} cannot settle them: {refusal}."
+    )
 
 
 def create_event_block_in_session(
@@ -865,6 +874,12 @@ def update_event_block(
     merged = dict(event.metadata_ or {})
     merged.update(body.metadata_patch)
     event.metadata_ = merged
+    if "publish_to_source" in body.metadata_patch:
+      from robosystems.operations.roboledger.commands.reconciling_items import (
+        refuse_publishing_a_settlement,
+      )
+
+      refuse_publishing_a_settlement(session, event)
 
   if body.obligated_by_event_id is not None:
     event.obligated_by_event_id = body.obligated_by_event_id

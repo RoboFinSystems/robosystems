@@ -1714,6 +1714,9 @@ def _plain_entry(db, ids, cents: int, *, metadata: dict | None = None) -> Event:
   return event
 
 
+_LOCAL = {"publish_to_source": False}
+
+
 def _publishes_at_close(db, event_id: str) -> bool:
   eligible = select_writeback_eligible_entries(
     db, OPEN_START, OPEN_END, entity_id=PARENT_ENTITY_ID
@@ -1745,7 +1748,7 @@ def test_superseding_an_alignment_moves_its_settlement_to_the_successor(session)
   QuickBooks. The successor settles a QuickBooks change, so it stays local."""
   ids, item = _flagged_at_1500(session)
   first = _hand_alignment(session, ids, 500, [_named(item, session)])
-  successor = _plain_entry(session, ids, 500)
+  successor = _plain_entry(session, ids, 500, metadata=_LOCAL)
   session.commit()
 
   _supersede(session, str(first.id), str(successor.id))
@@ -1770,7 +1773,7 @@ def test_superseding_an_alignment_moves_its_settlement_to_the_successor(session)
 def test_voiding_the_successor_reopens_the_item_it_took_over(session):
   ids, item = _flagged_at_1500(session)
   first = _hand_alignment(session, ids, 500, [_named(item, session)])
-  successor = _plain_entry(session, ids, 500)
+  successor = _plain_entry(session, ids, 500, metadata=_LOCAL)
   session.commit()
   _supersede(session, str(first.id), str(successor.id))
   session.commit()
@@ -1788,7 +1791,7 @@ def test_a_successor_booking_a_different_amount_cannot_take_the_settlement(sessi
   would leave it uncounted: the supersede is refused, and nothing moves."""
   ids, item = _flagged_at_1500(session)
   first = _hand_alignment(session, ids, 500, [_named(item, session)])
-  successor = _plain_entry(session, ids, 600)
+  successor = _plain_entry(session, ids, 600, metadata=_LOCAL)
   session.commit()
 
   with pytest.raises(ValueError, match="different amount"):
@@ -1899,20 +1902,34 @@ def test_voiding_a_catch_up_restores_a_round_trip_items_baseline(session):
   assert _repairs_delta(session, ids, str(written_back.id)) == 500
 
 
-def test_an_alignment_naming_a_quickbooks_item_never_publishes(session):
-  """A-R1-3: QuickBooks already holds the change the alignment books, so the
-  close must not write it back, whether or not the author said so."""
+def test_an_alignment_naming_a_quickbooks_item_must_say_it_stays_local(session):
+  """A-R1-3 / A-R2-1: QuickBooks already holds the change the alignment books,
+  so the close must not write it back. The author says so on the entry; one
+  that would publish is refused rather than rewritten."""
   ids, item = _flagged_at_1500(session)
-  alignment = _plain_entry(
-    session, ids, 500, metadata={"resolves_reconciling_items": [_named(item, session)]}
-  )
 
+  savepoint = session.begin_nested()
+  with pytest.raises(HandlerMetadataValidationError, match="publish_to_source"):
+    _plain_entry(
+      session,
+      ids,
+      500,
+      metadata={"resolves_reconciling_items": [_named(item, session)]},
+    )
+  savepoint.rollback()
+  assert _qb_item(session).payload_drift is True
+
+  alignment = _plain_entry(
+    session,
+    ids,
+    500,
+    metadata={**_LOCAL, "resolves_reconciling_items": [_named(item, session)]},
+  )
   assert _qb_item(session).payload_drift is False
-  assert alignment.metadata_["publish_to_source"] is False
   assert not _publishes_at_close(session, str(alignment.id))
 
 
-def test_an_alignment_committed_from_capture_never_publishes(session):
+def test_an_alignment_committed_from_capture_must_say_it_stays_local(session):
   from robosystems.models.api.event_block import UpdateEventBlockRequest
   from robosystems.operations.event_block.commands import update_event_block
 
@@ -1940,43 +1957,56 @@ def test_an_alignment_committed_from_capture_never_publishes(session):
   named = _named(item, session)
   session.commit()
 
-  update_event_block(
-    session,
-    UpdateEventBlockRequest(
-      event_id=str(captured.id),
-      transition_to="committed",
-      metadata_patch={"resolves_reconciling_items": [named]},
-    ),
-    "user_test",
-    graph_id=GRAPH_ID,
-  )
+  def commit(patch: dict) -> None:
+    update_event_block(
+      session,
+      UpdateEventBlockRequest(
+        event_id=str(captured.id),
+        transition_to="committed",
+        metadata_patch={"resolves_reconciling_items": [named], **patch},
+      ),
+      "user_test",
+      graph_id=GRAPH_ID,
+    )
 
+  with pytest.raises(HandlerMetadataValidationError, match="publish_to_source"):
+    commit({})
+  session.rollback()
+  assert _qb_item(session).payload_drift is True
+
+  commit(_LOCAL)
   assert _qb_item(session).payload_drift is False
   assert not _publishes_at_close(session, str(captured.id))
 
 
-def test_an_acknowledgement_keeps_its_entry_local(session):
+def test_an_acknowledgement_naming_an_entry_that_would_publish_is_refused(session):
   """The REST acknowledge naming the entry that booked a QuickBooks change is
-  the same settlement, so that entry stays local too."""
+  the same settlement: refused while that entry would publish, and the entry
+  is left as its author wrote it."""
   ids, item = _flagged_at_1500(session)
   entry = _plain_entry(session, ids, 500)
   assert _publishes_at_close(session, str(entry.id))
 
-  resolve_reconciling_item(
-    session,
-    ResolveReconcilingItemRequest(
-      event_id=str(item.id),
-      expected_drift_detected_at=_previewed(session, str(item.id)),
-      disposition="acknowledge",
-      note="booked by hand",
-      reference_event_id=str(entry.id),
-    ),
-    "user_test",
-    graph_id=GRAPH_ID,
-  )
-  session.flush()
+  savepoint = session.begin_nested()
+  with pytest.raises(ValueError, match="publish_to_source"):
+    resolve_reconciling_item(
+      session,
+      ResolveReconcilingItemRequest(
+        event_id=str(item.id),
+        expected_drift_detected_at=_previewed(session, str(item.id)),
+        disposition="acknowledge",
+        note="booked by hand",
+        reference_event_id=str(entry.id),
+      ),
+      "user_test",
+      graph_id=GRAPH_ID,
+    )
+  savepoint.rollback()
 
-  assert not _publishes_at_close(session, str(entry.id))
+  session.refresh(entry)
+  assert "publish_to_source" not in entry.metadata_
+  assert _publishes_at_close(session, str(entry.id))
+  assert _qb_item(session).payload_drift is True
 
 
 def test_an_alignment_asking_to_publish_a_quickbooks_change_is_refused(session):
@@ -1998,12 +2028,23 @@ def test_an_alignment_asking_to_publish_a_quickbooks_change_is_refused(session):
 
 
 @pytest.mark.parametrize(
-  "reference", ["the_item", "its_catch_up", "voided", "captured", "other_entity"]
+  "reference",
+  [
+    "the_item",
+    "its_catch_up",
+    "voided",
+    "captured",
+    "other_entity",
+    "another_items_catch_up",
+    "another_items_alignment",
+    "its_previous_settlement",
+  ],
 )
 def test_an_acknowledgement_must_name_an_entry_that_booked_it(session, reference):
-  """A-R1-4: a reference is counted as the booking of the difference while it
-  stands, so it has to be one: a standing entry on the item's books, other
-  than the item and the catch-up already counted for it."""
+  """A-R1-4 / A-R2-4: a reference is counted as the booking of the difference
+  while it stands, so it has to be one: a standing entry on the item's books,
+  other than the item, and not one already counted for something else (a
+  catch-up, another item's settlement, this item's previous change)."""
   ids, item = _flagged_at_1500(session)
   if reference == "the_item":
     reference_id = str(item.id)
@@ -2015,6 +2056,15 @@ def test_an_acknowledgement_must_name_an_entry_that_booked_it(session, reference
     session.commit()
     _void(session, str(voided.id))
     reference_id = str(voided.id)
+  elif reference == "another_items_catch_up":
+    other = _flagged_other(session)
+    reference_id = _catch_up(session, str(other.id), status="posted")
+  elif reference == "another_items_alignment":
+    other = _flagged_other(session)
+    reference_id = str(_hand_alignment(session, ids, 500, [_named(other, session)]).id)
+  elif reference == "its_previous_settlement":
+    reference_id = str(_hand_alignment(session, ids, 500, [_named(item, session)]).id)
+    _qb_sync(session, 1800, "2")
   elif reference == "captured":
     captured, _envelope = create_event_block_in_session(
       session,
@@ -2141,3 +2191,311 @@ def test_deleting_one_draft_of_an_alignment_that_settled_items_is_refused(sessio
   with pytest.raises(ValueError, match="settled"):
     delete_journal_entry(session, DeleteJournalEntryRequest(entry_id=str(first.id)))
   assert _repairs_books(session, ids) == 1500
+
+
+# Round 3: refuse, don't force ────────────────────────────────────────────
+
+OTHER_TXN = "Expense_88"
+
+
+def _qb_sync_other(db, amount: int, sync_token: str) -> None:
+  """A second QuickBooks expense on the same two accounts."""
+  from robosystems.operations.extensions.loader import OLTPLoader
+
+  def other(value):
+    if isinstance(value, dict):
+      return {key: other(item) for key, item in value.items()}
+    if isinstance(value, list):
+      return [other(item) for item in value]
+    return {QB_TXN: OTHER_TXN, "77": "88"}.get(value, value)
+
+  OLTPLoader()._capture_transactions_as_events(
+    db,
+    other(_qb_expense(amount, sync_token)),
+    source="quickbooks",
+    connection_id=CONNECTION_ID,
+    created_by="sync",
+    now=datetime.now(UTC),
+  )
+  db.flush()
+
+
+def _flagged_other(db) -> Event:
+  _qb_sync_other(db, 2000, "0")
+  _qb_sync_other(db, 2500, "1")
+  other = db.query(Event).filter(Event.external_id == OTHER_TXN).one()
+  db.refresh(other)
+  assert other.payload_drift is True
+  return other
+
+
+def _bundled_lines(db, ids, cents: int) -> list[dict]:
+  """The item's change plus a 20,000 legal accrual that has nothing to do
+  with it."""
+  accrued = Element(name="Accrued Liabilities", code="2100", created_by="test")
+  legal = Element(name="Legal Fees", code="6200", created_by="test")
+  db.add_all([accrued, legal])
+  db.flush()
+  return [
+    {"element_id": ids["Repairs"], "debit_amount": cents},
+    {"element_id": ids["Checking"], "credit_amount": cents},
+    {"element_id": str(legal.id), "debit_amount": 20_000},
+    {"element_id": str(accrued.id), "credit_amount": 20_000},
+  ]
+
+
+@pytest.mark.parametrize("publish_to_source", [None, False])
+def test_an_entry_booking_more_than_the_change_cannot_settle_it(
+  session, publish_to_source
+):
+  """A-R2-1: the month-end entry books the QuickBooks edit and a 20,000
+  accrual. Naming it as the item's booking is refused, and the entry is left
+  as its author wrote it: the accrual still reaches QuickBooks."""
+  ids, item = _flagged_at_1500(session)
+  extra = {} if publish_to_source is None else {"publish_to_source": False}
+  entry = _plain_entry(
+    session,
+    ids,
+    500,
+    metadata={"line_items": _bundled_lines(session, ids, 500), **extra},
+  )
+  publishes = _publishes_at_close(session, str(entry.id))
+  assert publishes is (publish_to_source is None)
+
+  savepoint = session.begin_nested()
+  with pytest.raises(ValueError, match="cannot settle"):
+    resolve_reconciling_item(
+      session,
+      ResolveReconcilingItemRequest(
+        event_id=str(item.id),
+        expected_drift_detected_at=_previewed(session, str(item.id)),
+        disposition="acknowledge",
+        note="booked in the month-end entry",
+        reference_event_id=str(entry.id),
+      ),
+      "user_test",
+      graph_id=GRAPH_ID,
+    )
+  savepoint.rollback()
+
+  session.refresh(entry)
+  assert entry.metadata_.get("publish_to_source") is publish_to_source
+  assert _publishes_at_close(session, str(entry.id)) is publishes
+  assert _qb_item(session).payload_drift is True
+
+
+def test_an_alignment_booking_more_than_the_change_is_refused(session):
+  """A-R2-1 at the alignment door: split the entry instead."""
+  ids, item = _flagged_at_1500(session)
+
+  savepoint = session.begin_nested()
+  with pytest.raises(HandlerMetadataValidationError, match="more than"):
+    _plain_entry(
+      session,
+      ids,
+      500,
+      metadata={
+        **_LOCAL,
+        "line_items": _bundled_lines(session, ids, 500),
+        "resolves_reconciling_items": [_named(item, session)],
+      },
+    )
+  savepoint.rollback()
+  assert _qb_item(session).payload_drift is True
+
+
+def test_one_alignment_booking_two_changes_in_full_settles_both(session):
+  """The settlement check counts what an entry books against everything it
+  settles, so one alignment for two items is still one booking."""
+  ids, item = _flagged_at_1500(session)
+  other = _flagged_other(session)
+
+  _hand_alignment(session, ids, 1000, [_named(item, session), _named(other, session)])
+
+  assert _qb_item(session).payload_drift is False
+  session.refresh(other)
+  assert other.payload_drift is False
+  _qb_sync(session, 1800, "2")
+  assert _repairs_delta(session, ids, str(_qb_item(session).id)) == 300
+
+
+@pytest.mark.parametrize(
+  "successor", ["another_items_alignment", "another_items_catch_up", "books_beyond"]
+)
+def test_a_successor_already_counted_cannot_take_the_settlement(session, successor):
+  """A-R2-3: the successor is counted toward the item from the move on, so it
+  has to book the item's difference and nothing it already books for
+  something else, or anything beside it."""
+  ids, item = _flagged_at_1500(session)
+  first = _hand_alignment(session, ids, 500, [_named(item, session)])
+  if successor == "another_items_alignment":
+    other = _flagged_other(session)
+    successor_id = str(_hand_alignment(session, ids, 500, [_named(other, session)]).id)
+  elif successor == "another_items_catch_up":
+    other = _flagged_other(session)
+    successor_id = _catch_up(session, str(other.id))
+  else:
+    successor_id = str(
+      _plain_entry(
+        session,
+        ids,
+        500,
+        metadata={**_LOCAL, "line_items": _bundled_lines(session, ids, 500)},
+      ).id
+    )
+  session.commit()
+
+  with pytest.raises(ValueError, match="cannot take that over"):
+    _supersede(session, str(first.id), successor_id)
+  session.rollback()
+
+  item = _qb_item(session)
+  assert item.payload_drift is False
+  assert item.metadata_["reconciliation_history"][-1]["reference_event_id"] == str(
+    first.id
+  )
+  assert session.get(Event, str(first.id)).status != "superseded"
+
+
+def test_a_successor_that_would_publish_cannot_take_a_quickbooks_settlement(session):
+  ids, item = _flagged_at_1500(session)
+  first = _hand_alignment(session, ids, 500, [_named(item, session)])
+  successor = _plain_entry(session, ids, 500)
+  session.commit()
+
+  with pytest.raises(ValueError, match="publish_to_source"):
+    _supersede(session, str(first.id), str(successor.id))
+  session.rollback()
+
+  session.refresh(successor)
+  assert "publish_to_source" not in successor.metadata_
+  assert session.get(Event, str(first.id)).status != "superseded"
+
+
+@pytest.mark.parametrize("value", [True, None])
+def test_an_entry_that_settled_a_quickbooks_change_cannot_be_set_to_publish(
+  session, value
+):
+  """A-R2-5: the flag is what keeps the change out of QuickBooks, which
+  already holds it, so it cannot be patched back while the entry settles."""
+  from robosystems.models.api.event_block import UpdateEventBlockRequest
+  from robosystems.operations.event_block.commands import update_event_block
+
+  ids, item = _flagged_at_1500(session)
+  alignment = _hand_alignment(session, ids, 500, [_named(item, session)])
+  session.commit()
+
+  with pytest.raises(ValueError, match="publish"):
+    update_event_block(
+      session,
+      UpdateEventBlockRequest(
+        event_id=str(alignment.id), metadata_patch={"publish_to_source": value}
+      ),
+      "user_test",
+      graph_id=GRAPH_ID,
+    )
+  session.rollback()
+
+  assert not _publishes_at_close(session, str(alignment.id))
+  assert _qb_item(session).payload_drift is False
+
+
+def test_a_moved_round_trip_settlement_keeps_the_decisions_after_it(session):
+  """A-R2-2: a round trip acknowledged by A, edited again in QuickBooks and
+  caught up. Voiding A is refused (a decision came after it); superseding A
+  and voiding the successor is the same retraction and is refused too, with
+  a remedy that stays local (A-R2-7)."""
+  from robosystems.operations.event_block.qb_writeback import ROUND_TRIP_BASELINE_KEY
+  from robosystems.operations.extensions.loader import _round_trip_update
+  from robosystems.operations.roboledger.commands.reconciling_items import (
+    SettlementNotReopenableError,
+  )
+
+  ids = _qb_accounts(session)
+
+  def shape(amount: int) -> dict:
+    return {
+      "posting_dates": ["2026-07-09"],
+      "lines": [[QB_CASH, 0, amount], [QB_REPAIRS, amount, 0]],
+    }
+
+  written_back = Event(
+    entity_id=PARENT_ENTITY_ID,
+    event_type="journal_entry_recorded",
+    event_category="adjustment",
+    source="manual",
+    status="fulfilled",
+    occurred_at=datetime(2026, 7, 9),
+    created_by="user_test",
+    payload_drift=True,
+    metadata_={
+      "qb_external_id": "303",
+      "qb_sync_confirmed_at": "2026-07-10T00:00:00+00:00",
+      ROUND_TRIP_BASELINE_KEY: {"303": shape(1000)},
+      "drift_payload": {
+        "round_trip": {
+          "qb_id": "303",
+          "entry_ids": [],
+          "baseline": shape(1000),
+          "accepted": shape(1500),
+        },
+        "entries": [],
+        "connection_id": CONNECTION_ID,
+      },
+      "drift_detected_at": "2026-08-20T03:32:00+00:00",
+    },
+  )
+  session.add(written_back)
+  session.flush()
+  first = _hand_alignment(session, ids, 500, [_named(written_back, session)])
+  session.commit()
+
+  session.refresh(written_back)
+  metadata, change = _round_trip_update(
+    written_back,
+    {
+      "303": {
+        "entries": [
+          {
+            "external_id": "303",
+            "memo": "",
+            "posting_date": date(2026, 7, 9),
+            "line_items": [
+              {
+                "element_external_id": QB_CASH,
+                "debit_amount": 0,
+                "credit_amount": 1800,
+              },
+              {
+                "element_external_id": QB_REPAIRS,
+                "debit_amount": 1800,
+                "credit_amount": 0,
+              },
+            ],
+          }
+        ]
+      }
+    },
+    session,
+    connection_id=CONNECTION_ID,
+    now=datetime.now(UTC),
+  )
+  assert change == "flag"
+  written_back.metadata_ = metadata
+  written_back.payload_drift = True
+  session.flush()
+  _catch_up(session, str(written_back.id))
+  session.commit()
+
+  successor = _plain_entry(session, ids, 500, metadata=_LOCAL)
+  session.commit()
+  _supersede(session, str(first.id), str(successor.id))
+  session.commit()
+
+  with pytest.raises(SettlementNotReopenableError, match="publish_to_source: false"):
+    _void(session, str(successor.id))
+  session.rollback()
+
+  session.refresh(written_back)
+  assert written_back.payload_drift is False
+  assert written_back.metadata_[ROUND_TRIP_BASELINE_KEY]["303"] == shape(1800)
