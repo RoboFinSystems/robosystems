@@ -87,6 +87,17 @@ run_coordinator:
       - key: "edgar"
         limit: 1
 
+# Run monitoring - fail runs whose process died (a container restart mid-run)
+# so they stop holding the two run slots. DefaultRunLauncher can't check worker
+# health, so a dead STARTED run is caught only by max_runtime_seconds; a job
+# that legitimately runs longer sets the dagster/max_runtime tag.
+run_monitoring:
+  enabled: true
+  poll_interval_seconds: 30
+  start_timeout_seconds: 300
+  cancel_timeout_seconds: 300
+  max_runtime_seconds: 21600 # 6 hours
+
 # Telemetry - disable for privacy
 telemetry:
   enabled: false
