@@ -112,16 +112,64 @@ def scrub_payload_keys(value: Any) -> Any:
   return value
 
 
+def _release_unposted_effects(
+  session: Session, event_ids: list[str]
+) -> tuple[list[str], int]:
+  """Delete the draft entries and unposted transactions these events left.
+
+  A voided line keeps its draft, and the close skips it only while the event
+  exists; tenant schemas have no FK to refuse deleting the event first.
+  Returns the ids that now own no ledger rows, and the drafts deleted.
+  """
+  from sqlalchemy import delete, select
+
+  from robosystems.models.extensions.roboledger.entry import Entry
+  from robosystems.models.extensions.roboledger.transaction import Transaction
+
+  if not event_ids:
+    return [], 0
+  drafts = session.execute(
+    delete(Entry)
+    .where(Entry.triggered_by_event_id.in_(event_ids), Entry.status == "draft")
+    .execution_options(synchronize_session=False)
+  )
+  session.execute(
+    delete(Transaction)
+    .where(
+      Transaction.triggered_by_event_id.in_(event_ids),
+      Transaction.status != "posted",
+      Transaction.id.not_in(
+        select(Entry.transaction_id).where(Entry.transaction_id.is_not(None))
+      ),
+    )
+    .execution_options(synchronize_session=False)
+  )
+  owners = set(
+    session.execute(
+      select(Entry.triggered_by_event_id)
+      .where(Entry.triggered_by_event_id.in_(event_ids))
+      .union(
+        select(Transaction.triggered_by_event_id).where(
+          Transaction.triggered_by_event_id.in_(event_ids)
+        )
+      )
+    )
+    .scalars()
+    .all()
+  )
+  return [i for i in event_ids if i not in owners], int(drafts.rowcount or 0)
+
+
 def purge_bank_feed(
   session: Session, *, source: str, connection_id: str
 ) -> dict[str, int]:
   """Delete what a bank feed captured and scrub what it left on posted rows.
 
   What the bank's data agreement requires on disconnect: unposted captured
-  events are hard-deleted; accepted events keep their accounting content but
-  lose the provider's payload keys and deep link; unreferenced counterparties
-  the feed created are deleted; chart-account links are cleared. Flushes; the
-  caller commits.
+  events are hard-deleted with any draft a voided line left; accepted events
+  keep their accounting content but lose the provider's payload keys and deep
+  link; unreferenced counterparties the feed created are deleted; chart-account
+  links are cleared. Flushes; the caller commits.
 
   Strictly scoped to ``connection_id``, even though only one live connection
   per provider is allowed today.
@@ -143,9 +191,12 @@ def purge_bank_feed(
     .scalars()
     .all()
   )
-  unposted_ids = [
-    str(event.id) for event in feed_events if event.status in _UNPOSTED_STATUSES
-  ]
+  # An event that still owns ledger rows once its drafts are gone has landed
+  # history: it is scrubbed below like any posted line, never deleted.
+  unposted_ids, drafts_deleted = _release_unposted_effects(
+    session,
+    [str(event.id) for event in feed_events if event.status in _UNPOSTED_STATUSES],
+  )
   if unposted_ids:
     session.execute(
       delete(event_dimensions).where(event_dimensions.c.event_id.in_(unposted_ids))
@@ -205,6 +256,7 @@ def purge_bank_feed(
 
   return {
     "events_deleted": len(unposted_ids),
+    "drafts_deleted": drafts_deleted,
     "events_scrubbed": scrubbed,
     "agents_deleted": len(removable),
     "accounts_unlinked": len(linked),
