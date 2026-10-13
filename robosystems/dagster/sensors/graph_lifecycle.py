@@ -2,9 +2,12 @@
 retention, and reap stalled provisioning."""
 
 from dagster import (
+  DagsterRunStatus,
   DefaultSensorStatus,
   RunRequest,
+  RunsFilter,
   SensorEvaluationContext,
+  SkipReason,
   sensor,
 )
 
@@ -17,6 +20,27 @@ from robosystems.logger import get_logger
 
 logger = get_logger(__name__)
 
+_UNFINISHED = [
+  DagsterRunStatus.QUEUED,
+  DagsterRunStatus.NOT_STARTED,
+  DagsterRunStatus.STARTING,
+  DagsterRunStatus.STARTED,
+  DagsterRunStatus.CANCELING,
+]
+
+
+def _unfinished_run(
+  context: SensorEvaluationContext, job_name: str
+) -> SkipReason | None:
+  """A skip while a run of the job is still queued or running. Each tick's
+  run key is new, so without it a backed-up queue gains a duplicate every
+  tick, and a slow run is joined by a second over the same graphs."""
+  if context.instance.get_run_ids(
+    RunsFilter(job_name=job_name, statuses=_UNFINISHED), limit=1
+  ):
+    return SkipReason(f"A {job_name} run is still queued or running")
+  return None
+
 
 @sensor(
   job=suspend_expired_graphs_job,
@@ -27,6 +51,11 @@ logger = get_logger(__name__)
 def expired_graph_subscription_sensor(context: SensorEvaluationContext):
   """Suspend active graphs whose subscription is terminal (canceled or failed)
   and past ends_at, or was canceled immediately."""
+  skip = _unfinished_run(context, suspend_expired_graphs_job.name)
+  if skip is not None:
+    yield skip
+    return
+
   from datetime import UTC, datetime
 
   from sqlalchemy import or_
@@ -94,6 +123,11 @@ def expired_graph_subscription_sensor(context: SensorEvaluationContext):
 def suspended_graph_deprovisioning_sensor(context: SensorEvaluationContext):
   """Deprovision suspended graphs past retention (immediate cancels bypass it),
   and retry teardowns stranded part-way."""
+  skip = _unfinished_run(context, deprovision_suspended_graphs_job.name)
+  if skip is not None:
+    yield skip
+    return
+
   from datetime import UTC, datetime, timedelta
 
   from sqlalchemy import or_
@@ -209,6 +243,11 @@ def stalled_provisioning_sensor(context: SensorEvaluationContext):
   Stalled `upgrading` rows are out of scope: the graph is serving, so neither
   write-off nor forcing active is safe; that needs an operator.
   """
+  skip = _unfinished_run(context, reap_stalled_provisioning_job.name)
+  if skip is not None:
+    yield skip
+    return
+
   from datetime import UTC, datetime, timedelta
 
   from robosystems.database import session as db_session_factory

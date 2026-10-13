@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
-from dagster import build_sensor_context
+from dagster import DagsterInstance, build_sensor_context
 
 from robosystems.dagster.sensors.graph_lifecycle import (
   suspended_graph_deprovisioning_sensor,
@@ -34,7 +34,8 @@ def _sensor_graph_ids(test_db) -> list[str]:
   factory = MagicMock(side_effect=lambda: test_db)
   factory.remove = MagicMock()
   with patch("robosystems.database.session", factory):
-    runs = list(suspended_graph_deprovisioning_sensor(build_sensor_context()))
+    context = build_sensor_context(instance=DagsterInstance.ephemeral())
+    runs = list(suspended_graph_deprovisioning_sensor(context))
   if not runs:
     return []
   return runs[0].run_config["ops"]["deprovision_suspended_graphs"]["config"][

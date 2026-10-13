@@ -2,10 +2,14 @@
 
 from unittest.mock import MagicMock, patch
 
-from dagster import build_sensor_context
+import pytest
+from dagster import DagsterInstance, DagsterRunStatus, SkipReason, build_sensor_context
+from dagster._core.storage.dagster_run import DagsterRun
+from dagster._core.utils import make_new_run_id
 
 from robosystems.dagster.sensors.graph_lifecycle import (
   expired_graph_subscription_sensor,
+  stalled_provisioning_sensor,
   suspended_graph_deprovisioning_sensor,
 )
 
@@ -25,7 +29,7 @@ class TestSuspendedGraphDeprovisioningSensor:
         mock_sub
       ]
 
-      context = build_sensor_context()
+      context = build_sensor_context(instance=DagsterInstance.ephemeral())
       runs = list(suspended_graph_deprovisioning_sensor(context))
 
       assert len(runs) == 1
@@ -39,7 +43,7 @@ class TestSuspendedGraphDeprovisioningSensor:
       mock_db.return_value = mock_session
       mock_session.query.return_value.join.return_value.filter.return_value.all.return_value = []
 
-      context = build_sensor_context()
+      context = build_sensor_context(instance=DagsterInstance.ephemeral())
       runs = list(suspended_graph_deprovisioning_sensor(context))
 
       assert len(runs) == 0
@@ -59,7 +63,7 @@ class TestSuspendedGraphDeprovisioningSensor:
         ("kg_stranded",)
       ]
 
-      context = build_sensor_context()
+      context = build_sensor_context(instance=DagsterInstance.ephemeral())
       runs = list(suspended_graph_deprovisioning_sensor(context))
 
       assert len(runs) == 1
@@ -79,7 +83,7 @@ class TestSuspendedGraphDeprovisioningSensor:
         ("kg_both",)
       ]
 
-      context = build_sensor_context()
+      context = build_sensor_context(instance=DagsterInstance.ephemeral())
       runs = list(suspended_graph_deprovisioning_sensor(context))
 
       assert len(runs) == 1
@@ -93,7 +97,7 @@ class TestSuspendedGraphDeprovisioningSensor:
       mock_db.return_value = mock_session
       mock_session.query.return_value.join.return_value.filter.return_value.all.return_value = []
 
-      context = build_sensor_context()
+      context = build_sensor_context(instance=DagsterInstance.ephemeral())
       list(suspended_graph_deprovisioning_sensor(context))
 
       mock_db.remove.assert_called_once()
@@ -113,7 +117,7 @@ class TestSuspendedGraphDeprovisioningSensor:
         mock_sub2,
       ]
 
-      context = build_sensor_context()
+      context = build_sensor_context(instance=DagsterInstance.ephemeral())
       runs = list(suspended_graph_deprovisioning_sensor(context))
 
       assert len(runs) == 1
@@ -129,7 +133,7 @@ class TestSuspendedGraphDeprovisioningSensor:
       mock_db.return_value = mock_session
       mock_session.query.return_value.join.return_value.filter.return_value.all.return_value = []
 
-      context = build_sensor_context()
+      context = build_sensor_context(instance=DagsterInstance.ephemeral())
       list(suspended_graph_deprovisioning_sensor(context))
 
       filter_call = mock_session.query.return_value.join.return_value.filter
@@ -165,7 +169,7 @@ class TestExpiredGraphSubscriptionSensor:
         mock_sub
       ]
 
-      context = build_sensor_context()
+      context = build_sensor_context(instance=DagsterInstance.ephemeral())
       runs = list(expired_graph_subscription_sensor(context))
 
       assert len(runs) == 1
@@ -179,7 +183,7 @@ class TestExpiredGraphSubscriptionSensor:
       mock_db.return_value = mock_session
       mock_session.query.return_value.join.return_value.filter.return_value.all.return_value = []
 
-      context = build_sensor_context()
+      context = build_sensor_context(instance=DagsterInstance.ephemeral())
       runs = list(expired_graph_subscription_sensor(context))
 
       assert len(runs) == 0
@@ -191,7 +195,7 @@ class TestExpiredGraphSubscriptionSensor:
       mock_db.return_value = mock_session
       mock_session.query.return_value.join.return_value.filter.return_value.all.return_value = []
 
-      context = build_sensor_context()
+      context = build_sensor_context(instance=DagsterInstance.ephemeral())
       list(expired_graph_subscription_sensor(context))
 
       mock_db.remove.assert_called_once()
@@ -207,7 +211,7 @@ class TestExpiredGraphSubscriptionSensor:
       mock_db.return_value = mock_session
       mock_session.query.return_value.join.return_value.filter.return_value.all.return_value = []
 
-      context = build_sensor_context()
+      context = build_sensor_context(instance=DagsterInstance.ephemeral())
       list(expired_graph_subscription_sensor(context))
 
       filter_call = mock_session.query.return_value.join.return_value.filter
@@ -245,7 +249,7 @@ class TestStalledProvisioningSensor:
       mock_db.return_value = mock_session
       mock_session.query.return_value.filter.return_value.all.return_value = [mock_sub]
 
-      context = build_sensor_context()
+      context = build_sensor_context(instance=DagsterInstance.ephemeral())
       runs = list(stalled_provisioning_sensor(context))
 
       assert len(runs) == 1
@@ -262,7 +266,7 @@ class TestStalledProvisioningSensor:
       mock_db.return_value = mock_session
       mock_session.query.return_value.filter.return_value.all.return_value = []
 
-      context = build_sensor_context()
+      context = build_sensor_context(instance=DagsterInstance.ephemeral())
       assert list(stalled_provisioning_sensor(context)) == []
 
   def test_session_cleanup(self):
@@ -275,7 +279,7 @@ class TestStalledProvisioningSensor:
       mock_db.return_value = mock_session
       mock_session.query.return_value.filter.return_value.all.return_value = []
 
-      context = build_sensor_context()
+      context = build_sensor_context(instance=DagsterInstance.ephemeral())
       list(stalled_provisioning_sensor(context))
 
       mock_db.remove.assert_called_once()
@@ -361,3 +365,40 @@ class TestReapStalledProvisioning:
 
     assert result["reaped_count"] == 0
     assert result["total_requested"] == 1
+
+
+@pytest.mark.parametrize(
+  "sensor_fn",
+  [
+    expired_graph_subscription_sensor,
+    suspended_graph_deprovisioning_sensor,
+    stalled_provisioning_sensor,
+  ],
+)
+class TestSkipWhileARunIsUnfinished:
+  """Each tick's run key is new, so a sensor that requested regardless would
+  queue a duplicate every tick behind one that has not finished."""
+
+  def _context_with_run(self, sensor_fn, status):
+    instance = DagsterInstance.ephemeral()
+    instance.add_run(
+      DagsterRun(job_name=sensor_fn.job_name, run_id=make_new_run_id(), status=status)
+    )
+    return build_sensor_context(instance=instance)
+
+  @pytest.mark.parametrize(
+    "status", [DagsterRunStatus.NOT_STARTED, DagsterRunStatus.STARTED]
+  )
+  def test_skips_without_reading_the_database(self, sensor_fn, status):
+    with patch("robosystems.database.session") as mock_db:
+      results = list(sensor_fn(self._context_with_run(sensor_fn, status)))
+
+    assert len(results) == 1 and isinstance(results[0], SkipReason)
+    mock_db.assert_not_called()
+
+  def test_a_finished_run_does_not_hold_the_next(self, sensor_fn):
+    context = self._context_with_run(sensor_fn, DagsterRunStatus.SUCCESS)
+    with patch("robosystems.database.session") as mock_db:
+      list(sensor_fn(context))
+
+    mock_db.assert_called_once()
