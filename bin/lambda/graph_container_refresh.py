@@ -213,14 +213,22 @@ def _in_flight_command(instance_id: str) -> str | None:
   return None
 
 
+def _note(state: dict[str, Any], message: str) -> None:
+  """Record a walk event in CloudWatch and in the step's `log`.
+
+  The caller is a public CI log, so it prints `log` only when the walk fails;
+  CloudWatch keeps the per-instance record either way.
+  """
+  logger.info(message)
+  state["log"].append(message)
+
+
 def _dispatch(state: dict[str, Any], instance_id: str) -> None:
   command_id = _in_flight_command(instance_id)
   if command_id:
     state["current"] = {"instance_id": instance_id, "command_id": command_id}
     state["phase"] = "running"
-    state["log"].append(
-      f"{instance_id}: refresh already in flight (command {command_id})"
-    )
+    _note(state, f"{instance_id}: refresh already in flight (command {command_id})")
     return
 
   response = ssm.send_command(
@@ -233,7 +241,7 @@ def _dispatch(state: dict[str, Any], instance_id: str) -> None:
   command_id = response["Command"]["CommandId"]
   state["current"] = {"instance_id": instance_id, "command_id": command_id}
   state["phase"] = "running"
-  state["log"].append(f"{instance_id}: refreshing (command {command_id})")
+  _note(state, f"{instance_id}: refreshing (command {command_id})")
 
 
 def _dispatch_next(state: dict[str, Any]) -> None:
@@ -249,9 +257,10 @@ def _dispatch_next(state: dict[str, Any]) -> None:
     busy = None if state["force_ignore_busy"] else _busy(instance_id)
     if busy:
       if instance_id not in state["busy"]:
-        state["log"].append(
+        _note(
+          state,
           f"{instance_id}: busy ({busy['count']} lease(s), latest {busy['kind']} "
-          f"since {busy['last_at'] or 'unknown'}) — coming back to it"
+          f"since {busy['last_at'] or 'unknown'}) — coming back to it",
         )
       state["busy"][instance_id] = busy
       passed.append(instance_id)
@@ -264,8 +273,9 @@ def _dispatch_next(state: dict[str, Any]) -> None:
   state["queue"] = passed
   if time.time() >= state["deadline"]:
     state["phase"] = "deferred"
-    state["log"].append(
-      f"Deadline reached with {len(passed)} instance(s) still busy: {', '.join(passed)}"
+    _note(
+      state,
+      f"Deadline reached with {len(passed)} instance(s) still busy: {', '.join(passed)}",
     )
   else:
     state["phase"] = "waiting"
@@ -295,9 +305,7 @@ def _read_current(state: dict[str, Any]) -> bool:
 
   if result == DEFERRED_RESULT:
     state["queue"].append(instance_id)
-    state["log"].append(
-      f"{instance_id}: became busy before the refresh — coming back to it"
-    )
+    _note(state, f"{instance_id}: became busy before the refresh — coming back to it")
     return True
 
   if result in SKIP_RESULTS or inv_status == "Success":
@@ -305,7 +313,7 @@ def _read_current(state: dict[str, Any]) -> bool:
     state["outcomes"].append(
       {"instance_id": instance_id, "result": result or "unknown"}
     )
-    state["log"].append(f"{instance_id}: {result or 'succeeded (no REFRESH_RESULT)'}")
+    _note(state, f"{instance_id}: {result or 'succeeded (no REFRESH_RESULT)'}")
     return True
 
   code = inv.get("ResponseCode")
@@ -318,9 +326,10 @@ def _read_current(state: dict[str, Any]) -> bool:
     "output_tail": output[-FAILURE_OUTPUT_TAIL_CHARS:],
   }
   state["phase"] = "failed"
-  state["log"].append(
+  _note(
+    state,
     f"{instance_id}: FAILED ({inv_status}/{inv.get('StatusDetails', '')}) — "
-    f"stopping; {len(state['queue'])} instance(s) not attempted"
+    f"stopping; {len(state['queue'])} instance(s) not attempted",
   )
   return True
 
@@ -367,15 +376,15 @@ def start(event: dict[str, Any]) -> dict[str, Any]:
     "log": [],
   }
   total = len(state["queue"])
-  logger.info(f"Refreshing {total} {node_type} instance(s) in {environment}")
-  state["log"].append(
-    f"Refreshing {total} {node_type} instance(s) in {environment}, one at a time"
+  _note(
+    state, f"Refreshing {total} {node_type} instance(s) in {environment}, one at a time"
   )
   if instance_ids:
     gone = [iid for iid in instance_ids if iid not in state["queue"]]
     if gone:
-      state["log"].append(
-        f"Not running or not a {node_type} in {environment}, skipped: {', '.join(gone)}"
+      _note(
+        state,
+        f"Not running or not a {node_type} in {environment}, skipped: {', '.join(gone)}",
       )
   _dispatch_next(state)
   return {"statusCode": 200, **state}

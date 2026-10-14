@@ -419,8 +419,6 @@ jobs:
               MIN_INSTANCES="${!MIN_VAR_NAME:-1}"
               MAX_INSTANCES="${!MAX_VAR_NAME:-1}"
 
-              echo "  Scaling for ${WRITER_NAME}: min=$MIN_INSTANCES, max=$MAX_INSTANCES"
-
               # Build the matrix entry from writer config with nested instance specs
               MATRIX_ENTRY=$(echo "$writer" | jq --arg min "$MIN_INSTANCES" --arg max "$MAX_INSTANCES" '{
                 name: .name,
@@ -449,10 +447,9 @@ jobs:
 
           echo "lbug_matrix=$LBUG_MATRIX" >> $GITHUB_OUTPUT
 
-          # Debug output
+          # Tier names only: the entries carry capacity, kept out of this public log.
           echo ""
-          echo "Graph writer matrix:"
-          echo "$LBUG_FILTERED" | jq '.'
+          echo "Graph writer matrix: $(echo "$LBUG_FILTERED" | jq -r '[.[].tier] | join(", ")')"
 
           # Summary
           LBUG_COUNT=$(echo "$LBUG_FILTERED" | jq 'length')
@@ -510,6 +507,8 @@ jobs:
           sleep 60
 
   deploy-graph-ladybug:
+    # Named by tier alone: the default name lists every matrix value, capacity included.
+    name: deploy-graph-ladybug (${{ matrix.tier }})
     needs: [prepare-writer-matrix, resolve-ami, pause-graph-writes]
     if: >-
       !cancelled()

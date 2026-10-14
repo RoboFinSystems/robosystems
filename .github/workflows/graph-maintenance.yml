@@ -266,8 +266,7 @@ jobs:
     # sequentially — so 2 x 20m, plus slack for dispatch and summarising.
     timeout-minutes: 50
     outputs:
-      instances_cleaned: ${{ steps.cleanup.outputs.instances_cleaned }}
-      space_freed: ${{ steps.cleanup.outputs.space_freed }}
+      results: ${{ steps.cleanup.outputs.results }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -292,7 +291,8 @@ jobs:
             ENVS="staging prod"
           fi
 
-          TOTAL=0
+          # Fleet size stays out of this public log: report per-environment
+          # status, and point at the SSM command for the per-instance detail.
           SUMMARY=""
 
           for ENV in $ENVS; do
@@ -325,17 +325,18 @@ jobs:
               sleep 20
             done
 
-            OK=$(aws ssm list-command-invocations --command-id "$CMD" --region "$REGION" \
-              --query "length(CommandInvocations[?Status=='Success'])" --output text 2>/dev/null || echo 0)
             BAD=$(aws ssm list-command-invocations --command-id "$CMD" --region "$REGION" \
               --query "length(CommandInvocations[?Status=='Failed' || Status=='TimedOut'])" --output text 2>/dev/null || echo 0)
-            echo "  ✅ ${OK} cleaned, ${BAD} failed"
-            TOTAL=$(( TOTAL + OK ))
-            SUMMARY="${SUMMARY}\n${ENV}: ${OK} cleaned, ${BAD} failed"
+            if [ "${BAD:-0}" = "0" ]; then
+              echo "  ✅ ${ENV} cleaned"
+              SUMMARY="${SUMMARY}\n${ENV}: cleaned"
+            else
+              echo "::warning::${ENV} docker cleanup failed on some writers; see SSM command ${CMD}"
+              SUMMARY="${SUMMARY}\n${ENV}: failures, see SSM command ${CMD}"
+            fi
           done
 
-          echo "instances_cleaned=$TOTAL" >> $GITHUB_OUTPUT
-          echo "space_freed<<EOF" >> $GITHUB_OUTPUT
+          echo "results<<EOF" >> $GITHUB_OUTPUT
           echo -e "$SUMMARY" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
@@ -446,13 +447,11 @@ jobs:
           echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Trigger | ${{ github.event_name }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Instances Cleaned | ${{ needs.docker-cleanup.outputs.instances_cleaned || '0' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Result | ${{ needs.docker-cleanup.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          if [ -n "${{ needs.docker-cleanup.outputs.space_freed }}" ]; then
-            echo "### Disk Status After Cleanup" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ needs.docker-cleanup.outputs.results }}" ]; then
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            echo "${{ needs.docker-cleanup.outputs.space_freed }}" >> $GITHUB_STEP_SUMMARY
+            echo "${{ needs.docker-cleanup.outputs.results }}" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           fi
           echo "" >> $GITHUB_STEP_SUMMARY

@@ -120,7 +120,7 @@ jobs:
           # One tier when explicitly targeted; otherwise every writer tier the
           # action iterates. ladybug-shared is skipped before its busy wait, so it
           # contributes nothing — keep this count in step with TIER_STACKS minus
-          # SHARED_TIERS in .github/actions/refresh-graph-asg/action.yml.
+          # the ladybug-shared skip in .github/actions/refresh-graph-asg/action.yml.
           if [ -n "$TIER" ]; then TIERS=1; else TIERS=3; fi
 
           # The busy-lease gate runs per tier in both modes and cannot be
