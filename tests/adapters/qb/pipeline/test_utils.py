@@ -521,7 +521,7 @@ class TestGetPipelineWorkDir:
 @pytest.mark.unit
 class TestWriteExtractParquet:
   def test_writes_all_files(self, tmp_path):
-    from unittest.mock import patch
+    import pyarrow.parquet as pq
 
     from robosystems.adapters.quickbooks.pipeline.utils import write_extract_parquet
 
@@ -558,34 +558,36 @@ class TestWriteExtractParquet:
     ]
     company_info = [{"Id": "1", "CompanyName": "Acme"}]
 
-    # Mock to_parquet to avoid pyarrow/DuckDB filesystem conflict in full suite
-    with patch("pandas.core.frame.DataFrame.to_parquet") as mock_parquet:
-      write_extract_parquet(
-        output_dir, accounts, journal_entries, journal_lines, company_info
-      )
+    write_extract_parquet(
+      output_dir, accounts, journal_entries, journal_lines, company_info
+    )
 
     # 4 original files (accounts, journal_entries, journal_lines,
     # company_info) + 6 first-batch (customers, vendors, employees, invoice_headers,
     # bill_headers, payment_headers) + 2 second-batch (bill_payment_headers,
     # sales_receipt_headers) + 1 third-batch (purchase_headers) = 13 total.
-    assert mock_parquet.call_count == 13
-    assert output_dir.exists()
+    written = sorted(f.name for f in output_dir.glob("*.parquet"))
+    assert len(written) == 13, written
+    # Read back through a handle too: the writer never resolves a path.
+    with open(output_dir / "raw_accounts.parquet", "rb") as f:
+      table = pq.read_table(f)
+    assert table.num_rows == 1
+    assert table.column("Name").to_pylist() == ["Cash"]
+    with open(output_dir / "raw_customers.parquet", "rb") as f:
+      assert pq.read_table(f).num_rows == 0
 
   def test_creates_output_directory(self, tmp_path):
-    from unittest.mock import patch
-
     from robosystems.adapters.quickbooks.pipeline.utils import write_extract_parquet
 
     output_dir = tmp_path / "nested" / "extract"
 
-    with patch("pandas.core.frame.DataFrame.to_parquet"):
-      write_extract_parquet(
-        output_dir,
-        [{"Id": "1"}],
-        [],
-        [],
-        [{"Id": "1"}],
-      )
+    write_extract_parquet(
+      output_dir,
+      [{"Id": "1"}],
+      [],
+      [],
+      [{"Id": "1"}],
+    )
 
     assert output_dir.exists()
 
