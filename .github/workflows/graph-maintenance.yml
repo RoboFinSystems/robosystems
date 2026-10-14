@@ -325,14 +325,16 @@ jobs:
               sleep 20
             done
 
+            # "cleaned" only on a positive answer: anything not Success, or a
+            # query that itself failed, reads as unconfirmed.
             BAD=$(aws ssm list-command-invocations --command-id "$CMD" --region "$REGION" \
-              --query "length(CommandInvocations[?Status=='Failed' || Status=='TimedOut'])" --output text 2>/dev/null || echo 0)
-            if [ "${BAD:-0}" = "0" ]; then
+              --query "length(CommandInvocations[?Status!='Success'])" --output text 2>/dev/null) || BAD=""
+            if [ "$BAD" = "0" ]; then
               echo "  ✅ ${ENV} cleaned"
               SUMMARY="${SUMMARY}\n${ENV}: cleaned"
             else
-              echo "::warning::${ENV} docker cleanup failed on some writers; see SSM command ${CMD}"
-              SUMMARY="${SUMMARY}\n${ENV}: failures, see SSM command ${CMD}"
+              echo "::warning::${ENV} docker cleanup not confirmed on every writer; see SSM command ${CMD}"
+              SUMMARY="${SUMMARY}\n${ENV}: not confirmed, see SSM command ${CMD}"
             fi
           done
 
