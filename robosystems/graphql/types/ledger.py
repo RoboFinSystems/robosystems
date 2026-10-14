@@ -166,6 +166,9 @@ from robosystems.models.api.extensions.taxonomies import (
   ElementResponse as PydanticElementResponse,
 )
 from robosystems.models.api.extensions.taxonomies import (
+  FlowCandidate as PydanticFlowCandidate,
+)
+from robosystems.models.api.extensions.taxonomies import (
   MappedTrialBalanceResponse as PydanticMappedTrialBalanceResponse,
 )
 from robosystems.models.api.extensions.taxonomies import (
@@ -626,6 +629,12 @@ class ElementList:
 @pydantic_type(model=PydanticSuggestedTarget, all_fields=True)
 class SuggestedTarget:
   """A suggested mapping target from the reporting taxonomy."""
+
+
+@pydantic_type(model=PydanticFlowCandidate, all_fields=True)
+class FlowCandidate:
+  """A cash flow row a line may be tagged with: the flow that overrides the
+  account's default on the cash flow and equity statements."""
 
 
 @pydantic_type(model=PydanticUnmappedElementResponse, all_fields=True)

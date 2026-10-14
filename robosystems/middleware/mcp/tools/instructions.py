@@ -139,8 +139,9 @@ def build_instructions(
         "capital contribution, an equipment purchase) also gets "
         "`classified_flow_qname` (e.g. `rs-gaap:ProceedsFromIssuanceOfLongTermDebt`), "
         "the override of the account's default flow that the cash flow and "
-        "equity statements read. It can be set on a posted line too: that "
-        "re-tags it in place."
+        "equity statements read. The rows this company's statement offers "
+        "are `flowCandidates(entityId)` over `query-graphql`. It can be set "
+        "on a posted line too: that re-tags it in place."
       ),
       (
         "- Post it → `transition_to='committed'` (a person, or you when "
