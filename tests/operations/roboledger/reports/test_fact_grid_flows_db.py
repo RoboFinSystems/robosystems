@@ -215,3 +215,21 @@ def test_an_untagged_entry_takes_the_accounts_default(tenant):
 def test_an_accrual_moves_no_cash_and_takes_no_flow(tenant):
   _post(tenant, [("note", 30_00, 0, None), ("equity", 0, 30_00, None)])
   assert _flows(tenant) == {}
+
+
+def test_an_account_line_shared_by_a_tagged_and_an_untagged_cash_line_stays_out(
+  tenant,
+):
+  """A hand-authored entry: one account line against two cash lines, one of
+  them tagged. The untagged lines do not balance on their own, so nothing
+  says how much of the account line the tag covers; the fallback stays out
+  and only the explicit pass reports (the rest is the operating plug)."""
+  _post(
+    tenant,
+    [
+      ("cash", 100_00, 0, "note_flow"),
+      ("cash", 50_00, 0, None),
+      ("note", 0, 150_00, None),
+    ],
+  )
+  assert _flows(tenant) == {NOTE_PROCEEDS: 100.0}

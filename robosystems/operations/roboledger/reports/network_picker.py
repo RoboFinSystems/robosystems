@@ -102,7 +102,9 @@ def taggable_flow_qnames(session: Session, reporting_style_id: str) -> set[str]:
         )
         AND EXISTS (
           SELECT 1 FROM associations k
+          JOIN structures ks ON ks.id = k.structure_id
           WHERE k.association_type = 'calculation'
+            AND ks.block_type = 'cash_flow_statement'
             AND k.to_element_id = p.to_element_id
         )
         AND EXISTS (

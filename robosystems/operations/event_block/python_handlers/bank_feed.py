@@ -546,6 +546,12 @@ def resolve_flows(
     rows = taggable_flow_qnames(
       session, load_entity_reporting_style(session, entity_id)
     )
+    if not rows:
+      logger.warning(
+        "Entity %s's reporting style presents no cash flow rows; its flow "
+        "tags are checked by trait only",
+        entity_id,
+      )
     off_statement = sorted(q for q in qnames if rows and q not in rows)
     if off_statement:
       raise HandlerMetadataValidationError(

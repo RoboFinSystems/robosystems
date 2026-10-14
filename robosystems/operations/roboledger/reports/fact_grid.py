@@ -279,15 +279,24 @@ def _flows_without_a_row(
   rows = taggable_flow_qnames(session, style)
   if not rows:
     return []
-  missing: dict[str, float] = {}
+  # Signed, per column: an inflow and an outflow of one flow stay distinct,
+  # and a comparative grid is not summed into one figure.
+  missing: dict[str, dict[date, float]] = {}
   for f in facts:
     if f.element_id in flow_ids and f.element_qname not in rows:
-      missing[f.element_qname] = missing.get(f.element_qname, 0.0) + abs(f.value)
+      by_period = missing.setdefault(f.element_qname, {})
+      by_period[f.period_end] = by_period.get(f.period_end, 0.0) + f.value
   return [
-    f"{qname} ({amount:,.2f}) has no row on this company's cash flow statement, "
+    f"{qname} ({amounts}) has no row on this company's cash flow statement, "
     "so its cash lands in the operating reconciling adjustment. Present the row "
     "in the reporting style, or tag the lines with a flow the statement shows."
-    for qname, amount in sorted(missing.items())
+    for qname, by_period in sorted(missing.items())
+    for amounts in [
+      ", ".join(
+        f"{amount:,.2f} for the period ending {end.isoformat()}"
+        for end, amount in sorted(by_period.items())
+      )
+    ]
   ]
 
 
@@ -1162,10 +1171,13 @@ def _emit_flow_facts(
         GROUP BY flow_id, rf.qname, rf.name, rf.balance_type
       """).bindparams(landed_entry_bindparam())
 
-  # Gated on the entry moving cash through a cash line that carries no tag:
-  # accruals don't leak in, and a cash line Pass 1 owns is never attributed
-  # twice. A split's tagged parts post with their own cash lines, so its
-  # untagged parts keep their defaults.
+  # Gated on the entry's untagged lines forming a balanced sub-entry that
+  # moves cash: accruals don't leak in, a cash line Pass 1 owns is never
+  # attributed twice, and an account line shared between a tagged and an
+  # untagged cash line (nothing says how much of it the tag covers) stays
+  # with the operating plug. A split's tagged parts post with their own cash
+  # and account lines, so its untagged parts balance on their own and keep
+  # their defaults.
   fallback_sql = text("""
         SELECT
           rf.id AS flow_id,
@@ -1207,6 +1219,11 @@ def _emit_flow_facts(
               AND cl.flow_element_id IS NULL
               AND COALESCE(cra.qname, ca.qname) = ANY(:cash_qnames)
           )
+          AND (
+            SELECT COALESCE(SUM(ul.debit_amount - ul.credit_amount), 0)
+            FROM line_items ul
+            WHERE ul.entry_id = en.id AND ul.flow_element_id IS NULL
+          ) = 0
         GROUP BY rf.id, rf.qname, rf.name, rf.balance_type
       """).bindparams(landed_entry_bindparam())
 
