@@ -1255,8 +1255,10 @@ class OLTPLoader:
         source == "quickbooks"
         and ext_id in existing
         and not any(e.get("line_items") for e in txn["entries"])
+        and not txn.get("amount")
       ):
-        # A void: QuickBooks keeps the transaction and zeroes every line.
+        # A void: QuickBooks keeps the transaction and zeroes every line, so
+        # its report total is zero too. Lines lost on our side leave a total.
         _retract_quickbooks_void(existing[ext_id], ext_id, txn, now, out)
         continue
 

@@ -324,6 +324,21 @@ def test_a_void_reaches_an_unposted_event_as_a_void(session):
   assert item.metadata_["source_removed_transaction_ids"] == ["77"]
 
 
+def test_lines_lost_with_a_total_left_are_not_a_void(session):
+  """No line survived, but the report still totals the transaction: lines were
+  lost on our side, not voided in QuickBooks. The posted entry stands."""
+  _qb_accounts(session)
+  _qb_sync(session, 1000, "0")
+  lost = _qb_void("1")
+  lost["transactions"][0]["amount"] = 1000
+
+  result = _load(session, lost)
+
+  assert result.dropped_empty_transactions == 1
+  item = _qb_item(session)
+  assert item.payload_drift is False
+
+
 def test_a_zero_line_transaction_never_seen_is_still_dropped(session):
   from robosystems.models.extensions.roboledger.event import Event
 
