@@ -17,17 +17,19 @@ The menu at the top right picks the company you're looking at: every company in 
 
 - **Entity Info** holds the selected company's details and, for a subsidiary, names its parent and the share held.
 - **All Entities** is the graph's reporting group: each company, the share the parent holds and the month it's closed through, with **New Entity** to add one. See [Work across several companies](working-across-companies.md#several-companies-in-one-graph).
-- **Connections** is where you connect QuickBooks, press **Sync Now**, choose sync options, and disconnect. See [Connect your books to your AI assistant](connect-your-books.md).
+- **Connections** is where you connect QuickBooks or a bank feed, press **Sync Now**, choose sync options, and disconnect. See [Connect your books to your AI assistant](connect-your-books.md).
 
 ## Agents
 
-The people and companies you do business with: customers, vendors and employees. They come over from QuickBooks, and each one opens to its details and activity.
+The people and companies you do business with: customers, vendors and employees. They come over from QuickBooks, or from a bank feed as its counterparties appear, and each one opens to its details and activity. One the bank feed pays or is paid by also keeps a **Default account**, learned from the lines you approve, with how often it held, and **Always ask** for a counterparty whose lines go to different accounts. See [Lines from a bank feed](inbox.md#lines-from-a-bank-feed).
 
 ## Ledger
 
 **Chart of Accounts** lists your accounts. **Show mappings** adds the reporting concept each account is mapped to, and the bar at the top shows how much of the chart is covered. See [Map your chart of accounts](map-your-chart-of-accounts.md).
 
 ![The chart of accounts with each account's reporting concept and a coverage bar reading 20 of 20](images/chart-of-accounts.png)
+
+**Bank Accounts** lists the bank and card accounts a feed keeps, each with its source, status, last sync, the company it belongs to and the chart account it books to. **Move** books it to a different account, or to another company's chart, and takes the lines still in the Inbox with it; posted entries stay where they are.
 
 **Inbox** holds events that have been captured and haven't posted to the ledger yet, so you can review and approve them first. See [Review events in the Inbox](inbox.md).
 
