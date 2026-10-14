@@ -51,6 +51,8 @@ def suspend_expired_graphs(
 @job(
   tags={
     "dagster/priority": "1",
+    # Its sensor waits while a run is unfinished: a hung run must end.
+    "dagster/max_runtime": 1800,
   }
 )
 def suspend_expired_graphs_job():
@@ -127,6 +129,8 @@ def deprovision_suspended_graphs(
 @job(
   tags={
     "dagster/priority": "1",
+    # Its sensor waits while a run is unfinished: a hung run must end.
+    "dagster/max_runtime": 7200,
   }
 )
 def deprovision_suspended_graphs_job():
@@ -211,6 +215,8 @@ def reap_stalled_provisioning(
 @job(
   tags={
     "dagster/priority": "1",
+    # Its sensor waits while a run is unfinished: a hung run must end.
+    "dagster/max_runtime": 1800,
   }
 )
 def reap_stalled_provisioning_job():

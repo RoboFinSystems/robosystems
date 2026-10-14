@@ -43,6 +43,7 @@ from robosystems.adapters.plaid.pipeline.transform import (
   days_between,
   leg_from_transaction,
   own_account_keys,
+  pair_day,
   transfer_event,
   transform,
   txn_external_id,
@@ -979,8 +980,9 @@ def _update_pair(pair: Event, out_leg: Leg, in_leg: Leg) -> bool:
   if int(pair.amount or 0) != magnitude:
     pair.amount = magnitude
     changed = True
-  if pair.occurred_at is None or _iso(pair.occurred_at)[:10] != out_leg.day:
-    pair.occurred_at = _parse(f"{out_leg.day}T00:00:00Z")
+  day = pair_day(out_leg, in_leg)
+  if pair.occurred_at is None or _iso(pair.occurred_at)[:10] != day:
+    pair.occurred_at = _parse(f"{day}T00:00:00Z")
     changed = True
   metadata = dict(pair.metadata_ or {})
   for key, value in (("from_date", out_leg.day), ("to_date", in_leg.day)):
@@ -1003,10 +1005,11 @@ def _flag_pair_changed(pair: Event, out_leg: Leg, in_leg: Leg) -> None:
   accepted = _accepted_payload(pair)
   accepted["source_legs"] = [_leg_record(out_leg), _leg_record(in_leg)]
   accepted["source_amount"] = magnitude
-  accepted["source_posted_date"] = out_leg.day
+  day = pair_day(out_leg, in_leg)
+  accepted["source_posted_date"] = day
   accepted["from_date"] = out_leg.day
   accepted["to_date"] = in_leg.day
-  accepted.update(_planned_entry(pair, magnitude, out_leg.day))
+  accepted.update(_planned_entry(pair, magnitude, day))
   _flag(pair, accepted)
 
 

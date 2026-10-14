@@ -375,12 +375,18 @@ def _leg_order(leg: Leg) -> tuple[str, str]:
   return leg.day, leg.transaction_id
 
 
+def pair_day(out_leg: Leg, in_leg: Leg) -> str:
+  """The day a transfer is booked: its earlier leg's. Each account clears it
+  on its own leg's date, so the later side carries it in transit until then;
+  booked on the later leg, the earlier side's statement could not be explained."""
+  return min(out_leg.day, in_leg.day)
+
+
 def transfer_event(
   out_leg: Leg, in_leg: Leg, *, connection_id: str, item_id: str | None
 ) -> dict[str, Any]:
-  """One ``internal_transfer`` for both legs, dated the day the money left.
-  The receiving account clears it on its own leg's date, which rides along
-  with the sending leg's, as an item in transit until then."""
+  """One ``internal_transfer`` for both legs, booked on the earlier leg's day
+  (`pair_day`), each leg's own date beside it."""
   from_name = out_leg.account_name or "account"
   to_name = in_leg.account_name or "account"
   metadata = _prune(
@@ -408,7 +414,7 @@ def transfer_event(
       "event_class": "economic",
       "event_action": "move",
       "resource_type": "money",
-      "occurred_at": f"{out_leg.day}T00:00:00Z",
+      "occurred_at": f"{pair_day(out_leg, in_leg)}T00:00:00Z",
       "source": SOURCE,
       "external_id": pair_external_id(out_leg.transaction_id, in_leg.transaction_id),
       "amount": abs(in_leg.amount),
