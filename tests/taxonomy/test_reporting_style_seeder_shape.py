@@ -73,31 +73,40 @@ class TestDeclaredStyles:
       stmt_types = {st for st, _net in style["networks"]}
       assert stmt_types == _REQUIRED, style["code"]
 
-  def test_all_presets_share_multistep_is_and_indirect_cf(self) -> None:
-    """The default family fixes IS-multistep + CashFlow-indirect across
-    all three forms — only the equity-form axis varies (next test)."""
+  def test_all_presets_share_multistep_is_and_an_indirect_cf(self) -> None:
+    """The default family fixes IS-multistep and the indirect cash flow
+    method across all three forms; the cash flow network itself is per form
+    (the equity rows differ), like the balance sheet (next test)."""
     by_code = {s["code"]: dict(s["networks"]) for s in mig_0008._declared_styles()}
-    for code in ("BSC-CORP-IS02-CF1", "BSC-PART-IS02-CF1", "BSC-LLC-IS02-CF1"):
+    for code, cf in (
+      ("BSC-CORP-IS02-CF1", "CashFlow-indirect"),
+      ("BSC-PART-IS02-CF1", "CashFlow-indirect-PART"),
+      ("BSC-LLC-IS02-CF1", "CashFlow-indirect-LLC"),
+    ):
       assert by_code[code]["income_statement"].endswith("IS-multistep"), code
-      assert by_code[code]["cash_flow_statement"].endswith("CashFlow-indirect"), code
+      assert by_code[code]["cash_flow_statement"].endswith("/" + cf), code
 
   def test_equity_form_axis_is_the_only_difference_corp_part_llc(self) -> None:
-    """CORP/PART/LLC share IS-multistep + CashFlow-indirect; only the
-    balance_sheet equity section and the equity_statement rollforward vary
-    by form (the equity-form axis)."""
+    """CORP/PART/LLC share IS-multistep; the balance sheet's equity section,
+    the cash flow's financing equity rows and the equity_statement
+    rollforward vary by form (the equity-form axis)."""
     by_code = {s["code"]: dict(s["networks"]) for s in mig_0008._declared_styles()}
     corp = by_code["BSC-CORP-IS02-CF1"]
     part = by_code["BSC-PART-IS02-CF1"]
     llc = by_code["BSC-LLC-IS02-CF1"]
 
-    # IS + CF are held constant across the three forms.
-    for stmt in ("income_statement", "cash_flow_statement"):
-      assert corp[stmt] == part[stmt] == llc[stmt], stmt
+    # The IS is held constant across the three forms.
+    assert (
+      corp["income_statement"] == part["income_statement"] == llc["income_statement"]
+    )
 
-    # Equity-form axis: BS + equity_statement networks are form-specific.
+    # Equity-form axis: BS, CF and equity_statement networks are form-specific.
     assert corp["balance_sheet"].endswith("BS-classified")
     assert part["balance_sheet"].endswith("BS-classified-PART")
     assert llc["balance_sheet"].endswith("BS-classified-LLC")
+    assert corp["cash_flow_statement"].endswith("CashFlow-indirect")
+    assert part["cash_flow_statement"].endswith("CashFlow-indirect-PART")
+    assert llc["cash_flow_statement"].endswith("CashFlow-indirect-LLC")
     assert corp["equity_statement"].endswith("Equity-rollforward")
     assert part["equity_statement"].endswith("Equity-rollforward-PART")
     assert llc["equity_statement"].endswith("Equity-rollforward-LLC")

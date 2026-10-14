@@ -496,10 +496,15 @@ def _flow_qnames(metadata: BankFeedMetadata) -> set[str]:
   return qnames
 
 
-def resolve_flows(session: Session, qnames: set[str]) -> dict[str, str]:
+def resolve_flows(
+  session: Session, qnames: set[str], *, entity_id: str | None = None
+) -> dict[str, str]:
   """``{qname: element_id}`` for flow concepts. Raises when one names no
   element, or one that is not a flow (no ``activityType`` trait): an
-  unresolved tag would silently leave the line on its default flow."""
+  unresolved tag would silently leave the line on its default flow. Given
+  the entity, a flow must also be a row of its cash flow statement: a tag
+  the statement cannot present computes a fact no row shows, and the
+  operating reconciling adjustment absorbs it."""
   if not qnames:
     return {}
   rows = session.execute(
@@ -532,6 +537,28 @@ def resolve_flows(session: Session, qnames: set[str]) -> dict[str, str]:
       f"{', '.join(not_flows)} is not a flow concept (it has no operating, "
       "investing or financing activity), so it cannot classify a flow."
     )
+  if entity_id is not None:
+    from robosystems.operations.roboledger.reports.network_picker import (
+      load_entity_reporting_style,
+      taggable_flow_qnames,
+    )
+
+    rows = taggable_flow_qnames(
+      session, load_entity_reporting_style(session, entity_id)
+    )
+    if not rows:
+      logger.warning(
+        "Entity %s's reporting style presents no cash flow rows; its flow "
+        "tags are checked by trait only",
+        entity_id,
+      )
+    off_statement = sorted(q for q in qnames if rows and q not in rows)
+    if off_statement:
+      raise HandlerMetadataValidationError(
+        f"{', '.join(off_statement)} is not a row of this company's cash flow "
+        "statement, so a line cannot carry it. The rows a line can be tagged "
+        f"with: {', '.join(sorted(rows))}."
+      )
   return {qname: element_id for qname, (element_id, _f) in found.items()}
 
 
@@ -555,7 +582,7 @@ def apply_flow_patch(
   itself on a posted line is refused here: that is a reversal.
   """
   metadata = BankFeedMetadata.model_validate(dict(event.metadata_ or {}))
-  flows = resolve_flows(session, _flow_qnames(metadata))
+  flows = resolve_flows(session, _flow_qnames(metadata), entity_id=str(event.entity_id))
   entries = (
     session.execute(
       select(Entry).where(

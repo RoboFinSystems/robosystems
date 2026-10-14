@@ -2491,6 +2491,20 @@
       "conceptArrangementPattern": "arithmetic"
     },
     {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "structureName": "rs-gaap — Cash Flow Statement — Indirect (LLC)",
+      "blockType": "cash_flow_statement",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "structureName": "rs-gaap — Cash Flow Statement — Indirect (Partnership)",
+      "blockType": "cash_flow_statement",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
       "@id": "_:rs-gaap-pres-cf-indirect-arc-1",
       "from": {
         "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
@@ -2809,6 +2823,1294 @@
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
       "order": 30340.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-17",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquireShortTermInvestments"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30261.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-18",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromSaleOfShortTermInvestments"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30262.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-19",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquireOtherInvestments"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30263.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-20",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromSaleOfOtherInvestments"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30264.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-21",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquireBusinessesNetOfCashAcquired"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30265.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-22",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromIssuanceOfPreferredStockAndPreferenceStock"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30341.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-23",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsForRepurchaseOfPreferredStockAndPreferenceStock"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30342.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-24",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsOfDividends"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30343.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-25",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromShortTermDebt"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30344.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-26",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:RepaymentsOfShortTermDebt"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30345.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-27",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromNotesPayable"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30346.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-28",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:RepaymentsOfNotesPayable"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30347.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-29",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromLinesOfCredit"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30348.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-30",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:RepaymentsOfLinesOfCredit"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30349.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-31",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromRelatedPartyDebt"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30350.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-32",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:RepaymentsOfRelatedPartyDebt"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30351.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-33",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:FinanceLeasePrincipalPayments"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30352.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-34",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromSaleOfTreasuryStock"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30353.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-1",
+      "from": {
+        "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+      },
+      "to": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-2",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:NetIncomeLoss"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30110.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-3",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:DepreciationDepletionAndAmortization"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30120.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-4",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInAccountsReceivable"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30130.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-5",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInInventories"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30140.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-6",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInPrepaidExpense"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30150.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-7",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30160.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-8",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30170.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-9",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInAccruedLiabilities"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30180.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-10",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInAccruedIncomeTaxesPayable"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30190.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-11",
+      "from": {
+        "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+      },
+      "to": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-12",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30210.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-13",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromSaleOfPropertyPlantAndEquipment"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30220.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-14",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquireInvestments"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30230.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-15",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromSaleMaturityAndCollectionsOfInvestments"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30240.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-16",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquireIntangibleAssets"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30250.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-17",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromSaleOfIntangibleAssets"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30260.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-18",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquireShortTermInvestments"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30261.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-19",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromSaleOfShortTermInvestments"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30262.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-20",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquireOtherInvestments"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30263.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-21",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromSaleOfOtherInvestments"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30264.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-22",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquireBusinessesNetOfCashAcquired"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30265.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-23",
+      "from": {
+        "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+      },
+      "to": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30300.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-24",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromIssuanceOfLongTermDebt"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30320.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-25",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:RepaymentsOfLongTermDebt"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30330.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-26",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromShortTermDebt"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30344.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-27",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:RepaymentsOfShortTermDebt"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30345.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-28",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromNotesPayable"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30346.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-29",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:RepaymentsOfNotesPayable"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30347.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-30",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromLinesOfCredit"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30348.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-31",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:RepaymentsOfLinesOfCredit"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30349.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-32",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromRelatedPartyDebt"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30350.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-33",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:RepaymentsOfRelatedPartyDebt"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30351.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-34",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:FinanceLeasePrincipalPayments"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30352.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-35",
+      "from": {
+        "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+      },
+      "to": {
+        "@id": "rs-gaap:EffectOfExchangeRateOnCash"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30400.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-36",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromContributedCapital"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30310.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-37",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsOfCapitalDistribution"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30320.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-1",
+      "from": {
+        "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+      },
+      "to": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-2",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:NetIncomeLoss"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30110.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-3",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:DepreciationDepletionAndAmortization"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30120.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-4",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInAccountsReceivable"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30130.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-5",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInInventories"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30140.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-6",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInPrepaidExpense"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30150.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-7",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30160.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-8",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30170.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-9",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInAccruedLiabilities"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30180.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-10",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInAccruedIncomeTaxesPayable"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30190.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-11",
+      "from": {
+        "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+      },
+      "to": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-12",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30210.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-13",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromSaleOfPropertyPlantAndEquipment"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30220.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-14",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquireInvestments"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30230.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-15",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromSaleMaturityAndCollectionsOfInvestments"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30240.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-16",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquireIntangibleAssets"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30250.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-17",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromSaleOfIntangibleAssets"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30260.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-18",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquireShortTermInvestments"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30261.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-19",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromSaleOfShortTermInvestments"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30262.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-20",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquireOtherInvestments"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30263.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-21",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromSaleOfOtherInvestments"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30264.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-22",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquireBusinessesNetOfCashAcquired"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30265.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-23",
+      "from": {
+        "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+      },
+      "to": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30300.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-24",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromIssuanceOfLongTermDebt"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30320.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-25",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:RepaymentsOfLongTermDebt"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30330.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-26",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromShortTermDebt"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30344.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-27",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:RepaymentsOfShortTermDebt"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30345.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-28",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromNotesPayable"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30346.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-29",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:RepaymentsOfNotesPayable"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30347.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-30",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromLinesOfCredit"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30348.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-31",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:RepaymentsOfLinesOfCredit"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30349.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-32",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromRelatedPartyDebt"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30350.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-33",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:RepaymentsOfRelatedPartyDebt"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30351.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-34",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:FinanceLeasePrincipalPayments"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30352.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-35",
+      "from": {
+        "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+      },
+      "to": {
+        "@id": "rs-gaap:EffectOfExchangeRateOnCash"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30400.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-36",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromPartnershipContribution"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30310.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-37",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsOfCapitalDistribution"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30320.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
@@ -3700,7 +5002,7 @@
         "@id": "rs-gaap:PartnersCapital"
       },
       "to": {
-        "@id": "rs-gaap:PaymentsOfDividends"
+        "@id": "rs-gaap:PaymentsOfCapitalDistribution"
       },
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-PART",
@@ -3749,11 +5051,25 @@
         "@id": "rs-gaap:MembersEquity"
       },
       "to": {
-        "@id": "rs-gaap:PaymentsOfDividends"
+        "@id": "rs-gaap:PaymentsOfCapitalDistribution"
       },
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-LLC",
       "order": 40600.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-equity-llc-arc-4",
+      "from": {
+        "@id": "rs-gaap:MembersEquity"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromContributedCapital"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-LLC",
+      "order": 40300.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },

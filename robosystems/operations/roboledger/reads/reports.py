@@ -179,6 +179,8 @@ def generate_adhoc_private_statement(
     periods=periods,
     reporting_style_id=reporting_style_id,
   )
+  if statement_type == "cash_flow_statement":
+    grid.warnings = facts.warnings
 
   return grid, facts.unmapped_count
 
@@ -1067,7 +1069,10 @@ def get_live_financial_statement(
     )
   # Validate the full grid: all-zero children still foot their subtotals.
   validation = validate_report(
-    statement_type, grid.rows, period_labels=[p.label for p in periods]
+    statement_type,
+    grid.rows,
+    period_labels=[p.label for p in periods],
+    warnings=grid.warnings,
   )
 
   facts: list[LiveStatementFactRow] = []

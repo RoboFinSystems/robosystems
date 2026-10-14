@@ -74,6 +74,53 @@ def get_render_network(
   )
 
 
+def taggable_flow_qnames(session: Session, reporting_style_id: str) -> set[str]:
+  """The investing and financing flows a Reporting Style's cash flow
+  statement presents as leaf rows that also foot a subtotal.
+
+  These are the flows a line may be tagged with and the ones a default may
+  land on: a flow outside the set computes a fact no row shows. Empty when
+  the Style composes no cash flow network.
+  """
+  try:
+    network = get_render_network(session, reporting_style_id, "cash_flow_statement")
+  except NoNetworkForStatementTypeError:
+    return set()
+  rows = session.execute(
+    text(
+      """
+      SELECT e.qname
+      FROM associations p
+      JOIN elements e ON e.id = p.to_element_id
+      WHERE p.structure_id = :sid
+        AND p.association_type = 'presentation'
+        AND NOT EXISTS (
+          SELECT 1 FROM associations c
+          WHERE c.structure_id = :sid
+            AND c.association_type = 'presentation'
+            AND c.from_element_id = p.to_element_id
+        )
+        AND EXISTS (
+          SELECT 1 FROM associations k
+          JOIN structures ks ON ks.id = k.structure_id
+          WHERE k.association_type = 'calculation'
+            AND ks.block_type = 'cash_flow_statement'
+            AND k.to_element_id = p.to_element_id
+        )
+        AND EXISTS (
+          SELECT 1 FROM element_traits et
+          JOIN traits t ON t.id = et.trait_id
+          WHERE et.element_id = e.id
+            AND t.category = 'activityType'
+            AND t.identifier IN ('investingActivity', 'financingActivity')
+        )
+      """
+    ),
+    {"sid": network.structure_id},
+  ).fetchall()
+  return {str(r.qname) for r in rows}
+
+
 def load_entity_reporting_style(session: Session, entity_id: str) -> str:
   """The Reporting Style pinned on an entity. Raises ``LookupError`` if absent."""
   row = session.execute(

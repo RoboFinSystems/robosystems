@@ -140,21 +140,25 @@ def test_derivation_arcs_reference_declared_concepts(graph: list[dict]) -> None:
 def test_debt_and_intangible_flows_reach_their_split_successors(
   graph: list[dict],
 ) -> None:
-  """Pins the bfa0ebc7 repointing so a future split can't silently undo it."""
-  targets = {
-    node["from"]["@id"]: node["to"]["@id"]
-    for node in graph
-    if node.get("associationType") == "derivation"
-  }
+  """Pins the bfa0ebc7 repointing so a future split can't silently undo it.
+
+  A flow may be the default of several balance-sheet concepts (long-term
+  debt issuance also defaults the current portion and other noncurrent
+  liabilities), so each flow maps to the set of concepts it derives from.
+  """
+  targets: dict[str, set[str]] = defaultdict(set)
+  for node in graph:
+    if node.get("associationType") == "derivation":
+      targets[node["from"]["@id"]].add(node["to"]["@id"])
   assert (
-    targets["rs-gaap:ProceedsFromIssuanceOfLongTermDebt"]
-    == "rs-gaap:LongTermDebtAndCapitalLeaseObligations"
+    "rs-gaap:LongTermDebtAndCapitalLeaseObligations"
+    in targets["rs-gaap:ProceedsFromIssuanceOfLongTermDebt"]
   )
   assert (
-    targets["rs-gaap:RepaymentsOfLongTermDebt"]
-    == "rs-gaap:LongTermDebtAndCapitalLeaseObligations"
+    "rs-gaap:LongTermDebtAndCapitalLeaseObligations"
+    in targets["rs-gaap:RepaymentsOfLongTermDebt"]
   )
   assert (
-    targets["rs-gaap:PaymentsToAcquireIntangibleAssets"]
-    == "rs-gaap:IntangibleAssetsNetExcludingGoodwill"
+    "rs-gaap:IntangibleAssetsNetExcludingGoodwill"
+    in targets["rs-gaap:PaymentsToAcquireIntangibleAssets"]
   )

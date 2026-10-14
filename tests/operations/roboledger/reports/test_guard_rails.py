@@ -815,3 +815,32 @@ class TestPerColumnValidation:
     plug_warnings = [w for w in result.warnings if "Other operating capital" in w]
     assert len(plug_warnings) == 1
     assert plug_warnings[0].startswith("[Prior] ")
+
+
+class TestGenerationWarnings:
+  """Findings made while the facts were generated ride with the rendered
+  statement's validation as warnings, never as failures."""
+
+  def test_warnings_are_reported_without_failing(self):
+    rows = [
+      _row(
+        "Net cash from operations",
+        100.0,
+        qname="rs-gaap:NetCashProvidedByUsedInOperatingActivities",
+        is_subtotal=True,
+      ),
+    ]
+    result = validate_report(
+      "cash_flow_statement",
+      rows,
+      warnings=[
+        "rs-gaap:ProceedsFromNotesPayable (50.00) has no row on this company's cash flow statement"
+      ],
+    )
+    assert result.passed
+    assert any("ProceedsFromNotesPayable" in w for w in result.warnings)
+
+  def test_an_inconclusive_block_still_carries_them(self):
+    result = validate_report("equity_statement", [], warnings=["a finding"])
+    assert result.status == "inconclusive"
+    assert "a finding" in result.warnings

@@ -1470,6 +1470,81 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
+      "@id": "_:rs-gaap-calc-cf-inv-arc-1",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquireShortTermInvestments"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 700.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-inv-arc-2",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromSaleOfShortTermInvestments"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 800.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-inv-arc-3",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquireOtherInvestments"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 900.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-inv-arc-4",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromSaleOfOtherInvestments"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 1000.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-inv-arc-5",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquireBusinessesNetOfCashAcquired"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 1100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
       "@id": "_:rs-gaap-calc-cf-financing-arc-1",
       "from": {
         "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
@@ -1667,6 +1742,356 @@
       "@type": "rs:Association"
     },
     {
+      "@id": "_:rs-gaap-deriv-cf-members-in-arc-1",
+      "from": {
+        "@id": "rs-gaap:ProceedsFromContributedCapital"
+      },
+      "to": {
+        "@id": "rs-gaap:MembersEquity"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-members-out-arc-1",
+      "from": {
+        "@id": "rs-gaap:PaymentsOfCapitalDistribution"
+      },
+      "to": {
+        "@id": "rs-gaap:MembersEquity"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": -1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-partners-in-arc-1",
+      "from": {
+        "@id": "rs-gaap:ProceedsFromPartnershipContribution"
+      },
+      "to": {
+        "@id": "rs-gaap:PartnersCapital"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-partners-out-arc-1",
+      "from": {
+        "@id": "rs-gaap:PaymentsOfCapitalDistribution"
+      },
+      "to": {
+        "@id": "rs-gaap:PartnersCapital"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": -1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-retained-earnings-out-arc-1",
+      "from": {
+        "@id": "rs-gaap:PaymentsOfDividends"
+      },
+      "to": {
+        "@id": "rs-gaap:RetainedEarningsAccumulatedDeficit"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": -1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-common-stock-in-arc-1",
+      "from": {
+        "@id": "rs-gaap:ProceedsFromIssuanceOfCommonStock"
+      },
+      "to": {
+        "@id": "rs-gaap:CommonStockValue"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-common-stock-out-arc-1",
+      "from": {
+        "@id": "rs-gaap:PaymentsForRepurchaseOfCommonStock"
+      },
+      "to": {
+        "@id": "rs-gaap:CommonStockValue"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": -1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-preferred-stock-in-arc-1",
+      "from": {
+        "@id": "rs-gaap:ProceedsFromIssuanceOfPreferredStockAndPreferenceStock"
+      },
+      "to": {
+        "@id": "rs-gaap:PreferredStockValue"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-preferred-stock-out-arc-1",
+      "from": {
+        "@id": "rs-gaap:PaymentsForRepurchaseOfPreferredStockAndPreferenceStock"
+      },
+      "to": {
+        "@id": "rs-gaap:PreferredStockValue"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": -1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-short-term-debt-in-arc-1",
+      "from": {
+        "@id": "rs-gaap:ProceedsFromShortTermDebt"
+      },
+      "to": {
+        "@id": "rs-gaap:DebtCurrent"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-short-term-debt-out-arc-1",
+      "from": {
+        "@id": "rs-gaap:RepaymentsOfShortTermDebt"
+      },
+      "to": {
+        "@id": "rs-gaap:DebtCurrent"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": -1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-long-term-debt-current-in-arc-1",
+      "from": {
+        "@id": "rs-gaap:ProceedsFromIssuanceOfLongTermDebt"
+      },
+      "to": {
+        "@id": "rs-gaap:LongTermDebtCurrent"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-long-term-debt-current-out-arc-1",
+      "from": {
+        "@id": "rs-gaap:RepaymentsOfLongTermDebt"
+      },
+      "to": {
+        "@id": "rs-gaap:LongTermDebtCurrent"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": -1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-finance-lease-out-arc-1",
+      "from": {
+        "@id": "rs-gaap:FinanceLeasePrincipalPayments"
+      },
+      "to": {
+        "@id": "rs-gaap:FinanceLeaseLiabilityCurrent"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": -1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-other-liabilities-noncurrent-in-arc-1",
+      "from": {
+        "@id": "rs-gaap:ProceedsFromIssuanceOfLongTermDebt"
+      },
+      "to": {
+        "@id": "rs-gaap:OtherLiabilitiesNoncurrent"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-other-liabilities-noncurrent-out-arc-1",
+      "from": {
+        "@id": "rs-gaap:RepaymentsOfLongTermDebt"
+      },
+      "to": {
+        "@id": "rs-gaap:OtherLiabilitiesNoncurrent"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": -1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-short-term-investments-out-arc-1",
+      "from": {
+        "@id": "rs-gaap:PaymentsToAcquireShortTermInvestments"
+      },
+      "to": {
+        "@id": "rs-gaap:ShortTermInvestments"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": -1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-short-term-investments-in-arc-1",
+      "from": {
+        "@id": "rs-gaap:ProceedsFromSaleOfShortTermInvestments"
+      },
+      "to": {
+        "@id": "rs-gaap:ShortTermInvestments"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-goodwill-out-arc-1",
+      "from": {
+        "@id": "rs-gaap:PaymentsToAcquireBusinessesNetOfCashAcquired"
+      },
+      "to": {
+        "@id": "rs-gaap:Goodwill"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": -1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-other-assets-noncurrent-out-arc-1",
+      "from": {
+        "@id": "rs-gaap:PaymentsToAcquireOtherInvestments"
+      },
+      "to": {
+        "@id": "rs-gaap:OtherAssetsNoncurrent"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": -1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-other-assets-noncurrent-in-arc-1",
+      "from": {
+        "@id": "rs-gaap:ProceedsFromSaleOfOtherInvestments"
+      },
+      "to": {
+        "@id": "rs-gaap:OtherAssetsNoncurrent"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-ppe-net-out-arc-1",
+      "from": {
+        "@id": "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment"
+      },
+      "to": {
+        "@id": "rs-gaap:PropertyPlantAndEquipmentNet"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": -1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-ppe-net-in-arc-1",
+      "from": {
+        "@id": "rs-gaap:ProceedsFromSaleOfPropertyPlantAndEquipment"
+      },
+      "to": {
+        "@id": "rs-gaap:PropertyPlantAndEquipmentNet"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-treasury-stock-out-arc-1",
+      "from": {
+        "@id": "rs-gaap:PaymentsForRepurchaseOfCommonStock"
+      },
+      "to": {
+        "@id": "rs-gaap:TreasuryStockValue"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": -1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-treasury-stock-in-arc-1",
+      "from": {
+        "@id": "rs-gaap:ProceedsFromSaleOfTreasuryStock"
+      },
+      "to": {
+        "@id": "rs-gaap:TreasuryStockValue"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
       "@id": "_:rs-gaap-calc-cf-operating-arc-8",
       "from": {
         "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
@@ -1738,6 +2163,246 @@
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 400.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-fin-arc-1",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromIssuanceOfPreferredStockAndPreferenceStock"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 500.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-fin-arc-2",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsForRepurchaseOfPreferredStockAndPreferenceStock"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 600.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-fin-arc-3",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsOfDividends"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 700.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-fin-arc-4",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromContributedCapital"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 800.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-fin-arc-5",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromPartnershipContribution"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 900.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-fin-arc-6",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsOfCapitalDistribution"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 1000.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-fin-arc-7",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromShortTermDebt"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 1100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-fin-arc-8",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:RepaymentsOfShortTermDebt"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 1200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-fin-arc-9",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromNotesPayable"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 1300.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-fin-arc-10",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:RepaymentsOfNotesPayable"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 1400.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-fin-arc-11",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromLinesOfCredit"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 1500.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-fin-arc-12",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:RepaymentsOfLinesOfCredit"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 1600.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-fin-arc-13",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromRelatedPartyDebt"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 1700.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-fin-arc-14",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:RepaymentsOfRelatedPartyDebt"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 1800.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-fin-arc-15",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:FinanceLeasePrincipalPayments"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 1900.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-fin-arc-16",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromSaleOfTreasuryStock"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 2000.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },

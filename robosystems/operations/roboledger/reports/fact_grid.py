@@ -77,6 +77,9 @@ class ReportFacts:
   unmapped_count: int
   taxonomy_id: str
   mapping_id: str
+  # Findings made while generating (a flow no row presents); reported with
+  # the rendered statement's validation, never failures.
+  warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -104,6 +107,7 @@ class FactGrid:
   periods: list[PeriodSpec]
   rows: list[FactRow] = field(default_factory=list)
   unmapped_count: int = 0
+  warnings: list[str] = field(default_factory=list)
 
 
 # ── Stage 1: Generate facts (structure-agnostic) ─────────────────────────
@@ -211,7 +215,8 @@ def generate_report_facts(
   # Investing/financing CF facts from per-line flow concepts. Must run
   # before _derive_cash_flow_facts so its "direct fact wins" guard skips
   # the ΔBS derivation for these leaves.
-  _emit_flow_facts(session, facts, periods, mapping_id, arc_type, entity_id)
+  flow_ids = _emit_flow_facts(session, facts, periods, mapping_id, arc_type, entity_id)
+  warnings = _flows_without_a_row(session, facts, flow_ids, entity_id)
 
   # Balances the day before each period starts, where that is not the previous
   # column's end (year-over-year, YTD, rolling). The cash flow measures change
@@ -241,7 +246,58 @@ def generate_report_facts(
     unmapped_count=unmapped_count,
     taxonomy_id=taxonomy_id,
     mapping_id=mapping_id,
+    warnings=warnings,
   )
+
+
+def _flows_without_a_row(
+  session: Session,
+  facts: list[ReportFact],
+  flow_ids: set[str],
+  entity_id: str | None,
+) -> list[str]:
+  """Name each emitted flow the entity's cash flow statement has no row for.
+
+  Such a fact matches no row when rendered and the operating reconciling
+  adjustment absorbs its cash, so the statement foots with the flow in the
+  wrong section and nothing says so.
+  """
+  if not flow_ids:
+    return []
+  from robosystems.operations.roboledger.entity_scope import resolve_entity_id
+  from robosystems.operations.roboledger.reports.network_picker import (
+    load_entity_reporting_style,
+    taggable_flow_qnames,
+  )
+
+  try:
+    style = load_entity_reporting_style(
+      session, entity_id or resolve_entity_id(session)
+    )
+  except LookupError:
+    return []
+  rows = taggable_flow_qnames(session, style)
+  if not rows:
+    return []
+  # Signed, per column: an inflow and an outflow of one flow stay distinct,
+  # and a comparative grid is not summed into one figure.
+  missing: dict[str, dict[date, float]] = {}
+  for f in facts:
+    if f.element_id in flow_ids and f.element_qname not in rows:
+      by_period = missing.setdefault(f.element_qname, {})
+      by_period[f.period_end] = by_period.get(f.period_end, 0.0) + f.value
+  return [
+    f"{qname} ({amounts}) has no row on this company's cash flow statement, "
+    "so its cash lands in the operating reconciling adjustment. Present the row "
+    "in the reporting style, or tag the lines with a flow the statement shows."
+    for qname, by_period in sorted(missing.items())
+    for amounts in [
+      ", ".join(
+        f"{amount:,.2f} for the period ending {end.isoformat()}"
+        for end, amount in sorted(by_period.items())
+      )
+    ]
+  ]
 
 
 # ── Stage 2: Render structure view ───────────────────────────────────────
@@ -1045,6 +1101,9 @@ _CASH_ANCHOR_QNAMES: frozenset[str] = frozenset(
     "rs-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
     "rs-gaap:Cash",
     "rs-gaap:CashAndCashEquivalents",
+    # Part of the cash total the statement reconciles to (ASU 2016-18), not a
+    # flow: its movement is in ΔCash, never in a section.
+    "rs-gaap:RestrictedCashAndInvestmentsCurrent",
   }
 )
 
@@ -1066,16 +1125,17 @@ def _emit_flow_facts(
   mapping_id: str,
   arc_type: str,
   entity_id: str | None = None,
-) -> None:
+) -> set[str]:
   """Emit investing/financing CF facts from per-line flows, per period.
 
   Pass 1 (explicit): the cash line carries ``flow_element_id``; its
   ``debit - credit`` is the flow. Pass 2 (fallback, the path for QuickBooks
-  data): each non-cash line of an untagged cash-moving entry routes to its
-  element's default flow via a ``derivation`` arc whose weight sign is the
-  cash direction. The passes agree in sign because a balanced entry's cash
-  side negates its non-cash side. Operating flows are excluded — indirect
-  operating is NI + addbacks + ΔWC. Replaces any existing fact for the leaf.
+  data): each untagged non-cash line of a cash-moving entry whose cash line
+  is untagged routes to its element's default flow via a ``derivation`` arc
+  whose weight sign is the cash direction. The passes agree in sign because
+  a balanced entry's cash side negates its non-cash side. Operating flows
+  are excluded — indirect operating is NI + addbacks + ΔWC. Replaces any
+  existing fact for the leaf. Returns the ids of the flows emitted.
   """
   cash_qnames = list(_CASH_ANCHOR_QNAMES)
 
@@ -1111,8 +1171,13 @@ def _emit_flow_facts(
         GROUP BY flow_id, rf.qname, rf.name, rf.balance_type
       """).bindparams(landed_entry_bindparam())
 
-  # Gated on the entry moving cash (so accruals don't leak in) and carrying
-  # no explicit tag anywhere (Pass 1 owns those entries).
+  # Gated on the entry's untagged lines forming a balanced sub-entry that
+  # moves cash: accruals don't leak in, a cash line Pass 1 owns is never
+  # attributed twice, and an account line shared between a tagged and an
+  # untagged cash line (nothing says how much of it the tag covers) stays
+  # with the operating plug. A split's tagged parts post with their own cash
+  # and account lines, so its untagged parts balance on their own and keep
+  # their defaults.
   fallback_sql = text("""
         SELECT
           rf.id AS flow_id,
@@ -1151,15 +1216,18 @@ def _emit_flow_facts(
               AND cmap.structure_id = :mapping_id
             LEFT JOIN elements cra ON cra.id = cmap.to_element_id
             WHERE cl.entry_id = en.id
+              AND cl.flow_element_id IS NULL
               AND COALESCE(cra.qname, ca.qname) = ANY(:cash_qnames)
           )
-          AND NOT EXISTS (
-            SELECT 1 FROM line_items x
-            WHERE x.entry_id = en.id AND x.flow_element_id IS NOT NULL
-          )
+          AND (
+            SELECT COALESCE(SUM(ul.debit_amount - ul.credit_amount), 0)
+            FROM line_items ul
+            WHERE ul.entry_id = en.id AND ul.flow_element_id IS NULL
+          ) = 0
         GROUP BY rf.id, rf.qname, rf.name, rf.balance_type
       """).bindparams(landed_entry_bindparam())
 
+  emitted: set[str] = set()
   for period in periods:
     params = {
       "arc_type": arc_type,
@@ -1182,6 +1250,7 @@ def _emit_flow_facts(
     for flow_id, (qname, name, balance_type, value) in combined.items():
       if value == 0:
         continue
+      emitted.add(flow_id)
       facts[:] = [
         f
         for f in facts
@@ -1204,6 +1273,7 @@ def _emit_flow_facts(
           period_type="duration",
         )
       )
+  return emitted
 
 
 def _opening_date(period: PeriodSpec) -> date:

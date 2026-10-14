@@ -58,12 +58,15 @@ def validate_report(
   block_type: str,
   rows: list[FactRow],
   period_labels: list[str] | None = None,
+  warnings: list[str] | None = None,
 ) -> ValidationResult:
   """Run structural and semantic validation for a rendered structure.
 
   ``period_labels`` names the columns of ``rows[*].values``; missing labels
-  fall back to ``column N``. Block types with no validators
-  (``equity_statement``, ``comprehensive_income``) come back ``inconclusive``.
+  fall back to ``column N``. ``warnings`` are findings made while the facts
+  were generated (a flow no row presents); they are reported, never
+  failures. Block types with no validators (``equity_statement``,
+  ``comprehensive_income``) come back ``inconclusive``.
   """
   validator = _VALIDATORS.get(block_type)
   if validator is None:
@@ -71,10 +74,13 @@ def validate_report(
       passed=False,
       status=STATUS_INCONCLUSIVE,
       checks=["no_validation_rules"],
-      warnings=[f"No validation rules exist for '{block_type}' — nothing was checked."],
+      warnings=[
+        f"No validation rules exist for '{block_type}' — nothing was checked.",
+        *(warnings or []),
+      ],
     )
 
-  result = ValidationResult()
+  result = ValidationResult(warnings=list(warnings or []))
   columns = _columns(rows, period_labels)
   empty_columns = _empty_column_indexes(rows, columns)
   for column in columns:
@@ -445,6 +451,6 @@ def _check_operating_plug(
       f"{column.prefix}Operating cash flow carries a large unattributed "
       f"reconciling adjustment in 'Other operating capital, net' "
       f"({plug_val:.2f} vs operating cash {op_val:.2f}) — likely an "
-      f"un-itemized non-cash item (gain/loss on disposal, etc.) or a flow "
-      f"misclassification; review."
+      f"un-itemized non-cash item (gain/loss on disposal, etc.), a flow "
+      f"misclassification, or a flow this statement has no row for; review."
     )

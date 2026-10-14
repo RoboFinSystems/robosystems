@@ -14306,6 +14306,17 @@
       ]
     },
     {
+      "@id": "rs-gaap:PaymentsToAcquireShortTermInvestments",
+      "https://robosystems.ai/vocab/hasTrait": [
+        {
+          "@id": "trait:activityType/investingActivity"
+        },
+        {
+          "@id": "trait:flowClassification/outflow"
+        }
+      ]
+    },
+    {
       "@id": "rs-gaap:PaymentsToAcquireOtherLoansAndLeasesHeldForInvestment",
       "https://robosystems.ai/vocab/hasTrait": [
         {
@@ -16105,6 +16116,17 @@
       ]
     },
     {
+      "@id": "rs-gaap:ProceedsFromShortTermDebt",
+      "https://robosystems.ai/vocab/hasTrait": [
+        {
+          "@id": "trait:activityType/financingActivity"
+        },
+        {
+          "@id": "trait:flowClassification/inflow"
+        }
+      ]
+    },
+    {
       "@id": "rs-gaap:ProceedsFromNuclearFuel",
       "https://robosystems.ai/vocab/hasTrait": [
         {
@@ -16907,6 +16929,17 @@
     },
     {
       "@id": "rs-gaap:ProceedsFromSaleOfOtherInvestments",
+      "https://robosystems.ai/vocab/hasTrait": [
+        {
+          "@id": "trait:activityType/investingActivity"
+        },
+        {
+          "@id": "trait:flowClassification/inflow"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:ProceedsFromSaleOfShortTermInvestments",
       "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "trait:activityType/investingActivity"
@@ -18174,6 +18207,17 @@
     },
     {
       "@id": "rs-gaap:RepaymentsOfNotesPayable",
+      "https://robosystems.ai/vocab/hasTrait": [
+        {
+          "@id": "trait:activityType/financingActivity"
+        },
+        {
+          "@id": "trait:flowClassification/outflow"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:RepaymentsOfShortTermDebt",
       "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "trait:activityType/financingActivity"
