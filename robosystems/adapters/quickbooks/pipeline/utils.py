@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from robosystems.logger import logger
 
@@ -512,44 +514,33 @@ def write_extract_parquet(
 ) -> None:
   output_dir.mkdir(parents=True, exist_ok=True)
 
-  pd.DataFrame(accounts).to_parquet(output_dir / "raw_accounts.parquet", index=False)
-  _to_dataframe(journal_entries, _JOURNAL_ENTRIES_SCHEMA).to_parquet(
-    output_dir / "raw_journal_entries.parquet", index=False
-  )
-  _to_dataframe(journal_lines, _JOURNAL_LINES_SCHEMA).to_parquet(
-    output_dir / "raw_journal_lines.parquet", index=False
-  )
-  pd.DataFrame(company_info).to_parquet(
-    output_dir / "raw_company_info.parquet", index=False
-  )
-
-  _to_dataframe(customers or [], _PARTY_SCHEMA).to_parquet(
-    output_dir / "raw_customers.parquet", index=False
-  )
-  _to_dataframe(vendors or [], _PARTY_SCHEMA).to_parquet(
-    output_dir / "raw_vendors.parquet", index=False
-  )
-  _to_dataframe(employees or [], _PARTY_SCHEMA).to_parquet(
-    output_dir / "raw_employees.parquet", index=False
-  )
-  _to_dataframe(invoice_headers or [], _TXN_HEADER_SCHEMA).to_parquet(
-    output_dir / "raw_invoice_headers.parquet", index=False
-  )
-  _to_dataframe(bill_headers or [], _TXN_HEADER_SCHEMA).to_parquet(
-    output_dir / "raw_bill_headers.parquet", index=False
-  )
-  _to_dataframe(payment_headers or [], _TXN_HEADER_SCHEMA).to_parquet(
-    output_dir / "raw_payment_headers.parquet", index=False
-  )
-  _to_dataframe(bill_payment_headers or [], _TXN_HEADER_SCHEMA).to_parquet(
-    output_dir / "raw_bill_payment_headers.parquet", index=False
-  )
-  _to_dataframe(sales_receipt_headers or [], _TXN_HEADER_SCHEMA).to_parquet(
-    output_dir / "raw_sales_receipt_headers.parquet", index=False
-  )
-  _to_dataframe(purchase_headers or [], _TXN_HEADER_SCHEMA).to_parquet(
-    output_dir / "raw_purchase_headers.parquet", index=False
-  )
+  frames = {
+    "raw_accounts": pd.DataFrame(accounts),
+    "raw_journal_entries": _to_dataframe(journal_entries, _JOURNAL_ENTRIES_SCHEMA),
+    "raw_journal_lines": _to_dataframe(journal_lines, _JOURNAL_LINES_SCHEMA),
+    "raw_company_info": pd.DataFrame(company_info),
+    "raw_customers": _to_dataframe(customers or [], _PARTY_SCHEMA),
+    "raw_vendors": _to_dataframe(vendors or [], _PARTY_SCHEMA),
+    "raw_employees": _to_dataframe(employees or [], _PARTY_SCHEMA),
+    "raw_invoice_headers": _to_dataframe(invoice_headers or [], _TXN_HEADER_SCHEMA),
+    "raw_bill_headers": _to_dataframe(bill_headers or [], _TXN_HEADER_SCHEMA),
+    "raw_payment_headers": _to_dataframe(payment_headers or [], _TXN_HEADER_SCHEMA),
+    "raw_bill_payment_headers": _to_dataframe(
+      bill_payment_headers or [], _TXN_HEADER_SCHEMA
+    ),
+    "raw_sales_receipt_headers": _to_dataframe(
+      sales_receipt_headers or [], _TXN_HEADER_SCHEMA
+    ),
+    "raw_purchase_headers": _to_dataframe(purchase_headers or [], _TXN_HEADER_SCHEMA),
+  }
+  # Through an open handle, never a path: a path makes pyarrow construct
+  # ``LocalFileSystem()``, which raises ``ArrowKeyError`` once networkit has
+  # loaded its own libarrow into the process (the SEC writers' convention).
+  # pandas' ``to_parquet`` hands pyarrow a handle's ``.name`` back as a path,
+  # so the table is written with pyarrow itself.
+  for name, frame in frames.items():
+    with open(output_dir / f"{name}.parquet", "wb") as f:
+      pq.write_table(pa.Table.from_pandas(frame, preserve_index=False), f)
 
   logger.info(
     f"Wrote extract parquet: {len(accounts)} accounts, "
