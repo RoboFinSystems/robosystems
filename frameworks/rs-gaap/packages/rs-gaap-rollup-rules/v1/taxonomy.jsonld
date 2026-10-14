@@ -659,7 +659,7 @@
       "@id": "_:rs-gaap-rollup-cf-financing",
       "ruleCategory": "FundamentalAccountingConceptRelation",
       "rulePattern": "RollUp",
-      "ruleExpression": "$NetCashProvidedByUsedInFinancingActivities = ($ProceedsFromIssuanceOfCommonStock + $ProceedsFromIssuanceOfLongTermDebt + $RepaymentsOfLongTermDebt + $PaymentsForRepurchaseOfCommonStock)",
+      "ruleExpression": "$NetCashProvidedByUsedInFinancingActivities = ($ProceedsFromIssuanceOfCommonStock + $ProceedsFromIssuanceOfLongTermDebt + $RepaymentsOfLongTermDebt + $PaymentsForRepurchaseOfCommonStock + $ProceedsFromIssuanceOfPreferredStockAndPreferenceStock + $PaymentsForRepurchaseOfPreferredStockAndPreferenceStock + $PaymentsOfDividends + $ProceedsFromContributedCapital + $ProceedsFromPartnershipContribution + $PaymentsOfCapitalDistribution + $ProceedsFromShortTermDebt + $RepaymentsOfShortTermDebt + $ProceedsFromNotesPayable + $RepaymentsOfNotesPayable + $ProceedsFromLinesOfCredit + $RepaymentsOfLinesOfCredit + $ProceedsFromRelatedPartyDebt + $RepaymentsOfRelatedPartyDebt + $FinanceLeasePrincipalPayments + $ProceedsFromSaleOfTreasuryStock)",
       "ruleTarget": {
         "targetKind": "element",
         "targetRef": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
@@ -684,6 +684,70 @@
         {
           "variableName": "PaymentsForRepurchaseOfCommonStock",
           "variableQname": "rs-gaap:PaymentsForRepurchaseOfCommonStock"
+        },
+        {
+          "variableName": "ProceedsFromIssuanceOfPreferredStockAndPreferenceStock",
+          "variableQname": "rs-gaap:ProceedsFromIssuanceOfPreferredStockAndPreferenceStock"
+        },
+        {
+          "variableName": "PaymentsForRepurchaseOfPreferredStockAndPreferenceStock",
+          "variableQname": "rs-gaap:PaymentsForRepurchaseOfPreferredStockAndPreferenceStock"
+        },
+        {
+          "variableName": "PaymentsOfDividends",
+          "variableQname": "rs-gaap:PaymentsOfDividends"
+        },
+        {
+          "variableName": "ProceedsFromContributedCapital",
+          "variableQname": "rs-gaap:ProceedsFromContributedCapital"
+        },
+        {
+          "variableName": "ProceedsFromPartnershipContribution",
+          "variableQname": "rs-gaap:ProceedsFromPartnershipContribution"
+        },
+        {
+          "variableName": "PaymentsOfCapitalDistribution",
+          "variableQname": "rs-gaap:PaymentsOfCapitalDistribution"
+        },
+        {
+          "variableName": "ProceedsFromShortTermDebt",
+          "variableQname": "rs-gaap:ProceedsFromShortTermDebt"
+        },
+        {
+          "variableName": "RepaymentsOfShortTermDebt",
+          "variableQname": "rs-gaap:RepaymentsOfShortTermDebt"
+        },
+        {
+          "variableName": "ProceedsFromNotesPayable",
+          "variableQname": "rs-gaap:ProceedsFromNotesPayable"
+        },
+        {
+          "variableName": "RepaymentsOfNotesPayable",
+          "variableQname": "rs-gaap:RepaymentsOfNotesPayable"
+        },
+        {
+          "variableName": "ProceedsFromLinesOfCredit",
+          "variableQname": "rs-gaap:ProceedsFromLinesOfCredit"
+        },
+        {
+          "variableName": "RepaymentsOfLinesOfCredit",
+          "variableQname": "rs-gaap:RepaymentsOfLinesOfCredit"
+        },
+        {
+          "variableName": "ProceedsFromRelatedPartyDebt",
+          "variableQname": "rs-gaap:ProceedsFromRelatedPartyDebt"
+        },
+        {
+          "variableName": "RepaymentsOfRelatedPartyDebt",
+          "variableQname": "rs-gaap:RepaymentsOfRelatedPartyDebt"
+        },
+        {
+          "variableName": "FinanceLeasePrincipalPayments",
+          "variableQname": "rs-gaap:FinanceLeasePrincipalPayments"
+        },
+        {
+          "variableName": "ProceedsFromSaleOfTreasuryStock",
+          "variableQname": "rs-gaap:ProceedsFromSaleOfTreasuryStock"
         }
       ],
       "ruleMessage": "Calculation rollup: rs-gaap:NetCashProvidedByUsedInFinancingActivities = Σ proceeds − Σ payments",
@@ -694,7 +758,7 @@
       "@id": "_:rs-gaap-rollup-cf-investing",
       "ruleCategory": "FundamentalAccountingConceptRelation",
       "rulePattern": "RollUp",
-      "ruleExpression": "$NetCashProvidedByUsedInInvestingActivities = ($PaymentsToAcquirePropertyPlantAndEquipment + $ProceedsFromSaleOfPropertyPlantAndEquipment + $PaymentsToAcquireInvestments + $ProceedsFromSaleMaturityAndCollectionsOfInvestments + $PaymentsToAcquireIntangibleAssets + $ProceedsFromSaleOfIntangibleAssets)",
+      "ruleExpression": "$NetCashProvidedByUsedInInvestingActivities = ($PaymentsToAcquirePropertyPlantAndEquipment + $ProceedsFromSaleOfPropertyPlantAndEquipment + $PaymentsToAcquireInvestments + $ProceedsFromSaleMaturityAndCollectionsOfInvestments + $PaymentsToAcquireIntangibleAssets + $ProceedsFromSaleOfIntangibleAssets + $PaymentsToAcquireShortTermInvestments + $ProceedsFromSaleOfShortTermInvestments + $PaymentsToAcquireOtherInvestments + $ProceedsFromSaleOfOtherInvestments + $PaymentsToAcquireBusinessesNetOfCashAcquired)",
       "ruleTarget": {
         "targetKind": "element",
         "targetRef": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
@@ -727,6 +791,26 @@
         {
           "variableName": "ProceedsFromSaleOfIntangibleAssets",
           "variableQname": "rs-gaap:ProceedsFromSaleOfIntangibleAssets"
+        },
+        {
+          "variableName": "PaymentsToAcquireShortTermInvestments",
+          "variableQname": "rs-gaap:PaymentsToAcquireShortTermInvestments"
+        },
+        {
+          "variableName": "ProceedsFromSaleOfShortTermInvestments",
+          "variableQname": "rs-gaap:ProceedsFromSaleOfShortTermInvestments"
+        },
+        {
+          "variableName": "PaymentsToAcquireOtherInvestments",
+          "variableQname": "rs-gaap:PaymentsToAcquireOtherInvestments"
+        },
+        {
+          "variableName": "ProceedsFromSaleOfOtherInvestments",
+          "variableQname": "rs-gaap:ProceedsFromSaleOfOtherInvestments"
+        },
+        {
+          "variableName": "PaymentsToAcquireBusinessesNetOfCashAcquired",
+          "variableQname": "rs-gaap:PaymentsToAcquireBusinessesNetOfCashAcquired"
         }
       ],
       "ruleMessage": "Calculation rollup: rs-gaap:NetCashProvidedByUsedInInvestingActivities = Σ Investing leaves (each pre-signed: outflows negative, proceeds positive)",

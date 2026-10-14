@@ -330,3 +330,98 @@ def test_a_classified_line_keeps_its_other_edits_after_its_account_retires(books
   _update(books, event, metadata_patch={"memo": "Note from the lender"})
 
   assert event.metadata_["memo"] == "Note from the lender"
+
+
+# ── A flow must be a row of the entity's cash flow statement ─────────────────
+
+
+def _cash_flow_network(session, entity_id: str, rows: list[str]) -> None:
+  """Compose a cash flow network for the entity's Style presenting ``rows``
+  under the financing subtotal, each footing it through a calc arc."""
+  from robosystems.models.extensions import (
+    Association,
+    ReportingStyleNetwork,
+    Structure,
+    Taxonomy,
+  )
+  from robosystems.operations.roboledger.reports.network_picker import (
+    load_entity_reporting_style,
+  )
+
+  taxonomy = Taxonomy(
+    name="pres", taxonomy_type="reporting_standard", created_by="test"
+  )
+  session.add(taxonomy)
+  session.flush()
+  network = Structure(
+    name="Cash Flow — Indirect",
+    block_type="cash_flow_statement",
+    taxonomy_id=taxonomy.id,
+    created_by="test",
+  )
+  session.add(network)
+  session.flush()
+  subtotal = Element(
+    name="NetCashProvidedByUsedInFinancingActivities",
+    qname="rs-gaap:NetCashProvidedByUsedInFinancingActivities",
+    balance_type="debit",
+    period_type="duration",
+    created_by="test",
+  )
+  session.add(subtotal)
+  session.flush()
+  for order, qname in enumerate(rows, start=1):
+    leaf = session.query(Element).filter(Element.qname == qname).one()
+    for association_type in ("presentation", "calculation"):
+      session.add(
+        Association(
+          structure_id=network.id,
+          from_element_id=subtotal.id,
+          to_element_id=leaf.id,
+          association_type=association_type,
+          order_value=order,
+          weight=1.0,
+          created_by="test",
+        )
+      )
+  session.add(
+    ReportingStyleNetwork(
+      reporting_style_id=load_entity_reporting_style(session, entity_id),
+      statement_type="cash_flow_statement",
+      network_id=network.id,
+    )
+  )
+  session.commit()
+
+
+def test_a_flow_the_statement_has_no_row_for_is_refused(books):
+  _cash_flow_network(books.session, books.parent.id, [NOTE_PROCEEDS])
+  event = _deposit(books)
+  with pytest.raises(HandlerMetadataValidationError) as excinfo:
+    _update(
+      books,
+      event,
+      transition_to="classified",
+      metadata_patch={
+        "classified_element_id": books.equity,
+        "classified_flow_qname": CONTRIBUTIONS,
+      },
+    )
+  message = str(excinfo.value)
+  assert "not a row of this company's cash flow statement" in message
+  assert NOTE_PROCEEDS in message
+
+
+def test_a_flow_the_statement_presents_is_accepted(books):
+  _cash_flow_network(books.session, books.parent.id, [NOTE_PROCEEDS])
+  event = _deposit(books)
+  _update(
+    books,
+    event,
+    transition_to="committed",
+    metadata_patch={
+      "classified_element_id": books.note,
+      "classified_flow_qname": NOTE_PROCEEDS,
+    },
+  )
+  assert {str(li.flow_element_id) for li in _lines(books, event)} == {books.note_flow}

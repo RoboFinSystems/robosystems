@@ -80961,6 +80961,58 @@
       ]
     },
     {
+      "@id": "rs-gaap:PaymentsToAcquireShortTermInvestments",
+      "balance": [
+        {
+          "@value": "credit"
+        }
+      ],
+      "periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "rs-gaap"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Payments to Acquire Short-Term Investments",
+          "@language": "en"
+        }
+      ],
+      "rdfs:comment": [
+        {
+          "@value": "The cash outflow for the purchase of short-term investments.",
+          "@language": "en"
+        }
+      ]
+    },
+    {
       "@id": "rs-gaap:PaymentsToAcquireOtherLoansAndLeasesHeldForInvestment",
       "balance": [
         {
@@ -89514,6 +89566,58 @@
       ]
     },
     {
+      "@id": "rs-gaap:ProceedsFromShortTermDebt",
+      "balance": [
+        {
+          "@value": "debit"
+        }
+      ],
+      "periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "rs-gaap"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Proceeds from Short-Term Debt",
+          "@language": "en"
+        }
+      ],
+      "rdfs:comment": [
+        {
+          "@value": "The cash inflow from a borrowing having an initial term of repayment within one year or the normal operating cycle, if longer.",
+          "@language": "en"
+        }
+      ]
+    },
+    {
       "@id": "rs-gaap:ProceedsFromNuclearFuel",
       "balance": [
         {
@@ -93305,6 +93409,58 @@
       "rdfs:comment": [
         {
           "@value": "Amount of cash inflow from the sale of investments classified as other.",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:ProceedsFromSaleOfShortTermInvestments",
+      "balance": [
+        {
+          "@value": "debit"
+        }
+      ],
+      "periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "rs-gaap"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Proceeds from Sale of Short-Term Investments",
+          "@language": "en"
+        }
+      ],
+      "rdfs:comment": [
+        {
+          "@value": "The cash inflow from the sale of short-term investments.",
           "@language": "en"
         }
       ]
@@ -100088,6 +100244,58 @@
       "rdfs:comment": [
         {
           "@value": "The cash outflow for a borrowing supported by a written promise to pay an obligation.",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:RepaymentsOfShortTermDebt",
+      "balance": [
+        {
+          "@value": "credit"
+        }
+      ],
+      "periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "rs-gaap"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Repayments of Short-Term Debt",
+          "@language": "en"
+        }
+      ],
+      "rdfs:comment": [
+        {
+          "@value": "The cash outflow for the payment of a borrowing having an initial term of repayment within one year or the normal operating cycle, if longer.",
           "@language": "en"
         }
       ]

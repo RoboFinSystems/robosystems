@@ -411,7 +411,7 @@
         },
         {
           "statementType": "cash_flow_statement",
-          "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect"
+          "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART"
         },
         {
           "statementType": "equity_statement",
@@ -438,7 +438,7 @@
         },
         {
           "statementType": "cash_flow_statement",
-          "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect"
+          "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC"
         },
         {
           "statementType": "equity_statement",
