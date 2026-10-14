@@ -33,6 +33,9 @@ NOT_SUBSCRIPTIONS = {"invoice"}
 BEFORE_ANY_GRANT = {
   # Reopens a row with no resource_id for the provisioning claim.
   "_handle_checkout_completed",
+  # Returns an unpaid row with no resource_id (a declined first payment, now
+  # paid) to pending_payment for the provisioning claim.
+  "_handle_payment_succeeded",
   # Fails the row before provisioning starts (no owner, unknown type).
   "_fail_subscription",
 }
