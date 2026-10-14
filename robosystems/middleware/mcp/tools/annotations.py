@@ -98,6 +98,7 @@ WRITE_TOOL_HINTS: dict[str, ToolHints] = {
   "create-agent": _ADDS,
   "update-agent": _REPLACES,
   "learn-classification-defaults": _REPLACES,
+  "accept-suggestions": _REPLACES_ONCE_PER_STATE,
   "create-entity": _ADDS,
   "update-entity": _REPLACES,
   # Taxonomy and mapping.

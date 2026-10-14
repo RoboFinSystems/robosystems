@@ -43,6 +43,12 @@ from robosystems.models.api.extensions.agent import (
   AgentClassification as PydanticAgentClassification,
 )
 from robosystems.models.api.extensions.agent import (
+  ClassificationSourceStats as PydanticClassificationSourceStats,
+)
+from robosystems.models.api.extensions.agent import (
+  ClassificationStatsResponse as PydanticClassificationStatsResponse,
+)
+from robosystems.models.api.extensions.agent import (
   LedgerAgentResponse as PydanticAgentResponse,
 )
 from robosystems.models.api.extensions.ar_ap import (
@@ -670,6 +676,17 @@ class UnreachableMappingType:
 @pydantic_type(model=PydanticMappingCoverageResponse, all_fields=True)
 class MappingCoverage:
   """Coverage stats for a mapping (mapped / unmapped / confidence bands)."""
+
+
+@pydantic_type(model=PydanticClassificationSourceStats, all_fields=True)
+class ClassificationSourceStats:
+  """One suggestion source's share of a month's committed bank lines."""
+
+
+@pydantic_type(model=PydanticClassificationStatsResponse, all_fields=True)
+class ClassificationStats:
+  """How a month's bank lines were classified: taken as suggested, overridden,
+  split, or chosen with no suggestion, and the share that needed a person."""
 
 
 # ── Fiscal calendar ───────────────────────────────────────────────────────

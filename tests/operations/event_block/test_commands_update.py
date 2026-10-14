@@ -73,7 +73,15 @@ def _session_with_events(*events: SimpleNamespace) -> MagicMock:
   """MagicMock session whose .get(Event, id) returns the matching event."""
   by_id = {e.id: e for e in events}
   session = MagicMock()
-  session.get.side_effect = lambda _cls, eid, **_kwargs: by_id.get(eid)
+
+  def _get(cls, eid, **_kwargs):
+    if eid in by_id:
+      return by_id[eid]
+    # Only an event can be missing here; an account the posting guard looks
+    # up is found, as on a real chart.
+    return None if getattr(cls, "__name__", "") == "Event" else object()
+
+  session.get.side_effect = _get
   # The locked read is one ordered batch query covering the event and, on a
   # supersede, its successor — `.filter(...).order_by(id).populate_existing()
   # .with_for_update().all()`. Self-returning links keep the stub independent

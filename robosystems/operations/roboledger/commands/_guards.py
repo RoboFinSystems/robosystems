@@ -259,6 +259,17 @@ class InactiveAccountError(ValueError):
     )
 
 
+class UnknownAccountError(ValueError):
+  """A line item names an account id that is on no chart of this graph."""
+
+  def __init__(self, element_ids: list[str]) -> None:
+    self.element_ids = element_ids
+    super().__init__(
+      f"Cannot post to account(s) that do not exist: {', '.join(element_ids)}. "
+      "Choose an account on this entity's chart of accounts."
+    )
+
+
 class AccountOutsideEntityChartError(ValueError):
   """A line item names an account in another entity's chart of accounts.
   Each entity keeps its books in its own chart; entities combine at the
@@ -336,7 +347,8 @@ def assert_accounts_postable(
   source: str | None = None,
   entity_id: str | None = None,
 ) -> None:
-  """Raise `InactiveAccountError` if any line-item element is retired, and
+  """Raise `UnknownAccountError` if a line-item element is on no chart at
+  all, `InactiveAccountError` if one is retired, and
   `AccountOutsideEntityChartError` if one belongs to an entity other than
   ``entity_id``, the entity whose books the lines go into.
 
@@ -349,6 +361,12 @@ def assert_accounts_postable(
   ids = sorted({str(eid) for eid in element_ids if eid})
   if not ids:
     return
+  # One lookup per account, through the identity map: a chart has a handful
+  # of accounts per entry, and a mocked session answers it the way a real one
+  # answers a known account.
+  missing = [eid for eid in ids if session.get(Element, eid) is None]
+  if missing:
+    raise UnknownAccountError(missing)
   rows = session.execute(
     select(Element.id, Element.code, Element.name).where(
       Element.id.in_(ids), Element.is_active.is_(False)
