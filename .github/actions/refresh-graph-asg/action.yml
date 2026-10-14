@@ -127,11 +127,6 @@ runs:
           ["ladybug-shared"]="LadybugShared"
         )
 
-        # Shared tiers have rebuildable data (no database allocation check needed)
-        declare -A SHARED_TIERS=(
-          ["ladybug-shared"]=1
-        )
-
         REFRESHED_ASGS=""
         TOTAL_REFRESHED=0
         HAS_ERRORS=false
@@ -176,45 +171,15 @@ runs:
           # Get ASG details
           ASG_INFO=$(aws autoscaling describe-auto-scaling-groups \
             --auto-scaling-group-names "$ASG_NAME" \
-            --query "AutoScalingGroups[0].{DesiredCapacity: DesiredCapacity, Instances: Instances[?LifecycleState=='InService'].InstanceId}" \
+            --query "AutoScalingGroups[0].{Instances: Instances[?LifecycleState=='InService'].InstanceId}" \
             --output json \
             --region "$REGION" 2>/dev/null || echo '{}')
 
-          DESIRED=$(echo "$ASG_INFO" | jq -r '.DesiredCapacity // 0')
           INSTANCES=$(echo "$ASG_INFO" | jq -r '.Instances // [] | length')
-
-          echo "  Desired: $DESIRED, InService: $INSTANCES"
 
           if [ "$INSTANCES" -eq 0 ]; then
             echo "  No instances in service - skipping"
             continue
-          fi
-
-          # For non-shared tiers, log allocated databases (informational only)
-          IS_SHARED="${SHARED_TIERS[$TIER]:-0}"
-
-          if [ "$IS_SHARED" != "1" ]; then
-            INSTANCE_IDS=$(echo "$ASG_INFO" | jq -r '.Instances[]')
-            ALLOCATED_COUNT=0
-
-            for INSTANCE_ID in $INSTANCE_IDS; do
-              DB_COUNT=$(aws dynamodb get-item \
-                --table-name "robosystems-graph-${ENVIRONMENT}-instance-registry" \
-                --key "{\"instance_id\":{\"S\":\"${INSTANCE_ID}\"}}" \
-                --query "Item.database_count.N" \
-                --output text \
-                --region "$REGION" 2>/dev/null || echo "0")
-
-              if [ "$DB_COUNT" != "0" ] && [ "$DB_COUNT" != "None" ] && [ -n "$DB_COUNT" ]; then
-                ALLOCATED_COUNT=$((ALLOCATED_COUNT + 1))
-              fi
-            done
-
-            if [ "$ALLOCATED_COUNT" -gt 0 ]; then
-              echo "  Note: $ALLOCATED_COUNT instances have allocated databases"
-            fi
-          else
-            echo "  Shared tier (data is rebuildable)"
           fi
 
           # Check for in-progress refresh
@@ -329,9 +294,9 @@ runs:
               --region "$REGION" 2>/dev/null || echo '{}')
 
             REFRESH_STATUS=$(echo "$STATUS" | jq -r '.Status // "Unknown"')
-            PERCENT=$(echo "$STATUS" | jq -r '.Percent // 0')
-
-            echo "  $ASG: $REFRESH_STATUS ($PERCENT%)"
+            # Status only: the percentage steps by one instance, so it would
+            # publish the tier's size in this public log.
+            echo "  $ASG: $REFRESH_STATUS"
 
             if [ "$REFRESH_STATUS" == "InProgress" ] || [ "$REFRESH_STATUS" == "Pending" ]; then
               ALL_COMPLETE=false

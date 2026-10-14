@@ -274,7 +274,10 @@ jobs:
             echo "::error::Refresh start failed: $(jq -r '.error // .errorMessage // "unknown"' /tmp/state.json)"
             exit 1
           fi
-          jq -r '.log[]' /tmp/state.json
+          # This log is public: the walk's per-instance lines would publish the
+          # fleet's size, so they are kept aside and printed only on a failure.
+          # The function's CloudWatch log carries them on every run.
+          jq -r '.log[]' /tmp/state.json > /tmp/walk.log
 
           # The walk's own deadline bounds waiting on busy instances; this one
           # also covers the refreshes themselves, and the job's timeout is
@@ -283,6 +286,7 @@ jobs:
           POLL_ERRORS=0
           while ! jq -e '.phase | IN("complete", "failed", "deferred")' /tmp/state.json >/dev/null; do
             if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+              cat /tmp/walk.log
               echo "::error::Refresh did not finish within the budget and has stopped dispatching. In flight: $(jq -r '.current.instance_id // "none"' /tmp/state.json); not attempted: $(jq -r '.queue | join(", ")' /tmp/state.json)"
               exit 1
             fi
@@ -292,13 +296,14 @@ jobs:
                && [ "$(jq -r '.statusCode // empty' /tmp/next.json)" = "200" ]; then
               mv /tmp/next.json /tmp/state.json
               POLL_ERRORS=0
-              jq -r '.log[]' /tmp/state.json
+              jq -r '.log[]' /tmp/state.json >> /tmp/walk.log
             else
               # Ride out transient failures, but a walk that cannot be stepped
               # must not read as "still in progress" until the deadline.
               POLL_ERRORS=$((POLL_ERRORS + 1))
               echo "::warning::refresh step failed (${POLL_ERRORS} consecutive): $(jq -r '.error // .errorMessage // "no response"' /tmp/next.json 2>/dev/null)"
               if [ "$POLL_ERRORS" -ge 5 ]; then
+                cat /tmp/walk.log
                 echo "::error::Cannot step the refresh through ${FUNCTION} after ${POLL_ERRORS} attempts. In flight: $(jq -r '.current.instance_id // "none"' /tmp/state.json) — check its SSM command history."
                 exit 1
               fi
@@ -309,12 +314,13 @@ jobs:
           echo "phase=${PHASE}" >> "$GITHUB_OUTPUT"
           {
             echo "### Graph container refresh (${ENV_NAME}, ${NODE_TYPES}): ${PHASE}"
-            echo
-            echo "| Instance | Outcome |"
-            echo "| --- | --- |"
-            jq -r '.outcomes[] | "| \(.instance_id) | \(.result) |"' /tmp/state.json
-            jq -r '.failure // empty | "| \(.instance_id) | **failed** (\(.status) \(.status_details), exit \(.response_code)) |"' /tmp/state.json
-            jq -r '.phase as $p | .queue[] | "| \(.) | \(if $p == "deferred" then "deferred: still busy" else "not attempted" end) |"' /tmp/state.json
+            if [ "$PHASE" != "complete" ]; then
+              echo
+              echo "| Instance | Outcome |"
+              echo "| --- | --- |"
+              jq -r '.failure // empty | "| \(.instance_id) | **failed** (\(.status) \(.status_details), exit \(.response_code)) |"' /tmp/state.json
+              jq -r '.phase as $p | .queue[] | "| \(.) | \(if $p == "deferred" then "deferred: still busy" else "not attempted" end) |"' /tmp/state.json
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "$(jq '.outcomes | length' /tmp/state.json)" = "0" ] && [ "$PHASE" = "complete" ]; then
@@ -326,11 +332,12 @@ jobs:
           # container deliberately untouched; a warning, not a failed deploy.
           SKIPPED=$(jq '[.outcomes[] | select(.result | startswith("skipped-"))] | length' /tmp/state.json)
           if [ "$SKIPPED" -gt 0 ]; then
-            echo "::warning::${SKIPPED} instance(s) skipped — not yet cycled onto the new refresh scripts. Cycle them (graph-asg-refresh.yml) to pick them up."
+            echo "::warning::Some instances were skipped — not yet cycled onto the new refresh scripts. The refresh function's CloudWatch log names them; cycle them (graph-asg-refresh.yml) to pick them up."
           fi
 
           case "$PHASE" in
             failed)
+              cat /tmp/walk.log
               echo "::error::Refresh failed on $(jq -r '.failure.instance_id' /tmp/state.json) and stopped; $(jq '.queue | length' /tmp/state.json) instance(s) not attempted."
               jq -r '.failure | "  status: \(.status) \(.status_details), exit \(.response_code), command \(.command_id)\n  output tail:\n\(.output_tail)"' /tmp/state.json
               exit 1
