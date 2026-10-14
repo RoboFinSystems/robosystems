@@ -178,6 +178,15 @@ jobs:
           # The service container only creates the platform DB. DB-backed
           # extensions tests skip without this one, and the library-backed suites
           # need migration 0002's taxonomy seed.
+          # A throwaway server: trade durability for speed. Hundreds of
+          # DB-backed tests build a schema each, and every DDL statement
+          # fsyncs otherwise. All three settings take effect on reload.
+          for setting in "fsync = off" "synchronous_commit = off" "full_page_writes = off"; do
+            PGPASSWORD=postgres psql -h localhost -U postgres -d postgres \
+              -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET $setting"
+          done
+          PGPASSWORD=postgres psql -h localhost -U postgres -d postgres \
+            -v ON_ERROR_STOP=1 -c "SELECT pg_reload_conf()"
           echo "🗄️  Creating the extensions database..."
           PGPASSWORD=postgres psql -h localhost -U postgres -d postgres \
             -c "CREATE DATABASE extensions" \
@@ -232,11 +241,12 @@ jobs:
       - name: Run tests
         timeout-minutes: 15
         run: |
-          # Run tests (exclude slow tests), one xdist worker per runner core.
+          # Run tests (exclude slow tests), one xdist worker per vCPU
+          # (`auto` counts physical cores, which halves a hosted runner).
           # Each worker gets its own platform test database, created on demand
           # (tests/xdist_workers.py); the extensions DB stays shared, which
           # `--dist loadfile` makes safe. Same flags as `just test`.
-          uv run pytest -n auto --dist loadfile --tb=short -m "not slow"
+          uv run pytest -n logical --dist loadfile --tb=short -m "not slow"
 
       - name: Run dbt tests
         timeout-minutes: 1
