@@ -444,37 +444,60 @@ jobs:
 
           ASG_NAME="${{ steps.get-outputs.outputs.asg_name }}"
 
-          # Wait for instances to be InService
-          for i in {1..30}; do
-            HEALTHY=$(aws autoscaling describe-auto-scaling-groups \
+          # The group's own desired count, not the DesiredCapacity input: target
+          # tracking scales the group between min and max, and a deploy that
+          # leaves the parameter unchanged does not reset it. The stack monitor
+          # above already waited for every replica this deploy rolled.
+          read -r DESIRED MIN_SIZE < <(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names "$ASG_NAME" \
+            --query 'AutoScalingGroups[0].[DesiredCapacity,MinSize]' \
+            --output text)
+
+          IN_SERVICE=0
+          for _ in {1..30}; do
+            IN_SERVICE=$(aws autoscaling describe-auto-scaling-groups \
               --auto-scaling-group-names "$ASG_NAME" \
               --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`] | length(@)' \
               --output text)
 
-            DESIRED=${{ inputs.desired_capacity }}
-
-            if [ "$HEALTHY" -ge "$DESIRED" ]; then
-              echo "✅ $HEALTHY/$DESIRED replicas InService"
+            if [ "$IN_SERVICE" -ge "$DESIRED" ]; then
+              echo "✅ $IN_SERVICE/$DESIRED replicas InService"
               break
             fi
 
-            echo "⏳ Waiting for replicas... ($HEALTHY/$DESIRED InService)"
+            echo "⏳ Waiting for replicas... ($IN_SERVICE/$DESIRED InService)"
             sleep 10
           done
 
-          # Check ALB target health
+          if [ "$IN_SERVICE" -lt "$DESIRED" ]; then
+            # Below the floor is a failed deploy; above it, a scale-out still
+            # warming (up to the 30-minute warmup) is not this deploy's to wait on.
+            if [ "$IN_SERVICE" -lt "$MIN_SIZE" ]; then
+              echo "::error::Only $IN_SERVICE replica(s) InService, below the group's minimum of $MIN_SIZE"
+              exit 1
+            fi
+            echo "::warning::$IN_SERVICE/$DESIRED replicas InService; the rest are still warming"
+          fi
+
           TARGET_GROUP_ARN=$(aws cloudformation describe-stacks \
             --stack-name "${{ inputs.stack_name }}" \
             --query 'Stacks[0].Outputs[?OutputKey==`TargetGroupArn`].OutputValue' \
             --output text)
 
-          if [ -n "$TARGET_GROUP_ARN" ]; then
+          if [ -n "$TARGET_GROUP_ARN" ] && [ "$TARGET_GROUP_ARN" != "None" ]; then
             HEALTHY_TARGETS=$(aws elbv2 describe-target-health \
               --target-group-arn "$TARGET_GROUP_ARN" \
               --query 'TargetHealthDescriptions[?TargetHealth.State==`healthy`] | length(@)' \
               --output text)
 
             echo "🎯 ALB Target Health: $HEALTHY_TARGETS targets healthy"
+            if [ "$HEALTHY_TARGETS" -eq 0 ]; then
+              echo "::error::No healthy replica behind the load balancer"
+              exit 1
+            fi
+            if [ "$HEALTHY_TARGETS" -lt "$IN_SERVICE" ]; then
+              echo "::warning::$HEALTHY_TARGETS of $IN_SERVICE InService replicas are healthy behind the load balancer"
+            fi
           fi
 
       - name: Update Deployment Status
