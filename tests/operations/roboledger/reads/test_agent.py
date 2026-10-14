@@ -74,16 +74,24 @@ def test_get_agent_activity_counts_all_transactions_for_agent() -> None:
     _scalar_count_result(42),
   ]
 
-  with patch(
-    "robosystems.operations.roboledger.reads.event_block.list_event_blocks",
-    return_value=[],
+  with (
+    patch(
+      "robosystems.operations.roboledger.reads.event_block.list_event_blocks",
+      return_value=[],
+    ),
+    patch(
+      "robosystems.operations.roboledger.reads.agent.find_entity_id",
+      return_value="ent_parent",
+    ),
   ):
     activity = get_agent_activity(session, "agt_vendor", limit=2)
 
   assert activity is not None
+  assert activity.entity_id == "ent_parent"
   assert activity.transaction_count == 42
   assert len(activity.recent_transactions) == 1
 
   count_stmt = str(session.execute.call_args_list[3].args[0])
   assert "JOIN events" in count_stmt
   assert "events.agent_id" in count_stmt
+  assert "events.entity_id" in count_stmt
