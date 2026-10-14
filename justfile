@@ -141,7 +141,7 @@ test-all:
 test module="":
     uv run pytest \
         {{ if module != "" { "tests/" + module } else { "" } }} \
-        -n auto --dist loadfile \
+        -n logical --dist loadfile \
         -m "not slow"
 
 # Run ALL tests including slow ones
