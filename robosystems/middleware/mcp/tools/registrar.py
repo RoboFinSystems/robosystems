@@ -239,6 +239,19 @@ def _inline_refs(node: Any, defs: dict[str, Any]) -> Any:
 
 # ── Error translation ──────────────────────────────────────────────────────
 
+# MCP answers carry a code, not a status. These codes are the platform's own
+# faults; every other code is a refusal REST would answer with a 4xx.
+_SERVER_FAULT_STATUS: dict[str, int] = {
+  "command_failed": 500,
+  "not_implemented": 501,
+  "statement_timeout": 504,
+}
+
+
+def audit_status(error_code: str) -> int:
+  """The REST-equivalent status an MCP error code is audited with."""
+  return _SERVER_FAULT_STATUS.get(error_code, 422)
+
 
 def translate_error(exc: Exception, error_map: ErrorMap) -> dict[str, Any]:
   """Mirror `OperationRegistrar._raise_mapped` as an MCP error dict.
@@ -357,6 +370,7 @@ class _RegistrarMCPTool(BaseTool):
         status="failed",
         error="duplicate call while an identical one is in progress",
         surface="mcp",
+        http_status=409,
       )
       return {
         "error": "in_progress",
@@ -384,6 +398,7 @@ class _RegistrarMCPTool(BaseTool):
       status="failed" if failed else "completed",
       error=str(result.get("error")) if failed else None,
       surface="mcp",
+      http_status=audit_status(str(result["error"])) if failed else None,
     )
     return result
 
@@ -530,6 +545,7 @@ def build_tools_for_extension(
 
 __all__ = [
   "_RegistrarMCPTool",
+  "audit_status",
   "build_tools_for_extension",
   "derive_input_schema",
   "translate_error",
