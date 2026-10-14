@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from robosystems.db.extensions import extensions_session
 from robosystems.logger import logger
 from robosystems.middleware.operations import run_off_loop
+from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
 from robosystems.operations.roboledger.reads.agent import (
   get_agent as ops_get_agent,
 )
@@ -20,6 +21,7 @@ from robosystems.operations.roboledger.reads.agent import (
 )
 
 from ._errors import database_failure
+from .constants import ENTITY_ID_ARGUMENT
 
 
 class GetAgentTool:
@@ -183,10 +185,14 @@ class AgentActivityTool:
 
 **PARAMETERS:**
 - id (required): Agent id (agt_ prefixed ULID)
+- entity_id (optional): the entity whose dealings with this counterparty to
+  read; omit for the group parent. The group shares the counterparty, and
+  each entity's events with it are its own
 - limit (optional, default 100, max 1000): max events and transactions returned
 
 **RETURNS:**
 - agent: full AgentResponse
+- entity_id: the entity the lists and counts are scoped to
 - recent_events: list of EventBlockEnvelopes for this agent (desc by occurred_at)
 - recent_transactions: list of transactions triggered by those events
 - event_count: total event count for this agent
@@ -198,6 +204,7 @@ class AgentActivityTool:
             "type": "string",
             "description": "Agent id (agt_ prefixed)",
           },
+          "entity_id": ENTITY_ID_ARGUMENT,
           "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
         },
         "required": ["id"],
@@ -220,10 +227,14 @@ class AgentActivityTool:
 
     try:
       with extensions_session(graph_id) as session:
-        activity = ops_get_agent_activity(session, agent_id, limit=limit)
+        activity = ops_get_agent_activity(
+          session, agent_id, limit=limit, entity_id=arguments.get("entity_id")
+        )
         if activity is None:
           return {"error": "not_found", "message": f"Agent not found: {agent_id}"}
         return activity.model_dump(mode="json")
+    except EntityNotInGraphError as exc:
+      return {"error": "entity_not_found", "message": str(exc)}
     except SQLAlchemyError as exc:
       return database_failure("agent-activity", exc)
     except Exception as exc:

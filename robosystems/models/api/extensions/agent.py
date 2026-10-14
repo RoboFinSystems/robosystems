@@ -276,6 +276,7 @@ class TransactionSummary(BaseModel):
 
 class AgentActivityResponse(BaseModel):
   agent: LedgerAgentResponse
+  entity_id: str | None = None
   recent_events: list
   recent_transactions: list[TransactionSummary]
   event_count: int

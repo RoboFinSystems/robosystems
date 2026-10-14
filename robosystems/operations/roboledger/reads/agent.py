@@ -14,6 +14,7 @@ from robosystems.models.api.extensions.agent import (
 from robosystems.models.extensions.roboledger.agent import Agent
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.transaction import Transaction
+from robosystems.operations.roboledger.entity_scope import find_entity_id
 
 
 def _classification(agent: Agent) -> AgentClassification | None:
@@ -96,17 +97,25 @@ def get_agent_activity(
   agent_id: str,
   *,
   limit: int = 100,
+  entity_id: str | None = None,
 ) -> AgentActivityResponse | None:
+  """One entity's dealings with a counterparty, default the group parent's.
+
+  The group shares the counterparty; the events with it, and the transactions
+  they triggered, belong to the entity whose books recorded them.
+  """
   agent = session.get(Agent, agent_id)
   if agent is None:
     return None
 
+  entity_id = find_entity_id(session, entity_id)
+  scope = [Event.agent_id == agent_id]
+  if entity_id is not None:
+    scope.append(Event.entity_id == entity_id)
+
   events = (
     session.execute(
-      select(Event)
-      .where(Event.agent_id == agent_id)
-      .order_by(Event.occurred_at.desc())
-      .limit(limit)
+      select(Event).where(*scope).order_by(Event.occurred_at.desc()).limit(limit)
     )
     .scalars()
     .all()
@@ -140,14 +149,14 @@ def get_agent_activity(
     ]
 
   event_count = session.execute(
-    select(func.count()).select_from(Event).where(Event.agent_id == agent_id)
+    select(func.count()).select_from(Event).where(*scope)
   ).scalar_one()
 
   txn_count = session.execute(
     select(func.count(Transaction.id))
     .select_from(Transaction)
     .join(Event, Transaction.triggered_by_event_id == Event.id)
-    .where(Event.agent_id == agent_id)
+    .where(*scope)
   ).scalar_one()
 
   from robosystems.operations.roboledger.reads.event_block import list_event_blocks
@@ -157,10 +166,12 @@ def get_agent_activity(
     agent_id=agent_id,
     limit=limit,
     offset=0,
+    entity_id=entity_id,
   )
 
   return AgentActivityResponse(
     agent=agent_to_response(agent),
+    entity_id=entity_id,
     recent_events=[e.model_dump(mode="json") for e in recent_events],
     recent_transactions=transactions,
     event_count=event_count,
