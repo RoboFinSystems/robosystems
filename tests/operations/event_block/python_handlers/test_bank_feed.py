@@ -468,14 +468,29 @@ class TestUnclassifiedReason:
 @pytest.mark.unit
 class TestValidateClassification:
   """`captured → classified` runs the commit's plan and refuses what it
-  could not post — so `classified` never lies."""
+  could not post — so `classified` never lies. The entity-chart check runs
+  against real Postgres in `test_bank_line_flows_db.py`."""
 
-  def test_a_resolvable_choice_passes(self):
-    validate_classification(_event(), BankFeedMetadata(classified_element_id="e1"))
+  @pytest.fixture(autouse=True)
+  def _accounts_postable(self):
+    with (
+      patch(f"{MODULE}.assert_accounts_postable") as guard,
+      patch(f"{MODULE}.owner_entity_id", return_value="ent_1"),
+    ):
+      yield guard
+
+  def test_a_resolvable_choice_passes(self, _accounts_postable):
+    validate_classification(
+      MagicMock(), _event(), BankFeedMetadata(classified_element_id="e1")
+    )
+    accounts = _accounts_postable.call_args.args[1]
+    assert "e1" in accounts
+    assert _accounts_postable.call_args.kwargs == {"entity_id": "ent_1"}
 
   def test_accepting_a_name_only_suggestion_is_refused_with_the_reason(self):
     with pytest.raises(BankEventNotClassifiedError) as exc:
       validate_classification(
+        MagicMock(),
         _event(),
         BankFeedMetadata(accept_suggestion=True, suggested_account_name="Office"),
       )
@@ -485,6 +500,7 @@ class TestValidateClassification:
   def test_a_split_that_does_not_add_up_is_refused(self):
     with pytest.raises(HandlerMetadataValidationError, match="whole amount"):
       validate_classification(
+        MagicMock(),
         _event(amount=-4250),
         BankFeedMetadata(
           classified_allocations=[
@@ -497,7 +513,9 @@ class TestValidateClassification:
   def test_an_internal_transfer_passes_as_it_is(self):
     event = _event(event_type="internal_transfer", amount=50000)
     validate_classification(
-      event, BankFeedMetadata(from_element_id="e_chk", to_element_id="e_sav")
+      MagicMock(),
+      event,
+      BankFeedMetadata(from_element_id="e_chk", to_element_id="e_sav"),
     )
 
 

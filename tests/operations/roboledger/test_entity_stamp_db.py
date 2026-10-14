@@ -18,6 +18,7 @@ from robosystems.models.api.extensions.schedules import (
   CreateScheduleRequest,
   EntryTemplateRequest,
   ScheduleMetadataRequest,
+  UpdateScheduleRequest,
 )
 from robosystems.models.extensions import Element, Structure
 from robosystems.models.extensions.roboledger.entry import Entry
@@ -37,7 +38,10 @@ from robosystems.operations.roboledger.commands.journal_entries import (
   create_journal_entry,
   reverse_journal_entry,
 )
-from robosystems.operations.roboledger.commands.schedules import create_schedule
+from robosystems.operations.roboledger.commands.schedules import (
+  create_schedule,
+  update_schedule,
+)
 from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
 from robosystems.operations.roboledger.reconciliations.blocks import (
   create_account_reconciliation,
@@ -310,6 +314,77 @@ class TestSchedules:
     entries = t.session.query(Entry).filter(Entry.source_structure_id == structure_id)
     assert entries.count() == 3
     assert {entry.entity_id for entry in entries} == {t.sub.id}
+
+  def test_a_schedule_on_another_entitys_accounts_is_refused_at_create(
+    self, two_entities
+  ):
+    """Named for the parent, built on the subsidiary's accounts: it could never
+    draft, so it is refused when it is made, not stranded in the close."""
+    t = two_entities
+    debit = _account(t.session, "Depreciation Expense", owner=t.sub.id)
+    credit = _account(t.session, "Accumulated Depreciation", owner=t.sub.id)
+
+    with pytest.raises(AccountOutsideEntityChartError):
+      create_schedule(
+        t.session,
+        CreateScheduleRequest(
+          name="Depreciation",
+          element_ids=[debit, credit],
+          period_start=date(2026, 7, 1),
+          period_end=date(2026, 9, 30),
+          monthly_amount=10_000,
+          entry_template=EntryTemplateRequest(
+            debit_element_id=debit, credit_element_id=credit
+          ),
+        ),
+        created_by="usr_1",
+      )
+    assert (
+      t.session.query(Structure).filter(Structure.name == "Depreciation").count() == 0
+    )
+
+  def test_a_schedules_asset_account_must_be_its_entitys(self, two_entities):
+    t = two_entities
+    foreign_asset = _account(t.session, "Equipment", owner=t.parent.id)
+
+    with pytest.raises(AccountOutsideEntityChartError):
+      _depreciation(t.session, entity_id=t.sub.id, asset=foreign_asset)
+
+  def test_a_template_moved_to_another_entitys_account_is_refused(self, two_entities):
+    t = two_entities
+    structure_id = _depreciation(t.session, entity_id=t.sub.id)
+    debit = _account(t.session, "Amortization", owner=t.parent.id)
+    credit = _account(t.session, "Accumulated Amortization", owner=t.parent.id)
+
+    with pytest.raises(AccountOutsideEntityChartError):
+      update_schedule(
+        t.session,
+        UpdateScheduleRequest(
+          structure_id=structure_id,
+          entry_template=EntryTemplateRequest(
+            debit_element_id=debit, credit_element_id=credit
+          ),
+        ),
+      )
+
+  def test_a_schedule_on_a_retired_account_can_still_be_redated(self, two_entities):
+    """Only the accounts an edit names are checked: a finished schedule whose
+    expense account was retired keeps its other edits."""
+    t = two_entities
+    structure_id = _depreciation(t.session, entity_id=t.sub.id)
+    structure = t.session.get(Structure, structure_id)
+    template = structure.metadata_["entry_template"]
+    retired = t.session.get(Element, template["debit_element_id"])
+    retired.is_active = False
+    t.session.flush()
+
+    update_schedule(
+      t.session,
+      UpdateScheduleRequest(
+        structure_id=structure_id,
+        schedule_metadata=ScheduleMetadataRequest(useful_life_months=36),
+      ),
+    )
 
   def test_a_manual_closing_entry_lands_where_it_is_sent(self, two_entities):
     t = two_entities

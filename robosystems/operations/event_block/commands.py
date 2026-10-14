@@ -643,7 +643,17 @@ def fire_handler_on_commit(
   return typed_metadata
 
 
-def _validate_classification(event: Event) -> None:
+# The metadata keys that choose where a classified line posts.
+_CLASSIFICATION_KEYS = (
+  "classified_element_id",
+  "classified_allocations",
+  "accept_suggestion",
+  "from_element_id",
+  "to_element_id",
+)
+
+
+def _validate_classification(session: Session, event: Event) -> None:
   """Let the event's Python handler refuse a ``classified`` it could not post.
 
   Runs after the metadata patch, so the handler sees the caller's choice.
@@ -660,7 +670,7 @@ def _validate_classification(event: Event) -> None:
       f"Event {event.id} (type={event.event_type}): metadata fails handler "
       f"validation — cannot classify. {e}"
     )
-  python_handler.validate_classification(event, typed_metadata)
+  python_handler.validate_classification(session, event, typed_metadata)
 
 
 def _refuse_system_metadata(patch: dict | None) -> None:
@@ -908,8 +918,15 @@ def update_event_block(
   if body.event_action is not None:
     event.event_action = body.event_action
 
-  if body.transition_to == "classified":
-    _validate_classification(event)
+  # Classified → classified is no transition, so a line already classified is
+  # re-pointed by a bare patch, and is checked the same way. A patch that
+  # leaves the choice alone (a memo, a document) is not re-checked.
+  if body.transition_to == "classified" or (
+    body.transition_to is None
+    and event.status == "classified"
+    and any(key in (body.metadata_patch or {}) for key in _CLASSIFICATION_KEYS)
+  ):
+    _validate_classification(session, event)
 
   if body.metadata_patch:
     from robosystems.operations.event_block.python_handlers.bank_feed import (
