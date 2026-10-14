@@ -8,7 +8,11 @@ import requests
 from intuitlib.client import AuthClient as _IntuitAuthClient
 from intuitlib.exceptions import AuthClientError
 from quickbooks import QuickBooks
-from quickbooks.exceptions import AuthorizationException, QuickbooksException
+from quickbooks.exceptions import (
+  AuthorizationException,
+  QuickbooksException,
+  SevereException,
+)
 from retrying import retry
 
 from robosystems.config import env
@@ -94,14 +98,14 @@ def _is_retryable_qb_error(exc: BaseException) -> bool:
       return status in (429, 500, 502, 503, 504)
     return True
   if isinstance(exc, QuickbooksException):
-    # The SDK embeds the HTTP status only in the message text.
-    msg = str(exc)
-    return (
-      "status code '429'" in msg
-      or "status code '500'" in msg
-      or "status code '502'" in msg
-      or "status code '503'" in msg
-      or "status code '504'" in msg
+    # The SDK raises Intuit's throttle as a Fault with code 3001, a system
+    # fault as SevereException, and a gateway page as unreadable JSON; only a
+    # JSON body without a Fault carries the HTTP status in its text.
+    if isinstance(exc, SevereException) or str(exc.error_code) == "3001":
+      return True
+    msg = exc.message if isinstance(exc.message, str) else str(exc)
+    return msg.startswith("Error reading json response") or any(
+      f"status code '{status}'" in msg for status in (429, 500, 502, 503, 504)
     )
   return False
 

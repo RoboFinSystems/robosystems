@@ -165,3 +165,119 @@ class TestDbtBuild:
       )
     finally:
       con.close()
+
+
+def test_a_negative_line_keeps_its_entry_balanced(tmp_path):
+  """A payout deposited net of its fee: QuickBooks shows the fee as a
+  negative credit. Dropped, it unbalanced the window and failed the build."""
+  import os
+
+  import duckdb
+
+  from robosystems.adapters.quickbooks.pipeline.utils import (
+    parse_journal_report,
+    write_extract_parquet,
+  )
+
+  def row(date, typ, tid, acct, aid, debit, credit):
+    return {
+      "ColData": [
+        {"value": date},
+        {"value": typ, "id": tid},
+        {"value": ""},
+        {"value": ""},
+        {"value": ""},
+        {"value": acct, "id": aid},
+        {"value": debit},
+        {"value": credit},
+      ]
+    }
+
+  def summary(debit, credit):
+    return {
+      "Summary": {
+        "ColData": [{"value": ""}] * 6 + [{"value": debit}, {"value": credit}]
+      }
+    }
+
+  report = {
+    "Rows": {
+      "Row": [
+        row("2026-09-03", "Deposit", "201", "Checking", "35", "970.00", ""),
+        row("", "", "", "Undeposited Funds", "4", "", "1000.00"),
+        row("", "", "", "Merchant Fees", "60", "", "-30.00"),
+        summary("970.00", "970.00"),
+      ]
+    }
+  }
+  accounts = [
+    {
+      "Id": aid,
+      "Name": name,
+      "FullyQualifiedName": name,
+      "AccountType": kind,
+      "Classification": cls,
+      "ParentRef": None,
+      "Active": True,
+      "CurrentBalance": 0.0,
+      "AccountSubType": kind,
+      "AcctNum": None,
+      "SubAccount": False,
+    }
+    for aid, name, kind, cls in [
+      ("35", "Checking", "Bank", "Asset"),
+      ("4", "Undeposited Funds", "Other Current Asset", "Asset"),
+      ("60", "Merchant Fees", "Expense", "Expense"),
+    ]
+  ]
+  company = [
+    {
+      "Id": "1",
+      "CompanyName": "Fictional Widgets LLC",
+      "LegalName": "Fictional Widgets LLC",
+      "CompanyAddr_Line1": "",
+      "CompanyAddr_City": "",
+      "CompanyAddr_CountrySubDivisionCode": "",
+      "CompanyAddr_PostalCode": "",
+      "CompanyAddr_Country": "US",
+      "PrimaryPhone_FreeFormNumber": "",
+      "WebAddr_URI": "",
+      "FiscalYearStartMonth": "January",
+    }
+  ]
+  extract = tmp_path / "extract"
+  entries, lines = parse_journal_report(report)
+  write_extract_parquet(extract, accounts, entries, lines, company)
+  duckdb_path = tmp_path / "quickbooks.duckdb"
+
+  result = subprocess.run(
+    [
+      "uv",
+      "run",
+      "dbt",
+      "build",
+      "--profiles-dir",
+      str(DBT_PROJECT_DIR),
+      "--project-dir",
+      str(DBT_PROJECT_DIR),
+      "--target-path",
+      str(tmp_path / "target"),
+      "--vars",
+      f'{{"realm_id": "1", "qb_extract_path": "{extract}", "use_seeds": false}}',
+    ],
+    capture_output=True,
+    text=True,
+    cwd=str(DBT_PROJECT_DIR),
+    env={**os.environ, "DBT_DUCKDB_PATH": str(duckdb_path)},
+  )
+
+  assert result.returncode == 0, result.stdout[-2000:]
+  con = duckdb.connect(str(duckdb_path), read_only=True)
+  try:
+    sides = con.execute(
+      "SELECT element_external_id, debit_amount, credit_amount FROM line_items "
+      "ORDER BY element_external_id"
+    ).fetchall()
+  finally:
+    con.close()
+  assert sides == [("35", 97000, 0), ("4", 0, 100000), ("60", 3000, 0)]
