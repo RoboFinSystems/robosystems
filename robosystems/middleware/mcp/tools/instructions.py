@@ -150,6 +150,16 @@ def build_instructions(
         "commit — never force it. Internal transfers are pre-classified "
         "(both bank legs known) and commit as they are."
       ),
+      (
+        "- Many at once → `accept-suggestions`: every open line with a "
+        "suggestion that the filters select (`source`, `agent_id`, "
+        "`suggestion_source='agent_default'` for the learned ones, a date "
+        "range, or explicit `event_ids`) is classified to it, and posted too "
+        "with `commit: true`; a line it cannot take comes back `skipped` with "
+        "the reason, never forced. `dry_run: true` counts first. What share "
+        "of a month's lines needed a person's choice is "
+        "`classificationStats(period)` over `query-graphql`."
+      ),
     ]
     if has("recall") and has("remember"):
       inbox_lines.append(

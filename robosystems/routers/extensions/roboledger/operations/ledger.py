@@ -31,6 +31,8 @@ from robosystems.models.api.event_handler import (
   UpdateEventHandlerRequest,
 )
 from robosystems.models.api.extensions.agent import (
+  AcceptSuggestionsRequest,
+  AcceptSuggestionsResponse,
   CreateAgentRequest,
   LearnClassificationDefaultsRequest,
   LearnClassificationDefaultsResponse,
@@ -169,6 +171,9 @@ from robosystems.operations.roboledger.commands.reconciling_items import (
 from robosystems.operations.roboledger.commands.reconciling_items import (
   resolve_reconciling_item as cmd_resolve_reconciling_item,
 )
+from robosystems.operations.roboledger.commands.suggestions import (
+  accept_suggestions as cmd_accept_suggestions,
+)
 from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
 from robosystems.operations.roboledger.reconciliations import (
   NoSourceLedgerError,
@@ -243,6 +248,32 @@ learn_classification_defaults_op = _registrar.register(
     result_type=LearnClassificationDefaultsResponse,
     error_map={RowLockedError: 409},
     mark_stale_reason="classification_defaults_learned",
+  )
+)
+
+
+accept_suggestions_op = _registrar.register(
+  OperationSpec(
+    name="accept-suggestions",
+    summary="Accept Suggestions",
+    description=(
+      "Take the suggestion on every open bank line the filters select, "
+      "oldest first: each is classified to its `suggested_element_id` "
+      "through the same update a single line goes through, and posted too "
+      "with `commit: true`. Select by `source`, `agent_id`, "
+      "`suggestion_source` (`agent_default` for the learned ones), a date "
+      "range, or explicit `event_ids` from a multi-select. A line it cannot "
+      "take — no suggestion to take, already classified or posted, a closed "
+      "month, a choice the handler refuses — comes back `skipped` with the "
+      "reason, never forced. `dry_run: true` reports the counts without "
+      "writing; `limit` bounds a call and `truncated` says more matched."
+    ),
+    command=cmd_accept_suggestions,
+    request_model=AcceptSuggestionsRequest,
+    result_type=AcceptSuggestionsResponse,
+    error_map={EntityNotInGraphError: 404, RowLockedError: 409},
+    requires_graph_id=True,
+    mark_stale_reason="event_block_updated",
   )
 )
 

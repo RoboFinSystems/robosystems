@@ -38,6 +38,7 @@ from robosystems.operations.roboledger.commands._guards import (
   AccountOutsideEntityChartError,
   ClosedPeriodError,
   InactiveAccountError,
+  UnknownAccountError,
   assert_accounts_postable,
   assert_period_not_closed,
   assert_within_calendar,
@@ -1143,7 +1144,11 @@ def preview_event_block(
       ),
       entity_id=entity_id,
     )
-  except (InactiveAccountError, AccountOutsideEntityChartError) as e:
+  except (
+    InactiveAccountError,
+    UnknownAccountError,
+    AccountOutsideEntityChartError,
+  ) as e:
     errors.append(str(e))
 
   return PreviewEventBlockResponse(

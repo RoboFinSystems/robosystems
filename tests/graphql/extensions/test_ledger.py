@@ -1940,3 +1940,103 @@ class TestBooksReadsNameTheirEntity:
       assert read.call_args.args[1] == "ent_sub"
     else:
       assert read.call_args.kwargs["entity_id"] == "ent_sub"
+
+
+class TestClassificationStatsResolver:
+  """`classificationStats` counts one month's bank lines per suggestion
+  source, read from the lines' own outcome stamps."""
+
+  @staticmethod
+  def _stats(entity_id: str | None = "ent_sub"):
+    from robosystems.models.api.extensions.agent import (
+      ClassificationSourceStats,
+      ClassificationStatsResponse,
+    )
+
+    return ClassificationStatsResponse(
+      period="2026-10",
+      entity_id=entity_id,
+      lines=5,
+      accepted=2,
+      overridden=1,
+      unsuggested=1,
+      split=1,
+      unstamped=1,
+      human_choice_share=0.6,
+      open_lines=2,
+      by_source=[
+        ClassificationSourceStats(
+          source="agent_default",
+          lines=3,
+          accepted=2,
+          overridden=1,
+          unsuggested=0,
+          split=0,
+        )
+      ],
+    )
+
+  def test_counts_the_named_entitys_month(self) -> None:
+    with patch(
+      f"{_OPS}.classification.classification_stats", return_value=self._stats()
+    ) as read:
+      result = _run(
+        'query { classificationStats(period: "2026-10", entityId: "ent_sub") { '
+        "period entityId lines accepted overridden unsuggested split unstamped "
+        "humanChoiceShare openLines bySource { source lines accepted overridden "
+        "unsuggested split } } }"
+      )
+    assert result.errors is None
+    assert result.data == {
+      "classificationStats": {
+        "period": "2026-10",
+        "entityId": "ent_sub",
+        "lines": 5,
+        "accepted": 2,
+        "overridden": 1,
+        "unsuggested": 1,
+        "split": 1,
+        "unstamped": 1,
+        "humanChoiceShare": 0.6,
+        "openLines": 2,
+        "bySource": [
+          {
+            "source": "agent_default",
+            "lines": 3,
+            "accepted": 2,
+            "overridden": 1,
+            "unsuggested": 0,
+            "split": 0,
+          }
+        ],
+      }
+    }
+    assert read.call_args.args[1:] == ("2026-10", "ent_sub")
+
+  def test_defaults_to_the_parent(self) -> None:
+    with patch(
+      f"{_OPS}.classification.classification_stats",
+      return_value=self._stats(entity_id=None),
+    ) as read:
+      result = _run('query { classificationStats(period: "2026-10") { lines } }')
+    assert result.errors is None
+    assert result.data == {"classificationStats": {"lines": 5}}
+    assert read.call_args.args[1:] == ("2026-10", None)
+
+  def test_a_malformed_period_is_an_error_before_any_read(self) -> None:
+    with patch(f"{_OPS}.classification.classification_stats") as read:
+      result = _run('query { classificationStats(period: "October") { lines } }')
+    assert result.errors is not None
+    assert "YYYY-MM" in result.errors[0].message
+    read.assert_not_called()
+
+  def test_an_entity_outside_the_graph_is_an_error(self) -> None:
+    with patch(
+      f"{_OPS}.classification.classification_stats",
+      side_effect=EntityNotInGraphError("Entity 'x' not found in this graph."),
+    ):
+      result = _run(
+        'query { classificationStats(period: "2026-10", entityId: "x") { lines } }'
+      )
+    assert result.errors is not None
+    assert "not found in this graph" in result.errors[0].message

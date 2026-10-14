@@ -31,6 +31,7 @@ from robosystems.operations.roboledger.commands._guards import (
   AccountOutsideEntityChartError,
   ClosedPeriodError,
   InactiveAccountError,
+  UnknownAccountError,
   assert_accounts_postable,
   assert_period_not_closed,
   assert_within_calendar,
@@ -500,7 +501,11 @@ def dispatch_preview(
     assert_accounts_postable(
       session, (li.element_id for li in line_items), entity_id=entity_id
     )
-  except (InactiveAccountError, AccountOutsideEntityChartError) as e:
+  except (
+    InactiveAccountError,
+    UnknownAccountError,
+    AccountOutsideEntityChartError,
+  ) as e:
     errors.append(str(e))
 
   synced = (body.source or "").lower() in SEVERABLE_SOURCES

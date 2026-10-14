@@ -10,13 +10,17 @@ from sqlalchemy.dialects import postgresql
 
 from robosystems.operations.roboledger.commands._guards import (
   InactiveAccountError,
+  UnknownAccountError,
   assert_accounts_postable,
 )
 
 
-def _session_with_inactive(rows):
+def _session_with_inactive(rows, *, missing=()):
+  """A session whose query returns the retired accounts in ``rows``, and
+  whose lookups find every account but those in ``missing``."""
   session = MagicMock()
   session.execute.return_value.all.return_value = rows
+  session.get.side_effect = lambda _model, eid: None if eid in missing else object()
   return session
 
 
@@ -33,6 +37,17 @@ class TestAssertAccountsPostable:
     )
     assert "elements.is_active IS false" in sql
     assert "'elem_a'" in sql and "'elem_b'" in sql
+
+  def test_refuses_and_names_an_account_that_does_not_exist(self) -> None:
+    """A choice that resolves no account is a refusal, not a foreign-key
+    error from the database; checked before the retired-account query."""
+    session = _session_with_inactive([], missing={"elem_b", "elem_c"})
+    with pytest.raises(UnknownAccountError) as exc:
+      assert_accounts_postable(session, ["elem_a", "elem_b", "elem_c"])
+    assert exc.value.element_ids == ["elem_b", "elem_c"]
+    assert "elem_b, elem_c" in str(exc.value)
+    assert issubclass(UnknownAccountError, ValueError)
+    session.execute.assert_not_called()
 
   def test_refuses_and_names_every_retired_account(self) -> None:
     session = _session_with_inactive(

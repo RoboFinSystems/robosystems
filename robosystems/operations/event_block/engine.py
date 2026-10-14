@@ -100,7 +100,8 @@ def apply_handler(
 
   Raises ``EngineValidationError`` on an unbalanced entry, a missing element,
   or a negative amount, ``TemplateInterpolationError`` on a bad template
-  expression, and ``InactiveAccountError`` on a retired account.
+  expression, ``InactiveAccountError`` on a retired account and
+  ``UnknownAccountError`` on one that is on no chart.
   """
   template = handler.transaction_template
   if not template or "transactions" not in template:

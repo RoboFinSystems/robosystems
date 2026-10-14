@@ -33,6 +33,7 @@ from robosystems.graphql.types.ledger import (
   BankAccountList,
   BlockedSourceGraphList,
   ChartTemplate,
+  ClassificationStats,
   ClosingBookStructures,
   Element,
   ElementList,
@@ -96,6 +97,9 @@ from robosystems.operations.roboledger.reads import (
 )
 from robosystems.operations.roboledger.reads import (
   blocked_source_graphs as reads_blocked_source_graphs,
+)
+from robosystems.operations.roboledger.reads import (
+  classification as reads_classification,
 )
 from robosystems.operations.roboledger.reads import (
   closing_book as reads_closing_book,
@@ -1044,6 +1048,37 @@ class LedgerQuery:
     if response is None:
       return None
     return MappingDetail.from_pydantic(response)
+
+  @strawberry.field
+  def classification_stats(
+    self,
+    info: Info[GraphQLContext, None],
+    period: str,
+    entity_id: str | None = None,
+  ) -> ClassificationStats | None:
+    """How one month's bank lines were classified, per suggestion source.
+
+    Taken as suggested, overridden, split, or chosen with no suggestion to
+    take, and the share that needed a person's choice. Counted from the
+    lines committed in the month; lines posted before outcomes were recorded
+    are `unstamped` and outside the share.
+
+    Args:
+      period: The month, `YYYY-MM`, over the lines' own dates.
+      entity_id: The entity whose lines to count. Omit for the group parent.
+    """
+    try:
+      parse_period(period)
+    except ValueError as exc:
+      raise strawberry.exceptions.StrawberryGraphQLError(str(exc)) from exc
+    try:
+      with _open_session(info, "roboledger") as session:
+        response = reads_classification.classification_stats(session, period, entity_id)
+    except EntityNotInGraphError as exc:
+      raise strawberry.exceptions.StrawberryGraphQLError(str(exc)) from exc
+    except (ValueError, ProgrammingError):
+      _raise_ledger_not_initialized()
+    return ClassificationStats.from_pydantic(response)
 
   @strawberry.field
   def mapping_coverage(
