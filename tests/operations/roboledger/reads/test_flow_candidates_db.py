@@ -119,9 +119,10 @@ def _compose_statement(t, rows: list[Element]) -> None:
   session.commit()
 
 
-def test_the_statements_leaf_rows_in_statement_order(flows):
-  """Only the rows the statement presents, investing before financing; the
-  subtotal they foot and a traited flow with no row stay out."""
+def test_the_statements_leaf_rows_by_section_then_name(flows):
+  """Only the rows the statement presents, investing before financing and by
+  name within each; the subtotal they foot and a traited flow with no row
+  stay out."""
   _compose_statement(flows, [flows.note, flows.capex])
 
   candidates = list_flow_candidates(
@@ -145,3 +146,24 @@ def test_with_no_statement_every_traited_flow_is_offered(flows):
   )
 
   assert [c.qname for c in candidates] == [CAPEX, CONTRIBUTIONS, NOTE_PROCEEDS]
+
+
+def test_a_flow_carrying_both_activities_is_listed_once_under_investing(flows):
+  session = flows.session
+  investing = (
+    session.query(Trait)
+    .filter(Trait.category == "activityType", Trait.identifier == "investingActivity")
+    .one()
+  )
+  session.add(ElementTrait(element_id=flows.note.id, trait_id=investing.id))
+  session.commit()
+
+  candidates = list_flow_candidates(
+    session, load_entity_reporting_style(session, flows.parent.id)
+  )
+
+  assert [(c.qname, c.activity) for c in candidates] == [
+    (NOTE_PROCEEDS, "investing"),
+    (CAPEX, "investing"),
+    (CONTRIBUTIONS, "financing"),
+  ]

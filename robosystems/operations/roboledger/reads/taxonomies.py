@@ -314,8 +314,9 @@ def list_flow_candidates(
   Reporting Style: the leaf rows of its cash flow statement, the set the
   write path accepts (``bank_feed.resolve_flows``). With no cash flow network
   composed, every flow concept carrying an investing or financing activity,
-  which is what the write path then checks by. Statement order: investing,
-  then financing, each by name.
+  which is what the write path then checks by. By section, investing then
+  financing, and by name within each: a picker's order, not the statement's
+  row order. A flow carrying both activities is listed under investing.
   """
   from robosystems.operations.roboledger.reports.network_picker import (
     taggable_flow_qnames,
@@ -336,16 +337,20 @@ def list_flow_candidates(
     stmt = stmt.where(Element.qname.in_(sorted(qnames)))
   rows = session.execute(stmt).all()
   order = {activity: rank for rank, activity in enumerate(_FLOW_ACTIVITIES.values())}
-  candidates = {
-    str(element_id): FlowCandidate(
-      element_id=str(element_id),
-      qname=str(qname),
-      name=str(name),
-      activity=_FLOW_ACTIVITIES[str(identifier)],
+  candidates: dict[str, FlowCandidate] = {}
+  for element_id, qname, name, identifier in sorted(
+    rows, key=lambda r: (order[_FLOW_ACTIVITIES[str(r[3])]], str(r[2]))
+  ):
+    candidates.setdefault(
+      str(element_id),
+      FlowCandidate(
+        element_id=str(element_id),
+        qname=str(qname),
+        name=str(name),
+        activity=_FLOW_ACTIVITIES[str(identifier)],
+      ),
     )
-    for element_id, qname, name, identifier in rows
-  }
-  return sorted(candidates.values(), key=lambda c: (order[c.activity], c.name))
+  return list(candidates.values())
 
 
 def list_unmapped_elements(

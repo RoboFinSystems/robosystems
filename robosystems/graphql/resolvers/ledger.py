@@ -941,8 +941,8 @@ class LedgerQuery:
     `transaction_description_code`). These are the leaf investing and
     financing rows of the entity's cash flow statement under its Reporting
     Style - the set the write path accepts - so a picker built from them
-    never offers a row the statement cannot present. Statement order:
-    investing, then financing.
+    never offers a row the statement cannot present. By section, investing
+    then financing, and by name within each.
 
     Args:
       entity_id: The entity whose statement the rows come from. Omit for the group parent.
