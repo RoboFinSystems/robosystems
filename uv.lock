@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.13"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -4873,7 +4873,7 @@ wheels = [
 
 [[package]]
 name = "xbrlkit"
-version = "0.21.0"
+version = "0.21.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "arelle-release" },
@@ -4885,9 +4885,9 @@ dependencies = [
     { name = "regex" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/88/bc/ecf8132d9af63abede2d9a96a680fa69023428bb691ceee26854719175ad/xbrlkit-0.21.0.tar.gz", hash = "sha256:d146546eaec4e562a5addd6def7047e2c2ceda0be213a746e01ddaa9cf48015d", size = 2153667, upload-time = "2026-10-14T17:12:56.101Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6a/cb/26a18c3333a83f5797c84bf0a2778ceee22f2f994f2c26430739df0ece57/xbrlkit-0.21.1.tar.gz", hash = "sha256:10fcd41dadc3d34ca58c88e7218cd6adf954f2cc5abe42a4b470eb368ea167ee", size = 2155648, upload-time = "2026-10-14T21:21:56.347Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/03/d5/9cb9167ddad0bf7f2a27e5aaf344a0817155301462eab6efff059c3fa3d7/xbrlkit-0.21.0-py3-none-any.whl", hash = "sha256:621e0a52d7aa0f44380a69835c5ad4f2ef1bc4bbcc03dcbc03b053184aceff36", size = 2089818, upload-time = "2026-10-14T17:12:53.971Z" },
+    { url = "https://files.pythonhosted.org/packages/1f/63/4cc5c578f936b06c58268a70b22649bf12558f24e9aa1cf098c1c8cef768/xbrlkit-0.21.1-py3-none-any.whl", hash = "sha256:2e7d0d5d19811bc3b5cda2ff66fcc9d919dcaa5efb243a81823a40c7e78be7ce", size = 2090722, upload-time = "2026-10-14T21:21:54.469Z" },
 ]
 
 [[package]]
