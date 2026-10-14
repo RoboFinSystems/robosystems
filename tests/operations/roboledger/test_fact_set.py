@@ -72,6 +72,7 @@ class TestCreateFactSetHelper:
       "period": "2026-01-01/2026-01-31",
       "arc_type": None,
       "posting_filter": None,
+      "stamped_at": None,
     }
     assert fs.factset_type == "report"
     assert fs.report_id == "rpt_1"

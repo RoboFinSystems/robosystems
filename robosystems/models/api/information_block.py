@@ -249,6 +249,15 @@ class FactSetLite(BaseModel):
       "when the FactSet carries no descriptor."
     ),
   )
+  created_at: datetime | None = Field(
+    None,
+    description=(
+      "When the set was computed. For a close-stamped canonical set "
+      "(`report_id` null, type `report`) this is the month as closed on "
+      "this date: its facts keep that answer while a live render reads "
+      "through the mapping arcs as they stand now."
+    ),
+  )
 
 
 class RuleTargetLite(BaseModel):

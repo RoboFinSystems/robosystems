@@ -40,9 +40,9 @@ Ask: "Which accounts aren't mapped yet? Suggest where each one belongs, and wait
 
 ## Map before you close
 
-Closing a month saves that month's statements, and they're built through the mapping as it stood. After that, RoboLedger refuses to change the mapping of an account that has activity in a closed month, because the saved statements would stop agreeing with the live ones. The message names the earliest month affected.
+Closing a month saves that month's statements, and they're built through the mapping as it stood. After that, an account with activity in a closed month can't simply be unmapped or mapped anew, because the saved statements would stop agreeing with the live ones. The message names the earliest month affected.
 
-So map first, close second. If you need to change a mapping after the fact, reopen the months it touches, change it, and close them again. See [Close the month with your AI assistant](month-end-close.md).
+So map first, close second. An account that was mapped to the wrong line can still be moved afterwards, as long as it stays on the same statement: a card that was booked as short-term debt can become other current liabilities, because no total the close recorded changes. That's a reclassification. The saved statements keep the answer as of the close, live statements and reports read through the new mapping, and the change is recorded with the months it reaches and your reason. Ask your assistant to move the account and say why, or change the mapping in the app. A move across statements, say from an expense to a liability, would change net income in those months, so it's refused: reopen the months it touches, change it, and close them again. See [Close the month with your AI assistant](month-end-close.md).
 
 ## Try asking
 
