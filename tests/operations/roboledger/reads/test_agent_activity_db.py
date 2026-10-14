@@ -79,6 +79,15 @@ def test_omitted_the_scope_is_the_group_parents(vendor):
   )
 
 
+def test_the_limit_applies_within_the_scope(vendor):
+  activity = get_agent_activity(vendor.session, vendor.vendor.id, limit=1)
+
+  assert activity is not None
+  assert activity.event_count == 2
+  assert [e["id"] for e in activity.recent_events] == [vendor.parent_events[1]]
+  assert len(activity.recent_transactions) == 1
+
+
 def test_a_subsidiary_reads_its_own_dealings(vendor):
   activity = get_agent_activity(
     vendor.session, vendor.vendor.id, entity_id=vendor.sub.id

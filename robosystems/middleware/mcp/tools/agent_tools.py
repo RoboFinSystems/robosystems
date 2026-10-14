@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from robosystems.db.extensions import extensions_session
 from robosystems.logger import logger
 from robosystems.middleware.operations import run_off_loop
+from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
 from robosystems.operations.roboledger.reads.agent import (
   get_agent as ops_get_agent,
 )
@@ -232,6 +233,8 @@ class AgentActivityTool:
         if activity is None:
           return {"error": "not_found", "message": f"Agent not found: {agent_id}"}
         return activity.model_dump(mode="json")
+    except EntityNotInGraphError as exc:
+      return {"error": "entity_not_found", "message": str(exc)}
     except SQLAlchemyError as exc:
       return database_failure("agent-activity", exc)
     except Exception as exc:
