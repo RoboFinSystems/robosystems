@@ -163,7 +163,7 @@ def test_a_flow_carrying_both_activities_is_listed_once_under_investing(flows):
   )
 
   assert [(c.qname, c.activity) for c in candidates] == [
-    (NOTE_PROCEEDS, "investing"),
     (CAPEX, "investing"),
+    (NOTE_PROCEEDS, "investing"),
     (CONTRIBUTIONS, "financing"),
   ]
