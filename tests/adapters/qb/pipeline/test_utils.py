@@ -523,7 +523,10 @@ class TestWriteExtractParquet:
   def test_writes_all_files(self, tmp_path):
     import pyarrow.parquet as pq
 
-    from robosystems.adapters.quickbooks.pipeline.utils import write_extract_parquet
+    from robosystems.adapters.quickbooks.pipeline.utils import (
+      _PARTY_SCHEMA,
+      write_extract_parquet,
+    )
 
     output_dir = tmp_path / "extract"
 
@@ -573,8 +576,11 @@ class TestWriteExtractParquet:
       table = pq.read_table(f)
     assert table.num_rows == 1
     assert table.column("Name").to_pylist() == ["Cash"]
+    # An empty frame keeps its typed schema.
     with open(output_dir / "raw_customers.parquet", "rb") as f:
-      assert pq.read_table(f).num_rows == 0
+      customers = pq.read_table(f)
+    assert customers.num_rows == 0
+    assert customers.column_names == list(_PARTY_SCHEMA)
 
   def test_creates_output_directory(self, tmp_path):
     from robosystems.adapters.quickbooks.pipeline.utils import write_extract_parquet
