@@ -312,3 +312,21 @@ def test_a_classified_line_repointed_to_the_parents_account_is_refused(books):
 
   with pytest.raises(AccountOutsideEntityChartError):
     _update(books, event, metadata_patch={"classified_element_id": books.note})
+
+
+def test_a_classified_line_keeps_its_other_edits_after_its_account_retires(books):
+  """Only a patch that re-points the line is re-checked: a memo edit on a line
+  whose account was retired since it was classified still goes through."""
+  event = _deposit(books)
+  _update(
+    books,
+    event,
+    transition_to="classified",
+    metadata_patch={"classified_element_id": books.note},
+  )
+  books.session.get(Element, books.note).is_active = False
+  books.session.commit()
+
+  _update(books, event, metadata_patch={"memo": "Note from the lender"})
+
+  assert event.metadata_["memo"] == "Note from the lender"

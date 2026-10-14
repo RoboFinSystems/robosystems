@@ -643,6 +643,16 @@ def fire_handler_on_commit(
   return typed_metadata
 
 
+# The metadata keys that choose where a classified line posts.
+_CLASSIFICATION_KEYS = (
+  "classified_element_id",
+  "classified_allocations",
+  "accept_suggestion",
+  "from_element_id",
+  "to_element_id",
+)
+
+
 def _validate_classification(session: Session, event: Event) -> None:
   """Let the event's Python handler refuse a ``classified`` it could not post.
 
@@ -909,9 +919,12 @@ def update_event_block(
     event.event_action = body.event_action
 
   # Classified → classified is no transition, so a line already classified is
-  # re-pointed by a bare patch, and is checked the same way.
+  # re-pointed by a bare patch, and is checked the same way. A patch that
+  # leaves the choice alone (a memo, a document) is not re-checked.
   if body.transition_to == "classified" or (
-    body.transition_to is None and body.metadata_patch and event.status == "classified"
+    body.transition_to is None
+    and event.status == "classified"
+    and any(key in (body.metadata_patch or {}) for key in _CLASSIFICATION_KEYS)
   ):
     _validate_classification(session, event)
 
