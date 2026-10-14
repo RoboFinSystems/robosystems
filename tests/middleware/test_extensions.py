@@ -609,6 +609,45 @@ class TestLogOperationAudit:
     assert audit["status"] == "failed"
     assert audit["error"] == "period already closed"
 
+  def test_a_refusal_answered_4xx_logs_at_warning(self) -> None:
+    with (
+      patch.object(middleware_module.logger, "error") as error_mock,
+      patch.object(middleware_module.logger, "warning") as warning_mock,
+    ):
+      log_operation_audit(
+        operation_name="create-mapping-association",
+        operation_id="op_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        user_id="usr_abc",
+        graph_id="kg1",
+        duration_ms=5.0,
+        status="failed",
+        error="protected_facts",
+        http_status=422,
+      )
+
+    error_mock.assert_not_called()
+    audit = self._get_audit_payload(warning_mock)
+    assert (audit["status"], audit["http_status"]) == ("failed", 422)
+
+  def test_a_5xx_failure_stays_at_error(self) -> None:
+    with (
+      patch.object(middleware_module.logger, "error") as error_mock,
+      patch.object(middleware_module.logger, "warning") as warning_mock,
+    ):
+      log_operation_audit(
+        operation_name="close-period",
+        operation_id="op_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        user_id="usr_abc",
+        graph_id="kg1",
+        duration_ms=5.0,
+        status="failed",
+        error="statement timeout",
+        http_status=504,
+      )
+
+    warning_mock.assert_not_called()
+    assert self._get_audit_payload(error_mock)["http_status"] == 504
+
   def test_idempotent_replay_flag_propagates(self) -> None:
     with patch.object(middleware_module.logger, "info") as info_mock:
       log_operation_audit(
@@ -1072,7 +1111,7 @@ class TestExecuteOperationFailurePath:
     assert exc_info.value.status_code == 404
 
   @pytest.mark.asyncio
-  async def test_failure_logged_as_error_with_status_failed(self) -> None:
+  async def test_a_refusal_is_audited_failed_at_warning(self) -> None:
     ctx = _make_ctx(operation_name="update-portfolio")
 
     def _runner():
@@ -1080,17 +1119,43 @@ class TestExecuteOperationFailurePath:
 
     with (
       patch.object(middleware_module.logger, "error") as error_mock,
+      patch.object(middleware_module.logger, "warning") as warning_mock,
       pytest.raises(HTTPException),
     ):
       await execute_operation(ctx, _runner)
 
-    audit_calls = [
-      c for c in error_mock.call_args_list if c.kwargs.get("extra", {}).get("audit")
-    ]
-    assert len(audit_calls) == 1
-    audit = audit_calls[0].kwargs["extra"]["audit"]
+    def audits(mock):
+      return [
+        c.kwargs["extra"]["audit"]
+        for c in mock.call_args_list
+        if c.kwargs.get("extra", {}).get("audit")
+      ]
+
+    assert audits(error_mock) == []
+    [audit] = audits(warning_mock)
     assert audit["status"] == "failed"
     assert audit["error"] == "Conflict"
+    assert audit["http_status"] == 409
+
+  @pytest.mark.asyncio
+  async def test_a_server_fault_is_audited_at_error(self) -> None:
+    ctx = _make_ctx(operation_name="update-portfolio")
+
+    def _runner():
+      raise HTTPException(status_code=504, detail="statement timeout")
+
+    with (
+      patch.object(middleware_module.logger, "error") as error_mock,
+      pytest.raises(HTTPException),
+    ):
+      await execute_operation(ctx, _runner)
+
+    [audit] = [
+      c.kwargs["extra"]["audit"]
+      for c in error_mock.call_args_list
+      if c.kwargs.get("extra", {}).get("audit")
+    ]
+    assert audit["http_status"] == 504
 
   @pytest.mark.asyncio
   async def test_failed_operation_not_cached(self) -> None:

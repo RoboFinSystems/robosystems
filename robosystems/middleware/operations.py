@@ -508,11 +508,16 @@ def log_operation_audit(
   surface: str = "rest",
   arguments_fingerprint: str | None = None,
   result: Any = None,
+  http_status: int | None = None,
 ) -> None:
   """Emit one structured audit-log line per operation call, and for a
   mutating REST call also queue its `operation_mutation_audit` row. An MCP
   call is recorded by the MCP tool manager instead, and a replay changed
   nothing.
+
+  A failure answered with a 4xx is the caller's (a refusal the operation
+  means to give) and logs at WARNING; anything else that failed logs at
+  ERROR, so the error stream carries only the platform's faults.
 
   `event` is `"extensions.operation"` or `"graph.operation"`; `surface` is
   `"rest"` or `"mcp"`. Inside a request the payload also carries the request
@@ -537,11 +542,15 @@ def log_operation_audit(
     ).hexdigest()[:16]
   if error is not None:
     payload["error"] = error
+  if http_status is not None:
+    payload["http_status"] = http_status
 
-  if status == "failed":
-    logger.error(event, extra={"audit": payload})
-  else:
+  if status != "failed":
     logger.info(event, extra={"audit": payload})
+  elif http_status is not None and 400 <= http_status < 500:
+    logger.warning(event, extra={"audit": payload})
+  else:
+    logger.error(event, extra={"audit": payload})
 
   if surface == "rest" and not idempotent_replay:
     from robosystems.middleware.mcp.tools.classification import is_mutating_tool
@@ -644,6 +653,7 @@ async def check_idempotency(
       idempotency_key=idempotency_key,
       error=str(exc),
       event=event,
+      http_status=409,
     )
     raise HTTPException(status_code=409, detail=str(exc))
   if cached is not None:
@@ -846,6 +856,7 @@ async def execute_operation(
         status="failed",
         idempotency_key=ctx.idempotency_key,
         error=str(exc),
+        http_status=409,
       )
       raise
     if cached is not None:
@@ -911,6 +922,7 @@ async def execute_operation(
           status="failed",
           idempotency_key=ctx.idempotency_key,
           error=str(exc.detail),
+          http_status=exc.status_code,
         )
         raise
       except Exception as exc:

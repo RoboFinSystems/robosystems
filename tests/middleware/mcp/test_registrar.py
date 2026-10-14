@@ -438,6 +438,7 @@ class TestRegistrarToolAuditAndInflight:
 
     assert "error" in result
     assert audit.call_args.kwargs["status"] == "failed"
+    assert audit.call_args.kwargs["http_status"] == 422
 
   @pytest.mark.asyncio
   async def test_identical_concurrent_call_is_refused_and_released_after(
@@ -683,13 +684,17 @@ class TestRegistrarToolExecute:
       spec=_spec(command=raising_cmd),
       registrar=_registrar_stub(),
     )
-    with patch(
-      "robosystems.middleware.mcp.tools.registrar.require_graph_extension_mcp",
-      return_value=MagicMock(),
+    with (
+      patch(
+        "robosystems.middleware.mcp.tools.registrar.require_graph_extension_mcp",
+        return_value=MagicMock(),
+      ),
+      patch("robosystems.middleware.mcp.tools.registrar.log_operation_audit") as audit,
     ):
       result = await tool.execute({"id": "x", "value": 0})
 
     assert result["error"] == "command_failed"
+    assert audit.call_args.kwargs["http_status"] == 500
     assert "boom" not in result["message"]
     assert "parameters" not in result["message"]
     assert "see server logs" in result["message"]
