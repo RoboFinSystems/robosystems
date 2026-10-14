@@ -16,6 +16,7 @@ except the leaf ``_guards`` module.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import delete, text
@@ -271,7 +272,9 @@ def _pre_create_report_fact_sets(
       entity_id=entity_id,
       report_id=report_id,
       created_by=created_by,
-      provenance=PivotProvenance(mapping_id=mapping_id, period=period_key),
+      provenance=PivotProvenance(
+        mapping_id=mapping_id, period=period_key, stamped_at=datetime.now(UTC)
+      ),
     )
   # The fact INSERTs reference these rows; flush order is not FK-aware here.
   session.flush()

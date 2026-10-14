@@ -146,16 +146,17 @@ def test_delete_mapping_association_refuses_an_account_with_closed_history() -> 
 
 def test_create_mapping_association_refuses_an_account_with_closed_history() -> None:
   """Map before you close: a new arc for an account with landed history in a
-  closed month would restate it. Checked before the target lookup and the
-  insert."""
+  closed month would restate it. Checked before the insert."""
   structure = MagicMock()
   structure.created_by = "usr_test"
   from_elem = MagicMock()
   from_elem.created_by = "usr_test"
+  to_elem = MagicMock()
   session = MagicMock()
   session.execute.side_effect = [
     _exec_result(row=structure),
     _exec_result(row=from_elem),
+    _exec_result(row=to_elem),
   ]
 
   with (

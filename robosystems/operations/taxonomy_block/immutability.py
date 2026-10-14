@@ -47,11 +47,13 @@ class ProtectedFactsError(ValueError):
     closed_period_count: int,
     disturbed_count: int = 0,
     closed_period_names: Sequence[str] = (),
+    note: str | None = None,
   ) -> None:
     self.filed_report_count = filed_report_count
     self.closed_period_count = closed_period_count
     self.disturbed_count = disturbed_count
     self.closed_period_names = tuple(closed_period_names)
+    self.note = note
     parts = []
     if filed_report_count:
       parts.append(
@@ -80,6 +82,7 @@ class ProtectedFactsError(ValueError):
     super().__init__(
       f"refusing to {verb} facts that the ledger treats as immutable: "
       + "; ".join(parts)
+      + (f" {note}" if note else "")
     )
 
 
@@ -106,12 +109,13 @@ class ProtectedFactSets:
       or self.disturbed_fact_set_ids
     )
 
-  def to_error(self) -> ProtectedFactsError:
+  def to_error(self, note: str | None = None) -> ProtectedFactsError:
     return ProtectedFactsError(
       filed_report_count=len(self.filed_report_fact_set_ids),
       closed_period_count=len(self.closed_period_fact_set_ids),
       disturbed_count=len(self.disturbed_fact_set_ids),
       closed_period_names=self.closed_period_names,
+      note=note,
     )
 
 

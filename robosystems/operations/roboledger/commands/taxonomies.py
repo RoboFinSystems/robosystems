@@ -42,6 +42,11 @@ from robosystems.operations.taxonomy_block.coa_mappings import COA_MAPPING_BLOCK
 from robosystems.operations.taxonomy_block.immutability import (
   assert_history_undisturbed,
 )
+from robosystems.operations.taxonomy_block.reclassification import (
+  Reclassification,
+  judge_remap,
+  reclassification_record,
+)
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 __all__ = [
@@ -129,6 +134,17 @@ def assert_mapping_leaf(session: Session, to_element_id: str) -> None:
     assert_leaf_target(session, target)
 
 
+class ReplacedArcMismatchError(ValueError):
+  """``replaces_association_id`` names an arc that is not this account's
+  mapping arc in this structure."""
+
+  def __init__(self, association_id: str, from_element_id: str) -> None:
+    super().__init__(
+      f"association {association_id!r} is not a mapping arc of account "
+      f"{from_element_id!r} in this structure, so it cannot be replaced here."
+    )
+
+
 class MappingAssociationExistsError(ValueError):
   """The pair is already mapped on this structure (a clean 409, so a re-run
   can skip what exists)."""
@@ -148,10 +164,16 @@ def create_mapping_association(
   body: CreateMappingAssociationOperation,
   created_by: str,
 ) -> AssociationResponse:
-  """Add a mapping association (CoA element → reporting concept).
+  """Add a mapping association (CoA element → reporting concept), replacing
+  the account's current arc in the same write when ``replaces_association_id``
+  names it.
 
   Raises `MappingStructureNotFoundError`, `ElementNotFoundError` (with
-  ``side``), `MappingTargetIsRollupError`, or `MappingAssociationExistsError`.
+  ``side``), `AssociationNotFoundError` / `ReplacedArcMismatchError` for a
+  bad ``replaces_association_id``, `MappingTargetIsRollupError`,
+  `MappingAssociationExistsError`, or `ProtectedFactsError` when the account
+  has landed history in a closed month and the write would restate it: a
+  plain new arc, or a replacement that crosses a primary statement.
   """
   structure = session.execute(
     select(Structure).where(
@@ -171,15 +193,47 @@ def create_mapping_association(
     raise ElementNotFoundError("source", body.from_element_id)
   # The source must be tenant-authored; the target may be a library row.
   assert_not_library_origin(from_elem)
-  # A closed month's stamped statements went through the arcs as they stood;
-  # a new arc on an account with history there would restate it.
-  assert_history_undisturbed(session, account_ids=[body.from_element_id])
 
   to_elem = session.execute(
     select(Element).where(Element.id == body.to_element_id)
   ).scalar_one_or_none()
   if to_elem is None:
     raise ElementNotFoundError("target", body.to_element_id)
+
+  replaced: Association | None = None
+  reclassified: Reclassification | None = None
+  if body.replaces_association_id:
+    replaced = session.execute(
+      select(Association).where(
+        Association.id == body.replaces_association_id,
+        Association.structure_id == body.mapping_id,
+        Association.association_type == body.association_type,
+      )
+    ).scalar_one_or_none()
+    if replaced is None:
+      raise AssociationNotFoundError(body.replaces_association_id)
+    if str(replaced.from_element_id) != body.from_element_id:
+      raise ReplacedArcMismatchError(body.replaces_association_id, body.from_element_id)
+    assert_not_library_origin(replaced)
+    if str(replaced.to_element_id) == body.to_element_id:
+      raise MappingAssociationExistsError(
+        body.mapping_id, body.from_element_id, body.to_element_id
+      )
+    # A closed month's stamped statements went through the arcs as they
+    # stood. Moving the account within its statement keeps every total the
+    # close asserted, so it is a reclassification; across one, a restatement.
+    reclassified = judge_remap(
+      session,
+      account_id=body.from_element_id,
+      account_taxonomy_id=str(from_elem.taxonomy_id),
+      account_qname=from_elem.qname,
+      old_target_id=str(replaced.to_element_id),
+      new_target_id=body.to_element_id,
+    )
+  else:
+    # A new arc on an account with history there would restate it.
+    assert_history_undisturbed(session, account_ids=[body.from_element_id])
+
   if body.association_type == "mapping":
     assert_leaf_target(session, to_elem)
 
@@ -196,6 +250,17 @@ def create_mapping_association(
       body.mapping_id, body.from_element_id, body.to_element_id
     )
 
+  previous_target_qname: str | None = None
+  if replaced is not None:
+    previous = session.get(Element, str(replaced.to_element_id))
+    if previous is not None and previous.qname:
+      previous_target_qname = str(previous.qname)
+    _delete_association_dependents(session, [str(replaced.id)])
+    session.query(Association).filter(Association.id == replaced.id).delete(
+      synchronize_session=False
+    )
+    session.flush()
+
   assoc = Association(
     id=generate_prefixed_ulid("assoc"),
     structure_id=body.mapping_id,
@@ -207,6 +272,16 @@ def create_mapping_association(
     confidence=body.confidence,
     suggested_by=body.suggested_by,
     created_by=created_by,
+    metadata_=(
+      reclassification_record(
+        reclassified,
+        replaces_association_id=str(replaced.id),
+        previous_target_qname=previous_target_qname,
+        reason=body.reason,
+      )
+      if reclassified is not None and replaced is not None
+      else {}
+    ),
   )
   session.add(assoc)
   try:
@@ -234,6 +309,10 @@ def create_mapping_association(
     confidence=assoc.confidence,
     suggested_by=assoc.suggested_by,
     approved_by=assoc.approved_by,
+    replaced_association_id=str(replaced.id) if replaced is not None else None,
+    reclassified_periods=(
+      list(reclassified.closed_periods) if reclassified is not None else []
+    ),
   )
 
 
@@ -244,7 +323,9 @@ def delete_mapping_association(
 
   Raises ``AssociationNotFoundError``, ``LibraryImmutableError``, or
   ``ProtectedFactsError`` when the account has landed history in a closed
-  month.
+  month: removing its arc alone would drop its balance off the statement.
+  Move such an account with ``create_mapping_association`` and
+  ``replaces_association_id`` instead.
   """
   assoc = session.execute(
     select(Association)

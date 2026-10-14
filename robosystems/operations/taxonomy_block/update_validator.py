@@ -272,13 +272,17 @@ def validate_update_envelope(
       session, taxonomy, payload, taxonomy_structure_id_set
     )
   )
+  judged, remap_issues = _judge_remaps(session, payload, element_id_by_qname)
+  issues.extend(remap_issues)
   issues.extend(
     _validate_associations_to_remove(
-      session, taxonomy, payload, taxonomy_structure_id_set
+      session, taxonomy, payload, taxonomy_structure_id_set, judged_accounts=judged
     )
   )
   issues.extend(
-    _validate_associations_to_add(session, taxonomy, payload, element_id_by_qname)
+    _validate_associations_to_add(
+      session, taxonomy, payload, element_id_by_qname, judged_accounts=judged
+    )
   )
 
   return issues
@@ -292,12 +296,12 @@ _MAPPING_ARC_TYPE = "mapping"
 
 
 def _protected_facts_issue(
-  protected: ProtectedFactSets, context: dict[str, Any]
+  protected: ProtectedFactSets, context: dict[str, Any], message: str | None = None
 ) -> ValidationIssue:
   return ValidationIssue(
     phase="delta_validation",
     code="protected_facts",
-    message=str(protected.to_error()),
+    message=message or str(protected.to_error()),
     context={
       **context,
       "filed_report_fact_set_ids": list(protected.filed_report_fact_set_ids),
@@ -737,11 +741,92 @@ def _validate_structures_to_remove(
   return issues
 
 
+def _judge_remaps(
+  session: Session,
+  payload: UpdateTaxonomyBlockRequest,
+  element_id_by_qname: dict[str, str],
+) -> tuple[frozenset[str], list[ValidationIssue]]:
+  """An account whose mapping arc the envelope removes and replaces in the
+  same write is judged as a move, not as a removal and an addition: within
+  its primary statement it is a reclassification the closed months allow;
+  across one, a restatement they refuse. Returns the accounts judged either
+  way, so the single-sided checks leave them alone, and the refusals."""
+  if not payload.associations_to_remove or not payload.associations_to_add:
+    return frozenset(), []
+  from robosystems.operations.taxonomy_block.reclassification import (
+    ReclassificationRefusedError,
+    judge_remap,
+  )
+
+  removed_target: dict[str, str] = {}
+  for from_id, to_id in session.execute(
+    select(Association.from_element_id, Association.to_element_id).where(
+      Association.id.in_(payload.associations_to_remove),
+      Association.association_type == _MAPPING_ARC_TYPE,
+    )
+  ).all():
+    removed_target[str(from_id)] = str(to_id)
+  if not removed_target:
+    return frozenset(), []
+
+  added = [
+    a
+    for a in payload.associations_to_add
+    if a.association_type == _MAPPING_ARC_TYPE
+    and element_id_by_qname.get(a.from_ref) in removed_target
+  ]
+  if not added:
+    return frozenset(), []
+  # Targets are library concepts, outside the taxonomy's own qname map.
+  target_ids = dict(element_id_by_qname)
+  missing = sorted({a.to_ref for a in added if a.to_ref not in target_ids})
+  if missing:
+    for qname, element_id in session.execute(
+      select(Element.qname, Element.id).where(Element.qname.in_(missing))
+    ).all():
+      target_ids[str(qname)] = str(element_id)
+  taxonomy_by_account = {
+    str(element_id): str(taxonomy_id)
+    for element_id, taxonomy_id in session.execute(
+      select(Element.id, Element.taxonomy_id).where(
+        Element.id.in_(sorted({element_id_by_qname[a.from_ref] for a in added}))
+      )
+    ).all()
+  }
+
+  judged: set[str] = set()
+  issues: list[ValidationIssue] = []
+  for a in added:
+    account_id = element_id_by_qname[a.from_ref]
+    new_target_id = target_ids.get(a.to_ref)
+    if new_target_id is None or account_id in judged:
+      continue
+    judged.add(account_id)
+    try:
+      judge_remap(
+        session,
+        account_id=account_id,
+        account_taxonomy_id=taxonomy_by_account.get(account_id, ""),
+        account_qname=a.from_ref,
+        old_target_id=removed_target[account_id],
+        new_target_id=new_target_id,
+      )
+    except ReclassificationRefusedError as exc:
+      issues.append(
+        _protected_facts_issue(
+          exc.protected, {"account_ids": [account_id]}, message=str(exc)
+        )
+      )
+  return frozenset(judged), issues
+
+
 def _validate_associations_to_remove(
   session: Session,
   taxonomy: Taxonomy,
   payload: UpdateTaxonomyBlockRequest,
   taxonomy_structure_ids: set[str],
+  *,
+  judged_accounts: frozenset[str] = frozenset(),
 ) -> list[ValidationIssue]:
   issues: list[ValidationIssue] = []
   if not payload.associations_to_remove:
@@ -784,7 +869,7 @@ def _validate_associations_to_remove(
         )
       )
       continue
-    if arc_type == _MAPPING_ARC_TYPE:
+    if arc_type == _MAPPING_ARC_TYPE and str(from_id) not in judged_accounts:
       remapped_accounts.append(str(from_id))
 
   # Checked here rather than at apply: the orchestrators remove arcs before
@@ -804,19 +889,24 @@ def _validate_associations_to_add(
   taxonomy: Taxonomy,
   payload: UpdateTaxonomyBlockRequest,
   element_id_by_qname: dict[str, str],
+  *,
+  judged_accounts: frozenset[str] = frozenset(),
 ) -> list[ValidationIssue]:
   """A new mapping arc for an account with landed history in a closed month.
 
   The projection above checks the arc's shape; this checks what it would
   reach. The account was unmapped (or mapped elsewhere) when the month was
   stamped, so the arc moves its balance into a statement line the stamp
-  never held.
+  never held. An account whose old arc the same envelope removes was judged
+  as a move already (``_judge_remaps``).
   """
   accounts = sorted(
     {
       element_id_by_qname[a.from_ref]
       for a in payload.associations_to_add
-      if a.association_type == _MAPPING_ARC_TYPE and a.from_ref in element_id_by_qname
+      if a.association_type == _MAPPING_ARC_TYPE
+      and a.from_ref in element_id_by_qname
+      and element_id_by_qname[a.from_ref] not in judged_accounts
     }
   )
   if not accounts:

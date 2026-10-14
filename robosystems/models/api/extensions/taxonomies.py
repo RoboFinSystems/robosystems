@@ -111,6 +111,21 @@ class AssociationResponse(BaseModel):
   confidence: float | None = None
   suggested_by: str | None = None
   approved_by: str | None = None
+  replaced_association_id: str | None = Field(
+    None,
+    description=(
+      "The arc this write removed in the same transaction, when the call "
+      "named one in `replaces_association_id`."
+    ),
+  )
+  reclassified_periods: list[str] = Field(
+    default_factory=list,
+    description=(
+      "Closed months whose live statements now read through this arc while "
+      "their stamped sets keep the answer as closed. Empty unless the write "
+      "replaced an arc on an account with landed history in a closed month."
+    ),
+  )
 
 
 class CreateAssociationRequest(BaseModel):
@@ -178,6 +193,26 @@ class CreateMappingAssociationOperation(CreateAssociationRequest):
   """
 
   mapping_id: str = Field(..., description="Target mapping structure ID.")
+  replaces_association_id: str | None = Field(
+    None,
+    description=(
+      "The account's current mapping arc in this structure, removed in the "
+      "same write: a remap in one call. When the account has landed history "
+      "in a closed month the move is judged as a reclassification: allowed "
+      "when the new concept sits on the same primary statement as the old "
+      "one (the stamped statements keep the answer as closed; live renders "
+      "follow the new arc; `reclassified_periods` names the months), refused "
+      "when it crosses one."
+    ),
+  )
+  reason: str | None = Field(
+    None,
+    max_length=500,
+    description=(
+      "Why the account is reclassified. Recorded on the new arc beside the "
+      "months it reaches."
+    ),
+  )
 
   model_config = ConfigDict(
     json_schema_extra={

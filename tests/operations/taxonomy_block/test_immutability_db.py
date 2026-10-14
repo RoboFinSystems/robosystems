@@ -9,136 +9,43 @@ mapping is wrongly refused or a restatement wrongly allowed.
 
 from __future__ import annotations
 
-import os
-import uuid
 from datetime import date
 
 import pytest
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import Session, sessionmaker
 
-import robosystems.models.extensions  # noqa: F401  (register models on ExtensionsBase)
-from robosystems.db.extensions import ExtensionsBase
 from robosystems.models.extensions import (
   Element,
-  FactSet,
   Report,
   Structure,
   Taxonomy,
 )
-from robosystems.models.extensions.roboledger.entry import Entry
-from robosystems.models.extensions.roboledger.fact import Fact
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
-from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.operations.taxonomy_block.immutability import (
   ProtectedFactsError,
   assert_history_undisturbed,
   find_protected_fact_sets,
 )
-from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
+from tests.closed_books import (
+  JULY,
+  JUNE,
+  ext_schema_session,
+)
+from tests.closed_books import (
+  canonical_set as _canonical_set,
+)
+from tests.closed_books import (
+  fiscal_period as _period,
+)
+from tests.closed_books import (
+  landed_line as _landed_line,
+)
 
 pytestmark = pytest.mark.unit
-
-GRAPH = "kg0123456789abcdef01"
-JUNE = (date(2026, 6, 1), date(2026, 6, 30))
-JULY = (date(2026, 7, 1), date(2026, 7, 31))
 
 
 @pytest.fixture()
 def ext_session():
-  """Extensions schema in the test Postgres DB, one throwaway schema per test."""
-  database_url = os.environ.get("TEST_DATABASE_URL")
-  if not database_url:
-    pytest.skip("TEST_DATABASE_URL not configured")
-
-  schema = f"ext_immut_{uuid.uuid4().hex[:12]}"
-  engine = create_engine(database_url)
-  with engine.begin() as conn:
-    conn.execute(text(f'CREATE SCHEMA "{schema}"'))
-
-  session_factory = sessionmaker(bind=engine)
-  session = session_factory()
-  session.execute(text(f'SET search_path TO "{schema}"'))
-  ExtensionsBase.metadata.create_all(bind=session.connection())
-  seed_parent_entity(session)
-  session.commit()
-  session.execute(text(f'SET search_path TO "{schema}"'))
-
-  try:
-    yield session
-  finally:
-    session.rollback()
-    session.close()
-    with engine.begin() as conn:
-      conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
-    engine.dispose()
-
-
-def _period(session: Session, name: str, window: tuple[date, date], status: str):
-  session.add(
-    FiscalPeriod(
-      entity_id=PARENT_ENTITY_ID,
-      graph_id=GRAPH,
-      name=name,
-      start_date=window[0],
-      end_date=window[1],
-      period_type="month",
-      status=status,
-    )
-  )
-
-
-def _canonical_set(
-  session: Session, structure: Structure, window: tuple[date, date], target: Element
-) -> FactSet:
-  """A close-minted statement set: report_id NULL, scenario NULL, type report."""
-  fact_set = FactSet(
-    structure_id=structure.id,
-    period_start=window[0],
-    period_end=window[1],
-    factset_type="report",
-    entity_id=PARENT_ENTITY_ID,
-  )
-  fact_set.provenance = {
-    "origin": "pivot",
-    "mapping_id": "map_1",
-    "period": f"{window[0]}/{window[1]}",
-  }
-  session.add(fact_set)
-  session.flush()
-  session.add(
-    Fact(
-      element_id=target.id,
-      string_value="stamped",
-      fact_type="Nonnumeric",
-      value_type="inline",
-      period_start=window[0],
-      period_end=window[1],
-      period_type="duration",
-      entity_id=PARENT_ENTITY_ID,
-      structure_id=structure.id,
-      fact_set_id=fact_set.id,
-    )
-  )
-  return fact_set
-
-
-def _landed_line(
-  session: Session, account: Element, posting_date: date, status: str = "posted"
-) -> None:
-  entry = Entry(
-    entity_id=PARENT_ENTITY_ID,
-    posting_date=posting_date,
-    status=status,
-    created_by="usr_1",
-  )
-  session.add(entry)
-  session.flush()
-  session.add(
-    LineItem(
-      entry_id=entry.id, element_id=account.id, debit_amount=100, credit_amount=0
-    )
-  )
+  yield from ext_schema_session()
 
 
 @pytest.fixture()

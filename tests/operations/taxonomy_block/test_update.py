@@ -921,3 +921,110 @@ class TestApplyIsActive:
     element = self._apply({"name": "Renamed"}, current=False)
     assert element.is_active is False
     assert element.name == "Renamed"
+
+
+class TestJudgeRemaps:
+  """An envelope that removes an account's mapping arc and adds another is
+  judged as one move, ahead of the single-sided closed-history checks."""
+
+  def _payload(self, *, remove: list[str], add: list[dict]):
+    from robosystems.models.api.taxonomy_block import TaxonomyBlockAssociationRequest
+
+    return UpdateTaxonomyBlockRequest(
+      taxonomy_id="tax_42",
+      associations_to_remove=remove,
+      associations_to_add=[TaxonomyBlockAssociationRequest(**a) for a in add],
+    )
+
+  _MOVE = {
+    "structure_ref": "Mapping",
+    "from_ref": "acme:Card",
+    "to_ref": "rs-gaap:OtherLiabilitiesCurrent",
+    "association_type": "mapping",
+  }
+
+  def _session(self) -> MagicMock:
+    session = MagicMock()
+    session.execute.side_effect = [
+      _mock_execute_result([("el_card", "rs_debt")]),  # the removed arcs
+      _mock_execute_result([("rs-gaap:OtherLiabilitiesCurrent", "rs_other")]),
+      _mock_execute_result([("el_card", "tax_42")]),  # the account's chart
+    ]
+    return session
+
+  def test_a_move_is_judged_once_and_exempts_the_account(self) -> None:
+    from robosystems.operations.taxonomy_block import reclassification, update_validator
+
+    session = self._session()
+    payload = self._payload(remove=["assoc_old"], add=[self._MOVE])
+    judged_move = reclassification.Reclassification("balance_sheet", ("2026-06",))
+    with patch.object(
+      reclassification, "judge_remap", return_value=judged_move
+    ) as judge:
+      judged, issues = update_validator._judge_remaps(
+        session, payload, {"acme:Card": "el_card"}
+      )
+
+    assert (judged, issues) == (frozenset({"el_card"}), [])
+    judge.assert_called_once_with(
+      session,
+      account_id="el_card",
+      account_taxonomy_id="tax_42",
+      account_qname="acme:Card",
+      old_target_id="rs_debt",
+      new_target_id="rs_other",
+    )
+
+    # The single-sided checks leave a judged account alone.
+    with patch.object(update_validator, "find_protected_fact_sets") as gate:
+      session.execute.side_effect = None
+      session.execute.return_value = _mock_execute_result(
+        [("assoc_old", "s_mine", "mapping", "el_card")]
+      )
+      removes = update_validator._validate_associations_to_remove(
+        session,
+        _fake_taxonomy("chart_of_accounts"),
+        payload,
+        {"s_mine"},
+        judged_accounts=judged,
+      )
+      adds = update_validator._validate_associations_to_add(
+        session,
+        _fake_taxonomy("chart_of_accounts"),
+        payload,
+        {"acme:Card": "el_card"},
+        judged_accounts=judged,
+      )
+    gate.assert_not_called()
+    assert (removes, adds) == ([], [])
+
+  def test_a_refused_move_is_one_issue_carrying_the_reason(self) -> None:
+    from robosystems.operations.taxonomy_block import reclassification, update_validator
+    from robosystems.operations.taxonomy_block.immutability import ProtectedFactSets
+
+    protected = ProtectedFactSets((), (), ("fs_jun",), ("2026-06",))
+    refusal = reclassification.ReclassificationRefusedError(
+      protected, "Moving acme:Card from the balance sheet to the income statement."
+    )
+    payload = self._payload(remove=["assoc_old"], add=[self._MOVE])
+    with patch.object(reclassification, "judge_remap", side_effect=refusal):
+      judged, issues = update_validator._judge_remaps(
+        self._session(), payload, {"acme:Card": "el_card"}
+      )
+
+    assert judged == frozenset({"el_card"})
+    assert [i.code for i in issues] == ["protected_facts"]
+    assert "from the balance sheet to the income statement" in issues[0].message
+    assert issues[0].context["closed_periods"] == ["2026-06"]
+    assert issues[0].context["account_ids"] == ["el_card"]
+
+  def test_one_sided_envelopes_are_not_judged(self) -> None:
+    from robosystems.operations.taxonomy_block import update_validator
+
+    session = MagicMock()
+    judged, issues = update_validator._judge_remaps(
+      session, self._payload(remove=["assoc_old"], add=[]), {"acme:Card": "el_card"}
+    )
+
+    assert (judged, issues) == (frozenset(), [])
+    session.execute.assert_not_called()

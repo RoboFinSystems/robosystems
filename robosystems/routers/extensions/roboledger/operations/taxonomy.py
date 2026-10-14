@@ -48,6 +48,7 @@ from robosystems.operations.roboledger.commands.taxonomies import (
   MappingAssociationExistsError,
   MappingStructureNotFoundError,
   MappingTargetIsRollupError,
+  ReplacedArcMismatchError,
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
   TaxonomyNotFoundError as TaxonomyMissingError,  # alias: avoids collision with commands.reports.TaxonomyNotFoundError
@@ -140,7 +141,9 @@ update_taxonomy_block_op = _registrar.register(
       "curation: a mapping arc added or removed for an account with "
       "landed history in a closed month, or a `balance_type` / "
       "`period_type` / `trait` change on such an account, is refused "
-      "(422, `protected_facts`) naming the months to reopen first."
+      "(422, `protected_facts`) naming the months to reopen first. An "
+      "envelope that removes an account's arc and adds one on the same "
+      "primary statement moves it: a reclassification, allowed."
     ),
     command=cmd_update_taxonomy_block,
     request_model=UpdateTaxonomyBlockRequest,
@@ -219,16 +222,23 @@ create_mapping_association_op = _registrar.register(
       "AI-assisted mapping. Duplicate (from, to, type) tuples return 409. "
       "The target must be a leaf concept: a subtotal the statement sums from "
       "its children is refused (422). "
-      "Map before you close: an account with landed history in a closed "
-      "month cannot be re-mapped (422) — the closed month's stamped "
-      "statements were computed through the old arcs. Reopen latest-first "
-      "down to the earliest month named, map, then close forward."
+      "Map before you close: a new arc for an account with landed history "
+      "in a closed month is refused (422), since the month's stamped "
+      "statements were computed through the arcs as they stood. To move "
+      "such an account, pass `replaces_association_id` (its current arc, "
+      "removed in the same write). A move within the same primary statement "
+      "is a reclassification and goes through: the stamped statements keep "
+      "the answer as closed, live renders follow the new arc, and "
+      "`reclassified_periods` names the months. A move across statements "
+      "restates net income and is refused, naming the months to reopen "
+      "latest-first."
     ),
     command=cmd_create_mapping_association,
     request_model=CreateMappingAssociationOperation,
     result_type=AssociationResponse,
     error_map={
       MappingStructureNotFoundError: (404, lambda _e: "Mapping not found"),
+      AssociationNotFoundError: (404, lambda _e: "Association not found"),
       LibraryImmutableError: 403,
       ElementNotFoundError: (
         400,
@@ -239,6 +249,7 @@ create_mapping_association_op = _registrar.register(
         lambda _e: "Mapping association already exists",
       ),
       MappingTargetIsRollupError: 422,
+      ReplacedArcMismatchError: 422,
       ProtectedFactsError: 422,
     },
     mark_stale_reason="mapping_association_created",
@@ -257,8 +268,9 @@ delete_mapping_association_op = _registrar.register(
       "then `create-mapping-association` the right one. Find the "
       "association id via the `library_element_arcs` GraphQL field. "
       "Library-seeded rows cannot be deleted (403). An edge for an "
-      "account with landed history in a closed month cannot be removed "
-      "(422) until those months are reopened, latest-first."
+      "account with landed history in a closed month cannot be removed on "
+      "its own (422): move the account with `create-mapping-association` "
+      "and `replaces_association_id` instead."
     ),
     command=cmd_delete_mapping_association,
     request_model=DeleteMappingAssociationOperation,

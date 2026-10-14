@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
-from datetime import date
+from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -380,8 +380,13 @@ def test_pre_create_report_fact_sets_one_row_per_picked_structure() -> None:
   # Envelope spans the full period range from `periods`.
   assert is_row.period_start == date(2025, 10, 1)
   assert is_row.period_end == date(2026, 3, 31)
-  # Report facts are pivoted from the posted ledger via the mapping.
-  assert is_row.provenance == {
+  # Report facts are pivoted from the posted ledger via the mapping, and the
+  # set records when: a close-stamped set is the month as closed on that date.
+  provenance = dict(is_row.provenance)
+  stamped_at = datetime.fromisoformat(provenance.pop("stamped_at"))
+  assert stamped_at.tzinfo is not None
+  assert abs((datetime.now(UTC) - stamped_at).total_seconds()) < 60
+  assert provenance == {
     "origin": "pivot",
     "mapping_id": "map_01",
     "period": "2025-10-01/2026-03-31",

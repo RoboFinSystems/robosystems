@@ -115,7 +115,8 @@ class GetUnmappedElementsTool:
 1. Call this tool to see unmapped elements
 2. For each element, use suggest-mapping to find matching reporting concepts
 3. Use create-mapping-association to write confirmed mappings
-4. Call get-mapping-summary to check overall coverage""",
+4. Call get-mapping-summary to check overall coverage
+5. To move an account that is already mapped, create-mapping-association with replaces_association_id (its current arc): one write, judged as a reclassification when closed months are involved""",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -380,8 +381,10 @@ class CreateMappingAssociationTool:
 - to_element_id: rs-gaap element ID (the reporting concept)
 - confidence: Float 0.0–1.0 (AI confidence in the match)
 - association_type: 'mapping' (CoA→rs-gaap, the primary arc the renderer follows) or 'equivalence' (alternate cross-taxonomy arc). Defaults to 'mapping'.
+- replaces_association_id: the account's current arc, removed in the same write. An account with landed history in a closed month moves only this way, and only within its primary statement (a reclassification); across one it is refused.
+- reason: why the account is reclassified, kept on the new arc.
 
-**RETURNS:** The written association's id, and the resulting mapping coverage.""",
+**RETURNS:** The written association's id, the arc it replaced, and the closed months it reclassified.""",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -406,6 +409,14 @@ class CreateMappingAssociationTool:
             "enum": ["mapping", "equivalence"],
             "description": "'mapping' = CoA→rs-gaap (primary, what the renderer follows); 'equivalence' = alternate cross-taxonomy arc. Defaults to 'mapping'.",
           },
+          "replaces_association_id": {
+            "type": "string",
+            "description": "The account's current mapping arc in this structure, removed in the same write.",
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the account is reclassified; recorded on the new arc.",
+          },
         },
         "required": ["mapping_id", "from_element_id", "to_element_id", "confidence"],
       },
@@ -424,6 +435,8 @@ class CreateMappingAssociationTool:
         confidence=float(arguments["confidence"]),
         association_type=arguments.get("association_type", "mapping"),
         suggested_by="mapping-agent",
+        replaces_association_id=arguments.get("replaces_association_id"),
+        reason=arguments.get("reason"),
       )
       # `created_by` is the accountable user, else the operator's own tag.
       created_by = str(getattr(self.client, "user_id", None) or "mapping-agent")
@@ -437,6 +450,8 @@ class CreateMappingAssociationTool:
         "from_element_id": result.from_element_id,
         "to_element_id": result.to_element_id,
         "confidence": result.confidence,
+        "replaced_association_id": result.replaced_association_id,
+        "reclassified_periods": result.reclassified_periods,
       }
     except ProtectedFactsError as exc:
       # The arc would restate a closed month. Typed so the mapping operator

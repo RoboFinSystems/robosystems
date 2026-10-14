@@ -48,6 +48,7 @@ blessed construction path) and the `before_insert` backstop on the
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -76,6 +77,14 @@ class PivotProvenance(BaseModel):
   arc_type: str | None = Field(
     None,
     description="Association arc type the pivot followed, when tracked.",
+  )
+  stamped_at: datetime | None = Field(
+    None,
+    description=(
+      "When the pivot ran. For a close-stamped set this is the month as "
+      "closed on this date: a later mapping change (a reclassification) "
+      "moves the live render, never the stamp."
+    ),
   )
   posting_filter: dict | None = Field(
     None,
