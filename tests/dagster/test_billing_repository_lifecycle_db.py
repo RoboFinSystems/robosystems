@@ -139,6 +139,15 @@ class TestStripeSideEnds:
 
 
 class TestFailedPayments:
+  @pytest.fixture(autouse=True)
+  def _stripe_agrees(self):
+    """Stripe's live subscription is in the delivered status; a stale one is
+    covered in test_stripe_handlers_db.py."""
+    with patch(
+      "robosystems.dagster.jobs.billing._stripe_still_says", return_value=True
+    ):
+      yield
+
   async def test_past_due_keeps_access_while_stripe_retries(
     self, test_db, test_user, test_org
   ):

@@ -1502,7 +1502,10 @@ class TestHandleSubscriptionUpdated:
     mock_subscription.status = "active"
     sub_data = make_subscription_data(status="past_due", cancel_at_period_end=False)
 
-    with patch(PATCH_BILLING_SUB) as MockSub:
+    with (
+      patch(PATCH_BILLING_SUB) as MockSub,
+      patch("robosystems.dagster.jobs.billing._stripe_still_says", return_value=True),
+    ):
       MockSub.get_by_provider_subscription_id.return_value = mock_subscription
 
       from robosystems.dagster.jobs.billing import _handle_subscription_updated
@@ -1531,8 +1534,9 @@ class TestHandleSubscriptionUpdated:
   async def test_status_transition_trialing_becomes_active(
     self, mock_db_session, mock_context, mock_subscription
   ):
-    """Maps Stripe 'trialing' to local 'active'."""
-    mock_subscription.status = "pending_payment"
+    """Maps Stripe 'trialing' to local 'active'. A checkout row is the
+    exception: it becomes active only through provisioning."""
+    mock_subscription.status = "past_due"
     sub_data = make_subscription_data(status="trialing", cancel_at_period_end=False)
 
     with patch(PATCH_BILLING_SUB) as MockSub:
