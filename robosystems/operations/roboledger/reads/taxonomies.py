@@ -12,6 +12,7 @@ from robosystems.models.api.extensions.taxonomies import (
   AssociationResponse,
   ElementListResponse,
   ElementResponse,
+  FlowCandidate,
   MappedTrialBalanceResponse,
   MappedTrialBalanceRow,
   MappingCoverageResponse,
@@ -301,6 +302,55 @@ def suggest_mapping_candidates(
 
   efs_map = _efs_by_element(session, [r.id for r in filtered])
   return [element_to_response(r, efs_map.get(r.id)) for r in filtered]
+
+
+_FLOW_ACTIVITIES = {"investingActivity": "investing", "financingActivity": "financing"}
+
+
+def list_flow_candidates(
+  session: Session, reporting_style_id: str
+) -> list[FlowCandidate]:
+  """The investing and financing flows a line may be tagged with under this
+  Reporting Style: the leaf rows of its cash flow statement, the set the
+  write path accepts (``bank_feed.resolve_flows``). With no cash flow network
+  composed, every flow concept carrying an investing or financing activity,
+  which is what the write path then checks by. By section, investing then
+  financing, and by name within each: a picker's order, not the statement's
+  row order. A flow carrying both activities is listed under investing.
+  """
+  from robosystems.operations.roboledger.reports.network_picker import (
+    taggable_flow_qnames,
+  )
+
+  stmt = (
+    select(Element.id, Element.qname, Element.name, Trait.identifier)
+    .join(ElementTrait, ElementTrait.element_id == Element.id)
+    .join(Trait, Trait.id == ElementTrait.trait_id)
+    .where(
+      Trait.category == "activityType",
+      Trait.identifier.in_(tuple(_FLOW_ACTIVITIES)),
+      Element.is_active.is_(True),
+    )
+  )
+  qnames = taggable_flow_qnames(session, reporting_style_id)
+  if qnames:
+    stmt = stmt.where(Element.qname.in_(sorted(qnames)))
+  rows = session.execute(stmt).all()
+  order = {activity: rank for rank, activity in enumerate(_FLOW_ACTIVITIES.values())}
+  candidates: dict[str, FlowCandidate] = {}
+  for element_id, qname, name, identifier in sorted(
+    rows, key=lambda r: (order[_FLOW_ACTIVITIES[str(r[3])]], str(r[2]))
+  ):
+    candidates.setdefault(
+      str(element_id),
+      FlowCandidate(
+        element_id=str(element_id),
+        qname=str(qname),
+        name=str(name),
+        activity=_FLOW_ACTIVITIES[str(identifier)],
+      ),
+    )
+  return list(candidates.values())
 
 
 def list_unmapped_elements(

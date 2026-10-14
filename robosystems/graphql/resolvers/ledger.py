@@ -38,6 +38,7 @@ from robosystems.graphql.types.ledger import (
   ElementList,
   EventBlock,
   FiscalCalendar,
+  FlowCandidate,
   LedgerEntity,
   LedgerJournalEntryList,
   LedgerSummary,
@@ -139,6 +140,7 @@ from robosystems.operations.roboledger.reads import (
   trial_balance as reads_trial_balance,
 )
 from robosystems.operations.roboledger.reports.network_picker import (
+  DEFAULT_STYLE_ID,
   load_entity_reporting_style,
 )
 from robosystems.operations.roboledger.schedules import ScheduleService
@@ -924,6 +926,41 @@ class LedgerQuery:
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
     return [Element.from_pydantic(r) for r in rows]
+
+  @strawberry.field
+  def flow_candidates(
+    self,
+    info: Info[GraphQLContext, None],
+    entity_id: str | None = None,
+  ) -> list[FlowCandidate]:
+    """The cash flow rows a line may be tagged with.
+
+    A flow is a second classification beside the account: it overrides the
+    account's default flow on the cash flow and equity statements (a bank
+    line's `classified_flow_qname`, a journal-entry line's
+    `transaction_description_code`). These are the leaf investing and
+    financing rows of the entity's cash flow statement under its Reporting
+    Style - the set the write path accepts - so a picker built from them
+    never offers a row the statement cannot present. By section, investing
+    then financing, and by name within each.
+
+    Args:
+      entity_id: The entity whose statement the rows come from. Omit for the group parent.
+    """
+    try:
+      with _open_session(info, "roboledger") as session:
+        try:
+          reporting_style_id = load_entity_reporting_style(
+            session, resolve_entity_id(session, entity_id)
+          )
+        except NoEntityError:
+          reporting_style_id = DEFAULT_STYLE_ID
+        rows = reads_taxonomies.list_flow_candidates(session, reporting_style_id)
+    except EntityNotInGraphError as exc:
+      raise strawberry.exceptions.StrawberryGraphQLError(str(exc)) from exc
+    except (ValueError, ProgrammingError):
+      _raise_ledger_not_initialized()
+    return [FlowCandidate.from_pydantic(r) for r in rows]
 
   @strawberry.field
   def unmapped_elements(

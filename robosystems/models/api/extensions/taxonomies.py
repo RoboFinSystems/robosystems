@@ -320,6 +320,29 @@ class SuggestedTarget(BaseModel):
   confidence: float | None = None
 
 
+class FlowCandidate(BaseModel):
+  """A cash flow row a line may be tagged with: the flow that overrides the
+  account's default on the cash flow and equity statements."""
+
+  element_id: str = Field(..., description="The flow concept's element id.")
+  qname: str = Field(
+    ...,
+    description=(
+      "The flow's qname, the value a bank line's `classified_flow_qname` and a "
+      "journal-entry line's `transaction_description_code` take."
+    ),
+  )
+  name: str = Field(
+    ..., description="The flow's name, as the statement labels its row."
+  )
+  activity: str = Field(
+    ...,
+    description=(
+      "`investing` or `financing`: the section of the statement the row sits in."
+    ),
+  )
+
+
 class UnmappedElementResponse(BaseModel):
   """An element not yet mapped to the reporting taxonomy."""
 

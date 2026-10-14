@@ -1542,6 +1542,98 @@ class TestMappingCandidatesResolver:
     assert suggest.call_args.kwargs["reporting_style_id"] is None
 
 
+class TestFlowCandidatesResolver:
+  """`flowCandidates` reads the entity's Reporting Style, the way
+  `mappingCandidates` does, so the picker offers the rows the write path
+  accepts."""
+
+  @staticmethod
+  def _candidate():
+    from robosystems.models.api.extensions.taxonomies import FlowCandidate
+
+    return FlowCandidate(
+      element_id="el_std",
+      qname="rs-gaap:ProceedsFromShortTermDebt",
+      name="Proceeds from Short-Term Debt",
+      activity="financing",
+    )
+
+  def test_reads_the_parents_style_by_default(self) -> None:
+    with (
+      patch(
+        "robosystems.graphql.resolvers.ledger.resolve_entity_id",
+        return_value="ent_parent",
+      ) as resolve,
+      patch(
+        "robosystems.graphql.resolvers.ledger.load_entity_reporting_style",
+        return_value="style_1",
+      ) as style,
+      patch(
+        f"{_OPS}.taxonomies.list_flow_candidates",
+        return_value=[self._candidate()],
+      ) as flows,
+    ):
+      result = _run("query { flowCandidates { elementId qname name activity } }")
+    assert result.errors is None
+    assert result.data == {
+      "flowCandidates": [
+        {
+          "elementId": "el_std",
+          "qname": "rs-gaap:ProceedsFromShortTermDebt",
+          "name": "Proceeds from Short-Term Debt",
+          "activity": "financing",
+        }
+      ]
+    }
+    assert resolve.call_args.args[1] is None
+    assert style.call_args.args[1] == "ent_parent"
+    assert flows.call_args.args[1] == "style_1"
+
+  def test_reads_a_named_entitys_style(self) -> None:
+    with (
+      patch(
+        "robosystems.graphql.resolvers.ledger.resolve_entity_id",
+        return_value="ent_sub",
+      ) as resolve,
+      patch(
+        "robosystems.graphql.resolvers.ledger.load_entity_reporting_style",
+        return_value="style_llc",
+      ),
+      patch(f"{_OPS}.taxonomies.list_flow_candidates", return_value=[]) as flows,
+    ):
+      result = _run('query { flowCandidates(entityId: "ent_sub") { qname } }')
+    assert result.errors is None
+    assert resolve.call_args.args[1] == "ent_sub"
+    assert flows.call_args.args[1] == "style_llc"
+
+  def test_an_entity_outside_the_graph_is_an_error(self) -> None:
+    with patch(
+      "robosystems.graphql.resolvers.ledger.resolve_entity_id",
+      side_effect=EntityNotInGraphError("Entity 'x' not found in this graph."),
+    ):
+      result = _run('query { flowCandidates(entityId: "x") { qname } }')
+    assert result.errors is not None
+    assert "not found in this graph" in result.errors[0].message
+
+  def test_without_an_entity_reads_the_default_style(self) -> None:
+    from robosystems.operations.roboledger.entity_scope import NoEntityError
+    from robosystems.operations.roboledger.reports.network_picker import (
+      DEFAULT_STYLE_ID,
+    )
+
+    with (
+      patch(
+        "robosystems.graphql.resolvers.ledger.resolve_entity_id",
+        side_effect=NoEntityError("no entity"),
+      ),
+      patch(f"{_OPS}.taxonomies.list_flow_candidates", return_value=[]) as flows,
+    ):
+      result = _run("query { flowCandidates { qname } }")
+    assert result.errors is None
+    assert result.data == {"flowCandidates": []}
+    assert flows.call_args.args[1] == DEFAULT_STYLE_ID
+
+
 class TestCloseReadsNameTheirEntity:
   """`fiscalCalendar`, `periodCloseStatus` and `periodDrafts` read one
   entity's books; `entityId` names it and the reads default to the parent."""
