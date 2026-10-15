@@ -17,6 +17,7 @@ from robosystems.middleware.mcp.tools.constants import (
   INVESTOR_AMOUNT_GUIDANCE,
   LEDGER_AMOUNT_GUIDANCE,
   LEDGER_STATUS_GUIDANCE,
+  MATERIALIZED_GRAPH_GUIDANCE,
 )
 from robosystems.middleware.mcp.tools.cypher_tool import (
   CypherTool,
@@ -170,6 +171,42 @@ class TestInvestorAmountGuidance:
   def test_sec_repository_omits_it(self):
     assert INVESTOR_AMOUNT_GUIDANCE not in self._description(
       "sec", ("roboledger", "roboinvestor")
+    )
+
+
+class TestMaterializedGraphGuidance:
+  """A tenant ledger's graph trails its writes until the next materialization,
+  so live-state reads are routed to the typed tools. The shared repository has
+  no live books behind it, so it never carries the note."""
+
+  @staticmethod
+  def _description(graph_id: str, extensions: tuple[str, ...]) -> str:
+    tool = CypherTool(SimpleNamespace(graph_id=graph_id), schema_extensions=extensions)
+    return tool.get_tool_definition()["description"]
+
+  @pytest.mark.parametrize(
+    "extensions", [("roboledger",), ("roboinvestor",), ("roboledger", "roboinvestor")]
+  )
+  def test_tenant_ledger_graph_states_it(self, extensions):
+    assert MATERIALIZED_GRAPH_GUIDANCE in self._description(
+      "kg1a0b70352e2fdcc071f1", extensions
+    )
+
+  def test_it_precedes_the_query_guidance(self):
+    description = self._description("kg1a0b70352e2fdcc071f1", ("roboledger",))
+    assert description.index(MATERIALIZED_GRAPH_GUIDANCE) < description.index(
+      LEDGER_STATUS_GUIDANCE
+    )
+
+  def test_custom_graph_omits_it(self):
+    assert MATERIALIZED_GRAPH_GUIDANCE not in self._description(
+      "kg1a0b70352e2fdcc071f1", ()
+    )
+
+  @pytest.mark.parametrize("graph_id", ["sec", "sec_historical"])
+  def test_shared_repository_omits_it(self, graph_id):
+    assert MATERIALIZED_GRAPH_GUIDANCE not in self._description(
+      graph_id, ("roboledger", "roboinvestor")
     )
 
 

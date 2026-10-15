@@ -29,6 +29,13 @@ Period nodes classify time context into three types:
 - `other` - Non-standard durations
 Note: Element.period_type indicates the expected period type for that metric - different from Period.period_type!"""
 
+MATERIALIZED_GRAPH_GUIDANCE = """**⚠️ THE GRAPH LAGS THE BOOKS:** this tool reads the materialized
+graph, which a write reaches only at the next materialization. For current state (an entry,
+schedule or classification just written, or "did my write land") use `query-graphql` or the
+typed reads (`get-information-block`, `get-event-block`, `list-event-blocks`); they read the
+live ledger. Use Cypher for traversal and analysis the typed reads cannot express, and check
+`get-graph-sync-status` when freshness matters."""
+
 LEDGER_STATUS_GUIDANCE = """**⚠️ LEDGER STATUS FILTERING (Event / Entry / Transaction / LineItem):**
 The graph is a faithful mirror of the ledger and KEEPS cancelled and replaced rows —
 voided/superseded events and draft/reversed entries are NOT removed (they are real audit

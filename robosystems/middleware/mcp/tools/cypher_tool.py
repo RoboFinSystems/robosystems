@@ -11,6 +11,7 @@ from .constants import (
   LEDGER_AMOUNT_GUIDANCE,
   LEDGER_ANCHOR_GUIDANCE,
   LEDGER_STATUS_GUIDANCE,
+  MATERIALIZED_GRAPH_GUIDANCE,
 )
 
 if TYPE_CHECKING:
@@ -86,6 +87,9 @@ RETURN DISTINCT labels(a)[0] AS from_type, type(r) AS rel_type, labels(b)[0] AS 
 **RELATED TOOLS:** `get-graph-schema` for what is in the graph, and
 `get-example-queries` for patterns that already work against it."""
 
+    # Tenant ledgers only: a shared repository has no live books to lag.
+    if self._has_ledger_spine() or self._has_investor_positions():
+      description += "\n\n" + MATERIALIZED_GRAPH_GUIDANCE
     if self._has_ledger_spine():
       # Anchor first, then status: a query anchored on the wrong node loses
       # rows outright, which no amount of correct status filtering recovers.
