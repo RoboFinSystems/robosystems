@@ -95,6 +95,43 @@ def test_consecutive_subsidiary_only_rows_keep_their_order():
   assert [r.element_id for r in parent.rows] == ["ap", "debt", "current", "total"]
 
 
+def test_three_entities_each_with_their_own_rows_keep_one_order():
+  """The parent, then two subsidiaries that each bring a row the others
+  lack: every row lands inside its subtotal, in one presentation order."""
+  parent = _grid(
+    _row("ap", 10.0, depth=3),
+    _row("current", 10.0, depth=2, subtotal=True),
+    _row("re", 30.0, depth=2),
+    _row("equity", 30.0, depth=1, subtotal=True),
+  )
+  first_sub = _grid(
+    _row("debt", 5.0, depth=3),
+    _row("current", 5.0, depth=2, subtotal=True),
+    _row("members", 100.0, depth=2),
+    _row("equity", 100.0, depth=1, subtotal=True),
+  )
+  second_sub = _grid(
+    _row("ap", 2.0, depth=3),
+    _row("accrued", 1.0, depth=3),
+    _row("current", 3.0, depth=2, subtotal=True),
+    _row("members", 40.0, depth=2),
+    _row("equity", 40.0, depth=1, subtotal=True),
+  )
+
+  _add_into(parent, first_sub)
+  _add_into(parent, second_sub)
+
+  assert _shape(parent) == [
+    ("debt", 3, [5.0]),
+    ("ap", 3, [12.0]),
+    ("accrued", 3, [1.0]),
+    ("current", 2, [18.0]),
+    ("members", 2, [140.0]),
+    ("re", 2, [30.0]),
+    ("equity", 1, [170.0]),
+  ]
+
+
 def test_shared_rows_sum_and_a_column_both_lack_stays_none():
   parent = _grid(_row("ap", 10.0, None, depth=3))
   sub = _grid(_row("ap", 2.0, None, depth=3))

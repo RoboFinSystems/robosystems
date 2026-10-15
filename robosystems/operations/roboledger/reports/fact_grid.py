@@ -414,9 +414,10 @@ def _calculation_ancestry(
     ).fetchall()
     next_frontier: set[str] = set()
     for row in rows:
-      parents.setdefault(str(row.source), []).append(str(row.target))
-      if row.target not in presented and row.target not in seen:
-        next_frontier.add(str(row.target))
+      target = str(row.target)
+      parents.setdefault(str(row.source), []).append(target)
+      if target not in presented and target not in seen:
+        next_frontier.add(target)
     seen |= next_frontier
     frontier = next_frontier
   return parents
@@ -438,7 +439,9 @@ def _place_strays_by_calculation(
   stray with no presented calculation ancestor belongs to another statement
   and stays off this one; a stray whose ancestor is itself a valued stray is
   covered by that ancestor's row. ``parents`` maps a summand to the subtotals
-  that sum it (``_calculation_ancestry``).
+  that sum it (``_calculation_ancestry``); the arcs' weights play no part,
+  because the footing check weights a child by its balance type against its
+  parent's, the same convention every presented row follows.
   """
   by_element: dict[str, list[ReportFact]] = {}
   for fact in strays:
