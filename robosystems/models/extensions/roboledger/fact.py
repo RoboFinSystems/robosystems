@@ -65,7 +65,7 @@ class Fact(ExtensionsBase):
   value_type = Column(String, nullable=False, default="inline")
   content_type = Column(String, nullable=True)  # MIME, e.g. 'text/markdown'
   # XBRL @decimals for numeric facts. NULL means unspecified; materialize
-  # substitutes '-2' for numeric rows so graph output stays stable.
+  # reads a NULL currency amount as cents ('2') and leaves other units NULL.
   decimals = Column(String, nullable=True)
   period_start = Column(Date, nullable=True)
   period_end = Column(Date, nullable=False)

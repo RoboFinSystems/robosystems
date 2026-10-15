@@ -346,6 +346,22 @@ def build_postgres_connstr() -> str:
   return connstr
 
 
+def _is_currency_sql(unit: str) -> str:
+  """A stored unit that is an ISO 4217 code: three upper-case letters, the
+  same test the export bundle applies."""
+  return f"(length({unit}) = 3 AND {unit} = upper({unit}))"
+
+
+def _unit_measure_sql(unit: str) -> str:
+  """The XBRL measure for a stored unit: currencies under ``iso4217``,
+  ``shares`` and ``pure`` under ``xbrli``, anything else (``days``) as stored."""
+  return (
+    f"CASE WHEN {_is_currency_sql(unit)} THEN 'iso4217:' || {unit} "
+    f"WHEN {unit} IN ('shares', 'pure') THEN 'xbrli:' || {unit} "
+    f"ELSE {unit} END"
+  )
+
+
 def _group_parent_id(graph_id: str) -> str:
   """The tenant's group parent, which owns the single-entity fanouts. A graph
   with no entity yet keeps the provisioning id, so its fanouts stay empty."""
@@ -1003,8 +1019,8 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     CREATE OR REPLACE TABLE Unit AS
     SELECT DISTINCT
       'unit_' || lower(unit)          AS identifier,
-      'iso4217:' || unit              AS uri,
-      'iso4217:' || unit              AS measure,
+      {_unit_measure_sql("unit")}     AS uri,
+      {_unit_measure_sql("unit")}     AS measure,
       unit                            AS value,
       NULL::VARCHAR                   AS numerator_uri,
       NULL::VARCHAR                   AS denominator_uri
@@ -1016,7 +1032,9 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       NULL::VARCHAR, NULL::VARCHAR
   """
 
-  # decimals: numeric rows default to '-2'; nonNumeric facts carry none.
+  # decimals: a currency amount with none stated is cents, the ledger's own
+  # precision; another unit's precision is unknown, so it stays NULL, as do
+  # nonNumeric facts.
   tables["Fact"] = f"""
     CREATE OR REPLACE TABLE Fact AS
     SELECT
@@ -1025,8 +1043,8 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       COALESCE(f.string_value, CAST(f.value AS VARCHAR)) AS value,
       f.value                         AS numeric_value,
       f.fact_type                     AS fact_type,
-      CASE WHEN f.fact_type = 'Numeric'
-           THEN COALESCE(f.decimals, '-2')
+      CASE WHEN f.fact_type = 'Numeric' AND {_is_currency_sql("f.unit")}
+           THEN COALESCE(f.decimals, '2')
            ELSE f.decimals END        AS decimals,
       f.value_type                    AS value_type,
       f.content_type                  AS content_type,

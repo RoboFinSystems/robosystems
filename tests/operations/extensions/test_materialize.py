@@ -164,20 +164,53 @@ class TestNonnumericFactStaging:
     assert "value_type" in sql
     assert "content_type" in sql
 
-  def test_fact_decimals_fallback_only_for_numeric(self):
+  def test_fact_decimals_default_to_cents_for_currency_amounts_only(self):
+    import duckdb
+
     sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["Fact"]
-    # Legacy '-2' preserved for numeric rows with unspecified decimals;
-    # Nonnumeric rows pass NULL through (no @decimals in XBRL).
-    assert "CASE WHEN f.fact_type = 'Numeric'" in sql
-    assert "COALESCE(f.decimals, '-2')" in sql
+    # The decimals CASE, evaluated over representative rows: a stated value
+    # wins; an unstated currency amount is cents (never '-2', which claims
+    # hundreds); another unit's precision is unknown; nonNumeric carries none.
+    case = sql[sql.index("CASE WHEN f.fact_type") : sql.index("AS decimals")]
+    rows = (
+      duckdb.connect()
+      .execute(
+        f"SELECT {case} FROM (VALUES "
+        "('Numeric', 'USD', NULL), ('Numeric', 'USD', 'INF'), "
+        "('Numeric', 'days', NULL), ('Numeric', 'pure', NULL), "
+        "('Nonnumeric', NULL, NULL)) f(fact_type, unit, decimals)"
+      )
+      .fetchall()
+    )
+    assert [r[0] for r in rows] == ["2", "INF", None, None, None]
 
   def test_unit_table_derives_from_fact_units(self):
     sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["Unit"]
     assert "'unit_' || lower(unit)" in sql
-    assert "'iso4217:' || unit" in sql
     assert "WHERE fact_type = 'Numeric'" in sql
     # Static USD fallback keeps the legacy node for fact-less graphs.
     assert "'unit_usd'" in sql
+
+  def test_unit_measures_prefix_only_currencies_with_iso4217(self):
+    import duckdb
+
+    from robosystems.operations.extensions.materialize import _unit_measure_sql
+
+    rows = (
+      duckdb.connect()
+      .execute(
+        f"SELECT {_unit_measure_sql('unit')} FROM (VALUES "
+        "('USD'), ('EUR'), ('pure'), ('shares'), ('days')) t(unit)"
+      )
+      .fetchall()
+    )
+    assert [r[0] for r in rows] == [
+      "iso4217:USD",
+      "iso4217:EUR",
+      "xbrli:pure",
+      "xbrli:shares",
+      "days",
+    ]
 
   def test_fact_has_unit_excludes_nonnumeric(self):
     sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["FACT_HAS_UNIT"]
