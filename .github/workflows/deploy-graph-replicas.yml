@@ -1,7 +1,7 @@
 name: Deploy Graph Shared Replicas
 
 # Deploys read-only replica fleet for shared repositories (SEC)
-# Replicas download .lbug and .duckdb files from S3 to local disk on boot
+# Replicas download .lbdb and .duckdb files from S3 to local disk on boot
 # Databases are published to S3 by Dagster's sec_lbug_s3_publish and sec_duckdb_s3_publish jobs
 
 on:
@@ -254,7 +254,7 @@ jobs:
       - name: Validate S3 Databases Exist
         id: s3_database
         run: |
-          # Build S3 prefix and validate each repository's .lbug file
+          # Build S3 prefix and validate each repository's database file
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           S3_PREFIX="s3://robosystems-${ACCOUNT_ID}-user-${{ inputs.environment }}/shared-repositories/databases"
           REPOS="${{ inputs.shared_repositories }}"
@@ -262,12 +262,16 @@ jobs:
           echo "🔍 Validating shared databases under prefix: $S3_PREFIX"
           echo "   Repositories: $REPOS"
 
-          # Validate each repository's .lbug file exists
+          # Validate each repository's database file exists, under either suffix
+          # (.lbdb since the 0.21 engine; .lbug before it)
           ALL_FOUND=true
           IFS=',' read -ra REPO_ARRAY <<< "$REPOS"
           for REPO_NAME in "${REPO_ARRAY[@]}"; do
             REPO_NAME=$(echo "$REPO_NAME" | xargs)  # trim whitespace
-            S3_URI="${S3_PREFIX}/${REPO_NAME}.lbug"
+            S3_URI="${S3_PREFIX}/${REPO_NAME}.lbdb"
+            if ! aws s3 ls "$S3_URI" >/dev/null 2>&1; then
+              S3_URI="${S3_PREFIX}/${REPO_NAME}.lbug"
+            fi
 
             if aws s3 ls "$S3_URI" >/dev/null 2>&1; then
               FILE_SIZE=$(aws s3 ls "$S3_URI" | awk '{print $3}')

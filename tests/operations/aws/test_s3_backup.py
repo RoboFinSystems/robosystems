@@ -186,11 +186,13 @@ class TestS3BackupAdapter:
       key_parts = backup_key.split("/")
       if len(key_parts) >= 5:
         timestamp_part = key_parts[4].replace("backup-", "")
-        # Handle both old (.cypher) and new (.lbug) extensions, with and without encryption
+        # Every extension a backup key has carried, with and without encryption
         timestamp_part = (
           timestamp_part.replace(".cypher.gz.enc", "")
+          .replace(".lbdb.gz.enc", "")
+          .replace(".lbdb.gz", "")
           .replace(".lbug.gz.enc", "")
-          .replace(".lbug.gz", "")  # New format without encryption
+          .replace(".lbug.gz", "")
           .replace(".cypher.gz", "")
         )
         try:

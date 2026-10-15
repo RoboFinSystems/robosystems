@@ -1,6 +1,6 @@
 #!/bin/bash
 # LadybugDB Shared Replica Instance UserData Script
-# Replicas download .lbug database files from S3 to local disk during startup,
+# Replicas download the shared database files from S3 to local disk during startup,
 # then serve them as local read-only databases using the standard connection pool.
 # This script uses the same shared components as writers for consistency
 
@@ -114,6 +114,25 @@ aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS 
 }
 
 # ==================================================================================
+# DATABASE SUFFIX (the image decides which file it serves)
+# ==================================================================================
+# .lbdb since the 0.21 engine, .lbug before it. Read from the image this fleet is
+# pinned to, so a boot during an engine upgrade downloads the file its own engine
+# opens, whichever key the publish has reached. The later pull is then a no-op.
+docker pull ${ECR_URI}:${ECR_IMAGE_TAG} || {
+    echo "ERROR: Failed to pull ${ECR_URI}:${ECR_IMAGE_TAG}"
+    exit 1
+}
+DB_SUFFIX=$(docker run --rm --entrypoint grep "${ECR_URI}:${ECR_IMAGE_TAG}" \
+  -oE '^GRAPH_DB_SUFFIX = "\.[a-z]+"' /app/robosystems/config/storage/graph.py 2>/dev/null \
+  | sed -E 's/.*"(.*)"/\1/')
+if [ -z "${DB_SUFFIX}" ]; then
+  DB_SUFFIX=".lbug"
+  echo "Image declares no database suffix; using the pre-0.21 ${DB_SUFFIX}"
+fi
+echo "Database suffix for this image: ${DB_SUFFIX}"
+
+# ==================================================================================
 # STORAGE SETUP (Download shared databases from S3)
 # ==================================================================================
 echo "Downloading shared databases from S3..."
@@ -130,8 +149,8 @@ printf '[default]\ns3 =\n  preferred_transfer_client = crt\n' > "${S3_CRT_CONFIG
 IFS=',' read -ra REPOS <<< "${SHARED_REPOSITORIES}"
 for REPO in "${REPOS[@]}"; do
   REPO=$(echo "$REPO" | tr -d ' ')
-  S3_URI="${SHARED_DATABASE_S3_PREFIX%/}/${REPO}.lbug"
-  LOCAL_PATH="/mnt/ladybug-data/databases/lbug-dbs/${REPO}.lbug"
+  S3_URI="${SHARED_DATABASE_S3_PREFIX%/}/${REPO}${DB_SUFFIX}"
+  LOCAL_PATH="/mnt/ladybug-data/databases/lbug-dbs/${REPO}${DB_SUFFIX}"
   echo "Downloading ${REPO}: ${S3_URI} -> ${LOCAL_PATH}"
   START_TIME=$(date +%s)
   AWS_CONFIG_FILE="${S3_CRT_CONFIG}" aws s3 cp "${S3_URI}" "${LOCAL_PATH}" --region "${AWS_REGION}" --only-show-errors || {

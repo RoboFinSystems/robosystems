@@ -65,7 +65,7 @@ class BackupRequest(BaseModel):
 
   backup_format: str = Field(
     default="full_dump",
-    description="Backup format: 'full_dump' (complete .lbug database file)",
+    description="Backup format: 'full_dump' (complete .lbdb database file)",
     pattern="^full_dump$",  # Only allow full_dump for now
   )
   include_metadata: bool = Field(
@@ -76,7 +76,7 @@ class BackupRequest(BaseModel):
   )
   backup_type: str = Field(
     default="standard",
-    description="Backup type: 'standard' (ZIP to S3), 'replica' (raw .lbug to S3), 'duckdb_staging' (raw .duckdb to S3), 'r2_download' (zstd .lbug.zst to R2)",
+    description="Backup type: 'standard' (ZIP to S3), 'replica' (raw .lbdb to S3), 'duckdb_staging' (raw .duckdb to S3), 'r2_download' (zstd .lbug.zst to R2)",
     pattern="^(standard|replica|duckdb_staging|r2_download)$",
   )
   s3_destination: S3Destination | None = Field(

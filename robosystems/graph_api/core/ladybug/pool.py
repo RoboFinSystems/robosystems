@@ -20,6 +20,7 @@ from typing import Any
 
 import ladybug as lbug
 
+from robosystems.config.storage.graph import graph_db_filename
 from robosystems.config.tuning import TuningConfig
 from robosystems.logger import logger
 
@@ -212,7 +213,7 @@ class LadybugConnectionPool:
         self._remove_oldest_connection(database_name)
 
     try:
-      db_path = self.base_path / f"{database_name}.lbug"
+      db_path = self.base_path / graph_db_filename(database_name)
 
       if database_name not in self._databases:
         logger.info(f"Creating new Database object for {database_name}")
@@ -295,7 +296,7 @@ class LadybugConnectionPool:
         # None of it is required — a failure here leaves a usable connection.
         try:
           # Keeps LadybugDB's temporary files on the same fast EBS volume as
-          # the databases. It appends ".lbug" itself, so pass the bare path.
+          # the databases. It appends ".lbdb" itself, so pass the bare path.
           home_dir = str(self.base_path)
 
           conn.execute(f"CALL home_directory='{home_dir}';")

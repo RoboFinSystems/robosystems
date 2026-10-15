@@ -3,7 +3,7 @@
 One asset, two consumers. ``xbrlkit.schema`` is the ordered declaration of
 the property-graph tables a filing projects into, and both ``xbrlkit build
 --format lpg`` and this platform's compiled schemas create those tables from
-it, so Cypher written against a single-filing ``.lbug`` runs unchanged on the
+it, so Cypher written against a single-filing ``.lbdb`` runs unchanged on the
 shared ``sec`` graph. The platform keeps its own ``Node`` and ``Relationship``
 objects — they carry the descriptions the schema surface shows and compose
 with the non-XBRL tables — but the columns, their types, their order and the

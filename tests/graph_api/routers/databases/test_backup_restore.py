@@ -234,7 +234,7 @@ def test_restore_passes_system_backup_choice_to_background_task(restore_client):
 @pytest.mark.asyncio
 async def test_download_backup_returns_zip_for_file_db(monkeypatch, tmp_path):
   cluster = FakeClusterService(read_only=False, databases=["graph1"])
-  db_file = tmp_path / "graph1.lbug"
+  db_file = tmp_path / "graph1.lbdb"
   db_file.write_bytes(b"lbug-data")
 
   monkeypatch.setattr(
@@ -254,11 +254,11 @@ async def test_download_backup_returns_zip_for_file_db(monkeypatch, tmp_path):
   assert isinstance(backup_bytes, bytes)
 
   with zipfile.ZipFile(io.BytesIO(backup_bytes), "r") as zf:
-    # The .lbug plus the manifest. No memory entries: this graph has no lance
+    # The .lbdb plus the manifest. No memory entries: this graph has no lance
     # directory, which is the ordinary case rather than an error.
     namelist = zf.namelist()
-    assert sorted(namelist) == ["backup-manifest.json", "graph1.lbug"]
-    extracted = zf.read("graph1.lbug")
+    assert sorted(namelist) == ["backup-manifest.json", "graph1.lbdb"]
+    extracted = zf.read("graph1.lbdb")
     assert extracted == b"lbug-data"
 
     manifest = json.loads(zf.read("backup-manifest.json"))
@@ -285,7 +285,7 @@ async def test_download_backup_aborts_when_checkpoint_fails(monkeypatch, tmp_pat
   cluster = FakeClusterService(
     read_only=False, databases=["graph1"], checkpoint_fails=True
   )
-  db_file = tmp_path / "graph1.lbug"
+  db_file = tmp_path / "graph1.lbdb"
   db_file.write_bytes(b"lbug-data")
 
   monkeypatch.setattr(
@@ -304,12 +304,12 @@ async def test_download_backup_aborts_when_checkpoint_fails(monkeypatch, tmp_pat
 async def test_download_backup_includes_memory_store(monkeypatch, tmp_path):
   """The semantic memory store has no upstream, so it must ride in the archive.
 
-  It is a sibling directory of the .lbug rather than part of it, so copying the
+  It is a sibling directory of the .lbdb rather than part of it, so copying the
   database alone silently omits the one thing on the volume that cannot be
   rebuilt from anywhere.
   """
   cluster = FakeClusterService(read_only=False, databases=["graph1"])
-  db_file = tmp_path / "graph1.lbug"
+  db_file = tmp_path / "graph1.lbdb"
   db_file.write_bytes(b"lbug-data")
 
   lance_root = tmp_path / "lance"
@@ -350,7 +350,7 @@ async def test_download_backup_does_not_create_the_memory_directory(
   ambiguous — "empty" and "never used" would look identical from then on.
   """
   cluster = FakeClusterService(read_only=False, databases=["graph1"])
-  db_file = tmp_path / "graph1.lbug"
+  db_file = tmp_path / "graph1.lbdb"
   db_file.write_bytes(b"lbug-data")
 
   lance_root = tmp_path / "lance"
@@ -391,7 +391,7 @@ async def test_download_backup_missing_path_returns_404(monkeypatch):
   cluster = FakeClusterService(read_only=False, databases=["graph1"])
   monkeypatch.setattr(
     "robosystems.middleware.graph.utils.MultiTenantUtils.get_database_path_for_graph",
-    lambda graph_id: "/nonexistent/path/graph1.lbug",
+    lambda graph_id: "/nonexistent/path/graph1.lbdb",
   )
 
   with pytest.raises(HTTPException) as exc:

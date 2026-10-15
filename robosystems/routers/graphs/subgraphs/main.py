@@ -43,7 +43,7 @@ async def get_subgraph_sizes(parent_graph_id: str) -> dict[str, int]:
   """On-disk bytes per subgraph, from one instance-wide storage breakdown.
 
   The same breakdown the storage cap reads, so the figure counts the WAL and
-  agrees with `/usage` (`db_info.size_bytes` counts only the primary `.lbug`).
+  agrees with `/usage` (`db_info.size_bytes` counts only the primary `.lbdb`).
   Returns an empty mapping when unavailable; callers then report `None`, since
   "not measured" is not "empty".
   """

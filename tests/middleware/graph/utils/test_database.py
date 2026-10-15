@@ -207,14 +207,14 @@ class TestGetDatabasePathForGraph:
 
   @patch("robosystems.operations.graph.engine.path_utils.env")
   def test_path_has_lbug_extension(self, mock_env):
-    """Test that the path has .lbug extension."""
+    """Test that the path has .lbdb extension."""
     mock_env.LBUG_DATABASE_PATH = "/tmp/lbug-dbs"
     from robosystems.middleware.graph.utils.database import (
       get_database_path_for_graph,
     )
 
     result = get_database_path_for_graph("test_graph")
-    assert result.endswith(".lbug")
+    assert result.endswith(".lbdb")
 
   @patch("robosystems.operations.graph.engine.path_utils.env")
   def test_path_uses_configured_base(self, mock_env):

@@ -500,7 +500,7 @@ class TestBackupManager:
 
     assert data == b"backup_content"
     assert content_type == "application/zip"
-    assert "database.lbug.zip" in filename
+    assert "database.lbdb.zip" in filename
 
   @pytest.mark.asyncio
   async def test_format_conversion_methods(self, backup_manager):
@@ -522,7 +522,7 @@ class TestBackupManager:
       "full_dump", "backup123"
     )
     assert content_type == "application/zip"
-    assert filename == "backup123_database.lbug.zip"
+    assert filename == "backup123_database.lbdb.zip"
 
     # Test CSV to JSON conversion
     with patch("pandas.read_csv") as mock_read_csv:
@@ -752,7 +752,7 @@ class TestGetContentTypeAndFilename:
       "full_dump", "bk_004"
     )
     assert content_type == "application/zip"
-    assert filename == "bk_004_database.lbug.zip"
+    assert filename == "bk_004_database.lbdb.zip"
 
 
 class TestBackupMetadataHandling:

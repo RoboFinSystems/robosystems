@@ -62,7 +62,7 @@ graph.get_staging_prefix("user123", "kg456")
 # 'user-staging/user123/kg456/'
 
 graph.get_backup_key("kg456", "full", ts)
-# 'graph-backups/databases/kg456/full/backup-20240115_123045.lbug.gz'
+# 'graph-backups/databases/kg456/full/backup-20240115_123045.lbdb.gz'
 graph.get_backup_metadata_key("kg456", ts)
 # 'graph-backups/metadata/kg456/backup-20240115_123045.json'
 
@@ -115,7 +115,7 @@ s3://robosystems-user-{env}/
     {user_id}/{graph_id}/{table_name}/{file_id}/*.parquet
 
   graph-backups/                 # Application-level backups
-    databases/{graph_id}/{full|incremental}/backup-{timestamp}.lbug.gz
+    databases/{graph_id}/{full|incremental}/backup-{timestamp}.lbdb.gz
     metadata/{graph_id}/backup-{timestamp}.json
 
   report-bundles/                # Per-Report serialization bundles

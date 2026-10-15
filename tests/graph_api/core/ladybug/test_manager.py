@@ -40,7 +40,7 @@ class TestValidateDatabasePath:
     base = Path("/tmp/test")
     for name in ["abc", "db_01", "my-db", "A1b2C3"]:
       result = validate_database_path(base, name)
-      assert result == base / f"{name}.lbug"
+      assert result == base / f"{name}.lbdb"
 
   def test_empty_name_raises(self):
     """Should reject empty database name."""
@@ -174,6 +174,19 @@ class TestLadybugDatabaseManagerCreateDatabase:
     """Should raise 409 if database already exists."""
     manager = _make_manager(self.temp_dir)
 
+    (Path(self.temp_dir) / "existing.lbdb").touch()
+
+    request = DatabaseCreateRequest(graph_id="existing", schema_type="entity")
+
+    with pytest.raises(HTTPException) as exc_info:
+      manager.create_database(request)
+    assert exc_info.value.status_code == 409
+
+  def test_create_database_conflict_if_legacy_named_file_exists(self):
+    """The same graph under the previous suffix is awaiting the engine
+    upgrade's import, not absent; creating beside it would leave two."""
+    manager = _make_manager(self.temp_dir)
+
     (Path(self.temp_dir) / "existing.lbug").touch()
 
     request = DatabaseCreateRequest(graph_id="existing", schema_type="entity")
@@ -186,7 +199,7 @@ class TestLadybugDatabaseManagerCreateDatabase:
     """Should remove orphaned WAL file before creation."""
     manager = _make_manager(self.temp_dir)
 
-    wal_path = Path(self.temp_dir) / "newdb.lbug.wal"
+    wal_path = Path(self.temp_dir) / "newdb.lbdb.wal"
     wal_path.touch()
     assert wal_path.exists()
 
@@ -336,6 +349,25 @@ class TestLadybugDatabaseManagerDeleteDatabase:
     assert not db_path.exists()
     assert not wal_path.exists()
 
+  def test_delete_database_removes_a_legacy_named_file_too(self):
+    """A file still under the previous suffix is the same database."""
+    manager = _make_manager(self.temp_dir)
+
+    paths = [
+      Path(self.temp_dir) / "testdb.lbug",
+      Path(self.temp_dir) / "testdb.lbug.wal",
+      Path(self.temp_dir) / "testdb.lbdb",
+    ]
+    for path in paths:
+      path.touch()
+
+    with patch("robosystems.graph_api.core.duckdb.get_duckdb_pool") as mock_get_duck:
+      mock_get_duck.return_value = MagicMock()
+      result = manager.delete_database("testdb")
+
+    assert result["status"] == "success"
+    assert not any(path.exists() for path in paths)
+
   def test_delete_database_preserve_duckdb(self):
     """Should skip DuckDB cleanup when preserve_duckdb is True."""
     manager = _make_manager(self.temp_dir)
@@ -395,6 +427,16 @@ class TestLadybugDatabaseManagerListDatabases:
 
     result = manager.list_databases()
     assert sorted(result) == ["db1", "db2"]
+
+  def test_list_databases_counts_either_suffix_once(self):
+    """A file still under the previous suffix holds its slot until the engine
+    upgrade's import migrates it; the same graph under both is one."""
+    manager = _make_manager(self.temp_dir)
+
+    for name in ("db1.lbdb", "db1.lbug", "db2.lbug", "db3.lbdb", "db3.lbdb.wal"):
+      (Path(self.temp_dir) / name).touch()
+
+    assert manager.list_databases() == ["db1", "db2", "db3"]
 
   def test_list_databases_sorted(self):
     """Should return sorted database names."""
@@ -603,7 +645,7 @@ class TestLadybugDatabaseManagerHealthCheck:
     """Should return True on successful health check."""
     manager = _make_manager(self.temp_dir)
 
-    (Path(self.temp_dir) / "testdb.lbug").touch()
+    (Path(self.temp_dir) / "testdb.lbdb").touch()
     mock_conn = MagicMock()
     mock_conn.execute.return_value = MagicMock()
     manager.connection_pool.get_connection.return_value.__enter__.return_value = (
@@ -635,7 +677,7 @@ class TestLadybugDatabaseManagerGetDatabaseInfo:
     """Should return database info with size and health status."""
     manager = _make_manager(self.temp_dir)
 
-    db_path = Path(self.temp_dir) / "testdb.lbug"
+    db_path = Path(self.temp_dir) / "testdb.lbdb"
     db_path.write_bytes(b"x" * 1024)
 
     mock_conn = MagicMock()

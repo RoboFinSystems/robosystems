@@ -10,7 +10,7 @@ class BackupCreateRequest(BaseModel):
 
   backup_format: str = Field(
     "full_dump",
-    description="Backup format - only 'full_dump' is supported (complete .lbug database file)",
+    description="Backup format - only 'full_dump' is supported (complete .lbdb database file)",
     pattern="^full_dump$",  # Only allow full_dump
   )
   backup_type: str = Field(
@@ -82,7 +82,7 @@ class BackupResponse(BaseModel):
     None,
     description=(
       "Extension the download will carry, and therefore how to unpack it: "
-      "'.lbug.zip' is a ZIP holding the LadybugDB database file, '.lbug.zst' "
+      "'.lbdb.zip' is a ZIP holding the LadybugDB database file, '.lbdb.zst' "
       "is zstd-compressed (`zstd -d`). Null only when the backup has no stored "
       "object yet."
     ),
@@ -137,7 +137,7 @@ class BackupExportRequest(BaseModel):
   backup_id: str = Field(..., description="ID of backup to export")
   export_format: str = Field(
     "original",
-    description="Export format - only 'original' is supported (compressed .lbug file)",
+    description="Export format - only 'original' is supported (compressed .lbdb file)",
     pattern="^original$",  # Only allow original format
   )
 
@@ -160,21 +160,21 @@ class BackupDownloadUrlResponse(BaseModel):
     json_schema_extra={
       "examples": [
         {
-          "download_url": "https://s3.amazonaws.com/robosystems-user-prod/graph-backups/databases/kg1a2b3c4d5/full/backup-20240115_100000.lbug.zip?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...",
+          "download_url": "https://s3.amazonaws.com/robosystems-user-prod/graph-backups/databases/kg1a2b3c4d5/full/backup-20240115_100000.lbdb.zip?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...",
           "expires_in": 3600,
           "expires_at": 1705315200.0,
           "backup_id": "bk1a2b3c4d5",
           "graph_id": "kg1a2b3c4d5",
         },
         {
-          "download_url": "https://s3.amazonaws.com/robosystems-user-prod/graph-backups/databases/kg9f8e7d6c5/full/backup-20240114_183000.lbug.zip?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...",
+          "download_url": "https://s3.amazonaws.com/robosystems-user-prod/graph-backups/databases/kg9f8e7d6c5/full/backup-20240114_183000.lbdb.zip?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...",
           "expires_in": 86400,
           "expires_at": 1705401600.0,
           "backup_id": "bk9f8e7d6c5",
           "graph_id": "kg9f8e7d6c5",
         },
         {
-          "download_url": "https://account.r2.cloudflarestorage.com/robosystems-downloads/downloads/sec/sec.lbug.zst?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...",
+          "download_url": "https://account.r2.cloudflarestorage.com/robosystems-downloads/downloads/sec/sec.lbdb.zst?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...",
           "expires_in": 300,
           "expires_at": 1705314900.0,
           "backup_id": "bksec123456",
@@ -188,7 +188,7 @@ class BackupDownloadUrlResponse(BaseModel):
     ...,
     description="Pre-signed S3 URL for downloading the backup file",
     examples=[
-      "https://s3.amazonaws.com/robosystems-backups/kg1a2b3c4d5/backup.lbug.tar.gz?X-Amz-Credential=..."
+      "https://s3.amazonaws.com/robosystems-backups/kg1a2b3c4d5/backup.lbdb.tar.gz?X-Amz-Credential=..."
     ],
   )
   expires_in: int = Field(

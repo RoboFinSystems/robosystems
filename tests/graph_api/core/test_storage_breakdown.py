@@ -139,6 +139,17 @@ class TestComputeStorageBreakdown:
 
   def test_folds_wal_into_its_database(self, roots):
     """A WAL is the same logical object as its database to a quota reader."""
+    _write(roots["lbug"] / f"{GRAPH_ID}.lbdb", 100)
+    _write(roots["lbug"] / f"{GRAPH_ID}.lbdb.wal", 50)
+
+    items = compute_storage_breakdown(GRAPH_ID)["items"]
+    graph_items = [i for i in items if i["type"] == "graph"]
+
+    assert len(graph_items) == 1
+    assert graph_items[0]["bytes"] == 150
+
+  def test_folds_a_legacy_named_database_and_its_wal(self, roots):
+    """A database still under the previous suffix is measured the same way."""
     _write(roots["lbug"] / f"{GRAPH_ID}.lbug", 100)
     _write(roots["lbug"] / f"{GRAPH_ID}.lbug.wal", 50)
 

@@ -205,7 +205,7 @@ sharing that instance. `.github/configs/graph.yml` is authoritative.
 | `ladybug-xlarge` | r7g.xlarge | 32 GB | 8 GB | 25 |
 | `ladybug-shared` | r7g.2xlarge | 64 GB | 10 GB | 10 (platform-managed) |
 
-Shared replicas are a separate read-only fleet: they pull `.lbug` and `.duckdb`
+Shared replicas are a separate read-only fleet: they pull `.lbdb` and `.duckdb`
 files from S3 on boot, serve queries locally, and return 503 from `/health`
 until warm. They refresh through a rolling ASG instance refresh after new
 database files are published.

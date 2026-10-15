@@ -81,7 +81,7 @@ class TestBackupKeys:
   def test_get_backup_key(self):
     ts = datetime(2024, 1, 15, 12, 30, 45, tzinfo=UTC)
     result = get_backup_key("kg456", "full", ts)
-    assert result == "graph-backups/databases/kg456/full/backup-20240115_123045.lbug.gz"
+    assert result == "graph-backups/databases/kg456/full/backup-20240115_123045.lbdb.gz"
 
   def test_get_backup_key_custom_extension(self):
     ts = datetime(2024, 6, 1, 0, 0, 0, tzinfo=UTC)
@@ -115,7 +115,7 @@ class TestSharedRepoKeys:
 
   def test_get_shared_repo_database_key_default_extension(self):
     result = get_shared_repo_database_key("sec")
-    assert result == "shared-repositories/databases/sec.lbug"
+    assert result == "shared-repositories/databases/sec.lbdb"
 
   def test_get_shared_repo_database_key_duckdb(self):
     result = get_shared_repo_database_key("sec", ".duckdb")
@@ -181,3 +181,33 @@ class TestURIBuilders:
     ts = datetime(2024, 3, 1, 10, 0, 0, tzinfo=UTC)
     result = get_backup_uri("my-bucket", "kg1", "full", ts)
     assert result.startswith("s3://my-bucket/graph-backups/")
+
+
+class TestGraphDbSuffix:
+  """The suffix moved from .lbug to .lbdb with the 0.21 engine; readers keep
+  accepting the old one for the retention window of the older archives."""
+
+  def test_builders_use_the_current_suffix(self):
+    from robosystems.config.storage.graph import (
+      graph_db_filename,
+      graph_db_wal_filename,
+    )
+
+    assert graph_db_filename("kg1") == "kg1.lbdb"
+    assert graph_db_wal_filename("kg1") == "kg1.lbdb.wal"
+
+  def test_split_accepts_either_suffix_and_nothing_else(self):
+    from robosystems.config.storage.graph import split_graph_db_filename
+
+    assert split_graph_db_filename("kg1.lbdb") == "kg1"
+    assert split_graph_db_filename("kg1.lbug") == "kg1"
+    assert split_graph_db_filename("kg1.lbdb.wal") is None
+    assert split_graph_db_filename("kg1.duckdb") is None
+    assert split_graph_db_filename("notes.txt") is None
+
+  def test_download_extension_knows_both_suffixes(self):
+    assert get_download_extension("a/backup-x.lbdb.zip") == ".lbdb.zip"
+    assert get_download_extension("downloads/sec/sec.lbdb.zst") == ".lbdb.zst"
+    assert get_download_extension("a/backup-x.lbdb.gz") == ".lbdb.gz"
+    assert get_download_extension("downloads/sec/sec.lbdb") == ".lbdb"
+    assert get_download_extension("a/backup-x.lbug.zip") == ".lbug.zip"

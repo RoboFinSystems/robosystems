@@ -13,7 +13,7 @@ s3://bucket/{graph}/entities/*.parquet
 {DUCKDB_STAGING_PATH}/{graph_id}.duckdb      ← one file per graph, persists
         │  COPY
         ▼
-{LBUG_DATABASE_PATH}/{graph_id}.lbug
+{LBUG_DATABASE_PATH}/{graph_id}.lbdb
 ```
 
 Staging tables are kept after materialization, not dropped. Incremental loads

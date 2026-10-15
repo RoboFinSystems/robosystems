@@ -76,7 +76,7 @@ def _incr_keyset_path(graph_id: str, table_name: str) -> FilePath:
   """Local path for a table's incremental keyset snapshot.
 
   Under DUCKDB_STAGING_PATH (instance-local EBS, colocated with staging) but NOT
-  a ``.duckdb``/``.lbug`` file, so it is never published to S3. Transient —
+  a ``.duckdb``/``.lbdb`` file, so it is never published to S3. Transient —
   deleted after the table's incremental run.
   """
   if not _SAFE_PATH_COMPONENT.fullmatch(graph_id):

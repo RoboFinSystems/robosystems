@@ -77,7 +77,7 @@ class TestGetContentTypeAndFilename:
   def test_full_dump_format(self, manager):
     ct, fn = manager._get_content_type_and_filename("full_dump", "bk4")
     assert ct == "application/zip"
-    assert fn == "bk4_database.lbug.zip"
+    assert fn == "bk4_database.lbdb.zip"
 
   def test_unknown_format_falls_back(self, manager):
     ct, fn = manager._get_content_type_and_filename("xml", "bk5")
@@ -181,7 +181,7 @@ class TestConvertFullDumpToZip:
     assert isinstance(result, bytes)
     with zipfile.ZipFile(io.BytesIO(result), "r") as zf:
       names = zf.namelist()
-      assert "database/my_graph.lbug" in names
+      assert "database/my_graph.lbdb" in names
       assert "metadata.json" in names
 
   @pytest.mark.asyncio
@@ -208,7 +208,7 @@ class TestConvertFullDumpToZip:
     result = await manager._convert_full_dump_to_zip(dump_file)
 
     with zipfile.ZipFile(io.BytesIO(result), "r") as zf:
-      stored = zf.read("database/dbfile.lbug")
+      stored = zf.read("database/dbfile.lbdb")
       assert stored == original_data
 
 
@@ -263,7 +263,7 @@ class TestConvertBackupFormat:
 
       mock_conv.assert_called_once()
       assert ct == "application/zip"
-      assert fn == "bk101_database.lbug.zip"
+      assert fn == "bk101_database.lbdb.zip"
 
   @pytest.mark.asyncio
   async def test_unsupported_conversion_raises(self, manager):
@@ -445,7 +445,7 @@ class TestDownloadBackup:
     data, ct, fn = await manager.download_backup("g1", "bk_fd")
 
     assert ct == "application/zip"
-    assert "database.lbug.zip" in fn
+    assert "database.lbdb.zip" in fn
 
 
 # ===========================================================================
@@ -470,7 +470,7 @@ class TestCreateBackup:
       patch.object(manager, "_export_database", new_callable=AsyncMock) as mock_export,
     ):
       mock_stats.return_value = {"node_count": 200, "relationship_count": 100}
-      mock_export.return_value = (b"exported_data", ".lbug.zip", None)
+      mock_export.return_value = (b"exported_data", ".lbdb.zip", None)
 
       job = BackupJob(
         graph_id="test_graph",
@@ -1027,7 +1027,7 @@ class TestExportDatabase:
     with patch.object(manager, "_export_full_dump", new_callable=AsyncMock) as mock_exp:
       mock_exp.return_value = (
         b"dump_data",
-        ".lbug.zip",
+        ".lbdb.zip",
         {"node_count": 1, "relationship_count": 0, "memory": "absent"},
       )
 
@@ -1038,7 +1038,7 @@ class TestExportDatabase:
       mock_exp.assert_called_once_with("g1", BackupType.FULL)
       assert result == (
         b"dump_data",
-        ".lbug.zip",
+        ".lbdb.zip",
         {"node_count": 1, "relationship_count": 0, "memory": "absent"},
       )
 
@@ -1258,11 +1258,11 @@ class TestDropDatabaseIfExists:
       patch("os.path.isfile", return_value=True),
       patch("os.remove") as mock_remove,
     ):
-      mock_mt.get_database_path_for_graph.return_value = "/data/test.lbug"
+      mock_mt.get_database_path_for_graph.return_value = "/data/test.lbdb"
 
       await manager._drop_database_if_exists("test_graph")
 
-      mock_remove.assert_called_once_with("/data/test.lbug")
+      mock_remove.assert_called_once_with("/data/test.lbdb")
 
   @pytest.mark.asyncio
   async def test_removes_directory_database(self, manager):
@@ -1498,7 +1498,7 @@ class TestExportFullDump:
     data, ext, payload = await manager._export_full_dump("test_graph", BackupType.FULL)
 
     assert data == b"binary_dump"
-    assert ext == ".lbug.zip"
+    assert ext == ".lbdb.zip"
     assert payload == {
       "node_count": 5,
       "relationship_count": 3,
@@ -1715,7 +1715,7 @@ def _full_dump_zip(graph_id: str, payload: bytes) -> bytes:
   """A full-dump archive of the single-file shape the engine writes today."""
   buf = io.BytesIO()
   with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-    zf.writestr(f"{graph_id}.lbug", payload)
+    zf.writestr(f"{graph_id}.lbdb", payload)
   return buf.getvalue()
 
 
@@ -1730,9 +1730,9 @@ class TestImportFullDumpRemovesTarget:
 
   @pytest.mark.asyncio
   async def test_replaces_existing_file_and_deletes_stale_wal(self, manager, tmp_path):
-    target = tmp_path / "test_graph.lbug"
+    target = tmp_path / "test_graph.lbdb"
     target.write_bytes(b"outgoing database")
-    wal = tmp_path / "test_graph.lbug.wal"
+    wal = tmp_path / "test_graph.lbdb.wal"
     wal.write_bytes(b"un-checkpointed writes from the outgoing database")
 
     with patch(
@@ -1753,7 +1753,7 @@ class TestImportFullDumpRemovesTarget:
   @pytest.mark.asyncio
   async def test_replaces_existing_directory_shape(self, manager, tmp_path):
     """Older engine versions stored a database as a directory."""
-    target = tmp_path / "test_graph.lbug"
+    target = tmp_path / "test_graph.lbdb"
     target.mkdir()
     (target / "stale.bin").write_bytes(b"outgoing")
 
@@ -1774,7 +1774,7 @@ class TestImportFullDumpRemovesTarget:
   @pytest.mark.asyncio
   async def test_failed_snapshot_leaves_database_untouched(self, manager, tmp_path):
     """The abort-on-failed-snapshot guard must fire before anything is removed."""
-    target = tmp_path / "test_graph.lbug"
+    target = tmp_path / "test_graph.lbdb"
     target.write_bytes(b"outgoing database")
 
     manager.s3_adapter.upload_backup = AsyncMock(return_value=None)
@@ -2011,7 +2011,7 @@ class TestRecordDescribesTheArchive:
       stats.return_value = {"node_count": 100, "relationship_count": 50}
       export.return_value = (
         b"dump",
-        ".lbug.zip",
+        ".lbdb.zip",
         {"node_count": 98, "relationship_count": 49, "memory": "absent"},
       )
 
@@ -2054,7 +2054,7 @@ class TestRecordDescribesTheArchive:
       stats.return_value = {"node_count": 100, "relationship_count": 50}
       export.return_value = (
         b"dump",
-        ".lbug.zip",
+        ".lbdb.zip",
         {"node_count": None, "relationship_count": None, "memory": None},
       )
 

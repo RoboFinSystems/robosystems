@@ -88,7 +88,7 @@ time, and how `from`/`to` become `src`/`dst` — are in
 
 ## Multi-tenancy
 
-Isolation is filesystem-level, not row-level. Each graph is one `.lbug` file
+Isolation is filesystem-level, not row-level. Each graph is one `.lbdb` file
 under `LBUG_DATABASE_PATH` and one `.duckdb` file under `DUCKDB_STAGING_PATH`,
 with its own pool entry and its own memory budget. Subgraphs are separate
 database files on the same instance, named `{parent}_{name}` — the underscore is
