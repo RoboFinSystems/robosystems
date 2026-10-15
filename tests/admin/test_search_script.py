@@ -18,7 +18,17 @@ from robosystems.admin.commands.search import _OPENSEARCH_QUERY_SCRIPT, _literal
 from robosystems.operations.search.client import INDEX_MAPPING
 
 # The dispatch values the template branches on — not the CLI subcommand names.
-ACTIONS = ["count", "search", "delete", "force-merge", "recreate-index"]
+ACTIONS = [
+  "count",
+  "search",
+  "delete",
+  "force-merge",
+  "settings",
+  "warmup",
+  "memory-optimized-on",
+  "memory-optimized-off",
+  "recreate-index",
+]
 
 
 def render(**overrides) -> str:
@@ -61,7 +71,7 @@ def delete_filters(**overrides) -> list[dict]:
     and isinstance(node.value, ast.Constant)
   }
 
-  body = script.split('elif action == "delete":', 1)[1].split("elif action ==", 1)[0]
+  body = script.split('elif action == "delete":', 1)[1].split("\nelif action", 1)[0]
   lines = []
   for line in body.splitlines():
     if line.strip().startswith("query ="):
@@ -383,3 +393,196 @@ def test_a_hostile_mapping_value_cannot_escape_its_literal():
     and node.targets[0].id == "mapping"
   )
   assert json.loads(assigned) == mapping
+
+
+def branch_output(action: str, responses: dict) -> tuple[dict, list[tuple]]:
+  """Run one read-only branch against a fake ``query_os`` answering by path.
+
+  A path missing from ``responses`` answers HTTP 403, the way IAM refuses.
+  Returns what the branch printed and the calls it made.
+  """
+  script = render(action=action)
+  calls: list[tuple] = []
+  printed: list[str] = []
+
+  def query_os(path, body=None, method="POST"):
+    calls.append((method, path))
+    if path not in responses:
+      raise urllib.error.HTTPError(path, 403, "Forbidden", None, None)  # type: ignore[arg-type]
+    return responses[path]
+
+  namespace: dict = {
+    "json": json,
+    "urllib": urllib,
+    "index_name": "documents",
+    "query_os": query_os,
+    "print": printed.append,
+  }
+  body = script.split(f'elif action == "{action}":', 1)[1].split("\nelif action", 1)[0]
+  exec(textwrap.dedent(body), namespace)  # noqa: S102
+  return json.loads(printed[0]), calls
+
+
+@pytest.mark.unit
+def test_settings_flags_the_four_pre_upgrade_blockers():
+  live = {
+    "index.knn": "true",
+    "index.knn.space_type": "l2",
+    "index.store.hybrid.mmap.extensions": ["vec"],
+    "index.number_of_shards": "1",
+  }
+  out, calls = branch_output(
+    "settings",
+    {"/documents/_settings?flat_settings=true": {"documents-v2": {"settings": live}}},
+  )
+  assert calls == [("GET", "/documents/_settings?flat_settings=true")]
+  assert out["upgrade_blockers"] == [
+    "index.knn.space_type",
+    "index.store.hybrid.mmap.extensions",
+  ]
+  assert out["settings"] == live
+
+
+@pytest.mark.unit
+def test_settings_reports_no_blockers_for_the_declared_mapping_shape():
+  out, _ = branch_output(
+    "settings",
+    {
+      "/documents/_settings?flat_settings=true": {
+        "documents": {"settings": {"index.knn": "true"}}
+      }
+    },
+  )
+  assert out["upgrade_blockers"] == []
+
+
+@pytest.mark.unit
+def test_warmup_reports_shards_and_cache_usage():
+  out, calls = branch_output(
+    "warmup",
+    {
+      "/_plugins/_knn/warmup/documents": {
+        "_shards": {"total": 1, "successful": 1, "failed": 0}
+      },
+      "/_plugins/_knn/stats/graph_memory_usage_percentage": {
+        "nodes": {"n1": {"graph_memory_usage_percentage": 67.9}}
+      },
+    },
+  )
+  assert [method for method, _ in calls] == ["GET", "GET"]
+  assert out == {
+    "shards": {"total": 1, "successful": 1, "failed": 0},
+    "graph_memory_usage_percentage": {"n1": 67.9},
+  }
+
+
+@pytest.mark.unit
+def test_warmup_still_reports_when_stats_are_refused():
+  out, _ = branch_output(
+    "warmup",
+    {
+      "/_plugins/_knn/warmup/documents": {
+        "_shards": {"total": 1, "successful": 1, "failed": 0}
+      }
+    },
+  )
+  assert out["shards"]["successful"] == 1
+  assert out["graph_memory_usage_percentage"] == {}
+
+
+def memory_optimized_calls(
+  action: str,
+  *,
+  enabled: bool,
+  dry_run: bool = False,
+  refuse_put: bool = False,
+  calls: list[tuple] | None = None,
+) -> tuple[dict | None, list[tuple]]:
+  """The memory-optimized branch, run against a fake domain that keeps the
+  setting's state, so a read after the update sees what the update wrote."""
+  script = render(action=action, dry_run="true" if dry_run else "false")
+  state = {"enabled": enabled}
+  calls = [] if calls is None else calls
+  printed: list[str] = []
+
+  def query_os(path, body=None, method="POST"):
+    calls.append((method, path.split("?", 1)[0], body))
+    if method == "PUT":
+      if refuse_put:
+        raise urllib.error.HTTPError(path, 403, "Forbidden", None, None)  # type: ignore[arg-type]
+      state["enabled"] = body["index.knn.memory_optimized_search"]
+    if path.startswith("/documents/_settings") and method == "GET":
+      return {
+        "documents": {
+          "settings": {"index.knn": "true"},
+          "defaults": {
+            "index.knn.memory_optimized_search": str(state["enabled"]).lower()
+          },
+        }
+      }
+    return {}
+
+  namespace: dict = {
+    "json": json,
+    "urllib": urllib,
+    "index_name": "documents",
+    "action": action,
+    "dry_run": dry_run,
+    "query_os": query_os,
+    "print": printed.append,
+  }
+  body = script.split(
+    'elif action in ("memory-optimized-on", "memory-optimized-off"):', 1
+  )[1]
+  body = body.split("\nelif action", 1)[0]
+  exec(textwrap.dedent(body), namespace)  # noqa: S102
+  return (json.loads(printed[0]) if printed else None), calls
+
+
+@pytest.mark.unit
+def test_memory_optimized_on_closes_updates_and_reopens_in_order():
+  out, calls = memory_optimized_calls("memory-optimized-on", enabled=False)
+  assert [(m, p) for m, p, _ in calls] == [
+    ("GET", "/documents/_settings"),
+    ("POST", "/documents/_close"),
+    ("PUT", "/documents/_settings"),
+    ("POST", "/documents/_open"),
+    ("GET", "/_cluster/health/documents"),
+    ("GET", "/documents/_settings"),
+  ]
+  assert calls[2][2] == {"index.knn.memory_optimized_search": True}
+  assert out == {"before": False, "after": True, "changed": True}
+
+
+@pytest.mark.unit
+def test_memory_optimized_off_is_the_rollback():
+  out, _ = memory_optimized_calls("memory-optimized-off", enabled=True)
+  assert out == {"before": True, "after": False, "changed": True}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+  ("action", "enabled", "dry_run"),
+  [("memory-optimized-on", True, False), ("memory-optimized-on", False, True)],
+)
+def test_memory_optimized_never_closes_when_nothing_changes(action, enabled, dry_run):
+  """Already in the asked-for state, or a status read: one GET, no close."""
+  out, calls = memory_optimized_calls(action, enabled=enabled, dry_run=dry_run)
+  assert [m for m, _, _ in calls] == ["GET"]
+  assert out == {"before": enabled, "after": enabled, "changed": False}
+
+
+@pytest.mark.unit
+def test_a_refused_update_still_reopens_the_index():
+  """The update failing must not leave the index closed: a closed index is a
+  search outage until someone notices."""
+  calls: list[tuple] = []
+  with pytest.raises(urllib.error.HTTPError):
+    memory_optimized_calls(
+      "memory-optimized-on", enabled=False, refuse_put=True, calls=calls
+    )
+  assert [(m, p) for m, p, _ in calls][-3:] == [
+    ("PUT", "/documents/_settings"),
+    ("POST", "/documents/_open"),
+    ("GET", "/_cluster/health/documents"),
+  ]

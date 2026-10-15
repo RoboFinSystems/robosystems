@@ -211,6 +211,60 @@ elif action == "force-merge":
     result = query_os(f"/{{index_name}}/_forcemerge?max_num_segments=1")
     print(json.dumps(result))
 
+elif action == "settings":
+    # The four index settings that fail the 2.19 -> 3.x pre-upgrade check.
+    flat = query_os(f"/{{index_name}}/_settings?flat_settings=true", method="GET")
+    settings = next(iter(flat.values()))["settings"]
+    blockers = [
+        key for key in (
+            "index.knn.algo_param.ef_construction",
+            "index.knn.algo_param.m",
+            "index.knn.space_type",
+            "index.store.hybrid.mmap.extensions",
+        )
+        if key in settings
+    ]
+    print(json.dumps({{"settings": settings, "upgrade_blockers": blockers}}))
+
+elif action == "warmup":
+    # Loads every segment's k-NN graph into native memory, so the first
+    # semantic query after a restart or an upgrade does not pay for it.
+    result = query_os(f"/_plugins/_knn/warmup/{{index_name}}", method="GET")
+    try:
+        stats = query_os("/_plugins/_knn/stats/graph_memory_usage_percentage", method="GET")
+        usage = {{
+            node_id: node.get("graph_memory_usage_percentage")
+            for node_id, node in stats.get("nodes", {{}}).items()
+        }}
+    except urllib.error.HTTPError:
+        usage = {{}}
+    print(json.dumps({{"shards": result.get("_shards", {{}}), "graph_memory_usage_percentage": usage}}))
+
+elif action in ("memory-optimized-on", "memory-optimized-off"):
+    # A static k-NN setting: it changes only on a closed index, so search is
+    # down from the close to the reopen. The reopen runs even if the update fails.
+    setting = "index.knn.memory_optimized_search"
+    want = action == "memory-optimized-on"
+
+    def memory_optimized():
+        found = query_os(f"/{{index_name}}/_settings?flat_settings=true&include_defaults=true", method="GET")
+        entry = next(iter(found.values()))
+        value = entry.get("settings", {{}}).get(setting, entry.get("defaults", {{}}).get(setting, "false"))
+        return str(value).lower() == "true"
+
+    before = memory_optimized()
+    if dry_run or before == want:
+        print(json.dumps({{"before": before, "after": before, "changed": False}}))
+    else:
+        query_os(f"/{{index_name}}/_close")
+        try:
+            query_os(f"/{{index_name}}/_settings", {{setting: want}}, method="PUT")
+        finally:
+            query_os(f"/{{index_name}}/_open")
+            query_os(f"/_cluster/health/{{index_name}}?wait_for_status=yellow&timeout=120s", method="GET")
+        after = memory_optimized()
+        print(json.dumps({{"before": before, "after": after, "changed": after != before}}))
+
 elif action == "recreate-index":
     # The whole index — every graph's documents. Count first so the confirm can
     # name what is about to go; then DELETE and PUT the mapping in the SAME
@@ -603,6 +657,127 @@ def search_force_merge(client, force):
     )
   else:
     console.print(f"\n[red]Force merge had {failed} failed shards:[/red] {data}\n")
+
+
+@search.command("settings")
+@click.option("--json", "json_output", is_flag=True, help="Print every setting")
+@click.pass_obj
+def search_settings(client, json_output):
+  """Show the live index settings and any that block a 3.x upgrade.
+
+  The OpenSearch 2.19 -> 3.x pre-upgrade check fails on four deprecated
+  index-level k-NN settings. The declared mapping carries none of them; this
+  reads what the live index actually has.
+
+  Examples:
+
+    just admin prod search settings
+
+    just admin prod search settings --json
+  """
+  data = _run_opensearch_script(client, action="settings")
+  settings = data.get("settings", {})
+  blockers = data.get("upgrade_blockers", [])
+
+  if json_output:
+    console.print_json(json.dumps(data))
+    return
+
+  console.print(
+    f"\n[bold cyan]'documents' INDEX SETTINGS[/bold cyan] ({client.environment})"
+  )
+  console.print("=" * 60)
+  for key in sorted(k for k in settings if ".knn" in k or "version" in k):
+    console.print(f"  {key}: {settings[key]}")
+  if blockers:
+    console.print(f"\n[red]3.x upgrade blockers:[/red] {', '.join(blockers)}\n")
+  else:
+    console.print("\n[green]No 3.x upgrade blockers.[/green]\n")
+
+
+@search.command("warmup")
+@click.pass_obj
+def search_warmup(client):
+  """Load the index's k-NN graphs into memory and report the cache's usage.
+
+  After a node restart or an engine upgrade the k-NN cache is empty, and the
+  first semantic query loads the whole index into it. Run this first so no
+  user query pays for that load. If it outlasts the SSM timeout, the warmup
+  carries on server-side; running it again is harmless.
+
+  Examples:
+
+    just admin prod search warmup
+  """
+  console.print("Warming the k-NN cache (this can take a few minutes)...")
+  data = _run_opensearch_script(client, action="warmup")
+  shards = data.get("shards", {})
+  failed = shards.get("failed", 0)
+
+  if failed:
+    console.print(f"\n[red]Warmup had {failed} failed shards:[/red] {data}\n")
+    return
+  console.print(
+    f"\n[green]Warmup complete.[/green] "
+    f"({shards.get('successful', 0)}/{shards.get('total', 0)} shards)"
+  )
+  for node_id, pct in data.get("graph_memory_usage_percentage", {}).items():
+    console.print(f"  k-NN cache on {node_id}: {pct}%")
+  console.print()
+
+
+@search.command("memory-optimized")
+@click.argument("state", type=click.Choice(["on", "off", "status"]))
+@click.option("--force", is_flag=True, help="Skip the confirmation prompt")
+@click.pass_obj
+def search_memory_optimized(client, state, force):
+  """Turn k-NN memory-optimized search on or off, or show whether it is on.
+
+  With it on, Faiss searches the graph file through the OS page cache instead
+  of loading it into the k-NN cache. It is a static index setting: the index
+  is closed, updated and reopened, so search is down for that gap. Off is the
+  rollback. Once it has proven out, the setting belongs in INDEX_MAPPING so a
+  rebuilt index keeps it.
+
+  Examples:
+
+    just admin prod search memory-optimized status
+
+    just admin prod search memory-optimized on
+  """
+  current = _run_opensearch_script(client, action="memory-optimized-on", dry_run=True)[
+    "before"
+  ]
+  console.print(
+    f"\nMemory-optimized search on 'documents' ({client.environment}): "
+    f"[bold]{'on' if current else 'off'}[/bold]"
+  )
+  want = state == "on"
+  if state == "status" or current == want:
+    console.print()
+    return
+
+  if not force:
+    console.print(
+      f"[bold yellow]Turning it {state} closes and reopens the index: "
+      "search is down until it reopens.[/bold yellow]"
+    )
+    if not click.confirm("Proceed?"):
+      console.print("[dim]Cancelled.[/dim]")
+      return
+
+  data = _run_opensearch_script(client, action=f"memory-optimized-{state}")
+  if data.get("after") == want:
+    console.print(f"\n[green]Memory-optimized search is {state}.[/green]")
+  else:
+    console.print(f"\n[red]The setting did not change:[/red] {data}")
+  if want:
+    console.print(
+      "Check KNNGraphMemoryUsage after a full semantic query: if it climbs back "
+      "to its old level, the index's encoder is not covered and it can go off again.\n"
+    )
+  else:
+    console.print()
 
 
 @search.command("recreate-index")
