@@ -13,11 +13,24 @@ inputs:
     description: "Check interval in seconds"
     required: false
     default: "10"
+  on-timeout:
+    description: >-
+      "fail" (default) exits 1 when the timeout passes. "continue" exits 0 and
+      sets the timed_out output, so a caller can refresh its credentials and
+      keep monitoring a stack that outlives one AWS session.
+    required: false
+    default: "fail"
+
+outputs:
+  timed_out:
+    description: "true when on-timeout is continue and the timeout passed"
+    value: ${{ steps.monitor.outputs.timed_out }}
 
 runs:
   using: "composite"
   steps:
     - name: Monitor Stack Deployment
+      id: monitor
       shell: bash
       run: |
         set -euo pipefail
@@ -25,7 +38,9 @@ runs:
         STACK_NAME="${{ inputs.stack-name }}"
         TIMEOUT=${{ inputs.timeout }}
         INTERVAL=${{ inputs.interval }}
+        ON_TIMEOUT="${{ inputs.on-timeout }}"
         START_TIME=$(date +%s)
+        DESCRIBE_ERR=$(mktemp)
         
         echo "Monitoring stack: $STACK_NAME"
         echo "Timeout: ${TIMEOUT}s, Check interval: ${INTERVAL}s"
@@ -34,14 +49,17 @@ runs:
         
         while true; do
           # Get current status
-          STATUS=$(aws cloudformation describe-stacks \
+          # Only "does not exist" means the stack is gone; any other error
+          # (an expired session, throttling) is reported as itself.
+          if ! STATUS=$(aws cloudformation describe-stacks \
             --stack-name "$STACK_NAME" \
             --query 'Stacks[0].StackStatus' \
-            --output text 2>/dev/null || echo "STACK_NOT_FOUND")
-          
-          # Check if stack exists
-          if [ "$STATUS" == "STACK_NOT_FOUND" ]; then
-            echo "ERROR: Stack '$STACK_NAME' not found"
+            --output text 2>"$DESCRIBE_ERR"); then
+            if grep -q "does not exist" "$DESCRIBE_ERR"; then
+              echo "ERROR: Stack '$STACK_NAME' not found"
+            else
+              echo "ERROR: describe-stacks failed: $(cat "$DESCRIBE_ERR")"
+            fi
             exit 1
           fi
           
@@ -99,6 +117,11 @@ runs:
           # Check timeout
           if [ $ELAPSED -gt $TIMEOUT ]; then
             echo "---"
+            if [ "$ON_TIMEOUT" == "continue" ]; then
+              echo "Still $STATUS after ${TIMEOUT}s; handing back to the caller"
+              echo "timed_out=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             echo "ERROR: Operation timed out after ${TIMEOUT}s"
             echo "Final status: $STATUS"
             

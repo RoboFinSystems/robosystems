@@ -437,10 +437,26 @@ def test_settings_flags_the_four_pre_upgrade_blockers():
   )
   assert calls == [("GET", "/documents/_settings?flat_settings=true")]
   assert out["upgrade_blockers"] == [
-    "index.knn.space_type",
-    "index.store.hybrid.mmap.extensions",
+    "documents-v2: index.knn.space_type",
+    "documents-v2: index.store.hybrid.mmap.extensions",
   ]
-  assert out["settings"] == live
+  assert out["settings"] == {"documents-v2": live}
+
+
+@pytest.mark.unit
+def test_settings_checks_every_index_behind_the_name():
+  """An alias over two indices passes only if both do: the second one's
+  blocker is reported even though the first is clean."""
+  out, _ = branch_output(
+    "settings",
+    {
+      "/documents/_settings?flat_settings=true": {
+        "documents-a": {"settings": {"index.knn": "true"}},
+        "documents-b": {"settings": {"index.knn.algo_param.m": "16"}},
+      }
+    },
+  )
+  assert out["upgrade_blockers"] == ["documents-b: index.knn.algo_param.m"]
 
 
 @pytest.mark.unit
@@ -488,6 +504,13 @@ def test_warmup_still_reports_when_stats_are_refused():
   )
   assert out["shards"]["successful"] == 1
   assert out["graph_memory_usage_percentage"] == {}
+
+
+@pytest.mark.unit
+def test_a_refused_warmup_reports_the_refusal_and_skips_the_stats():
+  out, calls = branch_output("warmup", {})
+  assert calls == [("GET", "/_plugins/_knn/warmup/documents")]
+  assert out == {"error": "warmup refused: HTTP 403 Forbidden"}
 
 
 def memory_optimized_calls(

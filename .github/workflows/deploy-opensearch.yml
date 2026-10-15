@@ -202,11 +202,31 @@ jobs:
             fi
           fi
 
+      # The role's sessions last an hour (MaxSessionDuration 3600), and a
+      # major-version upgrade can run longer: monitor for 55 minutes, then take
+      # fresh credentials and monitor up to 55 more.
       - name: Monitor Stack Deployment
+        id: monitor-first
         uses: ./.github/actions/monitor-stack-deployment
         with:
           stack-name: ${{ inputs.stack_name }}
-          timeout: "7200"
+          timeout: "3300"
+          interval: "10"
+          on-timeout: continue
+
+      - name: Refresh AWS credentials
+        if: steps.monitor-first.outputs.timed_out == 'true'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Monitor Stack Deployment (continued)
+        if: steps.monitor-first.outputs.timed_out == 'true'
+        uses: ./.github/actions/monitor-stack-deployment
+        with:
+          stack-name: ${{ inputs.stack_name }}
+          timeout: "3300"
           interval: "10"
 
       - name: Get Stack Outputs
