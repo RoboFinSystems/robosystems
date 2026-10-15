@@ -52,6 +52,7 @@ def _line_row(
   source_structure_id: str | None = None,
   source_structure_name: str | None = None,
   line_order: int = 1,
+  flow_qname: str | None = None,
 ):
   """One row in the shape the shared entry projection returns."""
   return SimpleNamespace(
@@ -76,6 +77,7 @@ def _line_row(
     credit_amount=credit,
     line_description=None,
     line_order=line_order,
+    flow_qname=flow_qname,
   )
 
 
@@ -91,6 +93,7 @@ def _empty_line_row(entry_id: str):
     "debit_amount",
     "credit_amount",
     "line_order",
+    "flow_qname",
   ):
     setattr(row, field, None)
   return row
@@ -162,6 +165,21 @@ class TestProjection:
     resp = list_journal_entries(_session(rows))
 
     assert [len(e.line_items) for e in resp.entries] == [2, 2]
+
+  def test_a_lines_flow_is_projected_by_qname(self):
+    rows = [
+      _line_row(
+        "je_a", "li1", 1000, 0, flow_qname="rs-gaap:ProceedsFromIssuanceOfLongTermDebt"
+      ),
+      _line_row("je_a", "li2", 0, 1000, line_order=2),
+    ]
+
+    resp = list_journal_entries(_session(rows))
+
+    assert [li.flow_qname for li in resp.entries[0].line_items] == [
+      "rs-gaap:ProceedsFromIssuanceOfLongTermDebt",
+      None,
+    ]
 
   def test_amounts_are_dollars_not_cents(self):
     rows = [

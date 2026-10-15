@@ -41,6 +41,19 @@ class JournalEntryLineItemInput(BaseModel):
   description: str | None = Field(
     None, description="Per-line memo (overrides the entry-level memo on this line)."
   )
+  flow_qname: str | None = Field(
+    None,
+    description=(
+      "The cash flow row this line's cash belongs to, an rs-gaap flow qname "
+      "(`flowCandidates(entityId)` lists the rows this company's statement "
+      "offers). Only for a loan drawn or repaid, capital put in or taken out, "
+      "an asset bought or sold; omitted, the account's default flow applies. "
+      "A flow set on one side of the entry tags the untagged lines on the "
+      "other: the cash flow statement reads the cash line and the "
+      "roll-forwards read the account line. Refused when it is not a row of "
+      "the entity's cash flow statement."
+    ),
+  )
   metadata: dict[str, Any] | None = Field(
     None,
     description=(
@@ -65,6 +78,13 @@ class JournalEntryLineItemResponse(BaseModel):
   credit_amount: int
   description: str | None = None
   line_order: int
+  flow_qname: str | None = Field(
+    None,
+    description=(
+      "The cash flow row this line carries, when tagged; null means the "
+      "account's default flow."
+    ),
+  )
 
 
 # ── Entry response ───────────────────────────────────────────────────────
@@ -121,9 +141,25 @@ class CreateJournalEntryRequest(BaseModel):
 # ── Update ────────────────────────────────────────────────────────────────
 
 
+class JournalEntryLineFlow(BaseModel):
+  """A line's cash flow row, set in place."""
+
+  line_id: str = Field(..., description="The line to re-tag, by id.")
+  flow_qname: str | None = Field(
+    None,
+    description=(
+      "The rs-gaap flow qname the line takes; null clears it, back to the "
+      "account's default flow."
+    ),
+  )
+
+
 class UpdateJournalEntryRequest(BaseModel):
-  """Update a draft journal entry. Posted entries cannot be updated —
-  create a reversal and a corrected entry instead.
+  """Update a draft journal entry, or re-tag any entry's flows.
+
+  Posted entries accept only `line_flows`: a flow moves no balance, so it
+  changes in place, closed month or not. Anything else on a posted entry is
+  a reversal and a corrected entry.
 
   Omitted fields are left unchanged. If `line_items` is provided, the
   existing line items are replaced entirely (atomic delete + insert)
@@ -144,6 +180,22 @@ class UpdateJournalEntryRequest(BaseModel):
       "Replacement line items. Whole-list replacement (not patch). The "
       "new set must still balance (total_debit == total_credit). Omit to "
       "leave existing lines untouched."
+    ),
+  )
+  line_flows: list[JournalEntryLineFlow] | None = Field(
+    None,
+    min_length=1,
+    description=(
+      "Re-tag lines in place: each named line takes its `flow_qname` (null "
+      "clears it), and when every line on that side of the entry then "
+      "carries one flow, the lines on the other side not named here follow "
+      "when they were in step with it — untagged, or carrying the flow the "
+      "named lines carried before — so the cash line and the account line "
+      "agree; a line tagged differently on purpose keeps its tag. Allowed on "
+      "a posted entry, closed month included, and the only change one "
+      "accepts; recorded on the entry as `flow_retags`, with what each "
+      "changed line carried before. Not combinable with `line_items`, which "
+      "replaces the lines (set `flow_qname` on them)."
     ),
   )
 

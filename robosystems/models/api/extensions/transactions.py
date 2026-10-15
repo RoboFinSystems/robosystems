@@ -61,6 +61,9 @@ class LedgerLineItemResponse(BaseModel):
   credit_amount: float
   description: str | None = None
   line_order: int
+  # The cash flow row the line carries when tagged; None is the account's
+  # default flow.
+  flow_qname: str | None = None
 
 
 class LedgerEntryResponse(BaseModel):
