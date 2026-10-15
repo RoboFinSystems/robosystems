@@ -10,6 +10,7 @@ Database objects over the same file do not see each other's committed writes.
 
 import itertools
 import os
+import re
 import threading
 import weakref
 from contextlib import contextmanager
@@ -24,6 +25,27 @@ from fastapi import status as http_status
 
 from robosystems.config.tuning import TuningConfig
 from robosystems.logger import logger
+
+_DATABASE_NAME = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+def _validated_database_path(base_path: Path, database_name: str) -> Path:
+  """The database's file path, refusing a name that is not a bare identifier
+  or that resolves outside ``base_path``. The routers validate the graph id;
+  this is the backstop for any caller that reaches the pool directly."""
+  if not _DATABASE_NAME.match(database_name or ""):
+    raise HTTPException(
+      status_code=http_status.HTTP_400_BAD_REQUEST, detail="Invalid database name"
+    )
+  db_path = base_path / f"{database_name}.lbug"
+  try:
+    db_path.resolve().relative_to(base_path.resolve())
+  except ValueError:
+    raise HTTPException(
+      status_code=http_status.HTTP_400_BAD_REQUEST,
+      detail="Database path outside allowed directory",
+    )
+  return db_path
 
 
 @dataclass
@@ -213,9 +235,9 @@ class LadybugConnectionPool:
       if current_count >= self.max_connections_per_db:
         self._remove_oldest_connection(database_name)
 
-    try:
-      db_path = self.base_path / f"{database_name}.lbug"
+    db_path = _validated_database_path(self.base_path, database_name)
 
+    try:
       if database_name not in self._databases:
         # A read-write open of a missing path creates an empty database, so
         # any path mismatch would serve an empty graph in place of the real

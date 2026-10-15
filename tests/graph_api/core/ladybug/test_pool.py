@@ -186,6 +186,24 @@ class TestLadybugConnectionPoolAcquireRelease:
     assert e.value.status_code == 404
     mock_lbug.Database.assert_not_called()
 
+  @patch("robosystems.graph_api.core.ladybug.pool.lbug")
+  @patch("robosystems.graph_api.core.ladybug.config.get_database_memory_config")
+  def test_name_that_is_not_an_identifier_is_refused_first(
+    self, mock_mem_config, mock_lbug
+  ):
+    """The routers validate the graph id; the pool is the backstop for any
+    caller that reaches it directly, before the name touches the filesystem."""
+    mock_mem_config.return_value = 256
+    pool = _make_pool(self.temp_dir)
+
+    for name in ("../etc/passwd", "db/../other", "", "db name", "db;x", "a\\b"):
+      with pytest.raises(HTTPException) as e:
+        pool._acquire_connection(name, read_only=False)
+      assert e.value.status_code == 400, name
+
+    mock_lbug.Database.assert_not_called()
+    assert not any(Path(self.temp_dir).iterdir())
+
   def test_release_connection(self):
     """Should release connection without error."""
     pool = _make_pool(self.temp_dir)
