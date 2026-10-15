@@ -151,6 +151,36 @@ def _revenue(session, charts, entity_id: str, cents: int, *, into: str | None = 
   )
 
 
+def _entry(
+  session,
+  charts,
+  entity_id: str,
+  debit_code: str,
+  credit_code: str,
+  cents: int,
+  memo: str,
+):
+  """Draft one two-line entry in ``entity_id``'s books, on its own chart."""
+  chart_id = charts[entity_id]
+  return create_journal_entry(
+    session,
+    CreateJournalEntryRequest(
+      posting_date=date(2026, 7, 20),
+      memo=memo,
+      line_items=[
+        JournalEntryLineItemInput(
+          element_id=_account(session, chart_id, debit_code), debit_amount=cents
+        ),
+        JournalEntryLineItemInput(
+          element_id=_account(session, chart_id, credit_code), credit_amount=cents
+        ),
+      ],
+    ),
+    "usr_1",
+    entity_id=entity_id,
+  )
+
+
 class TestOneChartPerEntity:
   def test_each_entity_initializes_its_own_chart(self, charts):
     assert charts[PARENT] != charts[SUB]
@@ -309,6 +339,39 @@ class TestEachEntityStampsItsOwnStatements:
     july = next(i for i, p in enumerate(response.periods) if p.end == JULY_END)
     cash = {fact.qname: fact.values[july] for fact in response.facts}.get(CASH)
     return cash, response
+
+  def test_the_combined_statement_presents_a_subsidiarys_own_concepts(self, charts):
+    """Two rows only the subsidiary carries: a bill payable, which the parent's
+    Style has a row for but the parent's own sheet dropped as all-zero, and
+    members' equity, which the corporate Style has no row for at all. Both
+    take a row under their subtotal in the combined view, and the view foots
+    instead of warning that two subtotals exceed their children."""
+    service = FiscalCalendarService()
+    with extensions_session(GRAPH) as session:
+      self._open_books(session, charts, service)
+      _entry(session, charts, SUB, "1000", "3000", 10_000, "Member contribution")
+      _entry(session, charts, SUB, "6000", "2000", 2_500, "July rent, unpaid")
+      session.commit()
+      self._close(session, service, SUB)
+      self._close(session, service, PARENT)
+
+      _, response = self._live_cash(session, consolidated=True)
+
+      july = next(i for i, p in enumerate(response.periods) if p.end == JULY_END)
+      order = [fact.qname for fact in response.facts]
+      by_qname = {fact.qname: fact for fact in response.facts}
+      payable = by_qname["rs-gaap:AccountsPayableCurrent"]
+      current = by_qname["rs-gaap:LiabilitiesCurrent"]
+      members = by_qname["rs-gaap:MembersEquity"]
+      equity = by_qname["rs-gaap:StockholdersEquity"]
+
+      assert order.index(payable.qname) < order.index(current.qname)
+      assert (payable.depth, payable.values[july]) == (current.depth + 1, 25.0)
+      assert order.index(members.qname) < order.index(equity.qname)
+      assert members.depth == equity.depth + 1
+      assert members.values[july] == 100.0
+      # The books start in July, so the prior column is empty; nothing else.
+      assert [w for w in response.validation.warnings if "Prior" not in w] == []
 
   def test_the_parents_combined_statement_sums_the_group(self, charts):
     """The combined view is the one new computation of M1: each entity's
