@@ -43,13 +43,7 @@ _SUBTOTALS = {
 # reconciling adjustment (the right section, if not yet their own row);
 # non-cash ones never move cash. Each needs a reason to stay here.
 OPERATING_OR_NON_CASH: dict[str, str] = {
-  "rs-gaap:DeferredRevenueCurrent": "operating: a working-capital change",
-  "rs-gaap:DeferredRevenueNoncurrent": "operating: a working-capital change",
-  "rs-gaap:DeferredIncomeTaxLiabilitiesNet": "non-cash: deferred tax",
-  "rs-gaap:OtherAssetsCurrent": "operating: a working-capital change",
   "rs-gaap:OperatingLeaseRightOfUseAsset": "non-cash: the ROU asset",
-  "rs-gaap:OperatingLeaseLiabilityCurrent": "operating: lease payments are rent",
-  "rs-gaap:OperatingLeaseLiabilityNoncurrent": "operating: lease payments are rent",
   "rs-gaap:FinanceLeaseRightOfUseAsset": "non-cash: the ROU asset",
   "rs-gaap:AccumulatedOtherComprehensiveIncomeLossNetOfTax": "non-cash: OCI",
   "rs-gaap:RetainedEarningsAccumulatedDeficit": (
@@ -79,6 +73,18 @@ def activity() -> dict[str, str]:
       if _cat.endswith("activityType") and ident in _SUBTOTALS:
         out[n["@id"]] = ident
   return out
+
+
+@pytest.fixture(scope="module")
+def reconciling() -> set[str]:
+  """Concepts carrying the indirect-method reconciling-item trait: the
+  operating section's working-capital and non-cash rows."""
+  return {
+    n["@id"]
+    for n in _graph("rs-gaap-traits")
+    for t in n.get(_HAS_TRAIT, [])
+    if t["@id"].endswith("/indirectCashFlowMethodReconcilingItem")
+  }
 
 
 @pytest.fixture(scope="module")
@@ -187,16 +193,19 @@ def test_every_reachable_flow_is_a_row_with_a_calc_arc(
 
 
 def test_every_default_flow_carries_its_activity_trait(
-  calc, activity, declared
+  calc, activity, declared, reconciling
 ) -> None:
   """The renderer emits, and the tag validator admits, only flows with an
-  ``activityType`` trait; a default without one is silently dropped."""
+  ``activityType`` trait; a default without one is silently dropped. An
+  operating row (a working-capital change, a non-cash adjustment) is not a
+  flow: it carries the reconciling-item trait instead."""
   operating_prefix = "rs-gaap:IncreaseDecreaseIn"
   untraited = sorted(
     flow
     for flows in calc["derivations"].values()
     for flow, _w in flows
     if flow not in activity
+    and flow not in reconciling
     and not flow.startswith(operating_prefix)
     and flow != "rs-gaap:DepreciationDepletionAndAmortization"
   )

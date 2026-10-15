@@ -3364,6 +3364,9 @@
       "@id": "rs-gaap:DeferredIncomeTaxExpenseBenefit",
       "https://robosystems.ai/vocab/hasTrait": [
         {
+          "@id": "trait:indirectCashFlowReconcilingItem/indirectCashFlowMethodReconcilingItem"
+        },
+        {
           "@id": "trait:operatingNonoperating/operating"
         },
         {
@@ -7855,6 +7858,31 @@
     {
       "@id": "rs-gaap:IncreaseDecreaseInOtherCurrentAssets",
       "https://robosystems.ai/vocab/hasTrait": [
+        {
+          "@id": "trait:indirectCashFlowReconcilingItem/indirectCashFlowMethodReconcilingItem"
+        },
+        {
+          "@id": "trait:operatingNonoperating/operating"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:IncreaseDecreaseInContractWithCustomerLiability",
+      "https://robosystems.ai/vocab/hasTrait": [
+        {
+          "@id": "trait:indirectCashFlowReconcilingItem/indirectCashFlowMethodReconcilingItem"
+        },
+        {
+          "@id": "trait:operatingNonoperating/operating"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:IncreaseDecreaseInOperatingLeaseLiability",
+      "https://robosystems.ai/vocab/hasTrait": [
+        {
+          "@id": "trait:indirectCashFlowReconcilingItem/indirectCashFlowMethodReconcilingItem"
+        },
         {
           "@id": "trait:operatingNonoperating/operating"
         }
