@@ -8,7 +8,6 @@ else.
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Optional
 
 from sqlalchemy import (
   Boolean,
@@ -38,12 +37,12 @@ class GraphRole(str, Enum):
   def rank(self) -> int:
     return _ROLE_ORDER.index(self)
 
-  def at_least(self, required: "GraphRole") -> bool:
+  def at_least(self, required: GraphRole) -> bool:
     """True when this role meets or exceeds the required role."""
     return self.rank >= required.rank
 
   @classmethod
-  def coerce(cls, value: "str | GraphRole") -> "GraphRole":
+  def coerce(cls, value: str | GraphRole) -> GraphRole:
     """Normalize a role value, raising ValueError for unknown strings."""
     if isinstance(value, cls):
       return value
@@ -93,7 +92,7 @@ class GraphUser(Model):
     role: str | GraphRole = GraphRole.MEMBER,
     is_selected: bool = False,
     session: Session | None = None,
-  ) -> "GraphUser":
+  ) -> GraphUser:
     """Create a new graph-user access relationship."""
     if session is None:
       raise ValueError("Session is required for GraphUser creation")
@@ -115,19 +114,19 @@ class GraphUser(Model):
     return graph_user
 
   @classmethod
-  def get_by_user_id(cls, user_id: str, session: Session) -> Sequence["GraphUser"]:
+  def get_by_user_id(cls, user_id: str, session: Session) -> Sequence[GraphUser]:
     """Get all graph relationships for a user."""
     return session.query(cls).filter(cls.user_id == user_id).all()
 
   @classmethod
-  def get_by_graph_id(cls, graph_id: str, session: Session) -> Sequence["GraphUser"]:
+  def get_by_graph_id(cls, graph_id: str, session: Session) -> Sequence[GraphUser]:
     """Get all user relationships for a graph."""
     return session.query(cls).filter(cls.graph_id == graph_id).all()
 
   @classmethod
   def get_by_user_and_graph(
     cls, user_id: str, graph_id: str, session: Session
-  ) -> Optional["GraphUser"]:
+  ) -> GraphUser | None:
     """Get a specific user-graph relationship."""
     return (
       session.query(cls)
@@ -136,7 +135,7 @@ class GraphUser(Model):
     )
 
   @classmethod
-  def get_selected_graph(cls, user_id: str, session: Session) -> Optional["GraphUser"]:
+  def get_selected_graph(cls, user_id: str, session: Session) -> GraphUser | None:
     """Get the currently selected graph for a user."""
     return session.query(cls).filter(cls.user_id == user_id, cls.is_selected).first()
 

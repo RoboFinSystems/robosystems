@@ -791,7 +791,7 @@ class _SpanIndex:
 
   def __init__(
     self,
-    analyzer: "CypherSecurityAnalyzer",
+    analyzer: CypherSecurityAnalyzer,
     tokens: list[str],
     guarded: dict[str, dict[str, str]],
     labels_by_variable: dict[str, set[str] | None],

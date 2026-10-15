@@ -795,7 +795,7 @@ finally:
       try:
         parts = result.stdout.strip().split(",")
         return int(parts[0]), int(parts[1])
-      except (ValueError, IndexError):
+      except ValueError, IndexError:
         pass
 
     return 0, 0

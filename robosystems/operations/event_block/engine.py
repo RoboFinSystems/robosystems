@@ -73,7 +73,7 @@ def _resolve_amount(expr: str, context: dict) -> int:
     )
   try:
     cents = int(value)
-  except (TypeError, ValueError):
+  except TypeError, ValueError:
     raise EngineValidationError(
       f"Amount expression '{expr}' resolved to non-numeric value: {value!r}"
     )

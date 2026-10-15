@@ -187,7 +187,7 @@ def cached_link_token(
     return None
   try:
     entry = json.loads(raw)
-  except (TypeError, ValueError):
+  except TypeError, ValueError:
     return None
   if not isinstance(entry, dict):
     return None

@@ -9,7 +9,7 @@ client_id shared across users cannot widen anyone's access.
 import hashlib
 import secrets
 from datetime import UTC, datetime, timedelta
-from typing import Optional, cast
+from typing import cast
 
 from sqlalchemy import Boolean, Column, DateTime, Index, String
 from sqlalchemy.dialects.postgresql import JSONB
@@ -111,15 +111,13 @@ class OAuthClient(Model):
     )
 
   @classmethod
-  def get_by_client_id(
-    cls, client_id: str, session: Session
-  ) -> Optional["OAuthClient"]:
+  def get_by_client_id(cls, client_id: str, session: Session) -> OAuthClient | None:
     if not client_id:
       return None
     return session.query(cls).filter(cls.client_id == client_id).first()
 
   @classmethod
-  def get_by_id(cls, row_id: str, session: Session) -> Optional["OAuthClient"]:
+  def get_by_id(cls, row_id: str, session: Session) -> OAuthClient | None:
     return session.query(cls).filter(cls.id == row_id).first()
 
   @classmethod
@@ -151,7 +149,7 @@ class OAuthClient(Model):
     logo_uri: str | None = None,
     scope: str | None = None,
     registration_ip: str | None = None,
-  ) -> tuple["OAuthClient", str | None]:
+  ) -> tuple[OAuthClient, str | None]:
     """RFC 7591 registration. Returns ``(row, client_secret_or_None)``.
 
     The caller has already validated the metadata (redirect URIs, auth
@@ -211,7 +209,7 @@ class OAuthClient(Model):
     session: Session,
     client_uri: str | None = None,
     logo_uri: str | None = None,
-  ) -> tuple["OAuthClient", str | None]:
+  ) -> tuple[OAuthClient, str | None]:
     """Operator-minted client (admin CLI). Trusted, never expires.
 
     Returns ``(row, client_secret_or_None)`` — the secret prints once for
@@ -270,7 +268,7 @@ class OAuthClient(Model):
     client_uri: str | None = None,
     logo_uri: str | None = None,
     scope: str | None = None,
-  ) -> "OAuthClient":
+  ) -> OAuthClient:
     """Mirror a validated Client ID Metadata Document into a row, updating
     the mirror when the document changed. Never expires (the document is
     the registration); ``is_active`` is left alone so an operator

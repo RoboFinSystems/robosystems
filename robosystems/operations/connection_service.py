@@ -678,7 +678,7 @@ def _any_is_group_parent(graph_id: str, entity_ids: list[str]) -> bool:
       try:
         if find_entity_id(ext, entity_id) == parent:
           return True
-      except (EntityNotInGraphError, NoEntityError):
+      except EntityNotInGraphError, NoEntityError:
         continue
     return False
 

@@ -171,7 +171,7 @@ just demo-roboledger --skeleton           # Skeleton: user + empty roboledger gr
 
 ## Code Standards
 
-- **Python 3.13** with uv package management
+- **Python 3.14** with uv package management
 - **Ruff** formatting (88-char lines, double quotes)
 - **basedpyright** for type checking
 - **Self-documenting code**: Prefer clear names over comments; add comments only for non-obvious logic

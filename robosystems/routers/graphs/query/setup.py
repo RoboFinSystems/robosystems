@@ -1,6 +1,7 @@
 """Initialization for the query executor that drains the query queue."""
 
 import asyncio
+import inspect
 from typing import Any
 
 from robosystems.logger import logger
@@ -25,7 +26,7 @@ def setup_query_executor():
       operation_type = get_query_operation_type(graph_id)
       repository = await graph_router.get_repository(graph_id, operation_type)
 
-      if hasattr(repository, "execute_query") and asyncio.iscoroutinefunction(
+      if hasattr(repository, "execute_query") and inspect.iscoroutinefunction(
         repository.execute_query
       ):
         data = await repository.execute_query(cypher, parameters)

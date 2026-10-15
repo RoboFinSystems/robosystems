@@ -1,7 +1,6 @@
 """Billing customer model - stores payment information for organizations."""
 
 from datetime import UTC, datetime
-from typing import Optional
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String
 from sqlalchemy.orm import Session
@@ -43,7 +42,7 @@ class BillingCustomer(Base):
     return f"<BillingCustomer org_id={self.org_id} invoice_enabled={self.invoice_billing_enabled}>"
 
   @classmethod
-  def get_or_create(cls, org_id: str, session: Session) -> "BillingCustomer":
+  def get_or_create(cls, org_id: str, session: Session) -> BillingCustomer:
     """Get or create billing customer for an organization."""
     customer = session.query(cls).filter(cls.org_id == org_id).first()
 
@@ -57,14 +56,12 @@ class BillingCustomer(Base):
     return customer
 
   @classmethod
-  def get_by_org_id(cls, org_id: str, session: Session) -> Optional["BillingCustomer"]:
+  def get_by_org_id(cls, org_id: str, session: Session) -> BillingCustomer | None:
     """Get billing customer by organization ID."""
     return session.query(cls).filter(cls.org_id == org_id).first()
 
   @classmethod
-  def get_by_user_id(
-    cls, user_id: str, session: Session
-  ) -> Optional["BillingCustomer"]:
+  def get_by_user_id(cls, user_id: str, session: Session) -> BillingCustomer | None:
     """Get billing customer by user ID (looks up user's org first)."""
     from robosystems.models.core.org import OrgUser
 
@@ -78,7 +75,7 @@ class BillingCustomer(Base):
   @classmethod
   def get_by_stripe_customer_id(
     cls, stripe_customer_id: str, session: Session
-  ) -> Optional["BillingCustomer"]:
+  ) -> BillingCustomer | None:
     """Get billing customer by Stripe customer ID."""
     return (
       session.query(cls).filter(cls.stripe_customer_id == stripe_customer_id).first()

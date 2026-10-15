@@ -518,7 +518,7 @@ class GraphCreationService:
         self._cleanup(graph_id, location, graph_client),
         timeout=CLEANUP_TIMEOUT_SECONDS,
       )
-    except (TimeoutError, asyncio.CancelledError):
+    except TimeoutError, asyncio.CancelledError:
       logger.error(
         f"Rollback for {graph_id} did not finish within {CLEANUP_TIMEOUT_SECONDS}s; "
         "resources may be left allocated"

@@ -23,7 +23,7 @@ def cap_memory(memory_bytes: int) -> None:
   """Bound this process's address space; macOS does not enforce the limit."""
   try:
     resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
-  except (ValueError, OSError):
+  except ValueError, OSError:
     pass
 
 

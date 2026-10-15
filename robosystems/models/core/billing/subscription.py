@@ -3,7 +3,6 @@
 import calendar
 from datetime import UTC, datetime, timedelta
 from enum import Enum
-from typing import Optional
 
 from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, case
 from sqlalchemy.dialects.postgresql import JSONB
@@ -156,7 +155,7 @@ class BillingSubscription(Base):
     billing_interval: str = "monthly",
     stripe_subscription_id: str | None = None,
     user_id: str | None = None,
-  ) -> "BillingSubscription":
+  ) -> BillingSubscription:
     """Create a pending subscription.
 
     Pass `user_id` for per-user resources (repositories). `resource_id` is
@@ -190,7 +189,7 @@ class BillingSubscription(Base):
   @classmethod
   def get_by_resource(
     cls, resource_type: str, resource_id: str, session: Session
-  ) -> Optional["BillingSubscription"]:
+  ) -> BillingSubscription | None:
     """Get subscription for a specific resource."""
     return (
       session.query(cls)
@@ -206,7 +205,7 @@ class BillingSubscription(Base):
     org_id: str,
     session: Session,
     exclude_statuses: tuple[str, ...] = (),
-  ) -> Optional["BillingSubscription"]:
+  ) -> BillingSubscription | None:
     """Get the org's subscription to a resource.
 
     Pass `exclude_statuses=TERMINAL_SUBSCRIPTION_STATUSES` when checking for a
@@ -233,7 +232,7 @@ class BillingSubscription(Base):
     user_id: str,
     session: Session,
     exclude_statuses: tuple[str, ...] = (),
-  ) -> Optional["BillingSubscription"]:
+  ) -> BillingSubscription | None:
     """Get a user's own subscription to a resource (access and credits are
     per user). Ordering matches `get_by_resource_and_org`."""
     query = session.query(cls).filter(
@@ -251,7 +250,7 @@ class BillingSubscription(Base):
   @classmethod
   def get_active_subscriptions_for_org(
     cls, org_id: str, session: Session
-  ) -> list["BillingSubscription"]:
+  ) -> list[BillingSubscription]:
     """Get all active subscriptions for an organization."""
     return (
       session.query(cls)
@@ -265,7 +264,7 @@ class BillingSubscription(Base):
   @classmethod
   def get_live_subscriptions_for_user(
     cls, user_id: str, session: Session, resource_type: str | None = None
-  ) -> list["BillingSubscription"]:
+  ) -> list[BillingSubscription]:
     """Get a user's subscriptions in any non-terminal status (pending and
     past-due rows included)."""
     query = session.query(cls).filter(
@@ -279,7 +278,7 @@ class BillingSubscription(Base):
   @classmethod
   def get_by_provider_subscription_id(
     cls, provider_subscription_id: str, session: Session
-  ) -> Optional["BillingSubscription"]:
+  ) -> BillingSubscription | None:
     """Get subscription by payment provider subscription ID (e.g., Stripe subscription ID)."""
     return (
       session.query(cls)
@@ -290,7 +289,7 @@ class BillingSubscription(Base):
   @classmethod
   def get_by_stripe_subscription_id(
     cls, stripe_subscription_id: str, session: Session
-  ) -> Optional["BillingSubscription"]:
+  ) -> BillingSubscription | None:
     """Get subscription by the Stripe-specific column.
 
     ``get_by_provider_subscription_id`` is the provider-agnostic equivalent.

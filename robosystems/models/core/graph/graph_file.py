@@ -1,7 +1,6 @@
 import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Optional
 
 from sqlalchemy import (
   BigInteger,
@@ -94,7 +93,7 @@ class GraphFile(Base):
     row_count: int | None = None,
     upload_status: str = "pending",
     commit: bool = True,
-  ) -> "GraphFile":
+  ) -> GraphFile:
     file = cls(
       graph_id=graph_id,
       table_id=table_id,
@@ -116,15 +115,15 @@ class GraphFile(Base):
     return file
 
   @classmethod
-  def get_by_id(cls, file_id: str, session: Session) -> Optional["GraphFile"]:
+  def get_by_id(cls, file_id: str, session: Session) -> GraphFile | None:
     return session.query(cls).filter(cls.id == file_id).first()
 
   @classmethod
-  def get_all_for_table(cls, table_id: str, session: Session) -> Sequence["GraphFile"]:
+  def get_all_for_table(cls, table_id: str, session: Session) -> Sequence[GraphFile]:
     return session.query(cls).filter(cls.table_id == table_id).all()
 
   @classmethod
-  def get_by_graph_id(cls, graph_id: str, session: Session) -> Sequence["GraphFile"]:
+  def get_by_graph_id(cls, graph_id: str, session: Session) -> Sequence[GraphFile]:
     return session.query(cls).filter(cls.graph_id == graph_id).all()
 
   def mark_uploaded(self, session: Session) -> None:

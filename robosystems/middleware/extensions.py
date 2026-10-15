@@ -236,7 +236,7 @@ class OperationRegistrar:
   """Binds one domain's plumbing and mounts its `OperationSpec`s as routes."""
 
   # Every registrar, populated at import, so tool adapters can find all specs.
-  _all_instances: ClassVar[list["OperationRegistrar"]] = []
+  _all_instances: ClassVar[list[OperationRegistrar]] = []
 
   def __init__(
     self,
@@ -273,7 +273,7 @@ class OperationRegistrar:
   @classmethod
   def specs_for_extension(
     cls, extension: str
-  ) -> list[tuple["OperationRegistrar", OperationSpec]]:
+  ) -> list[tuple[OperationRegistrar, OperationSpec]]:
     """Every `(registrar, spec)` pair for the extension, for tool adapters."""
     return [
       (reg, spec)

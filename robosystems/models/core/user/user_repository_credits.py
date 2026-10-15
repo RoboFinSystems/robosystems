@@ -9,7 +9,7 @@ import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from sqlalchemy import (
   Boolean,
@@ -136,7 +136,7 @@ class UserRepositoryCredits(Base):
     repository_plan: str,
     monthly_allocation: int,
     session: Session,
-  ) -> "UserRepositoryCredits":
+  ) -> UserRepositoryCredits:
     """Create credit pool for a new access record."""
     allows_rollover = False
     max_rollover = Decimal("0")
@@ -540,7 +540,7 @@ class UserRepositoryCredits(Base):
     user_id: str,
     repository_type: str,
     session: Session,
-  ) -> Optional["UserRepositoryCredits"]:
+  ) -> UserRepositoryCredits | None:
     """Get repository credits for a specific repository type."""
     from .user_repository import UserRepository
 
@@ -602,7 +602,7 @@ class UserRepositoryCreditTransaction(Base):
     description: str,
     metadata: dict[str, Any] | None = None,
     session: Session | None = None,
-  ) -> "UserRepositoryCreditTransaction":
+  ) -> UserRepositoryCreditTransaction:
     """Create a new transaction record."""
     import json
 

@@ -40,7 +40,7 @@ HOISTED_HIT_FIELDS = (
 DROPPED_HIT_FIELDS = ("xbrl_elements",)
 
 
-def compact_search_response(response: "SearchResponse") -> dict[str, Any]:
+def compact_search_response(response: SearchResponse) -> dict[str, Any]:
   """The search response as a model reads it: decision fields only.
 
   Drops null fields and the per-hit element list, and hoists the filing
@@ -73,7 +73,7 @@ def compact_search_response(response: "SearchResponse") -> dict[str, Any]:
 
 
 def window_section(
-  section: "DocumentSection", offset: int, length: int
+  section: DocumentSection, offset: int, length: int
 ) -> dict[str, Any]:
   """One window of a section's content, with the offset to read on from."""
   content = section.content

@@ -33,7 +33,7 @@ def _canonicalize(doc: dict | list) -> dict | list:
           x.get("@id", json.dumps(x, sort_keys=True)) if isinstance(x, dict) else str(x)
         ),
       )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
       return canonical_items
   return doc
 

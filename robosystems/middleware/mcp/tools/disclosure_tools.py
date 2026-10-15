@@ -249,7 +249,7 @@ class InformationBlockTool(BaseTool):
       max_rows = _cap(arguments.get("max_rows"), MAX_BLOCK_ROWS)
       max_members = _cap(arguments.get("max_members"), MAX_BLOCK_MEMBERS)
       offset = max(0, int(arguments.get("offset") or 0))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
       return {"error": "max_rows, max_members and offset must be whole numbers."}
     graph_id = self.client.graph_id
     try:

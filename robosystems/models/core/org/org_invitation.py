@@ -5,7 +5,6 @@ import secrets
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from enum import Enum
-from typing import Optional
 
 from sqlalchemy import (
   Column,
@@ -102,7 +101,7 @@ class OrgInvitation(Model):
     role: OrgRole,
     invited_by: str,
     session: Session,
-  ) -> tuple["OrgInvitation", str]:
+  ) -> tuple[OrgInvitation, str]:
     """Create a pending invitation and return it with the raw token.
 
     The raw token is returned exactly once for inclusion in the invitation
@@ -132,13 +131,11 @@ class OrgInvitation(Model):
     return invitation, raw_token
 
   @classmethod
-  def get_by_id(cls, invitation_id: str, session: Session) -> Optional["OrgInvitation"]:
+  def get_by_id(cls, invitation_id: str, session: Session) -> OrgInvitation | None:
     return session.query(cls).filter(cls.id == invitation_id).first()
 
   @classmethod
-  def get_valid_by_token(
-    cls, raw_token: str, session: Session
-  ) -> Optional["OrgInvitation"]:
+  def get_valid_by_token(cls, raw_token: str, session: Session) -> OrgInvitation | None:
     """Look up a pending, unexpired invitation by its raw token."""
     return (
       session.query(cls)
@@ -153,7 +150,7 @@ class OrgInvitation(Model):
   @classmethod
   def get_pending_for_org(
     cls, org_id: str, session: Session
-  ) -> Sequence["OrgInvitation"]:
+  ) -> Sequence[OrgInvitation]:
     """All pending invitations for an org (including expired-but-pending)."""
     return (
       session.query(cls)
@@ -165,7 +162,7 @@ class OrgInvitation(Model):
   @classmethod
   def get_pending_by_org_and_email(
     cls, org_id: str, email: str, session: Session
-  ) -> Optional["OrgInvitation"]:
+  ) -> OrgInvitation | None:
     return (
       session.query(cls)
       .filter(

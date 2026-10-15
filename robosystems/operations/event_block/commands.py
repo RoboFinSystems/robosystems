@@ -1109,7 +1109,7 @@ def preview_event_block(
       try:
         debit_cents = int(debit_raw)
         credit_cents = int(credit_raw)
-      except (TypeError, ValueError):
+      except TypeError, ValueError:
         errors.append(
           f"Entry {i}: amount expression resolved to non-numeric value "
           f"(debit={debit_raw!r}, credit={credit_raw!r})"

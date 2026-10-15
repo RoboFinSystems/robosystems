@@ -129,7 +129,7 @@ Either way, the first path segment is the branch type: `feature` (new capability
 
 ## Coding Standards
 
-- **Python 3.13**, with dependencies managed by uv
+- **Python 3.14**, with dependencies managed by uv
 - **Ruff** for formatting and linting (88-character lines, double quotes) and import sorting
 - **basedpyright** for type checking; add type hints to every function signature
 - **Self-documenting code** — prefer clear names over comments, and comment only non-obvious logic

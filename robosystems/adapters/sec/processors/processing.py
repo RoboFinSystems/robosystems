@@ -50,7 +50,7 @@ def process_single_filing_to_memory(
   source_file_id: str,
   s3_client,
   raw_bucket: str,
-  metadata_loader: "SECMetadataLoader",
+  metadata_loader: SECMetadataLoader,
   allowed_form_types: list[str] | None = None,
   enricher=None,
 ) -> ProcessedFilingResult:

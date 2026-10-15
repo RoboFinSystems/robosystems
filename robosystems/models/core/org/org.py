@@ -3,7 +3,6 @@
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Optional
 
 from sqlalchemy import Column, DateTime, String
 from sqlalchemy import Enum as SQLEnum
@@ -56,7 +55,7 @@ class Org(Model):
   @classmethod
   def get_by_id(
     cls, org_id: str, session: Session, include_deleted: bool = False
-  ) -> Optional["Org"]:
+  ) -> Org | None:
     """Get organization by ID, skipping soft-deleted rows by default."""
     query = session.query(cls).filter(cls.id == org_id)
     if not include_deleted:
@@ -70,7 +69,7 @@ class Org(Model):
     org_type: OrgType,
     session: Session,
     auto_commit: bool = True,
-  ) -> "Org":
+  ) -> Org:
     org = cls(name=name, org_type=org_type)
     session.add(org)
     session.flush()
@@ -88,7 +87,7 @@ class Org(Model):
   @classmethod
   def create_personal_org_for_user(
     cls, user_id: str, user_name: str, session: Session, auto_commit: bool = True
-  ) -> "Org":
+  ) -> Org:
     """Create a personal org with the user as OWNER. Registration needs one
     because every resource hangs off an org; it later grows into a team org
     in place."""
@@ -120,7 +119,7 @@ class Org(Model):
     return org
 
   @classmethod
-  def get_all(cls, session: Session, include_deleted: bool = False) -> Sequence["Org"]:
+  def get_all(cls, session: Session, include_deleted: bool = False) -> Sequence[Org]:
     """Get all organizations, skipping soft-deleted rows by default."""
     query = session.query(cls)
     if not include_deleted:

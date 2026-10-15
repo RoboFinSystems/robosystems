@@ -668,13 +668,13 @@ class TestPerformanceAndReliability:
     # Test with None input
     try:
       PasswordSecurity.validate_password(None)
-    except (TypeError, AttributeError):
+    except TypeError, AttributeError:
       pass  # Expected behavior
 
     # Test with non-string input
     try:
       PasswordSecurity.validate_password(12345)
-    except (TypeError, AttributeError):
+    except TypeError, AttributeError:
       pass  # Expected behavior
 
   @patch("bcrypt.hashpw")

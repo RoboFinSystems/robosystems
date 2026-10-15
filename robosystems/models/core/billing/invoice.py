@@ -2,7 +2,6 @@
 
 from datetime import UTC, datetime, timedelta
 from enum import Enum
-from typing import Optional
 
 from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Session, relationship
@@ -94,7 +93,7 @@ class BillingInvoice(Base):
     session: Session,
     payment_terms: str = "net_30",
     commit: bool = True,
-  ) -> "BillingInvoice":
+  ) -> BillingInvoice:
     """Create a new invoice for a billing period.
 
     ``commit=False`` only flushes, so the caller's transaction stays whole.
@@ -162,7 +161,7 @@ class BillingInvoice(Base):
     quantity: int = 1,
     line_metadata: dict | None = None,
     commit: bool = True,
-  ) -> "BillingInvoiceLineItem":
+  ) -> BillingInvoiceLineItem:
     """Add a line item to the invoice."""
     line_item = BillingInvoiceLineItem(
       invoice_id=self.id,
@@ -235,12 +234,12 @@ class BillingInvoice(Base):
     logger.info(f"Marked invoice {self.invoice_number} as paid")
 
   @classmethod
-  def get_by_org_id(cls, org_id: str, session: Session) -> list["BillingInvoice"]:
+  def get_by_org_id(cls, org_id: str, session: Session) -> list[BillingInvoice]:
     """Get all invoices for an organization."""
     return session.query(cls).filter(cls.org_id == org_id).all()
 
   @classmethod
-  def get_by_user_id(cls, user_id: str, session: Session) -> list["BillingInvoice"]:
+  def get_by_user_id(cls, user_id: str, session: Session) -> list[BillingInvoice]:
     """Get all invoices for a user (looks up user's org first)."""
     from robosystems.models.core.org import OrgUser
 
@@ -258,7 +257,7 @@ class BillingInvoice(Base):
     period_start: datetime,
     period_end: datetime,
     session: Session,
-  ) -> Optional["BillingInvoice"]:
+  ) -> BillingInvoice | None:
     """Get invoice for a specific billing period for an organization."""
     return (
       session.query(cls)
@@ -273,7 +272,7 @@ class BillingInvoice(Base):
   @classmethod
   def get_by_stripe_invoice_id(
     cls, stripe_invoice_id: str, session: Session
-  ) -> Optional["BillingInvoice"]:
+  ) -> BillingInvoice | None:
     """Get invoice by Stripe invoice ID."""
     return session.query(cls).filter(cls.stripe_invoice_id == stripe_invoice_id).first()
 

@@ -7,7 +7,7 @@ layer in SSM. Sections mirror the .env file order.
 
 import os
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:
@@ -91,7 +91,7 @@ def get_int_env(key: str, default: int) -> int:
   """Get an int env var, falling back to ``default`` if unset or unparseable."""
   try:
     return int(os.getenv(key, str(default)))
-  except (ValueError, TypeError):
+  except ValueError, TypeError:
     # print, not logger: the logger imports this module.
     print(f"Warning: Invalid {key} value, using default: {default}")
     return default
@@ -101,7 +101,7 @@ def get_float_env(key: str, default: float) -> float:
   """Get a float env var, falling back to ``default`` if unset or unparseable."""
   try:
     return float(os.getenv(key, str(default)))
-  except (ValueError, TypeError):
+  except ValueError, TypeError:
     print(f"Warning: Invalid {key} value, using default: {default}")
     return default
 
@@ -140,7 +140,7 @@ def get_tuning_float(env_key: str, ssm_path: str, default: float) -> float:
     if env_value is not None:
       try:
         return float(env_value)
-      except (ValueError, TypeError):
+      except ValueError, TypeError:
         print(f"Warning: Invalid {env_key} value, using default: {default}")
         return default
 
@@ -165,7 +165,7 @@ def get_tuning_int(env_key: str, ssm_path: str, default: int) -> int:
     if env_value is not None:
       try:
         return int(env_value)
-      except (ValueError, TypeError):
+      except ValueError, TypeError:
         print(f"Warning: Invalid {env_key} value, using default: {default}")
         return default
 
@@ -1320,7 +1320,7 @@ class EnvConfig:
       return ["*"]
 
   @classmethod
-  def get_valkey_url(cls, database: Union[int, "ValkeyDatabase"] | None = None) -> str:
+  def get_valkey_url(cls, database: int | ValkeyDatabase | None = None) -> str:
     """Valkey URL for ``database`` (prefer a ValkeyDatabase member over an
     int); None returns the base URL.
     """

@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 class CypherTool(BaseTool):
   def __init__(
     self,
-    client: "GraphMCPClient",
+    client: GraphMCPClient,
     schema_extensions: list[str] | tuple[str, ...] = (),
   ):
     super().__init__(client)

@@ -355,7 +355,7 @@ def promote_pending_obligations(
       result.dispatched_event_ids.append(event.id)
     except HandlerMetadataValidationError as e:
       result.errors.append((event.id, f"handler validation failed: {e}"))
-    except (RowLockedError, OperationalError):
+    except RowLockedError, OperationalError:
       # The sweep's own condition, not one bad event: let the caller retry.
       raise
     except Exception as e:

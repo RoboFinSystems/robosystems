@@ -246,7 +246,7 @@ def _measure_row_count(
       return _json_row_count(body, byte_limit, row_cap), True
     finally:
       body.close()
-  except (_PayloadTooLarge, _InvalidColumnName):
+  except _PayloadTooLarge, _InvalidColumnName:
     raise
   except Exception as e:
     logger.warning(

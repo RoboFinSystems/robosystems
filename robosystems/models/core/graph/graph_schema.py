@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy import (
   Boolean,
@@ -71,7 +71,7 @@ class GraphSchema(Base):
     custom_schema_version: str | None = None,
     is_active: bool = True,
     commit: bool = True,
-  ) -> "GraphSchema":
+  ) -> GraphSchema:
     schema = cls(
       graph_id=graph_id,
       schema_type=schema_type,
@@ -90,9 +90,7 @@ class GraphSchema(Base):
     return schema
 
   @classmethod
-  def get_active_schema(
-    cls, graph_id: str, session: Session
-  ) -> Optional["GraphSchema"]:
+  def get_active_schema(cls, graph_id: str, session: Session) -> GraphSchema | None:
     return (
       session.query(cls)
       .filter(cls.graph_id == graph_id, cls.is_active.is_(True))
@@ -101,7 +99,7 @@ class GraphSchema(Base):
     )
 
   @classmethod
-  def get_all_versions(cls, graph_id: str, session: Session) -> Sequence["GraphSchema"]:
+  def get_all_versions(cls, graph_id: str, session: Session) -> Sequence[GraphSchema]:
     return (
       session.query(cls)
       .filter(cls.graph_id == graph_id)

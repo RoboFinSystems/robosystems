@@ -225,7 +225,7 @@ class ParameterStoreManager:
     value = self.get_tuning_parameter(path, str(default))
     try:
       return int(value)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
       logger.warning(f"Invalid int value for tuning/{path}: {value}, using default")
       return default
 
@@ -234,7 +234,7 @@ class ParameterStoreManager:
     value = self.get_tuning_parameter(path, str(default))
     try:
       return float(value)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
       logger.warning(f"Invalid float value for tuning/{path}: {value}, using default")
       return default
 

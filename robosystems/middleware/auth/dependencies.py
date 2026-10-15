@@ -147,7 +147,7 @@ def _safe_user_session_version(user: User) -> int:
   """Read session_version defensively for real users and lightweight test mocks."""
   try:
     return int(getattr(user, "session_version", 0) or 0)
-  except (TypeError, ValueError):
+  except TypeError, ValueError:
     return 0
 
 
@@ -188,7 +188,7 @@ API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 def _stash_api_key_identity(
   request: Request,
   api_key: str,
-  user: "User | None" = None,
+  user: User | None = None,
   auth_method: str = "api_key",
 ) -> None:
   """Record which API key authenticated this request.

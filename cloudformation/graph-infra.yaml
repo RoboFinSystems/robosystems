@@ -237,7 +237,7 @@ Resources:
     Properties:
       FunctionName: !Sub "${AWS::StackName}-api-key-generator"
       Description: "API Key Generator Lambda - inline code (no S3)"
-      Runtime: python3.13
+      Runtime: python3.14
       Handler: index.lambda_handler
       Role: !GetAtt ApiKeyGeneratorRole.Arn
       Timeout: 60

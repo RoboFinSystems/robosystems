@@ -37,7 +37,7 @@ class DuckDBAnalyticsContext:
     self._output_dir: Path | None = None
     self._db_path: Path | None = None
 
-  def __enter__(self) -> "DuckDBAnalyticsContext":
+  def __enter__(self) -> DuckDBAnalyticsContext:
     if env.is_development():
       db_path = Path(get_staging_duckdb_path(self._duckdb_source))
       if not db_path.exists():

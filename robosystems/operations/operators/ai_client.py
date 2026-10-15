@@ -188,7 +188,7 @@ class AIClient:
       )
 
   @staticmethod
-  def _initialize_self_hosted_client() -> "OpenAICompatClient | None":
+  def _initialize_self_hosted_client() -> OpenAICompatClient | None:
     if not env.OPENAI_COMPAT_ENABLED:
       return None
     from robosystems.operations.operators.openai_compat import OpenAICompatClient

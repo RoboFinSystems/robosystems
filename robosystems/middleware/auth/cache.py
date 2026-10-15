@@ -152,7 +152,7 @@ class APIKeyCache:
           should_rotate = (
             current_time - last_rotation_time
           ) > self.KEY_ROTATION_INTERVAL
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
           should_rotate = True
 
       if should_rotate:

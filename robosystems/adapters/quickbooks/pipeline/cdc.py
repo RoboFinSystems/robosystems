@@ -234,7 +234,7 @@ def _is_void(row: dict[str, Any]) -> bool:
   amount = row.get("TotalAmt", row.get("Amount"))
   try:
     zeroed = amount is not None and float(amount) == 0
-  except (TypeError, ValueError):
+  except TypeError, ValueError:
     return False
   return zeroed and str(row.get("PrivateNote") or "").lower().startswith("voided")
 

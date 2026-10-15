@@ -228,7 +228,7 @@ async def refresh_session(
 
         try:
           token_session_version = int(payload.get("session_version", 0))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
           raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token session",

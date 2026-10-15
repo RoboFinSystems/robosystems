@@ -184,7 +184,7 @@ class MaterializationLock:
     except Exception as e:
       logger.debug(f"Closing the materialization lock client failed: {e}")
 
-  async def __aenter__(self) -> "MaterializationLock":
+  async def __aenter__(self) -> MaterializationLock:
     if not await self.acquire():
       raise RuntimeError(f"Could not acquire materialization lock: {self.lock_key}")
     return self
@@ -206,7 +206,7 @@ class MaterializationLock:
     graph_id: str,
     token: str,
     ttl_seconds: int = DEFAULT_LOCK_TTL_SECONDS,
-  ) -> "MaterializationLock | None":
+  ) -> MaterializationLock | None:
     """Take over a lock another process acquired, given its token.
 
     The token must be the one stored: the check and a TTL refresh are one

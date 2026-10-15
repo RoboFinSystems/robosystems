@@ -240,8 +240,8 @@ class SubgraphService:
 
   async def create_subgraph(
     self,
-    parent_graph: "Graph",
-    user: "User",
+    parent_graph: Graph,
+    user: User,
     name: str,
     description: str | None = None,
     subgraph_type: str = "static",
@@ -735,7 +735,7 @@ class SubgraphService:
     return ddl
 
   @staticmethod
-  async def _count(client: "GraphClient", database_name: str, cypher: str) -> int:
+  async def _count(client: GraphClient, database_name: str, cypher: str) -> int:
     result = await client.query(cypher=cypher, graph_id=database_name)
     rows = result.get("data") if isinstance(result, dict) else None
     if not rows:
@@ -746,7 +746,7 @@ class SubgraphService:
 
   async def _check_database_has_data(
     self,
-    client: "GraphClient",
+    client: GraphClient,
     database_name: str,
   ) -> bool:
     """True when the database holds at least one node.
@@ -769,7 +769,7 @@ class SubgraphService:
 
   async def _get_database_stats(
     self,
-    client: "GraphClient",
+    client: GraphClient,
     database_name: str,
   ) -> dict[str, Any]:
     """Node/edge counts and size. Fields are None when unavailable."""

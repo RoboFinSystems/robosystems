@@ -2,7 +2,6 @@
 
 import secrets
 from datetime import UTC, datetime
-from typing import Optional
 
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.exc import SQLAlchemyError
@@ -45,7 +44,7 @@ class OrgLimits(Model):
   @classmethod
   def create_default_limits(
     cls, org_id: str, session: Session, auto_commit: bool = True
-  ) -> "OrgLimits":
+  ) -> OrgLimits:
     """Create default safety limits for a new organization."""
     limits = cls(
       org_id=org_id,
@@ -62,12 +61,12 @@ class OrgLimits(Model):
     return limits
 
   @classmethod
-  def get_by_org_id(cls, org_id: str, session: Session) -> Optional["OrgLimits"]:
+  def get_by_org_id(cls, org_id: str, session: Session) -> OrgLimits | None:
     """Get limits for a specific organization."""
     return session.query(cls).filter(cls.org_id == org_id).first()
 
   @classmethod
-  def get_or_create_for_org(cls, org_id: str, session: Session) -> "OrgLimits":
+  def get_or_create_for_org(cls, org_id: str, session: Session) -> OrgLimits:
     """Get existing limits or create default ones for an organization."""
     limits = cls.get_by_org_id(org_id, session)
     if not limits:

@@ -83,7 +83,7 @@ class InvestorQuery:
     try:
       with _open_session(info, "roboinvestor") as session:
         response = reads_portfolios.list_portfolios(session, limit=limit, offset=offset)
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_investor_not_initialized()
     return PortfolioList.from_pydantic(response)
 
@@ -117,7 +117,7 @@ class InvestorQuery:
           limit=limit,
           offset=offset,
         )
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_investor_not_initialized()
     return SecurityList.from_pydantic(response)
 
@@ -135,7 +135,7 @@ class InvestorQuery:
     try:
       with _open_session(info, "roboinvestor") as session:
         response = reads_securities.get_security(session, security_id)
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_investor_not_initialized()
     if response is None:
       return None
@@ -171,7 +171,7 @@ class InvestorQuery:
           limit=limit,
           offset=offset,
         )
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_investor_not_initialized()
     return PositionList.from_pydantic(response)
 
@@ -189,7 +189,7 @@ class InvestorQuery:
     try:
       with _open_session(info, "roboinvestor") as session:
         response = reads_positions.get_position(session, position_id)
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_investor_not_initialized()
     if response is None:
       return None
@@ -213,7 +213,7 @@ class InvestorQuery:
         response = reads_holdings.list_holdings(session, portfolio_id)
     except reads_holdings.PortfolioNotFoundError:
       return None
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_investor_not_initialized()
     return HoldingsList.from_pydantic(response)
 
@@ -235,6 +235,6 @@ class InvestorQuery:
         response = reads_portfolio_block.get_portfolio_block(session, portfolio_id)
     except reads_holdings.PortfolioNotFoundError:
       return None
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_investor_not_initialized()
     return PortfolioBlock.from_pydantic(response)

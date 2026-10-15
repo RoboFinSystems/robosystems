@@ -214,7 +214,7 @@ def _mcp_tool_result(response) -> dict:
       None,
     )
     return json.loads(text) if isinstance(text, str) else {"_raw": result}
-  except (ValueError, AttributeError):
+  except ValueError, AttributeError:
     return {"_raw": response.text[:200]}
 
 

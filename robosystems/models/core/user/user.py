@@ -4,7 +4,6 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Optional
 
 from sqlalchemy import Boolean, Column, DateTime, Integer, String
 from sqlalchemy.exc import SQLAlchemyError
@@ -89,12 +88,12 @@ class User(Model):
     return f"<User {self.id} {self.email}>"
 
   @classmethod
-  def get_by_id(cls, user_id: str, session: Session) -> Optional["User"]:
+  def get_by_id(cls, user_id: str, session: Session) -> User | None:
     """Get a user by ID."""
     return session.query(cls).filter(cls.id == user_id).first()
 
   @classmethod
-  def get_by_email(cls, email: str, session: Session) -> Optional["User"]:
+  def get_by_email(cls, email: str, session: Session) -> User | None:
     """Get a user by email, case-insensitively (emails are stored lowercased)."""
     return session.query(cls).filter(cls.email == email.lower()).first()
 
@@ -107,7 +106,7 @@ class User(Model):
     session: Session,
     external_id: str | None = None,
     auto_commit: bool = True,
-  ) -> "User":
+  ) -> User:
     """Create a user. ``password_hash`` has no default so a passwordless
     (IdP-governed) account is always an explicit ``None``."""
     user = cls(
@@ -129,7 +128,7 @@ class User(Model):
     return user
 
   @classmethod
-  def get_all(cls, session: Session) -> Sequence["User"]:
+  def get_all(cls, session: Session) -> Sequence[User]:
     """Get all users."""
     return session.query(cls).all()
 

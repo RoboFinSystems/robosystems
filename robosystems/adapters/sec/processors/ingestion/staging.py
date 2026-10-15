@@ -558,7 +558,7 @@ class DuckDBStager:
     self,
     table_name: str,
     stage_fn,
-    graph_client: "GraphClient",
+    graph_client: GraphClient,
     log_progress: ProgressCallback,
     table_index: int,
     total_tables: int,
@@ -618,7 +618,7 @@ class DuckDBStager:
     entity_type: str,
     chunk_start_year: int,
     chunk_end_year: int,
-    graph_client: "GraphClient",
+    graph_client: GraphClient,
     log_progress: ProgressCallback | None = None,
     table_index: int = 0,
     total_tables: int = 0,
@@ -807,7 +807,7 @@ class DuckDBStager:
       return False, None, f"{table_name} failed: {e}"
 
   async def _cleanup_temp_tables(
-    self, graph_client: "GraphClient", temp_tables: list[str]
+    self, graph_client: GraphClient, temp_tables: list[str]
   ) -> None:
     for temp_name in temp_tables:
       try:
@@ -818,7 +818,7 @@ class DuckDBStager:
   async def _create_tables_with_glob(
     self,
     tables: dict[str, str],
-    graph_client: "GraphClient",
+    graph_client: GraphClient,
     year: int | None = None,
     start_year: int | None = None,
     end_year: int | None = None,

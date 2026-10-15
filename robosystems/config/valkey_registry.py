@@ -47,7 +47,7 @@ class ValkeyDatabase(IntEnum):
     raise ValueError("No database slots available (all 0-15 are allocated)")
 
   @classmethod
-  def get_url(cls, database: "ValkeyDatabase", base_url: str) -> str:
+  def get_url(cls, database: ValkeyDatabase, base_url: str) -> str:
     """Build the URL for a database against an explicit base URL."""
     return ValkeyURLBuilder.build_url(base_url, database)
 
@@ -151,7 +151,7 @@ class ValkeyURLBuilder:
           ValkeyURLBuilder._cached_auth_token = token
           ValkeyURLBuilder._auth_token_environment = current_env
           return token
-      except (ImportError, Exception):
+      except ImportError, Exception:
         pass
 
     token = os.getenv("VALKEY_AUTH_TOKEN", "")

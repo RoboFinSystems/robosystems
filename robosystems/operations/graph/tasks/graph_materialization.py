@@ -69,7 +69,7 @@ class GraphMaterializationTask(BaseTask):
         release = False
       return result
 
-    except (asyncio.CancelledError, GraphTransientError):
+    except asyncio.CancelledError, GraphTransientError:
       release = False
       if self._lock_lost:
         raise RuntimeError(

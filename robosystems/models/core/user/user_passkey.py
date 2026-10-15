@@ -8,7 +8,6 @@ unique constraint cannot silently fork identities.
 """
 
 from datetime import UTC, datetime
-from typing import Optional
 
 from sqlalchemy import (
   Boolean,
@@ -63,7 +62,7 @@ class UserPasskey(Model):
   @classmethod
   def get_by_credential_id(
     cls, credential_id: str, session: Session
-  ) -> Optional["UserPasskey"]:
+  ) -> UserPasskey | None:
     return (
       session.query(cls)
       .filter(cls.credential_id == normalize_credential_id(credential_id))
@@ -71,7 +70,7 @@ class UserPasskey(Model):
     )
 
   @classmethod
-  def get_all_for_user(cls, user_id: str, session: Session) -> list["UserPasskey"]:
+  def get_all_for_user(cls, user_id: str, session: Session) -> list[UserPasskey]:
     return (
       session.query(cls).filter(cls.user_id == user_id).order_by(cls.created_at).all()
     )
@@ -94,7 +93,7 @@ class UserPasskey(Model):
     backup_state: bool = False,
     name: str = "Passkey",
     auto_commit: bool = True,
-  ) -> "UserPasskey":
+  ) -> UserPasskey:
     passkey = cls(
       user_id=user_id,
       credential_id=normalize_credential_id(credential_id),

@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy import (
   Boolean,
@@ -102,7 +102,7 @@ class GraphCredits(Base):
     return GraphTier.LADYBUG_STANDARD.value
 
   @classmethod
-  def get_by_graph_id(cls, graph_id: str, session: Session) -> Optional["GraphCredits"]:
+  def get_by_graph_id(cls, graph_id: str, session: Session) -> GraphCredits | None:
     """Get credit record for a specific graph."""
     return session.query(cls).filter(cls.graph_id == graph_id).first()
 
@@ -114,7 +114,7 @@ class GraphCredits(Base):
     billing_admin_id: str,
     monthly_allocation: Decimal,
     session: Session,
-  ) -> "GraphCredits":
+  ) -> GraphCredits:
     """Create credit record for a new graph."""
     from .graph import Graph
 
@@ -686,7 +686,7 @@ class GraphCreditTransaction(Base):
     operation_id: str | None = None,
     graph_id: str | None = None,
     user_id: str | None = None,
-  ) -> "GraphCreditTransaction":
+  ) -> GraphCreditTransaction:
     """Post a credit transaction; ``amount`` is negative for consumption.
 
     When ``idempotency_key`` is supplied, an existing row with that key is
@@ -754,7 +754,7 @@ class GraphCreditTransaction(Base):
     transaction_type: CreditTransactionType | None = None,
     limit: int = 100,
     session: Session | None = None,
-  ) -> Sequence["GraphCreditTransaction"]:
+  ) -> Sequence[GraphCreditTransaction]:
     """Get transactions for a graph."""
     if not session:
       return []

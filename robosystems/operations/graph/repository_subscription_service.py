@@ -156,7 +156,7 @@ class RepositorySubscriptionService:
     access_level_str = plan_details.get("access_level", "READ")
     try:
       access_level = RepositoryAccessLevel(access_level_str.lower())
-    except (ValueError, AttributeError):
+    except ValueError, AttributeError:
       access_level = RepositoryAccessLevel.READ
 
     try:
@@ -306,7 +306,7 @@ class RepositorySubscriptionService:
     access_level_str = plan_config.get("access_level", "READ")
     try:
       access_level = RepositoryAccessLevel(access_level_str.lower())
-    except (ValueError, AttributeError):
+    except ValueError, AttributeError:
       access_level = RepositoryAccessLevel.READ
 
     UserRepository.create_access(

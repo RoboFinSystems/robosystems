@@ -78,7 +78,7 @@ class SSEEvent:
     return asdict(self)
 
   @classmethod
-  def from_dict(cls, data: dict[str, Any]) -> "SSEEvent":
+  def from_dict(cls, data: dict[str, Any]) -> SSEEvent:
     return cls(**data)
 
 
@@ -153,7 +153,7 @@ _STATUS_CHANGING_EVENTS = frozenset(
 
 
 def _apply_input_request(
-  metadata: "OperationMetadata", event_type: EventType, data: dict[str, Any]
+  metadata: OperationMetadata, event_type: EventType, data: dict[str, Any]
 ) -> None:
   """Record the pause's request on the metadata, and clear it once the run
   is going again — on the resume, and on a worker pickup (the two share a

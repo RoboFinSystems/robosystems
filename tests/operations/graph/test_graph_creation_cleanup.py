@@ -8,7 +8,7 @@ to touch, which is how a failed creation left a row its owner could not delete.
 
 The cancellation case is separate and worse: the worker runs the handler under
 `asyncio.wait_for`, and an expired budget raises `CancelledError` *inside* the
-pipeline. That is a `BaseException` in 3.13, so an `except Exception` rollback
+pipeline. That is a `BaseException` since 3.8, so an `except Exception` rollback
 is skipped entirely and the allocation is stranded on a writer that holds one
 graph.
 """

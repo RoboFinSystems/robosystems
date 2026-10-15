@@ -8,7 +8,6 @@ route the row's ``resource`` names.
 """
 
 from datetime import UTC, datetime
-from typing import Optional
 
 from sqlalchemy import Column, DateTime, ForeignKey, Index, String
 from sqlalchemy.exc import SQLAlchemyError
@@ -65,7 +64,7 @@ class OAuthGrant(Model):
     resource: str,
     scope: str,
     session: Session,
-  ) -> "OAuthGrant":
+  ) -> OAuthGrant:
     grant = cls(
       user_id=user_id,
       oauth_client_id=oauth_client_id,
@@ -97,11 +96,11 @@ class OAuthGrant(Model):
     return grant
 
   @classmethod
-  def get_by_id(cls, grant_id: str, session: Session) -> Optional["OAuthGrant"]:
+  def get_by_id(cls, grant_id: str, session: Session) -> OAuthGrant | None:
     return session.query(cls).filter(cls.id == grant_id).first()
 
   @classmethod
-  def get_active_by_user_id(cls, user_id: str, session: Session) -> list["OAuthGrant"]:
+  def get_active_by_user_id(cls, user_id: str, session: Session) -> list[OAuthGrant]:
     return (
       session.query(cls)
       .filter(cls.user_id == user_id, cls.revoked_at.is_(None))

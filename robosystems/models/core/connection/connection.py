@@ -5,7 +5,6 @@ import secrets
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Optional
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, String
 from sqlalchemy.dialects.postgresql import JSONB
@@ -160,7 +159,7 @@ class Connection(Model):
     source_name: str | None = None,
     auto_sync_enabled: bool = True,
     write_policy: str | None = None,
-  ) -> "Connection":
+  ) -> Connection:
     """Create a new connection.
 
     ``write_policy`` defaults per provider (QuickBooks → ``qb_authoritative``,
@@ -200,7 +199,7 @@ class Connection(Model):
     session: Session,
     *,
     include_deleted: bool = False,
-  ) -> Optional["Connection"]:
+  ) -> Connection | None:
     """Get a connection by ID, excluding soft-deleted rows by default."""
     query = session.query(cls).filter(cls.id == connection_id)
     if not include_deleted:
@@ -215,7 +214,7 @@ class Connection(Model):
     session: Session,
     *,
     include_deleted: bool = False,
-  ) -> Sequence["Connection"]:
+  ) -> Sequence[Connection]:
     """Get all connections for a graph and provider (live by default)."""
     query = session.query(cls).filter(
       cls.graph_id == graph_id, cls.provider == provider
@@ -231,7 +230,7 @@ class Connection(Model):
     session: Session,
     *,
     include_deleted: bool = False,
-  ) -> Sequence["Connection"]:
+  ) -> Sequence[Connection]:
     """Get all connections for a graph (live by default)."""
     query = session.query(cls).filter(cls.graph_id == graph_id)
     if not include_deleted:
@@ -247,7 +246,7 @@ class Connection(Model):
     provider: str | None = None,
     *,
     include_deleted: bool = False,
-  ) -> Sequence["Connection"]:
+  ) -> Sequence[Connection]:
     """List connections with optional filters (live by default)."""
     query = session.query(cls)
     if graph_id:
@@ -267,7 +266,7 @@ class Connection(Model):
     provider: str,
     realm_id: str,
     session: Session,
-  ) -> Optional["Connection"]:
+  ) -> Connection | None:
     """Most recently soft-deleted connection for this realm, for re-OAuth
     revival. A ``severed`` row is never a candidate."""
     return (

@@ -158,7 +158,7 @@ def _grant_suspension(grant: UserRepository) -> str | None:
 
   try:
     meta = json.loads(grant.extra_metadata) if grant.extra_metadata else {}
-  except (TypeError, ValueError):
+  except TypeError, ValueError:
     return None
   return meta.get("suspended_by") if isinstance(meta, dict) else None
 
@@ -168,7 +168,7 @@ def _set_grant_suspension(grant: UserRepository, reason: str | None) -> None:
 
   try:
     meta = json.loads(grant.extra_metadata) if grant.extra_metadata else {}
-  except (TypeError, ValueError):
+  except TypeError, ValueError:
     meta = {}
   if not isinstance(meta, dict):
     meta = {}

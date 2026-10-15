@@ -50,7 +50,7 @@ def _detect_secret_type(secret_string: str) -> str:
     secret_dict = json.loads(secret_string)
     if isinstance(secret_dict, dict) and "GRAPH_API_KEY" in secret_dict:
       return "graph_api"
-  except (json.JSONDecodeError, TypeError):
+  except json.JSONDecodeError, TypeError:
     # Non-JSON or invalid format — treat as plain string API key
     pass
   return "plain"

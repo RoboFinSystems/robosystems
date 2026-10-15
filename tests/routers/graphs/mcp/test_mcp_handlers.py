@@ -285,7 +285,7 @@ class TestMCPHandler:
           handler._init_task.cancel()
           try:
             await handler._init_task
-          except (asyncio.CancelledError, Exception):
+          except asyncio.CancelledError, Exception:
             pass
 
   @pytest.mark.asyncio
@@ -313,7 +313,7 @@ class TestMCPHandler:
           handler._init_task.cancel()
           try:
             await handler._init_task
-          except (asyncio.CancelledError, Exception):
+          except asyncio.CancelledError, Exception:
             pass
 
   @pytest.mark.asyncio

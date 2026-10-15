@@ -126,7 +126,7 @@ class GraphClient(BaseGraphClient):
     the writer does not answer."""
     try:
       return await self.client.post(path, **kwargs)
-    except (httpx.ConnectError, httpx.ConnectTimeout):
+    except httpx.ConnectError, httpx.ConnectTimeout:
       await self._forget_location()
       raise
 
@@ -251,7 +251,7 @@ class GraphClient(BaseGraphClient):
 
       try:
         response = await self.client.request(**request_kwargs)
-      except (httpx.ConnectError, httpx.ConnectTimeout):
+      except httpx.ConnectError, httpx.ConnectTimeout:
         # A dead or replaced writer: refused (container down) or silent (the
         # instance is gone). Either way the cached address is suspect.
         await self._forget_location()

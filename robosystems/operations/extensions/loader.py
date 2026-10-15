@@ -189,7 +189,7 @@ def _parse_metadata(raw) -> dict:
     try:
       parsed = json.loads(raw)
       return parsed if isinstance(parsed, dict) else {}
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
       return {}
   return {}
 
@@ -263,7 +263,7 @@ def _compare_sync_tokens(existing: str | None, incoming: str | None) -> str:
   try:
     incoming_int = int(incoming)
     existing_int = int(existing)
-  except (ValueError, TypeError):
+  except ValueError, TypeError:
     return "no_info"
   if incoming_int > existing_int:
     return "fresh"
@@ -1042,7 +1042,7 @@ class OLTPLoader:
         try:
           parsed = json.loads(raw_address)
           address = parsed if isinstance(parsed, dict) else {}
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
           address = {}
       else:
         address = {}

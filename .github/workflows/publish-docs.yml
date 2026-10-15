@@ -56,7 +56,7 @@ jobs:
 
       - name: Build the catalog
         run: |
-          uv run --no-project --python 3.13 python robosystems/scripts/publish_docs.py \
+          uv run --no-project --python 3.14 python robosystems/scripts/publish_docs.py \
             --wiki wiki \
             --product docs/product \
             --asset-base "${DOCS_BASE_URL%/}/" \

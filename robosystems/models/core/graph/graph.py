@@ -8,7 +8,7 @@ User graphs are owned by one org (the billing party) and grant access through
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from sqlalchemy import (
   Boolean,
@@ -241,7 +241,7 @@ class Graph(Model):
     subgraph_metadata: dict[str, Any] | None = None,
     status: GraphStatus = GraphStatus.ACTIVE,
     commit: bool = True,
-  ) -> "Graph":
+  ) -> Graph:
     """Create a new graph metadata entry."""
     if graph_type not in ["generic", "entity", "repository"]:
       raise ValueError("graph_type must be 'generic', 'entity', or 'repository'")
@@ -301,7 +301,7 @@ class Graph(Model):
   @classmethod
   def get_by_id(
     cls, graph_id: str, session: Session, include_deprovisioned: bool = False
-  ) -> Optional["Graph"]:
+  ) -> Graph | None:
     """Get a graph by ID, skipping deprovisioned graphs by default.
 
     A stamped ``deleted_at`` also counts as deprovisioned: teardown stamps it
@@ -315,7 +315,7 @@ class Graph(Model):
     return query.first()
 
   @classmethod
-  def get_active_by_id(cls, graph_id: str, session: Session) -> Optional["Graph"]:
+  def get_active_by_id(cls, graph_id: str, session: Session) -> Graph | None:
     """Get a graph only if it is in active status."""
     return (
       session.query(cls)
@@ -348,7 +348,7 @@ class Graph(Model):
       raise
 
   @classmethod
-  def get_by_extension(cls, extension: str, session: Session) -> Sequence["Graph"]:
+  def get_by_extension(cls, extension: str, session: Session) -> Sequence[Graph]:
     """Get all graphs that have a specific schema extension."""
     from sqlalchemy import cast
     from sqlalchemy.dialects.postgresql import JSONB
@@ -360,7 +360,7 @@ class Graph(Model):
     )
 
   @classmethod
-  def get_by_type(cls, graph_type: str, session: Session) -> Sequence["Graph"]:
+  def get_by_type(cls, graph_type: str, session: Session) -> Sequence[Graph]:
     """Get all graphs of a specific type."""
     return session.query(cls).filter(cls.graph_type == graph_type).all()
 
@@ -393,7 +393,7 @@ class Graph(Model):
       raise
 
   @classmethod
-  def get_subgraphs(cls, parent_graph_id: str, session: Session) -> Sequence["Graph"]:
+  def get_subgraphs(cls, parent_graph_id: str, session: Session) -> Sequence[Graph]:
     """Get all subgraphs for a parent graph."""
     return (
       session.query(cls)
@@ -424,7 +424,7 @@ class Graph(Model):
     return bool(re.match(r"^[a-zA-Z0-9]{1,20}$", name))
 
   @classmethod
-  def get_all_repositories(cls, session: Session) -> Sequence["Graph"]:
+  def get_all_repositories(cls, session: Session) -> Sequence[Graph]:
     """Get all shared repository graphs."""
     return (
       session.query(cls)
@@ -436,7 +436,7 @@ class Graph(Model):
   @classmethod
   def get_repository_by_type(
     cls, repository_type: str, session: Session
-  ) -> Optional["Graph"]:
+  ) -> Graph | None:
     """Get a repository by its type."""
     return (
       session.query(cls)
@@ -457,7 +457,7 @@ class Graph(Model):
     data_source_url: str | None = None,
     sync_frequency: str | None = None,
     graph_tier: GraphTier = GraphTier.LADYBUG_SHARED,
-  ) -> "Graph":
+  ) -> Graph:
     """Find or create a repository graph entry.
 
     Data pipelines (SEC and friends) call this so repository metadata exists on

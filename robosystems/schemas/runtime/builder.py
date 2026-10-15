@@ -33,7 +33,7 @@ class LadybugSchemaBuilder:
     self.schema_manager = SchemaManager()
     self.schema = None
 
-  def load_schemas(self) -> "LadybugSchemaBuilder":
+  def load_schemas(self) -> LadybugSchemaBuilder:
     """Load base schema and all configured extensions; returns self for chaining."""
     logger.info(f"Loading LadybugDB schemas from configuration: {self.config}")
 

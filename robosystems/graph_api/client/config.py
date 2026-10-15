@@ -38,7 +38,7 @@ class GraphClientConfig:
   verify_ssl: bool = True
 
   @classmethod
-  def from_env(cls, prefix: str = "GRAPH_CLIENT_") -> "GraphClientConfig":
+  def from_env(cls, prefix: str = "GRAPH_CLIENT_") -> GraphClientConfig:
     """Build a config from ``{prefix}{FIELD}`` environment variables.
 
     Each value is coerced to the type of the field's default; unset variables
@@ -76,7 +76,7 @@ class GraphClientConfig:
 
     return config
 
-  def with_overrides(self, **kwargs: Any) -> "GraphClientConfig":
+  def with_overrides(self, **kwargs: Any) -> GraphClientConfig:
     """Return a copy with ``kwargs`` applied; ``headers`` is copied, not shared."""
     config_dict: dict[str, Any] = {
       "base_url": self.base_url,
