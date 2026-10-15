@@ -923,7 +923,7 @@ get-document.""",
     try:
       first_page = max(1, int(arguments.get("first_page") or 1))
       max_pages = min(_MAX_PAGES_PER_READ, max(1, int(arguments.get("max_pages") or 3)))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
       return {
         "error": "invalid_input",
         "message": "first_page and max_pages must be whole numbers.",

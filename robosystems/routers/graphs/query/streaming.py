@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import inspect
 import json
 from datetime import UTC, datetime
 from typing import Any
@@ -65,7 +66,7 @@ async def execute_query_with_timeout(
   """Execute a query, raising `TimeoutError` once `timeout` seconds elapse."""
 
   async def execute():
-    if hasattr(repository, "execute_query") and asyncio.iscoroutinefunction(
+    if hasattr(repository, "execute_query") and inspect.iscoroutinefunction(
       repository.execute_query
     ):
       return await repository.execute_query(query, parameters)

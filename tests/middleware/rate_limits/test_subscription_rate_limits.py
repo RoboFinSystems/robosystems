@@ -252,6 +252,6 @@ class TestSubscriptionRateLimits:
         result = should_use_subscription_limits(invalid_path)
         # If it doesn't raise, it should return False for invalid input
         assert result is False
-      except (TypeError, AttributeError):
+      except TypeError, AttributeError:
         # These are acceptable errors for invalid input
         pass

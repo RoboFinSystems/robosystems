@@ -1492,7 +1492,7 @@ class ExtensionsMaterializer:
 
     return result
 
-  async def _acquire_lock(self, graph_id: str) -> "MaterializationLock":
+  async def _acquire_lock(self, graph_id: str) -> MaterializationLock:
     """Take the per-graph materialization lock, failing closed.
 
     Every failure mode raises ``MaterializationLockError`` — a lock held by
@@ -1531,7 +1531,7 @@ class ExtensionsMaterializer:
       f"Materialization lock for {graph_id} is held by another run; retry later"
     )
 
-  async def _adopt_lock(self, graph_id: str, token: str) -> "MaterializationLock":
+  async def _adopt_lock(self, graph_id: str, token: str) -> MaterializationLock:
     """Take over the lock the caller acquired, failing closed.
 
     The token must still be the stored one: a run that waited in the queue
@@ -1569,7 +1569,7 @@ class ExtensionsMaterializer:
       )
     return lock
 
-  async def _refresh_lock(self, lock: "MaterializationLock | None") -> None:
+  async def _refresh_lock(self, lock: MaterializationLock | None) -> None:
     """Checkpoint: push the lock TTL out, or abort if the lock is no longer ours.
 
     Called once per table. A run longer than the TTL would otherwise lose the
@@ -1602,12 +1602,12 @@ class ExtensionsMaterializer:
 
   async def _materialize_direct(
     self,
-    client: "GraphClient",
+    client: GraphClient,
     graph_id: str,
     entity_id: str,
     rebuild: bool,
     result: MaterializeResult,
-    lock: "MaterializationLock | None" = None,
+    lock: MaterializationLock | None = None,
   ) -> None:
     """Build in place, for first-time creation.
 
@@ -1633,11 +1633,11 @@ class ExtensionsMaterializer:
 
   async def _materialize_blue_green(
     self,
-    client: "GraphClient",
+    client: GraphClient,
     graph_id: str,
     entity_id: str,
     result: MaterializeResult,
-    lock: "MaterializationLock | None" = None,
+    lock: MaterializationLock | None = None,
   ) -> None:
     """Build ``{graph_id}-wip`` alongside the live graph and swap on success.
 
@@ -1721,7 +1721,7 @@ class ExtensionsMaterializer:
 
   async def _ensure_database(
     self,
-    client: "GraphClient",
+    client: GraphClient,
     graph_id: str,
     rebuild: bool,
     is_subgraph: bool = False,
@@ -1802,12 +1802,12 @@ class ExtensionsMaterializer:
 
   async def _stage_tables(
     self,
-    client: "GraphClient",
+    client: GraphClient,
     graph_id: str,
     staging_sql: dict[str, str],
     result: MaterializeResult,
     enabled_extensions: set[str],
-    lock: "MaterializationLock | None" = None,
+    lock: MaterializationLock | None = None,
   ) -> None:
     """Create the DuckDB staging tables from PostgreSQL via postgres_scanner.
 
@@ -1850,7 +1850,7 @@ class ExtensionsMaterializer:
     await self._prune_dangling_edges(client, graph_id, result)
 
   async def _prune_dangling_edges(
-    self, client: "GraphClient", graph_id: str, result: MaterializeResult
+    self, client: GraphClient, graph_id: str, result: MaterializeResult
   ) -> None:
     """Drop staged edges whose endpoint is not a staged node.
 
@@ -1904,11 +1904,11 @@ class ExtensionsMaterializer:
 
   async def _materialize_tables(
     self,
-    client: "GraphClient",
+    client: GraphClient,
     graph_id: str,
     result: MaterializeResult,
     source_graph_id: str | None = None,
-    lock: "MaterializationLock | None" = None,
+    lock: MaterializationLock | None = None,
   ) -> None:
     """COPY the staged DuckDB tables into LadybugDB, nodes before edges.
 

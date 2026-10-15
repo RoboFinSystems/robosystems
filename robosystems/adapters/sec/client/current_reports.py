@@ -45,7 +45,7 @@ def _page(efts: EftsClient, params: dict, offset: int, size: int) -> dict:
   while True:
     try:
       return efts._fetch_page(params, offset=offset, size=size)
-    except (requests.ConnectionError, requests.Timeout):
+    except requests.ConnectionError, requests.Timeout:
       if attempt >= CONNECTION_RETRIES:
         raise
       time.sleep(CONNECTION_RETRY_DELAY * 2**attempt)

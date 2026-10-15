@@ -56,7 +56,7 @@ class UserNotFound(Exception):
 class UserDeletionBlocked(Exception):
   """The user's account still holds resources that must be resolved first."""
 
-  def __init__(self, blockers: list["DeletionBlocker"]):
+  def __init__(self, blockers: list[DeletionBlocker]):
     self.blockers = blockers
     super().__init__("; ".join(b.detail for b in blockers))
 

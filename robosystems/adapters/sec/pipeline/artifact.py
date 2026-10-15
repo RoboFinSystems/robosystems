@@ -147,7 +147,7 @@ def sec_knowledge_artifacts(
 
 def _upload_artifact(
   context: AssetExecutionContext,
-  local_path: "Path",
+  local_path: Path,
   filename: str,
   publish_r2: bool = False,
 ) -> None:
@@ -169,7 +169,7 @@ def _upload_artifact(
 
 def _upload_artifact_r2(
   context: AssetExecutionContext,
-  local_path: "Path",
+  local_path: Path,
   filename: str,
 ) -> None:
   """Best-effort; a no-op when R2 is not configured."""

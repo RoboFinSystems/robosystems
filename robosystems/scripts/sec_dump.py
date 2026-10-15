@@ -245,7 +245,7 @@ def graph_api_running() -> bool:
       timeout=10,
       check=False,
     )
-  except (OSError, subprocess.SubprocessError):
+  except OSError, subprocess.SubprocessError:
     return False
   return bool(result.stdout.strip())
 

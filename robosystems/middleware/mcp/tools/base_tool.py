@@ -13,7 +13,7 @@ from robosystems.middleware.mcp.query_validator import GraphQueryValidator
 class BaseTool(ABC):
   """Shared client access, query validation, and logging for MCP tools."""
 
-  def __init__(self, client: "GraphMCPClient"):
+  def __init__(self, client: GraphMCPClient):
     self.client = client
     self.validator = GraphQueryValidator()
 

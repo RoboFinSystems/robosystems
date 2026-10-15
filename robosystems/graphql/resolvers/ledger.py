@@ -203,7 +203,7 @@ class LedgerQuery:
         response = reads_entity.get_entity(session, entity_id)
     except EntityNotInGraphError as exc:
       raise strawberry.exceptions.StrawberryGraphQLError(str(exc)) from exc
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     if response is None:
       return None
@@ -223,7 +223,7 @@ class LedgerQuery:
     try:
       with _open_session_for_any(info, _ENTITY_EXTENSIONS) as session:
         responses = reads_entity.list_entities(session, source=source)
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return [LedgerEntity.from_pydantic(r) for r in responses]
 
@@ -243,7 +243,7 @@ class LedgerQuery:
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_agent.get_agent(session, id)
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     if response is None:
       return None
@@ -277,7 +277,7 @@ class LedgerQuery:
           limit=limit,
           offset=offset,
         )
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return [Agent.from_pydantic(r) for r in responses]
 
@@ -299,7 +299,7 @@ class LedgerQuery:
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_ar_ap.compute_open_receivables(session, entity_id)
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return OpenBalanceAggregate.from_pydantic(response)
 
@@ -315,7 +315,7 @@ class LedgerQuery:
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_ar_ap.compute_open_payables(session, entity_id)
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return OpenBalanceAggregate.from_pydantic(response)
 
@@ -331,7 +331,7 @@ class LedgerQuery:
     try:
       with _open_session(info, "roboledger") as session:
         responses = reads_ar_ap.list_open_receivables_by_agent(session, entity_id)
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return [OpenBalanceByAgent.from_pydantic(r) for r in responses]
 
@@ -347,7 +347,7 @@ class LedgerQuery:
     try:
       with _open_session(info, "roboledger") as session:
         responses = reads_ar_ap.list_open_payables_by_agent(session, entity_id)
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return [OpenBalanceByAgent.from_pydantic(r) for r in responses]
 
@@ -367,7 +367,7 @@ class LedgerQuery:
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_event_block.get_event_block(session, id)
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     if response is None:
       return None
@@ -427,7 +427,7 @@ class LedgerQuery:
           offset=offset,
           entity_id=entity_id,
         )
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return [EventBlock.from_pydantic(r) for r in responses]
 
@@ -462,7 +462,7 @@ class LedgerQuery:
     try:
       with _open_session(info, "roboledger") as session:
         counts = reads_summary.get_ledger_counts(session, entity_id)
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
 
     connection_count = 0
@@ -528,7 +528,7 @@ class LedgerQuery:
           offset=offset,
           entity_id=entity_id,
         )
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return AccountList.from_pydantic(response)
 
@@ -556,7 +556,7 @@ class LedgerQuery:
         response = reads_accounts.get_account_tree(
           session, include_inactive=bool(include_inactive), entity_id=entity_id
         )
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return AccountTree(
       roots=[AccountTreeNode.from_pydantic(n) for n in response.roots],
@@ -604,7 +604,7 @@ class LedgerQuery:
         response = reads_bank_accounts.list_bank_accounts(
           session, entity_id=entity_id, connections=health
         )
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return BankAccountList.from_pydantic(response)
 
@@ -637,7 +637,7 @@ class LedgerQuery:
         )
     except reads_account_rollups.MappingNotFoundError:
       return None
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return AccountRollups.from_pydantic(response)
 
@@ -698,7 +698,7 @@ class LedgerQuery:
         response = reads_trial_balance.get_trial_balance(
           session, start_date=start_date, end_date=end_date, entity_id=entity_id
         )
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return TrialBalance.from_pydantic(response)
 
@@ -735,7 +735,7 @@ class LedgerQuery:
           offset=offset,
           entity_id=entity_id,
         )
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return LedgerTransactionList.from_pydantic(response)
 
@@ -753,7 +753,7 @@ class LedgerQuery:
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_transactions.get_transaction(session, transaction_id)
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     if response is None:
       return None
@@ -814,7 +814,7 @@ class LedgerQuery:
           offset=offset,
           entity_id=entity_id,
         )
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return LedgerJournalEntryList.from_pydantic(response)
 
@@ -836,7 +836,7 @@ class LedgerQuery:
         response = reads_taxonomies.list_taxonomies(
           session, taxonomy_type=taxonomy_type
         )
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return TaxonomyList.from_pydantic(response)
 
@@ -846,7 +846,7 @@ class LedgerQuery:
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_taxonomies.get_reporting_taxonomy(session)
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     if response is None:
       return None
@@ -886,7 +886,7 @@ class LedgerQuery:
           limit=limit,
           offset=offset,
         )
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return ElementList.from_pydantic(response)
 
@@ -927,7 +927,7 @@ class LedgerQuery:
         )
     except EntityNotInGraphError as exc:
       raise strawberry.exceptions.StrawberryGraphQLError(str(exc)) from exc
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return [Element.from_pydantic(r) for r in rows]
 
@@ -962,7 +962,7 @@ class LedgerQuery:
         rows = reads_taxonomies.list_flow_candidates(session, reporting_style_id)
     except EntityNotInGraphError as exc:
       raise strawberry.exceptions.StrawberryGraphQLError(str(exc)) from exc
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return [FlowCandidate.from_pydantic(r) for r in rows]
 
@@ -982,7 +982,7 @@ class LedgerQuery:
         responses = reads_taxonomies.list_unmapped_elements(
           session, mapping_id=mapping_id
         )
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return [UnmappedElement.from_pydantic(r) for r in responses]
 
@@ -1006,7 +1006,7 @@ class LedgerQuery:
         response = reads_taxonomies.list_structures(
           session, taxonomy_id=taxonomy_id, block_type=block_type
         )
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return StructureList.from_pydantic(response)
 
@@ -1025,7 +1025,7 @@ class LedgerQuery:
         response = reads_taxonomies.list_mappings(session, entity_id)
     except EntityNotInGraphError as exc:
       raise strawberry.exceptions.StrawberryGraphQLError(str(exc)) from exc
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return StructureList.from_pydantic(response)
 
@@ -1043,7 +1043,7 @@ class LedgerQuery:
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_taxonomies.get_mapping_detail(session, mapping_id)
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     if response is None:
       return None
@@ -1076,7 +1076,7 @@ class LedgerQuery:
         response = reads_classification.classification_stats(session, period, entity_id)
     except EntityNotInGraphError as exc:
       raise strawberry.exceptions.StrawberryGraphQLError(str(exc)) from exc
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return ClassificationStats.from_pydantic(response)
 
@@ -1094,7 +1094,7 @@ class LedgerQuery:
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_taxonomies.get_mapping_coverage(session, mapping_id)
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return MappingCoverage.from_pydantic(response)
 
@@ -1119,7 +1119,7 @@ class LedgerQuery:
         response = reads_taxonomies.get_mapped_trial_balance(
           session, mapping_id, start_date=start_date, end_date=end_date
         )
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return MappedTrialBalance.from_pydantic(response)
 
@@ -1145,7 +1145,7 @@ class LedgerQuery:
         response = reads_schedules.get_period_close_status(
           session, _schedule_svc, period_start, period_end, entity_id=entity_id
         )
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return PeriodCloseStatus.from_pydantic(response)
 
@@ -1199,7 +1199,7 @@ class LedgerQuery:
           last_sync_at,
           _fiscal_svc,
         )
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return FiscalCalendar.from_pydantic(response)
 
@@ -1239,7 +1239,7 @@ class LedgerQuery:
         response = reads_period_drafts.list_period_drafts(
           session, period, writeback=writeback, entity_id=entity_id, shadow=shadow
         )
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return PeriodDrafts.from_pydantic(response)
 
@@ -1260,7 +1260,7 @@ class LedgerQuery:
         response = reads_closing_book.get_closing_book_structures(
           session, entity_id=entity_id
         )
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return ClosingBookStructures.from_pydantic(response)
 
@@ -1289,7 +1289,7 @@ class LedgerQuery:
           lifecycle=PydanticReportLifecycle(lifecycle.value),
           entity_id=entity_id,
         )
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return ReportList.from_pydantic(response)
 
@@ -1307,7 +1307,7 @@ class LedgerQuery:
     try:
       with _open_session_for_any(info, _REPORT_EXTENSIONS) as session:
         response = reads_reports.get_report(session, report_id)
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     if response is None:
       return None
@@ -1331,7 +1331,7 @@ class LedgerQuery:
     try:
       with _open_session_for_any(info, _REPORT_EXTENSIONS) as session:
         response = reads_reports.get_report_package(session, report_id)
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     if response is None:
       return None
@@ -1396,7 +1396,7 @@ class LedgerQuery:
         message=str(exc),
         extensions={"code": "REPORT_BUNDLE_SIGNING_FAILED"},
       )
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     if response is None:
       return None
@@ -1428,7 +1428,7 @@ class LedgerQuery:
         )
     except reads_reports.StatementStructureNotFoundError:
       return None
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     if response is None:
       return None
@@ -1450,7 +1450,7 @@ class LedgerQuery:
         response = reads_publish_lists.list_publish_lists(
           session, limit=limit, offset=offset
         )
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return PublishListList.from_pydantic(response)
 
@@ -1468,7 +1468,7 @@ class LedgerQuery:
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_publish_lists.get_publish_list(session, list_id)
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     if response is None:
       return None
@@ -1494,6 +1494,6 @@ class LedgerQuery:
         response = reads_blocked_source_graphs.list_blocked_source_graphs(
           session, limit=limit, offset=offset
         )
-    except (ValueError, ProgrammingError):
+    except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return BlockedSourceGraphList.from_pydantic(response)

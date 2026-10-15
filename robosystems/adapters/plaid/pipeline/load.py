@@ -468,7 +468,7 @@ def _planned_entry(event: Event, amount: int, posted_date: str) -> dict[str, Any
       amount=amount,
       metadata=BankFeedMetadata.model_validate(dict(event.metadata_ or {})),
     )
-  except (HandlerMetadataValidationError, ValidationError):
+  except HandlerMetadataValidationError, ValidationError:
     lines = None
   if not lines:
     return {}
@@ -1108,7 +1108,7 @@ def classified_to(event: Event) -> str | None:
       BankFeedMetadata.model_validate(dict(event.metadata_ or {})),
       amount=int(event.amount or 0),
     )
-  except (HandlerMetadataValidationError, ValidationError):
+  except HandlerMetadataValidationError, ValidationError:
     return None
   if allocations and len(allocations) == 1:
     return str(allocations[0].element_id)

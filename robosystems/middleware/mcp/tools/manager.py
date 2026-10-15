@@ -536,7 +536,7 @@ class GraphMCPTools:
       f"read_only={self.read_only}, registrar_tools={len(self._registrar_dispatch)})"
     )
 
-  def _get_cached_meta(self) -> "GraphExtensionContext | None":
+  def _get_cached_meta(self) -> GraphExtensionContext | None:
     """Graph metadata, loaded once per handler; None on failure (the gate reloads)."""
     if self._cached_meta is not None:
       return self._cached_meta

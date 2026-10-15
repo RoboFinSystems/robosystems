@@ -117,7 +117,7 @@ class BillingAuditLog(Base):
     actor_user_id: str | None = None,
     actor_ip: str | None = None,
     commit: bool = True,
-  ) -> "BillingAuditLog":
+  ) -> BillingAuditLog:
     """Create an audit log entry.
 
     Requires at least one of ``org_id`` / ``subscription_id`` / ``invoice_id``
@@ -170,7 +170,7 @@ class BillingAuditLog(Base):
     org_id: str,
     event_type: BillingEventType | None = None,
     limit: int = 100,
-  ) -> list["BillingAuditLog"]:
+  ) -> list[BillingAuditLog]:
     """Get audit history for an organization."""
     query = session.query(cls).filter(cls.org_id == org_id)
 
@@ -186,7 +186,7 @@ class BillingAuditLog(Base):
     user_id: str,
     event_type: BillingEventType | None = None,
     limit: int = 100,
-  ) -> list["BillingAuditLog"]:
+  ) -> list[BillingAuditLog]:
     """Get audit history for a user (looks up user's org first)."""
     from robosystems.models.core.org import OrgUser
 
@@ -203,7 +203,7 @@ class BillingAuditLog(Base):
     session: Session,
     subscription_id: str,
     limit: int = 100,
-  ) -> list["BillingAuditLog"]:
+  ) -> list[BillingAuditLog]:
     """Get audit history for a subscription."""
     return (
       session.query(cls)
@@ -218,7 +218,7 @@ class BillingAuditLog(Base):
     cls,
     session: Session,
     invoice_id: str,
-  ) -> list["BillingAuditLog"]:
+  ) -> list[BillingAuditLog]:
     """Get audit history for an invoice."""
     return (
       session.query(cls)
@@ -253,7 +253,7 @@ class BillingAuditLog(Base):
     event_type: str,
     event_data: dict,
     session: Session,
-  ) -> "BillingAuditLog":
+  ) -> BillingAuditLog:
     """Record a webhook event, making a redelivery detectable.
 
     ``event_type`` is the provider's own type string (e.g.

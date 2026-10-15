@@ -71,7 +71,7 @@ class TuningConfig:
     if env_value is not None:
       try:
         return int(env_value)
-      except (ValueError, TypeError):
+      except ValueError, TypeError:
         logger.warning(f"Invalid int env var {env_key}: {env_value}")
 
     manager = _get_parameter_manager()
@@ -88,7 +88,7 @@ class TuningConfig:
     if env_value is not None:
       try:
         return float(env_value)
-      except (ValueError, TypeError):
+      except ValueError, TypeError:
         logger.warning(f"Invalid float env var {env_key}: {env_value}")
 
     manager = _get_parameter_manager()

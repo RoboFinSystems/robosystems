@@ -12,7 +12,7 @@ import logging
 import logging.config
 import time
 import traceback
-from datetime import datetime
+from datetime import UTC, datetime
 from functools import wraps
 from typing import Any
 
@@ -24,7 +24,9 @@ class StructuredFormatter(logging.Formatter):
 
   def format(self, record: logging.LogRecord) -> str:
     log_entry = {
-      "timestamp": datetime.utcfromtimestamp(record.created).isoformat() + "Z",
+      "timestamp": datetime.fromtimestamp(record.created, UTC)
+      .isoformat()
+      .replace("+00:00", "Z"),
       "level": record.levelname,
       "component": getattr(record, "component", record.name),
       "message": record.getMessage(),

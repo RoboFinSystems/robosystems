@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from sqlalchemy import (
   Boolean,
@@ -167,7 +167,7 @@ class UserRepository(Model):
     monthly_credits: int = 0,
     expires_at: datetime | None = None,
     metadata: dict[str, Any] | None = None,
-  ) -> "UserRepository":
+  ) -> UserRepository:
     """Create or update repository access for a user.
 
     Upserts on the (user, repository) pair, then creates or resizes the paired
@@ -252,7 +252,7 @@ class UserRepository(Model):
   @classmethod
   def get_by_user_and_repository(
     cls, user_id: str, repository_name: str, session: Session
-  ) -> Optional["UserRepository"]:
+  ) -> UserRepository | None:
     """Get access record for a user and repository."""
     return (
       session.query(cls)
@@ -291,7 +291,7 @@ class UserRepository(Model):
   @classmethod
   def get_user_repositories(
     cls, user_id: str, session: Session, active_only: bool = True
-  ) -> Sequence["UserRepository"]:
+  ) -> Sequence[UserRepository]:
     """Get all repositories a user has access to."""
     query = session.query(cls).filter(cls.user_id == user_id)
 
@@ -306,7 +306,7 @@ class UserRepository(Model):
   @classmethod
   def get_repository_users(
     cls, repository_name: str, session: Session
-  ) -> Sequence["UserRepository"]:
+  ) -> Sequence[UserRepository]:
     """Get all users with access to a repository."""
     return (
       session.query(cls)
@@ -322,7 +322,7 @@ class UserRepository(Model):
   @classmethod
   def get_by_repository_type(
     cls, repository_type: RepositoryType, session: Session
-  ) -> Sequence["UserRepository"]:
+  ) -> Sequence[UserRepository]:
     """Get all access records for a repository type."""
     return (
       session.query(cls)
@@ -477,7 +477,7 @@ class UserRepository(Model):
     access_level_str = plan_details.get("access_level", "READ")
     try:
       access_level = RepositoryAccessLevel(access_level_str.lower())
-    except (ValueError, AttributeError):
+    except ValueError, AttributeError:
       access_level = RepositoryAccessLevel.READ
 
     return {

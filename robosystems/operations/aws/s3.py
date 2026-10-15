@@ -529,7 +529,7 @@ class BackupMetadata:
     return data
 
   @classmethod
-  def from_dict(cls, data: dict[str, Any]) -> "BackupMetadata":
+  def from_dict(cls, data: dict[str, Any]) -> BackupMetadata:
     data["timestamp"] = datetime.fromisoformat(data["timestamp"])
     return cls(**data)
 

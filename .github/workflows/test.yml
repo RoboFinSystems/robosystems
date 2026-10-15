@@ -6,7 +6,7 @@ on:
       python-version:
         required: false
         type: string
-        default: "3.13"
+        default: "3.14"
       runner_config:
         required: true
         type: string
@@ -140,7 +140,7 @@ jobs:
         if: runner.os == 'Linux' && !contains(runner.name, 'robosystems')
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: ${{ inputs.python-version || '3.13' }}
+          python-version: ${{ inputs.python-version || '3.14' }}
 
       - name: Install uv (GitHub-hosted runners only)
         if: runner.os == 'Linux' && !contains(runner.name, 'robosystems')

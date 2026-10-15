@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy import (
   BigInteger,
@@ -76,7 +76,7 @@ class GraphTable(Base):
     session: Session,
     target_node_type: str | None = None,
     commit: bool = True,
-  ) -> "GraphTable":
+  ) -> GraphTable:
     table = cls(
       graph_id=graph_id,
       table_name=table_name,
@@ -94,7 +94,7 @@ class GraphTable(Base):
   @classmethod
   def get_by_name(
     cls, graph_id: str, table_name: str, session: Session
-  ) -> Optional["GraphTable"]:
+  ) -> GraphTable | None:
     return (
       session.query(cls)
       .filter(cls.graph_id == graph_id, cls.table_name == table_name)
@@ -102,7 +102,7 @@ class GraphTable(Base):
     )
 
   @classmethod
-  def get_all_for_graph(cls, graph_id: str, session: Session) -> Sequence["GraphTable"]:
+  def get_all_for_graph(cls, graph_id: str, session: Session) -> Sequence[GraphTable]:
     return (
       session.query(cls)
       .filter(cls.graph_id == graph_id)
@@ -111,7 +111,7 @@ class GraphTable(Base):
     )
 
   @classmethod
-  def get_by_id(cls, table_id: str, session: Session) -> Optional["GraphTable"]:
+  def get_by_id(cls, table_id: str, session: Session) -> GraphTable | None:
     return session.query(cls).filter(cls.id == table_id).first()
 
   def update_stats(

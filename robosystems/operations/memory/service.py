@@ -216,7 +216,7 @@ def _load_provenance(value: Any) -> dict[str, Any] | None:
     try:
       parsed = json.loads(value)
       return parsed if isinstance(parsed, dict) else None
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
       return None
   return None
 

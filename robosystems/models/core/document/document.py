@@ -11,7 +11,6 @@ identifies them, and nothing is indexed. A stored file never changes.
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Optional
 
 from sqlalchemy import (
   BigInteger,
@@ -100,7 +99,7 @@ class Document(Model):
     source_type: str = "uploaded_doc",
     source_provider: str | None = None,
     sections_indexed: int = 0,
-  ) -> "Document":
+  ) -> Document:
     """Create a new document."""
     doc = cls(
       graph_id=graph_id,
@@ -126,7 +125,7 @@ class Document(Model):
   @classmethod
   def get_by_id_and_graph(
     cls, document_id: str, graph_id: str, session: Session
-  ) -> Optional["Document"]:
+  ) -> Document | None:
     """Get document by ID with graph_id verification."""
     return (
       session.query(cls).filter(cls.id == document_id, cls.graph_id == graph_id).first()
@@ -135,7 +134,7 @@ class Document(Model):
   @classmethod
   def get_by_external_id(
     cls, graph_id: str, external_id: str, session: Session
-  ) -> Optional["Document"]:
+  ) -> Document | None:
     """Get document by external ID within a graph."""
     return (
       session.query(cls)
@@ -150,7 +149,7 @@ class Document(Model):
     session: Session,
     source_type: str | None = None,
     folder: str | None = None,
-  ) -> Sequence["Document"]:
+  ) -> Sequence[Document]:
     """Get all documents for a graph, optionally filtered by source type
     and/or folder."""
     query = session.query(cls).filter(cls.graph_id == graph_id)

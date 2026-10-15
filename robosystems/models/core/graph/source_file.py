@@ -8,7 +8,6 @@ staging and ingestion.
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Optional
 
 from sqlalchemy import (
   BigInteger,
@@ -95,7 +94,7 @@ class SourceFile(Base):
     partition_key: str | None = None,
     status: str = "pending",
     commit: bool = True,
-  ) -> "SourceFile":
+  ) -> SourceFile:
     """Create a new source file record."""
     source_file = cls(
       graph_id=graph_id,
@@ -116,9 +115,7 @@ class SourceFile(Base):
     return source_file
 
   @classmethod
-  def get_by_storage_key(
-    cls, storage_key: str, session: Session
-  ) -> Optional["SourceFile"]:
+  def get_by_storage_key(cls, storage_key: str, session: Session) -> SourceFile | None:
     """Get source file by S3 storage key."""
     return session.query(cls).filter(cls.storage_key == storage_key).first()
 
@@ -133,7 +130,7 @@ class SourceFile(Base):
     source_id: str | None = None,
     partition_key: str | None = None,
     commit: bool = True,
-  ) -> tuple["SourceFile", bool]:
+  ) -> tuple[SourceFile, bool]:
     """Look up by ``storage_key`` or insert; returns ``(row, created)``."""
     existing = cls.get_by_storage_key(storage_key, session)
     if existing:
@@ -154,7 +151,7 @@ class SourceFile(Base):
   @classmethod
   def get_by_graph_id(
     cls, graph_id: str, session: Session, status: str | None = None
-  ) -> Sequence["SourceFile"]:
+  ) -> Sequence[SourceFile]:
     """Get all source files for a graph, optionally filtered by status."""
     query = session.query(cls).filter(cls.graph_id == graph_id)
     if status:
@@ -168,7 +165,7 @@ class SourceFile(Base):
     session: Session,
     limit: int | None = None,
     max_attempts: int | None = None,
-  ) -> Sequence["SourceFile"]:
+  ) -> Sequence[SourceFile]:
     """Pending files, oldest first. ``max_attempts`` caps retry churn by
     skipping files that have already been tried that many times."""
     query = (
@@ -189,7 +186,7 @@ class SourceFile(Base):
     session: Session,
     max_attempts: int | None = None,
     limit: int | None = None,
-  ) -> Sequence["SourceFile"]:
+  ) -> Sequence[SourceFile]:
     """Errored files eligible for retry, least-recently-attempted first."""
     query = session.query(cls).filter(cls.graph_id == graph_id, cls.status == "error")
     if max_attempts:

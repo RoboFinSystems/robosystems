@@ -181,7 +181,7 @@ class GraphUsage(Model):
     instance_id: str | None = None,
     region: str | None = None,
     auto_commit: bool = True,
-  ) -> "GraphUsage":
+  ) -> GraphUsage:
     """Record a storage snapshot, optionally broken down by storage class.
 
     The ``*_storage_gb`` breakdown splits S3 (files, table imports) from EBS
@@ -239,7 +239,7 @@ class GraphUsage(Model):
     status_code: int | None = None,
     metadata: dict[str, Any] | None = None,
     auto_commit: bool = True,
-  ) -> "GraphUsage":
+  ) -> GraphUsage:
     """Record credit consumption event."""
     import json
 

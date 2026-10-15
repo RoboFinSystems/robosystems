@@ -136,7 +136,7 @@ def stale_graph_materialization_sensor(context: SensorEvaluationContext):
           else {"stale_at": None, "submitted_at": entry}
           for gid, entry in json.loads(context.cursor).items()
         }
-      except (json.JSONDecodeError, TypeError, AttributeError):
+      except json.JSONDecodeError, TypeError, AttributeError:
         submitted = {}
 
     stale_graphs = (
@@ -180,7 +180,7 @@ def stale_graph_materialization_sensor(context: SensorEvaluationContext):
           prior_at = date_parser.isoparse(str(prior.get("submitted_at")))
           if (now - prior_at).total_seconds() < _FAILED_RUN_RETRY_SECONDS:
             continue
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
           pass
 
       # The window index keeps a retry of the same event from deduping

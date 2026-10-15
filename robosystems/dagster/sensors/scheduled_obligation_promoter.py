@@ -70,7 +70,7 @@ def scheduled_obligation_promotion_sensor(context: SensorEvaluationContext):
     if context.cursor:
       try:
         in_progress = json.loads(context.cursor)
-      except (json.JSONDecodeError, TypeError):
+      except json.JSONDecodeError, TypeError:
         in_progress = {}
 
     active_in_progress: dict[str, str] = {}

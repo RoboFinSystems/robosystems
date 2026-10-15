@@ -3,7 +3,6 @@
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Optional
 
 from sqlalchemy import (
   Column,
@@ -58,13 +57,13 @@ class OrgUser(Model):
     return f"<OrgUser org={self.org_id} user={self.user_id} role={self.role}>"
 
   @classmethod
-  def get_by_id(cls, id: str, session: Session) -> Optional["OrgUser"]:
+  def get_by_id(cls, id: str, session: Session) -> OrgUser | None:
     return session.query(cls).filter(cls.id == id).first()
 
   @classmethod
   def get_by_org_and_user(
     cls, org_id: str, user_id: str, session: Session
-  ) -> Optional["OrgUser"]:
+  ) -> OrgUser | None:
     return (
       session.query(cls).filter(cls.org_id == org_id, cls.user_id == user_id).first()
     )
@@ -77,7 +76,7 @@ class OrgUser(Model):
     role: OrgRole,
     session: Session,
     auto_commit: bool = True,
-  ) -> "OrgUser":
+  ) -> OrgUser:
     org_user = cls(org_id=org_id, user_id=user_id, role=role)
     session.add(org_user)
 
@@ -92,12 +91,12 @@ class OrgUser(Model):
     return org_user
 
   @classmethod
-  def get_user_orgs(cls, user_id: str, session: Session) -> Sequence["OrgUser"]:
+  def get_user_orgs(cls, user_id: str, session: Session) -> Sequence[OrgUser]:
     """Get all organizations a user belongs to."""
     return session.query(cls).filter(cls.user_id == user_id).all()
 
   @classmethod
-  def get_org_users(cls, org_id: str, session: Session) -> Sequence["OrgUser"]:
+  def get_org_users(cls, org_id: str, session: Session) -> Sequence[OrgUser]:
     """Get all users of an organization."""
     return session.query(cls).filter(cls.org_id == org_id).all()
 

@@ -144,6 +144,6 @@ async def get_queue_position(operation_id: str) -> tuple[int | None, int]:
       if json.loads(raw).get("task_id") == operation_id:
         position = index + 1
         break
-    except (json.JSONDecodeError, AttributeError):
+    except json.JSONDecodeError, AttributeError:
       continue
   return position, len(entries)

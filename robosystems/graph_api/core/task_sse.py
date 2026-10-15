@@ -237,6 +237,6 @@ def _calculate_duration(task: dict[str, Any]) -> float:
       completed = datetime.fromisoformat(task["completed_at"])
       started = datetime.fromisoformat(task["started_at"])
       return (completed - started).total_seconds()
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
       pass
   return 0.0

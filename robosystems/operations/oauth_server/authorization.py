@@ -206,7 +206,7 @@ class AuthorizationCodeStore:
       return None
     try:
       payload = json.loads(raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
       return None
     return payload if isinstance(payload, dict) else None
 

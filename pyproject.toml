@@ -2,7 +2,7 @@
 name = "robosystems"
 version = "1.17.2"
 description = "RoboSystems"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 authors = [
     {name = "RFS LLC"},
 ]
@@ -18,7 +18,7 @@ classifiers = [
     "Natural Language :: English",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Office/Business :: Financial",
     "Topic :: Office/Business :: Financial :: Accounting",
     "Topic :: Office/Business :: Financial :: Investment",
@@ -59,7 +59,7 @@ dependencies = [
     "dagster-postgres>=0.29.15,<1.0",
     "dagster-aws>=0.29.15,<1.0",
     # Data Transformation (dbt)
-    "dbt-core>=1.11.14,<1.12",  # hold: 1.12 adds a beta parser dep + the metricflow subtree we don't use; 1.11.14 has the sqlparse<0.7.0 lift
+    "dbt-core>=1.12.0,<1.13",  # 1.12 is the first line that runs on Python 3.14 (mashumaro <3.18; 3.17 added 3.14)
     "dbt-duckdb>=1.10.0,<2.0",
     # Data Processing & Analytics
     "fastembed>=0.8.0,<1.0",
@@ -176,7 +176,7 @@ exclude = [
 ]
 line-length = 88
 indent-width = 2
-target-version = "py313"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = [
@@ -244,7 +244,7 @@ line-ending = "auto"
 include = ["robosystems", "main.py", "examples", "bin"]
 exclude = ["**/__pycache__", ".venv", "robosystems/adapters/sec/arelle", "tests"]
 extraPaths = ["."]
-pythonVersion = "3.13"
+pythonVersion = "3.14"
 venvPath = "."
 venv = ".venv"
 typeCheckingMode = "standard"

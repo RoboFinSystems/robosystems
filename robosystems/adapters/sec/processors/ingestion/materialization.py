@@ -152,7 +152,7 @@ class LadybugMaterializer:
       )
 
   async def _rebuild_ladybug_database(
-    self, client: "GraphClient", reset_staging: bool = False
+    self, client: GraphClient, reset_staging: bool = False
   ) -> None:
     """Delete the LadybugDB database and recreate it with the same schema.
 
@@ -240,7 +240,7 @@ class LadybugMaterializer:
   async def _trigger_ingestion(
     self,
     table_names: list[str],
-    graph_client: "GraphClient",
+    graph_client: GraphClient,
     batch_materialization: bool = True,
     batch_size: int = MATERIALIZATION_BATCH_SIZE,
     progress_callback: ProgressCallback | None = None,

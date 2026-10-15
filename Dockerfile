@@ -4,8 +4,8 @@
 FROM ghcr.io/ladybugdb/extension-repo:latest@sha256:842f4e8540a5bc5365f6245ba6ded0a5aa336d454cadb9ad41fb425833b17e98 AS extensions
 
 # Stage 1: Builder
-# Using Python 3.13 slim (Debian Trixie/13) for GLIBC 2.38+ required by LadybugDB extensions
-FROM public.ecr.aws/docker/library/python:3.13-slim AS builder
+# Using Python 3.14 slim (Debian Trixie/13) for GLIBC 2.38+ required by LadybugDB extensions
+FROM public.ecr.aws/docker/library/python:3.14-slim AS builder
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
@@ -110,8 +110,8 @@ ENV FASTEMBED_CACHE_PATH=/app/fastembed_cache
 RUN .venv/bin/python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')"
 
 # Stage 2: Runtime
-# Using Python 3.13 slim (Debian Trixie/13) for GLIBC 2.38+ required by LadybugDB extensions
-FROM public.ecr.aws/docker/library/python:3.13-slim
+# Using Python 3.14 slim (Debian Trixie/13) for GLIBC 2.38+ required by LadybugDB extensions
+FROM public.ecr.aws/docker/library/python:3.14-slim
 
 # Accept architecture argument in runtime stage
 ARG TARGETARCH=arm64

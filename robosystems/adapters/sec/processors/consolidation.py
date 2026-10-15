@@ -55,7 +55,7 @@ def get_quarter_end_date(year: int, quarter: int) -> str:
 
 
 def consolidate_parquet_tables_by_date(
-  results: list["ProcessedFilingResult"],
+  results: list[ProcessedFilingResult],
 ) -> dict[str, dict[str, bytes]]:
   """Merge filing results into ``{filing_date: {table_key: parquet_bytes}}``.
 

@@ -8,7 +8,6 @@ replay and revokes the whole family.
 import hashlib
 import secrets
 from datetime import UTC, datetime, timedelta
-from typing import Optional
 
 from sqlalchemy import Column, DateTime, ForeignKey, Index, String, or_
 from sqlalchemy.exc import SQLAlchemyError
@@ -101,7 +100,7 @@ class OAuthToken(Model):
     user_id: str,
     session: Session,
     family_id: str | None = None,
-  ) -> tuple["OAuthToken", str, "OAuthToken", str, int]:
+  ) -> tuple[OAuthToken, str, OAuthToken, str, int]:
     """Mint an access + refresh token for a grant.
 
     Returns ``(access_row, access_plain, refresh_row, refresh_plain,
@@ -161,7 +160,7 @@ class OAuthToken(Model):
   @classmethod
   def get_by_plaintext(
     cls, plain_token: str, token_type: str, session: Session
-  ) -> Optional["OAuthToken"]:
+  ) -> OAuthToken | None:
     """Resolve a presented token to its row, regardless of state. Callers
     decide what an expired / consumed / revoked row means (a consumed
     refresh token is a replay signal, not merely a miss)."""

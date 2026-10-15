@@ -348,14 +348,14 @@ async def sso_token_exchange(
 
     try:
       token_session_version = int(payload.get("session_version", 0))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
       raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid SSO token"
       )
 
     try:
       current_session_version = int(getattr(user, "session_version", 0) or 0)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
       current_session_version = 0
 
     if token_session_version != current_session_version:
@@ -618,7 +618,7 @@ async def sso_complete(
     try:
       handoff_session_version = int(session_data.get("session_version", 0) or 0)
       current_session_version = int(getattr(user, "session_version", 0) or 0)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
       # Fail closed: an unparseable version must not count as a match.
       raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session data"

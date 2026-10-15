@@ -27,7 +27,7 @@ def parse_ulid(ulid_str: str) -> ULID | None:
     if "_" in ulid_str:
       ulid_str = ulid_str.split("_", 1)[1]
     return ULID.from_str(ulid_str)
-  except (ValueError, IndexError):
+  except ValueError, IndexError:
     return None
 
 

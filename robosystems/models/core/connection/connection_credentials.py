@@ -5,7 +5,7 @@ import json
 import secrets
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any, Optional
+from typing import Any
 
 from cryptography.fernet import Fernet
 from sqlalchemy import Boolean, Column, DateTime, String, Text
@@ -129,7 +129,7 @@ class ConnectionCredentials(Model):
     credentials: dict[str, Any],
     session: Session,
     expires_at: datetime | None = None,
-  ) -> "ConnectionCredentials":
+  ) -> ConnectionCredentials:
     """Create new connection credentials."""
     cred = cls(
       connection_id=connection_id,
@@ -151,7 +151,7 @@ class ConnectionCredentials(Model):
   @classmethod
   def get_by_connection_id(
     cls, connection_id: str, session: Session
-  ) -> Optional["ConnectionCredentials"]:
+  ) -> ConnectionCredentials | None:
     """Get credentials by connection ID."""
     return (
       session.query(cls)
@@ -162,7 +162,7 @@ class ConnectionCredentials(Model):
   @classmethod
   def get_by_user_and_provider(
     cls, user_id: str, provider: str, session: Session
-  ) -> Sequence["ConnectionCredentials"]:
+  ) -> Sequence[ConnectionCredentials]:
     """Get all active credentials for a user and provider."""
     return (
       session.query(cls)

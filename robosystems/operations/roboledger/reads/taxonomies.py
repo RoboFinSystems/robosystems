@@ -446,7 +446,7 @@ def _load_renderable_concepts(
   result = {r.element_id for r in rows}
   try:
     setattr(session, cache_attr, result)
-  except (AttributeError, TypeError):
+  except AttributeError, TypeError:
     pass
   return result
 
@@ -488,7 +488,7 @@ def _load_rollup_concepts(
   result = {r.element_id for r in rows}
   try:
     setattr(session, cache_attr, result)
-  except (AttributeError, TypeError):
+  except AttributeError, TypeError:
     pass
   return result
 
@@ -521,7 +521,7 @@ def load_subtotal_concepts(session: Session, reporting_style_id: str) -> set[str
   )
   try:
     setattr(session, cache_attr, result)
-  except (AttributeError, TypeError):
+  except AttributeError, TypeError:
     pass
   return result
 
@@ -565,7 +565,7 @@ def _load_rs_gaap_presentation_set(session: Session) -> set[str]:
   result = {r.element_id for r in rows}
   try:
     setattr(session, _RS_GAAP_PRESENTATION_SET_ATTR, result)
-  except (AttributeError, TypeError):
+  except AttributeError, TypeError:
     # Some test sessions reject attribute writes.
     pass
   return result
@@ -907,7 +907,7 @@ def _load_calc_parents(session: Session) -> dict[str, set[str]]:
       parents.setdefault(child_id, set()).add(parent_id)
   try:
     session._calc_parents_cache = parents
-  except (AttributeError, TypeError):
+  except AttributeError, TypeError:
     pass  # MagicMock or other immutable session in tests
   return parents
 
@@ -924,7 +924,7 @@ def _resolve_root_ids(session: Session) -> set[str]:
   root_ids = {row[0] for row in rows}
   try:
     session._root_ids_cache = root_ids
-  except (AttributeError, TypeError):
+  except AttributeError, TypeError:
     pass
   return root_ids
 

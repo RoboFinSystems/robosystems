@@ -36,7 +36,7 @@ class PasskeyRegisterOptionsRequest(BaseModel):
   )
 
   @model_validator(mode="after")
-  def _lanes_are_disjoint(self) -> "PasskeyRegisterOptionsRequest":
+  def _lanes_are_disjoint(self) -> PasskeyRegisterOptionsRequest:
     if self.mfa_token and (self.password or self.assertion):
       raise ValueError("mfa_token and a re-auth proof are mutually exclusive")
     if bool(self.password) and bool(self.assertion):
@@ -109,7 +109,7 @@ class PasskeyDeleteRequest(BaseModel):
   )
 
   @model_validator(mode="after")
-  def _exactly_one_proof(self) -> "PasskeyDeleteRequest":
+  def _exactly_one_proof(self) -> PasskeyDeleteRequest:
     if bool(self.password) == bool(self.assertion):
       raise ValueError("Provide exactly one of password or assertion")
     return self
@@ -145,7 +145,7 @@ class MfaVerifyRequest(BaseModel):
   )
 
   @model_validator(mode="after")
-  def _exactly_one_factor(self) -> "MfaVerifyRequest":
+  def _exactly_one_factor(self) -> MfaVerifyRequest:
     if bool(self.assertion) == bool(self.recovery_code):
       raise ValueError("Provide exactly one of assertion or recovery_code")
     return self
@@ -175,7 +175,7 @@ class RecoveryCodesRequest(BaseModel):
   )
 
   @model_validator(mode="after")
-  def _exactly_one_proof(self) -> "RecoveryCodesRequest":
+  def _exactly_one_proof(self) -> RecoveryCodesRequest:
     if bool(self.password) == bool(self.assertion):
       raise ValueError("Provide exactly one of password or assertion")
     return self

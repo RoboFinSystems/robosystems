@@ -1,6 +1,6 @@
 """Shared utilities for schema endpoints."""
 
-import asyncio
+import inspect
 from typing import Any
 
 from robosystems.logger import logger
@@ -23,7 +23,7 @@ async def get_schema_info(repository: Any) -> dict[str, Any]:
   schema_info = {"node_labels": [], "relationship_types": [], "node_properties": {}}
 
   try:
-    if hasattr(repository, "execute_query") and asyncio.iscoroutinefunction(
+    if hasattr(repository, "execute_query") and inspect.iscoroutinefunction(
       repository.execute_query
     ):
       tables_result = await repository.execute_query(SCHEMA_QUERIES["tables"])
@@ -50,7 +50,7 @@ async def get_schema_info(repository: Any) -> dict[str, Any]:
     for node_label in node_tables:
       try:
         table_info_query = f"CALL TABLE_INFO('{node_label}') RETURN *"
-        if hasattr(repository, "execute_query") and asyncio.iscoroutinefunction(
+        if hasattr(repository, "execute_query") and inspect.iscoroutinefunction(
           repository.execute_query
         ):
           columns_result = await repository.execute_query(table_info_query)
@@ -68,7 +68,7 @@ async def get_schema_info(repository: Any) -> dict[str, Any]:
     logger.warning(f"Failed to get complete schema info: {e!s}")
     # Try fallback with simple queries
     try:
-      if hasattr(repository, "execute_query") and asyncio.iscoroutinefunction(
+      if hasattr(repository, "execute_query") and inspect.iscoroutinefunction(
         repository.execute_query
       ):
         tables_result = await repository.execute_query("CALL SHOW_TABLES() RETURN *")

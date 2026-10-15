@@ -146,13 +146,13 @@ class AdvancedAuthProtection:
     return raw
 
   @classmethod
-  def _dump_assessment(cls, assessment: "IPThreatAssessment") -> str:
+  def _dump_assessment(cls, assessment: IPThreatAssessment) -> str:
     data = asdict(assessment)
     data["threat_level"] = assessment.threat_level.value
     return json.dumps(data)
 
   @classmethod
-  def _load_assessment(cls, raw) -> "IPThreatAssessment":
+  def _load_assessment(cls, raw) -> IPThreatAssessment:
     data = cls._load(raw)
     data = dict(data)
     data["threat_level"] = ThreatLevel(data["threat_level"])

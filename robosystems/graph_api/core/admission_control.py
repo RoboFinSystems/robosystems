@@ -23,7 +23,7 @@ def _read_cgroup_limit_bytes() -> int | None:
   """Read the container's cgroup v2 memory limit, or None if unlimited/absent."""
   try:
     raw = (_CGROUP_DIR / "memory.max").read_text().strip()
-  except (FileNotFoundError, NotADirectoryError):
+  except FileNotFoundError, NotADirectoryError:
     return None
   if raw == "max":
     return None

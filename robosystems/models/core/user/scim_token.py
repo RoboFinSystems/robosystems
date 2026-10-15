@@ -3,7 +3,6 @@
 import hashlib
 import secrets
 from datetime import UTC, datetime, timedelta
-from typing import Optional
 
 import bcrypt
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String
@@ -61,7 +60,7 @@ class ScimToken(Model):
     name: str,
     session: Session,
     expires_at: datetime | None = None,
-  ) -> tuple["ScimToken", str]:
+  ) -> tuple[ScimToken, str]:
     """Mint a SCIM token, returning ``(row, plaintext)``.
 
     The plaintext is shown once and never stored — only its bcrypt hash and
@@ -103,15 +102,15 @@ class ScimToken(Model):
     return token, plain_token
 
   @classmethod
-  def get_by_id(cls, token_id: str, session: Session) -> Optional["ScimToken"]:
+  def get_by_id(cls, token_id: str, session: Session) -> ScimToken | None:
     return session.query(cls).filter(cls.id == token_id).first()
 
   @classmethod
-  def get_active_by_org_id(cls, org_id: str, session: Session) -> list["ScimToken"]:
+  def get_active_by_org_id(cls, org_id: str, session: Session) -> list[ScimToken]:
     return session.query(cls).filter(cls.org_id == org_id, cls.is_active).all()
 
   @classmethod
-  def validate_token(cls, plain_token: str, session: Session) -> Optional["ScimToken"]:
+  def validate_token(cls, plain_token: str, session: Session) -> ScimToken | None:
     """Resolve a presented bearer token to an active, unexpired row.
 
     Fingerprint narrows to one candidate row; bcrypt then verifies the

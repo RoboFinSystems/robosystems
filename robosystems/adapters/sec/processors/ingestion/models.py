@@ -28,7 +28,7 @@ class TableInfo:
     }
 
   @classmethod
-  def from_dict(cls, data: dict[str, Any]) -> "TableInfo":
+  def from_dict(cls, data: dict[str, Any]) -> TableInfo:
     return cls(
       name=data["name"],
       row_count=data["row_count"],
@@ -160,7 +160,7 @@ def make_progress_logger(
   return log_progress
 
 
-def s3_url_exists(s3_client: "S3Client", s3_url: str) -> bool:
+def s3_url_exists(s3_client: S3Client, s3_url: str) -> bool:
   s3_path = s3_url.replace("s3://", "")
   bucket_end = s3_path.find("/")
   bucket = s3_path[:bucket_end]
@@ -168,13 +168,13 @@ def s3_url_exists(s3_client: "S3Client", s3_url: str) -> bool:
   return s3_client.object_exists(bucket, key)
 
 
-def s3_prefix_has_objects(s3_client: "S3Client", bucket: str, prefix: str) -> bool:
+def s3_prefix_has_objects(s3_client: S3Client, bucket: str, prefix: str) -> bool:
   objects = s3_client.list_objects(bucket, prefix=prefix, max_keys=1)
   return len(objects) > 0
 
 
 def s3_table_data_exists(
-  s3_client: "S3Client",
+  s3_client: S3Client,
   bucket: str,
   source_prefix: str,
   filed_pattern: str,
@@ -194,7 +194,7 @@ def s3_table_data_exists(
 
 
 def s3_get_table_patterns(
-  s3_client: "S3Client",
+  s3_client: S3Client,
   bucket: str,
   source_prefix: str,
   filed_pattern: str,

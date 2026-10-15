@@ -204,7 +204,7 @@ class PasswordSecurity:
     """Verify a password against its bcrypt hash; malformed hashes return False."""
     try:
       return bcrypt.checkpw(cls._bcrypt_bytes(password), hashed.encode("utf-8"))
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
       return False
 
   @classmethod

@@ -211,7 +211,7 @@ def verify_jwt_claims(
 
     try:
       token_session_version = int(payload.get("session_version", 0))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
       logger.info("JWT token verification failed: invalid session_version claim")
       return None
 

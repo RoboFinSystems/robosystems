@@ -263,6 +263,6 @@ def _parse_arguments(raw: Any) -> dict[str, Any]:
     return {}
   try:
     parsed = json.loads(raw)
-  except (TypeError, ValueError):
+  except TypeError, ValueError:
     return {UNPARSED_ARGUMENTS_KEY: str(raw)}
   return parsed if isinstance(parsed, dict) else {UNPARSED_ARGUMENTS_KEY: str(raw)}

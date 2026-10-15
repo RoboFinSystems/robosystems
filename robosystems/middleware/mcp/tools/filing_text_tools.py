@@ -206,7 +206,7 @@ class SearchTextTool(BaseTool):
     try:
       window = _cap(arguments.get("window"), SEARCH_MAX_WINDOW)
       max_hits = _cap(arguments.get("max_hits"), SEARCH_MAX_HITS)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
       return {"error": "window and max_hits must be whole numbers."}
     graph_id = self.client.graph_id
     try:
@@ -262,7 +262,7 @@ class ReadTextTool(BaseTool):
     try:
       offset = max(0, int(arguments.get("offset") or 0))
       length = _cap(arguments.get("length"), READ_MAX_LENGTH)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
       return {"error": "offset and length must be whole numbers."}
     graph_id = self.client.graph_id
     try:

@@ -59,7 +59,7 @@ def _is_invalid_grant(error: AuthClientError) -> bool:
   """
   try:
     body = json.loads(error.content or b"{}")
-  except (ValueError, TypeError):
+  except ValueError, TypeError:
     return False
   return isinstance(body, dict) and body.get("error") == "invalid_grant"
 

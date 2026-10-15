@@ -135,7 +135,7 @@ def _parse_meta(raw: Any) -> dict[str, Any]:
   if isinstance(raw, str):
     try:
       return json.loads(raw)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
       return {}
   return {}
 

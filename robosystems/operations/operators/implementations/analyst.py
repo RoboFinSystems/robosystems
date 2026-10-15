@@ -484,7 +484,7 @@ EXAMPLE QUERIES (working patterns for this graph — copy and adapt rather than 
       return None
     try:
       value = float(raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
       return None
     return value if value > 0 else None
 

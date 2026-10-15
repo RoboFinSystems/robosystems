@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy import (
   JSON,
@@ -153,7 +153,7 @@ class GraphBackup(Model):
     s3_key: str,
     session: Session,
     **kwargs,
-  ) -> "GraphBackup":
+  ) -> GraphBackup:
     """Create a new graph backup record."""
     backup = cls(
       graph_id=graph_id,
@@ -180,7 +180,7 @@ class GraphBackup(Model):
     retention_days: int,
     initiated_by: str,
     now: datetime | None = None,
-  ) -> "GraphBackup":
+  ) -> GraphBackup:
     """Build, without persisting, a COMPLETED row from a BackupManager export.
 
     The caller owns ``add`` and the transaction (teardown adds it under a
@@ -224,14 +224,14 @@ class GraphBackup(Model):
     )
 
   @classmethod
-  def get_by_id(cls, backup_id: str, session: Session) -> Optional["GraphBackup"]:
+  def get_by_id(cls, backup_id: str, session: Session) -> GraphBackup | None:
     """Get a backup by ID."""
     return session.query(cls).filter(cls.id == backup_id).first()
 
   @classmethod
   def get_by_id_and_graph(
     cls, backup_id: str, graph_id: str, session: Session
-  ) -> Optional["GraphBackup"]:
+  ) -> GraphBackup | None:
     """Get a backup by ID within an already-authorized ``graph_id``, so a
     guessed backup_id cannot reach another graph's backup."""
     return (
@@ -247,7 +247,7 @@ class GraphBackup(Model):
     status: str | None = None,
     limit: int | None = None,
     include_expired: bool = False,
-  ) -> Sequence["GraphBackup"]:
+  ) -> Sequence[GraphBackup]:
     """Get backups for a specific graph."""
     query = session.query(cls).filter(cls.graph_id == graph_id)
 
@@ -270,7 +270,7 @@ class GraphBackup(Model):
   @classmethod
   def get_latest_successful(
     cls, graph_id: str, backup_type: str, session: Session
-  ) -> Optional["GraphBackup"]:
+  ) -> GraphBackup | None:
     """Get the latest successful backup for a graph."""
     return (
       session.query(cls)
@@ -284,7 +284,7 @@ class GraphBackup(Model):
     )
 
   @classmethod
-  def get_pending_backups(cls, session: Session) -> list["GraphBackup"]:
+  def get_pending_backups(cls, session: Session) -> list[GraphBackup]:
     """Get all pending backups."""
     return (
       session.query(cls)
@@ -317,7 +317,7 @@ class GraphBackup(Model):
     )
 
   @classmethod
-  def get_expired_backups(cls, session: Session) -> Sequence["GraphBackup"]:
+  def get_expired_backups(cls, session: Session) -> Sequence[GraphBackup]:
     """Get backups past their expiry that haven't been marked EXPIRED yet."""
     current_time = datetime.now(UTC)
     return (

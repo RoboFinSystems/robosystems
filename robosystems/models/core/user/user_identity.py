@@ -1,7 +1,6 @@
 """External identity link between a user and an IdP subject."""
 
 from datetime import UTC, datetime
-from typing import Optional
 
 from sqlalchemy import (
   Column,
@@ -52,7 +51,7 @@ class UserIdentity(Model):
   @classmethod
   def get_by_issuer_subject(
     cls, issuer: str, subject: str, session: Session
-  ) -> Optional["UserIdentity"]:
+  ) -> UserIdentity | None:
     return (
       session.query(cls).filter(cls.issuer == issuer, cls.subject == subject).first()
     )
@@ -60,7 +59,7 @@ class UserIdentity(Model):
   @classmethod
   def get_by_user_and_issuer(
     cls, user_id: str, issuer: str, session: Session
-  ) -> Optional["UserIdentity"]:
+  ) -> UserIdentity | None:
     return (
       session.query(cls).filter(cls.user_id == user_id, cls.issuer == issuer).first()
     )
@@ -75,7 +74,7 @@ class UserIdentity(Model):
     session: Session,
     provider_type: str = "oidc",
     auto_commit: bool = True,
-  ) -> "UserIdentity":
+  ) -> UserIdentity:
     identity = cls(
       user_id=user_id,
       issuer=issuer,

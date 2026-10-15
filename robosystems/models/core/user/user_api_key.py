@@ -4,7 +4,6 @@ import hashlib
 import secrets
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Optional
 
 import bcrypt
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, String, Text
@@ -70,7 +69,7 @@ class UserAPIKey(Model):
     expires_at: datetime | None = None,
     session: Session | None = None,
     graph_id: str | None = None,
-  ) -> tuple["UserAPIKey", str]:
+  ) -> tuple[UserAPIKey, str]:
     """Mint an API key, returning ``(row, plaintext)``; the plaintext is
     never stored."""
     # The scoped prefix is for human legibility only; scope checks read the
@@ -130,7 +129,7 @@ class UserAPIKey(Model):
     return user_api_key, plain_key
 
   @classmethod
-  def get_by_key(cls, plain_key: str, session: Session) -> Optional["UserAPIKey"]:
+  def get_by_key(cls, plain_key: str, session: Session) -> UserAPIKey | None:
     """Resolve a plaintext API key to its active, unexpired row.
 
     Narrows on the indexed ``prefix``, then bcrypt-verifies each candidate.
@@ -218,19 +217,19 @@ class UserAPIKey(Model):
     return (now or datetime.now(UTC)) > expires_at
 
   @classmethod
-  def get_by_hash(cls, key_hash: str, session: Session) -> Optional["UserAPIKey"]:
+  def get_by_hash(cls, key_hash: str, session: Session) -> UserAPIKey | None:
     """Get a user API key by its hash value."""
     return session.query(cls).filter(cls.key_hash == key_hash, cls.is_active).first()
 
   @classmethod
-  def get_by_user_id(cls, user_id: str, session: Session) -> Sequence["UserAPIKey"]:
+  def get_by_user_id(cls, user_id: str, session: Session) -> Sequence[UserAPIKey]:
     """Get all API keys for a user."""
     return session.query(cls).filter(cls.user_id == user_id).all()
 
   @classmethod
   def get_active_by_user_id(
     cls, user_id: str, session: Session
-  ) -> Sequence["UserAPIKey"]:
+  ) -> Sequence[UserAPIKey]:
     """Get all active API keys for a user."""
     return session.query(cls).filter(cls.user_id == user_id, cls.is_active).all()
 

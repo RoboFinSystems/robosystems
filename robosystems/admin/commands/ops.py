@@ -346,7 +346,7 @@ class InstancesHelper:
         check=True,
       )
       return True
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    except subprocess.CalledProcessError, FileNotFoundError:
       return False
 
   def terminate_instance(self, instance_id: str) -> None:
