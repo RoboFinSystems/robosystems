@@ -1150,7 +1150,7 @@ class GraphClient(BaseGraphClient):
     """Promote a WIP database to active (blue-green swap).
 
     ``graph_id`` is the base ID, not the ``-wip`` variant, and
-    ``{graph_id}-wip.lbug`` must already exist on the Graph API node. Pass
+    ``{graph_id}-wip.lbdb`` must already exist on the Graph API node. Pass
     ``lock_token`` if the caller already holds the materialization lock, so
     the swap endpoint does not try to re-acquire it.
     """

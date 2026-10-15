@@ -2,9 +2,9 @@
 
 Four backup types:
 - standard: BackupManager flow (ZIP, S3 upload)
-- replica: raw .lbug to S3 via OnInstanceBackupService (replica fleet downloads it)
+- replica: raw .lbdb to S3 via OnInstanceBackupService (replica fleet downloads it)
 - duckdb_staging: raw .duckdb to S3 via OnInstanceBackupService
-- r2_download: zstd-compressed .lbug.zst to R2 via OnInstanceBackupService
+- r2_download: zstd-compressed .lbdb.zst to R2 via OnInstanceBackupService
 """
 
 from datetime import UTC, datetime
@@ -122,9 +122,9 @@ async def create_backup(
 
   Backup types:
   - **standard**: Full dump ZIP uploaded to S3
-  - **replica**: Raw .lbug uploaded to S3 (downloaded by replica fleet at startup)
+  - **replica**: Raw .lbdb uploaded to S3 (downloaded by replica fleet at startup)
   - **duckdb_staging**: Raw .duckdb uploaded to S3 (for local dev / analytics)
-  - **r2_download**: zstd-compressed .lbug.zst uploaded to R2 (subscriber downloads)
+  - **r2_download**: zstd-compressed .lbdb.zst uploaded to R2 (subscriber downloads)
 
   For replica/duckdb_staging/r2_download types, s3_destination is required.
   """

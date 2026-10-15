@@ -120,7 +120,7 @@ indexing into OpenSearch for hybrid BM25 + KNN search.
 
 ### 6. Publish
 
-- `sec_lbug_s3_published` — the `.lbug` file for the replica fleet
+- `sec_lbug_s3_published` — the `.lbdb` file for the replica fleet
 - `sec_duckdb_s3_published` — the `.duckdb` file the offline knowledge-artifact
   build consumes
 - `sec_lbug_r2_published` — a Cloudflare R2 copy for zero-egress subscriber

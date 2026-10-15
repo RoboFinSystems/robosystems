@@ -35,7 +35,7 @@ async def swap_database(
   """Promote a WIP database to active (one-way swap).
 
   The old active database is deleted after the WIP is promoted.
-  The WIP database must exist ({graph_id}-wip.lbug).
+  The WIP database must exist ({graph_id}-wip.lbdb).
   Runs under the per-graph materialization lock: 409 when another run holds
   it, 503 when the lock service is unreachable.
   """

@@ -116,7 +116,7 @@ class TestPublishToR2StatsFile:
     body = json.loads(kwargs["Body"])
     assert body == {
       "graph_id": "sec",
-      "archive_key": "downloads/sec/sec.lbug.zst",
+      "archive_key": "downloads/sec/sec.lbdb.zst",
       "compressed_size_bytes": 1000,
       "original_size_bytes": 3000,
       "snapshot_at": "2026-09-30T04:00:00+00:00",

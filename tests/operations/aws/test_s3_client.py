@@ -1003,7 +1003,7 @@ class TestBackupMetadata:
       backup_duration_seconds=5.0,
       database_version="0.10.1",
       backup_format="cypher",
-      s3_key="graph-backups/databases/kg999/incremental/backup-20250615_123000.lbug.gz",
+      s3_key="graph-backups/databases/kg999/incremental/backup-20250615_123000.lbdb.gz",
     )
 
     d = original.to_dict()
@@ -1080,7 +1080,7 @@ class TestS3BackupAdapterPathGeneration:
 
     path = adapter._generate_backup_path("kg123", "full", ts)
 
-    assert path == "graph-backups/databases/kg123/full/backup-20250615_123000.lbug.gz"
+    assert path == "graph-backups/databases/kg123/full/backup-20250615_123000.lbdb.gz"
 
   def test_generate_backup_path_without_compression(self):
     """Backup path has no .gz when compression is disabled."""
@@ -1090,7 +1090,7 @@ class TestS3BackupAdapterPathGeneration:
 
     path = adapter._generate_backup_path("kg123", "full", ts)
 
-    assert path == "graph-backups/databases/kg123/full/backup-20250615_123000.lbug"
+    assert path == "graph-backups/databases/kg123/full/backup-20250615_123000.lbdb"
 
   def test_generate_backup_path_explicit_extension(self):
     """Explicit file_extension overrides default."""
@@ -1200,15 +1200,15 @@ class TestS3BackupAdapterCompression:
   def test_should_compress_skips_already_compressed_archives(self):
     """Gzipping a zip breaks the contract its extension states.
 
-    The download endpoint presigns the stored object, so a `.lbug.zip` that is
+    The download endpoint presigns the stored object, so a `.lbdb.zip` that is
     really gzip-wrapping-a-zip cannot be opened by anything trusting the name.
     """
     adapter = self._make_adapter()
     adapter.enable_compression = True
 
-    assert adapter._should_compress(".lbug.zip") is False
+    assert adapter._should_compress(".lbdb.zip") is False
     assert adapter._should_compress(".csv.zip") is False
-    assert adapter._should_compress(".lbug.zst") is False
+    assert adapter._should_compress(".lbdb.zst") is False
     assert adapter._should_compress(".GZ") is False
 
     assert adapter._should_compress(".cypher") is True
@@ -1216,7 +1216,7 @@ class TestS3BackupAdapterCompression:
 
   @pytest.mark.asyncio
   @pytest.mark.parametrize(
-    ("file_extension", "expected"), [(".lbug.zip", "False"), (".cypher", "True")]
+    ("file_extension", "expected"), [(".lbdb.zip", "False"), (".cypher", "True")]
   )
   async def test_upload_backup_metadata_records_actual_compression(
     self, file_extension, expected
@@ -1580,7 +1580,7 @@ class TestS3BackupAdapterDownloadBackupByKey:
     body_mock.read.return_value = compressed
     adapter.s3_client.get_object.return_value = {"Body": body_mock}
 
-    result = await adapter.download_backup_by_key("some/path/backup.lbug.gz")
+    result = await adapter.download_backup_by_key("some/path/backup.lbdb.gz")
 
     assert result == original_data
 

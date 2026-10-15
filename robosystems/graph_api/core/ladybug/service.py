@@ -25,6 +25,7 @@ from robosystems.config.constants import (
   MAX_QUERY_LENGTH,
   MAX_ROWS_PER_QUERY,
 )
+from robosystems.config.storage.graph import GRAPH_DB_SUFFIXES, graph_db_filename
 from robosystems.config.tuning import TuningConfig
 from robosystems.exceptions import (
   ConfigurationError,
@@ -889,13 +890,15 @@ class LadybugService:
 
         # Older engine versions stored a database as a directory.
         if os.path.isfile(db_path):
-          shutil.copy2(db_path, temp_path / f"{graph_id}.lbug")
+          shutil.copy2(db_path, temp_path / graph_db_filename(graph_id))
         else:
           shutil.copytree(db_path, temp_path / graph_id)
 
         with zipfile.ZipFile(backup_file, "w", zipfile.ZIP_DEFLATED) as zf:
           if os.path.isfile(db_path):
-            zf.write(temp_path / f"{graph_id}.lbug", f"{graph_id}.lbug")
+            zf.write(
+              temp_path / graph_db_filename(graph_id), graph_db_filename(graph_id)
+            )
           else:
             for root, dirs, files in os.walk(temp_path / graph_id):
               for file in files:
@@ -954,13 +957,15 @@ class LadybugService:
           temp_path = Path(temp_dir)
 
           if os.path.isfile(db_path):
-            shutil.copy2(db_path, temp_path / f"{graph_id}.lbug")
+            shutil.copy2(db_path, temp_path / graph_db_filename(graph_id))
           else:
             shutil.copytree(db_path, temp_path / graph_id)
 
           with zipfile.ZipFile(system_backup, "w", zipfile.ZIP_DEFLATED) as zf:
             if os.path.isfile(db_path):
-              zf.write(temp_path / f"{graph_id}.lbug", f"{graph_id}.lbug")
+              zf.write(
+                temp_path / graph_db_filename(graph_id), graph_db_filename(graph_id)
+              )
             else:
               for root, dirs, files in os.walk(temp_path / graph_id):
                 for file in files:
@@ -986,9 +991,18 @@ class LadybugService:
           else:
             shutil.rmtree(db_path)
 
-        # Older engine versions stored a database as a directory.
-        if (temp_path / f"{graph_id}.lbug").exists():
-          shutil.copy2(temp_path / f"{graph_id}.lbug", db_path)
+        # Older engine versions stored a database as a directory, and
+        # archives from before the suffix change hold the old member name.
+        archived = next(
+          (
+            temp_path / f"{graph_id}{suffix}"
+            for suffix in GRAPH_DB_SUFFIXES
+            if (temp_path / f"{graph_id}{suffix}").exists()
+          ),
+          None,
+        )
+        if archived is not None:
+          shutil.copy2(archived, db_path)
         elif (temp_path / graph_id).exists():
           shutil.copytree(temp_path / graph_id, db_path)
         else:

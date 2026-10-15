@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Path
 from fastapi import status as http_status
 
+from robosystems.config.storage.graph import graph_db_filename
 from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.graph_api.core.utils import validate_database_name
 from robosystems.graph_api.models.database import (
@@ -97,7 +98,7 @@ async def install_schema(
     )
 
   # Validate database exists (check file directly — list_databases() excludes -wip/-prev)
-  db_path = ladybug_service.db_manager.base_path / f"{graph_id}.lbug"
+  db_path = ladybug_service.db_manager.base_path / graph_db_filename(graph_id)
   if not db_path.exists():
     raise HTTPException(
       status_code=http_status.HTTP_404_NOT_FOUND,

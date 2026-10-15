@@ -140,8 +140,8 @@ class TestLadybugConnectionPool:
     with pool.get_connection("test_db", read_only=True) as conn:
       assert conn == mock_conn
 
-    # Verify LadybugDB objects were created correctly (LadybugDB 0.11.0 uses .lbug files)
-    expected_db_path = str(Path(self.base_path) / "test_db.lbug")
+    # Verify LadybugDB objects were created correctly (LadybugDB 0.11.0 uses .lbdb files)
+    expected_db_path = str(Path(self.base_path) / "test_db.lbdb")
     # Check that database was called with expected parameters (buffer_pool_size is now included)
     mock_db_class.assert_called_once()
     call_args = mock_db_class.call_args

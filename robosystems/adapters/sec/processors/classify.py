@@ -240,7 +240,7 @@ class TempLadybugContext:
     import ladybug as lbug
 
     self._tmpdir = tempfile.mkdtemp(prefix="lbug_classify_")
-    db_path = str(Path(self._tmpdir) / "classify.lbug")
+    db_path = str(Path(self._tmpdir) / "classify.lbdb")
 
     self._db = lbug.Database(
       db_path,

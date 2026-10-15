@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from robosystems.config import env
+from robosystems.config.storage.graph import split_graph_db_filename
 from robosystems.graph_api.core.utils import validate_database_name
 from robosystems.logger import logger
 
@@ -78,7 +79,7 @@ def _owns(name: str, graph_id: str) -> bool:
 
 
 def _classify_lbug(stem: str, graph_id: str) -> str:
-  """Classify a `.lbug` database by its name.
+  """Classify a `.lbdb` database by its name.
 
   The transient check must come first: a subgraph's build artifact would
   otherwise fall through to TYPE_SUBGRAPH.
@@ -104,11 +105,10 @@ def _collect_lbug(root: Path, graph_id: str) -> list[dict[str, Any]]:
 
   for item in root.iterdir():
     name = item.name
-    if name.endswith(".lbug"):
-      stem = name[: -len(".lbug")]
-    elif name.endswith(".lbug.wal"):
-      stem = name[: -len(".lbug.wal")]
-    else:
+    stem = split_graph_db_filename(
+      name[: -len(".wal")] if name.endswith(".wal") else name
+    )
+    if stem is None:
       continue
 
     if not _owns(stem, graph_id):

@@ -51,7 +51,7 @@ class FakeConnectionManager:
 class FakeDBManager:
   """Fake database manager for testing.
 
-  Creates a temp directory as `base_path` and touches an empty `.lbug` file
+  Creates a temp directory as `base_path` and touches an empty `.lbdb` file
   for each database name so the production `db_path.exists()` check passes.
   """
 
@@ -60,7 +60,7 @@ class FakeDBManager:
     self._connection = connection
     self.base_path = Path(tempfile.mkdtemp(prefix="fake_lbug_"))
     for db in self._databases:
-      (self.base_path / f"{db}.lbug").touch()
+      (self.base_path / f"{db}.lbdb").touch()
 
   def list_databases(self):
     return list(self._databases)

@@ -568,7 +568,7 @@ class GraphCreationService:
           return
 
       if location:
-        # Delete the `.lbug` before releasing the allocation: the node counts
+        # Delete the `.lbdb` before releasing the allocation: the node counts
         # on-disk databases while the allocator counts registry rows, so a
         # freed slot with a file still on it reads full to one and empty to
         # the other. Reclaim reconciliation is the backstop.

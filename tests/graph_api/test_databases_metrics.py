@@ -30,7 +30,7 @@ class TestDatabaseMetricsRouter:
     mock_service.db_manager.list_databases.return_value = ["test-db", "other-db"]
 
     with tempfile.TemporaryDirectory() as tmpdir:
-      db_path = Path(tmpdir) / "test-db.lbug"
+      db_path = Path(tmpdir) / "test-db.lbdb"
       db_path.write_bytes(b"x" * 3072)  # 3KB file
 
       mock_service.db_manager.base_path = Path(tmpdir)
@@ -80,7 +80,7 @@ class TestDatabaseMetricsRouter:
 
   def _stub_counts(self, tmpdir, mock_service, size=3072):
     """Wire a service whose count queries would succeed if they were run."""
-    db_path = Path(tmpdir) / "test-db.lbug"
+    db_path = Path(tmpdir) / "test-db.lbdb"
     db_path.write_bytes(b"x" * size)
     mock_service.db_manager.base_path = Path(tmpdir)
     mock_service.db_manager.list_databases.return_value = ["test-db"]
@@ -195,7 +195,7 @@ class TestDatabaseMetricsRouter:
     mock_service.db_manager.list_databases.return_value = ["shared-db"]
 
     with tempfile.TemporaryDirectory() as tmpdir:
-      db_path = Path(tmpdir) / "shared-db.lbug"
+      db_path = Path(tmpdir) / "shared-db.lbdb"
       db_path.write_bytes(b"x" * 1000)
 
       mock_service.db_manager.base_path = Path(tmpdir)

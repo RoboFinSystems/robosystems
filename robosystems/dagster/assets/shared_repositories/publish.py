@@ -1,6 +1,6 @@
 """Publish helpers that per-repository assets delegate to.
 
-S3 holds the .lbug/.duckdb the replica fleet pulls on boot; R2 holds the .lbug
+S3 holds the .lbdb/.duckdb the replica fleet pulls on boot; R2 holds the .lbdb
 for subscriber downloads (zero egress).
 """
 
@@ -14,6 +14,7 @@ from dagster import AssetExecutionContext, MaterializeResult
 from robosystems.config import env
 from robosystems.config.constants import TASK_TIME_LIMIT
 from robosystems.config.storage.graph import (
+  GRAPH_DB_SUFFIX,
   get_r2_download_key,
   get_shared_repo_database_key,
 )
@@ -127,7 +128,7 @@ def publish_duckdb_to_s3(
 
   _validate_shared_graph_id(graph_id)
 
-  # .duckdb extension instead of .lbug
+  # .duckdb extension instead of .lbdb
   s3_info = _build_duckdb_s3_destination(graph_id)
   bucket = s3_info["bucket"]
   s3_key = s3_info["s3_key"]
@@ -206,7 +207,7 @@ def _build_s3_destination(graph_id: str) -> dict[str, str]:
   sts = boto3.client("sts", region_name=env.AWS_REGION)
   account_id = sts.get_caller_identity()["Account"]
   bucket = f"robosystems-{account_id}-user-{env.ENVIRONMENT}"
-  s3_key = get_shared_repo_database_key(graph_id, ".lbug")
+  s3_key = get_shared_repo_database_key(graph_id, GRAPH_DB_SUFFIX)
   s3_uri = f"s3://{bucket}/{s3_key}"
   return {"bucket": bucket, "s3_key": s3_key, "s3_uri": s3_uri}
 
@@ -243,7 +244,7 @@ def publish_to_r2(
   db_resource,
   stats: dict[str, Any] | None = None,
 ) -> MaterializeResult:
-  """Publish a shared repository .lbug to R2 for subscriber downloads.
+  """Publish a shared repository .lbdb to R2 for subscriber downloads.
 
   Same on-instance backup pattern as publish_to_s3(), but uploads to
   Cloudflare R2 instead of AWS S3. Creates/updates a GraphBackup record
@@ -354,7 +355,7 @@ def _build_r2_destination(graph_id: str) -> dict[str, str]:
   bucket = env.R2_BUCKET_NAME
   if not bucket:
     raise RuntimeError("R2_BUCKET_NAME not configured")
-  r2_key = get_r2_download_key(graph_id, ".lbug.zst")
+  r2_key = get_r2_download_key(graph_id, f"{GRAPH_DB_SUFFIX}.zst")
   r2_uri = f"r2://{bucket}/{r2_key}"
   return {"bucket": bucket, "r2_key": r2_key, "r2_uri": r2_uri}
 

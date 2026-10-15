@@ -8,7 +8,7 @@
 
 Labels come from the same registry pass as ``/usage``
 (`IngestionLimitChecker.label_orphans`); a registry read failure leaves items
-unlabelled, so nothing is deleted. An orphan whose ``.lbug`` is already gone
+unlabelled, so nothing is deleted. An orphan whose ``.lbdb`` is already gone
 cannot be deleted (the Graph API anchors on it) and is reported in ``skipped``.
 """
 

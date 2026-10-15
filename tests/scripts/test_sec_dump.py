@@ -24,6 +24,8 @@ class TestGraphIdFor:
     assert sec_dump.graph_id_for("sec.lbug.zst") == "sec"
     assert sec_dump.graph_id_for("sec_historical.lbug") == "sec_historical"
     assert sec_dump.graph_id_for("snapshots/sec.lbug.zst") == "sec"
+    assert sec_dump.graph_id_for("sec.lbdb.zst") == "sec"
+    assert sec_dump.graph_id_for("sec_historical.lbdb") == "sec_historical"
 
 
 @pytest.mark.unit
@@ -111,10 +113,10 @@ def hub(tmp_path):
 
   api = MagicMock()
   api.dataset_info.return_value = SimpleNamespace(
-    siblings=[SimpleNamespace(rfilename="sec.lbug.zst", size=1234)]
+    siblings=[SimpleNamespace(rfilename="sec.lbdb.zst", size=1234)]
   )
   api.list_repo_commits.return_value = [
-    SimpleNamespace(title="sec.lbug.zst: snapshot 2026-07-16 (ladybug 0.18.1)")
+    SimpleNamespace(title="sec.lbdb.zst: snapshot 2026-07-16 (ladybug 0.18.1)")
   ]
   with (
     patch("huggingface_hub.hf_hub_download", side_effect=fake_download) as download,
@@ -143,53 +145,66 @@ class TestMain:
     code, dest_dir, download_dir = _run(tmp_path)
 
     assert code == 0
-    assert (dest_dir / "sec.lbug").read_bytes() == PAYLOAD
-    assert not (download_dir / "sec.lbug.zst").exists()
+    assert (dest_dir / "sec.lbdb").read_bytes() == PAYLOAD
+    assert not (download_dir / "sec.lbdb.zst").exists()
     hub.download.assert_called_once()
     assert hub.download.call_args.args[:2] == (
       "robosystems/sec-xbrl-knowledge-graphs",
-      "sec.lbug.zst",
+      "sec.lbdb.zst",
     )
 
   def test_keep_archive(self, tmp_path, hub):
     code, _, download_dir = _run(tmp_path, "--keep-archive")
     assert code == 0
-    assert (download_dir / "sec.lbug.zst").exists()
+    assert (download_dir / "sec.lbdb.zst").exists()
 
   def test_refuses_existing_without_force(self, tmp_path, hub):
     dest_dir = tmp_path / "lbug-dbs"
     dest_dir.mkdir()
-    (dest_dir / "sec.lbug").write_bytes(b"LBUG old")
+    (dest_dir / "sec.lbdb").write_bytes(b"LBUG old")
 
     code, _, _ = _run(tmp_path)
 
     assert code == 1
-    assert (dest_dir / "sec.lbug").read_bytes() == b"LBUG old"
+    assert (dest_dir / "sec.lbdb").read_bytes() == b"LBUG old"
     hub.download.assert_not_called()
 
   def test_force_replaces_and_drops_stale_wal(self, tmp_path, hub):
     dest_dir = tmp_path / "lbug-dbs"
     dest_dir.mkdir()
-    (dest_dir / "sec.lbug").write_bytes(b"LBUG old")
-    (dest_dir / "sec.lbug.wal").write_bytes(b"wal")
+    (dest_dir / "sec.lbdb").write_bytes(b"LBUG old")
+    (dest_dir / "sec.lbdb.wal").write_bytes(b"wal")
 
     code, _, _ = _run(tmp_path, "--force")
 
     assert code == 0
-    assert (dest_dir / "sec.lbug").read_bytes() == PAYLOAD
-    assert not (dest_dir / "sec.lbug.wal").exists()
+    assert (dest_dir / "sec.lbdb").read_bytes() == PAYLOAD
+    assert not (dest_dir / "sec.lbdb.wal").exists()
 
   def test_warns_on_engine_mismatch_but_proceeds(self, tmp_path, hub, caplog):
     with patch(f"{SCRIPT}.local_engine_version", return_value="0.19.0"):
       code, dest_dir, _ = _run(tmp_path)
     assert code == 0
-    assert (dest_dir / "sec.lbug").exists()
+    assert (dest_dir / "sec.lbdb").exists()
     assert "written by ladybug 0.18.1; this checkout pins 0.19.0" in caplog.text
+
+  def test_falls_back_to_the_archive_name_before_the_rename(self, tmp_path, hub):
+    """Until the first .lbdb snapshot is published the default name is not on
+    the Hub; the dump then takes the pre-0.21 name and still lands .lbdb."""
+    hub.api.dataset_info.return_value = SimpleNamespace(
+      siblings=[SimpleNamespace(rfilename=sec_dump.LEGACY_FILENAME, size=1234)]
+    )
+
+    code, dest_dir, _ = _run(tmp_path)
+
+    assert code == 0
+    assert hub.download.call_args.args[1] == sec_dump.LEGACY_FILENAME
+    assert (dest_dir / "sec.lbdb").exists()
 
   def test_graph_id_and_repo_overrides(self, tmp_path, hub):
     code, dest_dir, _ = _run(
       tmp_path, "--repo", "acme/dump", "--graph-id", "secx", "--force"
     )
     assert code == 0
-    assert (dest_dir / "secx.lbug").exists()
+    assert (dest_dir / "secx.lbdb").exists()
     assert hub.download.call_args.args[0] == "acme/dump"

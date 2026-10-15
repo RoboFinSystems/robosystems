@@ -38,7 +38,7 @@ Every storage type lives in USER_DATA_BUCKET under a fixed prefix. The
 
     shared-repositories/             # Shared repository data
       databases/                     # Published databases (downloaded by replicas on boot)
-        {graph_id}.lbug
+        {graph_id}.lbdb
         {graph_id}.duckdb
       backups/                       # Compressed backups (subscriber downloads)
         {graph_id}/
@@ -117,6 +117,36 @@ GRAPH_STORAGE: dict[GraphStorageType, GraphStorageConfig] = {
 }
 
 
+# The database file suffix. Upstream names LadybugDB files ``.lbdb``; the
+# platform wrote ``.lbug`` until the 0.21 engine upgrade. Archives, S3 keys and
+# public dumps written before then carry the old suffix, so readers accept both
+# for the backup retention window.
+GRAPH_DB_SUFFIX = ".lbdb"
+LEGACY_GRAPH_DB_SUFFIX = ".lbug"
+GRAPH_DB_SUFFIXES = (GRAPH_DB_SUFFIX, LEGACY_GRAPH_DB_SUFFIX)
+
+
+def graph_db_filename(graph_id: str) -> str:
+  """``{graph_id}.lbdb``."""
+  return f"{graph_id}{GRAPH_DB_SUFFIX}"
+
+
+def graph_db_wal_filename(graph_id: str) -> str:
+  """``{graph_id}.lbdb.wal``, the engine's write-ahead log beside the file."""
+  return f"{graph_id}{GRAPH_DB_SUFFIX}.wal"
+
+
+def split_graph_db_filename(name: str) -> str | None:
+  """The graph id a database file name carries, by either suffix, else None.
+
+  A ``.wal`` sidecar is not a database file.
+  """
+  for suffix in GRAPH_DB_SUFFIXES:
+    if name.endswith(suffix):
+      return name[: -len(suffix)]
+  return None
+
+
 # =============================================================================
 # User Staging Helpers
 # =============================================================================
@@ -175,7 +205,7 @@ def get_backup_key(
   graph_id: str,
   backup_type: str,
   timestamp: datetime,
-  extension: str = ".lbug.gz",
+  extension: str = f"{GRAPH_DB_SUFFIX}.gz",
 ) -> str:
   """Build S3 key for an application-level backup.
 
@@ -185,7 +215,7 @@ def get_backup_key(
       >>> from datetime import datetime, UTC
       >>> ts = datetime(2024, 1, 15, 12, 30, 45, tzinfo=UTC)
       >>> get_backup_key("kg456", "full", ts)
-      'graph-backups/databases/kg456/full/backup-20240115_123045.lbug.gz'
+      'graph-backups/databases/kg456/full/backup-20240115_123045.lbdb.gz'
   """
   config = GRAPH_STORAGE[GraphStorageType.BACKUPS]
   timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
@@ -352,14 +382,16 @@ def get_document_file_prefix(graph_id: str | None = None) -> str:
 # =============================================================================
 
 
-def get_shared_repo_database_key(graph_id: str, extension: str = ".lbug") -> str:
+def get_shared_repo_database_key(
+  graph_id: str, extension: str = GRAPH_DB_SUFFIX
+) -> str:
   """Build S3 key for a published shared repository database snapshot.
 
-  Replicas download these on boot. ``extension`` is ``.lbug`` or ``.duckdb``.
+  Replicas download these on boot. ``extension`` is ``.lbdb`` or ``.duckdb``.
 
   Example:
       >>> get_shared_repo_database_key("sec")
-      'shared-repositories/databases/sec.lbug'
+      'shared-repositories/databases/sec.lbdb'
       >>> get_shared_repo_database_key("sec", ".duckdb")
       'shared-repositories/databases/sec.duckdb'
   """
@@ -410,14 +442,14 @@ def get_shared_repo_backup_prefix(graph_id: str | None = None) -> str:
 # =============================================================================
 
 
-def get_r2_download_key(graph_id: str, extension: str = ".lbug") -> str:
+def get_r2_download_key(graph_id: str, extension: str = GRAPH_DB_SUFFIX) -> str:
   """Build R2 key for a subscriber download file.
 
   Uses a fixed key (no timestamp) — each publish overwrites the previous copy.
 
   Example:
       >>> get_r2_download_key("sec")
-      'downloads/sec/sec.lbug'
+      'downloads/sec/sec.lbdb'
       >>> get_r2_download_key("sec", ".duckdb")
       'downloads/sec/sec.duckdb'
   """
@@ -430,16 +462,21 @@ def get_r2_download_key(graph_id: str, extension: str = ".lbug") -> str:
 # =============================================================================
 
 # Extensions a stored backup object can carry, ordered longest-first so a
-# compound extension wins over its own suffix (".lbug.zip" over ".zip").
+# compound extension wins over its own suffix (".lbdb.zip" over ".zip"). Both
+# database suffixes stay for the retention window of the older archives.
 BACKUP_DOWNLOAD_EXTENSIONS = (
   ".parquet.zip",
   ".json.zip",
+  ".lbdb.zst",
   ".lbug.zst",
+  ".lbdb.zip",
   ".lbug.zip",
   ".csv.zip",
+  ".lbdb.gz",
   ".lbug.gz",
   ".duckdb",
   ".tar.gz",
+  ".lbdb",
   ".lbug",
   ".zip",
 )
@@ -452,6 +489,8 @@ def get_download_extension(s3_key: str, default: str = ".zip") -> str:
   so the served filename keeps its compound extension.
 
   Example:
+      >>> get_download_extension("graph-backups/databases/kg456/full/backup-20240115_123045.lbdb.zip")
+      '.lbdb.zip'
       >>> get_download_extension("graph-backups/databases/kg456/full/backup-20240115_123045.lbug.zip")
       '.lbug.zip'
       >>> get_download_extension("downloads/sec/sec.lbug.zst")

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from robosystems.config import env
+from robosystems.config.storage.graph import GRAPH_DB_SUFFIXES
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +180,7 @@ class LadybugMetricsCollector:
           db_name = item.name
           db_size = self._get_directory_size(item)
           new_cache[db_name] = db_size
-        elif item.is_file() and item.suffix == ".lbug":
+        elif item.is_file() and item.suffix in GRAPH_DB_SUFFIXES:
           db_name = item.stem
           db_size = item.stat().st_size
           new_cache[db_name] = db_size

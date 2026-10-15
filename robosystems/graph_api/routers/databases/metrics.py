@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import Path as PathParam
 from fastapi import status as http_status
 
+from robosystems.config.storage.graph import graph_db_filename
 from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.graph_api.core.storage_breakdown import compute_storage_breakdown
 from robosystems.graph_api.core.utils import validate_database_name
@@ -74,7 +75,7 @@ async def get_database_metrics(
         logger.warning(f"Failed to get graph counts for {validated_graph_id}: {e}")
 
     last_modified = None
-    db_path = Path(service.db_manager.base_path) / f"{validated_graph_id}.lbug"
+    db_path = Path(service.db_manager.base_path) / graph_db_filename(validated_graph_id)
     if db_path.exists():
       mtime = os.path.getmtime(db_path)
       last_modified = datetime.datetime.fromtimestamp(mtime).isoformat()

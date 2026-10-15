@@ -23,6 +23,7 @@ import ladybug as lbug
 from fastapi import HTTPException
 from fastapi import status as http_status
 
+from robosystems.config.storage.graph import graph_db_filename
 from robosystems.config.tuning import TuningConfig
 from robosystems.logger import logger
 
@@ -38,7 +39,7 @@ def _validated_database_path(base_path: Path, database_name: str) -> Path:
       status_code=http_status.HTTP_400_BAD_REQUEST, detail="Invalid database name"
     )
   base = os.path.normpath(str(base_path))
-  candidate = os.path.normpath(os.path.join(base, f"{database_name}.lbug"))
+  candidate = os.path.normpath(os.path.join(base, graph_db_filename(database_name)))
   if not candidate.startswith(base + os.sep):
     raise HTTPException(
       status_code=http_status.HTTP_400_BAD_REQUEST,

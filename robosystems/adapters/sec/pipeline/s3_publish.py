@@ -1,4 +1,4 @@
-"""Publish the sec and sec_historical .lbug databases to S3; replicas download
+"""Publish the sec and sec_historical .lbdb databases to S3; replicas download
 them to local disk on boot."""
 
 from dagster import (

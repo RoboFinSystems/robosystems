@@ -36,7 +36,7 @@ class TestDatabasePathValidation:
 
     for name in valid_names:
       result = validate_database_path(base_path, name)
-      expected = base_path / f"{name}.lbug"
+      expected = base_path / f"{name}.lbdb"
       assert result == expected
 
   def test_validate_database_path_invalid(self):
@@ -157,10 +157,10 @@ class TestLadybugDatabaseManager:
     assert response.graph_id == "test_entity"
     assert response.schema_applied is True
     assert response.execution_time_ms > 0
-    assert "test_entity.lbug" in response.database_path
+    assert "test_entity.lbdb" in response.database_path
 
     # Verify LadybugDB calls
-    expected_db_path = str(self.base_path / "test_entity.lbug")
+    expected_db_path = str(self.base_path / "test_entity.lbdb")
     # Check that database was called with expected parameters (buffer_pool_size is now included)
     mock_db_class.assert_called_once()
     call_args = mock_db_class.call_args
@@ -278,7 +278,7 @@ class TestLadybugDatabaseManager:
     manager.list_databases = MagicMock(return_value=[])
 
     # Create a database file to simulate existing database (LadybugDB 0.11.0)
-    existing_db_path = self.base_path / "existing_db.lbug"
+    existing_db_path = self.base_path / "existing_db.lbdb"
     existing_db_path.touch()
 
     request = DatabaseCreateRequest(
@@ -321,7 +321,7 @@ class TestLadybugDatabaseManager:
     assert "Database creation failed" in str(exc_info.value.detail)
 
     # Verify cleanup - database directory should not exist
-    db_path = self.base_path / "test_fail.lbug"
+    db_path = self.base_path / "test_fail.lbdb"
     assert not db_path.exists()
 
   @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
@@ -331,7 +331,7 @@ class TestLadybugDatabaseManager:
     manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
 
     # Create a test database file (LadybugDB 0.11.0)
-    db_path = self.base_path / "test_db.lbug"
+    db_path = self.base_path / "test_db.lbdb"
     db_path.touch()
 
     # Mock connection pool cleanup method
@@ -367,7 +367,7 @@ class TestLadybugDatabaseManager:
   def test_delete_database_missing_lbug_still_disposes_side_stores(
     self, mock_init_pool
   ):
-    """The .lbug is the first thing a delete removes, so a teardown that died
+    """The .lbdb is the first thing a delete removes, so a teardown that died
     between it and the side stores comes back to exactly this state. The old
     404-before-cleanup left the Lance directory, the DuckDB staging and the
     blue-green temporaries on a volume the registry was about to hand to the
@@ -377,10 +377,10 @@ class TestLadybugDatabaseManager:
     manager.connection_pool.close_database_connections = MagicMock()
 
     leftovers = [
-      self.base_path / "test_db.lbug.wal",
-      self.base_path / "test_db-wip.lbug",
-      self.base_path / "test_db-prev.lbug",
-      self.base_path / "test_db-prev.lbug.wal",
+      self.base_path / "test_db.lbdb.wal",
+      self.base_path / "test_db-wip.lbdb",
+      self.base_path / "test_db-prev.lbdb",
+      self.base_path / "test_db-prev.lbdb.wal",
     ]
     for path in leftovers:
       path.touch()
@@ -409,7 +409,7 @@ class TestLadybugDatabaseManager:
     mock_init_pool.return_value = MagicMock()
     manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
     manager.connection_pool.close_database_connections = MagicMock()
-    (self.base_path / "test_db.lbug").touch()
+    (self.base_path / "test_db.lbdb").touch()
 
     lance_patch, duck_patch, lance, duck = self._side_stores()
     lance.delete.side_effect = OSError("lance busy")
@@ -426,7 +426,7 @@ class TestLadybugDatabaseManager:
     mock_init_pool.return_value = MagicMock()
     manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
     manager.connection_pool.close_database_connections = MagicMock()
-    (self.base_path / "test_db.lbug").touch()
+    (self.base_path / "test_db.lbdb").touch()
 
     lance_patch, duck_patch, _, _ = self._side_stores()
     with lance_patch, duck_patch:
@@ -446,19 +446,19 @@ class TestLadybugDatabaseManager:
     manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
     manager.connection_pool.close_database_connections = MagicMock()
 
-    for name in ("test_db.lbug", "test_db-wip.lbug", "test_db-prev.lbug"):
+    for name in ("test_db.lbdb", "test_db-wip.lbdb", "test_db-prev.lbdb"):
       (self.base_path / name).touch()
-    (self.base_path / "other_db.lbug").touch()
+    (self.base_path / "other_db.lbdb").touch()
 
     lance_patch, duck_patch, _, _ = self._side_stores()
     with lance_patch, duck_patch:
       result = manager.delete_database("test_db")
 
     assert result["existed"] is True
-    assert not (self.base_path / "test_db.lbug").exists()
-    assert not (self.base_path / "test_db-wip.lbug").exists()
-    assert not (self.base_path / "test_db-prev.lbug").exists()
-    assert (self.base_path / "other_db.lbug").exists()
+    assert not (self.base_path / "test_db.lbdb").exists()
+    assert not (self.base_path / "test_db-wip.lbdb").exists()
+    assert not (self.base_path / "test_db-prev.lbdb").exists()
+    assert (self.base_path / "other_db.lbdb").exists()
     closed = [
       call.args[0]
       for call in manager.connection_pool.close_database_connections.call_args_list
@@ -473,16 +473,16 @@ class TestLadybugDatabaseManager:
     manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
     manager.connection_pool.close_database_connections = MagicMock()
 
-    for name in ("test_db.lbug", "test_db-wip.lbug", "test_db-prev.lbug"):
+    for name in ("test_db.lbdb", "test_db-wip.lbdb", "test_db-prev.lbdb"):
       (self.base_path / name).touch()
 
     lance_patch, duck_patch, _, _ = self._side_stores()
     with lance_patch, duck_patch:
       manager.delete_database("test_db-wip", preserve_duckdb=True)
 
-    assert not (self.base_path / "test_db-wip.lbug").exists()
-    assert (self.base_path / "test_db.lbug").exists()
-    assert (self.base_path / "test_db-prev.lbug").exists()
+    assert not (self.base_path / "test_db-wip.lbdb").exists()
+    assert (self.base_path / "test_db.lbdb").exists()
+    assert (self.base_path / "test_db-prev.lbdb").exists()
 
   @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_list_databases(self, mock_init_pool):
@@ -491,14 +491,14 @@ class TestLadybugDatabaseManager:
     manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
 
     # Create test database directories
-    (self.base_path / "db1.lbug").touch()
-    (self.base_path / "db2.lbug").touch()
+    (self.base_path / "db1.lbdb").touch()
+    (self.base_path / "db2.lbdb").touch()
     (self.base_path / "not_a_db").mkdir()  # Should be ignored
-    (self.base_path / "db3.lbug").touch()
+    (self.base_path / "db3.lbdb").touch()
 
     databases = manager.list_databases()
 
-    # Should return only .lbug files, sorted
+    # Should return only .lbdb files, sorted
     assert databases == ["db1", "db2", "db3"]
 
   @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
@@ -518,7 +518,7 @@ class TestLadybugDatabaseManager:
     manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
 
     # Create test database file (LadybugDB 0.11.0 uses single files)
-    db_path = self.base_path / "test_db.lbug"
+    db_path = self.base_path / "test_db.lbdb"
     db_path.write_bytes(b"x" * 1024)  # 1KB file
 
     # Mock health check
@@ -562,7 +562,7 @@ class TestLadybugDatabaseManager:
 
     mock_db_info_1 = DatabaseInfo(
       graph_id="db1",
-      database_path="/tmp/db1.lbug",
+      database_path="/tmp/db1.lbdb",
       created_at="2023-01-01T00:00:00",
       size_bytes=1024,
       read_only=False,
@@ -571,7 +571,7 @@ class TestLadybugDatabaseManager:
     )
     mock_db_info_2 = DatabaseInfo(
       graph_id="db2",
-      database_path="/tmp/db2.lbug",
+      database_path="/tmp/db2.lbdb",
       created_at="2023-01-01T00:00:00",
       size_bytes=2048,
       read_only=True,
@@ -602,7 +602,7 @@ class TestLadybugDatabaseManager:
       side_effect=[
         DatabaseInfo(
           graph_id=name,
-          database_path=f"/tmp/{name}.lbug",
+          database_path=f"/tmp/{name}.lbdb",
           created_at="2023-01-01T00:00:00",
           size_bytes=1,
           read_only=False,
@@ -631,7 +631,7 @@ class TestLadybugDatabaseManager:
 
     healthy_info = DatabaseInfo(
       graph_id="healthy_db",
-      database_path="/tmp/healthy_db.lbug",
+      database_path="/tmp/healthy_db.lbdb",
       created_at="2023-01-01T00:00:00",
       size_bytes=1024,
       read_only=False,
@@ -640,7 +640,7 @@ class TestLadybugDatabaseManager:
     )
     unhealthy_info = DatabaseInfo(
       graph_id="unhealthy_db",
-      database_path="/tmp/unhealthy_db.lbug",
+      database_path="/tmp/unhealthy_db.lbdb",
       created_at="2023-01-01T00:00:00",
       size_bytes=1024,
       read_only=False,
@@ -663,7 +663,7 @@ class TestLadybugDatabaseManager:
     manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
 
     # Create test database directory
-    db_path = self.base_path / "test_db.lbug"
+    db_path = self.base_path / "test_db.lbdb"
     db_path.touch()
 
     is_healthy = manager._check_database_health("test_db")
@@ -998,7 +998,7 @@ class TestLadybugDatabaseManagerIntegration:
 
       # Test 2: Concurrent deletion - create actual directories first for this test
       for db_name in results["created"]:
-        db_path = self.base_path / f"{db_name}.lbug"
+        db_path = self.base_path / f"{db_name}.lbdb"
         db_path.touch(exist_ok=True)
 
       existing_dbs = results["created"][:3]  # Test with first 3 created databases
@@ -1035,7 +1035,7 @@ class TestLadybugDatabaseManagerIntegration:
         time.sleep(0.05)
         for i in range(3, 6):
           # Create directories for deletion tests
-          db_path = self.base_path / f"{mixed_db_names[i]}.lbug"
+          db_path = self.base_path / f"{mixed_db_names[i]}.lbdb"
           db_path.touch(exist_ok=True)
 
           futures.append(executor.submit(create_database, mixed_db_names[i]))
@@ -1068,7 +1068,7 @@ class TestLadybugDatabaseManagerIntegration:
         assert response.status == "success"
 
         # Create directory for cleanup test
-        integrity_path = self.base_path / "integrity_test.lbug"
+        integrity_path = self.base_path / "integrity_test.lbdb"
         integrity_path.touch(exist_ok=True)
 
         # Clean up
@@ -1084,7 +1084,7 @@ class TestLadybugDatabaseManagerIntegration:
       import shutil
 
       for pattern in ["concurrent_db_", "mixed_db_"]:
-        for path in self.base_path.glob(f"{pattern}*.lbug"):
+        for path in self.base_path.glob(f"{pattern}*.lbdb"):
           try:
             shutil.rmtree(path, ignore_errors=True)
           except Exception:

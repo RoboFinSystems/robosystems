@@ -17,7 +17,11 @@ import ladybug as lbug
 from boto3.s3.transfer import TransferConfig
 
 from robosystems.config import env
-from robosystems.config.storage.graph import get_backup_key
+from robosystems.config.storage.graph import (
+  GRAPH_DB_SUFFIXES,
+  get_backup_key,
+  graph_db_filename,
+)
 from robosystems.graph_api.core.task_manager import migration_task_manager
 from robosystems.logger import logger
 
@@ -94,10 +98,10 @@ class MigrationService:
     return boto3.client("s3", **kwargs)
 
   def _checkpoint_database(self, graph_id: str) -> None:
-    """Drain the WAL into the .lbug file, through the pool's single-writer path.
+    """Drain the WAL into the database file, through the pool's single-writer path.
 
     Must run before EXPORT: the new engine cannot replay an old WAL tail, and
-    the raw .lbug system backup excludes the .wal. auto_checkpoint only fires
+    the raw system backup excludes the .wal. auto_checkpoint only fires
     past a size threshold (512 MB), so small graphs never drain on their own.
     Best-effort — the Parquet export captures committed WAL data regardless.
     """
@@ -115,13 +119,13 @@ class MigrationService:
     target_version: str,
     bucket: str,
   ) -> str:
-    """Upload the .lbug file to S3 as a pre-migration system backup.
+    """Upload the database file to S3 as a pre-migration system backup.
 
     ``bucket`` comes from the caller because the writer container does not
     set ``USER_DATA_BUCKET``. Returns the S3 key.
     """
     timestamp = datetime.now(UTC)
-    s3_key = get_backup_key(graph_id, "system", timestamp, extension=".lbug")
+    s3_key = get_backup_key(graph_id, "system", timestamp, extension=db_file.suffix)
 
     s3_client = self._get_s3_client()
     transfer_config = TransferConfig(
@@ -155,15 +159,25 @@ class MigrationService:
     logger.info(f"System backup uploaded: s3://{bucket}/{s3_key}")
     return s3_key
 
+  def _database_file(self, db_name: str) -> Path:
+    """The database's file on disk: the current suffix, else the previous one
+    (a database this upgrade's import has not reached), else the current
+    path, which does not exist."""
+    for suffix in GRAPH_DB_SUFFIXES:
+      candidate = self.base_path / f"{db_name}{suffix}"
+      if candidate.exists():
+        return candidate
+    return self.base_path / graph_db_filename(db_name)
+
   def _discover_databases(self) -> list[str]:
-    """Find all .lbug database files on this instance."""
+    """Find all database files on this instance, under either suffix."""
     if not self.base_path.exists():
       return []
-    databases = []
-    for f in sorted(self.base_path.iterdir()):
-      if f.suffix == ".lbug" and f.is_file():
-        databases.append(f.stem)
-    return databases
+    databases: set[str] = set()
+    for f in self.base_path.iterdir():
+      if f.is_file() and f.suffix in GRAPH_DB_SUFFIXES:
+        databases.add(f.stem)
+    return sorted(databases)
 
   def _get_node_count(self, conn) -> int:
     """Count total nodes across all node tables."""
@@ -198,11 +212,11 @@ class MigrationService:
     """Fail before exporting if the volume cannot hold the export."""
     total_db_size = 0
     for db_name in databases:
-      db_file = self.base_path / f"{db_name}.lbug"
+      db_file = self._database_file(db_name)
       if db_file.exists():
         total_db_size += db_file.stat().st_size
 
-    # Parquet exports run 25-60% of .lbug size; budgeting 100% is deliberate
+    # Parquet exports run 25-60% of database size; budgeting 100% is deliberate
     # headroom, since running out mid-export leaves a half-migrated instance.
     estimated_export_size = total_db_size
 
@@ -221,7 +235,7 @@ class MigrationService:
   ) -> None:
     """Export every database on this instance to Parquet, for a version upgrade.
 
-    EXPORTs each ``.lbug`` to ``exports/{graph_id}/`` and writes the
+    EXPORTs each database to ``exports/{graph_id}/`` and writes the
     ``migration.json`` manifest :meth:`import_all_databases` reads. Only one
     export runs at a time.
     """
@@ -257,7 +271,7 @@ class MigrationService:
       manifest_databases: list[dict[str, Any]] = []
 
       for i, db_name in enumerate(databases):
-        db_file = self.base_path / f"{db_name}.lbug"
+        db_file = self._database_file(db_name)
         export_dir = self.exports_path / db_name
 
         logger.info(f"Exporting {db_name} ({i + 1}/{len(databases)})")
@@ -368,7 +382,7 @@ class MigrationService:
       await migration_task_manager.fail_task(task_id, "Import already in progress")
       return
 
-    renamed_files: list[tuple[Path, Path]] = []
+    renamed_files: list[tuple[Path, Path, Path]] = []
 
     try:
       logger.info("Migration import started - health returning 503")
@@ -411,9 +425,11 @@ class MigrationService:
       for i, entry in enumerate(databases):
         db_name = entry["graph_id"]
         export_dir = self.base_path / entry["export_path"]
-        db_file = self.base_path / f"{db_name}.lbug"
-        pre_migration_file = Path(f"{db_file}.pre-migration")
-        wal_file = Path(f"{db_file}.wal")
+        # The import writes the current suffix; the file it replaces may still
+        # carry the previous one, and keeps it in its .pre-migration name.
+        db_file = self.base_path / graph_db_filename(db_name)
+        source_file = self._database_file(db_name)
+        pre_migration_file = Path(f"{source_file}.pre-migration")
 
         logger.info(f"Importing {db_name} ({i + 1}/{len(databases)})")
 
@@ -422,14 +438,16 @@ class MigrationService:
         if not export_dir.exists():
           raise RuntimeError(f"Export directory missing for {db_name}: {export_dir}")
 
-        if db_file.exists():
-          os.rename(db_file, pre_migration_file)
-          renamed_files.append((pre_migration_file, db_file))
-          logger.info(f"Renamed {db_name}.lbug -> .pre-migration")
+        if source_file.exists():
+          os.rename(source_file, pre_migration_file)
+          renamed_files.append((pre_migration_file, source_file, db_file))
+          logger.info(f"Renamed {source_file.name} -> .pre-migration")
 
         # The old WAL cannot be replayed by the new engine version.
-        if wal_file.exists():
-          os.remove(wal_file)
+        for suffix in GRAPH_DB_SUFFIXES:
+          wal_file = self.base_path / f"{db_name}{suffix}.wal"
+          if wal_file.exists():
+            os.remove(wal_file)
 
         start_time = time.time()
         db = None
@@ -511,12 +529,17 @@ class MigrationService:
     except Exception as e:
       logger.error(f"Migration import failed: {e}")
 
-      for pre_migration, original in renamed_files:
+      for pre_migration, original, imported in renamed_files:
         try:
           if pre_migration.exists():
-            # A partially imported .lbug would block the rename back.
-            if original.exists():
-              os.remove(original)
+            # A partially imported file would block the rename back, and one
+            # under the current suffix would be opened in place of the
+            # restored file. The original keeps its own name: an image rolled
+            # back to the old engine finds it, and the new engine refuses it
+            # until the import is run again.
+            for stale in {original, imported}:
+              if stale.exists():
+                os.remove(stale)
             os.rename(pre_migration, original)
             logger.info(f"Restored {original.name} from .pre-migration")
         except Exception as restore_err:

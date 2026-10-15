@@ -20,7 +20,7 @@ from robosystems.dagster.assets.shared_repositories.huggingface import (
 
 HELPER = "robosystems.dagster.assets.shared_repositories.huggingface"
 REPO = "robosystems/sec-xbrl-knowledge-graphs"
-PATH = "sec.lbug.zst"
+PATH = "sec.lbdb.zst"
 SIZE = 37_639_013_896
 SHA = "a" * 64
 
@@ -79,8 +79,8 @@ def r2_destination():
   with patch(f"{HELPER}._build_r2_destination") as build:
     build.return_value = {
       "bucket": "robosystems-downloads",
-      "r2_key": "downloads/sec/sec.lbug.zst",
-      "r2_uri": "r2://robosystems-downloads/downloads/sec/sec.lbug.zst",
+      "r2_key": "downloads/sec/sec.lbdb.zst",
+      "r2_uri": "r2://robosystems-downloads/downloads/sec/sec.lbdb.zst",
     }
     yield build
 
@@ -134,7 +134,7 @@ class TestSecLbugHfPublished:
     assert config.job_flavor == "cpu-basic"
     assert config.job_timeout == "6h"
     assert config.prune_previous is True
-    assert SEC_HF_PATH_IN_REPO == "sec.lbug.zst"
+    assert SEC_HF_PATH_IN_REPO == "sec.lbdb.zst"
 
 
 @pytest.mark.unit
@@ -186,13 +186,13 @@ class TestPublishToHuggingface:
     )
 
     r2_client.head_object.assert_called_once_with(
-      Bucket="robosystems-downloads", Key="downloads/sec/sec.lbug.zst"
+      Bucket="robosystems-downloads", Key="downloads/sec/sec.lbdb.zst"
     )
     r2_client.generate_presigned_url.assert_called_once()
     presign_kwargs = r2_client.generate_presigned_url.call_args.kwargs
     assert presign_kwargs["Params"] == {
       "Bucket": "robosystems-downloads",
-      "Key": "downloads/sec/sec.lbug.zst",
+      "Key": "downloads/sec/sec.lbdb.zst",
     }
     assert presign_kwargs["ExpiresIn"] == hf_module.HF_PRESIGN_TTL_SECONDS
 
@@ -212,7 +212,7 @@ class TestPublishToHuggingface:
     assert job_kwargs["env"]["REPO_ID"] == REPO
     assert job_kwargs["env"]["PATH_IN_REPO"] == PATH
     assert job_kwargs["env"]["COMMIT_MESSAGE"].startswith(
-      "sec.lbug.zst: snapshot 2026-07-16 (ladybug "
+      "sec.lbdb.zst: snapshot 2026-07-16 (ladybug "
     )
     assert "HF_TOKEN" not in job_kwargs["env"]
     assert "SRC_URL" not in job_kwargs["env"]

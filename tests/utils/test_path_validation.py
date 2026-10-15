@@ -89,8 +89,8 @@ class TestGetLadybugDatabasePath:
   def test_valid_graph_id_returns_path(self):
     with tempfile.TemporaryDirectory() as tmpdir:
       result = get_lbug_database_path("test_graph", base_path=tmpdir)
-      assert result == Path(tmpdir) / "test_graph.lbug"
-      assert result.suffix == ".lbug"
+      assert result == Path(tmpdir) / "test_graph.lbdb"
+      assert result.suffix == ".lbdb"
 
   def test_path_stays_within_base_directory(self):
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -113,16 +113,16 @@ class TestGetLadybugDatabasePath:
 
   def test_uses_env_config_when_no_base_path(self):
     result = get_lbug_database_path("test_graph")
-    assert "test_graph.lbug" in str(result)
-    assert result.suffix == ".lbug"
+    assert "test_graph.lbdb" in str(result)
+    assert result.suffix == ".lbdb"
 
   def test_path_format_consistency(self):
     with tempfile.TemporaryDirectory() as tmpdir:
       result1 = get_lbug_database_path("graph1", base_path=tmpdir)
       result2 = get_lbug_database_path("graph2", base_path=tmpdir)
       assert result1.parent == result2.parent
-      assert result1.name == "graph1.lbug"
-      assert result2.name == "graph2.lbug"
+      assert result1.name == "graph1.lbdb"
+      assert result2.name == "graph2.lbdb"
 
 
 class TestGetDuckDBStagingPath:
@@ -169,7 +169,7 @@ class TestGetDuckDBStagingPath:
       lbug_path = get_lbug_database_path("graph", base_path=tmpdir)
       duckdb_path = get_duckdb_staging_path("graph", base_path=tmpdir)
       assert lbug_path != duckdb_path
-      assert lbug_path.suffix == ".lbug"
+      assert lbug_path.suffix == ".lbdb"
       assert duckdb_path.suffix == ".duckdb"
 
 
@@ -290,7 +290,7 @@ class TestPathValidationIntegration:
 
       assert lbug.parent == duckdb.parent
       assert lbug.stem == duckdb.stem == "my_graph"
-      assert lbug.suffix == ".lbug"
+      assert lbug.suffix == ".lbdb"
       assert duckdb.suffix == ".duckdb"
 
   def test_validation_applied_consistently(self):
