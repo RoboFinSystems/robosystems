@@ -213,32 +213,41 @@ elif action == "force-merge":
 
 elif action == "settings":
     # The four index settings that fail the 2.19 -> 3.x pre-upgrade check.
+    # Every index the name resolves to: an alias over several must pass on all.
     flat = query_os(f"/{{index_name}}/_settings?flat_settings=true", method="GET")
-    settings = next(iter(flat.values()))["settings"]
+    settings = {{name: entry["settings"] for name, entry in flat.items()}}
     blockers = [
-        key for key in (
+        f"{{name}}: {{key}}"
+        for name, index_settings in settings.items()
+        for key in (
             "index.knn.algo_param.ef_construction",
             "index.knn.algo_param.m",
             "index.knn.space_type",
             "index.store.hybrid.mmap.extensions",
         )
-        if key in settings
+        if key in index_settings
     ]
     print(json.dumps({{"settings": settings, "upgrade_blockers": blockers}}))
 
 elif action == "warmup":
     # Loads every segment's k-NN graph into native memory, so the first
     # semantic query after a restart or an upgrade does not pay for it.
-    result = query_os(f"/_plugins/_knn/warmup/{{index_name}}", method="GET")
     try:
-        stats = query_os("/_plugins/_knn/stats/graph_memory_usage_percentage", method="GET")
-        usage = {{
-            node_id: node.get("graph_memory_usage_percentage")
-            for node_id, node in stats.get("nodes", {{}}).items()
-        }}
-    except urllib.error.HTTPError:
-        usage = {{}}
-    print(json.dumps({{"shards": result.get("_shards", {{}}), "graph_memory_usage_percentage": usage}}))
+        result = query_os(f"/_plugins/_knn/warmup/{{index_name}}", method="GET")
+    except urllib.error.HTTPError as e:
+        result = {{"error": f"warmup refused: HTTP {{e.code}} {{e.reason}}"}}
+    if "error" in result:
+        print(json.dumps(result))
+    else:
+        try:
+            stats = query_os("/_plugins/_knn/stats/graph_memory_usage_percentage", method="GET")
+            usage = {{
+                node_id: node.get("graph_memory_usage_percentage")
+                for node_id, node in stats.get("nodes", {{}}).items()
+            }}
+        except urllib.error.HTTPError:
+            usage = {{}}
+        print(json.dumps({{"shards": result.get("_shards", {{}}), "graph_memory_usage_percentage": usage}}))
 
 elif action in ("memory-optimized-on", "memory-optimized-off"):
     # A static k-NN setting: it changes only on a closed index, so search is
@@ -687,8 +696,10 @@ def search_settings(client, json_output):
     f"\n[bold cyan]'documents' INDEX SETTINGS[/bold cyan] ({client.environment})"
   )
   console.print("=" * 60)
-  for key in sorted(k for k in settings if ".knn" in k or "version" in k):
-    console.print(f"  {key}: {settings[key]}")
+  for name, index_settings in settings.items():
+    console.print(f"[bold]{name}[/bold]")
+    for key in sorted(k for k in index_settings if ".knn" in k or "version" in k):
+      console.print(f"  {key}: {index_settings[key]}")
   if blockers:
     console.print(f"\n[red]3.x upgrade blockers:[/red] {', '.join(blockers)}\n")
   else:
@@ -711,6 +722,9 @@ def search_warmup(client):
   """
   console.print("Warming the k-NN cache (this can take a few minutes)...")
   data = _run_opensearch_script(client, action="warmup")
+  if "error" in data:
+    console.print(f"\n[red]{data['error']}[/red]\n")
+    return
   shards = data.get("shards", {})
   failed = shards.get("failed", 0)
 
