@@ -240,6 +240,31 @@ elif action == "warmup":
         usage = {{}}
     print(json.dumps({{"shards": result.get("_shards", {{}}), "graph_memory_usage_percentage": usage}}))
 
+elif action in ("memory-optimized-on", "memory-optimized-off"):
+    # A static k-NN setting: it changes only on a closed index, so search is
+    # down from the close to the reopen. The reopen runs even if the update fails.
+    setting = "index.knn.memory_optimized_search"
+    want = action == "memory-optimized-on"
+
+    def memory_optimized():
+        found = query_os(f"/{{index_name}}/_settings?flat_settings=true&include_defaults=true", method="GET")
+        entry = next(iter(found.values()))
+        value = entry.get("settings", {{}}).get(setting, entry.get("defaults", {{}}).get(setting, "false"))
+        return str(value).lower() == "true"
+
+    before = memory_optimized()
+    if dry_run or before == want:
+        print(json.dumps({{"before": before, "after": before, "changed": False}}))
+    else:
+        query_os(f"/{{index_name}}/_close")
+        try:
+            query_os(f"/{{index_name}}/_settings", {{setting: want}}, method="PUT")
+        finally:
+            query_os(f"/{{index_name}}/_open")
+            query_os(f"/_cluster/health/{{index_name}}?wait_for_status=yellow&timeout=120s", method="GET")
+        after = memory_optimized()
+        print(json.dumps({{"before": before, "after": after, "changed": after != before}}))
+
 elif action == "recreate-index":
     # The whole index — every graph's documents. Count first so the confirm can
     # name what is about to go; then DELETE and PUT the mapping in the SAME
@@ -699,6 +724,60 @@ def search_warmup(client):
   for node_id, pct in data.get("graph_memory_usage_percentage", {}).items():
     console.print(f"  k-NN cache on {node_id}: {pct}%")
   console.print()
+
+
+@search.command("memory-optimized")
+@click.argument("state", type=click.Choice(["on", "off", "status"]))
+@click.option("--force", is_flag=True, help="Skip the confirmation prompt")
+@click.pass_obj
+def search_memory_optimized(client, state, force):
+  """Turn k-NN memory-optimized search on or off, or show whether it is on.
+
+  With it on, Faiss searches the graph file through the OS page cache instead
+  of loading it into the k-NN cache. It is a static index setting: the index
+  is closed, updated and reopened, so search is down for that gap. Off is the
+  rollback. Once it has proven out, the setting belongs in INDEX_MAPPING so a
+  rebuilt index keeps it.
+
+  Examples:
+
+    just admin prod search memory-optimized status
+
+    just admin prod search memory-optimized on
+  """
+  current = _run_opensearch_script(client, action="memory-optimized-on", dry_run=True)[
+    "before"
+  ]
+  console.print(
+    f"\nMemory-optimized search on 'documents' ({client.environment}): "
+    f"[bold]{'on' if current else 'off'}[/bold]"
+  )
+  want = state == "on"
+  if state == "status" or current == want:
+    console.print()
+    return
+
+  if not force:
+    console.print(
+      f"[bold yellow]Turning it {state} closes and reopens the index: "
+      "search is down until it reopens.[/bold yellow]"
+    )
+    if not click.confirm("Proceed?"):
+      console.print("[dim]Cancelled.[/dim]")
+      return
+
+  data = _run_opensearch_script(client, action=f"memory-optimized-{state}")
+  if data.get("after") == want:
+    console.print(f"\n[green]Memory-optimized search is {state}.[/green]")
+  else:
+    console.print(f"\n[red]The setting did not change:[/red] {data}")
+  if want:
+    console.print(
+      "Check KNNGraphMemoryUsage after a full semantic query: if it climbs back "
+      "to its old level, the index's encoder is not covered and it can go off again.\n"
+    )
+  else:
+    console.print()
 
 
 @search.command("recreate-index")

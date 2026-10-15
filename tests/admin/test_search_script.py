@@ -25,6 +25,8 @@ ACTIONS = [
   "force-merge",
   "settings",
   "warmup",
+  "memory-optimized-on",
+  "memory-optimized-off",
   "recreate-index",
 ]
 
@@ -69,7 +71,7 @@ def delete_filters(**overrides) -> list[dict]:
     and isinstance(node.value, ast.Constant)
   }
 
-  body = script.split('elif action == "delete":', 1)[1].split("elif action ==", 1)[0]
+  body = script.split('elif action == "delete":', 1)[1].split("\nelif action", 1)[0]
   lines = []
   for line in body.splitlines():
     if line.strip().startswith("query ="):
@@ -416,7 +418,7 @@ def branch_output(action: str, responses: dict) -> tuple[dict, list[tuple]]:
     "query_os": query_os,
     "print": printed.append,
   }
-  body = script.split(f'elif action == "{action}":', 1)[1].split("elif action ==", 1)[0]
+  body = script.split(f'elif action == "{action}":', 1)[1].split("\nelif action", 1)[0]
   exec(textwrap.dedent(body), namespace)  # noqa: S102
   return json.loads(printed[0]), calls
 
@@ -486,3 +488,101 @@ def test_warmup_still_reports_when_stats_are_refused():
   )
   assert out["shards"]["successful"] == 1
   assert out["graph_memory_usage_percentage"] == {}
+
+
+def memory_optimized_calls(
+  action: str,
+  *,
+  enabled: bool,
+  dry_run: bool = False,
+  refuse_put: bool = False,
+  calls: list[tuple] | None = None,
+) -> tuple[dict | None, list[tuple]]:
+  """The memory-optimized branch, run against a fake domain that keeps the
+  setting's state, so a read after the update sees what the update wrote."""
+  script = render(action=action, dry_run="true" if dry_run else "false")
+  state = {"enabled": enabled}
+  calls = [] if calls is None else calls
+  printed: list[str] = []
+
+  def query_os(path, body=None, method="POST"):
+    calls.append((method, path.split("?", 1)[0], body))
+    if method == "PUT":
+      if refuse_put:
+        raise urllib.error.HTTPError(path, 403, "Forbidden", None, None)  # type: ignore[arg-type]
+      state["enabled"] = body["index.knn.memory_optimized_search"]
+    if path.startswith("/documents/_settings") and method == "GET":
+      return {
+        "documents": {
+          "settings": {"index.knn": "true"},
+          "defaults": {
+            "index.knn.memory_optimized_search": str(state["enabled"]).lower()
+          },
+        }
+      }
+    return {}
+
+  namespace: dict = {
+    "json": json,
+    "urllib": urllib,
+    "index_name": "documents",
+    "action": action,
+    "dry_run": dry_run,
+    "query_os": query_os,
+    "print": printed.append,
+  }
+  body = script.split(
+    'elif action in ("memory-optimized-on", "memory-optimized-off"):', 1
+  )[1]
+  body = body.split("\nelif action", 1)[0]
+  exec(textwrap.dedent(body), namespace)  # noqa: S102
+  return (json.loads(printed[0]) if printed else None), calls
+
+
+@pytest.mark.unit
+def test_memory_optimized_on_closes_updates_and_reopens_in_order():
+  out, calls = memory_optimized_calls("memory-optimized-on", enabled=False)
+  assert [(m, p) for m, p, _ in calls] == [
+    ("GET", "/documents/_settings"),
+    ("POST", "/documents/_close"),
+    ("PUT", "/documents/_settings"),
+    ("POST", "/documents/_open"),
+    ("GET", "/_cluster/health/documents"),
+    ("GET", "/documents/_settings"),
+  ]
+  assert calls[2][2] == {"index.knn.memory_optimized_search": True}
+  assert out == {"before": False, "after": True, "changed": True}
+
+
+@pytest.mark.unit
+def test_memory_optimized_off_is_the_rollback():
+  out, _ = memory_optimized_calls("memory-optimized-off", enabled=True)
+  assert out == {"before": True, "after": False, "changed": True}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+  ("action", "enabled", "dry_run"),
+  [("memory-optimized-on", True, False), ("memory-optimized-on", False, True)],
+)
+def test_memory_optimized_never_closes_when_nothing_changes(action, enabled, dry_run):
+  """Already in the asked-for state, or a status read: one GET, no close."""
+  out, calls = memory_optimized_calls(action, enabled=enabled, dry_run=dry_run)
+  assert [m for m, _, _ in calls] == ["GET"]
+  assert out == {"before": enabled, "after": enabled, "changed": False}
+
+
+@pytest.mark.unit
+def test_a_refused_update_still_reopens_the_index():
+  """The update failing must not leave the index closed: a closed index is a
+  search outage until someone notices."""
+  calls: list[tuple] = []
+  with pytest.raises(urllib.error.HTTPError):
+    memory_optimized_calls(
+      "memory-optimized-on", enabled=False, refuse_put=True, calls=calls
+    )
+  assert [(m, p) for m, p, _ in calls][-3:] == [
+    ("PUT", "/documents/_settings"),
+    ("POST", "/documents/_open"),
+    ("GET", "/_cluster/health/documents"),
+  ]
