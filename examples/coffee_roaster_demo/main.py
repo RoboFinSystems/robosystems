@@ -4,9 +4,11 @@
 Loads a whole synthetic company into a RoboLedger graph and leaves it ready for
 a month-end close: chart of accounts, counterparty agents, 16 months of typed
 REA events, CoA→rs-gaap mappings, fiscal calendar, schedules, disclosure notes,
-policy documents, and a filed annual report — plus Driftline Café, LLC, a
-wholly owned subsidiary in the same graph with its own books and close, so the
-group's combined statement has two companies in it.
+policy documents, and a filed annual report — plus the Driftline group in the
+same graph: two café LLCs with their own books and closes (one wholly owned,
+one with an outside partner holding thirty percent) and a consolidation
+entity carrying the eliminations and the noncontrolling interest, so the
+consolidated statements have a whole group in them.
 
 Driftline is *profitable but cash-poor*. The P&L glows while cash drains into
 green-coffee inventory bought ahead of demand and into one large wholesale
@@ -30,7 +32,7 @@ Usage:
     just demo-coffee-roaster --dry-run    # validate the synthetic data only
     just demo-coffee-roaster --ai         # map the CoA with the MappingOperator
                                           #   (requires AWS Bedrock)
-    just demo-coffee-roaster --no-subsidiary   # the roaster alone, no café LLC
+    just demo-coffee-roaster --no-subsidiary   # the roaster alone, no café group
 
 Expect several minutes of progress output ending in a summary with the graph
 id, the period queued for close, the filed report id, and the reveal prompts
@@ -46,11 +48,11 @@ from examples._scenario.runner import run_demo
 from .agents import AGENTS
 from .data import SCENARIO
 from .disclosures import DISCLOSURE_NOTES, TEXT_BLOCK_NOTES
+from .group import GROUP
 from .mappings import mappings_for
 from .memories import MEMORIES
 from .metrics import CUSTOM_METRICS
 from .policies import DOCUMENTS
-from .subsidiary import SUBSIDIARY
 
 # Beat 4 — the analysis questions printed at the end of the run, to ask an MCP
 # client against the loaded graph. Driftline's reveal: profit is up, cash is
@@ -87,7 +89,7 @@ def main() -> None:
     custom_metrics=CUSTOM_METRICS,
     memories=MEMORIES,
     forecast_levers=FORECAST_LEVERS,
-    subsidiary=SUBSIDIARY,
+    group=GROUP,
   )
 
 

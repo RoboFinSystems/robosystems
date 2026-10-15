@@ -1,0 +1,108 @@
+{
+  "@context": {
+    "rs": "https://robosystems.ai/vocab/",
+    "rs-gaap": "https://robosystems.ai/taxonomy/rs-gaap/v1/",
+    "from": "rs:fromCode",
+    "to": {
+      "@id": "rs:toConcept",
+      "@type": "@id"
+    },
+    "arcs": {
+      "@id": "rs:mapping",
+      "@container": "@list"
+    },
+    "variants": "rs:variant"
+  },
+  "@id": "chart-templates:consolidation/v1/mappings/rs-gaap",
+  "@type": "rs:ChartMapping",
+  "framework": "rs-gaap",
+  "displayName": "US GAAP (rs-gaap)",
+  "structureName": "CoA to US GAAP Mapping",
+  "defaultVariant": "corporation",
+  "arcs": [
+    {
+      "from": "1150",
+      "to": "rs-gaap:DueFromAffiliateCurrent"
+    },
+    {
+      "from": "1600",
+      "to": "rs-gaap:InvestmentsInAffiliatesSubsidiariesAssociatesAndJointVentures"
+    },
+    {
+      "from": "1650",
+      "to": "rs-gaap:LongTermInvestmentsAndReceivablesNet"
+    },
+    {
+      "from": "1800",
+      "to": "rs-gaap:Goodwill"
+    },
+    {
+      "from": "2150",
+      "to": "rs-gaap:DueToAffiliateCurrent"
+    },
+    {
+      "from": "2600",
+      "to": "rs-gaap:LongTermDebtAndCapitalLeaseObligations"
+    },
+    {
+      "from": "3010",
+      "to": "rs-gaap:AdditionalPaidInCapital"
+    },
+    {
+      "from": "3020",
+      "to": "rs-gaap:MembersEquity"
+    },
+    {
+      "from": "3030",
+      "to": "rs-gaap:PartnersCapital"
+    },
+    {
+      "from": "3200",
+      "to": "rs-gaap:MinorityInterest"
+    },
+    {
+      "from": "4000",
+      "to": "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
+    },
+    {
+      "from": "4100",
+      "to": "rs-gaap:InvestmentIncomeInterest"
+    },
+    {
+      "from": "4200",
+      "to": "rs-gaap:OtherNonoperatingIncomeExpense"
+    },
+    {
+      "from": "5000",
+      "to": "rs-gaap:GeneralAndAdministrativeExpense"
+    },
+    {
+      "from": "5100",
+      "to": "rs-gaap:InterestExpense"
+    },
+    {
+      "from": "5900",
+      "to": "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest"
+    }
+  ],
+  "variants": {
+    "corporation": [
+      {
+        "from": "3100",
+        "to": "rs-gaap:RetainedEarningsAccumulatedDeficit"
+      }
+    ],
+    "partnership": [
+      {
+        "from": "3100",
+        "to": "rs-gaap:PartnersCapital"
+      }
+    ],
+    "llc": [
+      {
+        "from": "3100",
+        "to": "rs-gaap:MembersEquity"
+      }
+    ]
+  }
+}

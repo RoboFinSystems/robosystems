@@ -81,10 +81,10 @@ def rs_gaap_qnames() -> set[str]:
 
 @pytest.mark.unit
 class TestRegistry:
-  def test_three_templates_with_stable_keys(self) -> None:
-    assert TEMPLATE_KEYS == ("saas", "services", "product")
+  def test_four_templates_with_stable_keys(self) -> None:
+    assert TEMPLATE_KEYS == ("saas", "services", "product", "consolidation")
     assert [t.key for t in list_templates()] == list(TEMPLATE_KEYS)
-    assert [t.ordinal for t in list_templates()] == [0, 1, 2]
+    assert [t.ordinal for t in list_templates()] == [0, 1, 2, 3]
 
   def test_lookup_is_case_and_whitespace_tolerant(self) -> None:
     assert get_template(" SaaS ") is CHART_TEMPLATES["saas"]
@@ -135,7 +135,13 @@ class TestRegistry:
         set(mapped_codes) - set(codes),
       )
       assert len(mapped_codes) == len(set(mapped_codes)), (key, form, "duplicate")
-      assert set(EQUITY_CODES) <= set(mapped_codes), (key, form, "equity unmapped")
+      # Every equity row is mapped for every form: the base rows or the
+      # form's variant must cover it, since an unmapped equity account
+      # never closes to anything.
+      equity_codes = {
+        code for code, _n, trait, *_rest in template.accounts if trait == "equity"
+      }
+      assert equity_codes <= set(mapped_codes), (key, form, "equity unmapped")
       for _code, qname in arcs:
         assert qname.startswith("rs-gaap:"), (key, form, qname)
 

@@ -40,7 +40,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from .drivers import Scenario
-from .subsidiary import Subsidiary, load_subsidiary
+from .group import Group, load_group
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -2035,6 +2035,33 @@ def materialize_graph(graph_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def scenario_windows(scenario: Scenario) -> list[tuple[date, date]]:
+  """The scenario's month windows, the open close target last; empty for a
+  scenario with no ``report_period``. The grid every step shares."""
+  from .engine import add_months, get_demo_start_date, month_windows
+
+  if scenario.report_period is None:
+    return []
+
+  # Recover the rolling window's start from the annual period: the annual
+  # window ends at the close target, offset ``months - 2`` from the start.
+  annual_end = scenario.report_period[1]
+  start = add_months(date(annual_end.year, annual_end.month, 1), -(scenario.months - 2))
+  windows = month_windows(start, scenario.months)
+
+  # The two window derivations (period seeding from earliest_data_period,
+  # close windows from the annual period) must agree on the first month,
+  # or the very first close hits the SEQUENCE blocker.
+  demo_start = get_demo_start_date(scenario.months)
+  if (windows[0][0].year, windows[0][0].month) != (demo_start.year, demo_start.month):
+    raise RuntimeError(
+      f"Window derivations disagree: first close window starts {windows[0][0]} "
+      f"but the calendar was seeded from {demo_start} — the sequence gate "
+      f"would block every close."
+    )
+  return windows
+
+
 def close_monthly_history(graph_id: str, scenario: Scenario) -> list[tuple[date, date]]:
   """Close every completed historical month, in sequence.
 
@@ -2061,29 +2088,11 @@ def close_monthly_history(graph_id: str, scenario: Scenario) -> list[tuple[date,
   Returns the full month-window list (including the open close-target
   month) so downstream consumers share the exact period grid.
   """
-  from .engine import add_months, get_demo_start_date, month_windows
-
   client = _get_ledger_client()
-  if scenario.report_period is None:
+  windows = scenario_windows(scenario)
+  if not windows:
     print("  (skipped — scenario has no report_period)")
     return []
-
-  # Recover the rolling window's start from the annual period: the annual
-  # window ends at the close target, offset ``months - 2`` from the start.
-  annual_end = scenario.report_period[1]
-  start = add_months(date(annual_end.year, annual_end.month, 1), -(scenario.months - 2))
-  windows = month_windows(start, scenario.months)
-
-  # The two window derivations (period seeding from earliest_data_period,
-  # close windows from the annual period) must agree on the first month,
-  # or the very first close hits the SEQUENCE blocker.
-  demo_start = get_demo_start_date(scenario.months)
-  if (windows[0][0].year, windows[0][0].month) != (demo_start.year, demo_start.month):
-    raise RuntimeError(
-      f"Window derivations disagree: first close window starts {windows[0][0]} "
-      f"but the calendar was seeded from {demo_start} — the sequence gate "
-      f"would block every close."
-    )
 
   stamped = 0
   for _period_start, period_end in windows[:-1]:
@@ -2228,7 +2237,7 @@ def run_demo(
   custom_metrics: list[dict] | None = None,
   memories: list[dict] | None = None,
   forecast_levers: dict[str, float] | None = None,
-  subsidiary: Subsidiary | None = None,
+  group: Group | None = None,
   argv: list[str] | None = None,
 ) -> None:
   """Provision a graph and load the full company for one showcase episode.
@@ -2247,10 +2256,11 @@ def run_demo(
   ``forecast_levers`` (optional) authors + computes an operating-budget
   forecast scenario after the metric series lands (see
   ``run_forecast_scenario``) — a ``{rs-driver qname: value}`` map.
-  ``subsidiary`` (optional) puts a second entity in the graph beside the
-  company, with its own books and close, and reads the group's combined
-  balance sheet back (see ``subsidiary.load_subsidiary``); ``--no-subsidiary``
-  skips it.
+  ``group`` (optional) puts the company's subsidiaries and a consolidation
+  entity in the graph beside it, each with its own books and close, posts
+  every intercompany event on both sides with its consolidating entries, and
+  reads the consolidated statements back (see ``group.load_group``);
+  ``--no-subsidiary`` skips it.
   """
   argv = sys.argv if argv is None else argv
   dry_run = "--dry-run" in argv
@@ -2366,17 +2376,24 @@ def run_demo(
   # Plan grid bind). Runs BEFORE schedule creation: the closeable gate
   # counts pending schedule obligations globally, and schedules created
   # after the loop scope themselves to the advanced closed_through.
+  # The group in the same graph: each member's own books, chart and close, the
+  # consolidating entries in their own entity, and the consolidated statement
+  # on the parent. Before the parent's history closes, since the parent's
+  # side of every intercompany event lands in those months.
+  group_result = None
+  period_windows = scenario_windows(scenario)
+  if group is not None and period_windows and "--no-subsidiary" not in argv:
+    print(f"\nAdding the group ({len(group.members)} members)...")
+    group_result = load_group(
+      graph_id,
+      group,
+      config=_client_config(),
+      windows=period_windows,
+      parent_taxonomy_id=coa_taxonomy_id,
+    )
+
   print("\nClosing monthly history...")
   period_windows = close_monthly_history(graph_id, scenario)
-
-  # A subsidiary in the same graph: its own books, chart and close, and the
-  # group's combined statement on the parent.
-  subsidiary_result = None
-  if subsidiary is not None and period_windows and "--no-subsidiary" not in argv:
-    print(f"\nAdding subsidiary {subsidiary.name}...")
-    subsidiary_result = load_subsidiary(
-      graph_id, subsidiary, config=_client_config(), windows=period_windows
-    )
 
   # Create schedules (derived from the scenario's capex + prepaids)
   print("\nCreating schedules...")
@@ -2460,10 +2477,14 @@ def run_demo(
     print(f"  Viewer URL:    /reports/{report_id}?graph={graph_id}")
   if forecast_scenario_id:
     print(f"  Forecast:      /explorer?scenario={forecast_scenario_id}")
-  if subsidiary_result:
+  if group_result:
+    members = ", ".join(
+      f"{name} ({eid})" for name, eid in group_result.member_ids.items()
+    )
     print(
-      f"  Subsidiary:    {subsidiary_result.name} ({subsidiary_result.entity_id}), "
-      f"{subsidiary_result.months_closed} months closed on its own calendar"
+      f"  Group:         {members}; consolidation entity {group_result.consolidation_id}; "
+      f"{group_result.months_closed} entity-months closed on their own calendars; "
+      f"checks {'passed' if group_result.passed else 'FAILED'}"
     )
   print("\n  Run the close (Claude Desktop / MCP):")
   print(f"    1. Switch to workspace: {graph_id}")
@@ -2472,10 +2493,11 @@ def run_demo(
   print(f"    4. Ask: 'Close the period {close_target}'")
   print("\n  The reveal — turn Claude loose, no script:")
   prompts = list(reveal_prompts)
-  if subsidiary_result:
+  if group_result:
+    first = next(iter(group_result.member_ids))
     prompts.append(
-      f"Show me the group's combined balance sheet, then {subsidiary_result.name} on "
-      "its own."
+      f"Show me the group's consolidated balance sheet, then {first} on its own, "
+      "and tell me where the noncontrolling interest comes from."
     )
   for i, prompt in enumerate(prompts, start=5):
     print(f"    {i}. Ask: '{prompt}'")

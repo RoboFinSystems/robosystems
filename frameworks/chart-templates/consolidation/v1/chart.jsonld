@@ -1,0 +1,167 @@
+{
+  "@context": {
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "xbrli": "http://www.xbrl.org/2003/instance#",
+    "rs": "https://robosystems.ai/vocab/",
+    "trait": "https://robosystems.ai/taxonomy/fac-traits/v1/",
+    "label": "rdfs:label",
+    "documentation": "rdfs:comment",
+    "code": "rs:code",
+    "subClassification": "rs:subClassification",
+    "balance": {
+      "@id": "xbrli:balance"
+    },
+    "hasTrait": {
+      "@id": "rs:hasTrait",
+      "@type": "@id"
+    },
+    "accounts": {
+      "@id": "rs:account",
+      "@container": "@list"
+    }
+  },
+  "@id": "chart-templates:consolidation/v1",
+  "@type": "rs:ChartTemplate",
+  "key": "consolidation",
+  "ordinal": 3,
+  "displayName": "Consolidation adjustments (the eliminations column)",
+  "description": "The chart of a group's consolidation entity: the one place the consolidating entries post, read by the consolidated statements and never by an operating company's. The parent-standalone rows that eliminate (the investment in subsidiaries, the balances due from and to affiliates, intercompany revenue and expense), the subsidiaries' equity rows that eliminate, and the consolidation-only rows (noncontrolling interest and its share of income, goodwill). Every balance here is the adjustment, so an eliminated asset carries a credit balance and an eliminated revenue a debit.",
+  "accounts": [
+    {
+      "code": "1150",
+      "label": "Due from Affiliates — Eliminated",
+      "hasTrait": "trait:elementsOfFinancialStatements/asset",
+      "subClassification": "accounts_receivable",
+      "balance": "debit",
+      "documentation": "Reverses the receivables the members hold against each other; carries a credit balance equal to the open intercompany balance."
+    },
+    {
+      "code": "1600",
+      "label": "Investment in Subsidiaries — Eliminated",
+      "hasTrait": "trait:elementsOfFinancialStatements/asset",
+      "subClassification": "other_noncurrent_assets",
+      "balance": "debit",
+      "documentation": "Reverses the parent's investment accounts against the subsidiaries' contributed equity; carries a credit balance equal to the investments."
+    },
+    {
+      "code": "1650",
+      "label": "Notes Receivable from Affiliates — Eliminated",
+      "hasTrait": "trait:elementsOfFinancialStatements/asset",
+      "subClassification": "other_noncurrent_assets",
+      "balance": "debit",
+      "documentation": "Reverses notes one member holds on another; carries a credit balance equal to the principal outstanding."
+    },
+    {
+      "code": "1800",
+      "label": "Goodwill on Consolidation",
+      "hasTrait": "trait:elementsOfFinancialStatements/asset",
+      "subClassification": "intangible_assets",
+      "balance": "debit",
+      "documentation": "The excess of an acquired subsidiary's cost over its net assets at acquisition, confirmed by a person."
+    },
+    {
+      "code": "2150",
+      "label": "Due to Affiliates — Eliminated",
+      "hasTrait": "trait:elementsOfFinancialStatements/liability",
+      "subClassification": "accounts_payable",
+      "balance": "credit",
+      "documentation": "Reverses the payables the members owe each other; carries a debit balance equal to the open intercompany balance."
+    },
+    {
+      "code": "2600",
+      "label": "Notes Payable to Affiliates — Eliminated",
+      "hasTrait": "trait:elementsOfFinancialStatements/liability",
+      "subClassification": "long_term_debt",
+      "balance": "credit",
+      "documentation": "Reverses notes one member owes another; carries a debit balance equal to the principal outstanding."
+    },
+    {
+      "code": "3010",
+      "label": "Subsidiary Paid-in Capital — Eliminated",
+      "hasTrait": "trait:elementsOfFinancialStatements/equity",
+      "subClassification": "equity",
+      "balance": "credit",
+      "documentation": "Reverses a corporate subsidiary's contributed capital against the parent's investment and the noncontrolling interest; carries a debit balance."
+    },
+    {
+      "code": "3020",
+      "label": "Subsidiary Members' Equity — Eliminated",
+      "hasTrait": "trait:elementsOfFinancialStatements/equity",
+      "subClassification": "equity",
+      "balance": "credit",
+      "documentation": "Reverses an LLC subsidiary's contributed capital, net of distributions, against the parent's investment and the noncontrolling interest; carries a debit balance."
+    },
+    {
+      "code": "3030",
+      "label": "Subsidiary Partners' Capital — Eliminated",
+      "hasTrait": "trait:elementsOfFinancialStatements/equity",
+      "subClassification": "equity",
+      "balance": "credit",
+      "documentation": "Reverses a partnership subsidiary's contributed capital, net of distributions, against the parent's investment and the noncontrolling interest; carries a debit balance."
+    },
+    {
+      "code": "3100",
+      "label": "Retained Earnings — Consolidation",
+      "hasTrait": "trait:elementsOfFinancialStatements/equity",
+      "subClassification": "equity",
+      "balance": "credit",
+      "documentation": "Where this entity's own income statement closes: the cumulative share of income allocated to noncontrolling interests and any eliminated intercompany profit."
+    },
+    {
+      "code": "3200",
+      "label": "Noncontrolling Interest",
+      "hasTrait": "trait:elementsOfFinancialStatements/equity",
+      "subClassification": "equity",
+      "balance": "credit",
+      "documentation": "The outside owners' share of the consolidated subsidiaries' net assets: their share of contributed capital at formation or acquisition, plus their share of income, less their distributions."
+    },
+    {
+      "code": "4000",
+      "label": "Intercompany Revenue — Eliminated",
+      "hasTrait": "trait:elementsOfFinancialStatements/revenue",
+      "subClassification": "operating_revenue",
+      "balance": "credit",
+      "documentation": "Reverses revenue one member earned from another (management fees, rebills, sales); carries a debit balance for the period."
+    },
+    {
+      "code": "4100",
+      "label": "Intercompany Interest Income — Eliminated",
+      "hasTrait": "trait:elementsOfFinancialStatements/revenue",
+      "subClassification": "non_operating_revenue",
+      "balance": "credit",
+      "documentation": "Reverses interest one member earned on a note to another; carries a debit balance for the period."
+    },
+    {
+      "code": "4200",
+      "label": "Dividend Income from Subsidiaries — Eliminated",
+      "hasTrait": "trait:elementsOfFinancialStatements/revenue",
+      "subClassification": "non_operating_revenue",
+      "balance": "credit",
+      "documentation": "Reverses distributions a parent booked as income rather than as a return of its investment; carries a debit balance for the period."
+    },
+    {
+      "code": "5000",
+      "label": "Intercompany Expense — Eliminated",
+      "hasTrait": "trait:elementsOfFinancialStatements/expense",
+      "subClassification": "operating_expense",
+      "balance": "debit",
+      "documentation": "Reverses the expense a member recorded for what another member charged it; carries a credit balance for the period."
+    },
+    {
+      "code": "5100",
+      "label": "Intercompany Interest Expense — Eliminated",
+      "hasTrait": "trait:elementsOfFinancialStatements/expense",
+      "subClassification": "non_operating_expense",
+      "balance": "debit",
+      "documentation": "Reverses the interest a member recorded on a note from another; carries a credit balance for the period."
+    },
+    {
+      "code": "5900",
+      "label": "Net Income Attributable to Noncontrolling Interest",
+      "hasTrait": "trait:elementsOfFinancialStatements/expense",
+      "subClassification": "non_operating_expense",
+      "balance": "debit",
+      "documentation": "The outside owners' share of a consolidated subsidiary's income for the period, taken out of net income attributable to the parent and added to the noncontrolling interest."
+    }
+  ]
+}
