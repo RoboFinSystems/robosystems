@@ -34,6 +34,7 @@ from robosystems.operations.roboledger.commands.journal_entries import (
   UnbalancedJournalEntryError,
   create_journal_entry,
   delete_journal_entry,
+  propagate_flows,
   provenance_for_source,
   resolve_flow_element_id,
   reverse_journal_entry,
@@ -1069,3 +1070,195 @@ class TestInactiveAccountGuard:
     args, kwargs = _accounts_postable.call_args
     assert sorted(args[1]) == ["elem_cash", "elem_revenue"]
     assert kwargs == {"entity_id": ENTITY_ID}
+
+
+# ── Flows: the both-lines rule, first-class tags, and the in-place re-tag ──
+
+
+class TestPropagateFlows:
+  """One tag has to reach the cash line and the account line."""
+
+  def test_a_tag_on_one_side_of_a_two_line_entry_reaches_the_other(self):
+    assert propagate_flows([("debit", None), ("credit", "flow_a")]) == [
+      "flow_a",
+      "flow_a",
+    ]
+
+  def test_a_side_with_two_flows_says_nothing_about_the_other(self):
+    lines = [("debit", None), ("credit", "flow_a"), ("credit", "flow_b")]
+    assert propagate_flows(lines) == [None, "flow_a", "flow_b"]
+
+  def test_a_side_with_a_tagged_and_an_untagged_line_says_nothing(self):
+    lines = [("debit", None), ("credit", "flow_a"), ("credit", None)]
+    assert propagate_flows(lines) == [None, "flow_a", None]
+
+  def test_a_tag_already_on_the_other_side_stands(self):
+    lines = [("debit", "flow_cash"), ("credit", "flow_a")]
+    assert propagate_flows(lines) == ["flow_cash", "flow_a"]
+
+  def test_several_untagged_lines_on_the_other_side_all_take_it(self):
+    lines = [("debit", "flow_a"), ("credit", None), ("credit", None)]
+    assert propagate_flows(lines) == ["flow_a", "flow_a", "flow_a"]
+
+
+class TestFirstClassFlowOnCreate:
+  @patch(f"{MODULE}._entry_to_response")
+  @patch(f"{MODULE}._flow_qnames", return_value={})
+  @patch(f"{MODULE}._load_line_items", return_value=[])
+  @patch(f"{MODULE}.assert_period_not_closed")
+  @patch(
+    "robosystems.operations.event_block.python_handlers.bank_feed.resolve_flows",
+    return_value={"rs-gaap:ProceedsFromIssuanceOfLongTermDebt": "el_debt_in"},
+  )
+  def test_a_flow_on_the_account_line_tags_the_cash_line_too(
+    self, mock_resolve, _guard, _load, _names, _resp
+  ):
+    from robosystems.models.extensions.roboledger.line_item import LineItem
+
+    session = MagicMock()
+    body = CreateJournalEntryRequest(
+      posting_date=_DATE,
+      memo="Note drawn",
+      line_items=[
+        JournalEntryLineItemInput(element_id="elem_cash", debit_amount=50_000),
+        JournalEntryLineItemInput(
+          element_id="elem_note",
+          credit_amount=50_000,
+          flow_qname="rs-gaap:ProceedsFromIssuanceOfLongTermDebt",
+        ),
+      ],
+    )
+    create_journal_entry(session, body, "usr_1")
+
+    # Checked against the entity's own statement, not by name alone.
+    mock_resolve.assert_called_once_with(
+      session, {"rs-gaap:ProceedsFromIssuanceOfLongTermDebt"}, entity_id=ENTITY_ID
+    )
+    line_adds = [
+      call[0][0]
+      for call in session.add.call_args_list
+      if isinstance(call[0][0], LineItem)
+    ]
+    assert [li.flow_element_id for li in line_adds] == ["el_debt_in", "el_debt_in"]
+
+
+def _flow_lines():
+  cash = _mock_line("elem_cash", 50_000, 0, 1)
+  note = _mock_line("elem_note", 0, 50_000, 2)
+  cash.flow_element_id = None
+  note.flow_element_id = None
+  return [cash, note]
+
+
+class TestLineFlowsOnUpdate:
+  @patch(f"{MODULE}._flow_qnames", return_value={"el_debt_in": "rs-gaap:Debt"})
+  @patch(
+    "robosystems.operations.event_block.python_handlers.bank_feed.resolve_flows",
+    return_value={"rs-gaap:Debt": "el_debt_in"},
+  )
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_a_flow_alone_re_tags_a_posted_entry_without_the_period_fence(
+    self, mock_guard, _resolve, _names
+  ):
+    """A flow moves no balance: the posted entry is re-tagged in place, the
+    closed-month fence is not consulted, the other side follows, and the
+    change is recorded on the entry."""
+    entry = _mock_entry(status="posted")
+    entry.metadata_ = {}
+    lines = _flow_lines()
+    with patch(f"{MODULE}._load_line_items", return_value=lines):
+      response = update_journal_entry(
+        _session_for_entry(entry),
+        UpdateJournalEntryRequest(
+          entry_id="entry_01",
+          line_flows=[{"line_id": "li_02", "flow_qname": "rs-gaap:Debt"}],
+        ),
+      )
+
+    mock_guard.assert_not_called()
+    assert [li.flow_element_id for li in lines] == ["el_debt_in", "el_debt_in"]
+    assert [li.flow_qname for li in response.line_items] == [
+      "rs-gaap:Debt",
+      "rs-gaap:Debt",
+    ]
+    (record,) = entry.metadata_["flow_retags"]
+    assert (record["line_ids"], record["flows"]) == (["li_02"], ["rs-gaap:Debt"])
+
+  @patch(f"{MODULE}._flow_qnames", return_value={})
+  @patch(
+    "robosystems.operations.event_block.python_handlers.bank_feed.resolve_flows",
+    return_value={},
+  )
+  def test_clearing_one_side_clears_the_other(self, _resolve, _names):
+    entry = _mock_entry(status="posted")
+    entry.metadata_ = {}
+    lines = _flow_lines()
+    for li in lines:
+      li.flow_element_id = "el_debt_in"
+    with patch(f"{MODULE}._load_line_items", return_value=lines):
+      update_journal_entry(
+        _session_for_entry(entry),
+        UpdateJournalEntryRequest(
+          entry_id="entry_01", line_flows=[{"line_id": "li_01", "flow_qname": None}]
+        ),
+      )
+
+    assert [li.flow_element_id for li in lines] == [None, None]
+
+  @patch(f"{MODULE}._load_line_items", return_value=[])
+  def test_line_flows_beside_line_items_is_refused(self, _load):
+    entry = _mock_entry(status="draft")
+    with pytest.raises(ValueError, match="line_flows names lines by id"):
+      update_journal_entry(
+        _session_for_entry(entry),
+        UpdateJournalEntryRequest(
+          entry_id="entry_01",
+          line_items=_balanced_lines(),
+          line_flows=[{"line_id": "li_01", "flow_qname": "rs-gaap:Debt"}],
+        ),
+      )
+
+  @patch(
+    "robosystems.operations.event_block.python_handlers.bank_feed.resolve_flows",
+    return_value={},
+  )
+  def test_a_line_of_another_entry_is_refused(self, _resolve):
+    entry = _mock_entry(status="posted")
+    entry.metadata_ = {}
+    with (
+      patch(f"{MODULE}._load_line_items", return_value=_flow_lines()),
+      pytest.raises(ValueError, match="has no line li_99"),
+    ):
+      update_journal_entry(
+        _session_for_entry(entry),
+        UpdateJournalEntryRequest(
+          entry_id="entry_01", line_flows=[{"line_id": "li_99", "flow_qname": None}]
+        ),
+      )
+
+  @patch(f"{MODULE}._load_line_items", return_value=[])
+  def test_a_reversed_entry_is_not_re_tagged(self, _load):
+    entry = _mock_entry(status="reversed")
+    with pytest.raises(JournalEntryNotDraftError):
+      update_journal_entry(
+        _session_for_entry(entry),
+        UpdateJournalEntryRequest(
+          entry_id="entry_01", line_flows=[{"line_id": "li_01", "flow_qname": None}]
+        ),
+      )
+
+  @patch(f"{MODULE}.assert_period_not_closed")
+  @patch(f"{MODULE}._load_line_items", return_value=[])
+  def test_a_posted_entry_still_refuses_any_other_change(self, _load, _guard):
+    """Flows beside a memo change take the ordinary path, where a posted
+    entry is immutable."""
+    entry = _mock_entry(status="posted")
+    with pytest.raises(JournalEntryNotDraftError):
+      update_journal_entry(
+        _session_for_entry(entry),
+        UpdateJournalEntryRequest(
+          entry_id="entry_01",
+          memo="New memo",
+          line_flows=[{"line_id": "li_01", "flow_qname": None}],
+        ),
+      )

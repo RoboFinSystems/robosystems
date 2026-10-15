@@ -48,6 +48,7 @@ def _line_row(entry_id: str, line_item_id: str, debit: int, credit: int):
     credit_amount=credit,
     line_description=None,
     line_order=1,
+    flow_qname=None,
   )
 
 

@@ -776,12 +776,15 @@ update_journal_entry_op = _registrar.register(
     name="update-journal-entry",
     summary="Update Journal Entry",
     description=(
-      "Update a draft journal entry. Posted entries are immutable and "
-      "must be corrected via "
-      "`create-event-block(event_type='journal_entry_reversed')`. If "
+      "Update a draft journal entry, or re-tag any entry's flows. If "
       "line_items is provided, existing line items are replaced "
       "atomically, the new set must balance, and a line on a retired "
-      "(`is_active=false`) account is refused."
+      "(`is_active=false`) account is refused. `line_flows` sets the cash "
+      "flow row of the named lines in place, on a posted entry too, closed "
+      "month included, since a flow moves no balance; the lines on the "
+      "other side of the entry follow when that side carries one flow. "
+      "Posted entries accept nothing else and are corrected via "
+      "`create-event-block(event_type='journal_entry_reversed')`."
     ),
     command=cmd_update_journal_entry,
     request_model=UpdateJournalEntryRequest,

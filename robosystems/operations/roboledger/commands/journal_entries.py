@@ -19,6 +19,7 @@ from robosystems.logger import logger
 from robosystems.models.api.extensions.journal_entries import (
   CreateJournalEntryRequest,
   DeleteJournalEntryRequest,
+  JournalEntryLineFlow,
   JournalEntryLineItemInput,
   JournalEntryLineItemResponse,
   JournalEntryResponse,
@@ -203,6 +204,146 @@ def _split_flow_tag(metadata: dict | None) -> dict:
   return meta
 
 
+def propagate_flows(lines: list[tuple[str, str | None]]) -> list[str | None]:
+  """The both-lines rule: when every line on one side of the entry (its
+  debits, or its credits) carries the same flow, the untagged lines on the
+  other side take it. The cash flow statement reads the cash line's flow and
+  the roll-forwards read the account line's, so one tag has to reach both.
+  A side with two flows, or a tagged and an untagged line, says nothing
+  about the other, and the author's tags stand as written."""
+  flows = [flow for _side, flow in lines]
+  for side, other in (("debit", "credit"), ("credit", "debit")):
+    own = {flow for s, flow in lines if s == side}
+    if len(own) != 1 or None in own:
+      continue
+    (flow,) = own
+    for index, (s, existing) in enumerate(lines):
+      if s == other and existing is None:
+        flows[index] = flow
+  return flows
+
+
+def resolve_line_flows(
+  session: Session, normalized: list[dict], *, entity_id: str
+) -> list[str | None]:
+  """Each line's ``flow_element_id``. A first-class ``flow_qname`` must be a
+  row of the entity's cash flow statement (``resolve_flows`` refuses one that
+  is not, listing the rows); the legacy ``transaction_description_code``
+  metadata key resolves by name only, as before. Then the both-lines rule."""
+  strict = {li["flow_qname"] for li in normalized if li.get("flow_qname")}
+  resolved: dict[str, str] = {}
+  if strict:
+    from robosystems.operations.event_block.python_handlers.bank_feed import (
+      resolve_flows,
+    )
+
+    resolved = resolve_flows(session, strict, entity_id=entity_id)
+  tagged = [
+    (
+      "debit" if li["debit_amount"] > 0 else "credit",
+      resolved[li["flow_qname"]]
+      if li.get("flow_qname")
+      else resolve_flow_element_id(session, li.get("metadata")),
+    )
+    for li in normalized
+  ]
+  return propagate_flows(tagged)
+
+
+def _flow_qnames(session: Session, line_items: list[LineItem]) -> dict[str, str]:
+  """``{element_id: qname}`` for the flows the lines carry."""
+  ids = sorted({str(li.flow_element_id) for li in line_items if li.flow_element_id})
+  if not ids:
+    return {}
+  rows = session.execute(
+    text("SELECT id, qname FROM elements WHERE id = ANY(:ids)"), {"ids": ids}
+  ).all()
+  return {str(element_id): str(qname) for element_id, qname in rows}
+
+
+_RETAGGABLE_STATUSES = ("draft", "posted", "shadowed")
+
+
+def _apply_line_flows(
+  session: Session, entry: Entry, line_flows: list[JournalEntryLineFlow]
+) -> None:
+  """Set the named lines' flows in place and let the other side follow.
+
+  A flow moves no balance, so a posted entry's lines are re-tagged, closed
+  month or not, and the change is recorded on the entry. After the named
+  lines are set, when every line on a named line's side carries one flow
+  (or none, after a clear), the lines on the other side the request did not
+  name take it too: the both-lines rule for a re-tag. A line that is not
+  this entry's, or a flow that is not a row of the entity's cash flow
+  statement, refuses the request whole.
+  """
+  from robosystems.operations.event_block.python_handlers.bank_feed import (
+    resolve_flows,
+  )
+
+  lines = _load_line_items(session, entry.id)
+  by_id = {str(li.id): li for li in lines}
+  unknown = sorted(f.line_id for f in line_flows if f.line_id not in by_id)
+  if unknown:
+    raise ValueError(f"Journal entry {entry.id} has no line {', '.join(unknown)}.")
+  resolved = resolve_flows(
+    session,
+    {f.flow_qname for f in line_flows if f.flow_qname},
+    entity_id=str(entry.entity_id),
+  )
+  named = {
+    f.line_id: (resolved[f.flow_qname] if f.flow_qname else None) for f in line_flows
+  }
+  for line_id, flow_id in named.items():
+    by_id[line_id].flow_element_id = flow_id
+
+  def _side(li: LineItem) -> str:
+    return "debit" if int(li.debit_amount) > 0 else "credit"
+
+  for side, other in (("debit", "credit"), ("credit", "debit")):
+    if not any(_side(by_id[line_id]) == side for line_id in named):
+      continue
+    own = {li.flow_element_id for li in lines if _side(li) == side}
+    if len(own) != 1:
+      continue
+    (flow_id,) = own
+    for li in lines:
+      if _side(li) == other and str(li.id) not in named:
+        li.flow_element_id = flow_id
+
+  history = list((entry.metadata_ or {}).get("flow_retags") or [])
+  history.append(
+    {
+      "at": datetime.now(UTC).isoformat(),
+      "line_ids": sorted(named),
+      "flows": sorted({f.flow_qname for f in line_flows if f.flow_qname}),
+    }
+  )
+  entry.metadata_ = {**(entry.metadata_ or {}), "flow_retags": history}
+  session.flush()
+
+
+def _retag_lines(
+  session: Session, peek: Entry, line_flows: list[JournalEntryLineFlow]
+) -> JournalEntryResponse:
+  """The flow-only update: no period fence and no draft rule, since a flow
+  moves no balance; the entry is still locked while its lines change."""
+  _lock_owning_event(session, peek)
+  entry = lock_by_id(
+    session,
+    Entry,
+    peek.id,
+    f"Journal entry {peek.id} is being written by another process. Retry in a moment.",
+  )
+  if entry is None:
+    raise JournalEntryNotFoundError(peek.id)
+  if entry.status not in _RETAGGABLE_STATUSES:
+    raise JournalEntryNotDraftError(entry.id, entry.status)
+  _apply_line_flows(session, entry, line_flows)
+  line_items = _load_line_items(session, entry.id)
+  return _entry_to_response(entry, line_items, _flow_qnames(session, line_items))
+
+
 def validate_and_normalize_lines(
   lines: list[JournalEntryLineItemInput],
 ) -> tuple[list[dict], int, int]:
@@ -233,6 +374,7 @@ def validate_and_normalize_lines(
         "debit_amount": debit,
         "credit_amount": credit,
         "description": li.description,
+        "flow_qname": li.flow_qname,
         "metadata": li.metadata or {},
       }
     )
@@ -244,8 +386,11 @@ def validate_and_normalize_lines(
 
 
 def _entry_to_response(
-  entry: Entry, line_items: list[LineItem]
+  entry: Entry,
+  line_items: list[LineItem],
+  flow_qnames: dict[str, str] | None = None,
 ) -> JournalEntryResponse:
+  flows = flow_qnames or {}
   line_item_responses = [
     JournalEntryLineItemResponse(
       id=li.id,
@@ -254,6 +399,7 @@ def _entry_to_response(
       credit_amount=int(li.credit_amount),
       description=li.description,
       line_order=int(li.line_order),
+      flow_qname=flows.get(str(li.flow_element_id)) if li.flow_element_id else None,
     )
     for li in sorted(line_items, key=lambda li: li.line_order)
   ]
@@ -401,12 +547,13 @@ def create_journal_entry(
   session.add(entry)
   session.flush()
 
-  for order, li in enumerate(normalized, 1):
+  flow_ids = resolve_line_flows(session, normalized, entity_id=entity_id)
+  for order, (li, flow_id) in enumerate(zip(normalized, flow_ids, strict=True), 1):
     session.add(
       LineItem(
         entry_id=entry.id,
         element_id=li["element_id"],
-        flow_element_id=resolve_flow_element_id(session, li.get("metadata")),
+        flow_element_id=flow_id,
         debit_amount=li["debit_amount"],
         credit_amount=li["credit_amount"],
         description=li["description"],
@@ -417,7 +564,7 @@ def create_journal_entry(
   session.flush()
 
   line_items = _load_line_items(session, entry.id)
-  return _entry_to_response(entry, line_items)
+  return _entry_to_response(entry, line_items, _flow_qnames(session, line_items))
 
 
 # ── Update ───────────────────────────────────────────────────────────────
@@ -427,18 +574,33 @@ def update_journal_entry(
   session: Session, body: UpdateJournalEntryRequest
 ) -> JournalEntryResponse:
   """Update a draft journal entry; omitted fields are unchanged, and
-  ``line_items`` replaces the whole set.
+  ``line_items`` replaces the whole set. ``line_flows`` re-tags lines in
+  place; alone, it is allowed on a posted entry in a closed month too, since
+  a flow moves no balance.
 
   Raises:
     `JournalEntryNotFoundError`, `JournalEntryNotDraftError`,
     `UnbalancedJournalEntryError`.
     `ClosedPeriodError` if the existing or new `posting_date` is closed.
     `RowLockedError` if another writer holds the entry or its date moved.
+    `ValueError` for `line_flows` beside `line_items`, or naming a line
+      that is not the entry's; `HandlerMetadataValidationError` for a flow
+      that is not a row of the entity's cash flow statement.
   """
   # Peek, fence, then lock and re-check status. Keep the peeked date as a
   # value: after `lock_by_id` refreshes the same identity, `peek.posting_date`
   # would report the new date.
   peek = _load_entry_or_404(session, body.entry_id)
+  updates = body.model_dump(exclude_unset=True)
+  updates.pop("entry_id", None)
+  line_flows = body.line_flows if updates.pop("line_flows", None) is not None else None
+  if line_flows is not None and "line_items" in updates:
+    raise ValueError(
+      "line_flows names lines by id, and line_items replaces the lines; "
+      "set flow_qname on the new lines instead."
+    )
+  if line_flows is not None and not updates:
+    return _retag_lines(session, peek, line_flows)
   peeked_date = peek.posting_date
   dates = [peeked_date]
   if body.posting_date is not None:
@@ -464,8 +626,6 @@ def update_journal_entry(
   if entry.status != "draft":
     raise JournalEntryNotDraftError(entry.id, entry.status)
 
-  updates = body.model_dump(exclude_unset=True)
-  updates.pop("entry_id", None)
   replacement_lines = updates.pop("line_items", None)
 
   for key, value in updates.items():
@@ -489,12 +649,13 @@ def update_journal_entry(
     )
     session.flush()
 
-    for order, li in enumerate(normalized, 1):
+    flow_ids = resolve_line_flows(session, normalized, entity_id=str(entry.entity_id))
+    for order, (li, flow_id) in enumerate(zip(normalized, flow_ids, strict=True), 1):
       session.add(
         LineItem(
           entry_id=entry.id,
           element_id=li["element_id"],
-          flow_element_id=resolve_flow_element_id(session, li.get("metadata")),
+          flow_element_id=flow_id,
           debit_amount=li["debit_amount"],
           credit_amount=li["credit_amount"],
           description=li["description"],
@@ -503,9 +664,12 @@ def update_journal_entry(
         )
       )
 
+  if line_flows is not None:
+    _apply_line_flows(session, entry, line_flows)
+
   session.flush()
   line_items = _load_line_items(session, entry.id)
-  return _entry_to_response(entry, line_items)
+  return _entry_to_response(entry, line_items, _flow_qnames(session, line_items))
 
 
 # ── Delete ───────────────────────────────────────────────────────────────
@@ -670,4 +834,6 @@ def reverse_journal_entry(
     )
 
   reversing_lines = _load_line_items(session, reversing_entry.id)
-  return _entry_to_response(reversing_entry, reversing_lines)
+  return _entry_to_response(
+    reversing_entry, reversing_lines, _flow_qnames(session, reversing_lines)
+  )

@@ -62,7 +62,8 @@ _ENTRY_ROWS_TEMPLATE = """
     li.debit_amount       AS debit_amount,
     li.credit_amount      AS credit_amount,
     li.description        AS line_description,
-    li.line_order         AS line_order
+    li.line_order         AS line_order,
+    fl.qname              AS flow_qname
   -- LEFT, not INNER, on line_items: `matched` already picked this page of
   -- entries, so an entry with no line items would be dropped here after
   -- being counted and after consuming a LIMIT slot — a page silently
@@ -74,6 +75,7 @@ _ENTRY_ROWS_TEMPLATE = """
   LEFT JOIN structures s ON s.id = e.source_structure_id
   LEFT JOIN line_items li ON li.entry_id = e.id
   LEFT JOIN elements el ON el.id = li.element_id
+  LEFT JOIN elements fl ON fl.id = li.flow_element_id
   ORDER BY {order_by}, li.line_order, li.id
 """
 
@@ -190,6 +192,7 @@ def fetch_entry_rows(
         "credit_amount": int(row.credit_amount or 0),
         "description": row.line_description,
         "line_order": row.line_order,
+        "flow_qname": row.flow_qname,
       }
     )
 
@@ -263,6 +266,7 @@ def list_journal_entries(
             credit_amount=cents_to_dollars(li["credit_amount"]),
             description=li["description"],
             line_order=li["line_order"],
+            flow_qname=li["flow_qname"],
           )
           for li in entry.line_items
         ],
