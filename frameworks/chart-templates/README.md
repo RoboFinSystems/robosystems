@@ -35,7 +35,8 @@ chart-templates/
 │   ├── chart.jsonld               # the accounts — framework-free
 │   └── mappings/rs-gaap.jsonld    # CoA → rs-gaap, with the legal-form variants
 ├── services/v1/{chart.jsonld, mappings/rs-gaap.jsonld}
-└── product/v1/{chart.jsonld, mappings/rs-gaap.jsonld}
+├── product/v1/{chart.jsonld, mappings/rs-gaap.jsonld}
+└── consolidation/v1/{chart.jsonld, mappings/rs-gaap.jsonld}   # a group's eliminations column
 ```
 
 A template is two kinds of file, deliberately separate, because **a chart
@@ -94,4 +95,10 @@ the operation.
    image, so a deploy carries it.
 4. The `saas` and `services` demos read their chart and mappings from
    these files; `product` is the coffee-roaster demo's chart with generic
-   names, pinned structurally by the same test.
+   names, pinned structurally by the same test. `consolidation` is not an
+   operating company's chart: it is the one a group's consolidation entity
+   starts from — the parent-standalone rows that eliminate, the
+   subsidiaries' equity rows that eliminate, and the noncontrolling-interest
+   rows — so every balance in it is an adjustment the consolidated
+   statements read and no operating entity's ever includes
+   (`local/RoboSystems/specs/ledger/consolidation.md` §4.2).

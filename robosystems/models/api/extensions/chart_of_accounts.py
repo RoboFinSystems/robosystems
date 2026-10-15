@@ -14,7 +14,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-ChartTemplateKey = Literal["saas", "services", "product"]
+ChartTemplateKey = Literal["saas", "services", "product", "consolidation"]
 
 
 class InitializeChartOfAccountsRequest(BaseModel):
@@ -41,7 +41,11 @@ class InitializeChartOfAccountsRequest(BaseModel):
       "Template key: `saas` (subscription software — deferred revenue, "
       "cost of revenue, R&D / S&M / G&A), `services` (professional "
       "services — no inventory, no COGS), `product` (inventory and cost "
-      "of goods sold, direct + wholesale + subscription revenue)."
+      "of goods sold, direct + wholesale + subscription revenue), "
+      "`consolidation` (a group's consolidation entity: the eliminated "
+      "investment, intercompany and subsidiary-equity rows, noncontrolling "
+      "interest and its share of income — the adjustments column, never an "
+      "operating company's chart)."
     ),
   )
   entity_type: str | None = Field(
