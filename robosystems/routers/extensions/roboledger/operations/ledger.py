@@ -782,7 +782,7 @@ update_journal_entry_op = _registrar.register(
       "(`is_active=false`) account is refused. `line_flows` sets the cash "
       "flow row of the named lines in place, on a posted entry too, closed "
       "month included, since a flow moves no balance; the lines on the "
-      "other side of the entry follow when that side carries one flow. "
+      "other side of the entry that were in step with it follow. "
       "Posted entries accept nothing else and are corrected via "
       "`create-event-block(event_type='journal_entry_reversed')`."
     ),

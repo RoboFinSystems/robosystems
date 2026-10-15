@@ -235,9 +235,10 @@ class TestFlowsOnJournalEntries:
         text("SELECT metadata -> 'flow_retags' FROM entries WHERE id = :i"),
         {"i": posted.id},
       ).scalar()
-      assert [(h["line_ids"], h["flows"]) for h in history] == [
-        ([credit_line], [flow_b]),
-        ([credit_line], []),
+      debit_line = posted.line_items[0].id
+      assert [(h["line_ids"], h["flows"], h["from"]) for h in history] == [
+        ([credit_line], [flow_b], {debit_line: flow_a, credit_line: flow_a}),
+        ([credit_line], [], {debit_line: flow_b, credit_line: flow_b}),
       ]
 
   def test_the_list_read_projects_the_tag(self, books):

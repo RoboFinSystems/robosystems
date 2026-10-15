@@ -1205,6 +1205,108 @@ class TestLineFlowsOnUpdate:
 
     assert [li.flow_element_id for li in lines] == [None, None]
 
+  @patch(f"{MODULE}._flow_qnames", return_value={})
+  @patch(
+    "robosystems.operations.event_block.python_handlers.bank_feed.resolve_flows",
+    return_value={"rs-gaap:Equity": "el_equity_in"},
+  )
+  def test_a_line_tagged_differently_on_the_other_side_keeps_its_tag(
+    self, _resolve, _names
+  ):
+    """The cash line was tagged on purpose; re-tagging the account line does
+    not overwrite it."""
+    entry = _mock_entry(status="posted")
+    entry.metadata_ = {}
+    cash, note = _flow_lines()
+    cash.flow_element_id = "el_cash_choice"
+    note.flow_element_id = "el_debt_in"
+    with patch(f"{MODULE}._load_line_items", return_value=[cash, note]):
+      update_journal_entry(
+        _session_for_entry(entry),
+        UpdateJournalEntryRequest(
+          entry_id="entry_01",
+          line_flows=[{"line_id": "li_02", "flow_qname": "rs-gaap:Equity"}],
+        ),
+      )
+
+    assert [cash.flow_element_id, note.flow_element_id] == [
+      "el_cash_choice",
+      "el_equity_in",
+    ]
+
+  @patch(f"{MODULE}._flow_qnames", return_value={})
+  @patch(
+    "robosystems.operations.event_block.python_handlers.bank_feed.resolve_flows",
+    return_value={"rs-gaap:Equity": "el_equity_in"},
+  )
+  def test_a_line_that_followed_moves_with_the_line_it_followed(self, _resolve, _names):
+    entry = _mock_entry(status="posted")
+    entry.metadata_ = {}
+    cash, note = _flow_lines()
+    cash.flow_element_id = "el_debt_in"
+    note.flow_element_id = "el_debt_in"
+    with patch(f"{MODULE}._load_line_items", return_value=[cash, note]):
+      update_journal_entry(
+        _session_for_entry(entry),
+        UpdateJournalEntryRequest(
+          entry_id="entry_01",
+          line_flows=[{"line_id": "li_02", "flow_qname": "rs-gaap:Equity"}],
+        ),
+      )
+
+    assert [cash.flow_element_id, note.flow_element_id] == [
+      "el_equity_in",
+      "el_equity_in",
+    ]
+
+  @patch(
+    f"{MODULE}._element_qnames",
+    return_value={"el_debt_in": "rs-gaap:Debt", "el_equity_in": "rs-gaap:Equity"},
+  )
+  @patch(
+    "robosystems.operations.event_block.python_handlers.bank_feed.resolve_flows",
+    return_value={"rs-gaap:Equity": "el_equity_in"},
+  )
+  def test_the_record_names_what_each_changed_line_carried(self, _resolve, _names):
+    entry = _mock_entry(status="posted")
+    entry.metadata_ = {}
+    cash, note = _flow_lines()
+    cash.flow_element_id = "el_debt_in"
+    note.flow_element_id = "el_debt_in"
+    with patch(f"{MODULE}._load_line_items", return_value=[cash, note]):
+      update_journal_entry(
+        _session_for_entry(entry),
+        UpdateJournalEntryRequest(
+          entry_id="entry_01",
+          line_flows=[{"line_id": "li_02", "flow_qname": "rs-gaap:Equity"}],
+        ),
+      )
+
+    (record,) = entry.metadata_["flow_retags"]
+    assert record["from"] == {"li_01": "rs-gaap:Debt", "li_02": "rs-gaap:Debt"}
+
+  @patch(
+    "robosystems.operations.event_block.python_handlers.bank_feed.resolve_flows",
+    return_value={},
+  )
+  def test_a_line_named_twice_is_refused(self, _resolve):
+    entry = _mock_entry(status="posted")
+    entry.metadata_ = {}
+    with (
+      patch(f"{MODULE}._load_line_items", return_value=_flow_lines()),
+      pytest.raises(ValueError, match="more than once"),
+    ):
+      update_journal_entry(
+        _session_for_entry(entry),
+        UpdateJournalEntryRequest(
+          entry_id="entry_01",
+          line_flows=[
+            {"line_id": "li_01", "flow_qname": None},
+            {"line_id": "li_01", "flow_qname": None},
+          ],
+        ),
+      )
+
   @patch(f"{MODULE}._load_line_items", return_value=[])
   def test_line_flows_beside_line_items_is_refused(self, _load):
     entry = _mock_entry(status="draft")

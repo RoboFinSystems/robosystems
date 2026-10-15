@@ -188,11 +188,14 @@ class UpdateJournalEntryRequest(BaseModel):
     description=(
       "Re-tag lines in place: each named line takes its `flow_qname` (null "
       "clears it), and when every line on that side of the entry then "
-      "carries one flow, the lines on the other side not named here take it "
-      "too, so the cash line and the account line agree. Allowed on a "
-      "posted entry, closed month included, and the only change one "
-      "accepts; recorded on the entry as `flow_retags`. Not combinable with "
-      "`line_items`, which replaces the lines (set `flow_qname` on them)."
+      "carries one flow, the lines on the other side not named here follow "
+      "when they were in step with it — untagged, or carrying the flow the "
+      "named lines carried before — so the cash line and the account line "
+      "agree; a line tagged differently on purpose keeps its tag. Allowed on "
+      "a posted entry, closed month included, and the only change one "
+      "accepts; recorded on the entry as `flow_retags`, with what each "
+      "changed line carried before. Not combinable with `line_items`, which "
+      "replaces the lines (set `flow_qname` on them)."
     ),
   )
 

@@ -250,9 +250,9 @@ def resolve_line_flows(
   return propagate_flows(tagged)
 
 
-def _flow_qnames(session: Session, line_items: list[LineItem]) -> dict[str, str]:
-  """``{element_id: qname}`` for the flows the lines carry."""
-  ids = sorted({str(li.flow_element_id) for li in line_items if li.flow_element_id})
+def _element_qnames(session: Session, element_ids: set[str]) -> dict[str, str]:
+  """``{element_id: qname}`` for the given elements."""
+  ids = sorted(element_ids)
   if not ids:
     return {}
   rows = session.execute(
@@ -261,21 +261,32 @@ def _flow_qnames(session: Session, line_items: list[LineItem]) -> dict[str, str]
   return {str(element_id): str(qname) for element_id, qname in rows}
 
 
+def _flow_qnames(session: Session, line_items: list[LineItem]) -> dict[str, str]:
+  """``{element_id: qname}`` for the flows the lines carry."""
+  return _element_qnames(
+    session, {str(li.flow_element_id) for li in line_items if li.flow_element_id}
+  )
+
+
 _RETAGGABLE_STATUSES = ("draft", "posted", "shadowed")
 
 
 def _apply_line_flows(
   session: Session, entry: Entry, line_flows: list[JournalEntryLineFlow]
 ) -> None:
-  """Set the named lines' flows in place and let the other side follow.
+  """Set the named lines' flows in place and let the lines in step with them
+  follow.
 
   A flow moves no balance, so a posted entry's lines are re-tagged, closed
   month or not, and the change is recorded on the entry. After the named
-  lines are set, when every line on a named line's side carries one flow
-  (or none, after a clear), the lines on the other side the request did not
-  name take it too: the both-lines rule for a re-tag. A line that is not
-  this entry's, or a flow that is not a row of the entity's cash flow
-  statement, refuses the request whole.
+  lines are set, when every line on a named line's side carries one flow (or
+  none, after a clear), the lines on the other side the request did not name
+  take it too when they were in step with the named lines: untagged, or
+  carrying the flow those lines carried before. A line the author tagged
+  differently keeps its tag. Both sides are decided from the state as named,
+  so the result does not depend on which side is read first. A line named
+  twice, a line that is not this entry's, or a flow that is not a row of the
+  entity's cash flow statement refuses the request whole.
   """
   from robosystems.operations.event_block.python_handlers.bank_feed import (
     resolve_flows,
@@ -283,7 +294,11 @@ def _apply_line_flows(
 
   lines = _load_line_items(session, entry.id)
   by_id = {str(li.id): li for li in lines}
-  unknown = sorted(f.line_id for f in line_flows if f.line_id not in by_id)
+  ids = [f.line_id for f in line_flows]
+  twice = sorted({line_id for line_id in ids if ids.count(line_id) > 1})
+  if twice:
+    raise ValueError(f"line_flows names {', '.join(twice)} more than once.")
+  unknown = sorted(line_id for line_id in ids if line_id not in by_id)
   if unknown:
     raise ValueError(f"Journal entry {entry.id} has no line {', '.join(unknown)}.")
   resolved = resolve_flows(
@@ -294,29 +309,46 @@ def _apply_line_flows(
   named = {
     f.line_id: (resolved[f.flow_qname] if f.flow_qname else None) for f in line_flows
   }
-  for line_id, flow_id in named.items():
-    by_id[line_id].flow_element_id = flow_id
 
   def _side(li: LineItem) -> str:
+    # A line has exactly one non-zero side (validate_and_normalize_lines).
     return "debit" if int(li.debit_amount) > 0 else "credit"
 
+  before = {str(li.id): li.flow_element_id for li in lines}
+  as_named = {**before, **named}
+  after = dict(as_named)
   for side, other in (("debit", "credit"), ("credit", "debit")):
-    if not any(_side(by_id[line_id]) == side for line_id in named):
+    named_here = [line_id for line_id in named if _side(by_id[line_id]) == side]
+    if not named_here:
       continue
-    own = {li.flow_element_id for li in lines if _side(li) == side}
+    own = {as_named[str(li.id)] for li in lines if _side(li) == side}
     if len(own) != 1:
       continue
     (flow_id,) = own
+    previous = {before[line_id] for line_id in named_here}
+    followed = next(iter(previous)) if len(previous) == 1 else None
     for li in lines:
-      if _side(li) == other and str(li.id) not in named:
-        li.flow_element_id = flow_id
+      line_id = str(li.id)
+      if _side(li) != other or line_id in named:
+        continue
+      if before[line_id] is None or (
+        followed is not None and before[line_id] == followed
+      ):
+        after[line_id] = flow_id
+  for li in lines:
+    li.flow_element_id = after[str(li.id)]
 
+  changed = sorted(line_id for line_id in after if after[line_id] != before[line_id])
+  qnames = _element_qnames(
+    session, {flow for flow in (*before.values(), *after.values()) if flow}
+  )
   history = list((entry.metadata_ or {}).get("flow_retags") or [])
   history.append(
     {
       "at": datetime.now(UTC).isoformat(),
       "line_ids": sorted(named),
       "flows": sorted({f.flow_qname for f in line_flows if f.flow_qname}),
+      "from": {line_id: qnames.get(str(before[line_id])) for line_id in changed},
     }
   )
   entry.metadata_ = {**(entry.metadata_ or {}), "flow_retags": history}

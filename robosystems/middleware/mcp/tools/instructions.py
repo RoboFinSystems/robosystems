@@ -144,7 +144,7 @@ def build_instructions(
         "on a posted line too: that re-tags it in place. A journal entry's "
         "line takes `flow_qname` the same way, at creation or through "
         "`update-journal-entry(line_flows=[{line_id, flow_qname}])` on a "
-        "posted entry; the line on the other side of the entry follows."
+        "posted entry; the lines on the other side in step with it follow."
       ),
       (
         "- Post it → `transition_to='committed'` (a person, or you when "
