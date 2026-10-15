@@ -239,8 +239,7 @@ def _top_most_subtotal_for_classification(
   """
   best: FactRow | None = None
   for row in rows:
-    qname_lower = (row.element_qname or "").lower()
-    if "liabilit" in qname_lower and "equity" in qname_lower:
+    if _is_liabilities_and_equity(row.element_qname):
       continue
     row_class = row.classification or _infer_classification(
       row.element_qname, row.balance_type
@@ -263,6 +262,12 @@ def _top_most_subtotal_for_classification(
   return best
 
 
+def _is_liabilities_and_equity(qname: str | None) -> bool:
+  """The combined liabilities-and-equity total, in any framework's spelling."""
+  qname_lower = (qname or "").lower()
+  return "liabilit" in qname_lower and "equity" in qname_lower
+
+
 def _sibling_equity_leaves(rows: list[FactRow], equity: FactRow, col: int) -> float:
   """Equity presented beside the equity subtotal rather than inside it — the
   noncontrolling interest a consolidated balance sheet carries at the
@@ -274,8 +279,7 @@ def _sibling_equity_leaves(rows: list[FactRow], equity: FactRow, col: int) -> fl
       continue
     if row.depth != equity.depth:
       continue
-    qname_lower = (row.element_qname or "").lower()
-    if "liabilit" in qname_lower and "equity" in qname_lower:
+    if _is_liabilities_and_equity(row.element_qname):
       continue
     row_class = row.classification or _infer_classification(
       row.element_qname, row.balance_type

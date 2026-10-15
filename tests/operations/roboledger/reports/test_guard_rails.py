@@ -888,3 +888,59 @@ class TestBalanceSheetNoncontrollingInterest:
     ]
     result = validate_report("balance_sheet", rows)
     assert result.passed is True, f"Failures: {result.failures}"
+
+  def test_nci_deficit_reduces_equity(self):
+    """An outside owner's share can be a deficit; it carries its sign."""
+    rows = [
+      _row("Assets", 70.0, classification="asset", is_subtotal=True, depth=0),
+      _row("Liabilities", 20.0, classification="liability", is_subtotal=True, depth=1),
+      _row(
+        "Stockholders Equity", 80.0, classification="equity", is_subtotal=True, depth=1
+      ),
+      _row("Retained Earnings", 80.0, classification="equity", depth=2),
+      _row(
+        "Minority Interest",
+        -30.0,
+        classification="equity",
+        qname="rs-gaap:MinorityInterest",
+        depth=1,
+      ),
+    ]
+    result = validate_report("balance_sheet", rows)
+    assert result.passed is True, f"Failures: {result.failures}"
+
+  def test_nci_absent_in_one_column_present_in_another(self):
+    """Each column is its own equation: the prior period, before the outside
+    owner came in, balances on the subtotal alone."""
+    rows = [
+      _row(
+        "Assets", 130.0, classification="asset", is_subtotal=True, depth=0, prior=100.0
+      ),
+      _row(
+        "Liabilities",
+        20.0,
+        classification="liability",
+        is_subtotal=True,
+        depth=1,
+        prior=20.0,
+      ),
+      _row(
+        "Stockholders Equity",
+        80.0,
+        classification="equity",
+        is_subtotal=True,
+        depth=1,
+        prior=80.0,
+      ),
+      _row("Retained Earnings", 80.0, classification="equity", depth=2, prior=80.0),
+      _row(
+        "Minority Interest",
+        30.0,
+        classification="equity",
+        qname="rs-gaap:MinorityInterest",
+        depth=1,
+        prior=0.0,
+      ),
+    ]
+    result = validate_report("balance_sheet", rows, period_labels=["Current", "Prior"])
+    assert result.passed is True, f"Failures: {result.failures}"

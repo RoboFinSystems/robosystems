@@ -23,9 +23,8 @@ The committed packages now carry, additively — no arc moves, no new concept:
   flow networks, the NCI share as an operating add-back, the two affiliate
   working-capital rows, the investment's purchase and divestiture in
   investing, and distributions to and contributions from noncontrolling
-  interests in financing; on the three roll-forwards, noncontrolling
-  interest as a second root with its share of income, contributions and
-  distributions;
+  interests in financing (the equity statement's NCI roll-forward waits
+  for the roll-forward renderer);
 * ``rs-gaap-calculations``: a calc arc for each new row (net income subtracts
   the NCI share; the liabilities-and-equity total adds noncontrolling
   interest beside stockholders' equity), and a default flow for each new

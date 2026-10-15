@@ -118,6 +118,12 @@ def test_consolidation_rows_carry_their_traits(traits_by_qname) -> None:
     "elementsOfFinancialStatements=expense"
     in traits_by_qname["rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest"]
   )
+  # The balance-sheet equation counts the NCI leaf beside equity only through
+  # this classification; the qname inference fallback does not know it.
+  assert (
+    "elementsOfFinancialStatements=equity"
+    in traits_by_qname["rs-gaap:MinorityInterest"]
+  )
   for wc in (
     "rs-gaap:IncreaseDecreaseInDueFromAffiliatesCurrent",
     "rs-gaap:IncreaseDecreaseInDueToAffiliatesCurrent",
