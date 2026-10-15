@@ -197,6 +197,7 @@ def validate_cypher_query(cypher: str) -> None:
     is_bulk_operation,
     is_non_read_call,
     is_schema_ddl,
+    references_catalog_label,
   )
 
   # `is_write_operation` is deliberately absent: writers run ordinary graph
@@ -206,13 +207,14 @@ def validate_cypher_query(cypher: str) -> None:
     or is_admin_operation(cypher)
     or is_schema_ddl(cypher)
     or is_non_read_call(cypher)
+    or references_catalog_label(cypher)
   ):
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
       detail=(
         "Query contains an engine-level operation (bulk load, attach/install, "
-        "schema DDL, or a restricted CALL) that is not permitted on the "
-        "ad-hoc query endpoint."
+        "schema DDL, a restricted CALL, or a catalog-label pattern) that is "
+        "not permitted on the ad-hoc query endpoint."
       ),
     )
 

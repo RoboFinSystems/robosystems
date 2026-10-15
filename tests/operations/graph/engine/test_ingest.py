@@ -1,6 +1,5 @@
 """Tests for LadybugDB database ingestion operations."""
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from robosystems.operations.graph.engine.ingest import (
@@ -192,10 +191,11 @@ class TestIngestFromLocalFiles:
     mock_get_path,
     mock_ensure_schema,
     mock_engine_class,
+    tmp_path,
   ):
     """Test successful ingestion from local files."""
     # Setup mocks
-    mock_get_path.return_value = Path("/tmp/test.lbug")
+    mock_get_path.return_value = tmp_path / "test.lbug"
     mock_ensure_schema.return_value = False
 
     # Mock engine
@@ -227,11 +227,11 @@ class TestIngestFromLocalFiles:
   @patch("robosystems.operations.graph.engine.schema_setup.ensure_schema")
   @patch("robosystems.operations.graph.engine.path_utils.get_lbug_database_path")
   def test_ingest_from_local_files_empty_list(
-    self, mock_get_path, mock_ensure_schema, mock_engine_class
+    self, mock_get_path, mock_ensure_schema, mock_engine_class, tmp_path
   ):
     """Test ingestion with empty file list."""
     # Setup mocks
-    mock_get_path.return_value = Path("/tmp/test_db.lbug")
+    mock_get_path.return_value = tmp_path / "test_db.lbug"
     mock_ensure_schema.return_value = False
     mock_engine = MagicMock()
     mock_engine_class.return_value = mock_engine
@@ -505,11 +505,11 @@ class TestIngestionErrorHandling:
   @patch("robosystems.operations.graph.engine.schema_setup.ensure_schema")
   @patch("robosystems.operations.graph.engine.path_utils.get_lbug_database_path")
   def test_ingest_from_local_files_schema_error(
-    self, mock_get_path, mock_ensure_schema, mock_engine_class
+    self, mock_get_path, mock_ensure_schema, mock_engine_class, tmp_path
   ):
     """Test ingestion with schema processing error."""
     # Setup mocks
-    mock_get_path.return_value = Path("/tmp/test.lbug")
+    mock_get_path.return_value = tmp_path / "test.lbug"
     mock_ensure_schema.return_value = False
     mock_engine = MagicMock()
     mock_engine_class.return_value = mock_engine
@@ -529,11 +529,16 @@ class TestIngestionErrorHandling:
   @patch("robosystems.operations.graph.engine.path_utils.get_lbug_database_path")
   @patch("robosystems.operations.graph.engine.ingest._get_cached_schema_adapter")
   def test_ingest_from_local_files_table_creation_failure(
-    self, mock_get_adapter, mock_get_path, mock_ensure_schema, mock_engine_class
+    self,
+    mock_get_adapter,
+    mock_get_path,
+    mock_ensure_schema,
+    mock_engine_class,
+    tmp_path,
   ):
     """Test ingestion with table creation failure."""
     # Setup mocks
-    mock_get_path.return_value = Path("/tmp/test.lbug")
+    mock_get_path.return_value = tmp_path / "test.lbug"
     mock_ensure_schema.return_value = False
     mock_engine = MagicMock()
     mock_engine_class.return_value = mock_engine

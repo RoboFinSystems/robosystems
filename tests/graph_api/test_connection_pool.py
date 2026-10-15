@@ -51,6 +51,9 @@ class TestLadybugConnectionPool:
     """Set up test fixtures."""
     self.temp_dir = tempfile.mkdtemp()
     self.base_path = str(self.temp_dir)
+    # The pool refuses to open a database whose file is missing.
+    for name in ("test_db", "test_db2", "db1", "db2"):
+      (Path(self.temp_dir) / f"{name}.lbug").touch()
 
   def teardown_method(self):
     """Clean up test fixtures."""
@@ -706,6 +709,8 @@ class TestConnectionPoolIntegration:
 
     # Create temporary directory
     temp_base = tempfile.mkdtemp()
+    for name in ("test_db", "test_db2"):
+      (Path(temp_base) / f"{name}.lbug").touch()
     pool = None
     try:
       # Mock LadybugDB to avoid segmentation faults
@@ -826,6 +831,8 @@ class TestConnectionPoolIntegration:
         num_threads = 15
         operations_per_thread = 10
         database_names = [f"stress_db_{i}" for i in range(num_databases)]
+        for name in (*database_names, "integrity_check"):
+          (Path(temp_base) / f"{name}.lbug").touch()
 
         # Track results
         results = {"success": 0, "errors": 0, "exceptions": []}

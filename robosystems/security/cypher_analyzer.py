@@ -116,6 +116,10 @@ class CypherSecurityAnalyzer:
     "gql",
   }
 
+  # The engine's own catalog labels (LadybugDB 0.21+). A graph's schema is
+  # read through the schema endpoints, not matched as a graph.
+  CATALOG_LABELS = ("schema_table", "schema_rel")
+
   READ_KEYWORDS = {
     "MATCH",
     "RETURN",
@@ -220,6 +224,11 @@ class CypherSecurityAnalyzer:
 
     # `CALL <setting> = <value>`: session configuration, no parentheses.
     self.call_assignment_pattern = re.compile(r"\bCALL\s+([\w.]+)\s*=", re.IGNORECASE)
+
+    # `:schema_table` in a node or rel pattern, or as a label predicate.
+    self.catalog_label_pattern = re.compile(
+      r":\s*(" + "|".join(self.CATALOG_LABELS) + r")\b", re.IGNORECASE
+    )
 
     self.transaction_control_pattern = re.compile(
       r"(?:^|;)\s*(BEGIN|COMMIT|ROLLBACK|CHECKPOINT)\b", re.IGNORECASE
@@ -330,6 +339,19 @@ class CypherSecurityAnalyzer:
       return False
     except Exception as e:
       logger.warning(f"Opaque-statement call analysis failed: {e}")
+      return True
+
+  def references_catalog_label(self, query: str) -> bool:
+    """Whether a pattern or label predicate names one of CATALOG_LABELS.
+
+    Quoted identifiers stay visible here: a backtick-quoted label is still
+    that label to the engine. Fails closed.
+    """
+    try:
+      cleaned = self._clean_query(query, keep_quoted_identifiers=True)
+      return self.catalog_label_pattern.search(cleaned) is not None
+    except Exception as e:
+      logger.warning(f"Catalog-label analysis failed: {e}")
       return True
 
   def find_guarded_string_match(
@@ -456,10 +478,12 @@ class CypherSecurityAnalyzer:
         logger.warning(f"Suspicious query pattern detected: {pattern}")
         raise ValueError("Query contains potentially dangerous patterns")
 
-  def _clean_query(self, query: str) -> str:
+  def _clean_query(self, query: str, keep_quoted_identifiers: bool = False) -> str:
     """
     Mask comments, string literals, and backtick-quoted identifiers so keyword
-    detection only ever sees code, not data.
+    detection only ever sees code, not data. ``keep_quoted_identifiers`` leaves
+    a quoted identifier's text in place (minus the backticks) for the checks
+    that must see a label however it is spelled.
 
     One left-to-right scan so string context is decided before any comment
     marker; staged regex stripping lets data hide code.
@@ -502,13 +526,12 @@ class CypherSecurityAnalyzer:
       # close at the first backtick to match it exactly. Doubled backticks
       # split into two tokens, which can only over-classify.
       if ch == "`":
-        i += 1
-        while i < n:
-          c = query[i]
-          i += 1
-          if c == "`":
-            break
-        out.append(f" {_IDENTIFIER_PLACEHOLDER} ")
+        end = query.find("`", i + 1)
+        content = query[i + 1 : n if end == -1 else end]
+        i = n if end == -1 else end + 1
+        out.append(
+          f" {content} " if keep_quoted_identifiers else f" {_IDENTIFIER_PLACEHOLDER} "
+        )
         continue
 
       out.append(ch)
@@ -1105,6 +1128,12 @@ def has_opaque_statement_call(query: str) -> bool:
   """Whether the query calls a procedure that runs a string-supplied
   statement; callers refuse these outright rather than classifying them."""
   return cypher_analyzer.has_opaque_statement_call(query)
+
+
+def references_catalog_label(query: str) -> bool:
+  """Whether the statement names an engine catalog label; callers refuse
+  it outright rather than classifying it."""
+  return cypher_analyzer.references_catalog_label(query)
 
 
 def find_guarded_string_match(

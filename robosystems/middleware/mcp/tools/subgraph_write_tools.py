@@ -63,6 +63,7 @@ def _validate_write_query(query: str) -> str | None:
     is_bulk_operation,
     is_schema_ddl,
     is_write_operation,
+    references_catalog_label,
   )
 
   # A string payload (CALL GQL('...')) counts as a write but is opaque to the
@@ -72,6 +73,12 @@ def _validate_write_query(query: str) -> str | None:
       "Blocked operation detected. Procedures that execute a statement passed "
       "as a string (e.g. CALL GQL), and CALLs with a quoted procedure name, are "
       "not allowed; submit the statement directly with an unquoted name."
+    )
+
+  if references_catalog_label(query):
+    return (
+      "Blocked operation detected. Catalog labels (schema_table, schema_rel) "
+      "are not queryable; use get-graph-schema."
     )
 
   if is_schema_ddl(query) or is_bulk_operation(query) or is_admin_operation(query):

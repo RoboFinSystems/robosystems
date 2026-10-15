@@ -72,6 +72,19 @@ class TestValidateReadOnly:
   @pytest.mark.parametrize(
     "query",
     [
+      "MATCH (t:schema_table) RETURN t",
+      "MATCH ()-[r:schema_rel]->() RETURN r",
+      "MATCH (t:`schema_table`) RETURN t",
+    ],
+  )
+  def test_blocks_catalog_labels(self, query):
+    """The engine's catalog labels are read through get-graph-schema."""
+    with pytest.raises(ValueError, match="get-graph-schema"):
+      assert_read_only_cypher(query)
+
+  @pytest.mark.parametrize(
+    "query",
+    [
       "MATCH (n:Entity) RETURN n LIMIT 10",
       "MATCH (a)-[r]->(b) RETURN DISTINCT labels(a)[0], type(r) LIMIT 5",
       # Bulk keyword appears only inside a string literal — must not false-positive

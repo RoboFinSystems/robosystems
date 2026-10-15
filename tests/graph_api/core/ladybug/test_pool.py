@@ -1,5 +1,6 @@
 """Comprehensive unit tests for LadybugConnectionPool - targeting missed coverage lines."""
 
+import os
 import shutil
 import tempfile
 from datetime import UTC, datetime, timedelta
@@ -7,6 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 
 from robosystems.graph_api.core.ladybug.pool import (
   ConnectionInfo,
@@ -151,6 +153,39 @@ class TestLadybugConnectionPoolAcquireRelease:
     assert len(live) == 3
     assert {id(c) for c in live.values()} == {id(c) for c in (*created[1:], newest)}
 
+  @patch("robosystems.graph_api.core.ladybug.pool.lbug")
+  @patch("robosystems.graph_api.core.ladybug.config.get_database_memory_config")
+  def test_missing_database_file_is_refused_not_created(
+    self, mock_mem_config, mock_lbug
+  ):
+    """A read-write open of a missing path would create an empty database;
+    the pool refuses instead and never reaches the engine."""
+    mock_mem_config.return_value = 256
+    pool = _make_pool(self.temp_dir)
+
+    with pytest.raises(HTTPException) as e:
+      pool._acquire_connection("ghost", read_only=False)
+
+    assert e.value.status_code == 404
+    mock_lbug.Database.assert_not_called()
+    assert not (Path(self.temp_dir) / "ghost.lbug").exists()
+    assert "ghost" not in pool._databases
+
+  @patch("robosystems.graph_api.core.ladybug.pool.lbug")
+  @patch("robosystems.graph_api.core.ladybug.config.get_database_memory_config")
+  def test_missing_database_file_is_refused_on_a_replica(
+    self, mock_mem_config, mock_lbug
+  ):
+    mock_mem_config.return_value = 256
+    pool = _make_pool(self.temp_dir)
+
+    with patch.dict(os.environ, {"LBUG_ROLE": "replica"}):
+      with pytest.raises(HTTPException) as e:
+        pool._acquire_connection("ghost", read_only=True)
+
+    assert e.value.status_code == 404
+    mock_lbug.Database.assert_not_called()
+
   def test_release_connection(self):
     """Should release connection without error."""
     pool = _make_pool(self.temp_dir)
@@ -173,6 +208,70 @@ class TestLadybugConnectionPoolAcquireRelease:
       "No active transaction for ROLLBACK."
     )
     pool._release_connection("testdb", quiet)  # must not raise
+
+
+@pytest.mark.unit
+class TestLadybugConnectionPoolPlanCache:
+  """The plan-cache mode is applied in its own block after the other
+  settings, so an engine without the setting keeps all of them."""
+
+  MODE = "robosystems.graph_api.core.ladybug.pool.TuningConfig.get_graph_engine_plan_cache_mode"
+
+  def setup_method(self):
+    self.temp_dir = tempfile.mkdtemp()
+    (Path(self.temp_dir) / "testdb.lbug").touch()
+
+  def teardown_method(self):
+    shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+  def _open(self, mock_lbug, execute=None):
+    mock_conn = MagicMock()
+    if execute is None:
+      mock_conn.execute.return_value = MagicMock()
+    else:
+      mock_conn.execute.side_effect = execute
+    mock_lbug.Connection.return_value = mock_conn
+    pool = _make_pool(self.temp_dir)
+    info = pool._create_new_connection("testdb", read_only=False)
+    statements = [c.args[0] for c in mock_conn.execute.call_args_list]
+    return info, statements
+
+  @patch(MODE, return_value=None)
+  @patch("robosystems.graph_api.core.ladybug.pool.lbug")
+  @patch("robosystems.graph_api.core.ladybug.config.get_database_memory_config")
+  def test_unset_mode_sends_no_call(self, mock_mem_config, mock_lbug, _mode):
+    mock_mem_config.return_value = 256
+    _, statements = self._open(mock_lbug)
+    assert not any("enable_cached_prepared_statement" in s for s in statements)
+
+  @patch(MODE, return_value="NONE")
+  @patch("robosystems.graph_api.core.ladybug.pool.lbug")
+  @patch("robosystems.graph_api.core.ladybug.config.get_database_memory_config")
+  def test_mode_is_sent_after_the_other_settings(
+    self, mock_mem_config, mock_lbug, _mode
+  ):
+    mock_mem_config.return_value = 256
+    _, statements = self._open(mock_lbug)
+    call = "CALL enable_cached_prepared_statement='NONE';"
+    assert call in statements
+    assert statements.index(call) > statements.index("CALL spill_to_disk=true;")
+
+  @patch(MODE, return_value="NONE")
+  @patch("robosystems.graph_api.core.ladybug.pool.lbug")
+  @patch("robosystems.graph_api.core.ladybug.config.get_database_memory_config")
+  def test_engine_without_the_setting_keeps_the_connection(
+    self, mock_mem_config, mock_lbug, _mode
+  ):
+    mock_mem_config.return_value = 256
+
+    def execute(statement):
+      if "enable_cached_prepared_statement" in statement:
+        raise RuntimeError("Unrecognized setting")
+      return MagicMock()
+
+    info, statements = self._open(mock_lbug, execute=execute)
+    assert info.is_healthy is True
+    assert "CALL spill_to_disk=true;" in statements
 
 
 @pytest.mark.unit

@@ -412,6 +412,45 @@ class TestHasOpaqueStatementCall:
     assert has_opaque_statement_call("MATCH (n) RETURN n") is False
 
 
+class TestReferencesCatalogLabel:
+  """The engine's catalog labels are refused as patterns on every surface;
+  a graph's schema is read through the schema endpoints."""
+
+  @pytest.mark.parametrize(
+    "query",
+    [
+      "MATCH (t:schema_table) RETURN t",
+      "MATCH (t:SCHEMA_TABLE) RETURN t.name",
+      "MATCH (a:schema_table)-[r:schema_rel]->(b:schema_table) RETURN r",
+      "MATCH ()-[r:schema_rel]-() RETURN count(r)",
+      "MATCH (t:`schema_table`) RETURN t",
+      "MATCH (t) WHERE t:schema_table RETURN t",
+      "OPTIONAL MATCH (t: schema_table) RETURN t",
+      "MATCH (n:Fact) RETURN n; MATCH (t:schema_table) RETURN t",
+    ],
+  )
+  def test_catalog_labels_are_flagged(self, analyzer, query):
+    assert analyzer.references_catalog_label(query) is True
+
+  @pytest.mark.parametrize(
+    "query",
+    [
+      "MATCH (n:Fact) RETURN n",
+      "MATCH (n:SchemaTable) RETURN n",
+      "MATCH (n:schema_tables) RETURN n",
+      "MATCH (n:Fact) WHERE n.name = ':schema_table' RETURN n",
+      "MATCH (n:Fact) RETURN n.schema_table",
+      "RETURN {schema_table: 1} AS m",
+      "MATCH (n:Fact) RETURN n // (x:schema_rel)",
+      "CALL table_info('schema_table') RETURN *",
+    ],
+  )
+  def test_other_forms_are_not_flagged(self, analyzer, query):
+    """Ordinary labels, a longer name sharing the prefix, the name as a
+    property, map key, string or comment: none of them is a pattern."""
+    assert analyzer.references_catalog_label(query) is False
+
+
 class TestQuerySecurityValidation:
   """Tests for query security validation."""
 
