@@ -523,5 +523,5 @@ class TestEmbeddingMapping:
     # out-of-range value is a bug to reject, not one to round away.
     assert method["parameters"]["encoder"] == {
       "name": "sq",
-      "parameters": {"type": "fp16", "clip": False},
+      "parameters": {"type": "fp16", "bits": 16, "clip": False},
     }

@@ -362,7 +362,7 @@ jobs:
       dedicated_master_count: ${{ vars.OPENSEARCH_MASTER_COUNT_STAGING || '3' }}
       ebs_volume_size: ${{ vars.OPENSEARCH_EBS_SIZE_STAGING || '100' }}
       # Engine Version Configuration
-      engine_version: ${{ vars.OPENSEARCH_VERSION_STAGING || '2.19' }}
+      engine_version: ${{ vars.OPENSEARCH_VERSION_STAGING || '3.7' }}
       # Bastion Access
       bastion_sg_id: ${{ needs.deploy-bastion.outputs.bastion_sg_id }}
       # Other Configuration

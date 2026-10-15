@@ -376,7 +376,10 @@ def test_recreate_ships_the_checkout_mapping_intact():
   encoder = put_body["mappings"]["properties"]["embedding"]["method"]["parameters"][
     "encoder"
   ]
-  assert encoder == {"name": "sq", "parameters": {"type": "fp16", "clip": False}}
+  assert encoder == {
+    "name": "sq",
+    "parameters": {"type": "fp16", "bits": 16, "clip": False},
+  }
 
 
 @pytest.mark.unit

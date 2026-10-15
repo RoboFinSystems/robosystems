@@ -110,8 +110,9 @@ INDEX_MAPPING = {
       # Timestamps
       "indexed_at": {"type": "date"},
       # fp16 quantization halves HNSW memory; vectors lie in [-1, 1], so clip
-      # stays off (an out-of-range value is a bug to reject). Changing the
-      # encoder requires recreating the index.
+      # stays off (an out-of-range value is a bug to reject). OpenSearch 3.6+
+      # refuses an sq encoder without `bits`. Changing the encoder requires
+      # recreating the index.
       "embedding": {
         "type": "knn_vector",
         "dimension": 384,  # fastembed BAAI/bge-small-en-v1.5
@@ -120,7 +121,10 @@ INDEX_MAPPING = {
           "space_type": "innerproduct",
           "engine": "faiss",
           "parameters": {
-            "encoder": {"name": "sq", "parameters": {"type": "fp16", "clip": False}},
+            "encoder": {
+              "name": "sq",
+              "parameters": {"type": "fp16", "bits": 16, "clip": False},
+            },
           },
         },
       },

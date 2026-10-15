@@ -96,14 +96,11 @@ Parameters:
     Type: String
     Description: >-
       OpenSearch engine version. Service-software patches auto-apply
-      (AutoSoftwareUpdateEnabled); bump only for a deliberate major upgrade
-      (e.g. 2.19 -> 3.x, staging-first).
-    Default: "OpenSearch_2.19"
+      (AutoSoftwareUpdateEnabled); a minor bump is a deliberate in-place
+      upgrade. Upgrades are one-way, so only versions at or above the one
+      in production are allowed.
+    Default: "OpenSearch_3.7"
     AllowedValues:
-      - "OpenSearch_2.19"
-      - "OpenSearch_3.1"
-      - "OpenSearch_3.3"
-      - "OpenSearch_3.5"
       - "OpenSearch_3.7"
 
   # Bastion Access (optional)
