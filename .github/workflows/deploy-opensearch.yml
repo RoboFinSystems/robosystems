@@ -107,7 +107,7 @@ on:
 jobs:
   deploy:
     runs-on: ${{ fromJSON(inputs.runner_config) }}
-    timeout-minutes: 45  # OpenSearch domain creation can take 15-30 min
+    timeout-minutes: 130  # creation takes 15-30 min; a major-version upgrade can run past an hour
     permissions:
       id-token: write
       contents: read
@@ -206,7 +206,7 @@ jobs:
         uses: ./.github/actions/monitor-stack-deployment
         with:
           stack-name: ${{ inputs.stack_name }}
-          timeout: "2700"
+          timeout: "7200"
           interval: "10"
 
       - name: Get Stack Outputs

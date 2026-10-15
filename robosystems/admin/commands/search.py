@@ -211,6 +211,35 @@ elif action == "force-merge":
     result = query_os(f"/{{index_name}}/_forcemerge?max_num_segments=1")
     print(json.dumps(result))
 
+elif action == "settings":
+    # The four index settings that fail the 2.19 -> 3.x pre-upgrade check.
+    flat = query_os(f"/{{index_name}}/_settings?flat_settings=true", method="GET")
+    settings = next(iter(flat.values()))["settings"]
+    blockers = [
+        key for key in (
+            "index.knn.algo_param.ef_construction",
+            "index.knn.algo_param.m",
+            "index.knn.space_type",
+            "index.store.hybrid.mmap.extensions",
+        )
+        if key in settings
+    ]
+    print(json.dumps({{"settings": settings, "upgrade_blockers": blockers}}))
+
+elif action == "warmup":
+    # Loads every segment's k-NN graph into native memory, so the first
+    # semantic query after a restart or an upgrade does not pay for it.
+    result = query_os(f"/_plugins/_knn/warmup/{{index_name}}", method="GET")
+    try:
+        stats = query_os("/_plugins/_knn/stats/graph_memory_usage_percentage", method="GET")
+        usage = {{
+            node_id: node.get("graph_memory_usage_percentage")
+            for node_id, node in stats.get("nodes", {{}}).items()
+        }}
+    except urllib.error.HTTPError:
+        usage = {{}}
+    print(json.dumps({{"shards": result.get("_shards", {{}}), "graph_memory_usage_percentage": usage}}))
+
 elif action == "recreate-index":
     # The whole index — every graph's documents. Count first so the confirm can
     # name what is about to go; then DELETE and PUT the mapping in the SAME
@@ -603,6 +632,73 @@ def search_force_merge(client, force):
     )
   else:
     console.print(f"\n[red]Force merge had {failed} failed shards:[/red] {data}\n")
+
+
+@search.command("settings")
+@click.option("--json", "json_output", is_flag=True, help="Print every setting")
+@click.pass_obj
+def search_settings(client, json_output):
+  """Show the live index settings and any that block a 3.x upgrade.
+
+  The OpenSearch 2.19 -> 3.x pre-upgrade check fails on four deprecated
+  index-level k-NN settings. The declared mapping carries none of them; this
+  reads what the live index actually has.
+
+  Examples:
+
+    just admin prod search settings
+
+    just admin prod search settings --json
+  """
+  data = _run_opensearch_script(client, action="settings")
+  settings = data.get("settings", {})
+  blockers = data.get("upgrade_blockers", [])
+
+  if json_output:
+    console.print_json(json.dumps(data))
+    return
+
+  console.print(
+    f"\n[bold cyan]'documents' INDEX SETTINGS[/bold cyan] ({client.environment})"
+  )
+  console.print("=" * 60)
+  for key in sorted(k for k in settings if ".knn" in k or "version" in k):
+    console.print(f"  {key}: {settings[key]}")
+  if blockers:
+    console.print(f"\n[red]3.x upgrade blockers:[/red] {', '.join(blockers)}\n")
+  else:
+    console.print("\n[green]No 3.x upgrade blockers.[/green]\n")
+
+
+@search.command("warmup")
+@click.pass_obj
+def search_warmup(client):
+  """Load the index's k-NN graphs into memory and report the cache's usage.
+
+  After a node restart or an engine upgrade the k-NN cache is empty, and the
+  first semantic query loads the whole index into it. Run this first so no
+  user query pays for that load. If it outlasts the SSM timeout, the warmup
+  carries on server-side; running it again is harmless.
+
+  Examples:
+
+    just admin prod search warmup
+  """
+  console.print("Warming the k-NN cache (this can take a few minutes)...")
+  data = _run_opensearch_script(client, action="warmup")
+  shards = data.get("shards", {})
+  failed = shards.get("failed", 0)
+
+  if failed:
+    console.print(f"\n[red]Warmup had {failed} failed shards:[/red] {data}\n")
+    return
+  console.print(
+    f"\n[green]Warmup complete.[/green] "
+    f"({shards.get('successful', 0)}/{shards.get('total', 0)} shards)"
+  )
+  for node_id, pct in data.get("graph_memory_usage_percentage", {}).items():
+    console.print(f"  k-NN cache on {node_id}: {pct}%")
+  console.print()
 
 
 @search.command("recreate-index")

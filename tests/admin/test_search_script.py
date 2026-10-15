@@ -18,7 +18,15 @@ from robosystems.admin.commands.search import _OPENSEARCH_QUERY_SCRIPT, _literal
 from robosystems.operations.search.client import INDEX_MAPPING
 
 # The dispatch values the template branches on — not the CLI subcommand names.
-ACTIONS = ["count", "search", "delete", "force-merge", "recreate-index"]
+ACTIONS = [
+  "count",
+  "search",
+  "delete",
+  "force-merge",
+  "settings",
+  "warmup",
+  "recreate-index",
+]
 
 
 def render(**overrides) -> str:
@@ -383,3 +391,98 @@ def test_a_hostile_mapping_value_cannot_escape_its_literal():
     and node.targets[0].id == "mapping"
   )
   assert json.loads(assigned) == mapping
+
+
+def branch_output(action: str, responses: dict) -> tuple[dict, list[tuple]]:
+  """Run one read-only branch against a fake ``query_os`` answering by path.
+
+  A path missing from ``responses`` answers HTTP 403, the way IAM refuses.
+  Returns what the branch printed and the calls it made.
+  """
+  script = render(action=action)
+  calls: list[tuple] = []
+  printed: list[str] = []
+
+  def query_os(path, body=None, method="POST"):
+    calls.append((method, path))
+    if path not in responses:
+      raise urllib.error.HTTPError(path, 403, "Forbidden", None, None)  # type: ignore[arg-type]
+    return responses[path]
+
+  namespace: dict = {
+    "json": json,
+    "urllib": urllib,
+    "index_name": "documents",
+    "query_os": query_os,
+    "print": printed.append,
+  }
+  body = script.split(f'elif action == "{action}":', 1)[1].split("elif action ==", 1)[0]
+  exec(textwrap.dedent(body), namespace)  # noqa: S102
+  return json.loads(printed[0]), calls
+
+
+@pytest.mark.unit
+def test_settings_flags_the_four_pre_upgrade_blockers():
+  live = {
+    "index.knn": "true",
+    "index.knn.space_type": "l2",
+    "index.store.hybrid.mmap.extensions": ["vec"],
+    "index.number_of_shards": "1",
+  }
+  out, calls = branch_output(
+    "settings",
+    {"/documents/_settings?flat_settings=true": {"documents-v2": {"settings": live}}},
+  )
+  assert calls == [("GET", "/documents/_settings?flat_settings=true")]
+  assert out["upgrade_blockers"] == [
+    "index.knn.space_type",
+    "index.store.hybrid.mmap.extensions",
+  ]
+  assert out["settings"] == live
+
+
+@pytest.mark.unit
+def test_settings_reports_no_blockers_for_the_declared_mapping_shape():
+  out, _ = branch_output(
+    "settings",
+    {
+      "/documents/_settings?flat_settings=true": {
+        "documents": {"settings": {"index.knn": "true"}}
+      }
+    },
+  )
+  assert out["upgrade_blockers"] == []
+
+
+@pytest.mark.unit
+def test_warmup_reports_shards_and_cache_usage():
+  out, calls = branch_output(
+    "warmup",
+    {
+      "/_plugins/_knn/warmup/documents": {
+        "_shards": {"total": 1, "successful": 1, "failed": 0}
+      },
+      "/_plugins/_knn/stats/graph_memory_usage_percentage": {
+        "nodes": {"n1": {"graph_memory_usage_percentage": 67.9}}
+      },
+    },
+  )
+  assert [method for method, _ in calls] == ["GET", "GET"]
+  assert out == {
+    "shards": {"total": 1, "successful": 1, "failed": 0},
+    "graph_memory_usage_percentage": {"n1": 67.9},
+  }
+
+
+@pytest.mark.unit
+def test_warmup_still_reports_when_stats_are_refused():
+  out, _ = branch_output(
+    "warmup",
+    {
+      "/_plugins/_knn/warmup/documents": {
+        "_shards": {"total": 1, "successful": 1, "failed": 0}
+      }
+    },
+  )
+  assert out["shards"]["successful"] == 1
+  assert out["graph_memory_usage_percentage"] == {}

@@ -104,6 +104,7 @@ Parameters:
       - "OpenSearch_3.1"
       - "OpenSearch_3.3"
       - "OpenSearch_3.5"
+      - "OpenSearch_3.7"
 
   # Bastion Access (optional)
   BastionSecurityGroupId:
@@ -200,6 +201,10 @@ Resources:
     Type: AWS::OpenSearchService::Domain
     DeletionPolicy: !If [IsProduction, Retain, Delete]
     UpdateReplacePolicy: Retain
+    # Without it an EngineVersion change is a replacement, which the fixed
+    # DomainName refuses; with it, CloudFormation runs an in-place upgrade.
+    UpdatePolicy:
+      EnableVersionUpgrade: true
     Properties:
       DomainName: !Sub "robosystems-${Environment}"
       EngineVersion: !Ref EngineVersion
