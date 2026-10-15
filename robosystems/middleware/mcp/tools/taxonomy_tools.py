@@ -18,6 +18,7 @@ from robosystems.operations.extensions.staleness import mark_graph_stale
 from robosystems.operations.roboledger.commands.taxonomies import (
   create_mapping_association,
 )
+from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
 from robosystems.operations.roboledger.reads.taxonomies import (
   count_coa_elements,
   get_element,
@@ -26,9 +27,11 @@ from robosystems.operations.roboledger.reads.taxonomies import (
   list_unmapped_elements,
   suggest_mapping_candidates,
 )
+from robosystems.operations.taxonomy_block.coa_mappings import mapping_owner_id
 from robosystems.operations.taxonomy_block.immutability import ProtectedFactsError
 
 from ._errors import database_failure
+from .constants import ENTITY_ID_ARGUMENT
 
 
 class ListMappingStructuresTool:
@@ -53,10 +56,11 @@ class ListMappingStructuresTool:
 List of mapping structures with id, name, block_type, taxonomy_id and
 framework — the reporting framework each maps the chart into. A chart
 holds one mapping per framework; the book mapping (`rs-gaap`) is listed
-first.""",
+first. On a group, the mappings of one entity's chart: `entity_id` names
+it, default the group parent.""",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "properties": {"entity_id": ENTITY_ID_ARGUMENT},
         "required": [],
       },
     }
@@ -69,7 +73,7 @@ first.""",
 
     try:
       with extensions_session(graph_id) as session:
-        result = list_mappings(session)
+        result = list_mappings(session, arguments.get("entity_id"))
         return {
           "structures": [
             {
@@ -83,6 +87,8 @@ first.""",
           ],
           "count": len(result.structures),
         }
+    except EntityNotInGraphError as exc:
+      return {"error": "entity_not_found", "message": str(exc)}
     except SQLAlchemyError as exc:
       return database_failure("list-mapping-structures", exc)
     except Exception as exc:
@@ -109,6 +115,7 @@ class GetUnmappedElementsTool:
 **RETURNS:**
 - List of unmapped CoA elements with id, code, name, classification, balance_type
 - EFS trait (asset/liability/equity/revenue/expense) helps narrow the target reporting concept
+- On a group, one entity's chart: `entity_id` names it (or `mapping_id` does, through the entity whose chart it maps); default the group parent's
 - liquidity (current/noncurrent, assets/liabilities only) narrows further to the right BS section
 
 **WORKFLOW:**
@@ -122,8 +129,13 @@ class GetUnmappedElementsTool:
         "properties": {
           "mapping_id": {
             "type": "string",
-            "description": "Optional: specific mapping structure ID to check against. If omitted, checks all mapping structures.",
+            "description": (
+              "Optional: the mapping structure to check against. It names the "
+              "entity whose chart is read, over `entity_id`; omit it to read "
+              "`entity_id`'s chart."
+            ),
           },
+          "entity_id": ENTITY_ID_ARGUMENT,
         },
         "required": [],
       },
@@ -135,16 +147,26 @@ class GetUnmappedElementsTool:
   def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
     mapping_id = arguments.get("mapping_id")
+    entity_id = arguments.get("entity_id")
 
     try:
       with extensions_session(graph_id) as session:
-        unmapped = list_unmapped_elements(session, mapping_id=mapping_id)
-        total_coa = count_coa_elements(session)
+        # A mapping names the entity whose chart it maps, and that is the
+        # chart the list reads; the count follows it, whatever entity the
+        # caller also named, so the two numbers describe one chart.
+        if mapping_id:
+          entity_id = mapping_owner_id(session, mapping_id)
+        unmapped = list_unmapped_elements(
+          session, mapping_id=mapping_id, entity_id=entity_id
+        )
+        total_coa = count_coa_elements(session, entity_id=entity_id)
         return {
           "unmapped_count": len(unmapped),
           "total_coa_elements": total_coa,
           "elements": [e.model_dump(mode="json") for e in unmapped],
         }
+    except EntityNotInGraphError as exc:
+      return {"error": "entity_not_found", "message": str(exc)}
     except SQLAlchemyError as exc:
       return database_failure("get-unmapped-elements", exc)
     except Exception as exc:

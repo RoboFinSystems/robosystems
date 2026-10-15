@@ -14,6 +14,7 @@ import pytest
 from robosystems.middleware.mcp.tools.taxonomy_tools import (
   GetMappingSummaryTool,
   GetUnmappedElementsTool,
+  ListMappingStructuresTool,
   SuggestMappingTool,
 )
 from robosystems.models.api.extensions.taxonomies import (
@@ -21,6 +22,7 @@ from robosystems.models.api.extensions.taxonomies import (
   MappingCoverageResponse,
   UnmappedElementResponse,
 )
+from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
 
 MODULE = "robosystems.middleware.mcp.tools.taxonomy_tools"
 
@@ -95,7 +97,59 @@ class TestGetUnmappedElementsTool:
     tool = GetUnmappedElementsTool(mock_graph_client)
     defn = tool.get_tool_definition()
     assert defn["name"] == "get-unmapped-elements"
-    assert "inputSchema" in defn
+    assert set(defn["inputSchema"]["properties"]) == {"mapping_id", "entity_id"}
+
+  @pytest.mark.asyncio
+  async def test_reads_the_named_entitys_chart(self, mock_graph_client):
+    """On a group the list and the count describe one entity's chart —
+    the one named — not the parent's whatever the caller asked about."""
+    tool = GetUnmappedElementsTool(mock_graph_client)
+
+    with (
+      _patch_session() as session,
+      patch(f"{MODULE}.list_unmapped_elements", return_value=[]) as listed,
+      patch(f"{MODULE}.count_coa_elements", return_value=7) as counted,
+    ):
+      result = await tool.execute({"entity_id": "ent_sub"})
+
+    listed.assert_called_once_with(session, mapping_id=None, entity_id="ent_sub")
+    counted.assert_called_once_with(session, entity_id="ent_sub")
+    assert result["total_coa_elements"] == 7
+
+  @pytest.mark.asyncio
+  async def test_a_mapping_names_the_entity_for_the_count(self, mock_graph_client):
+    """A mapping names the chart the list reads, so the count follows the
+    mapping's entity, over an entity the caller also named, and the two
+    numbers describe one chart."""
+    tool = GetUnmappedElementsTool(mock_graph_client)
+
+    with (
+      _patch_session() as session,
+      patch(f"{MODULE}.mapping_owner_id", return_value="ent_sub") as owner,
+      patch(f"{MODULE}.list_unmapped_elements", return_value=[]) as listed,
+      patch(f"{MODULE}.count_coa_elements", return_value=3) as counted,
+    ):
+      await tool.execute({"mapping_id": "map_sub", "entity_id": "ent_other"})
+
+    owner.assert_called_once_with(session, "map_sub")
+    listed.assert_called_once_with(session, mapping_id="map_sub", entity_id="ent_sub")
+    counted.assert_called_once_with(session, entity_id="ent_sub")
+
+  @pytest.mark.asyncio
+  async def test_an_entity_outside_the_graph_is_named(self, mock_graph_client):
+    tool = GetUnmappedElementsTool(mock_graph_client)
+
+    with (
+      _patch_session(),
+      patch(
+        f"{MODULE}.list_unmapped_elements",
+        side_effect=EntityNotInGraphError("ent_elsewhere is not this graph's"),
+      ),
+    ):
+      result = await tool.execute({"entity_id": "ent_elsewhere"})
+
+    assert result["error"] == "entity_not_found"
+    assert "ent_elsewhere" in result["message"]
 
   @pytest.mark.asyncio
   async def test_returns_unmapped_elements(self, mock_graph_client):
@@ -143,6 +197,63 @@ class TestGetUnmappedElementsTool:
       result = await tool.execute({})
 
     assert "error" in result
+
+
+# ── ListMappingStructuresTool ────────────────────────────────────────────
+
+
+class TestListMappingStructuresTool:
+  def test_tool_definition(self, mock_graph_client):
+    defn = ListMappingStructuresTool(mock_graph_client).get_tool_definition()
+    assert defn["name"] == "list-mapping-structures"
+    assert set(defn["inputSchema"]["properties"]) == {"entity_id"}
+
+  @pytest.mark.asyncio
+  async def test_lists_the_named_entitys_mappings(self, mock_graph_client):
+    tool = ListMappingStructuresTool(mock_graph_client)
+    structure = MagicMock(
+      id="map_sub", block_type="coa_mapping", taxonomy_id="tax_1", framework="rs-gaap"
+    )
+    structure.name = "Maple Court LLC mapping"
+    listing = MagicMock(structures=[structure])
+
+    with (
+      _patch_session() as session,
+      patch(f"{MODULE}.list_mappings", return_value=listing) as listed,
+    ):
+      result = await tool.execute({"entity_id": "ent_sub"})
+
+    listed.assert_called_once_with(session, "ent_sub")
+    assert result["count"] == 1
+    assert result["structures"][0]["id"] == "map_sub"
+    assert result["structures"][0]["framework"] == "rs-gaap"
+
+  @pytest.mark.asyncio
+  async def test_an_entity_outside_the_graph_is_named(self, mock_graph_client):
+    tool = ListMappingStructuresTool(mock_graph_client)
+
+    with (
+      _patch_session(),
+      patch(
+        f"{MODULE}.list_mappings",
+        side_effect=EntityNotInGraphError("ent_elsewhere is not this graph's"),
+      ),
+    ):
+      result = await tool.execute({"entity_id": "ent_elsewhere"})
+
+    assert result["error"] == "entity_not_found"
+
+  @pytest.mark.asyncio
+  async def test_defaults_to_the_group_parent(self, mock_graph_client):
+    tool = ListMappingStructuresTool(mock_graph_client)
+
+    with (
+      _patch_session() as session,
+      patch(f"{MODULE}.list_mappings", return_value=MagicMock(structures=[])) as listed,
+    ):
+      await tool.execute({})
+
+    listed.assert_called_once_with(session, None)
 
 
 # ── SuggestMappingTool ───────────────────────────────────────────────────
