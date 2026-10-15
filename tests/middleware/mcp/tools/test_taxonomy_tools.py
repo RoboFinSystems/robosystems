@@ -22,6 +22,7 @@ from robosystems.models.api.extensions.taxonomies import (
   MappingCoverageResponse,
   UnmappedElementResponse,
 )
+from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
 
 MODULE = "robosystems.middleware.mcp.tools.taxonomy_tools"
 
@@ -117,8 +118,9 @@ class TestGetUnmappedElementsTool:
 
   @pytest.mark.asyncio
   async def test_a_mapping_names_the_entity_for_the_count(self, mock_graph_client):
-    """Given only a mapping, the count is of the chart that mapping maps,
-    so the two numbers describe the same entity."""
+    """A mapping names the chart the list reads, so the count follows the
+    mapping's entity, over an entity the caller also named, and the two
+    numbers describe one chart."""
     tool = GetUnmappedElementsTool(mock_graph_client)
 
     with (
@@ -127,11 +129,27 @@ class TestGetUnmappedElementsTool:
       patch(f"{MODULE}.list_unmapped_elements", return_value=[]) as listed,
       patch(f"{MODULE}.count_coa_elements", return_value=3) as counted,
     ):
-      await tool.execute({"mapping_id": "map_sub"})
+      await tool.execute({"mapping_id": "map_sub", "entity_id": "ent_other"})
 
     owner.assert_called_once_with(session, "map_sub")
     listed.assert_called_once_with(session, mapping_id="map_sub", entity_id="ent_sub")
     counted.assert_called_once_with(session, entity_id="ent_sub")
+
+  @pytest.mark.asyncio
+  async def test_an_entity_outside_the_graph_is_named(self, mock_graph_client):
+    tool = GetUnmappedElementsTool(mock_graph_client)
+
+    with (
+      _patch_session(),
+      patch(
+        f"{MODULE}.list_unmapped_elements",
+        side_effect=EntityNotInGraphError("ent_elsewhere is not this graph's"),
+      ),
+    ):
+      result = await tool.execute({"entity_id": "ent_elsewhere"})
+
+    assert result["error"] == "entity_not_found"
+    assert "ent_elsewhere" in result["message"]
 
   @pytest.mark.asyncio
   async def test_returns_unmapped_elements(self, mock_graph_client):
@@ -209,6 +227,21 @@ class TestListMappingStructuresTool:
     assert result["count"] == 1
     assert result["structures"][0]["id"] == "map_sub"
     assert result["structures"][0]["framework"] == "rs-gaap"
+
+  @pytest.mark.asyncio
+  async def test_an_entity_outside_the_graph_is_named(self, mock_graph_client):
+    tool = ListMappingStructuresTool(mock_graph_client)
+
+    with (
+      _patch_session(),
+      patch(
+        f"{MODULE}.list_mappings",
+        side_effect=EntityNotInGraphError("ent_elsewhere is not this graph's"),
+      ),
+    ):
+      result = await tool.execute({"entity_id": "ent_elsewhere"})
+
+    assert result["error"] == "entity_not_found"
 
   @pytest.mark.asyncio
   async def test_defaults_to_the_group_parent(self, mock_graph_client):
