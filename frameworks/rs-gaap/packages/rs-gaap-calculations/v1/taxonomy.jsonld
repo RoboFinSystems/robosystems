@@ -1616,6 +1616,76 @@
       "@type": "rs:Association"
     },
     {
+      "@id": "_:rs-gaap-deriv-cf-deferred-tax-arc-1",
+      "from": {
+        "@id": "rs-gaap:DeferredIncomeTaxExpenseBenefit"
+      },
+      "to": {
+        "@id": "rs-gaap:DeferredIncomeTaxLiabilitiesNet"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-other-current-assets-arc-1",
+      "from": {
+        "@id": "rs-gaap:IncreaseDecreaseInOtherCurrentAssets"
+      },
+      "to": {
+        "@id": "rs-gaap:OtherAssetsCurrent"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": -1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-deferred-revenue-arc-1",
+      "from": {
+        "@id": "rs-gaap:IncreaseDecreaseInContractWithCustomerLiability"
+      },
+      "to": {
+        "@id": "rs-gaap:DeferredRevenueCurrent"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-deferred-revenue-arc-2",
+      "from": {
+        "@id": "rs-gaap:IncreaseDecreaseInContractWithCustomerLiability"
+      },
+      "to": {
+        "@id": "rs-gaap:DeferredRevenueNoncurrent"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-operating-lease-arc-1",
+      "from": {
+        "@id": "rs-gaap:IncreaseDecreaseInOperatingLeaseLiability"
+      },
+      "to": {
+        "@id": "rs-gaap:OperatingLeaseLiabilityNoncurrent"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
       "@id": "_:rs-gaap-deriv-cf-dda-from-accum-arc-1",
       "from": {
         "@id": "rs-gaap:DepreciationDepletionAndAmortization"
@@ -2118,6 +2188,66 @@
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 900.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-operating-arc-10",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:DeferredIncomeTaxExpenseBenefit"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 1000.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-operating-arc-11",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInOtherCurrentAssets"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 1100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-operating-arc-12",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInContractWithCustomerLiability"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 1200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-operating-arc-13",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInOperatingLeaseLiability"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 1300.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },

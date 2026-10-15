@@ -856,7 +856,7 @@
       "@id": "_:rs-gaap-rollup-cf-operating",
       "ruleCategory": "FundamentalAccountingConceptRelation",
       "rulePattern": "RollUp",
-      "ruleExpression": "$NetCashProvidedByUsedInOperatingActivities = ($NetIncomeLoss + $DepreciationDepletionAndAmortization + $IncreaseDecreaseInAccountsReceivable + $IncreaseDecreaseInInventories + $IncreaseDecreaseInPrepaidExpense + $IncreaseDecreaseInAccountsPayableAndAccruedLiabilities + $IncreaseDecreaseInOtherOperatingCapitalNet + $IncreaseDecreaseInAccruedLiabilities + $IncreaseDecreaseInAccruedIncomeTaxesPayable)",
+      "ruleExpression": "$NetCashProvidedByUsedInOperatingActivities = ($NetIncomeLoss + $DepreciationDepletionAndAmortization + $IncreaseDecreaseInAccountsReceivable + $IncreaseDecreaseInInventories + $IncreaseDecreaseInPrepaidExpense + $IncreaseDecreaseInAccountsPayableAndAccruedLiabilities + $IncreaseDecreaseInOtherOperatingCapitalNet + $IncreaseDecreaseInAccruedLiabilities + $IncreaseDecreaseInAccruedIncomeTaxesPayable + $DeferredIncomeTaxExpenseBenefit + $IncreaseDecreaseInOtherCurrentAssets + $IncreaseDecreaseInContractWithCustomerLiability + $IncreaseDecreaseInOperatingLeaseLiability)",
       "ruleTarget": {
         "targetKind": "element",
         "targetRef": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
@@ -901,6 +901,22 @@
         {
           "variableName": "IncreaseDecreaseInAccruedIncomeTaxesPayable",
           "variableQname": "rs-gaap:IncreaseDecreaseInAccruedIncomeTaxesPayable"
+        },
+        {
+          "variableName": "DeferredIncomeTaxExpenseBenefit",
+          "variableQname": "rs-gaap:DeferredIncomeTaxExpenseBenefit"
+        },
+        {
+          "variableName": "IncreaseDecreaseInOtherCurrentAssets",
+          "variableQname": "rs-gaap:IncreaseDecreaseInOtherCurrentAssets"
+        },
+        {
+          "variableName": "IncreaseDecreaseInContractWithCustomerLiability",
+          "variableQname": "rs-gaap:IncreaseDecreaseInContractWithCustomerLiability"
+        },
+        {
+          "variableName": "IncreaseDecreaseInOperatingLeaseLiability",
+          "variableQname": "rs-gaap:IncreaseDecreaseInOperatingLeaseLiability"
         }
       ],
       "ruleMessage": "Calculation rollup: rs-gaap:NetCashProvidedByUsedInOperatingActivities = NetIncomeLoss + DDA + Σ working-capital deltas (indirect method)",
