@@ -83,12 +83,15 @@ class TestBalanceSheetCalcs:
     }
 
   def test_balance_sheet_identity(self, calculations: TaxonomyPackage) -> None:
-    """rs-gaap:LiabilitiesAndStockholdersEquity = Liabilities + StockholdersEquity."""
+    """rs-gaap:LiabilitiesAndStockholdersEquity = Liabilities + StockholdersEquity
+    + MinorityInterest — the outside owners' share sits beside the parent's
+    equity, not inside it."""
     assert _equation(
       calculations, self.STATEMENT, "rs-gaap:LiabilitiesAndStockholdersEquity"
     ) == {
       "rs-gaap:Liabilities": 1.0,
       "rs-gaap:StockholdersEquity": 1.0,
+      "rs-gaap:MinorityInterest": 1.0,
     }
 
   def test_equity_has_treasury_with_negative_weight(
@@ -139,7 +142,10 @@ class TestIncomeStatementCalcs:
   def test_net_income_sums_continuing_and_discontinued(
     self, calculations: TaxonomyPackage
   ) -> None:
+    """Net income attributable to the parent: continuing + discontinued,
+    less the share attributable to noncontrolling interests."""
     assert _equation(calculations, self.STATEMENT, "rs-gaap:NetIncomeLoss") == {
       "rs-gaap:IncomeLossFromContinuingOperations": 1.0,
       "rs-gaap:IncomeLossFromDiscontinuedOperationsNetOfTax": 1.0,
+      "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest": -1.0,
     }

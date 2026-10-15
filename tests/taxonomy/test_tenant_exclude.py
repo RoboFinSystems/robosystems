@@ -48,6 +48,15 @@ def test_keep_critical_concepts_are_never_excluded() -> None:
     "rs-gaap:NetIncomeLoss",
     "rs-gaap:ComprehensiveIncomeNetOfTax",
     "rs-gaap:OtherComprehensiveIncomeLossNetOfTax",
+    # The consolidation rows (migration 0046): presented in every Style, so
+    # a regeneration keeps them; a tenant maps its consolidation entity to them.
+    "rs-gaap:MinorityInterest",
+    "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest",
+    "rs-gaap:InvestmentsInAffiliatesSubsidiariesAssociatesAndJointVentures",
+    "rs-gaap:DueFromAffiliateCurrent",
+    "rs-gaap:DueToAffiliateCurrent",
+    "rs-gaap:PaymentsToMinorityShareholders",
+    "rs-gaap:ProceedsFromMinorityShareholders",
   ):
     assert qname not in excluded, (
       f"{qname} is rollup/rule-critical — must not be excluded"

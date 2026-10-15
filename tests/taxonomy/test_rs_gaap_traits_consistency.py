@@ -106,3 +106,23 @@ def test_working_set_efs_bindings_present(
     f"{qname} is missing {required} — it would drop out of EFS-filtered "
     f"mapping/category surfaces"
   )
+
+
+@pytest.mark.unit
+def test_consolidation_rows_carry_their_traits(traits_by_qname) -> None:
+  """The NCI share of income is a mapping candidate only through its EFS
+  trait, and its sign reaches net income through it; the affiliate
+  working-capital rows render in the operating section through the
+  reconciling-item trait (migration 0046)."""
+  assert (
+    "elementsOfFinancialStatements=expense"
+    in traits_by_qname["rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest"]
+  )
+  for wc in (
+    "rs-gaap:IncreaseDecreaseInDueFromAffiliatesCurrent",
+    "rs-gaap:IncreaseDecreaseInDueToAffiliatesCurrent",
+  ):
+    assert (
+      "indirectCashFlowReconcilingItem=indirectCashFlowMethodReconcilingItem"
+      in traits_by_qname[wc]
+    )

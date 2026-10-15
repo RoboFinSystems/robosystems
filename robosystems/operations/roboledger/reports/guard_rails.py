@@ -263,6 +263,28 @@ def _top_most_subtotal_for_classification(
   return best
 
 
+def _sibling_equity_leaves(rows: list[FactRow], equity: FactRow, col: int) -> float:
+  """Equity presented beside the equity subtotal rather than inside it — the
+  noncontrolling interest a consolidated balance sheet carries at the
+  subtotal's own depth. Leaves only: a sibling subtotal is a placeholder the
+  top-most pick already chose between."""
+  total = 0.0
+  for row in rows:
+    if row is equity or row.is_subtotal or row.is_abstract:
+      continue
+    if row.depth != equity.depth:
+      continue
+    qname_lower = (row.element_qname or "").lower()
+    if "liabilit" in qname_lower and "equity" in qname_lower:
+      continue
+    row_class = row.classification or _infer_classification(
+      row.element_qname, row.balance_type
+    )
+    if row_class == "equity":
+      total += _value(row, col)
+  return total
+
+
 def _net_income_row(rows: list[FactRow]) -> FactRow | None:
   """Find the row that reports Net Income (or Net Loss).
 
@@ -310,7 +332,9 @@ def _validate_balance_sheet(
 
   total_assets = _value(candidates["asset"], column.index)
   total_liabilities = _value(candidates["liability"], column.index)
-  total_equity = _value(candidates["equity"], column.index)
+  total_equity = _value(candidates["equity"], column.index) + _sibling_equity_leaves(
+    rows, candidates["equity"], column.index
+  )
   diff = abs(total_assets - (total_liabilities + total_equity))
   if diff > _TOLERANCE:
     _fail(
