@@ -396,3 +396,28 @@ class TestEnvVarNaming:
 
       # Verify the correct env var name was checked
       mock_env.assert_called_with("TUNING_CACHE_BALANCE_TTL")
+
+
+class TestGraphEnginePlanCacheMode:
+  """The plan-cache mode: a validated string the pool sends as a CALL, or
+  None, which sends nothing and keeps the engine default."""
+
+  def _mode(self, env_value):
+    with (
+      patch("robosystems.config.tuning._get_env_override") as mock_env,
+      patch("robosystems.config.tuning._get_parameter_manager") as mock_pm,
+    ):
+      mock_env.return_value = env_value
+      mock_pm.return_value = None
+      return TuningConfig.get_graph_engine_plan_cache_mode()
+
+  def test_unset_is_none(self):
+    assert self._mode(None) is None
+    assert self._mode("") is None
+
+  def test_value_is_normalized(self):
+    assert self._mode(" none ") == "NONE"
+    assert self._mode("reads") == "READS"
+
+  def test_invalid_value_is_ignored(self):
+    assert self._mode("SOMETIMES") is None

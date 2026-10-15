@@ -10,6 +10,7 @@ Database objects over the same file do not see each other's committed writes.
 
 import itertools
 import os
+import re
 import threading
 import weakref
 from contextlib import contextmanager
@@ -19,9 +20,31 @@ from pathlib import Path
 from typing import Any
 
 import ladybug as lbug
+from fastapi import HTTPException
+from fastapi import status as http_status
 
 from robosystems.config.tuning import TuningConfig
 from robosystems.logger import logger
+
+_DATABASE_NAME = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+def _validated_database_path(base_path: Path, database_name: str) -> Path:
+  """The database's file path, refusing a name that is not a bare identifier
+  or that resolves outside ``base_path``. The routers validate the graph id;
+  this is the backstop for any caller that reaches the pool directly."""
+  if not _DATABASE_NAME.match(database_name or ""):
+    raise HTTPException(
+      status_code=http_status.HTTP_400_BAD_REQUEST, detail="Invalid database name"
+    )
+  base = os.path.normpath(str(base_path))
+  candidate = os.path.normpath(os.path.join(base, f"{database_name}.lbug"))
+  if not candidate.startswith(base + os.sep):
+    raise HTTPException(
+      status_code=http_status.HTTP_400_BAD_REQUEST,
+      detail="Database path outside allowed directory",
+    )
+  return Path(candidate)
 
 
 @dataclass
@@ -211,10 +234,19 @@ class LadybugConnectionPool:
       if current_count >= self.max_connections_per_db:
         self._remove_oldest_connection(database_name)
 
-    try:
-      db_path = self.base_path / f"{database_name}.lbug"
+    db_path = _validated_database_path(self.base_path, database_name)
 
+    try:
       if database_name not in self._databases:
+        # A read-write open of a missing path creates an empty database, so
+        # any path mismatch would serve an empty graph in place of the real
+        # one. Files are created by create_database and the migration import.
+        if not db_path.exists():
+          raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail=f"Database '{database_name}' not found",
+          )
+
         logger.info(f"Creating new Database object for {database_name}")
 
         from .config import get_database_memory_config
@@ -295,7 +327,7 @@ class LadybugConnectionPool:
         # None of it is required — a failure here leaves a usable connection.
         try:
           # Keeps LadybugDB's temporary files on the same fast EBS volume as
-          # the databases. It appends ".lbug" itself, so pass the bare path.
+          # the databases. It appends ".lbdb" itself, so pass the bare path.
           home_dir = str(self.base_path)
 
           conn.execute(f"CALL home_directory='{home_dir}';")
@@ -321,6 +353,18 @@ class LadybugConnectionPool:
           logger.debug(
             f"Could not apply connection settings (non-critical): {config_error}"
           )
+
+        # Its own block: an engine without the setting raises on the CALL,
+        # and that must not take the settings above with it.
+        plan_cache_mode = TuningConfig.get_graph_engine_plan_cache_mode()
+        if plan_cache_mode:
+          try:
+            conn.execute(f"CALL enable_cached_prepared_statement='{plan_cache_mode}';")
+            logger.info(f"Plan cache mode {plan_cache_mode} set for {database_name}")
+          except Exception as plan_cache_error:
+            logger.debug(
+              f"Plan cache mode not applied for {database_name}: {plan_cache_error}"
+            )
 
       except Exception as e:
         logger.warning(f"New connection health check failed for {database_name}: {e}")
@@ -350,6 +394,8 @@ class LadybugConnectionPool:
 
       return connection_info
 
+    except HTTPException:
+      raise
     except Exception as e:
       logger.error(f"Failed to create connection for {database_name}: {e}")
       raise

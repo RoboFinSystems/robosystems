@@ -23,6 +23,7 @@ from robosystems.security.cypher_analyzer import (
   is_bulk_operation,
   is_schema_ddl,
   is_write_operation,
+  references_catalog_label,
 )
 
 logger = logging.getLogger(__name__)
@@ -123,6 +124,19 @@ class StatementKernel:
         "(e.g. CALL GQL(...)), and CALLs whose procedure name is quoted, are "
         "not allowed through the query endpoints. Submit the statement "
         "directly, with an unquoted procedure name, so it can be authorized.",
+      )
+
+    # The engine's catalog labels are served by the schema endpoints; a
+    # statement over them is refused on every graph.
+    if references_catalog_label(statement):
+      logger.warning(
+        f"User {user.id} attempted a catalog-label statement on {graph_id}: {statement[:100]}"
+      )
+      raise HTTPException(
+        status_code=http_status.HTTP_403_FORBIDDEN,
+        detail="Statements over the engine's catalog labels (schema_table, "
+        "schema_rel) are not accepted through the query endpoints. Read the "
+        "schema through GET /v1/graphs/{graph_id}/schema or get-graph-schema.",
       )
 
     is_write = is_write_operation(statement)

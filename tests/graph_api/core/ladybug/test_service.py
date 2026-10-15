@@ -188,6 +188,20 @@ class TestValidateCypherQuery:
       validate_cypher_query("create database test")
     assert exc_info.value.status_code == 403
 
+  @pytest.mark.parametrize(
+    "query",
+    [
+      "MATCH (t:schema_table) RETURN t",
+      "MATCH ()-[r:schema_rel]->() RETURN r",
+    ],
+  )
+  def test_catalog_label_patterns_raise_403(self, query):
+    """Refused in this process too, however the request arrived."""
+    with pytest.raises(HTTPException) as exc_info:
+      validate_cypher_query(query)
+    assert exc_info.value.status_code == 403
+    assert "catalog-label" in exc_info.value.detail
+
   def test_query_length_limit(self):
     """Query exceeding max length raises 400."""
     long_query = "MATCH (n) RETURN n " + "a" * 10001

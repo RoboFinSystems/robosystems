@@ -192,6 +192,7 @@ def assert_read_only_cypher(query: str, graph_id: str | None = None) -> None:
     is_bulk_operation,
     is_schema_ddl,
     is_write_operation,
+    references_catalog_label,
   )
 
   if is_bulk_operation(query):
@@ -214,6 +215,13 @@ def assert_read_only_cypher(query: str, graph_id: str | None = None) -> None:
       "Blocked write operation (CREATE/MERGE/SET/DELETE) in read-graph-cypher"
     )
     raise ValueError("Only read-only queries are allowed")
+
+  if references_catalog_label(query):
+    logger.warning("Blocked catalog-label statement in read-graph-cypher")
+    raise ValueError(
+      "Catalog labels (schema_table, schema_rel) are not queryable here; "
+      "use get-graph-schema."
+    )
 
   if graph_id:
     from robosystems.middleware.graph.statement_kernel import (

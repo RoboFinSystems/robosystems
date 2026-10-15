@@ -128,7 +128,7 @@ class TestIdentifierEscaping:
 
 
 @pytest.fixture
-def test_client():
+def test_client(tmp_path):
   """Create a test client with mocked cluster service."""
   from robosystems.graph_api.core.ladybug import service as ladybug_service
 
@@ -139,7 +139,7 @@ def test_client():
   try:
     # Initialize cluster service
     init_ladybug_service(
-      base_path="/tmp/test_lbug",
+      base_path=str(tmp_path / "lbug"),
       max_databases=10,
       read_only=False,
       node_type=NodeType.WRITER,

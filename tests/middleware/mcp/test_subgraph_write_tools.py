@@ -109,6 +109,12 @@ class TestValidateWriteQuery:
     assert "write operation" in result
 
   @pytest.mark.unit
+  def test_catalog_label_blocked(self):
+    result = _validate_write_query("MATCH (t:schema_table) SET t.x = 1")
+    assert result is not None
+    assert "get-graph-schema" in result
+
+  @pytest.mark.unit
   def test_drop_blocked(self):
     result = _validate_write_query("DROP TABLE Concept")
     assert result is not None

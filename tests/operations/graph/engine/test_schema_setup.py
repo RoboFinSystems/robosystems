@@ -319,7 +319,7 @@ class TestEnsureSchema:
 
   @patch("robosystems.graph_api.core.ladybug.engine.Engine")
   @patch("robosystems.operations.graph.engine.path_utils.ensure_lbug_directory")
-  def test_ensure_schema_success(self, mock_ensure_dir, mock_engine_class):
+  def test_ensure_schema_success(self, mock_ensure_dir, mock_engine_class, tmp_path):
     """Test successful schema creation."""
     # Setup mocks
     mock_engine = MagicMock()
@@ -334,7 +334,7 @@ class TestEnsureSchema:
       mock_manager.initialize_schema.return_value = True
       mock_manager_class.return_value = mock_manager
 
-      result = ensure_schema("/tmp/test.lbug")
+      result = ensure_schema(str(tmp_path / "test.lbug"))
 
     assert result is True
     mock_ensure_dir.assert_called_once()
@@ -344,7 +344,7 @@ class TestEnsureSchema:
   @patch("robosystems.graph_api.core.ladybug.engine.Engine")
   @patch("robosystems.operations.graph.engine.path_utils.ensure_lbug_directory")
   def test_ensure_schema_error(
-    self, mock_ensure_dir, mock_engine_class, mock_manager_class
+    self, mock_ensure_dir, mock_engine_class, mock_manager_class, tmp_path
   ):
     """Test ensure_schema with error."""
     # Make the schema manager raise an error
@@ -355,4 +355,4 @@ class TestEnsureSchema:
     mock_manager_class.return_value = mock_manager
 
     with pytest.raises(Exception, match="Schema initialization failed"):
-      ensure_schema("/tmp/test.lbug")
+      ensure_schema(str(tmp_path / "test.lbug"))

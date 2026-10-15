@@ -257,6 +257,21 @@ class TuningConfig:
       "timeouts/GRAPH_ENGINE_QUERY", TimeoutDefaults.GRAPH_ENGINE_QUERY
     )
 
+  GRAPH_ENGINE_PLAN_CACHE_MODES = frozenset({"READS", "WRITES", "BOTH", "NONE"})
+
+  @classmethod
+  def get_graph_engine_plan_cache_mode(cls) -> str | None:
+    """Which statements may reuse a cached plan (READS, WRITES, BOTH or NONE),
+    set on each new connection. Empty keeps the engine default; NONE turns the
+    plan cache off. An engine without the setting ignores it."""
+    value = cls.get("graph/ENGINE_PLAN_CACHE_MODE", "").strip().upper()
+    if not value:
+      return None
+    if value not in cls.GRAPH_ENGINE_PLAN_CACHE_MODES:
+      logger.warning(f"Ignoring invalid graph/ENGINE_PLAN_CACHE_MODE: {value}")
+      return None
+    return value
+
   # =========================================================================
   # SSE ACCESSORS
   # =========================================================================

@@ -36,6 +36,7 @@ def _topology(
   is_admin=False,
   is_ddl=False,
   is_opaque_call=False,
+  is_catalog=False,
   is_subgraph=False,
   is_shared=False,
   has_write_access=True,
@@ -47,6 +48,7 @@ def _topology(
     patch(f"{MOD}.is_admin_operation", return_value=is_admin),
     patch(f"{MOD}.is_schema_ddl", return_value=is_ddl),
     patch(f"{MOD}.has_opaque_statement_call", return_value=is_opaque_call),
+    patch(f"{MOD}.references_catalog_label", return_value=is_catalog),
     patch(f"{MOD}.parse_subgraph_id", return_value=(object() if is_subgraph else None)),
     patch(
       f"{MOD}.MultiTenantUtils.is_shared_repository_or_subgraph",
@@ -149,6 +151,24 @@ def test_opaque_statement_call_blocked_on_subgraph_for_writer():
       )
   assert e.value.status_code == 403
   assert "CALL GQL" in e.value.detail
+
+
+def test_catalog_label_statement_blocked_on_every_graph():
+  """Refused ahead of write classification: on a main-graph read, and on a
+  subgraph for a member whose write access would otherwise carry it."""
+  cases = (
+    ("kg1234567890abcdef", {"is_write": False}),
+    (
+      "kg1234567890abcdef_dev",
+      {"is_write": True, "is_subgraph": True, "has_write_access": True},
+    ),
+  )
+  for graph_id, topology in cases:
+    with _topology(is_catalog=True, **topology):
+      with pytest.raises(HTTPException) as e:
+        _authorize(graph_id, "MATCH (t:schema_table) RETURN t")
+    assert e.value.status_code == 403
+    assert "schema_table" in e.value.detail
 
 
 def test_opaque_statement_call_blocked_on_main_graph_read():
