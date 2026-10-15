@@ -18,6 +18,7 @@ from robosystems.operations.extensions.staleness import mark_graph_stale
 from robosystems.operations.roboledger.commands.taxonomies import (
   create_mapping_association,
 )
+from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
 from robosystems.operations.roboledger.reads.taxonomies import (
   count_coa_elements,
   get_element,
@@ -86,6 +87,8 @@ it, default the group parent.""",
           ],
           "count": len(result.structures),
         }
+    except EntityNotInGraphError as exc:
+      return {"error": "entity_not_found", "message": str(exc)}
     except SQLAlchemyError as exc:
       return database_failure("list-mapping-structures", exc)
     except Exception as exc:
@@ -127,8 +130,9 @@ class GetUnmappedElementsTool:
           "mapping_id": {
             "type": "string",
             "description": (
-              "Optional: the mapping structure to check against; it names the "
-              "entity whose chart is read. Omit to read `entity_id`'s chart."
+              "Optional: the mapping structure to check against. It names the "
+              "entity whose chart is read, over `entity_id`; omit it to read "
+              "`entity_id`'s chart."
             ),
           },
           "entity_id": ENTITY_ID_ARGUMENT,
@@ -147,9 +151,10 @@ class GetUnmappedElementsTool:
 
     try:
       with extensions_session(graph_id) as session:
-        # A mapping names the entity whose chart it maps; the count must
-        # describe the same chart as the list beside it.
-        if mapping_id and entity_id is None:
+        # A mapping names the entity whose chart it maps, and that is the
+        # chart the list reads; the count follows it, whatever entity the
+        # caller also named, so the two numbers describe one chart.
+        if mapping_id:
           entity_id = mapping_owner_id(session, mapping_id)
         unmapped = list_unmapped_elements(
           session, mapping_id=mapping_id, entity_id=entity_id
@@ -160,6 +165,8 @@ class GetUnmappedElementsTool:
           "total_coa_elements": total_coa,
           "elements": [e.model_dump(mode="json") for e in unmapped],
         }
+    except EntityNotInGraphError as exc:
+      return {"error": "entity_not_found", "message": str(exc)}
     except SQLAlchemyError as exc:
       return database_failure("get-unmapped-elements", exc)
     except Exception as exc:
