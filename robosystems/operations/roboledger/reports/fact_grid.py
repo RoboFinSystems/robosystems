@@ -313,8 +313,10 @@ def render_structure_view(
   """Apply the Reporting Style's structure for ``block_type`` to ``facts``.
 
   Facts outside the hierarchy roll up via ``general-special`` arcs to their
-  nearest in-structure ancestor; facts with none are dropped from the view
-  (still persisted for audit).
+  nearest in-structure ancestor. On a balance sheet or income statement a
+  fact with none takes a row of its own under the nearest calculation
+  ancestor the statement presents (``_place_strays_by_calculation``);
+  elsewhere it is dropped from the view (still persisted for audit).
   """
   (
     structure_id,
@@ -332,7 +334,8 @@ def render_structure_view(
     )
 
   in_structure = _collect_hierarchy_element_ids(hierarchy)
-  rolled_up = _roll_up_facts_to_structure(session, facts, in_structure)
+  strays: list[ReportFact] = []
+  rolled_up = _roll_up_facts_to_structure(session, facts, in_structure, dropped=strays)
 
   period_balances = [_facts_to_balance_dict(rolled_up, p.start, p.end) for p in periods]
 
@@ -345,6 +348,11 @@ def render_structure_view(
 
   # Facts are already natural-signed.
   rows = _build_rows(hierarchy, period_balances, calculations, pre_signed=True)
+  if strays and block_type in _PLACED_BY_CALCULATION:
+    ancestry = _calculation_ancestry(
+      session, {f.element_id for f in strays}, {row.element_id for row in rows}
+    )
+    rows = _place_strays_by_calculation(rows, strays, periods, ancestry)
 
   return FactGrid(
     structure_id=structure_id,
@@ -369,6 +377,145 @@ def _collect_hierarchy_element_ids(hierarchy: list[_HierarchyNode]) -> set[str]:
   for root in hierarchy:
     _walk(root)
   return ids
+
+
+# The statements whose stray facts take a row by calculation. The cash flow
+# statement keeps its own contract: a flow its network has no row for is named
+# in ``ReportFacts.warnings`` rather than placed.
+_PLACED_BY_CALCULATION: frozenset[str] = frozenset(
+  {"balance_sheet", "income_statement"}
+)
+
+
+def _calculation_ancestry(
+  session: Session, element_ids: set[str], presented: set[str], max_depth: int = 4
+) -> dict[str, list[str]]:
+  """``{summand element_id: [subtotal element_ids]}`` from every calculation
+  arc that sums one of ``element_ids``, climbing breadth-first through
+  unpresented subtotals until each path reaches a presented element or runs
+  out. Library arcs live in their own structures (``rs-gaap-calculations``),
+  not in the Style's presentation structure, so the walk is unscoped."""
+  parents: dict[str, list[str]] = {}
+  frontier = set(element_ids)
+  seen = set(frontier)
+  for _ in range(max_depth):
+    if not frontier:
+      break
+    rows = session.execute(
+      text(
+        """
+        SELECT DISTINCT from_element_id AS target, to_element_id AS source
+        FROM associations
+        WHERE association_type = 'calculation'
+          AND to_element_id = ANY(:sources)
+        """
+      ),
+      {"sources": sorted(frontier)},
+    ).fetchall()
+    next_frontier: set[str] = set()
+    for row in rows:
+      target = str(row.target)
+      parents.setdefault(str(row.source), []).append(target)
+      if target not in presented and target not in seen:
+        next_frontier.add(target)
+    seen |= next_frontier
+    frontier = next_frontier
+  return parents
+
+
+def _place_strays_by_calculation(
+  rows: list[FactRow],
+  strays: list[ReportFact],
+  periods: list[PeriodSpec],
+  parents: dict[str, list[str]],
+) -> list[FactRow]:
+  """Give a fact the Style presents no row for a row of its own, as the last
+  child of the nearest calculation ancestor the statement does present.
+
+  The case is a concept of another entity form on this Style: an LLC's
+  members' equity on the corporate balance sheet. Its subtotal already holds
+  it (the calculation DAG summed it when the subtotal fact was emitted), so
+  without a row the subtotal did not foot and the amount showed nowhere. A
+  stray with no presented calculation ancestor belongs to another statement
+  and stays off this one; a stray whose ancestor is itself a valued stray is
+  covered by that ancestor's row. ``parents`` maps a summand to the subtotals
+  that sum it (``_calculation_ancestry``); the arcs' weights play no part,
+  because the footing check weights a child by its balance type against its
+  parent's, the same convention every presented row follows.
+  """
+  by_element: dict[str, list[ReportFact]] = {}
+  for fact in strays:
+    by_element.setdefault(fact.element_id, []).append(fact)
+  valued: dict[str, tuple[ReportFact, list[float | None]]] = {}
+  for element_id, facts in by_element.items():
+    values = [
+      _unsigned_zero(
+        sum(
+          f.value for f in facts if (f.period_start, f.period_end) == (p.start, p.end)
+        )
+      )
+      for p in periods
+    ]
+    if any(v not in (None, 0, 0.0) for v in values):
+      valued[element_id] = (facts[0], values)
+  if not valued:
+    return rows
+
+  # The deepest presented ancestor is the most specific subtotal; among the
+  # rows for one element (rare), the first in presentation order.
+  presented: dict[str, tuple[int, int]] = {}
+  for index, row in enumerate(rows):
+    presented.setdefault(row.element_id, (row.depth, index))
+  summed = {target for targets in parents.values() for target in targets}
+
+  def _anchor(element_id: str) -> str | None:
+    frontier = [element_id]
+    visited = {element_id}
+    while frontier:
+      found: list[str] = []
+      next_frontier: list[str] = []
+      for current in frontier:
+        for parent in parents.get(current, []):
+          if parent in visited:
+            continue
+          visited.add(parent)
+          if parent in presented:
+            found.append(parent)
+          elif parent in valued:
+            return None
+          else:
+            next_frontier.append(parent)
+      if found:
+        return max(found, key=lambda eid: (presented[eid][0], -presented[eid][1]))
+      frontier = next_frontier
+    return None
+
+  placed: dict[str, list[FactRow]] = {}
+  for element_id, (first, values) in valued.items():
+    anchor = _anchor(element_id)
+    if anchor is None:
+      continue
+    placed.setdefault(anchor, []).append(
+      FactRow(
+        element_id=element_id,
+        element_qname=first.element_qname,
+        element_name=first.element_name,
+        classification=first.classification,
+        balance_type=first.balance_type,
+        values=values,
+        is_subtotal=element_id in summed,
+      )
+    )
+  if not placed:
+    return rows
+
+  result: list[FactRow] = []
+  for row in rows:
+    for stray in placed.pop(row.element_id, ()):
+      stray.depth = row.depth + 1
+      result.append(stray)
+    result.append(row)
+  return result
 
 
 def _resolve_renderable_ancestor(
@@ -431,10 +578,13 @@ def _roll_up_facts_to_structure(
   session: Session,
   facts: list[ReportFact],
   in_structure: set[str],
+  *,
+  dropped: list[ReportFact] | None = None,
 ) -> list[ReportFact]:
   """Repoint out-of-structure facts at their nearest in-structure ancestor.
 
-  Facts with no ancestor are dropped. No aggregation here —
+  Facts with no ancestor are dropped, and collected into ``dropped`` when
+  given, for the caller to present another way. No aggregation here —
   ``_facts_to_balance_dict`` sums facts sharing an element_id.
   """
   if not facts:
@@ -462,6 +612,8 @@ def _roll_up_facts_to_structure(
       session, fact.element_id, in_structure, cache
     )
     if ancestor is None:
+      if dropped is not None:
+        dropped.append(fact)
       continue
     if (ancestor, fact.period_start, fact.period_end) in direct_keys:
       continue
