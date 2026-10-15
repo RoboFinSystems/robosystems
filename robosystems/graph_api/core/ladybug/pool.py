@@ -37,15 +37,14 @@ def _validated_database_path(base_path: Path, database_name: str) -> Path:
     raise HTTPException(
       status_code=http_status.HTTP_400_BAD_REQUEST, detail="Invalid database name"
     )
-  db_path = base_path / f"{database_name}.lbug"
-  try:
-    db_path.resolve().relative_to(base_path.resolve())
-  except ValueError:
+  base = os.path.normpath(str(base_path))
+  candidate = os.path.normpath(os.path.join(base, f"{database_name}.lbug"))
+  if not candidate.startswith(base + os.sep):
     raise HTTPException(
       status_code=http_status.HTTP_400_BAD_REQUEST,
       detail="Database path outside allowed directory",
     )
-  return db_path
+  return Path(candidate)
 
 
 @dataclass
