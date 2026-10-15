@@ -20766,6 +20766,482 @@
       "order": 10646.6667,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-nci-1",
+      "from": {
+        "@id": "rs-gaap:AssetsCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:DueFromAffiliateCurrent"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "order": 20125.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-nci-2",
+      "from": {
+        "@id": "rs-gaap:AssetsNoncurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:InvestmentsInAffiliatesSubsidiariesAssociatesAndJointVentures"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "order": 20235.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-nci-3",
+      "from": {
+        "@id": "rs-gaap:LiabilitiesCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:DueToAffiliateCurrent"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "order": 20311.7,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-nci-4",
+      "from": {
+        "@id": "rs-gaap:LiabilitiesAndStockholdersEquity"
+      },
+      "to": {
+        "@id": "rs-gaap:MinorityInterest"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "order": 20500.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-llc-arc-nci-1",
+      "from": {
+        "@id": "rs-gaap:AssetsCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:DueFromAffiliateCurrent"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-LLC",
+      "order": 20125.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-llc-arc-nci-2",
+      "from": {
+        "@id": "rs-gaap:AssetsNoncurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:InvestmentsInAffiliatesSubsidiariesAssociatesAndJointVentures"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-LLC",
+      "order": 20235.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-llc-arc-nci-3",
+      "from": {
+        "@id": "rs-gaap:LiabilitiesCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:DueToAffiliateCurrent"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-LLC",
+      "order": 20311.7,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-llc-arc-nci-4",
+      "from": {
+        "@id": "rs-gaap:LiabilitiesAndStockholdersEquity"
+      },
+      "to": {
+        "@id": "rs-gaap:MinorityInterest"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-LLC",
+      "order": 20500.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-part-arc-nci-1",
+      "from": {
+        "@id": "rs-gaap:AssetsCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:DueFromAffiliateCurrent"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-PART",
+      "order": 20125.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-part-arc-nci-2",
+      "from": {
+        "@id": "rs-gaap:AssetsNoncurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:InvestmentsInAffiliatesSubsidiariesAssociatesAndJointVentures"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-PART",
+      "order": 20235.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-part-arc-nci-3",
+      "from": {
+        "@id": "rs-gaap:LiabilitiesCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:DueToAffiliateCurrent"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-PART",
+      "order": 20311.7,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-part-arc-nci-4",
+      "from": {
+        "@id": "rs-gaap:LiabilitiesAndStockholdersEquity"
+      },
+      "to": {
+        "@id": "rs-gaap:MinorityInterest"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-PART",
+      "order": 20500.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-nci",
+      "from": {
+        "@id": "rs-gaap:IncomeStatementAbstract"
+      },
+      "to": {
+        "@id": "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "order": 11150.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-nci-1",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30115.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-nci-2",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInDueFromAffiliatesCurrent"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30156.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-nci-3",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInDueToAffiliatesCurrent"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30157.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-nci-4",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquireInterestInSubsidiariesAndAffiliates"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30270.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-nci-5",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromDivestitureOfInterestInSubsidiariesAndAffiliates"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30271.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-nci-6",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromMinorityShareholders"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30360.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-nci-7",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToMinorityShareholders"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30361.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-nci-1",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30115.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-nci-2",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInDueFromAffiliatesCurrent"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30156.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-nci-3",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInDueToAffiliatesCurrent"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30157.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-nci-4",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquireInterestInSubsidiariesAndAffiliates"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30270.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-nci-5",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromDivestitureOfInterestInSubsidiariesAndAffiliates"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30271.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-nci-6",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromMinorityShareholders"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30360.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-nci-7",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToMinorityShareholders"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30361.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-nci-1",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30115.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-nci-2",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInDueFromAffiliatesCurrent"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30156.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-nci-3",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInDueToAffiliatesCurrent"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30157.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-nci-4",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquireInterestInSubsidiariesAndAffiliates"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30270.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-nci-5",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromDivestitureOfInterestInSubsidiariesAndAffiliates"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30271.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-nci-6",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromMinorityShareholders"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30360.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-nci-7",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToMinorityShareholders"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30361.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     }
   ]
 }

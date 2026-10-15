@@ -7331,6 +7331,9 @@
       "@id": "rs-gaap:IncreaseDecreaseInDueFromAffiliatesCurrent",
       "https://robosystems.ai/vocab/hasTrait": [
         {
+          "@id": "trait:indirectCashFlowReconcilingItem/indirectCashFlowMethodReconcilingItem"
+        },
+        {
           "@id": "trait:operatingNonoperating/operating"
         }
       ]
@@ -7370,6 +7373,9 @@
     {
       "@id": "rs-gaap:IncreaseDecreaseInDueToAffiliatesCurrent",
       "https://robosystems.ai/vocab/hasTrait": [
+        {
+          "@id": "trait:indirectCashFlowReconcilingItem/indirectCashFlowMethodReconcilingItem"
+        },
         {
           "@id": "trait:operatingNonoperating/operating"
         }
@@ -11257,6 +11263,9 @@
     {
       "@id": "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest",
       "https://robosystems.ai/vocab/hasTrait": [
+        {
+          "@id": "trait:elementsOfFinancialStatements/expense"
+        },
         {
           "@id": "trait:flowClassification/outflow"
         }
