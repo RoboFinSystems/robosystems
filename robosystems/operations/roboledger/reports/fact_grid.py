@@ -1743,6 +1743,19 @@ class _Bill:
   columns: list[PeriodSpec]
 
 
+def _cash_share(lines: list[_CfLine]) -> float:
+  """The share of an entry's other side its cash settles: a payment of 100
+  against 150 of debits (the rest added to a debt) settles two thirds."""
+  cash = sum(ln.net for ln in lines if ln.kind == "cash")
+  if cash < 0:
+    other = sum(ln.debit for ln in lines if ln.kind != "cash")
+  elif cash > 0:
+    other = sum(ln.credit for ln in lines if ln.kind != "cash")
+  else:
+    return 0.0
+  return min(1.0, abs(cash) / other) if other else 0.0
+
+
 def _sign(value: float) -> int:
   return (value > 0) - (value < 0)
 
@@ -1819,8 +1832,10 @@ def _emit_noncash_and_settlement_facts(
   pass's; its tagged working-capital lines come out of their deltas here.
 
   Cash paid for interest and income taxes is the expense lines an entry
-  with a cash line carries, and a settled bill's share of them; interest added
-  to a debt with no cash moving is not paid.
+  with a cash line carries, at the share its cash settles, and a settled
+  bill's share of them; interest added to a debt with no cash moving is not
+  paid. An expense accrued by journal entry and paid by a cash entry that
+  links to nothing is not traced to the payment, so it is not disclosed.
 
   Returns the ids of the flows emitted, and a warning per period in which
   payments to payables carry no link while a bill with investing or
@@ -2077,7 +2092,9 @@ def _emit_noncash_and_settlement_facts(
             _add(str(acquisition_id), column, capex)
       continue
 
-    _add_paid(lines, columns)
+    # The supplemental rows read every cash entry, tagged or not: a tag picks
+    # a flow, not whether interest was paid.
+    _add_paid(lines, columns, _cash_share(lines))
 
     if not untagged:
       # The explicit pass already took the tagged cash into its flow, so a

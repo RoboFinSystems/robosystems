@@ -214,3 +214,31 @@ def test_the_holon_round_trips_the_preferred_labels() -> None:
     (HEADER, EQUITY, PERIOD_START_LABEL_ROLE),
     (HEADER, EQUITY, PERIOD_END_LABEL_ROLE),
   }
+
+
+def test_unordered_movements_still_sit_between_the_balances() -> None:
+  linkbases = BundleLinkbases(
+    presentation_links=[
+      _link(
+        "presentation",
+        "equity_statement",
+        [
+          BundleArc(
+            arc_type="presentationArc",
+            arcrole=PARENT_CHILD,
+            from_qname=EQUITY,
+            to_qname=child,
+          )
+          for child in (ISSUED, DIVIDENDS)
+        ],
+      )
+    ]
+  )
+  _apply_preferred_labels(linkbases, _concepts())
+  ordered = sorted(linkbases.presentation_links[0].arcs, key=lambda a: a.order_value)
+  assert [(a.to_qname, a.preferred_label) for a in ordered] == [
+    (EQUITY, PERIOD_START_LABEL_ROLE),
+    (ISSUED, None),
+    (DIVIDENDS, None),
+    (EQUITY, PERIOD_END_LABEL_ROLE),
+  ]

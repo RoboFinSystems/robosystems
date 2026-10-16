@@ -592,3 +592,9 @@ def test_interest_added_to_a_debt_is_not_paid(tenant):
 def test_income_tax_paid_in_cash_is_disclosed(tenant):
   _post(tenant, [("income_tax", 300, 0), ("cash", 0, 300)])
   assert _cash_flow(tenant)[TAXES_PAID] == 300.0
+
+
+def test_interest_settled_partly_in_cash_is_paid_at_the_cash_share(tenant):
+  """150 of interest: 100 paid, 50 added to the debt."""
+  _post(tenant, [("interest", 150, 0), ("cash", 0, 100), ("credit_line", 0, 50)])
+  assert _cash_flow(tenant)[INTEREST_PAID] == 100.0

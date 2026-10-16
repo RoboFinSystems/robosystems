@@ -987,6 +987,8 @@ def _apply_preferred_labels(
         weight = weights.get((arc.from_qname, arc.to_qname))
         if weight is not None and weight < 0:
           arc.preferred_label = NEGATED_LABEL_ROLE
+          # The standard wording: the role, not the text, is what flips the
+          # displayed sign.
           _add_role_label(by_qname.get(arc.to_qname), NEGATED_LABEL_ROLE, "")
     elif link.block_type == "equity_statement":
       header = _as_rollforward(link, by_qname)
@@ -1021,6 +1023,10 @@ def _as_rollforward(
     return None
   header_qname, header_label = _ROLLFORWARD_ABSTRACTS[root]
   movements = [arc for arc in link.arcs if arc.from_qname == root]
+  # An unordered movement would sort ahead of the opening balance.
+  for position, arc in enumerate(movements, start=1):
+    if arc.order_value is None:
+      arc.order_value = float(position)
   orders = [arc.order_value for arc in movements if arc.order_value is not None]
   first = min(orders, default=0.0)
   last = max(orders, default=0.0)
