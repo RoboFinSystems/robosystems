@@ -4374,6 +4374,20 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
+      "@id": "_:rs-gaap-pres-equity-arc-sbc",
+      "from": {
+        "@id": "rs-gaap:StockholdersEquity"
+      },
+      "to": {
+        "@id": "rs-gaap:AdjustmentsToAdditionalPaidInCapitalSharebasedCompensationRequisiteServicePeriodRecognitionValue"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
+      "order": 40500.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
       "@id": "_:rs-gaap-pres-bs-classified-part",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-PART",
       "structureName": "rs-gaap — Balance Sheet — Classified (Partnership)",
@@ -5193,6 +5207,20 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
+      "@id": "_:rs-gaap-pres-equity-part-arc-sbc",
+      "from": {
+        "@id": "rs-gaap:PartnersCapital"
+      },
+      "to": {
+        "@id": "rs-gaap:PartnersCapitalAccountUnitBasedCompensation"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-PART",
+      "order": 40500.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
       "@id": "_:rs-gaap-pres-equity-llc",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-LLC",
       "structureName": "rs-gaap — Statement of Changes in Members' Equity — Roll Forward",
@@ -5266,6 +5294,20 @@
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-LLC",
       "order": 40700.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-equity-llc-arc-sbc",
+      "from": {
+        "@id": "rs-gaap:MembersEquity"
+      },
+      "to": {
+        "@id": "rs-gaap:PartnersCapitalAccountUnitBasedCompensation"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-LLC",
+      "order": 40500.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
@@ -20978,6 +21020,34 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-professional-fees",
+      "from": {
+        "@id": "rs-gaap:OperatingExpenses"
+      },
+      "to": {
+        "@id": "rs-gaap:ProfessionalFees"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "order": 10412.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-sbc",
+      "from": {
+        "@id": "rs-gaap:OperatingExpenses"
+      },
+      "to": {
+        "@id": "rs-gaap:ShareBasedCompensation"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "order": 10435.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
       "@id": "_:rs-gaap-pres-cf-indirect-arc-nci-1",
       "from": {
         "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
@@ -21072,6 +21142,20 @@
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
       "order": 30361.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-sbc",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ShareBasedCompensation"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30122.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
@@ -21174,6 +21258,20 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-sbc",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ShareBasedCompensation"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30122.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
       "@id": "_:rs-gaap-pres-cf-indirect-part-arc-nci-1",
       "from": {
         "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
@@ -21268,6 +21366,20 @@
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
       "order": 30361.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-sbc",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ShareBasedCompensation"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30122.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     }

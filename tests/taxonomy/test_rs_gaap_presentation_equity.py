@@ -8,7 +8,7 @@ OCI, and the equity movement concepts, which are not the cash flow's.
 These tests guard against:
 - the structure being dropped on a future edit
 - arcs being rewired away from the StockholdersEquity hub
-- the activity concept set drifting from the six rows we ship
+- the activity concept set drifting from the seven rows we ship
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ class TestEquityPresentationStructure:
   ) -> None:
     """The StockholdersEquity hub fans out to the roll-forward's change
     rows: net income, OCI, and the equity movement concepts — stock issued,
-    stock repurchased, dividends, other. None of them is a cash flow concept:
+    stock repurchased, dividends, share-based compensation, other. None of them is a cash flow concept:
     an equity movement need not move cash."""
     arcs_from_hub = [
       a
@@ -66,6 +66,7 @@ class TestEquityPresentationStructure:
       "rs-gaap:StockIssuedDuringPeriodValueNewIssues",
       "rs-gaap:StockRepurchasedDuringPeriodValue",
       "rs-gaap:Dividends",
+      "rs-gaap:AdjustmentsToAdditionalPaidInCapitalSharebasedCompensationRequisiteServicePeriodRecognitionValue",
       "rs-gaap:StockholdersEquityOther",
     }
 

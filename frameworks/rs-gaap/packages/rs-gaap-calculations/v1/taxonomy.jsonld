@@ -2822,6 +2822,36 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
+      "@id": "_:rs-gaap-calc-is-opex-arc-professional-fees",
+      "from": {
+        "@id": "rs-gaap:OperatingExpenses"
+      },
+      "to": {
+        "@id": "rs-gaap:ProfessionalFees"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
+      "weight": 1.0,
+      "order": 120.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-is-opex-arc-sbc",
+      "from": {
+        "@id": "rs-gaap:OperatingExpenses"
+      },
+      "to": {
+        "@id": "rs-gaap:ShareBasedCompensation"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
+      "weight": 1.0,
+      "order": 350.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
       "@id": "_:rs-gaap-calc-cf-operating-arc-nci",
       "from": {
         "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
@@ -3009,6 +3039,21 @@
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-operating-arc-sbc",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ShareBasedCompensation"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 250.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     }
   ]
 }

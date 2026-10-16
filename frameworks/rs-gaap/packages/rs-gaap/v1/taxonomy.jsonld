@@ -107479,6 +107479,110 @@
       ]
     },
     {
+      "@id": "rs-gaap:AdjustmentsToAdditionalPaidInCapitalSharebasedCompensationRequisiteServicePeriodRecognitionValue",
+      "balance": [
+        {
+          "@value": "credit"
+        }
+      ],
+      "periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "rs-gaap"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "APIC, Share-Based Payment Arrangement, Increase for Cost Recognition",
+          "@language": "en"
+        }
+      ],
+      "rdfs:comment": [
+        {
+          "@value": "Amount of increase to additional paid-in capital (APIC) for recognition of cost for award under share-based payment arrangement.",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:PartnersCapitalAccountUnitBasedCompensation",
+      "balance": [
+        {
+          "@value": "credit"
+        }
+      ],
+      "periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "rs-gaap"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Capital, Unit-Based Payment Arrangement",
+          "@language": "en"
+        }
+      ],
+      "rdfs:comment": [
+        {
+          "@value": "Amount of increase (decrease) in partners' or members' capital for a unit-based payment arrangement.",
+          "@language": "en"
+        }
+      ]
+    },
+    {
       "@id": "rs-gaap:PartnersCapitalAccountContributions",
       "balance": [
         {
