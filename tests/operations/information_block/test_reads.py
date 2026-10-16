@@ -18,6 +18,7 @@ from robosystems.models.api.information_block import (
 from robosystems.operations.information_block.reads import (
   get_information_block,
   get_information_block_for_fact_set,
+  list_information_block_summaries,
   list_information_blocks,
 )
 from robosystems.operations.information_block.registry import SCHEDULE_BLOCK
@@ -370,3 +371,79 @@ class TestGetInformationBlockForFactSet:
       series_forecast=None,
       entity_id=PARENT,
     )
+
+
+# ── list_information_block_summaries ───────────────────────────────────────
+
+
+class TestListInformationBlockSummaries:
+  def test_unknown_block_type_filter_raises_value_error(self) -> None:
+    with pytest.raises(ValueError, match="nonsense"):
+      list_information_block_summaries(MagicMock(), block_type="nonsense")
+
+  def test_library_sentinel_returns_empty_for_non_surfacing_block_type(
+    self,
+  ) -> None:
+    session = MagicMock()
+    assert (
+      list_information_block_summaries(
+        session, block_type="schedule", library_sentinel=True
+      )
+      == []
+    )
+    session.execute.assert_not_called()
+
+  def test_one_statement_counts_facts_and_arcs_per_row(self) -> None:
+    """The whole page is one SELECT over Structure with correlated counts
+    and the taxonomy name joined in — no per-row dispatch."""
+    session = MagicMock()
+    captured: list[str] = []
+
+    def _execute(stmt, *args, **kwargs):
+      captured.append(str(stmt))
+      result = MagicMock()
+      result.all.return_value = []
+      return result
+
+    session.execute.side_effect = _execute
+    list_information_block_summaries(session, library_sentinel=False)
+
+    assert len(captured) == 1
+    sql = captured[0]
+    assert sql.count("count(") == 2
+    assert "facts" in sql and "associations" in sql and "taxonomies" in sql
+    assert "EXISTS" in sql  # the arc-less disclosure guard still applies
+    assert "facts.entity_id" in sql  # counted for the entity read as
+    assert "facts.fact_scope" in sql  # a schedule's history is not carried
+
+  def test_rows_map_to_summaries_with_the_entity_read_as(self) -> None:
+    session = MagicMock()
+    structure = MagicMock()
+    structure.id = "struct_1"
+    structure.block_type = "schedule"
+    structure.name = "Prepaid insurance"
+    structure.taxonomy_id = "tax_1"
+    unregistered = MagicMock()
+    unregistered.id = "struct_2"
+    unregistered.block_type = "not_a_block"
+    session.execute.return_value.all.return_value = [
+      (structure, None, "rs-gaap", 7, 2),
+      (unregistered, None, "rs-gaap", 1, 1),
+    ]
+
+    result = list_information_block_summaries(session, library_sentinel=False)
+
+    assert [s.model_dump() for s in result] == [
+      {
+        "id": "struct_1",
+        "block_type": "schedule",
+        "name": "Prepaid insurance",
+        "display_name": "Schedule",
+        "category": "Close",
+        "taxonomy_id": "tax_1",
+        "taxonomy_name": "rs-gaap",
+        "entity_id": PARENT,
+        "fact_count": 7,
+        "connection_count": 2,
+      }
+    ]

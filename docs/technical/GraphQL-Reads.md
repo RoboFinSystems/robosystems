@@ -104,7 +104,7 @@ The schema is not static — it is composed at startup from the extensions enabl
 | --- | --- | --- |
 | Ledger fields | `ROBOLEDGER_ENABLED` | `entity`, `agents`, `transactions`, `fiscalCalendar`, `periodCloseStatus`, `trialBalance`, `reports` |
 | Investor fields | `ROBOINVESTOR_ENABLED` | `portfolios`, `securities`, `positions`, `holdings`, `portfolioBlock` |
-| Always-on fields | not flag-gated | `informationBlock` / `informationBlocks`, taxonomy blocks, the `library*` family, `hello` (an auth probe) |
+| Always-on fields | not flag-gated | `informationBlock` / `informationBlocks` / `informationBlockSummaries`, taxonomy blocks, the `library*` family, `hello` (an auth probe) |
 
 The consequence: on a ledger-only deployment, a field like `portfolios` is **absent from the schema entirely**. Introspection won't list it, and querying it is a schema validation error rather than a runtime "not initialized" error. Clients should branch on the schema shape they discover through introspection rather than trial-and-error against fields that may not exist. This is why the recommended first step from any client — human or agent — is to read the schema (an introspection query or `get-graphql-schema`) and query only the fields the deployment actually exposes.
 
@@ -112,7 +112,7 @@ The consequence: on a ledger-only deployment, a field like `portfolios` is **abs
 
 The always-on group is larger than one table cell suggests. Three query classes — information blocks, taxonomy blocks, and the library — are composed on every deployment regardless of flags, because they are cross-domain and not gated by a per-graph extension:
 
-- **Information blocks** — `informationBlock`, `informationBlocks`
+- **Information blocks** — `informationBlock`, `informationBlocks`, `informationBlockSummaries`
 - **Taxonomy blocks** — `taxonomyBlock`, `taxonomyBlocks`
 - **Library taxonomies** — `libraryTaxonomies`, `libraryTaxonomy`, `libraryTaxonomyArcs`, `libraryTaxonomyArcCount`
 - **Library elements** — `libraryElements`, `libraryElement`, `searchLibraryElements`, `libraryElementTree`, `libraryElementEquivalents`, `libraryElementArcs`, `libraryElementClassifications`

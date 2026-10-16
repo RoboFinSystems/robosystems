@@ -6,9 +6,12 @@ from __future__ import annotations
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from robosystems.models.api.information_block import InformationBlockEnvelope
-from robosystems.models.extensions import Association, Structure
-from robosystems.models.extensions.roboledger import FactSet
+from robosystems.models.api.information_block import (
+  InformationBlockEnvelope,
+  InformationBlockSummary,
+)
+from robosystems.models.extensions import Association, Structure, Taxonomy
+from robosystems.models.extensions.roboledger import Fact, FactSet
 from robosystems.operations.information_block import registry as registry_module
 from robosystems.operations.information_block.envelope import DISCLOSURE_BLOCK_TYPE
 from robosystems.operations.roboledger.entity_scope import find_entity_id
@@ -154,54 +157,14 @@ def list_information_blocks(
   entity's schedules, reconciliations or forecasts; shared blocks show its
   sets.
   """
-  if block_type is not None:
-    try:
-      entry = registry_module.get(block_type)
-    except KeyError as exc:
-      raise ValueError(str(exc)) from exc
-    if library_sentinel and not entry.surfaces_in_library:
-      return []
-    if category is not None and entry.category != category:
-      return []
-    candidate_ids: list[str] = [entry.id]
-  else:
-    entries = registry_module.list_registered()
-    if library_sentinel:
-      entries = [e for e in entries if e.surfaces_in_library]
-    if category is not None:
-      entries = [e for e in entries if e.category == category]
-    candidate_ids = [e.id for e in entries]
-
+  candidate_ids = _candidate_block_types(block_type, category, library_sentinel)
   if not candidate_ids:
     return []
-
-  # Tenant-authored blocks sort first so library statements don't swamp the
-  # default page. Arc-less disclosure rows build to None, so they're
-  # excluded in SQL to keep pages full.
-  has_presentation_arc = (
-    select(Association.id)
-    .where(Association.structure_id == Structure.id)
-    .where(Association.association_type == "presentation")
-    .exists()
-  )
   scope = _requested_entity_id(session, entity_id, scenario_id, library_sentinel)
   owner = _owner_entity_id_column()
-  query = (
-    select(Structure, owner)
-    .where(Structure.block_type.in_(candidate_ids))
-    .where(Structure.is_active.is_(True))
-    .where(or_(Structure.block_type != DISCLOSURE_BLOCK_TYPE, has_presentation_arc))
-    .order_by(
-      (Structure.created_by == "library-seeder").asc(),
-      Structure.block_type,
-      Structure.name,
-    )
-    .limit(limit)
-    .offset(offset)
-  )
-  if scope is not None:
-    query = query.where(or_(owner.is_(None), owner == scope))
-  rows = session.execute(query).all()
+  rows = session.execute(
+    _listing(candidate_ids, scope, owner, limit=limit, offset=offset)
+  ).all()
 
   envelopes: list[InformationBlockEnvelope] = []
   for structure, owner_id in rows:
@@ -221,9 +184,133 @@ def list_information_blocks(
   return envelopes
 
 
+def list_information_block_summaries(
+  session: Session,
+  *,
+  block_type: str | None = None,
+  category: str | None = None,
+  limit: int = 50,
+  offset: int = 0,
+  library_sentinel: bool = False,
+  scenario_id: str | None = None,
+  entity_id: str | None = None,
+) -> list[InformationBlockSummary]:
+  """The page :func:`list_information_blocks` returns — rows, filters, order
+  — as identities and counts from one query, with no envelope built per
+  row. A picker or a rail needs nothing more, and a graph's whole catalogue
+  lists in the time one envelope builds.
+  """
+  candidate_ids = _candidate_block_types(block_type, category, library_sentinel)
+  if not candidate_ids:
+    return []
+  scope = _requested_entity_id(session, entity_id, scenario_id, library_sentinel)
+  owner = _owner_entity_id_column()
+  # The facts an envelope carries: in scope (a schedule's closed periods are
+  # history, already in its opening balances) and the entity's the page reads
+  # as. A block one entity owns holds only its owner's, and the page lists
+  # owned blocks of that entity alone.
+  fact_filters = [Fact.structure_id == Structure.id, Fact.fact_scope == "in_scope"]
+  if scope is not None:
+    fact_filters.append(Fact.entity_id == scope)
+  fact_count = (
+    select(func.count(Fact.id)).where(*fact_filters).correlate(Structure)
+  ).scalar_subquery()
+  connection_count = (
+    select(func.count(Association.id))
+    .where(Association.structure_id == Structure.id)
+    .correlate(Structure)
+  ).scalar_subquery()
+  query = _listing(
+    candidate_ids,
+    scope,
+    owner,
+    Taxonomy.name,
+    fact_count,
+    connection_count,
+    limit=limit,
+    offset=offset,
+  ).outerjoin(Taxonomy, Taxonomy.id == Structure.taxonomy_id)
+
+  summaries: list[InformationBlockSummary] = []
+  for structure, owner_id, taxonomy_name, facts, connections in session.execute(
+    query
+  ).all():
+    try:
+      entry = registry_module.get(structure.block_type)
+    except KeyError:
+      continue
+    summaries.append(
+      InformationBlockSummary(
+        id=structure.id,
+        block_type=structure.block_type,
+        name=structure.name,
+        display_name=entry.display_name,
+        category=entry.category,
+        taxonomy_id=structure.taxonomy_id,
+        taxonomy_name=taxonomy_name,
+        entity_id=owner_id or scope,
+        fact_count=facts or 0,
+        connection_count=connections or 0,
+      )
+    )
+  return summaries
+
+
+def _candidate_block_types(
+  block_type: str | None, category: str | None, library_sentinel: bool
+) -> list[str]:
+  """The registered block types a listing covers once its filters apply."""
+  if block_type is not None:
+    try:
+      entry = registry_module.get(block_type)
+    except KeyError as exc:
+      raise ValueError(str(exc)) from exc
+    if library_sentinel and not entry.surfaces_in_library:
+      return []
+    if category is not None and entry.category != category:
+      return []
+    return [entry.id]
+  entries = registry_module.list_registered()
+  if library_sentinel:
+    entries = [e for e in entries if e.surfaces_in_library]
+  if category is not None:
+    entries = [e for e in entries if e.category == category]
+  return [e.id for e in entries]
+
+
+def _listing(candidate_ids, scope, owner, *columns, limit: int, offset: int):
+  """The page of ``Structure`` rows (with ``owner`` and ``columns``) a
+  listing covers. Tenant-authored blocks sort first so library statements
+  don't swamp the default page. Arc-less disclosure rows build to None, so
+  they're excluded in SQL to keep pages full."""
+  has_presentation_arc = (
+    select(Association.id)
+    .where(Association.structure_id == Structure.id)
+    .where(Association.association_type == "presentation")
+    .exists()
+  )
+  query = (
+    select(Structure, owner, *columns)
+    .where(Structure.block_type.in_(candidate_ids))
+    .where(Structure.is_active.is_(True))
+    .where(or_(Structure.block_type != DISCLOSURE_BLOCK_TYPE, has_presentation_arc))
+    .order_by(
+      (Structure.created_by == "library-seeder").asc(),
+      Structure.block_type,
+      Structure.name,
+    )
+    .limit(limit)
+    .offset(offset)
+  )
+  if scope is not None:
+    query = query.where(or_(owner.is_(None), owner == scope))
+  return query
+
+
 __all__ = [
   "get_information_block",
   "get_information_block_for_fact_set",
+  "list_information_block_summaries",
   "list_information_blocks",
   "owner_entity_id",
 ]

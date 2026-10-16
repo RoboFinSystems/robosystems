@@ -17,9 +17,13 @@ from robosystems.graphql.resolvers._common import (
 from robosystems.graphql.resolvers._common import (
   resolve_pagination as _resolve_pagination,
 )
-from robosystems.graphql.types.information_block import InformationBlock
+from robosystems.graphql.types.information_block import (
+  InformationBlock,
+  InformationBlockSummary,
+)
 from robosystems.operations.information_block import (
   get_information_block,
+  list_information_block_summaries,
   list_information_blocks,
 )
 from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
@@ -151,6 +155,52 @@ class InformationBlockQuery:
     except EntityNotInGraphError as exc:
       raise strawberry.exceptions.StrawberryGraphQLError(str(exc)) from exc
     return [InformationBlock.from_pydantic(r) for r in rows]
+
+  @strawberry.field
+  def information_block_summaries(
+    self,
+    info: Info[GraphQLContext, None],
+    block_type: str | None = None,
+    category: str | None = None,
+    limit: int | None = None,
+    offset: int | None = None,
+    scenario_id: str | None = None,
+    entity_id: str | None = None,
+  ) -> list[InformationBlockSummary]:
+    """List Information Blocks as identities and counts, one row per block.
+
+    The rows, filters, order and page of `informationBlocks`, read in one
+    query instead of an envelope build per block — the call that fills a
+    picker or a rail. `factCount` says whether a block carries facts for
+    the entity read (a library-seeded structure variant carries none);
+    a block's atoms come from `informationBlock(id)`.
+
+    Args:
+      block_type: Filter to one registered block type, e.g. `schedule`.
+      category: Filter on the registry entry's category label, e.g. `Close` or
+        `Reporting`.
+      scenario_id: A forecast block's structure id; its entity scopes the list
+        when `entityId` is omitted.
+      entity_id: The entity whose blocks and facts to list. Omit for the group
+        parent.
+    """
+    limit, offset = _resolve_pagination(limit, offset, default_limit=50)
+    graph_id = require_graph_id(info)
+    try:
+      with _open_session(info) as session:
+        rows = list_information_block_summaries(
+          session,
+          block_type=block_type,
+          category=category,
+          limit=limit,
+          offset=offset,
+          library_sentinel=(graph_id == LIBRARY_GRAPH_ID),
+          scenario_id=scenario_id,
+          entity_id=entity_id,
+        )
+    except EntityNotInGraphError as exc:
+      raise strawberry.exceptions.StrawberryGraphQLError(str(exc)) from exc
+    return [InformationBlockSummary.from_pydantic(r) for r in rows]
 
 
 __all__ = [

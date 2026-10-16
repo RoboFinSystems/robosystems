@@ -41,6 +41,9 @@ from robosystems.models.api.information_block import (
   InformationBlockEnvelope as PydanticInformationBlock,
 )
 from robosystems.models.api.information_block import (
+  InformationBlockSummary as PydanticInformationBlockSummary,
+)
+from robosystems.models.api.information_block import (
   InformationModelResponse as PydanticInformationModel,
 )
 from robosystems.models.api.information_block import (
@@ -215,6 +218,12 @@ class Artifact:
 # ── Top-level envelope — hand-written so we can override `artifact` ────────
 
 
+@pydantic_type(model=PydanticInformationBlockSummary, all_fields=True)
+class InformationBlockSummary:
+  """One row of a block list: the envelope's identity with counts in place
+  of its atoms."""
+
+
 @strawberry.type
 class InformationBlock:
   """Information Block envelope — the molecular exchange format.
@@ -311,6 +320,7 @@ __all__ = [
   "InformationBlockRule",
   "InformationBlockRuleTarget",
   "InformationBlockRuleVariable",
+  "InformationBlockSummary",
   "InformationBlockValidation",
   "InformationBlockVerificationCategorySummary",
   "InformationBlockVerificationResult",

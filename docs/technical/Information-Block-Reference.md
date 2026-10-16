@@ -268,10 +268,11 @@ The rendering payload (`rows`, `periods`, `validation`, `unmapped_count`) is des
 GraphQL at `POST /extensions/{graph_id}/graphql`:
 
 - `informationBlock(id, scenarioId, series, seriesHistory, seriesForecast)`: one envelope. `scenarioId` selects a forecast scenario (omit for actuals). `series: true` renders a statement block as its whole monthly series; non-statement types ignore it. `seriesHistory` / `seriesForecast` cap the series at the last N actual and first N forecast columns.
-- `informationBlocks(blockType, category, limit, offset, scenarioId)`: a list; filters combine as AND; `limit` defaults to 50.
+- `informationBlocks(blockType, category, limit, offset, scenarioId)`: a list; filters combine as AND; `limit` defaults to 50. Every row is a full envelope, built one block at a time — the read for atoms, not for a picker.
+- `informationBlockSummaries(blockType, category, limit, offset, scenarioId, entityId)`: the same rows, filters, order and page as identities and counts (`factCount`, the facts in scope for the entity read; `connectionCount`), read in one query. A list of a hundred blocks returns in the time one envelope builds; `factCount > 0` is the test for a block whose envelope carries facts — a library-seeded structure variant carries none, nor does a schedule that has run off into history.
 - `reportPackage(reportId)`: a saved Report's metadata plus `items[]`, each with `fact_set_id`, `structure_id`, `display_order`, and the pinned `block` envelope.
 
-MCP: `get-information-block` (`id`, `scenario_id`, `series`, `series_history`, `series_forecast`) and `list-information-blocks` (`block_type`, `category`, `limit`, `offset`, `include_atoms`, `scenario_id`).
+MCP: `get-information-block` (`id`, `scenario_id`, `series`, `series_history`, `series_forecast`) and `list-information-blocks` (`block_type`, `category`, `limit`, `offset`, `include_atoms`, `scenario_id`). The list's default mode is the summaries read; `include_atoms: true` builds every envelope.
 
 ## Gotchas
 
@@ -279,7 +280,7 @@ MCP: `get-information-block` (`id`, `scenario_id`, `series`, `series_history`, `
 - **Statements are rendered, not created.** `create-information-block` with a statement, disclosure, metric, or reconciliation type returns 501. Author a `schedule`, `rollforward`, or `forecast`; produce statements with `create-report`.
 - **Element ids, not qnames.** Schedule templates take chart-of-accounts element ids. A qname such as `us-gaap:Depreciation` does not resolve there.
 - **`periodic_amounts` is strict.** One entry per month in the window, none negative, summing exactly to `original_amount` less `residual_value`; anything else is rejected at create.
-- **The graph is the URL.** `informationBlock` and `informationBlocks` take no `graphId` argument.
+- **The graph is the URL.** `informationBlock`, `informationBlocks` and `informationBlockSummaries` take no `graphId` argument.
 - **`fact_set: null` and `facts: []` are normal** for a statement Structure no report or close has instantiated yet.
 - **`verification_summary` is null until the rules run.** Call `evaluate-rules`, or close the period.
 - **`disclosure_id` is derived.** It is present only when a Disclosure mapping exists; tenant-authored schedules carry null.

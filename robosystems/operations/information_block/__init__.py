@@ -8,6 +8,7 @@ from robosystems.operations.information_block.commands import (
 )
 from robosystems.operations.information_block.reads import (
   get_information_block,
+  list_information_block_summaries,
   list_information_blocks,
 )
 from robosystems.operations.information_block.registry import (
@@ -29,6 +30,7 @@ __all__ = [
   "create_information_block",
   "get",
   "get_information_block",
+  "list_information_block_summaries",
   "list_information_blocks",
   "list_registered",
 ]
