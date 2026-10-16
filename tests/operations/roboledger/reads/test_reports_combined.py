@@ -1,12 +1,34 @@
 """The combined view sums each entity's statement row by row. A row only one
-entity has must land where the Style's presentation order puts it, not after
-the final total, or its subtotal does not foot.
+entity has must land where the Style's presentation order puts it — not after
+the final total, or its subtotal does not foot, and not where the other grid's
+adjacency puts it, or a line lands mid-statement when that entity rendered
+none of the rows in between.
 """
 
 from __future__ import annotations
 
 from robosystems.operations.roboledger.reads.reports import _add_into
 from robosystems.operations.roboledger.reports.fact_grid import FactGrid, FactRow
+
+# One Style's presentation order: a grid's rows are a subsequence of it, and
+# each row carries its place in it.
+ORDER = [
+  "revenue",
+  "opex",
+  "operating_income",
+  "pretax",
+  "nci_share",
+  "net_income",
+  "ap",
+  "debt",
+  "accrued",
+  "other",
+  "current",
+  "members",
+  "re",
+  "equity",
+  "total",
+]
 
 
 def _row(
@@ -21,6 +43,7 @@ def _row(
     values=list(values),
     is_subtotal=subtotal,
     depth=depth,
+    position=ORDER.index(qname),
   )
 
 
@@ -97,7 +120,7 @@ def test_consecutive_subsidiary_only_rows_keep_their_order():
 
 def test_three_entities_each_with_their_own_rows_keep_one_order():
   """The parent, then two subsidiaries that each bring a row the others
-  lack: every row lands inside its subtotal, in one presentation order."""
+  lack: every row lands inside its subtotal, in the Style's one order."""
   parent = _grid(
     _row("ap", 10.0, depth=3),
     _row("current", 10.0, depth=2, subtotal=True),
@@ -122,13 +145,43 @@ def test_three_entities_each_with_their_own_rows_keep_one_order():
   _add_into(parent, second_sub)
 
   assert _shape(parent) == [
-    ("debt", 3, [5.0]),
     ("ap", 3, [12.0]),
+    ("debt", 3, [5.0]),
     ("accrued", 3, [1.0]),
     ("current", 2, [18.0]),
     ("members", 2, [140.0]),
     ("re", 2, [30.0]),
     ("equity", 1, [170.0]),
+  ]
+
+
+def test_a_row_lands_by_the_styles_order_not_the_other_grids_adjacency():
+  """The consolidation entity's income statement is the noncontrolling
+  share and net income alone — its operating income and pre-tax income are
+  zero and dropped. Merged into the parent's, the share belongs just above
+  net income, after the subtotals that entity never rendered; the row it
+  happens to follow in its own sparse grid says nothing about that."""
+  parent = _grid(
+    _row("revenue", 100.0, depth=2),
+    _row("opex", 60.0, depth=2),
+    _row("operating_income", 40.0, depth=1, subtotal=True),
+    _row("pretax", 40.0, depth=1, subtotal=True),
+    _row("net_income", 40.0, depth=1, subtotal=True),
+  )
+  consolidation = _grid(
+    _row("nci_share", 3.0, depth=1),
+    _row("net_income", -3.0, depth=1, subtotal=True),
+  )
+
+  _add_into(parent, consolidation)
+
+  assert _shape(parent) == [
+    ("revenue", 2, [100.0]),
+    ("opex", 2, [60.0]),
+    ("operating_income", 1, [40.0]),
+    ("pretax", 1, [40.0]),
+    ("nci_share", 1, [3.0]),
+    ("net_income", 1, [37.0]),
   ]
 
 

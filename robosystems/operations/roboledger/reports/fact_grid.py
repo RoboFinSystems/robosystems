@@ -95,6 +95,10 @@ class FactRow:
   is_subtotal: bool = False
   is_abstract: bool = False
   depth: int = 0
+  # The row's place in the Style's full presentation order — post-order over
+  # every node, populated or not — so two grids of one Style merge by it even
+  # when one of them kept none of the rows in between.
+  position: float = 0.0
 
 
 @dataclass
@@ -513,6 +517,9 @@ def _place_strays_by_calculation(
   for row in rows:
     for stray in placed.pop(row.element_id, ()):
       stray.depth = row.depth + 1
+      # Just before its ancestor in the presentation order, where a merge
+      # with another entity's grid keeps it.
+      stray.position = row.position - 0.5
       result.append(stray)
     result.append(row)
   return result
@@ -2531,6 +2538,7 @@ def _build_rows(
         is_subtotal=is_subtotal,
         is_abstract=node.is_abstract,
         depth=node.depth,
+        position=len(rows),
       )
     )
 

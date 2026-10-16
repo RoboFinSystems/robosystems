@@ -45,6 +45,7 @@ from robosystems.operations.roboledger.reads.fiscal_calendar import (
 )
 from robosystems.operations.roboledger.reports.fact_grid import (
   FactGrid,
+  FactRow,
   _compute_prior_period,
   generate_report_facts,
   render_structure_view,
@@ -1006,31 +1007,32 @@ def _combined_statement(
 
 def _add_into(base: FactGrid, other: FactGrid) -> None:
   """Sum ``other``'s rows into ``base``'s, matched by concept. Both come from
-  the same Style, so the two row lists are subsequences of one presentation
-  order; a row only ``other`` has (the parent's was all-zero and dropped)
-  goes where that order puts it, right after the nearest preceding row the
-  two share, so it stays a child of its subtotal rather than a stray after
-  the total."""
-  position: dict[str, int] = {}
-  for index, row in enumerate(base.rows):
-    position.setdefault(row.element_qname, index)
-  cursor = -1
+  the same Style, and every row carries its place in that Style's full
+  presentation order (``FactRow.position``), so a row only ``other`` has
+  (the parent's was all-zero and dropped) is inserted where that order puts
+  it — inside its subtotal, and a line like the noncontrolling-interest
+  share above net income even when the entity that carries it rendered none
+  of the subtotals in between. Adjacency in ``other``'s own sparse grid is
+  not the order: the consolidation entity's income statement has no
+  operating-income or pre-tax rows, and the share would have landed between
+  them."""
+  shared: dict[str, FactRow] = {}
+  for row in base.rows:
+    shared.setdefault(row.element_qname, row)
   for row in other.rows:
-    at = position.get(row.element_qname)
-    if at is None:
-      at = cursor + 1
+    target = shared.get(row.element_qname)
+    if target is None:
+      at = next(
+        (i for i, r in enumerate(base.rows) if r.position > row.position),
+        len(base.rows),
+      )
       base.rows.insert(at, row)
-      for qname, index in position.items():
-        if index >= at:
-          position[qname] = index + 1
-      position[row.element_qname] = at
+      shared[row.element_qname] = row
     else:
-      target = base.rows[at]
       target.values = [
         (a or 0.0) + (b or 0.0) if a is not None or b is not None else None
         for a, b in zip(target.values, row.values, strict=False)
       ]
-    cursor = at
 
 
 def get_live_financial_statement(
@@ -1046,8 +1048,9 @@ def get_live_financial_statement(
   consolidated: bool = False,
 ) -> LiveFinancialStatementResponse:
   """Render a current + prior ad-hoc statement from one entity's OLTP data,
-  default the group parent's; ``consolidated`` combines every entity of the
-  group under the parent's Style, summed per concept with no eliminations.
+  default the group parent's; ``consolidated`` sums every entity of the group
+  under the parent's Style, per concept. The sum itself eliminates nothing;
+  a consolidation entity's entries, when the group keeps one, are summed in.
 
   Drops abstract and all-zero rows and caps at ``limit`` (``truncated``).
   ``reporting_style_id`` defaults to the entity's Style. Raises
