@@ -1721,8 +1721,9 @@ class _CfLine:
 
 @dataclass
 class _Bill:
-  """An entry with no cash line that a payable settles, carrying investing or
-  financing lines."""
+  """What a payable settles for one event, from its entries with no cash line
+  that carry investing or financing lines. ``columns`` are the report's
+  columns it was posted in; one posted before them has none."""
 
   posted: date
   payable: int
@@ -1902,9 +1903,10 @@ def _emit_noncash_and_settlement_facts(
         out.setdefault(key, []).append(line)  # type: ignore[union-attr]
     return out
 
+  window_start = min(p.start for p in periods)
   rows = _lines(
     "en.posting_date BETWEEN :start AND :end",
-    start=min(p.start for p in periods),
+    start=window_start,
     end=max(p.end for p in periods),
   )
   dated: dict[str, date] = {}
@@ -1962,6 +1964,39 @@ def _emit_noncash_and_settlement_facts(
     key = (element_id, period.start, period.end)
     adjustments[key] = adjustments.get(key, 0.0) + cents
 
+  def _hold_bill(
+    event_id: str, lines: list[_CfLine], posted: date, columns: list[PeriodSpec]
+  ) -> bool:
+    """Record ``lines`` as (part of) a bill when a payable settles investing
+    or financing lines; an event's entries accumulate."""
+    payable = -sum(
+      ln.net
+      for ln in lines
+      if ln.kind == "working" and ln.concept_id in payable_concepts and ln.net < 0
+    )
+    settles_flows = any(
+      ln.kind == "nonoperating" and _default_flow(ln.concept_id, -ln.net)
+      for ln in lines
+    )
+    if not payable or not settles_flows:
+      return False
+    capex = sum(
+      ln.net
+      for ln in lines
+      if ln.kind == "nonoperating"
+      and ln.net > 0
+      and _default_flow(ln.concept_id, -ln.net, "investingActivity")
+    )
+    held = bills.get(event_id)
+    if held is None:
+      bills[event_id] = _Bill(posted, payable, capex, list(columns))
+    else:
+      held.posted = min(held.posted, posted)
+      held.payable += payable
+      held.capex += capex
+      held.columns += [c for c in columns if c not in held.columns]
+    return True
+
   for entry_key, lines in entries.items():
     if not lines:
       continue
@@ -1991,6 +2026,10 @@ def _emit_noncash_and_settlement_facts(
           for column in columns:
             _add(working_leaf[line.concept_id], column, -share)
 
+      if entry_key in event_of and _hold_bill(
+        event_of[entry_key], lines, posted, columns
+      ):
+        continue
       capex = sum(
         ln.net
         for ln in lines
@@ -1998,18 +2037,7 @@ def _emit_noncash_and_settlement_facts(
         and ln.net > 0
         and _default_flow(ln.concept_id, -ln.net, "investingActivity")
       )
-      payable = -sum(
-        ln.net
-        for ln in lines
-        if ln.kind == "working" and ln.concept_id in payable_concepts and ln.net < 0
-      )
-      settles_flows = any(
-        ln.kind == "nonoperating" and _default_flow(ln.concept_id, -ln.net)
-        for ln in lines
-      )
-      if payable and settles_flows and entry_key in event_of:
-        bills[event_of[entry_key]] = _Bill(posted, payable, capex, columns)
-      elif capex and acquisition_id is not None:
+      if capex and acquisition_id is not None:
         consideration = any(
           ln.net < 0 and ln.kind in ("working", "nonoperating") for ln in lines
         )
@@ -2069,6 +2097,20 @@ def _emit_noncash_and_settlement_facts(
         emitted_flows.add(flow_id)
         for column in columns:
           _add(flow_id, column, -sum(ln.net for ln in gains))
+
+  # An unlinked payment may settle a bill posted before the window, so the
+  # warning weighs those still open too. They are no acquisition of any
+  # column: the disclosure is the period's own capex.
+  if unlinked:
+    earlier = _lines(
+      "en.posting_date < :start AND en.triggered_by_event_id IS NOT NULL",
+      start=window_start,
+    )
+    earlier_event = {str(r.entry_id): str(r.triggered_by_event_id) for r in earlier}
+    earlier_posted = {str(r.entry_id): r.posting_date for r in earlier}
+    for entry_key, lines in _entries(earlier).items():
+      if lines and not any(ln.kind == "cash" for ln in lines):
+        _hold_bill(earlier_event[entry_key], lines, earlier_posted[entry_key], [])
 
   # What each bill's linked payments had settled by a date.
   payments: dict[str, list[tuple[date, int]]] = {}
