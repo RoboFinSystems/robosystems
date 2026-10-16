@@ -43,4 +43,4 @@ Put images in the site's `images/` folder and show one with `![what it shows](im
 
 ## Publishing
 
-The Publish Docs workflow (`.github/workflows/publish-docs.yml`) builds these pages and the wiki into one catalog on every push to `main` that touches this folder, and uploads it to the content CDN the sites read from. Preview the build locally with `just docs-build`.
+The Publish Docs workflow (`.github/workflows/publish-docs.yml`) builds these pages and the technical docs (`docs/technical/`) into one catalog on every push to `main` that touches either folder, and uploads it to the content CDN the sites read from. Preview the build locally with `just docs-build`.

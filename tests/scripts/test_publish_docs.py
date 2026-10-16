@@ -9,30 +9,30 @@ from robosystems.scripts import publish_docs
 
 ASSET_BASE = "https://assets.example.test/docs/"
 
-SIDEBAR = """**[Home](Home)**
+SIDEBAR = """**[Home](Home.md)**
 
 ### Getting Started
-- [Quick Start](Quick-Start)
-- [Core Concepts](Core-Concepts)
+- [Quick Start](Quick-Start.md)
+- [Core Concepts](Core-Concepts.md)
 
 ### Operations
-- [Graph Operations](Graph-Operations)
+- [Graph Operations](Graph-Operations.md)
 """
 
 
-def _wiki(tmp_path, pages, sidebar=SIDEBAR):
-  wiki = tmp_path / "wiki"
-  wiki.mkdir()
-  (wiki / "_Sidebar.md").write_text(sidebar)
-  (wiki / "_Footer.md").write_text("footer")
+def _technical(tmp_path, pages, sidebar=SIDEBAR):
+  technical = tmp_path / "docs" / "technical"
+  technical.mkdir(parents=True)
+  (technical / "_Sidebar.md").write_text(sidebar)
+  (technical / "README.md").write_text("conventions, not a page")
   for name, text in pages.items():
-    (wiki / f"{name}.md").write_text(text)
-  return wiki
+    (technical / f"{name}.md").write_text(text)
+  return technical
 
 
 def _pages(**overrides):
   pages = {
-    "Home": "# Welcome to the Wiki!\n\nRoboSystems is a platform.\n",
+    "Home": "# RoboSystems Technical Documentation\n\nRoboSystems is a platform.\n",
     "Quick-Start": "# Quick Start\n\nStart here.\n\n## First Query\n\nRun it.\n",
     "Core-Concepts": "# Core Concepts\n\nThe vocabulary.\n",
     "Graph-Operations": "# Graph Operations\n\nOperations on graphs.\n",
@@ -41,9 +41,9 @@ def _pages(**overrides):
   return pages
 
 
-def _build_wiki(wiki):
+def _build_technical(technical):
   build = publish_docs.Build()
-  publish_docs.build_wiki(wiki, ASSET_BASE, build)
+  publish_docs.build_technical(technical, technical.parents[1], build, ASSET_BASE)
   return build
 
 
@@ -105,15 +105,15 @@ class TestMarkdownHelpers:
 
 
 @pytest.mark.unit
-class TestWikiLinks:
+class TestTechnicalLinks:
   def test_page_links_become_site_paths(self, tmp_path):
-    build = _build_wiki(
-      _wiki(
+    build = _build_technical(
+      _technical(
         tmp_path,
         _pages(
           **{
-            "Core-Concepts": "# Core Concepts\n\nSee [Quick Start](Quick-Start), "
-            "[its query](Quick-Start#first-query) and [home](Home).\n"
+            "Core-Concepts": "# Core Concepts\n\nSee [Quick Start](Quick-Start.md), "
+            "[its query](Quick-Start.md#first-query) and [home](Home.md).\n"
           }
         ),
       )
@@ -125,24 +125,35 @@ class TestWikiLinks:
     assert build.errors == []
     assert build.warnings == []
 
-  def test_absolute_wiki_urls_are_rewritten(self, tmp_path):
+  def test_links_into_the_retired_wiki_are_errors(self, tmp_path):
     text = (
       "# Core Concepts\n\n- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)\n"
       "- [QS](https://github.com/RoboFinSystems/robosystems/wiki/Quick-Start)\n"
-      "- [Home anchor](https://github.com/RoboFinSystems/robosystems/wiki#overview)\n"
       "- [Not the wiki](https://github.com/RoboFinSystems/robosystems/wikis)\n"
     )
-    pages = _pages(
-      **{"Core-Concepts": text, "Home": "# Welcome\n\nIntro.\n\n## Overview\n"}
-    )
-    build = _build_wiki(_wiki(tmp_path, pages))
+    build = _build_technical(_technical(tmp_path, _pages(**{"Core-Concepts": text})))
+    assert build.errors == [
+      "Core-Concepts.md: link to the retired wiki; name the page (x.md): "
+      "https://github.com/RoboFinSystems/robosystems/wiki",
+      "Core-Concepts.md: link to the retired wiki; name the page (x.md): "
+      "https://github.com/RoboFinSystems/robosystems/wiki/Quick-Start",
+    ]
     body = build.files["technical/core-concepts.md"].decode()
-    assert "[Wiki](/docs/technical)" in body
-    assert "[QS](/docs/technical/quick-start)" in body
-    assert "[Home anchor](/docs/technical#overview)" in body
     assert "[Not the wiki](https://github.com/RoboFinSystems/robosystems/wikis)" in body
-    assert build.errors == []
-    assert build.warnings == []
+
+  def test_a_wiki_style_link_is_an_error(self, tmp_path):
+    build = _build_technical(
+      _technical(
+        tmp_path,
+        _pages(
+          **{"Core-Concepts": "# Core Concepts\n\n[x](Quick-Start) [y](a/b.md)\n"}
+        ),
+      )
+    )
+    assert build.errors == [
+      "Core-Concepts.md: relative links must name a sibling page (x.md): Quick-Start",
+      "Core-Concepts.md: relative links must name a sibling page (x.md): a/b.md",
+    ]
 
   def test_code_and_external_links_are_untouched(self, tmp_path):
     text = (
@@ -150,7 +161,7 @@ class TestWikiLinks:
       "Inline `[x](Quick-Start)` stays. [Repo](https://github.com/RoboFinSystems/robosystems/blob/main/README.md) stays.\n\n"
       "```markdown\n[x](Missing-Page)\n```\n"
     )
-    build = _build_wiki(_wiki(tmp_path, _pages(**{"Core-Concepts": text})))
+    build = _build_technical(_technical(tmp_path, _pages(**{"Core-Concepts": text})))
     body = build.files["technical/core-concepts.md"].decode()
     assert "`[x](Quick-Start)`" in body
     assert "[x](Missing-Page)" in body
@@ -158,35 +169,35 @@ class TestWikiLinks:
     assert build.errors == []
 
   def test_images_point_at_the_cdn_and_ship(self, tmp_path):
-    wiki = _wiki(
+    technical = _technical(
       tmp_path,
       _pages(**{"Core-Concepts": "# Core Concepts\n\n![viz](images/viz.png)\n"}),
     )
-    (wiki / "images").mkdir()
-    (wiki / "images" / "viz.png").write_bytes(b"png")
-    build = _build_wiki(wiki)
+    (technical / "images").mkdir()
+    (technical / "images" / "viz.png").write_bytes(b"png")
+    build = _build_technical(technical)
     body = build.files["technical/core-concepts.md"].decode()
     assert f"![viz]({ASSET_BASE}technical/images/viz.png)" in body
     assert build.files["technical/images/viz.png"] == b"png"
 
   def test_a_link_to_a_missing_page_is_an_error(self, tmp_path):
-    build = _build_wiki(
-      _wiki(
+    build = _build_technical(
+      _technical(
         tmp_path,
-        _pages(**{"Core-Concepts": "# Core Concepts\n\n[Gone](Renamed-Page)\n"}),
+        _pages(**{"Core-Concepts": "# Core Concepts\n\n[Gone](Renamed-Page.md)\n"}),
       )
     )
     assert build.errors == [
-      "Core-Concepts.md: link to a wiki page that does not exist: Renamed-Page"
+      "Core-Concepts.md: link to a page that does not exist: Renamed-Page.md"
     ]
 
   def test_an_anchor_with_no_heading_is_a_warning(self, tmp_path):
-    build = _build_wiki(
-      _wiki(
+    build = _build_technical(
+      _technical(
         tmp_path,
         _pages(
           **{
-            "Core-Concepts": "# Core Concepts\n\n[x](#nowhere) [y](Quick-Start#gone)\n"
+            "Core-Concepts": "# Core Concepts\n\n[x](#nowhere) [y](Quick-Start.md#gone)\n"
           }
         ),
       )
@@ -199,14 +210,15 @@ class TestWikiLinks:
 
 
 @pytest.mark.unit
-class TestWikiCatalog:
+class TestTechnicalCatalog:
   def test_pages_sections_and_home(self, tmp_path):
-    build = _build_wiki(_wiki(tmp_path, _pages()))
+    build = _build_technical(_technical(tmp_path, _pages()))
     home = _page(build, "index")
     assert home.path == "/docs/technical"
     assert home.title == "Technical documentation"
     assert home.description == "RoboSystems is a platform."
-    assert "Welcome" not in build.files["technical/index.md"].decode()
+    assert "# RoboSystems" not in build.files["technical/index.md"].decode()
+    assert "readme" not in {page.slug for page in build.pages}
 
     quick = _page(build, "quick-start")
     assert (quick.title, quick.section, quick.order) == (
@@ -216,7 +228,7 @@ class TestWikiCatalog:
     )
     assert (
       quick.source_url
-      == "https://github.com/RoboFinSystems/robosystems/wiki/Quick-Start"
+      == "https://github.com/RoboFinSystems/robosystems/blob/main/docs/technical/Quick-Start.md"
     )
     assert build.collections == [
       {
@@ -232,7 +244,7 @@ class TestWikiCatalog:
 
   def test_pages_missing_from_the_sidebar_land_in_other(self, tmp_path):
     pages = _pages(**{"Orphan-Page": "# Orphan\n\nAlone.\n"})
-    build = _build_wiki(_wiki(tmp_path, pages))
+    build = _build_technical(_technical(tmp_path, pages))
     assert build.collections[0]["sections"][-1] == {
       "title": "Other",
       "slugs": ["orphan-page"],
@@ -240,28 +252,47 @@ class TestWikiCatalog:
     assert build.warnings == ["_Sidebar.md: pages not in the sidebar: Orphan-Page"]
 
   def test_a_sidebar_link_to_a_missing_page_is_an_error(self, tmp_path):
-    build = _build_wiki(
-      _wiki(tmp_path, _pages(), sidebar=SIDEBAR + "- [Gone](Gone-Page)\n")
+    build = _build_technical(
+      _technical(tmp_path, _pages(), sidebar=SIDEBAR + "- [Gone](Gone-Page.md)\n")
     )
-    assert (
-      "_Sidebar.md: link to a wiki page that does not exist: Gone-Page" in build.errors
-    )
+    assert "_Sidebar.md: link to a page that does not exist: Gone-Page" in build.errors
 
-  def test_updated_is_the_last_commit_date(self, tmp_path):
-    wiki = _wiki(tmp_path, _pages())
+  def _commit(self, cwd, message, author_date, committer_date):
     env = {
       "GIT_AUTHOR_NAME": "t",
       "GIT_AUTHOR_EMAIL": "t@example.test",
       "GIT_COMMITTER_NAME": "t",
       "GIT_COMMITTER_EMAIL": "t@example.test",
-      "GIT_COMMITTER_DATE": "2026-01-02T03:04:05-05:00",
-      "GIT_AUTHOR_DATE": "2026-01-02T03:04:05-05:00",
+      "GIT_AUTHOR_DATE": author_date,
+      "GIT_COMMITTER_DATE": committer_date,
       "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
     }
-    subprocess.run(["git", "init", "-q"], cwd=wiki, check=True, env=env)
-    subprocess.run(["git", "add", "."], cwd=wiki, check=True, env=env)
-    subprocess.run(["git", "commit", "-qm", "init"], cwd=wiki, check=True, env=env)
-    build = _build_wiki(wiki)
+    if not (cwd / ".git").exists():
+      subprocess.run(["git", "init", "-q"], cwd=cwd, check=True, env=env)
+    subprocess.run(["git", "add", "."], cwd=cwd, check=True, env=env)
+    subprocess.run(["git", "commit", "-qm", message], cwd=cwd, check=True, env=env)
+
+  def test_updated_is_the_last_author_date(self, tmp_path):
+    technical = _technical(tmp_path, _pages())
+    self._commit(
+      tmp_path, "init", "2026-01-02T03:04:05-05:00", "2026-03-04T05:06:07-05:00"
+    )
+    build = _build_technical(technical)
+    assert _page(build, "quick-start").updated == "2026-01-02T03:04:05-05:00"
+
+  def test_a_mechanical_commit_leaves_the_date_alone(self, tmp_path):
+    technical = _technical(tmp_path, _pages())
+    self._commit(
+      tmp_path, "init", "2026-01-02T03:04:05-05:00", "2026-01-02T03:04:05-05:00"
+    )
+    (technical / "Quick-Start.md").write_text("# Quick Start\n\nReworded.\n")
+    self._commit(
+      tmp_path,
+      "docs: link sweep\n\nDocs-Mechanical: true",
+      "2026-05-06T07:08:09-05:00",
+      "2026-05-06T07:08:09-05:00",
+    )
+    build = _build_technical(technical)
     assert _page(build, "quick-start").updated == "2026-01-02T03:04:05-05:00"
 
 
@@ -419,7 +450,7 @@ class TestProductPages:
     ]
     assert _page(build, "plan").section == "Work with your books"
 
-  def test_technical_links_are_checked_against_the_wiki(self, tmp_path):
+  def test_technical_links_are_checked_against_the_technical_docs(self, tmp_path):
     product = self._product(
       tmp_path,
       {
@@ -433,7 +464,7 @@ class TestProductPages:
         "`[code](https://robosystems.ai/docs/technical/nowhere)`\n",
       },
     )
-    build = _build_wiki(_wiki(tmp_path, _pages()))
+    build = _build_technical(_technical(tmp_path, _pages()))
     publish_docs.build_product(product, tmp_path, build)
     assert build.errors == [
       "roboledger/a.md: link to a technical page that does not exist: "
@@ -444,7 +475,7 @@ class TestProductPages:
     body = build.files["product/roboledger/a.md"].decode()
     assert "[ok](https://robosystems.ai/docs/technical/quick-start#first-query)" in body
 
-  def test_technical_links_are_not_checked_without_the_wiki(self, tmp_path):
+  def test_technical_links_are_not_checked_without_the_technical_docs(self, tmp_path):
     product = self._product(
       tmp_path,
       {
@@ -467,11 +498,11 @@ class TestProductPages:
 @pytest.mark.unit
 class TestMain:
   def test_writes_the_catalog_and_a_stable_digest(self, tmp_path, capsys):
-    wiki = _wiki(tmp_path, _pages())
+    technical = _technical(tmp_path, _pages())
     out = tmp_path / "out"
     assert (
       publish_docs.main(
-        ["--wiki", str(wiki), "--out", str(out), "--asset-base", ASSET_BASE]
+        ["--technical", str(technical), "--out", str(out), "--asset-base", ASSET_BASE]
       )
       == 0
     )
@@ -487,27 +518,29 @@ class TestMain:
 
     assert (
       publish_docs.main(
-        ["--wiki", str(wiki), "--out", str(out), "--asset-base", ASSET_BASE]
+        ["--technical", str(technical), "--out", str(out), "--asset-base", ASSET_BASE]
       )
       == 0
     )
     assert json.loads((out / "index.json").read_text())["digest"] == index["digest"]
 
-    (wiki / "Core-Concepts.md").write_text("# Core Concepts\n\nChanged.\n")
+    (technical / "Core-Concepts.md").write_text("# Core Concepts\n\nChanged.\n")
     assert (
       publish_docs.main(
-        ["--wiki", str(wiki), "--out", str(out), "--asset-base", ASSET_BASE]
+        ["--technical", str(technical), "--out", str(out), "--asset-base", ASSET_BASE]
       )
       == 0
     )
     assert json.loads((out / "index.json").read_text())["digest"] != index["digest"]
 
   def test_errors_fail_without_writing(self, tmp_path, capsys):
-    wiki = _wiki(tmp_path, _pages(**{"Core-Concepts": "# C\n\n[x](Nope)\n"}))
+    technical = _technical(
+      tmp_path, _pages(**{"Core-Concepts": "# C\n\n[x](Nope.md)\n"})
+    )
     out = tmp_path / "out"
-    assert publish_docs.main(["--wiki", str(wiki), "--out", str(out)]) == 1
+    assert publish_docs.main(["--technical", str(technical), "--out", str(out)]) == 1
     assert not out.exists()
-    assert "does not exist: Nope" in capsys.readouterr().err
+    assert "does not exist: Nope.md" in capsys.readouterr().err
 
   def test_nothing_to_publish_is_an_error(self, tmp_path):
     assert publish_docs.main(["--out", str(tmp_path / "out")]) == 1

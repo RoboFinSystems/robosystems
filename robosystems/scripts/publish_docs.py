@@ -3,27 +3,26 @@
 
 Two sources feed it:
 
-- **Technical docs** — the GitHub wiki, checked out beside this repo. GitHub
-  serves wiki pages ``X-Robots-Tag: none``, so the wiki is where these are
-  written, never where they are found. They render at
-  ``robosystems.ai/docs/technical``.
+- **Technical docs** — ``docs/technical/*.md`` in this repo, ordered by its
+  ``_Sidebar.md``, rendered at ``robosystems.ai/docs/technical``. They lived in
+  the GitHub wiki until 2026-10; the history came with them.
 - **Product docs** — ``docs/product/{site}/*.md`` in this repo, one folder per
   site, rendered at that site's docs path.
 
 The output directory is what the Publish Docs workflow syncs to the content CDN:
 
     index.json
-    technical/{slug}.md           one body per wiki page, links rewritten
-    technical/images/...          images the wiki references
+    technical/{slug}.md           one body per technical page, links rewritten
+    technical/images/...          images the technical pages reference
     product/{site}/{slug}.md      one body per product page
     product/{site}/images/...     screenshots and clips the product pages show
 
 The apps read ``index.json`` with ISR and fetch each body by its ``body`` key.
 Nothing here renders HTML, so the bodies stay plain GitHub-flavored markdown:
-the wiki's prose carries literal ``{`` and ``<`` that an MDX compiler rejects.
+the technical prose carries literal ``{`` and ``<`` that an MDX compiler rejects.
 
-Wiki-relative links become site paths, and a link to a page that does not
-exist fails the build, so a renamed page breaks the publish rather than the
+Sibling-page links (``x.md``) become site paths, and a link to a page that does
+not exist fails the build, so a renamed page breaks the publish rather than the
 site. Anchors that match no heading are reported as warnings. When both are
 built in one run, a product page's link into the technical docs must name a
 page and a heading that exist, or the build fails.
@@ -32,9 +31,9 @@ page and a heading that exist, or the build fails.
 upload when nothing changed.
 
 Usage:
-    just docs-build ../robosystems.wiki
+    just docs-build
     uv run --no-project python robosystems/scripts/publish_docs.py \\
-        --wiki ../robosystems.wiki --product docs/product --out build/docs
+        --technical docs/technical --product docs/product --out build/docs
 """
 
 from __future__ import annotations
@@ -50,7 +49,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 SCHEMA_VERSION = 1
-WIKI_URL = "https://github.com/RoboFinSystems/robosystems/wiki"
+# The technical docs' old home: a link into it points at a page no longer kept.
+RETIRED_WIKI_URL = "https://github.com/RoboFinSystems/robosystems/wiki"
 REPO_BLOB_URL = "https://github.com/RoboFinSystems/robosystems/blob/main"
 DEFAULT_ASSET_BASE = "https://assets.robosystems.ai/docs/"
 
@@ -110,9 +110,9 @@ class Build:
   files: dict[str, bytes] = field(default_factory=dict)
   errors: list[str] = field(default_factory=list)
   warnings: list[str] = field(default_factory=list)
-  # Heading anchors per technical page path, set when the wiki is built in the
-  # same run. Product pages link the technical docs by absolute URL, and those
-  # links are checked against it; without the wiki there is nothing to check.
+  # Heading anchors per technical page path, set when the technical docs are
+  # built in the same run. Product pages link them by absolute URL, and those
+  # links are checked against it; without them there is nothing to check.
   technical_anchors: dict[str, set[str]] | None = None
 
 
@@ -256,11 +256,31 @@ def split_front_matter(text: str) -> tuple[dict[str, str], str]:
   return meta, text[end + 5 :].lstrip("\n")
 
 
+# A commit carrying this trailer (a link-format sweep, a rename of a term) leaves
+# every page it touches with the date it had.
+MECHANICAL_TRAILER = "Docs-Mechanical:"
+
+
 def last_commit_date(path: Path) -> str | None:
-  """The file's last commit time, or None outside git or before its first commit."""
+  """When the file's content last changed, or None outside git.
+
+  The author date, not the committer date: a rebase or an imported history
+  restamps the committer date, never the author's.
+  """
   try:
     result = subprocess.run(
-      ["git", "-C", str(path.parent), "log", "-1", "--format=%cI", "--", path.name],
+      [
+        "git",
+        "-C",
+        str(path.parent),
+        "log",
+        "-1",
+        "--format=%aI",
+        "--invert-grep",
+        f"--grep=^{MECHANICAL_TRAILER}",
+        "--",
+        path.name,
+      ],
       capture_output=True,
       text=True,
       check=False,
@@ -271,7 +291,7 @@ def last_commit_date(path: Path) -> str | None:
   return value or None
 
 
-# ── The wiki ────────────────────────────────────────────────────────────────
+# ── Technical pages ─────────────────────────────────────────────────────────
 
 
 def technical_path(page_name: str) -> str:
@@ -281,7 +301,7 @@ def technical_path(page_name: str) -> str:
 
 
 def parse_sidebar(text: str) -> list[tuple[str, list[str]]]:
-  """``_Sidebar.md`` as (section title, wiki page names), in order."""
+  """``_Sidebar.md`` as (section title, page names), in order."""
   sections: list[tuple[str, list[str]]] = []
   for line in text.splitlines():
     heading = _SIDEBAR_SECTION.match(line)
@@ -290,11 +310,11 @@ def parse_sidebar(text: str) -> list[tuple[str, list[str]]]:
       continue
     item = _SIDEBAR_ITEM.match(line)
     if item and sections:
-      sections[-1][1].append(item.group(1))
+      sections[-1][1].append(item.group(1).removesuffix(".md"))
   return sections
 
 
-def rewrite_wiki_links(
+def rewrite_technical_links(
   text: str,
   source: str,
   pages: set[str],
@@ -304,13 +324,13 @@ def rewrite_wiki_links(
 ) -> str:
   def replace(match: re.Match[str]) -> str:
     bang, label, target, title = match.groups()
-    new = resolve_wiki_target(target, source, pages, anchors, asset_base, build)
+    new = resolve_technical_target(target, source, pages, anchors, asset_base, build)
     return f"{bang}[{label}]({new}{title})"
 
   return map_prose(text, lambda chunk: _LINK.sub(replace, chunk))
 
 
-def resolve_wiki_target(
+def resolve_technical_target(
   target: str,
   source: str,
   pages: set[str],
@@ -318,12 +338,13 @@ def resolve_wiki_target(
   asset_base: str,
   build: Build,
 ) -> str:
-  if target == WIKI_URL or target.startswith((f"{WIKI_URL}/", f"{WIKI_URL}#")):
-    rest = target[len(WIKI_URL) :].lstrip("/")
-    # The wiki root is Home, so a bare `#anchor` after it is Home's anchor.
-    if not rest or rest.startswith("#"):
-      rest = f"Home{rest}"
-    return resolve_wiki_target(rest, source, pages, anchors, asset_base, build)
+  if target == RETIRED_WIKI_URL or target.startswith(
+    (f"{RETIRED_WIKI_URL}/", f"{RETIRED_WIKI_URL}#")
+  ):
+    build.errors.append(
+      f"{source}.md: link to the retired wiki; name the page (x.md): {target}"
+    )
+    return target
   if target.startswith(("http://", "https://", "mailto:")):
     return target
   if target.startswith("#"):
@@ -332,10 +353,14 @@ def resolve_wiki_target(
   if target.startswith("images/"):
     return f"{asset_base}technical/{target}"
   name, _, anchor = target.partition("#")
-  if name not in pages:
+  if not name.endswith(".md") or "/" in name:
     build.errors.append(
-      f"{source}.md: link to a wiki page that does not exist: {target}"
+      f"{source}.md: relative links must name a sibling page (x.md): {target}"
     )
+    return target
+  name = name[:-3]
+  if name not in pages:
+    build.errors.append(f"{source}.md: link to a page that does not exist: {target}")
     return target
   if anchor:
     check_anchor(source, name, anchor, anchors, build)
@@ -350,14 +375,19 @@ def check_anchor(
     build.warnings.append(f"{source}.md: no heading in {page} for #{anchor}")
 
 
-def build_wiki(wiki_dir: Path, asset_base: str, build: Build) -> None:
+def build_technical(
+  technical_dir: Path,
+  repo_root: Path,
+  build: Build,
+  asset_base: str = DEFAULT_ASSET_BASE,
+) -> None:
   sources = {
     path.stem: path.read_text(encoding="utf-8")
-    for path in sorted(wiki_dir.glob("*.md"))
-    if not path.name.startswith("_")
+    for path in sorted(technical_dir.glob("*.md"))
+    if not path.name.startswith("_") and path.name != "README.md"
   }
   if "Home" not in sources:
-    build.errors.append(f"{wiki_dir}: no Home.md")
+    build.errors.append(f"{technical_dir}: no Home.md")
     return
   pages = set(sources)
   anchors = {name: heading_anchors(text) for name, text in sources.items()}
@@ -365,7 +395,7 @@ def build_wiki(wiki_dir: Path, asset_base: str, build: Build) -> None:
     technical_path(name): found for name, found in anchors.items()
   }
 
-  sidebar_path = wiki_dir / "_Sidebar.md"
+  sidebar_path = technical_dir / "_Sidebar.md"
   sidebar = (
     parse_sidebar(sidebar_path.read_text(encoding="utf-8"))
     if sidebar_path.exists()
@@ -378,9 +408,7 @@ def build_wiki(wiki_dir: Path, asset_base: str, build: Build) -> None:
     slugs: list[str] = []
     for name in names:
       if name not in pages:
-        build.errors.append(
-          f"_Sidebar.md: link to a wiki page that does not exist: {name}"
-        )
+        build.errors.append(f"_Sidebar.md: link to a page that does not exist: {name}")
         continue
       if name in placement or name == "Home":
         continue
@@ -401,11 +429,16 @@ def build_wiki(wiki_dir: Path, asset_base: str, build: Build) -> None:
 
   for name, raw in sources.items():
     title, body = strip_title(raw)
-    body = rewrite_wiki_links(body, name, pages, anchors, asset_base, build)
+    body = rewrite_technical_links(body, name, pages, anchors, asset_base, build)
     slug = "index" if name == "Home" else name.lower()
     section, position = placement.get(name, (None, 0))
     key = f"technical/{slug}.md"
     build.files[key] = body.encode("utf-8")
+    path = technical_dir / f"{name}.md"
+    try:
+      repo_path = path.resolve().relative_to(repo_root.resolve()).as_posix()
+    except ValueError:
+      repo_path = f"docs/technical/{name}.md"
     build.pages.append(
       Page(
         site="robosystems",
@@ -418,19 +451,18 @@ def build_wiki(wiki_dir: Path, asset_base: str, build: Build) -> None:
         description=describe(body),
         section=section,
         order=position,
-        updated=last_commit_date(wiki_dir / f"{name}.md"),
+        updated=last_commit_date(path),
         body=key,
-        source_url=WIKI_URL if name == "Home" else f"{WIKI_URL}/{name}",
+        source_url=f"{REPO_BLOB_URL}/{repo_path}",
       )
     )
 
-  for image in (
-    sorted((wiki_dir / "images").glob("**/*")) if (wiki_dir / "images").is_dir() else []
-  ):
+  images = technical_dir / "images"
+  for image in sorted(images.glob("**/*")) if images.is_dir() else []:
     if image.is_file():
-      build.files[
-        f"technical/images/{image.relative_to(wiki_dir / 'images').as_posix()}"
-      ] = image.read_bytes()
+      build.files[f"technical/images/{image.relative_to(images).as_posix()}"] = (
+        image.read_bytes()
+      )
 
   build.collections.append(
     {
@@ -597,7 +629,7 @@ def check_technical_link(label: str, target: str, build: Build) -> None:
   """A product page's jump into the technical docs must land on a real heading.
 
   Product pages are public, so a dead jump-off is a defect, not a warning. The
-  check needs the wiki built in the same run and is skipped without it.
+  check needs the technical docs built in the same run and is skipped without them.
   """
   if build.technical_anchors is None:
     return
@@ -647,10 +679,10 @@ def write_output(
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
   parser = argparse.ArgumentParser(
-    description="Build the public docs catalog from the wiki and docs/product",
+    description="Build the public docs catalog from docs/technical and docs/product",
     formatter_class=argparse.RawDescriptionHelpFormatter,
   )
-  parser.add_argument("--wiki", type=Path, help="a checkout of robosystems.wiki")
+  parser.add_argument("--technical", type=Path, help="the docs/technical directory")
   parser.add_argument("--product", type=Path, help="the docs/product directory")
   parser.add_argument(
     "--out", type=Path, required=True, help="output directory (replaced)"
@@ -669,12 +701,12 @@ def main(argv: list[str] | None = None) -> int:
     args.asset_base if args.asset_base.endswith("/") else f"{args.asset_base}/"
   )
   build = Build()
-  if args.wiki:
-    build_wiki(args.wiki, asset_base, build)
+  if args.technical:
+    build_technical(args.technical, Path.cwd(), build, asset_base)
   if args.product and args.product.is_dir():
     build_product(args.product, Path.cwd(), build, asset_base)
   if not build.pages and not build.errors:
-    build.errors.append("nothing to publish: pass --wiki and/or --product")
+    build.errors.append("nothing to publish: pass --technical and/or --product")
 
   for warning in build.warnings:
     print(f"warning: {warning}", file=sys.stderr)
