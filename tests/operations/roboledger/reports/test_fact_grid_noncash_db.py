@@ -64,6 +64,7 @@ ACCOUNTS = {
     "duration",
   ),
   "interest": ("rs-gaap:InterestExpense", "debit", "duration"),
+  "income_tax": ("rs-gaap:IncomeTaxExpenseBenefit", "debit", "duration"),
   "other_income": ("rs-gaap:OtherNonoperatingIncomeExpense", "credit", "duration"),
   "disposal_gain": (DISPOSAL_GAIN, "credit", "duration"),
 }
@@ -565,3 +566,35 @@ def test_a_bill_settled_through_clearing_is_a_noncash_acquisition(tenant):
   assert cf[ACQUIRED] == 6000.0
   assert cf.get(OPERATING, 0.0) == 0.0
   _assert_no_reconciling_adjustment(cf)
+
+
+INTEREST_PAID = "rs-gaap:InterestPaidNet"
+TAXES_PAID = "rs-gaap:IncomeTaxesPaidNet"
+
+
+def test_interest_paid_in_cash_is_disclosed(tenant):
+  _post(tenant, [("interest", 120, 0), ("cash", 0, 120)])
+  assert _cash_flow(tenant)[INTEREST_PAID] == 120.0
+
+
+def test_a_settled_bill_pays_its_interest_share(tenant):
+  """The bill splits 900 principal from 100 interest; the payment settles
+  half, so half the interest is paid."""
+  _bill_and_payment(tenant, 500)
+  assert _cash_flow(tenant)[INTEREST_PAID] == 50.0
+
+
+def test_interest_added_to_a_debt_is_not_paid(tenant):
+  _post(tenant, [("interest", 150, 0), ("credit_line", 0, 150)])
+  assert INTEREST_PAID not in _cash_flow(tenant)
+
+
+def test_income_tax_paid_in_cash_is_disclosed(tenant):
+  _post(tenant, [("income_tax", 300, 0), ("cash", 0, 300)])
+  assert _cash_flow(tenant)[TAXES_PAID] == 300.0
+
+
+def test_interest_settled_partly_in_cash_is_paid_at_the_cash_share(tenant):
+  """150 of interest: 100 paid, 50 added to the debt."""
+  _post(tenant, [("interest", 150, 0), ("cash", 0, 100), ("credit_line", 0, 50)])
+  assert _cash_flow(tenant)[INTEREST_PAID] == 100.0

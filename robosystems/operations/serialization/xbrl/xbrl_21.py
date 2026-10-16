@@ -570,6 +570,21 @@ def _build_label_linkbase(bundle: StatementBundle) -> etree._Element:
       },
     )
     label_el.text = label_text
+    # One arc from the loc to every label resource sharing its xlink:label:
+    # the standard one and each preferred-label role (XBRL 2.1 §5.2.4.2.1
+    # requires the role a presentation arc names to exist on the concept).
+    for role, text in sorted(concept.role_labels.items()):
+      role_el = etree.SubElement(
+        label_link,
+        f"{{{NS_LINK}}}label",
+        attrib={
+          f"{{{NS_XLINK}}}type": "resource",
+          f"{{{NS_XLINK}}}label": res_label,
+          f"{{{NS_XLINK}}}role": role,
+          f"{{{NS_XML}}}lang": "en",
+        },
+      )
+      role_el.text = text
     etree.SubElement(
       label_link,
       f"{{{NS_LINK}}}labelArc",
@@ -671,6 +686,8 @@ def _append_arc(
     attrs["order"] = _format_decimal(arc.order_value)
   if include_weight and arc.weight is not None:
     attrs["weight"] = _format_decimal(arc.weight)
+  if arc.preferred_label:
+    attrs["preferredLabel"] = arc.preferred_label
   etree.SubElement(link_el, f"{{{NS_LINK}}}{arc_local}", attrib=attrs)
 
 

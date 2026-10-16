@@ -1704,6 +1704,17 @@ _CF_NONCASH_ACQUISITION_QNAME = (
 _CF_PAYABLES_LEAF_QNAME = (
   "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities"
 )
+_CF_INTEREST_PAID_QNAME = "rs-gaap:InterestPaidNet"
+_CF_TAXES_PAID_QNAME = "rs-gaap:IncomeTaxesPaidNet"
+# The expense concepts whose cash settlement is a supplemental disclosure.
+# Taxes payable is curated out of tenants, so taxes paid reads the expense
+# lines that an entry with cash, or a settled bill, carries.
+_CF_PAID_ROWS: dict[str, str] = {
+  "rs-gaap:InterestExpense": _CF_INTEREST_PAID_QNAME,
+  "rs-gaap:InterestExpenseDebt": _CF_INTEREST_PAID_QNAME,
+  "rs-gaap:IncomeTaxExpenseBenefit": _CF_TAXES_PAID_QNAME,
+  "rs-gaap:CurrentIncomeTaxExpenseBenefit": _CF_TAXES_PAID_QNAME,
+}
 
 
 @dataclass
@@ -1713,6 +1724,7 @@ class _CfLine:
   debit: int
   credit: int
   tagged: bool
+  qname: str | None = None
 
   @property
   def net(self) -> int:
@@ -1729,6 +1741,19 @@ class _Bill:
   payable: int
   capex: int
   columns: list[PeriodSpec]
+
+
+def _cash_share(lines: list[_CfLine]) -> float:
+  """The share of an entry's other side its cash settles: a payment of 100
+  against 150 of debits (the rest added to a debt) settles two thirds."""
+  cash = sum(ln.net for ln in lines if ln.kind == "cash")
+  if cash < 0:
+    other = sum(ln.debit for ln in lines if ln.kind != "cash")
+  elif cash > 0:
+    other = sum(ln.credit for ln in lines if ln.kind != "cash")
+  else:
+    return 0.0
+  return min(1.0, abs(cash) / other) if other else 0.0
 
 
 def _sign(value: float) -> int:
@@ -1805,6 +1830,12 @@ def _emit_noncash_and_settlement_facts(
   out of the payable's delta. In a cash sale, a gain on a concept the cash
   flow presents joins the proceeds. A tagged entry's flow is the explicit
   pass's; its tagged working-capital lines come out of their deltas here.
+
+  Cash paid for interest and income taxes is the expense lines an entry
+  with a cash line carries, at the share its cash settles, and a settled
+  bill's share of them; interest added to a debt with no cash moving is not
+  paid. An expense accrued by journal entry and paid by a cash entry that
+  links to nothing is not traced to the payment, so it is not disclosed.
 
   Returns the ids of the flows emitted, and a warning per period in which
   payments to payables carry no link while a bill with investing or
@@ -1890,6 +1921,7 @@ def _emit_noncash_and_settlement_facts(
       int(row.debit_amount or 0),
       int(row.credit_amount or 0),
       row.flow_element_id is not None,
+      row.concept_qname,
     )
 
   def _entries(rows) -> dict[str, list[_CfLine] | None]:
@@ -1949,6 +1981,8 @@ def _emit_noncash_and_settlement_facts(
           _CF_OTHER_NONCASH_QNAME,
           _CF_CAPEX_UNPAID_QNAME,
           _CF_NONCASH_ACQUISITION_QNAME,
+          _CF_INTEREST_PAID_QNAME,
+          _CF_TAXES_PAID_QNAME,
         ]
       },
     ).fetchall()
@@ -1964,6 +1998,17 @@ def _emit_noncash_and_settlement_facts(
   def _add(element_id: str, period: PeriodSpec, cents: float) -> None:
     key = (element_id, period.start, period.end)
     adjustments[key] = adjustments.get(key, 0.0) + cents
+
+  def _add_paid(
+    lines: list[_CfLine], columns: list[PeriodSpec], share: float = 1.0
+  ) -> None:
+    """Interest and income tax expense settled in cash, at ``share``."""
+    for line in lines:
+      row = _CF_PAID_ROWS.get(line.qname or "") if line.kind == "pnl" else None
+      paid_id = element_ids.get(row) if row else None
+      if paid_id is not None and line.net:
+        for column in columns:
+          _add(str(paid_id), column, line.net * share)
 
   def _hold_bill(
     event_id: str, lines: list[_CfLine], posted: date, columns: list[PeriodSpec]
@@ -2047,6 +2092,10 @@ def _emit_noncash_and_settlement_facts(
             _add(str(acquisition_id), column, capex)
       continue
 
+    # The supplemental rows read every cash entry, tagged or not: a tag picks
+    # a flow, not whether interest was paid.
+    _add_paid(lines, columns, _cash_share(lines))
+
     if not untagged:
       # The explicit pass already took the tagged cash into its flow, so a
       # payable or receivable it settles comes out of that account's delta;
@@ -2064,6 +2113,7 @@ def _emit_noncash_and_settlement_facts(
       paid = sum(ln.net for ln in paid_lines)
       if payable and paid:
         fraction = min(abs(paid), payable) / payable
+        _add_paid(bill, columns, fraction)
         routed = 0.0
         for line in bill:
           if line.kind != "nonoperating":
