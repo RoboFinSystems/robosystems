@@ -888,7 +888,7 @@
       "@id": "_:rs-gaap-rollup-cf-operating",
       "ruleCategory": "FundamentalAccountingConceptRelation",
       "rulePattern": "RollUp",
-      "ruleExpression": "$NetCashProvidedByUsedInOperatingActivities = ($NetIncomeLoss + $DepreciationDepletionAndAmortization + $ShareBasedCompensation + $IncreaseDecreaseInAccountsReceivable + $IncreaseDecreaseInInventories + $IncreaseDecreaseInPrepaidExpense + $IncreaseDecreaseInAccountsPayableAndAccruedLiabilities + $IncreaseDecreaseInOtherOperatingCapitalNet + $IncreaseDecreaseInAccruedLiabilities + $IncreaseDecreaseInAccruedIncomeTaxesPayable + $DeferredIncomeTaxExpenseBenefit + $IncreaseDecreaseInOtherCurrentAssets + $IncreaseDecreaseInContractWithCustomerLiability + $IncreaseDecreaseInOperatingLeaseLiability + $NetIncomeLossAttributableToNoncontrollingInterest + $IncreaseDecreaseInDueFromAffiliatesCurrent + $IncreaseDecreaseInDueToAffiliatesCurrent)",
+      "ruleExpression": "$NetCashProvidedByUsedInOperatingActivities = ($NetIncomeLoss + $DepreciationDepletionAndAmortization + $ShareBasedCompensation - $GainLossOnDispositionOfAssets + $AssetImpairmentCharges - $GainsLossesOnExtinguishmentOfDebt - $OtherNoncashIncomeExpense + $IncreaseDecreaseInAccountsReceivable + $IncreaseDecreaseInInventories + $IncreaseDecreaseInPrepaidExpense + $IncreaseDecreaseInAccountsPayableAndAccruedLiabilities + $IncreaseDecreaseInOtherCurrentLiabilities + $IncreaseDecreaseInOtherOperatingCapitalNet + $IncreaseDecreaseInAccruedLiabilities + $IncreaseDecreaseInAccruedIncomeTaxesPayable + $DeferredIncomeTaxExpenseBenefit + $IncreaseDecreaseInOtherCurrentAssets + $IncreaseDecreaseInContractWithCustomerLiability + $IncreaseDecreaseInOperatingLeaseLiability + $NetIncomeLossAttributableToNoncontrollingInterest + $IncreaseDecreaseInDueFromAffiliatesCurrent + $IncreaseDecreaseInDueToAffiliatesCurrent)",
       "ruleTarget": {
         "targetKind": "element",
         "targetRef": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
@@ -911,6 +911,22 @@
           "variableQname": "rs-gaap:ShareBasedCompensation"
         },
         {
+          "variableName": "GainLossOnDispositionOfAssets",
+          "variableQname": "rs-gaap:GainLossOnDispositionOfAssets"
+        },
+        {
+          "variableName": "AssetImpairmentCharges",
+          "variableQname": "rs-gaap:AssetImpairmentCharges"
+        },
+        {
+          "variableName": "GainsLossesOnExtinguishmentOfDebt",
+          "variableQname": "rs-gaap:GainsLossesOnExtinguishmentOfDebt"
+        },
+        {
+          "variableName": "OtherNoncashIncomeExpense",
+          "variableQname": "rs-gaap:OtherNoncashIncomeExpense"
+        },
+        {
           "variableName": "IncreaseDecreaseInAccountsReceivable",
           "variableQname": "rs-gaap:IncreaseDecreaseInAccountsReceivable"
         },
@@ -925,6 +941,10 @@
         {
           "variableName": "IncreaseDecreaseInAccountsPayableAndAccruedLiabilities",
           "variableQname": "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities"
+        },
+        {
+          "variableName": "IncreaseDecreaseInOtherCurrentLiabilities",
+          "variableQname": "rs-gaap:IncreaseDecreaseInOtherCurrentLiabilities"
         },
         {
           "variableName": "IncreaseDecreaseInOtherOperatingCapitalNet",
