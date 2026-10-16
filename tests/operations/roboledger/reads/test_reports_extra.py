@@ -155,6 +155,7 @@ class TestGetLiveFinancialStatement:
       r.depth = 0
       r.is_subtotal = is_subtotal
       r.is_abstract = is_abstract
+      r.period_role = None
       return r
 
     mock_grid = MagicMock()
@@ -211,6 +212,7 @@ class TestGetLiveFinancialStatement:
       r.depth = 0
       r.is_subtotal = False
       r.is_abstract = False
+      r.period_role = None
       rows.append(r)
     mock_grid = MagicMock()
     mock_grid.rows = rows
@@ -389,6 +391,7 @@ class TestLiveCashFlowRendersEveryColumn:
       r.depth = 0
       r.is_subtotal = False
       r.is_abstract = False
+      r.period_role = None
       return r
 
     mock_grid = MagicMock()
@@ -438,6 +441,7 @@ class TestLiveCashFlowRendersEveryColumn:
     r.depth = 0
     r.is_subtotal = False
     r.is_abstract = False
+    r.period_role = None
     mock_grid = MagicMock()
     mock_grid.rows = [r]
 

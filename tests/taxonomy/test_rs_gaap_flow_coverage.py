@@ -221,34 +221,47 @@ def test_every_default_flow_carries_its_activity_trait(
   assert not undeclared, f"defaults naming undeclared concepts: {undeclared}"
 
 
-def test_the_form_equity_rows_are_shared_with_the_equity_statement(
-  styles, networks
-) -> None:
-  """One concept on both statements (decision 3, 2026-10-13): the LLC's
-  contributions and distributions, and the partnership's, are rows of the
-  cash flow network and of the equity roll-forward alike."""
-  for code, rows in (
+def test_the_equity_statement_has_rows_of_its_own(styles, networks) -> None:
+  """The roll-forward's change rows are equity movement concepts, never the
+  cash flow's (Joey, 2026-10-16, replacing the 2026-10-13 shared-concept
+  decision): an owner who pays a company liability contributes capital and
+  moves no cash, so a cash flow row cannot carry it. Each form keeps its
+  cash flow equity rows on the cash flow statement alone."""
+  for code, movement_rows in (
+    (
+      "BSC-CORP-IS02-CF1",
+      {
+        "rs-gaap:StockIssuedDuringPeriodValueNewIssues",
+        "rs-gaap:StockRepurchasedDuringPeriodValue",
+        "rs-gaap:Dividends",
+        "rs-gaap:StockholdersEquityOther",
+      },
+    ),
     (
       "BSC-LLC-IS02-CF1",
       {
-        "rs-gaap:ProceedsFromContributedCapital",
-        "rs-gaap:PaymentsOfCapitalDistribution",
+        "rs-gaap:PartnersCapitalAccountContributions",
+        "rs-gaap:PartnersCapitalAccountDistributions",
+        "rs-gaap:PartnersCapitalOther",
       },
     ),
     (
       "BSC-PART-IS02-CF1",
       {
-        "rs-gaap:ProceedsFromPartnershipContribution",
-        "rs-gaap:PaymentsOfCapitalDistribution",
+        "rs-gaap:PartnersCapitalAccountContributions",
+        "rs-gaap:PartnersCapitalAccountDistributions",
+        "rs-gaap:PartnersCapitalOther",
       },
     ),
   ):
     composition = styles[code]
     cf_rows = _leaves(networks[composition["cash_flow_statement"]])
     equity_rows = _leaves(networks[composition["equity_statement"]])
-    assert rows <= cf_rows, (code, rows - cf_rows)
-    assert rows <= equity_rows, (code, rows - equity_rows)
-    assert "rs-gaap:PaymentsOfDividends" not in equity_rows, code
+    assert movement_rows <= equity_rows, (code, movement_rows - equity_rows)
+    assert not (equity_rows & cf_rows) - {"rs-gaap:NetIncomeLoss"}, (
+      code,
+      equity_rows & cf_rows,
+    )
 
 
 def test_the_form_cash_flow_networks_differ_only_in_equity_rows(

@@ -192,3 +192,42 @@ def test_shared_rows_sum_and_a_column_both_lack_stays_none():
   _add_into(parent, sub)
 
   assert parent.rows[0].values == [12.0, None]
+
+
+def _balance(role: str, value: float, position: float) -> FactRow:
+  """One of a roll-forward's two balance rows: the same concept on both."""
+  return FactRow(
+    element_id="equity",
+    element_qname="rs-gaap:equity",
+    element_name=f"equity, {role}",
+    classification="equity",
+    balance_type="credit",
+    values=[value],
+    is_subtotal=role == "end",
+    period_role=role,
+    position=position,
+  )
+
+
+def test_a_rollforwards_two_balances_sum_apart():
+  """The beginning and ending balances share a concept; each entity's
+  beginning sums into the group's beginning and its ending into the ending,
+  and a change row only the subsidiary has lands between them."""
+  parent = _grid(
+    _balance("start", 100.0, -1.0),
+    _row("net_income", 20.0, depth=1),
+    _balance("end", 120.0, ORDER.index("equity")),
+  )
+  sub = _grid(
+    _balance("start", 50.0, -1.0),
+    _row("members", 5.0, depth=1),
+    _balance("end", 55.0, ORDER.index("equity")),
+  )
+  _add_into(parent, sub)
+
+  assert [(r.element_id, r.period_role, r.values) for r in parent.rows] == [
+    ("equity", "start", [150.0]),
+    ("net_income", None, [20.0]),
+    ("members", None, [5.0]),
+    ("equity", "end", [175.0]),
+  ]

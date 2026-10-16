@@ -602,11 +602,13 @@ class TestSemanticChecks:
     assert "no_validation_rules" in result.checks
     assert any("nothing was checked" in w for w in result.warnings)
 
-  def test_equity_statement_is_inconclusive(self):
+  def test_equity_statement_without_its_balances_fails_inconclusive(self):
+    """A roll-forward with no beginning and ending rows cannot be checked,
+    and says so rather than passing."""
     rows = [_row("Total Equity", 500.0, classification="equity", is_subtotal=True)]
     result = validate_report("equity_statement", rows)
-    assert result.status == "inconclusive"
-    assert result.passed is False
+    assert result.status == "failed"
+    assert any("no beginning or ending" in f for f in result.failures)
 
   def test_status_tracks_failures(self):
     passing = validate_report(
@@ -841,7 +843,7 @@ class TestGenerationWarnings:
     assert any("ProceedsFromNotesPayable" in w for w in result.warnings)
 
   def test_an_inconclusive_block_still_carries_them(self):
-    result = validate_report("equity_statement", [], warnings=["a finding"])
+    result = validate_report("comprehensive_income", [], warnings=["a finding"])
     assert result.status == "inconclusive"
     assert "a finding" in result.warnings
 
@@ -944,3 +946,64 @@ class TestBalanceSheetNoncontrollingInterest:
     ]
     result = validate_report("balance_sheet", rows, period_labels=["Current", "Prior"])
     assert result.passed is True, f"Failures: {result.failures}"
+
+
+def _equity_rows(opening: float, changes: list[float], closing: float) -> list[FactRow]:
+  """A roll-forward as the renderer lays it out: the beginning balance, the
+  changes beneath the root, then the root as the ending balance."""
+  qname = "rs-gaap:StockholdersEquity"
+  rows = [
+    FactRow(
+      element_id="se",
+      element_qname=qname,
+      element_name="Equity, beginning balance",
+      classification="equity",
+      balance_type="credit",
+      values=[opening],
+      period_role="start",
+    )
+  ]
+  rows += [
+    FactRow(
+      element_id=f"change_{i}",
+      element_qname=f"rs-gaap:Change{i}",
+      element_name=f"Change {i}",
+      classification=None,
+      balance_type="credit",
+      values=[value],
+      depth=1,
+    )
+    for i, value in enumerate(changes)
+  ]
+  rows.append(
+    FactRow(
+      element_id="se",
+      element_qname=qname,
+      element_name="Equity, ending balance",
+      classification="equity",
+      balance_type="credit",
+      values=[closing],
+      is_subtotal=True,
+      period_role="end",
+    )
+  )
+  return rows
+
+
+class TestEquityStatementValidation:
+  def test_a_rollforward_that_reaches_its_closing_balance_passes(self):
+    """Beginning + net income + contributions - distributions = ending."""
+    rows = _equity_rows(69152.94, [10612.03, 45156.00, -2500.00], 122420.97)
+    result = validate_report("equity_statement", rows)
+    assert (result.status, result.passed) == ("passed", True)
+    assert "rollforward_articulates" in result.checks
+    # The ending balance is not the sum of the changes; no foot warning.
+    assert not any("does not match sum of children" in w for w in result.warnings)
+
+  def test_a_rollforward_that_misses_its_closing_balance_fails(self):
+    """The gap the statement had when it read cash flows only: the owner's
+    non-cash contribution and distribution missing."""
+    rows = _equity_rows(69152.94, [10612.03, 35000.00], 122420.97)
+    result = validate_report("equity_statement", rows)
+    assert result.status == "failed"
+    assert any("difference: 7656.00" in f for f in result.failures)

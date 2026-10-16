@@ -25,7 +25,7 @@ One manual journal entry on July 28 for $60,000, with no reference number or ven
 
 ## What your assistant can read
 
-- **Statements.** The balance sheet, income statement and cash flow for any period, built from the ledger when you ask. No close is needed.
+- **Statements.** The balance sheet, income statement, cash flow and statement of equity for any period, built from the ledger when you ask. No close is needed. The statement of equity runs from the opening balance through net income, contributions and distributions to the closing balance, and counts contributions that never touched your bank, like an owner paying a company card directly.
 - **The trial balance,** with debits and credits for every account.
 - **Journal entries and transactions,** line by line.
 - **Customers, vendors and employees,** and the activity with each one.

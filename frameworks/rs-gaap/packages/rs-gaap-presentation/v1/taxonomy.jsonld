@@ -4323,7 +4323,7 @@
         "@id": "rs-gaap:StockholdersEquity"
       },
       "to": {
-        "@id": "rs-gaap:ProceedsFromIssuanceOfCommonStock"
+        "@id": "rs-gaap:StockIssuedDuringPeriodValueNewIssues"
       },
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
@@ -4337,7 +4337,7 @@
         "@id": "rs-gaap:StockholdersEquity"
       },
       "to": {
-        "@id": "rs-gaap:PaymentsForRepurchaseOfCommonStock"
+        "@id": "rs-gaap:StockRepurchasedDuringPeriodValue"
       },
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
@@ -4351,11 +4351,11 @@
         "@id": "rs-gaap:StockholdersEquity"
       },
       "to": {
-        "@id": "rs-gaap:ShareBasedCompensation"
+        "@id": "rs-gaap:Dividends"
       },
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
-      "order": 40500.0,
+      "order": 40600.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
@@ -4365,11 +4365,11 @@
         "@id": "rs-gaap:StockholdersEquity"
       },
       "to": {
-        "@id": "rs-gaap:PaymentsOfDividends"
+        "@id": "rs-gaap:StockholdersEquityOther"
       },
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
-      "order": 40600.0,
+      "order": 40700.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
@@ -5156,7 +5156,7 @@
         "@id": "rs-gaap:PartnersCapital"
       },
       "to": {
-        "@id": "rs-gaap:ProceedsFromPartnershipContribution"
+        "@id": "rs-gaap:PartnersCapitalAccountContributions"
       },
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-PART",
@@ -5170,11 +5170,25 @@
         "@id": "rs-gaap:PartnersCapital"
       },
       "to": {
-        "@id": "rs-gaap:PaymentsOfCapitalDistribution"
+        "@id": "rs-gaap:PartnersCapitalAccountDistributions"
       },
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-PART",
       "order": 40600.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-equity-part-arc-5",
+      "from": {
+        "@id": "rs-gaap:PartnersCapital"
+      },
+      "to": {
+        "@id": "rs-gaap:PartnersCapitalOther"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-PART",
+      "order": 40700.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
@@ -5219,11 +5233,11 @@
         "@id": "rs-gaap:MembersEquity"
       },
       "to": {
-        "@id": "rs-gaap:PaymentsOfCapitalDistribution"
+        "@id": "rs-gaap:PartnersCapitalAccountContributions"
       },
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-LLC",
-      "order": 40600.0,
+      "order": 40300.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
@@ -5233,11 +5247,25 @@
         "@id": "rs-gaap:MembersEquity"
       },
       "to": {
-        "@id": "rs-gaap:ProceedsFromContributedCapital"
+        "@id": "rs-gaap:PartnersCapitalAccountDistributions"
       },
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-LLC",
-      "order": 40300.0,
+      "order": 40600.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-equity-llc-arc-5",
+      "from": {
+        "@id": "rs-gaap:MembersEquity"
+      },
+      "to": {
+        "@id": "rs-gaap:PartnersCapitalOther"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-LLC",
+      "order": 40700.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
