@@ -1,21 +1,17 @@
 name: Publish Docs
 
-# Publishes the GitHub wiki (technical docs) and docs/product/ to the content
-# CDN as markdown plus index.json, which the apps read with ISR. Runs only where
-# DOCS_BUCKET is set; skips the upload when the built digest is unchanged.
+# Publishes docs/technical/ and docs/product/ to the content CDN as markdown
+# plus index.json, which the apps read with ISR. Runs only where DOCS_BUCKET is
+# set; skips the upload when the built digest is unchanged.
 
 on:
-  gollum:
   push:
     branches: [main]
     paths:
+      - "docs/technical/**"
       - "docs/product/**"
       - "robosystems/scripts/publish_docs.py"
       - ".github/workflows/publish-docs.yml"
-  schedule:
-    # Backstop for wiki edits: GitHub does not document whether a git push to the
-    # wiki repository fires `gollum`, and every wiki commit arrives that way.
-    - cron: "17 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -42,13 +38,6 @@ jobs:
           fetch-depth: 0
           filter: blob:none
 
-      - name: Checkout wiki
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: ${{ github.repository }}.wiki
-          path: wiki
-          fetch-depth: 0
-
       - name: Install uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
@@ -57,7 +46,7 @@ jobs:
       - name: Build the catalog
         run: |
           uv run --no-project --python 3.14 python robosystems/scripts/publish_docs.py \
-            --wiki wiki \
+            --technical docs/technical \
             --product docs/product \
             --asset-base "${DOCS_BASE_URL%/}/" \
             --out build/docs

@@ -1,0 +1,238 @@
+# Extensions Surface Overview
+
+The extensions surface is the read/write API layer for RoboSystems product extensions (RoboLedger and RoboInvestor). It sits beside the core `/v1` platform API under a single `/extensions/*` prefix, and everything on it is graph-scoped at the URL.
+
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
+
+## Table of Contents
+
+- [What the Extensions Surface Is](#what-the-extensions-surface-is)
+- [The Three Sub-Surfaces](#the-three-sub-surfaces)
+- [Graph-Scoping at the URL](#graph-scoping-at-the-url)
+- [Auth Runs Before the Handler](#auth-runs-before-the-handler)
+- [Feature Flags and the Dynamically Built Schema](#feature-flags-and-the-dynamically-built-schema)
+- [The OperationEnvelope Contract](#the-operationenvelope-contract)
+- [One Invariant: The Ops Layer Is the Single Source of Truth](#one-invariant-the-ops-layer-is-the-single-source-of-truth)
+- [Worked Examples](#worked-examples)
+- [Gotchas](#gotchas)
+- [Related Documentation](#related-documentation)
+- [Support](#support)
+
+## What the Extensions Surface Is
+
+The core platform API lives under `/v1` and covers graphs, billing, auth, and shared repositories. Product extensions — RoboLedger (accounting) and RoboInvestor (investment management) — are served separately under `/extensions/*`. The split is deliberate: the platform API manages identity, infrastructure, and metadata, while the extensions surface is where you read and write the domain data for a specific graph.
+
+The extensions surface has a single organizing rule: **the graph (tenant) is always in the URL path**. Every route below is scoped to a `graph_id`, and FastAPI validates the user's access to that graph before any handler runs.
+
+## The Three Sub-Surfaces
+
+Everything on the extensions surface falls into one of three sub-surfaces, split by transport rather than by HTTP verb. Typed reads go through GraphQL, writes go through named command operations, and read-only analytics go through named view operations.
+
+| Sub-surface | Method + Path | Read/Write | Backs onto |
+| --- | --- | --- | --- |
+| **GraphQL typed reads** | `POST /extensions/{graph_id}/graphql` | Read | PostgreSQL extensions OLTP database |
+| **Command writes** | `POST /extensions/{roboledger\|roboinvestor}/{graph_id}/operations/{op_name}` | Write | PostgreSQL extensions OLTP database |
+| **Analytical view operations** | `POST /extensions/roboledger/{graph_id}/operations/{view_name}` | Read | The materialized LadybugDB XBRL hypercube, or a report or SEC filing read whole |
+
+A few details worth pinning down:
+
+- **GraphQL typed reads** are served by a single Strawberry endpoint per graph. The schema is composed dynamically per deployment (see [Feature Flags](#feature-flags-and-the-dynamically-built-schema)). Introspection over POST works on the hosted API, with or without credentials; the in-browser GraphiQL explorer is development-only and is not mounted on `api.robosystems.ai`.
+- **Command writes** are explicit, named operations (`close-period`, `share-report`, `create-security`) rather than resource CRUD. They match the multi-step domain operations they actually perform. Each returns an [`OperationEnvelope`](#the-operationenvelope-contract).
+- **Analytical view operations** share the same envelope contract as command writes but are read-only and never touch the OLTP database. There are seven. Two query the materialized graph: `build-fact-grid` (facts over the XBRL hypercube, returned flat for the caller to pivot) and `financial-statement-analysis`. Five run xbrlkit's tools over one report or filing held whole, without the graph: `disclosures` and `information-block` read a report's sections (the published filing on SEC, the ledger's own report on a tenant), and `describe-filing`, `search-text` and `read-text` read an SEC filing's own text, on the SEC repository only. All seven are gated independently of the OLTP domains, so a deployment without RoboLedger tenants can still use them.
+- **One more shape rides the command-operation transport.** A few RoboLedger operations are POST `…/operations/{name}` and return an `OperationEnvelope` like a command write, but read the OLTP database instead of writing to it. `live-financial-statement` generates an ad-hoc statement straight from the tenant's ledger using the active CoA→GAAP mapping, with no materialization step. Because it reads the same PostgreSQL database the ledger commands write, it is gated by `ROBOLEDGER_ENABLED` rather than `FACT_GRID_ENABLED`.
+
+For the full, machine-readable endpoint surface — every operation name, request schema, and response shape — see the extensions API reference at [`https://robosystems.ai/docs/extensions`](https://robosystems.ai/docs/extensions). This page covers the concepts and tasks; the OpenAPI spec is the authoritative endpoint reference.
+
+## Graph-Scoping at the URL
+
+The `graph_id` is always a URL path parameter, never a query argument or request-body field. The path pattern accepts parent graph IDs (`kg` + 16 or more hex chars, e.g. `kg1a2b3c4d5e6f7890`), shared-repository IDs (`sec`, and any subgraph the platform creates under it), the reserved `library` sentinel (which browses the shared public taxonomy library), and subgraph IDs (`{parent_id}_{subgraph_name}`, e.g. `kg1a2b3c4d5e6f7890_dev`).
+
+This matters most for GraphQL. The graph is determined by the URL, and resolvers read it from request context — so GraphQL queries do **not** take a `graphId` argument:
+
+```text
+Wrong:  { entity(graphId: "kg1a2b3c4d5e6f7890") { name } }
+Right:  { entity { name } }
+```
+
+Putting the tenant in the URL rather than the query body eliminates a whole class of "I queried the wrong tenant" bugs: the scope is fixed before the resolver runs, and there is no way to override it from inside the query.
+
+Subgraph IDs are the one case where matching the pattern is not enough. GraphQL and the command operations reject a subgraph with **HTTP 403** — a subgraph is a modality container with no extensions schema of its own, so the request is refused rather than quietly resolved to its parent. On GraphQL the check runs after authentication and before the access check, so the denial stays attributable. Target the parent graph instead. The seven analytical view operations accept a subgraph id, since they read the graph or a report rather than the extensions schema; `live-financial-statement`, which reads the extensions schema, refuses one like the commands.
+
+## Auth Runs Before the Handler
+
+Authentication and per-graph access are enforced by FastAPI dependencies that run **before** any resolver, command runner, or view handler executes. A request that lacks access to the graph never reaches business logic.
+
+- GraphQL requests resolve the user and graph through the context dependency, then check graph access before the query is executed.
+- Command and view operations resolve the user and validate per-graph access via the operation dependency before the runner is invoked.
+
+Authenticate API calls with the **`X-API-Key`** header. Create the key in the app under **Settings → API keys** — it is shown once, and can be scoped to all your graphs or to one graph. The key has the format `rfs` followed by 64 hex characters:
+
+```bash
+-H "X-API-Key: $ROBOSYSTEMS_API_KEY"
+```
+
+`Authorization: Bearer` (JWT) is a frontend concern — the apps use an HTTP-only cookie. Do not use Bearer tokens for backend `curl` testing.
+
+## Feature Flags and the Dynamically Built Schema
+
+Each sub-surface is gated by a feature flag, and the gating happens at **schema-construction time, not request time**. Disabled domains are simply absent from the API rather than mounted and throwing runtime errors.
+
+These flags are deployment configuration, not something an API caller sets. On robosystems.ai all four are on; a self-hosted deployment controls them through its environment.
+
+| Flag | Gates | Default |
+| --- | --- | --- |
+| `ROBOLEDGER_ENABLED` | RoboLedger command operations + reads + GraphQL ledger fields | `true` |
+| `ROBOINVESTOR_ENABLED` | RoboInvestor command operations + GraphQL investor fields | `true` |
+| `EXTENSIONS_GRAPHQL_ENABLED` | Kill switch for the `/extensions/{graph_id}/graphql` endpoint | `true` |
+| `FACT_GRID_ENABLED` | The analytical view operations that don't read the OLTP database (`build-fact-grid`, `financial-statement-analysis`, and the five read-whole views) | `true` |
+
+`EXTENSIONS_ENABLED` is a **derived** property — it is `ROBOLEDGER_ENABLED OR ROBOINVESTOR_ENABLED`, not a standalone environment variable. It controls whether the extensions database engine is active at all. (The legacy `LEDGER_ENABLED` / `INVESTOR_ENABLED` names have been retired; use the `ROBO*` names.)
+
+The database that engine opens is configured with **`EXTENSIONS_DATABASE_URL`** — a database separate from the platform's `DATABASE_URL`, with its own independent migration history (both live on the same RDS instance in deployed environments). Tenancy inside it is **schema-per-graph**: each request sets `search_path` to the graph's own schema with `public` as the fallback, so a graph's rows are never visible from another graph's session.
+
+**The GraphQL schema is composed per deployment.** A baseline set of query fields is always present (information blocks, taxonomy blocks, and the library), and the domain-specific field sets are added only when their flag is on:
+
+- `ROBOLEDGER_ENABLED` adds the 42 ledger query fields (`entity`, `trialBalance`, `fiscalCalendar`, `reconciliations`, `reports`, `mappings`, and more).
+- `ROBOINVESTOR_ENABLED` adds the investor query fields (`portfolios`, `securities`, `positions`, `holdings`, and related).
+
+Because the schema is built at construction time, a ledger-only deployment literally has no `portfolios` field — introspection never reveals it, and clients should branch on the introspected schema rather than discovering disabled domains through trial-and-error runtime errors. Note that the analytical view operations in `views.py` are gated by `FACT_GRID_ENABLED` independently of `ROBOLEDGER_ENABLED`: they are mounted under the `/extensions/roboledger/...` path but stay available on deployments (such as SEC-only setups) that have no RoboLedger tenants. The OLTP-backed read operation `live-financial-statement` sits on the same path but follows `ROBOLEDGER_ENABLED`.
+
+## The OperationEnvelope Contract
+
+Command writes and analytical view operations return the same `OperationEnvelope`, and accept the same `Idempotency-Key` header, as the graph lifecycle operations under `/v1/graphs/{graph_id}/operations/{op_name}`; long-running commands return `status: "pending"` and are followed over SSE. The views in `views.py` accept the key and don't replay on it: a read has nothing to deduplicate, so each call runs fresh. The field reference, idempotency rules, failure shapes, and progress events are in [Operations Contract](Operations-Contract.md).
+
+## One Invariant: The Ops Layer Is the Single Source of Truth
+
+All three sub-surfaces — plus the MCP tool layer — delegate to the same domain functions in `operations/{domain}/{reads,commands,views}`. Those functions are the only place domain logic lives:
+
+- **GraphQL resolvers** delegate reads to `operations/{domain}/reads/*`.
+- **Command operation routers** delegate writes to `operations/{domain}/commands/*`.
+- **Analytical view handlers** delegate to `operations/{domain}/views/*`.
+- **MCP tools** (the operational and analytical retrieval planes) call the same ops-layer modules directly.
+
+This invariant is load-bearing: whether a request arrives through GraphQL, a named operation, or an MCP tool, the same function runs and the same business rules are enforced. Adding logic anywhere else — in a router, a resolver, or an MCP handler — is a mistake.
+
+## Worked Examples
+
+All examples assume an API key and a RoboLedger graph — see [Quick Start](Quick-Start.md) for getting both. Set them once:
+
+```bash
+export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
+export GRAPH_ID=kg...               # from GET /v1/graphs or the app's graph selector
+```
+
+### GraphQL Liveness and Auth Probe
+
+The `hello` field is an auth probe that returns no business data — it works on any extensions-enabled graph and is the quickest way to confirm credentials and reachability:
+
+```bash
+curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "{ hello }"}'
+```
+
+### GraphQL Typed Read
+
+The graph is in the URL, so the query carries no `graphId` argument. Field names are camelCase on the wire:
+
+```bash
+curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "{ fiscalCalendar { closedThrough closeTarget } entity { name } }"}'
+```
+
+GraphQL list resolvers take `limit` (per-resolver default, must be 1–1000) and `offset` (default 0, must be ≥ 0). A success returns `{"data": {...}}`; a typed error returns `{"errors": [{"extensions": {"code": "..."}}]}`. Clients should branch on `extensions.code` (for example `UNAUTHENTICATED`, `INVALID_PAGINATION`, `EXTENSION_NOT_PROVISIONED`, `LEDGER_NOT_INITIALIZED`, `INVESTOR_NOT_INITIALIZED`), not on the human-readable message. A valid key without access to the graph never gets that far: it is refused with **HTTP 403** before the query runs, with no GraphQL error body. The full code list is in [GraphQL Reads](GraphQL-Reads.md#error-surface).
+
+### Command Write — Close a Period
+
+A RoboLedger command write returns an `OperationEnvelope` and supports `Idempotency-Key`:
+
+```bash
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/close-period" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Idempotency-Key: $(date +%s)" \
+  -H "Content-Type: application/json" \
+  -d '{"period": "2026-03", "allow_stale_sync": false}'
+```
+
+### Analytical View Operation — build-fact-grid
+
+A graph-backed analytical view over the XBRL hypercube. It hits the materialized LadybugDB graph rather than the OLTP database. This example compares two filers on the SEC shared repository:
+
+```bash
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/sec/operations/build-fact-grid" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "canonical_concepts": ["revenue"],
+        "entities": ["NVDA", "AMD"],
+        "form": "10-K",
+        "fiscal_year": 2024,
+        "fiscal_period": "FY",
+        "view_config": {"rows": [{"type": "entity"}]}
+      }'
+```
+
+**Important:** `build-fact-grid` requires a scoping filter. You must supply `elements` and/or `canonical_concepts`, **and** at least one of `periods` / `period_type` / `fiscal_year`. Omitting both classes of filter returns HTTP 400.
+
+On your own ledger's graph, select by `elements` (qnames such as `rs-gaap:Assets`) with `periods` or `period_type`. Canonical concepts and the `form`, `fiscal_year` and `fiscal_period` filters are written by the shared-repository pipeline and are not on a ledger's graph:
+
+```bash
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/build-fact-grid" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"elements": ["rs-gaap:Assets"], "period_type": "instant"}'
+```
+
+### RoboInvestor Command Write — Create a Security
+
+RoboInvestor writes go through the same operation surface under the `roboinvestor` path segment, and require a deployment with `ROBOINVESTOR_ENABLED` (on robosystems.ai it is) and a graph that carries the `roboinvestor` extension:
+
+```bash
+curl -X POST "https://api.robosystems.ai/extensions/roboinvestor/$GRAPH_ID/operations/create-security" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Acme Common Stock", "security_type": "common_stock"}'
+```
+
+For the exact request-body fields of any operation, consult the [extensions API reference](https://robosystems.ai/docs/extensions) rather than guessing — it carries a page per operation, generated from the live specification.
+
+## Gotchas
+
+- **GraphQL takes no `graphId` argument.** Use `{ entity { … } }`, never `{ entity(graphId: "kg_x") }`. The graph is the URL.
+- **Use `X-API-Key` for API calls**, not `Authorization: Bearer`. Send the key as a header, never in the URL.
+- **The analytical views in `views.py` (`build-fact-grid`, `financial-statement-analysis` and the five read-whole views) are gated by `FACT_GRID_ENABLED`, not `ROBOLEDGER_ENABLED`.** They live under the `/extensions/roboledger/...` path but are flagged independently, so they remain available on SEC-only deployments. `live-financial-statement`, which reads the OLTP database rather than the graph, follows `ROBOLEDGER_ENABLED` like the command writes.
+- **Subgraph IDs are rejected on GraphQL and the command operations with HTTP 403.** They match the path pattern, so the failure surfaces at runtime rather than as a validation error. Target the parent graph. The seven analytical view operations accept them; `live-financial-statement` does not.
+- **`build-fact-grid` requires a scoping filter** — `elements` and/or `canonical_concepts`, plus at least one of `periods` / `period_type` / `fiscal_year`, or you get HTTP 400.
+- **A GraphQL "error" can still return HTTP 200.** Anonymous introspection is allowed, so an unauthenticated request can return a `200` with an `UNAUTHENTICATED` error code in `extensions.code`; HTTP 401 means credentials were presented but invalid.
+- **Idempotency conflicts return HTTP 409** when the same key is reused with a different request body. Identical replays return `idempotentReplay: true` without re-executing.
+- **Async commands return HTTP 202 with `status: "pending"`.** Monitor them over SSE at `/v1/operations/{operationId}/stream`; do not expect the result inline.
+- **Disabled-domain fields are simply absent.** Branch on the introspected schema, not on trial-and-error runtime errors.
+- **Pagination bounds are enforced.** `limit` must be 1–1000 or the resolver returns `INVALID_PAGINATION`.
+
+## Related Documentation
+
+**Guides:**
+- **[Architecture Overview](Architecture-Overview.md)** - Platform architecture; its "Extensions API" subsection is the parent context for this page
+- **[Operations Contract](Operations-Contract.md)** - The envelope, idempotency, and progress-streaming contract shared by every operation
+- **[Errors and Rate Limits](Errors-and-Rate-Limits.md)** - Error bodies, status codes, and rate-limit headers
+- **[GraphQL Reads](GraphQL-Reads.md)** - Deep dive on the typed read surface and field catalog
+- **[RoboLedger Operations](RoboLedger-Operations.md)** - The RoboLedger command operation catalog
+- **[RoboInvestor Operations](RoboInvestor-Operations.md)** - The RoboInvestor command operation catalog
+- **[RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough.md)** - End-to-end close and reporting workflow against synthetic data
+
+**Codebase Documentation:**
+- **[GraphQL Extensions](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)** - Strawberry GraphQL surface, Pydantic auto-derivation, and resolver patterns
+- **[Operations](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md)** - The reads/commands/views domain kernel that all sub-surfaces delegate to
+- **[Authentication](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/middleware/auth/README.md)** - API key and JWT authentication
+- **[API Models](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/models/api/README.md)** - Pydantic request/response models for the operation surface
+- **[Extensions API reference](https://robosystems.ai/docs/extensions)** - The full extensions endpoint surface, generated from the live OpenAPI spec
+
+## Support
+
+- [Issues](https://github.com/RoboFinSystems/robosystems/issues)
+- [Technical docs](Home.md)
+- [Projects](https://github.com/orgs/RoboFinSystems/projects)
+- [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

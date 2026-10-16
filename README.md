@@ -270,7 +270,7 @@ Details: [Enterprise SSO & SCIM](https://robosystems.ai/docs/technical/enterpris
 
 A curated knowledge graph of US public company financial data from SEC EDGAR XBRL filings. Runs on the shared LadybugDB tier, accessible via MCP tools, Cypher queries, and the AI Operator.
 
-The full corpus is also published monthly as one LadybugDB file on Hugging Face — [robosystems/sec-xbrl-knowledge-graphs](https://huggingface.co/datasets/robosystems/sec-xbrl-knowledge-graphs) (tens of GiB to download, well over 100 GiB on disk; the dataset card carries each snapshot's exact sizes). `just sec-dump` pulls it into `data/lbug-dbs` for local Cypher, API, and MCP with no pipeline run; see the [SEC XBRL Pipeline](https://robosystems.ai/docs/technical/sec-xbrl-pipeline) wiki page.
+The full corpus is also published monthly as one LadybugDB file on Hugging Face — [robosystems/sec-xbrl-knowledge-graphs](https://huggingface.co/datasets/robosystems/sec-xbrl-knowledge-graphs) (tens of GiB to download, well over 100 GiB on disk; the dataset card carries each snapshot's exact sizes). `just sec-dump` pulls it into `data/lbug-dbs` for local Cypher, API, and MCP with no pipeline run; see the [SEC XBRL Pipeline](https://robosystems.ai/docs/technical/sec-xbrl-pipeline) guide.
 
 - **Pipeline**: EDGAR → Download → Process (Parquet) → Stage (DuckDB) → Enrich (Icebug+fastembed) → Materialize (LadybugDB) → Index + Embed (OpenSearch)
 - **Graph**: the base schema plus the `roboledger` extension — 20 node types and 41 relationship types modeling the full XBRL reporting hierarchy
@@ -315,7 +315,7 @@ claude mcp add --transport http robosystems-sec \
 
 **Claude (claude.ai / Desktop)** — Settings → Connectors → Add custom connector with `https://api.robosystems.ai/v1/mcp` (or a per-graph URL): Claude detects OAuth and you pick the graph at sign-in. The **MCP page** in the app (`/connect`) has every snippet filled in for the selected graph, and mints graph-scoped keys for header-only clients.
 
-- **Documentation**: [Wiki guide](https://robosystems.ai/docs/technical/ai-operators-and-mcp) | [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) (proxy mode) for clients without HTTP transport support
+- **Documentation**: [AI Operators and MCP](https://robosystems.ai/docs/technical/ai-operators-and-mcp) | [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) (proxy mode) for clients without HTTP transport support
 
 ### TypeScript/JavaScript Client
 
