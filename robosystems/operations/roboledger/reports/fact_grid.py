@@ -95,6 +95,10 @@ class FactRow:
   is_subtotal: bool = False
   is_abstract: bool = False
   depth: int = 0
+  # The row's place in the Style's full presentation order — post-order over
+  # every node, populated or not — so two grids of one Style merge by it even
+  # when one of them kept none of the rows in between.
+  position: float = 0.0
   # On a roll-forward, ``start`` / ``end`` mark the balance it opens and closes
   # on: one concept on two rows (XBRL's periodStart / periodEnd labels).
   period_role: str | None = None
@@ -557,6 +561,9 @@ def _place_strays_by_calculation(
   for row in rows:
     for stray in placed.pop(row.element_id, ()):
       stray.depth = row.depth + 1
+      # Just before its ancestor in the presentation order, where a merge
+      # with another entity's grid keeps it.
+      stray.position = row.position - 0.5
       result.append(stray)
     result.append(row)
   return result
@@ -2121,6 +2128,8 @@ def _with_opening_balance(
     values=[_unsigned_zero(balance_on.get(_opening_date(p), 0.0)) for p in periods],
     depth=closing.depth,
     period_role="start",
+    # Ahead of every row in the Style's order, where a merge keeps it.
+    position=-1.0,
   )
   return [opening, *rows]
 
@@ -2956,6 +2965,7 @@ def _build_rows(
         is_subtotal=is_subtotal,
         is_abstract=node.is_abstract,
         depth=node.depth,
+        position=len(rows),
       )
     )
 
