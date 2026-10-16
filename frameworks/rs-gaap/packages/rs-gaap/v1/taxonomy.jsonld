@@ -107654,6 +107654,110 @@
       ]
     },
     {
+      "@id": "rs-gaap:InterestPaidNet",
+      "balance": [
+        {
+          "@value": "credit"
+        }
+      ],
+      "periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "rs-gaap"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Interest Paid, Excluding Capitalized Interest, Operating Activities",
+          "@language": "en"
+        }
+      ],
+      "rdfs:comment": [
+        {
+          "@value": "Amount of cash paid for interest, excluding capitalized interest, classified as operating activity.",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:IncomeTaxesPaidNet",
+      "balance": [
+        {
+          "@value": "credit"
+        }
+      ],
+      "periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "rs-gaap"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Income Taxes Paid, Net",
+          "@language": "en"
+        }
+      ],
+      "rdfs:comment": [
+        {
+          "@value": "Amount, after refund, of cash paid to foreign, federal, state, and local jurisdictions as income tax.",
+          "@language": "en"
+        }
+      ]
+    },
+    {
       "@id": "rs-gaap:StockholdersEquityOther",
       "balance": [
         {

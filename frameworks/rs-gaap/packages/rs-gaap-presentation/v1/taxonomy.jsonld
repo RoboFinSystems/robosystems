@@ -21258,6 +21258,34 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-supplemental-interest-paid",
+      "from": {
+        "@id": "rs-gaap:SupplementalCashFlowInformationAbstract"
+      },
+      "to": {
+        "@id": "rs-gaap:InterestPaidNet"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30500.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-supplemental-taxes-paid",
+      "from": {
+        "@id": "rs-gaap:SupplementalCashFlowInformationAbstract"
+      },
+      "to": {
+        "@id": "rs-gaap:IncomeTaxesPaidNet"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30505.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
       "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-nci-1",
       "from": {
         "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
@@ -21468,6 +21496,34 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-supplemental-interest-paid",
+      "from": {
+        "@id": "rs-gaap:SupplementalCashFlowInformationAbstract"
+      },
+      "to": {
+        "@id": "rs-gaap:InterestPaidNet"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30500.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-supplemental-taxes-paid",
+      "from": {
+        "@id": "rs-gaap:SupplementalCashFlowInformationAbstract"
+      },
+      "to": {
+        "@id": "rs-gaap:IncomeTaxesPaidNet"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30505.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
       "@id": "_:rs-gaap-pres-cf-indirect-part-arc-nci-1",
       "from": {
         "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
@@ -21674,6 +21730,34 @@
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
       "order": 30520.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-supplemental-interest-paid",
+      "from": {
+        "@id": "rs-gaap:SupplementalCashFlowInformationAbstract"
+      },
+      "to": {
+        "@id": "rs-gaap:InterestPaidNet"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30500.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-supplemental-taxes-paid",
+      "from": {
+        "@id": "rs-gaap:SupplementalCashFlowInformationAbstract"
+      },
+      "to": {
+        "@id": "rs-gaap:IncomeTaxesPaidNet"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30505.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     }
