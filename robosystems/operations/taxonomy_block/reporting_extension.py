@@ -6,7 +6,7 @@ taxonomy only (no global search); anything else is a ValueError.
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.taxonomy_block import (
@@ -29,6 +29,7 @@ from robosystems.models.extensions import (
 from robosystems.operations.roboledger.commands.taxonomies import (
   assert_mapping_leaf,
 )
+from robosystems.operations.roboledger.reports.calc_dag import EXTENDS_NETWORK_KEY
 from robosystems.operations.taxonomy_block._helpers import (
   qname_for,
   structure_from_request,
@@ -46,6 +47,11 @@ from robosystems.operations.taxonomy_block.rule_persistence import (
   persist_tenant_rules,
 )
 from robosystems.operations.taxonomy_block.rule_reads import project_rules
+from robosystems.operations.taxonomy_block.style_extension import (
+  inherit_parent_traits,
+  resolve_extended_network,
+  validate_extension_network,
+)
 from robosystems.operations.taxonomy_block.update_apply import (
   apply_associations_to_add,
   apply_associations_to_remove,
@@ -66,6 +72,7 @@ from robosystems.operations.taxonomy_block.validators import (
   TaxonomyBlockValidationError,
   validate_create_envelope,
 )
+from robosystems.taxonomy.writer import pull_library_elements
 
 REPORTING_EXTENSION_BLOCK_TYPE = "reporting_extension"
 DISPLAY_NAME = "Reporting Extension"
@@ -76,16 +83,60 @@ CATEGORY = "Reporting"
 def _library_qname_lookup(
   session: Session, parent_taxonomy_id: str, qnames: set[str]
 ) -> dict[str, str]:
-  """Resolve a set of qnames to element ids scoped to the parent library."""
+  """Resolve a set of qnames to element ids scoped to the parent library.
+
+  A library concept the tenant copy curated out is pulled in from the
+  library, so an extension names rs-gaap's concept rather than minting one.
+  """
   if not qnames:
     return {}
-  rows = session.execute(
-    select(Element.qname, Element.id).where(
-      Element.taxonomy_id == parent_taxonomy_id,
-      Element.qname.in_(qnames),
+  found = dict(
+    session.execute(
+      select(Element.qname, Element.id).where(
+        Element.taxonomy_id == parent_taxonomy_id,
+        Element.qname.in_(qnames),
+      )
+    ).all()
+  )
+  missing = set(qnames) - set(found)
+  if missing:
+    schema = session.execute(text("SELECT current_schema()")).scalar()
+    found.update(
+      pull_library_elements(
+        session.connection(), str(schema), parent_taxonomy_id, missing
+      )
     )
-  ).all()
-  return dict(rows)
+  return found
+
+
+def _anchor_extension_networks(
+  session: Session,
+  requests,
+  structures_by_name: dict[str, Structure],
+) -> list[Structure]:
+  """Record the Style network each ``extends_network`` structure layers onto;
+  returns those structures."""
+  extensions: list[Structure] = []
+  for req in requests:
+    if not req.extends_network:
+      continue
+    structure = structures_by_name[req.name]
+    network_id = resolve_extended_network(session, req.extends_network, req.block_type)
+    structure.metadata_ = {
+      **(structure.metadata_ or {}),
+      EXTENDS_NETWORK_KEY: network_id,
+    }
+    extensions.append(structure)
+  return extensions
+
+
+def _validate_extension_networks(session: Session, taxonomy: Taxonomy) -> None:
+  for structure in session.execute(
+    select(Structure).where(
+      Structure.taxonomy_id == taxonomy.id, Structure.is_active.is_(True)
+    )
+  ).scalars():
+    validate_extension_network(session, structure)
 
 
 def create(
@@ -194,6 +245,11 @@ def create(
       )
     elements_by_qname[qname].parent_id = library_id
 
+  session.flush()
+  for req in payload.elements:
+    qname = req.qname or qname_for(payload.standard, "ext", req.code, req.name)
+    inherit_parent_traits(session, elements_by_qname[qname], req.trait)
+
   structures_by_name: dict[str, Structure] = {}
   for req in payload.structures:
     is_chart_mapping(taxonomy, req.block_type)
@@ -203,6 +259,7 @@ def create(
     session.add(structure)
     structures_by_name[req.name] = structure
 
+  _anchor_extension_networks(session, payload.structures, structures_by_name)
   session.flush()
 
   for req in payload.associations:
@@ -242,6 +299,7 @@ def create(
     session.add(association)
 
   session.flush()
+  _validate_extension_networks(session, taxonomy)
 
   emit_auto_rules(
     session,
@@ -330,7 +388,13 @@ def update(
   )
   apply_structures_to_update(session, taxonomy, payload, updated_by)
   new_structures = apply_structures_to_add(session, taxonomy, payload, updated_by)
+  _anchor_extension_networks(session, payload.structures_to_add, new_structures)
   session.flush()
+  added_by_qname = {str(e.qname): e for e in new_elements.values()}
+  for req in payload.elements_to_add:
+    element = added_by_qname.get(req.qname)
+    if element is not None:
+      inherit_parent_traits(session, element, req.trait)
   apply_associations_to_add(
     session,
     taxonomy,
@@ -349,6 +413,7 @@ def update(
   )
   refresh_auto_rules(session, taxonomy, payload, updated_by=updated_by)
   session.flush()
+  _validate_extension_networks(session, taxonomy)
   return taxonomy.id
 
 

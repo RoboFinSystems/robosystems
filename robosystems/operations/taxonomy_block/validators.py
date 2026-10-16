@@ -26,7 +26,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.taxonomy_block import (
@@ -582,7 +582,21 @@ def _load_library_qnames(
       Element.qname.in_(referenced),
     )
   ).all()
-  return {row[0] for row in rows}
+  found = {row[0] for row in rows}
+  # The full library resolves too: the handler pulls in a concept the
+  # tenant copy curated out (``writer.pull_library_elements``).
+  missing = referenced - found
+  if missing:
+    found |= set(
+      session.execute(
+        text(
+          "SELECT qname FROM public.elements "
+          "WHERE taxonomy_id = :tid AND qname = ANY(:qnames)"
+        ),
+        {"tid": payload.parent_taxonomy_id, "qnames": sorted(missing)},
+      ).scalars()
+    )
+  return found
 
 
 def _detect_cycle(arcs: list[tuple[str, str]]) -> list[str] | None:

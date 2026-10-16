@@ -155,13 +155,25 @@ def test_load_calculations_groups_arcs_by_subtotal_target() -> None:
   carry the inputs."""
   session = MagicMock()
   row1 = MagicMock(
-    structure_id="struct_a", from_element_id="t1", to_element_id="s1", weight=1.0
+    is_extension=False,
+    structure_id="struct_a",
+    from_element_id="t1",
+    to_element_id="s1",
+    weight=1.0,
   )
   row2 = MagicMock(
-    structure_id="struct_a", from_element_id="t1", to_element_id="s2", weight=-1.0
+    is_extension=False,
+    structure_id="struct_a",
+    from_element_id="t1",
+    to_element_id="s2",
+    weight=-1.0,
   )
   row3 = MagicMock(
-    structure_id="struct_b", from_element_id="t2", to_element_id="s3", weight=1.0
+    is_extension=False,
+    structure_id="struct_b",
+    from_element_id="t2",
+    to_element_id="s3",
+    weight=1.0,
   )
   result_mock = MagicMock()
   result_mock.__iter__ = lambda self: iter([row1, row2, row3])
@@ -183,16 +195,29 @@ def test_load_calculations_picks_arrangement_whose_summands_are_in_hierarchy() -
   session = MagicMock()
   # IS2 multistep: OpIncome = GrossProfit - OpEx (both in hierarchy)
   is2_row1 = MagicMock(
-    structure_id="is2", from_element_id="opincome", to_element_id="gp", weight=1.0
+    is_extension=False,
+    structure_id="is2",
+    from_element_id="opincome",
+    to_element_id="gp",
+    weight=1.0,
   )
   is2_row2 = MagicMock(
-    structure_id="is2", from_element_id="opincome", to_element_id="opex", weight=-1.0
+    is_extension=False,
+    structure_id="is2",
+    from_element_id="opincome",
+    to_element_id="opex",
+    weight=-1.0,
   )
   # IS11 singlestep: OpIncome = Revenues - CostsAndExpenses (CostsAndExpenses NOT in hierarchy)
   is11_row1 = MagicMock(
-    structure_id="is11", from_element_id="opincome", to_element_id="rev", weight=1.0
+    is_extension=False,
+    structure_id="is11",
+    from_element_id="opincome",
+    to_element_id="rev",
+    weight=1.0,
   )
   is11_row2 = MagicMock(
+    is_extension=False,
     structure_id="is11",
     from_element_id="opincome",
     to_element_id="costs_and_expenses",
@@ -222,18 +247,21 @@ def test_load_calculations_prefers_decomposition_over_identity_check() -> None:
   """
   session = MagicMock()
   identity_summand = MagicMock(
+    is_extension=False,
     structure_id="bs2_identity",
     from_element_id="assets",
     to_element_id="liab_and_equity",
     weight=1.0,
   )
   decomp_a = MagicMock(
+    is_extension=False,
     structure_id="bs3_decomp",
     from_element_id="assets",
     to_element_id="current",
     weight=1.0,
   )
   decomp_b = MagicMock(
+    is_extension=False,
     structure_id="bs3_decomp",
     from_element_id="assets",
     to_element_id="noncurrent",
@@ -255,7 +283,11 @@ def test_load_calculations_defaults_missing_weight_to_one() -> None:
   """Calc arcs with NULL weight default to 1.0 (additive)."""
   session = MagicMock()
   row = MagicMock(
-    structure_id="struct_x", from_element_id="t1", to_element_id="s1", weight=None
+    is_extension=False,
+    structure_id="struct_x",
+    from_element_id="t1",
+    to_element_id="s1",
+    weight=None,
   )
   result_mock = MagicMock()
   result_mock.__iter__ = lambda self: iter([row])

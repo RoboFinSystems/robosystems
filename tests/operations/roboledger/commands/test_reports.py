@@ -57,6 +57,14 @@ class _FakeFacts:
 _PICKER_PATH = (
   "robosystems.operations.roboledger.reports.statement_sets.get_render_network"
 )
+# One structure per network: these statements carry no tenant extension.
+_EXTENSIONS_PATH = (
+  "robosystems.operations.roboledger.reports.statement_sets.network_structure_ids"
+)
+
+
+def _no_extensions(_session, network_id):
+  return [network_id]
 
 
 def test_build_structure_mapping_resolves_each_statement_type_via_picker() -> None:
@@ -85,7 +93,10 @@ def test_build_structure_mapping_resolves_each_statement_type_via_picker() -> No
   ]
   session.execute.return_value.fetchall.return_value = element_rows
 
-  with patch(_PICKER_PATH, side_effect=fake_picker):
+  with (
+    patch(_PICKER_PATH, side_effect=fake_picker),
+    patch(_EXTENSIONS_PATH, side_effect=_no_extensions),
+  ):
     elem_map, fs_map = _build_structure_mapping(session, "025f5d48-style")
 
   # element_to_structures is multi-valued — an element can appear in
@@ -126,7 +137,10 @@ def test_build_structure_mapping_skips_uncomposed_statement_types() -> None:
   ]
   session.execute.return_value.fetchall.return_value = element_rows
 
-  with patch(_PICKER_PATH, side_effect=fake_picker):
+  with (
+    patch(_PICKER_PATH, side_effect=fake_picker),
+    patch(_EXTENSIONS_PATH, side_effect=_no_extensions),
+  ):
     elem_map, fs_map = _build_structure_mapping(session, "style_x")
 
   assert set(fs_map.keys()) == {"struct_bs", "struct_is"}
@@ -142,7 +156,10 @@ def test_build_structure_mapping_returns_empty_when_no_compositions() -> None:
   def fake_picker(_session, _style_id, stmt_type):
     raise NoNetworkForStatementTypeError("empty_style", stmt_type)
 
-  with patch(_PICKER_PATH, side_effect=fake_picker):
+  with (
+    patch(_PICKER_PATH, side_effect=fake_picker),
+    patch(_EXTENSIONS_PATH, side_effect=_no_extensions),
+  ):
     elem_map, fs_map = _build_structure_mapping(session, "empty_style")
 
   assert elem_map == {}
@@ -237,7 +254,10 @@ def test_build_structure_mapping_merges_fact_picked_disclosures() -> None:
   # mapping query over all picked structures.
   session.execute.side_effect = [disclosure_rows, association_rows]
 
-  with patch(_PICKER_PATH, side_effect=fake_picker):
+  with (
+    patch(_PICKER_PATH, side_effect=fake_picker),
+    patch(_EXTENSIONS_PATH, side_effect=_no_extensions),
+  ):
     elem_map, fs_map = _build_structure_mapping(
       session,
       "025f5d48-style",
@@ -272,7 +292,10 @@ def test_build_structure_mapping_without_fact_ids_skips_disclosure_query() -> No
     MagicMock(structure_id="struct_bs", element_id="elem_cash"),
   ]
 
-  with patch(_PICKER_PATH, side_effect=fake_picker):
+  with (
+    patch(_PICKER_PATH, side_effect=fake_picker),
+    patch(_EXTENSIONS_PATH, side_effect=_no_extensions),
+  ):
     _elem_map, fs_map = _build_structure_mapping(session, "025f5d48-style")
 
   assert set(fs_map.keys()) == {"struct_bs", "struct_is", "struct_cf", "struct_se"}

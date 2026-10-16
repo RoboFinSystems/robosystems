@@ -75,16 +75,21 @@ def _presented_on(
   session: Session, reporting_style_id: str, element_ids: Sequence[str]
 ) -> dict[str, set[str]]:
   """Each concept's primary statements under the style, by the presentation
-  arcs of the networks the style composes."""
+  arcs of the networks the style composes and the extensions layered on them."""
   if not element_ids:
     return {}
+  # Lazy: the picker's import chain pulls commands code into this module.
+  from robosystems.operations.roboledger.reports.network_picker import (
+    style_structures_cte,
+  )
+
   rows = session.execute(
-    text("""
-      SELECT a.to_element_id AS element_id, rsn.statement_type
-      FROM reporting_style_networks rsn
-      JOIN associations a ON a.structure_id = rsn.network_id
-      WHERE rsn.reporting_style_id = :rsid
-        AND rsn.statement_type = ANY(:statement_types)
+    text(f"""
+      WITH {style_structures_cte()}
+      SELECT a.to_element_id AS element_id, ss.statement_type
+      FROM style_structures ss
+      JOIN associations a ON a.structure_id = ss.structure_id
+      WHERE ss.statement_type = ANY(:statement_types)
         AND a.association_type = 'presentation'
         AND a.to_element_id = ANY(:ids)
     """),

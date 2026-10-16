@@ -21,6 +21,7 @@ from robosystems.operations.roboledger.entry_status import (
   landed_entry_bindparam,
 )
 from robosystems.operations.roboledger.reports.calc_dag import (
+  EXTENDS_NETWORK_KEY,
   PPE_ACCUMULATED_DEPRECIATION_QNAME,
   PPE_GROSS_QNAME,
   PPE_NET_QNAME,
@@ -2610,6 +2611,7 @@ def _load_reporting_structure(
   from robosystems.operations.roboledger.reports.network_picker import (
     NoNetworkForStatementTypeError,
     get_render_network,
+    network_structure_ids,
   )
 
   try:
@@ -2643,12 +2645,16 @@ def _load_reporting_structure(
         WHERE et.is_primary = TRUE
           AND t.category = 'elementsOfFinancialStatements'
       ) cls ON cls.element_id = e.id
-      WHERE ea.structure_id = :structure_id
+      WHERE ea.structure_id = ANY(:structure_ids)
         AND ea.association_type = 'presentation'
         AND ea.from_element_id != :structure_id
       ORDER BY ea.order_value
     """),
-    {"structure_id": structure_id},
+    # A tenant extension's rows hang under the network's own concepts.
+    {
+      "structure_id": structure_id,
+      "structure_ids": network_structure_ids(session, structure_id),
+    },
   )
 
   children_map: dict[str, list[dict[str, Any]]] = {}
@@ -2799,11 +2805,13 @@ def _load_calculations(
     params = {f"e{i}": eid for i, eid in enumerate(element_ids)}
     result = session.execute(
       text(f"""
-        SELECT structure_id, from_element_id, to_element_id, weight
-        FROM associations
-        WHERE association_type = 'calculation'
-          AND from_element_id IN ({placeholders})
-        ORDER BY structure_id, order_value
+        SELECT a.structure_id, a.from_element_id, a.to_element_id, a.weight,
+               s.metadata ->> '{EXTENDS_NETWORK_KEY}' IS NOT NULL AS is_extension
+        FROM associations a
+        JOIN structures s ON s.id = a.structure_id
+        WHERE a.association_type = 'calculation'
+          AND a.from_element_id IN ({placeholders})
+        ORDER BY a.structure_id, a.order_value
       """),
       params,
     )
@@ -2825,8 +2833,17 @@ def _load_calculations(
   # summands are all in the hierarchy, then pick one per target.
   assert element_ids is not None  # narrowed by the elif above
   by_struct_target: dict[tuple[str, str], list[tuple[str, float]]] = {}
+  # A tenant extension adds summands to the library's arrangement rather than
+  # offering one of its own.
+  extension_summands: dict[str, list[tuple[str, float]]] = {}
   for row in result:
     weight = row.weight if row.weight is not None else 1.0
+    if row.is_extension:
+      if row.to_element_id in element_ids:
+        extension_summands.setdefault(row.from_element_id, []).append(
+          (row.to_element_id, weight)
+        )
+      continue
     by_struct_target.setdefault((row.structure_id, row.from_element_id), []).append(
       (row.to_element_id, weight)
     )
@@ -2842,6 +2859,9 @@ def _load_calculations(
     # (Assets = LiabilitiesAndEquity), meant for validation, not computation.
     candidates.sort(key=lambda c: (-len(c[1]), c[0]))
     calculations[target] = candidates[0][1]
+  for target, summands in extension_summands.items():
+    chosen = calculations.setdefault(target, [])
+    chosen.extend(arc for arc in summands if arc not in chosen)
   return calculations
 
 

@@ -155,6 +155,22 @@ class TaxonomyBlockStructureRequest(BaseModel):
       "holds one mapping per framework."
     ),
   )
+  extends_network: str | None = Field(
+    None,
+    description=(
+      "`reporting_extension` only: the role URI of the Reporting Style network "
+      "this structure extends (e.g. `https://robosystems.ai/seattle/cm-roles/"
+      "roles/rs-gaap-presentation/CashFlow-indirect`). Its arcs then render as "
+      "rows of that statement for every entity whose Style composes it. "
+      "`block_type` must be that network's statement type. A row's parent must "
+      "be on the network, a balance sheet, income statement or cash flow row "
+      "needs a calculation arc from its section subtotal, an equity movement "
+      "hangs from the roll-forward's root, and a tenant concept placed as a row "
+      "must set `parent_ref` to the rs-gaap concept it refines — prefer the "
+      "rs-gaap concept itself (any library concept may be named, including "
+      "ones not yet in this graph)."
+    ),
+  )
   metadata: dict[str, Any] = Field(default_factory=dict)
 
   @model_validator(mode="after")

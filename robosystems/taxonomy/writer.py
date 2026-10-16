@@ -587,6 +587,87 @@ def resync_library_into_tenant(
   )
 
 
+def pull_library_elements(
+  connection: Connection,
+  schema: str,
+  taxonomy_id: str,
+  qnames: set[str],
+  *,
+  source_schema: str = "public",
+) -> dict[str, str]:
+  """Copy library concepts the tenant-exclude curation left out of ``schema``
+  into it, with their labels, references and trait assignments; returns
+  ``qname -> element id`` for those found in ``taxonomy_id``.
+
+  The exclusion list is the default working set, not a ceiling: a tenant that
+  names a library concept (a reporting extension placing it on a statement)
+  gets the library's row, never a copy of its own. Ids are the library's, so
+  the next resync recognises the row, and its library arcs copy once both
+  endpoints are present. Inserts only, so no immutability trigger fires.
+  """
+  if not qnames:
+    return {}
+  params = {"tid": taxonomy_id, "qnames": sorted(qnames)}
+  # ``parent_id`` is a foreign key; a parent still curated out stays out.
+  select_cols = _ELEMENT_COLS.replace(
+    "parent_id, depth",
+    f"CASE WHEN parent_id IN (SELECT id FROM {schema}.elements) "
+    "THEN parent_id END AS parent_id, depth",
+  )
+  assert select_cols != _ELEMENT_COLS
+  connection.execute(
+    text(f"""
+      INSERT INTO {schema}.elements ({_ELEMENT_COLS})
+      SELECT {select_cols} FROM {source_schema}.elements
+      WHERE taxonomy_id = :tid AND qname = ANY(:qnames)
+      ON CONFLICT (id) DO NOTHING
+    """),
+    params,
+  )
+  pulled = {
+    str(row.qname): str(row.id)
+    for row in connection.execute(
+      text(f"""
+        SELECT id, qname FROM {schema}.elements
+        WHERE taxonomy_id = :tid AND qname = ANY(:qnames)
+      """),
+      params,
+    )
+  }
+  if not pulled:
+    return {}
+  ids = {"ids": list(pulled.values())}
+  connection.execute(
+    text(f"""
+      INSERT INTO {schema}.element_labels ({_ELEMENT_LABEL_COLS})
+      SELECT {_ELEMENT_LABEL_COLS} FROM {source_schema}.element_labels
+      WHERE element_id = ANY(:ids)
+      ON CONFLICT (id) DO NOTHING
+    """),
+    ids,
+  )
+  connection.execute(
+    text(f"""
+      INSERT INTO {schema}.element_references ({_ELEMENT_REFERENCE_COLS})
+      SELECT {_ELEMENT_REFERENCE_COLS} FROM {source_schema}.element_references
+      WHERE element_id = ANY(:ids)
+      ON CONFLICT (id) DO NOTHING
+    """),
+    ids,
+  )
+  connection.execute(
+    text(f"""
+      INSERT INTO {schema}.element_traits ({_ELEMENT_TRAIT_COLS})
+      SELECT {_ELEMENT_TRAIT_COLS} FROM {source_schema}.element_traits
+      WHERE element_id = ANY(:ids)
+        AND trait_id IN (SELECT id FROM {schema}.traits)
+      ON CONFLICT DO NOTHING
+    """),
+    ids,
+  )
+  return pulled
+
+
 def find_unsourced_library_arcs(
   connection: Connection,
   schema: str,

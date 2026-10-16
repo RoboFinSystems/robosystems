@@ -48,6 +48,7 @@ from robosystems.operations.roboledger.reports.network_picker import (
   get_render_network,
   load_close_target_concept,
   load_entity_reporting_style,
+  network_structure_ids,
 )
 from robosystems.operations.taxonomy_block.coa_mappings import (
   BOOK_FRAMEWORK,
@@ -191,6 +192,9 @@ def _build_structure_mapping(
   element_to_structures: dict[str, list[str]] = {}
   structure_to_factset: dict[str, str] = {}
   picked_structure_ids: list[str] = []
+  # A tenant extension's arcs read as its network's: its rows' facts land in
+  # the statement's fact set, where the statement renders from.
+  owner_of: dict[str, str] = {}
 
   for statement_type in _RENDER_TARGET_STATEMENT_TYPES:
     try:
@@ -199,6 +203,8 @@ def _build_structure_mapping(
       # Optional for this Style; change-reporting-style validates required ones.
       continue
     picked_structure_ids.append(network.structure_id)
+    for sid in network_structure_ids(session, network.structure_id):
+      owner_of[sid] = network.structure_id
 
   if taxonomy_id is not None:
     for disclosure_id in _pick_disclosure_structures(
@@ -224,11 +230,19 @@ def _build_structure_mapping(
       WHERE a.structure_id = ANY(:struct_ids) AND a.from_element_id IS NOT NULL
       """
     ),
-    {"struct_ids": picked_structure_ids},
+    {
+      "struct_ids": [
+        *picked_structure_ids,
+        *(set(owner_of) - set(picked_structure_ids)),
+      ]
+    },
   ).fetchall()
 
   for row in rows:
-    element_to_structures.setdefault(row.element_id, []).append(row.structure_id)
+    owner = owner_of.get(row.structure_id, row.structure_id)
+    owners = element_to_structures.setdefault(row.element_id, [])
+    if owner not in owners:
+      owners.append(owner)
   structure_to_factset = {
     sid: generate_prefixed_ulid("fs") for sid in picked_structure_ids
   }

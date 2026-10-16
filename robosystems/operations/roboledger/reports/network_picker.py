@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from robosystems.config.constants import ReportingStyleConstants
 from robosystems.operations.roboledger.entity_scope import resolve_entity_id
+from robosystems.operations.roboledger.reports.calc_dag import EXTENDS_NETWORK_KEY
 
 DEFAULT_STYLE_ID = ReportingStyleConstants.DEFAULT_STYLE_ID
 
@@ -74,13 +75,50 @@ def get_render_network(
   )
 
 
+def network_structure_ids(session: Session, network_id: str) -> list[str]:
+  """The network and every active extension layered onto it, the network
+  first. Read a statement's arcs from all of them."""
+  extensions = session.execute(
+    text(
+      """
+      SELECT id FROM structures
+      WHERE metadata ->> :key = :nid AND is_active = true
+      ORDER BY created_at, id
+      """
+    ),
+    {"key": EXTENDS_NETWORK_KEY, "nid": network_id},
+  ).scalars()
+  return [network_id, *(str(sid) for sid in extensions)]
+
+
+def style_structures_cte(style_param: str = "rsid") -> str:
+  """A ``style_structures (structure_id, statement_type)`` CTE body: every
+  network a Reporting Style composes, plus the extensions layered onto them.
+  Callers bind ``:<style_param>``."""
+  return f"""
+    style_structures AS (
+      SELECT rsn.network_id AS structure_id, rsn.statement_type
+      FROM reporting_style_networks rsn
+      WHERE rsn.reporting_style_id = :{style_param}
+      UNION ALL
+      SELECT s.id AS structure_id, rsn.statement_type
+      FROM reporting_style_networks rsn
+      JOIN structures s
+        ON s.metadata ->> '{EXTENDS_NETWORK_KEY}' = rsn.network_id
+        AND s.is_active = true
+      WHERE rsn.reporting_style_id = :{style_param}
+    )
+  """
+
+
 def taggable_flow_qnames(session: Session, reporting_style_id: str) -> set[str]:
   """The investing and financing flows a Reporting Style's cash flow
   statement presents as leaf rows that also foot a subtotal.
 
   These are the flows a line may be tagged with and the ones a default may
-  land on: a flow outside the set computes a fact no row shows. Empty when
-  the Style composes no cash flow network.
+  land on: a flow outside the set computes a fact no row shows. Rows a
+  tenant extension layers onto the network count. Empty when the Style
+  composes no cash flow network.
   """
   try:
     network = get_render_network(session, reporting_style_id, "cash_flow_statement")
@@ -92,11 +130,11 @@ def taggable_flow_qnames(session: Session, reporting_style_id: str) -> set[str]:
       SELECT e.qname
       FROM associations p
       JOIN elements e ON e.id = p.to_element_id
-      WHERE p.structure_id = :sid
+      WHERE p.structure_id = ANY(:sids)
         AND p.association_type = 'presentation'
         AND NOT EXISTS (
           SELECT 1 FROM associations c
-          WHERE c.structure_id = :sid
+          WHERE c.structure_id = ANY(:sids)
             AND c.association_type = 'presentation'
             AND c.from_element_id = p.to_element_id
         )
@@ -116,7 +154,7 @@ def taggable_flow_qnames(session: Session, reporting_style_id: str) -> set[str]:
         )
       """
     ),
-    {"sid": network.structure_id},
+    {"sids": network_structure_ids(session, network.structure_id)},
   ).fetchall()
   return {str(r.qname) for r in rows}
 
