@@ -83,11 +83,9 @@ LIVE_STATEMENT_TYPES: tuple[str, ...] = (
   "equity_statement",
 )
 
-# The subset offered to an AI operator. ``equity_statement`` renders equity
-# balances, not a rollforward, so it stays off MCP until it articulates.
-MCP_LIVE_STATEMENT_TYPES: tuple[str, ...] = tuple(
-  t for t in LIVE_STATEMENT_TYPES if t != "equity_statement"
-)
+# The statements offered to an AI operator: every live statement, the equity
+# roll-forward included now that it articulates.
+MCP_LIVE_STATEMENT_TYPES: tuple[str, ...] = LIVE_STATEMENT_TYPES
 
 ANALYSIS_STATEMENT_TYPES: tuple[str, ...] = (
   "income_statement",
@@ -857,6 +855,7 @@ def get_statement(
       values=r.values,
       is_subtotal=r.is_subtotal,
       depth=r.depth,
+      period_role=r.period_role,
     )
     for r in grid.rows
     if not r.is_abstract
@@ -1004,6 +1003,12 @@ def _combined_statement(
   return base, unmapped_count, combined
 
 
+def _row_key(row) -> tuple[str, str | None]:
+  """A row's identity across grids: its concept, and on a roll-forward which
+  of the two balances it is."""
+  return row.element_qname, row.period_role
+
+
 def _add_into(base: FactGrid, other: FactGrid) -> None:
   """Sum ``other``'s rows into ``base``'s, matched by concept. Both come from
   the same Style, so the two row lists are subsequences of one presentation
@@ -1011,19 +1016,19 @@ def _add_into(base: FactGrid, other: FactGrid) -> None:
   goes where that order puts it, right after the nearest preceding row the
   two share, so it stays a child of its subtotal rather than a stray after
   the total."""
-  position: dict[str, int] = {}
+  position: dict[tuple[str, str | None], int] = {}
   for index, row in enumerate(base.rows):
-    position.setdefault(row.element_qname, index)
+    position.setdefault(_row_key(row), index)
   cursor = -1
   for row in other.rows:
-    at = position.get(row.element_qname)
+    at = position.get(_row_key(row))
     if at is None:
       at = cursor + 1
       base.rows.insert(at, row)
-      for qname, index in position.items():
+      for key, index in position.items():
         if index >= at:
-          position[qname] = index + 1
-      position[row.element_qname] = at
+          position[key] = index + 1
+      position[_row_key(row)] = at
     else:
       target = base.rows[at]
       target.values = [
@@ -1091,7 +1096,9 @@ def get_live_financial_statement(
     if row.is_abstract:
       continue
     values = row.values
-    if not any(v != 0.0 for v in values):
+    # A roll-forward's balances stay even at zero: a company's first period
+    # opens on nothing.
+    if row.period_role is None and not any(v != 0.0 for v in values):
       continue
     facts.append(
       LiveStatementFactRow(
@@ -1101,6 +1108,7 @@ def get_live_financial_statement(
         values=values,
         depth=row.depth,
         is_subtotal=row.is_subtotal,
+        period_role=row.period_role,
       )
     )
 

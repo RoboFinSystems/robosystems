@@ -2,13 +2,13 @@
 
 Under the rs-gaap-anchored architecture, the roll-forward hangs directly
 off ``rs-gaap:StockholdersEquity`` — no fac scaffolding. The activity arcs
-are the rs-gaap concepts the statement displays as change rows: NetIncomeLoss,
-OCI, issuance, repurchase, share-based compensation, dividends.
+are the rs-gaap concepts the statement displays as change rows: net income,
+OCI, and the equity movement concepts, which are not the cash flow's.
 
 These tests guard against:
 - the structure being dropped on a future edit
 - arcs being rewired away from the StockholdersEquity hub
-- the activity concept set shrinking below the six items we ship
+- the activity concept set drifting from the six rows we ship
 """
 
 from __future__ import annotations
@@ -49,9 +49,10 @@ class TestEquityPresentationStructure:
   def test_rollforward_hub_has_activity_arcs(
     self, presentation: TaxonomyPackage
   ) -> None:
-    """The StockholdersEquity hub fans out to the six rs-gaap activity
-    concepts that drive the roll-forward: net income, OCI, issuance,
-    repurchase, share-based compensation, dividends."""
+    """The StockholdersEquity hub fans out to the roll-forward's change
+    rows: net income, OCI, and the equity movement concepts — stock issued,
+    stock repurchased, dividends, other. None of them is a cash flow concept:
+    an equity movement need not move cash."""
     arcs_from_hub = [
       a
       for a in presentation.associations
@@ -59,16 +60,14 @@ class TestEquityPresentationStructure:
     ]
     activity_targets = {a.to_qname for a in arcs_from_hub}
 
-    required = {
+    assert activity_targets == {
       "rs-gaap:NetIncomeLoss",
       "rs-gaap:OtherComprehensiveIncomeLossNetOfTax",
-      "rs-gaap:ProceedsFromIssuanceOfCommonStock",
-      "rs-gaap:PaymentsForRepurchaseOfCommonStock",
-      "rs-gaap:ShareBasedCompensation",
-      "rs-gaap:PaymentsOfDividends",
+      "rs-gaap:StockIssuedDuringPeriodValueNewIssues",
+      "rs-gaap:StockRepurchasedDuringPeriodValue",
+      "rs-gaap:Dividends",
+      "rs-gaap:StockholdersEquityOther",
     }
-    missing = required - activity_targets
-    assert not missing, f"rollforward missing activity arcs to: {missing}"
 
 
 _PRES = "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation"

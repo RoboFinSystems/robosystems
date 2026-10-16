@@ -95,6 +95,9 @@ class FactRow:
   is_subtotal: bool = False
   is_abstract: bool = False
   depth: int = 0
+  # On a roll-forward, ``start`` / ``end`` mark the balance it opens and closes
+  # on: one concept on two rows (XBRL's periodStart / periodEnd labels).
+  period_role: str | None = None
 
 
 @dataclass
@@ -142,66 +145,16 @@ def generate_report_facts(
   facts: list[ReportFact] = []
 
   for period in periods:
-    balances = _read_mapped_balances(
-      session,
-      mapping_id,
-      period.start,
-      period.end,
-      arc_type=arc_type,
-      entity_id=entity_id,
-    )
-    for balance in balances.values():
-      facts.append(
-        ReportFact(
-          element_id=balance.element_id,
-          element_qname=balance.qname,
-          element_name=balance.name,
-          classification=balance.classification,
-          balance_type=balance.balance_type,
-          value=_natural_sign(balance.net_balance, balance.balance_type),
-          period_start=period.start,
-          period_end=period.end,
-          period_type=balance.period_type or _infer_period_type(balance.classification),
-          close_value=(
-            _natural_sign(balance.close_net_balance, balance.balance_type)
-            if balance.close_net_balance is not None
-            else None
-          ),
-          source_values={
-            source_id: _natural_sign(net, balance.balance_type)
-            for source_id, net in balance.by_source.items()
-          },
-        )
+    facts.extend(
+      _period_balance_facts(
+        session,
+        mapping_id,
+        period.start,
+        period.end,
+        arc_type=arc_type,
+        close_target_qname=close_target_qname,
+        entity_id=entity_id,
       )
-
-    # Seed zero facts for mapped equity targets with no postings yet, so
-    # the close finds the RE-shaped target instead of falling back to APIC.
-    _append_empty_equity_facts(
-      session,
-      mapping_id,
-      facts,
-      period.start,
-      period.end,
-      arc_type=arc_type,
-      close_target_qname=close_target_qname,
-    )
-
-    # No-op where real closing entries already zeroed rev/exp.
-    _close_to_retained_earnings(
-      facts, period.start, period.end, close_target_qname=close_target_qname
-    )
-
-    # Runs from inception: real closing entries already zeroed what they
-    # closed, so cumulative rev - exp is only the still-unclosed portion.
-    _close_prior_periods_to_retained_earnings(
-      session,
-      mapping_id,
-      facts,
-      period.start,
-      period.end,
-      arc_type=arc_type,
-      close_target_qname=close_target_qname,
-      entity_id=entity_id,
     )
 
   # NetIncomeLoss as its own fact: the IS bottom line and the first child
@@ -217,6 +170,11 @@ def generate_report_facts(
   # the ΔBS derivation for these leaves.
   flow_ids = _emit_flow_facts(session, facts, periods, mapping_id, arc_type, entity_id)
   warnings = _flows_without_a_row(session, facts, flow_ids, entity_id)
+
+  # The equity statement's movement rows, from every equity line, cash or not.
+  _emit_equity_movement_facts(
+    session, facts, periods, mapping_id, arc_type, entity_id, close_target_qname
+  )
 
   # Balances the day before each period starts, where that is not the previous
   # column's end (year-over-year, YTD, rolling). The cash flow measures change
@@ -237,6 +195,11 @@ def generate_report_facts(
 
   # Warning-only: a mismatch flags incomplete investing/financing attribution.
   _check_cash_flow_tie_out(facts, periods, opening_facts)
+
+  # Last, so no step above reads a balance dated outside every column.
+  _emit_opening_equity_facts(
+    session, facts, periods, mapping_id, arc_type, entity_id, close_target_qname
+  )
 
   unmapped_count = _count_unmapped(session, mapping_id, arc_type=arc_type)
 
@@ -300,6 +263,85 @@ def _flows_without_a_row(
   ]
 
 
+def _period_balance_facts(
+  session: Session,
+  mapping_id: str,
+  period_start: date,
+  period_end: date,
+  *,
+  arc_type: str,
+  close_target_qname: str,
+  entity_id: str | None,
+) -> list[ReportFact]:
+  """One column's mapped balances, with earnings closed to the Style's
+  earnings home: instants through ``period_end``, durations over the period.
+  A one-day column (``period_start == period_end``) is the balance sheet as of
+  that day."""
+  facts: list[ReportFact] = []
+  balances = _read_mapped_balances(
+    session,
+    mapping_id,
+    period_start,
+    period_end,
+    arc_type=arc_type,
+    entity_id=entity_id,
+  )
+  for balance in balances.values():
+    facts.append(
+      ReportFact(
+        element_id=balance.element_id,
+        element_qname=balance.qname,
+        element_name=balance.name,
+        classification=balance.classification,
+        balance_type=balance.balance_type,
+        value=_natural_sign(balance.net_balance, balance.balance_type),
+        period_start=period_start,
+        period_end=period_end,
+        period_type=balance.period_type or _infer_period_type(balance.classification),
+        close_value=(
+          _natural_sign(balance.close_net_balance, balance.balance_type)
+          if balance.close_net_balance is not None
+          else None
+        ),
+        source_values={
+          source_id: _natural_sign(net, balance.balance_type)
+          for source_id, net in balance.by_source.items()
+        },
+      )
+    )
+
+  # Seed zero facts for mapped equity targets with no postings yet, so
+  # the close finds the RE-shaped target instead of falling back to APIC.
+  _append_empty_equity_facts(
+    session,
+    mapping_id,
+    facts,
+    period_start,
+    period_end,
+    arc_type=arc_type,
+    close_target_qname=close_target_qname,
+  )
+
+  # No-op where real closing entries already zeroed rev/exp.
+  _close_to_retained_earnings(
+    facts, period_start, period_end, close_target_qname=close_target_qname
+  )
+
+  # Runs from inception: real closing entries already zeroed what they
+  # closed, so cumulative rev - exp is only the still-unclosed portion.
+  _close_prior_periods_to_retained_earnings(
+    session,
+    mapping_id,
+    facts,
+    period_start,
+    period_end,
+    arc_type=arc_type,
+    close_target_qname=close_target_qname,
+    entity_id=entity_id,
+  )
+  return facts
+
+
 # ── Stage 2: Render structure view ───────────────────────────────────────
 
 
@@ -353,6 +395,8 @@ def render_structure_view(
       session, {f.element_id for f in strays}, {row.element_id for row in rows}
     )
     rows = _place_strays_by_calculation(rows, strays, periods, ancestry)
+  if block_type == "equity_statement":
+    rows = _with_opening_balance(rows, facts, periods)
 
   return FactGrid(
     structure_id=structure_id,
@@ -1762,6 +1806,387 @@ def _check_cash_flow_tie_out(
         delta_cash,
         residual,
       )
+
+
+# ── Equity roll-forward ───────────────────────────────────────────────────
+
+# The equity statement's change rows are their own concepts, not the cash
+# flow's: an owner who pays a company liability directly has contributed
+# capital and moved no company cash. Each roll-forward roots at the Style's
+# capital concept; the corporate one sums its components through the calc DAG.
+_CORPORATE_EQUITY_ROOT = "rs-gaap:StockholdersEquity"
+_CAPITAL_ACCOUNT_ROOTS: frozenset[str] = frozenset(
+  {"rs-gaap:PartnersCapital", "rs-gaap:MembersEquity"}
+)
+EQUITY_ROLLFORWARD_ROOTS: frozenset[str] = _CAPITAL_ACCOUNT_ROOTS | {
+  _CORPORATE_EQUITY_ROOT
+}
+
+_CORPORATE_MOVEMENTS: dict[str, str] = {
+  "contribution": "rs-gaap:StockIssuedDuringPeriodValueNewIssues",
+  "repurchase": "rs-gaap:StockRepurchasedDuringPeriodValue",
+  "distribution": "rs-gaap:Dividends",
+  "other": "rs-gaap:StockholdersEquityOther",
+}
+# A redemption of units has no row of its own on the capital-account forms.
+_CAPITAL_ACCOUNT_MOVEMENTS: dict[str, str] = {
+  "contribution": "rs-gaap:PartnersCapitalAccountContributions",
+  "repurchase": "rs-gaap:PartnersCapitalOther",
+  "distribution": "rs-gaap:PartnersCapitalAccountDistributions",
+  "other": "rs-gaap:PartnersCapitalOther",
+}
+
+# The equity-side reading of a financing flow: a line tagged, or defaulting
+# to, one of these is that kind of equity movement.
+_FLOW_MOVEMENT_KIND: dict[str, str] = {
+  **dict.fromkeys(
+    (
+      "rs-gaap:ProceedsFromIssuanceOfCommonStock",
+      "rs-gaap:ProceedsFromIssuanceOfPreferredStockAndPreferenceStock",
+      "rs-gaap:ProceedsFromContributedCapital",
+      "rs-gaap:ProceedsFromPartnershipContribution",
+      "rs-gaap:ProceedsFromSaleOfTreasuryStock",
+    ),
+    "contribution",
+  ),
+  **dict.fromkeys(
+    (
+      "rs-gaap:PaymentsForRepurchaseOfCommonStock",
+      "rs-gaap:PaymentsForRepurchaseOfEquity",
+      "rs-gaap:PaymentsForRepurchaseOfPreferredStockAndPreferenceStock",
+    ),
+    "repurchase",
+  ),
+  **dict.fromkeys(
+    (
+      "rs-gaap:PaymentsOfDividends",
+      "rs-gaap:PaymentsOfDividendsCommonStock",
+      "rs-gaap:PaymentsOfDividendsPreferredStockAndPreferenceStock",
+      "rs-gaap:PaymentsOfOrdinaryDividends",
+      "rs-gaap:PaymentsOfCapitalDistribution",
+      "rs-gaap:DistributionsMade",
+      "rs-gaap:DistributionsMadeToLimitedLiabilityCompanyLlcMember",
+      "rs-gaap:DistributionMadeToLimitedLiabilityCompanyLLCMemberCashDistributionsPaid",
+    ),
+    "distribution",
+  ),
+}
+
+# Classifications whose line, beside an equity line, makes the movement an
+# exchange with an owner rather than an entry against income.
+_BALANCE_SHEET_CLASSIFICATIONS = frozenset(
+  {"asset", "liability", "contraAsset", "contraLiability", "temporaryEquity"}
+)
+
+
+def _equity_rollforward_form(close_target_qname: str) -> tuple[str, dict[str, str]]:
+  """The roll-forward's root concept and movement rows for the Style whose
+  earnings close to ``close_target_qname``."""
+  if close_target_qname in _CAPITAL_ACCOUNT_ROOTS:
+    return close_target_qname, _CAPITAL_ACCOUNT_MOVEMENTS
+  return _CORPORATE_EQUITY_ROOT, _CORPORATE_MOVEMENTS
+
+
+def _equity_descendant_weights(
+  calculations: dict[str, list[tuple[str, float]]], root_id: str
+) -> dict[str, float]:
+  """Every concept the root sums, with the weight it enters the root at
+  (the product along its calc path); the root itself at 1."""
+  weights = {root_id: 1.0}
+  pending = [root_id]
+  while pending:
+    parent = pending.pop()
+    for child, weight in calculations.get(parent, ()):
+      if child not in weights:
+        weights[child] = weights[parent] * weight
+        pending.append(child)
+  return weights
+
+
+def _emit_equity_movement_facts(
+  session: Session,
+  facts: list[ReportFact],
+  periods: list[PeriodSpec],
+  mapping_id: str,
+  arc_type: str,
+  entity_id: str | None,
+  close_target_qname: str,
+) -> None:
+  """Append the equity statement's change rows, per period, from every
+  landed line on an account the roll-forward's root sums — cash or not.
+
+  A line's movement is, in order: its flow tag's; the reducer concept its
+  account maps to (a distributions account mapped to ``PaymentsOfDividends``);
+  its account's default financing flow, when the entry exchanges with an
+  owner (moves cash, or settles or brings an asset or liability); otherwise
+  other. So an owner paying the company card is a contribution, and
+  share-based compensation (equity against expense) is other. Values are
+  equity-effect signed, increases positive, as the cash flow's are
+  cash-effect signed, so opening + net income + the rows is the closing
+  balance by construction; the equity validator checks it.
+  """
+  root_qname, movement_qnames = _equity_rollforward_form(close_target_qname)
+  meta = {
+    row.qname: row
+    for row in session.execute(
+      text("SELECT id, qname, name, balance_type FROM elements WHERE qname = ANY(:q)"),
+      {"q": [root_qname, close_target_qname, *movement_qnames.values()]},
+    ).fetchall()
+  }
+  root = meta.get(root_qname)
+  if root is None:
+    return
+  weights = _equity_descendant_weights(load_rs_gaap_calculations(session), root.id)
+  # Reducers fold into the earnings home, so they move the root only when it
+  # sums that home.
+  close_target = meta.get(close_target_qname)
+  reducer_qnames = (
+    sorted(_EQUITY_FLOW_REDUCER_QNAMES)
+    if close_target is not None and close_target.id in weights
+    else []
+  )
+
+  line_sql = text("""
+    SELECT
+      li.entry_id,
+      target.id AS target_id,
+      target.qname AS target_qname,
+      target.balance_type AS target_balance_type,
+      li.debit_amount,
+      li.credit_amount,
+      tag.qname AS tag_qname,
+      (
+        SELECT rf.qname
+        FROM associations darc
+        JOIN elements rf ON rf.id = darc.from_element_id
+        WHERE darc.to_element_id = target.id
+          AND darc.association_type = 'derivation'
+          AND SIGN(darc.weight) = SIGN(li.credit_amount - li.debit_amount)
+        ORDER BY rf.qname
+        LIMIT 1
+      ) AS default_flow_qname
+    FROM line_items li
+    JOIN entries en ON en.id = li.entry_id
+    JOIN associations amap
+      ON amap.from_element_id = li.element_id
+      AND amap.association_type = :arc_type
+      AND amap.structure_id = :mapping_id
+    JOIN elements target ON target.id = amap.to_element_id
+    LEFT JOIN associations fmap
+      ON fmap.from_element_id = li.flow_element_id
+      AND fmap.association_type = :arc_type
+      AND fmap.structure_id = :mapping_id
+    LEFT JOIN elements tag ON tag.id = COALESCE(fmap.to_element_id, li.flow_element_id)
+    WHERE en.status IN :landed_entry_statuses
+      AND (:entity_id IS NULL OR en.entity_id = :entity_id)
+      AND en.posting_date BETWEEN :start AND :end
+      AND (target.id = ANY(:equity_ids) OR target.qname = ANY(:reducer_qnames))
+  """).bindparams(landed_entry_bindparam())
+
+  # What else each entry touches: cash, or a balance-sheet account other than
+  # the root's own equity.
+  counterpart_sql = text("""
+    SELECT
+      li.entry_id,
+      target.id AS target_id,
+      target.qname AS target_qname,
+      target.balance_type AS target_balance_type,
+      tcls.identifier AS classification
+    FROM line_items li
+    JOIN associations amap
+      ON amap.from_element_id = li.element_id
+      AND amap.association_type = :arc_type
+      AND amap.structure_id = :mapping_id
+    JOIN elements target ON target.id = amap.to_element_id
+    LEFT JOIN (
+      SELECT et.element_id, t.identifier
+      FROM element_traits et
+      JOIN traits t ON t.id = et.trait_id
+      WHERE et.is_primary = TRUE
+        AND t.category = 'elementsOfFinancialStatements'
+    ) tcls ON tcls.element_id = target.id
+    WHERE li.entry_id = ANY(:entry_ids)
+  """)
+
+  for period in periods:
+    lines = session.execute(
+      line_sql,
+      {
+        "arc_type": arc_type,
+        "mapping_id": mapping_id,
+        "entity_id": entity_id,
+        "start": period.start,
+        "end": period.end,
+        "equity_ids": list(weights),
+        "reducer_qnames": reducer_qnames,
+      },
+    ).fetchall()
+    if not lines:
+      continue
+
+    exchanges_with_owner: set[str] = set()
+    for row in session.execute(
+      counterpart_sql,
+      {
+        "arc_type": arc_type,
+        "mapping_id": mapping_id,
+        "entry_ids": sorted({line.entry_id for line in lines}),
+      },
+    ):
+      if row.target_id in weights or row.target_qname in reducer_qnames:
+        continue
+      classification = row.classification or _infer_classification(
+        row.target_qname, row.target_balance_type
+      )
+      if (
+        row.target_qname in _CASH_ANCHOR_QNAMES
+        or classification in _BALANCE_SHEET_CLASSIFICATIONS
+      ):
+        exchanges_with_owner.add(row.entry_id)
+
+    totals: dict[str, float] = {}
+    for line in lines:
+      net = cents_to_dollars(line.debit_amount - line.credit_amount)
+      if line.target_qname in reducer_qnames:
+        # The sign the close folds it in with.
+        effect = _natural_sign(net, line.target_balance_type or "debit")
+      else:
+        effect = weights[line.target_id] * _natural_sign(
+          net, line.target_balance_type or "credit"
+        )
+      kind = _FLOW_MOVEMENT_KIND.get(line.tag_qname or "")
+      if kind is None and line.target_qname in reducer_qnames:
+        kind = _FLOW_MOVEMENT_KIND.get(line.target_qname)
+      if kind is None and line.entry_id in exchanges_with_owner:
+        kind = _FLOW_MOVEMENT_KIND.get(line.default_flow_qname or "")
+      qname = movement_qnames[kind or "other"]
+      totals[qname] = totals.get(qname, 0.0) + effect
+
+    for qname, value in totals.items():
+      concept = meta.get(qname)
+      if concept is None or abs(value) < 0.005:
+        continue
+      facts.append(
+        ReportFact(
+          element_id=concept.id,
+          element_qname=qname,
+          element_name=concept.name or qname,
+          classification=None,
+          balance_type=concept.balance_type or "credit",
+          value=value,
+          period_start=period.start,
+          period_end=period.end,
+          period_type="duration",
+        )
+      )
+
+
+def _with_opening_balance(
+  rows: list[FactRow], facts: list[ReportFact], periods: list[PeriodSpec]
+) -> list[FactRow]:
+  """Open an equity roll-forward on its root's balance the day before each
+  column starts, so the statement reads beginning balance + changes = ending
+  balance. The opening is another column's closing where one ends that day,
+  else the instant ``_emit_opening_equity_facts`` stored; none is 0."""
+  closing = next(
+    (r for r in rows if r.element_qname in EQUITY_ROLLFORWARD_ROOTS and r.depth == 0),
+    None,
+  )
+  if closing is None:
+    return rows
+
+  # (end, start) -> value. Two columns can end the same day; the earliest
+  # start wins, as ``_one_column_per_date`` decides for the cash flow.
+  by_context: dict[tuple[date, date | None], float] = {}
+  for f in facts:
+    if f.element_id != closing.element_id or f.period_type != "instant":
+      continue
+    if f.audit_only:
+      continue
+    key = (f.period_end, f.period_start)
+    by_context[key] = by_context.get(key, 0.0) + f.value
+  balance_on: dict[date, float] = {}
+  for end, start in sorted(by_context, key=lambda k: (k[0], k[1] or date.min)):
+    balance_on.setdefault(end, by_context[(end, start)])
+
+  name = closing.element_name
+  closing.element_name = f"{name}, ending balance"
+  closing.period_role = "end"
+  opening = FactRow(
+    element_id=closing.element_id,
+    element_qname=closing.element_qname,
+    element_name=f"{name}, beginning balance",
+    classification=closing.classification,
+    balance_type=closing.balance_type,
+    values=[_unsigned_zero(balance_on.get(_opening_date(p), 0.0)) for p in periods],
+    depth=closing.depth,
+    period_role="start",
+  )
+  return [opening, *rows]
+
+
+def _emit_opening_equity_facts(
+  session: Session,
+  facts: list[ReportFact],
+  periods: list[PeriodSpec],
+  mapping_id: str,
+  arc_type: str,
+  entity_id: str | None,
+  close_target_qname: str,
+) -> None:
+  """Append the roll-forward root's balance the day before each column opens,
+  where no other column ends that day — the earliest column's opening, or
+  every column's on a YTD or rolling layout. It is the same balance the
+  balance sheet would report that day, earnings closed to date, at an instant
+  no column renders."""
+  root_qname, _ = _equity_rollforward_form(close_target_qname)
+  root = session.execute(
+    text("SELECT id, name, balance_type FROM elements WHERE qname = :q"),
+    {"q": root_qname},
+  ).fetchone()
+  if root is None:
+    return
+  calculations = load_rs_gaap_calculations(session)
+  order = topo_sort_calculations(calculations)
+  summed = _equity_descendant_weights(calculations, root.id)
+
+  column_ends = {p.end for p in periods}
+  seen: set[date] = set()
+  for period in sorted(periods, key=lambda p: p.end):
+    opening = _opening_date(period)
+    if opening in column_ends or opening in seen:
+      continue
+    seen.add(opening)
+    day = _period_balance_facts(
+      session,
+      mapping_id,
+      opening,
+      opening,
+      arc_type=arc_type,
+      close_target_qname=close_target_qname,
+      entity_id=entity_id,
+    )
+    balances: dict[str, float] = {}
+    for f in day:
+      if f.period_type == "instant":
+        balances[f.element_id] = balances.get(f.element_id, 0.0) + f.value
+    present = set(balances)
+    computed = resolve_calc_dag(balances, present, calculations, order)
+    if not present & summed.keys():
+      continue
+    facts.append(
+      ReportFact(
+        element_id=root.id,
+        element_qname=root_qname,
+        element_name=root.name or root_qname,
+        classification="equity",
+        balance_type=root.balance_type or "credit",
+        value=computed.get(root.id, 0.0),
+        period_start=opening,
+        period_end=opening,
+        period_type="instant",
+      )
+    )
 
 
 def _count_unmapped(

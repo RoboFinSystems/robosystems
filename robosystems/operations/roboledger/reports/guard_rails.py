@@ -65,8 +65,8 @@ def validate_report(
   ``period_labels`` names the columns of ``rows[*].values``; missing labels
   fall back to ``column N``. ``warnings`` are findings made while the facts
   were generated (a flow no row presents); they are reported, never
-  failures. Block types with no validators (``equity_statement``,
-  ``comprehensive_income``) come back ``inconclusive``.
+  failures. Block types with no validators (``comprehensive_income``) come
+  back ``inconclusive``.
   """
   validator = _VALIDATORS.get(block_type)
   if validator is None:
@@ -363,10 +363,47 @@ def _validate_cash_flow(
   _check_operating_plug(rows, result, column)
 
 
+def _validate_equity_statement(
+  rows: list[FactRow], result: ValidationResult, column: _Column
+) -> None:
+  """Beginning balance + the changes beneath it = ending balance.
+
+  The changes are the closing row's direct children, equity-effect signed,
+  so they foot as a plain sum; the closing row is not their total (the
+  opening is), which is why the subtotal foot check does not apply here.
+  """
+  _note_check(result, "rollforward_articulates")
+  opening = next((r for r in rows if r.period_role == "start"), None)
+  closing = next((r for r in rows if r.period_role == "end"), None)
+  if opening is None or closing is None:
+    _fail(
+      result,
+      "Equity statement validation inconclusive: no beginning or ending "
+      "balance row to roll forward between.",
+    )
+    return
+  changes = sum(
+    _value(r, column.index)
+    for r in rows
+    if r.depth == closing.depth + 1 and not r.is_abstract and r.period_role is None
+  )
+  begin = _value(opening, column.index)
+  end = _value(closing, column.index)
+  diff = abs(begin + changes - end)
+  if diff > _TOLERANCE:
+    _fail(
+      result,
+      f"{column.prefix}Equity does not roll forward: beginning balance "
+      f"({begin:.2f}) + changes ({changes:.2f}) ≠ ending balance ({end:.2f}), "
+      f"difference: {diff:.2f}",
+    )
+
+
 _VALIDATORS: dict[str, _Validator] = {
   "income_statement": _validate_income_statement,
   "balance_sheet": _validate_balance_sheet,
   "cash_flow_statement": _validate_cash_flow,
+  "equity_statement": _validate_equity_statement,
 }
 
 

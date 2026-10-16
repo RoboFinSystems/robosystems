@@ -54,9 +54,8 @@ class TestLiveFinancialStatementToolDefinition:
     assert "income_statement" in enum
     assert "balance_sheet" in enum
     assert "cash_flow_statement" in enum
-    # Served on REST for the app's tab, not offered to an operator until it
-    # articulates — today it is equity balances, not a rollforward.
-    assert "equity_statement" not in enum
+    # Offered now that it rolls forward from a beginning balance.
+    assert "equity_statement" in enum
 
   @pytest.mark.unit
   def test_limit_defaults_to_the_whole_statement(self):
@@ -227,11 +226,38 @@ class TestLiveFinancialStatementToolExecute:
     assert live.call_args.kwargs["limit"] == 1000
 
   @pytest.mark.unit
-  async def test_equity_statement_is_refused_with_a_reason(self):
-    tool = LiveFinancialStatementTool(_make_client())
-    result = await tool.execute({"statement_type": "equity_statement"})
-    assert "rollforward" in result["error"]
-    assert "balance_sheet" in result["error"]
+  async def test_equity_statement_is_rendered(self):
+    """The roll-forward reaches the live statement like the other three."""
+    tool = LiveFinancialStatementTool(_make_client("kg_123"))
+    from robosystems.models.api.extensions.reports import (
+      LiveFinancialStatementResponse,
+    )
+
+    mock_response = LiveFinancialStatementResponse(
+      graph_id="kg_123",
+      statement_type="equity_statement",
+      periods=[],
+      facts=[],
+      fact_count=0,
+    )
+    cm = MagicMock()
+    cm.__enter__.return_value = MagicMock()
+    cm.__exit__.return_value = False
+
+    with (
+      patch(f"{MODULE}.extensions_session", return_value=cm),
+      patch(
+        f"{MODULE}.resolve_reporting_window",
+        return_value=(date(2026, 1, 1), date(2026, 12, 31)),
+      ),
+      patch(
+        f"{MODULE}.get_live_financial_statement", return_value=mock_response
+      ) as live,
+    ):
+      result = await tool.execute({"statement_type": "equity_statement"})
+
+    assert "error" not in result
+    assert live.call_args.kwargs["statement_type"] == "equity_statement"
 
   @pytest.mark.unit
   async def test_missing_statement_type(self):

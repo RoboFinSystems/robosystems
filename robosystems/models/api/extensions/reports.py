@@ -260,6 +260,13 @@ class FactRowResponse(BaseModel):
     0,
     description="Indentation depth in the structure hierarchy (0 = root).",
   )
+  period_role: str | None = Field(
+    None,
+    description=(
+      "On a roll-forward, `start` for the beginning-balance row and `end` "
+      "for the ending-balance row — one concept, two rows. Null elsewhere."
+    ),
+  )
 
 
 class ValidationCheckResponse(BaseModel):
@@ -672,6 +679,13 @@ class LiveStatementFactRow(BaseModel):
   values: list[float | None]
   depth: int = 0
   is_subtotal: bool = False
+  period_role: str | None = Field(
+    None,
+    description=(
+      "On the equity roll-forward, `start` for the beginning-balance row and "
+      "`end` for the ending-balance row. Null elsewhere."
+    ),
+  )
 
 
 class LiveFinancialStatementResponse(BaseModel):

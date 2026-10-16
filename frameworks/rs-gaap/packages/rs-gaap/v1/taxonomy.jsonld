@@ -107271,6 +107271,370 @@
       ]
     },
     {
+      "@id": "rs-gaap:StockIssuedDuringPeriodValueNewIssues",
+      "balance": [
+        {
+          "@value": "credit"
+        }
+      ],
+      "periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "rs-gaap"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Stock Issued During Period, Value, New Issues",
+          "@language": "en"
+        }
+      ],
+      "rdfs:comment": [
+        {
+          "@value": "Equity impact of the value of new stock issued during the period. Includes shares issued in an initial public offering or a secondary public offering.",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:StockRepurchasedDuringPeriodValue",
+      "balance": [
+        {
+          "@value": "debit"
+        }
+      ],
+      "periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "rs-gaap"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Stock Repurchased During Period, Value",
+          "@language": "en"
+        }
+      ],
+      "rdfs:comment": [
+        {
+          "@value": "Equity impact of the value of stock that has been repurchased during the period and has not been retired and is not held in treasury.",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:Dividends",
+      "balance": [
+        {
+          "@value": "debit"
+        }
+      ],
+      "periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "rs-gaap"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Dividends",
+          "@language": "en"
+        }
+      ],
+      "rdfs:comment": [
+        {
+          "@value": "Amount of paid and unpaid cash, stock, and paid-in-kind (PIK) dividends declared, for example, but not limited to, common and preferred stock.",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:StockholdersEquityOther",
+      "balance": [
+        {
+          "@value": "debit"
+        }
+      ],
+      "periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "rs-gaap"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Stockholders' Equity, Other",
+          "@language": "en"
+        }
+      ],
+      "rdfs:comment": [
+        {
+          "@value": "Movements included in the statement of changes in stockholders' equity which are not separately disclosed or provided for elsewhere in the taxonomy.",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:PartnersCapitalAccountContributions",
+      "balance": [
+        {
+          "@value": "credit"
+        }
+      ],
+      "periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "rs-gaap"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Capital Contributions",
+          "@language": "en"
+        }
+      ],
+      "rdfs:comment": [
+        {
+          "@value": "Total contributions made by the partners or members during the period, in cash or otherwise.",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:PartnersCapitalAccountDistributions",
+      "balance": [
+        {
+          "@value": "debit"
+        }
+      ],
+      "periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "rs-gaap"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Capital Distributions",
+          "@language": "en"
+        }
+      ],
+      "rdfs:comment": [
+        {
+          "@value": "Total distributions to the partners or members during the period, in cash or otherwise.",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:PartnersCapitalOther",
+      "balance": [
+        {
+          "@value": "credit"
+        }
+      ],
+      "periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "rs-gaap"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Other Changes in Capital",
+          "@language": "en"
+        }
+      ],
+      "rdfs:comment": [
+        {
+          "@value": "Amount of increase (decrease) in partners' or members' capital classified as other.",
+          "@language": "en"
+        }
+      ]
+    },
+    {
       "@id": "rs-gaap:StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
       "balance": [
         {

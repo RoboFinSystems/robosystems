@@ -125,10 +125,11 @@ class LiveFinancialStatementTool(BaseTool):
 **PARAMETERS:**
 - `entity_id` (optional) — the entity whose books to render; omit for the group parent
 - `consolidated` (optional, default false) — on the group parent, a COMBINED statement, not a consolidation: each entity's statement under the parent's Reporting Style, summed per rs-gaap concept, nothing eliminated between them (an intercompany balance is still in); `combined_entity_ids` on the response names who was summed, and an entity with no mapping yet is left out
-- `statement_type` (required) — one of the three below (a statement of equity is not offered here yet: the live path renders equity balances, not a rollforward)
+- `statement_type` (required) — one of the four below
 - income_statement — Revenue, expenses, net income
 - balance_sheet — Assets, liabilities, equity (instant periods)
 - cash_flow_statement — Operating (indirect: net income + non-cash add-backs + working-capital deltas), investing, financing. Investing/financing leaves resolve from each line's explicit flow tag when present, else from the mapped rs-gaap element's default-flow derivation arc — so untagged QB data renders too, provided the relevant accounts are mapped at the grain the arcs key on (e.g. PP&E Gross for capex). Needs ≥2 periods (current + prior) for the indirect deltas, so the prior period is pivoted as the delta basis and only the current period is rendered.
+- equity_statement — The roll-forward of the Reporting Style's capital (stockholders' equity, partners' capital or members' equity): beginning balance, net income, contributions, distributions or dividends, and other changes, to the ending balance. Every equity line counts, cash or not — an owner paying a company bill directly is a contribution. The two balance rows share the capital concept's qname and are told apart by `period_role` (`start`, `end`).
 - Explicit `period_start` / `period_end` (YYYY-MM-DD) win over everything else
 - `period_type="annual"` + `fiscal_year=2025` → window anchored on the graph's FiscalCalendar
 - `period_type="quarterly"` → current calendar quarter
@@ -137,7 +138,7 @@ class LiveFinancialStatementTool(BaseTool):
 **RETURNS:**
 Facts with element qnames, names, classifications, and values aligned with `periods` — current + prior (equal duration) for income_statement and balance_sheet, current only for cash_flow_statement. Abstract scaffolding rows and all-zero rows are filtered out; subtotals are kept and flagged `is_subtotal`. Capped at `limit` rows (default 1000 — the whole statement).
 
-`validation` is the guard-rail outcome for the rendered columns (`status`: passed | failed | inconclusive; `failures`; `warnings`). Read it before quoting a number: a `failed` status means the statement does not foot or balance, and a warning about 'Other operating capital, net' means the cash flow was made to foot by a reconciling plug — say so rather than presenting the figure as clean.
+`validation` is the guard-rail outcome for the rendered columns (`status`: passed | failed | inconclusive; `failures`; `warnings`). Read it before quoting a number: a `failed` status means the statement does not foot or balance, and a warning about 'Other operating capital, net' means the cash flow was made to foot by a reconciling plug — say so rather than presenting the figure as clean. On the equity statement a failure means beginning balance + changes does not reach the ending balance.
 """,
       "inputSchema": {
         "type": "object",
@@ -194,15 +195,6 @@ Facts with element qnames, names, classifications, and values aligned with `peri
     statement_type = (arguments.get("statement_type") or "").strip()
     if not statement_type:
       return {"error": "statement_type is required"}
-    if statement_type == "equity_statement":
-      return {
-        "error": (
-          "equity_statement is not offered on this surface yet: the live "
-          "path renders equity balances, not a rollforward, so the result "
-          "would read as a statement it is not. Use balance_sheet for the "
-          "equity section."
-        ),
-      }
     if statement_type not in MCP_LIVE_STATEMENT_TYPES:
       return {
         "error": (
