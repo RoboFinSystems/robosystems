@@ -25,6 +25,7 @@ from robosystems.operations.information_block.forecast_history import (
 )
 from robosystems.operations.information_block.reads import (
   get_information_block,
+  list_information_block_summaries,
   list_information_blocks,
 )
 from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
@@ -341,3 +342,93 @@ class TestForecastHistory:
     assert newest_actual_structure_id(ext_session, "income_statement", SUB) == (
       sub_is.id
     )
+
+
+class TestListInformationBlockSummaries:
+  def test_summaries_are_the_lists_rows_without_the_envelopes(
+    self, ext_session
+  ) -> None:
+    """Same rows, same order, same entity as the full list — read without
+    building an envelope per block."""
+    group = _Group(ext_session)
+    group.add_report_set(PARENT, JUNE, 100.0)
+    parent_plan = group.add_forecast(PARENT, "Parent plan")
+    group.add_forecast(SUB, "Sub plan")
+
+    full = list_information_blocks(ext_session, limit=200)
+    summaries = list_information_block_summaries(ext_session, limit=200)
+
+    assert [
+      (s.id, s.block_type, s.entity_id, s.fact_count, s.connection_count)
+      for s in summaries
+    ] == [
+      (b.id, b.block_type, b.entity_id, len(b.facts), len(b.connections)) for b in full
+    ]
+    by_id = {s.id: s for s in summaries}
+    balance_sheet = by_id[group.balance_sheet.id]
+    assert balance_sheet.display_name == "Balance Sheet"
+    assert balance_sheet.taxonomy_name == "rs-gaap"
+    assert (balance_sheet.fact_count, balance_sheet.connection_count) == (1, 1)
+    assert by_id[parent_plan.id].fact_count == 0
+
+  def test_fact_count_is_the_entitys_own_on_a_shared_block(self, ext_session) -> None:
+    group = _Group(ext_session)
+    group.add_report_set(PARENT, JUNE, 100.0)
+    group.add_report_set(SUB, JUNE, 7.0)
+    group.add_report_set(SUB, JULY, 8.0)
+
+    parent = list_information_block_summaries(ext_session, block_type="balance_sheet")
+    sub = list_information_block_summaries(
+      ext_session, block_type="balance_sheet", entity_id=SUB
+    )
+
+    assert [(s.id, s.entity_id, s.fact_count) for s in parent] == [
+      (group.balance_sheet.id, PARENT, 1)
+    ]
+    assert [(s.id, s.entity_id, s.fact_count) for s in sub] == [
+      (group.balance_sheet.id, SUB, 2)
+    ]
+
+  def test_a_schedules_history_is_not_counted(self, ext_session) -> None:
+    """A schedule's closed periods are history, already in its opening
+    balances; its envelope carries only what is in scope, and so does the
+    count — a schedule that has run off lists with none."""
+    from robosystems.models.extensions.roboledger import Fact
+
+    group = _Group(ext_session)
+    run_off = group.structure("Run-off prepaid", "schedule", entity_id=PARENT)
+    live = group.structure("Live prepaid", "schedule", entity_id=PARENT)
+    for structure, scope in ((run_off, "historical"), (live, "in_scope")):
+      fact_set = create_fact_set(
+        ext_session,
+        structure_id=structure.id,
+        period_start=JUNE[0],
+        period_end=JUNE[1],
+        factset_type="schedule",
+        entity_id=PARENT,
+        provenance={"origin": "pivot", "mapping_id": "m", "period": "2026-06"},
+        created_by="t",
+      )
+      ext_session.flush()
+      ext_session.add(
+        Fact(
+          element_id=group.cash.id,
+          value=10.0,
+          fact_type="Numeric",
+          period_start=JUNE[0],
+          period_end=JUNE[1],
+          period_type="duration",
+          entity_id=PARENT,
+          structure_id=structure.id,
+          fact_set_id=fact_set.id,
+          fact_scope=scope,
+        )
+      )
+    ext_session.flush()
+
+    counts = {
+      s.name: s.fact_count
+      for s in list_information_block_summaries(ext_session, block_type="schedule")
+    }
+
+    assert counts == {"Run-off prepaid": 0, "Live prepaid": 1}

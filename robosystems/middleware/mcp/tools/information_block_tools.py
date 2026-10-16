@@ -14,6 +14,9 @@ from robosystems.operations.information_block import (
   get_information_block as ops_get_information_block,
 )
 from robosystems.operations.information_block import (
+  list_information_block_summaries as ops_list_information_block_summaries,
+)
+from robosystems.operations.information_block import (
   list_information_blocks as ops_list_information_blocks,
 )
 from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
@@ -194,7 +197,8 @@ class ListInformationBlocksTool:
   else the group parent
 - include_atoms (optional, default false): When false, returns a lean
   summary per block (id, type, name, display_name, category, taxonomy_id,
-  taxonomy_name, disclosure_id, element_count, fact_count, rule_count).
+  taxonomy_name, entity_id, fact_count, connection_count), read in one
+  query.
   When true, returns the full envelope including elements, connections,
   facts, rules, dimensions, fact_set, verification_results, and view
   projections — same shape as get-information-block. Default is
@@ -282,22 +286,22 @@ class ListInformationBlocksTool:
 
     try:
       with extensions_session(graph_id) as session:
-        envelopes = ops_list_information_blocks(
-          session,
-          block_type=block_type,
-          category=category,
-          limit=limit,
-          offset=offset,
-          library_sentinel=(graph_id == LIBRARY_GRAPH_ID),
-          scenario_id=scenario_id,
-          entity_id=arguments.get("entity_id"),
-        )
+        filters = {
+          "block_type": block_type,
+          "category": category,
+          "limit": limit,
+          "offset": offset,
+          "library_sentinel": graph_id == LIBRARY_GRAPH_ID,
+          "scenario_id": scenario_id,
+          "entity_id": arguments.get("entity_id"),
+        }
         if include_atoms:
-          blocks = [e.model_dump(mode="json") for e in envelopes]
+          rows = ops_list_information_blocks(session, **filters)
           mode = "full"
         else:
-          blocks = [_summarize_information_block(e) for e in envelopes]
+          rows = ops_list_information_block_summaries(session, **filters)
           mode = "summary"
+        blocks = [r.model_dump(mode="json") for r in rows]
         return {
           "mode": mode,
           "block_count": len(blocks),
@@ -313,27 +317,6 @@ class ListInformationBlocksTool:
     except Exception as exc:
       logger.warning(f"list-information-blocks failed: {exc}")
       return {"error": "command_failed", "message": str(exc)}
-
-
-def _summarize_information_block(envelope) -> dict[str, Any]:
-  """Identity and taxonomy linkage, with counts in place of the heavy atoms."""
-  return {
-    "id": envelope.id,
-    "block_type": envelope.block_type,
-    "name": envelope.name,
-    "display_name": envelope.display_name,
-    "category": envelope.category,
-    "taxonomy_id": envelope.taxonomy_id,
-    "taxonomy_name": envelope.taxonomy_name,
-    "disclosure_id": envelope.disclosure_id,
-    "entity_id": envelope.entity_id,
-    "element_count": len(envelope.elements or []),
-    "connection_count": len(envelope.connections or []),
-    "fact_count": len(envelope.facts or []),
-    "rule_count": len(envelope.rules or []),
-    "has_fact_set": envelope.fact_set is not None,
-    "verification_result_count": len(envelope.verification_results or []),
-  }
 
 
 __all__ = [

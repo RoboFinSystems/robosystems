@@ -20,6 +20,7 @@ from robosystems.models.api.extensions.schedules import EntryTemplateRequest
 from robosystems.models.api.information_block import (
   ArtifactResponse,
   InformationBlockEnvelope,
+  InformationBlockSummary,
   InformationModelResponse,
   ScheduleMechanics,
 )
@@ -46,6 +47,21 @@ def _patch_session():
   cm.__exit__ = MagicMock(return_value=False)
   with patch(f"{MODULE}.extensions_session", return_value=cm):
     yield session
+
+
+def _summary(structure_id: str = "struct_x") -> InformationBlockSummary:
+  return InformationBlockSummary(
+    id=structure_id,
+    block_type="schedule",
+    name="Test Schedule",
+    display_name="Schedule",
+    category="Close",
+    taxonomy_id="tax_1",
+    taxonomy_name="rs-gaap",
+    entity_id="ent_parent",
+    fact_count=12,
+    connection_count=3,
+  )
 
 
 def _envelope(structure_id: str = "struct_x") -> InformationBlockEnvelope:
@@ -124,17 +140,41 @@ class TestListInformationBlocksTool:
     assert defn["inputSchema"].get("required", []) == []
 
   @pytest.mark.asyncio
-  async def test_returns_block_count_and_envelopes(self, mock_graph_client):
+  async def test_summary_mode_reads_summaries_in_one_query(self, mock_graph_client):
+    """The default projection is the one-query summaries read, never an
+    envelope build per block."""
+    tool = ListInformationBlocksTool(mock_graph_client)
+    summaries = [_summary("struct_a"), _summary("struct_b")]
+    with (
+      _patch_session(),
+      patch(f"{MODULE}.ops_list_information_block_summaries", return_value=summaries),
+      patch(f"{MODULE}.ops_list_information_blocks") as full_read,
+    ):
+      result = await tool.execute({"block_type": "schedule"})
+
+    full_read.assert_not_called()
+    assert result["mode"] == "summary"
+    assert result["block_count"] == 2
+    assert [b["id"] for b in result["blocks"]] == ["struct_a", "struct_b"]
+    assert result["blocks"][0]["fact_count"] == 12
+    assert "elements" not in result["blocks"][0]
+
+  @pytest.mark.asyncio
+  async def test_include_atoms_returns_full_envelopes(self, mock_graph_client):
     tool = ListInformationBlocksTool(mock_graph_client)
     envelopes = [_envelope("struct_a"), _envelope("struct_b")]
     with (
       _patch_session(),
       patch(f"{MODULE}.ops_list_information_blocks", return_value=envelopes),
+      patch(f"{MODULE}.ops_list_information_block_summaries") as summaries_read,
     ):
-      result = await tool.execute({"block_type": "schedule"})
+      result = await tool.execute({"block_type": "schedule", "include_atoms": True})
 
+    summaries_read.assert_not_called()
+    assert result["mode"] == "full"
     assert result["block_count"] == 2
     assert [b["id"] for b in result["blocks"]] == ["struct_a", "struct_b"]
+    assert "elements" in result["blocks"][0]
 
   @pytest.mark.asyncio
   async def test_unknown_block_type_returns_invalid_arguments(self, mock_graph_client):
@@ -143,7 +183,7 @@ class TestListInformationBlocksTool:
     with (
       _patch_session(),
       patch(
-        f"{MODULE}.ops_list_information_blocks",
+        f"{MODULE}.ops_list_information_block_summaries",
         side_effect=ValueError("Unknown block_type: nonsense"),
       ),
     ):
@@ -166,7 +206,9 @@ class TestListInformationBlocksTool:
     tool = ListInformationBlocksTool(mock_graph_client)
     with (
       _patch_session() as session,
-      patch(f"{MODULE}.ops_list_information_blocks", return_value=[]) as ops_mock,
+      patch(
+        f"{MODULE}.ops_list_information_block_summaries", return_value=[]
+      ) as ops_mock,
     ):
       await tool.execute(
         {"block_type": "schedule", "category": "Close", "limit": 10, "offset": 5}
@@ -189,7 +231,9 @@ class TestListInformationBlocksTool:
     tool = ListInformationBlocksTool(mock_graph_client)
     with (
       _patch_session() as session,
-      patch(f"{MODULE}.ops_list_information_blocks", return_value=[]) as ops_mock,
+      patch(
+        f"{MODULE}.ops_list_information_block_summaries", return_value=[]
+      ) as ops_mock,
     ):
       await tool.execute({})
 

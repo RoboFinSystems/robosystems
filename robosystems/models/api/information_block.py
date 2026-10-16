@@ -1117,6 +1117,51 @@ class ViewProjections(BaseModel):
 # ── Envelope root ──────────────────────────────────────────────────────────
 
 
+class InformationBlockSummary(BaseModel):
+  """One row of a block list: the envelope's identity with counts in place
+  of its atoms. Read in one query, so a graph's whole catalogue lists in the
+  time one envelope builds."""
+
+  id: str = Field(..., description="The block's structure id.")
+  block_type: str = Field(..., description="Discriminator — 'schedule', …")
+  name: str = Field(
+    ...,
+    description=(
+      "The block's own name — the instance ('FY27 Operating Budget'), where "
+      "`display_name` is its type's label ('Forecast')."
+    ),
+  )
+  display_name: str = Field(
+    ..., description="Registry-sourced display label (e.g., 'Schedule')."
+  )
+  category: str = Field(
+    ..., description="Registry-sourced sidebar grouping ('Close', 'Reporting', …)."
+  )
+  taxonomy_id: str | None = Field(
+    None, description="Source taxonomy the Structure was seeded from."
+  )
+  taxonomy_name: str | None = Field(
+    None, description="Display name of the source taxonomy."
+  )
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity whose books the block reads: its owner for a schedule, "
+      "reconciliation or forecast; the entity asked for, else the group "
+      "parent, on a block shared by the group. Null on the library."
+    ),
+  )
+  fact_count: int = Field(
+    0,
+    description=(
+      "Facts in the block's scope for that entity, every set — what its "
+      "envelope carries. Zero on a library-seeded structure variant and on "
+      "a schedule that has run off into history, which a picker leaves out."
+    ),
+  )
+  connection_count: int = Field(0, description="Arcs the block's structure carries.")
+
+
 class InformationBlockEnvelope(BaseModel):
   """The Information Block exchange format.
 
@@ -2253,6 +2298,7 @@ __all__ = [
   "ForecastMechanics",
   "ForecastMonthLite",
   "InformationBlockEnvelope",
+  "InformationBlockSummary",
   "InformationModelResponse",
   "LeverAssertionLite",
   "LineAssertionLite",

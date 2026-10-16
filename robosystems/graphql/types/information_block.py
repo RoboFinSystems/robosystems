@@ -41,6 +41,9 @@ from robosystems.models.api.information_block import (
   InformationBlockEnvelope as PydanticInformationBlock,
 )
 from robosystems.models.api.information_block import (
+  InformationBlockSummary as PydanticInformationBlockSummary,
+)
+from robosystems.models.api.information_block import (
   InformationModelResponse as PydanticInformationModel,
 )
 from robosystems.models.api.information_block import (
@@ -190,6 +193,12 @@ class InformationBlockViewProjections:
 MechanicsPayload = strawberry.scalars.JSON
 
 
+@pydantic_type(model=PydanticInformationBlockSummary, all_fields=True)
+class InformationBlockSummary:
+  """One row of a block list: the envelope's identity with counts in place
+  of its atoms."""
+
+
 # ── Artifact — hand-written so the mechanics JSON is explicit ──────────────
 
 
@@ -311,6 +320,7 @@ __all__ = [
   "InformationBlockRule",
   "InformationBlockRuleTarget",
   "InformationBlockRuleVariable",
+  "InformationBlockSummary",
   "InformationBlockValidation",
   "InformationBlockVerificationCategorySummary",
   "InformationBlockVerificationResult",

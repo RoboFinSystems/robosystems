@@ -16,6 +16,7 @@ from robosystems.models.api.extensions.schedules import EntryTemplateRequest
 from robosystems.models.api.information_block import (
   ArtifactResponse,
   InformationBlockEnvelope,
+  InformationBlockSummary,
   InformationModelResponse,
   ScheduleMechanics,
   StatementMechanics,
@@ -326,3 +327,68 @@ class TestStatementInformationBlocks:
       )
     assert result.errors is None
     assert result.data["informationBlocks"] == []
+
+
+# ── informationBlockSummaries ──────────────────────────────────────────────
+
+SUMMARIES_PATH = (
+  "robosystems.graphql.resolvers.information_block.list_information_block_summaries"
+)
+
+
+def _summary(structure_id: str = "struct_ib_01") -> InformationBlockSummary:
+  return InformationBlockSummary(
+    id=structure_id,
+    block_type="schedule",
+    name="Equipment Depreciation",
+    display_name="Schedule",
+    category="Close",
+    taxonomy_id="tax_1",
+    taxonomy_name="rs-gaap",
+    entity_id="ent_parent",
+    fact_count=12,
+    connection_count=3,
+  )
+
+
+class TestInformationBlockSummariesQuery:
+  def test_returns_identities_and_counts(self) -> None:
+    """The list a picker fills from: identity fields and counts, no atoms."""
+    with (
+      _patch_session(),
+      patch(SUMMARIES_PATH, return_value=[_summary("a"), _summary("b")]) as read,
+    ):
+      result = schema.execute_sync(
+        "query { informationBlockSummaries(limit: 200) { id blockType name"
+        " displayName category taxonomyId taxonomyName entityId factCount"
+        " connectionCount } }",
+        context_value=_ctx(),
+      )
+    assert result.errors is None
+    items = result.data["informationBlockSummaries"]
+    assert [i["id"] for i in items] == ["a", "b"]
+    assert items[0]["displayName"] == "Schedule"
+    assert items[0]["entityId"] == "ent_parent"
+    assert (items[0]["factCount"], items[0]["connectionCount"]) == (12, 3)
+    read.assert_called_once()
+    assert read.call_args.kwargs["limit"] == 200
+    assert read.call_args.kwargs["library_sentinel"] is False
+
+  def test_filters_and_entity_pass_through(self) -> None:
+    with (
+      _patch_session(),
+      patch(SUMMARIES_PATH, return_value=[]) as read,
+    ):
+      result = schema.execute_sync(
+        'query { informationBlockSummaries(blockType: "forecast",'
+        ' category: "Planning", entityId: "ent_sub") { id } }',
+        context_value=_ctx(),
+      )
+    assert result.errors is None
+    assert result.data["informationBlockSummaries"] == []
+    kwargs = read.call_args.kwargs
+    assert (kwargs["block_type"], kwargs["category"], kwargs["entity_id"]) == (
+      "forecast",
+      "Planning",
+      "ent_sub",
+    )
