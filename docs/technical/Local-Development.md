@@ -4,7 +4,7 @@ Run the open-source RoboSystems platform on your own machine to develop against 
 
 **Quick Start:** Run `just start`, then `just demo-user`, then `just demo-custom-graph`, and you have a live graph to query at `http://localhost:8000`.
 
-Every API guide in this wiki is written against the hosted platform at `https://api.robosystems.ai`, and every example in them works against a local stack too: swap the base URL for `http://localhost:8000` and use the key from `just demo-user`. The table below lists the other differences.
+Every API guide in these docs is written against the hosted platform at `https://api.robosystems.ai`, and every example in them works against a local stack too: swap the base URL for `http://localhost:8000` and use the key from `just demo-user`. The table below lists the other differences.
 
 ## Local vs Hosted
 
@@ -34,7 +34,7 @@ Before starting, ensure you have:
 - **[jq](https://jqlang.github.io/jq/)** to read your API key out of `.local/config.json`. On macOS: `brew install jq`.
 - A clone of the [robosystems repository](https://github.com/RoboFinSystems/robosystems) and a terminal at its root.
 
-**On Windows?** Set up WSL2 first and clone the repo inside the Linux filesystem — see [Windows Setup (WSL2)](Windows-Setup-with-WSL2). Every command below then works verbatim.
+**On Windows?** Set up WSL2 first and clone the repo inside the Linux filesystem — see [Windows Setup (WSL2)](Windows-Setup-with-WSL2.md). Every command below then works verbatim.
 
 ## Quick Start
 
@@ -118,7 +118,7 @@ just demo-user --name QA --email qa@example.com
 just demo-user --json           # Machine-readable output
 ```
 
-For everything about API keys — creation, rotation, the `X-API-Key` vs JWT distinction — see [Authentication and API Keys](Authentication-and-API-Keys).
+For everything about API keys — creation, rotation, the `X-API-Key` vs JWT distinction — see [Authentication and API Keys](Authentication-and-API-Keys.md).
 
 ## Step 3: Export Your API Key
 
@@ -137,7 +137,7 @@ The credentials file holds your key at the top-level `api_key` field. Its shape:
 }
 ```
 
-The API guides in this wiki send the key as `$ROBOSYSTEMS_API_KEY`. Export it from the credentials file so their examples run unchanged apart from the base URL:
+The API guides in these docs send the key as `$ROBOSYSTEMS_API_KEY`. Export it from the credentials file so their examples run unchanged apart from the base URL:
 
 ```bash
 export ROBOSYSTEMS_API_KEY=$(jq -r .api_key .local/config.json)
@@ -178,7 +178,7 @@ The quickest route is to let a demo recipe provision a graph for you. Creating a
 just demo-custom-graph
 ```
 
-This builds the People / Companies / Projects graph described in [Custom Graph Schema](Custom-Graph-Schema). After it runs, the new graph appears in your credentials file and in the API.
+This builds the People / Companies / Projects graph described in [Custom Graph Schema](Custom-Graph-Schema.md). After it runs, the new graph appears in your credentials file and in the API.
 
 To list your graphs through the API, call `GET /v1/graphs`:
 
@@ -211,7 +211,7 @@ The response is a `UserGraphsResponse` whose `graphs[]` entries each carry a `gr
 export GRAPH_ID=kg1a2b3c4d5e...
 ```
 
-Other demos provision other kinds of graph: `just demo-roboledger` builds a RoboLedger graph from synthetic data (see [RoboLedger Demos](RoboLedger-Demo-Walkthrough)), and `just demo-roboinvestor` a RoboInvestor one. To learn how graphs, subgraphs, repositories, and tenancy fit together, see [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy).
+Other demos provision other kinds of graph: `just demo-roboledger` builds a RoboLedger graph from synthetic data (see [RoboLedger Demos](RoboLedger-Demo-Walkthrough.md)), and `just demo-roboinvestor` a RoboInvestor one. To learn how graphs, subgraphs, repositories, and tenancy fit together, see [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy.md).
 
 ## Step 6: Your First Query
 
@@ -235,7 +235,7 @@ curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/query/cypher" \
   -d '{"query": "MATCH (p:Person) WHERE p.age > $min_age RETURN p.name, p.age", "parameters": {"min_age": 40}}'
 ```
 
-**Note:** Main graphs are **read-only** through `/query/cypher` — you load data through the ingestion pipeline (which is exactly what `just demo-custom-graph` does). Only subgraphs accept writes. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy) for the read-vs-write model.
+**Note:** Main graphs are **read-only** through `/query/cypher` — you load data through the ingestion pipeline (which is exactly what `just demo-custom-graph` does). Only subgraphs accept writes. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy.md) for the read-vs-write model.
 
 ## Local-Only Tools
 
@@ -248,7 +248,7 @@ just graph-query "$GRAPH_ID" "MATCH (n) RETURN count(n)"
 just lbug-query "$GRAPH_ID" "MATCH (n) RETURN count(n)"
 ```
 
-**GraphiQL.** Open `http://localhost:8000/extensions/{graph_id}/graphql` in a browser to explore the extensions schema interactively. The playground is mounted only in development; hosted, the endpoint serves queries and introspection but no playground. See [GraphQL Reads](GraphQL-Reads).
+**GraphiQL.** Open `http://localhost:8000/extensions/{graph_id}/graphql` in a browser to explore the extensions schema interactively. The playground is mounted only in development; hosted, the endpoint serves queries and introspection but no playground. See [GraphQL Reads](GraphQL-Reads.md).
 
 **Dagster.** The orchestration UI at [localhost:8002](http://localhost:8002) shows every pipeline run, including QuickBooks syncs, SEC processing, and materialization, with step logs for failures.
 
@@ -275,7 +275,7 @@ just sec-reset                # Start over
 
 `just demo-sec` does all of it in one step: loads filings, subscribes the demo user, and runs example queries.
 
-`just sec-dump` pulls the published SEC database dump from Hugging Face instead of processing filings yourself. It is large: tens of GiB to download and more than 100 GiB on disk. The pipeline behind `sec-load` is described in [SEC XBRL Pipeline](SEC-XBRL-Pipeline).
+`just sec-dump` pulls the published SEC database dump from Hugging Face instead of processing filings yourself. It is large: tens of GiB to download and more than 100 GiB on disk. The pipeline behind `sec-load` is described in [SEC XBRL Pipeline](SEC-XBRL-Pipeline.md).
 
 ## Web Apps
 
@@ -283,7 +283,7 @@ The RoboSystems, RoboLedger, and RoboInvestor web apps are open source too, each
 
 **Run the web apps in Docker.** To skip the Node toolchain, `just clone-apps` clones all three repositories next to this one, and `just start apps build` builds their images and starts them on the same three ports, pointed at your local API. In this profile the landing page at `/` shows a maintenance screen; sign in at `/login`.
 
-To connect a real QuickBooks company to a local stack, see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally).
+To connect a real QuickBooks company to a local stack, see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally.md).
 
 ## AI Models
 
@@ -297,7 +297,7 @@ OPENAI_COMPAT_API_KEY=...                                    # blank if the serv
 OPERATOR_PROFILE_BALANCED=openai-compat                      # a tier you leave unmapped stays on Bedrock
 ```
 
-Then run `just rebuild`, because a plain restart does not pick up environment changes. For the rest of the settings, which endpoints work, which models we tested, and what to check before pointing it at real books, see **[Self-Hosted AI Models](Self-Hosted-AI-Models)**.
+Then run `just rebuild`, because a plain restart does not pick up environment changes. For the rest of the settings, which endpoints work, which models we tested, and what to check before pointing it at real books, see **[Self-Hosted AI Models](Self-Hosted-AI-Models.md)**.
 
 ## Restarting and Iterating
 
@@ -324,7 +324,7 @@ just test-all   # Unit tests plus linting, formatting, and type checks
 
 ## Deploying Your Own
 
-Running locally is the first half of self-hosting. The repository also ships the GitHub Actions workflows and CloudFormation templates that deploy the full platform into your own AWS account — see the [Bootstrap Guide](Bootstrap-Guide).
+Running locally is the first half of self-hosting. The repository also ships the GitHub Actions workflows and CloudFormation templates that deploy the full platform into your own AWS account — see the [Bootstrap Guide](Bootstrap-Guide.md).
 
 ## Troubleshooting
 
@@ -370,7 +370,7 @@ curl -H "X-API-Key: $ROBOSYSTEMS_API_KEY" http://localhost:8000/v1/user
 
 ### Write Query Rejected on a Main Graph
 
-**Solution:** Main graphs are read-only through `/query/cypher`. Load data through the ingestion pipeline (the demos do this), or run writes against a subgraph. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy).
+**Solution:** Main graphs are read-only through `/query/cypher`. Load data through the ingestion pipeline (the demos do this), or run writes against a subgraph. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy.md).
 
 ### Code or Environment Changes Are Not Taking Effect
 
@@ -378,15 +378,15 @@ curl -H "X-API-Key: $ROBOSYSTEMS_API_KEY" http://localhost:8000/v1/user
 
 ## Related Documentation
 
-**Wiki Guides:**
+**Guides:**
 
-- **[Quick Start](Quick-Start)** - The same first steps against the hosted platform
-- **[Windows Setup (WSL2)](Windows-Setup-with-WSL2)** - Run this guide on Windows
-- **[Self-Hosted AI Models](Self-Hosted-AI-Models)** - Run the operators on an open-weight model instead of Bedrock
-- **[Custom Graph Schema](Custom-Graph-Schema)** - The full version of the graph provisioned in Step 5
-- **[RoboLedger Demos](RoboLedger-Demo-Walkthrough)** - The synthetic Cascade demo and the Driftline and Cadence showcase scenarios
-- **[Architecture Overview](Architecture-Overview)** - Platform API vs Graph API, the two-database split, and the components behind `just start`
-- **[Bootstrap Guide](Bootstrap-Guide)** - Deploy the platform into your own AWS account
+- **[Quick Start](Quick-Start.md)** - The same first steps against the hosted platform
+- **[Windows Setup (WSL2)](Windows-Setup-with-WSL2.md)** - Run this guide on Windows
+- **[Self-Hosted AI Models](Self-Hosted-AI-Models.md)** - Run the operators on an open-weight model instead of Bedrock
+- **[Custom Graph Schema](Custom-Graph-Schema.md)** - The full version of the graph provisioned in Step 5
+- **[RoboLedger Demos](RoboLedger-Demo-Walkthrough.md)** - The synthetic Cascade demo and the Driftline and Cadence showcase scenarios
+- **[Architecture Overview](Architecture-Overview.md)** - Platform API vs Graph API, the two-database split, and the components behind `just start`
+- **[Bootstrap Guide](Bootstrap-Guide.md)** - Deploy the platform into your own AWS account
 
 **Codebase Documentation:**
 
@@ -396,6 +396,6 @@ curl -H "X-API-Key: $ROBOSYSTEMS_API_KEY" http://localhost:8000/v1/user
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

@@ -52,7 +52,7 @@ Deliberately narrow. The surface implements what a real IdP integration needs an
 
 ## Prerequisites
 
-- A deployment you control — dedicated or self-hosted. See the [Bootstrap Guide](Bootstrap-Guide) for standing one up.
+- A deployment you control — dedicated or self-hosted. See the [Bootstrap Guide](Bootstrap-Guide.md) for standing one up.
 - Admin access to the customer's identity provider.
 - `RATE_LIMIT_ENABLED=true`. The OIDC and SCIM surfaces carry their own rate buckets, which are inert without it; boot validation refuses to start otherwise.
 - Access to the deployment's admin CLI (`just admin <env> …`), which reaches the admin plane over an SSM tunnel. The admin surface is not internet-reachable.
@@ -61,7 +61,7 @@ Deliberately narrow. The surface implements what a real IdP integration needs an
 
 **The sequence matters and is not atomic.** The org id you need to pin doesn't exist until after the first bootstrap, so this is four steps with two restarts — not one config change.
 
-Flags live in SSM Parameter Store; the connection block lives in the environment's Secrets Manager secret. Both are read once at process start, so a restart is required after each. See [Bootstrap Guide → SSM Parameters & Secrets Manager](Bootstrap-Guide#ssm-parameters--secrets-manager) for the mechanics.
+Flags live in SSM Parameter Store; the connection block lives in the environment's Secrets Manager secret. Both are read once at process start, so a restart is required after each. See [Bootstrap Guide → SSM Parameters & Secrets Manager](Bootstrap-Guide.md#ssm-parameters--secrets-manager) for the mechanics.
 
 ### 1. Turn on the flags and configure the connection
 
@@ -182,7 +182,7 @@ GET /v1/auth/oidc/callback  → validates the ID token, resolves the user,
                               → 302 to the login home's session bridge
 ```
 
-The callback does not mint a session token itself. It hands the browser to the same handoff path the platform's internal cross-app bridge already uses, which is the single point where a platform JWT is issued. One issuance point, one set of session rules — see [Authentication & API Keys](Authentication-and-API-Keys) for the credential model that results.
+The callback does not mint a session token itself. It hands the browser to the same handoff path the platform's internal cross-app bridge already uses, which is the single point where a platform JWT is issued. One issuance point, one set of session rules — see [Authentication & API Keys](Authentication-and-API-Keys.md) for the credential model that results.
 
 Failures redirect back to the login page with a coarse reason code rather than returning an error body: a top-level browser navigation that dead-ends on JSON is unrecoverable for the user. The distinction between failure kinds is recorded in the audit log, not handed to the browser.
 
@@ -252,12 +252,12 @@ The frontend renders from `GET /v1/auth/providers`. Call it and confirm `oidc.en
 
 ## Related Documentation
 
-**Wiki Guides:**
+**Guides:**
 
-- **[Authentication & API Keys](Authentication-and-API-Keys)** — the credential model SSO resolves into, plus passkeys and MFA
-- **[Security & Compliance](Security-and-Compliance)** — built-in controls, optional compliance stacks, SOC 2 posture
-- **[Bootstrap Guide](Bootstrap-Guide)** — standing up a deployment, and the SSM/Secrets Manager mechanics this guide's steps rely on
-- **[Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy)** — what an organization owns, and the per-graph access model
+- **[Authentication & API Keys](Authentication-and-API-Keys.md)** — the credential model SSO resolves into, plus passkeys and MFA
+- **[Security & Compliance](Security-and-Compliance.md)** — built-in controls, optional compliance stacks, SOC 2 posture
+- **[Bootstrap Guide](Bootstrap-Guide.md)** — standing up a deployment, and the SSM/Secrets Manager mechanics this guide's steps rely on
+- **[Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy.md)** — what an organization owns, and the per-graph access model
 
 **Codebase Documentation:**
 
@@ -268,6 +268,6 @@ The frontend renders from `GET /v1/auth/providers`. Call it and confirm `oidc.en
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

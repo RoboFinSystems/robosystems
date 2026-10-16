@@ -4,7 +4,7 @@ Closing a month in RoboLedger is one atomic operation that checks the month is r
 
 The product doc *Close the month with your AI assistant* at roboledger.ai describes the workflow for end users. This page covers the operations, payloads and guarantees underneath.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Table of Contents
 
@@ -36,7 +36,7 @@ The close workflow lives on the RoboLedger operations surface:
 | `terminate-schedule` | End a schedule at a month-end with no entry booked |
 | `close-period` | Lock one month |
 | `reopen-period` | Unlock the most recently closed month |
-| `backfill-plan-history` | Stamp statements for historical months behind the boundary. See [Forecasting and Metrics](Forecasting-and-Metrics#plan-history). |
+| `backfill-plan-history` | Stamp statements for historical months behind the boundary. See [Forecasting and Metrics](Forecasting-and-Metrics.md#plan-history). |
 | `preview-reconciliations`, `refresh-reconciliations`, `record-statement-balance`, `set-reconciliation-policy`, `sign-off-reconciliation` | Compare the ledger's balances with independent ones at a month-end, and sign the comparisons off. See [Reconciliations](#reconciliations). |
 
 Reads come from GraphQL (`fiscalCalendar`, `periodDrafts`, `periodCloseStatus`, `reconciliations`) or from the MCP tools `get-fiscal-calendar`, `get-period-close-status` and `list-period-drafts`. An assistant running a close over MCP should call `get-close-playbook` first. It returns the full tool sequence and the setup decisions.
@@ -94,7 +94,7 @@ The closeable gate returns structured codes. The calendar read lists them, and `
 
 Detail fields accompany some codes: `pending_obligation_count`, `pending_obligation_sample[]` (up to five, each with `event_id`, `schedule_id`, `schedule_name` and `period`), `earliest_pending_period`, `stranded_obligation_count`, `stranded_obligation_sample[]`, `reconciling_item_count`, `reconciling_item_sample[]` (source ids), `unposted_source_event_count`, `unposted_source_event_sample[]` (source ids, or event ids where there is none), `unreconciled_account_count`, `unreconciled_account_sample[]` (each reconciliation's name and why it isn't ready, such as `"Source ledger (QuickBooks): unreconciled"` or `"...: awaiting review"`) and `sync_stale_days`. The calendar read carries the same fields in camelCase.
 
-Every override the close accepts is written into the close's audit note. A close over stranded obligations knowingly leaves those adjusting entries out of the month. A close over reconciling items stamps statements that may disagree with QuickBooks. A close over unposted source events leaves those transactions out of the month for good, and a close over unreconciled accounts closes the books without that check. Settling the item is almost always the better choice. See [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy#reconciling-items).
+Every override the close accepts is written into the close's audit note. A close over stranded obligations knowingly leaves those adjusting entries out of the month. A close over reconciling items stamps statements that may disagree with QuickBooks. A close over unposted source events leaves those transactions out of the month for good, and a close over unreconciled accounts closes the books without that check. Settling the item is almost always the better choice. See [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md#reconciling-items).
 
 ### Unposted source events
 
@@ -235,7 +235,7 @@ A close session runs in this order. Each step clears one class of blocker or one
    ```
 
    The result counts `classified_count`, `dispatched_count`, `stranded_count` and `error_count`. The sweep is idempotent: re-running it skips promoted obligations and reuses existing drafts.
-6. **Add one-off adjustments** as `journal_entry_recorded` events with `status: "draft"`. See [Event-Driven Ledger](Event-Driven-Ledger#posting-an-event-to-the-ledger).
+6. **Add one-off adjustments** as `journal_entry_recorded` events with `status: "draft"`. See [Event-Driven Ledger](Event-Driven-Ledger.md#posting-an-event-to-the-ledger).
 7. **Review the drafts.** `periodDrafts(period:)` (or `list-period-drafts`) lists every draft with its lines, whether it balances, and `willPublishToQb`. The close follows this list exactly.
 8. **Reconcile, last.** Run `refresh-reconciliations` for the month, clear what it reports, and sign off where a review is required. Any later change to the books makes the comparison `stale`, so this is the final step before the close. See [Reconciliations](#reconciliations).
 
@@ -299,7 +299,7 @@ On success, the envelope's `result` is the close summary:
 | --- | --- | --- |
 | `422` | `{"detail": {"message", "blockers": [...], ...detail fields}}` | The gate failed. Parse `detail.blockers`, never the message. |
 | `422` | `"Balance sheet equation broken for this period: ..."` | Debits and credits across the month's draft and posted entries don't agree. Checked before anything changes. |
-| `422` | `{"detail": {"code": "WRITE_BACK_FAILED", "failed_events": [...]}}` | QuickBooks rejected one or more drafts. See [Rejections and retry](QuickBooks-Sync-and-Write-Policy#rejections-and-retry). |
+| `422` | `{"detail": {"code": "WRITE_BACK_FAILED", "failed_events": [...]}}` | QuickBooks rejected one or more drafts. See [Rejections and retry](QuickBooks-Sync-and-Write-Policy.md#rejections-and-retry). |
 | `422` | `{"detail": {"code": "STATEMENT_STAMP_FAILED", "message"}}` | Reporting is set up but the statements couldn't be stamped. The whole close rolled back. Fix the cause (usually the mapping or the Reporting Style) and close again. |
 | `409` | message | Another close or reopen holds the month, or the month closed in the meantime. Retry. |
 | `404` | `"Fiscal calendar not initialized. ..."` | No calendar |
@@ -396,7 +396,7 @@ Every later closed month carries statements stamped from this month's numbers.
 Reopen latest-first — 2026-08, 2026-07, 2026-06 — then close forward month by month.
 ```
 
-This is also the path the [mapping lock](Chart-of-Accounts-Mapping#the-closed-period-mapping-lock) points to. A month that isn't closed returns `422`, and an unknown month returns `404`. Reopening invalidates what trusted the closed state, such as shared reports and filings, so use it sparingly.
+This is also the path the [mapping lock](Chart-of-Accounts-Mapping.md#the-closed-period-mapping-lock) points to. A month that isn't closed returns `422`, and an unknown month returns `404`. Reopening invalidates what trusted the closed state, such as shared reports and filings, so use it sparingly.
 
 ## Ending a Schedule Early
 
@@ -431,7 +431,7 @@ Cannot write to closed period '2026-08' (posting_date=2026-08-14). Reopen the pe
 
 The gate and the close share a per-month fence. A write that arrives while that month is closing waits briefly and then gets `409` instead of slipping a draft into a month whose statements are being stamped. A QuickBooks transaction that syncs into a closed month doesn't post. It waits in the inbox as `captured` until the month is reopened.
 
-The same principle covers the mapping. After a close, an arc that fed the month's stamped statements can't change until that month is reopened. See [Chart of Accounts Mapping](Chart-of-Accounts-Mapping#the-closed-period-mapping-lock).
+The same principle covers the mapping. After a close, an arc that fed the month's stamped statements can't change until that month is reopened. See [Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md#the-closed-period-mapping-lock).
 
 ## Gotchas and Pitfalls
 
@@ -457,17 +457,17 @@ Ending a schedule after its month's entry is drafted leaves a stale draft for a 
 
 ## Self-hosted deployments
 
-On your own stack, `just demo-roboledger` provisions a tenant with 16 months of synthetic books, schedules and closed history to exercise every call here. See the [RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough). Use `http://localhost:8000` and the key from `just demo-user`.
+On your own stack, `just demo-roboledger` provisions a tenant with 16 months of synthetic books, schedules and closed history to exercise every call here. See the [RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough.md). Use `http://localhost:8000` and the key from `just demo-user`.
 
 ## Related Documentation
 
-- **[QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy)** - The outbox the close flushes, and reconciling items
-- **[Chart of Accounts Mapping](Chart-of-Accounts-Mapping)** - The mapping the close stamps statements through, and its lock
-- **[Forecasting and Metrics](Forecasting-and-Metrics)** - What reads the stamped statements, and the plan-history backfill
-- **[Information Blocks](Information-Blocks)** - Schedules and the rules the close verifies
-- **[Event-Driven Ledger](Event-Driven-Ledger)** - Drafts, reversals, and event statuses
-- **[RoboLedger Operations](RoboLedger-Operations)** - The full operations catalog and envelope contract
-- **[GraphQL Reads](GraphQL-Reads)** - `fiscalCalendar`, `periodDrafts`, `periodCloseStatus`, `reconciliations`
+- **[QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md)** - The outbox the close flushes, and reconciling items
+- **[Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md)** - The mapping the close stamps statements through, and its lock
+- **[Forecasting and Metrics](Forecasting-and-Metrics.md)** - What reads the stamped statements, and the plan-history backfill
+- **[Information Blocks](Information-Blocks.md)** - Schedules and the rules the close verifies
+- **[Event-Driven Ledger](Event-Driven-Ledger.md)** - Drafts, reversals, and event statuses
+- **[RoboLedger Operations](RoboLedger-Operations.md)** - The full operations catalog and envelope contract
+- **[GraphQL Reads](GraphQL-Reads.md)** - `fiscalCalendar`, `periodDrafts`, `periodCloseStatus`, `reconciliations`
 
 **API Reference:**
 
@@ -477,6 +477,6 @@ On your own stack, `just demo-roboledger` provisions a tenant with 16 months of 
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

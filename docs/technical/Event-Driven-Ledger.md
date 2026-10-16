@@ -2,9 +2,9 @@
 
 RoboLedger treats business events as the durable truth and the general ledger as something derived from them. A sale, a payment, an asset disposal: those happen in the world, and the debits and credits that record them are an interpretation made afterwards. The **Event Block** is the one write surface that carries an event into the ledger, and a **handler** turns it into balanced journal entries.
 
-This page is the concept. The envelope fields, the enum vocabularies, the handler registry, the template grammar, and the graph edges are in [Event Block Reference](Event-Block-Reference).
+This page is the concept. The envelope fields, the enum vocabularies, the handler registry, the template grammar, and the graph edges are in [Event Block Reference](Event-Block-Reference.md).
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Table of Contents
 
@@ -48,7 +48,7 @@ LineItem      one debit or one credit against a chart-of-accounts element
 - An **Entry** (`je_…`) is a journal entry: `standard`, `adjusting`, `closing`, or `reversing`, and `draft`, `posted`, or `reversed`. It needs at least two line items, and Σ debits must equal Σ credits; an unbalanced entry is rejected before anything is written.
 - A **LineItem** (`li_…`) carries exactly one non-zero side against an `element_id`.
 
-**The chart of accounts is the `Element`.** There is no separate account table. A line item points at the element it debits or credits, and the same associations that drive taxonomy roll-ups map those elements to reporting concepts. See [Chart of Accounts Mapping](Chart-of-Accounts-Mapping).
+**The chart of accounts is the `Element`.** There is no separate account table. A line item points at the element it debits or credits, and the same associations that drive taxonomy roll-ups map those elements to reporting concepts. See [Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md).
 
 A source that already journalized the event, such as QuickBooks, supplies its entry and it is kept 1:1. A source that supplies only the business event lets a handler write the entry.
 
@@ -83,7 +83,7 @@ An event moves through a small state machine. The forward path runs from the inb
  superseded   replaced by a corrected event (superseded_by_id)
 ```
 
-There is no separate `void` or `supersede` operation: every move goes through `update-event-block` with `transition_to`. A retraction is refused, from any status, once the event's entries or transactions have posted or it has published to QuickBooks; reverse the posted entry instead. The full transition table is in [Event Block Reference § Statuses and Transitions](Event-Block-Reference#statuses-and-transitions).
+There is no separate `void` or `supersede` operation: every move goes through `update-event-block` with `transition_to`. A retraction is refused, from any status, once the event's entries or transactions have posted or it has published to QuickBooks; reverse the posted entry instead. The full transition table is in [Event Block Reference § Statuses and Transitions](Event-Block-Reference.md#statuses-and-transitions).
 
 **The event's status tracks the work; the entry's status tracks the books.** Close does not look at event status to decide what to post. It posts every draft entry dated in the period whose event is not voided or superseded.
 
@@ -95,7 +95,7 @@ There are two ways in, and they meet at the draft.
 
 **Capture, classify, commit.** A plain create (`apply_handlers` defaults to `false`) lands the event at `captured` and writes no ledger rows. It sits in the inbox until someone decides how to book it:
 
-1. **Classify.** `update-event-block` with `transition_to: "classified"` records the choice, supplied in `metadata_patch` in the same call. Nothing posts yet. A handler that validates classifications checks the choice here and refuses one it could not post, with the reason, rather than failing later at commit. Today the bank-feed handlers are the ones that do (see [Event Block Reference § Bank-feed handlers](Event-Block-Reference#bank-feed-handlers)). For every other type the choice is checked at commit.
+1. **Classify.** `update-event-block` with `transition_to: "classified"` records the choice, supplied in `metadata_patch` in the same call. Nothing posts yet. A handler that validates classifications checks the choice here and refuses one it could not post, with the reason, rather than failing later at commit. Today the bank-feed handlers are the ones that do (see [Event Block Reference § Bank-feed handlers](Event-Block-Reference.md#bank-feed-handlers)). For every other type the choice is checked at commit.
 2. **Commit.** `update-event-block` with `transition_to: "committed"` fires the event's Python handler against the final metadata and writes the event's entry, normally as a draft. If the handler already wrote the event's entry when it was created, committing does not write a second one. A handler error rolls the whole update back, so a Python-handled event never sits at `committed` with no entry behind it. Commit fires Python handlers only: an event type covered only by a DSL handler commits with no entry, so book those with `apply_handlers: true` at create.
 
 ```bash
@@ -121,12 +121,12 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
 - A `classified` event whose handler has **already written a draft** (the fire-handler path, or a scheduled obligation promoted when its month matures) is booked. Its draft posts at the next close of that period unless the event is voided or superseded first.
 - A `classified` event from the **capture path** has an account choice but no entry. It does not post at close; it posts once it is committed and its draft is then included in the close.
 
-To see what a close will post, list the period's drafts with `list-period-drafts`. The close itself is covered in [Period Close](Period-Close).
+To see what a close will post, list the period's drafts with `list-period-drafts`. The close itself is covered in [Period Close](Period-Close.md).
 
 Two operations move events forward without a new create:
 
 - **`promote-obligations`** sweeps scheduled obligations whose month has arrived, moves them to `classified`, and drafts their closing entries. A background sensor runs the same sweep; the operation runs it now.
-- **`execute-event-block`** publishes an event to its source-of-truth system when the event's connection has the `qb_authoritative` write policy, moving it to `fulfilled` (or `pending` if QuickBooks rejects it) and posting its drafts. On a `native` connection, or an event with no connection, it returns without an external write. See [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy).
+- **`execute-event-block`** publishes an event to its source-of-truth system when the event's connection has the `qb_authoritative` write policy, moving it to `fulfilled` (or `pending` if QuickBooks rejects it) and posting its drafts. On a `native` connection, or an event with no connection, it returns without an external write. See [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md).
 
 ## Handlers: How Events Become GL Entries
 
@@ -137,21 +137,21 @@ A handler is the part that knows the accounting. It takes an event and produces 
 
 An event with `apply_handlers: true` whose type matches no handler is an error, not a silent capture. `preview-event-block` takes the same body as a create and returns the planned entries and a `would_succeed` flag without writing anything.
 
-The handler list, the aliases, the matching rules, and the template grammar are in [Event Block Reference § Handlers](Event-Block-Reference#handlers).
+The handler list, the aliases, the matching rules, and the template grammar are in [Event Block Reference § Handlers](Event-Block-Reference.md#handlers).
 
 ## The Closed-Period Write Gate
 
 Once a fiscal period is closed, its books are fixed. Any write that would put a ledger row in a closed period, or remove one that landed there, is refused with a closed-period error naming the period: posting an event whose entry is dated in it, committing one, voiding or superseding one whose entries are dated in it, drafting a schedule's entry there, or disposing of a reconciling item into it. Capturing an event writes no ledger rows, so capture is never blocked.
 
-To change a closed month, reopen it with `reopen-period`, make the correction, and close it again. The gate and the close take the same per-period lock, so a write cannot see a period as open and commit after it has closed. See [Period Close](Period-Close).
+To change a closed month, reopen it with `reopen-period`, make the correction, and close it again. The gate and the close take the same per-period lock, so a write cannot see a period as open and commit after it has closed. See [Period Close](Period-Close.md).
 
 ## Source Systems and Reconciling Items
 
 `source` names where an event came from. The platform's own values (`manual`, `system`, `schedule`) are always accepted; any other value must be a provider or source name registered as a connection on the graph. Supply `external_id` with the source's own id: events are idempotent on `(source, external_id)`, so a retried delivery does not create a duplicate.
 
-**Write policy** decides who is the system of record for a connection. `native` means RoboLedger is; nothing is written back. `qb_authoritative` means QuickBooks is, and RoboLedger's own entries are published to it (at `execute-event-block`, or in a batch at close). These are the two policies that can be set; `hybrid` is reserved and is rejected. Detail is in [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy).
+**Write policy** decides who is the system of record for a connection. `native` means RoboLedger is; nothing is written back. `qb_authoritative` means QuickBooks is, and RoboLedger's own entries are published to it (at `execute-event-block`, or in a batch at close). These are the two policies that can be set; `hybrid` is reserved and is rejected. Detail is in [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md).
 
-**Reconciling items** handle a source that changes its mind. When a re-sync brings a changed payload for an event whose entry has already posted, the platform does not rewrite the books. It keeps the posted entry and the stored payload, holds the incoming one aside, and flags the event as a reconciling item (`isReconcilingItem` on `eventBlocks`). Each one waits for an explicit disposition: **restate** the affected months, **catch up** with an entry in the open period, or **acknowledge** it as handled, with a note. `preview-reconciling-item` shows what each would do and `resolve-reconciling-item` applies one. See [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy).
+**Reconciling items** handle a source that changes its mind. When a re-sync brings a changed payload for an event whose entry has already posted, the platform does not rewrite the books. It keeps the posted entry and the stored payload, holds the incoming one aside, and flags the event as a reconciling item (`isReconcilingItem` on `eventBlocks`). Each one waits for an explicit disposition: **restate** the affected months, **catch up** with an entry in the open period, or **acknowledge** it as handled, with a note. `preview-reconciling-item` shows what each would do and `resolve-reconciling-item` applies one. See [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md).
 
 ## Posting an Event to the Ledger
 
@@ -186,17 +186,17 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
 
 Element ids come from the graph's own chart of accounts. The response is an `OperationEnvelope` whose `result` is the event at status `classified`. Read events back with the `eventBlocks` GraphQL field, or `list-event-blocks` and `get-event-block` from an MCP client.
 
-Building a full integration (capturing from a source system, idempotent retries, choosing capture or fire-handler, reading back, and tracing the audit chain in the graph) is walked through in [Build a Ledger Integration](Build-a-Ledger-Integration).
+Building a full integration (capturing from a source system, idempotent retries, choosing capture or fire-handler, reading back, and tracing the audit chain in the graph) is walked through in [Build a Ledger Integration](Build-a-Ledger-Integration.md).
 
 ## Related Documentation
 
-**Wiki Guides:**
-- **[Event Block Reference](Event-Block-Reference)** - Envelope fields, vocabularies, transitions, handlers, the template grammar, and graph edges
-- **[Build a Ledger Integration](Build-a-Ledger-Integration)** - Posting events from your own system, end to end
-- **[Period Close](Period-Close)** - How drafts post, and reopening a closed period
-- **[QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy)** - Systems of record, write-back, and reconciling items
-- **[Operations Contract](Operations-Contract)** - The operation envelope, idempotency, and errors every write shares
-- **[Information Blocks](Information-Blocks)** - How the facts events produce are packaged for reporting
+**Guides:**
+- **[Event Block Reference](Event-Block-Reference.md)** - Envelope fields, vocabularies, transitions, handlers, the template grammar, and graph edges
+- **[Build a Ledger Integration](Build-a-Ledger-Integration.md)** - Posting events from your own system, end to end
+- **[Period Close](Period-Close.md)** - How drafts post, and reopening a closed period
+- **[QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md)** - Systems of record, write-back, and reconciling items
+- **[Operations Contract](Operations-Contract.md)** - The operation envelope, idempotency, and errors every write shares
+- **[Information Blocks](Information-Blocks.md)** - How the facts events produce are packaged for reporting
 
 **Codebase Documentation:**
 - **[API Reference](https://robosystems.ai/docs/extensions)** - Request and response schemas for every operation
@@ -205,6 +205,6 @@ Building a full integration (capturing from a source system, idempotent retries,
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

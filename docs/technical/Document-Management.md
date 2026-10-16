@@ -4,7 +4,7 @@ Every graph you own carries a document store for policies, procedures and notes,
 
 **Quick Start:** Create a markdown document with `POST /v1/graphs/{graph_id}/operations/index-document` (or the `create-document` MCP tool), and it is automatically split into sections and indexed for search. Creation, update, and deletion are **content operations**; the REST surface at `/v1/graphs/{graph_id}/documents` is read-only (list and get).
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Overview
 
@@ -17,11 +17,11 @@ The document store is a per-graph layer for unstructured, human- and agent-autho
 
 PostgreSQL holds the full document; OpenSearch holds a derived projection used only for search. Create and update write PostgreSQL first, then sync to OpenSearch; delete removes both. This split keeps the canonical record durable while letting the retrieval index be rebuilt at any time.
 
-Documents are the foundation of the retrieval layer your AI agents read from — policies become searchable context an agent can cite. Agent recollections are a **separate** surface: semantic memory is now first-class, with its own per-graph vector store and its own operations (see [Semantic Memory Is a Separate Surface](#semantic-memory-is-a-separate-surface)). For the search and retrieval side, see [Search and AI Retrieval](Search-and-AI-Retrieval). For bulk tabular node and relationship data (parquet, CSV, JSON staged into the graph), see [File Uploads](File-Uploads).
+Documents are the foundation of the retrieval layer your AI agents read from — policies become searchable context an agent can cite. Agent recollections are a **separate** surface: semantic memory is now first-class, with its own per-graph vector store and its own operations (see [Semantic Memory Is a Separate Surface](#semantic-memory-is-a-separate-surface)). For the search and retrieval side, see [Search and AI Retrieval](Search-and-AI-Retrieval.md). For bulk tabular node and relationship data (parquet, CSV, JSON staged into the graph), see [File Uploads](File-Uploads.md).
 
 ## Prerequisites
 
-- A RoboSystems account and an API key, sent as the `X-API-Key` header (see [Quick Start](Quick-Start)).
+- A RoboSystems account and an API key, sent as the `X-API-Key` header (see [Quick Start](Quick-Start.md)).
 - A **non-shared user graph** — document operations are rejected on shared public repositories (SEC and other platform-managed repos).
 - Document search enabled on the deployment. It is on robosystems.ai; a self-hosted deployment controls it with `SEMANTIC_SEARCH_ENABLED` (see [Self-hosted deployments](#self-hosted-deployments)).
 
@@ -213,7 +213,7 @@ curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/operations/delete-d
   -d '{"document_id": "doc_01J9XYZ..."}'
 ```
 
-**Note:** `GET /documents/{id}` and `GET /search/{id}` return different things. The first returns the whole PostgreSQL document by its `doc_...` id; the second returns a single OpenSearch section by its `udoc_..._{index}` id. Do not conflate the two ids. The full search story — BM25 versus semantic search, ranking, and agent retrieval — is covered in [Search and AI Retrieval](Search-and-AI-Retrieval).
+**Note:** `GET /documents/{id}` and `GET /search/{id}` return different things. The first returns the whole PostgreSQL document by its `doc_...` id; the second returns a single OpenSearch section by its `udoc_..._{index}` id. Do not conflate the two ids. The full search story — BM25 versus semantic search, ranking, and agent retrieval — is covered in [Search and AI Retrieval](Search-and-AI-Retrieval.md).
 
 ## The MCP Surface
 
@@ -229,7 +229,7 @@ The same document operations are exposed as MCP tools for agent-driven workflows
 | `search-documents` | Search the document index (returns a `document_id` per hit) |
 | `get-document-section` | Read a section by the id returned from search, a window at a time |
 
-`search-documents` returns a `document_id` per hit; pass it to `get-document-section` to read the section. Semantic (KNN) search is opt-in; the default mode is BM25 full-text. The MCP retrieval tools are documented alongside the rest of the search surface in [Search and AI Retrieval](Search-and-AI-Retrieval).
+`search-documents` returns a `document_id` per hit; pass it to `get-document-section` to read the section. Semantic (KNN) search is opt-in; the default mode is BM25 full-text. The MCP retrieval tools are documented alongside the rest of the search surface in [Search and AI Retrieval](Search-and-AI-Retrieval.md).
 
 ## Semantic Memory Is a Separate Surface
 
@@ -243,7 +243,7 @@ Agent recollections used to be modelled as documents filed under `folder="memory
 
 The gating is **different from documents**: a deployment controls memory with `SEMANTIC_MEMORY_ENABLED` (with `MCP_SEMANTIC_MEMORY_ENABLED` as an additional sub-gate on the MCP tools), not with `SEMANTIC_SEARCH_ENABLED`. Like documents, memory is blocked on shared repositories. Unlike documents, `remember` and `update-memory` are also blocked on subgraphs — a subgraph is meant to be cheap to create and throw away, so memories belong on the parent graph — while `forget` stays open so existing memories remain removable.
 
-Memory recall is covered with the rest of the retrieval layer in [Search and AI Retrieval](Search-and-AI-Retrieval).
+Memory recall is covered with the rest of the retrieval layer in [Search and AI Retrieval](Search-and-AI-Retrieval.md).
 
 ## Tier Limits
 
@@ -282,15 +282,15 @@ Content is capped at 500,000 characters at the request layer. Individual section
 
 ## Self-hosted deployments
 
-Document search is gated by `SEMANTIC_SEARCH_ENABLED`, and the flag gates both halves differently. The read routers (`/documents`, `/search`) are conditionally mounted — with the flag off they do not exist and calls return **404** rather than a feature-disabled error. The `index-document` and `delete-document` operations are always mounted and return **503 "Document search is not enabled"** instead. Either way the fix is the same: confirm the flag in your environment and restart the stack if you changed it. See [Local Development](Local-Development).
+Document search is gated by `SEMANTIC_SEARCH_ENABLED`, and the flag gates both halves differently. The read routers (`/documents`, `/search`) are conditionally mounted — with the flag off they do not exist and calls return **404** rather than a feature-disabled error. The `index-document` and `delete-document` operations are always mounted and return **503 "Document search is not enabled"** instead. Either way the fix is the same: confirm the flag in your environment and restart the stack if you changed it. See [Local Development](Local-Development.md).
 
 ## Related Documentation
 
-**Wiki Guides:**
+**Guides:**
 
-- **[Search and AI Retrieval](Search-and-AI-Retrieval)** - How documents become searchable and how AI agents retrieve them
-- **[File Uploads](File-Uploads)** - Bulk tabular node and relationship data (parquet, CSV, JSON), a distinct surface from this markdown document store
-- **[Custom Graph Schema](Custom-Graph-Schema)** - A custom-graph demo whose Step 6 indexes documents into this store
+- **[Search and AI Retrieval](Search-and-AI-Retrieval.md)** - How documents become searchable and how AI agents retrieve them
+- **[File Uploads](File-Uploads.md)** - Bulk tabular node and relationship data (parquet, CSV, JSON), a distinct surface from this markdown document store
+- **[Custom Graph Schema](Custom-Graph-Schema.md)** - A custom-graph demo whose Step 6 indexes documents into this store
 
 **Codebase Documentation:**
 
@@ -304,6 +304,6 @@ Document search is gated by `SEMANTIC_SEARCH_ENABLED`, and the flag gates both h
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

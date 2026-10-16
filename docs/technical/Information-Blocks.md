@@ -2,9 +2,9 @@
 
 An **Information Block** is the platform's unit of financial meaning: the numbers, plus the concepts, structure, and rules that make them facts. On its own, `83333` could be cents of depreciation, a share count, or a typo; it only becomes a fact once you know which concept it measures, which period it covers, which statement it rolls into, and which rules it has to satisfy. The block carries all of that together, and every block, whatever its type, is read and written in the same envelope.
 
-This page is the concept. The field-by-field envelope, the per-type mechanics, and the rule and registry matrices are in [Information Block Reference](Information-Block-Reference).
+This page is the concept. The field-by-field envelope, the per-type mechanics, and the rule and registry matrices are in [Information Block Reference](Information-Block-Reference.md).
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Table of Contents
 
@@ -57,7 +57,7 @@ Every type belongs to one of three **construction modes**, and the mode decides 
 | **compositional** | The facts already exist from the ledger; the block is assembled when you read it. You **render** these, through a Report. | `balance_sheet`, `income_statement`, `cash_flow_statement`, `equity_statement`, `comprehensive_income`, `regulatory_disclosure` |
 | **derivative** | Facts are computed from other blocks, asserted from outside, or observed from a source outside the ledger. | `metric`, `reconciliation` |
 
-The practical consequence: **you author a Schedule; you render a Balance Sheet.** Calling `create-information-block` with a compositional or derivative type returns HTTP 501 with a pointer to the right path (`create-report` for statements, `create-taxonomy-block` for a disclosure or metric structure, `refresh-reconciliations` for a reconciliation). The full type-by-operation matrix is in [Information Block Reference § The Registry](Information-Block-Reference#the-registry).
+The practical consequence: **you author a Schedule; you render a Balance Sheet.** Calling `create-information-block` with a compositional or derivative type returns HTTP 501 with a pointer to the right path (`create-report` for statements, `create-taxonomy-block` for a disclosure or metric structure, `refresh-reconciliations` for a reconciliation). The full type-by-operation matrix is in [Information Block Reference § The Registry](Information-Block-Reference.md#the-registry).
 
 ## The Envelope
 
@@ -112,7 +112,7 @@ A trimmed schedule envelope, as `create-information-block` returns it (snake_cas
 }
 ```
 
-Every field, and what each mechanics arm carries, is in [Information Block Reference § The Envelope](Information-Block-Reference#the-envelope).
+Every field, and what each mechanics arm carries, is in [Information Block Reference § The Envelope](Information-Block-Reference.md#the-envelope).
 
 ## FactSets — Block = Fact Set
 
@@ -129,9 +129,9 @@ The envelope you read is the Structure plus **one** FactSet. A library-seeded st
 
 Rules are not a global corpus run against a graph. **Every rule hangs off a block**, and ships in the block's envelope next to the facts it checks. Some arrive with the block: a schedule with a cost basis gets a `SumEquals` rule proving its periodic amounts add back to that basis, and the seeded statement structures carry their calculation arcs as `RollUp` and `EqualTo` rules. Others are authored with the structure.
 
-Evaluating writes one result per rule and fills `verification_results` and `verification_summary`. Call `evaluate-rules` with a `structure_id` to run one block by hand; `close-period` runs the same engine over the period's schedules and the statements it stamps, and returns the tallies on its receipt. Each result is `pass`, `fail`, `error`, or `skipped`; a pattern without an evaluator reports `skipped` rather than failing. Which patterns evaluate today is in [Information Block Reference § Rule Patterns](Information-Block-Reference#rule-patterns); a walk through the rules a demo tenant carries is in [RoboLedger Demo Walkthrough § The Rule Engine](RoboLedger-Demo-Walkthrough#the-rule-engine).
+Evaluating writes one result per rule and fills `verification_results` and `verification_summary`. Call `evaluate-rules` with a `structure_id` to run one block by hand; `close-period` runs the same engine over the period's schedules and the statements it stamps, and returns the tallies on its receipt. Each result is `pass`, `fail`, `error`, or `skipped`; a pattern without an evaluator reports `skipped` rather than failing. Which patterns evaluate today is in [Information Block Reference § Rule Patterns](Information-Block-Reference.md#rule-patterns); a walk through the rules a demo tenant carries is in [RoboLedger Demo Walkthrough § The Rule Engine](RoboLedger-Demo-Walkthrough.md#the-rule-engine).
 
-Rule-engine verification is not the same as a statement's render-time footing check. See [Reporting and Rendering § Guard Rails](Reporting-and-Rendering#guard-rails).
+Rule-engine verification is not the same as a statement's render-time footing check. See [Reporting and Rendering § Guard Rails](Reporting-and-Rendering.md#guard-rails).
 
 ## View Projections
 
@@ -140,7 +140,7 @@ A **view** is one way of looking at the same block, with no second query. Two vi
 - **`rendering`**: ordered, footed rows with one value per period column. Filled for the statement family, disclosures, metrics, forecast blocks, and reconciliations.
 - **`chart`**: panel and series configuration over those rows. Filled for metric blocks.
 
-The rest are projections of the envelope's own lists, done by the client: the facts table (`facts`), the elements (`elements`), the rules (`rules`), and the verification results (`verification_results`, `verification_summary`). This is how the RoboLedger Explorer offers Rendered, Chart, Facts, Elements, Validation, and Rules views over one envelope. The rendering payload and how statements are laid out, including the per-entity Reporting Style that picks which presentation a statement uses, are in [Reporting and Rendering](Reporting-and-Rendering).
+The rest are projections of the envelope's own lists, done by the client: the facts table (`facts`), the elements (`elements`), the rules (`rules`), and the verification results (`verification_results`, `verification_summary`). This is how the RoboLedger Explorer offers Rendered, Chart, Facts, Elements, Validation, and Rules views over one envelope. The rendering payload and how statements are laid out, including the per-entity Reporting Style that picks which presentation a statement uses, are in [Reporting and Rendering](Reporting-and-Rendering.md).
 
 ## Live and Pinned Reads
 
@@ -151,13 +151,13 @@ Two GraphQL reads return envelopes, and they answer different questions:
 
 The snapshot unit is the FactSet, not the Structure. Use the live read for the closing book and the pinned read for anything you file, share, or compare against later.
 
-> **Same noun, different call.** The analytical surface also has operations named **`disclosures`** and **`information-block`** (`POST /extensions/roboledger/{graph_id}/operations/information-block`, and the MCP tool of the same name). Those do **not** read the blocks on this page. They read **one section of a filing or report whole**: `disclosures` lists a report's sections, and `information-block` returns one of them with its rows, its breakdown by its own axes, its calculation footing, and its text blocks. They run xbrlkit over the report held whole (the published filing on `sec`, the report bundle on a tenant), not over the graph and not over this envelope. To read an authored or rendered block, use `informationBlock` / `get-information-block`. See [RoboLedger Operations](RoboLedger-Operations#analytical-view-operations).
+> **Same noun, different call.** The analytical surface also has operations named **`disclosures`** and **`information-block`** (`POST /extensions/roboledger/{graph_id}/operations/information-block`, and the MCP tool of the same name). Those do **not** read the blocks on this page. They read **one section of a filing or report whole**: `disclosures` lists a report's sections, and `information-block` returns one of them with its rows, its breakdown by its own axes, its calculation footing, and its text blocks. They run xbrlkit over the report held whole (the published filing on `sec`, the report bundle on a tenant), not over the graph and not over this envelope. To read an authored or rendered block, use `informationBlock` / `get-information-block`. See [RoboLedger Operations](RoboLedger-Operations.md#analytical-view-operations).
 
 ## Authoring an Information Block
 
 Statements are rendered and metrics are derived, so the block you author is a declarative one. A **Schedule** is the canonical example: a generator of recurring closing entries for depreciation, amortization, prepaid drawdowns, and accruals.
 
-All calls authenticate with `X-API-Key`, using a key from **Settings → API keys** at robosystems.ai. `GRAPH_ID` is a graph with the RoboLedger extension. See [Quick Start](Quick-Start) for an account, a key, and a graph.
+All calls authenticate with `X-API-Key`, using a key from **Settings → API keys** at robosystems.ai. `GRAPH_ID` is a graph with the RoboLedger extension. See [Quick Start](Quick-Start.md) for an account, a key, and a graph.
 
 ### Create a schedule with an uneven curve
 
@@ -196,7 +196,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
   }'
 ```
 
-The response is an `OperationEnvelope` whose `result` is the new block's envelope. Creating the schedule also writes its facts, a `SumEquals` rule proving the six amounts total `original_amount`, and one obligation event per month that drafts that month's entry when its period arrives (see [Event-Driven Ledger](Event-Driven-Ledger)). Keep the `id`.
+The response is an `OperationEnvelope` whose `result` is the new block's envelope. Creating the schedule also writes its facts, a `SumEquals` rule proving the six amounts total `original_amount`, and one obligation event per month that drafts that month's entry when its period arrives (see [Event-Driven Ledger](Event-Driven-Ledger.md)). Keep the `id`.
 
 ### Read it back and verify it
 
@@ -218,30 +218,30 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
 
 ### Where to go next
 
-- The other declarative types: [Information Block Reference § Per-Type Mechanics](Information-Block-Reference#per-type-mechanics) for rollforwards; [Forecasting and Metrics](Forecasting-and-Metrics) for forecast scenarios and metric blocks.
-- How schedule drafts post: [Period Close](Period-Close).
-- Reconciliation blocks, which the close maintains rather than you authoring them: [Period Close § Reconciliations](Period-Close#reconciliations).
-- Producing statements: [Reporting and Rendering](Reporting-and-Rendering).
-- Gotchas (cents in, dollars out; 501s; null summaries): [Information Block Reference § Gotchas](Information-Block-Reference#gotchas).
+- The other declarative types: [Information Block Reference § Per-Type Mechanics](Information-Block-Reference.md#per-type-mechanics) for rollforwards; [Forecasting and Metrics](Forecasting-and-Metrics.md) for forecast scenarios and metric blocks.
+- How schedule drafts post: [Period Close](Period-Close.md).
+- Reconciliation blocks, which the close maintains rather than you authoring them: [Period Close § Reconciliations](Period-Close.md#reconciliations).
+- Producing statements: [Reporting and Rendering](Reporting-and-Rendering.md).
+- Gotchas (cents in, dollars out; 501s; null summaries): [Information Block Reference § Gotchas](Information-Block-Reference.md#gotchas).
 
 ## How It Ties Together
 
 The Information Block is where the two halves of the platform meet:
 
-- **Taxonomy content** supplies the structural atoms, the elements and associations. See [Taxonomy and Frameworks](Taxonomy-and-Frameworks).
-- **Ledger content** supplies the measured atoms, the facts derived from transactions, entries, and line items. See [Event-Driven Ledger](Event-Driven-Ledger).
+- **Taxonomy content** supplies the structural atoms, the elements and associations. See [Taxonomy and Frameworks](Taxonomy-and-Frameworks.md).
+- **Ledger content** supplies the measured atoms, the facts derived from transactions, entries, and line items. See [Event-Driven Ledger](Event-Driven-Ledger.md).
 
-A taxonomy without facts is an empty skeleton, and facts without a taxonomy are loose numbers. The block binds them into one molecule that is assembled once, read the same way everywhere, and projected into [Reporting and Rendering](Reporting-and-Rendering) and [Serialization and Export](Serialization-and-Export).
+A taxonomy without facts is an empty skeleton, and facts without a taxonomy are loose numbers. The block binds them into one molecule that is assembled once, read the same way everywhere, and projected into [Reporting and Rendering](Reporting-and-Rendering.md) and [Serialization and Export](Serialization-and-Export.md).
 
 ## Related Documentation
 
-**Wiki Guides:**
-- **[Information Block Reference](Information-Block-Reference)** - Envelope fields, per-type mechanics, the registry, rule patterns, and gotchas
-- **[Reporting and Rendering](Reporting-and-Rendering)** - Statement rendering, Reporting Style, and the rendering payload
-- **[Forecasting and Metrics](Forecasting-and-Metrics)** - Forecast scenarios and metric blocks
-- **[Period Close](Period-Close)** - How schedule drafts post and the close runs the rule engine
-- **[Taxonomy and Frameworks](Taxonomy-and-Frameworks)** - The elements and associations that supply a block's structure
-- **[Event-Driven Ledger](Event-Driven-Ledger)** - The events and entries that supply a block's facts
+**Guides:**
+- **[Information Block Reference](Information-Block-Reference.md)** - Envelope fields, per-type mechanics, the registry, rule patterns, and gotchas
+- **[Reporting and Rendering](Reporting-and-Rendering.md)** - Statement rendering, Reporting Style, and the rendering payload
+- **[Forecasting and Metrics](Forecasting-and-Metrics.md)** - Forecast scenarios and metric blocks
+- **[Period Close](Period-Close.md)** - How schedule drafts post and the close runs the rule engine
+- **[Taxonomy and Frameworks](Taxonomy-and-Frameworks.md)** - The elements and associations that supply a block's structure
+- **[Event-Driven Ledger](Event-Driven-Ledger.md)** - The events and entries that supply a block's facts
 
 **Codebase Documentation:**
 - **[API reference](https://robosystems.ai/docs/extensions)** - Full request and response schemas
@@ -251,6 +251,6 @@ A taxonomy without facts is an empty skeleton, and facts without a taxonomy are 
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

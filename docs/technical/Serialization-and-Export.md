@@ -4,7 +4,7 @@ A published RoboLedger report downloads as a file in three formats: the holon (J
 
 **Quick Start:** Publish a report with `create-report`, then query the `reportDownloadUrl` GraphQL field for a short-lived link to the file. With no `format`, the link is to the holon.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Table of Contents
 
@@ -25,7 +25,7 @@ A published RoboLedger report downloads as a file in three formats: the holon (J
 
 ## Overview
 
-A published report is not a rendered document. It is a structured object: the report's facts, periods, concept declarations, presentation and calculation networks, and the [Information Block](Information-Blocks) for each statement. All three formats are projections of that one assembled object, so they cannot disagree with each other.
+A published report is not a rendered document. It is a structured object: the report's facts, periods, concept declarations, presentation and calculation networks, and the [Information Block](Information-Blocks.md) for each statement. All three formats are projections of that one assembled object, so they cannot disagree with each other.
 
 | Format | `format` value | What it is for |
 | --- | --- | --- |
@@ -35,7 +35,7 @@ A published report is not a rendered document. It is a structured object: the re
 
 ## Prerequisites
 
-- A RoboSystems account and an API key; see [Quick Start](Quick-Start)
+- A RoboSystems account and an API key; see [Quick Start](Quick-Start.md)
 - A graph with the RoboLedger extension, ledger data, a chart-of-accounts mapping, and at least one published report
 
 ## What a Report Bundle Carries
@@ -82,7 +82,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
   }'
 ```
 
-`mapping_id` is the id of the graph's chart-of-accounts mapping structure, a `struct_…` id; see [Chart of Accounts Mapping](Chart-of-Accounts-Mapping). The `id` in the response's `result` is the `report_id` you download with.
+`mapping_id` is the id of the graph's chart-of-accounts mapping structure, a `struct_…` id; see [Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md). The `id` in the response's `result` is the `report_id` you download with.
 
 ## Downloading a Bundle
 
@@ -135,7 +135,7 @@ Pass `format: TAVI` (`-o report.tavi.json`) or `format: XBRL_2_1` (`-o report.zi
 
 ## Downloading from Code
 
-**From an AI client.** On a graph's MCP connection, the `get-report-bundle` tool returns the same short-lived link, with the same `format` choices (`holon-jsonld` by default, `tavi`, `xbrl-2.1`). It is meant for a reader on the same machine that loads a file by URL, such as `xbrlkit serve`. The link carries its own credential, so pass it straight to the tool that fetches it rather than into a message. The RoboLedger connector address (`/v1/mcp/roboledger`) does not offer this tool; see [AI Operators & MCP](AI-Operators-and-MCP).
+**From an AI client.** On a graph's MCP connection, the `get-report-bundle` tool returns the same short-lived link, with the same `format` choices (`holon-jsonld` by default, `tavi`, `xbrl-2.1`). It is meant for a reader on the same machine that loads a file by URL, such as `xbrlkit serve`. The link carries its own credential, so pass it straight to the tool that fetches it rather than into a message. The RoboLedger connector address (`/v1/mcp/roboledger`) does not offer this tool; see [AI Operators & MCP](AI-Operators-and-MCP.md).
 
 **From Python.** The [Python SDK](https://github.com/RoboFinSystems/robosystems-python-client) resolves the link and follows it in one call:
 
@@ -254,7 +254,7 @@ uv run python -m examples._common.validate --zip report.zip --label fy2025
 
 ## Changing What a Report Contains
 
-A report's content is the ledger's facts, mapped through the chart of accounts to framework concepts. To change it, change those: post or correct events ([Event-Driven Ledger](Event-Driven-Ledger)), adjust the mapping ([Chart of Accounts Mapping](Chart-of-Accounts-Mapping)), then run `regenerate-report`. That writes a new generation, and the next download returns it.
+A report's content is the ledger's facts, mapped through the chart of accounts to framework concepts. To change it, change those: post or correct events ([Event-Driven Ledger](Event-Driven-Ledger.md)), adjust the mapping ([Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md)), then run `regenerate-report`. That writes a new generation, and the next download returns it.
 
 A filed report is fixed. `regenerate-report` on a report whose filing status is `filed` or `archived` is refused with `422`; to replace a filed report, archive it and create a new report for the period.
 
@@ -309,13 +309,13 @@ just demo-roboledger
 
 ## Related Documentation
 
-**Wiki Guides:**
+**Guides:**
 
-- **[Information Blocks](Information-Blocks)** - The blocks whose envelopes the bundle carries
-- **[Reporting & Rendering](Reporting-and-Rendering)** - How published reports are produced
-- **[Chart of Accounts Mapping](Chart-of-Accounts-Mapping)** - The mapping a report rolls up through
-- **[RoboLedger Operations](RoboLedger-Operations)** - The command surface, including report publishing
-- **[GraphQL Reads](GraphQL-Reads)** - The read surface `reportDownloadUrl` lives on
+- **[Information Blocks](Information-Blocks.md)** - The blocks whose envelopes the bundle carries
+- **[Reporting & Rendering](Reporting-and-Rendering.md)** - How published reports are produced
+- **[Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md)** - The mapping a report rolls up through
+- **[RoboLedger Operations](RoboLedger-Operations.md)** - The command surface, including report publishing
+- **[GraphQL Reads](GraphQL-Reads.md)** - The read surface `reportDownloadUrl` lives on
 
 **API & Codebase:**
 
@@ -325,6 +325,6 @@ just demo-roboledger
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

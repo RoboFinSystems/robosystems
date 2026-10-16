@@ -8,7 +8,7 @@ The server-side AI operators can run on an open-weight model through any OpenAI-
 
 | | Who chooses the model | Where it runs |
 | --- | --- | --- |
-| **MCP clients** | The client does | Wherever the client runs. Any MCP client — including one driving an open-weight model — connects to your stack's MCP routes and calls the same tool surface. See [AI Operators & MCP](AI-Operators-and-MCP#connecting-from-mcp-clients). |
+| **MCP clients** | The client does | Wherever the client runs. Any MCP client — including one driving an open-weight model — connects to your stack's MCP routes and calls the same tool surface. See [AI Operators & MCP](AI-Operators-and-MCP.md#connecting-from-mcp-clients). |
 | **Operators** | Your deployment does | Your stack calls the model. By default that is Claude through Bedrock; this page covers pointing it somewhere else. |
 
 Operators are the server-side AI: the chat assistant that answers questions by composing graph reads, the author operator behind the console's `/do` that makes a requested change through a narrow set of writes, and the chart-of-accounts mapping operator. The author operator always runs on the `quality` tier, so map that tier to move it. Everything else the platform does — ingestion, reporting, close, search — runs without a model at all.
@@ -85,7 +85,7 @@ What to take from it: **frontier-size open weights, served from a GPU server or 
 
 ## Before You Point It at Real Books
 
-- **Credits read zero by default.** The credit rate is a cost passthrough, and a GPU you already own has no per-token cost, so both rates default to `0`. If you point the lane at a paid endpoint and have billing on, set `OPENAI_COMPAT_CREDITS_PER_1K_INPUT` / `_OUTPUT` or your meter will under-report real spend. See [Credits & Billing](Credits-and-Billing).
+- **Credits read zero by default.** The credit rate is a cost passthrough, and a GPU you already own has no per-token cost, so both rates default to `0`. If you point the lane at a paid endpoint and have billing on, set `OPENAI_COMPAT_CREDITS_PER_1K_INPUT` / `_OUTPUT` or your meter will under-report real spend. See [Credits & Billing](Credits-and-Billing.md).
 - **A hosted catalog sees your prompts.** Operator prompts carry ledger data — account names, balances, question text. Check the endpoint's data-retention and training terms before using anything but demo data, and prefer a server you run for real books.
 - **Free tiers are for evaluation.** They are rate-limited and slow — minutes per question is normal — and they support no latency claim.
 - **No caching discount.** The Bedrock path caches the large system-and-tools prefix between calls. This lane does not send cache directives, so unless your server caches on its own, every call pays for the full prefix.
@@ -115,13 +115,13 @@ What to take from it: **frontier-size open weights, served from a GPU server or 
 
 ## Related Documentation
 
-**Wiki Guides:**
+**Guides:**
 
-- **[AI Operators & MCP](AI-Operators-and-MCP)** - The operator endpoint, the MCP tool surface, and connecting your own client
-- **[Local Development](Local-Development)** - Getting the stack running in the first place
-- **[Credits & Billing](Credits-and-Billing)** - How AI calls are metered
-- **[Bootstrap Guide](Bootstrap-Guide)** - Deploy the platform into your own AWS account
-- **[Architecture Overview](Architecture-Overview)** - Where operators sit in the platform
+- **[AI Operators & MCP](AI-Operators-and-MCP.md)** - The operator endpoint, the MCP tool surface, and connecting your own client
+- **[Local Development](Local-Development.md)** - Getting the stack running in the first place
+- **[Credits & Billing](Credits-and-Billing.md)** - How AI calls are metered
+- **[Bootstrap Guide](Bootstrap-Guide.md)** - Deploy the platform into your own AWS account
+- **[Architecture Overview](Architecture-Overview.md)** - Where operators sit in the platform
 
 **Codebase Documentation:**
 
@@ -131,6 +131,6 @@ What to take from it: **frontier-size open weights, served from a GPU server or 
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

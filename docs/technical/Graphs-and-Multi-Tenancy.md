@@ -2,7 +2,7 @@
 
 RoboSystems is multi-tenant at the graph layer: every customer dataset lives in its own isolated graph database keyed by a `graph_id`. This page explains the `graph_id` model, the three stores a tenant spans, the available graph tiers, subgraphs, and the day-to-day tasks of creating, listing, and querying graphs.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Table of Contents
 
@@ -63,7 +63,7 @@ Before working with graphs, ensure you have:
 - An API key, from **Settings → API keys** at robosystems.ai
 - A graph, or the org owner or admin role needed to create one (see [Creating a Graph](#creating-a-graph))
 
-[Quick Start](Quick-Start) walks through getting all three. All authenticated examples below target `https://api.robosystems.ai` and read the API key from `$ROBOSYSTEMS_API_KEY`. Use the `X-API-Key` header for backend testing; `Authorization: Bearer` is a frontend concern only.
+[Quick Start](Quick-Start.md) walks through getting all three. All authenticated examples below target `https://api.robosystems.ai` and read the API key from `$ROBOSYSTEMS_API_KEY`. Use the `X-API-Key` header for backend testing; `Authorization: Bearer` is a frontend concern only.
 
 ## The `graph_id` Model and Per-Graph Isolation
 
@@ -112,7 +112,7 @@ Two rules make the effective role non-obvious, and both are worth knowing before
 - **Org owners and admins hold implicit graph admin** on every graph their org owns — paying for a graph carries the right to manage it. The effective role is the stronger of the explicit grant and that implicit one, so a user with an explicit `viewer` row on a graph their org owns and administers is still an admin there.
 - **Subgraphs have no permissions of their own.** An access check on `kg…_dev` resolves to `kg…` and is answered by the parent's membership. Granting access to a parent grants it to every subgraph beneath it.
 
-**Shared repositories** do not use this model at all. They have no owning org and no member rows; access is **subscription-based** through a repository plan. See [Shared Repositories](Shared-Repositories).
+**Shared repositories** do not use this model at all. They have no owning org and no member rows; access is **subscription-based** through a repository plan. See [Shared Repositories](Shared-Repositories.md).
 
 `GET /v1/graphs/{graph_id}/members` reports who can reach a graph and at what role.
 
@@ -141,7 +141,7 @@ Notes:
 
 - **A graph and its subgraphs share one instance.** The subgraph cap, storage budget, and RAM are budgets for the whole instance, not per database — a parent plus its subgraphs draw on the same pool.
 - **The API rate multiplier applies to dedicated-resource categories only**, and scales with the tier's instance vCPU using Standard as the anchor. **Shared categories are the same on every tier**: auth, status, billing, and SSE do not scale, because they consume platform resources rather than your instance. The multiplier in `/v1/offering` is derived from the limit table the rate limiter actually enforces, so what is advertised cannot drift from what a caller receives.
-- **`ladybug-shared` is platform-managed and not user-creatable.** It backs read-only public repositories such as the `sec` corpus. You consume it through queries; you do not provision it. See [Shared Repositories](Shared-Repositories) for the subscription and consumption model.
+- **`ladybug-shared` is platform-managed and not user-creatable.** It backs read-only public repositories such as the `sec` corpus. You consume it through queries; you do not provision it. See [Shared Repositories](Shared-Repositories.md) for the subscription and consumption model.
 - **Only Standard, Large, and XLarge are creatable tiers.** The `instance_tier` field on graph creation accepts `ladybug-standard`, `ladybug-large`, or `ladybug-xlarge`.
 - **The tier sizes the graph, not the OLTP store.** Everything above describes the dedicated EC2 instance running your LadybugDB database. The extensions PostgreSQL schema (see [The Three Stores](#the-three-stores)) is per-graph regardless of tier and lives on shared managed infrastructure — tier does not change its isolation, which is the same schema-per-graph binding for every customer.
 
@@ -152,7 +152,7 @@ Graphs are created with `POST /v1/graphs`. Creation is **asynchronous**: the cal
 There are two flavors of graph:
 
 - **Entity graphs** — pre-wired for a financial entity (the default for RoboLedger). Supply an `initial_entity` and any `schema_extensions` (such as `roboledger`).
-- **Custom graphs** — your own node and relationship model. Supply a `custom_schema`. See [Custom Graph Schema](Custom-Graph-Schema) for the full how-to.
+- **Custom graphs** — your own node and relationship model. Supply a `custom_schema`. See [Custom Graph Schema](Custom-Graph-Schema.md) for the full how-to.
 
 ### Quick Start
 
@@ -228,7 +228,7 @@ Everything under `/extensions/*` is graph-scoped at the URL and falls into one o
 
 **For an entity graph, the command-write surface — not the Cypher endpoint — is how data enters the system.** This is the point that ties the whole page together: `/v1/graphs/{graph_id}/query/cypher` is read-only on the main graph *because* the write path is `/extensions/{domain}/{graph_id}/operations/*`, and the graph is rebuilt from what those operations write.
 
-Both surfaces are gated per deployment: on robosystems.ai both extensions are enabled, and a self-hosted deployment controls each with `ROBOLEDGER_ENABLED` and `ROBOINVESTOR_ENABLED`. The GraphQL schema is composed at construction time — a ledger-only deployment has literally no investor fields to introspect, rather than fields that fail at runtime. Full detail, including the operation envelope and idempotency semantics, is in **[Extensions Surface Overview](Extensions-Surface-Overview)**.
+Both surfaces are gated per deployment: on robosystems.ai both extensions are enabled, and a self-hosted deployment controls each with `ROBOLEDGER_ENABLED` and `ROBOINVESTOR_ENABLED`. The GraphQL schema is composed at construction time — a ledger-only deployment has literally no investor fields to introspect, rather than fields that fail at runtime. Full detail, including the operation envelope and idempotency semantics, is in **[Extensions Surface Overview](Extensions-Surface-Overview.md)**.
 
 ## Listing and Inspecting Graphs
 
@@ -331,7 +331,7 @@ curl "https://api.robosystems.ai/v1/graphs/kg1234567890abcdef/subgraphs" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
-Subgraph lifecycle writes (create, delete) follow the same operation pattern as other graph operations. See [Graph Operations](Graph-Operations) for the complete operations surface.
+Subgraph lifecycle writes (create, delete) follow the same operation pattern as other graph operations. See [Graph Operations](Graph-Operations.md) for the complete operations surface.
 
 ## Querying a Graph
 
@@ -357,7 +357,7 @@ The Cypher endpoint enforces a three-tier write policy, and knowing which tier y
 So how does data reach a main graph? It depends on what kind of graph it is — and this is exactly the distinction [The Three Stores](#the-three-stores) sets up:
 
 - **Entity graphs (RoboLedger / RoboInvestor)** — write through the extensions command surface, `POST /extensions/{domain}/{graph_id}/operations/{op_name}`. Those writes land in the extensions PostgreSQL tenant schema, mark the graph stale, and are swept into the graph by the next materialization. The graph catches up; you never write to it directly.
-- **Custom graphs** — write through the staging and materialization pipeline: upload a file, ingest it to a staging table, materialize. See [Custom Graph Schema](Custom-Graph-Schema) and [File Uploads](File-Uploads).
+- **Custom graphs** — write through the staging and materialization pipeline: upload a file, ingest it to a staging table, materialize. See [Custom Graph Schema](Custom-Graph-Schema.md) and [File Uploads](File-Uploads.md).
 
 Regardless of tier, three classes of statement are refused on the query endpoint entirely: bulk operations (`COPY`, `LOAD`, `IMPORT`), administrative operations (`EXPORT`, `INSTALL`, `ATTACH`), and schema DDL (`CREATE`/`DROP`/`ALTER TABLE`). A main graph's schema is fixed at creation so it stays consistent with its staging tables; a subgraph's schema is extended through the MCP tools `add-node-table` and `add-relationship-table`, not through the query endpoint.
 
@@ -376,7 +376,7 @@ The tool set is not fixed — it is assembled from the graph's schema extensions
 | **Memory** | `remember`, `recall`, `update-memory`, `forget` |
 | **Documents** | `create-document`, `get-document`, `list-documents`, `update-document`, `delete-document`, `search-documents`, `get-document-section` |
 
-`read-graph-cypher` is read-only: `CREATE`, `SET`, `DELETE`, `MERGE`, and `DROP`, along with `CALL db.` and `CALL apoc.`, are blocked — writes go through `write-graph-cypher`, which (like `add-node-table` and `add-relationship-table`) acts only on a subgraph and answers `subgraph_required` on a parent graph. `get-example-queries`, which returns sample queries tailored to a graph's schema, is contributed by the **RoboLedger extension** and is absent on a plain graph. Extension graphs add substantially more on top of this base. See [Custom Graph Schema](Custom-Graph-Schema) for a worked MCP example and [AI Operators and MCP](AI-Operators-and-MCP) for the full surface.
+`read-graph-cypher` is read-only: `CREATE`, `SET`, `DELETE`, `MERGE`, and `DROP`, along with `CALL db.` and `CALL apoc.`, are blocked — writes go through `write-graph-cypher`, which (like `add-node-table` and `add-relationship-table`) acts only on a subgraph and answers `subgraph_required` on a parent graph. `get-example-queries`, which returns sample queries tailored to a graph's schema, is contributed by the **RoboLedger extension** and is absent on a plain graph. Extension graphs add substantially more on top of this base. See [Custom Graph Schema](Custom-Graph-Schema.md) for a worked MCP example and [AI Operators and MCP](AI-Operators-and-MCP.md) for the full surface.
 
 **Connecting MCP to a subgraph gives you a deliberately smaller list.** Because a subgraph is not an extensions tenant, its tool list is trimmed to what is genuinely meaningful there: schema DDL, Cypher in both directions, `get-example-queries` where the parent's extensions contribute it, `recall` and `forget` for anything stored there earlier, `get-graph-info`, and `list-subgraphs`. Tools that would need an OLTP schema or a materialization relationship are withheld rather than allowed to fail — the platform-lifecycle ones are the reason the cut exists, because they would otherwise fail *quietly by succeeding*, returning a confident sync status about a relationship the subgraph does not have.
 
@@ -393,7 +393,7 @@ What makes this consistent with everything above rather than a hole in it:
 - **Provenance is explicit at the destination.** Shared content lands under a provenance record naming the source graph and report, so a recipient's data is never silently commingled with their own.
 - **Authorization is capability-style, and the recipient holds the exit.** A `graph_id` is unguessable, so the only way a sender holds yours is that you handed it over — the handover is the handshake, with no invite dance. Because a `graph_id` cannot be rotated, recipients get real controls rather than only an entry gate: an admin of the receiving graph can delete a shared report, and a per-graph block list (with optional purge) refuses future deliveries from a sender. Senders can also revoke a delivered copy.
 
-This works within a single deployment. Cross-deployment distribution is the holon JSON-LD export path — see [Serialization and Export](Serialization-and-Export).
+This works within a single deployment. Cross-deployment distribution is the holon JSON-LD export path — see [Serialization and Export](Serialization-and-Export.md).
 
 ## Troubleshooting
 
@@ -401,7 +401,7 @@ This works within a single deployment. Cross-deployment distribution is the holo
 
 You have hit the tier's subgraph cap.
 
-**Solution:** Delete an unused subgraph, or change the parent graph to a higher tier with a `change-tier` operation. Check the cap for your tier with `GET /v1/graphs/{graph_id}/limits`. See [Graph Operations](Graph-Operations).
+**Solution:** Delete an unused subgraph, or change the parent graph to a higher tier with a `change-tier` operation. Check the cap for your tier with `GET /v1/graphs/{graph_id}/limits`. See [Graph Operations](Graph-Operations.md).
 
 ### Subgraph Creation Fails: "Subgraphs are not available"
 
@@ -453,17 +453,17 @@ Subgraphs allow writes, but only for `member` and `admin`. A `viewer` gets `403`
 
 ## Related Documentation
 
-**Wiki Guides:**
+**Guides:**
 
-- **[Core Concepts](Core-Concepts)** - Orientation glossary: `graph_id`, OLTP vs OLAP, blocks, and the other recurring terms
-- **[Extensions Surface Overview](Extensions-Surface-Overview)** - The `/extensions/*` surface in full: three sub-surfaces, feature flags, and the operation envelope
-- **[Graph Operations](Graph-Operations)** - Lifecycle operations (create-subgraph, delete-subgraph, change-tier, backups, materialize) and the CQRS operation envelope
-- **[GraphQL Reads](GraphQL-Reads)** - The typed read surface over the extensions OLTP database and its field catalog
-- **[Shared Repositories](Shared-Repositories)** - The `ladybug-shared` tier, repository plans, and how to subscribe to and query public datasets
-- **[Authentication and API Keys](Authentication-and-API-Keys)** - API key creation, the `X-API-Key` header, and per-graph access control
-- **[Custom Graph Schema](Custom-Graph-Schema)** - Designing node and relationship schemas and querying a custom graph
-- **[Querying the Analytical Graph](Querying-the-Analytical-Graph)** - Cypher patterns against the materialized projection
-- **[Credits and Billing](Credits-and-Billing)** - Credit pools, what consumes them, and how subgraphs draw from the parent
+- **[Core Concepts](Core-Concepts.md)** - Orientation glossary: `graph_id`, OLTP vs OLAP, blocks, and the other recurring terms
+- **[Extensions Surface Overview](Extensions-Surface-Overview.md)** - The `/extensions/*` surface in full: three sub-surfaces, feature flags, and the operation envelope
+- **[Graph Operations](Graph-Operations.md)** - Lifecycle operations (create-subgraph, delete-subgraph, change-tier, backups, materialize) and the CQRS operation envelope
+- **[GraphQL Reads](GraphQL-Reads.md)** - The typed read surface over the extensions OLTP database and its field catalog
+- **[Shared Repositories](Shared-Repositories.md)** - The `ladybug-shared` tier, repository plans, and how to subscribe to and query public datasets
+- **[Authentication and API Keys](Authentication-and-API-Keys.md)** - API key creation, the `X-API-Key` header, and per-graph access control
+- **[Custom Graph Schema](Custom-Graph-Schema.md)** - Designing node and relationship schemas and querying a custom graph
+- **[Querying the Analytical Graph](Querying-the-Analytical-Graph.md)** - Cypher patterns against the materialized projection
+- **[Credits and Billing](Credits-and-Billing.md)** - Credit pools, what consumes them, and how subgraphs draw from the parent
 
 **Codebase Documentation:**
 
@@ -480,6 +480,6 @@ Subgraphs allow writes, but only for `member` and `admin`. A `viewer` gets `403`
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

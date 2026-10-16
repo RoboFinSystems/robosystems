@@ -4,7 +4,7 @@ Search gives an AI Operator hybrid keyword and semantic search over your own doc
 
 **Quick Start:** Upload a policy document into a writable graph with the `index-document` operation, then search it with `POST /v1/graphs/{graph_id}/search` (or the `search-documents` MCP tool) to see it surface.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Overview
 
@@ -28,7 +28,7 @@ Indexing and semantic search run a local embedding model in-image. They make **n
 
 Before starting, ensure you have:
 
-- A RoboSystems account, an API key, and a writable graph of your own (see [Quick Start](Quick-Start))
+- A RoboSystems account, an API key, and a writable graph of your own (see [Quick Start](Quick-Start.md))
 - For SEC filing narratives, a subscription to the `sec` repository (from **Repositories** in the app)
 - Document search enabled on the deployment. It is on robosystems.ai; a self-hosted deployment controls it with `SEMANTIC_SEARCH_ENABLED` (see [Self-hosted deployments](#self-hosted-deployments))
 
@@ -174,7 +174,7 @@ AI Operators interact with the index through MCP tools. All of them require docu
 
 **Filing-text tools** (no OpenSearch; the filing is read whole from the public data bucket):
 
-- `describe-filing`, `search-text`, `read-text` — one filing's layout, a word search inside it, and its text by offset, on shared repositories only. A `ticker` picks the filing (with `fiscal_year` / `period_type`, an `accession`, or `form: "8-K"` for the latest earnings release). A ledger files no document; its sections read through `disclosures` and `information-block`. See [AI Operators & MCP](AI-Operators-and-MCP#the-three-retrieval-planes).
+- `describe-filing`, `search-text`, `read-text` — one filing's layout, a word search inside it, and its text by offset, on shared repositories only. A `ticker` picks the filing (with `fiscal_year` / `period_type`, an `accession`, or `form: "8-K"` for the latest earnings release). A ledger files no document; its sections read through `disclosures` and `information-block`. See [AI Operators & MCP](AI-Operators-and-MCP.md#the-three-retrieval-planes).
 
 **Document tools:**
 
@@ -188,7 +188,7 @@ AI Operators interact with the index through MCP tools. All of them require docu
 
 For an iXBRL disclosure, `get-document-section` returns the XBRL elements tagged in that section (`xbrl_elements`); the MCP `search-documents` hits leave them out to stay small. An Operator can hand one to `resolve-element` to look up the XBRL element, then run `read-graph-cypher` to pull the structured values — pivoting from narrative to numbers.
 
-For Operator setup and the broader MCP tool surface, see [AI Operators and MCP](AI-Operators-and-MCP).
+For Operator setup and the broader MCP tool surface, see [AI Operators and MCP](AI-Operators-and-MCP.md).
 
 ### Option 2: REST API
 
@@ -211,7 +211,7 @@ curl "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/documents/doc_abc123def456"
 
 The full request/response schema for every endpoint is published in the live OpenAPI spec — see [API reference](https://robosystems.ai/docs/api) rather than re-deriving it here.
 
-**Important:** The document write operations (`index-document`, `delete-document`) require write access and are blocked on shared-repository graphs. You can `search` and `get-document-section` against the `sec` repository, but you cannot index documents into it — index into your own graph. See [Document Management](Document-Management) for the full document lifecycle.
+**Important:** The document write operations (`index-document`, `delete-document`) require write access and are blocked on shared-repository graphs. You can `search` and `get-document-section` against the `sec` repository, but you cannot index documents into it — index into your own graph. See [Document Management](Document-Management.md) for the full document lifecycle.
 
 ## Search Filters
 
@@ -253,7 +253,7 @@ Those five are the whole set. `memory` is **not** among them — semantic memori
 - YAML frontmatter (`title`, `tags`, `folder`) fills any field you didn't set on the request; an explicit request value always wins over frontmatter.
 - Sections under 20 words are merged into a neighbor; the maximum is 50,000 characters per section, and 500,000 characters per document.
 
-**The iXBRL bridge:** an SEC disclosure section carries the XBRL elements tagged in it (`xbrl_elements` on the section read, and on REST search hits). This lets an Operator move from the narrative ("goodwill impairment discussion") to the structured fact (`us-gaap:Goodwill`) by handing the element to `resolve-element`, then querying values with `read-graph-cypher`. For how the SEC corpus is built, see [SEC XBRL Pipeline](SEC-XBRL-Pipeline).
+**The iXBRL bridge:** an SEC disclosure section carries the XBRL elements tagged in it (`xbrl_elements` on the section read, and on REST search hits). This lets an Operator move from the narrative ("goodwill impairment discussion") to the structured fact (`us-gaap:Goodwill`) by handing the element to `resolve-element`, then querying values with `read-graph-cypher`. For how the SEC corpus is built, see [SEC XBRL Pipeline](SEC-XBRL-Pipeline.md).
 
 ## How Search Works
 
@@ -379,16 +379,16 @@ just search-count sec
 
 The `just search` recipe forces semantic mode by default, while the REST and MCP surfaces default to BM25-only (`semantic=false`). Pass `--no-semantic` to match the REST/MCP default.
 
-`just demo-user` then `just demo-roboledger` create a demo user and a writable RoboLedger graph to upload into, and `just demo-custom-graph` exercises both retrieval planes: step 6 indexes markdown documents, and step 7 creates a `knowledge` subgraph that pairs structured graph traversal on the subgraph with semantic recall on the parent. See [Local Development](Local-Development).
+`just demo-user` then `just demo-roboledger` create a demo user and a writable RoboLedger graph to upload into, and `just demo-custom-graph` exercises both retrieval planes: step 6 indexes markdown documents, and step 7 creates a `knowledge` subgraph that pairs structured graph traversal on the subgraph with semantic recall on the parent. See [Local Development](Local-Development.md).
 
 ## Related Documentation
 
-**Wiki Guides:**
+**Guides:**
 
-- **[AI Operators and MCP](AI-Operators-and-MCP)** - How Operators use MCP tools to ground answers on your data
-- **[Document Management](Document-Management)** - The full document upload, list, update, and delete lifecycle
-- **[File Uploads](File-Uploads)** - Bulk tabular node and relationship data into a custom graph (a separate surface — it does not index documents)
-- **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - The SEC narrative and iXBRL corpus, and the graph bridge
+- **[AI Operators and MCP](AI-Operators-and-MCP.md)** - How Operators use MCP tools to ground answers on your data
+- **[Document Management](Document-Management.md)** - The full document upload, list, update, and delete lifecycle
+- **[File Uploads](File-Uploads.md)** - Bulk tabular node and relationship data into a custom graph (a separate surface — it does not index documents)
+- **[SEC XBRL Pipeline](SEC-XBRL-Pipeline.md)** - The SEC narrative and iXBRL corpus, and the graph bridge
 
 **Codebase Documentation:**
 
@@ -402,6 +402,6 @@ The `just search` recipe forces semantic mode by default, while the REST and MCP
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

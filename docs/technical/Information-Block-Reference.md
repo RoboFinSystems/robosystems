@@ -1,6 +1,6 @@
 # Information Block Reference
 
-The field-level reference for Information Blocks: the envelope, each block type's mechanics and operations, the rule patterns, and the view projections. It covers every envelope field, which operations each type supports, and which rules evaluate today. For the concepts behind it, read [Information Blocks](Information-Blocks) first.
+The field-level reference for Information Blocks: the envelope, each block type's mechanics and operations, the rule patterns, and the view projections. It covers every envelope field, which operations each type supports, and which rules evaluate today. For the concepts behind it, read [Information Blocks](Information-Blocks.md) first.
 
 Names below are the REST and MCP spelling (snake_case). GraphQL serves the same fields in camelCase (`block_type` → `blockType`, `fact_set` → `factSet`). The live reference at [robosystems.ai/docs/extensions](https://robosystems.ai/docs/extensions) is the source of truth for exact types.
 
@@ -171,7 +171,7 @@ A closing-entry generator: one fact per element per month across a window, and a
 
 `ScheduleMechanics` on the envelope: `kind: "closing_entry_generator"`, `entry_template`, `schedule_metadata`, and `periods_with_entries` (months that already have a closing entry, computed at read time).
 
-Update takes `structure_id` plus any of `name`, `entry_template`, `schedule_metadata`; delete takes `structure_id`. Two further operations change a live schedule: `terminate-schedule` (end it early with a `new_end_date` and a `reason`; removes the facts and voids the obligations past that date) and `rebuild-schedule` (re-run the generator in place from the stored definition, keeping the structure id: the old facts, rules, and pending obligations are replaced, and the historical/in-scope split is re-derived from the current close state). How schedule drafts post is in [Period Close](Period-Close).
+Update takes `structure_id` plus any of `name`, `entry_template`, `schedule_metadata`; delete takes `structure_id`. Two further operations change a live schedule: `terminate-schedule` (end it early with a `new_end_date` and a `reason`; removes the facts and voids the obligations past that date) and `rebuild-schedule` (re-run the generator in place from the stored definition, keeping the structure id: the old facts, rules, and pending obligations are replaced, and the historical/in-scope split is re-derived from the current close state). How schedule drafts post is in [Period Close](Period-Close.md).
 
 ### Rollforward
 
@@ -189,11 +189,11 @@ Payload: `name`, `bs_source_qname`, `default_change_tag_qname` (the flow concept
 
 An authored scenario. The block **is** the scenario: its id is the `scenario_id` every forecast FactSet carries. `compute-forecast` walks the months forward from the last closed actuals and writes them into the existing statement and metric blocks, stamped with that scenario.
 
-`ForecastMechanics`: `kind: "forecast"`, `scenario_kind` (`budget` / `forecast` / `projection`), `horizon_months` (1 to 36), `base_period` (`YYYY-MM`), `base_anchor` (`seam` re-anchors on the newest closed month; `fixed` pins the walk to `base_period`), `levers[]`, `line_assertions[]`, `line_growth[]`, and `computed_months`. Authoring and computing scenarios is covered in [Forecasting and Metrics](Forecasting-and-Metrics).
+`ForecastMechanics`: `kind: "forecast"`, `scenario_kind` (`budget` / `forecast` / `projection`), `horizon_months` (1 to 36), `base_period` (`YYYY-MM`), `base_anchor` (`seam` re-anchors on the newest closed month; `fixed` pins the walk to `base_period`), `levers[]`, `line_assertions[]`, `line_growth[]`, and `computed_months`. Authoring and computing scenarios is covered in [Forecasting and Metrics](Forecasting-and-Metrics.md).
 
 ### Statement family
 
-`balance_sheet`, `income_statement`, `cash_flow_statement`, `equity_statement`, `comprehensive_income`. `StatementMechanics`: `kind: "statement_renderer"`, `template_id` (reserved, not yet used), `rollup_root_element_ids` (the roll-up roots, such as the Assets total), `period_comparisons` (1 to 4 columns). Envelopes carry `view.rendering`. Rendering is covered in [Reporting and Rendering](Reporting-and-Rendering).
+`balance_sheet`, `income_statement`, `cash_flow_statement`, `equity_statement`, `comprehensive_income`. `StatementMechanics`: `kind: "statement_renderer"`, `template_id` (reserved, not yet used), `rollup_root_element_ids` (the roll-up roots, such as the Assets total), `period_comparisons` (1 to 4 columns). Envelopes carry `view.rendering`. Rendering is covered in [Reporting and Rendering](Reporting-and-Rendering.md).
 
 ### Disclosure
 
@@ -203,7 +203,7 @@ An authored scenario. The block **is** the scenario: its id is the `scenario_id`
 
 A standing per-period series: ratios, covenant tests, KPIs. The structure (elements, presentation arcs, `Derive` rules) is authored with `create-taxonomy-block`. Facts are written by `compute-metrics`, which evaluates the `Derive` rules against a period's closed statements, or by `assert-metrics`, which records externally observed values. Envelopes carry `view.rendering` and `view.chart`.
 
-`MetricMechanics` (`kind: "metric"`, `source_block_ids`, `derivation_type`, `expression`, `unit`) is declared for a block-level derivation expression that is not evaluated yet; the computation runs through the `Derive` rules. See [Forecasting and Metrics](Forecasting-and-Metrics).
+`MetricMechanics` (`kind: "metric"`, `source_block_ids`, `derivation_type`, `expression`, `unit`) is declared for a block-level derivation expression that is not evaluated yet; the computation runs through the `Derive` rules. See [Forecasting and Metrics](Forecasting-and-Metrics.md).
 
 ### Reconciliation
 
@@ -222,7 +222,7 @@ Ties the ledger to a balance outside it. Each period end carries one comparison:
 | `review_required` | Whether the close also waits for a sign-off |
 | `separate_reviewer` | Whether the sign-off must come from someone other than the person who ran the comparison |
 
-Each period's comparison is its own FactSet (`factset_type: "custom"`, provenance `observed`). A ledger-scope block presents `rs-rec:UnreconciledDifference`, `rs-rec:AccountsCompared` and `rs-rec:AccountsDifferent`; an account-scope block presents `rs-rec:LedgerBalance`, `rs-rec:IndependentBalance` and `rs-rec:UnreconciledDifference`. One `EqualTo` rule, `$UnreconciledDifference = 0` with the materiality as its tolerance, decides whether the block reconciles for a period. The live read returns the whole series, one rendering column per period end, and ignores `scenarioId`. How reconciliations hold the close, sign-off, and staleness are covered in [Period Close § Reconciliations](Period-Close#reconciliations).
+Each period's comparison is its own FactSet (`factset_type: "custom"`, provenance `observed`). A ledger-scope block presents `rs-rec:UnreconciledDifference`, `rs-rec:AccountsCompared` and `rs-rec:AccountsDifferent`; an account-scope block presents `rs-rec:LedgerBalance`, `rs-rec:IndependentBalance` and `rs-rec:UnreconciledDifference`. One `EqualTo` rule, `$UnreconciledDifference = 0` with the materiality as its tolerance, decides whether the block reconciles for a period. The live read returns the whole series, one rendering column per period end, and ignores `scenarioId`. How reconciliations hold the close, sign-off, and staleness are covered in [Period Close § Reconciliations](Period-Close.md#reconciliations).
 
 ## Rule Patterns
 
@@ -261,7 +261,7 @@ A rule whose variables have no bound fact reports `skipped` rather than failing.
 | Rules | `rules` | Client-side projection, whether or not the rules have run |
 | Model structure | `connections` | Not shipped as a view |
 
-The rendering payload (`rows`, `periods`, `validation`, `unmapped_count`) is described in [Reporting and Rendering § The View Projections](Reporting-and-Rendering#the-view-projections).
+The rendering payload (`rows`, `periods`, `validation`, `unmapped_count`) is described in [Reporting and Rendering § The View Projections](Reporting-and-Rendering.md#the-view-projections).
 
 ## Reads
 
@@ -283,16 +283,16 @@ MCP: `get-information-block` (`id`, `scenario_id`, `series`, `series_history`, `
 - **`fact_set: null` and `facts: []` are normal** for a statement Structure no report or close has instantiated yet.
 - **`verification_summary` is null until the rules run.** Call `evaluate-rules`, or close the period.
 - **`disclosure_id` is derived.** It is present only when a Disclosure mapping exists; tenant-authored schedules carry null.
-- **The `information-block` view operation is a different call.** It reads one section of a filing or report whole; see [Information Blocks § Live and Pinned Reads](Information-Blocks#live-and-pinned-reads).
+- **The `information-block` view operation is a different call.** It reads one section of a filing or report whole; see [Information Blocks § Live and Pinned Reads](Information-Blocks.md#live-and-pinned-reads).
 
 ## Related Documentation
 
-**Wiki Guides:**
-- **[Information Blocks](Information-Blocks)** - The concepts: atoms and molecules, FactSets, rules, views
-- **[Reporting and Rendering](Reporting-and-Rendering)** - The rendering payload and statement production
-- **[Forecasting and Metrics](Forecasting-and-Metrics)** - Forecast scenarios and metric blocks
-- **[Period Close](Period-Close)** - Schedule drafts and the close-time rule run
-- **[Taxonomy and Frameworks](Taxonomy-and-Frameworks)** - Taxonomy blocks, which author disclosure and metric structures
+**Guides:**
+- **[Information Blocks](Information-Blocks.md)** - The concepts: atoms and molecules, FactSets, rules, views
+- **[Reporting and Rendering](Reporting-and-Rendering.md)** - The rendering payload and statement production
+- **[Forecasting and Metrics](Forecasting-and-Metrics.md)** - Forecast scenarios and metric blocks
+- **[Period Close](Period-Close.md)** - Schedule drafts and the close-time rule run
+- **[Taxonomy and Frameworks](Taxonomy-and-Frameworks.md)** - Taxonomy blocks, which author disclosure and metric structures
 
 **Codebase Documentation:**
 - **[API reference](https://robosystems.ai/docs/extensions)** - Full request and response schemas
@@ -301,6 +301,6 @@ MCP: `get-information-block` (`id`, `scenario_id`, `series`, `series_history`, `
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

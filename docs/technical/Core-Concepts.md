@@ -2,7 +2,7 @@
 
 A glossary of the terms that run through RoboSystems: `graph_id`, tiers, subgraphs, Elements, block envelopes, operators, and the two graph stores. RoboSystems is a financial intelligence platform for accounting, financial reporting, and investment management, built on a multi-tenant knowledge graph, and these terms recur in every endpoint, SDK call, and README. The definitions are short and plain, build on one another, and each links to its deep-dive page. Read it once to get your bearings, then follow the links when you need detail.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Table of Contents
 
@@ -39,7 +39,7 @@ curl "https://api.robosystems.ai/v1/graphs" \
 
 **Note:** Use `X-API-Key` for backend and `curl` testing. `Authorization: Bearer` (JWT) is a frontend concern and is not used for API testing.
 
-→ Deep-dive: [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy)
+→ Deep-dive: [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy.md)
 
 ## Graph Tiers
 
@@ -59,7 +59,7 @@ the same file that drives provisioning — so they cannot fall out of step with 
 
 `ladybug-shared` is not a customer-selectable tier. It is the platform's read-only fleet that serves public repositories such as SEC filings, accessible to all users but owned by the platform. Customer graphs run on one of the three dedicated tiers.
 
-→ Deep-dive: [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy)
+→ Deep-dive: [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy.md)
 
 ## Subgraphs
 
@@ -67,7 +67,7 @@ A subgraph is an isolated database *inside* a parent graph — a workspace for A
 
 A subgraph ID is the parent ID plus the subgraph name, joined by an underscore: `{parent_graph_id}_{subgraph_name}` (for example `kg1234567890abcdef_dev`). Subgraph names are alphanumeric, 1–20 characters, with no hyphens or underscores. Subgraphs are created through the graph-lifecycle command surface (`POST /v1/graphs/{graph_id}/operations/create-subgraph`).
 
-→ Deep-dive: [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy)
+→ Deep-dive: [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy.md)
 
 ## Element and the Chart of Accounts
 
@@ -84,13 +84,13 @@ curl -X POST "https://api.robosystems.ai/v1/graphs/kg1234567890abcdef/query/cyph
   -d '{"query": "MATCH (e:Element) RETURN e.qname, e.balance LIMIT 5"}'
 ```
 
-→ Deep-dive: [Information Blocks](Information-Blocks)
+→ Deep-dive: [Information Blocks](Information-Blocks.md)
 
 ## Information Block
 
 The Information Block is the platform's load-bearing primitive: a typed, queryable, exchangeable unit of accounting information. It bundles *atoms* (Elements, associations, facts) with *molecular wiring* (classification, rules, mechanics, presentation) into one self-describing object.
 
-What the frontend calls a "Balance Sheet" or a "Depreciation Schedule" the backend, API, and AI Operators all speak of as an `InformationBlock` discriminated by a `block_type`. The registered block types are `schedule`, `rollforward`, `forecast`, `balance_sheet`, `income_statement`, `cash_flow_statement`, `equity_statement`, `comprehensive_income`, `regulatory_disclosure`, `metric`, and `reconciliation` — the last ties a ledger balance to an independent source each period (see [Period Close](Period-Close#reconciliations)). The governing rule is: **what crosses a system boundary is a molecule, never a bare atom.** You exchange a whole, self-describing block, not a loose Element or fact.
+What the frontend calls a "Balance Sheet" or a "Depreciation Schedule" the backend, API, and AI Operators all speak of as an `InformationBlock` discriminated by a `block_type`. The registered block types are `schedule`, `rollforward`, `forecast`, `balance_sheet`, `income_statement`, `cash_flow_statement`, `equity_statement`, `comprehensive_income`, `regulatory_disclosure`, `metric`, and `reconciliation` — the last ties a ledger balance to an independent source each period (see [Period Close](Period-Close.md#reconciliations)). The governing rule is: **what crosses a system boundary is a molecule, never a bare atom.** You exchange a whole, self-describing block, not a loose Element or fact.
 
 Information Blocks are read through the GraphQL surface. Note that `graph_id` comes from the URL, not from a query argument:
 
@@ -101,7 +101,7 @@ curl -X POST "https://api.robosystems.ai/extensions/kg1234567890abcdef/graphql" 
   -d '{"query": "{ informationBlocks { id blockType } }"}'
 ```
 
-→ Deep-dive: [Information Blocks](Information-Blocks)
+→ Deep-dive: [Information Blocks](Information-Blocks.md)
 
 ## Taxonomy Block and Event Block
 
@@ -112,7 +112,7 @@ Two sibling envelopes feed the same Information Block machinery, and they are ho
 
 The principle is the same as for Information Blocks: vocabulary changes go through the Taxonomy Block and ledger writes go through the Event Block, so the molecule crosses the boundary and the platform keeps the derived state consistent. There is no `accounts` table to write to and no raw element or event write path.
 
-→ Deep-dive: [Information Blocks](Information-Blocks)
+→ Deep-dive: [Information Blocks](Information-Blocks.md)
 
 ## Operator vs REA Agent
 
@@ -132,7 +132,7 @@ curl -X POST "https://api.robosystems.ai/v1/graphs/kg1234567890abcdef/operator" 
   -d '{"message": "What was total revenue last period?"}'
 ```
 
-→ Deep-dive: [AI Operators and MCP](AI-Operators-and-MCP)
+→ Deep-dive: [AI Operators and MCP](AI-Operators-and-MCP.md)
 
 ## Framework vs Reporting Style
 
@@ -143,7 +143,7 @@ These two terms describe different layers of how numbers become a report, and th
 
 A practical consequence: banking and insurance presentations are **reporting styles within `rs-gaap`**, not separate frameworks, because they re-present the same GAAP measurements. The decision rule is whether the underlying recognition and measurement change (framework) or only the layout changes (reporting style).
 
-→ Deep-dive: [Information Blocks](Information-Blocks)
+→ Deep-dive: [Information Blocks](Information-Blocks.md)
 
 ## OLTP vs OLAP (Operational vs Analytical Graph)
 
@@ -156,7 +156,7 @@ The operational store is the source of truth for transactions; its rows are **ma
 
 **Important:** On a main graph, Cypher access is **read-only** — the analytical graph is a projection, so hand-editing it would be undone at the next rebuild. Writes take one of two doors: the **extensions command surface** (`POST /extensions/{domain}/{graph_id}/operations/{op_name}`) for operational data — Event Blocks are one such command, alongside period close, entity updates, securities and the rest — or the **staging-and-materialize pipeline** for bulk analytical loads. Only subgraphs accept Cypher writes, and only from a `member` or `admin`.
 
-→ Deep-dive: [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy)
+→ Deep-dive: [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy.md)
 
 ## The Three Retrieval Planes
 
@@ -180,7 +180,7 @@ Retrieval is not the whole surface. Beyond the three planes, MCP also carries cu
 
 On shared repositories with semantic enrichment (SEC), a further tool, `resolve-element`, maps a natural-language financial concept to its XBRL Element name using vector search — useful for grounding a query before you run it. It is not registered on a customer entity graph.
 
-→ Deep-dive: [AI Operators and MCP](AI-Operators-and-MCP)
+→ Deep-dive: [AI Operators and MCP](AI-Operators-and-MCP.md)
 
 ## Where to Go Next
 
@@ -188,20 +188,20 @@ This page is the orientation hub. Each glossary term has a deeper home:
 
 | Topic | Page |
 | --- | --- |
-| The full system map — services, storage, infrastructure | [Architecture Overview](Architecture-Overview) |
-| `graph_id`, tiers, subgraphs, OLTP vs OLAP in depth | [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy) |
-| Information Blocks, Elements, Taxonomy/Event Blocks, frameworks | [Information Blocks](Information-Blocks) |
-| Operators, the REA Agent distinction, the MCP retrieval planes | [AI Operators and MCP](AI-Operators-and-MCP) |
+| The full system map — services, storage, infrastructure | [Architecture Overview](Architecture-Overview.md) |
+| `graph_id`, tiers, subgraphs, OLTP vs OLAP in depth | [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy.md) |
+| Information Blocks, Elements, Taxonomy/Event Blocks, frameworks | [Information Blocks](Information-Blocks.md) |
+| Operators, the REA Agent distinction, the MCP retrieval planes | [AI Operators and MCP](AI-Operators-and-MCP.md) |
 
 For the full, machine-readable endpoint surface, use the API reference at [https://robosystems.ai/docs/api](https://robosystems.ai/docs/api), rather than re-deriving routes by hand.
 
 ## Related Documentation
 
-**Wiki Guides:**
-- **[Architecture Overview](Architecture-Overview)** - The higher-altitude system map: services, storage, and infrastructure
-- **[Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy)** - Tenancy, tiers, subgraphs, and the operational/analytical split
-- **[Information Blocks](Information-Blocks)** - Elements, Information Blocks, and the Taxonomy/Event contribution envelopes
-- **[AI Operators and MCP](AI-Operators-and-MCP)** - The AI executor layer and the three MCP retrieval planes
+**Guides:**
+- **[Architecture Overview](Architecture-Overview.md)** - The higher-altitude system map: services, storage, and infrastructure
+- **[Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy.md)** - Tenancy, tiers, subgraphs, and the operational/analytical split
+- **[Information Blocks](Information-Blocks.md)** - Elements, Information Blocks, and the Taxonomy/Event contribution envelopes
+- **[AI Operators and MCP](AI-Operators-and-MCP.md)** - The AI executor layer and the three MCP retrieval planes
 
 **Codebase Documentation:**
 - **[GraphQL Extensions](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)** - The typed operational-read surface
@@ -211,6 +211,6 @@ For the full, machine-readable endpoint surface, use the API reference at [https
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

@@ -4,7 +4,7 @@ RoboLedger's command writes and analytical views are graph-scoped operations at 
 
 **Quick Start:** With an API key and a RoboLedger graph, `curl` any operation below against `https://api.robosystems.ai`, sending the key in the `X-API-Key` header.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Table of Contents
 
@@ -29,17 +29,17 @@ RoboLedger's extensions surface follows a CQRS split with three sub-surfaces, al
 
 | Sub-surface | Endpoint | Purpose |
 | --- | --- | --- |
-| **Typed reads** | `POST /extensions/{graph_id}/graphql` | Strawberry GraphQL — entity, fiscal calendar, mappings, reports. See [GraphQL Reads](GraphQL-Reads). |
+| **Typed reads** | `POST /extensions/{graph_id}/graphql` | Strawberry GraphQL — entity, fiscal calendar, mappings, reports. See [GraphQL Reads](GraphQL-Reads.md). |
 | **Command writes** | `POST /extensions/roboledger/{graph_id}/operations/{op_name}` | Mutations — close a period, update the entity, generate a report. |
 | **Analytical views** | `POST /extensions/roboledger/{graph_id}/operations/{view_name}` | Read-only queries over the XBRL hypercube (`build-fact-grid`, `financial-statement-analysis`), over a report read whole (`disclosures`, `information-block`), over an SEC filing's own text (`describe-filing`, `search-text`, `read-text`), and over the live OLTP ledger (`live-financial-statement`). |
 
-This page covers the latter two. The `graph_id` always comes from the URL path — FastAPI dependencies validate authentication and per-graph access before the handler runs. The reads sibling is documented in [GraphQL Reads](GraphQL-Reads), and the surface as a whole in [Extensions Surface Overview](Extensions-Surface-Overview).
+This page covers the latter two. The `graph_id` always comes from the URL path — FastAPI dependencies validate authentication and per-graph access before the handler runs. The reads sibling is documented in [GraphQL Reads](GraphQL-Reads.md), and the surface as a whole in [Extensions Surface Overview](Extensions-Surface-Overview.md).
 
 Command writes and analytical views share one response shape — the `OperationEnvelope` — and accept an `Idempotency-Key` header. Most operations complete synchronously; a few dispatch to a background worker and stream progress over Server-Sent Events.
 
 ## Prerequisites
 
-- A RoboSystems account and an API key, created in the app under **Settings → API keys**. See [Quick Start](Quick-Start).
+- A RoboSystems account and an API key, created in the app under **Settings → API keys**. See [Quick Start](Quick-Start.md).
 - A graph with an initialized RoboLedger ledger. On the hosted platform a RoboLedger graph comes from roboledger.ai when you connect QuickBooks, or from **Create Graph** in the app.
 - The SEC examples (`/extensions/roboledger/sec/...`) need a subscription to the SEC repository, from **Repositories** in the app.
 - `ROBOLEDGER_ENABLED` gates the command-write operations. The analytical view router is gated independently by `FACT_GRID_ENABLED`, so deployments serving only the SEC shared repository can mount `build-fact-grid` without enabling RoboLedger tenants. On robosystems.ai both are on; a self-hosted deployment sets them in its environment.
@@ -103,15 +103,15 @@ The registered command-write operations, grouped by workflow stage. They live in
 
 | Workflow | Operations | Page |
 | --- | --- | --- |
-| Month-end close | `set-close-target`, `promote-obligations`, `terminate-schedule`, `close-period`, `reopen-period` | [Period Close](Period-Close) |
-| Account reconciliations | `preview-reconciliations`, `refresh-reconciliations`, `record-statement-balance`, `set-reconciliation-policy`, `sign-off-reconciliation` | [Period Close](Period-Close#reconciliations) |
-| QuickBooks write-back and drift | `execute-event-block`, `preview-reconciling-item`, `resolve-reconciling-item` | [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy) |
-| Mapping | `create-mapping-association`, `delete-mapping-association`, `auto-map-elements`, `initialize-chart-of-accounts` | [Chart of Accounts Mapping](Chart-of-Accounts-Mapping) |
-| Planning and KPIs | `compute-forecast`, `backfill-plan-history`, `compute-metrics`, `assert-metrics` | [Forecasting and Metrics](Forecasting-and-Metrics) |
-| Events and journal entries | `create-event-block`, `update-event-block`, `preview-event-block`, `update-journal-entry`, `delete-journal-entry` | [Event-Driven Ledger](Event-Driven-Ledger) |
-| Schedules and other blocks | `create-information-block`, `update-information-block`, `evaluate-rules` | [Information Blocks](Information-Blocks) |
+| Month-end close | `set-close-target`, `promote-obligations`, `terminate-schedule`, `close-period`, `reopen-period` | [Period Close](Period-Close.md) |
+| Account reconciliations | `preview-reconciliations`, `refresh-reconciliations`, `record-statement-balance`, `set-reconciliation-policy`, `sign-off-reconciliation` | [Period Close](Period-Close.md#reconciliations) |
+| QuickBooks write-back and drift | `execute-event-block`, `preview-reconciling-item`, `resolve-reconciling-item` | [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md) |
+| Mapping | `create-mapping-association`, `delete-mapping-association`, `auto-map-elements`, `initialize-chart-of-accounts` | [Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md) |
+| Planning and KPIs | `compute-forecast`, `backfill-plan-history`, `compute-metrics`, `assert-metrics` | [Forecasting and Metrics](Forecasting-and-Metrics.md) |
+| Events and journal entries | `create-event-block`, `update-event-block`, `preview-event-block`, `update-journal-entry`, `delete-journal-entry` | [Event-Driven Ledger](Event-Driven-Ledger.md) |
+| Schedules and other blocks | `create-information-block`, `update-information-block`, `evaluate-rules` | [Information Blocks](Information-Blocks.md) |
 
-**Forecasting and metrics.** A forecast is a scenario authored as a `forecast` Information Block. `compute-forecast` walks it forward month by month into scenario-stamped statement FactSets, halting at the first month that fails verification. `backfill-plan-history` stamps the historical months a scenario stands on. `compute-metrics` derives a metric block's ratios for a period, and `assert-metrics` records observed values into one. All four are deterministic and consume no credits. The block shape, the four drivers and a full scenario payload are on [Forecasting and Metrics](Forecasting-and-Metrics).
+**Forecasting and metrics.** A forecast is a scenario authored as a `forecast` Information Block. `compute-forecast` walks it forward month by month into scenario-stamped statement FactSets, halting at the first month that fails verification. `backfill-plan-history` stamps the historical months a scenario stands on. `compute-metrics` derives a metric block's ratios for a period, and `assert-metrics` records observed values into one. All four are deterministic and consume no credits. The block shape, the four drivers and a full scenario payload are on [Forecasting and Metrics](Forecasting-and-Metrics.md).
 
 One example, `update-entity`, illustrates the partial-update convention. Only the non-null fields in the body are applied; an empty body returns `400 "No fields provided for update."`
 
@@ -128,7 +128,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
   }'
 ```
 
-**Downloading a report bundle is a read, not an operation.** Generating, regenerating, and filing reports are command writes (`create-report`, `regenerate-report`, `file-report`, `transition-filing-status`), but fetching the produced artifact is not: the former `GET .../reports/{id}/download` REST resource has been retired. Use the GraphQL field `reportDownloadUrl(reportId:, format:, expiresIn:)` on `POST /extensions/{graph_id}/graphql`, or the MCP tool `get-report-bundle`, which returns the same link. Every flavor — `HOLON_JSONLD` (the default, stamped at publish), `TAVI`, `XBRL_2_1` (both built on first download) — resolves to a short-lived presigned S3 URL the client follows directly; the API never streams the bytes. The holon is the one flavor that carries the whole report, and `omittedContent` on the result names what the other two leave out. See [GraphQL Reads](GraphQL-Reads).
+**Downloading a report bundle is a read, not an operation.** Generating, regenerating, and filing reports are command writes (`create-report`, `regenerate-report`, `file-report`, `transition-filing-status`), but fetching the produced artifact is not: the former `GET .../reports/{id}/download` REST resource has been retired. Use the GraphQL field `reportDownloadUrl(reportId:, format:, expiresIn:)` on `POST /extensions/{graph_id}/graphql`, or the MCP tool `get-report-bundle`, which returns the same link. Every flavor — `HOLON_JSONLD` (the default, stamped at publish), `TAVI`, `XBRL_2_1` (both built on first download) — resolves to a short-lived presigned S3 URL the client follows directly; the API never streams the bytes. The holon is the one flavor that carries the whole report, and `omittedContent` on the result names what the other two leave out. See [GraphQL Reads](GraphQL-Reads.md).
 
 ## Period Close
 
@@ -142,15 +142,15 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
   -d '{"period": "2026-03"}'
 ```
 
-The fiscal calendar, every blocker and its remedy, the account reconciliations the close waits on, the full result and receipt, the MCP async close, reopening, ending a schedule early and the closed-period write gate are on **[Period Close](Period-Close)**.
+The fiscal calendar, every blocker and its remedy, the account reconciliations the close waits on, the full result and receipt, the MCP async close, reopening, ending a schedule early and the closed-period write gate are on **[Period Close](Period-Close.md)**.
 
 ## QuickBooks Write-Back and Reconciling Items
 
-On a graph whose QuickBooks connection is `qb_authoritative`, RoboLedger-originated drafts are written to QuickBooks at close (the `entries_published_to_qb` / `entries_posted_locally` split in the close result), or one at a time with `execute-event-block`. A transaction edited in QuickBooks after it posted is flagged as a reconciling item rather than overwritten. `preview-reconciling-item` shows the difference, and `resolve-reconciling-item` settles it by `restate`, `catch_up` or `acknowledge`. Pass the preview's `drift_detected_at` back as `expected_drift_detected_at`, so a resolution decided on one preview is refused with `409` if the item was flagged again since. Sync windows, the write-back predicate, retry after a QuickBooks rejection, and disconnect vs. sever are on **[QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy)**.
+On a graph whose QuickBooks connection is `qb_authoritative`, RoboLedger-originated drafts are written to QuickBooks at close (the `entries_published_to_qb` / `entries_posted_locally` split in the close result), or one at a time with `execute-event-block`. A transaction edited in QuickBooks after it posted is flagged as a reconciling item rather than overwritten. `preview-reconciling-item` shows the difference, and `resolve-reconciling-item` settles it by `restate`, `catch_up` or `acknowledge`. Pass the preview's `drift_detected_at` back as `expected_drift_detected_at`, so a resolution decided on one preview is refused with `409` if the item was flagged again since. Sync windows, the write-back predicate, retry after a QuickBooks rejection, and disconnect vs. sever are on **[QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md)**.
 
 ## Forecasting and Metrics
 
-Scenarios, the four drivers, line values and line growth, the verification halt, plan-history backfill, and the metric operations are on **[Forecasting and Metrics](Forecasting-and-Metrics)**.
+Scenarios, the four drivers, line values and line growth, the verification halt, plan-history backfill, and the metric operations are on **[Forecasting and Metrics](Forecasting-and-Metrics.md)**.
 
 ## Analytical View Operations
 
@@ -320,13 +320,13 @@ The either/or is hard-enforced, and the two graph classes fail in opposite direc
 - On a **tenant** graph, omitting `report_id` returns `400 "report_id is required for tenant graphs."`
 - On a **shared repository**, omitting both `ticker` and `report_id` returns `400 "ticker is required on shared-repository graphs (e.g. SEC)."` Supplying `ticker` auto-resolves the latest matching filing; a `fiscal_year` that resolves to nothing is a `404`, never a silent fallback to a different year.
 
-How statements are rendered — the structures, the calc rollup, the footing — is the subject of [Reporting and Rendering](Reporting-and-Rendering).
+How statements are rendered — the structures, the calc rollup, the footing — is the subject of [Reporting and Rendering](Reporting-and-Rendering.md).
 
 ## Gotchas and Pitfalls
 
 ### Sequential Close Only
 
-`close-period` requires `period == closed_through + 1`. Closing out of order returns `422` with `blockers: ["sequence_violation"]`. To advance multiple periods, close them one at a time in order. See [Period Close](Period-Close#blockers).
+`close-period` requires `period == closed_through + 1`. Closing out of order returns `422` with `blockers: ["sequence_violation"]`. To advance multiple periods, close them one at a time in order. See [Period Close](Period-Close.md#blockers).
 
 ### "Ledger not initialized" 404
 
@@ -338,7 +338,7 @@ Any operation against a graph that has no extensions schema returns `404 "Ledger
 
 ### close-period Blockers Are Structured
 
-Do not parse a flat error string — read `detail.blockers`. `sync_stale` is overridable with `allow_stale_sync: true` only after you have manually verified the source data is current. A `WRITE_BACK_FAILED` failure carries a `failed_events[]` array for diagnosis, and retrying the close is safe. See [Period Close](Period-Close#refusals-and-errors).
+Do not parse a flat error string — read `detail.blockers`. `sync_stale` is overridable with `allow_stale_sync: true` only after you have manually verified the source data is current. A `WRITE_BACK_FAILED` failure carries a `failed_events[]` array for diagnosis, and retrying the close is safe. See [Period Close](Period-Close.md#refusals-and-errors).
 
 ### Fact Grid Needs Both a Concept and a Period Filter
 
@@ -364,20 +364,20 @@ Reusing an `Idempotency-Key` with a different request body returns `409`, not a 
 
 ## Self-hosted deployments
 
-On your own stack, `just demo-roboledger` provisions a tenant with 16 months of synthetic books in a few minutes and writes the API key and graph id into `.local/config.json` — see the [RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough). To connect a real QuickBooks company to your own stack, see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally). The write-policy model behind the `entries_published_to_qb` / `entries_posted_locally` split is on [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy).
+On your own stack, `just demo-roboledger` provisions a tenant with 16 months of synthetic books in a few minutes and writes the API key and graph id into `.local/config.json` — see the [RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough.md). To connect a real QuickBooks company to your own stack, see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally.md). The write-policy model behind the `entries_published_to_qb` / `entries_posted_locally` split is on [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md).
 
 ## Related Documentation
 
-**Wiki Guides:**
+**Guides:**
 
-- **[Extensions Surface Overview](Extensions-Surface-Overview)** - The full RoboLedger / RoboInvestor extensions surface and CQRS split
-- **[GraphQL Reads](GraphQL-Reads)** - The typed-read sibling surface (`POST /extensions/{graph_id}/graphql`)
-- **[Reporting and Rendering](Reporting-and-Rendering)** - How statements are rendered and footed from the hypercube
-- **[RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough)** - See the operations surface end-to-end against a populated tenant
-- **[Period Close](Period-Close)** - Fiscal calendar, blockers, reconciliations, the close and its receipt, reopening
-- **[QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy)** - Sync windows, write-back, reconciling items
-- **[Chart of Accounts Mapping](Chart-of-Accounts-Mapping)** - Mapping model, auto-map, the closed-period mapping lock
-- **[Forecasting and Metrics](Forecasting-and-Metrics)** - Scenarios, drivers, plan history, metrics
+- **[Extensions Surface Overview](Extensions-Surface-Overview.md)** - The full RoboLedger / RoboInvestor extensions surface and CQRS split
+- **[GraphQL Reads](GraphQL-Reads.md)** - The typed-read sibling surface (`POST /extensions/{graph_id}/graphql`)
+- **[Reporting and Rendering](Reporting-and-Rendering.md)** - How statements are rendered and footed from the hypercube
+- **[RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough.md)** - See the operations surface end-to-end against a populated tenant
+- **[Period Close](Period-Close.md)** - Fiscal calendar, blockers, reconciliations, the close and its receipt, reopening
+- **[QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md)** - Sync windows, write-back, reconciling items
+- **[Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md)** - Mapping model, auto-map, the closed-period mapping lock
+- **[Forecasting and Metrics](Forecasting-and-Metrics.md)** - Scenarios, drivers, plan history, metrics
 
 **API Reference:**
 
@@ -395,6 +395,6 @@ On your own stack, `just demo-roboledger` provisions a tenant with 16 months of 
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

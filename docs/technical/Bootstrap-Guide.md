@@ -163,7 +163,7 @@ While bootstrap sets the core OIDC variables (`AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, 
 
 **Note:** Workflows have sensible defaults. You can skip this during bootstrap for basic deployments and run it later when you need custom infrastructure sizing, staging environment, or production features (WAF, Multi-AZ, etc.).
 
-For the security and compliance toggles (WAF, CloudTrail, the detective baseline, audit retention), see [Security & Compliance](Security-and-Compliance). The Security Baseline needs a `just bootstrap` re-run before its first enable so the deploy role picks up the required IAM grants.
+For the security and compliance toggles (WAF, CloudTrail, the detective baseline, audit retention), see [Security & Compliance](Security-and-Compliance.md). The Security Baseline needs a `just bootstrap` re-run before its first enable so the deploy role picks up the required IAM grants.
 
 ### Application Secrets (`just setup-aws`)
 
@@ -222,7 +222,7 @@ robosystems/{env}
 
 The bank-feed keys are seeded as placeholders and matter only if you turn a feed on: Mercury and Plaid are off by default behind `CONNECTION_MERCURY_ENABLED` and `CONNECTION_PLAID_ENABLED`.
 
-The SSO keys are absent rather than placeheld on purpose: boot validation refuses to start with `SSO_OIDC_ENABLED=true` and an unconfigured connection, and a placeholder string would satisfy that check with garbage instead of failing loudly. The full enablement sequence is in [Enterprise SSO & SCIM](Enterprise-SSO-and-SCIM).
+The SSO keys are absent rather than placeheld on purpose: boot validation refuses to start with `SSO_OIDC_ENABLED=true` and an unconfigured connection, and a placeholder string would satisfy that check with garbage instead of failing loudly. The full enablement sequence is in [Enterprise SSO & SCIM](Enterprise-SSO-and-SCIM.md).
 
 **Managing secrets:**
 ```bash
@@ -342,7 +342,7 @@ This dispatches `create-release.yml`, which bumps the version on `main`, cuts a 
 
 **Deploys** are always a manual dispatch of `staging.yml` or `prod.yml`. `just deploy <env> [ref]` dispatches one for the current branch or tag, or the ref you name. **Service Refresh** (`service-refresh.yml`) restarts running services without deploying.
 
-**Docs**: `publish-docs.yml` publishes the product docs (`docs/product/`) and the wiki to a docs bucket. It runs only when the `DOCS_BUCKET` and `DOCS_BASE_URL` variables are set, so a fork that doesn't publish docs can ignore it.
+**Docs**: `publish-docs.yml` publishes the product docs (`docs/product/`) and these technical docs (`docs/technical/`) to a docs bucket. It runs only when the `DOCS_BUCKET` and `DOCS_BASE_URL` variables are set, so a fork that doesn't publish docs can ignore it.
 
 ## Multi-Repository Setup
 
@@ -591,6 +591,6 @@ aws sts get-caller-identity
 
 ## Related Documentation
 
-- [Architecture Overview](Architecture-Overview) - System architecture
+- [Architecture Overview](Architecture-Overview.md) - System architecture
 - [CloudFormation Templates](https://github.com/RoboFinSystems/robosystems/tree/main/cloudformation) - Infrastructure as code
 - [Setup Scripts](https://github.com/RoboFinSystems/robosystems/tree/main/bin/setup) - Bootstrap scripts

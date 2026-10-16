@@ -1,8 +1,8 @@
 # Shared Repositories
 
-A **shared repository** is a platform-managed, read-only public dataset you subscribe to and query alongside your own graphs. Where the dedicated tiers in [Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy) give each customer an isolated graph, a shared repository is a single large graph that every subscriber reads — served from its own infrastructure tier and billed per subscriber. SEC EDGAR is the one shared repository available today.
+A **shared repository** is a platform-managed, read-only public dataset you subscribe to and query alongside your own graphs. Where the dedicated tiers in [Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy.md) give each customer an isolated graph, a shared repository is a single large graph that every subscriber reads — served from its own infrastructure tier and billed per subscriber. SEC EDGAR is the one shared repository available today.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Table of Contents
 
@@ -38,13 +38,13 @@ Shared repositories run on a dedicated infrastructure tier, `ladybug-shared`, se
 - A **read-only replica fleet** serves queries. Replicas download the materialized `.lbug` / `.duckdb` / vector artifacts from S3 on boot and sit behind a load balancer, so read volume scales by adding replicas rather than by resizing one instance.
 - On robosystems.ai this tier serves the SEC repository; for a self-hosted deployment it is **opt-in** (`LBUG_SHARED_ENABLED`), since the replica fleet is separate infrastructure.
 
-See the [Architecture Overview](Architecture-Overview) for the cluster topology and the S3-publish → replica-refresh flow.
+See the [Architecture Overview](Architecture-Overview.md) for the cluster topology and the S3-publish → replica-refresh flow.
 
 ## The registry and manifest model
 
 Every shared repository is declared by a single **adapter manifest** and registered in `config/shared_repositories.py`. The manifest is the one source of truth for the repository — its identity, data source, schema, allowed and blocked endpoints, rate limits, subscription plans, and credit costs all live in one file. The registry lazy-loads manifests and exposes a query API (`is_shared_repository`, `get_manifest`, `get_all_repository_ids`, `get_plan_details`) used across billing, middleware, and operations.
 
-Adding a new shared repository is therefore a two-step change — write the manifest, register it — with no separate billing config, database migrations, or hardcoded lists to update. The ingestion side (how a repository's data is downloaded, staged, materialized, and published to the replica fleet) is covered in the [Pipeline Guide](Pipeline-Guide). **SEC is the only shared repository registered today;** the model is built to host additional public datasets.
+Adding a new shared repository is therefore a two-step change — write the manifest, register it — with no separate billing config, database migrations, or hardcoded lists to update. The ingestion side (how a repository's data is downloaded, staged, materialized, and published to the replica fleet) is covered in the [Pipeline Guide](Pipeline-Guide.md). **SEC is the only shared repository registered today;** the model is built to host additional public datasets.
 
 ## Subscribing and accessing
 
@@ -97,7 +97,7 @@ curl -X POST "https://api.robosystems.ai/v1/graphs/sec/query/cypher" \
   -d '{"query": "MATCH (e:Entity) RETURN e.name LIMIT 10"}'
 ```
 
-Database operations (query, MCP, search) are **free** — they draw down rate-limit budget, not credits. Only AI operations consume credits, drawn from your repository plan's monthly allocation. See [Credits & Billing](Credits-and-Billing).
+Database operations (query, MCP, search) are **free** — they draw down rate-limit budget, not credits. Only AI operations consume credits, drawn from your repository plan's monthly allocation. See [Credits & Billing](Credits-and-Billing.md).
 
 ## The SEC shared repository
 
@@ -110,7 +110,7 @@ SEC EDGAR is the one shared repository available today — public-company filing
 
 Prices, monthly AI credit allocations and download allowances are served live and unauthenticated at **`GET /v1/offering`**, and shown on the [pricing page](https://robosystems.ai/pricing). Rate limits apply per category — queries, MCP calls, searches, and AI agent calls each have their own per-minute / per-hour / per-day budgets.
 
-The repository id is `sec`. For the data model and the rules a query must follow to return the right number, see [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules); for loading filings into a local stack, the [SEC XBRL Pipeline](SEC-XBRL-Pipeline) demo.
+The repository id is `sec`. For the data model and the rules a query must follow to return the right number, see [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules.md); for loading filings into a local stack, the [SEC XBRL Pipeline](SEC-XBRL-Pipeline.md) demo.
 
 ### Freshness
 
@@ -148,27 +148,27 @@ Then decompress it in the folder holding the download (on macOS, right-click the
 zstd -d sec.lbug.zst   # -> sec.lbug ; add --rm to delete the .zst afterwards
 ```
 
-Plain `zstd -d` is enough — no `--long` flag — and the decompressed file is roughly 2× the download, so leave disk headroom. The result is a LadybugDB database you can query directly; see [Graph Operations](Graph-Operations#downloading-and-unpacking-a-backup) for the full download-and-unpack walkthrough.
+Plain `zstd -d` is enough — no `--long` flag — and the decompressed file is roughly 2× the download, so leave disk headroom. The result is a LadybugDB database you can query directly; see [Graph Operations](Graph-Operations.md#downloading-and-unpacking-a-backup) for the full download-and-unpack walkthrough.
 
 The same graph file is also published as a public dataset on Hugging Face, [robosystems/sec-xbrl-knowledge-graphs](https://huggingface.co/datasets/robosystems/sec-xbrl-knowledge-graphs), under CC BY 4.0 and with no subscription. That copy is published by hand, not on every pipeline run, so it is a point-in-time snapshot — its dataset card gives the date and the filings it runs through — and lags the hosted graph. It is the graph alone: the filing-text views, the viewer and document search are not in it.
 
 ## Self-hosted deployments
 
-There is no free hosted SEC tier; self-hosting is the free path. On a stack you run, load the filings you want with `just sec-load`, or the whole corpus from the Hugging Face snapshot with `just sec-dump`, and query them through the same `sec` graph id — see [Local Development](Local-Development#sec-filings).
+There is no free hosted SEC tier; self-hosting is the free path. On a stack you run, load the filings you want with `just sec-load`, or the whole corpus from the Hugging Face snapshot with `just sec-dump`, and query them through the same `sec` graph id — see [Local Development](Local-Development.md#sec-filings).
 
 ## Related Documentation
 
-- **[Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy)** - The dedicated per-customer tiers, the other half of graph access
-- **[SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules)** - The `sec` graph's model, the four query rules, and worked queries
-- **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Loading SEC filings into a local stack
-- **[Pipeline Guide](Pipeline-Guide)** - How a shared repository's data is ingested and published
-- **[Credits & Billing](Credits-and-Billing)** - The credit model and subscription billing
-- **[AI Operators & MCP](AI-Operators-and-MCP)** - Querying a repository alongside your own graphs
+- **[Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy.md)** - The dedicated per-customer tiers, the other half of graph access
+- **[SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules.md)** - The `sec` graph's model, the four query rules, and worked queries
+- **[SEC XBRL Pipeline](SEC-XBRL-Pipeline.md)** - Loading SEC filings into a local stack
+- **[Pipeline Guide](Pipeline-Guide.md)** - How a shared repository's data is ingested and published
+- **[Credits & Billing](Credits-and-Billing.md)** - The credit model and subscription billing
+- **[AI Operators & MCP](AI-Operators-and-MCP.md)** - Querying a repository alongside your own graphs
 - **[Shared Repository Registry](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/shared_repositories.py)** - The registry in the codebase
 
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

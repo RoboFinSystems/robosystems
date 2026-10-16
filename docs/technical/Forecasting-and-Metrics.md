@@ -4,7 +4,7 @@ RoboLedger plans and measures in the same shape it reports in. A **forecast** is
 
 The product doc *Plan and forecast with your AI assistant* at roboledger.ai describes scenarios for end users. This page covers the block shape, the operations and their payloads, and how the engine walks a scenario.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Table of Contents
 
@@ -147,7 +147,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
 
 For each forward month, in order, the engine:
 
-1. **Builds the income statement.** Each detail line takes its value from its one owner for the month: a line value if one is set, else its driver rule (evaluated in dependency order) or its growth rate, else the prior month's value carried forward. [Schedules](Information-Blocks) keep running, so depreciation and amortization continue at their scheduled amounts and stop when the schedule ends. The calc-DAG subtotals are then derived down to net income.
+1. **Builds the income statement.** Each detail line takes its value from its one owner for the month: a line value if one is set, else its driver rule (evaluated in dependency order) or its growth rate, else the prior month's value carried forward. [Schedules](Information-Blocks.md) keep running, so depreciation and amortization continue at their scheduled amounts and stop when the schedule ends. The calc-DAG subtotals are then derived down to net income.
 2. **Rolls the balance sheet.** Receivables and payables follow DSO and DPO. Schedules move the assets they belong to. Net income rolls into retained earnings. Cash is the balancing figure, so assets equal liabilities plus equity by construction.
 3. **Derives the cash flow** by the indirect method, from the balance-sheet changes and net income, reconciled to the change in cash.
 4. **Verifies the month** with the rules that check actual statements: subtotals foot, the balance sheet balances, the cash flow ties to cash.
@@ -213,7 +213,7 @@ It seeds any missing months of the fiscal calendar back to `start_period`, as al
 - **Never posts.** A month holding draft entries is reported `skipped_drafts` and left alone.
 - **Stops on failure.** A month whose re-close fails is reported `failed` and the chunk halts, because continuing would leave a hole in the series. Untried months stay in `remaining_periods`.
 
-Each month's outcome is in `processed[]` (`stamped`, `skipped_drafts` or `failed`, with detail). Preconditions return `422` with a `code`: `nothing_closed` (close one month first), `no_ledger_data`, or `start_after_boundary`. The same five override flags as `close-period` (`allow_stale_sync`, `allow_stranded_obligations`, `allow_reconciling_items`, `allow_unposted_source_events`, `allow_unreconciled_accounts`) apply to each re-close. On a ledger with a reconciliation the close waits on, `allow_unreconciled_accounts` is needed for any month closed before that reconciliation existed, because it was never compared for that month. See [Period Close](Period-Close#reconciliations).
+Each month's outcome is in `processed[]` (`stamped`, `skipped_drafts` or `failed`, with detail). Preconditions return `422` with a `code`: `nothing_closed` (close one month first), `no_ledger_data`, or `start_after_boundary`. The same five override flags as `close-period` (`allow_stale_sync`, `allow_stranded_obligations`, `allow_reconciling_items`, `allow_unposted_source_events`, `allow_unreconciled_accounts`) apply to each re-close. On a ledger with a reconciliation the close waits on, `allow_unreconciled_accounts` is needed for any month closed before that reconciliation existed, because it was never compared for that month. See [Period Close](Period-Close.md#reconciliations).
 
 ## Metrics
 
@@ -294,20 +294,20 @@ Retained earnings grows by net income. Distributions and dividends are not proje
 
 ## Self-hosted deployments
 
-`just demo-saas-startup` (Cadence Labs) and `just demo-coffee-roaster` (Driftline Coffee) provision tenants whose books have a financial story worth planning against. See [Showcase Scenarios](RoboLedger-Demo-Walkthrough#showcase-scenarios). Use `http://localhost:8000` and the key from `just demo-user`.
+`just demo-saas-startup` (Cadence Labs) and `just demo-coffee-roaster` (Driftline Coffee) provision tenants whose books have a financial story worth planning against. See [Showcase Scenarios](RoboLedger-Demo-Walkthrough.md#showcase-scenarios). Use `http://localhost:8000` and the key from `just demo-user`.
 
 ## Related Documentation
 
-- **[Information Blocks](Information-Blocks)** - The block envelope, FactSets and `scenario_id`
-- **[Period Close](Period-Close)** - The stamped statements every scenario and metric reads
-- **[Chart of Accounts Mapping](Chart-of-Accounts-Mapping)** - Statements, and therefore forecasts, need a mapped chart
-- **[Reporting and Rendering](Reporting-and-Rendering)** - The calc DAG, and how forecast columns render
-- **[Taxonomy and Frameworks](Taxonomy-and-Frameworks)** - The `rs-driver` and `rs-metric` packages
-- **[RoboLedger Operations](RoboLedger-Operations)** - The full operations catalog
+- **[Information Blocks](Information-Blocks.md)** - The block envelope, FactSets and `scenario_id`
+- **[Period Close](Period-Close.md)** - The stamped statements every scenario and metric reads
+- **[Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md)** - Statements, and therefore forecasts, need a mapped chart
+- **[Reporting and Rendering](Reporting-and-Rendering.md)** - The calc DAG, and how forecast columns render
+- **[Taxonomy and Frameworks](Taxonomy-and-Frameworks.md)** - The `rs-driver` and `rs-metric` packages
+- **[RoboLedger Operations](RoboLedger-Operations.md)** - The full operations catalog
 
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

@@ -4,7 +4,7 @@ Query the analytical graph — the LadybugDB projection of a graph's data — wi
 
 **Quick Start:** Post `{"query": "MATCH (e:Entity) RETURN e.name LIMIT 10"}` to `https://api.robosystems.ai/v1/graphs/sec/query/cypher` with your API key in `X-API-Key` to run your first Cypher query against the SEC analytical graph.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Table of Contents
 
@@ -25,7 +25,7 @@ Query the analytical graph — the LadybugDB projection of a graph's data — wi
 RoboSystems exposes two distinct query planes, and it is worth being explicit about which one you are using:
 
 - **Analytical / OLAP** — Cypher (and supporting SQL) over the LadybugDB graph. This is where you traverse relationships and aggregate across an entire dataset. **This page covers the analytical plane.**
-- **Operational / OLTP** — typed GraphQL reads over the extensions PostgreSQL database (live transactional state). That plane is covered in [GraphQL Reads](GraphQL-Reads).
+- **Operational / OLTP** — typed GraphQL reads over the extensions PostgreSQL database (live transactional state). That plane is covered in [GraphQL Reads](GraphQL-Reads.md).
 
 The analytical graph is a materialized projection. Data flows into DuckDB staging tables — from the extensions PostgreSQL database on an entity graph, from uploaded files in S3 on a custom graph — and is materialized from there into LadybugDB; a sensor-driven blue/green rebuild keeps the graph in sync with its source. Because it is a projection, the analytical graph can lag the operational source by the length of a rebuild cycle.
 
@@ -51,8 +51,8 @@ LadybugDB analytical graph  ──  Cypher  ──▶  POST /v1/graphs/{g}/query
 
 Before querying, ensure you have:
 
-- A RoboSystems account and an API key — see [Quick Start](Quick-Start)
-- A graph to query — the examples use the shared `sec` repository, which needs a subscription from **Repositories** in the app (see [Shared Repositories](Shared-Repositories)); the staging-SQL examples use a graph you own
+- A RoboSystems account and an API key — see [Quick Start](Quick-Start.md)
+- A graph to query — the examples use the shared `sec` repository, which needs a subscription from **Repositories** in the app (see [Shared Repositories](Shared-Repositories.md)); the staging-SQL examples use a graph you own
 
 ## Quick Start
 
@@ -76,7 +76,7 @@ The user-facing way to run Cypher is `POST /v1/graphs/{graph_id}/query/cypher`. 
 
 ### Running Ad-Hoc Cypher
 
-Send your API key as `X-API-Key` and post a Cypher query with named parameters. This one returns a company's consolidated annual revenue, written to the [four SEC query rules](SEC-Data-Model-and-Query-Rules#the-four-rules):
+Send your API key as `X-API-Key` and post a Cypher query with named parameters. This one returns a company's consolidated annual revenue, written to the [four SEC query rules](SEC-Data-Model-and-Query-Rules.md#the-four-rules):
 
 ```bash
 curl -X POST "https://api.robosystems.ai/v1/graphs/sec/query/cypher" \
@@ -120,7 +120,7 @@ The model forbids extra fields. **Always parameterize** with `$name` placeholder
 
 Read-only is not a property of this endpoint — it is a property of the platform. Every statement, whichever transport carried it, runs through a single **`StatementKernel`** (`middleware/graph/statement_kernel.py`): a transport-independent authorization gauntlet shared by `/query/cypher`, `/query/sql`, the MCP `read-graph-cypher` tool, and the Operator path, delegating keyword analysis to `security/cypher_analyzer.py`. One implementation means those surfaces cannot drift apart from one another.
 
-The kernel is read-only for main graphs. Attempting a `CREATE`, `MERGE`, `SET`, `DELETE`, or other mutation against a main graph returns **HTTP 403**. Data reaches a main graph only by materialization, and where it comes from depends on the graph: an **entity graph** (RoboLedger, RoboInvestor) is written through the extensions command surface and materialized from the extensions database — file uploads are refused on it — while a **custom graph** loads files through the staging pipeline in [File Uploads](File-Uploads). See [Graph Operations](Graph-Operations#materialize) for `materialize`, and [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy#where-writes-go) for the full write map.
+The kernel is read-only for main graphs. Attempting a `CREATE`, `MERGE`, `SET`, `DELETE`, or other mutation against a main graph returns **HTTP 403**. Data reaches a main graph only by materialization, and where it comes from depends on the graph: an **entity graph** (RoboLedger, RoboInvestor) is written through the extensions command surface and materialized from the extensions database — file uploads are refused on it — while a **custom graph** loads files through the staging pipeline in [File Uploads](File-Uploads.md). See [Graph Operations](Graph-Operations.md#materialize) for `materialize`, and [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy.md#where-writes-go) for the full write map.
 
 Subgraphs are the exception and do allow writes, subject to two carve-outs:
 
@@ -241,13 +241,13 @@ curl -s -X POST "https://api.robosystems.ai/v1/graphs/sec/mcp" \
 
 The older REST tool endpoints (`GET /mcp/tools`, `POST /mcp/call-tool`) no longer exist.
 
-Alongside these two, `get-graph-info` is available on every graph, and graphs carrying the `roboledger` extension (including `sec`) also expose `get-example-queries`. `resolve-element`, which maps a concept such as "revenue" to the element qnames filers use, is served only on `sec`: it is gated on the shared-repository manifest's semantic enrichment, so a tenant RoboLedger graph does not list it. There is a separate operational MCP plane (`query-graphql`, `get-graphql-schema`) that reads the OLTP database, and an unstructured plane (`search-documents`, `get-document-section`) over the document index. For the full agent surface, see [AI Operators and MCP](AI-Operators-and-MCP).
+Alongside these two, `get-graph-info` is available on every graph, and graphs carrying the `roboledger` extension (including `sec`) also expose `get-example-queries`. `resolve-element`, which maps a concept such as "revenue" to the element qnames filers use, is served only on `sec`: it is gated on the shared-repository manifest's semantic enrichment, so a tenant RoboLedger graph does not list it. There is a separate operational MCP plane (`query-graphql`, `get-graphql-schema`) that reads the OLTP database, and an unstructured plane (`search-documents`, `get-document-section`) over the document index. For the full agent surface, see [AI Operators and MCP](AI-Operators-and-MCP.md).
 
 **Note:** `read-graph-cypher` strips string literals before scanning for write keywords, but the scan matches on whole words. A variable or property named exactly like a blocked keyword — for example a property access `n.set` or a variable `delete` — trips the word-boundary match and is rejected. Names that merely contain a keyword as a substring (such as `created_at` or `deleted`) are fine; avoid naming a read-only variable exactly `set`, `create`, `delete`, `merge`, `remove`, or `drop`.
 
 ## Read Patterns and Example Cypher
 
-The examples below use the `sec` repository as an illustrative dataset. Its data model has node types including `Entity`, `Report`, `Fact`, `Element`, `Period`, `Unit`, `Dimension`, `FactSet`, and `Structure`; [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules) covers the whole model and the four rules that decide whether a number read from it is right. Other graphs have their own schemas — always discover the schema before querying.
+The examples below use the `sec` repository as an illustrative dataset. Its data model has node types including `Entity`, `Report`, `Fact`, `Element`, `Period`, `Unit`, `Dimension`, `FactSet`, and `Structure`; [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules.md) covers the whole model and the four rules that decide whether a number read from it is right. Other graphs have their own schemas — always discover the schema before querying.
 
 Before writing Cypher against `sec`, check whether a ready-made view answers the question: `financial-statement-analysis`, `build-fact-grid`, `disclosures`, and `information-block` (MCP tools, and operations under `POST /extensions/roboledger/sec/operations/{name}`) already apply the rules.
 
@@ -364,11 +364,11 @@ ORDER BY r.fiscal_year_focus DESC, r.form
 LIMIT 20
 ```
 
-More worked queries — a statement for a ticker's latest 10-K, a metric across eight quarters, a balance sheet at a date — are on [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules#worked-queries).
+More worked queries — a statement for a ticker's latest 10-K, a metric across eight quarters, a balance sheet at a date — are on [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules.md#worked-queries).
 
 ## Gotchas and Limits
 
-- **SEC numbers have four rules.** Consolidated facts (`has_dimensions: false`), `Element.canonical_concept` over one qname, a pinned `Period` shape, and `RETURN DISTINCT` anchored on the `Entity`. A query that skips one returns a plausible wrong number rather than an error — see [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules).
+- **SEC numbers have four rules.** Consolidated facts (`has_dimensions: false`), `Element.canonical_concept` over one qname, a pinned `Period` shape, and `RETURN DISTINCT` anchored on the `Entity`. A query that skips one returns a plausible wrong number rather than an error — see [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules.md).
 - **Two parameter conventions.** Cypher takes named `$param` with a `parameters` object. Staging SQL takes either a `parameters` list for positional `?` (or `$1`, `$2`), or an object for named `$param` — never both in one statement.
 - **Write attempts return 403 on main graphs.** Data enters by materialization — from the extensions database on an entity graph, from staged uploads on a custom graph. Only *user* subgraphs accept writes through the query path — and only for callers with the `member` or `admin` role. Shared repositories and their subgraphs never do.
 - **Shared-repo staging SQL is blocked on the public API.** `POST /v1/graphs/{shared}/query/sql` returns 403 for shared repositories and their subgraphs — query the graph with Cypher instead.
@@ -376,7 +376,7 @@ More worked queries — a statement for a ticker's latest 10-K, a metric across 
 - **Queries are scoped to one graph.** There are no cross-database or cross-graph queries; each request targets a single `graph_id`.
 - **Ingestion is sequential and single-writer.** Each database allows one writer at a time and a limited number of concurrent connections, so favor read-only traversals when querying live graphs.
 - **`CALL db.*` introspection is refused on main graphs and shared repositories.** Only the [read-only procedures](#read-only-on-main-graphs) pass; use `CALL show_tables() RETURN *`, `CALL table_info('Label') RETURN *`, or `get-graph-schema`.
-- **On `sec`, text is not a Cypher question.** String matching (`CONTAINS`, `STARTS WITH`, `ENDS WITH`, `=~`) on `Fact.value` or `Fact.uri` is refused with 400 — see [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules#other-limits) for the tools that search filing text instead.
+- **On `sec`, text is not a Cypher question.** String matching (`CONTAINS`, `STARTS WITH`, `ENDS WITH`, `=~`) on `Fact.value` or `Fact.uri` is refused with 400 — see [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules.md#other-limits) for the tools that search filing text instead.
 
 ## Self-hosted deployments
 
@@ -398,13 +398,13 @@ None of them exercise the public API's authentication, rate limiting, or shared-
 
 ## Related Documentation
 
-**Wiki Guides:**
-- **[GraphQL Reads](GraphQL-Reads)** - The operational/OLTP query plane (typed GraphQL over PostgreSQL)
-- **[AI Operators and MCP](AI-Operators-and-MCP)** - The full MCP tool surface for AI agents
-- **[Graph Operations](Graph-Operations)** - Graph lifecycle, subgraphs, and the staging/materialize write path
-- **[SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules)** - The `sec` graph's model, the four query rules, and worked queries
-- **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Loading the SEC dataset on a local stack, and its staging tables
-- **[Custom Graph Schema](Custom-Graph-Schema)** - Define your own node and relationship types
+**Guides:**
+- **[GraphQL Reads](GraphQL-Reads.md)** - The operational/OLTP query plane (typed GraphQL over PostgreSQL)
+- **[AI Operators and MCP](AI-Operators-and-MCP.md)** - The full MCP tool surface for AI agents
+- **[Graph Operations](Graph-Operations.md)** - Graph lifecycle, subgraphs, and the staging/materialize write path
+- **[SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules.md)** - The `sec` graph's model, the four query rules, and worked queries
+- **[SEC XBRL Pipeline](SEC-XBRL-Pipeline.md)** - Loading the SEC dataset on a local stack, and its staging tables
+- **[Custom Graph Schema](Custom-Graph-Schema.md)** - Define your own node and relationship types
 
 **Codebase Documentation:**
 - **[Graph API](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graph_api/README.md)** - The graph engine beneath the public query API
@@ -418,6 +418,6 @@ None of them exercise the public API's authentication, rate limiting, or shared-
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

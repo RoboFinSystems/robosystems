@@ -1,8 +1,8 @@
 # Operations Contract
 
-Graph and extension writes in RoboSystems are named operations sharing one contract: one URL shape, response envelope, retry key, and progress stream. This page is the one home for that contract. The pages for each surface — [Graph Operations](Graph-Operations), [RoboLedger Operations](RoboLedger-Operations), [RoboInvestor Operations](RoboInvestor-Operations) — cover what each operation does and link back here for how they all behave. A few writes sit outside it as plain REST calls: account-level ones such as API keys, organization members, and billing, and graph-level ones such as membership grants and connection management.
+Graph and extension writes in RoboSystems are named operations sharing one contract: one URL shape, response envelope, retry key, and progress stream. This page is the one home for that contract. The pages for each surface — [Graph Operations](Graph-Operations.md), [RoboLedger Operations](RoboLedger-Operations.md), [RoboInvestor Operations](RoboInvestor-Operations.md) — cover what each operation does and link back here for how they all behave. A few writes sit outside it as plain REST calls: account-level ones such as API keys, organization members, and billing, and graph-level ones such as membership grants and connection management.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Table of Contents
 
@@ -113,7 +113,7 @@ A pending envelope:
 }
 ```
 
-Nothing was written: a synchronous operation that raises rolls back its whole unit of work. The status codes, the `detail` shapes, and what to do about each are in [Errors and Rate Limits](Errors-and-Rate-Limits).
+Nothing was written: a synchronous operation that raises rolls back its whole unit of work. The status codes, the `detail` shapes, and what to do about each are in [Errors and Rate Limits](Errors-and-Rate-Limits.md).
 
 **Failed after an async hand-off.** The request already returned a `pending` envelope, so the failure arrives on the operation's progress stream as an `operation_error` event, and the status snapshot reports `"status": "failed"` with an `error` message — see [Following an Async Operation](#following-an-async-operation).
 
@@ -148,7 +148,7 @@ curl -s -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/operations/creat
 
 A good key names the intent of the request — a source record id plus a version, or a job id plus a date — so the retry after a network error carries the same key and a genuinely new request carries a new one.
 
-`Idempotency-Key` is separate from any idempotency an operation has in its own data. `create-event-block`, for example, also refuses a second event with the same `source` and `external_id`, with or without the header — see [Build a Ledger Integration](Build-a-Ledger-Integration#step-5-capture-the-event).
+`Idempotency-Key` is separate from any idempotency an operation has in its own data. `create-event-block`, for example, also refuses a second event with the same `source` and `external_id`, with or without the header — see [Build a Ledger Integration](Build-a-Ledger-Integration.md#step-5-capture-the-event).
 
 ## Following an Async Operation
 
@@ -161,7 +161,7 @@ DELETE /v1/operations/{operation_id}           # cancel a pending, running, or p
 POST   /v1/operations/{operation_id}/resume    # answer an operation paused for input
 ```
 
-All are authenticated with `X-API-Key`, answer only for operations you started, and consume no credits. They carry no graph id, so they take an account-wide key: a graph-scoped key is refused here with 401 (see [Choosing a Key Scope](Authentication-and-API-Keys#choosing-a-key-scope)). The stream endpoint allows a small number of concurrent connections per user (the limit is in its description in the [API reference](https://robosystems.ai/docs/api)); close streams you are done with.
+All are authenticated with `X-API-Key`, answer only for operations you started, and consume no credits. They carry no graph id, so they take an account-wide key: a graph-scoped key is refused here with 401 (see [Choosing a Key Scope](Authentication-and-API-Keys.md#choosing-a-key-scope)). The stream endpoint allows a small number of concurrent connections per user (the limit is in its description in the [API reference](https://robosystems.ai/docs/api)); close streams you are done with.
 
 ### The stream
 
@@ -256,7 +256,7 @@ Once an operation's records expire, both endpoints answer **404**. Read the outc
 - Send an `Idempotency-Key` on every write you might retry, and reuse it only for the same request.
 - Branch on `status` in the envelope: `completed` → read `result`; `pending` → follow `operationId`.
 - Treat a 409 whose `detail` says the key is in progress as "wait and retry the same request", and one that says the key was reused with a different body as a bug in your key choice.
-- On a non-2xx response, log the `request_id` from the body (also sent as the `X-Request-ID` header) — see [Errors and Rate Limits](Errors-and-Rate-Limits#quoting-a-request-id).
+- On a non-2xx response, log the `request_id` from the body (also sent as the `X-Request-ID` header) — see [Errors and Rate Limits](Errors-and-Rate-Limits.md#quoting-a-request-id).
 - For async work, prefer the stream; fall back to polling `/status` with a delay; stop at a terminal state. Follow operations with an account-wide key.
 
 ## Self-hosted deployments
@@ -265,13 +265,13 @@ The contract is identical on a local stack at `http://localhost:8000`. Idempoten
 
 ## Related Documentation
 
-**Wiki Guides:**
+**Guides:**
 
-- **[Errors and Rate Limits](Errors-and-Rate-Limits)** - The error body, status codes, rate-limit headers, and insufficient-credits responses
-- **[Graph Operations](Graph-Operations)** - The graph lifecycle and content operations
-- **[Extensions Surface Overview](Extensions-Surface-Overview)** - The `/extensions` surface these operations share with GraphQL reads
-- **[Build a Ledger Integration](Build-a-Ledger-Integration)** - The contract in use, end to end
-- **[Versioning and Compatibility](Versioning-and-Compatibility)** - What stays stable as the API evolves
+- **[Errors and Rate Limits](Errors-and-Rate-Limits.md)** - The error body, status codes, rate-limit headers, and insufficient-credits responses
+- **[Graph Operations](Graph-Operations.md)** - The graph lifecycle and content operations
+- **[Extensions Surface Overview](Extensions-Surface-Overview.md)** - The `/extensions` surface these operations share with GraphQL reads
+- **[Build a Ledger Integration](Build-a-Ledger-Integration.md)** - The contract in use, end to end
+- **[Versioning and Compatibility](Versioning-and-Compatibility.md)** - What stays stable as the API evolves
 
 **API Reference:**
 
@@ -280,6 +280,6 @@ The contract is identical on a local stack at `http://localhost:8000`. Idempoten
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

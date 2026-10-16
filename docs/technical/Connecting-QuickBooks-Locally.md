@@ -4,9 +4,9 @@ This tutorial connects a QuickBooks Online company to a **self-hosted** RoboSyst
 
 What happens *after* a connection exists is the same on either deployment and is documented once, for the hosted API:
 
-- **[QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy)**: sync windows, write policy, the close-time write-back outbox, reconciling items, disconnect vs. sever
-- **[Chart of Accounts Mapping](Chart-of-Accounts-Mapping)**: auto-map on first sync, coverage vs. renderability, correcting a mapping
-- **[Period Close](Period-Close)**: closing the synced books
+- **[QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md)**: sync windows, write policy, the close-time write-back outbox, reconciling items, disconnect vs. sever
+- **[Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md)**: auto-map on first sync, coverage vs. renderability, correcting a mapping
+- **[Period Close](Period-Close.md)**: closing the synced books
 
 ## Two Paths for Local Development
 
@@ -16,7 +16,7 @@ There are two ways to develop against QuickBooks data locally. Pick the path tha
 | --- | --- | --- | --- |
 | **A. Sandbox + localhost** | Intuit Sample Company (pre-populated canned data) | Minutes — no tunnel, no production keys | Validating the OAuth handshake, exploring the sync flow, demoing the close/report UX without your own books |
 | **B. Production + public tunnel** | Your own real QB Online companies | ~15 min mechanical setup **+ a one-time Intuit production-access approval** (app assessment questionnaire — see [Prerequisites](#prerequisites)) | Real-data smoke tests, customer-facing demos against your own QB, debugging adapter edge cases that only surface in messy real data |
-| _Neither_ — synthetic data only | N/A | One command | When you don't need Intuit at all — see the [RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough) for the `just demo-roboledger` workflow which generates fake books for testing close-period, reports, and rules without OAuth |
+| _Neither_ — synthetic data only | N/A | One command | When you don't need Intuit at all — see the [RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough.md) for the `just demo-roboledger` workflow which generates fake books for testing close-period, reports, and rules without OAuth |
 
 Both QB paths use the same RoboSystems stack, the same sync pipeline, and the same reporting surface. The only differences are which Intuit OAuth credentials you use and whether the redirect URI points at localhost or a public tunnel.
 
@@ -52,8 +52,8 @@ When you connect QuickBooks to a local stack, four things happen end to end:
 
 1. **Sync.** A Dagster job pulls the chart of accounts, transactions, customers, vendors, employees and company info from the QuickBooks API, normalizes them with dbt, and loads them into the graph's tenant schema in the extensions database.
 2. **Materialize.** A sensor sees the graph marked stale and projects the OLTP data into LadybugDB, the graph backend used for analytical reads.
-3. **Map.** On the first sync, the MappingOperator maps the chart of accounts to `rs-gaap` reporting concepts. On a local stack this needs Bedrock credentials. See [Chart of Accounts Mapping](Chart-of-Accounts-Mapping).
-4. **Report.** Live statements, the close and saved reports read the synced ledger through that mapping. See [Reporting and Rendering](Reporting-and-Rendering).
+3. **Map.** On the first sync, the MappingOperator maps the chart of accounts to `rs-gaap` reporting concepts. On a local stack this needs Bedrock credentials. See [Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md).
+4. **Report.** Live statements, the close and saved reports read the synced ledger through that mapping. See [Reporting and Rendering](Reporting-and-Rendering.md).
 
 This page covers steps 1 and 2 and the setup in front of them. Steps 3 and 4 behave exactly as they do on the hosted platform.
 
@@ -68,7 +68,7 @@ This page covers steps 1 and 2 and the setup in front of them. Steps 3 and 4 beh
    git clone https://github.com/RoboFinSystems/roboledger-app.git
    ```
 
-2. **Complete the base local setup first** so `just start` works — see [Local Development](Local-Development) / [Bootstrap Guide](Bootstrap-Guide) (Docker, `uv`, `just`, the generated `.env`, migrations).
+2. **Complete the base local setup first** so `just start` works — see [Local Development](Local-Development.md) / [Bootstrap Guide](Bootstrap-Guide.md) (Docker, `uv`, `just`, the generated `.env`, migrations).
 3. **Install the frontend deps**: `cd roboledger-app && npm install` (Node 24+; `.nvmrc` pins the exact version). Run the frontend with `npm run dev` on the host for the OAuth step (see the Private-Network-Access note in [Troubleshooting](#troubleshooting)).
 
 ### Intuit Developer account (both paths)
@@ -426,7 +426,7 @@ curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/connections/$CONN_ID/syn
   -d '{"full_rebuild": true}'
 ```
 
-For a connection that has never synced, that first sync pulls full history. `full_rebuild: true` pulls all history, `{}` pulls the last 60 days, and `since_date` pulls from a date. See [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy#syncing) for what each window does.
+For a connection that has never synced, that first sync pulls full history. `full_rebuild: true` pulls all history, `{}` pulls the last 60 days, and `since_date` pulls from a date. See [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md#syncing) for what each window does.
 
 The response is a `pending` envelope carrying the Dagster run id as `task_id`. Follow the run in the Dagster UI at [localhost:8002](http://localhost:8002). When it finishes, the outcome is on the connection's `metadata.last_sync_result`.
 
@@ -468,11 +468,11 @@ If any data test fails, the entire transform fails — surfacing data-quality is
 - Inserts `Agent` rows (customers, vendors, employees as parties)
 - For each transaction, creates an `Event` with `status='captured'` and rich metadata
 - Because QuickBooks is the book of record for these transactions, immediately fires the event handler, which creates `Transaction → Entry → LineItem` rows in one transaction and lands the event `fulfilled`. A transaction that can't post stays `captured` in the inbox.
-- Flags any already-posted transaction whose payload changed upstream as a reconciling item instead of overwriting it (see [Reconciling Items](QuickBooks-Sync-and-Write-Policy#reconciling-items))
+- Flags any already-posted transaction whose payload changed upstream as a reconciling item instead of overwriting it (see [Reconciling Items](QuickBooks-Sync-and-Write-Policy.md#reconciling-items))
 - Records `last_sync` and `last_sync_result` on the connection
 - Triggers `_bootstrap_fiscal_calendar_if_needed` (so the close workflow works on a fresh sync)
 - Triggers `_trigger_auto_map_if_needed` (enqueues the MappingOperator when the mapping has no associations yet)
-- Refreshes the next period's reconciliations on a ledger that already reconciles its accounts (best-effort; see [Period Close](Period-Close#reconciliations))
+- Refreshes the next period's reconciliations on a ledger that already reconciles its accounts (best-effort; see [Period Close](Period-Close.md#reconciliations))
 - Marks the graph stale so the materializer knows there's new data
 
 After `qb_load` returns, the **stale graph sensor** (a Dagster sensor running every 60 seconds) picks up the stale flag, submits an `extensions_materialize_job`, and the materializer projects the OLTP data into LadybugDB:
@@ -604,7 +604,7 @@ Open the Dagster UI at [localhost:8002](http://localhost:8002), find the failed 
 
 ### Statements come out empty or unbalanced after a sync
 
-These are mapping problems, not sync problems, and they look the same on a local stack as on the hosted platform: unmapped accounts with balances, mappings to concepts the Reporting Style doesn't render (`unreachable_count > 0`), or a mapping to a subtotal. Diagnose with `get-mapping-summary` and `get-unmapped-elements`. See [Chart of Accounts Mapping](Chart-of-Accounts-Mapping). On a local stack, also confirm that auto-map actually ran: it needs Bedrock credentials, and without them the first sync leaves the chart unmapped.
+These are mapping problems, not sync problems, and they look the same on a local stack as on the hosted platform: unmapped accounts with balances, mappings to concepts the Reporting Style doesn't render (`unreachable_count > 0`), or a mapping to a subtotal. Diagnose with `get-mapping-summary` and `get-unmapped-elements`. See [Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md). On a local stack, also confirm that auto-map actually ran: it needs Bedrock credentials, and without them the first sync leaves the chart unmapped.
 
 ### `endpoint already online` / `tunnel already in use` error
 
@@ -660,11 +660,11 @@ Intuit Developer Portal entries (apps, registered redirect URIs, keys) are durab
 
 Once a company is connected and synced, the rest of the workflow is the hosted one, pointed at `http://localhost:8000`:
 
-- **[Chart of Accounts Mapping](Chart-of-Accounts-Mapping)**: check coverage and renderability before anything else
-- **[QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy)**: re-syncing, write-back, and settling transactions edited in QuickBooks
-- **[Period Close](Period-Close)**: close the synced months, and see what writes back to QuickBooks
-- **[Reporting and Rendering](Reporting-and-Rendering)**: live statements and saved reports over the synced ledger
-- **[AI Operators and MCP](AI-Operators-and-MCP)**: drive the close from an MCP client
-- **[Event-Driven Ledger](Event-Driven-Ledger)** and **[GraphQL Reads](GraphQL-Reads)**: how the synced data is modeled and read
+- **[Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md)**: check coverage and renderability before anything else
+- **[QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md)**: re-syncing, write-back, and settling transactions edited in QuickBooks
+- **[Period Close](Period-Close.md)**: close the synced months, and see what writes back to QuickBooks
+- **[Reporting and Rendering](Reporting-and-Rendering.md)**: live statements and saved reports over the synced ledger
+- **[AI Operators and MCP](AI-Operators-and-MCP.md)**: drive the close from an MCP client
+- **[Event-Driven Ledger](Event-Driven-Ledger.md)** and **[GraphQL Reads](GraphQL-Reads.md)**: how the synced data is modeled and read
 
-To exercise the same surfaces without Intuit at all, `just demo-roboledger` generates synthetic books. See the [RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough).
+To exercise the same surfaces without Intuit at all, `just demo-roboledger` generates synthetic books. See the [RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough.md).

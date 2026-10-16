@@ -6,7 +6,7 @@ The write path is a set of **content operations** at `POST /v1/graphs/{graph_id}
 
 **Quick Start:** Request a presigned URL with `create-file-upload`, `PUT` the bytes to S3, then call `ingest-file` with `ingest_to_graph: true` — see [Quick Start](#quick-start) below for the calls.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Table of Contents
 
@@ -38,11 +38,11 @@ This surface lets you load bulk data — nodes and relationships — into a cust
 2. **Stage** it into a DuckDB table (queryable immediately).
 3. **Ingest** it into the LadybugDB graph, either per-file or in a single batch.
 
-This is a different surface from document management. The file pipeline moves **structured tabular data into the graph**; it does not store or index documents. For narrative content — policies, procedures and notes, uploaded as markdown and indexed for full-text and semantic search — see [Document Management](Document-Management) instead. That store takes markdown text, not binary files such as PDFs.
+This is a different surface from document management. The file pipeline moves **structured tabular data into the graph**; it does not store or index documents. For narrative content — policies, procedures and notes, uploaded as markdown and indexed for full-text and semantic search — see [Document Management](Document-Management.md) instead. That store takes markdown text, not binary files such as PDFs.
 
 ## When to Use This
 
-Use this surface when you are loading data into a **custom / generic graph** — the kind you create with a `schema.json` template (see [Custom Graph Schema](Custom-Graph-Schema)).
+Use this surface when you are loading data into a **custom / generic graph** — the kind you create with a `schema.json` template (see [Custom Graph Schema](Custom-Graph-Schema.md)).
 
 Three graph types are explicitly **not** supported, and the operations reject them:
 
@@ -74,8 +74,8 @@ Every file lives across three layers, each with its own independent status. The 
 
 Before starting, ensure you have:
 
-- A RoboSystems account and an API key (see [Quick Start](Quick-Start))
-- A custom graph and its `graph_id` (see [Custom Graph Schema](Custom-Graph-Schema))
+- A RoboSystems account and an API key (see [Quick Start](Quick-Start.md))
+- A custom graph and its `graph_id` (see [Custom Graph Schema](Custom-Graph-Schema.md))
 
 All `curl` examples below read the API key from `$ROBOSYSTEMS_API_KEY` and target `https://api.robosystems.ai`. Substitute your own `graph_id` (the examples use `kg1a2b3c4d5e6f7a8b`).
 
@@ -191,7 +191,7 @@ The top-level `operationId` on a pending envelope is what you pass to `/v1/opera
 
 ### Step 4: Verify the Data
 
-Once the data is in the graph, query it. Reads run through `POST /v1/graphs/{graph_id}/query/cypher`, or through any MCP-compatible AI tool using the `read-graph-cypher` tool (run `get-graph-schema` first). See [Querying the Analytical Graph](Querying-the-Analytical-Graph) for both paths.
+Once the data is in the graph, query it. Reads run through `POST /v1/graphs/{graph_id}/query/cypher`, or through any MCP-compatible AI tool using the `read-graph-cypher` tool (run `get-graph-schema` first). See [Querying the Analytical Graph](Querying-the-Analytical-Graph.md) for both paths.
 
 ```bash
 curl -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e6f7a8b/query/cypher" \
@@ -351,15 +351,15 @@ For the full request and response schemas (`FileUploadRequest`, `IngestFileOp`, 
 
 ## Self-hosted deployments
 
-On a local stack, `just demo-custom-graph` exercises the entire upload → stage → ingest → query flow end-to-end against a real schema and is the canonical runnable reference for the multi-file flow. It creates a custom graph, generates parquet node and relationship files, uploads them, stages them, materializes the graph, and runs a few verification queries — seven steps in all, finishing with document indexing and a `knowledge` subgraph that exercises structured and semantic memory. See [Local Development](Local-Development).
+On a local stack, `just demo-custom-graph` exercises the entire upload → stage → ingest → query flow end-to-end against a real schema and is the canonical runnable reference for the multi-file flow. It creates a custom graph, generates parquet node and relationship files, uploads them, stages them, materializes the graph, and runs a few verification queries — seven steps in all, finishing with document indexing and a `knowledge` subgraph that exercises structured and semantic memory. See [Local Development](Local-Development.md).
 
 ## Related Documentation
 
-**Wiki Guides:**
+**Guides:**
 
-- **[Custom Graph Schema](Custom-Graph-Schema)** - Design the schema and tables that file uploads populate
-- **[Search and AI Retrieval](Search-and-AI-Retrieval)** - Query the loaded graph with MCP tools (`read-graph-cypher`, `get-graph-schema`) after ingest
-- **[Document Management](Document-Management)** - For markdown documents on any user graph (the contrasting surface; this page is bulk tabular data)
+- **[Custom Graph Schema](Custom-Graph-Schema.md)** - Design the schema and tables that file uploads populate
+- **[Search and AI Retrieval](Search-and-AI-Retrieval.md)** - Query the loaded graph with MCP tools (`read-graph-cypher`, `get-graph-schema`) after ingest
+- **[Document Management](Document-Management.md)** - For markdown documents on any user graph (the contrasting surface; this page is bulk tabular data)
 
 **Codebase Documentation:**
 
@@ -370,6 +370,6 @@ On a local stack, `just demo-custom-graph` exercises the entire upload → stage
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

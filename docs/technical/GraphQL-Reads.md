@@ -4,7 +4,7 @@ GraphQL gives you ad-hoc, strongly-typed reads over a graph's operational (OLTP)
 
 **Quick Start:** With an API key and a `graph_id` in hand, `curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql"` with `-H "X-API-Key: $ROBOSYSTEMS_API_KEY"` and `-d '{"query": "{ entity { id name } }"}'` returns the parent entity for that graph.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## The Two Read Planes
 
@@ -47,7 +47,7 @@ The GraphQL surface gives you typed, ad-hoc reads over a graph's operational dat
 
 ## Prerequisites
 
-- A RoboSystems account and an API key, created in the app under **Settings → API keys**. See [Quick Start](Quick-Start).
+- A RoboSystems account and an API key, created in the app under **Settings → API keys**. See [Quick Start](Quick-Start.md).
 - A `graph_id` to query against — list yours with `GET /v1/graphs` or copy it from the app's graph selector. A RoboLedger graph comes from roboledger.ai when you connect QuickBooks, or from **Create Graph** in the app.
 - On robosystems.ai the GraphQL endpoint is on, with both the ledger and investor field groups. A self-hosted deployment mounts it only when at least one extension (`ROBOLEDGER_ENABLED` or `ROBOINVESTOR_ENABLED`) is enabled, behind the `EXTENSIONS_GRAPHQL_ENABLED` kill switch.
 
@@ -159,7 +159,7 @@ A response looks like this:
 }
 ```
 
-The wire field names are the camelCase form of the underlying Pydantic fields: `closed_through` becomes `closedThrough`, `close_target` becomes `closeTarget`, `gap_periods` becomes `gapPeriods`, and so on. Querying the snake_case names fails. The full `fiscalCalendar` shape carries more than the five fields above — `fiscalYearStartMonth`, `catchUpSequence`, a count and a sample for each blocker that has detail (`pendingObligationCount`, `strandedObligationCount`, `reconcilingItemCount`, `unpostedSourceEventCount`, `unreconciledAccountCount`, each with its `…Sample`), `earliestPendingPeriod`, `syncStaleDays`, `lastCloseAt`, `lastSyncAt`, and a `periods` list — discover them through introspection. What each blocker means is on [Period Close](Period-Close#blockers).
+The wire field names are the camelCase form of the underlying Pydantic fields: `closed_through` becomes `closedThrough`, `close_target` becomes `closeTarget`, `gap_periods` becomes `gapPeriods`, and so on. Querying the snake_case names fails. The full `fiscalCalendar` shape carries more than the five fields above — `fiscalYearStartMonth`, `catchUpSequence`, a count and a sample for each blocker that has detail (`pendingObligationCount`, `strandedObligationCount`, `reconcilingItemCount`, `unpostedSourceEventCount`, `unreconciledAccountCount`, each with its `…Sample`), `earliestPendingPeriod`, `syncStaleDays`, `lastCloseAt`, `lastSyncAt`, and a `periods` list — discover them through introspection. What each blocker means is on [Period Close](Period-Close.md#blockers).
 
 ### Parent entity
 
@@ -213,7 +213,7 @@ This page does not repeat that list. What follows is the orientation the generat
 | You want to know | Start with |
 | --- | --- |
 | What is blocking the month-end close | `fiscalCalendar` — `closedThrough`, `blockers`, the per-blocker counts (`reconcilingItemCount`, `unpostedSourceEventCount`, `unreconciledAccountCount`, …) and `syncStaleDays` in one read |
-| Whether the books tie to their independent sources for a month | `reconciliations(period: "YYYY-MM")` — each reconciliation's `status`, `unreconciledDifference`, balances and sign-off. See [Period Close](Period-Close#reconciliations) |
+| Whether the books tie to their independent sources for a month | `reconciliations(period: "YYYY-MM")` — each reconciliation's `status`, `unreconciledDifference`, balances and sign-off. See [Period Close](Period-Close.md#reconciliations) |
 | Which schedules are drafted, posted or pending for a period | `periodCloseStatus`, then `periodDrafts` for the entries themselves |
 | Who owes us, and how concentrated it is | `agents(agentType: "customer")` with `openReceivable` on each — names and balances together. `openReceivablesByAgent` gives the same balances keyed by id only |
 | What a counterparty has done | `agent`, then the event and transaction history behind the balance |
@@ -273,7 +273,7 @@ The intended flow is two steps: discover the schema, then query it.
 
 Direct HTTP queries are bounded too, just more loosely, and on a different third axis. The endpoint applies Strawberry limiters for maximum depth 15, maximum 30 aliases, and maximum 2000 **tokens** — deployment settings `EXTENSIONS_GRAPHQL_MAX_DEPTH`, `EXTENSIONS_GRAPHQL_MAX_ALIASES`, and `EXTENSIONS_GRAPHQL_MAX_TOKENS`, which a deployment's operator can tune at runtime through SSM without a redeploy. They exist to bound query cost against the small extensions OLTP connection pool, where each resolved field can open a session. Introspection is exempt from the depth limiter, so SDK codegen is unaffected.
 
-Note the easy-to-confuse pairing: `get-graphql-schema` returns the **GraphQL SDL** for this OLTP plane, while `get-graph-schema` (no `ql`) returns the **Cypher/graph** schema for the analytical LadybugDB plane. They are different tools for different planes. See [AI Operators and MCP](AI-Operators-and-MCP) for the full MCP tool surface.
+Note the easy-to-confuse pairing: `get-graphql-schema` returns the **GraphQL SDL** for this OLTP plane, while `get-graph-schema` (no `ql`) returns the **Cypher/graph** schema for the analytical LadybugDB plane. They are different tools for different planes. See [AI Operators and MCP](AI-Operators-and-MCP.md) for the full MCP tool surface.
 
 ## Error Surface
 
@@ -341,25 +341,25 @@ The graph is scoped by the URL path, never by a query argument. The query body i
 
 **GraphiQL.** On a development deployment, open the endpoint URL in a browser — `http://localhost:8000/extensions/<your graph id>/graphql`. GraphiQL renders with introspection enabled; use the **Docs** / **Schema** panel to browse types and fields and the editor to compose and run queries interactively.
 
-**A demo graph.** `just demo-roboledger` provisions a graph with synthetic books (see [RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough)); on a fresh graph it is an alternative to connecting a data source. Demo scripts write the `graph_id` to `.local/config.json` under `graphs.<slot>.graph_id` — not a top-level key — and slot names vary by script (`cascade_demo`, `cascade_demo_<entity_type>`, `roboledger_skeleton`, `roboinvestor_demo`, `saas_startup`, `custom_graph_demo`, and others). Picking a slot positionally (`to_entries[0]`) often grabs another demo's graph, so list the slots and name yours:
+**A demo graph.** `just demo-roboledger` provisions a graph with synthetic books (see [RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough.md)); on a fresh graph it is an alternative to connecting a data source. Demo scripts write the `graph_id` to `.local/config.json` under `graphs.<slot>.graph_id` — not a top-level key — and slot names vary by script (`cascade_demo`, `cascade_demo_<entity_type>`, `roboledger_skeleton`, `roboinvestor_demo`, `saas_startup`, `custom_graph_demo`, and others). Picking a slot positionally (`to_entries[0]`) often grabs another demo's graph, so list the slots and name yours:
 
 ```bash
 jq -r '.graphs | keys[]' .local/config.json
 GRAPH_ID=$(jq -r '.graphs.cascade_demo.graph_id' .local/config.json)   # substitute your slot
 ```
 
-For real synced data on your own stack, see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally).
+For real synced data on your own stack, see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally.md).
 
 ## Related Documentation
 
-**Wiki Guides:**
+**Guides:**
 
-- **[Extensions Surface Overview](Extensions-Surface-Overview)** - The three sub-surfaces (GraphQL typed reads, command writes, analytical view operations), the shared `OperationEnvelope`, and the feature-flag story
-- **[RoboLedger Operations](RoboLedger-Operations)** - The write counterpart at `/extensions/roboledger/{graph_id}/operations/*`, making the read/write split concrete
-- **[Querying the Analytical Graph](Querying-the-Analytical-Graph)** - The Cypher/OLAP plane this page contrasts against, with `read-graph-cypher` and `get-graph-schema`
-- **[AI Operators and MCP](AI-Operators-and-MCP)** - The MCP tool surface, including `get-graphql-schema` and `query-graphql`
-- **[Connecting QuickBooks Locally](Connecting-QuickBooks-Locally)** - Shows the OLTP → materialize → Cypher flow this page's analytical plane contrasts against
-- **[RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough)** - Provisions a graph with synthetic books to run these queries against
+- **[Extensions Surface Overview](Extensions-Surface-Overview.md)** - The three sub-surfaces (GraphQL typed reads, command writes, analytical view operations), the shared `OperationEnvelope`, and the feature-flag story
+- **[RoboLedger Operations](RoboLedger-Operations.md)** - The write counterpart at `/extensions/roboledger/{graph_id}/operations/*`, making the read/write split concrete
+- **[Querying the Analytical Graph](Querying-the-Analytical-Graph.md)** - The Cypher/OLAP plane this page contrasts against, with `read-graph-cypher` and `get-graph-schema`
+- **[AI Operators and MCP](AI-Operators-and-MCP.md)** - The MCP tool surface, including `get-graphql-schema` and `query-graphql`
+- **[Connecting QuickBooks Locally](Connecting-QuickBooks-Locally.md)** - Shows the OLTP → materialize → Cypher flow this page's analytical plane contrasts against
+- **[RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough.md)** - Provisions a graph with synthetic books to run these queries against
 
 **Codebase Documentation:**
 
@@ -371,6 +371,6 @@ For real synced data on your own stack, see [Connecting QuickBooks Locally](Conn
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

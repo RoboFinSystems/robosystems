@@ -2,7 +2,7 @@
 
 RoboSystems treats accounting vocabulary as data: concepts, hierarchies, calculation arcs, and rules are versioned rows seeded from JSON-LD packages. This page explains the substrate — the `fac`, `cm`, and `rs-gaap` frameworks, the canonical ontology, the Element and Association atoms, and traits — and shows you how to contribute your own vocabulary through the Taxonomy Block write path.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Table of Contents
 
@@ -86,7 +86,7 @@ Key element columns include `qname`, `name`, `balance_type` (`debit | credit`), 
 
 Six of these are authorable from the public write path; `derivation` and `has-part` are system-emitted, so `create-taxonomy-block` rejects them.
 
-Associations are unique on `(structure_id, from, to, association_type)`, so the same two elements can participate in several linkbases at once — a concept can sit in a presentation tree *and* a calculation rollup with different parents. The `calculation` linkbase is the DAG the renderer walks to derive and foot subtotals; see [Reporting & Rendering](Reporting-and-Rendering) for how that projection works.
+Associations are unique on `(structure_id, from, to, association_type)`, so the same two elements can participate in several linkbases at once — a concept can sit in a presentation tree *and* a calculation rollup with different parents. The `calculation` linkbase is the DAG the renderer walks to derive and foot subtotals; see [Reporting & Rendering](Reporting-and-Rendering.md) for how that projection works.
 
 ## Traits
 
@@ -130,7 +130,7 @@ The pin manifest (`frameworks/{name}/v1.json`) declares the framework, its versi
 
 ## Contributing: The Taxonomy Block Write Path
 
-The **Taxonomy Block** is the single public write path for vocabulary. It is modeled directly on the [Information Block](Information-Blocks): a molecule (the envelope) crosses the API boundary in one transaction, never a raw atom. "No raw element writes" is the taxonomy-side twin of "no raw fact writes" — there is no per-row element or association CRUD on the public surface.
+The **Taxonomy Block** is the single public write path for vocabulary. It is modeled directly on the [Information Block](Information-Blocks.md): a molecule (the envelope) crosses the API boundary in one transaction, never a raw atom. "No raw element writes" is the taxonomy-side twin of "no raw fact writes" — there is no per-row element or association CRUD on the public surface.
 
 A Taxonomy Block envelope carries everything needed to stand up a piece of vocabulary atomically: the taxonomy itself, its `structures`, its `elements`, the `associations` that wire them together, and any user `rules`. The system also auto-generates structural rules (unique qnames, no cycles, no orphan arcs, parent-before-child, leaf classification for charts of accounts, and library-immutability for extensions).
 
@@ -145,7 +145,7 @@ The `taxonomy_type` field selects the block type. Four are writable from the pub
 | **`custom_ontology`** | You need a free-form vocabulary with no accounting discipline | No trait requirement; every reference must resolve within the envelope |
 | **`schedule`** | You want a named container to group Schedule information blocks under | Name and description only; any atoms in the envelope are ignored. Create only: update and delete return `501` |
 
-A `schedule` taxonomy is a grouping container, not a working schedule: the schedule itself, with its monthly facts and closing entries, is created with `create-information-block` (see [Information Blocks](Information-Blocks#authoring-an-information-block)) and can name the container as its `taxonomy_id`. The remaining type, `reporting_standard`, is seeded by an admin-only library creator; create, update, and delete on one return `501`.
+A `schedule` taxonomy is a grouping container, not a working schedule: the schedule itself, with its monthly facts and closing entries, is created with `create-information-block` (see [Information Blocks](Information-Blocks.md#authoring-an-information-block)) and can name the container as its `taxonomy_id`. The remaining type, `reporting_standard`, is seeded by an admin-only library creator; create, update, and delete on one return `501`.
 
 Authoring `reporting_extension` and `custom_ontology` blocks can be switched off per deployment with `TAXONOMY_AUTHORING_ENABLED`; where it is off, create and update of those two types return `403` (delete stays open). `chart_of_accounts` and `schedule` are never gated.
 
@@ -182,7 +182,7 @@ The request and response schemas (`CreateTaxonomyBlockRequest`, `TaxonomyBlockEl
 
 ## Worked Example
 
-This walkthrough authors a custom ontology, then reads it back. The examples need an API key and a tenant graph (see [Quick Start](Quick-Start)); they read the key from `$ROBOSYSTEMS_API_KEY` and the graph id from `$GRAPH_ID`. Steps 1 and 3 author the two types a deployment can switch off; a `403` there is that switch (see [Extension and Ontology Authoring Can Be Off](#extension-and-ontology-authoring-can-be-off)).
+This walkthrough authors a custom ontology, then reads it back. The examples need an API key and a tenant graph (see [Quick Start](Quick-Start.md)); they read the key from `$ROBOSYSTEMS_API_KEY` and the graph id from `$GRAPH_ID`. Steps 1 and 3 author the two types a deployment can switch off; a `403` there is that switch (see [Extension and Ontology Authoring Can Be Off](#extension-and-ontology-authoring-can-be-off)).
 
 ### Step 1: Create a Custom Ontology
 
@@ -310,7 +310,7 @@ The two scopes differ in what the same fields see, not in which fields exist: `l
 
 ## Mapping
 
-A tenant's chart of accounts reaches the statements through `mapping` associations: one arc from each chart-of-accounts element to an `rs-gaap` leaf concept, held in a `coa_mapping` Structure. Each `coa_mapping` Structure is anchored to its own `mapping` taxonomy, whose source is the chart and whose target is one framework; the chart owns its mapping taxonomies, so the chart's Taxonomy Block is the chart plus every mapping sourced from it, created, read, edited, and deleted together. A chart holds at most one mapping per framework. Mapping arcs are written one at a time with `create-mapping-association` or in bulk by the AI MappingOperator, not through a Taxonomy Block. Candidate targets are limited to concepts that render under the entity's active Reporting Style, which is also the working set the tenant library keeps (see [The JSON-LD Package Library](#the-json-ld-package-library)). The mapping model, coverage vs. renderability, auto-map and its confidence thresholds, and the lock that protects closed months are on [Chart of Accounts Mapping](Chart-of-Accounts-Mapping).
+A tenant's chart of accounts reaches the statements through `mapping` associations: one arc from each chart-of-accounts element to an `rs-gaap` leaf concept, held in a `coa_mapping` Structure. Each `coa_mapping` Structure is anchored to its own `mapping` taxonomy, whose source is the chart and whose target is one framework; the chart owns its mapping taxonomies, so the chart's Taxonomy Block is the chart plus every mapping sourced from it, created, read, edited, and deleted together. A chart holds at most one mapping per framework. Mapping arcs are written one at a time with `create-mapping-association` or in bulk by the AI MappingOperator, not through a Taxonomy Block. Candidate targets are limited to concepts that render under the entity's active Reporting Style, which is also the working set the tenant library keeps (see [The JSON-LD Package Library](#the-json-ld-package-library)). The mapping model, coverage vs. renderability, auto-map and its confidence thresholds, and the lock that protects closed months are on [Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md).
 
 ## Common Pitfalls
 
@@ -368,12 +368,12 @@ Validate the edit before you pay for a reseed. `just framework-validate` checks 
 
 ## Related Documentation
 
-**Wiki Guides:**
+**Guides:**
 
-- **[Information Blocks](Information-Blocks)** - Where Elements get their *values*; the Taxonomy Block reuses the same envelope, idempotency, audit, and auto-rule machinery
-- **[Chart of Accounts Mapping](Chart-of-Accounts-Mapping)** - How chart-of-accounts elements are mapped to `rs-gaap` concepts
-- **[Reporting & Rendering](Reporting-and-Rendering)** - How statements render over these Elements; the renderer walks the `calculation` linkbase to derive and foot subtotals
-- **[Custom Graph Schema](Custom-Graph-Schema)** - A different layer: the LadybugDB **graph schema** (node and relationship table DDL via `schema.json`), not the accounting **vocabulary** described here. Do not conflate "custom graph schema" with "custom ontology"
+- **[Information Blocks](Information-Blocks.md)** - Where Elements get their *values*; the Taxonomy Block reuses the same envelope, idempotency, audit, and auto-rule machinery
+- **[Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md)** - How chart-of-accounts elements are mapped to `rs-gaap` concepts
+- **[Reporting & Rendering](Reporting-and-Rendering.md)** - How statements render over these Elements; the renderer walks the `calculation` linkbase to derive and foot subtotals
+- **[Custom Graph Schema](Custom-Graph-Schema.md)** - A different layer: the LadybugDB **graph schema** (node and relationship table DDL via `schema.json`), not the accounting **vocabulary** described here. Do not conflate "custom graph schema" with "custom ontology"
 
 **Codebase Documentation:**
 
@@ -385,6 +385,6 @@ Validate the edit before you pay for a reseed. `just framework-validate` checks 
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

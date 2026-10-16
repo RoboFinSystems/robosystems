@@ -4,7 +4,7 @@ The SEC XBRL pipeline turns EDGAR filings into the `sec` graph: the hosted repos
 
 ## On the hosted platform
 
-Using SEC data needs none of this page. Subscribe to the SEC repository from **Repositories** in the app at robosystems.ai, then connect Claude, ChatGPT, or any MCP client to `https://api.robosystems.ai/v1/graphs/sec/mcp` — or skip the address and add RoboSystems SEC from Claude's connector directory or the ChatGPT plugin directory. Plans and access are on [Shared Repositories](Shared-Repositories); clients, sign-in, and the tool list are on [AI Operators & MCP](AI-Operators-and-MCP). How current the hosted graph is: [How fresh is the hosted sec graph](#how-fresh-is-the-hosted-sec-graph).
+Using SEC data needs none of this page. Subscribe to the SEC repository from **Repositories** in the app at robosystems.ai, then connect Claude, ChatGPT, or any MCP client to `https://api.robosystems.ai/v1/graphs/sec/mcp` — or skip the address and add RoboSystems SEC from Claude's connector directory or the ChatGPT plugin directory. Plans and access are on [Shared Repositories](Shared-Repositories.md); clients, sign-in, and the tool list are on [AI Operators & MCP](AI-Operators-and-MCP.md). How current the hosted graph is: [How fresh is the hosted sec graph](#how-fresh-is-the-hosted-sec-graph).
 
 The rest of this page runs the pipeline on your own stack, where loading filings is free.
 
@@ -23,7 +23,7 @@ The SEC local pipeline allows you to:
 
 ## Prerequisites
 
-A running local stack (`just start`) — setup, the demo user, and the local-only tools are on [Local Development](Local-Development).
+A running local stack (`just start`) — setup, the demo user, and the local-only tools are on [Local Development](Local-Development.md).
 
 ## Quick Start
 
@@ -187,7 +187,7 @@ In interactive mode (the prompt is `sec>`), you can:
 
 ## Authentication Setup
 
-`just demo-sec` creates the demo user and saves its API key (it starts with `rfs`, and travels in `X-API-Key`) to `.local/config.json`. For another user with SEC access, run `just demo-user --repositories sec`; the demo user itself is covered on [Local Development](Local-Development#step-2-create-a-demo-user-and-api-key).
+`just demo-sec` creates the demo user and saves its API key (it starts with `rfs`, and travels in `X-API-Key`) to `.local/config.json`. For another user with SEC access, run `just demo-user --repositories sec`; the demo user itself is covered on [Local Development](Local-Development.md#step-2-create-a-demo-user-and-api-key).
 
 ## Accessing the Data
 
@@ -232,7 +232,7 @@ For Cursor / VS Code (`mcp.json`):
 
 Against production the same URL shape is `https://api.robosystems.ai/v1/graphs/sec/mcp`. Clients without HTTP transport support can use the legacy [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client).
 
-A key never travels in the URL: a credential in the query string is rejected. The hosted sign-in (OAuth) path, used by claude.ai and Claude Desktop custom connectors (Customize → Connectors) and by the directory listings, is on [AI Operators & MCP](AI-Operators-and-MCP).
+A key never travels in the URL: a credential in the query string is rejected. The hosted sign-in (OAuth) path, used by claude.ai and Claude Desktop custom connectors (Customize → Connectors) and by the directory listings, is on [AI Operators & MCP](AI-Operators-and-MCP.md).
 
 4. Restart your MCP-compatible AI tool
 
@@ -277,7 +277,7 @@ The AI will use:
 
 ### Option 2: Direct Cypher Queries (For Development)
 
-Query the local database directly using Cypher (no authentication required for local queries). Queries that read numbers follow the [four SEC query rules](SEC-Data-Model-and-Query-Rules#the-four-rules): consolidated facts (`has_dimensions: false`), `canonical_concept` over one qname, a pinned period shape, and `RETURN DISTINCT` from an `Entity` anchor. `just graph-query` rewrites single quotes to double quotes, so string literals inside the query are fine.
+Query the local database directly using Cypher (no authentication required for local queries). Queries that read numbers follow the [four SEC query rules](SEC-Data-Model-and-Query-Rules.md#the-four-rules): consolidated facts (`has_dimensions: false`), `canonical_concept` over one qname, a pinned period shape, and `RETURN DISTINCT` from an `Entity` anchor. `just graph-query` rewrites single quotes to double quotes, so string literals inside the query are fine.
 
 ```bash
 # List the companies in the database
@@ -323,7 +323,7 @@ ORDER BY end_date DESC
 LIMIT 60
 ```
 
-More worked queries, and why each rule matters, are on [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules).
+More worked queries, and why each rule matters, are on [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules.md).
 
 ### Option 3: Query Staging Tables (For Data Validation)
 
@@ -547,7 +547,7 @@ LIMIT 10;
 
 The graph you load is the same model the hosted `sec` repository serves. Each filing is a `Report` of an `Entity`; each reported number is a `Fact` linked to its `Element` (the concept, with a normalized `canonical_concept`), its `Period`, its `Unit`, and any `Dimension` qualifiers. A filing's statements and notes are `Structure` nodes (with `canonical_type` on the primary statements), each holding a `FactSet` of the facts it presents, and `Association` nodes carry the parent–child arcs within a structure.
 
-The complete node and relationship reference, the traversal patterns, the enriched properties, and the four rules every number-reading query should follow are on **[SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules)**.
+The complete node and relationship reference, the traversal patterns, the enriched properties, and the four rules every number-reading query should follow are on **[SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules.md)**.
 
 ## How fresh is the hosted sec graph
 
@@ -613,7 +613,7 @@ Common financial metrics (XBRL qname → canonical concept):
 
 ### Query by Time Period
 
-A `Period` is either an `instant` (a balance-sheet date, held in `end_date`) or a `duration` bucketed by `duration_type` (`quarterly`, `semi_annual`, `nine_months`, `annual`, `other`). Pin one or the other; see [rule 3](SEC-Data-Model-and-Query-Rules#the-four-rules).
+A `Period` is either an `instant` (a balance-sheet date, held in `end_date`) or a `duration` bucketed by `duration_type` (`quarterly`, `semi_annual`, `nine_months`, `annual`, `other`). Pin one or the other; see [rule 3](SEC-Data-Model-and-Query-Rules.md#the-four-rules).
 
 ```bash
 # Consolidated balance-sheet facts at one date
@@ -627,7 +627,7 @@ just graph-query sec "MATCH (e:Entity {ticker: 'NVDA'})-[:ENTITY_HAS_REPORT]->(r
 
 ### Service Not Running
 
-Connection errors are a stack problem, not a pipeline one — see [Local Development](Local-Development#troubleshooting).
+Connection errors are a stack problem, not a pipeline one — see [Local Development](Local-Development.md#troubleshooting).
 
 ### Database Empty
 
@@ -678,16 +678,16 @@ just sec-load NVDA 2025
 - **RoboSystems API**: `http://localhost:8000/` — Swagger UI, with try-it (when running locally)
 - **SEC EDGAR**: [SEC Website](https://www.sec.gov/edgar)
 - **DuckDB**: [Documentation](https://duckdb.org/docs/) - SQL database for staging
-- **Search SEC narratives**: [Search & AI Retrieval](Search-and-AI-Retrieval) - Full-text and semantic search over filing text
-- **XBRL taxonomy**: [Taxonomy & Frameworks](Taxonomy-and-Frameworks) - The rs-gaap and fac frameworks behind the facts
-- **Query the graph**: [Querying the Analytical Graph](Querying-the-Analytical-Graph) - Ad-hoc Cypher over the SEC graph
-- **Data model and rules**: [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules) - The node model, the four query rules, and worked queries
-- **MCP & operators**: [AI Operators & MCP](AI-Operators-and-MCP) - The MCP retrieval surface
-- **Shared repositories**: [Shared Repositories](Shared-Repositories) - SEC as the `ladybug-shared` tier: plans, subscription, and access
+- **Search SEC narratives**: [Search & AI Retrieval](Search-and-AI-Retrieval.md) - Full-text and semantic search over filing text
+- **XBRL taxonomy**: [Taxonomy & Frameworks](Taxonomy-and-Frameworks.md) - The rs-gaap and fac frameworks behind the facts
+- **Query the graph**: [Querying the Analytical Graph](Querying-the-Analytical-Graph.md) - Ad-hoc Cypher over the SEC graph
+- **Data model and rules**: [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules.md) - The node model, the four query rules, and worked queries
+- **MCP & operators**: [AI Operators & MCP](AI-Operators-and-MCP.md) - The MCP retrieval surface
+- **Shared repositories**: [Shared Repositories](Shared-Repositories.md) - SEC as the `ladybug-shared` tier: plans, subscription, and access
 
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

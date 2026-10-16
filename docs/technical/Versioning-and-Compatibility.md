@@ -21,9 +21,9 @@ The API evolves **additively**. New operations, new endpoints, new optional requ
 - Ignore response fields you do not recognise.
 - Do not rely on the order of keys or of unsorted lists.
 - Treat enumerated string values (statuses, categories) as open — handle an unknown value rather than crash on it.
-- Branch on status codes and typed error codes, not on the wording of `detail` messages (see [Errors and Rate Limits](Errors-and-Rate-Limits)).
+- Branch on status codes and typed error codes, not on the wording of `detail` messages (see [Errors and Rate Limits](Errors-and-Rate-Limits.md)).
 
-Changes that are not additive — a field or endpoint removed or renamed — are named in the platform's release notes. The per-graph GraphQL schema follows the same rule and is introspectable, so a client can check for a field before relying on it (see [GraphQL Reads](GraphQL-Reads)).
+Changes that are not additive — a field or endpoint removed or renamed — are named in the platform's release notes. The per-graph GraphQL schema follows the same rule and is introspectable, so a client can check for a field before relying on it (see [GraphQL Reads](GraphQL-Reads.md)).
 
 ## The Client SDKs
 
@@ -78,11 +78,11 @@ Watch the repositories for releases (GitHub **Watch → Custom → Releases**) t
 
 ## Related Documentation
 
-**Wiki Guides:**
+**Guides:**
 
-- **[Building Custom Integrations](Building-Custom-Integrations)** - The integration template and the three lanes
-- **[Operations Contract](Operations-Contract)** - The envelope and retry contract shared by every write
-- **[Errors and Rate Limits](Errors-and-Rate-Limits)** - Status codes and typed error codes to branch on
+- **[Building Custom Integrations](Building-Custom-Integrations.md)** - The integration template and the three lanes
+- **[Operations Contract](Operations-Contract.md)** - The envelope and retry contract shared by every write
+- **[Errors and Rate Limits](Errors-and-Rate-Limits.md)** - Status codes and typed error codes to branch on
 
 **API Reference:**
 
@@ -91,6 +91,6 @@ Watch the repositories for releases (GitHub **Watch → Custom → Releases**) t
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

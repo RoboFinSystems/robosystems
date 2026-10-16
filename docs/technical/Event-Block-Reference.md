@@ -1,8 +1,8 @@
 # Event Block Reference
 
-The reference for the Event Block: its fields, vocabularies, transitions and handlers, the ledger records a handler writes, and the graph edges they become. For the concepts, read [Event-Driven Ledger](Event-Driven-Ledger) first; for a worked integration, [Build a Ledger Integration](Build-a-Ledger-Integration).
+The reference for the Event Block: its fields, vocabularies, transitions and handlers, the ledger records a handler writes, and the graph edges they become. For the concepts, read [Event-Driven Ledger](Event-Driven-Ledger.md) first; for a worked integration, [Build a Ledger Integration](Build-a-Ledger-Integration.md).
 
-All operations are `POST /extensions/roboledger/{graph_id}/operations/{name}`, return an `OperationEnvelope` whose `result` carries the payload below, and accept an `Idempotency-Key` header. See [Operations Contract](Operations-Contract). Exact types are in the live reference at [robosystems.ai/docs/extensions](https://robosystems.ai/docs/extensions).
+All operations are `POST /extensions/roboledger/{graph_id}/operations/{name}`, return an `OperationEnvelope` whose `result` carries the payload below, and accept an `Idempotency-Key` header. See [Operations Contract](Operations-Contract.md). Exact types are in the live reference at [robosystems.ai/docs/extensions](https://robosystems.ai/docs/extensions).
 
 ## Table of Contents
 
@@ -137,7 +137,7 @@ Publishes an event to its connection's system of record. Request: `event_id`, an
 | `write_policy: native` | Returned unchanged; RoboLedger is the system of record |
 | `write_policy: qb_authoritative` | Each unpublished draft entry is written to QuickBooks as its own journal entry, with the entry id as the request id, and recorded in `metadata.qb_entry_ids` (entry id → QuickBooks id). Each entry that lands posts. Once no draft is left, the event moves to `fulfilled` and its transactions post. On rejection, the entries sent before it stay posted, the rejection is stored on `metadata.last_outbound_error`, the event moves to `pending`, and the rest stay draft for a retry, which sends only the entries not yet in `qb_entry_ids`. |
 
-Response: `event_id`, `status`, `qb_external_id` (the first entry this call published), `qb_entry_ids` (every entry of the event now in QuickBooks), and `qb_error` (`{code, message, qb_response_at}` on rejection). An event already `fulfilled` is returned as-is. A `voided` or `superseded` event, or one with no drafted ledger entries (commit it first), is refused with `409`. A `401` means QuickBooks refused the credentials and the connection needs a fresh consent; a `503` means Intuit was unreachable, and the call can be retried. Write policies are covered in [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy).
+Response: `event_id`, `status`, `qb_external_id` (the first entry this call published), `qb_entry_ids` (every entry of the event now in QuickBooks), and `qb_error` (`{code, message, qb_response_at}` on rejection). An event already `fulfilled` is returned as-is. A `voided` or `superseded` event, or one with no drafted ledger entries (commit it first), is refused with `409`. A `401` means QuickBooks refused the credentials and the connection needs a fresh consent; a `503` means Intuit was unreachable, and the call can be retried. Write policies are covered in [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md).
 
 ## Validation and Idempotency
 
@@ -163,7 +163,7 @@ When a re-sync brings a changed payload for an event whose entry has already pos
 | `catch_up` | Post an entry for the difference in an open period (by default the end of the earliest one), as a draft unless `status: posted`. The default when any period the event touches is closed. |
 | `acknowledge` | Mark it handled without a ledger change; a `note` is required |
 
-Writes from a disposition are subject to the closed-period gate. Detail is in [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy).
+Writes from a disposition are subject to the closed-period gate. Detail is in [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md).
 
 ## Handlers
 
@@ -282,7 +282,7 @@ RETURN e.event_type, t.amount, en.status, li.debit_amount, li.credit_amount
 LIMIT 10
 ```
 
-Run it with the MCP `read-graph-cypher` tool or the query endpoint in [Querying the Analytical Graph](Querying-the-Analytical-Graph).
+Run it with the MCP `read-graph-cypher` tool or the query endpoint in [Querying the Analytical Graph](Querying-the-Analytical-Graph.md).
 
 ## Reads
 
@@ -314,12 +314,12 @@ MCP: `list-event-blocks`, `get-event-block`, and the write tools `create-event-b
 
 ## Related Documentation
 
-**Wiki Guides:**
-- **[Event-Driven Ledger](Event-Driven-Ledger)** - The concepts: events before entries, the lifecycle, capture and commit
-- **[Build a Ledger Integration](Build-a-Ledger-Integration)** - Posting events from your own system
-- **[Period Close](Period-Close)** - How drafts post
-- **[QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy)** - Write-back and reconciling items
-- **[Operations Contract](Operations-Contract)** - The envelope, idempotency, and error format
+**Guides:**
+- **[Event-Driven Ledger](Event-Driven-Ledger.md)** - The concepts: events before entries, the lifecycle, capture and commit
+- **[Build a Ledger Integration](Build-a-Ledger-Integration.md)** - Posting events from your own system
+- **[Period Close](Period-Close.md)** - How drafts post
+- **[QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md)** - Write-back and reconciling items
+- **[Operations Contract](Operations-Contract.md)** - The envelope, idempotency, and error format
 
 **Codebase Documentation:**
 - **[API Reference](https://robosystems.ai/docs/extensions)** - Request and response schemas
@@ -328,6 +328,6 @@ MCP: `list-event-blocks`, `get-event-block`, and the write tools `create-event-b
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

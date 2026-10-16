@@ -4,7 +4,7 @@ RoboInvestor's API is six command operations for securities and portfolio blocks
 
 RoboInvestor is focused on private-company portfolio management. This page documents what the command surface exposes: six write operations plus a GraphQL read surface. It is an API-first walkthrough — every step is a `curl` against a graph you provision yourself.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Table of Contents
 
@@ -33,13 +33,13 @@ The RoboInvestor command surface lives under the extensions mount and is graph-s
 POST /extensions/roboinvestor/{graph_id}/operations/{op_name}
 ```
 
-The RoboInvestor surface follows CQRS strictly: **all six operations are writes, and reads go through GraphQL only.** There are no REST read routes here. Each write returns an `OperationEnvelope` and accepts an `Idempotency-Key` header. (RoboLedger additionally exposes a few read-shaped analytical operations on its own mount — see [Extensions Surface Overview](Extensions-Surface-Overview) — so the "operations are always writes" rule is a RoboInvestor property, not a corpus-wide one.)
+The RoboInvestor surface follows CQRS strictly: **all six operations are writes, and reads go through GraphQL only.** There are no REST read routes here. Each write returns an `OperationEnvelope` and accepts an `Idempotency-Key` header. (RoboLedger additionally exposes a few read-shaped analytical operations on its own mount — see [Extensions Surface Overview](Extensions-Surface-Overview.md) — so the "operations are always writes" rule is a RoboInvestor property, not a corpus-wide one.)
 
 The surface is intentionally small. Portfolios and positions are written through a single molecule — the **Portfolio Block** — rather than through atom-level CRUD. Securities are the one standalone entity with their own create / update / delete operations.
 
 ## Prerequisites
 
-- A RoboSystems account and an API key, created in the app under **Settings → API keys**. See [Quick Start](Quick-Start).
+- A RoboSystems account and an API key, created in the app under **Settings → API keys**. See [Quick Start](Quick-Start.md).
 - RoboInvestor enabled on the deployment. The `ROBOINVESTOR_ENABLED` flag gates both the RoboInvestor operations and the GraphQL investor fields; on robosystems.ai it is on. On a deployment where it is off, the operation routes aren't mounted, so a call is a plain HTTP 404, and the investor fields are absent from the GraphQL schema.
 - A graph provisioned with the `roboinvestor` schema extension. The operations and the GraphQL investor fields only appear on graphs that carry this extension. In the app, **Create Graph** lets you select it among the graph's schema extensions.
 
@@ -314,11 +314,11 @@ GRAPH_ID=$(jq -r '.graphs.roboinvestor_demo.graph_id' .local/config.json)
 
 ## Related Documentation
 
-**Wiki Guides:**
+**Guides:**
 
-- **[Extensions Surface Overview](Extensions-Surface-Overview)** - The shared `/extensions/{...}/operations/{op}` envelope, CQRS, and idempotency contract this surface inherits.
-- **[GraphQL Reads](GraphQL-Reads)** - The typed read surface where the investor query fields live.
-- **[RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough)** - The sibling issuer-side product, on the same extensions envelope contract.
+- **[Extensions Surface Overview](Extensions-Surface-Overview.md)** - The shared `/extensions/{...}/operations/{op}` envelope, CQRS, and idempotency contract this surface inherits.
+- **[GraphQL Reads](GraphQL-Reads.md)** - The typed read surface where the investor query fields live.
+- **[RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough.md)** - The sibling issuer-side product, on the same extensions envelope contract.
 
 **Codebase Documentation:**
 
@@ -333,6 +333,6 @@ GRAPH_ID=$(jq -r '.graphs.roboinvestor_demo.graph_id' .local/config.json)
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

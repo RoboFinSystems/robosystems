@@ -4,16 +4,16 @@ How RoboSystems is built: the knowledge graph at the center, the operational and
 
 ## Documentation Map
 
-The wiki's sections, as the sidebar groups them, with a representative page or two from each:
+The sections of these docs, as the sidebar groups them, with a representative page or two from each:
 
-- **Start Here** — orientation against the hosted platform ([Quick Start](Quick-Start), [Core Concepts](Core-Concepts)).
-- **Build on the API** — the contracts and the core graph surface ([Operations Contract](Operations-Contract), [Graph Operations](Graph-Operations), [Querying the Analytical Graph](Querying-the-Analytical-Graph)).
-- **Connect AI, Documents & Search** — the MCP server, the operators, and retrieval ([AI Operators & MCP](AI-Operators-and-MCP), [Search & AI Retrieval](Search-and-AI-Retrieval)).
-- **Shared Repositories (SEC)** — the public datasets ([Shared Repositories](Shared-Repositories), [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules)).
-- **RoboLedger & RoboInvestor** — the extensions ([Extensions Surface Overview](Extensions-Surface-Overview), [GraphQL Reads](GraphQL-Reads), [RoboLedger Operations](RoboLedger-Operations)).
-- **Concepts in Depth** — the financial-content model ([Information Blocks](Information-Blocks), [Event-Driven Ledger](Event-Driven-Ledger), [Reporting & Rendering](Reporting-and-Rendering)).
-- **Run It Yourself** — running and deploying your own stack ([Local Development](Local-Development), [Bootstrap Guide](Bootstrap-Guide), [Security & Compliance](Security-and-Compliance)).
-- **Demos** — hands-on walkthroughs on a local stack ([RoboLedger Demos](RoboLedger-Demo-Walkthrough), [SEC XBRL Pipeline](SEC-XBRL-Pipeline), [Custom Graph Schema](Custom-Graph-Schema)).
+- **Start Here** — orientation against the hosted platform ([Quick Start](Quick-Start.md), [Core Concepts](Core-Concepts.md)).
+- **Build on the API** — the contracts and the core graph surface ([Operations Contract](Operations-Contract.md), [Graph Operations](Graph-Operations.md), [Querying the Analytical Graph](Querying-the-Analytical-Graph.md)).
+- **Connect AI, Documents & Search** — the MCP server, the operators, and retrieval ([AI Operators & MCP](AI-Operators-and-MCP.md), [Search & AI Retrieval](Search-and-AI-Retrieval.md)).
+- **Shared Repositories (SEC)** — the public datasets ([Shared Repositories](Shared-Repositories.md), [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules.md)).
+- **RoboLedger & RoboInvestor** — the extensions ([Extensions Surface Overview](Extensions-Surface-Overview.md), [GraphQL Reads](GraphQL-Reads.md), [RoboLedger Operations](RoboLedger-Operations.md)).
+- **Concepts in Depth** — the financial-content model ([Information Blocks](Information-Blocks.md), [Event-Driven Ledger](Event-Driven-Ledger.md), [Reporting & Rendering](Reporting-and-Rendering.md)).
+- **Run It Yourself** — running and deploying your own stack ([Local Development](Local-Development.md), [Bootstrap Guide](Bootstrap-Guide.md), [Security & Compliance](Security-and-Compliance.md)).
+- **Demos** — hands-on walkthroughs on a local stack ([RoboLedger Demos](RoboLedger-Demo-Walkthrough.md), [SEC XBRL Pipeline](SEC-XBRL-Pipeline.md), [Custom Graph Schema](Custom-Graph-Schema.md)).
 
 ### Three Retrieval Planes
 
@@ -21,11 +21,11 @@ AI Operators — and any MCP client — read three distinct data planes, each wi
 
 | Plane | Store | Query tool | Documented in |
 | --- | --- | --- | --- |
-| Operational | OLTP / extensions data | `query-graphql` | [GraphQL Reads](GraphQL-Reads) |
-| Analytical | OLAP / LadybugDB graph | `read-graph-cypher` | [Querying the Analytical Graph](Querying-the-Analytical-Graph) |
-| Unstructured | document index (BM25 + KNN) | `search-documents` | [Search & AI Retrieval](Search-and-AI-Retrieval) |
+| Operational | OLTP / extensions data | `query-graphql` | [GraphQL Reads](GraphQL-Reads.md) |
+| Analytical | OLAP / LadybugDB graph | `read-graph-cypher` | [Querying the Analytical Graph](Querying-the-Analytical-Graph.md) |
+| Unstructured | document index (BM25 + KNN) | `search-documents` | [Search & AI Retrieval](Search-and-AI-Retrieval.md) |
 
-An operator composes across all three — pulling a policy from the unstructured plane, a live balance from the operational plane, and a reporting fact from the analytical plane. See [AI Operators & MCP](AI-Operators-and-MCP).
+An operator composes across all three — pulling a policy from the unstructured plane, a live balance from the operational plane, and a reporting fact from the analytical plane. See [AI Operators & MCP](AI-Operators-and-MCP.md).
 
 ## Table of Contents
 
@@ -154,7 +154,7 @@ Model Context Protocol server for AI integration:
 - **Streaming Support**: SSE for memory-efficient large result processing
 - **Query Validation**: Complexity scoring and timeout enforcement
 
-**Client Integration**: MCP clients (Claude, ChatGPT, Cursor or any MCP client) connect to a graph's MCP Streamable HTTP endpoint (`POST /v1/graphs/{graph_id}/mcp`) with an `X-API-Key` header or OAuth, or sign in through the graph-agnostic OAuth routes (`/v1/mcp`, and `/v1/mcp/roboledger` for RoboLedger graphs) — see [AI Operators and MCP](AI-Operators-and-MCP). A legacy [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) (`@robosystems/mcp` npm package) remains for stdio-only clients.
+**Client Integration**: MCP clients (Claude, ChatGPT, Cursor or any MCP client) connect to a graph's MCP Streamable HTTP endpoint (`POST /v1/graphs/{graph_id}/mcp`) with an `X-API-Key` header or OAuth, or sign in through the graph-agnostic OAuth routes (`/v1/mcp`, and `/v1/mcp/roboledger` for RoboLedger graphs) — see [AI Operators and MCP](AI-Operators-and-MCP.md). A legacy [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) (`@robosystems/mcp` npm package) remains for stdio-only clients.
 
 **See**: [MCP Middleware Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/middleware/mcp/README.md) in codebase
 
@@ -270,7 +270,7 @@ Each adapter's pipeline is collected only when its flag is on (`SEC_PIPELINE_ENA
 - **Observability**: Dagster's web UI for runs, step logs, and asset lineage
 - **Scheduling**: Cron-based schedules for billing, cleanup, and pipelines
 - **Sensors**: Event-driven job triggers (e.g., expired subscription → suspend, then deprovision; stale graph → rematerialize)
-- **Local Development**: on a local stack, `just sec-load` drives the SEC pipeline's Dagster jobs inside the local containers (see [Local Development](Local-Development#sec-filings))
+- **Local Development**: on a local stack, `just sec-load` drives the SEC pipeline's Dagster jobs inside the local containers (see [Local Development](Local-Development.md#sec-filings))
 
 **Infrastructure (AWS):**
 - **ECS Fargate**: Daemon, Webserver, and Run Workers - all serverless
@@ -609,7 +609,7 @@ The manifest registry (`config/shared_repositories.py`) lazy-loads all manifests
 
 **Extending with custom sources:**
 
-The supported route for connecting your own data sources is an **integration** — a program in its own repository writing through the public API ([Building Custom Integrations](Building-Custom-Integrations), [`robosystems-integration-template`](https://github.com/RoboFinSystems/robosystems-integration-template)). The in-core adapter registry is maintained exclusively by the platform team; platform-operated deployments run an unmodified core.
+The supported route for connecting your own data sources is an **integration** — a program in its own repository writing through the public API ([Building Custom Integrations](Building-Custom-Integrations.md), [`robosystems-integration-template`](https://github.com/RoboFinSystems/robosystems-integration-template)). The in-core adapter registry is maintained exclusively by the platform team; platform-operated deployments run an unmodified core.
 
 For **self-hosted forks**, the adapter directory remains a merge boundary — in-core additions go in the `custom_*` namespace so `git pull upstream main` never conflicts:
 
@@ -759,7 +759,7 @@ The same directory tree also hosts the dormant IVF-PQ index builder described un
 **Extensions database (`extensions`)** — per-graph OLTP for RoboLedger and RoboInvestor:
 - Transactional state (ledger entries, schedules, reports, portfolio positions) written through the `/extensions/*/operations/*` command surface
 - **Schema-per-graph-id tenancy**: each graph's data is isolated in its own PostgreSQL schema via `SET search_path`
-- Materialized into the graph (LadybugDB) for analytical queries — see the Pattern C pipeline in the [Pipeline Guide](Pipeline-Guide)
+- Materialized into the graph (LadybugDB) for analytical queries — see the Pattern C pipeline in the [Pipeline Guide](Pipeline-Guide.md)
 
 **Dagster database (`dagster`)** — orchestration state:
 - Job runs, schedules, sensor cursors, event logs, and asset metadata
@@ -879,7 +879,7 @@ RoboSystems uses GitHub OIDC federation for AWS authentication - no AWS credenti
 3. Creates ECR repository for Docker images
 4. Creates application secrets in AWS Secrets Manager
 
-See **[Bootstrap Guide](Bootstrap-Guide)** for complete setup instructions.
+See **[Bootstrap Guide](Bootstrap-Guide.md)** for complete setup instructions.
 
 ### GitHub Actions Workflows
 
@@ -898,7 +898,7 @@ See [.github/workflows/](https://github.com/RoboFinSystems/robosystems/tree/main
 
 ### CloudFormation Templates
 
-All infrastructure is managed through CloudFormation templates in `/cloudformation/`. See **[CloudFormation README](https://github.com/RoboFinSystems/robosystems/blob/main/cloudformation/README.md)** for detailed template documentation including parameters, exports, and deployment order. For initial setup, see the **[Bootstrap Guide](Bootstrap-Guide)**.
+All infrastructure is managed through CloudFormation templates in `/cloudformation/`. See **[CloudFormation README](https://github.com/RoboFinSystems/robosystems/blob/main/cloudformation/README.md)** for detailed template documentation including parameters, exports, and deployment order. For initial setup, see the **[Bootstrap Guide](Bootstrap-Guide.md)**.
 
 #### Bootstrap
 
@@ -961,7 +961,7 @@ Environment variables are managed through:
 
 ### Infrastructure Setup
 
-See **[Bootstrap Guide](Bootstrap-Guide)** for complete setup instructions including:
+See **[Bootstrap Guide](Bootstrap-Guide.md)** for complete setup instructions including:
 - AWS OIDC federation (`just bootstrap`)
 - GitHub variables and secrets (`just setup-gha`)
 - AWS Secrets Manager configuration (`just setup-aws`)
@@ -1061,7 +1061,7 @@ See individual app repositories for specific deployment workflows.
 **Purpose**: Accounting data synchronization
 
 - OAuth 2.0 authentication with token management
-- Dagster pipeline: extract from the QuickBooks API to Parquet → dbt-duckdb transform → load into the extensions PostgreSQL database, which then materializes into the graph (Pattern C in the [Pipeline Guide](Pipeline-Guide))
+- Dagster pipeline: extract from the QuickBooks API to Parquet → dbt-duckdb transform → load into the extensions PostgreSQL database, which then materializes into the graph (Pattern C in the [Pipeline Guide](Pipeline-Guide.md))
 - Full rebuild and incremental sync modes
 
 ### AI Models (via AWS Bedrock)
@@ -1069,7 +1069,7 @@ See individual app repositories for specific deployment workflows.
 **Purpose**: AI-powered financial operations
 
 - AWS Bedrock (the Converse API) for model access: Claude Sonnet 5.5 by default (the balanced profile), with Claude Opus 5.5 (quality) and OpenAI GPT-5.6 Luna (economy) as the other profiles; the `author` operator runs on the quality profile
-- Self-hosted stacks can point operators at any OpenAI-compatible server instead (see [Self-Hosted AI Models](Self-Hosted-AI-Models))
+- Self-hosted stacks can point operators at any OpenAI-compatible server instead (see [Self-Hosted AI Models](Self-Hosted-AI-Models.md))
 - Unified operator system: stateless operators with automatic credit tracking per call
 - Three registered operators: `analyst` (`AnalystOperator`, answers a question from the graph's read-only tools), `author` (`AuthorOperator`, makes a requested change through writes that are reversible or wait on a person's step — metric and forecast blocks, counterparties, memories, draft reports, inbox classifications), and `mapping` (`MappingOperator`, autonomous CoA→rs-gaap taxonomy mapping)
 - MCP tools provide operators with graph queries, taxonomy operations, SEC structure discovery, and document search
@@ -1119,15 +1119,15 @@ See individual app repositories for specific deployment workflows.
 - **Encryption**: TLS in transit, at rest
 - **Audit Logging**: All operations tracked
 
-For the full posture — built-in controls, the optional compliance stacks (WAF, CloudTrail, VPC flow logs, detective baseline, audit retention) and their toggles, and the SOC 2 story for forks — see **[Security & Compliance](Security-and-Compliance)** (and [`SECURITY.md`](https://github.com/RoboFinSystems/robosystems/blob/main/SECURITY.md) for the control catalog).
+For the full posture — built-in controls, the optional compliance stacks (WAF, CloudTrail, VPC flow logs, detective baseline, audit retention) and their toggles, and the SOC 2 story for forks — see **[Security & Compliance](Security-and-Compliance.md)** (and [`SECURITY.md`](https://github.com/RoboFinSystems/robosystems/blob/main/SECURITY.md) for the control catalog).
 
 ## Related Documentation
 
-**Wiki Guides:**
-- **[Bootstrap Guide](Bootstrap-Guide)** - Set up a fresh fork with AWS OIDC authentication
-- **[Data Pipeline Guide](Pipeline-Guide)** - Dagster data orchestration and custom integrations
-- **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Load and query SEC financial filings
-- **[Custom Graph Schema](Custom-Graph-Schema)** - Design and build custom graph databases
+**Guides:**
+- **[Bootstrap Guide](Bootstrap-Guide.md)** - Set up a fresh fork with AWS OIDC authentication
+- **[Data Pipeline Guide](Pipeline-Guide.md)** - Dagster data orchestration and custom integrations
+- **[SEC XBRL Pipeline](SEC-XBRL-Pipeline.md)** - Load and query SEC financial filings
+- **[Custom Graph Schema](Custom-Graph-Schema.md)** - Design and build custom graph databases
 
 **Codebase Documentation:**
 - **[Dagster Orchestration](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/dagster/README.md)** - Platform orchestration and adapter pipeline collection
@@ -1138,6 +1138,6 @@ For the full posture — built-in controls, the optional compliance stacks (WAF,
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

@@ -4,7 +4,7 @@ A custom graph carries your own node and relationship types, declared in a `sche
 
 ## On the hosted platform
 
-A custom graph is created like any other, with `POST /v1/graphs`, by passing the schema as `custom_schema` in place of `initial_entity` ([Creating a Graph](Graphs-and-Multi-Tenancy#creating-a-graph) covers the role and payment-method requirements):
+A custom graph is created like any other, with `POST /v1/graphs`, by passing the schema as `custom_schema` in place of `initial_entity` ([Creating a Graph](Graphs-and-Multi-Tenancy.md#creating-a-graph) covers the role and payment-method requirements):
 
 ```bash
 curl -X POST "https://api.robosystems.ai/v1/graphs" \
@@ -14,7 +14,7 @@ curl -X POST "https://api.robosystems.ai/v1/graphs" \
   -d "{\"metadata\": {\"graph_name\": \"my_graph\"}, \"custom_schema\": $(cat schema.json)}"
 ```
 
-Creation is asynchronous: the `202` carries an `OperationEnvelope`, and the new graph id arrives with the operation's result. Data then goes in through the file pipeline — `create-file-upload`, the upload itself, `ingest-file`, and `materialize` — described on [File Uploads](File-Uploads), and is read with Cypher.
+Creation is asynchronous: the `202` carries an `OperationEnvelope`, and the new graph id arrives with the operation's result. Data then goes in through the file pipeline — `create-file-upload`, the upload itself, `ingest-file`, and `materialize` — described on [File Uploads](File-Uploads.md), and is read with Cypher.
 
 The rest of this page runs the custom graph demo on your own stack: it scripts those same calls end to end.
 
@@ -509,7 +509,7 @@ For Cursor / VS Code (`mcp.json`):
 
 Against production the same URL shape is `https://api.robosystems.ai/v1/graphs/{graph_id}/mcp`. Clients without HTTP transport support can use the legacy [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client).
 
-A key never travels in the URL: a credential in the query string is rejected. The hosted sign-in (OAuth) path — add `https://api.robosystems.ai/v1/mcp` and choose the graph on the consent screen, as claude.ai and Claude Desktop custom connectors do (Customize → Connectors) — is on [AI Operators & MCP](AI-Operators-and-MCP).
+A key never travels in the URL: a credential in the query string is rejected. The hosted sign-in (OAuth) path — add `https://api.robosystems.ai/v1/mcp` and choose the graph on the consent screen, as claude.ai and Claude Desktop custom connectors do (Customize → Connectors) — is on [AI Operators & MCP](AI-Operators-and-MCP.md).
 
 4. Restart your MCP-compatible AI tool
 
@@ -839,7 +839,7 @@ LIMIT 10
 
 A graph's schema is fixed when the graph is created. The query surface blocks schema DDL (`CREATE`/`DROP`/`ALTER TABLE`) on every graph, and on a main graph Cypher is read-only: data enters through the staging pipeline (upload → ingest → materialize) against the tables declared in `schema.json`. To change a main graph's node or relationship types, edit the schema and create a new graph.
 
-Subgraphs are the place to extend a schema live. On a subgraph, the MCP tools `add-node-table` and `add-relationship-table` add new types, and `write-graph-cypher` writes to them; on a parent graph all three answer `subgraph_required`. Create one with `POST /v1/graphs/{graph_id}/operations/create-subgraph` — `subgraph_type: "static"` starts from the platform base schema plus the parent's schema extensions — **not** a custom graph's own tables, so add those with `add-node-table` / `add-relationship-table` if you need them there — `"knowledge"` from the Concept / Observation / Session schema that Step 7 uses, and `"empty"` from nothing. Anything written this way lives in the subgraph only. See [Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy#subgraphs).
+Subgraphs are the place to extend a schema live. On a subgraph, the MCP tools `add-node-table` and `add-relationship-table` add new types, and `write-graph-cypher` writes to them; on a parent graph all three answer `subgraph_required`. Create one with `POST /v1/graphs/{graph_id}/operations/create-subgraph` — `subgraph_type: "static"` starts from the platform base schema plus the parent's schema extensions — **not** a custom graph's own tables, so add those with `add-node-table` / `add-relationship-table` if you need them there — `"knowledge"` from the Concept / Observation / Session schema that Step 7 uses, and `"empty"` from nothing. Anything written this way lives in the subgraph only. See [Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy.md#subgraphs).
 
 ## Troubleshooting
 
@@ -901,10 +901,10 @@ just install
 - **G.V() Graph IDE**: [https://gdotv.com/](https://gdotv.com/)
 - **Cypher Docs**: [Cypher Manual](https://neo4j.com/docs/cypher-manual/current/introduction/)
 - **RoboSystems API**: `http://localhost:8000/` — Swagger UI, with try-it
-- **Graphs & Tenancy**: [Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy) - The graph_id model, tiers, and subgraphs
-- **Query the graph**: [Querying the Analytical Graph](Querying-the-Analytical-Graph) - Ad-hoc Cypher and staging tables
-- **MCP & operators**: [AI Operators & MCP](AI-Operators-and-MCP) - Access your graph through MCP tools
-- **Data pipelines**: [Pipeline Guide](Pipeline-Guide) - How data reaches a graph: the staging path and the Dagster pipelines behind it
+- **Graphs & Tenancy**: [Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy.md) - The graph_id model, tiers, and subgraphs
+- **Query the graph**: [Querying the Analytical Graph](Querying-the-Analytical-Graph.md) - Ad-hoc Cypher and staging tables
+- **MCP & operators**: [AI Operators & MCP](AI-Operators-and-MCP.md) - Access your graph through MCP tools
+- **Data pipelines**: [Pipeline Guide](Pipeline-Guide.md) - How data reaches a graph: the staging path and the Dagster pipelines behind it
 
 ## Support
 

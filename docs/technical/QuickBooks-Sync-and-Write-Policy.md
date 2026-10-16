@@ -4,7 +4,7 @@ This page covers how a connected QuickBooks Online company moves data into a Rob
 
 The product docs at roboledger.ai describe this for end users (*Nothing writes to QuickBooks until you post* and *When QuickBooks changes after a sync*). This page covers the contracts underneath: the operations, their payloads, and why they behave the way they do.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Table of Contents
 
@@ -70,8 +70,8 @@ Completing the OAuth consent starts a sync on its own. When the connection has n
 
 The first sync also does two one-time setup steps:
 
-- **Bootstraps the fiscal calendar**, so the close workflow is reachable without a separate `initialize` call. See [Period Close](Period-Close).
-- **Starts AI auto-mapping** of the chart of accounts when the mapping structure has no associations yet. This is the one sync step that consumes credits. See [Chart of Accounts Mapping](Chart-of-Accounts-Mapping).
+- **Bootstraps the fiscal calendar**, so the close workflow is reachable without a separate `initialize` call. See [Period Close](Period-Close.md).
+- **Starts AI auto-mapping** of the chart of accounts when the mapping structure has no associations yet. This is the one sync step that consumes credits. See [Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md).
 
 ### On demand only
 
@@ -128,7 +128,7 @@ Re-syncing is idempotent. Events are upserted by `(source, external_id)`, and a 
 
 Every successful sync marks the graph stale. That schedules a rematerialization of the analytical graph, so fact grids and Cypher reads catch up. Operations that read the ledger directly, such as `live-financial-statement`, see the new data as soon as the sync finishes.
 
-On a ledger that already reconciles its accounts, a successful sync also refreshes the reconciliations of the next period to close, so the close gate reads a current comparison without anyone running the refresh. A ledger with no reconciliations is left alone, because the first refresh is someone's decision. The refresh is best-effort: if it fails, the period keeps its last comparison and the sync still succeeds. See [Period Close](Period-Close#reconciliations).
+On a ledger that already reconciles its accounts, a successful sync also refreshes the reconciliations of the next period to close, so the close gate reads a current comparison without anyone running the refresh. A ledger with no reconciliations is left alone, because the first refresh is someone's decision. The refresh is best-effort: if it fails, the period keeps its last comparison and the sync still succeeds. See [Period Close](Period-Close.md#reconciliations).
 
 ## Write Policy
 
@@ -218,7 +218,7 @@ The MCP equivalent is `list-period-drafts`.
 
 ### What happens at close
 
-`close-period` publishes eligible drafts to QuickBooks **before** it changes anything else. Each draft entry is sent as its own QuickBooks journal entry, with the entry id as the QuickBooks request id, so a repeat inside QuickBooks' deduplication window is not booked twice. The returned QuickBooks id is recorded per entry on the event, in `metadata.qb_entry_ids` (entry id → QuickBooks id), and the draft is promoted to `posted`. Only the entries dated in the month being closed are sent. An event whose entries span months stays open until the close of each later month publishes its remaining entries, and it moves to `fulfilled` once none is left. Everything the publish step didn't send is posted locally in one bulk transition. The close receipt reports the two lanes separately: `entries_published_to_qb`, `entries_posted_locally`, and their total `entries_posted`. On a `native` graph the first is always zero. The full close sequence is on [Period Close](Period-Close#what-a-close-does).
+`close-period` publishes eligible drafts to QuickBooks **before** it changes anything else. Each draft entry is sent as its own QuickBooks journal entry, with the entry id as the QuickBooks request id, so a repeat inside QuickBooks' deduplication window is not booked twice. The returned QuickBooks id is recorded per entry on the event, in `metadata.qb_entry_ids` (entry id → QuickBooks id), and the draft is promoted to `posted`. Only the entries dated in the month being closed are sent. An event whose entries span months stays open until the close of each later month publishes its remaining entries, and it moves to `fulfilled` once none is left. Everything the publish step didn't send is posted locally in one bulk transition. The close receipt reports the two lanes separately: `entries_published_to_qb`, `entries_posted_locally`, and their total `entries_posted`. On a `native` graph the first is always zero. The full close sequence is on [Period Close](Period-Close.md#what-a-close-does).
 
 ### Rejections and retry
 
@@ -265,7 +265,7 @@ Errors: `409` for an event with no drafted ledger entries (commit it first) or o
 
 People edit QuickBooks. When a sync brings a changed payload for a transaction that RoboLedger has already posted, the loader does **not** overwrite the posted entry. The old figures may sit in a closed month, a stamped statement, or a report someone has received. Instead the loader leaves the posted GL and the accepted payload as they are, stores the incoming payload next to them, and flags the event as a **reconciling item**. The sync's `counts.reconciling_items` reports how many it found.
 
-The flag stays until someone settles the item. Each later sync reports it again, and the close refuses to run over it (see [Period Close](Period-Close#blockers)).
+The flag stays until someone settles the item. Each later sync reports it again, and the close refuses to run over it (see [Period Close](Period-Close.md#blockers)).
 
 ### Finding them
 
@@ -404,20 +404,20 @@ The sync loads amounts in USD only. A sync that finds a transaction in another c
 
 ## Self-hosted deployments
 
-Connecting QuickBooks to your own stack needs your own Intuit app, OAuth redirect and tunnel. That setup is on [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally). Everything on this page applies unchanged once the connection exists. Use `http://localhost:8000` and the key from `just demo-user`.
+Connecting QuickBooks to your own stack needs your own Intuit app, OAuth redirect and tunnel. That setup is on [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally.md). Everything on this page applies unchanged once the connection exists. Use `http://localhost:8000` and the key from `just demo-user`.
 
 ## Related Documentation
 
-- **[Period Close](Period-Close)** - The close sequence that flushes the outbox, and the reconciling-item blocker
-- **[Chart of Accounts Mapping](Chart-of-Accounts-Mapping)** - The auto-map that runs on first sync
-- **[Event-Driven Ledger](Event-Driven-Ledger)** - Event statuses, handlers, and the capture-to-post lifecycle
-- **[RoboLedger Operations](RoboLedger-Operations)** - The full operations catalog and envelope contract
-- **[GraphQL Reads](GraphQL-Reads)** - `periodDrafts`, `eventBlocks` and the other read fields used here
-- **[Connecting QuickBooks Locally](Connecting-QuickBooks-Locally)** - Intuit app, tunnel and OAuth setup for a self-hosted stack
+- **[Period Close](Period-Close.md)** - The close sequence that flushes the outbox, and the reconciling-item blocker
+- **[Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md)** - The auto-map that runs on first sync
+- **[Event-Driven Ledger](Event-Driven-Ledger.md)** - Event statuses, handlers, and the capture-to-post lifecycle
+- **[RoboLedger Operations](RoboLedger-Operations.md)** - The full operations catalog and envelope contract
+- **[GraphQL Reads](GraphQL-Reads.md)** - `periodDrafts`, `eventBlocks` and the other read fields used here
+- **[Connecting QuickBooks Locally](Connecting-QuickBooks-Locally.md)** - Intuit app, tunnel and OAuth setup for a self-hosted stack
 
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

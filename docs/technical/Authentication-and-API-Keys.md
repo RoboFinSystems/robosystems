@@ -1,8 +1,8 @@
 # Authentication & API Keys
 
-API keys, browser sessions, and MCP OAuth: how each authenticates to the RoboSystems API, and how roles and graph membership decide what it reaches. The one rule to internalize up front: backend and programmatic access uses the `X-API-Key` header, JWT/Bearer tokens are a frontend concern, and OAuth 2.1 is how MCP clients sign in (covered on [AI Operators & MCP](AI-Operators-and-MCP#connecting-from-mcp-clients)).
+API keys, browser sessions, and MCP OAuth: how each authenticates to the RoboSystems API, and how roles and graph membership decide what it reaches. The one rule to internalize up front: backend and programmatic access uses the `X-API-Key` header, JWT/Bearer tokens are a frontend concern, and OAuth 2.1 is how MCP clients sign in (covered on [AI Operators & MCP](AI-Operators-and-MCP.md#connecting-from-mcp-clients)).
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Three Authentication Methods at a Glance
 
@@ -12,7 +12,7 @@ RoboSystems has three doors into the same building. All resolve to the same `Use
 | --- | --- | --- | --- | --- |
 | **API key** | Scripts, `curl`, MCP clients, SDKs, CI | `X-API-Key` | **Settings → API keys** at robosystems.ai; or `POST /v1/user/api-keys` | Long-lived; you revoke or expire it explicitly |
 | **JWT / Bearer** | The browser frontends (robosystems-app, roboledger-app, roboinvestor-app) | `Authorization: Bearer …` | `POST /v1/auth/login` issues a token | Short-lived, auto-refreshed by the frontend session layer |
-| **OAuth 2.1 bearer** | MCP clients that run a consent flow — claude.ai, Claude Code, ChatGPT, Cursor, VS Code, the Docker MCP Toolkit | `Authorization: Bearer rfso…` (opaque; accepted by the MCP routes only) | The client discovers the authorization server from `https://api.robosystems.ai/v1/mcp`, you sign in, and the consent screen picks the graph — see [AI Operators & MCP](AI-Operators-and-MCP#connecting-from-mcp-clients) | 1-hour access token, 90-day refresh token rotated on use; scoped to the one graph chosen at consent; revoke with `POST /v1/oauth/revoke` or from [Connected Apps](#connected-apps) |
+| **OAuth 2.1 bearer** | MCP clients that run a consent flow — claude.ai, Claude Code, ChatGPT, Cursor, VS Code, the Docker MCP Toolkit | `Authorization: Bearer rfso…` (opaque; accepted by the MCP routes only) | The client discovers the authorization server from `https://api.robosystems.ai/v1/mcp`, you sign in, and the consent screen picks the graph — see [AI Operators & MCP](AI-Operators-and-MCP.md#connecting-from-mcp-clients) | 1-hour access token, 90-day refresh token rotated on use; scoped to the one graph chosen at consent; revoke with `POST /v1/oauth/revoke` or from [Connected Apps](#connected-apps) |
 
 For everything in this guide — `curl`, MCP, SDK smoke tests — use the API key. You never need to call `login` for backend testing, and OAuth is the browser-driven sign-in an MCP client runs for you.
 
@@ -52,7 +52,7 @@ The full endpoint surface — request/response schemas, every field, every statu
 
 - A RoboSystems account — sign up at [robosystems.ai/register](https://robosystems.ai/register).
 - An API key (next section).
-- For the graph-scoped examples, a graph. See [Quick Start](Quick-Start) for getting all three.
+- For the graph-scoped examples, a graph. See [Quick Start](Quick-Start.md) for getting all three.
 
 ## Getting an API Key
 
@@ -251,7 +251,7 @@ The practical consequence is the status-code split:
 | **401** | No credential, or an invalid/expired/revoked browser session | Check the `X-API-Key` header is present and no stale `Authorization` header rides along |
 | **403** | No access to that `graph_id` — or an API key that failed validation | Confirm the key still exists and is active, then that the graph belongs to (or is shared with) your user and the id is correct |
 
-The same key is validated against per-graph access across the REST graph endpoints (`/v1/graphs/{graph_id}/...`), the extensions command and view operations (`/extensions/{domain}/{graph_id}/operations/...`), and a graph's MCP address. On those routes the key and the graph are checked in one step, so a revoked, expired, or mistyped key answers **403** with `Invalid API key or access denied to graph`, exactly as a graph you cannot reach does. The GraphQL endpoint (`/extensions/{graph_id}/graphql`) separates the two: a bad key is **401**, no access to the graph is **403**. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy) for the multi-tenant model and how graph access is granted.
+The same key is validated against per-graph access across the REST graph endpoints (`/v1/graphs/{graph_id}/...`), the extensions command and view operations (`/extensions/{domain}/{graph_id}/operations/...`), and a graph's MCP address. On those routes the key and the graph are checked in one step, so a revoked, expired, or mistyped key answers **403** with `Invalid API key or access denied to graph`, exactly as a graph you cannot reach does. The GraphQL endpoint (`/extensions/{graph_id}/graphql`) separates the two: a bad key is **401**, no access to the graph is **403**. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy.md) for the multi-tenant model and how graph access is granted.
 
 ## Organizations and Roles
 
@@ -313,7 +313,7 @@ Four rules govern the surface, and each one is a distinct error if you trip it:
 - **You can only grant access to someone already in the graph's owning organization.** There is no cross-org sharing here; the invitation flow above is how a person enters the org in the first place.
 - **Org owners and admins hold implicit graph admin** on every graph their org owns. They appear in the listing with `source: "org_role"` and a null `granted_at`, as opposed to `source: "explicit"` for a direct grant. Their access is managed by changing their org role — you cannot revoke it from the graph.
 - **Subgraphs inherit the parent's permissions.** Calling the member endpoints on a subgraph returns 400 and points you at the parent graph.
-- **Shared repositories have no member management.** They are subscription-based, so these endpoints return 403 for `sec` and its peers. See [Shared Repositories](Shared-Repositories).
+- **Shared repositories have no member management.** They are subscription-based, so these endpoints return 403 for `sec` and its peers. See [Shared Repositories](Shared-Repositories.md).
 
 ```bash
 curl "https://api.robosystems.ai/v1/graphs/kg1234567890abcdef/members" \
@@ -469,7 +469,7 @@ The design rule that surprises people: **login never creates an account.** SCIM 
 
 Both endpoints are redirect-based and deliberately absent from the OpenAPI spec — they are browser surface, not SDK surface, and you do not exercise them with `curl`.
 
-**Full setup, IdP configuration, and the control story: [Enterprise SSO & SCIM](Enterprise-SSO-and-SCIM).**
+**Full setup, IdP configuration, and the control story: [Enterprise SSO & SCIM](Enterprise-SSO-and-SCIM.md).**
 
 ## The Internal Cross-App SSO Bridge
 
@@ -509,7 +509,7 @@ Bearer-wins precedence is biting you. If the request carries an `Authorization: 
 
 Your user does not have access to the `graph_id` in the URL — or, on a REST or MCP route with a graph id, your API key itself failed validation, which answers 403 there rather than 401.
 
-**Solution:** First confirm the key is live (`GET /v1/user` with an account-wide key, or list your keys and check `is_active` and `expires_at`). Then confirm the graph id is correct and that the graph belongs to (or is shared with) your user. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy).
+**Solution:** First confirm the key is live (`GET /v1/user` with an account-wide key, or list your keys and check `is_active` and `expires_at`). Then confirm the graph id is correct and that the graph belongs to (or is shared with) your user. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy.md).
 
 ### "I Lost My API Key"
 
@@ -539,14 +539,14 @@ Expected. Changing or resetting a password bumps the user's `session_version`, w
 
 ## Related Documentation
 
-**Wiki Guides:**
+**Guides:**
 
-- **[Quick Start](Quick-Start)** - Create an account, your first API key, and a graph on robosystems.ai
-- **[Enterprise SSO & SCIM](Enterprise-SSO-and-SCIM)** - Identity-provider federation and SCIM 2.0 provisioning for dedicated and self-hosted deployments
-- **[Security & Compliance](Security-and-Compliance)** - The platform's built-in controls and the optional compliance stacks
-- **[Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy)** - The per-graph access model and 401-vs-403 semantics
-- **[Graph Operations](Graph-Operations)** - Where authenticated requests go: operation envelopes and `X-API-Key` in practice
-- **[Credits and Billing](Credits-and-Billing)** - What the organization carries: credit pools, account limits, and the role-gated billing endpoints
+- **[Quick Start](Quick-Start.md)** - Create an account, your first API key, and a graph on robosystems.ai
+- **[Enterprise SSO & SCIM](Enterprise-SSO-and-SCIM.md)** - Identity-provider federation and SCIM 2.0 provisioning for dedicated and self-hosted deployments
+- **[Security & Compliance](Security-and-Compliance.md)** - The platform's built-in controls and the optional compliance stacks
+- **[Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy.md)** - The per-graph access model and 401-vs-403 semantics
+- **[Graph Operations](Graph-Operations.md)** - Where authenticated requests go: operation envelopes and `X-API-Key` in practice
+- **[Credits and Billing](Credits-and-Billing.md)** - What the organization carries: credit pools, account limits, and the role-gated billing endpoints
 
 **API Reference:**
 
@@ -562,6 +562,6 @@ Expected. Changing or resetting a password bumps the user's `session_version`, w
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

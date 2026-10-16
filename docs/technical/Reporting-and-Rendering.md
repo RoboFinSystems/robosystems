@@ -2,7 +2,7 @@
 
 RoboSystems renders financial statements once, on the server, from atomic facts — and ships the result to any consumer as light JSON. The browser displays pre-computed rows; it never walks a calculation graph. This page explains the rendering engine, the conceptual model behind it, and how to request a rendered report.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Table of Contents
 
@@ -140,13 +140,13 @@ This is why a statement is a view, not a stored artifact: the Report holds facts
 
 ## How to Request a Rendered Report
 
-There are several addressable surfaces, depending on whether you want a saved Report, a live ad-hoc statement, or a slice of facts. All authenticated `curl` examples target `https://api.robosystems.ai` and send your API key from `$ROBOSYSTEMS_API_KEY` in the `X-API-Key` header; to get an account, a key, and a graph, see [Quick Start](Quick-Start). Replace `$GRAPH_ID` with your tenant graph id. The read surfaces `build-fact-grid` and `financial-statement-analysis` also take `sec`, the shared SEC repository; `create-report` and `live-financial-statement` need a tenant graph with a RoboLedger ledger, so `sec` is not valid there.
+There are several addressable surfaces, depending on whether you want a saved Report, a live ad-hoc statement, or a slice of facts. All authenticated `curl` examples target `https://api.robosystems.ai` and send your API key from `$ROBOSYSTEMS_API_KEY` in the `X-API-Key` header; to get an account, a key, and a graph, see [Quick Start](Quick-Start.md). Replace `$GRAPH_ID` with your tenant graph id. The read surfaces `build-fact-grid` and `financial-statement-analysis` also take `sec`, the shared SEC repository; `create-report` and `live-financial-statement` need a tenant graph with a RoboLedger ledger, so `sec` is not valid there.
 
 Full request/response schemas live in the [live OpenAPI spec](https://robosystems.ai/docs/api) — this page shows usage, not the full endpoint surface.
 
 ### Build a Fact Grid (Scoped Slice of the Hypercube)
 
-`build-fact-grid` returns a scoped, deduplicated slice of facts from the XBRL hypercube in the graph, plus the aspects they span. It works on the `sec` repository and on materialized tenant graphs, and it leaves arranging the facts into a pivot to the consumer. Request rules and a worked example are in [RoboLedger Operations § Worked Example: build-fact-grid](RoboLedger-Operations#worked-example-build-fact-grid).
+`build-fact-grid` returns a scoped, deduplicated slice of facts from the XBRL hypercube in the graph, plus the aspects they span. It works on the `sec` repository and on materialized tenant graphs, and it leaves arranging the facts into a pivot to the consumer. Request rules and a worked example are in [RoboLedger Operations § Worked Example: build-fact-grid](RoboLedger-Operations.md#worked-example-build-fact-grid).
 
 ### Create a Saved Report
 
@@ -168,7 +168,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
   }'
 ```
 
-The `mapping_id` is the id of the graph's chart-of-accounts mapping structure (a `struct_…` id); the `mappings` GraphQL field or the `list-mapping-structures` MCP tool returns it. See [Chart of Accounts Mapping](Chart-of-Accounts-Mapping). The operation returns an `OperationEnvelope` and accepts an `Idempotency-Key` header so retries are safe.
+The `mapping_id` is the id of the graph's chart-of-accounts mapping structure (a `struct_…` id); the `mappings` GraphQL field or the `list-mapping-structures` MCP tool returns it. See [Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md). The operation returns an `OperationEnvelope` and accepts an `Idempotency-Key` header so retries are safe.
 
 ### Fetch a Rendered Statement via GraphQL
 
@@ -200,7 +200,7 @@ The cash-flow path on this surface needs at least two periods so the indirect-me
 
 ### From an MCP Client
 
-The same operations are exposed as MCP tools — `build-fact-grid`, `financial-statement-analysis`, and `live-financial-statement`. On a shared SEC repository graph, `financial-statement-analysis` takes a `ticker` and `statement_type` to pull a company's statement straight from the graph hypercube. They delegate to the same operations layer as the REST surface, so an AI assistant gets identical numbers. Connecting Claude, ChatGPT, or any MCP client is covered in [AI Operators & MCP](AI-Operators-and-MCP).
+The same operations are exposed as MCP tools — `build-fact-grid`, `financial-statement-analysis`, and `live-financial-statement`. On a shared SEC repository graph, `financial-statement-analysis` takes a `ticker` and `statement_type` to pull a company's statement straight from the graph hypercube. They delegate to the same operations layer as the REST surface, so an AI assistant gets identical numbers. Connecting Claude, ChatGPT, or any MCP client is covered in [AI Operators & MCP](AI-Operators-and-MCP.md).
 
 ## The BlockView Frontend
 
@@ -210,14 +210,14 @@ If a rendered number is wrong, the fix is almost never in the renderer. It is in
 
 ## Related Documentation
 
-**Wiki Guides:**
+**Guides:**
 
-- **[Information Blocks](Information-Blocks)** - The data envelope, block types, FactSets, and the View projections at the data layer
-- **[Information Block Reference](Information-Block-Reference)** - Envelope fields and view projection status
-- **[RoboLedger Operations](RoboLedger-Operations)** - The command writes (`create-report`, `regenerate-report`, period close) that produce the facts this page renders
-- **[Serialization & Export](Serialization-and-Export)** - Downloading a published report as the holon, Tavi, or XBRL 2.1 (there is no iXBRL output)
-- **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Load and query the SEC graph that `build-fact-grid` and `financial-statement-analysis` run against
-- **[Architecture Overview](Architecture-Overview)** - How the reporting layer fits the broader platform
+- **[Information Blocks](Information-Blocks.md)** - The data envelope, block types, FactSets, and the View projections at the data layer
+- **[Information Block Reference](Information-Block-Reference.md)** - Envelope fields and view projection status
+- **[RoboLedger Operations](RoboLedger-Operations.md)** - The command writes (`create-report`, `regenerate-report`, period close) that produce the facts this page renders
+- **[Serialization & Export](Serialization-and-Export.md)** - Downloading a published report as the holon, Tavi, or XBRL 2.1 (there is no iXBRL output)
+- **[SEC XBRL Pipeline](SEC-XBRL-Pipeline.md)** - Load and query the SEC graph that `build-fact-grid` and `financial-statement-analysis` run against
+- **[Architecture Overview](Architecture-Overview.md)** - How the reporting layer fits the broader platform
 
 **Codebase Documentation:**
 
@@ -228,6 +228,6 @@ If a rendered number is wrong, the fix is almost never in the renderer. It is in
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

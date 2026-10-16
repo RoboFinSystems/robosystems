@@ -2,7 +2,7 @@
 
 Every RoboSystems graph is an MCP server; this page covers connecting a client, the full tool catalog, and the Operator endpoint that runs a model. RoboSystems exposes its data and reasoning surface to AI through the [Model Context Protocol](https://modelcontextprotocol.io/). An **AI Operator** is a model-driven executor that answers a natural-language question by composing reads across three retrieval planes — operational, analytical, and unstructured — using the same MCP tool layer that any MCP client (Claude, ChatGPT, Claude Code, Cursor, a custom orchestrator) can call directly.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ---
 
@@ -147,7 +147,7 @@ The tool names below are the exact `name` strings for `tools/call`, grouped by f
 | `sync-connection` | An on-demand resync from a connected source such as QuickBooks | Writable tenant parent graphs |
 | `set-write-policy` | Whether a connection writes back to its source system | Writable tenant graphs |
 
-`change-tier` is deliberately absent: it is a multi-minute destructive volume migration with billing consequences, so it stays on REST for humans. Restore is absent because it has no customer-facing surface at all — see [Graph Operations](Graph-Operations).
+`change-tier` is deliberately absent: it is a multi-minute destructive volume migration with billing consequences, so it stays on REST for humans. Restore is absent because it has no customer-facing surface at all — see [Graph Operations](Graph-Operations.md).
 
 **Close and fiscal calendar** — RoboLedger tenant:
 
@@ -163,7 +163,7 @@ The tool names below are the exact `name` strings for `tools/call`, grouped by f
 | `update-journal-entry` / `delete-journal-entry` | Edit or delete a draft entry (posted entries are reversed, never edited) |
 | `backfill-plan-history` | Compile monthly statement history behind the close boundary |
 
-**Reconciliations** — RoboLedger tenant; how they gate the close is in [Period Close](Period-Close#reconciliations):
+**Reconciliations** — RoboLedger tenant; how they gate the close is in [Period Close](Period-Close.md#reconciliations):
 
 | Tool | Purpose |
 | --- | --- |
@@ -297,9 +297,9 @@ Two curated tools sit on top of this plane:
 - `financial-statement-analysis` — graph-backed statement analysis over LadybugDB (SEC + materialized tenants); historical and cross-period.
 - `build-fact-grid` — pivot tables over the XBRL hypercube.
 
-Beside them, `disclosures` and `information-block` read one report section by section. They run xbrlkit over the report held whole — the published filing on `sec`, the ledger's own report on a tenant — so the graph is not in their path. On `sec`, raw Cypher has four rules that decide whether a number is right; see [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules).
+Beside them, `disclosures` and `information-block` read one report section by section. They run xbrlkit over the report held whole — the published filing on `sec`, the ledger's own report on a tenant — so the graph is not in their path. On `sec`, raw Cypher has four rules that decide whether a number is right; see [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules.md).
 
-`describe-filing`, `search-text` and `read-text` read the same filing as text: its own document from its public folder — any processed year, back to 2015, and an 8-K earnings release with its EX-99 exhibits. They register on shared repositories only; a ledger files no document, and its sections are the pair above. A `ticker` picks the filing: the latest annual report, or `fiscal_year` / `period_type` for another, `accession` for one named, `form: "8-K"` for the latest earnings release. Neither the search index nor EDGAR is in the path. `search-text` matches words, never a regular expression, and answers *where in this filing*; `search-documents` (Plane C) answers *which filings*, across the corpus. On `sec`, every tool that resolves a filing — these three, `financial-statement-analysis`, `disclosures` and `information-block` — returns `resolved_report.links`, with the viewer URL to hand a person; see [Where a Filing Is Served](SEC-Data-Model-and-Query-Rules#where-a-filing-is-served).
+`describe-filing`, `search-text` and `read-text` read the same filing as text: its own document from its public folder — any processed year, back to 2015, and an 8-K earnings release with its EX-99 exhibits. They register on shared repositories only; a ledger files no document, and its sections are the pair above. A `ticker` picks the filing: the latest annual report, or `fiscal_year` / `period_type` for another, `accession` for one named, `form: "8-K"` for the latest earnings release. Neither the search index nor EDGAR is in the path. `search-text` matches words, never a regular expression, and answers *where in this filing*; `search-documents` (Plane C) answers *which filings*, across the corpus. On `sec`, every tool that resolves a filing — these three, `financial-statement-analysis`, `disclosures` and `information-block` — returns `resolved_report.links`, with the viewer URL to hand a person; see [Where a Filing Is Served](SEC-Data-Model-and-Query-Rules.md#where-a-filing-is-served).
 
 Note the distinct curated companion `live-financial-statement`, which reads the **OLTP** books of a tenant graph (current period, before materialization). Do not conflate the two: `financial-statement-analysis` is analytical/historical, `live-financial-statement` is operational/current.
 
@@ -489,21 +489,21 @@ Relevant feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`, `EXTENSION
 
 ## Self-hosted deployments
 
-A stack you run serves the same MCP routes at `http://localhost:8000/v1/mcp`, `http://localhost:8000/v1/mcp/roboledger` and `http://localhost:8000/v1/graphs/{graph_id}/mcp`. The OAuth routes require `MCP_OAUTH_ENABLED=true`; the per-graph route takes the key from `just demo-user` in `X-API-Key`. See [Local Development](Local-Development).
+A stack you run serves the same MCP routes at `http://localhost:8000/v1/mcp`, `http://localhost:8000/v1/mcp/roboledger` and `http://localhost:8000/v1/graphs/{graph_id}/mcp`. The OAuth routes require `MCP_OAUTH_ENABLED=true`; the per-graph route takes the key from `just demo-user` in `X-API-Key`. See [Local Development](Local-Development.md).
 
-Operators on a stack you run can use an open-weight model in place of the Bedrock models, through any OpenAI-compatible server. Which tiers it backs, which endpoints work, and which models we tested are in [Self-Hosted AI Models](Self-Hosted-AI-Models).
+Operators on a stack you run can use an open-weight model in place of the Bedrock models, through any OpenAI-compatible server. Which tiers it backs, which endpoints work, and which models we tested are in [Self-Hosted AI Models](Self-Hosted-AI-Models.md).
 
 ---
 
 ## Related Documentation
 
-**Wiki Guides:**
-- **[Architecture Overview](Architecture-Overview)** - The OLTP/OLAP split that the three planes sit on top of
-- **[Querying the Analytical Graph](Querying-the-Analytical-Graph)** - Cypher over LadybugDB in depth
-- **[SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules)** - The `sec` graph's model and the four rules for reading its numbers
-- **[GraphQL Reads](GraphQL-Reads)** - The typed operational read surface in depth
-- **[Search and AI Retrieval](Search-and-AI-Retrieval)** - The document index and hybrid search in depth
-- **[Self-Hosted AI Models](Self-Hosted-AI-Models)** - Running the operators on a model you choose
+**Guides:**
+- **[Architecture Overview](Architecture-Overview.md)** - The OLTP/OLAP split that the three planes sit on top of
+- **[Querying the Analytical Graph](Querying-the-Analytical-Graph.md)** - Cypher over LadybugDB in depth
+- **[SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules.md)** - The `sec` graph's model and the four rules for reading its numbers
+- **[GraphQL Reads](GraphQL-Reads.md)** - The typed operational read surface in depth
+- **[Search and AI Retrieval](Search-and-AI-Retrieval.md)** - The document index and hybrid search in depth
+- **[Self-Hosted AI Models](Self-Hosted-AI-Models.md)** - Running the operators on a model you choose
 
 **Codebase Documentation:**
 - **[GraphQL Extensions](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)** - Strawberry GraphQL surface, resolver patterns
@@ -516,6 +516,6 @@ Operators on a stack you run can use an open-weight model in place of the Bedroc
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

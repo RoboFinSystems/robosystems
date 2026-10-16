@@ -1,12 +1,12 @@
 # Build a Ledger Integration
 
-A ledger integration posts business events from an external system into a RoboLedger graph, and this tutorial builds one end to end. It registers the integration as a source, finds the accounts to post to, checks an event before sending it, captures it, approves it into the ledger, and reads the result back. It is lane 1 of the three integration lanes — see [Building Custom Integrations](Building-Custom-Integrations#the-three-lanes).
+A ledger integration posts business events from an external system into a RoboLedger graph, and this tutorial builds one end to end. It registers the integration as a source, finds the accounts to post to, checks an event before sending it, captures it, approves it into the ledger, and reads the result back. It is lane 1 of the three integration lanes — see [Building Custom Integrations](Building-Custom-Integrations.md#the-three-lanes).
 
 The running example is **Driftline**, a fictional invoicing app used by a fictional design studio, **Harbor & Pine Studio**. Each invoice Driftline issues becomes a sales event in the studio's books: debit Accounts Receivable, credit Revenue.
 
 Every step is shown twice: as `curl`, and as Python using the [`robosystems-integration-template`](https://github.com/RoboFinSystems/robosystems-integration-template), whose emitters wrap the [`robosystems-client`](https://pypi.org/project/robosystems-client/) SDK.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Table of Contents
 
@@ -47,7 +47,7 @@ This is the capture-then-approve discipline: your integration delivers facts, an
 ## Prerequisites
 
 - **A RoboLedger graph** with a chart of accounts — one created in the app with RoboLedger enabled. Its id looks like `kg1a2b3c4d5e6f7890`.
-- **An API key** from **Settings → API keys** for a user who can write to that graph (member or admin; viewers are read-only). See [Authentication and API Keys](Authentication-and-API-Keys).
+- **An API key** from **Settings → API keys** for a user who can write to that graph (member or admin; viewers are read-only). See [Authentication and API Keys](Authentication-and-API-Keys.md).
 - `curl` and `jq`, and for the Python path, a repository made from the integration template (`just venv`).
 
 ```bash
@@ -116,7 +116,7 @@ connection = client.unwrap(
 )
 ```
 
-`create_connection` is in the SDK's generated tier rather than the template's stable set — fine for a one-time setup call. See [Versioning and Compatibility](Versioning-and-Compatibility#the-two-tier-sdk-contract).
+`create_connection` is in the SDK's generated tier rather than the template's stable set — fine for a one-time setup call. See [Versioning and Compatibility](Versioning-and-Compatibility.md#the-two-tier-sdk-contract).
 
 ## Step 2: Find the Accounts
 
@@ -135,7 +135,7 @@ curl -s -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
 { "id": "elem_01K5N7A3B5C7D9E1F3G5H7J9M3", "code": "4000", "name": "Design Services Revenue", "trait": "revenue", "balanceType": "credit" }
 ```
 
-The graph is in the URL, so the query takes no graph argument; `classification` filters by trait (`asset`, `revenue`, …) if you want a narrower list. `accountTree` returns the same chart as a hierarchy. See [GraphQL Reads](GraphQL-Reads).
+The graph is in the URL, so the query takes no graph argument; `classification` filters by trait (`asset`, `revenue`, …) if you want a narrower list. `accountTree` returns the same chart as a hierarchy. See [GraphQL Reads](GraphQL-Reads.md).
 
 ```python
 data = client.graphql(
@@ -250,12 +250,12 @@ curl -s -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/oper
   -d @driftline-inv-10042.json
 ```
 
-The response is an [`OperationEnvelope`](Operations-Contract#the-operationenvelope) whose `result` is the event, with its `id` (`evt_…`) and `"status": "captured"`. Keep the `id` — the next step needs it.
+The response is an [`OperationEnvelope`](Operations-Contract.md#the-operationenvelope) whose `result` is the event, with its `id` (`evt_…`) and `"status": "captured"`. Keep the `id` — the next step needs it.
 
 **Re-sending is safe in two independent ways:**
 
 - **`(source, external_id)`** — the graph refuses a second event with the same pair. A repeat delivery answers **409** with `"detail": "Event already ingested for this source and external_id"`; treat that as "already done". This protects you across runs, days apart, with or without any header.
-- **`Idempotency-Key`** — a retry with the same key and body within 24 hours replays the original envelope (`idempotentReplay: true`) instead of reaching the duplicate check. Useful for retrying after a timeout, when you did not see the first response. See [Operations Contract](Operations-Contract#idempotency-key).
+- **`Idempotency-Key`** — a retry with the same key and body within 24 hours replays the original envelope (`idempotentReplay: true`) instead of reaching the duplicate check. Useful for retrying after a timeout, when you did not see the first response. See [Operations Contract](Operations-Contract.md#idempotency-key).
 
 Capture does not validate the handler metadata — that happens at commit — which is why Step 4 is worth running first.
 
@@ -296,7 +296,7 @@ The allowed moves:
 Any other move is a **422** that lists the allowed transitions. Notes on the ones an integration uses:
 
 - **`classified`** records a decision without posting anything. It is the reviewer's "this is right" step, useful when approval and posting are separate; the handler runs on the later `committed`. For an event captured without its accounts (a bank line, for example), the account choice is patched into `metadata_patch` in the same call, and the handler refuses a classification it could not post.
-- **`committed`** writes the draft entry. The draft becomes `posted` when the period is closed ([`close-period`](RoboLedger-Operations)).
+- **`committed`** writes the draft entry. The draft becomes `posted` when the period is closed ([`close-period`](RoboLedger-Operations.md)).
 - **`voided`** and **`superseded`** retract an event and are final. They are refused once the event's entries have posted — after the close, correct the books with a reversing entry instead. `superseded` requires `superseded_by_id`, the replacement event.
 - A **409** from this call means another process holds the event's row (usually a sync); retry after a moment.
 
@@ -337,7 +337,7 @@ Capturing an event dated in a closed period is still accepted — it is a record
   ```json
   {"event_id": "evt_…", "effective_at": "2026-09-01T00:00:00Z", "metadata_patch": {"posting_date": "2026-09-01"}}
   ```
-- **Reopen the period**, commit, and close again (`reopen-period`, then `close-period`; see [RoboLedger Operations](RoboLedger-Operations)).
+- **Reopen the period**, commit, and close again (`reopen-period`, then `close-period`; see [RoboLedger Operations](RoboLedger-Operations.md)).
 
 `preview-event-block` reports the gate in `validation_errors` before anything is sent, so a nightly job can route late records to a person instead of failing.
 
@@ -365,7 +365,7 @@ curl -s -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/operations/mater
   -d '{}'
 ```
 
-For a RoboLedger graph the source defaults to the ledger. The call returns a `pending` envelope; follow its `operationId` over the progress stream until `operation_completed` ([Operations Contract](Operations-Contract#following-an-async-operation)). A **409** means a materialization is already running for this graph — wait for it rather than starting another.
+For a RoboLedger graph the source defaults to the ledger. The call returns a `pending` envelope; follow its `operationId` over the progress stream until `operation_completed` ([Operations Contract](Operations-Contract.md#following-an-async-operation)). A **409** means a materialization is already running for this graph — wait for it rather than starting another.
 
 ```python
 from integration.emit.graph import materialize
@@ -373,7 +373,7 @@ from integration.emit.graph import materialize
 pending = materialize(client)  # follow pending["operationId"]
 ```
 
-Then query the rebuilt graph — see [Querying the Analytical Graph](Querying-the-Analytical-Graph).
+Then query the rebuilt graph — see [Querying the Analytical Graph](Querying-the-Analytical-Graph.md).
 
 Materializing after every event is unnecessary. Run it once after a batch, or leave it to the schedule your deployment already runs.
 
@@ -441,7 +441,7 @@ curl -s -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/oper
       }'
 ```
 
-`structure_id` comes from the `structures` in `create-taxonomy-block`'s result. Re-asserting a period replaces that period's values, so the call is safe to re-run, and the series then appears in fact grids, GraphQL, and MCP with no further work. The template's [`emit/metrics.py`](https://github.com/RoboFinSystems/robosystems-integration-template/blob/main/src/integration/emit/metrics.py) builds the full `create-taxonomy-block` payload from a list of concepts (`author_metric_structure`) and wraps `assert-metrics` (`assert_metrics`); [`robosystems-marketing-integration`](https://github.com/RoboFinSystems/robosystems-marketing-integration) is a working example. See [Information Blocks](Information-Blocks) and [Taxonomy and Frameworks](Taxonomy-and-Frameworks) for the model behind it.
+`structure_id` comes from the `structures` in `create-taxonomy-block`'s result. Re-asserting a period replaces that period's values, so the call is safe to re-run, and the series then appears in fact grids, GraphQL, and MCP with no further work. The template's [`emit/metrics.py`](https://github.com/RoboFinSystems/robosystems-integration-template/blob/main/src/integration/emit/metrics.py) builds the full `create-taxonomy-block` payload from a list of concepts (`author_metric_structure`) and wraps `assert-metrics` (`assert_metrics`); [`robosystems-marketing-integration`](https://github.com/RoboFinSystems/robosystems-marketing-integration) is a working example. See [Information Blocks](Information-Blocks.md) and [Taxonomy and Frameworks](Taxonomy-and-Frameworks.md) for the model behind it.
 
 ## Common Pitfalls
 
@@ -467,18 +467,18 @@ Refused: posted books are corrected, not rewritten. Record a reversing entry in 
 
 ## Self-hosted deployments
 
-Everything above works against a local stack: set `ROBOSYSTEMS_API_URL=http://localhost:8000` and use the key from `just demo-user`. `just demo-roboledger` provisions a RoboLedger graph with a chart of accounts to practise against. See [Local Development](Local-Development).
+Everything above works against a local stack: set `ROBOSYSTEMS_API_URL=http://localhost:8000` and use the key from `just demo-user`. `just demo-roboledger` provisions a RoboLedger graph with a chart of accounts to practise against. See [Local Development](Local-Development.md).
 
 ## Related Documentation
 
-**Wiki Guides:**
+**Guides:**
 
-- **[Building Custom Integrations](Building-Custom-Integrations)** - The three lanes and the integration template
-- **[Event-Driven Ledger](Event-Driven-Ledger)** - Events, handlers, and the three-level ledger behind this tutorial
-- **[RoboLedger Operations](RoboLedger-Operations)** - Every ledger operation, including `close-period` and `reopen-period`
-- **[Operations Contract](Operations-Contract)** - The envelope, `Idempotency-Key`, and progress streaming
-- **[Errors and Rate Limits](Errors-and-Rate-Limits)** - What each status code means and how to retry
-- **[GraphQL Reads](GraphQL-Reads)** - The read surface used in Steps 2 and 8
+- **[Building Custom Integrations](Building-Custom-Integrations.md)** - The three lanes and the integration template
+- **[Event-Driven Ledger](Event-Driven-Ledger.md)** - Events, handlers, and the three-level ledger behind this tutorial
+- **[RoboLedger Operations](RoboLedger-Operations.md)** - Every ledger operation, including `close-period` and `reopen-period`
+- **[Operations Contract](Operations-Contract.md)** - The envelope, `Idempotency-Key`, and progress streaming
+- **[Errors and Rate Limits](Errors-and-Rate-Limits.md)** - What each status code means and how to retry
+- **[GraphQL Reads](GraphQL-Reads.md)** - The read surface used in Steps 2 and 8
 
 **Repositories:**
 
@@ -488,6 +488,6 @@ Everything above works against a local stack: set `ROBOSYSTEMS_API_URL=http://lo
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

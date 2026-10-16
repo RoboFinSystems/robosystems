@@ -5,7 +5,7 @@ The RoboLedger demos load synthetic books into a graph and exercise ingest, mapp
 - **Synthetic data** (`just demo-roboledger`) — a fully-populated tenant generated from synthetic books: 16 months for a consulting firm, a filed annual report, a mapped Chart of Accounts, schedules, and one period queued for the AI-driven close. The fastest way to see RoboLedger end-to-end (a few minutes), and the canonical surface for prospect demos, frontend evaluation, and regression testing. **This page walks through it in detail.**
 - **Showcase scenarios** (`just demo-coffee-roaster`, `just demo-saas-startup`) — the same scenario engine pointed at two businesses with a story: Driftline Coffee (profitable but cash-poor) and Cadence Labs (burning cash on a deferred-revenue runway). Use these when the *shape of the numbers* is the point. See [Showcase Scenarios](#showcase-scenarios) below.
 
-Connecting a *real* QuickBooks company (sandbox or production) is a live OAuth connection rather than a demo — see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally).
+Connecting a *real* QuickBooks company (sandbox or production) is a live OAuth connection rather than a demo — see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally.md).
 
 The synthetic demo needs no QuickBooks account, Intuit Developer setup, or ngrok tunnel. It emulates data arriving the same way a real QB sync produces it — same typed event vocabulary, same OLTP shape, same materialized graph — without the OAuth and external-API requirements.
 
@@ -117,7 +117,7 @@ To validate the data without writing anything:
 just demo-roboledger --dry-run
 ```
 
-To provision a user + empty roboledger graph **without** the synthetic data (for connecting a real QuickBooks sandbox via the UI — see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally)):
+To provision a user + empty roboledger graph **without** the synthetic data (for connecting a real QuickBooks sandbox via the UI — see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally.md)):
 
 ```bash
 just demo-roboledger --skeleton
@@ -401,7 +401,7 @@ claude mcp add --transport http robosystems-roboledger \
   --header "X-API-Key: <your key>"
 ```
 
-See [AI Operators & MCP](AI-Operators-and-MCP) for the header-less connector form and the stdio bridge. Once connected, try:
+See [AI Operators & MCP](AI-Operators-and-MCP.md) for the header-less connector form and the stdio bridge. Once connected, try:
 
 ```text
 "What entities are in this graph?"
@@ -478,7 +478,7 @@ Common customizations:
 | Iteration speed | Fast — re-running the recipe wipes and reloads | Slow — re-sync takes minutes, data isn't deterministic |
 | Mapping coverage | 100% mapped on first run (3 targets unreachable under the active Reporting Style) | Variable — the MappingOperator runs, partial coverage typical, manual remap for edge cases |
 
-Both paths produce the same OLTP shape, the same materialized graph, and the same Report-Block lifecycle. The demo is for showing the product; QB is for using it on your own books. See the [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally) guide for the QB workflow.
+Both paths produce the same OLTP shape, the same materialized graph, and the same Report-Block lifecycle. The demo is for showing the product; QB is for using it on your own books. See the [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally.md) guide for the QB workflow.
 
 ## Showcase Scenarios
 
@@ -500,16 +500,16 @@ There is also a RoboInvestor demo — Meridian Ventures Fund I, including the cr
 just demo-roboinvestor
 ```
 
-See [RoboInvestor Operations](RoboInvestor-Operations) for what it exercises.
+See [RoboInvestor Operations](RoboInvestor-Operations.md) for what it exercises.
 
 ## Next Steps
 
 Once you're comfortable with the demo:
 
-- **Connect a real QB company** — see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally) to layer real data on top of the same workflow
+- **Connect a real QB company** — see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally.md) to layer real data on top of the same workflow
 - **Customize the demo** — modify `data.py` to demo a different vertical for a specific prospect, or start from one of the [showcase scenarios](#showcase-scenarios)
 - **Author your own Information Blocks** — `create-information-block` builds `schedule` and `rollforward` blocks, each carrying its own verification rules
 - **Build a custom MCP workflow** — the close prompt at `examples/roboledger_demo/prompt.md` is one starting point; you can build vertical-specific agent workflows on the same MCP surface
-- **Go deeper on the model** — [RoboLedger Operations](RoboLedger-Operations) (command writes and the fact grid), [Reporting & Rendering](Reporting-and-Rendering) (how statements are built), and [Information Blocks](Information-Blocks) (the unifying envelope)
+- **Go deeper on the model** — [RoboLedger Operations](RoboLedger-Operations.md) (command writes and the fact grid), [Reporting & Rendering](Reporting-and-Rendering.md) (how statements are built), and [Information Blocks](Information-Blocks.md) (the unifying envelope)
 
 If you're evaluating RoboLedger for a real engagement: run the demo, drive the AI close, read the rule tallies the close hands back, then connect one of your own QB companies via the QB Local guide. The full evaluation arc takes ~30 minutes if everything's smooth.

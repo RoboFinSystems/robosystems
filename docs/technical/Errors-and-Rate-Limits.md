@@ -2,7 +2,7 @@
 
 Every RoboSystems endpoint reports failure the same way: a non-2xx status and a small JSON body with a `detail` and a `request_id`. This page covers that body, what each status code means for an integrator and what to do about it, the rate-limit headers and 429 response, and the response an AI operation returns when a graph runs out of credits.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Table of Contents
 
@@ -52,7 +52,7 @@ An error response carries two keys:
 
 A route that catches its own failure may instead return a short message of its own, such as `"Failed to cancel operation"`, still with the `request_id`. Either way, the `request_id` is how that error is found — see [Quoting a Request ID](#quoting-a-request-id).
 
-The SCIM provisioning surface (`/scim/v2`) is the one exception to this shape: it answers in the RFC 7644 error format that identity providers expect. See [Enterprise SSO and SCIM](Enterprise-SSO-and-SCIM).
+The SCIM provisioning surface (`/scim/v2`) is the one exception to this shape: it answers in the RFC 7644 error format that identity providers expect. See [Enterprise SSO and SCIM](Enterprise-SSO-and-SCIM.md).
 
 ## Status Codes and What to Do
 
@@ -73,7 +73,7 @@ The SCIM provisioning surface (`/scim/v2`) is the one exception to this shape: i
 
 Two patterns cover most integration code:
 
-- **Retry**: 409 lock conflicts, 429, 500, 503, 504 — with backoff, and with the same `Idempotency-Key` so a retry that races a success cannot double-write (see [Operations Contract](Operations-Contract#idempotency-key)).
+- **Retry**: 409 lock conflicts, 429, 500, 503, 504 — with backoff, and with the same `Idempotency-Key` so a retry that races a success cannot double-write (see [Operations Contract](Operations-Contract.md#idempotency-key)).
 - **Stop and fix**: 400, 401, 403, 404, 413, 422 — the same request will fail the same way.
 
 ## Typed Error Codes
@@ -147,7 +147,7 @@ Branch on `extensions.code`, not on `message`:
 | `STATEMENT_TIMEOUT` | The read exceeded the per-statement time limit; narrow it |
 | `INTERNAL_ERROR` | An unexpected failure; the error's `extensions.requestId` is the value to quote |
 
-Access is not a GraphQL error code. An HTTP 401 (bad credential) or 403 (no access to the graph, or a subgraph id in the URL) from the GraphQL endpoint means the request was refused before any query ran. See [GraphQL Reads](GraphQL-Reads).
+Access is not a GraphQL error code. An HTTP 401 (bad credential) or 403 (no access to the graph, or a subgraph id in the URL) from the GraphQL endpoint means the request was refused before any query ran. See [GraphQL Reads](GraphQL-Reads.md).
 
 ## Quoting a Request ID
 
@@ -171,7 +171,7 @@ Rate limits protect shared infrastructure from bursts. They are separate from cr
 - Limits are **per endpoint category** — graph reads, graph writes, Cypher queries, MCP, AI Operators, search, backups, extension GraphQL reads, extension operations, and so on — so a burst of one kind of traffic does not starve another.
 - Windows are **short** — the configured limits are per minute. They absorb normal bursts rather than cap monthly volume; volume is what credits and tier limits are for.
 - Categories served by the graph's own dedicated instance (queries, reads, writes, MCP, operators, analytics) **scale with the graph's tier** and are counted per graph. Categories that land on shared infrastructure (search, backups, imports, management, sync) are the same on every tier and are counted per user.
-- Shared repositories such as `sec` carry their own per-plan limits — see [Shared Repositories](Shared-Repositories).
+- Shared repositories such as `sec` carry their own per-plan limits — see [Shared Repositories](Shared-Repositories.md).
 
 **Where the numbers are.** The limits are configuration, served live rather than restated here:
 
@@ -208,11 +208,11 @@ X-RateLimit-Category: extensions_write
 
 `Retry-After` is in seconds; `X-RateLimit-Reset` is a Unix timestamp in seconds. Limits outside the tier-aware categories (authentication, SSE connections, billing) send `X-RateLimit-Type` in place of the tier and category headers. Wait at least `Retry-After` before retrying; spreading a backfill evenly across windows is faster overall than bursting and backing off.
 
-Server-Sent Event streams have their own limit on concurrent connections per user — see [Operations Contract](Operations-Contract#following-an-async-operation).
+Server-Sent Event streams have their own limit on concurrent connections per user — see [Operations Contract](Operations-Contract.md#following-an-async-operation).
 
 ## Insufficient Credits
 
-Only AI operations consume credits (see [Credits and Billing](Credits-and-Billing)). When a graph's pool cannot cover an AI Operator call, the operator endpoints (`POST /v1/graphs/{graph_id}/operator` and `POST /v1/graphs/{graph_id}/operator/{operator_type}`) refuse it up front with **402**:
+Only AI operations consume credits (see [Credits and Billing](Credits-and-Billing.md)). When a graph's pool cannot cover an AI Operator call, the operator endpoints (`POST /v1/graphs/{graph_id}/operator` and `POST /v1/graphs/{graph_id}/operator/{operator_type}`) refuse it up front with **402**:
 
 ```json
 {
@@ -248,13 +248,13 @@ Rate limiting is controlled by `RATE_LIMIT_ENABLED`, and the limit table lives i
 
 ## Related Documentation
 
-**Wiki Guides:**
+**Guides:**
 
-- **[Operations Contract](Operations-Contract)** - The envelope, `Idempotency-Key`, and progress streaming shared by every write
-- **[Credits and Billing](Credits-and-Billing)** - What consumes credits, allocations, and balances
-- **[Authentication and API Keys](Authentication-and-API-Keys)** - Creating, scoping, and rotating keys
-- **[Shared Repositories](Shared-Repositories)** - Per-plan limits on `sec` and other repositories
-- **[GraphQL Reads](GraphQL-Reads)** - The GraphQL error codes in context
+- **[Operations Contract](Operations-Contract.md)** - The envelope, `Idempotency-Key`, and progress streaming shared by every write
+- **[Credits and Billing](Credits-and-Billing.md)** - What consumes credits, allocations, and balances
+- **[Authentication and API Keys](Authentication-and-API-Keys.md)** - Creating, scoping, and rotating keys
+- **[Shared Repositories](Shared-Repositories.md)** - Per-plan limits on `sec` and other repositories
+- **[GraphQL Reads](GraphQL-Reads.md)** - The GraphQL error codes in context
 
 **API Reference:**
 
@@ -263,6 +263,6 @@ Rate limiting is controlled by `RATE_LIMIT_ENABLED`, and the limit table lives i
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

@@ -4,7 +4,7 @@ This page is for integrators querying the hosted `sec` graph — the shared repo
 
 **Quick Start:** Before writing Cypher, try the ready-made views: `financial-statement-analysis` returns a company's statement by ticker, and `build-fact-grid` pivots facts across companies and periods. Both already apply the rules on this page. When you do write Cypher, filter `Fact {has_dimensions: false}`, match `Element.canonical_concept`, pin the `Period` shape, and `RETURN DISTINCT` from an `Entity` anchor.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Table of Contents
 
@@ -17,7 +17,7 @@ This page is for integrators querying the hosted `sec` graph — the shared repo
 
 ## Before You Write Cypher
 
-Access to `sec` is a subscription (see [Shared Repositories](Shared-Repositories)). Every example authenticates with an API key in `X-API-Key`:
+Access to `sec` is a subscription (see [Shared Repositories](Shared-Repositories.md)). Every example authenticates with an API key in `X-API-Key`:
 
 ```bash
 export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
@@ -91,7 +91,7 @@ curl -X POST "https://api.robosystems.ai/v1/graphs/sec/query/cypher" \
   -d '{"query": "MATCH (ent:Entity {ticker: $ticker}) RETURN ent.name AS name, ent.cik AS cik, ent.fiscal_year_end AS fiscal_year_end", "parameters": {"ticker": "NVDA"}}'
 ```
 
-Request fields, response modes and limits are covered in [Querying the Analytical Graph](Querying-the-Analytical-Graph). The MCP tool `get-example-queries` returns working patterns that follow the rules below.
+Request fields, response modes and limits are covered in [Querying the Analytical Graph](Querying-the-Analytical-Graph.md). The MCP tool `get-example-queries` returns working patterns that follow the rules below.
 
 ## The Data Model
 
@@ -413,21 +413,21 @@ A filer usually breaks one figure down along several axes (segment, geography, p
 
 - **Text is not a Cypher question.** String matching (`CONTAINS`, `STARTS WITH`, `ENDS WITH`, `=~`) on `Fact.value` or `Fact.uri` is refused on `sec`. Search filing text with `search-documents` (MCP) to find which filings say something, or `search-text` to find where one filing says it; read one disclosure whole with `disclosures`, then `information-block`.
 - **Read-only.** `sec` and its subgraphs refuse every write, and the staging-table SQL endpoint returns 403 for shared repositories. Query the graph with Cypher.
-- **Scope.** The graph holds 10-K, 10-Q, 20-F and 40-F XBRL filings filed since January 2024, rebuilt nightly. The text views reach further back — any processed annual or quarterly report since 2015 — and pick up a filing the day it is filed; see [Shared Repositories](Shared-Repositories#freshness). For one filing on your own machine, with no account, [xbrlkit](https://xbrlkit.com) reads it with the same schema.
-- **Rate limits** follow your subscription plan; see [Shared Repositories](Shared-Repositories).
+- **Scope.** The graph holds 10-K, 10-Q, 20-F and 40-F XBRL filings filed since January 2024, rebuilt nightly. The text views reach further back — any processed annual or quarterly report since 2015 — and pick up a filing the day it is filed; see [Shared Repositories](Shared-Repositories.md#freshness). For one filing on your own machine, with no account, [xbrlkit](https://xbrlkit.com) reads it with the same schema.
+- **Rate limits** follow your subscription plan; see [Shared Repositories](Shared-Repositories.md).
 
 ## Self-hosted deployments
 
-On a stack you run, load the filings you want with [SEC XBRL Pipeline](SEC-XBRL-Pipeline) (`just sec-load NVDA 2025`) and query them through the same `sec` graph id; the rules on this page apply unchanged.
+On a stack you run, load the filings you want with [SEC XBRL Pipeline](SEC-XBRL-Pipeline.md) (`just sec-load NVDA 2025`) and query them through the same `sec` graph id; the rules on this page apply unchanged.
 
 ## Related Documentation
 
-**Wiki Guides:**
-- **[Querying the Analytical Graph](Querying-the-Analytical-Graph)** - The Cypher endpoint, response modes, parameters, and the MCP query tools
-- **[Shared Repositories](Shared-Repositories)** - Subscribing to `sec`, plans, and access
-- **[AI Operators and MCP](AI-Operators-and-MCP)** - The MCP tool surface, including the views and `resolve-element`
-- **[Search & AI Retrieval](Search-and-AI-Retrieval)** - Full-text and semantic search over filing text
-- **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Loading SEC filings into a local stack
+**Guides:**
+- **[Querying the Analytical Graph](Querying-the-Analytical-Graph.md)** - The Cypher endpoint, response modes, parameters, and the MCP query tools
+- **[Shared Repositories](Shared-Repositories.md)** - Subscribing to `sec`, plans, and access
+- **[AI Operators and MCP](AI-Operators-and-MCP.md)** - The MCP tool surface, including the views and `resolve-element`
+- **[Search & AI Retrieval](Search-and-AI-Retrieval.md)** - Full-text and semantic search over filing text
+- **[SEC XBRL Pipeline](SEC-XBRL-Pipeline.md)** - Loading SEC filings into a local stack
 
 **Product Guide:**
 - **[Analyze SEC filings](https://robosystems.ai/docs/guides/sec-filings)** - Connecting an AI client to the SEC graph, and what to ask of it
@@ -439,6 +439,6 @@ On a stack you run, load the filings you want with [SEC XBRL Pipeline](SEC-XBRL-
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

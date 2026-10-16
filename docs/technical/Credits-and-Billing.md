@@ -2,7 +2,7 @@
 
 In RoboSystems, only AI operations consume credits — every database, graph, MCP, Cypher, import, sync, backup, and schema operation is free. Credits exist solely to meter the external model-inference cost of AI Operators (models served through AWS Bedrock), and each graph carries a monthly credit allocation tied to its tier.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Table of Contents
 
@@ -50,7 +50,7 @@ The current rates are served as `operation_costs.token_pricing` from `GET /v1/of
 
 ### Capping a Run
 
-An operator request can carry `max_credits`, a soft ceiling on what that one run spends. It is checked before each model call, so the first call always runs and the run can end slightly above the ceiling; once reached, the operator stops calling tools and answers from what it has. The author operator applies a default of 750 credits when a request sets none, so every write run is bounded; a request's own `max_credits`, higher or lower, takes precedence. See [AI Operators & MCP](AI-Operators-and-MCP#the-operator-endpoint).
+An operator request can carry `max_credits`, a soft ceiling on what that one run spends. It is checked before each model call, so the first call always runs and the run can end slightly above the ceiling; once reached, the operator stops calling tools and answers from what it has. The author operator applies a default of 750 credits when a request sets none, so every write run is bounded; a request's own `max_credits`, higher or lower, takes precedence. See [AI Operators & MCP](AI-Operators-and-MCP.md#the-operator-endpoint).
 
 A run's first model call after a few idle minutes costs more than the ones that follow, because the operator's instructions and the graph's schema are written to the model's prompt cache on that call and read from it afterwards.
 
@@ -195,7 +195,7 @@ Each member holds one of three roles, and the role decides what they can do with
 | **`admin`** | Invite and manage members, view invoices, and manage another member's subscriptions |
 | **`member`** | Works in the graphs they are granted; manages only their own subscriptions |
 
-Graph *access* is a separate, narrower grant on top of org membership — being in the org does not by itself put you in every graph. Org owners and admins are the exception: they hold implicit admin on every graph their org owns. The full model, the invitation flow, and the per-graph member endpoints are covered in [Authentication and API Keys](Authentication-and-API-Keys#organizations-and-roles).
+Graph *access* is a separate, narrower grant on top of org membership — being in the org does not by itself put you in every graph. Org owners and admins are the exception: they hold implicit admin on every graph their org owns. The full model, the invitation flow, and the per-graph member endpoints are covered in [Authentication and API Keys](Authentication-and-API-Keys.md#organizations-and-roles).
 
 The organization carries one account-level limit, independent of credits and storage: a **maximum number of graphs** it can hold (`max_graphs`, defaulting to the configured `ORG_GRAPHS_DEFAULT_LIMIT`). This caps how many graphs the account can provision at once — distinct from each graph's own storage limit and credit pool. `GET /v1/orgs/{org_id}/limits` reports the cap and where you stand against it, and `GET /v1/orgs/{org_id}/usage` aggregates activity across every graph in the org (`days` sets the lookback, default 30). See the [API reference](https://robosystems.ai/docs/api) for the exact request and response shapes.
 
@@ -226,11 +226,11 @@ Checkout is asynchronous. After the user returns from Stripe, the status endpoin
 - **A graph** — `POST /v1/graphs/{graph_id}/operations/delete-graph`. This tears down **immediately** by default; pass `at_period_end: true` to keep the graph usable through the current billing period. The caller must be both an org owner (billing authority) and an admin on the graph (operational authority).
 - **A shared-repository subscription** — `POST /v1/graphs/{repo_id}/subscriptions/cancel`. This cancels **at period end** by default; pass `immediate: true` to stop access right away.
 
-Each guards itself with a `confirm` value that must equal the resource id — `delete-graph` always, the repository cancel when you ask for immediate termination — so a mistyped call cannot destroy the wrong thing. See [Shared Repositories](Shared-Repositories) for the repository half.
+Each guards itself with a `confirm` value that must equal the resource id — `delete-graph` always, the repository cancel when you ask for immediate termination — so a mistyped call cannot destroy the wrong thing. See [Shared Repositories](Shared-Repositories.md) for the repository half.
 
 ## Rate Limits
 
-Rate limits are the third metering axis, alongside credits and storage — and the only one that throttles *free* operations. They are short, per-category windows that absorb normal bursts, scaled by tier for the categories served by a graph's own instance, and independent of credits: hitting a rate limit consumes nothing, and an exhausted credit pool does not change a rate limit. The headers, the 429 response, and where the live limits are served are in [Errors and Rate Limits](Errors-and-Rate-Limits#rate-limits), along with the 402 an AI operation returns when the pool is empty ([Insufficient Credits](Errors-and-Rate-Limits#insufficient-credits)).
+Rate limits are the third metering axis, alongside credits and storage — and the only one that throttles *free* operations. They are short, per-category windows that absorb normal bursts, scaled by tier for the categories served by a graph's own instance, and independent of credits: hitting a rate limit consumes nothing, and an exhausted credit pool does not change a rate limit. The headers, the 429 response, and where the live limits are served are in [Errors and Rate Limits](Errors-and-Rate-Limits.md#rate-limits), along with the 402 an AI operation returns when the pool is empty ([Insufficient Credits](Errors-and-Rate-Limits.md#insufficient-credits)).
 
 ## Self-hosted deployments
 
@@ -257,11 +257,11 @@ just admin dev credits repos bonus <user_repository_id> --amount 500 --descripti
 
 ## Related Documentation
 
-**Wiki Guides:**
-- **[Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy)** - How credits scope per graph, and how subgraphs share the parent pool
-- **[AI Operators and MCP](AI-Operators-and-MCP)** - The AI Operators that consume credits, and the free MCP tool surface
-- **[Errors and Rate Limits](Errors-and-Rate-Limits)** - Rate-limit headers, 429 handling, and the insufficient-credits response
-- **[Architecture Overview](Architecture-Overview)** - Platform architecture, tiers, and the operations layer
+**Guides:**
+- **[Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy.md)** - How credits scope per graph, and how subgraphs share the parent pool
+- **[AI Operators and MCP](AI-Operators-and-MCP.md)** - The AI Operators that consume credits, and the free MCP tool surface
+- **[Errors and Rate Limits](Errors-and-Rate-Limits.md)** - Rate-limit headers, 429 handling, and the insufficient-credits response
+- **[Architecture Overview](Architecture-Overview.md)** - Platform architecture, tiers, and the operations layer
 
 **Codebase Documentation:**
 - **[Billing Configuration](https://github.com/RoboFinSystems/robosystems/tree/main/robosystems/config/billing)** - Subscription plans, AI token pricing, and storage limits
@@ -271,6 +271,6 @@ just admin dev credits repos bonus <user_repository_id> --amount 500 --descripti
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

@@ -2,7 +2,7 @@
 
 Graph operations change a graph's lifecycle — subgraphs, backups, tier, materialization, metadata and deletion — through one command endpoint. This page covers each operation, the guards that refuse it, and how to follow a long-running one to completion.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Table of Contents
 
@@ -60,14 +60,14 @@ The rest move content and memory in and out of the graph, using the identical en
 
 `update-graph-metadata`, `delete-graph` and the content/memory operations are covered briefly in the [Operations Reference](#operations-reference).
 
-**Not on this surface:** `change-reporting-style` is a RoboLedger operation, not a graph-lifecycle one — it lives at `POST /extensions/roboledger/{graph_id}/operations/change-reporting-style`. See [RoboLedger Operations](RoboLedger-Operations).
+**Not on this surface:** `change-reporting-style` is a RoboLedger operation, not a graph-lifecycle one — it lives at `POST /extensions/roboledger/{graph_id}/operations/change-reporting-style`. See [RoboLedger Operations](RoboLedger-Operations.md).
 
 ## Prerequisites
 
 Before starting, ensure you have:
 
-- A RoboSystems account and an API key — see [Quick Start](Quick-Start)
-- A writable graph to act on — one you create in the app with **Create Graph** (see [Quick Start](Quick-Start)). Substitute your own `graph_id` everywhere `kg1a2b3c4d5e6f7a8b` appears below.
+- A RoboSystems account and an API key — see [Quick Start](Quick-Start.md)
+- A writable graph to act on — one you create in the app with **Create Graph** (see [Quick Start](Quick-Start.md)). Substitute your own `graph_id` everywhere `kg1a2b3c4d5e6f7a8b` appears below.
 - `jq` and `curl` on your path
 
 The shared `sec` repository is **read-only** — these operations are blocked on it. Use a graph you own.
@@ -113,19 +113,19 @@ Funneling every write through one envelope means the same idempotency, auditing,
 - **Synchronous** operations finish in the response body with `status: "completed"`. The `result` field carries the command's output.
 - **Asynchronous** operations enqueue work and return `status: "pending"`. You follow the operation's `operationId` over [SSE](#monitoring-progress-with-sse).
 
-The HTTP code is fixed per operation, not chosen by how the call ran: `create-backup`, `change-tier`, `materialize` and `delete-graph` always answer **202** — including a materialize dry run and a `delete-graph`, which come back `completed` — and the rest answer **200**, including a forked `create-subgraph`, which comes back `pending`. Either way, the response is an `OperationEnvelope`, and its `status` — not the HTTP code — says which you got. A request the operation refuses (validation, access, a conflict) is an HTTP error with a `detail` and `request_id` rather than an envelope; see [Operations Contract](Operations-Contract#when-an-operation-fails) and [Errors and Rate Limits](Errors-and-Rate-Limits).
+The HTTP code is fixed per operation, not chosen by how the call ran: `create-backup`, `change-tier`, `materialize` and `delete-graph` always answer **202** — including a materialize dry run and a `delete-graph`, which come back `completed` — and the rest answer **200**, including a forked `create-subgraph`, which comes back `pending`. Either way, the response is an `OperationEnvelope`, and its `status` — not the HTTP code — says which you got. A request the operation refuses (validation, access, a conflict) is an HTTP error with a `detail` and `request_id` rather than an envelope; see [Operations Contract](Operations-Contract.md#when-an-operation-fails) and [Errors and Rate Limits](Errors-and-Rate-Limits.md).
 
 ## The OperationEnvelope
 
-Every operation on this surface returns an `OperationEnvelope` — `operation`, `operationId`, `status` (`completed`, `pending`, or `failed`), `result`, `at`, `createdBy`, `idempotentReplay`, camelCase on the wire. The field reference, success and pending examples, and what a failure looks like (an HTTP error body for a refused request, an `operation_error` event for async work that fails later) are in [Operations Contract](Operations-Contract#the-operationenvelope).
+Every operation on this surface returns an `OperationEnvelope` — `operation`, `operationId`, `status` (`completed`, `pending`, or `failed`), `result`, `at`, `createdBy`, `idempotentReplay`, camelCase on the wire. The field reference, success and pending examples, and what a failure looks like (an HTTP error body for a refused request, an `operation_error` event for async work that fails later) are in [Operations Contract](Operations-Contract.md#the-operationenvelope).
 
 ## Idempotency
 
-Every operation accepts an optional `Idempotency-Key` header: a retry with the same key and body within 24 hours replays the original envelope with `idempotentReplay: true`, and the same key with a different body is a **409**. The full rules — scope, in-flight retries, and what happens after a failure — are in [Operations Contract](Operations-Contract#idempotency-key).
+Every operation accepts an optional `Idempotency-Key` header: a retry with the same key and body within 24 hours replays the original envelope with `idempotentReplay: true`, and the same key with a different body is a **409**. The full rules — scope, in-flight retries, and what happens after a failure — are in [Operations Contract](Operations-Contract.md#idempotency-key).
 
 ## Monitoring Progress with SSE
 
-Async operations are followed by `operationId` at `GET /v1/operations/{operation_id}/stream` (Server-Sent Events) or `GET /v1/operations/{operation_id}/status` (a snapshot). The event names, payloads, and reconnecting with `from_sequence` are in [Operations Contract](Operations-Contract#following-an-async-operation).
+Async operations are followed by `operationId` at `GET /v1/operations/{operation_id}/stream` (Server-Sent Events) or `GET /v1/operations/{operation_id}/status` (a snapshot). The event names, payloads, and reconnecting with `from_sequence` are in [Operations Contract](Operations-Contract.md#following-an-async-operation).
 
 ## Operations Reference
 
@@ -138,7 +138,7 @@ Adds a child graph under a parent. The resulting subgraph id is `{parent_graph_i
 - **Body:** `name` (alphanumeric, 1–20 chars, lowercased), `display_name` (required), optional `description`, `metadata`, `subgraph_type`, and `fork_parent`.
 - **The schema follows `subgraph_type`:** `static` (the default) gets the parent's base schema plus the parent's extensions, `knowledge` a knowledge-only schema, and `empty` a bare database. The request model also carries a `schema_extensions` field, but the operation does not read it — choose the schema with `subgraph_type`.
 - **Sync/async:** Creating an empty subgraph is **synchronous**. Setting `fork_parent: true` copies the parent's data and runs **asynchronously** — the envelope comes back `pending` (over HTTP 200) with an `operationId` to follow.
-- **Requires admin on the parent graph.** A name already in use is a **409**; a parent at its tier's subgraph cap, a tier with no subgraph capacity, or a shared repository is a **403**. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy#subgraphs).
+- **Requires admin on the parent graph.** A name already in use is a **409**; a parent at its tier's subgraph cap, a tier with no subgraph capacity, or a shared repository is a **403**. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy.md#subgraphs).
 
 ```bash
 curl -s -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e6f7a8b/operations/create-subgraph" \
@@ -200,7 +200,7 @@ Rebuilds the analytical graph (LadybugDB) from OLTP or staged source data. **Asy
 - **Body:** `source` (`staged` or `extensions`), `rebuild`, `force`, `dry_run`, `materialize_embeddings` — all four booleans default `false`.
 - **Omit `source` and it follows the graph type:** an entity graph materializes from the extensions database, a custom graph from its staged uploads. Naming the other one is a **400** — an entity graph cannot take `staged`, nor a custom graph `extensions`. An `extensions` run always rebuilds a graph that already exists, building the new copy alongside and swapping it in.
 - **Needs the `member` or `admin` role.** A viewer gets 403, as does a subgraph (subgraphs are written to directly, and a rebuild would discard those writes) and a shared repository.
-- **One at a time per graph.** While another materialization of the graph is running the call is a **409**; so is a staged run that would re-copy rows the graph already holds — pass `rebuild: true` (see [File Uploads](File-Uploads#auto-ingest-vs-batch)).
+- **One at a time per graph.** While another materialization of the graph is running the call is a **409**; so is a staged run that would re-copy rows the graph already holds — pass `rebuild: true` (see [File Uploads](File-Uploads.md#auto-ingest-vs-batch)).
 - **Tier limits apply.** A rebuild that would exceed the tier's limits is a **413**. When the platform cannot check them, or cannot take the per-graph lock, the call is a **503** — retry shortly.
 
 ```bash
@@ -220,7 +220,7 @@ curl -s -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e6f7a8b/operati
   -d '{"dry_run": true}'
 ```
 
-After a materialize completes, the rebuilt graph is queryable — see [Querying the Analytical Graph](Querying-the-Analytical-Graph).
+After a materialize completes, the rebuilt graph is queryable — see [Querying the Analytical Graph](Querying-the-Analytical-Graph.md).
 
 ### update-graph-metadata
 
@@ -231,7 +231,7 @@ Edits the graph's platform-level label — its display name, description and tag
 - **Requires admin on the graph** (403 otherwise). A shared repository's metadata is platform-managed and refuses with 403.
 - The `result` echoes the stored `graph_name`, `description` and `tags`, plus `updated_fields` — the fields this call actually changed, empty when the values already matched.
 
-This is not the entity name printed on financial statements; change that with the RoboLedger `update-entity` operation (see [RoboLedger Operations](RoboLedger-Operations)).
+This is not the entity name printed on financial statements; change that with the RoboLedger `update-entity` operation (see [RoboLedger Operations](RoboLedger-Operations.md)).
 
 ```bash
 curl -s -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e6f7a8b/operations/update-graph-metadata" \
@@ -253,8 +253,8 @@ Deletes the graph itself. **Synchronous** in the envelope — it comes back `com
 The content and memory operations share the surface and the contract, and all but `ingest-file` are synchronous:
 
 - **`create-file-upload` / `ingest-file` / `delete-file`** — the staging-file path: presign an upload target, stage the uploaded file into a columnar table, then `materialize` to move it into the graph.
-- **`index-document` / `delete-document`** — add and remove documents in the search index. See [Search and AI Retrieval](Search-and-AI-Retrieval).
-- **`remember` / `update-memory` / `forget`** — the per-graph semantic memory store an Operator writes to. See [AI Operators and MCP](AI-Operators-and-MCP).
+- **`index-document` / `delete-document`** — add and remove documents in the search index. See [Search and AI Retrieval](Search-and-AI-Retrieval.md).
+- **`remember` / `update-memory` / `forget`** — the per-graph semantic memory store an Operator writes to. See [AI Operators and MCP](AI-Operators-and-MCP.md).
 
 Two of these families are refused on a subgraph with 403: the staging-file path (`create-file-upload`, `ingest-file`), because a staging rebuild would discard the subgraph's direct writes, and `remember` / `update-memory`, because memory lives on the parent graph. `delete-file` and `forget` stay open on a subgraph, so anything stored there earlier can still be removed.
 
@@ -439,7 +439,7 @@ The key is bound to the first body it saw. Change the body and you get a **409 C
 
 ### A Subgraph Cannot Be Materialized
 
-`materialize` returns **403** on a subgraph. A subgraph is written to directly, and a rebuild would discard those writes; load data into a subgraph with Cypher or the MCP schema tools instead (see [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy#where-writes-go)).
+`materialize` returns **403** on a subgraph. A subgraph is written to directly, and a rebuild would discard those writes; load data into a subgraph with Cypher or the MCP schema tools instead (see [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy.md#where-writes-go)).
 
 ### compression Must Be true
 
@@ -458,13 +458,13 @@ just lbug-query sec "MATCH (e:Entity) RETURN e.name LIMIT 10"
 
 ## Related Documentation
 
-**Wiki Guides:**
+**Guides:**
 
-- **[Operations Contract](Operations-Contract)** - The envelope, `Idempotency-Key`, and SSE progress contract every operation here follows
-- **[Errors and Rate Limits](Errors-and-Rate-Limits)** - Error bodies, status codes, and rate-limit headers
-- **[Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy)** - What `graph_id`, subgraphs, tiers, and shared repositories are — the things these operations act on
-- **[Querying the Analytical Graph](Querying-the-Analytical-Graph)** - Query the LadybugDB graph after a `materialize` rebuilds it
-- **[RoboLedger Operations](RoboLedger-Operations)** - The extensions analogue of this surface (`POST /extensions/roboledger/{g}/operations/{op}`), using the same `OperationEnvelope` and `Idempotency-Key` contract
+- **[Operations Contract](Operations-Contract.md)** - The envelope, `Idempotency-Key`, and SSE progress contract every operation here follows
+- **[Errors and Rate Limits](Errors-and-Rate-Limits.md)** - Error bodies, status codes, and rate-limit headers
+- **[Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy.md)** - What `graph_id`, subgraphs, tiers, and shared repositories are — the things these operations act on
+- **[Querying the Analytical Graph](Querying-the-Analytical-Graph.md)** - Query the LadybugDB graph after a `materialize` rebuilds it
+- **[RoboLedger Operations](RoboLedger-Operations.md)** - The extensions analogue of this surface (`POST /extensions/roboledger/{g}/operations/{op}`), using the same `OperationEnvelope` and `Idempotency-Key` contract
 
 **Codebase Documentation:**
 
@@ -478,6 +478,6 @@ just lbug-query sec "MATCH (e:Entity) RETURN e.name LIMIT 10"
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

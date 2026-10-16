@@ -3,11 +3,11 @@
 RoboSystems uses [Dagster](https://dagster.io) to orchestrate every pipeline that feeds the knowledge graph: SEC XBRL filings, connector syncs, and ledger writes. Data flows from external sources through adapters and DuckDB staging into the knowledge graph (LadybugDB); connector data reaches the graph by way of the extensions PostgreSQL database.
 
 **Related documentation:**
-- [Architecture Overview](Architecture-Overview) - System architecture
-- [Bootstrap Guide](Bootstrap-Guide) - Deployment instructions
-- [Custom Graph Schema](Custom-Graph-Schema) - Define a custom graph schema and load data into it through the staging path
-- [Building Custom Integrations](Building-Custom-Integrations) - Connect a custom data source through the public API, outside the core
-- [SEC XBRL Pipeline](SEC-XBRL-Pipeline) - The SEC ingestion pipeline in depth
+- [Architecture Overview](Architecture-Overview.md) - System architecture
+- [Bootstrap Guide](Bootstrap-Guide.md) - Deployment instructions
+- [Custom Graph Schema](Custom-Graph-Schema.md) - Define a custom graph schema and load data into it through the staging path
+- [Building Custom Integrations](Building-Custom-Integrations.md) - Connect a custom data source through the public API, outside the core
+- [SEC XBRL Pipeline](SEC-XBRL-Pipeline.md) - The SEC ingestion pipeline in depth
 
 ---
 
@@ -20,7 +20,7 @@ RoboSystems uses [Dagster](https://dagster.io) to orchestrate every pipeline tha
 | Mercury    | Off by default   | `CONNECTION_MERCURY_ENABLED`    | [Bank feed](#bank-feeds-mercury-plaid), then C |
 | Plaid      | Off by default   | `CONNECTION_PLAID_ENABLED`      | [Bank feed](#bank-feeds-mercury-plaid), then C |
 
-`dagster/definitions.py` loads a pipeline's assets and jobs only when its flag is on. The code defaults are on for SEC and QuickBooks and off for the two bank feeds; a fresh deployment seeded by `just setup-aws` starts with all four off (see [Bootstrap Guide → Turn on what you need](Bootstrap-Guide#turn-on-what-you-need)).
+`dagster/definitions.py` loads a pipeline's assets and jobs only when its flag is on. The code defaults are on for SEC and QuickBooks and off for the two bank feeds; a fresh deployment seeded by `just setup-aws` starts with all four off (see [Bootstrap Guide → Turn on what you need](Bootstrap-Guide.md#turn-on-what-you-need)).
 
 One more connector is live but is not a pipeline in this sense: **`external`** ("External Integration") registers a source namespace on a graph for an integration the platform does not run. It is registration and telemetry rather than execution config — the integration itself runs outside the platform, holds its own source credentials, and writes through the public API. That is the connector side of the [integration lane](#adding-custom-data-sources) below; the implementation is `operations/providers/external_provider.py`.
 
@@ -79,7 +79,7 @@ Extensions PostgreSQL → postgres_scanner → DuckDB Staging → LadybugDB
 - **Trigger**: Event-driven rather than scheduled. Each write calls `mark_graph_stale`; the stale-graph sensor (`dagster/sensors/materialization.py`) batches bursts of writes — it waits for them to settle, a few minutes at most — and submits one materialization. `POST /v1/graphs/{graph_id}/operations/materialize` runs one on demand
 - **Blue-green**: an existing graph is rebuilt whole into a fresh copy and swapped in, so readers never see a half-built graph; a graph's first build goes in place
 - **No Parquet intermediate**: DuckDB's `postgres_scanner` reads the extensions schema directly — each staging table is a `CREATE TABLE ... AS SELECT ... FROM postgres_scan(...)` shaped to the graph schema — skipping the S3 round-trip Pattern A needs
-- **Not an adapter**: there's no `adapters/extensions/` directory — this pipeline is platform-internal. The materializer is `operations/extensions/materialize.py`, beside `loader.py` (the connector load) and `staleness.py`; see also [RoboLedger Operations](RoboLedger-Operations)
+- **Not an adapter**: there's no `adapters/extensions/` directory — this pipeline is platform-internal. The materializer is `operations/extensions/materialize.py`, beside `loader.py` (the connector load) and `staleness.py`; see also [RoboLedger Operations](RoboLedger-Operations.md)
 
 ---
 
@@ -176,7 +176,7 @@ carries the sizes, and it has been resized more than once.
 
 ## Adding a Shared Repository
 
-> The consumer-facing concept — the `ladybug-shared` tier, subscription plans, and how a user subscribes to and queries a shared repository — is covered in [Shared Repositories](Shared-Repositories). This section is the producer side: defining one.
+> The consumer-facing concept — the `ladybug-shared` tier, subscription plans, and how a user subscribes to and queries a shared repository — is covered in [Shared Repositories](Shared-Repositories.md). This section is the producer side: defining one.
 
 Shared repositories (like SEC) are defined by adapter manifests. Each manifest declares everything about a repo: identity, data source, schema, rate limits, plans/pricing, endpoint access, and credit costs.
 
@@ -193,7 +193,7 @@ See [PR #308](https://github.com/RoboFinSystems/robosystems/pull/308) and [RFC #
 
 ## Adding Custom Data Sources
 
-**The supported route is an integration, not an in-core adapter**: a program in its own repository that writes through the public API — see [Building Custom Integrations](Building-Custom-Integrations) and the [`robosystems-integration-template`](https://github.com/RoboFinSystems/robosystems-integration-template). Integrations survive every platform release, work against managed and self-hosted deployments alike, and need no fork. The in-core adapter registry (this page's pipelines) is maintained exclusively by the platform team — platform-operated deployments run an unmodified core.
+**The supported route is an integration, not an in-core adapter**: a program in its own repository that writes through the public API — see [Building Custom Integrations](Building-Custom-Integrations.md) and the [`robosystems-integration-template`](https://github.com/RoboFinSystems/robosystems-integration-template). Integrations survive every platform release, work against managed and self-hosted deployments alike, and need no fork. The in-core adapter registry (this page's pipelines) is maintained exclusively by the platform team — platform-operated deployments run an unmodified core.
 
 For **self-hosted forks only**, the `custom_*/` namespace remains available as a merge boundary for in-core additions:
 
@@ -207,7 +207,7 @@ See the [Adapters README](https://github.com/RoboFinSystems/robosystems/blob/mai
 
 ## Unified Ingestion Pattern
 
-All pipelines use DuckDB staging regardless of source. Parquet in S3 — the SEC pipeline, and files uploaded to a graph through the [staging path](Custom-Graph-Schema) — enters staging through `httpfs`; the extensions database (Pattern C, which carries QuickBooks, the bank feeds and every ledger write) enters through `postgres_scanner`.
+All pipelines use DuckDB staging regardless of source. Parquet in S3 — the SEC pipeline, and files uploaded to a graph through the [staging path](Custom-Graph-Schema.md) — enters staging through `httpfs`; the extensions database (Pattern C, which carries QuickBooks, the bank feeds and every ledger write) enters through `postgres_scanner`.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐

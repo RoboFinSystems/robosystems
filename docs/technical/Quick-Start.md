@@ -4,7 +4,7 @@ Create a RoboSystems account and API key, get a graph, and run your first authen
 
 **Quick Start:** Create an account at [robosystems.ai](https://robosystems.ai/register), create an API key under **Settings → API keys**, and send it as the `X-API-Key` header to `https://api.robosystems.ai/v1/graphs`.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Overview
 
@@ -57,7 +57,7 @@ The key is a string beginning with `rfs`, and it is **shown once**. Copy it into
 export ROBOSYSTEMS_API_KEY=rfs...
 ```
 
-Every example in this wiki reads the key from `$ROBOSYSTEMS_API_KEY`, the same variable the [RoboSystems MCP client](https://github.com/RoboFinSystems/robosystems-mcp-client) uses. Revoke a key at any time from the same page.
+Every example in these docs reads the key from `$ROBOSYSTEMS_API_KEY`, the same variable the [RoboSystems MCP client](https://github.com/RoboFinSystems/robosystems-mcp-client) uses. Revoke a key at any time from the same page.
 
 Confirm the key works by fetching your user:
 
@@ -76,7 +76,7 @@ curl -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
 }
 ```
 
-Without a key the API answers `401` with `{"detail": "Authentication required"}`, and with a key it does not accept, `401` with `{"detail": "Invalid API key"}`. For rotation, key scopes, and the `X-API-Key` vs JWT boundary, see [Authentication and API Keys](Authentication-and-API-Keys).
+Without a key the API answers `401` with `{"detail": "Authentication required"}`, and with a key it does not accept, `401` with `{"detail": "Invalid API key"}`. For rotation, key scopes, and the `X-API-Key` vs JWT boundary, see [Authentication and API Keys](Authentication-and-API-Keys.md).
 
 ## Step 3: Get a Graph
 
@@ -86,9 +86,9 @@ Graphs are the multi-tenant unit of data in RoboSystems. Each is a dedicated gra
 | --- | --- | --- |
 | **Create a graph** | **Create Graph** on the app's Home page or in the graph selector | An empty graph you load with your own data, on the tier you choose. |
 | **Connect your books** | [roboledger.ai](https://roboledger.ai) | A RoboLedger graph populated from QuickBooks. See [Connect your books](https://roboledger.ai/docs/connect-your-books). |
-| **Subscribe to SEC filings** | **Repositories** in the app | Read access to the shared `sec` repository of public-company XBRL filings. See [Shared Repositories](Shared-Repositories). |
+| **Subscribe to SEC filings** | **Repositories** in the app | Read access to the shared `sec` repository of public-company XBRL filings. See [Shared Repositories](Shared-Repositories.md). |
 
-`POST /v1/graphs` creates a graph over the API too. It is asynchronous — it returns `202 Accepted` with an `OperationEnvelope` whose `operation_id` you follow to completion — and it answers `402 payment_required` if the organization has no payment method, or `403 graph_creation_requires_admin` if you are not an owner or admin. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy).
+`POST /v1/graphs` creates a graph over the API too. It is asynchronous — it returns `202 Accepted` with an `OperationEnvelope` whose `operation_id` you follow to completion — and it answers `402 payment_required` if the organization has no payment method, or `403 graph_creation_requires_admin` if you are not an owner or admin. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy.md).
 
 List your graphs with `GET /v1/graphs`:
 
@@ -152,7 +152,7 @@ curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/query/cypher" \
   -d '{"query": "MATCH (n) WHERE n.name = $name RETURN n LIMIT 5", "parameters": {"name": "Operating Expenses"}}'
 ```
 
-**Note:** Main graphs are **read-only** through `/query/cypher` — you load data through ingestion (file uploads, connectors, or integrations), and only subgraphs accept writes. See [Querying the Analytical Graph](Querying-the-Analytical-Graph) for the query surface and [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy) for the read-vs-write model.
+**Note:** Main graphs are **read-only** through `/query/cypher` — you load data through ingestion (file uploads, connectors, or integrations), and only subgraphs accept writes. See [Querying the Analytical Graph](Querying-the-Analytical-Graph.md) for the query surface and [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy.md) for the read-vs-write model.
 
 ## Step 5: Connect an AI Client
 
@@ -168,17 +168,17 @@ In Claude Code:
 claude mcp add --transport http robosystems https://api.robosystems.ai/v1/mcp
 ```
 
-The app's **MCP** page builds a ready-made connector for your graph, and [AI Operators and MCP](AI-Operators-and-MCP) covers every client — Claude, ChatGPT, Cursor, VS Code — along with the per-graph address, `https://api.robosystems.ai/v1/graphs/{graph_id}/mcp`, for clients that cannot run OAuth: they send an API key in the `X-API-Key` header, never in the URL, and a key scoped to that one graph is the one to give them.
+The app's **MCP** page builds a ready-made connector for your graph, and [AI Operators and MCP](AI-Operators-and-MCP.md) covers every client — Claude, ChatGPT, Cursor, VS Code — along with the per-graph address, `https://api.robosystems.ai/v1/graphs/{graph_id}/mcp`, for clients that cannot run OAuth: they send an API key in the `X-API-Key` header, never in the URL, and a key scoped to that one graph is the one to give them.
 
 ## Load Your Data
 
 An empty graph becomes useful once data flows into it. Pick the route that matches your source:
 
-- **Files** — upload Parquet, CSV, or JSON node and relationship data into a custom graph: [File Uploads](File-Uploads).
-- **Documents** — add policies, procedures, and notes as markdown for search and AI retrieval: [Document Management](Document-Management).
-- **Accounting data** — connect QuickBooks through [RoboLedger](https://roboledger.ai/docs), or write ledger entries through [RoboLedger Operations](RoboLedger-Operations).
-- **Your own systems** — the SDKs, [`robosystems-client`](https://pypi.org/project/robosystems-client/) for Python and [`@robosystems/client`](https://www.npmjs.com/package/@robosystems/client) for TypeScript, and the patterns in [Building Custom Integrations](Building-Custom-Integrations).
-- **Next:** post events from your own system into a ledger with [Build a Ledger Integration](Build-a-Ledger-Integration), and read [Operations Contract](Operations-Contract) for the envelope and retry rules every write shares.
+- **Files** — upload Parquet, CSV, or JSON node and relationship data into a custom graph: [File Uploads](File-Uploads.md).
+- **Documents** — add policies, procedures, and notes as markdown for search and AI retrieval: [Document Management](Document-Management.md).
+- **Accounting data** — connect QuickBooks through [RoboLedger](https://roboledger.ai/docs), or write ledger entries through [RoboLedger Operations](RoboLedger-Operations.md).
+- **Your own systems** — the SDKs, [`robosystems-client`](https://pypi.org/project/robosystems-client/) for Python and [`@robosystems/client`](https://www.npmjs.com/package/@robosystems/client) for TypeScript, and the patterns in [Building Custom Integrations](Building-Custom-Integrations.md).
+- **Next:** post events from your own system into a ledger with [Build a Ledger Integration](Build-a-Ledger-Integration.md), and read [Operations Contract](Operations-Contract.md) for the envelope and retry rules every write shares.
 
 ## Troubleshooting
 
@@ -204,17 +204,17 @@ curl -H "X-API-Key: $ROBOSYSTEMS_API_KEY" https://api.robosystems.ai/v1/user
 
 ### Write Query Rejected on a Main Graph
 
-**Solution:** Main graphs are read-only through `/query/cypher`. Load data through ingestion, or run writes against a subgraph. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy).
+**Solution:** Main graphs are read-only through `/query/cypher`. Load data through ingestion, or run writes against a subgraph. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy.md).
 
 ## Related Documentation
 
-**Wiki Guides:**
+**Guides:**
 
-- **[Core Concepts](Core-Concepts)** - The vocabulary: graphs, tiers, blocks, operators, operational vs analytical
-- **[Authentication and API Keys](Authentication-and-API-Keys)** - Key scopes, rotation, and the `X-API-Key` vs JWT boundary
-- **[Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy)** - `graph_id`, main graphs vs subgraphs, read-vs-write semantics, repositories
-- **[AI Operators and MCP](AI-Operators-and-MCP)** - Connecting AI clients and the retrieval planes behind them
-- **[Local Development](Local-Development)** - Run the whole platform on your own machine
+- **[Core Concepts](Core-Concepts.md)** - The vocabulary: graphs, tiers, blocks, operators, operational vs analytical
+- **[Authentication and API Keys](Authentication-and-API-Keys.md)** - Key scopes, rotation, and the `X-API-Key` vs JWT boundary
+- **[Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy.md)** - `graph_id`, main graphs vs subgraphs, read-vs-write semantics, repositories
+- **[AI Operators and MCP](AI-Operators-and-MCP.md)** - Connecting AI clients and the retrieval planes behind them
+- **[Local Development](Local-Development.md)** - Run the whole platform on your own machine
 
 **Reference:**
 
@@ -224,6 +224,6 @@ curl -H "X-API-Key: $ROBOSYSTEMS_API_KEY" https://api.robosystems.ai/v1/user
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

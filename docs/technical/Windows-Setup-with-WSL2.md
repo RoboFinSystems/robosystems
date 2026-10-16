@@ -2,13 +2,13 @@
 
 Run the RoboSystems stack on Windows through WSL2, with the repository stored inside the Linux filesystem rather than on a Windows drive. RoboSystems is developed and tested on macOS and Linux, and **WSL2 with the repository in the Linux filesystem** is the supported Windows path — it makes your environment the Linux environment we already test, rather than a third platform.
 
-**Quick Start:** Run `wsl --install` in an admin PowerShell, enable Docker Desktop's WSL integration, clone the repo to `~/` **inside** the distro (never `/mnt/c`), install `uv`, `just`, and `jq`, then follow the normal [Local Development](Local-Development) guide.
+**Quick Start:** Run `wsl --install` in an admin PowerShell, enable Docker Desktop's WSL integration, clone the repo to `~/` **inside** the distro (never `/mnt/c`), install `uv`, `just`, and `jq`, then follow the normal [Local Development](Local-Development.md) guide.
 
 ## Why WSL2 rather than native Windows
 
 The stack leans on POSIX conventions in a few places that are load-bearing rather than cosmetic: the `just` recipes assume a POSIX shell, several shell scripts are executed inside Linux containers, and the graph and staging engines (LadybugDB, DuckDB) do file locking against paths that must not cross a Windows/Linux filesystem boundary.
 
-WSL2 removes all of that as a category of problem. Inside the distro you are running Linux, the container bind mounts are ext4, and every command in the wiki works verbatim. Native Windows is a best-effort configuration — see [Running natively on Windows](#running-natively-on-windows) at the end for what to expect.
+WSL2 removes all of that as a category of problem. Inside the distro you are running Linux, the container bind mounts are ext4, and every command in these docs works verbatim. Native Windows is a best-effort configuration — see [Running natively on Windows](#running-natively-on-windows) at the end for what to expect.
 
 ## Prerequisites
 
@@ -101,7 +101,7 @@ Inside WSL:
 # uv — Python package and version management
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# just — the task runner used throughout the wiki
+# just — the task runner used throughout these docs
 curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | \
   sudo bash -s -- --to /usr/local/bin
 
@@ -117,7 +117,7 @@ uv --version && just --version && jq --version && docker version
 
 ## Step 6: Follow the standard Quick Start
 
-From here, nothing is Windows-specific. Every command in the rest of the wiki works verbatim:
+From here, nothing is Windows-specific. Every command in the rest of these docs works verbatim:
 
 ```bash
 just start
@@ -125,7 +125,7 @@ just demo-user
 just demo-custom-graph
 ```
 
-See [Local Development](Local-Development) for the full walkthrough.
+See [Local Development](Local-Development.md) for the full walkthrough.
 
 ## Working with the stack from Windows
 
@@ -180,6 +180,6 @@ If you hit something not listed here, please [open an issue](https://github.com/
 
 ## Related
 
-- [Local Development](Local-Development) — the standard walkthrough, which works verbatim inside WSL2
-- [Core Concepts](Core-Concepts) — what the platform does once it is running
-- [Bootstrap Guide](Bootstrap-Guide) — AWS setup, if you intend to deploy your own fork
+- [Local Development](Local-Development.md) — the standard walkthrough, which works verbatim inside WSL2
+- [Core Concepts](Core-Concepts.md) — what the platform does once it is running
+- [Bootstrap Guide](Bootstrap-Guide.md) — AWS setup, if you intend to deploy your own fork

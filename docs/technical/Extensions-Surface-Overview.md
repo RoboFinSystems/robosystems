@@ -2,7 +2,7 @@
 
 The extensions surface is the read/write API layer for RoboSystems product extensions (RoboLedger and RoboInvestor). It sits beside the core `/v1` platform API under a single `/extensions/*` prefix, and everything on it is graph-scoped at the URL.
 
-> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development).
+> **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
 ## Table of Contents
 
@@ -99,7 +99,7 @@ Because the schema is built at construction time, a ledger-only deployment liter
 
 ## The OperationEnvelope Contract
 
-Command writes and analytical view operations return the same `OperationEnvelope`, and accept the same `Idempotency-Key` header, as the graph lifecycle operations under `/v1/graphs/{graph_id}/operations/{op_name}`; long-running commands return `status: "pending"` and are followed over SSE. The views in `views.py` accept the key and don't replay on it: a read has nothing to deduplicate, so each call runs fresh. The field reference, idempotency rules, failure shapes, and progress events are in [Operations Contract](Operations-Contract).
+Command writes and analytical view operations return the same `OperationEnvelope`, and accept the same `Idempotency-Key` header, as the graph lifecycle operations under `/v1/graphs/{graph_id}/operations/{op_name}`; long-running commands return `status: "pending"` and are followed over SSE. The views in `views.py` accept the key and don't replay on it: a read has nothing to deduplicate, so each call runs fresh. The field reference, idempotency rules, failure shapes, and progress events are in [Operations Contract](Operations-Contract.md).
 
 ## One Invariant: The Ops Layer Is the Single Source of Truth
 
@@ -114,7 +114,7 @@ This invariant is load-bearing: whether a request arrives through GraphQL, a nam
 
 ## Worked Examples
 
-All examples assume an API key and a RoboLedger graph — see [Quick Start](Quick-Start) for getting both. Set them once:
+All examples assume an API key and a RoboLedger graph — see [Quick Start](Quick-Start.md) for getting both. Set them once:
 
 ```bash
 export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
@@ -143,7 +143,7 @@ curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
   -d '{"query": "{ fiscalCalendar { closedThrough closeTarget } entity { name } }"}'
 ```
 
-GraphQL list resolvers take `limit` (per-resolver default, must be 1–1000) and `offset` (default 0, must be ≥ 0). A success returns `{"data": {...}}`; a typed error returns `{"errors": [{"extensions": {"code": "..."}}]}`. Clients should branch on `extensions.code` (for example `UNAUTHENTICATED`, `INVALID_PAGINATION`, `EXTENSION_NOT_PROVISIONED`, `LEDGER_NOT_INITIALIZED`, `INVESTOR_NOT_INITIALIZED`), not on the human-readable message. A valid key without access to the graph never gets that far: it is refused with **HTTP 403** before the query runs, with no GraphQL error body. The full code list is in [GraphQL Reads](GraphQL-Reads#error-surface).
+GraphQL list resolvers take `limit` (per-resolver default, must be 1–1000) and `offset` (default 0, must be ≥ 0). A success returns `{"data": {...}}`; a typed error returns `{"errors": [{"extensions": {"code": "..."}}]}`. Clients should branch on `extensions.code` (for example `UNAUTHENTICATED`, `INVALID_PAGINATION`, `EXTENSION_NOT_PROVISIONED`, `LEDGER_NOT_INITIALIZED`, `INVESTOR_NOT_INITIALIZED`), not on the human-readable message. A valid key without access to the graph never gets that far: it is refused with **HTTP 403** before the query runs, with no GraphQL error body. The full code list is in [GraphQL Reads](GraphQL-Reads.md#error-surface).
 
 ### Command Write — Close a Period
 
@@ -214,14 +214,14 @@ For the exact request-body fields of any operation, consult the [extensions API 
 
 ## Related Documentation
 
-**Wiki Guides:**
-- **[Architecture Overview](Architecture-Overview)** - Platform architecture; its "Extensions API" subsection is the parent context for this page
-- **[Operations Contract](Operations-Contract)** - The envelope, idempotency, and progress-streaming contract shared by every operation
-- **[Errors and Rate Limits](Errors-and-Rate-Limits)** - Error bodies, status codes, and rate-limit headers
-- **[GraphQL Reads](GraphQL-Reads)** - Deep dive on the typed read surface and field catalog
-- **[RoboLedger Operations](RoboLedger-Operations)** - The RoboLedger command operation catalog
-- **[RoboInvestor Operations](RoboInvestor-Operations)** - The RoboInvestor command operation catalog
-- **[RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough)** - End-to-end close and reporting workflow against synthetic data
+**Guides:**
+- **[Architecture Overview](Architecture-Overview.md)** - Platform architecture; its "Extensions API" subsection is the parent context for this page
+- **[Operations Contract](Operations-Contract.md)** - The envelope, idempotency, and progress-streaming contract shared by every operation
+- **[Errors and Rate Limits](Errors-and-Rate-Limits.md)** - Error bodies, status codes, and rate-limit headers
+- **[GraphQL Reads](GraphQL-Reads.md)** - Deep dive on the typed read surface and field catalog
+- **[RoboLedger Operations](RoboLedger-Operations.md)** - The RoboLedger command operation catalog
+- **[RoboInvestor Operations](RoboInvestor-Operations.md)** - The RoboInvestor command operation catalog
+- **[RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough.md)** - End-to-end close and reporting workflow against synthetic data
 
 **Codebase Documentation:**
 - **[GraphQL Extensions](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)** - Strawberry GraphQL surface, Pydantic auto-derivation, and resolver patterns
@@ -233,6 +233,6 @@ For the exact request-body fields of any operation, consult the [extensions API 
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Technical docs](Home.md)
 - [Projects](https://github.com/orgs/RoboFinSystems/projects)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)
