@@ -1803,7 +1803,8 @@ def _emit_noncash_and_settlement_facts(
   looked through to that bill's entry: the share of the payment that settles
   investing or financing lines takes those lines' default flows, and comes
   out of the payable's delta. In a cash sale, a gain on a concept the cash
-  flow presents joins the proceeds. A tagged entry is the explicit pass's.
+  flow presents joins the proceeds. A tagged entry's flow is the explicit
+  pass's; its tagged working-capital lines come out of their deltas here.
 
   Returns the ids of the flows emitted, and a warning per period in which
   payments to payables carry no link while a bill with investing or
@@ -2047,6 +2048,13 @@ def _emit_noncash_and_settlement_facts(
       continue
 
     if not untagged:
+      # The explicit pass already took the tagged cash into its flow, so a
+      # payable or receivable it settles comes out of that account's delta;
+      # otherwise the bill's back-out above leaves the payment counted twice.
+      for line in lines:
+        if line.tagged and line.kind == "working":
+          for column in columns:
+            _add(working_leaf[line.concept_id], column, line.net)
       continue
 
     bill = settled.get(discharges.get(entry_key, ""))
@@ -2112,28 +2120,52 @@ def _emit_noncash_and_settlement_facts(
       if lines and not any(ln.kind == "cash" for ln in lines):
         _hold_bill(earlier_event[entry_key], lines, earlier_posted[entry_key], [])
 
-  # What each bill's linked payments had settled by a date.
-  payments: dict[str, list[tuple[date, int]]] = {}
+  # What each bill's linked payments settled, and when: only their payable
+  # lines count (a payment through a clearing account carries another
+  # working line), and one with no cash line settled the bill in kind.
+  payments: dict[str, list[tuple[date, int, bool]]] = {}
   if bills:
+    settling: dict[str, tuple[str, date, int, bool]] = {}
     for row in _lines("ev.discharges_event_id = ANY(:events)", events=sorted(bills)):
       line = _classify(row)
-      if line is not None and line.kind == "working":
-        payments.setdefault(str(row.discharges_event_id), []).append(
-          (row.posting_date, line.net)
-        )
+      if line is None:
+        continue
+      event_id, posted, paid, cash = settling.get(
+        str(row.entry_id), (str(row.discharges_event_id), row.posting_date, 0, False)
+      )
+      if line.kind == "working" and line.concept_id in payable_concepts:
+        paid += line.net
+      settling[str(row.entry_id)] = (
+        event_id,
+        posted,
+        paid,
+        cash or line.kind == "cash",
+      )
+    for event_id, posted, paid, cash in settling.values():
+      payments.setdefault(event_id, []).append((posted, paid, cash))
 
   def _unpaid(event_id: str, bill: _Bill, on: date) -> float:
-    paid = sum(net for posted, net in payments.get(event_id, ()) if posted <= on)
+    paid = sum(net for posted, net, _ in payments.get(event_id, ()) if posted <= on)
     return max(0.0, 1.0 - paid / bill.payable)
 
   capex_unpaid_id = element_ids.get(_CF_CAPEX_UNPAID_QNAME)
   for event_id, bill in bills.items():
-    if not bill.capex or capex_unpaid_id is None:
+    if not bill.capex:
       continue
-    for column in bill.columns:
-      _add(
-        str(capex_unpaid_id), column, bill.capex * _unpaid(event_id, bill, column.end)
-      )
+    if capex_unpaid_id is not None:
+      for column in bill.columns:
+        _add(
+          str(capex_unpaid_id),
+          column,
+          bill.capex * _unpaid(event_id, bill, column.end),
+        )
+    if acquisition_id is not None:
+      for posted, paid, cash in payments.get(event_id, ()):
+        if cash:
+          continue
+        for column in periods:
+          if column.start <= posted <= column.end:
+            _add(str(acquisition_id), column, bill.capex * paid / bill.payable)
 
   warnings: list[str] = []
   for column in periods:

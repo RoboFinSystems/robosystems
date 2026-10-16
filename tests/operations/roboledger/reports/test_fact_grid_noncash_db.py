@@ -46,6 +46,7 @@ REPAYMENTS = "rs-gaap:RepaymentsOfLongTermDebt"
 CAPEX = "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment"
 PPE_PROCEEDS = "rs-gaap:ProceedsFromSaleOfPropertyPlantAndEquipment"
 DISPOSAL_GAIN = "rs-gaap:GainLossOnDispositionOfAssets"
+OTHER_INVESTMENTS = "rs-gaap:PaymentsToAcquireOtherInvestments"
 NET_CHANGE = "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
 
 ACCOUNTS = {
@@ -55,6 +56,7 @@ ACCOUNTS = {
   "equipment": ("rs-gaap:PropertyPlantAndEquipmentGross", "debit", "instant"),
   "credit_line": ("rs-gaap:OtherLiabilitiesNoncurrent", "credit", "instant"),
   "metals": ("rs-gaap:OtherAssetsNoncurrent", "debit", "instant"),
+  "clearing": ("rs-gaap:OtherAssetsCurrent", "debit", "instant"),
   "capital": ("rs-gaap:AdditionalPaidInCapital", "credit", "instant"),
   "revenue": (
     "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
@@ -135,7 +137,7 @@ def _seed() -> dict[str, str]:
         )
       )
       ids[key] = account.id
-    for qname in (REPAYMENTS, CAPEX):
+    for qname in (REPAYMENTS, CAPEX, OTHER_INVESTMENTS):
       ids[qname] = str(
         session.execute(select(Element.id).where(Element.qname == qname)).scalar_one()
       )
@@ -306,6 +308,7 @@ def test_a_tagged_payment_keeps_its_tag(tenant):
   cf = _cash_flow(tenant)
   assert cf[REPAYMENTS] == -1000.0
   assert CAPEX not in cf
+  _assert_no_reconciling_adjustment(cf)
 
 
 def test_a_cash_sale_at_a_gain_puts_all_the_cash_in_investing(tenant):
@@ -500,5 +503,65 @@ def test_a_mixed_entry_keeps_the_cash_flow_footed(tenant):
     ],
   )
   cf = _cash_flow(tenant)
+  assert cf.get(OPERATING, 0.0) == 0.0
+  _assert_no_reconciling_adjustment(cf)
+
+
+def test_a_tagged_payment_of_a_capex_bill_is_counted_once(tenant):
+  """The Harbinger gold purchase: bought on a bill, the payment's lines
+  tagged by hand. The bill's payable is backed out as a non-cash acquisition;
+  the tagged payment's payable must come out too, or the cash is in
+  operating and investing both."""
+  bill = _event("bill_received")
+  _post(tenant, [("metals", 11000, 0), ("payable", 0, 11000)], event_id=bill)
+  payment = _event("bill_paid", discharges=bill)
+  _post(
+    tenant,
+    [
+      ("payable", 11000, 0, OTHER_INVESTMENTS),
+      ("cash", 0, 11000, OTHER_INVESTMENTS),
+    ],
+    posted=date(2026, 1, 29),
+    event_id=payment,
+  )
+  cf = _cash_flow(tenant)
+  assert cf[OTHER_INVESTMENTS] == -11000.0
+  assert cf.get(OPERATING, 0.0) == 0.0
+  assert cf.get(PAYABLES_ROW, 0.0) == 0.0
+  _assert_no_reconciling_adjustment(cf)
+
+
+def test_a_tagged_payment_of_an_expense_bill_moves_the_cash_to_its_flow(tenant):
+  """A person tags a payable's payment as investing: the tag wins, and the
+  cash is in investing once."""
+  _post(tenant, [("interest", 500, 0), ("payable", 0, 500)])
+  _post(
+    tenant,
+    [("payable", 500, 0, CAPEX), ("cash", 0, 500, CAPEX)],
+    posted=date(2026, 1, 20),
+  )
+  cf = _cash_flow(tenant)
+  assert cf[CAPEX] == -500.0
+  assert cf[NET_CHANGE] == -500.0
+  _assert_no_reconciling_adjustment(cf)
+
+
+def test_a_bill_settled_through_clearing_is_a_noncash_acquisition(tenant):
+  """The Harbinger platinum: silver sold into a clearing account, platinum
+  bought on a bill, the bill settled from clearing. No cash moves; the
+  platinum is acquired in kind, not capex awaiting payment."""
+  _post(tenant, [("clearing", 6000, 0), ("metals", 0, 6000)], posted=date(2026, 1, 10))
+  bill = _event("bill_received")
+  _post(tenant, [("metals", 6000, 0), ("payable", 0, 6000)], event_id=bill)
+  payment = _event("bill_paid", discharges=bill)
+  _post(
+    tenant,
+    [("payable", 6000, 0), ("clearing", 0, 6000)],
+    posted=date(2026, 1, 29),
+    event_id=payment,
+  )
+  cf = _cash_flow(tenant)
+  assert CAPEX_UNPAID not in cf
+  assert cf[ACQUIRED] == 6000.0
   assert cf.get(OPERATING, 0.0) == 0.0
   _assert_no_reconciling_adjustment(cf)
