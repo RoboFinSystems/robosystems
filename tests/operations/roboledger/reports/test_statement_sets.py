@@ -388,3 +388,59 @@ class TestStampRoundsToCents:
   def test_helper_is_the_ledgers_precision(self):
     assert to_cents_precision(6085.000000000004) == 6085.0
     assert to_cents_precision(1.005) in (1.0, 1.01)  # binary rounding, never a tail
+
+
+class TestStampOneFactPerContext:
+  """The cash-flow plug lands on the operating leaf the ΔBS derivation may
+  already have filled for the same period. Readers sum the pair, but two
+  values in one context is an inconsistent duplicate in every export, so the
+  stamp persists their sum as one fact."""
+
+  FY_START = date(2025, 1, 1)
+  FY_END = date(2025, 12, 31)
+
+  def _fact(self, element_id: str, value: float, start: date | None = None):
+    return SimpleNamespace(
+      element_id=element_id,
+      value=value,
+      period_start=start or self.FY_START,
+      period_end=self.FY_END,
+      period_type="duration",
+    )
+
+  def _stamp(self, facts) -> list:
+    session = MagicMock()
+    _stamp_facts_into_sets(
+      session,
+      SimpleNamespace(facts=facts),
+      "ent_1",
+      {"el_other_wc": ["struct_cf"], "el_ni": ["struct_cf"]},
+      {"struct_cf": "fs_cf"},
+    )
+    return [call.args[0] for call in session.add.call_args_list]
+
+  def test_derived_value_and_plug_persist_as_their_sum(self):
+    rows = self._stamp(
+      [
+        self._fact("el_ni", 10_612.03),
+        self._fact("el_other_wc", 2_601.64),
+        self._fact("el_other_wc", -34_745.08),
+      ]
+    )
+    other = [r for r in rows if r.element_id == "el_other_wc"]
+    assert len(other) == 1
+    assert other[0].value == -32_143.44
+    assert len(rows) == 2
+
+  def test_the_sum_is_rounded_once_after_adding(self):
+    rows = self._stamp([self._fact("el_other_wc", 0.1), self._fact("el_other_wc", 0.2)])
+    assert [r.value for r in rows] == [0.3]
+
+  def test_different_periods_on_one_element_stay_separate(self):
+    rows = self._stamp(
+      [
+        self._fact("el_other_wc", 5.0),
+        self._fact("el_other_wc", 7.0, start=date(2025, 10, 1)),
+      ]
+    )
+    assert sorted(r.value for r in rows) == [5.0, 7.0]

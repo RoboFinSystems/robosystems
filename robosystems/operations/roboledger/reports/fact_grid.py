@@ -1040,7 +1040,9 @@ def _emit_subtotal_facts(
   facts: list[ReportFact],
   periods: list[PeriodSpec],
 ) -> None:
-  """Append one fact per non-zero rs-gaap calculation subtotal, per period.
+  """Append one fact per rs-gaap calculation subtotal with any fact beneath
+  it, per period — zero included, so a total whose children net to zero
+  still states 0 beside them.
 
   Persisted so verification rules scoped to a subtotal can bind. Uses the
   same resolution as ``_build_rows`` (direct fact wins, else Σ child·weight),
@@ -1074,13 +1076,16 @@ def _emit_subtotal_facts(
         present.add(f.element_id)
 
     computed = resolve_calc_dag(balances, present, calculations, order)
+    # ``order`` lists children before parents, so one pass propagates presence.
+    reported = set(present)
+    for elem_id in order:
+      if any(src in reported for src, _ in calculations.get(elem_id, ())):
+        reported.add(elem_id)
 
     for elem_id in target_ids:
-      if elem_id in present:
+      if elem_id in present or elem_id not in reported:
         continue
       value = computed.get(elem_id, 0.0)
-      if value == 0.0:
-        continue
       m = meta.get(elem_id)
       if m is None:
         continue

@@ -303,19 +303,29 @@ def _stamp_facts_into_sets(
   ``facts.value`` is a double, so this strips float noise the ledger (integer
   cents) never had — and ``decimals`` says so, so the graph and every export
   state the precision the value has.
+
+  Facts sharing an element and period persist as their sum, the way every
+  reader of generated facts already combines them: the cash-flow plug can
+  land on a leaf the ΔBS derivation filled, and two values in one context
+  would be an inconsistent duplicate in each export.
   """
+  totals: dict[tuple, float] = {}
   for fact in facts.facts:
-    for structure_id in element_to_structures.get(fact.element_id, ()):
+    key = (fact.element_id, fact.period_start, fact.period_end, fact.period_type)
+    totals[key] = totals.get(key, 0.0) + fact.value
+
+  for (element_id, period_start, period_end, period_type), value in totals.items():
+    for structure_id in element_to_structures.get(element_id, ()):
       fact_set_id = structure_to_factset.get(structure_id)
       if fact_set_id is None:
         continue
       rf = Fact(
-        element_id=fact.element_id,
-        value=to_cents_precision(fact.value),
+        element_id=element_id,
+        value=to_cents_precision(value),
         decimals=CENTS_DECIMALS,
-        period_start=fact.period_start,
-        period_end=fact.period_end,
-        period_type=fact.period_type,
+        period_start=period_start,
+        period_end=period_end,
+        period_type=period_type,
         unit="USD",
         entity_id=entity_id,
         structure_id=structure_id,

@@ -108,11 +108,32 @@ class TestEmitSubtotalFacts:
     assert len(assets) == 1
     assert assets[0].value == 999.0
 
-  def test_zero_subtotal_not_emitted(self) -> None:
+  def test_subtotal_netting_to_zero_is_emitted_as_zero(self) -> None:
+    """Children present and netting to zero (+2,000 issued, -2,000
+    repurchased) still give the total a 0 — not a blank beside them."""
+    dag = [
+      _dag_row("Financing", "Issuance", 1.0),
+      _dag_row("Financing", "Repurchase", 1.0),
+      _dag_row("NetChange", "Financing", 1.0),
+    ]
+    facts = [_leaf("Issuance", 2000.0), _leaf("Repurchase", -2000.0)]
+    _emit_subtotal_facts(_session(dag, ["Financing", "NetChange"]), facts, [_P])
+    by_id = {f.element_id: f.value for f in facts}
+    assert by_id["Financing"] == 0.0
+    assert by_id["NetChange"] == 0.0
+
+  def test_zero_leaf_gives_its_total_a_zero(self) -> None:
     dag = [_dag_row("AssetsNoncurrent", "PPE", 1.0)]
     facts = [_leaf("PPE", 0.0)]
     _emit_subtotal_facts(_session(dag, ["AssetsNoncurrent"]), facts, [_P])
-    assert all(f.element_id != "AssetsNoncurrent" for f in facts)
+    assert [f.value for f in facts if f.element_id == "AssetsNoncurrent"] == [0.0]
+
+  def test_subtotal_with_nothing_beneath_is_not_emitted(self) -> None:
+    facts = [_leaf("Cash", 100.0)]
+    _emit_subtotal_facts(_session(_DAG, _TARGETS), facts, [_P])
+    emitted = {f.element_id for f in facts}
+    assert "AssetsNoncurrent" not in emitted  # PPE absent
+    assert {"AssetsCurrent", "Assets"} <= emitted
 
   def test_zero_direct_fact_wins_over_calc_sum_for_downstream(self) -> None:
     """A calc target with a zero-valued DIRECT fact must contribute its 0
