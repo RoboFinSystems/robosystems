@@ -192,10 +192,13 @@ def generate_report_facts(
   # Entries with no cash line, and payments settled through payables: the
   # non-cash part comes out of operating, and a settled bill's capex or debt
   # reaches its own section. Adjusts the leaves derived above.
-  flow_ids |= _emit_noncash_and_settlement_facts(
+  settlement_flows, settlement_warnings = _emit_noncash_and_settlement_facts(
     session, facts, periods, mapping_id, arc_type, entity_id, derived
   )
-  warnings = _flows_without_a_row(session, facts, flow_ids, entity_id)
+  warnings = _flows_without_a_row(
+    session, facts, flow_ids | settlement_flows, entity_id
+  )
+  warnings.extend(settlement_warnings)
 
   # Book ΔCash - Investing - Financing - (NI + DDA + ΔWC) on an operating
   # leaf so the CF foots to actual cash. Must precede the subtotal roll-up.
@@ -1694,6 +1697,13 @@ def _derive_cash_flow_facts(
 
 
 _CF_OTHER_NONCASH_QNAME = "rs-gaap:OtherNoncashIncomeExpense"
+_CF_CAPEX_UNPAID_QNAME = "rs-gaap:CapitalExpendituresIncurredButNotYetPaid"
+_CF_NONCASH_ACQUISITION_QNAME = (
+  "rs-gaap:NoncashOrPartNoncashAcquisitionValueOfAssetsAcquired1"
+)
+_CF_PAYABLES_LEAF_QNAME = (
+  "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities"
+)
 
 
 @dataclass
@@ -1707,6 +1717,17 @@ class _CfLine:
   @property
   def net(self) -> int:
     return self.debit - self.credit
+
+
+@dataclass
+class _Bill:
+  """An entry with no cash line that a payable settles, carrying investing or
+  financing lines."""
+
+  posted: date
+  payable: int
+  capex: int
+  columns: list[PeriodSpec]
 
 
 def _sign(value: float) -> int:
@@ -1762,7 +1783,7 @@ def _emit_noncash_and_settlement_facts(
   arc_type: str,
   entity_id: str | None,
   derived: set[tuple[str, date, date]],
-) -> set[str]:
+) -> tuple[set[str], list[str]]:
   """The cash flow's non-cash and settlement corrections, per period.
 
   An entry with no cash line moves no cash, yet its income-statement lines
@@ -1772,41 +1793,53 @@ def _emit_noncash_and_settlement_facts(
 
   - the income-statement part is backed out on ``OtherNoncashIncomeExpense``,
     unless the concept is one the cash flow presents from its own fact;
-  - the working-capital part is backed out of that account's delta.
+  - the working-capital part is backed out of that account's delta;
+  - an investing asset it acquires is disclosed: through payables, as capital
+    expenditures incurred but not yet paid at the period's end; otherwise (on
+    the card, in exchange for another asset) as a non-cash acquisition.
 
   A payment whose event discharges a bill (or a receipt an invoice) is
   looked through to that bill's entry: the share of the payment that settles
   investing or financing lines takes those lines' default flows, and comes
   out of the payable's delta. In a cash sale, a gain on a concept the cash
   flow presents joins the proceeds. A tagged entry is the explicit pass's.
-  Returns the ids of the flows emitted.
+
+  Returns the ids of the flows emitted, and a warning per period in which
+  payments to payables carry no link while a bill with investing or
+  financing lines is open: what those payments settled stays in operating.
   """
   if not periods:
-    return set()
+    return set(), []
 
   derivation_rows = session.execute(
     text("""
-      SELECT a.from_element_id, a.to_element_id, a.weight,
-        EXISTS (
-          SELECT 1 FROM element_traits et
+      SELECT a.from_element_id, a.to_element_id, a.weight, fe.qname AS from_qname,
+        (
+          SELECT t.identifier FROM element_traits et
           JOIN traits t ON t.id = et.trait_id
           WHERE et.element_id = a.from_element_id
             AND t.category = 'activityType'
             AND t.identifier IN ('investingActivity', 'financingActivity')
-        ) AS is_flow
+          LIMIT 1
+        ) AS activity
       FROM associations a
+      JOIN elements fe ON fe.id = a.from_element_id
       WHERE a.association_type = 'derivation'
     """)
   ).fetchall()
   working_leaf: dict[str, str] = {}
-  default_flows: dict[str, list[tuple[str, float]]] = {}
+  payable_concepts: set[str] = set()
+  default_flows: dict[str, list[tuple[str, float, str]]] = {}
   for row in derivation_rows:
-    if row.is_flow:
-      default_flows.setdefault(str(row.to_element_id), []).append(
-        (str(row.from_element_id), float(row.weight or 1.0))
+    concept = str(row.to_element_id)
+    if row.activity:
+      default_flows.setdefault(concept, []).append(
+        (str(row.from_element_id), float(row.weight or 1.0), row.activity)
       )
     else:
-      working_leaf.setdefault(str(row.to_element_id), str(row.from_element_id))
+      working_leaf.setdefault(concept, str(row.from_element_id))
+      if row.from_qname == _CF_PAYABLES_LEAF_QNAME:
+        payable_concepts.add(concept)
 
   reused = _cash_flow_reused_concepts(session, entity_id)
   cash_qnames = _CASH_ANCHOR_QNAMES
@@ -1829,6 +1862,13 @@ def _emit_noncash_and_settlement_facts(
       AND (:entity_id IS NULL OR en.entity_id = :entity_id)
       AND {scope}
   """)
+  base = {"arc_type": arc_type, "mapping_id": mapping_id, "entity_id": entity_id}
+
+  def _lines(scope: str, **params) -> list:
+    return session.execute(
+      text(line_sql.text.format(scope=scope)).bindparams(landed_entry_bindparam()),
+      {**base, **params},
+    ).fetchall()
 
   def _classify(row) -> _CfLine | None:
     concept_id = str(row.concept_id)
@@ -1862,50 +1902,61 @@ def _emit_noncash_and_settlement_facts(
         out.setdefault(key, []).append(line)  # type: ignore[union-attr]
     return out
 
-  base = {"arc_type": arc_type, "mapping_id": mapping_id, "entity_id": entity_id}
-  start = min(p.start for p in periods)
-  end = max(p.end for p in periods)
-  rows = session.execute(
-    text(
-      line_sql.text.format(scope="en.posting_date BETWEEN :start AND :end")
-    ).bindparams(landed_entry_bindparam()),
-    {**base, "start": start, "end": end},
-  ).fetchall()
+  rows = _lines(
+    "en.posting_date BETWEEN :start AND :end",
+    start=min(p.start for p in periods),
+    end=max(p.end for p in periods),
+  )
   dated: dict[str, date] = {}
+  event_of: dict[str, str] = {}
   discharges: dict[str, str] = {}
   for row in rows:
-    dated[str(row.entry_id)] = row.posting_date
+    key = str(row.entry_id)
+    dated[key] = row.posting_date
+    if row.triggered_by_event_id:
+      event_of[key] = str(row.triggered_by_event_id)
     if row.discharges_event_id:
-      discharges[str(row.entry_id)] = str(row.discharges_event_id)
+      discharges[key] = str(row.discharges_event_id)
   entries = _entries(rows)
 
   settled: dict[str, list[_CfLine]] = {}
   if discharges:
-    bill_rows = session.execute(
-      text(
-        line_sql.text.format(scope="en.triggered_by_event_id = ANY(:events)")
-      ).bindparams(landed_entry_bindparam()),
-      {**base, "events": sorted(set(discharges.values()))},
-    ).fetchall()
-    by_entry = _entries(bill_rows)
-    event_of = {str(r.entry_id): str(r.triggered_by_event_id) for r in bill_rows}
-    for entry_key, lines in by_entry.items():
+    bill_rows = _lines(
+      "en.triggered_by_event_id = ANY(:events)",
+      events=sorted(set(discharges.values())),
+    )
+    bill_event = {str(r.entry_id): str(r.triggered_by_event_id) for r in bill_rows}
+    for entry_key, lines in _entries(bill_rows).items():
       if lines is not None:
-        settled.setdefault(event_of[entry_key], []).extend(lines)
+        settled.setdefault(bill_event[entry_key], []).extend(lines)
 
-  def _default_flow(concept_id: str, cash_effect: float) -> str | None:
-    for flow_id, weight in default_flows.get(concept_id, ()):
-      if _sign(weight) == _sign(cash_effect):
+  def _default_flow(
+    concept_id: str, cash_effect: float, activity: str | None = None
+  ) -> str | None:
+    for flow_id, weight, flow_activity in default_flows.get(concept_id, ()):
+      if _sign(weight) == _sign(cash_effect) and activity in (None, flow_activity):
         return flow_id
     return None
 
-  other_noncash_id = session.execute(
-    text("SELECT id FROM elements WHERE qname = :q"),
-    {"q": _CF_OTHER_NONCASH_QNAME},
-  ).scalar()
+  element_ids = dict(
+    session.execute(
+      text("SELECT qname, id FROM elements WHERE qname = ANY(:q)"),
+      {
+        "q": [
+          _CF_OTHER_NONCASH_QNAME,
+          _CF_CAPEX_UNPAID_QNAME,
+          _CF_NONCASH_ACQUISITION_QNAME,
+        ]
+      },
+    ).fetchall()
+  )
+  other_noncash_id = element_ids.get(_CF_OTHER_NONCASH_QNAME)
+  acquisition_id = element_ids.get(_CF_NONCASH_ACQUISITION_QNAME)
 
   emitted_flows: set[str] = set()
   adjustments: dict[tuple[str, date, date], float] = {}
+  bills: dict[str, _Bill] = {}
+  unlinked: dict[tuple[date, date], list[int]] = {}
 
   def _add(element_id: str, period: PeriodSpec, cents: float) -> None:
     key = (element_id, period.start, period.end)
@@ -1939,6 +1990,32 @@ def _emit_noncash_and_settlement_facts(
           share = -line.net * working_matched / working
           for column in columns:
             _add(working_leaf[line.concept_id], column, -share)
+
+      capex = sum(
+        ln.net
+        for ln in lines
+        if ln.kind == "nonoperating"
+        and ln.net > 0
+        and _default_flow(ln.concept_id, -ln.net, "investingActivity")
+      )
+      payable = -sum(
+        ln.net
+        for ln in lines
+        if ln.kind == "working" and ln.concept_id in payable_concepts and ln.net < 0
+      )
+      settles_flows = any(
+        ln.kind == "nonoperating" and _default_flow(ln.concept_id, -ln.net)
+        for ln in lines
+      )
+      if payable and settles_flows and entry_key in event_of:
+        bills[event_of[entry_key]] = _Bill(posted, payable, capex, columns)
+      elif capex and acquisition_id is not None:
+        consideration = any(
+          ln.net < 0 and ln.kind in ("working", "nonoperating") for ln in lines
+        )
+        if consideration:
+          for column in columns:
+            _add(str(acquisition_id), column, capex)
       continue
 
     if not untagged:
@@ -1968,6 +2045,16 @@ def _emit_noncash_and_settlement_facts(
               _add(working_leaf[line.concept_id], column, routed * line.net / paid)
       continue
 
+    if entry_key not in discharges and kinds <= {"cash", "working", "pnl"}:
+      to_payables = sum(
+        ln.net
+        for ln in lines
+        if ln.kind == "working" and ln.concept_id in payable_concepts and ln.net > 0
+      )
+      if to_payables:
+        for column in columns:
+          unlinked.setdefault((column.start, column.end), []).append(to_payables)
+
     gains = [ln for ln in lines if ln.kind == "pnl" and ln.concept_id in reused]
     if gains:
       flows = {
@@ -1983,8 +2070,51 @@ def _emit_noncash_and_settlement_facts(
         for column in columns:
           _add(flow_id, column, -sum(ln.net for ln in gains))
 
+  # What each bill's linked payments had settled by a date.
+  payments: dict[str, list[tuple[date, int]]] = {}
+  if bills:
+    for row in _lines("ev.discharges_event_id = ANY(:events)", events=sorted(bills)):
+      line = _classify(row)
+      if line is not None and line.kind == "working":
+        payments.setdefault(str(row.discharges_event_id), []).append(
+          (row.posting_date, line.net)
+        )
+
+  def _unpaid(event_id: str, bill: _Bill, on: date) -> float:
+    paid = sum(net for posted, net in payments.get(event_id, ()) if posted <= on)
+    return max(0.0, 1.0 - paid / bill.payable)
+
+  capex_unpaid_id = element_ids.get(_CF_CAPEX_UNPAID_QNAME)
+  for event_id, bill in bills.items():
+    if not bill.capex or capex_unpaid_id is None:
+      continue
+    for column in bill.columns:
+      _add(
+        str(capex_unpaid_id), column, bill.capex * _unpaid(event_id, bill, column.end)
+      )
+
+  warnings: list[str] = []
+  for column in periods:
+    amounts = unlinked.get((column.start, column.end))
+    if not amounts:
+      continue
+    open_bills = sum(
+      bill.payable * _unpaid(event_id, bill, column.end)
+      for event_id, bill in bills.items()
+      if bill.posted <= column.end
+    )
+    if open_bills >= 1:
+      warnings.append(
+        f"[{column.label}] {len(amounts)} payment(s) to payables "
+        f"({cents_to_dollars(sum(amounts)):,.2f}) carry no link to the bill "
+        f"they settle, while bills with investing or financing lines "
+        f"({cents_to_dollars(round(open_bills)):,.2f}) are unpaid; whatever "
+        "capex or loan principal those payments settled is in operating cash. "
+        "Link each payment to its bill."
+      )
+
   if not adjustments:
-    return emitted_flows
+    return emitted_flows, warnings
 
   meta = {
     str(r.id): r
@@ -2019,7 +2149,7 @@ def _emit_noncash_and_settlement_facts(
           period_type="duration",
         )
       )
-  return emitted_flows
+  return emitted_flows, warnings
 
 
 def _reconcile_operating_to_cash(

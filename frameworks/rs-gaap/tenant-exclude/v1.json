@@ -4,11 +4,11 @@
   "policy": "tenant_exclude_keep_critical",
   "description": "rs-gaap concepts kept in the public library but NOT copied into tenant schemas. The keep-critical curation: a tenant keeps EXACTLY the concepts that render under the active Reporting Style (the working set) plus their structural scaffolding \u2014 the calc DAG, rollup ancestors, rule operands, and the synthesized PP&E grains. Everything else renders nowhere and cannot be mapped (mapping candidates are capped at the renderable working set), so it is dropped: 'kept \u27fa used'. The excluded set is the library minus keep-critical, broken down for audit into dimension members/domains, general-special-disconnected concepts, industry/specialist verticals (peer-framework material), general-special leaves, and unanchored intermediate aggregates (unwired BS/IS disaggregations, finer CF detail, replaced combined leaves). Any concept is re-added via resync the moment a future Reporting Style or deeper breakdown wires it (add is cheap; delete after a tenant maps to a concept is not).",
   "counts": {
-    "rs_gaap_total": 2170,
-    "working_set": 142,
-    "keep_critical": 207,
+    "rs_gaap_total": 2173,
+    "working_set": 145,
+    "keep_critical": 210,
     "excluded": 1963,
-    "tenant_kept": 207,
+    "tenant_kept": 210,
     "by_category": {
       "dimension_member_domain": 266,
       "disaggregation_leaf": 903,

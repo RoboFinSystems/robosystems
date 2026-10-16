@@ -21230,6 +21230,34 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-supplemental-capex-unpaid",
+      "from": {
+        "@id": "rs-gaap:SupplementalCashFlowInformationAbstract"
+      },
+      "to": {
+        "@id": "rs-gaap:CapitalExpendituresIncurredButNotYetPaid"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30510.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-supplemental-noncash-acquisition",
+      "from": {
+        "@id": "rs-gaap:SupplementalCashFlowInformationAbstract"
+      },
+      "to": {
+        "@id": "rs-gaap:NoncashOrPartNoncashAcquisitionValueOfAssetsAcquired1"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30520.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
       "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-nci-1",
       "from": {
         "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
@@ -21412,6 +21440,34 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-supplemental-capex-unpaid",
+      "from": {
+        "@id": "rs-gaap:SupplementalCashFlowInformationAbstract"
+      },
+      "to": {
+        "@id": "rs-gaap:CapitalExpendituresIncurredButNotYetPaid"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30510.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-supplemental-noncash-acquisition",
+      "from": {
+        "@id": "rs-gaap:SupplementalCashFlowInformationAbstract"
+      },
+      "to": {
+        "@id": "rs-gaap:NoncashOrPartNoncashAcquisitionValueOfAssetsAcquired1"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30520.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
       "@id": "_:rs-gaap-pres-cf-indirect-part-arc-nci-1",
       "from": {
         "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
@@ -21590,6 +21646,34 @@
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
       "order": 30165.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-supplemental-capex-unpaid",
+      "from": {
+        "@id": "rs-gaap:SupplementalCashFlowInformationAbstract"
+      },
+      "to": {
+        "@id": "rs-gaap:CapitalExpendituresIncurredButNotYetPaid"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30510.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-supplemental-noncash-acquisition",
+      "from": {
+        "@id": "rs-gaap:SupplementalCashFlowInformationAbstract"
+      },
+      "to": {
+        "@id": "rs-gaap:NoncashOrPartNoncashAcquisitionValueOfAssetsAcquired1"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30520.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     }

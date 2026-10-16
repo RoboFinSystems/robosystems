@@ -3,12 +3,18 @@ every Reporting Style.
 
 Spec ``cash-flow-noncash-and-settlement``. The committed packages now carry:
 
+* ``rs-gaap``: ``CapitalExpendituresIncurredButNotYetPaid`` and
+  ``NoncashOrPartNoncashAcquisitionValueOfAssetsAcquired1``, under their
+  us-gaap names, and ``SupplementalCashFlowInformationAbstract``, the header
+  they sit under;
 * ``rs-gaap-presentation``: on ``CashFlow-indirect``, ``-LLC`` and ``-PART``,
   four operating adjustments — ``GainLossOnDispositionOfAssets``,
   ``AssetImpairmentCharges`` and ``GainsLossesOnExtinguishmentOfDebt`` (each
   presented from its income statement fact, as depreciation is) and
   ``OtherNoncashIncomeExpense`` (which the engine computes from entries that
-  move no cash) — and ``IncreaseDecreaseInOtherCurrentLiabilities``;
+  move no cash) — and ``IncreaseDecreaseInOtherCurrentLiabilities``; and a
+  supplemental section, a second root that sums into nothing, carrying the
+  two non-cash disclosures;
 * ``rs-gaap-calculations``: a calc arc for each under operating cash, gains
   subtracted; the derivation of ``OtherLiabilitiesCurrent`` moves from the
   reconciling leaf ``IncreaseDecreaseInOtherOperatingCapitalNet`` to
@@ -17,7 +23,7 @@ Spec ``cash-flow-noncash-and-settlement``. The committed packages now carry:
 * ``rs-gaap-rollup-rules``: the operating-cash RollUp, whose children grew,
   regenerated.
 
-No concept is new to ``rs-gaap``. A statement with none of these facts
+A statement with none of these facts
 renders as before, except that a change in other current liabilities now
 has its own row instead of sitting in the reconciling adjustment.
 
@@ -59,6 +65,14 @@ _PINS = {
   "rs-gaap-rollup-rules": "v1",
 }
 
+_NEW_CONCEPTS = frozenset(
+  {
+    "rs-gaap:SupplementalCashFlowInformationAbstract",
+    "rs-gaap:CapitalExpendituresIncurredButNotYetPaid",
+    "rs-gaap:NoncashOrPartNoncashAcquisitionValueOfAssetsAcquired1",
+  }
+)
+
 # Packages whose arcs changed.
 _ARC_PACKAGES = ("rs-gaap-calculations", "rs-gaap-presentation")
 
@@ -78,12 +92,23 @@ def _refresh_public(conn) -> None:
   from robosystems.operations.taxonomy_block.library_creator import (
     create_library_arcs,
     create_library_rules,
+    create_library_taxonomy_elements,
   )
   from robosystems.taxonomy import load_taxonomy_package
 
   session = _Session(bind=conn)
   try:
-    # 1. Arcs; new ones insert and the replaced derivation arc retires.
+    # 1. The new concepts. Every other element and structure already exists
+    #    and is left alone.
+    rs_gaap = load_taxonomy_package(_seed_path("rs-gaap", _PINS["rs-gaap"]))
+    only_new = rs_gaap.model_copy(
+      update={"elements": [e for e in rs_gaap.elements if e.qname in _NEW_CONCEPTS]}
+    )
+    _taxonomy_id, counts = create_library_taxonomy_elements(session, only_new)
+    session.flush()
+    print(f"  [rs-gaap] elements={counts['elements']}")
+
+    # 2. Arcs; new ones insert and the replaced derivation arc retires.
     for standard in _ARC_PACKAGES:
       counts = create_library_arcs(
         session, load_taxonomy_package(_seed_path(standard, _PINS[standard]))
@@ -95,7 +120,7 @@ def _refresh_public(conn) -> None:
         f"retired={counts['associations_retired']}"
       )
 
-    # 2. Upserts on the rule id through the canonical variable writer, so the
+    # 3. Upserts on the rule id through the canonical variable writer, so the
     #    regenerated RollUp replaces the old one in place.
     counts = create_library_rules(
       session,

@@ -364,3 +364,103 @@ def test_a_subtracted_row_shows_its_cash_effect(tenant):
   assert rows[OPERATING].values == [500.0]
   result = validate_report("cash_flow_statement", grid.rows)
   assert not [w for w in result.warnings if "does not match" in w], result.warnings
+
+
+CAPEX_UNPAID = "rs-gaap:CapitalExpendituresIncurredButNotYetPaid"
+ACQUIRED = "rs-gaap:NoncashOrPartNoncashAcquisitionValueOfAssetsAcquired1"
+
+
+def _warnings(ids, periods) -> list[str]:
+  with extensions_session(GRAPH) as session:
+    return generate_report_facts(
+      session, "", ids["mapping"], periods, entity_id=PARENT
+    ).warnings
+
+
+def test_capex_on_the_card_is_a_noncash_acquisition(tenant):
+  _post(tenant, [("equipment", 500, 0), ("card", 0, 500)])
+  cf = _cash_flow(tenant)
+  assert cf[ACQUIRED] == 500.0
+  assert CAPEX_UNPAID not in cf
+
+
+def test_an_asset_taken_in_exchange_is_a_noncash_acquisition(tenant):
+  _post(tenant, [("equipment", 600, 0), ("metals", 0, 400), ("disposal_gain", 0, 200)])
+  assert _cash_flow(tenant)[ACQUIRED] == 600.0
+
+
+def test_a_remeasurement_acquires_nothing(tenant):
+  _post(tenant, [("metals", 1000, 0), ("other_income", 0, 1000)])
+  assert ACQUIRED not in _cash_flow(tenant)
+
+
+def _equipment_bill(ids, paid_on: date | None) -> None:
+  bill = _event("bill_received")
+  _post(ids, [("equipment", 1000, 0), ("payable", 0, 1000)], event_id=bill)
+  if paid_on is not None:
+    payment = _event("bill_paid", discharges=bill)
+    _post(
+      ids, [("payable", 1000, 0), ("cash", 0, 1000)], posted=paid_on, event_id=payment
+    )
+
+
+def test_capex_on_a_bill_unpaid_at_period_end_is_disclosed(tenant):
+  _equipment_bill(tenant, paid_on=date(2026, 2, 10))
+  jan = _cash_flow(tenant, JAN, [JAN, FEB])
+  feb = _cash_flow(tenant, FEB, [JAN, FEB])
+  assert jan[CAPEX_UNPAID] == 1000.0
+  assert CAPEX not in jan
+  assert feb[CAPEX] == -1000.0
+  assert CAPEX_UNPAID not in feb
+  _assert_no_reconciling_adjustment(jan)
+  _assert_no_reconciling_adjustment(feb)
+
+
+def test_capex_on_a_bill_paid_in_the_period_is_cash_capex(tenant):
+  _equipment_bill(tenant, paid_on=date(2026, 1, 20))
+  cf = _cash_flow(tenant)
+  assert cf[CAPEX] == -1000.0
+  assert CAPEX_UNPAID not in cf
+  assert ACQUIRED not in cf
+
+
+def test_an_unlinked_payment_against_an_open_capex_bill_is_named(tenant):
+  _bill_and_payment(tenant, 1000, link=False)
+  (warning,) = [w for w in _warnings(tenant, [JAN]) if "no link" in w]
+  assert "1 payment(s) to payables (1,000.00)" in warning
+  assert "(1,000.00) are unpaid" in warning
+
+
+def test_linked_payments_raise_no_warning(tenant):
+  _bill_and_payment(tenant, 1000)
+  assert not [w for w in _warnings(tenant, [JAN]) if "no link" in w]
+
+
+def test_the_supplemental_section_renders_outside_the_net_change(tenant):
+  from robosystems.operations.roboledger.reports.fact_grid import (
+    render_structure_view,
+  )
+  from robosystems.operations.roboledger.reports.guard_rails import validate_report
+  from robosystems.operations.roboledger.reports.network_picker import (
+    load_entity_reporting_style,
+  )
+
+  _post(tenant, [("equipment", 500, 0), ("card", 0, 500)])
+  _post(tenant, [("cash", 800, 0), ("revenue", 0, 800)])
+  with extensions_session(GRAPH) as session:
+    facts = generate_report_facts(
+      session, "", tenant["mapping"], [JAN], entity_id=PARENT
+    ).facts
+    grid = render_structure_view(
+      session,
+      facts,
+      "cash_flow_statement",
+      [JAN],
+      load_entity_reporting_style(session, PARENT),
+    )
+  rows = {r.element_qname: r for r in grid.rows}
+  assert rows[ACQUIRED].values == [500.0]
+  assert rows[NET_CHANGE].values == [800.0]
+  result = validate_report("cash_flow_statement", grid.rows)
+  assert result.status == "passed", (result.failures, result.warnings)
+  assert not [w for w in result.warnings if "does not match" in w]
