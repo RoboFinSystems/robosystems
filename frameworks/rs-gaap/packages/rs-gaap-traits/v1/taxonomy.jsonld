@@ -19224,6 +19224,9 @@
       "@id": "rs-gaap:ShareBasedCompensation",
       "https://robosystems.ai/vocab/hasTrait": [
         {
+          "@id": "trait:elementsOfFinancialStatements/expense"
+        },
+        {
           "@id": "trait:operatingNonoperating/operating"
         },
         {

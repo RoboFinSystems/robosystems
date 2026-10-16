@@ -1833,6 +1833,9 @@ _CORPORATE_MOVEMENTS: dict[str, str] = {
   "contribution": "rs-gaap:StockIssuedDuringPeriodValueNewIssues",
   "repurchase": "rs-gaap:StockRepurchasedDuringPeriodValue",
   "distribution": "rs-gaap:Dividends",
+  "share_based_compensation": (
+    "rs-gaap:AdjustmentsToAdditionalPaidInCapitalSharebasedCompensationRequisiteServicePeriodRecognitionValue"
+  ),
   "other": "rs-gaap:StockholdersEquityOther",
 }
 # A redemption of units has no row of its own on the capital-account forms.
@@ -1840,8 +1843,14 @@ _CAPITAL_ACCOUNT_MOVEMENTS: dict[str, str] = {
   "contribution": "rs-gaap:PartnersCapitalAccountContributions",
   "repurchase": "rs-gaap:PartnersCapitalOther",
   "distribution": "rs-gaap:PartnersCapitalAccountDistributions",
+  "share_based_compensation": "rs-gaap:PartnersCapitalAccountUnitBasedCompensation",
   "other": "rs-gaap:PartnersCapitalOther",
 }
+
+# The expense an equity award is recognized through. An entry that books it
+# against equity is share-based compensation on the roll-forward, and the
+# same fact is the cash flow's non-cash add-back.
+_SHARE_BASED_COMPENSATION_QNAME = "rs-gaap:ShareBasedCompensation"
 
 # The equity-side reading of a financing flow: a line tagged, or defaulting
 # to, one of these is that kind of equity movement.
@@ -1924,10 +1933,11 @@ def _emit_equity_movement_facts(
 
   A line's movement is, in order: its flow tag's; the reducer concept its
   account maps to (a distributions account mapped to ``PaymentsOfDividends``);
-  its account's default financing flow, when the entry exchanges with an
-  owner (moves cash, or settles or brings an asset or liability); otherwise
-  other. So an owner paying the company card is a contribution, and
-  share-based compensation (equity against expense) is other. Values are
+  share-based compensation, when the entry books that expense; its account's
+  default financing flow, when the entry exchanges with an owner (moves cash,
+  or settles or brings an asset or liability); otherwise other. So an owner
+  paying the company card is a contribution, and equity booked against any
+  other expense is other. Values are
   equity-effect signed, increases positive, as the cash flow's are
   cash-effect signed, so opening + net income + the rows is the closing
   balance by construction; the equity validator checks it.
@@ -2032,6 +2042,7 @@ def _emit_equity_movement_facts(
       continue
 
     exchanges_with_owner: set[str] = set()
+    books_share_based_compensation: set[str] = set()
     for row in session.execute(
       counterpart_sql,
       {
@@ -2041,6 +2052,9 @@ def _emit_equity_movement_facts(
       },
     ):
       if row.target_id in weights or row.target_qname in reducer_qnames:
+        continue
+      if row.target_qname == _SHARE_BASED_COMPENSATION_QNAME:
+        books_share_based_compensation.add(row.entry_id)
         continue
       classification = row.classification or _infer_classification(
         row.target_qname, row.target_balance_type
@@ -2064,6 +2078,8 @@ def _emit_equity_movement_facts(
       kind = _FLOW_MOVEMENT_KIND.get(line.tag_qname or "")
       if kind is None and line.target_qname in reducer_qnames:
         kind = _FLOW_MOVEMENT_KIND.get(line.target_qname)
+      if kind is None and line.entry_id in books_share_based_compensation:
+        kind = "share_based_compensation"
       if kind is None and line.entry_id in exchanges_with_owner:
         kind = _FLOW_MOVEMENT_KIND.get(line.default_flow_qname or "")
       qname = movement_qnames[kind or "other"]

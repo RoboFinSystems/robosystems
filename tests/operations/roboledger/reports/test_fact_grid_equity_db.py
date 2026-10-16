@@ -45,6 +45,8 @@ CONTRIBUTED = "rs-gaap:PartnersCapitalAccountContributions"
 DISTRIBUTED = "rs-gaap:PartnersCapitalAccountDistributions"
 CAPITAL_OTHER = "rs-gaap:PartnersCapitalOther"
 LLC_DISTRIBUTIONS = "rs-gaap:DistributionsMadeToLimitedLiabilityCompanyLlcMember"
+APIC_SBC = "rs-gaap:AdjustmentsToAdditionalPaidInCapitalSharebasedCompensationRequisiteServicePeriodRecognitionValue"
+UNIT_SBC = "rs-gaap:PartnersCapitalAccountUnitBasedCompensation"
 
 
 @pytest.fixture(scope="module")
@@ -144,6 +146,10 @@ def _seed() -> dict[str, str]:
         _element("rs-gaap:GeneralAndAdministrativeExpense", "debit", "duration"),
         "expense",
       ),
+      "stock_comp": (
+        _element("rs-gaap:ShareBasedCompensation", "debit", "duration"),
+        "expense",
+      ),
     }
     session.add_all(c for c, _ in concepts.values())
     session.flush()
@@ -178,6 +184,8 @@ def _seed() -> dict[str, str]:
       _element(CONTRIBUTED, "credit", "duration"),
       _element(DISTRIBUTED, "debit", "duration"),
       _element(CAPITAL_OTHER, "credit", "duration"),
+      _element(APIC_SBC, "credit", "duration"),
+      _element(UNIT_SBC, "credit", "duration"),
     ]
     session.add_all([se, ni, *movements])
     session.flush()
@@ -371,3 +379,22 @@ def test_the_capital_account_form_uses_its_own_rows(tenant):
   assert fy26[DISTRIBUTED] == -70.0
   assert ISSUED not in fy26 and DIVIDENDS not in fy26
   assert fy26[MEMBERS] == 0.0 + 620.0 - 70.0 + 30.0
+
+
+def test_equity_booked_against_share_based_compensation_is_its_own_row(tenant):
+  """A stock award's cost, expensed against paid-in capital, is the
+  share-based compensation movement on both forms; equity booked against any
+  other expense stays other. Either way the root moves by net income and the
+  rows."""
+  _post(tenant, date(2026, 2, 1), [("cash", 1000, 0), ("revenue", 0, 1000)])
+  _post(tenant, date(2026, 3, 31), [("stock_comp", 250, 0), ("apic", 0, 250)])
+  _post(tenant, date(2026, 6, 1), [("expense", 40, 0), ("apic", 0, 40)])
+  fy26 = _by_qname(_facts(tenant, [FY26]), FY26)
+  assert fy26[APIC_SBC] == 250.0
+  assert fy26[OTHER] == 40.0
+  assert fy26["rs-gaap:NetIncomeLoss"] == 1000.0 - 250.0 - 40.0
+  assert fy26[SE] == 1000.0
+
+  _post(tenant, date(2026, 4, 30), [("stock_comp", 60, 0), ("members", 0, 60)])
+  llc = _by_qname(_facts(tenant, [FY26], close_target=MEMBERS), FY26)
+  assert llc[UNIT_SBC] == 60.0

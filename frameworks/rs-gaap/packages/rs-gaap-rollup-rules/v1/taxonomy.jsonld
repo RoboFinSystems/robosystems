@@ -888,7 +888,7 @@
       "@id": "_:rs-gaap-rollup-cf-operating",
       "ruleCategory": "FundamentalAccountingConceptRelation",
       "rulePattern": "RollUp",
-      "ruleExpression": "$NetCashProvidedByUsedInOperatingActivities = ($NetIncomeLoss + $DepreciationDepletionAndAmortization + $IncreaseDecreaseInAccountsReceivable + $IncreaseDecreaseInInventories + $IncreaseDecreaseInPrepaidExpense + $IncreaseDecreaseInAccountsPayableAndAccruedLiabilities + $IncreaseDecreaseInOtherOperatingCapitalNet + $IncreaseDecreaseInAccruedLiabilities + $IncreaseDecreaseInAccruedIncomeTaxesPayable + $DeferredIncomeTaxExpenseBenefit + $IncreaseDecreaseInOtherCurrentAssets + $IncreaseDecreaseInContractWithCustomerLiability + $IncreaseDecreaseInOperatingLeaseLiability + $NetIncomeLossAttributableToNoncontrollingInterest + $IncreaseDecreaseInDueFromAffiliatesCurrent + $IncreaseDecreaseInDueToAffiliatesCurrent)",
+      "ruleExpression": "$NetCashProvidedByUsedInOperatingActivities = ($NetIncomeLoss + $DepreciationDepletionAndAmortization + $ShareBasedCompensation + $IncreaseDecreaseInAccountsReceivable + $IncreaseDecreaseInInventories + $IncreaseDecreaseInPrepaidExpense + $IncreaseDecreaseInAccountsPayableAndAccruedLiabilities + $IncreaseDecreaseInOtherOperatingCapitalNet + $IncreaseDecreaseInAccruedLiabilities + $IncreaseDecreaseInAccruedIncomeTaxesPayable + $DeferredIncomeTaxExpenseBenefit + $IncreaseDecreaseInOtherCurrentAssets + $IncreaseDecreaseInContractWithCustomerLiability + $IncreaseDecreaseInOperatingLeaseLiability + $NetIncomeLossAttributableToNoncontrollingInterest + $IncreaseDecreaseInDueFromAffiliatesCurrent + $IncreaseDecreaseInDueToAffiliatesCurrent)",
       "ruleTarget": {
         "targetKind": "element",
         "targetRef": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
@@ -905,6 +905,10 @@
         {
           "variableName": "DepreciationDepletionAndAmortization",
           "variableQname": "rs-gaap:DepreciationDepletionAndAmortization"
+        },
+        {
+          "variableName": "ShareBasedCompensation",
+          "variableQname": "rs-gaap:ShareBasedCompensation"
         },
         {
           "variableName": "IncreaseDecreaseInAccountsReceivable",
@@ -1153,7 +1157,7 @@
       "@id": "_:rs-gaap-rollup-is-opex",
       "ruleCategory": "FundamentalAccountingConceptRelation",
       "rulePattern": "RollUp",
-      "ruleExpression": "$OperatingExpenses = ($GeneralAndAdministrativeExpense + $SellingAndMarketingExpense + $ResearchAndDevelopmentExpense + $DepreciationDepletionAndAmortization + $OtherCostAndExpenseOperating + $RestructuringCharges + $AssetImpairmentCharges)",
+      "ruleExpression": "$OperatingExpenses = ($GeneralAndAdministrativeExpense + $ProfessionalFees + $SellingAndMarketingExpense + $ResearchAndDevelopmentExpense + $DepreciationDepletionAndAmortization + $ShareBasedCompensation + $OtherCostAndExpenseOperating + $RestructuringCharges + $AssetImpairmentCharges)",
       "ruleTarget": {
         "targetKind": "element",
         "targetRef": "rs-gaap:OperatingExpenses"
@@ -1168,6 +1172,10 @@
           "variableQname": "rs-gaap:GeneralAndAdministrativeExpense"
         },
         {
+          "variableName": "ProfessionalFees",
+          "variableQname": "rs-gaap:ProfessionalFees"
+        },
+        {
           "variableName": "SellingAndMarketingExpense",
           "variableQname": "rs-gaap:SellingAndMarketingExpense"
         },
@@ -1178,6 +1186,10 @@
         {
           "variableName": "DepreciationDepletionAndAmortization",
           "variableQname": "rs-gaap:DepreciationDepletionAndAmortization"
+        },
+        {
+          "variableName": "ShareBasedCompensation",
+          "variableQname": "rs-gaap:ShareBasedCompensation"
         },
         {
           "variableName": "OtherCostAndExpenseOperating",
