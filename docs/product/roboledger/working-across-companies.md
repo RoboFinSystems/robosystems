@@ -19,7 +19,7 @@ A graph is one **reporting group**: the group parent, the company the graph was 
 
 Ask your assistant to add a subsidiary: its name, its legal form and the share the parent holds. It gets a chart of accounts from a template and a calendar on the group's cadence, and from then on every question or action names the company it's about. When you don't name one, your assistant works on the group parent. In the app, **Entity → All Entities** shows the group and **New Entity** adds a company: its name, legal name, legal form, ticker, the company it's held under and the parent's share. There is no limit on the companies in a group; the graph's tier decides its capacity.
 
-The group's combined statements are the sum of every company's own, line by line at the reporting concepts. They are combined, not consolidated: nothing is eliminated between the companies, so a balance one owes another is still in. Ask for the combined balance sheet on the group parent, or for any one company's own. In the app, **Ledger → Statements** on the group parent has a Scope control, _This entity_ or _Combined_, and the combined view says how many companies it summed.
+The group's combined statements are the sum of every company's own, line by line at the reporting concepts; nothing is eliminated on its own. To consolidate, add one more company to the group for the consolidating entries and start its chart from the _Consolidation adjustments_ template. Post the eliminations there: the parent's investment against each subsidiary's contributed capital, the balances the companies owe each other, and an outside owner's share of a subsidiary as noncontrolling interest. That company's entries are the adjustments column of a consolidation worksheet: the combined statements read them, and no operating company's statements ever include them. The combined balance sheet then shows the investment and the intercompany balances at zero and noncontrolling interest beside the parent's equity, and the income statement shows the share of income attributable to it. Ask for the combined balance sheet on the group parent, or for any one company's own. In the app, **Ledger → Statements** on the group parent has a Scope control, _This entity_ or _Combined_, and the combined view says how many companies it summed.
 
 A reporting group is companies under common control. It is not a way to put several clients in one graph: everyone with access to the graph sees every company in it.
 
@@ -66,6 +66,8 @@ When a client's investor, lender or board member has a RoboLedger or RoboInvesto
 - "Add Maple Court LLC as a wholly owned subsidiary and set up its chart of accounts."
 - "Close September for Maple Court LLC."
 - "Show me the group's combined balance sheet, then Maple Court on its own."
+- "Add a Consolidation adjustments company and eliminate my investment in Maple Court against its contributed capital."
+- "Where does the noncontrolling interest on the combined balance sheet come from?"
 - "What's blocking the close for this client?"
 - "Using the connections for [client] and [client], compare gross margin for the last quarter."
 - "Create the September report for this client and tell me anything that looks off."
