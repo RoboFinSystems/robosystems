@@ -1368,7 +1368,7 @@
     {
       "@id": "_:rs-gaap-deriv-cf-other-op-arc-1",
       "from": {
-        "@id": "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet"
+        "@id": "rs-gaap:IncreaseDecreaseInOtherCurrentLiabilities"
       },
       "to": {
         "@id": "rs-gaap:OtherLiabilitiesCurrent"
@@ -3052,6 +3052,81 @@
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 250.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-operating-arc-gain-disposition",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:GainLossOnDispositionOfAssets"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": -1.0,
+      "order": 260.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-operating-arc-impairment",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:AssetImpairmentCharges"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 270.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-operating-arc-gain-extinguishment",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:GainsLossesOnExtinguishmentOfDebt"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": -1.0,
+      "order": 280.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-operating-arc-other-noncash",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:OtherNoncashIncomeExpense"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": -1.0,
+      "order": 290.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-operating-arc-other-current-liabilities",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInOtherCurrentLiabilities"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 650.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     }
