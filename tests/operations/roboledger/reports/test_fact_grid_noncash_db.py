@@ -464,3 +464,41 @@ def test_the_supplemental_section_renders_outside_the_net_change(tenant):
   result = validate_report("cash_flow_statement", grid.rows)
   assert result.status == "passed", (result.failures, result.warnings)
   assert not [w for w in result.warnings if "does not match" in w]
+
+
+def test_a_bill_posted_as_two_entries_is_one_bill(tenant):
+  bill = _event("bill_received")
+  _post(tenant, [("equipment", 600, 0), ("payable", 0, 600)], event_id=bill)
+  _post(tenant, [("equipment", 400, 0), ("payable", 0, 400)], event_id=bill)
+  assert _cash_flow(tenant)[CAPEX_UNPAID] == 1000.0
+
+
+def test_an_unlinked_payment_against_a_bill_from_before_the_window_is_named(tenant):
+  bill = _event("bill_received")
+  _post(
+    tenant,
+    [("credit_line", 900, 0), ("payable", 0, 900)],
+    posted=date(2025, 12, 15),
+    event_id=bill,
+  )
+  _post(tenant, [("payable", 900, 0), ("cash", 0, 900)])
+  (warning,) = [w for w in _warnings(tenant, [JAN]) if "no link" in w]
+  assert "(900.00) are unpaid" in warning
+
+
+def test_a_mixed_entry_keeps_the_cash_flow_footed(tenant):
+  """An entry pairing several unrelated sides is split by sign and size,
+  which can blur which row an amount lands on; operating cash is still the
+  cash that moved, with nothing left to reconcile."""
+  _post(
+    tenant,
+    [
+      ("metals", 1000, 0),
+      ("other_income", 0, 1000),
+      ("interest", 300, 0),
+      ("card", 0, 300),
+    ],
+  )
+  cf = _cash_flow(tenant)
+  assert cf.get(OPERATING, 0.0) == 0.0
+  _assert_no_reconciling_adjustment(cf)
