@@ -13,9 +13,10 @@ nothing sums it:
 1. the extended network is composed by a Style an entity of this graph uses,
    and the structure's statement type is the network's;
 2. every presentation parent is presented in the network (or is a row the
-   extension adds), and no row is one the network already presents;
+   extension adds), and no row is one the network, or another extension of
+   it, already presents;
 3. on the balance sheet, income statement and cash flow, every new row has a
-   calculation path to a concept the network presents; on the equity
+   calculation path to a subtotal the network presents; on the equity
    roll-forward every row hangs from the root and is a duration amount;
 4. library first: a tenant concept placed as a row must refine an rs-gaap
    concept (``parent_ref``), whose traits it inherits, so every reader that
@@ -24,6 +25,8 @@ nothing sums it:
 """
 
 from __future__ import annotations
+
+from collections import Counter
 
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -39,6 +42,9 @@ from robosystems.models.extensions import (
 from robosystems.operations.roboledger.reports.calc_dag import (
   EXTENDS_NETWORK_KEY,
   load_rs_gaap_calculations,
+)
+from robosystems.operations.roboledger.reports.network_picker import (
+  network_structure_ids,
 )
 
 STATEMENT_BLOCK_TYPES: frozenset[str] = frozenset(
@@ -148,18 +154,19 @@ def inherit_parent_traits(
 
 
 def _presentation_concepts(
-  session: Session, structure_id: str
-) -> tuple[set[str], set[str]]:
-  """(every concept on either end of a presentation arc, the parents)."""
+  session: Session, structure_ids: list[str]
+) -> tuple[set[str], set[str], set[str]]:
+  """(every concept on either end of a presentation arc, the parents, the
+  roots) across ``structure_ids``."""
   rows = session.execute(
     select(Association.from_element_id, Association.to_element_id).where(
-      Association.structure_id == structure_id,
+      Association.structure_id.in_(structure_ids),
       Association.association_type == "presentation",
     )
   ).all()
-  froms = {str(f) for f, _ in rows if f is not None and str(f) != structure_id}
+  froms = {str(f) for f, _ in rows if f is not None and str(f) not in structure_ids}
   tos = {str(t) for _, t in rows if t is not None}
-  return froms | tos, froms - tos
+  return froms | tos, froms, froms - tos
 
 
 def validate_extension_network(session: Session, structure: Structure) -> None:
@@ -172,7 +179,11 @@ def validate_extension_network(session: Session, structure: Structure) -> None:
     raise StyleExtensionError(
       f"structure {structure.name!r} extends a network that no longer exists."
     )
-  presented, roots = _presentation_concepts(session, network_id)
+  base_rows, subtotals, roots = _presentation_concepts(session, [network_id])
+  presented, _, _ = _presentation_concepts(
+    session,
+    [sid for sid in network_structure_ids(session, network_id) if sid != structure.id],
+  )
 
   arcs = (
     session.execute(select(Association).where(Association.structure_id == structure.id))
@@ -193,12 +204,13 @@ def validate_extension_network(session: Session, structure: Structure) -> None:
   def _name(element_id: str) -> str:
     return names.get(element_id, element_id)
 
-  moved = new_rows & presented
+  placements = Counter(str(a.to_element_id) for a in presentation)
+  moved = (new_rows & presented) | {r for r, n in placements.items() if n > 1}
   if moved:
     raise StyleExtensionError(
       f"{structure.name!r} places {sorted(_name(m) for m in moved)} again; the "
-      f"network already presents them, and an extension adds rows, it never "
-      f"moves one."
+      f"network, an extension of it, or this structure already presents them, "
+      f"and an extension adds rows, it never moves one."
     )
   for a in presentation:
     parent = str(a.from_element_id)
@@ -211,7 +223,9 @@ def validate_extension_network(session: Session, structure: Structure) -> None:
   if network.block_type == "equity_statement":
     _check_equity_rows(session, structure, presentation, roots, _name)
   else:
-    _check_calculation_paths(session, structure, arcs, new_rows, presented, _name)
+    _check_calculation_paths(
+      session, structure, arcs, new_rows, subtotals, base_rows - subtotals, _name
+    )
   _check_rows_refine_the_library(session, structure, new_rows, _name)
 
 
@@ -232,8 +246,10 @@ def _check_equity_rows(session, structure, presentation, roots, name) -> None:
 
 
 def _check_calculation_paths(
-  session, structure, arcs, new_rows, presented, name
+  session, structure, arcs, new_rows, subtotals, leaves, name
 ) -> None:
+  """A path may not run through a presented leaf: the leaf's own fact wins
+  over a calc sum, so a row summing into it drops out of every total."""
   parents: dict[str, set[str]] = {}
   for parent, children in load_rs_gaap_calculations(session).items():
     for child, _weight in children:
@@ -241,6 +257,8 @@ def _check_calculation_paths(
   for a in arcs:
     if a.association_type == "calculation":
       parents.setdefault(str(a.to_element_id), set()).add(str(a.from_element_id))
+  calc_parents = set().union(*parents.values()) if parents else set()
+  presented = subtotals & calc_parents
   for row in new_rows:
     frontier, seen = [row], {row}
     while frontier:
@@ -248,7 +266,7 @@ def _check_calculation_paths(
       reached = parents.get(current, set())
       if reached & presented:
         break
-      frontier.extend(p for p in reached if p not in seen)
+      frontier.extend(p for p in reached if p not in seen and p not in leaves)
       seen |= reached
     else:
       raise StyleExtensionError(

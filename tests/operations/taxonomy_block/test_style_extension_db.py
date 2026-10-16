@@ -23,13 +23,14 @@ from robosystems.models.api.taxonomy_block import (
   TaxonomyBlockElementRequest,
   TaxonomyBlockStructureRequest,
 )
-from robosystems.models.extensions import Element, Entity, Taxonomy
+from robosystems.models.extensions import Element, Entity, Structure, Taxonomy
 from robosystems.operations.roboledger.reads.taxonomies import (
   suggest_mapping_candidates,
 )
 from robosystems.operations.roboledger.reports.fact_grid import (
   PeriodSpec,
   ReportFact,
+  _load_calculations,
   render_structure_view,
 )
 from robosystems.operations.roboledger.reports.network_picker import (
@@ -109,15 +110,17 @@ def _network_role(session, statement_type: str) -> str:
   )
 
 
-def _extension(session, *, elements=(), structures=(), associations=()) -> str:
+def _extension(
+  session, *, elements=(), structures=(), associations=(), standard="acme"
+) -> str:
   return reporting_extension.create(
     session,
     CreateTaxonomyBlockRequest(
-      name="Acme Reporting Extension",
+      name=f"{standard.title()} Reporting Extension",
       taxonomy_type="reporting_extension",
       parent_taxonomy_id=_library_id(session),
-      standard="acme",
-      namespace_uri="https://acme.example.com/acme",
+      standard=standard,
+      namespace_uri=f"https://{standard}.example.com/{standard}",
       elements=list(elements),
       structures=list(structures),
       associations=list(associations),
@@ -259,6 +262,8 @@ def test_a_tenant_row_renders_persists_and_is_mappable(tenant):
     ("moves_library_row", "an extension adds rows, it never moves one"),
     ("no_calculation_path", "no calculation path"),
     ("tenant_concept_without_parent", "must refine an rs-gaap concept"),
+    ("sums_into_a_presented_leaf", "no calculation path"),
+    ("placed_twice", "places"),
   ],
 )
 def test_an_extension_that_would_not_anchor_is_refused(tenant, case, message):
@@ -289,6 +294,21 @@ def test_an_extension_that_would_not_anchor_is_refused(tenant, case, message):
         )
       ]
       child = "acme:Orphan"
+    elif case == "sums_into_a_presented_leaf":
+      elements = [
+        TaxonomyBlockElementRequest(
+          qname="acme:AuditFees",
+          name="Audit Fees",
+          balance_type="debit",
+          period_type="duration",
+          parent_ref="rs-gaap:ProfessionalFees",
+        )
+      ]
+      child = "acme:AuditFees"
+    # A presented leaf has its own fact, which wins over any calc sum.
+    calc_parent = (
+      "rs-gaap:ProfessionalFees" if case == "sums_into_a_presented_leaf" else parent
+    )
     associations = [
       TaxonomyBlockAssociationRequest(
         structure_ref="Acme rows",
@@ -297,11 +317,20 @@ def test_an_extension_that_would_not_anchor_is_refused(tenant, case, message):
         association_type="presentation",
       )
     ]
+    if case == "placed_twice":
+      associations.append(
+        TaxonomyBlockAssociationRequest(
+          structure_ref="Acme rows",
+          from_ref="rs-gaap:CostsAndExpenses",
+          to_ref=child,
+          association_type="presentation",
+        )
+      )
     if calc:
       associations.append(
         TaxonomyBlockAssociationRequest(
           structure_ref="Acme rows",
-          from_ref=parent,
+          from_ref=calc_parent,
           to_ref=child,
           association_type="calculation",
           weight=1.0,
@@ -339,3 +368,59 @@ def test_extends_network_must_name_a_style_network_of_its_statement(tenant):
         ],
       )
     session.rollback()
+
+
+def _labor_row_extension(session, standard: str) -> str:
+  role = _network_role(session, "income_statement")
+  name = f"{standard} rows"
+  return _extension(
+    session,
+    standard=standard,
+    structures=[
+      TaxonomyBlockStructureRequest(
+        name=name, block_type="income_statement", extends_network=role
+      )
+    ],
+    associations=[
+      TaxonomyBlockAssociationRequest(
+        structure_ref=name,
+        from_ref="rs-gaap:OperatingExpenses",
+        to_ref="rs-gaap:LaborAndRelatedExpense",
+        association_type=association_type,
+        **({"weight": 1.0} if association_type == "calculation" else {}),
+      )
+      for association_type in ("presentation", "calculation")
+    ],
+  )
+
+
+def test_a_second_extension_cannot_place_a_row_another_already_places(tenant):
+  with extensions_session(GRAPH) as session:
+    _labor_row_extension(session, "acme")
+    with pytest.raises(StyleExtensionError, match="places"):
+      _labor_row_extension(session, "beta")
+    session.rollback()
+
+
+def test_an_inactive_extension_adds_no_summands(tenant):
+  """Deactivated, an extension's calc arcs stop summing into the library
+  subtotal along with its rows leaving the statement."""
+  with extensions_session(GRAPH) as session:
+    _income_statement_extension(session)
+    ids = dict(
+      session.execute(
+        select(Element.qname, Element.id).where(
+          Element.qname.in_(["acme:AuditFees", "rs-gaap:OperatingExpenses"])
+        )
+      ).all()
+    )
+    audit, opex = str(ids["acme:AuditFees"]), str(ids["rs-gaap:OperatingExpenses"])
+    assert (audit, 1.0) in _load_calculations(session, element_ids={opex, audit})[opex]
+
+    for structure in session.execute(
+      select(Structure).where(Structure.name == "Acme income statement rows")
+    ).scalars():
+      structure.is_active = False
+    session.flush()
+    summands = _load_calculations(session, element_ids={opex, audit}).get(opex, [])
+    assert (audit, 1.0) not in summands

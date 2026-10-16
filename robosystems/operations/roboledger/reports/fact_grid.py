@@ -2811,6 +2811,7 @@ def _load_calculations(
         JOIN structures s ON s.id = a.structure_id
         WHERE a.association_type = 'calculation'
           AND a.from_element_id IN ({placeholders})
+          AND (s.metadata ->> '{EXTENDS_NETWORK_KEY}' IS NULL OR s.is_active)
         ORDER BY a.structure_id, a.order_value
       """),
       params,
