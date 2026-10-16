@@ -568,8 +568,24 @@ def load_base_envelope_atoms(
     select(Taxonomy.name).where(Taxonomy.id == structure.taxonomy_id)
   ).scalar()
 
+  # A statement network's arcs include the tenant extensions layered onto it;
+  # no other structure is extended.
+  from robosystems.operations.roboledger.reports.network_picker import (
+    network_structure_ids,
+  )
+  from robosystems.operations.taxonomy_block.style_extension import (
+    STATEMENT_BLOCK_TYPES,
+  )
+
+  structure_ids = (
+    network_structure_ids(session, structure_id)
+    if structure.block_type in STATEMENT_BLOCK_TYPES
+    else [structure_id]
+  )
   associations = list(
-    session.execute(select(Association).where(Association.structure_id == structure_id))
+    session.execute(
+      select(Association).where(Association.structure_id.in_(structure_ids))
+    )
     .scalars()
     .all()
   )

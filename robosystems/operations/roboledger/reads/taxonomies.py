@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from sqlalchemy import func, select, text
+from sqlalchemy import false, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.common import create_pagination_info
@@ -249,11 +249,16 @@ def suggest_mapping_candidates(
   else:
     presentation_set = _load_rs_gaap_presentation_set(session)
 
+  # A tenant concept is a candidate once an extension network places it on
+  # one of the Style's statements; library concepts come from rs-gaap.
   rows = (
     session.execute(
       select(Element)
       .where(
-        Element.source == "rs-gaap",
+        or_(
+          Element.source == "rs-gaap",
+          Element.id.in_(presentation_set) if presentation_set else false(),
+        ),
         Element.is_active.is_(True),
         Element.id.in_(
           select(ElementTrait.element_id)
@@ -425,20 +430,24 @@ def _load_renderable_concepts(
   if isinstance(cached, set):
     return cached
 
+  # Lazy: the picker's import chain pulls commands code into the reads layer.
+  from robosystems.operations.roboledger.reports.network_picker import (
+    style_structures_cte,
+  )
+
   rows = session.execute(
-    text("""
+    text(f"""
+      WITH {style_structures_cte()}
       SELECT DISTINCT a.to_element_id AS element_id
-      FROM reporting_style_networks rsn
-      JOIN associations a ON a.structure_id = rsn.network_id
-      WHERE rsn.reporting_style_id = :rsid
-        AND a.association_type = 'presentation'
+      FROM style_structures ss
+      JOIN associations a ON a.structure_id = ss.structure_id
+      WHERE a.association_type = 'presentation'
         AND a.to_element_id IS NOT NULL
       UNION
       SELECT DISTINCT a.from_element_id AS element_id
-      FROM reporting_style_networks rsn
-      JOIN associations a ON a.structure_id = rsn.network_id
-      WHERE rsn.reporting_style_id = :rsid
-        AND a.association_type = 'presentation'
+      FROM style_structures ss
+      JOIN associations a ON a.structure_id = ss.structure_id
+      WHERE a.association_type = 'presentation'
         AND a.from_element_id IS NOT NULL
     """),
     {"rsid": reporting_style_id},
@@ -471,14 +480,22 @@ def _load_rollup_concepts(
   if isinstance(cached, set):
     return cached
 
+  # Lazy: the picker's import chain pulls commands code into the reads layer.
+  from robosystems.operations.roboledger.reports.network_picker import (
+    style_structures_cte,
+  )
+
   rows = session.execute(
-    text("""
+    text(f"""
+      WITH {style_structures_cte()}
       SELECT DISTINCT a.from_element_id AS element_id
-      FROM reporting_style_networks rsn
-      JOIN associations a ON a.structure_id = rsn.network_id
+      FROM style_structures ss
+      JOIN associations a ON a.structure_id = ss.structure_id
+      JOIN reporting_style_networks rsn
+        ON rsn.reporting_style_id = :rsid
+        AND rsn.statement_type = ss.statement_type
       JOIN structures st ON st.id = rsn.network_id
-      WHERE rsn.reporting_style_id = :rsid
-        AND a.association_type = 'presentation'
+      WHERE a.association_type = 'presentation'
         AND a.from_element_id IS NOT NULL
         AND a.to_element_id IS NOT NULL
         AND st.concept_arrangement IS DISTINCT FROM 'roll_forward'

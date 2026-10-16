@@ -384,7 +384,7 @@ def build_report_bundle(
   structure_ids: set[str] = {
     str(fs.structure_id) for fs in fact_sets if fs.structure_id
   }
-  associations: list[Association] = []
+  associations: list[Any] = []
   structures_by_id: dict[str, Structure] = {}
   if structure_ids:
     associations = list(
@@ -392,6 +392,7 @@ def build_report_bundle(
         select(Association).where(Association.structure_id.in_(structure_ids))
       ).scalars()
     )
+    associations.extend(_extension_presentation_arcs(session, structure_ids))
     structures_by_id = {
       str(s.id): s
       for s in session.execute(
@@ -664,6 +665,44 @@ def _element_to_bundle(e: Any, standard_label: str | None = None) -> BundleEleme
     source=str(e.source),
     item_type=_wire_item_type(getattr(e, "item_type", None)),
   )
+
+
+def _extension_presentation_arcs(
+  session: Session, structure_ids: set[str]
+) -> list[Any]:
+  """The presentation arcs tenant extensions layer onto the report's
+  statement networks, re-hosted on the network they extend so the rows
+  render in its role. Stand-ins, like ``_source_calculation_arcs``'s, so the
+  reassigned ``structure_id`` never dirties the session."""
+  from robosystems.models.extensions.association import Association
+  from robosystems.operations.roboledger.reports.network_picker import (
+    network_structure_ids,
+  )
+
+  host_of = {
+    ext_id: network_id
+    for network_id in structure_ids
+    for ext_id in network_structure_ids(session, network_id)[1:]
+  }
+  if not host_of:
+    return []
+  return [
+    SimpleNamespace(
+      association_type="presentation",
+      structure_id=host_of[str(a.structure_id)],
+      from_element_id=a.from_element_id,
+      to_element_id=a.to_element_id,
+      arcrole=a.arcrole,
+      order_value=a.order_value,
+      weight=a.weight,
+    )
+    for a in session.execute(
+      select(Association).where(
+        Association.structure_id.in_(list(host_of)),
+        Association.association_type == "presentation",
+      )
+    ).scalars()
+  ]
 
 
 def _source_calculation_arcs(

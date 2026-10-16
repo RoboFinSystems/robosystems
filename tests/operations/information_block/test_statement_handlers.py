@@ -162,10 +162,11 @@ class TestBuildEnvelope:
     session.get.return_value = structure
     # Query order (no associations → no elements or classifications queries):
     # fact_set (validated first so a stale pin doesn't pay for atom loads)
-    # → taxonomy name → associations → rules → verification_results
+    # → taxonomy name → extension networks → associations → rules → verification_results
     session.execute.side_effect = [
       _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalar="US GAAP"),  # taxonomy name
+      _exec_result(scalars_all=[]),  # extension networks on the structure
       _exec_result(scalars_all=[]),  # associations
       _exec_result(scalars_all=[]),  # rules
       _exec_result(scalars_all=[]),  # verification results
@@ -237,11 +238,12 @@ class TestBuildEnvelope:
     element_sales.item_type = None
 
     # Query order (1 association → elements + classifications queries run):
-    # fact_set → taxonomy → associations → elements → rules → classifications →
+    # fact_set → taxonomy → extension networks → associations → elements → rules → classifications →
     # verification_results → documentation labels
     session.execute.side_effect = [
       _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalar="US GAAP"),  # taxonomy name
+      _exec_result(scalars_all=[]),  # extension networks on the structure
       _exec_result(scalars_all=[association]),  # associations
       _exec_result(scalars_all=[element_revenue, element_sales]),  # elements
       _exec_result(scalars_all=[]),  # rules
@@ -331,7 +333,7 @@ class TestBuildEnvelope:
 
     # Query order (Plan B — fact_set_id read path; FactSet validated
     # first so the pin path can short-circuit on mismatch):
-    # fact_set → taxonomy → associations → elements → rules →
+    # fact_set → taxonomy → extension networks → associations → elements → rules →
     # assoc-classifications → verification_results →
     # facts (filtered by fact_set.id) →
     # element-classifications (rendering projection trait lookup) →
@@ -339,6 +341,7 @@ class TestBuildEnvelope:
     session.execute.side_effect = [
       _exec_result(scalar=fact_set),  # latest fact set
       _exec_result(scalar="US GAAP"),  # taxonomy name
+      _exec_result(scalars_all=[]),  # extension networks on the structure
       _exec_result(scalars_all=[assoc]),  # associations
       _exec_result(scalars_all=[element]),  # elements
       _exec_result(scalars_all=[]),  # rules
@@ -378,6 +381,7 @@ class TestBuildEnvelope:
     session.execute.side_effect = [
       _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalar="US GAAP"),
+      _exec_result(scalars_all=[]),  # extension networks on the structure
       _exec_result(scalars_all=[]),  # associations
       _exec_result(scalars_all=[]),  # rules
       _exec_result(scalars_all=[]),  # verification results
@@ -634,18 +638,21 @@ class TestRenderingComposesCalcsCrossStructure:
         from_element_id="e_gp",
         to_element_id="e_rev",
         weight=1.0,
+        is_extension=False,
       ),
       SimpleNamespace(
         structure_id="struct_is_calc",
         from_element_id="e_gp",
         to_element_id="e_cogs",
         weight=-1.0,
+        is_extension=False,
       ),
       SimpleNamespace(
         structure_id="struct_is_calc",
         from_element_id="e_ni",
         to_element_id="e_gp",
         weight=1.0,
+        is_extension=False,
       ),
     ]
     session = MagicMock()
@@ -774,6 +781,7 @@ class TestSeriesMode:
     session.execute.side_effect = [
       _exec_result(scalar=latest),  # latest set (atoms.fact_set)
       _exec_result(scalar="US GAAP"),  # taxonomy name
+      _exec_result(scalars_all=[]),  # extension networks on the structure
       _exec_result(scalars_all=[self._assoc()]),  # associations
       _exec_result(
         scalars_all=[self._element("elem_cash", "rs-gaap:Cash")]
@@ -884,6 +892,7 @@ class TestSeriesMode:
     session.execute.side_effect = [
       _exec_result(scalar=pinned),  # fact set by id (pin validation)
       _exec_result(scalar="US GAAP"),  # taxonomy name
+      _exec_result(scalars_all=[]),  # extension networks on the structure
       _exec_result(scalars_all=[self._assoc()]),  # associations
       _exec_result(
         scalars_all=[self._element("elem_cash", "rs-gaap:Cash")]

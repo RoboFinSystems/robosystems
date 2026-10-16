@@ -4,7 +4,8 @@ The fact producer (``fact_grid``) and the rollup validator
 (``information_block.rules``) both resolve subtotals here, so they can never
 disagree.
 
-- children come from the ``rs-gaap-calculations`` calculation arcs;
+- children come from the ``rs-gaap-calculations`` calculation arcs, plus
+  those of the tenant extension networks layered onto the library's;
 - a direct fact wins over the calc sum, keyed on presence, so a legitimately
   zero fact is not overwritten;
 - an absent summand contributes 0;
@@ -15,6 +16,11 @@ from __future__ import annotations
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+# A tenant extension network names the library network it extends here, in
+# ``structures.metadata``. Its arcs layer onto that network wherever the
+# network is read; the library structure itself stays library-only.
+EXTENDS_NETWORK_KEY = "extends_network_id"
 
 PPE_NET_QNAME = "rs-gaap:PropertyPlantAndEquipmentNet"
 PPE_GROSS_QNAME = "rs-gaap:PropertyPlantAndEquipmentGross"
@@ -35,7 +41,10 @@ def load_rs_gaap_calculations(
 ) -> dict[str, list[tuple[str, float]]]:
   """Load the rs-gaap-calculations DAG as ``parent_element_id → [(child_id, weight)]``.
 
-  Global to the standard, not scoped to any presentation structure.
+  Global to the standard, not scoped to any presentation structure. A tenant
+  extension network's calc arcs join it, after the library's, so a row it
+  layers onto a statement foots that statement's subtotal everywhere the DAG
+  is read.
   """
   rows = session.execute(
     text("""
@@ -44,9 +53,13 @@ def load_rs_gaap_calculations(
       JOIN structures s ON s.id = a.structure_id
       JOIN taxonomies t ON t.id = s.taxonomy_id
       WHERE a.association_type = 'calculation'
-        AND t.standard = 'rs-gaap-calculations'
-      ORDER BY a.order_value
-    """)
+        AND (
+          t.standard = 'rs-gaap-calculations'
+          OR (s.metadata ->> :extends_key IS NOT NULL AND s.is_active = true)
+        )
+      ORDER BY (t.standard = 'rs-gaap-calculations') DESC, a.order_value
+    """),
+    {"extends_key": EXTENDS_NETWORK_KEY},
   ).fetchall()
   calculations: dict[str, list[tuple[str, float]]] = {}
   seen: set[tuple[str, str]] = set()
