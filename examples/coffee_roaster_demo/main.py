@@ -32,7 +32,8 @@ Usage:
     just demo-coffee-roaster --dry-run    # validate the synthetic data only
     just demo-coffee-roaster --ai         # map the CoA with the MappingOperator
                                           #   (requires AWS Bedrock)
-    just demo-coffee-roaster --no-subsidiary   # the roaster alone, no café group
+    just demo-coffee-roaster --no-group   # the roaster alone, no café group
+                                          #   (--no-subsidiary still works)
 
 Expect several minutes of progress output ending in a summary with the graph
 id, the period queued for close, the filed report id, and the reveal prompts

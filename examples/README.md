@@ -91,7 +91,7 @@ than be asserted in prose:
   **Consolidation Adjustments** entity carrying the eliminations and the
   noncontrolling interest — every intercompany event posted on both sides,
   so the consolidated statements have a whole group in them
-  (`--no-subsidiary` loads the roaster alone).
+  (`--no-group` loads the roaster alone).
 - **Cadence Labs** is a seed-funded B2B SaaS startup *burning cash behind a
   deferred-revenue float*. Customers pay annually up front, so the bank balance
   looks like comfortable runway until you net out the service still owed.

@@ -2260,7 +2260,7 @@ def run_demo(
   entity in the graph beside it, each with its own books and close, posts
   every intercompany event on both sides with its consolidating entries, and
   reads the consolidated statements back (see ``group.load_group``);
-  ``--no-subsidiary`` skips it.
+  ``--no-group`` (or the older ``--no-subsidiary``) skips it.
   """
   argv = sys.argv if argv is None else argv
   dry_run = "--dry-run" in argv
@@ -2382,7 +2382,8 @@ def run_demo(
   # side of every intercompany event lands in those months.
   group_result = None
   period_windows = scenario_windows(scenario)
-  if group is not None and period_windows and "--no-subsidiary" not in argv:
+  skip_group = {"--no-group", "--no-subsidiary"} & set(argv)
+  if group is not None and period_windows and not skip_group:
     print(f"\nAdding the group ({len(group.members)} members)...")
     group_result = load_group(
       graph_id,

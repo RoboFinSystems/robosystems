@@ -149,8 +149,11 @@ class Member:
 
   ``template`` is one of the shipped chart templates; the accounts the group
   needs beyond it (due to affiliates, the note, distributions, the fee and
-  interest expense) are added to the chart. ``ownership_pct`` is the parent's
-  share; ``outside_owner`` holds the rest and contributes it at formation.
+  interest expense) are added to the chart. The months post to the
+  ``product`` template's codes (1000 cash, 3000 contributed capital, 4000
+  revenue, 6600 utilities for the rebill), so another template has to carry
+  the same ones. ``ownership_pct`` is the parent's share; ``outside_owner``
+  holds the rest and contributes it at formation.
   """
 
   name: str
@@ -235,6 +238,11 @@ class _Api:
       headers={"X-API-Key": config["token"], "Content-Type": "application/json"},
       timeout=180.0,
     )
+    # ``{qname: element id}`` for the graph's rs-gaap library copy, read once.
+    self.rs_gaap_ids: dict[str, str] | None = None
+
+  def close(self) -> None:
+    self.http.close()
 
   def operation(self, name: str, body: dict[str, Any], *, ok: tuple[int, ...] = ()):
     """POST one roboledger operation; returns the envelope's ``result``.
@@ -491,14 +499,13 @@ def _ensure_chart(
     {"template": template, "entity_id": entity_id, "entity_type": entity_type},
     ok=(409,),
   )
-  return (chart or {}).get("taxonomy_id") if chart else None
+  return chart.get("taxonomy_id") if chart else None
 
 
 def _rs_gaap_ids(api: _Api) -> dict[str, str]:
   """``{qname: element id}`` for the graph's rs-gaap library copy, once."""
-  cached = getattr(api, "_rs_gaap_ids", None)
-  if cached is not None:
-    return cached
+  if api.rs_gaap_ids is not None:
+    return api.rs_gaap_ids
   ids: dict[str, str] = {}
   offset = 0
   while True:
@@ -515,6 +522,34 @@ def _rs_gaap_ids(api: _Api) -> dict[str, str]:
   return ids
 
 
+def _mapping_structure(api: _Api, books: _Books, taxonomy_id: str | None) -> str:
+  """The entity's CoA→rs-gaap mapping structure. The chart's id names it
+  directly; without one (a re-run), the structure whose taxonomy holds the
+  entity's cash account."""
+  candidates = api.graphql(
+    'query($t: String) { structures(taxonomyId: $t, blockType: "coa_mapping") '
+    "{ structures { id taxonomyId } } }",
+    {"t": taxonomy_id},
+  )["structures"]["structures"]
+  if taxonomy_id is None:
+    cash_id = books.account("1000")["id"]
+    for candidate in candidates:
+      ids = {
+        e["id"]
+        for e in api.graphql(
+          "query($t: String!) { elements(taxonomyId: $t, limit: 500) "
+          "{ elements { id } } }",
+          {"t": candidate["taxonomyId"]},
+        )["elements"]["elements"]
+      }
+      if cash_id in ids:
+        return candidate["id"]
+    raise RuntimeError(f"{books.name}: no mapping structure holds its chart")
+  if not candidates:
+    raise RuntimeError(f"{books.name}: the chart has no mapping structure")
+  return candidates[0]["id"]
+
+
 def _extend_chart(
   api: _Api,
   books: _Books,
@@ -527,53 +562,64 @@ def _extend_chart(
   """Add the group's accounts to an entity's chart when missing, each mapped
   to its rs-gaap concept the way a person would: the accounts through
   ``update-taxonomy-block``, the arcs one by one through
-  ``create-mapping-association`` on the chart's mapping structure."""
-  missing = [row for row in rows if not books.has_account(row[0])]
-  if not missing:
-    return 0
-  if taxonomy_id is None:
-    raise RuntimeError(
-      f"{books.name}: the chart exists without the group's accounts and the "
-      "chart id is unknown; reset the demo and run again"
-    )
-  api.operation(
-    "update-taxonomy-block",
-    {
-      "taxonomy_id": taxonomy_id,
-      "elements_to_add": [
-        {
-          "qname": f"{namespace}:{code}",
-          "name": name,
-          "trait": trait,
-          "balance_type": balance,
-          "code": code,
-          "sub_classification": sub_classification,
-        }
-        for code, name, trait, sub_classification, balance, _target in missing
-      ],
-    },
-  )
-  books.refresh()
-  structures = api.graphql(
-    'query($t: String!) { structures(taxonomyId: $t, blockType: "coa_mapping") '
-    "{ structures { id name } } }",
-    {"t": taxonomy_id},
-  )["structures"]["structures"]
-  if not structures:
-    raise RuntimeError(f"{books.name}: the chart has no mapping structure")
-  mapping_id = structures[0]["id"]
+  ``create-mapping-association`` on the chart's mapping structure. Resolves
+  every target before it writes anything, and maps whatever is still unmapped
+  afterwards, so a run that died between the two steps heals on the next."""
   targets = _rs_gaap_ids(api)
-  for code, _name, _trait, _sub, _balance, target in missing:
-    qname = target or equity_concept
-    api.operation(
-      "create-mapping-association",
-      {
-        "mapping_id": mapping_id,
-        "from_element_id": books.account(code)["id"],
-        "to_element_id": targets[qname],
-      },
-      ok=(409,),
+  wanted = {code: target or equity_concept for code, *_rest, target in rows}
+  unknown = sorted(q for q in wanted.values() if q not in targets)
+  if unknown:
+    raise RuntimeError(
+      f"{books.name}: not in this graph's rs-gaap library: {', '.join(unknown)}"
     )
+
+  missing = [row for row in rows if not books.has_account(row[0])]
+  if missing:
+    if taxonomy_id is None:
+      raise RuntimeError(
+        f"{books.name}: the chart exists without the group's accounts and the "
+        "chart id is unknown; reset the demo and run again"
+      )
+    api.operation(
+      "update-taxonomy-block",
+      {
+        "taxonomy_id": taxonomy_id,
+        "elements_to_add": [
+          {
+            "qname": f"{namespace}:{code}",
+            "name": name,
+            "trait": trait,
+            "balance_type": balance,
+            "code": code,
+            "sub_classification": sub_classification,
+          }
+          for code, name, trait, sub_classification, balance, _target in missing
+        ],
+      },
+    )
+    books.refresh()
+
+  # Unmapped is measured against the mapping structure, not the entity.
+  mapping_id = _mapping_structure(api, books, taxonomy_id)
+  unmapped = {
+    e.get("code")
+    for e in api.graphql(
+      "query($m: String!) { unmappedElements(mappingId: $m) { code } }",
+      {"m": mapping_id},
+    )["unmappedElements"]
+  }
+  to_map = [code for code in wanted if code in unmapped]
+  if to_map:
+    for code in to_map:
+      api.operation(
+        "create-mapping-association",
+        {
+          "mapping_id": mapping_id,
+          "from_element_id": books.account(code)["id"],
+          "to_element_id": targets[wanted[code]],
+        },
+        ok=(409,),
+      )
   return len(missing)
 
 
@@ -657,6 +703,19 @@ def load_group(
   twice: a group with any posting already in its books is left as it is.
   """
   api = _Api(graph_id, config)
+  try:
+    return _load(api, group, windows, parent_taxonomy_id, close_history)
+  finally:
+    api.close()
+
+
+def _load(
+  api: _Api,
+  group: Group,
+  windows: list[tuple[date, date]],
+  parent_taxonomy_id: str | None,
+  close_history: bool,
+) -> GroupResult:
   parent_entity = next(
     e
     for e in api.graphql("{ entities { id name source isParent } }")["entities"]
@@ -749,10 +808,24 @@ def load_group(
       )
 
   # 3. The months, on every side at once — unless the group is already in.
-  already = [m.name for m in group.members if members[m.ticker].has_postings()]
-  if already:
-    print(
-      f"  Activity:     already in the books ({', '.join(already)}); nothing posted"
+  # A whole group is reused; a partial one — a run that died mid-way — is not
+  # patched up, since the parent's side would post twice.
+  first_start, first_end = windows[0]
+  parent_invested = _value(
+    _statement(api, "balance_sheet", first_start, first_end),
+    "rs-gaap:InvestmentsInAffiliatesSubsidiariesAssociatesAndJointVentures",
+    first_end,
+  )
+  present = {m.name: members[m.ticker].has_postings() for m in group.members}
+  present[group.consolidation_name] = consolidation.has_postings()
+  present[parent.name] = bool(parent_invested)
+  if all(present.values()):
+    print("  Activity:     already in the books; nothing posted")
+  elif any(present.values()):
+    half = ", ".join(name for name, there in present.items() if there)
+    raise RuntimeError(
+      f"a partial group is in the books ({half} only); reset the demo and run "
+      "again rather than posting on top of it"
     )
   else:
     _post_group(api, group, parent, members, consolidation, agent_of, windows)
