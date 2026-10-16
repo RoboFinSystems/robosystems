@@ -1076,6 +1076,7 @@ def _emit_subtotal_facts(
         present.add(f.element_id)
 
     computed = resolve_calc_dag(balances, present, calculations, order)
+    # ``order`` lists children before parents, so one pass propagates presence.
     reported = set(present)
     for elem_id in order:
       if any(src in reported for src, _ in calculations.get(elem_id, ())):

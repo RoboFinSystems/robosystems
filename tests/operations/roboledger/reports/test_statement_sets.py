@@ -432,6 +432,10 @@ class TestStampOneFactPerContext:
     assert other[0].value == -32_143.44
     assert len(rows) == 2
 
+  def test_the_sum_is_rounded_once_after_adding(self):
+    rows = self._stamp([self._fact("el_other_wc", 0.1), self._fact("el_other_wc", 0.2)])
+    assert [r.value for r in rows] == [0.3]
+
   def test_different_periods_on_one_element_stay_separate(self):
     rows = self._stamp(
       [
