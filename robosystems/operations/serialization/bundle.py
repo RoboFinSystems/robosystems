@@ -98,6 +98,9 @@ class BundleElement(BaseModel):
   )
   substitution_group: str | None = None
   source: str
+  # Labels in roles other than the standard one, keyed by role URI: the
+  # roles a presentation arc's preferred label names.
+  role_labels: dict[str, str] = Field(default_factory=dict)
   # Wire vocabulary (camelCase, e.g. 'textBlock'); 'textBlock' gates narrative
   # rendering in report-components.
   item_type: str | None = None
@@ -133,6 +136,10 @@ class BundleArc(BaseModel):
   to_qname: str
   order_value: float | None = None
   weight: float | None = None
+  # Presentation arcs only: the label role the row displays with (negated,
+  # period start / end), which also tells a renderer the row's sign or the
+  # instant it binds.
+  preferred_label: str | None = None
 
 
 class BundleLinkbaseLink(BaseModel):
@@ -485,6 +492,7 @@ def build_report_bundle(
     for eid in sorted(elements_by_id)
   ]
   linkbases = _associations_to_linkbases(associations, structures_by_id, elements_by_id)
+  schema_concepts.extend(_apply_preferred_labels(linkbases, schema_concepts))
   period_nodes, period_ref_for_fact = _mint_periods(facts)
   units, unit_ref_for_fact = _mint_units(facts)
   bundle_facts = [
@@ -923,6 +931,135 @@ def _associations_to_linkbases(
     presentation_links=presentation_links,
     calculation_links=calculation_links,
     definition_links=definition_links,
+  )
+
+
+NEGATED_LABEL_ROLE = "http://www.xbrl.org/2009/role/negatedLabel"
+PERIOD_START_LABEL_ROLE = "http://www.xbrl.org/2003/role/periodStartLabel"
+PERIOD_END_LABEL_ROLE = "http://www.xbrl.org/2003/role/periodEndLabel"
+_PARENT_CHILD = "http://www.xbrl.org/2003/arcrole/parent-child"
+
+# The roll-forward's capital concept -> the us-gaap header it sits under.
+_ROLLFORWARD_ABSTRACTS: dict[str, tuple[str, str]] = {
+  "rs-gaap:StockholdersEquity": (
+    "rs-gaap:StatementOfStockholdersEquityAbstract",
+    "Statement of Stockholders' Equity [Abstract]",
+  ),
+  "rs-gaap:PartnersCapital": (
+    "rs-gaap:StatementOfPartnersCapitalAbstract",
+    "Statement of Partners' Capital [Abstract]",
+  ),
+  "rs-gaap:MembersEquity": (
+    "rs-gaap:StatementOfPartnersCapitalAbstract",
+    "Statement of Partners' Capital [Abstract]",
+  ),
+}
+
+
+def _apply_preferred_labels(
+  linkbases: BundleLinkbases, concepts: list[BundleElement]
+) -> list[BundleElement]:
+  """Give the exported statements the preferred labels XBRL renders by.
+
+  The engine keeps neither in its networks, so the export adds them:
+
+  - a cash flow row its parent subtracts (a gain presented from its income
+    statement fact) takes ``negatedLabel``, shown at its cash effect;
+  - an equity roll-forward, whose capital concept the engine holds as the
+    parent of its movements, takes the XBRL shape: a header with the capital
+    concept first under ``periodStartLabel``, the movements, and the capital
+    concept again under ``periodEndLabel``.
+
+  Adds the role labels to the concepts and returns the header concepts the
+  bundle must also declare.
+  """
+  by_qname = {c.qname: c for c in concepts}
+  weights = {
+    (arc.from_qname, arc.to_qname): arc.weight
+    for link in linkbases.calculation_links
+    for arc in link.arcs
+    if arc.weight is not None
+  }
+  added: dict[str, BundleElement] = {}
+  for link in linkbases.presentation_links:
+    if link.block_type == "cash_flow_statement":
+      for arc in link.arcs:
+        weight = weights.get((arc.from_qname, arc.to_qname))
+        if weight is not None and weight < 0:
+          arc.preferred_label = NEGATED_LABEL_ROLE
+          _add_role_label(by_qname.get(arc.to_qname), NEGATED_LABEL_ROLE, "")
+    elif link.block_type == "equity_statement":
+      header = _as_rollforward(link, by_qname)
+      if header is not None and header.qname not in by_qname:
+        added[header.qname] = header
+  return list(added.values())
+
+
+def _add_role_label(concept: BundleElement | None, role: str, suffix: str) -> None:
+  if concept is None:
+    return
+  base = concept_label(concept) or concept.qname.split(":", 1)[-1]
+  concept.role_labels.setdefault(role, f"{base}{suffix}")
+
+
+def _as_rollforward(
+  link: BundleLinkbaseLink, by_qname: dict[str, BundleElement]
+) -> BundleElement | None:
+  """Rewrite ``link`` into the XBRL roll-forward shape; the header concept,
+  or None when the network has no capital root."""
+  targets = {arc.to_qname for arc in link.arcs}
+  root = next(
+    (
+      arc.from_qname
+      for arc in link.arcs
+      if arc.from_qname not in targets and arc.from_qname in _ROLLFORWARD_ABSTRACTS
+    ),
+    None,
+  )
+  capital = by_qname.get(root) if root else None
+  if root is None or capital is None:
+    return None
+  header_qname, header_label = _ROLLFORWARD_ABSTRACTS[root]
+  movements = [arc for arc in link.arcs if arc.from_qname == root]
+  orders = [arc.order_value for arc in movements if arc.order_value is not None]
+  first = min(orders, default=0.0)
+  last = max(orders, default=0.0)
+  for arc in movements:
+    arc.from_qname = header_qname
+  link.arcs = [
+    BundleArc(
+      arc_type="presentationArc",
+      arcrole=_PARENT_CHILD,
+      from_qname=header_qname,
+      to_qname=root,
+      order_value=first - 1,
+      preferred_label=PERIOD_START_LABEL_ROLE,
+    ),
+    *link.arcs,
+    BundleArc(
+      arc_type="presentationArc",
+      arcrole=_PARENT_CHILD,
+      from_qname=header_qname,
+      to_qname=root,
+      order_value=last + 1,
+      preferred_label=PERIOD_END_LABEL_ROLE,
+    ),
+  ]
+  _add_role_label(capital, PERIOD_START_LABEL_ROLE, ", beginning balance")
+  _add_role_label(capital, PERIOD_END_LABEL_ROLE, ", ending balance")
+  return BundleElement(
+    id=header_qname,
+    qname=header_qname,
+    namespace=capital.namespace,
+    namespace_uri=capital.namespace_uri,
+    name=header_qname.split(":", 1)[-1],
+    label=header_label,
+    period_type="duration",
+    is_abstract=True,
+    is_monetary=False,
+    element_type="abstract",
+    substitution_group=capital.substitution_group,
+    source=capital.source,
   )
 
 

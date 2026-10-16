@@ -192,6 +192,10 @@ def _concept(element: BundleElement) -> Concept:
     if label
     else []
   )
+  labels += [
+    Label(value=text, role=role, language=TEXT_LANGUAGE)
+    for role, text in sorted(element.role_labels.items())
+  ]
   return Concept(
     qname=element.qname,
     namespace=element.namespace_uri or namespace_uri_for(prefix),
@@ -282,6 +286,7 @@ def _networks(bundle: StatementBundle) -> list[Network]:
         arcrole=arc.arcrole or None,
         order=arc.order_value,
         weight=arc.weight if kind == "calculation" else None,
+        preferred_label=arc.preferred_label if kind == "presentation" else None,
         is_root=arc.from_qname not in targets,
       )
       for arc in link.arcs
