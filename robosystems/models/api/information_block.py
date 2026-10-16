@@ -1122,9 +1122,15 @@ class InformationBlockSummary(BaseModel):
   of its atoms. Read in one query, so a graph's whole catalogue lists in the
   time one envelope builds."""
 
-  id: str
+  id: str = Field(..., description="The block's structure id.")
   block_type: str = Field(..., description="Discriminator — 'schedule', …")
-  name: str
+  name: str = Field(
+    ...,
+    description=(
+      "The block's own name — the instance ('FY27 Operating Budget'), where "
+      "`display_name` is its type's label ('Forecast')."
+    ),
+  )
   display_name: str = Field(
     ..., description="Registry-sourced display label (e.g., 'Schedule')."
   )
