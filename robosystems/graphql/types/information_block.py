@@ -193,6 +193,12 @@ class InformationBlockViewProjections:
 MechanicsPayload = strawberry.scalars.JSON
 
 
+@pydantic_type(model=PydanticInformationBlockSummary, all_fields=True)
+class InformationBlockSummary:
+  """One row of a block list: the envelope's identity with counts in place
+  of its atoms."""
+
+
 # ── Artifact — hand-written so the mechanics JSON is explicit ──────────────
 
 
@@ -216,12 +222,6 @@ class Artifact:
 
 
 # ── Top-level envelope — hand-written so we can override `artifact` ────────
-
-
-@pydantic_type(model=PydanticInformationBlockSummary, all_fields=True)
-class InformationBlockSummary:
-  """One row of a block list: the envelope's identity with counts in place
-  of its atoms."""
 
 
 @strawberry.type

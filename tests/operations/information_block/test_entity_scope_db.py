@@ -358,8 +358,11 @@ class TestListInformationBlockSummaries:
     full = list_information_blocks(ext_session, limit=200)
     summaries = list_information_block_summaries(ext_session, limit=200)
 
-    assert [(s.id, s.block_type, s.entity_id) for s in summaries] == [
-      (b.id, b.block_type, b.entity_id) for b in full
+    assert [
+      (s.id, s.block_type, s.entity_id, s.fact_count, s.connection_count)
+      for s in summaries
+    ] == [
+      (b.id, b.block_type, b.entity_id, len(b.facts), len(b.connections)) for b in full
     ]
     by_id = {s.id: s for s in summaries}
     balance_sheet = by_id[group.balance_sheet.id]

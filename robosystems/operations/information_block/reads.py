@@ -3,7 +3,9 @@ the MCP tools."""
 
 from __future__ import annotations
 
-from sqlalchemy import func, or_, select
+from typing import Any
+
+from sqlalchemy import ColumnElement, Select, func, or_, select
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.information_block import (
@@ -208,7 +210,8 @@ def list_information_block_summaries(
   # The facts an envelope carries: in scope (a schedule's closed periods are
   # history, already in its opening balances) and the entity's the page reads
   # as. A block one entity owns holds only its owner's, and the page lists
-  # owned blocks of that entity alone.
+  # owned blocks of that entity alone. ``scope`` is None only on the library
+  # and on a graph with no entity row, where no block is anyone's own.
   fact_filters = [Fact.structure_id == Structure.id, Fact.fact_scope == "in_scope"]
   if scope is not None:
     fact_filters.append(Fact.entity_id == scope)
@@ -229,7 +232,8 @@ def list_information_block_summaries(
     connection_count,
     limit=limit,
     offset=offset,
-  ).outerjoin(Taxonomy, Taxonomy.id == Structure.taxonomy_id)
+    with_taxonomy=True,
+  )
 
   summaries: list[InformationBlockSummary] = []
   for structure, owner_id, taxonomy_name, facts, connections in session.execute(
@@ -278,20 +282,31 @@ def _candidate_block_types(
   return [e.id for e in entries]
 
 
-def _listing(candidate_ids, scope, owner, *columns, limit: int, offset: int):
+def _listing(
+  candidate_ids: list[str],
+  scope: str | None,
+  owner: ColumnElement[Any],
+  *columns: ColumnElement[Any],
+  limit: int,
+  offset: int,
+  with_taxonomy: bool = False,
+) -> Select[Any]:
   """The page of ``Structure`` rows (with ``owner`` and ``columns``) a
   listing covers. Tenant-authored blocks sort first so library statements
   don't swamp the default page. Arc-less disclosure rows build to None, so
-  they're excluded in SQL to keep pages full."""
+  they're excluded in SQL to keep pages full. ``with_taxonomy`` joins the
+  structure's taxonomy for a column over it."""
   has_presentation_arc = (
     select(Association.id)
     .where(Association.structure_id == Structure.id)
     .where(Association.association_type == "presentation")
     .exists()
   )
+  query = select(Structure, owner, *columns)
+  if with_taxonomy:
+    query = query.outerjoin(Taxonomy, Taxonomy.id == Structure.taxonomy_id)
   query = (
-    select(Structure, owner, *columns)
-    .where(Structure.block_type.in_(candidate_ids))
+    query.where(Structure.block_type.in_(candidate_ids))
     .where(Structure.is_active.is_(True))
     .where(or_(Structure.block_type != DISCLOSURE_BLOCK_TYPE, has_presentation_arc))
     .order_by(
