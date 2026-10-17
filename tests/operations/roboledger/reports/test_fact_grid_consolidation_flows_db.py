@@ -30,7 +30,7 @@ from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity_on
 
 pytestmark = pytest.mark.integration
 
-GRAPH = "kgdddddddddddddddd12"
+GRAPH = "kgdddddddddddddddd13"
 ADJUSTMENTS = "ent_test_adjustments"
 JAN = PeriodSpec(start=date(2026, 1, 1), end=date(2026, 1, 31), label="Jan")
 NOTE_PROCEEDS = "rs-gaap:ProceedsFromRelatedPartyDebt"
