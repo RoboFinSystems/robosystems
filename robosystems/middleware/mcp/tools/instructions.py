@@ -301,6 +301,13 @@ def build_instructions(
   return result or None
 
 
+# A member the group does not sum, by its consolidation method.
+_NOT_SUMMED = {
+  "equity": "equity method, not summed",
+  "cost": "an investment at cost, not summed",
+}
+
+
 def _entity_lines(entities: Sequence[Mapping[str, Any]], has) -> list[str]:
   """The reporting group, and the one rule for naming an entity."""
 
@@ -308,15 +315,20 @@ def _entity_lines(entities: Sequence[Mapping[str, Any]], has) -> list[str]:
     return f"`{entity['name']}` (`{entity['id']}`)"
 
   def member(entity: Mapping[str, Any]) -> str:
-    note = _NOT_SUMMED.get(entity.get("consolidation_method") or "")
-    return label(entity) + (f" ({note})" if note else "")
+    notes = []
+    if left := entity.get("left_on"):
+      notes.append(f"left the group {str(left)[:7]}")
+    if note := _NOT_SUMMED.get(entity.get("consolidation_method") or ""):
+      notes.append(note)
+    return label(entity) + (f" ({'; '.join(notes)})" if notes else "")
+
+  def is_consolidation(entity: Mapping[str, Any]) -> bool:
+    return entity.get("entity_role") == "consolidation"
 
   parents = [e for e in entities if e.get("is_group_parent")]
   parent = parents[0] if parents else entities[0]
-  adjustments = [
-    e for e in entities if e is not parent and e.get("entity_role") == "consolidation"
-  ]
-  subs = [e for e in entities if e is not parent and e not in adjustments]
+  adjustments = [e for e in entities if e is not parent and is_consolidation(e)]
+  subs = [e for e in entities if e is not parent and not is_consolidation(e)]
   adds = " `create-entity` adds one." if has("create-entity") else ""
   lists = " `get-graph-info` lists them." if has("get-graph-info") else ""
   if not subs and not adjustments:
@@ -347,17 +359,11 @@ def _entity_lines(entities: Sequence[Mapping[str, Any]], has) -> list[str]:
   return lines
 
 
-# A member the group does not sum, by its consolidation method.
-_NOT_SUMMED = {
-  "equity": "equity method, not summed",
-  "cost": "an investment at cost, not summed",
-}
-
-
 def _consolidation_lines(adjustments: Sequence[Mapping[str, Any]], has) -> list[str]:
   """The consolidation entity, the two group scopes, and what a tag does on
-  an elimination — only where the graph has any of it."""
-  lines = ["CONSOLIDATION"]
+  an elimination — each line riding the tool it names; nothing, header
+  included, when no line survives."""
+  lines: list[str] = []
   for entity in adjustments:
     lines.append(
       f"- `{entity['name']}` (`{entity['id']}`) is the group's consolidation "
@@ -383,4 +389,4 @@ def _consolidation_lines(adjustments: Sequence[Mapping[str, Any]], has) -> list[
       "so an elimination offsets the flow a member's line produced; tag each "
       "side with the row it offsets."
     )
-  return lines
+  return ["CONSOLIDATION", *lines] if lines else []

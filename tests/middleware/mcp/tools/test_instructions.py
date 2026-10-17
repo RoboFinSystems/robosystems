@@ -314,3 +314,34 @@ class TestConsolidation:
     assert out is not None
     assert "CONSOLIDATION" not in out
     assert "not summed" not in out
+
+  def test_a_cost_member_and_a_departed_member_are_marked(self) -> None:
+    stake = {
+      "id": "ent_stake",
+      "name": "Stake Co",
+      "is_group_parent": False,
+      "consolidation_method": "cost",
+    }
+    former = {
+      "id": "ent_former",
+      "name": "Old Mill LLC",
+      "is_group_parent": False,
+      "consolidation_method": "full",
+      "left_on": "2026-06-30",
+    }
+    out = self._ledger([_PARENT, stake, former])
+    assert out is not None
+    assert "`Stake Co` (`ent_stake`) (an investment at cost, not summed)" in out
+    assert "`Old Mill LLC` (`ent_former`) (left the group 2026-06)" in out
+
+  def test_no_bare_header_when_no_line_survives(self) -> None:
+    out = build_instructions(
+      graph_id="kg_x",
+      tool_names=_LEDGER - {"live-financial-statement"},
+      is_shared_repo=False,
+      read_only=False,
+      entities=[_PARENT, _KIOSK],
+    )
+    assert out is not None
+    assert "CONSOLIDATION" not in out
+    assert "(equity method, not summed)" in out
