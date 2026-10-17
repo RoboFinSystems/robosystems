@@ -34,7 +34,9 @@ row is a leaf that drops when all-zero, and no subtotal's children moved.
 This migration brings ``public`` up to the committed source and fans the
 pinned packages into every tenant through ``resync_library_into_tenant``
 (the 0046 pattern). ``tenant-exclude/v1.json`` was regenerated with this
-change so the concepts copy. Tenant-authored arcs are never touched.
+change so the concepts copy (and with them ``IncomeLossFromEquityMethodInvestmentsNetOfDividendsOrDistributions``, a
+hierarchy intermediate the generator keeps as scaffolding; it is presented in no
+Style and renders nowhere). Tenant-authored arcs are never touched.
 
 Revision ID: 0052
 Revises: 0051
