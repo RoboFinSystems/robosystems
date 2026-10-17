@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import re
 import sys
+import time
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
@@ -278,6 +279,9 @@ class GroupResult:
     return all(c.passed for c in self.checks)
 
 
+_RATE_LIMIT_RETRIES = 3
+
+
 class _Api:
   """The REST operations and the GraphQL read, with the demo's credentials."""
 
@@ -296,11 +300,15 @@ class _Api:
 
   def operation(self, name: str, body: dict[str, Any], *, ok: tuple[int, ...] = ()):
     """POST one roboledger operation; returns the envelope's ``result``.
-    Statuses in ``ok`` (a 409 for something already done) return None."""
-    response = self.http.post(
-      f"{self.base_url}/extensions/roboledger/{self.graph_id}/operations/{name}",
-      json=body,
-    )
+    Statuses in ``ok`` (a 409 for something already done) return None.
+    A 429 waits out the rate-limit window and retries."""
+    url = f"{self.base_url}/extensions/roboledger/{self.graph_id}/operations/{name}"
+    response = self.http.post(url, json=body)
+    for _ in range(_RATE_LIMIT_RETRIES):
+      if response.status_code != 429:
+        break
+      time.sleep(int(response.headers.get("Retry-After", "60")))
+      response = self.http.post(url, json=body)
     if response.status_code in ok:
       return None
     if response.status_code >= 400:
