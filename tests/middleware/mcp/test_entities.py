@@ -20,6 +20,8 @@ def _row(id, name, *, is_parent, created_at, source="native", parent_entity_id=N
   row.id, row.name, row.is_parent, row.created_at = id, name, is_parent, created_at
   row.source, row.parent_entity_id = source, parent_entity_id
   row.ticker, row.entity_type = None, "llc"
+  row.ownership_pct, row.consolidation_method = None, "full"
+  row.entity_role, row.joined_on, row.left_on = "operating", None, None
   return row
 
 

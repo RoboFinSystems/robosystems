@@ -265,3 +265,83 @@ class TestEntities:
       )
       or ""
     )
+
+
+_ADJUSTMENTS = {
+  "id": "ent_cons",
+  "name": "Consolidation Adjustments",
+  "is_group_parent": False,
+  "entity_role": "consolidation",
+  "consolidation_method": "none",
+}
+_KIOSK = {
+  "id": "ent_kiosk",
+  "name": "Pier Market Kiosk LLC",
+  "is_group_parent": False,
+  "consolidation_method": "equity",
+}
+
+
+class TestConsolidation:
+  def _ledger(self, entities, extra=()):
+    return build_instructions(
+      graph_id="kg_x",
+      tool_names=_LEDGER | set(extra),
+      is_shared_repo=False,
+      read_only=False,
+      entities=entities,
+    )
+
+  def test_the_consolidation_entity_and_the_scopes_are_explained(self) -> None:
+    out = self._ledger([_PARENT, _SUB, _KIOSK, _ADJUSTMENTS])
+    assert out is not None
+    assert "Consolidation entity: `Consolidation Adjustments` (`ent_cons`)." in out
+    assert "`Pier Market Kiosk LLC` (`ent_kiosk`) (equity method, not summed)" in out
+    assert "Subsidiaries: `Maple Court LLC` (`ent_sub`), `Pier" in out
+    assert "CONSOLIDATION" in out
+    assert "is the group's consolidation entity" in out
+    assert "`live-financial-statement` on the group parent takes `scope`" in out
+    # The tag rule names the journal tool, which this set lacks.
+    assert "flow_qname" not in out
+
+  def test_the_tag_rule_rides_the_journal_tool(self) -> None:
+    out = self._ledger([_PARENT, _ADJUSTMENTS], extra={"update-journal-entry"})
+    assert out is not None
+    assert "carries a `flow_qname` counts" in out
+
+  def test_a_plain_group_says_nothing_about_consolidation(self) -> None:
+    out = self._ledger([_PARENT, _SUB])
+    assert out is not None
+    assert "CONSOLIDATION" not in out
+    assert "not summed" not in out
+
+  def test_a_cost_member_and_a_departed_member_are_marked(self) -> None:
+    stake = {
+      "id": "ent_stake",
+      "name": "Stake Co",
+      "is_group_parent": False,
+      "consolidation_method": "cost",
+    }
+    former = {
+      "id": "ent_former",
+      "name": "Old Mill LLC",
+      "is_group_parent": False,
+      "consolidation_method": "full",
+      "left_on": "2026-06-30",
+    }
+    out = self._ledger([_PARENT, stake, former])
+    assert out is not None
+    assert "`Stake Co` (`ent_stake`) (an investment at cost, not summed)" in out
+    assert "`Old Mill LLC` (`ent_former`) (left the group 2026-06)" in out
+
+  def test_no_bare_header_when_no_line_survives(self) -> None:
+    out = build_instructions(
+      graph_id="kg_x",
+      tool_names=_LEDGER - {"live-financial-statement"},
+      is_shared_repo=False,
+      read_only=False,
+      entities=[_PARENT, _KIOSK],
+    )
+    assert out is not None
+    assert "CONSOLIDATION" not in out
+    assert "(equity method, not summed)" in out
