@@ -132,3 +132,18 @@ def test_consolidation_rows_carry_their_traits(traits_by_qname) -> None:
       "indirectCashFlowReconcilingItem=indirectCashFlowMethodReconcilingItem"
       in traits_by_qname[wc]
     )
+
+
+@pytest.mark.unit
+def test_equity_method_income_is_a_gain(traits_by_qname) -> None:
+  """The share of an associate's result is a mapping candidate only through
+  its EFS trait, and its sign reaches net income through it (migration
+  0052); the investment leaf was an asset already."""
+  assert (
+    "elementsOfFinancialStatements=gain"
+    in traits_by_qname["rs-gaap:IncomeLossFromEquityMethodInvestments"]
+  )
+  assert (
+    "elementsOfFinancialStatements=asset"
+    in traits_by_qname["rs-gaap:EquityMethodInvestments"]
+  )

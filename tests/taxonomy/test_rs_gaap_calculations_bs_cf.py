@@ -149,3 +149,45 @@ class TestIncomeStatementCalcs:
       "rs-gaap:IncomeLossFromDiscontinuedOperationsNetOfTax": 1.0,
       "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest": -1.0,
     }
+
+
+class TestEquityMethodRows:
+  """The associate's investment and its share of income (migration 0052):
+  an asset leaf beside the investment in subsidiaries, a nonoperating income
+  leaf, and on the cash flow the income removed as non-cash while the
+  investment's purchase and sale are investing flows."""
+
+  def test_the_investment_is_a_noncurrent_asset(
+    self, calculations: TaxonomyPackage
+  ) -> None:
+    equation = _equation(calculations, "BalanceSheet", "rs-gaap:AssetsNoncurrent")
+    assert equation["rs-gaap:EquityMethodInvestments"] == 1.0
+    assert (
+      equation["rs-gaap:InvestmentsInAffiliatesSubsidiariesAssociatesAndJointVentures"]
+      == 1.0
+    )
+
+  def test_the_share_of_income_is_nonoperating(
+    self, calculations: TaxonomyPackage
+  ) -> None:
+    equation = _equation(
+      calculations, "IncomeStatement", "rs-gaap:NonoperatingIncomeExpense"
+    )
+    assert equation["rs-gaap:IncomeLossFromEquityMethodInvestments"] == 1.0
+
+  def test_the_cash_flow_removes_the_income_and_shows_the_flows(
+    self, calculations: TaxonomyPackage
+  ) -> None:
+    operating = _equation(
+      calculations,
+      "CashFlowStatement",
+      "rs-gaap:NetCashProvidedByUsedInOperatingActivities",
+    )
+    assert operating["rs-gaap:IncomeLossFromEquityMethodInvestments"] == -1.0
+    investing = _equation(
+      calculations,
+      "CashFlowStatement",
+      "rs-gaap:NetCashProvidedByUsedInInvestingActivities",
+    )
+    assert investing["rs-gaap:PaymentsToAcquireEquityMethodInvestments"] == 1.0
+    assert investing["rs-gaap:ProceedsFromSaleOfEquityMethodInvestments"] == 1.0
