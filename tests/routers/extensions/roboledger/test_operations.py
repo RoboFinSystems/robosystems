@@ -96,6 +96,9 @@ from robosystems.routers.extensions.roboledger.operations import (
   update_event_block_op,
   update_journal_entry_op,
 )
+from robosystems.routers.extensions.roboledger.operations.setup import (
+  _require_entity_updates,
+)
 
 GRAPH_ID = "kg01234567890abcdef"
 
@@ -2429,3 +2432,11 @@ class TestChangeCalendarStartOperation:
     with pytest.raises(HTTPException) as raised:
       await self._call(side_effect=error)
     assert raised.value.status_code == status
+
+
+def test_an_explicit_null_on_the_interval_is_a_change() -> None:
+  """Reopening membership is `left_on: null` — an update, not an empty body."""
+  body = UpdateEntityRequest(entity_id="ent_sub", left_on=None)
+  _require_entity_updates(body)
+  with pytest.raises(HTTPException):
+    _require_entity_updates(UpdateEntityRequest(entity_id="ent_sub"))

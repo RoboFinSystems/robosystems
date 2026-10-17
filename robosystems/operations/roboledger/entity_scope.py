@@ -235,6 +235,8 @@ def group_members(
     {"parent": parent_id, "consolidated": consolidated},
   ).all()
   return [
+    # The parent is a member of its own group for every period, whatever its
+    # row says; only the others carry an interval the read consults.
     GroupMember(parent_id, "operating", None, None),
     *(
       GroupMember(str(row.id), str(row.entity_role), row.joined_on, row.left_on)

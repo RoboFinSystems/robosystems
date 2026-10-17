@@ -59,6 +59,7 @@ from robosystems.operations.roboledger.commands.chart_of_accounts import (
   initialize_chart_of_accounts as cmd_initialize_chart_of_accounts,
 )
 from robosystems.operations.roboledger.commands.entity import (
+  CLEARABLE_FIELDS,
   EntityHierarchyError,
   EntityTickerTakenError,
   ParentEntityNotFoundError,
@@ -299,7 +300,9 @@ create_entity_op = _registrar.register(
 
 
 def _require_entity_updates(body: UpdateEntityRequest) -> None:
-  if not body.model_dump(exclude_none=True, exclude={"entity_id"}):
+  if not body.model_dump(exclude_none=True, exclude={"entity_id"}) and not (
+    body.model_fields_set & set(CLEARABLE_FIELDS)
+  ):
     raise HTTPException(status_code=400, detail="No fields provided for update.")
 
 

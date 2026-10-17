@@ -174,3 +174,64 @@ def test_a_schema_with_no_entity_gets_the_columns_and_nothing_else(tenant):
       )
     }
     assert not (set(migration.COLUMNS) & columns)
+
+
+def _chart(conn, schema, taxonomy_id, entity_id, template):
+  conn.execute(
+    text(
+      f'INSERT INTO "{schema}".taxonomies (id, name, taxonomy_type, is_shared, '
+      "is_active, is_locked, metadata, created_at, updated_at, created_by) VALUES "
+      "(:id, :id, 'chart_of_accounts', false, true, false, "
+      "jsonb_build_object('template', :template), now(), now(), 'usr_1')"
+    ),
+    {"id": taxonomy_id, "template": template},
+  )
+  conn.execute(
+    text(
+      f'INSERT INTO "{schema}".entity_taxonomies (id, entity_id, taxonomy_id, '
+      "is_primary, basis, created_at, updated_at) VALUES "
+      "(:id, :entity, :taxonomy, true, 'chart_of_accounts', now(), now())"
+    ),
+    {"id": f"et_{taxonomy_id}", "entity": entity_id, "taxonomy": taxonomy_id},
+  )
+
+
+def test_a_consolidation_chart_types_its_entity(tenant):
+  """A consolidation entity made before the role existed is known by its
+  chart's template; it is typed first, so the method backfill leaves it."""
+  engine, schema = tenant
+  with engine.begin() as conn:
+    _entity(
+      conn,
+      schema,
+      "ent_parent",
+      is_parent=True,
+      source="native",
+      ownership_pct=None,
+      seconds=0,
+    )
+    _entity(
+      conn,
+      schema,
+      "ent_adjust",
+      is_parent=False,
+      source="native",
+      ownership_pct=100,
+      seconds=1,
+    )
+    _entity(
+      conn,
+      schema,
+      "ent_cafe",
+      is_parent=False,
+      source="native",
+      ownership_pct=100,
+      seconds=2,
+    )
+    _chart(conn, schema, "tax_cons", "ent_adjust", "consolidation")
+    _chart(conn, schema, "tax_prod", "ent_cafe", "product")
+
+    migration._add(conn, schema)
+
+    assert _row(conn, schema, "ent_adjust")[:2] == ("none", "consolidation")
+    assert _row(conn, schema, "ent_cafe")[:2] == ("full", "operating")

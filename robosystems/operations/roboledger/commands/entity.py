@@ -29,6 +29,7 @@ from robosystems.operations.roboledger.reads.entity import entity_to_response
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 __all__ = [
+  "CLEARABLE_FIELDS",
   "EntityHierarchyError",
   "EntityMembershipError",
   "EntityTickerTakenError",
@@ -40,6 +41,8 @@ __all__ = [
 ]
 
 _TICKER_MAX = 10
+# The fields an explicit null clears: membership reopens by clearing left_on.
+CLEARABLE_FIELDS = ("joined_on", "left_on")
 _METHOD_NONE = "none"
 _ROLE_OPERATING = "operating"
 _ROLE_CONSOLIDATION = "consolidation"
@@ -110,6 +113,7 @@ def _apply_updates(session: Session, entity: Entity, updates: dict[str, Any]):
       "another entity."
     )
   role = updates.get("entity_role", entity.entity_role)
+  retyped = role != entity.entity_role
   if role == _ROLE_CONSOLIDATION and "consolidation_method" not in updates:
     updates["consolidation_method"] = _METHOD_NONE
   if "consolidation_method" in updates:
@@ -120,9 +124,14 @@ def _apply_updates(session: Session, entity: Entity, updates: dict[str, Any]):
         "The group parent and the consolidation entity are not consolidated "
         "into the group; their consolidation_method is none."
       )
-  elif "ownership_pct" in updates and role == _ROLE_OPERATING:
+  elif (
+    not parent and role == _ROLE_OPERATING and ("ownership_pct" in updates or retyped)
+  ):
+    # A new share implies a new default, and so does leaving the consolidation
+    # role, which would otherwise keep the entity at none and out of every sum.
+    share = updates.get("ownership_pct", entity.ownership_pct)
     updates["consolidation_method"] = derived_consolidation_method(
-      updates["ownership_pct"]
+      float(share) if share is not None else None
     )
   _check_membership(
     updates.get("joined_on", entity.joined_on), updates.get("left_on", entity.left_on)
@@ -169,7 +178,8 @@ def update_entity(
 ) -> LedgerEntityResponse:
   """Update an entity of the group from a validated request body.
 
-  Only non-null fields are applied. Raises `ValueError` for an empty body,
+  Only non-null fields are applied, except that an explicit null clears
+  ``joined_on`` or ``left_on``. Raises `ValueError` for an empty body,
   `ParentEntityNotFoundError` when the graph has no entity, and
   `EntityNotInGraphError` for an `entity_id` that is not this graph's.
   ``created_by`` is unused (registrar signature).
@@ -177,6 +187,9 @@ def update_entity(
   del created_by
 
   updates = body.model_dump(exclude_none=True, exclude={"entity_id"})
+  for field_name in CLEARABLE_FIELDS:
+    if field_name in body.model_fields_set and getattr(body, field_name) is None:
+      updates[field_name] = None
   if not updates:
     raise ValueError("No fields provided for update.")
 

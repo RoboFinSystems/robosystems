@@ -19,9 +19,11 @@ except the group parent takes the method its recorded share implies — half
 or more ``full``, a fifth to a half ``equity``, less ``cost``, unrecorded
 ``full`` (the same rule as ``commands.entity.derived_consolidation_method``,
 and the same set the combined view summed before the method existed) — so
-no graph's combined read moves. A consolidation entity made before the role
-existed (the demo group's) is typed by ``update-entity`` on its next run;
-until then it is a ``full`` member and summed in, as it was.
+no graph's combined read moves. An entity whose chart came from the
+``consolidation`` template is the group's consolidation entity made before
+the role existed (the demo group's, or a tenant's own): it is typed
+``consolidation`` with method ``none`` first, so ``combined`` is the
+pre-adjustment total from the first read.
 
 Fresh tenants get the columns from the model.
 
@@ -69,6 +71,23 @@ def _backfill(conn: Connection, schema: str) -> None:
   parent_id = _group_parent(conn, schema)
   if parent_id is None:
     return
+  conn.execute(
+    text(
+      f"""
+      UPDATE "{schema}".entities e
+      SET entity_role = 'consolidation', consolidation_method = 'none'
+      WHERE e.source <> 'linked' AND e.id <> :parent
+        AND e.entity_role = 'operating'
+        AND EXISTS (
+          SELECT 1 FROM "{schema}".entity_taxonomies et
+          JOIN "{schema}".taxonomies t ON t.id = et.taxonomy_id
+          WHERE et.entity_id = e.id
+            AND t.metadata->>'template' = 'consolidation'
+        )
+      """
+    ),
+    {"parent": parent_id},
+  )
   conn.execute(
     text(
       f"""

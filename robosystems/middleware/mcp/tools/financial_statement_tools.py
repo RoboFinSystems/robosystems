@@ -19,6 +19,7 @@ from robosystems.operations.roboledger.reads.reports import (
   MCP_LIVE_STATEMENT_TYPES,
   CoaMappingNotFoundError,
   CombinedViewOnParentOnlyError,
+  InvalidStatementScopeError,
   get_live_financial_statement,
   resolve_reporting_window,
 )
@@ -248,7 +249,7 @@ Facts with element qnames, names, classifications, and values aligned with `peri
       except (
         CoaMappingNotFoundError,
         CombinedViewOnParentOnlyError,
-        ValueError,
+        InvalidStatementScopeError,
       ) as exc:
         return {
           "error": str(exc),

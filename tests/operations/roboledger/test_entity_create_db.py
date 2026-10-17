@@ -492,3 +492,45 @@ class TestGroupMembers:
     assert not member.is_member_for(date(2026, 10, 1), date(2026, 10, 31))
     always = GroupMember("ent", "operating", None, None)
     assert always.is_member_for(date(2000, 1, 1), date(2000, 1, 31))
+
+
+class TestConsolidationFollowUps:
+  def test_leaving_the_consolidation_role_re_derives_the_method(self, two_entities):
+    """Typed back to operating, an entity takes the method its share implies
+    instead of staying at none and out of every sum."""
+    session, sub = two_entities.session, two_entities.sub
+    update_entity(
+      session,
+      UpdateEntityRequest(entity_id=sub.id, entity_role="consolidation"),
+      created_by="u",
+    )
+    back = update_entity(
+      session,
+      UpdateEntityRequest(entity_id=sub.id, entity_role="operating"),
+      created_by="u",
+    )
+    assert (back.entity_role, back.consolidation_method) == ("operating", "full")
+    update_entity(
+      session,
+      UpdateEntityRequest(entity_id=sub.id, entity_role="consolidation"),
+      created_by="u",
+    )
+    back = update_entity(
+      session,
+      UpdateEntityRequest(entity_id=sub.id, entity_role="operating", ownership_pct=40),
+      created_by="u",
+    )
+    assert back.consolidation_method == "equity"
+
+  def test_an_explicit_null_reopens_membership(self, two_entities):
+    session, sub = two_entities.session, two_entities.sub
+    left = update_entity(
+      session,
+      UpdateEntityRequest(entity_id=sub.id, left_on=date(2026, 6, 30)),
+      created_by="u",
+    )
+    assert left.left_on == date(2026, 6, 30)
+    reopened = update_entity(
+      session, UpdateEntityRequest(entity_id=sub.id, left_on=None), created_by="u"
+    )
+    assert reopened.left_on is None

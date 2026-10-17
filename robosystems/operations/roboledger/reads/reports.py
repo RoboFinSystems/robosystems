@@ -956,6 +956,15 @@ def build_current_and_prior_periods(start: date, end: date) -> list[FactPeriodSp
   ]
 
 
+class InvalidStatementScopeError(ValueError):
+  """A scope that is not one of ``LIVE_STATEMENT_SCOPES``."""
+
+  def __init__(self, scope: str) -> None:
+    super().__init__(
+      f"Unknown scope {scope!r}. Valid scopes: {', '.join(LIVE_STATEMENT_SCOPES)}."
+    )
+
+
 class CombinedViewOnParentOnlyError(ValueError):
   """A combined statement is read on the group parent, never on a subsidiary."""
 
@@ -1090,13 +1099,11 @@ def get_live_financial_statement(
   ``reporting_style_id`` defaults to the entity's Style. Raises
   ``CoaMappingNotFoundError`` when no CoA→GAAP mapping exists,
   ``CombinedViewOnParentOnlyError`` for a group scope on a subsidiary, and
-  ``ValueError`` for a scope that is not one of ``LIVE_STATEMENT_SCOPES``.
+  ``InvalidStatementScopeError`` for a scope not in ``LIVE_STATEMENT_SCOPES``.
   """
   scope = scope or ("consolidated" if consolidated else "entity")
   if scope not in LIVE_STATEMENT_SCOPES:
-    raise ValueError(
-      f"Unknown scope {scope!r}. Valid scopes: {', '.join(LIVE_STATEMENT_SCOPES)}."
-    )
+    raise InvalidStatementScopeError(scope)
   entity_id = resolve_entity_id(session, entity_id)
   if reporting_style_id is None:
     reporting_style_id = load_entity_reporting_style(session, entity_id)

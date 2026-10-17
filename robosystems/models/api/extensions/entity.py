@@ -34,15 +34,20 @@ _ROLE_DESCRIPTION = (
   "consolidation worksheet, which only the consolidated statements read and "
   "no operating company's statements ever include. Its method is `none`."
 )
+_MONTH_NOTE = (
+  " Membership is by month: a period column wider than a month that overlaps "
+  "the interval is summed whole, so a member's books in this graph should "
+  "hold only the months it belonged."
+)
 _JOINED_DESCRIPTION = (
   "The month this entity became a member of the group, as any date in it; "
   "null is a member since the beginning. The consolidated statements include "
-  "it from that month."
+  "it from that month." + _MONTH_NOTE
 )
 _LEFT_DESCRIPTION = (
   "The month this entity left the group, as any date in it; null is a member "
   "still. The consolidated statements include it through that month and "
-  "leave it out after."
+  "leave it out after." + _MONTH_NOTE
 )
 
 
@@ -212,13 +217,15 @@ class UpdateEntityRequest(BaseModel):
     + " Refused on the group parent. Marking an entity `consolidation` sets "
     "its method to `none`.",
   )
-  joined_on: date | None = Field(None, description=_JOINED_DESCRIPTION)
+  joined_on: date | None = Field(
+    None, description=_JOINED_DESCRIPTION + " Pass null to clear it."
+  )
   left_on: date | None = Field(
     None,
     description=_LEFT_DESCRIPTION
     + " Must not precede `joined_on`. Set it when a subsidiary is sold, "
     "dissolved or deconsolidated; its closed months and stamped statements "
-    "stay readable under the group.",
+    "stay readable under the group. Pass null to reopen membership.",
   )
 
   model_config = ConfigDict(
