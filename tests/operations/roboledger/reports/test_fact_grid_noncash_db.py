@@ -21,10 +21,12 @@ from robosystems.config import env
 from robosystems.db.extensions import extensions_session, provision_tenant_schema
 from robosystems.models.extensions import Element, Entity
 from robosystems.models.extensions.association import Association
+from robosystems.models.extensions.element_trait import ElementTrait
 from robosystems.models.extensions.roboledger import Entry, LineItem
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.structure import Structure
 from robosystems.models.extensions.taxonomy import Taxonomy
+from robosystems.models.extensions.trait import Trait
 from robosystems.operations.roboledger.reports.fact_grid import (
   PeriodSpec,
   generate_report_facts,
@@ -67,7 +69,18 @@ ACCOUNTS = {
   "income_tax": ("rs-gaap:IncomeTaxExpenseBenefit", "debit", "duration"),
   "other_income": ("rs-gaap:OtherNonoperatingIncomeExpense", "credit", "duration"),
   "disposal_gain": (DISPOSAL_GAIN, "credit", "duration"),
+  "inventory": (
+    "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings",
+    "debit",
+    "instant",
+  ),
+  "cogs": ("rs-gaap:CostOfGoodsAndServicesSold", "debit", "duration"),
 }
+
+# A tenant-authored disclosure member the inventory account is also mapped to,
+# as an inventory-components note maps it: an asset, as the statement concept
+# is, with no working-capital row, and a qname that sorts before rs-gaap.
+INVENTORY_MEMBER = "acme:InventoryRawMaterials"
 
 
 @pytest.fixture(scope="module")
@@ -138,6 +151,31 @@ def _seed() -> dict[str, str]:
         )
       )
       ids[key] = account.id
+    member = Element(
+      qname=INVENTORY_MEMBER,
+      name="Raw materials",
+      balance_type="debit",
+      period_type="instant",
+      element_type="concept",
+      is_abstract=False,
+    )
+    session.add(member)
+    session.flush()
+    asset = session.execute(
+      select(Trait.id).where(
+        Trait.category == "elementsOfFinancialStatements",
+        Trait.identifier == "asset",
+      )
+    ).scalar_one()
+    session.add(ElementTrait(element_id=member.id, trait_id=asset, is_primary=True))
+    session.add(
+      Association(
+        structure_id=mapping.id,
+        from_element_id=ids["inventory"],
+        to_element_id=member.id,
+        association_type="mapping",
+      )
+    )
     for qname in (REPAYMENTS, CAPEX, OTHER_INVESTMENTS):
       ids[qname] = str(
         session.execute(select(Element.id).where(Element.qname == qname)).scalar_one()
@@ -598,3 +636,15 @@ def test_interest_settled_partly_in_cash_is_paid_at_the_cash_share(tenant):
   """150 of interest: 100 paid, 50 added to the debt."""
   _post(tenant, [("interest", 150, 0), ("cash", 0, 100), ("credit_line", 0, 50)])
   assert _cash_flow(tenant)[INTEREST_PAID] == 100.0
+
+
+def test_a_multi_mapped_account_counts_once(tenant):
+  """An inventory account also mapped to a disclosure member: cost of goods
+  sold against it moves no cash and is no non-cash item. Each line is read
+  through the account's primary target, as the close reads it, not once per
+  target."""
+  _post(tenant, [("cogs", 364, 0), ("inventory", 0, 364)])
+  cf = _cash_flow(tenant)
+  assert cf.get(OTHER_NONCASH, 0.0) == 0.0, cf
+  assert cf["rs-gaap:IncreaseDecreaseInInventories"] == 364.0
+  _assert_no_reconciling_adjustment(cf)

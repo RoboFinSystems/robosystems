@@ -1367,6 +1367,31 @@ _CF_OPERATING_SUBTOTAL_QNAME = "rs-gaap:NetCashProvidedByUsedInOperatingActiviti
 _CF_PLUG_WARN_RATIO = 0.25
 
 
+def _primary_mapping(line: str) -> str:
+  """A subquery giving the one target a line's account counts toward, for
+  ``LEFT JOIN LATERAL (...) amap ON TRUE``. An account mapped to several
+  targets (a tenant's disclosure member beside its statement concept) is
+  read through the library concept the statements are built from, then a
+  trait-classified one, qname last, so a per-line pass never counts a line
+  twice or reads it as the member."""
+  return f"""
+    SELECT m.to_element_id
+    FROM associations m
+    JOIN elements mt ON mt.id = m.to_element_id
+    LEFT JOIN taxonomies mtx ON mtx.id = mt.taxonomy_id
+    LEFT JOIN element_traits pet
+      ON pet.element_id = m.to_element_id AND pet.is_primary = TRUE
+    LEFT JOIN traits pt
+      ON pt.id = pet.trait_id AND pt.category = 'elementsOfFinancialStatements'
+    WHERE m.from_element_id = {line}.element_id
+      AND m.association_type = :arc_type
+      AND m.structure_id = :mapping_id
+    ORDER BY (mtx.taxonomy_type IS DISTINCT FROM 'reporting_standard'),
+      (pt.id IS NULL), mt.qname
+    LIMIT 1
+  """
+
+
 def _is_consolidation_entity(session: Session, entity_id: str | None) -> bool:
   """Whether the entity is the group's consolidation entity, whose entries
   only the consolidated statements read; a whole-graph pivot is not."""
@@ -1405,7 +1430,7 @@ def _emit_flow_facts(
   """
   cash_qnames = list(_CASH_ANCHOR_QNAMES)
 
-  explicit_sql = text("""
+  explicit_sql = text(f"""
         SELECT
           COALESCE(fmap.to_element_id, li.flow_element_id) AS flow_id,
           rf.qname AS flow_qname,
@@ -1420,10 +1445,7 @@ def _emit_flow_facts(
         FROM line_items li
         JOIN entries en ON en.id = li.entry_id
         JOIN elements acct ON acct.id = li.element_id
-        LEFT JOIN associations amap
-          ON amap.from_element_id = li.element_id
-          AND amap.association_type = :arc_type
-          AND amap.structure_id = :mapping_id
+        LEFT JOIN LATERAL ({_primary_mapping("li")}) amap ON TRUE
         LEFT JOIN elements racct ON racct.id = amap.to_element_id
         LEFT JOIN associations fmap
           ON fmap.from_element_id = li.flow_element_id
@@ -1453,7 +1475,7 @@ def _emit_flow_facts(
   # with the operating plug. A split's tagged parts post with their own cash
   # and account lines, so its untagged parts balance on their own and keep
   # their defaults.
-  fallback_sql = text("""
+  fallback_sql = text(f"""
         SELECT
           rf.id AS flow_id,
           rf.qname AS flow_qname,
@@ -1463,10 +1485,7 @@ def _emit_flow_facts(
         FROM line_items li
         JOIN entries en ON en.id = li.entry_id
         JOIN elements acct ON acct.id = li.element_id
-        LEFT JOIN associations amap
-          ON amap.from_element_id = li.element_id
-          AND amap.association_type = :arc_type
-          AND amap.structure_id = :mapping_id
+        LEFT JOIN LATERAL ({_primary_mapping("li")}) amap ON TRUE
         LEFT JOIN elements racct ON racct.id = amap.to_element_id
         JOIN associations darc
           ON darc.to_element_id = COALESCE(amap.to_element_id, li.element_id)
@@ -1485,10 +1504,7 @@ def _emit_flow_facts(
           AND EXISTS (
             SELECT 1 FROM line_items cl
             JOIN elements ca ON ca.id = cl.element_id
-            LEFT JOIN associations cmap
-              ON cmap.from_element_id = cl.element_id
-              AND cmap.association_type = :arc_type
-              AND cmap.structure_id = :mapping_id
+            LEFT JOIN LATERAL ({_primary_mapping("cl")}) cmap ON TRUE
             LEFT JOIN elements cra ON cra.id = cmap.to_element_id
             WHERE cl.entry_id = en.id
               AND cl.flow_element_id IS NULL
@@ -1905,7 +1921,7 @@ def _emit_noncash_and_settlement_facts(
   reused = _cash_flow_reused_concepts(session, entity_id)
   cash_qnames = _CASH_ANCHOR_QNAMES
 
-  line_sql = text("""
+  line_sql = text(f"""
     SELECT en.id AS entry_id, en.posting_date, en.triggered_by_event_id,
       ev.discharges_event_id,
       li.debit_amount, li.credit_amount, li.flow_element_id,
@@ -1913,15 +1929,12 @@ def _emit_noncash_and_settlement_facts(
       c.qname AS concept_qname, c.period_type AS concept_period_type
     FROM line_items li
     JOIN entries en ON en.id = li.entry_id
-    LEFT JOIN associations amap
-      ON amap.from_element_id = li.element_id
-      AND amap.association_type = :arc_type
-      AND amap.structure_id = :mapping_id
+    LEFT JOIN LATERAL ({_primary_mapping("li")}) amap ON TRUE
     LEFT JOIN elements c ON c.id = COALESCE(amap.to_element_id, li.element_id)
     LEFT JOIN events ev ON ev.id = en.triggered_by_event_id
     WHERE en.status IN :landed_entry_statuses
       AND (:entity_id IS NULL OR en.entity_id = :entity_id)
-      AND {scope}
+      AND {{scope}}
   """)
   base = {"arc_type": arc_type, "mapping_id": mapping_id, "entity_id": entity_id}
 
@@ -2617,7 +2630,7 @@ def _emit_equity_movement_facts(
     else []
   )
 
-  line_sql = text("""
+  line_sql = text(f"""
     SELECT
       li.entry_id,
       target.id AS target_id,
@@ -2638,10 +2651,7 @@ def _emit_equity_movement_facts(
       ) AS default_flow_qname
     FROM line_items li
     JOIN entries en ON en.id = li.entry_id
-    JOIN associations amap
-      ON amap.from_element_id = li.element_id
-      AND amap.association_type = :arc_type
-      AND amap.structure_id = :mapping_id
+    LEFT JOIN LATERAL ({_primary_mapping("li")}) amap ON TRUE
     JOIN elements target ON target.id = amap.to_element_id
     LEFT JOIN associations fmap
       ON fmap.from_element_id = li.flow_element_id
@@ -2656,7 +2666,7 @@ def _emit_equity_movement_facts(
 
   # What else each entry touches: cash, or a balance-sheet account other than
   # the root's own equity.
-  counterpart_sql = text("""
+  counterpart_sql = text(f"""
     SELECT
       li.entry_id,
       target.id AS target_id,
@@ -2664,10 +2674,7 @@ def _emit_equity_movement_facts(
       target.balance_type AS target_balance_type,
       tcls.identifier AS classification
     FROM line_items li
-    JOIN associations amap
-      ON amap.from_element_id = li.element_id
-      AND amap.association_type = :arc_type
-      AND amap.structure_id = :mapping_id
+    LEFT JOIN LATERAL ({_primary_mapping("li")}) amap ON TRUE
     JOIN elements target ON target.id = amap.to_element_id
     LEFT JOIN (
       SELECT et.element_id, t.identifier
