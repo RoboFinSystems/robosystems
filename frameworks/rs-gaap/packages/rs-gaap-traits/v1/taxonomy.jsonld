@@ -6786,6 +6786,9 @@
       "@id": "rs-gaap:IncomeLossFromEquityMethodInvestments",
       "https://robosystems.ai/vocab/hasTrait": [
         {
+          "@id": "trait:elementsOfFinancialStatements/gain"
+        },
+        {
           "@id": "trait:operatingNonoperating/operating"
         },
         {

@@ -3129,6 +3129,109 @@
       "order": 650.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-bs-noncurrent-assets-arc-eqm",
+      "from": {
+        "@id": "rs-gaap:AssetsNoncurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:EquityMethodInvestments"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
+      "weight": 1.0,
+      "order": 800.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-is-nonop-arc-eqm",
+      "from": {
+        "@id": "rs-gaap:NonoperatingIncomeExpense"
+      },
+      "to": {
+        "@id": "rs-gaap:IncomeLossFromEquityMethodInvestments"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
+      "weight": 1.0,
+      "order": 410.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-operating-arc-eqm",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncomeLossFromEquityMethodInvestments"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": -1.0,
+      "order": 1700.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-investing-arc-eqm-out",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquireEquityMethodInvestments"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 1400.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-investing-arc-eqm-in",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromSaleOfEquityMethodInvestments"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 1500.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-eqm-out-arc-1",
+      "from": {
+        "@id": "rs-gaap:PaymentsToAcquireEquityMethodInvestments"
+      },
+      "to": {
+        "@id": "rs-gaap:EquityMethodInvestments"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": -1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-eqm-in-arc-1",
+      "from": {
+        "@id": "rs-gaap:ProceedsFromSaleOfEquityMethodInvestments"
+      },
+      "to": {
+        "@id": "rs-gaap:EquityMethodInvestments"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
     }
   ]
 }

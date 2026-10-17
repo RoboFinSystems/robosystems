@@ -57,6 +57,12 @@ def test_keep_critical_concepts_are_never_excluded() -> None:
     "rs-gaap:DueToAffiliateCurrent",
     "rs-gaap:PaymentsToMinorityShareholders",
     "rs-gaap:ProceedsFromMinorityShareholders",
+    # The equity-method rows (migration 0052): the investment, its income and
+    # its flows, presented in every Style.
+    "rs-gaap:EquityMethodInvestments",
+    "rs-gaap:IncomeLossFromEquityMethodInvestments",
+    "rs-gaap:PaymentsToAcquireEquityMethodInvestments",
+    "rs-gaap:ProceedsFromSaleOfEquityMethodInvestments",
   ):
     assert qname not in excluded, (
       f"{qname} is rollup/rule-critical — must not be excluded"
