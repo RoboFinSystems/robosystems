@@ -29,6 +29,11 @@ def ledger_entities(graph_id: str) -> list[dict[str, Any]] | None:
       "entity_type": row.entity_type,
       "is_group_parent": row.id == parent_id,
       "parent_entity_id": row.parent_entity_id,
+      "ownership_pct": row.ownership_pct,
+      "consolidation_method": row.consolidation_method,
+      "entity_role": row.entity_role,
+      "joined_on": row.joined_on.isoformat() if row.joined_on else None,
+      "left_on": row.left_on.isoformat() if row.left_on else None,
     }
     for row in own
   ]

@@ -127,7 +127,9 @@ def _graph_info_tool_definition(graph_id: str, is_shared_repo: bool) -> dict[str
     if is_shared_repo
     else (
       ", and on a ledger graph its `entities` — the reporting group, the group "
-      "parent first, each with the `entity_id` the ledger tools take"
+      "parent first, each with the `entity_id` the ledger tools take, how the "
+      "group treats it (`consolidation_method`) and whether it is the group's "
+      "consolidation entity (`entity_role`)"
     )
   )
   return {

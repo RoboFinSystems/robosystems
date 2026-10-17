@@ -307,12 +307,19 @@ def _entity_lines(entities: Sequence[Mapping[str, Any]], has) -> list[str]:
   def label(entity: Mapping[str, Any]) -> str:
     return f"`{entity['name']}` (`{entity['id']}`)"
 
+  def member(entity: Mapping[str, Any]) -> str:
+    note = _NOT_SUMMED.get(entity.get("consolidation_method") or "")
+    return label(entity) + (f" ({note})" if note else "")
+
   parents = [e for e in entities if e.get("is_group_parent")]
   parent = parents[0] if parents else entities[0]
-  subs = [e for e in entities if e is not parent]
+  adjustments = [
+    e for e in entities if e is not parent and e.get("entity_role") == "consolidation"
+  ]
+  subs = [e for e in entities if e is not parent and e not in adjustments]
   adds = " `create-entity` adds one." if has("create-entity") else ""
   lists = " `get-graph-info` lists them." if has("get-graph-info") else ""
-  if not subs:
+  if not subs and not adjustments:
     return [
       "ENTITIES",
       (
@@ -321,15 +328,59 @@ def _entity_lines(entities: Sequence[Mapping[str, Any]], has) -> list[str]:
         "tool then takes `entity_id`, omitted meaning the group parent."
       ),
     ]
-  return [
+  group = f"- This graph is one reporting group. Group parent: {label(parent)}."
+  if subs:
+    group += " Subsidiaries: " + ", ".join(member(e) for e in subs) + "."
+  if adjustments:
+    group += " Consolidation entity: " + ", ".join(label(e) for e in adjustments) + "."
+  lines = [
     "ENTITIES",
-    (
-      f"- This graph is one reporting group. Group parent: {label(parent)}. "
-      "Subsidiaries: " + ", ".join(label(e) for e in subs) + "."
-    ),
+    group,
     (
       "- Every ledger tool takes `entity_id`; omitted, it acts on the group "
       "parent. A subsidiary's books, chart, calendar and close are its own — "
       f"name it on every call about it.{adds}{lists}"
     ),
   ]
+  if adjustments or any(e.get("consolidation_method") in _NOT_SUMMED for e in subs):
+    lines += _consolidation_lines(adjustments, has)
+  return lines
+
+
+# A member the group does not sum, by its consolidation method.
+_NOT_SUMMED = {
+  "equity": "equity method, not summed",
+  "cost": "an investment at cost, not summed",
+}
+
+
+def _consolidation_lines(adjustments: Sequence[Mapping[str, Any]], has) -> list[str]:
+  """The consolidation entity, the two group scopes, and what a tag does on
+  an elimination — only where the graph has any of it."""
+  lines = ["CONSOLIDATION"]
+  for entity in adjustments:
+    lines.append(
+      f"- `{entity['name']}` (`{entity['id']}`) is the group's consolidation "
+      "entity: the consolidating entries post there — the parent's investment "
+      "against each subsidiary's capital, the balances the companies owe each "
+      "other, an outside owner's share of a subsidiary as noncontrolling "
+      "interest — and only the consolidated statements read them. No operating "
+      "company's statements ever include them."
+    )
+  if has("live-financial-statement"):
+    lines.append(
+      "- `live-financial-statement` on the group parent takes `scope`: "
+      "`consolidated` is the members plus the consolidation entity, what a "
+      "question about the group reads; `combined` is the members alone, "
+      "nothing eliminated. A member on the equity method (`consolidation_method`, "
+      "from its share) is never summed: the group carries its investment and its "
+      "share of the member's result instead."
+    )
+  if adjustments and has("update-journal-entry"):
+    lines.append(
+      "- A line of the consolidation entity that carries a `flow_qname` counts "
+      "on the cash flow on its own, cash-effect signed (a credit is an inflow), "
+      "so an elimination offsets the flow a member's line produced; tag each "
+      "side with the row it offsets."
+    )
+  return lines
