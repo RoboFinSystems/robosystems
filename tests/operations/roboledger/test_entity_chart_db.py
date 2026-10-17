@@ -17,6 +17,10 @@ from robosystems.db.extensions import extensions_session, provision_tenant_schem
 from robosystems.models.api.extensions.chart_of_accounts import (
   InitializeChartOfAccountsRequest,
 )
+from robosystems.models.api.extensions.entity import (
+  CreateEntityRequest,
+  UpdateEntityRequest,
+)
 from robosystems.models.api.extensions.journal_entries import (
   CreateJournalEntryRequest,
   JournalEntryLineItemInput,
@@ -30,6 +34,10 @@ from robosystems.operations.roboledger.commands.chart_of_accounts import (
   ChartAlreadyExistsError,
   active_chart_id,
   initialize_chart_of_accounts,
+)
+from robosystems.operations.roboledger.commands.entity import (
+  create_entity,
+  update_entity,
 )
 from robosystems.operations.roboledger.commands.fiscal_calendar import close_period
 from robosystems.operations.roboledger.commands.journal_entries import (
@@ -95,6 +103,7 @@ def tenant():
           entity_type="llc",
           is_parent=False,
           parent_entity_id=PARENT,
+          consolidation_method="full",
           created_by="usr_1",
         )
       )
@@ -392,3 +401,107 @@ class TestEachEntityStampsItsOwnStatements:
       assert response.combined_entity_ids == [PARENT, SUB]
       with pytest.raises(CombinedViewOnParentOnlyError):
         self._live_cash(session, entity_id=SUB, consolidated=True)
+
+  def _open_member(self, session, charts, service, body) -> str:
+    """One more entity with a services chart and July open, as the fixture's
+    two have; returns its id."""
+    created = create_entity(session, body, "usr_1")
+    charts[created.id] = initialize_chart_of_accounts(
+      session,
+      InitializeChartOfAccountsRequest(template="services", entity_id=created.id),
+      "usr_1",
+    ).taxonomy_id
+    service.initialize(
+      session, GRAPH, closed_through="2026-06", actor_id="usr_1", entity_id=created.id
+    )
+    service.ensure_fiscal_periods(
+      session,
+      GRAPH,
+      start_period="2026-06",
+      end_period="2026-07",
+      closed_through="2026-06",
+      entity_id=created.id,
+    )
+    return created.id
+
+  def test_combined_is_the_sum_before_the_consolidation_entity(self, charts):
+    """``combined`` is the worksheet's first total; ``consolidated`` adds the
+    consolidation entity, the adjustments column, and the older
+    ``consolidated=True`` reads the same."""
+    service = FiscalCalendarService()
+    with extensions_session(GRAPH) as session:
+      self._open_books(session, charts, service)
+      adjustments = self._open_member(
+        session,
+        charts,
+        service,
+        CreateEntityRequest(
+          name="Consolidation Adjustments", entity_role="consolidation"
+        ),
+      )
+      _revenue(session, charts, adjustments, 30_000)
+      session.commit()
+      self._close(session, service, SUB)
+      self._close(session, service, adjustments)
+      self._close(session, service, PARENT)
+
+      combined, combined_response = self._live_cash(session, scope="combined")
+      consolidated, response = self._live_cash(session, scope="consolidated")
+      older, _ = self._live_cash(session, consolidated=True)
+
+      assert (combined, consolidated, older) == (5700.0, 6000.0, 6000.0)
+      assert (combined_response.scope, combined_response.consolidated) == (
+        "combined",
+        True,
+      )
+      assert combined_response.combined_entity_ids == [PARENT, SUB]
+      assert response.scope == "consolidated"
+      assert response.combined_entity_ids == [PARENT, SUB, adjustments]
+
+  def test_an_equity_method_member_is_not_summed(self, charts):
+    service = FiscalCalendarService()
+    with extensions_session(GRAPH) as session:
+      self._open_books(session, charts, service)
+      self._close(session, service, SUB)
+      self._close(session, service, PARENT)
+      update_entity(
+        session, UpdateEntityRequest(entity_id=SUB, ownership_pct=40), "usr_1"
+      )
+
+      cash, response = self._live_cash(session, scope="consolidated")
+
+      assert cash == 5000.0
+      assert response.combined_entity_ids == [PARENT]
+
+  def test_a_member_is_summed_for_the_months_inside_its_interval(self, charts):
+    """Any day of the month a member left still counts that month; a month
+    after it adds nothing, and a member outside every column is not listed."""
+    service = FiscalCalendarService()
+    with extensions_session(GRAPH) as session:
+      self._open_books(session, charts, service)
+      self._close(session, service, SUB)
+      self._close(session, service, PARENT)
+
+      update_entity(
+        session,
+        UpdateEntityRequest(entity_id=SUB, left_on=date(2026, 7, 10)),
+        "usr_1",
+      )
+      still, _ = self._live_cash(session, scope="combined")
+      update_entity(
+        session,
+        UpdateEntityRequest(entity_id=SUB, left_on=date(2026, 6, 30)),
+        "usr_1",
+      )
+      gone, response = self._live_cash(session, scope="combined")
+      update_entity(
+        session,
+        UpdateEntityRequest(entity_id=SUB, left_on=date(2026, 5, 31)),
+        "usr_1",
+      )
+      _, before = self._live_cash(session, scope="combined")
+
+      assert (still, gone) == (5700.0, 5000.0)
+      # June, the prior column, still counts it; from May it is in neither.
+      assert response.combined_entity_ids == [PARENT, SUB]
+      assert before.combined_entity_ids == [PARENT]

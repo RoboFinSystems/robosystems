@@ -2,9 +2,11 @@
 
 from datetime import date, datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+LiveStatementScope = Literal["entity", "combined", "consolidated"]
 
 # ── Period specification ─────────────────────────────────────────────────────
 
@@ -647,18 +649,28 @@ class LiveFinancialStatementRequest(BaseModel):
   fiscal_year: int | None = Field(
     None, description="Fiscal year for annual window (anchored on FiscalCalendar)"
   )
+  scope: LiveStatementScope | None = Field(
+    None,
+    description=(
+      "`entity` (the default): one entity's own books. `combined`: on the "
+      "group parent, every member consolidated in full rendered under the "
+      "parent's Reporting Style and summed per rs-gaap concept, each for the "
+      "months it was a member — the pre-adjustment total, nothing "
+      "eliminated. `consolidated`: the same sum plus the consolidation "
+      "entity, whose eliminations and noncontrolling interest are the "
+      "adjustments column, so a group that posts its consolidating entries "
+      "there reads its consolidated statement. An equity-method or cost "
+      "member is never summed (its `consolidation_method` says so). Both "
+      "group scopes are read on the group parent only (422 on a "
+      "subsidiary). An entity with no CoA mapping yet contributes nothing "
+      "and is left out of `combined_entity_ids`."
+    ),
+  )
   consolidated: bool = Field(
     False,
     description=(
-      "Every entity of the reporting group rendered under the group parent's "
-      "Reporting Style and summed per rs-gaap concept. The sum itself "
-      "eliminates nothing: a group that keeps a consolidation entity for its "
-      "consolidating entries gets its consolidated statement, since that "
-      "entity's eliminations and noncontrolling interest are summed in; "
-      "without one the statement is combined and an intercompany balance is "
-      "still in. Only on the group parent (422 on a subsidiary). "
-      "An entity with no CoA mapping yet contributes nothing and is left out "
-      "of `combined_entity_ids`."
+      "The older spelling of `scope: consolidated`, kept for callers that "
+      "pass it; `scope` wins when both are given."
     ),
   )
   limit: int = Field(
@@ -698,17 +710,27 @@ class LiveFinancialStatementResponse(BaseModel):
   entity_id: str | None = Field(
     None, description="The entity whose books were rendered."
   )
+  scope: str = Field(
+    "entity",
+    description=(
+      "What was rendered: `entity`, `combined` (the members summed, nothing "
+      "eliminated) or `consolidated` (the members plus the consolidation "
+      "entity's adjustments)."
+    ),
+  )
   consolidated: bool = Field(
     False,
     description=(
-      "Whether the group's entities were summed into this. The sum itself "
-      "eliminates nothing; a consolidation entity's entries, when the group "
-      "keeps one, are summed in."
+      "Whether the group's entities were summed into this — true for the "
+      "`combined` and `consolidated` scopes."
     ),
   )
   combined_entity_ids: list[str] = Field(
     default_factory=list,
-    description="The entities summed into a combined statement, parent first.",
+    description=(
+      "The entities summed, parent first; on `consolidated` the "
+      "consolidation entity comes last."
+    ),
   )
   statement_type: str
   periods: list[PeriodSpec] = Field(

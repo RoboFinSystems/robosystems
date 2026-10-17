@@ -26,6 +26,8 @@ from robosystems.operations.roboledger.commands.reporting_style import (
 )
 from robosystems.operations.roboledger.entity_scope import (
   EntityNotInGraphError,
+  GroupMember,
+  group_members,
   resolve_entity_id,
 )
 from robosystems.operations.roboledger.reads.entity import get_entity, list_entities
@@ -454,3 +456,39 @@ class TestReads:
     assert rows["Cedar Row LLC"].ownership_pct == 75.0
     assert rows["Sender Co"].source == "linked"
     assert sub.id in {r.id for r in rows.values()}
+
+
+class TestGroupMembers:
+  def test_full_members_then_the_adjustments_column(self, two_entities):
+    session, parent, sub = two_entities.session, two_entities.parent, two_entities.sub
+    create_entity(
+      session,
+      CreateEntityRequest(name="Pier Market Kiosk LLC", ownership_pct=40),
+      created_by="u",
+    )
+    create_entity(
+      session, CreateEntityRequest(name="Stake Co", ownership_pct=10), created_by="u"
+    )
+    adjustments = create_entity(
+      session,
+      CreateEntityRequest(
+        name="Consolidation Adjustments", entity_role="consolidation"
+      ),
+      created_by="u",
+    )
+
+    combined = group_members(session, parent.id, consolidated=False)
+    consolidated = group_members(session, parent.id, consolidated=True)
+
+    assert [m.id for m in combined] == [parent.id, sub.id]
+    assert [m.id for m in consolidated] == [parent.id, sub.id, adjustments.id]
+    assert consolidated[-1].role == "consolidation"
+
+  def test_membership_is_by_month(self):
+    member = GroupMember("ent", "operating", date(2026, 3, 14), date(2026, 9, 20))
+    assert not member.is_member_for(date(2026, 2, 1), date(2026, 2, 28))
+    assert member.is_member_for(date(2026, 3, 1), date(2026, 3, 31))
+    assert member.is_member_for(date(2026, 9, 1), date(2026, 9, 30))
+    assert not member.is_member_for(date(2026, 10, 1), date(2026, 10, 31))
+    always = GroupMember("ent", "operating", None, None)
+    assert always.is_member_for(date(2000, 1, 1), date(2000, 1, 31))

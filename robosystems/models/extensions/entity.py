@@ -78,10 +78,14 @@ class Entity(ExtensionsBase):
   # carries an investment, ``none`` is the group parent, the consolidation
   # entity and a linked counterparty. Defaulted from ``ownership_pct`` at
   # creation and set by a person where control is not the percentage.
-  consolidation_method = Column(String, nullable=False, default="none")
+  consolidation_method = Column(
+    String, nullable=False, default="none", server_default="none"
+  )
   # ``operating`` keeps a company's books; ``consolidation`` holds the
   # consolidating entries that only the consolidated statements read.
-  entity_role = Column(String, nullable=False, default="operating")
+  entity_role = Column(
+    String, nullable=False, default="operating", server_default="operating"
+  )
   # Membership in the group, by month: null ``joined_on`` is a member since
   # the beginning, null ``left_on`` a member still.
   joined_on = Column(Date, nullable=True)

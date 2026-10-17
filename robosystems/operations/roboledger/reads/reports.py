@@ -36,8 +36,8 @@ from robosystems.models.extensions.roboledger import Structure
 from robosystems.operations.aws.s3 import S3Client
 from robosystems.operations.roboledger.entity_scope import (
   find_entity_id,
+  group_members,
   is_group_parent,
-  own_entity_ids,
   resolve_entity_id,
 )
 from robosystems.operations.roboledger.reads.fiscal_calendar import (
@@ -87,6 +87,11 @@ LIVE_STATEMENT_TYPES: tuple[str, ...] = (
 # The statements offered to an AI operator: every live statement, the equity
 # roll-forward included now that it articulates.
 MCP_LIVE_STATEMENT_TYPES: tuple[str, ...] = LIVE_STATEMENT_TYPES
+
+# What a live statement renders: one entity's books; the group parent and
+# every member consolidated in full, summed for the months each was a member
+# (the pre-adjustment total); or that sum plus the consolidation entity.
+LIVE_STATEMENT_SCOPES: tuple[str, ...] = ("entity", "combined", "consolidated")
 
 ANALYSIS_STATEMENT_TYPES: tuple[str, ...] = (
   "income_statement",
@@ -968,11 +973,16 @@ def _combined_statement(
   periods: list[FactPeriodSpec],
   reporting_style_id: str,
   parent_id: str,
+  consolidated: bool,
 ):
-  """Every entity's statement under the parent's Style, summed row by row:
-  the combination happens at the rs-gaap concepts, where every entity's own
-  chart has been mapped. No eliminations (M2). An entity with no mapping is
-  left out; with none mapped at all the parent's error stands.
+  """The group's statement under the parent's Style, summed row by row at
+  the rs-gaap concepts, where every entity's own chart has been mapped: the
+  parent and every operating entity consolidated in full, each for the
+  periods it was a member, and — ``consolidated`` — the consolidation
+  entity, whose entries are the worksheet's adjustments column (``combined``
+  is the same sum without it). An equity-method or cost member is never
+  summed. An entity with no mapping is left out; with none mapped at all
+  the parent's error stands.
 
   Returns ``(grid, unmapped_count, combined_entity_ids)``.
   """
@@ -980,19 +990,24 @@ def _combined_statement(
   unmapped_count = 0
   combined: list[str] = []
   first_error: CoaMappingNotFoundError | None = None
-  for entity_id in own_entity_ids(session, parent_id):
+  for member in group_members(session, parent_id, consolidated=consolidated):
+    summed = [member.is_member_for(p.start, p.end) for p in periods]
+    if not any(summed):
+      continue
     try:
       grid, unmapped = generate_adhoc_private_statement(
         session,
         statement_type=statement_type,
         periods=periods,
         reporting_style_id=reporting_style_id,
-        entity_id=entity_id,
+        entity_id=member.id,
       )
     except CoaMappingNotFoundError as exc:
       first_error = first_error or exc
       continue
-    combined.append(entity_id)
+    if not all(summed):
+      _keep_periods(grid, summed)
+    combined.append(member.id)
     unmapped_count += unmapped
     if base is None:
       base = grid
@@ -1002,6 +1017,15 @@ def _combined_statement(
     assert first_error is not None
     raise first_error
   return base, unmapped_count, combined
+
+
+def _keep_periods(grid: FactGrid, summed: list[bool]) -> None:
+  """Zero the columns of the periods the entity was not a member for, so a
+  subsidiary that joined this period adds nothing to the prior column."""
+  for row in grid.rows:
+    row.values = [
+      value if keep else 0.0 for value, keep in zip(row.values, summed, strict=False)
+    ]
 
 
 def _row_key(row: FactRow) -> tuple[str, str | None]:
@@ -1052,23 +1076,33 @@ def get_live_financial_statement(
   reporting_style_id: str | None = None,
   entity_id: str | None = None,
   consolidated: bool = False,
+  scope: str | None = None,
 ) -> LiveFinancialStatementResponse:
-  """Render a current + prior ad-hoc statement from one entity's OLTP data,
-  default the group parent's; ``consolidated`` sums every entity of the group
-  under the parent's Style, per concept. The sum itself eliminates nothing;
-  a consolidation entity's entries, when the group keeps one, are summed in.
+  """Render a current + prior ad-hoc statement from OLTP data: ``scope``
+  ``entity`` (the default) is one entity's books, default the group
+  parent's; ``combined`` sums the parent and every member consolidated in
+  full under the parent's Style, per concept, for the months each was a
+  member — the pre-adjustment total, nothing eliminated; ``consolidated``
+  adds the consolidation entity, whose entries are the adjustments column.
+  ``consolidated=True`` is the older spelling of ``scope="consolidated"``.
 
   Drops abstract and all-zero rows and caps at ``limit`` (``truncated``).
   ``reporting_style_id`` defaults to the entity's Style. Raises
-  ``CoaMappingNotFoundError`` when no CoA→GAAP mapping exists, and
-  ``CombinedViewOnParentOnlyError`` for ``consolidated`` on a subsidiary.
+  ``CoaMappingNotFoundError`` when no CoA→GAAP mapping exists,
+  ``CombinedViewOnParentOnlyError`` for a group scope on a subsidiary, and
+  ``ValueError`` for a scope that is not one of ``LIVE_STATEMENT_SCOPES``.
   """
+  scope = scope or ("consolidated" if consolidated else "entity")
+  if scope not in LIVE_STATEMENT_SCOPES:
+    raise ValueError(
+      f"Unknown scope {scope!r}. Valid scopes: {', '.join(LIVE_STATEMENT_SCOPES)}."
+    )
   entity_id = resolve_entity_id(session, entity_id)
   if reporting_style_id is None:
     reporting_style_id = load_entity_reporting_style(session, entity_id)
   periods = build_current_and_prior_periods(period_start, period_end)
   combined_entity_ids: list[str] = []
-  if consolidated:
+  if scope != "entity":
     if not is_group_parent(session, entity_id):
       raise CombinedViewOnParentOnlyError(entity_id)
     grid, unmapped_count, combined_entity_ids = _combined_statement(
@@ -1077,6 +1111,7 @@ def get_live_financial_statement(
       periods=periods,
       reporting_style_id=reporting_style_id,
       parent_id=entity_id,
+      consolidated=scope == "consolidated",
     )
   else:
     grid, unmapped_count = generate_adhoc_private_statement(
@@ -1123,7 +1158,8 @@ def get_live_financial_statement(
   return LiveFinancialStatementResponse(
     graph_id=graph_id,
     entity_id=entity_id,
-    consolidated=consolidated,
+    scope=scope,
+    consolidated=scope != "entity",
     combined_entity_ids=combined_entity_ids,
     statement_type=statement_type,
     periods=[PeriodSpec(start=p.start, end=p.end, label=p.label) for p in periods],
