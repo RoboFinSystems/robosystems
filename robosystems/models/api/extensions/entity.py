@@ -8,7 +8,42 @@ and close. An operation that names no `entity_id` acts on the group
 parent.
 """
 
+from datetime import date
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
+
+ConsolidationMethod = Literal["full", "equity", "cost", "none"]
+EntityRole = Literal["operating", "consolidation"]
+
+_METHOD_DESCRIPTION = (
+  "How the group's consolidated statements treat this entity: `full` (its "
+  "books are summed and an outside owner's share is carried as "
+  "noncontrolling interest), `equity` (one investment line and one income "
+  "line), `cost` (an investment at cost) or `none` (the group parent, the "
+  "consolidation entity, a linked counterparty). Derived from "
+  "`ownership_pct` when not given — 50 and above `full`, 20 to 50 `equity`, "
+  "below 20 `cost`, unrecorded `full` — and set by a person where control is "
+  "not the percentage: a managing member with a minority stake consolidates "
+  "in full, a majority without control takes the equity method."
+)
+_ROLE_DESCRIPTION = (
+  "`operating` keeps a company's books. `consolidation` is the group's one "
+  "entity for the consolidating entries — eliminations, noncontrolling "
+  "interest, the equity-method pick-up — the adjustments column of a "
+  "consolidation worksheet, which only the consolidated statements read and "
+  "no operating company's statements ever include. Its method is `none`."
+)
+_JOINED_DESCRIPTION = (
+  "The month this entity became a member of the group, as any date in it; "
+  "null is a member since the beginning. The consolidated statements include "
+  "it from that month."
+)
+_LEFT_DESCRIPTION = (
+  "The month this entity left the group, as any date in it; null is a member "
+  "still. The consolidated statements include it through that month and "
+  "leave it out after."
+)
 
 
 class LedgerEntityResponse(BaseModel):
@@ -81,6 +116,10 @@ class LedgerEntityResponse(BaseModel):
       "owned). Null on the group parent, and where it was never recorded."
     ),
   )
+  consolidation_method: str = Field("none", description=_METHOD_DESCRIPTION)
+  entity_role: str = Field("operating", description=_ROLE_DESCRIPTION)
+  joined_on: date | None = Field(None, description=_JOINED_DESCRIPTION)
+  left_on: date | None = Field(None, description=_LEFT_DESCRIPTION)
 
   # Source provenance
   source: str = Field(
@@ -158,8 +197,28 @@ class UpdateEntityRequest(BaseModel):
     le=100,
     description=(
       "The parent's share of this entity, as a percent. Refused on the "
-      "group parent, which has no owner in the graph."
+      "group parent, which has no owner in the graph. A new share re-derives "
+      "`consolidation_method` unless that is given too."
     ),
+  )
+  consolidation_method: ConsolidationMethod | None = Field(
+    None,
+    description=_METHOD_DESCRIPTION
+    + " On the group parent and the consolidation entity only `none` holds.",
+  )
+  entity_role: EntityRole | None = Field(
+    None,
+    description=_ROLE_DESCRIPTION
+    + " Refused on the group parent. Marking an entity `consolidation` sets "
+    "its method to `none`.",
+  )
+  joined_on: date | None = Field(None, description=_JOINED_DESCRIPTION)
+  left_on: date | None = Field(
+    None,
+    description=_LEFT_DESCRIPTION
+    + " Must not precede `joined_on`. Set it when a subsidiary is sold, "
+    "dissolved or deconsolidated; its closed months and stamped statements "
+    "stay readable under the group.",
   )
 
   model_config = ConfigDict(
@@ -182,6 +241,12 @@ class UpdateEntityRequest(BaseModel):
         },
         {"name": "Acme Holdings, LLC"},
         {"entity_id": "ent_01J9ZK3M4N5P6Q7R8S9T0V1W2X", "ownership_pct": 80},
+        {
+          "entity_id": "ent_01J9ZK3M4N5P6Q7R8S9T0V1W2X",
+          "ownership_pct": 45,
+          "consolidation_method": "full",
+        },
+        {"entity_id": "ent_01J9ZK3M4N5P6Q7R8S9T0V1W2X", "left_on": "2026-12-31"},
       ]
     }
   )
@@ -236,6 +301,26 @@ class CreateEntityRequest(BaseModel):
       "which becomes the group parent."
     ),
   )
+  consolidation_method: ConsolidationMethod | None = Field(
+    None,
+    description=_METHOD_DESCRIPTION
+    + " Omit to derive it; a graph's first entity and a `consolidation` "
+    "entity take `none`.",
+  )
+  entity_role: EntityRole | None = Field(
+    None,
+    description=_ROLE_DESCRIPTION
+    + " Default `operating`; a graph's first entity, its group parent, is "
+    "always operating. Start a consolidation entity's chart from the "
+    "`consolidation` template.",
+  )
+  joined_on: date | None = Field(
+    None,
+    description=_JOINED_DESCRIPTION
+    + " Omit for a subsidiary formed by the parent; give the acquisition "
+    "month for one acquired, whose books in this graph then hold only what "
+    "follows it.",
+  )
   ticker: str | None = Field(
     None,
     min_length=1,
@@ -283,6 +368,12 @@ class CreateEntityRequest(BaseModel):
           "ownership_pct": 60,
           "state_of_incorporation": "DE",
           "tax_id": "12-3456789",
+        },
+        {"name": "Pier Market Kiosk LLC", "entity_type": "llc", "ownership_pct": 40},
+        {
+          "name": "Consolidation Adjustments",
+          "entity_type": "llc",
+          "entity_role": "consolidation",
         },
       ]
     }

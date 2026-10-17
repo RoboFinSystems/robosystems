@@ -3,6 +3,8 @@ any entity of it. Runs the commands' real SQL against a tenant schema."""
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
 from robosystems.config.constants import ReportingStyleConstants
@@ -13,6 +15,7 @@ from robosystems.models.api.extensions.entity import (
 from robosystems.models.extensions import Entity
 from robosystems.operations.roboledger.commands.entity import (
   EntityHierarchyError,
+  EntityMembershipError,
   EntityTickerTakenError,
   ParentEntityNotFoundError,
   create_entity,
@@ -28,6 +31,154 @@ from robosystems.operations.roboledger.entity_scope import (
 from robosystems.operations.roboledger.reads.entity import get_entity, list_entities
 
 pytestmark = pytest.mark.unit
+
+
+class TestConsolidationFields:
+  @pytest.mark.parametrize(
+    ("share", "method"),
+    [
+      (100, "full"),
+      (70, "full"),
+      (50, "full"),
+      (40, "equity"),
+      (20, "equity"),
+      (10, "cost"),
+    ],
+  )
+  def test_the_share_implies_the_method(self, two_entities, share, method):
+    created = create_entity(
+      two_entities.session,
+      CreateEntityRequest(name="Pier Market Kiosk LLC", ownership_pct=share),
+      created_by="usr_1",
+    )
+    assert created.consolidation_method == method
+    assert created.entity_role == "operating"
+    assert created.joined_on is None and created.left_on is None
+
+  def test_an_unrecorded_share_is_summed_in_full(self, two_entities):
+    created = create_entity(
+      two_entities.session, CreateEntityRequest(name="Cedar Row LLC"), created_by="u"
+    )
+    assert created.consolidation_method == "full"
+
+  def test_a_person_overrides_the_method_control_is_not_the_percentage(
+    self, two_entities
+  ):
+    created = create_entity(
+      two_entities.session,
+      CreateEntityRequest(
+        name="Managed Fund LP",
+        ownership_pct=45,
+        consolidation_method="full",
+        joined_on=date(2026, 3, 14),
+      ),
+      created_by="u",
+    )
+    assert created.consolidation_method == "full"
+    assert created.joined_on == date(2026, 3, 14)
+
+  def test_the_group_parent_is_operating_with_no_method(self, tenant_session):
+    # A graph's first entity becomes its group parent, so neither holds on it.
+    for body in (
+      CreateEntityRequest(name="Harbor Holdings", entity_role="consolidation"),
+      CreateEntityRequest(name="Harbor Holdings", consolidation_method="full"),
+    ):
+      with pytest.raises(EntityHierarchyError):
+        create_entity(tenant_session, body, created_by="u")
+    created = create_entity(
+      tenant_session, CreateEntityRequest(name="Harbor Holdings"), created_by="u"
+    )
+    assert (created.consolidation_method, created.entity_role) == ("none", "operating")
+
+  def test_the_consolidation_entity_takes_none(self, two_entities):
+    created = create_entity(
+      two_entities.session,
+      CreateEntityRequest(
+        name="Consolidation Adjustments", entity_role="consolidation"
+      ),
+      created_by="u",
+    )
+    assert (created.consolidation_method, created.entity_role) == (
+      "none",
+      "consolidation",
+    )
+    with pytest.raises(EntityHierarchyError):
+      create_entity(
+        two_entities.session,
+        CreateEntityRequest(
+          name="Eliminations", entity_role="consolidation", consolidation_method="full"
+        ),
+        created_by="u",
+      )
+
+  def test_a_new_share_re_derives_the_method_unless_both_are_given(self, two_entities):
+    session, sub = two_entities.session, two_entities.sub
+    updated = update_entity(
+      session, UpdateEntityRequest(entity_id=sub.id, ownership_pct=30), created_by="u"
+    )
+    assert updated.consolidation_method == "equity"
+    updated = update_entity(
+      session,
+      UpdateEntityRequest(
+        entity_id=sub.id, ownership_pct=30, consolidation_method="full"
+      ),
+      created_by="u",
+    )
+    assert updated.consolidation_method == "full"
+
+  def test_marking_an_entity_consolidation_sets_its_method_to_none(self, two_entities):
+    session, sub = two_entities.session, two_entities.sub
+    updated = update_entity(
+      session,
+      UpdateEntityRequest(entity_id=sub.id, entity_role="consolidation"),
+      created_by="u",
+    )
+    assert (updated.consolidation_method, updated.entity_role) == (
+      "none",
+      "consolidation",
+    )
+    with pytest.raises(EntityHierarchyError):
+      update_entity(
+        session,
+        UpdateEntityRequest(entity_id=sub.id, consolidation_method="equity"),
+        created_by="u",
+      )
+
+  def test_the_group_parent_refuses_a_role_and_a_method(self, two_entities):
+    session = two_entities.session
+    for body in (
+      UpdateEntityRequest(entity_role="consolidation"),
+      UpdateEntityRequest(consolidation_method="full"),
+    ):
+      with pytest.raises(EntityHierarchyError):
+        update_entity(session, body, created_by="u")
+    updated = update_entity(
+      session, UpdateEntityRequest(consolidation_method="none"), created_by="u"
+    )
+    assert updated.consolidation_method == "none"
+
+  def test_membership_ends_after_it_starts(self, two_entities):
+    session, sub = two_entities.session, two_entities.sub
+    updated = update_entity(
+      session,
+      UpdateEntityRequest(entity_id=sub.id, joined_on=date(2026, 2, 1)),
+      created_by="u",
+    )
+    assert updated.joined_on == date(2026, 2, 1)
+    with pytest.raises(EntityMembershipError):
+      update_entity(
+        session,
+        UpdateEntityRequest(entity_id=sub.id, left_on=date(2026, 1, 31)),
+        created_by="u",
+      )
+    updated = update_entity(
+      session,
+      UpdateEntityRequest(entity_id=sub.id, left_on=date(2026, 12, 31)),
+      created_by="u",
+    )
+    assert updated.left_on == date(2026, 12, 31)
+    listed = {e.id: e for e in list_entities(session)}
+    assert listed[sub.id].left_on == date(2026, 12, 31)
 
 
 class TestCreateSubsidiary:

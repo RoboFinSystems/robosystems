@@ -198,6 +198,7 @@ class TestCreateEntityOp:
         "is_parent": False,
         "parent_entity_id": "ent_kg01234567890abcdef",
         "ownership_pct": 100.0,
+        "consolidation_method": "full",
       }
     )
 
@@ -226,6 +227,8 @@ class TestCreateEntityOp:
     assert envelope.result["id"] == "ent_sub"
     assert envelope.result["parent_entity_id"] == "ent_kg01234567890abcdef"
     assert envelope.result["ownership_pct"] == 100.0
+    assert envelope.result["consolidation_method"] == "full"
+    assert envelope.result["entity_role"] == "operating"
     # The registrar passes the actor as created_by.
     assert cmd.call_args.kwargs["created_by"] == "usr_test123"
     # An Entity node and an ENTITY_OWNS_ENTITY edge have to reach the graph.

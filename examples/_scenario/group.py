@@ -776,9 +776,15 @@ def _load(
       "legal_name": group.consolidation_legal_name,
       "ticker": group.consolidation_ticker,
       "entity_type": "llc",
-      "ownership_pct": 100,
+      "entity_role": "consolidation",
     },
   )
+  if reused:
+    # A reset keeps entity rows; one made before the role existed is typed here.
+    api.operation(
+      "update-entity",
+      {"entity_id": consolidation_id, "entity_role": "consolidation"},
+    )
   consolidation = _Books(api, consolidation_id, group.consolidation_name)
   _ensure_chart(api, consolidation_id, "consolidation", "llc")
   _ensure_calendar(api, consolidation_id, group.consolidation_ticker, windows)

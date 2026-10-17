@@ -30,14 +30,19 @@ from robosystems.utils.ulid import generate_prefixed_ulid
 
 __all__ = [
   "EntityHierarchyError",
+  "EntityMembershipError",
   "EntityTickerTakenError",
   "ParentEntityNotFoundError",
   "create_entity",
+  "derived_consolidation_method",
   "update_entity",
   "update_parent_entity",
 ]
 
 _TICKER_MAX = 10
+_METHOD_NONE = "none"
+_ROLE_OPERATING = "operating"
+_ROLE_CONSOLIDATION = "consolidation"
 
 # Tickers are unique among a graph's own entities, and the table has no
 # constraint saying so: the check and the insert run under one lock per
@@ -58,6 +63,29 @@ class EntityHierarchyError(ValueError):
   """A hierarchy field that cannot hold on this entity."""
 
 
+class EntityMembershipError(EntityHierarchyError):
+  """A membership interval that ends before it starts."""
+
+
+def derived_consolidation_method(ownership_pct: float | None) -> str:
+  """The treatment a share implies, the default a person may override: half
+  or more consolidates in full, a fifth to a half takes the equity method,
+  less is an investment at cost. An unrecorded share is summed, as every
+  subsidiary was before the method existed."""
+  if ownership_pct is None or ownership_pct >= 50:
+    return "full"
+  if ownership_pct >= 20:
+    return "equity"
+  return "cost"
+
+
+def _check_membership(joined_on, left_on) -> None:
+  if joined_on is not None and left_on is not None and left_on < joined_on:
+    raise EntityMembershipError(
+      f"left_on {left_on.isoformat()} precedes joined_on {joined_on.isoformat()}."
+    )
+
+
 class EntityTickerTakenError(ValueError):
   """Another entity of the graph already has this ticker."""
 
@@ -70,11 +98,35 @@ class EntityTickerTakenError(ValueError):
 def _apply_updates(session: Session, entity: Entity, updates: dict[str, Any]):
   """Set ``updates`` on ``entity`` and commit; the response is built before
   the commit expires the row."""
-  if "ownership_pct" in updates and is_group_parent(session, str(entity.id)):
+  parent = is_group_parent(session, str(entity.id))
+  if "ownership_pct" in updates and parent:
     raise EntityHierarchyError(
       "The group parent has no owner in this graph; ownership_pct applies to "
       "a subsidiary."
     )
+  if "entity_role" in updates and parent:
+    raise EntityHierarchyError(
+      "The group parent keeps the group's own books; entity_role applies to "
+      "another entity."
+    )
+  role = updates.get("entity_role", entity.entity_role)
+  if role == _ROLE_CONSOLIDATION and "consolidation_method" not in updates:
+    updates["consolidation_method"] = _METHOD_NONE
+  if "consolidation_method" in updates:
+    if updates["consolidation_method"] != _METHOD_NONE and (
+      parent or role == _ROLE_CONSOLIDATION
+    ):
+      raise EntityHierarchyError(
+        "The group parent and the consolidation entity are not consolidated "
+        "into the group; their consolidation_method is none."
+      )
+  elif "ownership_pct" in updates and role == _ROLE_OPERATING:
+    updates["consolidation_method"] = derived_consolidation_method(
+      updates["ownership_pct"]
+    )
+  _check_membership(
+    updates.get("joined_on", entity.joined_on), updates.get("left_on", entity.left_on)
+  )
   if "ticker" in updates:
     session.execute(_TICKER_LOCK_SQL)
     ticker = str(updates["ticker"]).strip().upper()
@@ -184,6 +236,23 @@ def create_entity(
       "This graph has no entity yet, so this one becomes its group parent, "
       "which has no owner in the graph; omit ownership_pct."
     )
+  role = body.entity_role or _ROLE_OPERATING
+  if parent is None and role != _ROLE_OPERATING:
+    raise EntityHierarchyError(
+      "This graph has no entity yet, so this one becomes its group parent, "
+      "which keeps the group's own books; omit entity_role."
+    )
+  if parent is None or role == _ROLE_CONSOLIDATION:
+    if body.consolidation_method not in (None, _METHOD_NONE):
+      raise EntityHierarchyError(
+        "The group parent and the consolidation entity are not consolidated "
+        "into the group; omit consolidation_method or pass none."
+      )
+    method = _METHOD_NONE
+  else:
+    method = body.consolidation_method or derived_consolidation_method(
+      body.ownership_pct
+    )
 
   if body.reporting_style_id:
     require_reporting_style(session, body.reporting_style_id)
@@ -218,6 +287,9 @@ def create_entity(
     is_parent=parent is None,
     parent_entity_id=parent.id if parent is not None else None,
     ownership_pct=body.ownership_pct,
+    consolidation_method=method,
+    entity_role=role,
+    joined_on=body.joined_on,
     source="native",
     address_line1=body.address_line1,
     address_city=body.address_city,

@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from sqlalchemy import (
   Boolean,
   Column,
+  Date,
   DateTime,
   ForeignKey,
   Index,
@@ -69,8 +70,22 @@ class Entity(ExtensionsBase):
   is_parent = Column(Boolean, nullable=False, default=True)
   parent_entity_id = Column(String, ForeignKey("entities.id"), nullable=True)
   # The parent's share of this entity, as a percent. Null on the group parent
-  # and on linked counterparties; the treatment it implies is M2 consolidation.
+  # and on linked counterparties.
   ownership_pct = Column(Numeric(7, 4), nullable=True)
+  # How the consolidated statements treat the entity: ``full`` sums its books
+  # and carries an outside owner's share as noncontrolling interest,
+  # ``equity`` collapses it to one investment and one income line, ``cost``
+  # carries an investment, ``none`` is the group parent, the consolidation
+  # entity and a linked counterparty. Defaulted from ``ownership_pct`` at
+  # creation and set by a person where control is not the percentage.
+  consolidation_method = Column(String, nullable=False, default="none")
+  # ``operating`` keeps a company's books; ``consolidation`` holds the
+  # consolidating entries that only the consolidated statements read.
+  entity_role = Column(String, nullable=False, default="operating")
+  # Membership in the group, by month: null ``joined_on`` is a member since
+  # the beginning, null ``left_on`` a member still.
+  joined_on = Column(Date, nullable=True)
+  left_on = Column(Date, nullable=True)
 
   source = Column(String, nullable=False, default="native")  # native, quickbooks, xero
   source_id = Column(String)  # realm_id for QB, org_id for Xero
