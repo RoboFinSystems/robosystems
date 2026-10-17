@@ -60,9 +60,11 @@ _require_roboledger = require_graph_extension("roboledger")
     "OLTP ledger data using the active CoA→GAAP mapping. This is the "
     "authoritative source for RoboLedger entity graphs — no graph "
     "materialization required. One entity's books: `entity_id` names a "
-    "subsidiary, omitted means the group parent; `consolidated` on the parent "
-    "combines every entity of the group at the rs-gaap concepts, with no "
-    "eliminations. Rejected on "
+    "subsidiary, omitted means the group parent. On the parent, `scope: "
+    "combined` sums every member consolidated in full at the rs-gaap "
+    "concepts for the months each was a member, nothing eliminated, and "
+    "`scope: consolidated` adds the consolidation entity's entries — the "
+    "eliminations and noncontrolling interest. Rejected on "
     "shared-repository graphs; those should use "
     "`financial-statement-analysis` instead."
   ),
@@ -120,6 +122,7 @@ async def live_financial_statement_op(
             limit=body.limit,
             entity_id=body.entity_id,
             consolidated=body.consolidated,
+            scope=body.scope,
             # Reporting Style resolves from the entity on this same session.
           )
         except (CoaMappingNotFoundError, CombinedViewOnParentOnlyError) as exc:

@@ -41,6 +41,10 @@ def entity_to_response(entity: Entity) -> LedgerEntityResponse:
     ownership_pct=(
       float(entity.ownership_pct) if entity.ownership_pct is not None else None
     ),
+    consolidation_method=entity.consolidation_method,
+    entity_role=entity.entity_role,
+    joined_on=entity.joined_on,
+    left_on=entity.left_on,
     source=entity.source,
     source_id=entity.source_id,
     source_graph_id=(entity.metadata_ or {}).get("source_graph_id"),

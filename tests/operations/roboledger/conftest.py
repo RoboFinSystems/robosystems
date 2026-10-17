@@ -92,6 +92,7 @@ def two_entities(tenant_session) -> TwoEntityTenant:
     source="native",
     created_at=t0 + timedelta(seconds=1),
     parent_entity_id=parent.id,
+    consolidation_method="full",
   )
   tenant_session.commit()
   return TwoEntityTenant(tenant_session, parent, sub, linked)

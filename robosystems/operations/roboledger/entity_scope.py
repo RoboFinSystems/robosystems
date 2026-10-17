@@ -7,6 +7,9 @@ companies received with a shared report, never a scope of this ledger.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import date
+
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
@@ -192,3 +195,51 @@ def find_linked_entity_id(
     {"sgid": source_graph_id, "seid": source_entity_id, "unkeyed": match_unkeyed},
   ).fetchone()
   return str(row.id) if row else None
+
+
+@dataclass(frozen=True)
+class GroupMember:
+  """An entity a group read sums, with the months it is summed for."""
+
+  id: str
+  role: str
+  joined_on: date | None
+  left_on: date | None
+
+  def is_member_for(self, start: date, end: date) -> bool:
+    """Whether the period ``start`` to ``end`` falls inside the membership
+    interval. Membership is by month: any day of the month joined or left
+    counts, so a sub acquired on the 14th is summed for that month."""
+    return (self.joined_on is None or self.joined_on <= end) and (
+      self.left_on is None or self.left_on >= start
+    )
+
+
+def group_members(
+  session: Session, parent_id: str, *, consolidated: bool
+) -> list[GroupMember]:
+  """The entities a group read sums, the parent first: every operating
+  entity consolidated in full, by creation, then — when ``consolidated`` —
+  the consolidation entity, whose entries are the worksheet's adjustments
+  column. An equity-method or cost member is never summed; its effect
+  reaches the group through that column. Each carries its membership
+  interval, and the read decides per period."""
+  rows = session.execute(
+    text(
+      "SELECT id, entity_role, joined_on, left_on FROM entities "
+      "WHERE source <> 'linked' AND id <> :parent "
+      "  AND ((entity_role = 'operating' AND consolidation_method = 'full') "
+      "       OR (:consolidated AND entity_role = 'consolidation')) "
+      "ORDER BY (entity_role = 'consolidation'), created_at ASC, id ASC"
+    ),
+    {"parent": parent_id, "consolidated": consolidated},
+  ).all()
+  return [
+    # The parent is a member of its own group for every period, whatever its
+    # row says; only the others carry an interval the read consults.
+    GroupMember(parent_id, "operating", None, None),
+    *(
+      GroupMember(str(row.id), str(row.entity_role), row.joined_on, row.left_on)
+      for row in rows
+    ),
+  ]

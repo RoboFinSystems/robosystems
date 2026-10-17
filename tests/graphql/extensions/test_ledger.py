@@ -15,7 +15,7 @@ tests cover:
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -231,6 +231,8 @@ class TestEntityResolver:
       is_parent=False,
       parent_entity_id="ent_01",
       ownership_pct=100.0,
+      consolidation_method="full",
+      joined_on=date(2026, 3, 1),
     )
     with (
       _patch_session(),
@@ -240,13 +242,22 @@ class TestEntityResolver:
       ) as get_entity,
     ):
       result = schema.execute_sync(
-        'query { entity(entityId: "ent_sub") { id parentEntityId ownershipPct } }',
+        'query { entity(entityId: "ent_sub") { id parentEntityId ownershipPct '
+        "consolidationMethod entityRole joinedOn leftOn } }",
         context_value=_ctx(),
       )
 
     assert result.errors is None
     assert result.data == {
-      "entity": {"id": "ent_sub", "parentEntityId": "ent_01", "ownershipPct": 100.0}
+      "entity": {
+        "id": "ent_sub",
+        "parentEntityId": "ent_01",
+        "ownershipPct": 100.0,
+        "consolidationMethod": "full",
+        "entityRole": "operating",
+        "joinedOn": "2026-03-01",
+        "leftOn": None,
+      }
     }
     assert get_entity.call_args.args[1] == "ent_sub"
 

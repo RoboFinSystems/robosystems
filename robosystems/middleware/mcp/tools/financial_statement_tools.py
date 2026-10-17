@@ -15,9 +15,11 @@ from robosystems.db.extensions import extensions_session
 from robosystems.middleware.operations import run_off_loop
 from robosystems.operations.roboledger.reads.reports import (
   ANALYSIS_STATEMENT_TYPES,
+  LIVE_STATEMENT_SCOPES,
   MCP_LIVE_STATEMENT_TYPES,
   CoaMappingNotFoundError,
   CombinedViewOnParentOnlyError,
+  InvalidStatementScopeError,
   get_live_financial_statement,
   resolve_reporting_window,
 )
@@ -124,7 +126,7 @@ class LiveFinancialStatementTool(BaseTool):
 
 **PARAMETERS:**
 - `entity_id` (optional) — the entity whose books to render; omit for the group parent
-- `consolidated` (optional, default false) — on the group parent, every entity's statement under the parent's Reporting Style, summed per rs-gaap concept. The sum itself eliminates nothing: a group that keeps a consolidation entity for its consolidating entries gets its consolidated statement (that entity's eliminations and noncontrolling interest are summed in); without one the statement is combined and an intercompany balance is still in. `combined_entity_ids` on the response names who was summed, and an entity with no mapping yet is left out
+- `scope` (optional, default `entity`) — `entity` is one entity's own books. On the group parent, `combined` sums every member consolidated in full under the parent's Reporting Style, per rs-gaap concept, for the months each was a member — the pre-adjustment total, nothing eliminated; `consolidated` adds the consolidation entity, whose eliminations and noncontrolling interest are the adjustments column, so a group that posts its consolidating entries there reads its consolidated statement. An equity-method or cost member (its `consolidation_method`) is never summed. A question about "the group" reads `consolidated`; `combined` is the worksheet's first total. `combined_entity_ids` on the response names who was summed, and an entity with no mapping yet is left out. `consolidated: true` is the older spelling of `scope: consolidated`
 - `statement_type` (required) — one of the four below
 - income_statement — Revenue, expenses, net income
 - balance_sheet — Assets, liabilities, equity (instant periods)
@@ -171,13 +173,24 @@ Facts with element qnames, names, classifications, and values aligned with `peri
             "default": 1000,
           },
           "entity_id": ENTITY_ID_ARGUMENT,
+          "scope": {
+            "type": "string",
+            "enum": list(LIVE_STATEMENT_SCOPES),
+            "description": (
+              "entity: one entity's books. combined: on the group parent, "
+              "every member consolidated in full, summed per rs-gaap concept "
+              "for the months each was a member, nothing eliminated. "
+              "consolidated: that sum plus the consolidation entity's "
+              "eliminations and noncontrolling interest — what 'the group' "
+              "reads."
+            ),
+          },
           "consolidated": {
             "type": "boolean",
             "default": False,
             "description": (
-              "Every entity of the group summed per rs-gaap concept; the sum "
-              "eliminates nothing, and a consolidation entity's entries are "
-              "summed in when the group keeps one. Only on the group parent."
+              "The older spelling of scope: consolidated; scope wins when "
+              "both are given."
             ),
           },
         },
@@ -231,8 +244,13 @@ Facts with element qnames, names, classifications, and values aligned with `peri
           limit=limit,
           entity_id=arguments.get("entity_id"),
           consolidated=bool(arguments.get("consolidated", False)),
+          scope=arguments.get("scope"),
         )
-      except (CoaMappingNotFoundError, CombinedViewOnParentOnlyError) as exc:
+      except (
+        CoaMappingNotFoundError,
+        CombinedViewOnParentOnlyError,
+        InvalidStatementScopeError,
+      ) as exc:
         return {
           "error": str(exc),
           "statement_type": statement_type,

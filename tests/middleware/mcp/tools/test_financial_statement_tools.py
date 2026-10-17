@@ -133,11 +133,13 @@ class TestLiveFinancialStatementToolExecute:
           "statement_type": "balance_sheet",
           "entity_id": "ent_sub",
           "consolidated": True,
+          "scope": "combined",
         }
       )
 
     assert read.call_args.kwargs["entity_id"] == "ent_sub"
     assert read.call_args.kwargs["consolidated"] is True
+    assert read.call_args.kwargs["scope"] == "combined"
 
   @pytest.mark.unit
   async def test_validation_rides_the_payload(self):

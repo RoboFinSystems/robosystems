@@ -59,6 +59,7 @@ from robosystems.operations.roboledger.commands.chart_of_accounts import (
   initialize_chart_of_accounts as cmd_initialize_chart_of_accounts,
 )
 from robosystems.operations.roboledger.commands.entity import (
+  CLEARABLE_FIELDS,
   EntityHierarchyError,
   EntityTickerTakenError,
   ParentEntityNotFoundError,
@@ -276,7 +277,12 @@ create_entity_op = _registrar.register(
       "`reporting_style_id` names one. `ticker` prefixes the entity's "
       "account names and must be unique in the graph (409). There is no "
       "cap on entities: a graph is one reporting group, and everyone with "
-      "access to it sees every entity."
+      "access to it sees every entity. `ownership_pct` implies the "
+      "`consolidation_method` (50 and above full, 20 to 50 equity, below "
+      "20 cost) unless one is given; `entity_role: consolidation` makes "
+      "this the group's entity for consolidating entries, read by the "
+      "consolidated statements only; `joined_on` dates an acquired "
+      "subsidiary's membership."
     ),
     command=cmd_create_entity,
     request_model=CreateEntityRequest,
@@ -294,7 +300,9 @@ create_entity_op = _registrar.register(
 
 
 def _require_entity_updates(body: UpdateEntityRequest) -> None:
-  if not body.model_dump(exclude_none=True, exclude={"entity_id"}):
+  if not body.model_dump(exclude_none=True, exclude={"entity_id"}) and not (
+    body.model_fields_set & set(CLEARABLE_FIELDS)
+  ):
     raise HTTPException(status_code=400, detail="No fields provided for update.")
 
 
@@ -309,7 +317,12 @@ update_entity_op = _registrar.register(
       "(non-null) fields are updated. Omit `entity_id` to target the group "
       "parent; name a subsidiary's id to edit it. `ownership_pct` is "
       "refused on the group parent (422), and `ticker` must stay unique in "
-      "the graph (409)."
+      "the graph (409). `consolidation_method` overrides the treatment the "
+      "share implies (a new share re-derives it unless both are given), "
+      "`entity_role: consolidation` marks the group's entity for "
+      "consolidating entries, and `joined_on` / `left_on` bound its "
+      "membership by month — set `left_on` when a subsidiary leaves the "
+      "group and its history stays readable under it."
     ),
     command=cmd_update_entity,
     request_model=UpdateEntityRequest,
