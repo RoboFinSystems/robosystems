@@ -1440,7 +1440,8 @@ def _emit_flow_facts(
           AND en.posting_date BETWEEN :start AND :end
           AND (
             COALESCE(racct.qname, acct.qname) = ANY(:cash_qnames)
-            OR :tags_count_without_cash
+            -- the consolidation entity: every tagged line, cash or not
+            OR :tags_count_without_cash = TRUE
           )
         GROUP BY flow_id, rf.qname, rf.name, rf.balance_type
       """).bindparams(landed_entry_bindparam())

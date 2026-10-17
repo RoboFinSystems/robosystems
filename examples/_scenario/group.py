@@ -45,6 +45,10 @@ _ELIMINATED_EQUITY_CODE = {
   "corporation": "3010",
 }
 
+# A distribution every third month, split by ownership; the read-back counts
+# the same months.
+_DISTRIBUTION_EVERY = 3
+
 # The cash flow rows a member's own contribution and distribution lines take,
 # by its legal form: what the elimination of its capital has to offset.
 _MEMBER_CAPITAL_FLOWS = {
@@ -831,6 +835,15 @@ def _load(
       + ")"
     )
 
+  # The consolidation entity presents its own form's cash flow rows, and its
+  # eliminations tag the rows the members' lines took (_MEMBER_CAPITAL_FLOWS),
+  # so a member of another form would need a consolidation entity on that form.
+  other_forms = sorted({m.entity_type for m in group.members} - {"llc"})
+  if other_forms:
+    raise RuntimeError(
+      "the consolidation entity is an LLC; a member of another form "
+      f"({', '.join(other_forms)}) needs one on its own form"
+    )
   consolidation_id, reused = _ensure_entity(
     api,
     group.consolidation_name,
@@ -1105,7 +1118,11 @@ def _post_group(
       due[member.ticker] = fee + interest + rebill
 
       # A distribution every third month, split by ownership.
-      if member.distribution and (index + 1) % 3 == 0 and index < last_index:
+      if (
+        member.distribution
+        and (index + 1) % _DISTRIBUTION_EVERY == 0
+        and index < last_index
+      ):
         parent_part = _share(member.distribution, member.parent_share)
         books.post(
           end,
@@ -1289,7 +1306,9 @@ def _read_back(
     for m in group.members
     if m.outside_share
   )
-  paid_months = sum(1 for i in range(len(windows) - 1) if (i + 1) % 3 == 0)
+  paid_months = sum(
+    1 for i in range(len(windows) - 1) if (i + 1) % _DISTRIBUTION_EVERY == 0
+  )
   outside_out = sum(
     (m.distribution - _share(m.distribution, m.parent_share)) * paid_months
     for m in group.members

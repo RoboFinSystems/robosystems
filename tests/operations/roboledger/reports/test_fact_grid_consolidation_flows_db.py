@@ -214,3 +214,10 @@ def test_a_cash_line_on_the_consolidation_entity_keeps_its_own_sign(tenant):
     tenant, ADJUSTMENTS, [("cash", 50_00, 0, "note_flow"), ("note", 0, 50_00, None)]
   )
   assert _flows(tenant, ADJUSTMENTS) == {NOTE_PROCEEDS: 50.0}
+
+
+def test_a_whole_graph_pivot_keeps_the_rule_off(tenant):
+  """With no entity named the pivot spans the graph, and only cash lines
+  count, as for any entity: the consolidation entity's rule is its own."""
+  _post(tenant, ADJUSTMENTS, ELIMINATION)
+  assert _flows(tenant, None) == {}
