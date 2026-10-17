@@ -50,7 +50,10 @@ class JournalEntryLineItemInput(BaseModel):
       "an asset bought or sold; omitted, the account's default flow applies. "
       "A flow set on one side of the entry tags the untagged lines on the "
       "other: the cash flow statement reads the cash line and the "
-      "roll-forwards read the account line. Refused when it is not a row of "
+      "roll-forwards read the account line. On the group's consolidation "
+      "entity, which moves no cash, every tagged line counts on its own, "
+      "cash-effect signed (a credit is an inflow), so an elimination offsets "
+      "the flow a member's line produced. Refused when it is not a row of "
       "the entity's cash flow statement."
     ),
   )

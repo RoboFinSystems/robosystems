@@ -45,6 +45,56 @@ _ELIMINATED_EQUITY_CODE = {
   "corporation": "3010",
 }
 
+# A distribution every third month, split by ownership; the read-back counts
+# the same months.
+_DISTRIBUTION_EVERY = 3
+
+# The cash flow rows a member's own contribution and distribution lines take,
+# by its legal form: what the elimination of its capital has to offset.
+_MEMBER_CAPITAL_FLOWS = {
+  "llc": (
+    "rs-gaap:ProceedsFromContributedCapital",
+    "rs-gaap:PaymentsOfCapitalDistribution",
+  ),
+  "partnership": (
+    "rs-gaap:ProceedsFromPartnershipContribution",
+    "rs-gaap:PaymentsOfCapitalDistribution",
+  ),
+  "corporation": (
+    "rs-gaap:ProceedsFromIssuanceOfCommonStock",
+    "rs-gaap:PaymentsOfDividends",
+  ),
+}
+
+# The flow each cumulative adjustment's delta offsets, by the delta's side:
+# the consolidation entity moves no cash, so its tagged lines count on their
+# own, cash-effect signed. A debit on the eliminated capital is the
+# contribution the member booked, a credit there the distribution; the parent's
+# investment and note the other way round; the outside owners' parts are the
+# group's real flows, on the noncontrolling-interest rows.
+_ADJUSTMENT_FLOWS: dict[tuple[str, str], tuple[str, str]] = {
+  ("1600", "capital"): (
+    "rs-gaap:ProceedsFromDivestitureOfInterestInSubsidiariesAndAffiliates",
+    "rs-gaap:PaymentsToAcquireInterestInSubsidiariesAndAffiliates",
+  ),
+  ("3200", "capital"): (
+    "rs-gaap:PaymentsToMinorityShareholders",
+    "rs-gaap:ProceedsFromMinorityShareholders",
+  ),
+  ("2600", "balance"): (
+    "rs-gaap:ProceedsFromRelatedPartyDebt",
+    "rs-gaap:RepaymentsOfRelatedPartyDebt",
+  ),
+  ("1650", "balance"): (
+    "rs-gaap:ProceedsFromSaleMaturityAndCollectionsOfInvestments",
+    "rs-gaap:PaymentsToAcquireInvestments",
+  ),
+  **{
+    (code, "capital"): _MEMBER_CAPITAL_FLOWS[form]
+    for form, code in _ELIMINATED_EQUITY_CODE.items()
+  },
+}
+
 # Accounts a member's template chart lacks and the group needs: (code, name,
 # trait, sub_classification, balance, rs-gaap target). The distributions row
 # maps to the form's equity concept.
@@ -412,16 +462,33 @@ class _Adjustments:
     posting_date: date,
     memo: str,
     targets: dict[tuple[str, str], int],
-  ) -> None:
-    lines: list[tuple[str, int, int, str | None]] = []
+  ) -> int:
+    """Post the deltas to the targets; returns the entries posted. The deltas
+    that offset a flow carry its tag (``_ADJUSTMENT_FLOWS``) and post apart
+    from the untagged balances, so the both-lines rule never spreads a tag
+    onto a line that offsets nothing."""
+    tagged: list[tuple[str, int, int, str | None]] = []
+    untagged: list[tuple[str, int, int, str | None]] = []
     for key, target in targets.items():
       delta = target - self.held.get(key, 0)
       if not delta:
         continue
       code = key[0]
-      lines.append((code, delta, 0, None) if delta > 0 else (code, 0, -delta, None))
+      flows = _ADJUSTMENT_FLOWS.get(key)
+      if delta > 0:
+        line = (code, delta, 0, flows[0] if flows else None)
+      else:
+        line = (code, 0, -delta, flows[1] if flows else None)
+      (tagged if flows else untagged).append(line)
       self.held[key] = target
-    self.books.post(posting_date, memo, lines)
+    posted = 0
+    if tagged:
+      self.books.post(posting_date, memo, tagged)
+      posted += 1
+    if untagged:
+      self.books.post(posting_date, f"{memo} — intercompany balances", untagged)
+      posted += 1
+    return posted
 
   def activity(
     self,
@@ -768,6 +835,15 @@ def _load(
       + ")"
     )
 
+  # The consolidation entity presents its own form's cash flow rows, and its
+  # eliminations tag the rows the members' lines took (_MEMBER_CAPITAL_FLOWS),
+  # so a member of another form would need a consolidation entity on that form.
+  other_forms = sorted({m.entity_type for m in group.members} - {"llc"})
+  if other_forms:
+    raise RuntimeError(
+      "the consolidation entity is an LLC; a member of another form "
+      f"({', '.join(other_forms)}) needs one on its own form"
+    )
   consolidation_id, reused = _ensure_entity(
     api,
     group.consolidation_name,
@@ -848,7 +924,15 @@ def _load(
   # consolidation.
   last_start, last_end = windows[-2]
   return _read_back(
-    api, group, parent, members, consolidation, last_start, last_end, months_closed
+    api,
+    group,
+    parent,
+    members,
+    consolidation,
+    last_start,
+    last_end,
+    months_closed,
+    windows=windows,
   )
 
 
@@ -1034,7 +1118,11 @@ def _post_group(
       due[member.ticker] = fee + interest + rebill
 
       # A distribution every third month, split by ownership.
-      if member.distribution and (index + 1) % 3 == 0 and index < last_index:
+      if (
+        member.distribution
+        and (index + 1) % _DISTRIBUTION_EVERY == 0
+        and index < last_index
+      ):
         parent_part = _share(member.distribution, member.parent_share)
         books.post(
           end,
@@ -1114,8 +1202,9 @@ def _post_group(
       targets[("1650", "balance")] = (
         targets.get(("1650", "balance"), 0) - member.note_from_parent
       )
-    adjustments.bring_to(end, f"Consolidating entries at {_period(end)}", targets)
-    count += 1
+    count += adjustments.bring_to(
+      end, f"Consolidating entries at {_period(end)}", targets
+    )
 
   print(f"  Activity:     {count} entries over {len(windows)} months, on every side")
 
@@ -1129,6 +1218,8 @@ def _read_back(
   start: date,
   end: date,
   months_closed: int,
+  *,
+  windows: list[tuple[date, date]],
 ) -> GroupResult:
   cash = "rs-gaap:CashAndCashEquivalentsAtCarryingValue"
   checks: list[GroupCheck] = []
@@ -1193,6 +1284,46 @@ def _read_back(
         "; ".join(validation.get("failures") or []) or "passed",
       )
     )
+
+  # The consolidated cash flow over the whole run: what the group paid itself
+  # is gone, and the outside owners' flows stand on their own rows.
+  cf_all = _statement(api, "cash_flow_statement", windows[0][0], end, consolidated=True)
+  for qname, label in (
+    (
+      "rs-gaap:PaymentsToAcquireInterestInSubsidiariesAndAffiliates",
+      "the investment in subsidiaries",
+    ),
+    (
+      "rs-gaap:ProceedsFromDivestitureOfInterestInSubsidiariesAndAffiliates",
+      "the returns of that investment",
+    ),
+    ("rs-gaap:PaymentsToAcquireInvestments", "the note to a subsidiary"),
+    ("rs-gaap:ProceedsFromRelatedPartyDebt", "the note from the parent"),
+  ):
+    check(f"consolidated cash flow nets {label}", _value(cf_all, qname, end), 0.0)
+  outside_in = sum(
+    m.contributed_capital - _share(m.contributed_capital, m.parent_share)
+    for m in group.members
+    if m.outside_share
+  )
+  paid_months = sum(
+    1 for i in range(len(windows) - 1) if (i + 1) % _DISTRIBUTION_EVERY == 0
+  )
+  outside_out = sum(
+    (m.distribution - _share(m.distribution, m.parent_share)) * paid_months
+    for m in group.members
+    if m.outside_share and m.distribution
+  )
+  check(
+    "outside owners' contributions on their own row",
+    _value(cf_all, "rs-gaap:ProceedsFromMinorityShareholders", end),
+    outside_in / 100,
+  )
+  check(
+    "distributions to outside owners on their own row",
+    -_value(cf_all, "rs-gaap:PaymentsToMinorityShareholders", end),
+    outside_out / 100,
+  )
 
   result = GroupResult(
     member_ids={m.name: members[m.ticker].entity_id for m in group.members},

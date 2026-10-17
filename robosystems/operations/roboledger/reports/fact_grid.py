@@ -1367,6 +1367,17 @@ _CF_OPERATING_SUBTOTAL_QNAME = "rs-gaap:NetCashProvidedByUsedInOperatingActiviti
 _CF_PLUG_WARN_RATIO = 0.25
 
 
+def _is_consolidation_entity(session: Session, entity_id: str | None) -> bool:
+  """Whether the entity is the group's consolidation entity, whose entries
+  only the consolidated statements read; a whole-graph pivot is not."""
+  if entity_id is None:
+    return False
+  role = session.execute(
+    text("SELECT entity_role FROM entities WHERE id = :id"), {"id": entity_id}
+  ).scalar()
+  return role == "consolidation"
+
+
 def _emit_flow_facts(
   session: Session,
   facts: list[ReportFact],
@@ -1385,6 +1396,12 @@ def _emit_flow_facts(
   a balanced entry's cash side negates its non-cash side. Operating flows
   are excluded — indirect operating is NI + addbacks + ΔWC. Replaces any
   existing fact for the leaf. Returns the ids of the flows emitted.
+
+  The group's consolidation entity moves no cash: its eliminations carry,
+  on the lines themselves, the flows the members' lines produced, so there
+  every tagged line counts on its own, cash-effect signed (a credit is an
+  inflow) — the debit that reverses a member's note nets the proceeds the
+  member booked.
   """
   cash_qnames = list(_CASH_ANCHOR_QNAMES)
 
@@ -1394,7 +1411,12 @@ def _emit_flow_facts(
           rf.qname AS flow_qname,
           rf.name AS flow_name,
           rf.balance_type AS flow_balance_type,
-          COALESCE(SUM(li.debit_amount - li.credit_amount), 0) AS value_cents
+          COALESCE(SUM(
+            CASE WHEN COALESCE(racct.qname, acct.qname) = ANY(:cash_qnames)
+              THEN li.debit_amount - li.credit_amount
+              ELSE li.credit_amount - li.debit_amount
+            END
+          ), 0) AS value_cents
         FROM line_items li
         JOIN entries en ON en.id = li.entry_id
         JOIN elements acct ON acct.id = li.element_id
@@ -1416,7 +1438,11 @@ def _emit_flow_facts(
           AND en.status IN :landed_entry_statuses
           AND (:entity_id IS NULL OR en.entity_id = :entity_id)
           AND en.posting_date BETWEEN :start AND :end
-          AND COALESCE(racct.qname, acct.qname) = ANY(:cash_qnames)
+          AND (
+            COALESCE(racct.qname, acct.qname) = ANY(:cash_qnames)
+            -- the consolidation entity: every tagged line, cash or not
+            OR :tags_count_without_cash = TRUE
+          )
         GROUP BY flow_id, rf.qname, rf.name, rf.balance_type
       """).bindparams(landed_entry_bindparam())
 
@@ -1477,6 +1503,7 @@ def _emit_flow_facts(
       """).bindparams(landed_entry_bindparam())
 
   emitted: set[str] = set()
+  tags_count_without_cash = _is_consolidation_entity(session, entity_id)
   for period in periods:
     params = {
       "arc_type": arc_type,
@@ -1485,6 +1512,7 @@ def _emit_flow_facts(
       "end": period.end,
       "cash_qnames": cash_qnames,
       "entity_id": entity_id,
+      "tags_count_without_cash": tags_count_without_cash,
     }
     # flow_id -> [qname, name, balance_type, summed_value]
     combined: dict[str, list] = {}
