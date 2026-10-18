@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.journal_entries import (
@@ -22,7 +23,7 @@ from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.models.extensions.roboledger.transaction import Transaction
 from robosystems.operations.library.reads.elements import efs_trait_by_element
-from robosystems.operations.locking import acquire_shared_period_fence
+from robosystems.operations.locking import RowLockedError, acquire_shared_period_fence
 from robosystems.operations.roboledger.commands._guards import assert_accounts_postable
 from robosystems.operations.roboledger.commands.journal_entries import (
   _entry_to_response,
@@ -238,7 +239,14 @@ def record_opening_balance(
     created_by=created_by,
   )
   session.add(entry)
-  session.flush()
+  try:
+    session.flush()
+  except IntegrityError as exc:
+    # Two records raced past the read above; the index lets one through.
+    raise RowLockedError(
+      "Another opening balance was recorded for this entity at the same time. "
+      "Retry to replace it."
+    ) from exc
   for order, (element_id, debit, credit) in enumerate(lines, start=1):
     session.add(
       LineItem(

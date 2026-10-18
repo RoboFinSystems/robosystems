@@ -635,6 +635,7 @@ class FiscalCalendarService:
 
     calendar.updated_by = actor_id
     session.flush()
+    # Local: the commands import this package, through journal_entries.
     from robosystems.operations.roboledger.commands.opening_balances import (
       move_opening_entry,
     )

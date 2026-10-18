@@ -1389,6 +1389,14 @@ def get_live_financial_statement(
     period_labels=[p.label for p in periods],
     warnings=grid.warnings,
   )
+  if not periods:
+    # Nothing left to check is not a pass.
+    validation.passed = False
+    validation.status = "inconclusive"
+    validation.warnings = [
+      "Every column reaches back before the books begin; record the window "
+      "from the first month the books cover."
+    ]
 
   facts: list[LiveStatementFactRow] = []
   for row in grid.rows:

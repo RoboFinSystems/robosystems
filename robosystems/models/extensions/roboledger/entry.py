@@ -77,6 +77,13 @@ class Entry(ExtensionsBase):
       unique=True,
       postgresql_where="source_structure_id IS NOT NULL AND reversal_of IS NULL",
     ),
+    # One opening balance per entity, whatever writes it.
+    Index(
+      "uq_entries_one_opening_per_entity",
+      "entity_id",
+      unique=True,
+      postgresql_where="type = 'opening'",
+    ),
     # ``opening`` is the balance sheet a ledger starts from, one per entity,
     # written only by ``record-opening-balance``.
     CheckConstraint(

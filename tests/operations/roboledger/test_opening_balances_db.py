@@ -286,3 +286,49 @@ def test_the_opening_cannot_be_reversed(tenant):
         ReverseJournalEntryRequest(entry_id=entry.id, posting_date=date(2026, 7, 1)),
         "usr_1",
       )
+
+
+def test_the_database_holds_an_entity_to_one_opening(tenant):
+  """Two records that race past the read still leave one: the second
+  opening entry for the entity is refused at insert."""
+  from sqlalchemy.exc import IntegrityError
+
+  with extensions_session(GRAPH) as session:
+    entry = record_opening_balance(session, _opening(session, tenant), "usr_1")
+    session.commit()
+    with pytest.raises(IntegrityError):
+      session.add(
+        Entry(
+          entity_id=PARENT,
+          transaction_id=None,
+          type="opening",
+          status="posted",
+          posting_date=entry.posting_date,
+          memo="a second opening",
+          created_by="usr_1",
+        )
+      )
+      session.flush()
+    session.rollback()
+
+
+def test_a_window_entirely_before_the_books_is_inconclusive(tenant):
+  """June reaches back before July's books in every column, so nothing is
+  rendered and the statement says why rather than passing vacuously."""
+  with extensions_session(GRAPH) as session:
+    record_opening_balance(session, _opening(session, tenant), "usr_1")
+    session.commit()
+    response = get_live_financial_statement(
+      session,
+      graph_id=GRAPH,
+      statement_type="income_statement",
+      period_start=date(2026, 6, 1),
+      period_end=date(2026, 6, 30),
+    )
+    assert response.periods == []
+    assert len(response.omitted_periods) == 2
+    assert response.validation is not None
+    assert (response.validation.passed, response.validation.status) == (
+      False,
+      "inconclusive",
+    )
