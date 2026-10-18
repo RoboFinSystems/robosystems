@@ -191,6 +191,45 @@ def engine_drafts(
   )
 
 
+_DraftKey = tuple[str, str, str, str | None]  # kind, member, account, flow
+
+
+def _drafted(session: Session, drafts: list[Entry]) -> dict[_DraftKey, int]:
+  """What the engine's drafts hold, net per kind, member, account and flow."""
+  if not drafts:
+    return {}
+  rows = session.execute(
+    text(
+      """
+      SELECT e.adjustment_kind, e.adjusts_entity_id, li.element_id,
+             fe.qname AS flow_qname,
+             SUM(li.debit_amount - li.credit_amount) AS amount
+      FROM line_items li
+      JOIN entries e ON e.id = li.entry_id
+      LEFT JOIN elements fe ON fe.id = li.flow_element_id
+      WHERE e.id IN :ids
+      GROUP BY e.adjustment_kind, e.adjusts_entity_id, li.element_id, fe.qname
+      """
+    ).bindparams(bindparam("ids", expanding=True)),
+    {"ids": [str(e.id) for e in drafts]},
+  ).all()
+  return {
+    (r.adjustment_kind, r.adjusts_entity_id, r.element_id, r.flow_qname): int(r.amount)
+    for r in rows
+    if r.amount
+  }
+
+
+def _proposed(proposals: list[ConsolidationProposal]) -> dict[_DraftKey, int]:
+  """What drafting the proposals would hold, keyed as ``_drafted``."""
+  held: dict[_DraftKey, int] = defaultdict(int)
+  for p in proposals:
+    for line in p.lines:
+      key = (p.adjustment_kind, p.adjusts_entity_id, line.element_id, line.flow_qname)
+      held[key] += line.debit_amount - line.credit_amount
+  return {k: v for k, v in held.items() if v}
+
+
 def _flow(qname: str, kind: str, amount: int) -> str | None:
   flows = _FLOWS.get((qname, kind))
   if flows is None:
@@ -948,6 +987,9 @@ def preview_consolidation_entries(
       + ", ".join(sorted(untaggable))
       + " row; the lines that would offset it are left untagged."
     )
+  # The month's own drafts are left out of what is held, since drafting again
+  # replaces them; the month is up to date when they hold what it needs.
+  drafts = engine_drafts(session, consolidation.id, start, end)
   return PreviewConsolidationEntriesResponse(
     period=period,
     period_start=start,
@@ -957,8 +999,10 @@ def preview_consolidation_entries(
     residuals=plan.residuals,
     reconciling_items=plan.reconciling,
     notes=plan.notes,
-    up_to_date=not proposals and not plan.residuals and not plan.incomplete,
-    drafted_entry_ids=[
-      str(e.id) for e in engine_drafts(session, consolidation.id, start, end)
-    ],
+    up_to_date=(
+      not plan.residuals
+      and not plan.incomplete
+      and _drafted(session, drafts) == _proposed(proposals)
+    ),
+    drafted_entry_ids=[str(e.id) for e in drafts],
   )

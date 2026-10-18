@@ -125,9 +125,10 @@ class PreviewConsolidationEntriesResponse(BaseModel):
   up_to_date: bool = Field(
     ...,
     description=(
-      "True when nothing is proposed, withheld or left out: the "
-      "consolidation entity already holds what the month needs. A closed "
-      "month is up to date as posted; read `closed` first."
+      "True when nothing is withheld or left out and the consolidation "
+      "entity holds what the month needs, posted or in the month's drafts "
+      "(then `proposals` lists what the drafts hold). A closed month is up "
+      "to date as posted; read `closed` first."
     ),
   )
   closed: bool = Field(

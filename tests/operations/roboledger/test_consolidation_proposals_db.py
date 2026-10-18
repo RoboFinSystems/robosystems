@@ -816,8 +816,10 @@ def test_proposing_drafts_the_month_and_replaces_its_own_drafts(group, monkeypat
   assert first.replaced == 0
   assert {e.status for e in first.entries} == {"draft"}
   assert set(preview().drafted_entry_ids) == {e.id for e in first.entries}
-  # Drafts are not held until close posts them: the proposals stand.
+  # Drafts are not held until close posts them: the proposals stand, and the
+  # month is up to date because its drafts hold them.
   assert len(preview().proposals) == expected
+  assert preview().up_to_date
 
   second = _propose()
   assert second.replaced == expected
@@ -835,6 +837,30 @@ def test_proposing_drafts_the_month_and_replaces_its_own_drafts(group, monkeypat
       {"e": ADJUSTMENTS},
     )
   assert preview().up_to_date
+
+
+def test_drafts_short_of_the_month_leave_it_out_of_date(group, monkeypatch):
+  """A month whose drafts no longer hold what it needs, here one deleted, is
+  not up to date, though drafts remain."""
+  monkeypatch.setattr(engine, "_FLOWS", {})
+  _form_the_group(group)
+  _january(group)
+  drafted = _propose()
+  assert len(drafted.entries) > 1
+
+  with extensions_session(GRAPH) as session:
+    session.execute(
+      text("DELETE FROM line_items WHERE entry_id = :id"),
+      {"id": drafted.entries[0].id},
+    )
+    session.execute(
+      text("DELETE FROM entries WHERE id = :id"), {"id": drafted.entries[0].id}
+    )
+    session.commit()
+
+  response = preview()
+  assert response.drafted_entry_ids
+  assert not response.up_to_date
 
 
 def test_drafts_of_an_earlier_open_month_are_held(group, monkeypatch):

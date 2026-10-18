@@ -389,7 +389,7 @@ class PreviewConsolidationEntriesTool(BaseTool):
 - `residuals` — the parent's investment in a member that differs from its share of the member's capital; that member's investment elimination is withheld until it is explained, never plugged
 - `reconciling_items` — intercompany figures the two sides disagree on; the lower amount is eliminated
 - `notes` — what was left out and why, e.g. a cost one company recharged to another at cost, which stays in the group's result
-- `up_to_date` — nothing to post and nothing withheld
+- `up_to_date` — nothing withheld, and the month's needs are posted or already drafted (`drafted_entry_ids`); drafted, they wait for the consolidation entity's close
 """,
       "inputSchema": {
         "type": "object",
