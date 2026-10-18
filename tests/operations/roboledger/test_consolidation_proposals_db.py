@@ -19,6 +19,7 @@ from robosystems.config import env
 from robosystems.db.extensions import ExtensionsBase, extensions_session
 from robosystems.models.api.extensions.consolidation import (
   ProposeConsolidationEntriesRequest,
+  SetAllocationOverrideRequest,
 )
 from robosystems.models.api.extensions.entity import (
   CreateEntityRequest,
@@ -37,8 +38,11 @@ from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.structure import Structure
 from robosystems.models.extensions.taxonomy import Taxonomy
 from robosystems.models.extensions.trait import Trait
+from robosystems.operations.roboledger.commands._guards import ClosedPeriodError
 from robosystems.operations.roboledger.commands.consolidation import (
+  AllocationOverrideError,
   propose_consolidation_entries,
+  set_allocation_override,
 )
 from robosystems.operations.roboledger.commands.entity import (
   ConsolidatedHistoryError,
@@ -81,6 +85,7 @@ _CONCEPTS = {
   "rs-gaap:InvestmentIncomeInterest": ("credit", "duration", "revenue"),
   "rs-gaap:GeneralAndAdministrativeExpense": ("debit", "duration", "expense"),
   "rs-gaap:InterestExpense": ("debit", "duration", "expense"),
+  "rs-gaap:OtherNonoperatingIncomeExpense": ("credit", "duration", "revenue"),
   engine.INVESTMENT_IN_SUBSIDIARIES: ("debit", "instant", "asset"),
   engine.EQUITY_METHOD_INVESTMENT: ("debit", "instant", "asset"),
   engine.EQUITY_METHOD_INCOME: ("credit", "duration", "revenue"),
@@ -98,6 +103,7 @@ _CHARTS = {
     "note": "rs-gaap:LongTermInvestmentsAndReceivablesNet",
     "fees": "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
     "interest": "rs-gaap:InvestmentIncomeInterest",
+    "distributions": "rs-gaap:OtherNonoperatingIncomeExpense",
   },
   MEMBER: {
     "cash": "rs-gaap:Cash",
@@ -130,6 +136,7 @@ _CHARTS = {
     "5000": "rs-gaap:GeneralAndAdministrativeExpense",
     "5100": "rs-gaap:InterestExpense",
     "5900": engine.NCI_SHARE_OF_INCOME,
+    "4200": "rs-gaap:OtherNonoperatingIncomeExpense",
   },
 }
 
@@ -468,27 +475,48 @@ def test_eliminations_carry_the_flow_they_offset(group):
     assert set(_flows(response, kind, **which).values()) == {None}
 
 
-def test_a_tag_that_would_spread_is_left_off(group, monkeypatch):
-  """A wholly-owned member whose capital has no row on the consolidation
-  entity's statement: its untagged capital line cannot post apart from the
-  tagged investment, and the both-lines rule would copy the investment's
-  tag onto it, so the entry is proposed untagged."""
-  monkeypatch.setattr(
-    engine,
-    "_FLOWS",
-    {k: v for k, v in engine._FLOWS.items() if k[0] != "rs-gaap:MembersEquity"},
-  )
+def test_a_tag_stays_on_the_line_it_was_written_on(group):
+  """The consolidation entity moves no cash, so the both-lines rule does not
+  run there: a tag on the investment stays off the untagged capital line."""
+  qname = "rs-gaap:PaymentsToAcquireInterestInSubsidiariesAndAffiliates"
   with extensions_session(GRAPH) as session:
-    session.execute(
-      text("UPDATE entities SET ownership_pct = 100 WHERE id = :id"), {"id": MEMBER}
+    flow = Element(
+      qname=qname,
+      name="PaymentsToAcquireInterestInSubsidiariesAndAffiliates",
+      balance_type="credit",
+      period_type="duration",
+      element_type="concept",
+      is_abstract=False,
+      created_by="test",
     )
-  P, M = PARENT_ENTITY_ID, MEMBER
-  post(group, P, DEC, [("investment", 1_000_000), ("cash", -1_000_000)], agent=M)
-  post(group, M, DEC, [("cash", 1_000_000), ("equity", -1_000_000)], agent=P)
-  response = preview()
-
-  assert set(_flows(response, "elimination_investment").values()) == {None}
-  assert any("proposed untagged" in note for note in response.notes)
+    activity = Trait(category="activityType", identifier="investing")
+    session.add_all([flow, activity])
+    session.flush()
+    session.add(ElementTrait(element_id=flow.id, trait_id=activity.id))
+    session.flush()
+    entry = create_journal_entry(
+      session,
+      CreateJournalEntryRequest(
+        posting_date=JAN_31,
+        memo="Eliminate the investment",
+        adjustment_kind="elimination_investment",
+        adjusts_entity_id=MEMBER,
+        line_items=[
+          JournalEntryLineItemInput(
+            element_id=group["accounts"][(ADJUSTMENTS, "3020")],
+            debit_amount=1_000,
+          ),
+          JournalEntryLineItemInput(
+            element_id=group["accounts"][(ADJUSTMENTS, "1600")],
+            credit_amount=1_000,
+            flow_qname=qname,
+          ),
+        ],
+      ),
+      "test",
+      entity_id=ADJUSTMENTS,
+    )
+  assert [line.flow_qname for line in entry.line_items] == [None, qname]
 
 
 def _post_proposals(group: dict, response) -> None:
@@ -846,6 +874,137 @@ def test_a_method_change_is_refused_once_the_group_has_closed(group):
       UpdateEntityRequest(entity_id=MEMBER, entity_role="consolidation"),
       "test",
     )
+
+
+def _january_with_distributions_as_income(group: dict) -> None:
+  """January as before, except that the parent takes its 700 of the
+  member's distribution, and 200 from the associate, as income."""
+  P, M, K = PARENT_ENTITY_ID, MEMBER, ASSOCIATE
+  post(group, M, JAN_15, [("cash", 200_000), ("sales", -200_000)])
+  post(group, M, JAN_31, [("equity", 100_000), ("cash", -100_000)])
+  post(group, P, JAN_31, [("cash", 70_000), ("distributions", -70_000)], agent=M)
+  post(group, K, JAN_15, [("cash", 50_000), ("sales", -50_000)])
+  post(group, P, JAN_31, [("cash", 20_000), ("distributions", -20_000)], agent=K)
+
+
+def test_distributions_taken_as_income_explain_the_residual(group):
+  """The investment the parent still carries is its share of the capital
+  plus the distributions it took as income: that income is reversed against
+  the investment, nothing is withheld, and the one-sided income is no
+  disagreement."""
+  _form_the_group(group)
+  _january_with_distributions_as_income(group)
+  response = preview()
+
+  assert response.residuals == []
+  assert response.reconciling_items == []
+  assert _lines(response, "elimination_investment") == {
+    "rs-gaap:MembersEquity": 900_000,
+    engine.INVESTMENT_IN_SUBSIDIARIES: -700_000,
+    engine.NONCONTROLLING_INTEREST: -270_000,
+    "rs-gaap:OtherNonoperatingIncomeExpense": 70_000,
+  }
+  # On the equity method the associate's distribution reduces the investment.
+  assert _lines(response, "equity_method_distribution") == {
+    "rs-gaap:OtherNonoperatingIncomeExpense": 20_000,
+    engine.EQUITY_METHOD_INVESTMENT: -20_000,
+  }
+
+  _post_proposals(group, response)
+  assert preview().up_to_date
+  assert preview("2026-02").up_to_date
+
+
+def test_income_that_explains_only_part_of_the_residual_withholds_it(group):
+  _form_the_group(group)
+  _january_with_distributions_as_income(group)
+  post(
+    group,
+    PARENT_ENTITY_ID,
+    JAN_31,
+    [("investment", 10_000), ("cash", -10_000)],
+    agent=MEMBER,
+  )
+  response = preview()
+
+  assert [(r.entity_id, r.amount) for r in response.residuals] == [(MEMBER, 80_000)]
+  assert "explains only part" in response.residuals[0].explanation
+
+
+def test_distribution_income_the_residual_does_not_need_is_a_disagreement(group):
+  """The parent took the distribution against its investment and also as
+  income: the investment needs no explaining, so the income is not
+  reversed with it, and it comes back as one-sided intercompany income
+  rather than dropping out."""
+  _form_the_group(group)
+  _january(group)
+  post(
+    group,
+    PARENT_ENTITY_ID,
+    JAN_31,
+    [("cash", 5_000), ("distributions", -5_000)],
+    agent=MEMBER,
+  )
+  response = preview()
+
+  assert response.residuals == []
+  assert "rs-gaap:OtherNonoperatingIncomeExpense" not in _lines(
+    response, "elimination_investment"
+  )
+  assert [(i.entity_id, i.concept, i.amount) for i in response.reconciling_items] == [
+    (PARENT_ENTITY_ID, "rs-gaap:OtherNonoperatingIncomeExpense", -5_000)
+  ]
+
+
+def _override(**fields):
+  with extensions_session(GRAPH) as session:
+    return set_allocation_override(
+      session,
+      SetAllocationOverrideRequest(period="2026-01", **fields),
+      "test",
+    )
+
+
+def test_an_allocation_override_replaces_the_pro_rata_share(group):
+  """The member's month is 1,825; pro rata the outside 30 % is 547.50. An
+  override sets the share as an amount or a percentage, and clearing it
+  goes back to pro rata."""
+  _form_the_group(group)
+  _january(group)
+
+  _override(entity_id=MEMBER, amount=100_000, basis="Preferred return first")
+  proposal = _proposal(preview(), "nci_allocation")
+  assert {line.concept: line.debit_amount for line in proposal.lines}[
+    engine.NCI_SHARE_OF_INCOME
+  ] == 100_000
+  assert "Preferred return first" in proposal.basis
+
+  _override(entity_id=MEMBER, percentage=50, basis="Waterfall tier two")
+  assert _lines(preview(), "nci_allocation")[engine.NCI_SHARE_OF_INCOME] == 91_250
+
+  cleared = _override(entity_id=MEMBER, clear=True)
+  assert cleared.cleared
+  assert _lines(preview(), "nci_allocation")[engine.NCI_SHARE_OF_INCOME] == 54_750
+
+
+@pytest.mark.parametrize(
+  "fields",
+  [
+    {"entity_id": ASSOCIATE, "amount": 1, "basis": "Not in full"},
+    {"entity_id": MEMBER, "amount": 1},
+    {"entity_id": MEMBER, "amount": 1, "percentage": 10, "basis": "Both"},
+    {"entity_id": MEMBER, "amount": 1, "clear": True},
+  ],
+)
+def test_an_override_needs_a_member_in_full_one_share_and_a_basis(group, fields):
+  with pytest.raises(AllocationOverrideError):
+    _override(**fields)
+
+
+def test_an_override_is_refused_in_a_closed_month(group):
+  _close_the_consolidation_entity_through("2026-01")
+  with pytest.raises(ClosedPeriodError):
+    _override(entity_id=MEMBER, amount=1, basis="Too late")
 
 
 def test_no_consolidation_entity_is_refused(group):

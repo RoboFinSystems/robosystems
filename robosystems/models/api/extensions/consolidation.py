@@ -173,3 +173,48 @@ class ProposeConsolidationEntriesResponse(BaseModel):
     default_factory=list,
     description="Anything the engine left out, and why.",
   )
+
+
+class SetAllocationOverrideRequest(BaseModel):
+  """The outside owners' share of a member's result for one month, set by a
+  person in place of the pro-rata share: a preferred return, a waterfall, a
+  special allocation."""
+
+  entity_id: str = Field(..., description="The member, consolidated in full.")
+  period: str = _PERIOD
+  amount: int | None = Field(
+    None,
+    description=(
+      "The outside owners' share of the month's result, in cents; negative "
+      "for a share of a loss."
+    ),
+  )
+  percentage: float | None = Field(
+    None,
+    ge=0,
+    le=100,
+    description="The outside owners' share as a percentage of the month's result.",
+  )
+  basis: str | None = Field(
+    None,
+    description=(
+      "Why the share differs from the ownership percentage; required to set one."
+    ),
+  )
+  clear: bool = Field(
+    False, description="Remove the month's override, back to the pro-rata share."
+  )
+
+
+class AllocationOverrideResponse(BaseModel):
+  """A member's allocation override for one month."""
+
+  entity_id: str = Field(..., description="The member.")
+  period: str = Field(..., description="The month, as YYYY-MM.")
+  amount: int | None = Field(None, description="The share, in cents, when set so.")
+  percentage: float | None = Field(
+    None, description="The share as a percentage, when set so."
+  )
+  basis: str | None = Field(None, description="Why it differs from pro rata.")
+  set_by: str | None = Field(None, description="Who set it.")
+  cleared: bool = Field(False, description="True when the override was removed.")

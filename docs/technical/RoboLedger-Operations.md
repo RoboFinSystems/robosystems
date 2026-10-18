@@ -93,7 +93,7 @@ The registered command-write operations, grouped by workflow stage. They live in
 | **Reconciling Items** | `preview-reconciling-item`, `resolve-reconciling-item` |
 | **Reconciliations** | `preview-reconciliations`, `refresh-reconciliations`, `record-statement-balance`, `set-reconciliation-policy`, `sign-off-reconciliation` |
 | **Event Handlers** | `create-event-handler`, `update-event-handler` |
-| **Journal Entries** | `update-journal-entry`, `delete-journal-entry`, `propose-consolidation-entries` |
+| **Journal Entries** | `update-journal-entry`, `delete-journal-entry`, `propose-consolidation-entries`, `set-allocation-override` |
 | **Schedules** | `promote-obligations`, `rebuild-schedule`, `terminate-schedule` |
 | **Close Workflow** | `set-close-target`, `close-period`, `reopen-period` |
 | **Reports** | `create-report`, `regenerate-report`, `delete-report`, `share-report`, `revoke-report-share`, `file-report`, `transition-filing-status` |
@@ -332,13 +332,22 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
   -d '{"period": "2026-08"}'
 ```
 
+The outside owners' share of a member's result is pro rata by default. Where they take a different share for a month — a preferred return, a waterfall, a special allocation — `set-allocation-override` records it on the member as an amount in cents or a percentage of the month's result, with the basis, and the engine proposes that instead, saying so in the entry's basis. A hand entry of `nci_allocation` would not do: the engine brings each kind back to its target.
+
+```bash
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/set-allocation-override" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"entity_id": "ent_...", "period": "2026-08", "amount": 250000, "basis": "Preferred return to the outside member first"}'
+```
+
 Accounts are found by the rs-gaap concept they map to, never by code, and the consolidation entity posts each adjustment to its own account mapped to that concept. An intercompany line is one whose event names another of the group's entities as its counterparty, through that entity's `self` agent; `create-entity` adds that agent for each operating entity it creates, and for the group parent. Each proposal is the difference between the target and what the consolidation entity already holds for that `adjustment_kind` and member, so an entry a person posted with the same kind counts toward it. `up_to_date` is true when nothing is proposed, withheld or left out.
 
 A line that eliminates a cash flow carries the row it offsets in `flow_qname`: the parent's investment, the member's contributed capital and distributions, an intercompany loan, and the outside owners' share of capital, which is the group's own financing flow. Those lines are proposed apart from the untagged ones, so a tag never spreads to a line that offsets nothing. A row the consolidation entity's own cash flow statement does not present is left off, and `notes[]` says so.
 
 `propose-consolidation-entries` takes the same `period` and writes the proposals as drafts in the consolidation entity, which its close posts. Proposing a month again replaces the drafts it wrote before and never touches a person's own entries; until the close posts them the drafts are not held, so the preview still lists them, with their ids in `drafted_entry_ids`. A month the consolidation entity has closed comes back `closed`, as posted, and nothing is computed or written for it. Once the group has closed a month, `update-entity` refuses an ownership change that would move a member to a different `consolidation_method`, since that would restate the months already closed; a change that keeps the method is accepted.
 
-A difference between the parent's investment in a member and its share of the member's capital comes back in `residuals[]`, and that member's investment elimination is withheld rather than plugged. Intercompany balances or income the two sides disagree on come back in `reconciling_items[]`, with the lower amount eliminated. An intercompany expense with no income against it, such as a cost one company paid and recharged to another at cost, stays in the consolidated statements and is listed in `notes[]`.
+A difference between the parent's investment in a member and its share of the member's capital comes back in `residuals[]`, and that member's investment elimination is withheld rather than plugged — unless the parent took the member's distributions as income. A parent line on `OtherNonoperatingIncomeExpense`, `OtherNonoperatingIncome`, `InvestmentIncomeDividend` or `DividendIncomeOperating` whose event names the member is a distribution taken as income; when those lines account for the difference, the income is reversed against the investment in the same entry and nothing is withheld. For a member on the equity method, the same income is reclassed against the investment in an `equity_method_distribution` entry each month. Intercompany balances or income the two sides disagree on come back in `reconciling_items[]`, with the lower amount eliminated. An intercompany expense with no income against it, such as a cost one company paid and recharged to another at cost, stays in the consolidated statements and is listed in `notes[]`.
 
 A journal entry in the consolidation entity carries its `adjustment_kind` (`elimination_investment`, `elimination_intercompany`, `nci_allocation`, `equity_method_pickup`, `manual`, and the rest) and `adjusts_entity_id`, the entity whose figures it adjusts. Both are refused on an operating entity's books.
 

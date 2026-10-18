@@ -40,8 +40,10 @@ from robosystems.models.api.extensions.agent import (
   UpdateAgentRequest,
 )
 from robosystems.models.api.extensions.consolidation import (
+  AllocationOverrideResponse,
   ProposeConsolidationEntriesRequest,
   ProposeConsolidationEntriesResponse,
+  SetAllocationOverrideRequest,
 )
 from robosystems.models.api.extensions.journal_entries import (
   DeleteJournalEntryRequest,
@@ -118,7 +120,13 @@ from robosystems.operations.roboledger.commands.agent import (
   update_agent as cmd_update_agent,
 )
 from robosystems.operations.roboledger.commands.consolidation import (
+  AllocationOverrideError,
+)
+from robosystems.operations.roboledger.commands.consolidation import (
   propose_consolidation_entries as cmd_propose_consolidation_entries,
+)
+from robosystems.operations.roboledger.commands.consolidation import (
+  set_allocation_override as cmd_set_allocation_override,
 )
 from robosystems.operations.roboledger.commands.event_handler import (
   EventHandlerNotFoundError,
@@ -854,6 +862,34 @@ propose_consolidation_entries_op = _registrar.register(
       ValueError: 422,
     },
     mark_stale_reason="consolidation_entries_proposed",
+  )
+)
+
+set_allocation_override_op = _registrar.register(
+  OperationSpec(
+    name="set-allocation-override",
+    summary="Set Allocation Override",
+    description=(
+      "Set the outside owners' share of a member's result for one month in "
+      "place of the pro-rata share its ownership percentage gives: a "
+      "preferred return, a waterfall, a special allocation. Give the share "
+      "as an amount in cents (negative for a share of a loss) or as a "
+      "percentage of the month's result, with the basis; `clear` removes it. "
+      "preview- and propose-consolidation-entries then use it for that "
+      "month, and their basis says so. Only for a member consolidated in "
+      "full, and refused in a month the consolidation entity has closed."
+    ),
+    command=cmd_set_allocation_override,
+    request_model=SetAllocationOverrideRequest,
+    result_type=AllocationOverrideResponse,
+    error_map={
+      EntityNotInGraphError: 404,
+      AllocationOverrideError: 422,
+      ClosedPeriodError: 422,
+      RowLockedError: 409,
+      ValueError: 422,
+    },
+    mark_stale_reason="allocation_override_set",
   )
 )
 

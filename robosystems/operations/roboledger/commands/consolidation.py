@@ -1,6 +1,7 @@
 """Draft the consolidating entries a group's month needs (spec
 ``consolidation`` C2): the engine's proposals written as drafts in the
-consolidation entity, which its close posts."""
+consolidation entity, which its close posts; and the allocation overrides a
+person sets in place of a member's pro-rata share."""
 
 from __future__ import annotations
 
@@ -8,20 +9,29 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.consolidation import (
+  AllocationOverrideResponse,
   ProposeConsolidationEntriesRequest,
   ProposeConsolidationEntriesResponse,
+  SetAllocationOverrideRequest,
 )
 from robosystems.models.api.extensions.journal_entries import (
   CreateJournalEntryRequest,
   JournalEntryLineItemInput,
 )
+from robosystems.models.extensions import Entity
+from robosystems.operations.locking import lock_by_id
 from robosystems.operations.roboledger.commands._guards import (
   assert_period_not_closed,
 )
 from robosystems.operations.roboledger.commands.journal_entries import (
   create_journal_entry,
 )
+from robosystems.operations.roboledger.entity_scope import (
+  is_group_parent,
+  resolve_entity,
+)
 from robosystems.operations.roboledger.reads.consolidation import (
+  ALLOCATION_OVERRIDES,
   ENGINE_SOURCE,
   engine_drafts,
   month_bounds,
@@ -97,3 +107,82 @@ def propose_consolidation_entries(
     )
   session.commit()
   return response
+
+
+class AllocationOverrideError(ValueError):
+  """An allocation override that cannot be set as given."""
+
+
+def set_allocation_override(
+  session: Session, body: SetAllocationOverrideRequest, created_by: str
+) -> AllocationOverrideResponse:
+  """Set, or clear, the outside owners' share of a member's result for one
+  month, in place of the pro-rata share the engine would propose. Refused in
+  a month the consolidation entity has closed.
+
+  Raises ``AllocationOverrideError`` for a member not consolidated in full
+  or an override without one share and a basis."""
+  entity = resolve_entity(session, body.entity_id)
+  if (
+    is_group_parent(session, str(entity.id))
+    or entity.entity_role != "operating"
+    or entity.consolidation_method != "full"
+  ):
+    raise AllocationOverrideError(
+      f"{entity.name} is not a member consolidated in full; only such a "
+      "member's outside owners have a share of its result to override."
+    )
+  if body.clear:
+    if body.amount is not None or body.percentage is not None:
+      raise AllocationOverrideError("Clearing an override takes no share.")
+  else:
+    if (body.amount is None) == (body.percentage is None):
+      raise AllocationOverrideError("Give the share as an amount or a percentage.")
+    if not (body.basis or "").strip():
+      raise AllocationOverrideError(
+        "Give the basis: why the share differs from the ownership percentage."
+      )
+  _start, end = month_bounds(body.period)
+  consolidation_id = session.execute(
+    text(
+      "SELECT id FROM entities WHERE entity_role = 'consolidation' "
+      "AND source <> 'linked' ORDER BY created_at, id LIMIT 1"
+    )
+  ).scalar()
+  # A group with no consolidation entity yet has no consolidated month closed.
+  if consolidation_id is not None:
+    assert_period_not_closed(session, end, entity_id=str(consolidation_id))
+
+  locked = lock_by_id(
+    session,
+    Entity,
+    entity.id,
+    f"{entity.name} is being updated by another process. Retry in a moment.",
+  )
+  if locked is None:
+    raise AllocationOverrideError(f"{entity.name} is no longer in the group.")
+  metadata = dict(locked.metadata_ or {})
+  overrides = dict(metadata.get(ALLOCATION_OVERRIDES) or {})
+  if body.clear:
+    overrides.pop(body.period, None)
+    record: dict = {}
+  else:
+    record = {
+      "amount": body.amount,
+      "percentage": body.percentage,
+      "basis": (body.basis or "").strip(),
+      "set_by": created_by,
+    }
+    overrides[body.period] = record
+  metadata[ALLOCATION_OVERRIDES] = overrides
+  locked.metadata_ = metadata
+  session.commit()
+  return AllocationOverrideResponse(
+    entity_id=str(entity.id),
+    period=body.period,
+    amount=record.get("amount"),
+    percentage=record.get("percentage"),
+    basis=record.get("basis"),
+    set_by=record.get("set_by"),
+    cleared=body.clear,
+  )
