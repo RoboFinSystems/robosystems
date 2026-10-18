@@ -87,6 +87,8 @@ WRITE_TOOL_HINTS: dict[str, ToolHints] = {
   "resolve-reconciling-item": _REPLACES_ONCE_PER_STATE,
   "update-journal-entry": _REPLACES,
   "delete-journal-entry": _REPLACES,
+  # Replaces the entity's one opening balance, until its first close.
+  "record-opening-balance": _REPLACES,
   "create-event-handler": _ADDS,
   "update-event-handler": _REPLACES,
   # Schedules.

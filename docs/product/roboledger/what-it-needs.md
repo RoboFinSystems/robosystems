@@ -37,7 +37,7 @@ The calendar records which months are closed and which month you're working towa
 
 A company with no calendar shows **Set up calendar** on the **Entities** page. Setting one up asks where that company's books start:
 
-- **New books, or moving over at a month-end:** pick the first month these books close. It starts open, so a cutover's opening balances go in it.
+- **New books, or moving over at a month-end:** pick the first month these books close, the month after the cutover. Then record the balance sheet on the cutover date as the books' opening balance: your assistant takes one balance per account and dates it the day before the first month, so the statements start from it rather than counting it as a month's activity. Any difference goes to an equity account you name, usually Opening Balance Equity, and the opening can be recorded again until the first close.
 - **History already closed in another system:** pick the last month closed there. It and every month before it are locked, and the first close is the month after.
 
 The dialog shows the first close before you confirm. If it's months back, every month from there has to close in order. Until the company's first close, the start can still move: earlier, to take in history the bank feed brought, or later, to drop empty months. Choose **Change start** beside the company on the **Entities** page, or ask your assistant. Moving it later is refused while the months it would drop hold any entry. A subsidiary follows the group's fiscal year. Your assistant can set the calendar up too, once you tell it which of the two applies and the month. If QuickBooks hasn't finished its first sync, wait for it instead: the sync sets the calendar up with last month as the next to close.

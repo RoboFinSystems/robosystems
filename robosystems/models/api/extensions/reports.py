@@ -742,6 +742,16 @@ class LiveFinancialStatementResponse(BaseModel):
       "indirect-method delta basis and not rendered."
     ),
   )
+  omitted_periods: list[PeriodSpec] = Field(
+    default_factory=list,
+    description=(
+      "Columns left out because they reach back before the books begin: on "
+      "books that start from an opening balance, a flow statement column "
+      "that starts before the first day it covers, or a balance sheet dated "
+      "before it. They would show a partial figure, not the months before "
+      "the books."
+    ),
+  )
   facts: list[LiveStatementFactRow]
   fact_count: int
   validation: ValidationCheckResponse | None = Field(

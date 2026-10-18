@@ -258,3 +258,41 @@ class ReverseJournalEntryRequest(BaseModel):
   entry_id: str
   posting_date: date | None = None  # defaults to today
   memo: str | None = None  # auto-generated if None
+
+
+class OpeningBalanceInput(BaseModel):
+  """One account's balance on the day the books begin, in its normal
+  direction: an asset as a debit, a liability or equity account as a credit
+  (a contra account the other way)."""
+
+  element_id: str = Field(..., description="The balance-sheet account, by id.")
+  debit_amount: int = Field(0, ge=0, description="Debit balance in cents.")
+  credit_amount: int = Field(0, ge=0, description="Credit balance in cents.")
+
+
+class RecordOpeningBalanceRequest(BaseModel):
+  """The balance sheet a ledger starts from."""
+
+  entity_id: str | None = Field(
+    None, description="The entity whose books start here; omit for the group parent."
+  )
+  balances: list[OpeningBalanceInput] = Field(
+    ...,
+    min_length=1,
+    description=(
+      "One balance per balance-sheet account (assets, liabilities, equity). "
+      "An income or expense account is refused: income before the books "
+      "begin is already in retained earnings."
+    ),
+  )
+  equity_element_id: str | None = Field(
+    None,
+    description=(
+      "The equity account that takes any difference between debits and "
+      "credits, usually Opening Balance Equity. Required when the balances "
+      "do not balance; a non-zero balance left there is a review item."
+    ),
+  )
+  memo: str | None = Field(
+    None, description="The entry's memo; defaults to 'Opening balances'."
+  )

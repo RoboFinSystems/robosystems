@@ -216,7 +216,13 @@ def _activity_before(
     retirable_obligations,
   )
 
-  entry_filters = [Entry.entity_id == entity_id, Entry.posting_date < start]
+  # The opening entry sits on the eve of the first month by design and moves
+  # with the start, so it strands nothing.
+  entry_filters = [
+    Entry.entity_id == entity_id,
+    Entry.posting_date < start,
+    Entry.type != "opening",
+  ]
   if at_opening:
     entry_filters.append(Entry.status == "draft")
     # The same drafts `retire_schedule_history` deletes, and no others.
@@ -629,6 +635,11 @@ class FiscalCalendarService:
 
     calendar.updated_by = actor_id
     session.flush()
+    from robosystems.operations.roboledger.commands.opening_balances import (
+      move_opening_entry,
+    )
+
+    move_opening_entry(session, entity_id)
     self.record_event(
       session,
       calendar,

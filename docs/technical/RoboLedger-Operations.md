@@ -83,7 +83,7 @@ The registered command-write operations, grouped by workflow stage. They live in
 
 | Stage | Operations |
 | --- | --- |
-| **Setup** | `initialize`, `initialize-chart-of-accounts`, `update-entity`, `change-reporting-style` |
+| **Setup** | `initialize`, `initialize-chart-of-accounts`, `record-opening-balance`, `update-entity`, `change-reporting-style` |
 | **Taxonomy Blocks** | `create-taxonomy-block`, `update-taxonomy-block`, `delete-taxonomy-block`, `link-entity-taxonomy` |
 | **Mapping** | `create-mapping-association`, `delete-mapping-association`, `auto-map-elements` |
 | **Information Blocks** | `create-information-block`, `update-information-block`, `delete-information-block`, `bind-text-block`, `evaluate-rules` |
@@ -112,6 +112,8 @@ The registered command-write operations, grouped by workflow stage. They live in
 | Schedules and other blocks | `create-information-block`, `update-information-block`, `evaluate-rules` | [Information Blocks](Information-Blocks.md) |
 
 **Forecasting and metrics.** A forecast is a scenario authored as a `forecast` Information Block. `compute-forecast` walks it forward month by month into scenario-stamped statement FactSets, halting at the first month that fails verification. `backfill-plan-history` stamps the historical months a scenario stands on. `compute-metrics` derives a metric block's ratios for a period, and `assert-metrics` records observed values into one. All four are deterministic and consume no credits. The block shape, the four drivers and a full scenario payload are on [Forecasting and Metrics](Forecasting-and-Metrics.md).
+
+**Opening balances.** Books whose history does not come with them start from a balance sheet. `record-opening-balance` takes one balance per balance-sheet account, in cents, debit or credit in the account's normal direction, and posts them as one `opening` entry dated the day before the entity's first fiscal month. Every month's opening balances then include it and no month's activity does, so the first month's cash flow and statement of equity start from it rather than counting it. Any difference between debits and credits goes to the equity account named in `equity_element_id` (usually Opening Balance Equity), and an income or expense account is refused. It is one per entity: recording it again replaces it until the entity's first close, `change-calendar-start` moves it with the start, and it cannot be reversed. A live statement column that reaches back before the books begin is left out and named in `omitted_periods`.
 
 One example, `update-entity`, illustrates the partial-update convention. Only the non-null fields in the body are applied; an empty body returns `400 "No fields provided for update."`
 

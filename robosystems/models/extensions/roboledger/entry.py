@@ -77,8 +77,10 @@ class Entry(ExtensionsBase):
       unique=True,
       postgresql_where="source_structure_id IS NOT NULL AND reversal_of IS NULL",
     ),
+    # ``opening`` is the balance sheet a ledger starts from, one per entity,
+    # written only by ``record-opening-balance``.
     CheckConstraint(
-      "type IN ('standard', 'adjusting', 'closing', 'reversing')",
+      "type IN ('standard', 'adjusting', 'closing', 'reversing', 'opening')",
       name="check_entry_type",
     ),
     CheckConstraint(

@@ -213,16 +213,18 @@ class InitializeFiscalCalendarTool:
 **WHEN TO USE:**
 - get-fiscal-calendar returns `calendar_not_initialized` for the entity
 - A new subsidiary (create-entity) is about to keep books: after its chart
-  (initialize-chart-of-accounts), before posting its opening entry
+  (initialize-chart-of-accounts), before recording its opening balance
 
 **THE DECISION — pass exactly one (ask the user if it is not clear):**
 - `first_open_period`: the first month THESE books will close. Every month
   from it through the current month is created open, and the first close is
   that month. Use for new books, and for books cut over from another system
-  at a month-end: the cutover month holds the opening entry, so it must be
-  open (e.g. opening balances as of 2026-09-30 → first_open_period
-  '2026-09'). Never earlier than needed: every open month before the one
-  you want to close must be closed first, in order.
+  at a month-end: the books start the month after the cutover, and the
+  balance sheet on the cutover date is recorded with record-opening-balance,
+  which dates it the day before the first month (e.g. balances as of
+  2026-09-30 → first_open_period '2026-10'). Never earlier than needed:
+  every open month before the one you want to close must be closed first,
+  in order.
 - `closed_through`: the last month already closed ELSEWHERE (QuickBooks, a
   prior system). Months on or before it are created closed — nothing can
   post into them — and the first close is the month after. Use when history
