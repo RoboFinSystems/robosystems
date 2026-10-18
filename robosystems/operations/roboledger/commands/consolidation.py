@@ -4,6 +4,7 @@ consolidation entity, which its close posts."""
 
 from __future__ import annotations
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.consolidation import (
@@ -37,6 +38,15 @@ def propose_consolidation_entries(
   same whether or not earlier drafts exist.
 
   Raises ``NoConsolidationEntityError`` when the group has none."""
+  # One proposer per month at a time: two would each replace the same drafts
+  # and each write a full set.
+  session.execute(
+    text(
+      "SELECT pg_advisory_xact_lock(hashtext('consolidation_propose'), "
+      "hashtext(current_schema() || :period))"
+    ),
+    {"period": body.period},
+  )
   preview = preview_consolidation_entries(session, period=body.period)
   consolidation_id = preview.consolidation_entity_id
   response = ProposeConsolidationEntriesResponse(
@@ -51,6 +61,7 @@ def propose_consolidation_entries(
     return response
 
   start, end = month_bounds(body.period)
+  # Fences the month against a close that began after the preview read it.
   assert_period_not_closed(session, end, entity_id=consolidation_id)
   stale = engine_drafts(session, consolidation_id, start, end)
   for entry in stale:

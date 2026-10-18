@@ -83,7 +83,8 @@ def _closed_through_as_member(session: Session, entity: Entity) -> str | None:
       "SELECT fc.closed_through_period FROM fiscal_calendar fc "
       "JOIN entities e ON e.id = fc.entity_id "
       "WHERE e.entity_role = :role AND e.source <> 'linked' "
-      "AND fc.closed_through_period IS NOT NULL LIMIT 1"
+      "AND fc.closed_through_period IS NOT NULL "
+      "ORDER BY e.created_at, e.id LIMIT 1"
     ),
     {"role": _ROLE_CONSOLIDATION},
   ).scalar()
@@ -180,9 +181,8 @@ def _apply_updates(session: Session, entity: Entity, updates: dict[str, Any]):
   method = updates.get("consolidation_method", entity.consolidation_method)
   if (
     not parent
-    and not retyped
-    and role == _ROLE_OPERATING
-    and method != entity.consolidation_method
+    and entity.entity_role == _ROLE_OPERATING
+    and (retyped or method != entity.consolidation_method)
   ):
     # Whether a member is summed is not an entry, so a closed month cannot
     # hold it; a share within the method's band can change freely.
@@ -191,8 +191,9 @@ def _apply_updates(session: Session, entity: Entity, updates: dict[str, Any]):
       raise ConsolidatedHistoryError(
         f"The group has closed its consolidated months through "
         f"{closed_through} with {entity.name} on the "
-        f"{entity.consolidation_method} method; changing it to {method} "
-        "would restate them. A change of method from a date is not supported "
+        f"{entity.consolidation_method} method; changing it to {method}"
+        + (f" as a {role} entity" if retyped else "")
+        + " would restate them. A change of method from a date is not supported "
         "yet; a change of ownership that keeps the method is."
       )
   _check_membership(

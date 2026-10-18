@@ -43,6 +43,7 @@ from robosystems.models.api.extensions.consolidation import (
 )
 from robosystems.models.extensions.roboledger import Entry
 from robosystems.operations.roboledger.commands._guards import closed_periods
+from robosystems.operations.roboledger.commands.journal_entries import propagate_flows
 from robosystems.operations.roboledger.entity_scope import (
   GroupMember,
   resolve_entity_id,
@@ -786,11 +787,18 @@ def preview_consolidation_entries(
     untagged = {q: a for q, a in lines.items() if not flows[q]}
     # Tagged and untagged lines post apart when each part balances, so the
     # both-lines rule never spreads a tag onto a line that offsets no flow.
-    parts = (
-      [(tagged, " — cash flows"), (untagged, "")]
-      if tagged and untagged and not sum(tagged.values())
-      else [(lines, "")]
-    )
+    # Where they cannot, and the rule would spread one, no line is tagged.
+    if tagged and untagged and not sum(tagged.values()):
+      parts = [(tagged, " — cash flows"), (untagged, "")]
+    else:
+      parts = [(lines, "")]
+      sides = [("debit" if a > 0 else "credit", flows[q]) for q, a in lines.items()]
+      if propagate_flows(sides) != [flow for _side, flow in sides]:
+        flows = dict.fromkeys(lines)
+        plan.notes.append(
+          f"The {kind} entry for {name} cannot keep its cash flow tags apart "
+          "from its untagged lines; it is proposed untagged."
+        )
     for part, suffix in parts:
       proposals.append(
         ConsolidationProposal(

@@ -468,6 +468,29 @@ def test_eliminations_carry_the_flow_they_offset(group):
     assert set(_flows(response, kind, **which).values()) == {None}
 
 
+def test_a_tag_that_would_spread_is_left_off(group, monkeypatch):
+  """A wholly-owned member whose capital has no row on the consolidation
+  entity's statement: its untagged capital line cannot post apart from the
+  tagged investment, and the both-lines rule would copy the investment's
+  tag onto it, so the entry is proposed untagged."""
+  monkeypatch.setattr(
+    engine,
+    "_FLOWS",
+    {k: v for k, v in engine._FLOWS.items() if k[0] != "rs-gaap:MembersEquity"},
+  )
+  with extensions_session(GRAPH) as session:
+    session.execute(
+      text("UPDATE entities SET ownership_pct = 100 WHERE id = :id"), {"id": MEMBER}
+    )
+  P, M = PARENT_ENTITY_ID, MEMBER
+  post(group, P, DEC, [("investment", 1_000_000), ("cash", -1_000_000)], agent=M)
+  post(group, M, DEC, [("cash", 1_000_000), ("equity", -1_000_000)], agent=P)
+  response = preview()
+
+  assert set(_flows(response, "elimination_investment").values()) == {None}
+  assert any("proposed untagged" in note for note in response.notes)
+
+
 def _post_proposals(group: dict, response) -> None:
   for proposal in response.proposals:
     with extensions_session(GRAPH) as session:
@@ -816,6 +839,12 @@ def test_a_method_change_is_refused_once_the_group_has_closed(group):
   with extensions_session(GRAPH) as session, pytest.raises(ConsolidatedHistoryError):
     update_entity(
       session, UpdateEntityRequest(entity_id=ASSOCIATE, ownership_pct=60), "test"
+    )
+  with extensions_session(GRAPH) as session, pytest.raises(ConsolidatedHistoryError):
+    update_entity(
+      session,
+      UpdateEntityRequest(entity_id=MEMBER, entity_role="consolidation"),
+      "test",
     )
 
 
