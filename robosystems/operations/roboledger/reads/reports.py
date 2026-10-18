@@ -1170,7 +1170,9 @@ def get_consolidation_worksheet(
   first_error: CoaMappingNotFoundError | None = None
   for entity in _worksheet_entities(session, parent_id):
     summed = [entity.member.is_member_for(p.start, p.end) for p in periods]
-    if not any(summed):
+    # A member outside the sum matters only as its own column.
+    needed = summed[0] if entity.kind == "not_summed" else any(summed)
+    if not needed:
       continue
     try:
       grid, unmapped = generate_adhoc_private_statement(
@@ -1213,8 +1215,9 @@ def get_consolidation_worksheet(
   if combined is None:
     # The parent is summed for every period, so only its missing mapping
     # leaves nothing to sum.
-    assert first_error is not None
-    raise first_error
+    raise first_error or CoaMappingNotFoundError(
+      "No CoA→GAAP mapping found. Run the mapping workflow first."
+    )
   consolidated = _sum_grids([combined, *adjustments])
   assert consolidated is not None
   ordered = [
@@ -1240,9 +1243,9 @@ def get_consolidation_worksheet(
     warnings=consolidated.warnings,
   )
 
-  # Every column's lines in the Style's order: the sum of all of them has
-  # each line once, where the Style puts it.
-  skeleton = _sum_grids([g for _, g in ordered])
+  # Every column's lines in the Style's order: the consolidated sum and the
+  # members outside it hold each line once, where the Style puts it.
+  skeleton = _sum_grids([consolidated, *(g for _, g in outside_columns)])
   assert skeleton is not None
   by_column = [{_row_key(r): r for r in g.rows} for _, g in ordered]
   rows: list[WorksheetRow] = []

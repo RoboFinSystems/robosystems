@@ -561,3 +561,39 @@ class TestEachEntityStampsItsOwnStatements:
       assert worksheet.entity_id == PARENT
       assert worksheet.validation is not None
       assert worksheet.validation.status == consolidated.validation.status
+
+  def test_the_worksheet_leaves_out_who_is_not_there(self, charts):
+    """A member that left before the window has no column, an entity with
+    no mapping is named instead of failing the read, and a group with no
+    consolidation entity has no adjustments column: consolidated is
+    combined."""
+    service = FiscalCalendarService()
+    with extensions_session(GRAPH) as session:
+      self._open_books(session, charts, service)
+      unmapped = create_entity(
+        session, CreateEntityRequest(name="Unmapped LLC", ownership_pct=100), "usr_1"
+      ).id
+      self._close(session, service, SUB)
+      self._close(session, service, PARENT)
+      update_entity(
+        session,
+        UpdateEntityRequest(entity_id=SUB, left_on=date(2026, 6, 30)),
+        "usr_1",
+      )
+
+      worksheet = get_consolidation_worksheet(
+        session,
+        graph_id=GRAPH,
+        statement_type="balance_sheet",
+        period_start=date(2026, 7, 1),
+        period_end=JULY_END,
+      )
+
+      assert [(c.key, c.kind) for c in worksheet.columns] == [
+        (PARENT, "member"),
+        ("combined", "combined"),
+        ("consolidated", "consolidated"),
+      ]
+      assert worksheet.unmapped_entity_ids == [unmapped]
+      cash = next(r for r in worksheet.rows if r.qname == CASH)
+      assert cash.values == [5000.0, 5000.0, 5000.0]
