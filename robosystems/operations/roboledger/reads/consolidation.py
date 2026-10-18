@@ -360,9 +360,14 @@ def _rows(
   concepts: dict[str, _Concept],
   start: date,
   end: date,
+  *,
+  drafts_of: str,
 ) -> list[_Row]:
   """Every landed line of the group's entities through ``end``, summed by
-  account, counterparty, kind and whether it falls in the month."""
+  account, counterparty, kind and whether it falls in the month. The
+  consolidation entity's (``drafts_of``) drafts count as well, since its
+  close will post them, but not the engine's own drafts of this month,
+  which the proposal replaces: so two open months never eliminate twice."""
   result = session.execute(
     text(
       """
@@ -377,7 +382,14 @@ def _rows(
       JOIN elements src ON src.id = li.element_id
       LEFT JOIN events ev ON ev.id = e.triggered_by_event_id
       LEFT JOIN agents ag ON ag.id = ev.agent_id AND ag.agent_type = 'self'
-      WHERE e.status IN :landed_entry_statuses
+      WHERE (
+          e.status IN :landed_entry_statuses
+          OR (
+            e.status = 'draft'
+            AND e.entity_id = :drafts_of
+            AND NOT (e.provenance = :engine AND e.posting_date >= :start)
+          )
+        )
         AND e.posting_date <= :end
         AND e.entity_id IN :entities
       GROUP BY e.entity_id, li.element_id, src.name, ag.external_id,
@@ -385,7 +397,13 @@ def _rows(
                (e.posting_date >= :start)
       """
     ).bindparams(landed_entry_bindparam(), bindparam("entities", expanding=True)),
-    {"entities": entity_ids, "start": start, "end": end},
+    {
+      "entities": entity_ids,
+      "start": start,
+      "end": end,
+      "drafts_of": drafts_of,
+      "engine": ENGINE_PROVENANCE,
+    },
   ).all()
   members = set(entity_ids)
   rows: list[_Row] = []
@@ -819,6 +837,7 @@ def preview_consolidation_entries(
     concepts,
     start,
     end,
+    drafts_of=consolidation.id,
   )
 
   accounts = _posting_accounts(session, consolidation.id, concepts)
