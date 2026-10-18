@@ -46,6 +46,14 @@ from robosystems.operations.roboledger.fiscal_calendar import (
 from robosystems.operations.roboledger.reads.reports import (
   get_live_financial_statement,
 )
+from robosystems.operations.roboledger.reports.fact_grid import (
+  PeriodSpec,
+  generate_report_facts,
+)
+from robosystems.operations.taxonomy_block.coa_mappings import (
+  BOOK_FRAMEWORK,
+  find_entity_mapping,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -332,3 +340,45 @@ def test_a_window_entirely_before_the_books_is_inconclusive(tenant):
       False,
       "inconclusive",
     )
+
+
+def test_a_report_column_reaching_before_the_books_carries_no_flows(tenant):
+  """A saved report's comparison column starting before the books keeps the
+  opening balance sheet but no flows: no partial activity, and no plug for
+  the opening's cash appearing out of nothing. July's column is unchanged."""
+  with extensions_session(GRAPH) as session:
+    record_opening_balance(session, _opening(session, tenant), "usr_1")
+    _july_revenue(session, tenant)
+    session.commit()
+    mapping = find_entity_mapping(session, PARENT, BOOK_FRAMEWORK)
+    assert mapping is not None
+    taxonomy_id = session.execute(
+      text(
+        "SELECT id FROM taxonomies WHERE standard = 'rs-gaap-presentation' "
+        "ORDER BY version DESC LIMIT 1"
+      )
+    ).scalar_one()
+    june = PeriodSpec(start=date(2026, 6, 1), end=EVE, label="Prior")
+    july = PeriodSpec(start=JULY[0], end=JULY[1], label="Current")
+    facts = generate_report_facts(
+      session, str(taxonomy_id), str(mapping.id), [july, june], entity_id=PARENT
+    ).facts
+
+  assert not [
+    f.element_qname
+    for f in facts
+    if f.period_type == "duration" and f.period_start == june.start
+  ]
+  assert not [
+    f
+    for f in facts
+    if f.element_qname == "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet"
+  ]
+  cash = {f.period_end: f.value for f in facts if f.element_qname == CASH}
+  assert cash == {EVE: 60_000.0, JULY[1]: 65_000.0}
+  net_change = [
+    f.value
+    for f in facts
+    if f.element_qname == "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+  ]
+  assert net_change == [5_000.0]

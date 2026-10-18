@@ -148,6 +148,10 @@ def generate_report_facts(
   """
   arc_type = _arc_type_for_taxonomy(session, taxonomy_id)
   facts: list[ReportFact] = []
+  # Columns reaching back before the books are computed, since later columns
+  # measure change from their balances, but never plugged or reported.
+  start = _books_start(session, entity_id)
+  covered = [p for p in periods if start is None or p.start >= start]
 
   for period in periods:
     facts.extend(
@@ -203,19 +207,22 @@ def generate_report_facts(
 
   # Book ΔCash - Investing - Financing - (NI + DDA + ΔWC) on an operating
   # leaf so the CF foots to actual cash. Must precede the subtotal roll-up.
-  _reconcile_operating_to_cash(session, facts, periods, opening_facts)
+  _reconcile_operating_to_cash(session, facts, covered, opening_facts)
 
   # Calc-DAG subtotals as facts, so rules scoped to a subtotal can bind.
   # Runs after every leaf and derived fact is in place.
   _emit_subtotal_facts(session, facts, periods)
 
   # Warning-only: a mismatch flags incomplete investing/financing attribution.
-  _check_cash_flow_tie_out(facts, periods, opening_facts)
+  _check_cash_flow_tie_out(facts, covered, opening_facts)
 
   # Last, so no step above reads a balance dated outside every column.
   _emit_opening_equity_facts(
     session, facts, periods, mapping_id, arc_type, entity_id, close_target_qname
   )
+
+  if start is not None:
+    facts = [f for f in facts if _within_the_books(f, start)]
 
   unmapped_count = _count_unmapped(session, mapping_id, arc_type=arc_type)
 
@@ -227,6 +234,24 @@ def generate_report_facts(
     mapping_id=mapping_id,
     warnings=warnings,
   )
+
+
+def _books_start(session: Session, entity_id: str | None) -> date | None:
+  """The first day the entity's books cover, when they start from an opening
+  balance."""
+  from robosystems.operations.roboledger.commands.opening_balances import (
+    books_start,
+  )
+
+  return books_start(session, [entity_id]) if entity_id else None
+
+
+def _within_the_books(fact: ReportFact, start: date) -> bool:
+  """A flow from the books' first day on, or a balance from the opening on:
+  anything earlier is a partial figure the books cannot support."""
+  if fact.period_type == "instant":
+    return fact.period_end >= start - timedelta(days=1)
+  return fact.period_start >= start
 
 
 def _flows_without_a_row(
