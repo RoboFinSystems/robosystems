@@ -34,6 +34,7 @@ from datetime import date
 from sqlalchemy import bindparam, select, text
 from sqlalchemy.orm import Session
 
+from robosystems.logger import logger
 from robosystems.models.api.extensions.consolidation import (
   ConsolidationProposal,
   ConsolidationProposalLine,
@@ -1006,3 +1007,103 @@ def preview_consolidation_entries(
     ),
     drafted_entry_ids=[str(e.id) for e in drafts],
   )
+
+
+@dataclass
+class GroupCloseStatus:
+  """What holds the group's month open, each a list of named items: the
+  entities not closed through it, the consolidating entries the
+  consolidation entity's drafts and postings do not hold, the residuals and
+  intercompany disagreements nobody has explained, and the consolidated
+  statements' validation failures."""
+
+  open_entities: list[str] = field(default_factory=list)
+  pending_adjustments: list[str] = field(default_factory=list)
+  unexplained: list[str] = field(default_factory=list)
+  not_footing: list[str] = field(default_factory=list)
+
+
+def group_close_status(
+  session: Session, graph_id: str, period: str
+) -> GroupCloseStatus:
+  """The group close's checks for ``period`` (§4.5): every entity the month
+  consolidates, the parent and its equity-method members included, closed
+  through it; the month's consolidating entries posted or drafted; no
+  residual or disagreement left; the consolidated balance sheet and equity
+  statement passing their checks."""
+  from robosystems.operations.roboledger.reads.reports import (
+    CoaMappingNotFoundError,
+    get_live_financial_statement,
+  )
+
+  start, end = month_bounds(period)
+  parent_id = resolve_entity_id(session, None)
+  status = GroupCloseStatus()
+  members = [
+    e
+    for e in _group(session, parent_id)
+    if e.role != "consolidation"
+    and (
+      e.id == parent_id
+      or (e.method in ("full", "equity") and e.member.is_member_for(start, end))
+    )
+  ]
+  closed_through: dict[str, str] = {
+    str(row.entity_id): str(row.closed_through_period)
+    for row in session.execute(
+      text(
+        "SELECT entity_id, closed_through_period FROM fiscal_calendar "
+        "WHERE entity_id IN :ids AND closed_through_period IS NOT NULL"
+      ).bindparams(bindparam("ids", expanding=True)),
+      {"ids": [e.id for e in members]},
+    )
+  }
+  status.open_entities = [
+    e.name for e in members if closed_through.get(e.id, "") < period
+  ]
+
+  preview = preview_consolidation_entries(session, period=period)
+  status.unexplained = [
+    f"{r.entity_name}: {r.explanation}" for r in preview.residuals
+  ] + [item.description for item in preview.reconciling_items]
+  # Apart from the residuals: overriding them must not let the other
+  # members' entries go undrafted.
+  drafts = engine_drafts(session, preview.consolidation_entity_id, start, end)
+  if _drafted(session, drafts) != _proposed(preview.proposals):
+    status.pending_adjustments = [
+      f"{p.adjustment_kind} for {p.adjusts_entity_name}" for p in preview.proposals
+    ] or ["drafts that no longer match the books"]
+  elif not preview.residuals and not preview.up_to_date:
+    # Held and drafted agree; what is missing is what the engine left out.
+    status.pending_adjustments = list(preview.notes)
+
+  for statement_type in ("balance_sheet", "equity_statement"):
+    try:
+      statement = get_live_financial_statement(
+        session,
+        graph_id=graph_id,
+        statement_type=statement_type,
+        period_start=start,
+        period_end=end,
+        entity_id=parent_id,
+        scope="consolidated",
+      )
+    except CoaMappingNotFoundError as exc:
+      status.not_footing.append(
+        f"The consolidated {statement_type} cannot be read: {exc}"
+      )
+      continue
+    except Exception as exc:
+      # A calendar read must not fail on it; the close still waits.
+      logger.exception("group close: consolidated %s unreadable", statement_type)
+      status.not_footing.append(
+        f"The consolidated {statement_type} could not be read ({type(exc).__name__})"
+      )
+      continue
+    if statement.validation is not None and statement.validation.status == "failed":
+      # A check that could not run (a chart with no rollup for a class) is
+      # not a disagreement; the close waits only on numbers that do not tie.
+      status.not_footing.extend(
+        f for f in statement.validation.failures if "validation inconclusive" not in f
+      )
+  return status

@@ -2257,6 +2257,7 @@ class TestClosePeriodOp:
       allow_reconciling_items=True,
       allow_unposted_source_events=True,
       allow_unreconciled_accounts=True,
+      allow_unexplained_residuals=True,
     )
     with (
       patch(
@@ -2292,6 +2293,7 @@ class TestClosePeriodOp:
       "allow_reconciling_items",
       "allow_unposted_source_events",
       "allow_unreconciled_accounts",
+      "allow_unexplained_residuals",
     }
     dropped = overrides - set(kwargs)
     assert not dropped, (

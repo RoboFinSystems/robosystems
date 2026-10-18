@@ -2434,6 +2434,13 @@ def run_demo(
   group_result = None
   period_windows = scenario_windows(scenario)
   skip_group = {"--no-group", "--no-subsidiary"} & set(argv)
+  closed_windows: list = []
+
+  def _close_parent_history() -> None:
+    print("\nClosing monthly history...")
+    closed_windows.append(close_monthly_history(graph_id, scenario))
+    print("\nClosing the group's history...")
+
   if group is not None and period_windows and not skip_group:
     print(f"\nAdding the group ({len(group.members)} members)...")
     group_result = load_group(
@@ -2442,10 +2449,14 @@ def run_demo(
       config=_client_config(),
       windows=period_windows,
       parent_taxonomy_id=coa_taxonomy_id,
+      close_parent_history=_close_parent_history,
     )
 
-  print("\nClosing monthly history...")
-  period_windows = close_monthly_history(graph_id, scenario)
+  if closed_windows:
+    period_windows = closed_windows[0]
+  else:
+    print("\nClosing monthly history...")
+    period_windows = close_monthly_history(graph_id, scenario)
 
   # Create schedules (derived from the scenario's capex + prepaids)
   print("\nCreating schedules...")

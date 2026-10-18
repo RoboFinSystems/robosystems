@@ -23,6 +23,7 @@ from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
   BackfillPreconditionError,
+  GroupClosedError,
   PeriodNotClosedError,
   PeriodNotFoundInLedgerError,
   ReopenOrderError,
@@ -275,6 +276,13 @@ class TestClosePeriodResponseMapping:
     command has to hand that to the fence rather than swallow it."""
     self._run(_close_result(), fence_wait_ms=600_000)
     assert _noop_exclusive_period_fence.call_args.kwargs["wait_ms"] == 600_000
+
+
+@pytest.fixture(autouse=True)
+def _no_group_close():
+  """These sessions are mocks: no consolidation entity has closed a month."""
+  with patch(f"{_MOD}._group_closed", return_value=None):
+    yield
 
 
 class TestReopenRetractsCanonicalSets:
@@ -682,3 +690,48 @@ class TestRestampClosedPeriod:
     with pytest.raises(UnbalancedLedgerError):
       self._run(close_side_effect=UnbalancedLedgerError(100, 90), session=session)
     session.commit.assert_not_called()
+
+
+class TestReopenUnderAClosedGroup:
+  def _reopen(self, *, enforce_latest: bool):
+    from robosystems.operations.roboledger.commands.fiscal_calendar import (
+      _reopen_under_fence,
+    )
+
+    session = MagicMock()
+    fp = MagicMock()
+    fp.status = "closed"
+    _stub_period_lock(session, fp)
+    with (
+      patch(f"{_MOD}._group_closed", return_value="Consolidation Adjustments"),
+      patch(
+        "robosystems.operations.roboledger.commands.schedules."
+        "reinstate_reopened_schedule_scopes"
+      ),
+      patch(
+        "robosystems.operations.roboledger.reports.statement_sets."
+        "retract_canonical_statement_sets",
+        return_value=[],
+      ),
+    ):
+      return _reopen_under_fence(
+        session,
+        GRAPH_ID,
+        "2026-01",
+        actor_id="usr_1",
+        reason="restamp",
+        note=None,
+        service=_service_closed_through("2026-01"),
+        actor_type="user",
+        entity_id="ent_member",
+        enforce_latest=enforce_latest,
+      )
+
+  def test_a_member_reopen_waits_for_the_group(self):
+    with pytest.raises(GroupClosedError, match="Consolidation Adjustments"):
+      self._reopen(enforce_latest=True)
+
+  def test_the_backfill_restamp_recloses_under_it(self):
+    """The restamp recloses in the same transaction from the same ledger, so
+    the group's stamp still holds."""
+    self._reopen(enforce_latest=False)

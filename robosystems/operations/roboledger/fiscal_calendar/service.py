@@ -83,6 +83,13 @@ class CloseableGateResult:
   unreconciled_account_count: int = 0
   unreconciled_account_sample: list[str] = field(default_factory=list)
 
+  # The group close (the consolidation entity's): named items, populated
+  # whenever their blocker would be, so an override is recorded with them.
+  group_open_entities: list[str] = field(default_factory=list)
+  group_pending_adjustments: list[str] = field(default_factory=list)
+  group_unexplained: list[str] = field(default_factory=list)
+  group_not_footing: list[str] = field(default_factory=list)
+
   SEQUENCE = "sequence_violation"
   PERIOD_INCOMPLETE = "period_incomplete"
   SYNC_STALE = "sync_stale"
@@ -93,6 +100,26 @@ class CloseableGateResult:
   RECONCILING_ITEMS = "reconciling_items"
   UNPOSTED_SOURCE_EVENTS = "unposted_source_events"
   UNRECONCILED_ACCOUNTS = "unreconciled_accounts"
+  ENTITY_OPEN = "entity_open"
+  ADJUSTMENTS_UNPOSTED = "adjustments_unposted"
+  RESIDUAL_UNEXPLAINED = "residual_unexplained"
+  CONSOLIDATED_DOES_NOT_FOOT = "consolidated_does_not_foot"
+
+
+# The group gate's detail fields, named in a refusal when non-empty.
+GROUP_GATE_FIELDS = (
+  "group_open_entities",
+  "group_pending_adjustments",
+  "group_unexplained",
+  "group_not_footing",
+)
+
+
+def _is_consolidation_entity(session: Session, entity_id: str) -> bool:
+  from robosystems.models.extensions import Entity
+
+  entity = session.query(Entity).filter(Entity.id == entity_id).first()
+  return entity is not None and entity.entity_role == "consolidation"
 
 
 class FiscalCalendarError(ValueError):
@@ -938,6 +965,7 @@ class FiscalCalendarService:
     allow_reconciling_items: bool = False,
     allow_unposted_source_events: bool = False,
     allow_unreconciled_accounts: bool = False,
+    allow_unexplained_residuals: bool = False,
     entity_id: str | None = None,
   ) -> CloseableGateResult:
     """Check whether `period` can be closed now in one entity's books.
@@ -950,6 +978,10 @@ class FiscalCalendarService:
     source event dated in the period left uncommitted (bypass:
     `allow_unposted_source_events`); every reconciliation the close waits on
     is reconciled for the period (bypass: `allow_unreconciled_accounts`).
+    On the consolidation entity the close is the group's: every entity the
+    month consolidates closed; its consolidating entries posted or drafted;
+    no residual or intercompany disagreement left (bypass:
+    `allow_unexplained_residuals`); the consolidated statements passing.
 
     `has_sync_connection` and `last_sync_at` come from the platform DB and
     are distinct: no connection passes the sync gate, but a connection that
@@ -1133,9 +1165,30 @@ class FiscalCalendarService:
       for rec in unreconciled[:5]
     ]
 
+    group = None
+    already_closed = CloseableGateResult.ALREADY_CLOSED in blockers
+    if not already_closed and _is_consolidation_entity(session, entity_id):
+      from robosystems.operations.roboledger.reads.consolidation import (
+        group_close_status,
+      )
+
+      group = group_close_status(session, graph_id, period)
+      if group.open_entities:
+        blockers.append(CloseableGateResult.ENTITY_OPEN)
+      if group.pending_adjustments:
+        blockers.append(CloseableGateResult.ADJUSTMENTS_UNPOSTED)
+      if group.unexplained and not allow_unexplained_residuals:
+        blockers.append(CloseableGateResult.RESIDUAL_UNEXPLAINED)
+      if group.not_footing:
+        blockers.append(CloseableGateResult.CONSOLIDATED_DOES_NOT_FOOT)
+
     return CloseableGateResult(
       is_closeable=not blockers,
       blockers=blockers,
+      group_open_entities=group.open_entities if group else [],
+      group_pending_adjustments=group.pending_adjustments if group else [],
+      group_unexplained=group.unexplained if group else [],
+      group_not_footing=group.not_footing if group else [],
       pending_obligation_count=pending_count,
       pending_obligation_sample=pending_sample,
       earliest_pending_period=earliest_pending_period,

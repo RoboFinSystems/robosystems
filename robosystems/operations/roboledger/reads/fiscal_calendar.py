@@ -205,6 +205,10 @@ def build_fiscal_calendar_response(
     unreconciled_account_sample=(
       list(gate.unreconciled_account_sample) if gate else []
     ),
+    group_open_entities=list(gate.group_open_entities) if gate else [],
+    group_pending_adjustments=list(gate.group_pending_adjustments) if gate else [],
+    group_unexplained=list(gate.group_unexplained) if gate else [],
+    group_not_footing=list(gate.group_not_footing) if gate else [],
     last_close_at=calendar.last_close_at,
     initialized_at=calendar.initialized_at,
     last_sync_at=last_sync_at,

@@ -405,6 +405,16 @@ def _consolidation_lines(adjustments: Sequence[Mapping[str, Any]], has) -> list[
       "the consolidation entity's close posts them. A residual is returned "
       "beside them, never plugged: explain it or post it by hand with a basis."
     )
+  if adjustments and has("close-period"):
+    lines.append(
+      "- The consolidation entity's close is the group close: "
+      "`close-period(entity_id=<consolidation entity>, period)` closes the "
+      "group's month once every entity the month consolidates has closed it, "
+      "its consolidating entries are posted or drafted, no residual or "
+      "intercompany disagreement is left, and the consolidated statements "
+      "pass. Its `get-fiscal-calendar` names what holds it (`group_*`). A "
+      "member's month the group has closed reopens only after the group's."
+    )
   if adjustments and has("set-allocation-override"):
     lines.append(
       "- A member whose outside owners take a share of its result other than "

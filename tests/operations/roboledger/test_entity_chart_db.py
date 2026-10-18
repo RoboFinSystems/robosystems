@@ -443,8 +443,8 @@ class TestEachEntityStampsItsOwnStatements:
       _revenue(session, charts, adjustments, 30_000)
       session.commit()
       self._close(session, service, SUB)
-      self._close(session, service, adjustments)
       self._close(session, service, PARENT)
+      self._close(session, service, adjustments)
 
       combined, combined_response = self._live_cash(session, scope="combined")
       consolidated, response = self._live_cash(session, scope="consolidated")
@@ -530,8 +530,15 @@ class TestEachEntityStampsItsOwnStatements:
       )
       _revenue(session, charts, adjustments, 30_000)
       _revenue(session, charts, kiosk, 20_000)
+      # The adjustments column, posted: the group close waits on entries this
+      # chart cannot post (it has no equity-method accounts), and this reads
+      # the worksheet, not the close.
+      session.execute(
+        text("UPDATE entries SET status = 'posted' WHERE entity_id = :e"),
+        {"e": adjustments},
+      )
       session.commit()
-      for entity_id in (SUB, adjustments, kiosk, PARENT):
+      for entity_id in (SUB, kiosk, PARENT):
         self._close(session, service, entity_id)
 
       worksheet = get_consolidation_worksheet(

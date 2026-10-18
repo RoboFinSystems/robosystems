@@ -81,6 +81,7 @@ from robosystems.operations.roboledger.fiscal_calendar.close_service import (
   WritebackFailed,
 )
 from robosystems.operations.roboledger.fiscal_calendar.service import (
+  GROUP_GATE_FIELDS,
   InvalidCloseTargetError,
 )
 from robosystems.operations.roboledger.reports.statement_sets import StatementStampError
@@ -303,6 +304,7 @@ async def close_period_op(
           allow_reconciling_items=body.allow_reconciling_items,
           allow_unposted_source_events=body.allow_unposted_source_events,
           allow_unreconciled_accounts=body.allow_unreconciled_accounts,
+          allow_unexplained_residuals=body.allow_unexplained_residuals,
           entity_id=body.entity_id,
         )
     except CloseGateFailed as e:
@@ -352,6 +354,9 @@ async def close_period_op(
       if e.gate.unreconciled_account_count:
         detail["unreconciled_account_count"] = e.gate.unreconciled_account_count
         detail["unreconciled_account_sample"] = list(e.gate.unreconciled_account_sample)
+      for name in GROUP_GATE_FIELDS:
+        if getattr(e.gate, name):
+          detail[name] = list(getattr(e.gate, name))
       if e.gate.sync_stale_days is not None:
         detail["sync_stale_days"] = e.gate.sync_stale_days
       raise HTTPException(status_code=422, detail=detail)
