@@ -1330,7 +1330,12 @@ def _read_back(
   }
   consolidated = {
     kind: _statement(api, kind, start, end, consolidated=True)
-    for kind in ("balance_sheet", "income_statement", "cash_flow_statement")
+    for kind in (
+      "balance_sheet",
+      "income_statement",
+      "cash_flow_statement",
+      "equity_statement",
+    )
   }
   bs, is_ = consolidated["balance_sheet"], consolidated["income_statement"]
 

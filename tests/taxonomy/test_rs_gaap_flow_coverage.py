@@ -258,10 +258,12 @@ def test_the_equity_statement_has_rows_of_its_own(styles, networks) -> None:
     cf_rows = _leaves(networks[composition["cash_flow_statement"]])
     equity_rows = _leaves(networks[composition["equity_statement"]])
     assert movement_rows <= equity_rows, (code, movement_rows - equity_rows)
-    assert not (equity_rows & cf_rows) - {"rs-gaap:NetIncomeLoss"}, (
-      code,
-      equity_rows & cf_rows,
-    )
+    # Net income, and the outside owners' share of it, open both statements.
+    shared = {
+      "rs-gaap:NetIncomeLoss",
+      "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest",
+    }
+    assert not (equity_rows & cf_rows) - shared, (code, equity_rows & cf_rows)
 
 
 def test_the_form_cash_flow_networks_differ_only_in_equity_rows(

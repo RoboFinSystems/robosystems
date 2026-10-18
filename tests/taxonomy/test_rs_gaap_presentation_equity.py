@@ -26,6 +26,7 @@ EQUITY_STRUCTURE_NAME = (
 )
 EQUITY_ROLE_URI = "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward"
 ROLLFORWARD_HUB = "rs-gaap:StockholdersEquity"
+NCI_HUB = "rs-gaap:MinorityInterest"
 
 
 @pytest.fixture(scope="module")
@@ -139,6 +140,27 @@ class TestEquityFormVariants:
       (f"{_PRES}/Equity-rollforward-LLC", "rs-gaap:MembersEquity"),
     ):
       froms = {a.from_qname for a in presentation.associations if a.role == role}
-      assert froms == {hub}, role
+      assert froms == {hub, NCI_HUB}, role
       targets = {a.to_qname for a in presentation.associations if a.role == role}
       assert "rs-gaap:NetIncomeLoss" in targets
+
+  def test_every_rollforward_carries_the_noncontrolling_interest(
+    self, presentation: TaxonomyPackage
+  ) -> None:
+    """A group with an outside owner rolls the noncontrolling interest
+    forward beside the parent's equity, in every form's statement."""
+    for role in (
+      "Equity-rollforward",
+      "Equity-rollforward-PART",
+      "Equity-rollforward-LLC",
+    ):
+      rows = {
+        a.to_qname
+        for a in presentation.associations
+        if a.role == f"{_PRES}/{role}" and a.from_qname == NCI_HUB
+      }
+      assert rows == {
+        "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest",
+        "rs-gaap:NoncontrollingInterestIncreaseFromSubsidiaryEquityIssuance",
+        "rs-gaap:MinorityInterestDecreaseFromDistributionsToNoncontrollingInterestHolders",
+      }, role

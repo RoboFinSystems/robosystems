@@ -4388,6 +4388,48 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
+      "@id": "_:rs-gaap-pres-equity-arc-nci-1",
+      "from": {
+        "@id": "rs-gaap:MinorityInterest"
+      },
+      "to": {
+        "@id": "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
+      "order": 41100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-equity-arc-nci-2",
+      "from": {
+        "@id": "rs-gaap:MinorityInterest"
+      },
+      "to": {
+        "@id": "rs-gaap:NoncontrollingInterestIncreaseFromSubsidiaryEquityIssuance"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
+      "order": 41300.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-equity-arc-nci-3",
+      "from": {
+        "@id": "rs-gaap:MinorityInterest"
+      },
+      "to": {
+        "@id": "rs-gaap:MinorityInterestDecreaseFromDistributionsToNoncontrollingInterestHolders"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
+      "order": 41600.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
       "@id": "_:rs-gaap-pres-bs-classified-part",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-PART",
       "structureName": "rs-gaap — Balance Sheet — Classified (Partnership)",
@@ -5221,6 +5263,48 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
+      "@id": "_:rs-gaap-pres-equity-part-arc-nci-1",
+      "from": {
+        "@id": "rs-gaap:MinorityInterest"
+      },
+      "to": {
+        "@id": "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-PART",
+      "order": 41100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-equity-part-arc-nci-2",
+      "from": {
+        "@id": "rs-gaap:MinorityInterest"
+      },
+      "to": {
+        "@id": "rs-gaap:NoncontrollingInterestIncreaseFromSubsidiaryEquityIssuance"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-PART",
+      "order": 41300.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-equity-part-arc-nci-3",
+      "from": {
+        "@id": "rs-gaap:MinorityInterest"
+      },
+      "to": {
+        "@id": "rs-gaap:MinorityInterestDecreaseFromDistributionsToNoncontrollingInterestHolders"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-PART",
+      "order": 41600.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
       "@id": "_:rs-gaap-pres-equity-llc",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-LLC",
       "structureName": "rs-gaap — Statement of Changes in Members' Equity — Roll Forward",
@@ -5308,6 +5392,48 @@
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-LLC",
       "order": 40500.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-equity-llc-arc-nci-1",
+      "from": {
+        "@id": "rs-gaap:MinorityInterest"
+      },
+      "to": {
+        "@id": "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-LLC",
+      "order": 41100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-equity-llc-arc-nci-2",
+      "from": {
+        "@id": "rs-gaap:MinorityInterest"
+      },
+      "to": {
+        "@id": "rs-gaap:NoncontrollingInterestIncreaseFromSubsidiaryEquityIssuance"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-LLC",
+      "order": 41300.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-equity-llc-arc-nci-3",
+      "from": {
+        "@id": "rs-gaap:MinorityInterest"
+      },
+      "to": {
+        "@id": "rs-gaap:MinorityInterestDecreaseFromDistributionsToNoncontrollingInterestHolders"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-LLC",
+      "order": 41600.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
