@@ -39,6 +39,10 @@ from robosystems.models.api.extensions.agent import (
   LedgerAgentResponse,
   UpdateAgentRequest,
 )
+from robosystems.models.api.extensions.consolidation import (
+  ProposeConsolidationEntriesRequest,
+  ProposeConsolidationEntriesResponse,
+)
 from robosystems.models.api.extensions.journal_entries import (
   DeleteJournalEntryRequest,
   JournalEntryResponse,
@@ -113,6 +117,9 @@ from robosystems.operations.roboledger.commands.agent import (
 from robosystems.operations.roboledger.commands.agent import (
   update_agent as cmd_update_agent,
 )
+from robosystems.operations.roboledger.commands.consolidation import (
+  propose_consolidation_entries as cmd_propose_consolidation_entries,
+)
 from robosystems.operations.roboledger.commands.event_handler import (
   EventHandlerNotFoundError,
   TemplateValidationError,
@@ -124,6 +131,7 @@ from robosystems.operations.roboledger.commands.event_handler import (
   update_event_handler as cmd_update_event_handler,
 )
 from robosystems.operations.roboledger.commands.journal_entries import (
+  ConsolidationAdjustmentError,
   JournalEntryAlreadyReversedError,
   JournalEntryNotDraftError,
   JournalEntryNotFoundError,
@@ -183,6 +191,9 @@ from robosystems.operations.roboledger.commands.suggestions import (
   accept_suggestions as cmd_accept_suggestions,
 )
 from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
+from robosystems.operations.roboledger.reads.consolidation import (
+  NoConsolidationEntityError,
+)
 from robosystems.operations.roboledger.reconciliations import (
   NoSourceLedgerError,
   SourceLedgerUnavailableError,
@@ -812,6 +823,37 @@ record_opening_balance_op = _registrar.register(
       ValueError: 422,
     },
     mark_stale_reason="opening_balance_recorded",
+  )
+)
+
+propose_consolidation_entries_op = _registrar.register(
+  OperationSpec(
+    name="propose-consolidation-entries",
+    summary="Propose Consolidation Entries",
+    description=(
+      "Draft a month's consolidating entries in the group's consolidation "
+      "entity: what preview-consolidation-entries computes, written as "
+      "drafts that the consolidation entity's close posts. Proposing the "
+      "month again replaces the drafts it wrote before, so it can be run "
+      "after any member's books change; a person's own entries are never "
+      "touched. Lines that eliminate a cash flow carry the row they offset. "
+      "A residual or a disagreement is returned beside the drafts, never "
+      "plugged; a month the consolidation entity has closed is left as "
+      "posted."
+    ),
+    command=cmd_propose_consolidation_entries,
+    request_model=ProposeConsolidationEntriesRequest,
+    result_type=ProposeConsolidationEntriesResponse,
+    error_map={
+      NoConsolidationEntityError: 422,
+      HandlerMetadataValidationError: 422,
+      ClosedPeriodError: 422,
+      ConsolidationAdjustmentError: 422,
+      UnbalancedJournalEntryError: 422,
+      RowLockedError: 409,
+      ValueError: 422,
+    },
+    mark_stale_reason="consolidation_entries_proposed",
   )
 )
 

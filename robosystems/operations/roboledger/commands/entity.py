@@ -15,6 +15,7 @@ from robosystems.models.api.extensions.entity import (
   UpdateEntityRequest,
 )
 from robosystems.models.extensions import Entity
+from robosystems.models.extensions.roboledger.agent import Agent
 from robosystems.operations.graph.entity_ticker import derive_ticker
 from robosystems.operations.graph.reporting_style_defaults import default_style_for
 from robosystems.operations.roboledger.commands.reporting_style import (
@@ -68,6 +69,50 @@ class EntityHierarchyError(ValueError):
 
 class EntityMembershipError(EntityHierarchyError):
   """A membership interval that ends before it starts."""
+
+
+class ConsolidatedHistoryError(EntityHierarchyError):
+  """A change of method that would restate months the group has closed."""
+
+
+def _closed_through_as_member(session: Session, entity: Entity) -> str | None:
+  """The last month the consolidation entity has closed with ``entity`` a
+  member of the group, or None."""
+  closed_through = session.execute(
+    text(
+      "SELECT fc.closed_through_period FROM fiscal_calendar fc "
+      "JOIN entities e ON e.id = fc.entity_id "
+      "WHERE e.entity_role = :role AND e.source <> 'linked' "
+      "AND fc.closed_through_period IS NOT NULL "
+      "ORDER BY e.created_at, e.id LIMIT 1"
+    ),
+    {"role": _ROLE_CONSOLIDATION},
+  ).scalar()
+  if closed_through is None:
+    return None
+  if entity.joined_on is not None and f"{entity.joined_on:%Y-%m}" > closed_through:
+    return None
+  return str(closed_through)
+
+
+def ensure_self_agent(session: Session, entity: Entity, created_by: str) -> None:
+  """The counterparty an intercompany event names for ``entity``: a ``self``
+  agent whose ``external_id`` is the entity's id."""
+  exists = session.execute(
+    select(Agent.id).where(
+      Agent.agent_type == "self", Agent.external_id == str(entity.id)
+    )
+  ).first()
+  if exists is None:
+    session.add(
+      Agent(
+        agent_type="self",
+        name=entity.name,
+        source="native",
+        external_id=str(entity.id),
+        created_by=created_by,
+      )
+    )
 
 
 def derived_consolidation_method(ownership_pct: float | None) -> str:
@@ -133,6 +178,24 @@ def _apply_updates(session: Session, entity: Entity, updates: dict[str, Any]):
     updates["consolidation_method"] = derived_consolidation_method(
       float(share) if share is not None else None
     )
+  method = updates.get("consolidation_method", entity.consolidation_method)
+  if (
+    not parent
+    and entity.entity_role == _ROLE_OPERATING
+    and (retyped or method != entity.consolidation_method)
+  ):
+    # Whether a member is summed is not an entry, so a closed month cannot
+    # hold it; a share within the method's band can change freely.
+    closed_through = _closed_through_as_member(session, entity)
+    if closed_through is not None:
+      raise ConsolidatedHistoryError(
+        f"The group has closed its consolidated months through "
+        f"{closed_through} with {entity.name} on the "
+        f"{entity.consolidation_method} method; changing it to {method}"
+        + (f" as a {role} entity" if retyped else "")
+        + " would restate them. A change of method from a date is not supported "
+        "yet; a change of ownership that keeps the method is."
+      )
   _check_membership(
     updates.get("joined_on", entity.joined_on), updates.get("left_on", entity.left_on)
   )
@@ -315,6 +378,10 @@ def create_entity(
   )
   session.add(entity)
   session.flush()
+  if parent is not None and role == _ROLE_OPERATING:
+    ensure_self_agent(session, parent, created_by)
+    ensure_self_agent(session, entity, created_by)
+    session.flush()
   response = entity_to_response(entity)
   session.commit()
   return response
