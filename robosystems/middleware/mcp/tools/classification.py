@@ -21,6 +21,7 @@ READ_ONLY_MCP_TOOLS: frozenset[str] = frozenset(
     "financial-statement-analysis",
     "live-financial-statement",
     "consolidation-worksheet",
+    "preview-consolidation-entries",
     "build-fact-grid",
     "resolve-element",
     "disclosures",

@@ -450,6 +450,8 @@ def _entry_to_response(
     line_items=line_item_responses,
     total_debit=total_debit,
     total_credit=total_credit,
+    adjustment_kind=entry.adjustment_kind,
+    adjusts_entity_id=entry.adjusts_entity_id,
   )
 
 
@@ -494,6 +496,48 @@ _PLATFORM_SOURCE_PROVENANCE = {
 }
 
 
+class ConsolidationAdjustmentError(ValueError):
+  """An adjustment kind on an entry that is not a consolidating one."""
+
+
+def assert_adjustment_allowed(
+  session: Session, entity_id: str, body: CreateJournalEntryRequest
+) -> None:
+  """An ``adjustment_kind`` belongs only on the consolidation entity's
+  books, and names the entity it adjusts (any of the group's own entities
+  but the consolidation entity) unless the kind is ``manual``."""
+  if body.adjustment_kind is None:
+    if body.adjusts_entity_id is not None:
+      raise ConsolidationAdjustmentError(
+        "adjusts_entity_id is set without an adjustment_kind."
+      )
+    return
+  role = session.execute(
+    text("SELECT entity_role FROM entities WHERE id = :id"), {"id": entity_id}
+  ).scalar()
+  if role != "consolidation":
+    raise ConsolidationAdjustmentError(
+      "An adjustment_kind is only for the group's consolidation entity; "
+      "this entry is in an operating entity's books."
+    )
+  if body.adjusts_entity_id is None:
+    if body.adjustment_kind != "manual":
+      raise ConsolidationAdjustmentError(
+        f"A {body.adjustment_kind} entry names the entity it adjusts "
+        "(adjusts_entity_id)."
+      )
+    return
+  adjusted = session.execute(
+    text("SELECT entity_role FROM entities WHERE id = :id AND source <> 'linked'"),
+    {"id": body.adjusts_entity_id},
+  ).scalar()
+  if adjusted is None or adjusted == "consolidation":
+    raise ConsolidationAdjustmentError(
+      f"adjusts_entity_id {body.adjusts_entity_id!r} is not one of the "
+      "group's own entities."
+    )
+
+
 def provenance_for_source(source: str | None) -> str:
   """Map a Transaction/Event source onto `Entry.provenance`."""
   if not source:
@@ -530,6 +574,7 @@ def create_journal_entry(
   entity_id = ensure_entity_id(session, entity_id)
   assert_period_not_closed(session, body.posting_date, entity_id=entity_id)
   assert_within_calendar(session, body.posting_date, entity_id=entity_id)
+  assert_adjustment_allowed(session, entity_id, body)
   synced = (body.source or "").lower() in SEVERABLE_SOURCES
   if body.status == "posted" and not synced and not mirrors_source:
     assert_local_posting_allowed(session, entity_id, "Posting this journal entry")
@@ -575,6 +620,8 @@ def create_journal_entry(
     provenance=provenance_for_source(body.source),
     posted_at=now,
     created_by=created_by,
+    adjustment_kind=body.adjustment_kind,
+    adjusts_entity_id=body.adjusts_entity_id,
   )
   session.add(entry)
   session.flush()

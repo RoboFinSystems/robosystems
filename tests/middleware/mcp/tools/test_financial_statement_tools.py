@@ -24,9 +24,13 @@ from robosystems.middleware.mcp.tools.financial_statement_tools import (
   ConsolidationWorksheetTool,
   FinancialStatementAnalysisTool,
   LiveFinancialStatementTool,
+  PreviewConsolidationEntriesTool,
   cap_periods,
   compact_fact,
   default_period_type,
+)
+from robosystems.operations.roboledger.reads.consolidation import (
+  NoConsolidationEntityError,
 )
 from robosystems.operations.roboledger.reads.reports import CoaMappingNotFoundError
 
@@ -339,6 +343,60 @@ class TestConsolidationWorksheetTool:
     )
 
     name = ConsolidationWorksheetTool(_make_client()).get_tool_definition()["name"]
+    assert name in READ_ONLY_MCP_TOOLS
+
+
+@pytest.mark.asyncio
+class TestPreviewConsolidationEntriesTool:
+  @staticmethod
+  def _session():
+    cm = MagicMock()
+    cm.__enter__.return_value = MagicMock()
+    cm.__exit__.return_value = False
+    return cm
+
+  @pytest.mark.unit
+  async def test_the_month_reaches_the_engine(self):
+    tool = PreviewConsolidationEntriesTool(_make_client("kg_123"))
+    response = MagicMock()
+    response.model_dump.return_value = {"proposals": [], "up_to_date": True}
+    with (
+      patch(f"{MODULE}.extensions_session", return_value=self._session()) as session,
+      patch(
+        f"{MODULE}.preview_consolidation_entries", return_value=response
+      ) as preview,
+    ):
+      result = await tool.execute({"period": " 2026-08 "})
+    assert result == {"proposals": [], "up_to_date": True}
+    assert preview.call_args.kwargs == {"period": "2026-08"}
+    assert session.call_args.args == ("kg_123",)
+
+  @pytest.mark.unit
+  async def test_a_period_that_is_not_a_month_is_refused(self):
+    tool = PreviewConsolidationEntriesTool(_make_client())
+    result = await tool.execute({"period": "2026-13"})
+    assert result == {"error": "period must be a month, as YYYY-MM."}
+
+  @pytest.mark.unit
+  async def test_a_group_with_no_consolidation_entity_says_so(self):
+    tool = PreviewConsolidationEntriesTool(_make_client())
+    with (
+      patch(f"{MODULE}.extensions_session", return_value=self._session()),
+      patch(
+        f"{MODULE}.preview_consolidation_entries",
+        side_effect=NoConsolidationEntityError("no consolidation entity"),
+      ),
+    ):
+      result = await tool.execute({"period": "2026-08"})
+    assert result == {"error": "no consolidation entity"}
+
+  @pytest.mark.unit
+  def test_it_is_a_read(self):
+    from robosystems.middleware.mcp.tools.classification import (
+      READ_ONLY_MCP_TOOLS,
+    )
+
+    name = PreviewConsolidationEntriesTool(_make_client()).get_tool_definition()["name"]
     assert name in READ_ONLY_MCP_TOOLS
 
 

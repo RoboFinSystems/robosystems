@@ -123,6 +123,8 @@ def _mock_entry(
   e.provenance = "manual_entry"
   e.reversal_of = None
   e.posted_at = None
+  e.adjustment_kind = None
+  e.adjusts_entity_id = None
   # A standalone draft (no owning event) unless a test says otherwise; the
   # owned-by-event paths build their own owner.
   e.triggered_by_event_id = None

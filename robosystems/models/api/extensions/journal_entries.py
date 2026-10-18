@@ -93,6 +93,23 @@ class JournalEntryLineItemResponse(BaseModel):
 # ── Entry response ───────────────────────────────────────────────────────
 
 
+# What a consolidating entry adjusts (spec ``consolidation`` §4.2); mirrors
+# ``Entry.ADJUSTMENT_KINDS``.
+AdjustmentKind = Literal[
+  "elimination_investment",
+  "elimination_intercompany",
+  "elimination_unrealized_profit",
+  "nci_allocation",
+  "nci_distribution",
+  "equity_method_pickup",
+  "equity_method_distribution",
+  "acquisition",
+  "deconsolidation",
+  "translation",
+  "manual",
+]
+
+
 class JournalEntryResponse(BaseModel):
   """The common response shape for journal entry write operations."""
 
@@ -108,6 +125,8 @@ class JournalEntryResponse(BaseModel):
   line_items: list[JournalEntryLineItemResponse]
   total_debit: int
   total_credit: int
+  adjustment_kind: str | None = None
+  adjusts_entity_id: str | None = None
 
 
 # ── Create ────────────────────────────────────────────────────────────────
@@ -139,6 +158,11 @@ class CreateJournalEntryRequest(BaseModel):
   # Business-event kind (e.g. `bill_paid`); distinct from the entry-level
   # `type`, which is the accounting role (standard / adjusting / ...).
   transaction_type: str = "journal_entry"
+  # A consolidating entry in the group's consolidation entity: what it
+  # adjusts, and the entity whose figures it adjusts. Refused on any other
+  # entity's books.
+  adjustment_kind: AdjustmentKind | None = None
+  adjusts_entity_id: str | None = None
 
 
 # ── Update ────────────────────────────────────────────────────────────────

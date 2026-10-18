@@ -194,6 +194,7 @@ class GraphMCPTools:
     self.example_queries_tool = None
     self.live_financial_statement_tool = None
     self.consolidation_worksheet_tool = None
+    self.preview_consolidation_entries_tool = None
     self.financial_statement_analysis_tool = None
     self.disclosures_tool = None
     self.information_block_tool = None
@@ -210,6 +211,7 @@ class GraphMCPTools:
         ConsolidationWorksheetTool,
         FinancialStatementAnalysisTool,
         LiveFinancialStatementTool,
+        PreviewConsolidationEntriesTool,
       )
 
       # Graph-backed: shared repos and materialized tenants alike.
@@ -234,6 +236,9 @@ class GraphMCPTools:
       if not self._is_shared_repository():
         self.live_financial_statement_tool = LiveFinancialStatementTool(graph_client)
         self.consolidation_worksheet_tool = ConsolidationWorksheetTool(graph_client)
+        self.preview_consolidation_entries_tool = PreviewConsolidationEntriesTool(
+          graph_client
+        )
 
       if self._should_include_semantic_tools():
         from .resolve_element_tool import ResolveElementTool
@@ -756,6 +761,8 @@ class GraphMCPTools:
       tools.append(self.live_financial_statement_tool.get_tool_definition())
     if self.consolidation_worksheet_tool is not None:
       tools.append(self.consolidation_worksheet_tool.get_tool_definition())
+    if self.preview_consolidation_entries_tool is not None:
+      tools.append(self.preview_consolidation_entries_tool.get_tool_definition())
     if self.disclosures_tool is not None:
       tools.append(self.disclosures_tool.get_tool_definition())
     if self.information_block_tool is not None:
@@ -1057,6 +1064,16 @@ class GraphMCPTools:
             "the roboledger schema extension."
           )
         result = await self.consolidation_worksheet_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "preview-consolidation-entries":
+        if self.preview_consolidation_entries_tool is None:
+          raise ValueError(
+            "preview-consolidation-entries tool is not available. "
+            "This graph is either a shared repository, read-only, or missing "
+            "the roboledger schema extension."
+          )
+        result = await self.preview_consolidation_entries_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "create-subgraph":

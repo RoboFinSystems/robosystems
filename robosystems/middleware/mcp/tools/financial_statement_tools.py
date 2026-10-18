@@ -1,9 +1,10 @@
 """Financial statement MCP tools.
 
 ``live-financial-statement`` reads the tenant's OLTP ledger through the
-CoA→GAAP mapping, and ``consolidation-worksheet`` the same ledger with the
-entity as the column; ``financial-statement-analysis`` reads the graph (SEC,
-or a materialized tenant).
+CoA→GAAP mapping, ``consolidation-worksheet`` the same ledger with the entity
+as the column, and ``preview-consolidation-entries`` the consolidating entries
+a month needs; ``financial-statement-analysis`` reads the graph (SEC, or a
+materialized tenant).
 """
 
 from __future__ import annotations
@@ -11,9 +12,18 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from pydantic import ValidationError
+
 from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 from robosystems.db.extensions import extensions_session
 from robosystems.middleware.operations import run_off_loop
+from robosystems.models.api.extensions.consolidation import (
+  PreviewConsolidationEntriesRequest,
+)
+from robosystems.operations.roboledger.reads.consolidation import (
+  NoConsolidationEntityError,
+  preview_consolidation_entries,
+)
 from robosystems.operations.roboledger.reads.reports import (
   ANALYSIS_STATEMENT_TYPES,
   LIVE_STATEMENT_SCOPES,
@@ -355,6 +365,62 @@ class ConsolidationWorksheetTool(BaseTool):
         )
       except CoaMappingNotFoundError as exc:
         return {"error": str(exc), "statement_type": statement_type}
+    return response.model_dump(mode="json")
+
+
+class PreviewConsolidationEntriesTool(BaseTool):
+  """MCP tool: the consolidating entries a group's month needs."""
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "preview-consolidation-entries",
+      "description": """The consolidating entries a group's month needs, computed from the books. Posts nothing.
+
+**WHEN TO USE:**
+- "What consolidating entries does August need", "are the eliminations up to date", "why does the consolidated balance sheet still show the investment"
+- Before posting a consolidating entry by hand: see what the engine would post, and whether a hand entry of the same kind already covers it
+- After a member's month changes: what moved in the eliminations and the noncontrolling interest
+
+**PARAMETERS:**
+- `period` (required) — the month, YYYY-MM
+
+**RETURNS:**
+- `proposals` — one entry per kind and member, each the difference between what that adjustment should hold at the month end and what the consolidation entity already holds: `elimination_investment` (the parent's investment against the member's capital, the outside owners' share as noncontrolling interest), `elimination_intercompany` (the balances the companies owe each other, and the month's intercompany income against the matching expense), `nci_allocation` (the outside owners' share of the month's result), `equity_method_pickup` (the parent's share of an equity-method member's result). Each has its `lines` in the consolidation entity's accounts and a `basis` saying how it was computed
+- `residuals` — the parent's investment in a member that differs from its share of the member's capital; that member's investment elimination is withheld until it is explained, never plugged
+- `reconciling_items` — intercompany figures the two sides disagree on; the lower amount is eliminated
+- `notes` — what was left out and why, e.g. a cost one company recharged to another at cost, which stays in the group's result
+- `up_to_date` — nothing to post and nothing withheld
+""",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "description": "The month, as YYYY-MM.",
+            "pattern": r"^\d{4}-(0[1-9]|1[0-2])$",
+          },
+        },
+        "required": ["period"],
+        "additionalProperties": False,
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    self._log_tool_execution("preview-consolidation-entries", arguments)
+    try:
+      body = PreviewConsolidationEntriesRequest.model_validate(
+        {"period": (arguments.get("period") or "").strip()}
+      )
+    except ValidationError:
+      return {"error": "period must be a month, as YYYY-MM."}
+    with extensions_session(self.client.graph_id) as session:
+      try:
+        response = preview_consolidation_entries(session, period=body.period)
+      except NoConsolidationEntityError as exc:
+        return {"error": str(exc)}
     return response.model_dump(mode="json")
 
 
