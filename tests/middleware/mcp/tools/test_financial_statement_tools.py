@@ -21,6 +21,7 @@ from robosystems.middleware.mcp.tools.financial_statement_tools import (
   PERIODS_DEFAULT_INSTANT,
   PERIODS_MAX,
   QUERY_ROW_CEILING,
+  ConsolidationWorksheetTool,
   FinancialStatementAnalysisTool,
   LiveFinancialStatementTool,
   cap_periods,
@@ -295,6 +296,50 @@ class TestLiveFinancialStatementToolExecute:
     ):
       result = await tool.execute({"statement_type": "income_statement"})
     assert "no mapping" in result["error"]
+
+
+@pytest.mark.asyncio
+class TestConsolidationWorksheetTool:
+  @pytest.mark.unit
+  async def test_the_statement_and_window_reach_the_read(self):
+    tool = ConsolidationWorksheetTool(_make_client("kg_123"))
+    cm = MagicMock()
+    cm.__enter__.return_value = MagicMock()
+    cm.__exit__.return_value = False
+    response = MagicMock()
+    response.model_dump.return_value = {"columns": [], "rows": []}
+    with (
+      patch(f"{MODULE}.extensions_session", return_value=cm),
+      patch(
+        f"{MODULE}.resolve_reporting_window",
+        return_value=(date(2026, 7, 1), date(2026, 7, 31)),
+      ),
+      patch(
+        f"{MODULE}.get_consolidation_worksheet", return_value=response
+      ) as worksheet,
+    ):
+      result = await tool.execute({"statement_type": "balance_sheet"})
+    assert result == {"columns": [], "rows": []}
+    kwargs = worksheet.call_args.kwargs
+    assert (kwargs["graph_id"], kwargs["statement_type"]) == (
+      "kg_123",
+      "balance_sheet",
+    )
+
+  @pytest.mark.unit
+  async def test_an_unknown_statement_type_is_refused(self):
+    tool = ConsolidationWorksheetTool(_make_client())
+    result = await tool.execute({"statement_type": "bogus"})
+    assert "Unknown statement_type" in result["error"]
+
+  @pytest.mark.unit
+  def test_it_is_a_read(self):
+    from robosystems.middleware.mcp.tools.classification import (
+      READ_ONLY_MCP_TOOLS,
+    )
+
+    name = ConsolidationWorksheetTool(_make_client()).get_tool_definition()["name"]
+    assert name in READ_ONLY_MCP_TOOLS
 
 
 # ──────────────────────────────────────────────────────────────────────────

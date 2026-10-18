@@ -31,7 +31,7 @@ RoboLedger's extensions surface follows a CQRS split with three sub-surfaces, al
 | --- | --- | --- |
 | **Typed reads** | `POST /extensions/{graph_id}/graphql` | Strawberry GraphQL — entity, fiscal calendar, mappings, reports. See [GraphQL Reads](GraphQL-Reads.md). |
 | **Command writes** | `POST /extensions/roboledger/{graph_id}/operations/{op_name}` | Mutations — close a period, update the entity, generate a report. |
-| **Analytical views** | `POST /extensions/roboledger/{graph_id}/operations/{view_name}` | Read-only queries over the XBRL hypercube (`build-fact-grid`, `financial-statement-analysis`), over a report read whole (`disclosures`, `information-block`), over an SEC filing's own text (`describe-filing`, `search-text`, `read-text`), and over the live OLTP ledger (`live-financial-statement`). |
+| **Analytical views** | `POST /extensions/roboledger/{graph_id}/operations/{view_name}` | Read-only queries over the XBRL hypercube (`build-fact-grid`, `financial-statement-analysis`), over a report read whole (`disclosures`, `information-block`), over an SEC filing's own text (`describe-filing`, `search-text`, `read-text`), and over the live OLTP ledger (`live-financial-statement`, `consolidation-worksheet`). |
 
 This page covers the latter two. The `graph_id` always comes from the URL path — FastAPI dependencies validate authentication and per-graph access before the handler runs. The reads sibling is documented in [GraphQL Reads](GraphQL-Reads.md), and the surface as a whole in [Extensions Surface Overview](Extensions-Surface-Overview.md).
 
@@ -71,7 +71,7 @@ Every command write and analytical view returns the same envelope. This uniformi
 
 The envelope is defined in [`middleware/operations.py`](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/middleware/operations.py). Wire aliases are camelCase (`operationId`, `createdBy`, `idempotentReplay`), and the model is `populate_by_name=True`, so both spellings are accepted on input.
 
-**Idempotency-Key.** Send an `Idempotency-Key` header to make a write safe to retry. A replay with the same key returns the cached envelope (with `idempotentReplay: true`) without re-executing. Reusing a key with a *different* request body returns `409` — the body fingerprint must match, so the cache never silently overwrites a different operation. The analytical views, apart from `live-financial-statement`, accept the header and ignore it: a read has nothing to deduplicate, so every call runs fresh and `idempotentReplay` is always `false`.
+**Idempotency-Key.** Send an `Idempotency-Key` header to make a write safe to retry. A replay with the same key returns the cached envelope (with `idempotentReplay: true`) without re-executing. Reusing a key with a *different* request body returns `409` — the body fingerprint must match, so the cache never silently overwrites a different operation. The analytical views, apart from `live-financial-statement` and `consolidation-worksheet`, accept the header and ignore it: a read has nothing to deduplicate, so every call runs fresh and `idempotentReplay` is always `false`.
 
 **Synchronous vs async.** Most operations run synchronously and return `200` with `status: completed`. A few — notably `auto-map-elements` — dispatch to the background worker, return `202` with `status: pending`, and stream progress. The `operation_id` bridges to the monitoring surface: subscribe to `GET /v1/operations/{operation_id}/stream` (SSE) to follow a long-running operation to completion.
 
@@ -154,7 +154,7 @@ Scenarios, the four drivers, line values and line growth, the verification halt,
 
 ## Analytical View Operations
 
-Analytical view operations are read-only. Two of them, `build-fact-grid` and `financial-statement-analysis`, query the **XBRL hypercube** — the `Fact` nodes materialized into the LadybugDB graph. Five more run xbrlkit's tools over a report or filing held whole and don't touch the graph, and `live-financial-statement` reads the OLTP ledger ([below](#live-financial-statement--tenant-graphs)). They share the `OperationEnvelope` contract with command writes and live under the same `/operations/` prefix, but they mutate nothing.
+Analytical view operations are read-only. Two of them, `build-fact-grid` and `financial-statement-analysis`, query the **XBRL hypercube** — the `Fact` nodes materialized into the LadybugDB graph. Five more run xbrlkit's tools over a report or filing held whole and don't touch the graph, and `live-financial-statement` and `consolidation-worksheet` read the OLTP ledger ([below](#live-financial-statement--tenant-graphs)). They share the `OperationEnvelope` contract with command writes and live under the same `/operations/` prefix, but they mutate nothing.
 
 Two view operations read a report *whole* instead of querying the hypercube. `disclosures` returns the map of a report's sections, one row per note or statement family with its block ids. `information-block` reads one section in full: rows with values per period, breakdowns by the section's own axes, calculation footing and text blocks. Both run xbrlkit's own tools over the report: the published filing on the SEC repository, or the ledger's own report on a tenant graph (pass `report_id`; on SEC, `ticker` or `report_id`). Call `disclosures` first, since it is cheap. `information-block` is the expensive call, one block at a time.
 
@@ -287,7 +287,7 @@ A `ViewConfig` has exactly two fields: `rows[]` and `columns[]`, each a list of 
 
 ## Financial Statements
 
-Two operations render a *complete* statement rather than a free-form slice. Which one you want depends on where the truth for that graph lives.
+Three operations render a *complete* statement rather than a free-form slice. Which one you want depends on where the truth for that graph lives.
 
 ### live-financial-statement — tenant graphs
 
@@ -303,6 +303,21 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
 ```
 
 `statement_type` is one of `income_statement`, `balance_sheet`, `cash_flow_statement`, or `equity_statement`. Scope the window either explicitly (`period_start` / `period_end`) or by fiscal context (`period_type`, `fiscal_year`), anchored on the graph's fiscal calendar; explicit dates win. `limit` caps the fact rows returned. The result carries the resolved `periods[]` (current plus prior comparative), the rendered `facts[]` with `depth` and `is_subtotal` for indentation, and an `unmapped_count`.
+
+`entity_id` names one entity's books; omitted, the statement is the group parent's. On the group parent, `scope` reads the group: `combined` sums every member consolidated in full, at the rs-gaap concepts and for the months each was a member, with nothing eliminated; `consolidated` adds the consolidation entity, whose entries are the eliminations and noncontrolling interest. A member on the equity method or at cost is never summed. `combined_entity_ids` on the response names the entities summed.
+
+### consolidation-worksheet — tenant graphs
+
+`consolidation-worksheet` reads the same ledger for one window with the entity as the column: the group parent, each member consolidated in full, their `combined` sum, the consolidation entity's adjustments, the `consolidated` total, and then each equity-method or cost member beside the sum (`in_sum: false`), never in it. Every column renders under the group parent's Reporting Style, and the two totals are the numbers `live-financial-statement` returns for its two group scopes. It is the read to check a consolidating entry against.
+
+```bash
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/consolidation-worksheet" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"statement_type": "balance_sheet", "period_start": "2026-08-01", "period_end": "2026-08-31"}'
+```
+
+It takes the same `statement_type` and window fields. The result carries `columns[]` (each with its `kind`, `entity_id`, `consolidation_method` and `ownership_pct`), `rows[]` with one value per column in the Style's order, and `validation` for the consolidated column. A member outside its membership interval for the window has no column, and `unmapped_entity_ids` names any entity with no mapping yet.
 
 ### financial-statement-analysis — materialized and shared-repository graphs
 
@@ -388,7 +403,7 @@ On your own stack, `just demo-roboledger` provisions a tenant with 16 months of 
 
 - **[RoboLedger operations package](https://github.com/RoboFinSystems/robosystems/tree/main/robosystems/routers/extensions/roboledger/operations)** - The registered command-write operations, one module per tag
 - **[Analytical view router](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/routers/extensions/roboledger/views.py)** - `build-fact-grid`, `financial-statement-analysis`, `disclosures`, `information-block`, `describe-filing`, `search-text`, `read-text`
-- **[OLTP reads router](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/routers/extensions/roboledger/reads.py)** - `live-financial-statement`
+- **[OLTP reads router](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/routers/extensions/roboledger/reads.py)** - `live-financial-statement`, `consolidation-worksheet`
 - **[Operation envelope](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/middleware/operations.py)** - `OperationEnvelope`, idempotency, audit
 - **[Operations kernel](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md)** - Business logic patterns behind every operation
 

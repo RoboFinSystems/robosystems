@@ -382,6 +382,13 @@ def _consolidation_lines(adjustments: Sequence[Mapping[str, Any]], has) -> list[
       "from its share) is never summed: the group carries its investment and its "
       "share of the member's result instead."
     )
+  if adjustments and has("consolidation-worksheet"):
+    lines.append(
+      "- `consolidation-worksheet` lays the group's statement out by entity: "
+      "each member, their combined sum, the consolidation entity's "
+      "adjustments, the consolidated total, and an equity-method member "
+      "beside the sum. Read it to check a consolidating entry."
+    )
   if adjustments and has("update-journal-entry"):
     lines.append(
       "- A line of the consolidation entity that carries a `flow_qname` counts "

@@ -19,10 +19,14 @@ from fastapi import HTTPException
 from sqlalchemy.exc import ProgrammingError
 
 from robosystems.models.api.extensions.reports import (
+  ConsolidationWorksheetRequest,
+  ConsolidationWorksheetResponse,
   LiveFinancialStatementRequest,
   LiveFinancialStatementResponse,
+  PeriodSpec,
 )
 from robosystems.routers.extensions.roboledger.reads import (
+  consolidation_worksheet_op,
   live_financial_statement_op,
 )
 
@@ -239,3 +243,91 @@ class TestLiveFinancialStatementOp:
         )
     assert exc_info.value.status_code == 404
     assert "Ledger not initialized" in exc_info.value.detail
+
+
+def _session_cm() -> MagicMock:
+  cm = MagicMock()
+  cm.__enter__.return_value = MagicMock()
+  cm.__exit__.return_value = False
+  return cm
+
+
+@pytest.mark.asyncio
+class TestConsolidationWorksheetOp:
+  @pytest.mark.unit
+  async def test_the_window_reaches_the_read(self):
+    body = ConsolidationWorksheetRequest(statement_type="balance_sheet")
+    response = ConsolidationWorksheetResponse(
+      graph_id=GRAPH_ID,
+      entity_id="entity_x",
+      statement_type="balance_sheet",
+      period=PeriodSpec(start=date(2026, 7, 1), end=date(2026, 7, 31), label="Current"),
+      columns=[],
+      rows=[],
+    )
+    with (
+      patch(f"{MODULE}.extensions_session", return_value=_session_cm()),
+      patch(
+        f"{MODULE}.resolve_reporting_window",
+        return_value=(date(2026, 7, 1), date(2026, 7, 31)),
+      ),
+      patch(f"{MODULE}.get_consolidation_worksheet", return_value=response) as mock_fn,
+    ):
+      envelope = await consolidation_worksheet_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        _ext=MagicMock(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert envelope.operation == "consolidation-worksheet"
+    assert envelope.result is not None
+    assert envelope.result["entity_id"] == "entity_x"
+    kwargs = mock_fn.call_args.kwargs
+    assert (kwargs["statement_type"], kwargs["period_end"]) == (
+      "balance_sheet",
+      date(2026, 7, 31),
+    )
+
+  @pytest.mark.unit
+  async def test_an_unknown_statement_type_is_a_400(self):
+    with pytest.raises(HTTPException) as exc_info:
+      await consolidation_worksheet_op(
+        body=ConsolidationWorksheetRequest(statement_type="not_real"),
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        _ext=MagicMock(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+    assert exc_info.value.status_code == 400
+
+  @pytest.mark.unit
+  async def test_a_missing_mapping_is_a_422(self):
+    from robosystems.operations.roboledger.reads.reports import (
+      CoaMappingNotFoundError,
+    )
+
+    with (
+      patch(f"{MODULE}.extensions_session", return_value=_session_cm()),
+      patch(
+        f"{MODULE}.resolve_reporting_window",
+        return_value=(date(2026, 7, 1), date(2026, 7, 31)),
+      ),
+      patch(
+        f"{MODULE}.get_consolidation_worksheet",
+        side_effect=CoaMappingNotFoundError("run the mapping workflow first"),
+      ),
+    ):
+      with pytest.raises(HTTPException) as exc_info:
+        await consolidation_worksheet_op(
+          body=ConsolidationWorksheetRequest(statement_type="balance_sheet"),
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          _ext=MagicMock(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+    assert exc_info.value.status_code == 422

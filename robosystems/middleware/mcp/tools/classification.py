@@ -20,6 +20,7 @@ READ_ONLY_MCP_TOOLS: frozenset[str] = frozenset(
     # Financial analysis / reporting reads
     "financial-statement-analysis",
     "live-financial-statement",
+    "consolidation-worksheet",
     "build-fact-grid",
     "resolve-element",
     "disclosures",

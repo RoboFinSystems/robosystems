@@ -1,8 +1,9 @@
 """Financial statement MCP tools.
 
 ``live-financial-statement`` reads the tenant's OLTP ledger through the
-CoA→GAAP mapping; ``financial-statement-analysis`` reads the graph (SEC, or a
-materialized tenant).
+CoA→GAAP mapping, and ``consolidation-worksheet`` the same ledger with the
+entity as the column; ``financial-statement-analysis`` reads the graph (SEC,
+or a materialized tenant).
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from robosystems.operations.roboledger.reads.reports import (
   CoaMappingNotFoundError,
   CombinedViewOnParentOnlyError,
   InvalidStatementScopeError,
+  get_consolidation_worksheet,
   get_live_financial_statement,
   resolve_reporting_window,
 )
@@ -263,6 +265,97 @@ Facts with element qnames, names, classifications, and values aligned with `peri
         "Check that ledger data is loaded and CoA→GAAP mappings are complete."
       )
     return result
+
+
+class ConsolidationWorksheetTool(BaseTool):
+  """MCP tool: the group's statement with the entity as the column."""
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "consolidation-worksheet",
+      "description": """The group's statement for one window with each entity as a column, live from the ledger — the worksheet a controller checks a consolidation against.
+
+**WHEN TO USE:**
+- "Show me the consolidation worksheet", "how does each company contribute to the group's balance sheet", "what do the eliminations take out"
+- Checking the consolidating entries: each member's own number, the combined sum, the adjustments, the consolidated result, side by side
+- For the group's statement alone, `live-financial-statement` with `scope: consolidated` is smaller
+
+**PARAMETERS:**
+- `statement_type` (required) — income_statement, balance_sheet, cash_flow_statement or equity_statement
+- `period_start` / `period_end`, or `period_type` + `fiscal_year` — the window, as for `live-financial-statement`
+
+**RETURNS:**
+- `columns` in order: the group parent, each member consolidated in full, `combined` (their sum, nothing eliminated), the consolidation entity (`kind: adjustments`, when the group has one), `consolidated`, then each equity-method or cost member (`kind: not_summed`, `in_sum: false`) — shown for reference, never added in; its effect reaches the group through the adjustments
+- `rows` — every line in the parent's Reporting Style order, `values` aligned with `columns`; a line zero in every column is left out
+- `validation` — the guard rails on the consolidated column; read it before quoting a number
+- A member outside its membership interval for the window has no column; `unmapped_entity_ids` names any entity with no mapping yet
+""",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "statement_type": {
+            "type": "string",
+            "description": "Type of financial statement to generate",
+            "enum": list(MCP_LIVE_STATEMENT_TYPES),
+          },
+          "period_start": {
+            "type": "string",
+            "description": "Explicit window start (YYYY-MM-DD). Overrides period_type/fiscal_year.",
+          },
+          "period_end": {
+            "type": "string",
+            "description": "Explicit window end (YYYY-MM-DD). Overrides period_type/fiscal_year.",
+          },
+          "period_type": {
+            "type": "string",
+            "description": "annual | quarterly | instant (ignored when explicit dates supplied)",
+            "enum": ["annual", "quarterly", "instant"],
+          },
+          "fiscal_year": {
+            "type": "integer",
+            "description": "Fiscal year for annual window (anchored on FiscalCalendar)",
+          },
+        },
+        "required": ["statement_type"],
+        "additionalProperties": False,
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    self._log_tool_execution("consolidation-worksheet", arguments)
+
+    statement_type = (arguments.get("statement_type") or "").strip()
+    if statement_type not in MCP_LIVE_STATEMENT_TYPES:
+      return {
+        "error": (
+          f"Unknown statement_type '{statement_type}'. "
+          f"Valid types: {', '.join(MCP_LIVE_STATEMENT_TYPES)}."
+        ),
+      }
+
+    graph_id = self.client.graph_id
+    with extensions_session(graph_id) as session:
+      start, end = resolve_reporting_window(
+        session,
+        period_start=_parse_date(arguments.get("period_start")),
+        period_end=_parse_date(arguments.get("period_end")),
+        period_type=arguments.get("period_type"),
+        fiscal_year=arguments.get("fiscal_year"),
+      )
+      try:
+        response = get_consolidation_worksheet(
+          session,
+          graph_id=graph_id,
+          statement_type=statement_type,
+          period_start=start,
+          period_end=end,
+        )
+      except CoaMappingNotFoundError as exc:
+        return {"error": str(exc), "statement_type": statement_type}
+    return response.model_dump(mode="json")
 
 
 class FinancialStatementAnalysisTool(BaseTool):

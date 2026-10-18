@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -19,6 +21,7 @@ from robosystems.config import env
 from robosystems.config.storage.graph import get_report_bundle_key
 from robosystems.logger import logger
 from robosystems.models.api.extensions.reports import (
+  ConsolidationWorksheetResponse,
   FactRowResponse,
   LiveFinancialStatementResponse,
   LiveStatementFactRow,
@@ -30,11 +33,14 @@ from robosystems.models.api.extensions.reports import (
   StatementResponse,
   StructureSummary,
   ValidationCheckResponse,
+  WorksheetColumn,
+  WorksheetRow,
 )
 from robosystems.models.extensions import Entity, Report
 from robosystems.models.extensions.roboledger import Structure
 from robosystems.operations.aws.s3 import S3Client
 from robosystems.operations.roboledger.entity_scope import (
+  GroupMember,
   find_entity_id,
   group_members,
   is_group_parent,
@@ -1072,6 +1078,215 @@ def _add_into(base: FactGrid, other: FactGrid) -> None:
         (a or 0.0) + (b or 0.0) if a is not None or b is not None else None
         for a, b in zip(target.values, row.values, strict=False)
       ]
+
+
+@dataclass(frozen=True)
+class _WorksheetEntity:
+  member: GroupMember
+  name: str
+  method: str
+  ownership_pct: float | None
+
+  @property
+  def kind(self) -> str:
+    if self.member.role == "consolidation":
+      return "adjustments"
+    return "member" if self.method == "full" else "not_summed"
+
+
+def _worksheet_entities(session: Session, parent_id: str) -> list[_WorksheetEntity]:
+  """Every own entity in worksheet order: the parent, the members
+  consolidated in full by creation, the consolidation entity, then the
+  members outside the sum."""
+  rows = session.execute(
+    text(
+      "SELECT id, name, entity_role, consolidation_method, ownership_pct, "
+      "       joined_on, left_on FROM entities "
+      "WHERE source <> 'linked' "
+      "ORDER BY (id <> :parent), "
+      "  CASE WHEN entity_role = 'consolidation' THEN 1 "
+      "       WHEN consolidation_method = 'full' THEN 0 ELSE 2 END, "
+      "  created_at ASC, id ASC"
+    ),
+    {"parent": parent_id},
+  ).all()
+  return [
+    _WorksheetEntity(
+      member=GroupMember(
+        str(row.id),
+        str(row.entity_role),
+        # The parent belongs to its own group for every period.
+        None if row.id == parent_id else row.joined_on,
+        None if row.id == parent_id else row.left_on,
+      ),
+      name=str(row.name),
+      method="full" if row.id == parent_id else str(row.consolidation_method),
+      ownership_pct=float(row.ownership_pct) if row.ownership_pct is not None else None,
+    )
+    for row in rows
+  ]
+
+
+def _sum_grids(grids: list[FactGrid]) -> FactGrid | None:
+  """The row-by-row sum of ``grids``, leaving each of them untouched."""
+  total: FactGrid | None = None
+  for grid in grids:
+    if total is None:
+      total = copy.deepcopy(grid)
+    else:
+      _add_into(total, copy.deepcopy(grid))
+  return total
+
+
+def get_consolidation_worksheet(
+  session: Session,
+  *,
+  graph_id: str,
+  statement_type: str,
+  period_start: date,
+  period_end: date,
+  limit: int = 1000,
+) -> ConsolidationWorksheetResponse:
+  """The group's statement for one window with the entity as the column:
+  the parent and each member consolidated in full, their ``combined`` sum,
+  the consolidation entity's adjustments, the ``consolidated`` total, and
+  each equity-method or cost member beside the sum, never in it. Every
+  column renders under the parent's Style; the totals are the same sums
+  ``get_live_financial_statement`` reads for its two group scopes.
+
+  Raises ``CoaMappingNotFoundError`` when no summed entity is mapped."""
+  parent_id = resolve_entity_id(session, None)
+  reporting_style_id = load_entity_reporting_style(session, parent_id)
+  periods = build_current_and_prior_periods(period_start, period_end)
+
+  # Each list holds (column, grid), already in worksheet order.
+  summed_columns: list[tuple[WorksheetColumn, FactGrid]] = []
+  adjustment_columns: list[tuple[WorksheetColumn, FactGrid]] = []
+  outside_columns: list[tuple[WorksheetColumn, FactGrid]] = []
+  members: list[FactGrid] = []
+  adjustments: list[FactGrid] = []
+  unmapped_entity_ids: list[str] = []
+  unmapped_count = 0
+  first_error: CoaMappingNotFoundError | None = None
+  for entity in _worksheet_entities(session, parent_id):
+    summed = [entity.member.is_member_for(p.start, p.end) for p in periods]
+    if not any(summed):
+      continue
+    try:
+      grid, unmapped = generate_adhoc_private_statement(
+        session,
+        statement_type=statement_type,
+        periods=periods,
+        reporting_style_id=reporting_style_id,
+        entity_id=entity.member.id,
+      )
+    except CoaMappingNotFoundError as exc:
+      first_error = first_error or exc
+      unmapped_entity_ids.append(entity.member.id)
+      continue
+    if not all(summed):
+      _keep_periods(grid, summed)
+    kind = entity.kind
+    if kind != "not_summed":
+      unmapped_count += unmapped
+      (members if kind == "member" else adjustments).append(grid)
+    # The prior window still counts a member that joined in this one; only a
+    # member for the window itself gets a column.
+    if not summed[0]:
+      continue
+    column = WorksheetColumn(
+      key=entity.member.id,
+      label=entity.name,
+      kind=kind,
+      entity_id=entity.member.id,
+      consolidation_method=entity.method,
+      ownership_pct=entity.ownership_pct,
+      in_sum=kind != "not_summed",
+    )
+    {
+      "member": summed_columns,
+      "adjustments": adjustment_columns,
+      "not_summed": outside_columns,
+    }[kind].append((column, grid))
+
+  combined = _sum_grids(members)
+  if combined is None:
+    # The parent is summed for every period, so only its missing mapping
+    # leaves nothing to sum.
+    assert first_error is not None
+    raise first_error
+  consolidated = _sum_grids([combined, *adjustments])
+  assert consolidated is not None
+  ordered = [
+    *summed_columns,
+    (
+      WorksheetColumn(key="combined", label="Combined", kind="combined", in_sum=True),
+      combined,
+    ),
+    *adjustment_columns,
+    (
+      WorksheetColumn(
+        key="consolidated", label="Consolidated", kind="consolidated", in_sum=True
+      ),
+      consolidated,
+    ),
+    *outside_columns,
+  ]
+
+  validation = validate_report(
+    statement_type,
+    consolidated.rows,
+    period_labels=[p.label for p in periods],
+    warnings=consolidated.warnings,
+  )
+
+  # Every column's lines in the Style's order: the sum of all of them has
+  # each line once, where the Style puts it.
+  skeleton = _sum_grids([g for _, g in ordered])
+  assert skeleton is not None
+  by_column = [{_row_key(r): r for r in g.rows} for _, g in ordered]
+  rows: list[WorksheetRow] = []
+  for line in skeleton.rows:
+    if line.is_abstract:
+      continue
+    values: list[float | None] = []
+    for index in by_column:
+      found = index.get(_row_key(line))
+      values.append(found.values[0] if found is not None and found.values else 0.0)
+    if line.period_role is None and not any(v for v in values):
+      continue
+    rows.append(
+      WorksheetRow(
+        qname=line.element_qname,
+        name=line.element_name,
+        trait=line.classification,
+        values=values,
+        depth=line.depth,
+        is_subtotal=line.is_subtotal,
+        period_role=line.period_role,
+      )
+    )
+
+  truncated = len(rows) > limit
+  current = periods[0]
+  return ConsolidationWorksheetResponse(
+    graph_id=graph_id,
+    entity_id=parent_id,
+    statement_type=statement_type,
+    period=PeriodSpec(start=current.start, end=current.end, label=current.label),
+    columns=[c for c, _ in ordered],
+    rows=rows[:limit],
+    validation=ValidationCheckResponse(
+      passed=validation.passed,
+      status=validation.status,
+      checks=validation.checks,
+      failures=validation.failures,
+      warnings=validation.warnings,
+    ),
+    unmapped_entity_ids=unmapped_entity_ids,
+    unmapped_count=unmapped_count,
+    truncated=truncated,
+  )
 
 
 def get_live_financial_statement(
