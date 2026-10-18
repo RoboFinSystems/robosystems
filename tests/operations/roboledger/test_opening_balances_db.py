@@ -382,3 +382,28 @@ def test_a_report_column_reaching_before_the_books_carries_no_flows(tenant):
     if f.element_qname == "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
   ]
   assert net_change == [5_000.0]
+
+
+def test_a_column_straddling_the_books_start_carries_only_its_balances(tenant):
+  """June 1 to July 31 ends inside the books, but its flows would be July's
+  labelled as two months: the column keeps its balance sheet only."""
+  with extensions_session(GRAPH) as session:
+    record_opening_balance(session, _opening(session, tenant), "usr_1")
+    _july_revenue(session, tenant)
+    session.commit()
+    mapping = find_entity_mapping(session, PARENT, BOOK_FRAMEWORK)
+    assert mapping is not None
+    taxonomy_id = session.execute(
+      text(
+        "SELECT id FROM taxonomies WHERE standard = 'rs-gaap-presentation' "
+        "ORDER BY version DESC LIMIT 1"
+      )
+    ).scalar_one()
+    straddling = PeriodSpec(start=date(2026, 6, 1), end=JULY[1], label="Current")
+    facts = generate_report_facts(
+      session, str(taxonomy_id), str(mapping.id), [straddling], entity_id=PARENT
+    ).facts
+
+  assert {f.period_type for f in facts} == {"instant"}
+  cash = {f.period_end: f.value for f in facts if f.element_qname == CASH}
+  assert cash[JULY[1]] == 65_000.0

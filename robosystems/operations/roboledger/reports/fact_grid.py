@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
 from robosystems.models.api.extensions import cents_to_dollars
+from robosystems.operations.roboledger.commands.opening_balances import books_start
 from robosystems.operations.roboledger.entry_status import (
   landed_entry_bindparam,
 )
@@ -145,6 +146,11 @@ def generate_report_facts(
   concept cumulative earnings close to — the Reporting Style's earnings home
   (``PartnersCapital`` / ``MembersEquity`` for PART/LLC) — so earnings land on
   the form's capital line and the BS foots.
+
+  A column starting before the books' first day carries only its balances,
+  as a live statement leaves it out: that holds for a column that ends
+  inside the books too (a calendar year for books opening in July), whose
+  flows would be the months since the opening labelled as the whole year.
   """
   arc_type = _arc_type_for_taxonomy(session, taxonomy_id)
   facts: list[ReportFact] = []
@@ -239,10 +245,6 @@ def generate_report_facts(
 def _books_start(session: Session, entity_id: str | None) -> date | None:
   """The first day the entity's books cover, when they start from an opening
   balance."""
-  from robosystems.operations.roboledger.commands.opening_balances import (
-    books_start,
-  )
-
   return books_start(session, [entity_id]) if entity_id else None
 
 
