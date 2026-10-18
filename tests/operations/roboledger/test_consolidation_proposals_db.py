@@ -837,6 +837,19 @@ def test_proposing_drafts_the_month_and_replaces_its_own_drafts(group, monkeypat
   assert preview().up_to_date
 
 
+def test_drafts_of_an_earlier_open_month_are_held(group, monkeypatch):
+  """January's drafts wait for its close; February's proposal counts them,
+  so closing both months eliminates once."""
+  monkeypatch.setattr(engine, "_FLOWS", {})
+  _form_the_group(group)
+  _january(group)
+  _propose()
+
+  february = preview("2026-02")
+  assert february.proposals == []
+  assert february.up_to_date
+
+
 def test_a_new_member_gets_its_own_counterparty(group):
   """create-entity adds the ``self`` agent an intercompany event names, for
   the member and, once, for the group parent."""

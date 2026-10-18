@@ -10,13 +10,10 @@ intercompany event is posted on both sides, so the
 group creates no cash from nothing, and the consolidated statement is the
 sum of every entity's at the rs-gaap concepts.
 
-The consolidation entity keeps a running ledger, so a cumulative adjustment
-(the eliminated investment, the eliminated equity, noncontrolling interest)
-is posted as the difference between its target balance at the month end and
-what the entity already holds, while period activity (an intercompany fee,
-the outside owners' share of the month's income) posts as it is. That is the
-rule the consolidation engine will follow (``consolidation.md`` §4.3, D8), so
-the entries here are its acceptance test: it must propose exactly these.
+The consolidating entries are the engine's: each month, once every side of
+it is in the books, ``propose-consolidation-entries`` drafts them in the
+consolidation entity, and its close posts them. Nothing here computes one,
+so the read-back below checks the engine against the scenario's own figures.
 
 The entity-scoped operations are posted directly: the published client's
 facades predate ``entity_id``.
@@ -39,63 +36,9 @@ _FORM_EQUITY = {
   "corporation": "rs-gaap:RetainedEarningsAccumulatedDeficit",
 }
 
-# The consolidation template's row for a subsidiary's eliminated equity, by
-# the subsidiary's legal form.
-_ELIMINATED_EQUITY_CODE = {
-  "llc": "3020",
-  "partnership": "3030",
-  "corporation": "3010",
-}
-
 # A distribution every third month, split by ownership; the read-back counts
 # the same months.
 _DISTRIBUTION_EVERY = 3
-
-# The cash flow rows a member's own contribution and distribution lines take,
-# by its legal form: what the elimination of its capital has to offset.
-_MEMBER_CAPITAL_FLOWS = {
-  "llc": (
-    "rs-gaap:ProceedsFromContributedCapital",
-    "rs-gaap:PaymentsOfCapitalDistribution",
-  ),
-  "partnership": (
-    "rs-gaap:ProceedsFromPartnershipContribution",
-    "rs-gaap:PaymentsOfCapitalDistribution",
-  ),
-  "corporation": (
-    "rs-gaap:ProceedsFromIssuanceOfCommonStock",
-    "rs-gaap:PaymentsOfDividends",
-  ),
-}
-
-# The flow each cumulative adjustment's delta offsets, by the delta's side:
-# the consolidation entity moves no cash, so its tagged lines count on their
-# own, cash-effect signed. A debit on the eliminated capital is the
-# contribution the member booked, a credit there the distribution; the parent's
-# investment and note the other way round; the outside owners' parts are the
-# group's real flows, on the noncontrolling-interest rows.
-_ADJUSTMENT_FLOWS: dict[tuple[str, str], tuple[str, str]] = {
-  ("1600", "elimination_investment"): (
-    "rs-gaap:ProceedsFromDivestitureOfInterestInSubsidiariesAndAffiliates",
-    "rs-gaap:PaymentsToAcquireInterestInSubsidiariesAndAffiliates",
-  ),
-  ("3200", "elimination_investment"): (
-    "rs-gaap:PaymentsToMinorityShareholders",
-    "rs-gaap:ProceedsFromMinorityShareholders",
-  ),
-  ("2600", "elimination_intercompany"): (
-    "rs-gaap:ProceedsFromRelatedPartyDebt",
-    "rs-gaap:RepaymentsOfRelatedPartyDebt",
-  ),
-  ("1650", "elimination_intercompany"): (
-    "rs-gaap:ProceedsFromSaleMaturityAndCollectionsOfInvestments",
-    "rs-gaap:PaymentsToAcquireInvestments",
-  ),
-  **{
-    (code, "elimination_investment"): _MEMBER_CAPITAL_FLOWS[form]
-    for form, code in _ELIMINATED_EQUITY_CODE.items()
-  },
-}
 
 # Accounts a member's template chart lacks and the group needs: (code, name,
 # trait, sub_classification, balance, rs-gaap target). The distributions row
@@ -510,68 +453,6 @@ class _Books:
     return (status or {}).get("closedThrough")
 
 
-class _Adjustments:
-  """The consolidation entity's cumulative balances, posted as deltas, one
-  entry per kind and member, so the engine reads what is held for each."""
-
-  def __init__(self, books: _Books) -> None:
-    self.books = books
-    # Debit-positive balances held per (code, kind, member).
-    self.held: dict[tuple[str, str, str], int] = {}
-
-  def bring_to(
-    self,
-    posting_date: date,
-    memo: str,
-    targets: dict[tuple[str, str, str], int],
-    names: dict[str, str],
-  ) -> int:
-    """Post the deltas to the targets; returns the entries posted. The deltas
-    that offset a flow carry its tag (``_ADJUSTMENT_FLOWS``) and post apart
-    from the untagged balances, so the both-lines rule never spreads a tag
-    onto a line that offsets nothing."""
-    groups: dict[tuple[str, str], tuple[list, list]] = {}
-    for key, target in targets.items():
-      delta = target - self.held.get(key, 0)
-      if not delta:
-        continue
-      code, kind, member = key
-      flows = _ADJUSTMENT_FLOWS.get((code, kind))
-      if delta > 0:
-        line = (code, delta, 0, flows[0] if flows else None)
-      else:
-        line = (code, 0, -delta, flows[1] if flows else None)
-      tagged, untagged = groups.setdefault((kind, member), ([], []))
-      (tagged if flows else untagged).append(line)
-      self.held[key] = target
-    posted = 0
-    for (kind, member), (tagged, untagged) in groups.items():
-      label = f"{memo} — {names[member]}"
-      if tagged:
-        self.books.post(posting_date, label, tagged, adjustment=(kind, member))
-        posted += 1
-      if untagged:
-        self.books.post(
-          posting_date,
-          f"{label} — intercompany balances",
-          untagged,
-          adjustment=(kind, member),
-        )
-        posted += 1
-    return posted
-
-  def activity(
-    self,
-    posting_date: date,
-    memo: str,
-    lines: list[tuple[str, int, int, str | None]],
-    *,
-    adjustment: tuple[str, str],
-    agent_id: str | None = None,
-  ) -> None:
-    self.books.post(posting_date, memo, lines, agent_id=agent_id, adjustment=adjustment)
-
-
 def _statement(
   api: _Api,
   statement_type: str,
@@ -609,10 +490,6 @@ def _row(statement: dict, qname: str, end: date) -> float | None:
 
 def _value(statement: dict, qname: str, end: date) -> float:
   return _row(statement, qname, end) or 0.0
-
-
-def _cents(statement: dict, qname: str, end: date) -> int:
-  return round(_value(statement, qname, end) * 100)
 
 
 def _ensure_entity(api: _Api, name: str, body: dict[str, Any]) -> tuple[str, bool]:
@@ -905,8 +782,8 @@ def _load(
     )
 
   # The consolidation entity presents its own form's cash flow rows, and its
-  # eliminations tag the rows the members' lines took (_MEMBER_CAPITAL_FLOWS),
-  # so a member of another form would need a consolidation entity on that form.
+  # eliminations tag the rows the members' lines took, so a member of another
+  # form would need a consolidation entity on that form.
   for member in group.members:
     if member.method == "cost" or (
       member.method == "equity"
@@ -1031,15 +908,12 @@ def _post_group(
   windows: list[tuple[date, date]],
 ) -> None:
   pa = group.parent
-  adjustments = _Adjustments(consolidation)
   demo_start = windows[0][0]
   last_index = len(windows) - 1
   parent_agent = agent_of[parent.entity_id]
 
-  # Running state per member, in cents.
+  # What each member owes the parent at the month end, in cents.
   due: dict[str, int] = {m.ticker: 0 for m in group.members}
-  distributions: dict[str, int] = {m.ticker: 0 for m in group.members}
-  nci_income: dict[str, int] = {m.ticker: 0 for m in group.members}
 
   # Formation. The founders fund the parent for the group, the parent forms
   # each member, and the outside owner puts in its share directly.
@@ -1227,92 +1101,17 @@ def _post_group(
           [(pa.cash, parent_part, 0, None), (investment, 0, parent_part, None)],
           agent_id=member_agent,
         )
-        distributions[member.ticker] += member.distribution
         count += 2
 
-      # The consolidating entries for the month: period activity as it is.
-      if fee or interest:
-        adjustments.activity(
-          end,
-          f"Eliminate intercompany charges — {member.name}",
-          [
-            ("4000", fee, 0, None),
-            ("5000", 0, fee, None),
-            ("4100", interest, 0, None),
-            ("5100", 0, interest, None),
-          ],
-          adjustment=("elimination_intercompany", books.entity_id),
-          agent_id=member_agent,
-        )
-        count += 1
-      if member.method == "equity":
-        income = _cents(
-          _statement(api, "income_statement", start, end, entity_id=books.entity_id),
-          "rs-gaap:NetIncomeLoss",
-          end,
-        )
-        pickup = _share(income, member.parent_share)
-        if pickup:
-          lines = (
-            [("1700", pickup, 0, None), ("4500", 0, pickup, None)]
-            if pickup > 0
-            else [("4500", -pickup, 0, None), ("1700", 0, -pickup, None)]
-          )
-          adjustments.activity(
-            end,
-            f"Share of {member.name}'s income — equity method",
-            lines,
-            adjustment=("equity_method_pickup", books.entity_id),
-          )
-          count += 1
-      elif member.outside_share:
-        income = _cents(
-          _statement(api, "income_statement", start, end, entity_id=books.entity_id),
-          "rs-gaap:NetIncomeLoss",
-          end,
-        )
-        share = _share(income, member.outside_share)
-        if share:
-          lines = (
-            [("5900", share, 0, None), ("3200", 0, share, None)]
-            if share > 0
-            else [("3200", -share, 0, None), ("5900", 0, -share, None)]
-          )
-          adjustments.activity(
-            end,
-            f"Share of {member.name}'s income attributable to {member.outside_owner}",
-            lines,
-            adjustment=("nci_allocation", books.entity_id),
-          )
-          nci_income[member.ticker] += share
-          count += 1
-
-    # The cumulative adjustments, brought to their month-end targets: the
-    # parent's investment against each member's contributed capital net of
-    # distributions, the outside owners' share of that capital, and the
-    # intercompany balances.
-    targets: dict[tuple[str, str, str], int] = {}
-    for member in group.members:
-      if member.method != "full":
-        continue
-      m = members[member.ticker].entity_id
-      capital = member.contributed_capital - distributions[member.ticker]
-      parent_part = _share(capital, member.parent_share)
-      eq = _ELIMINATED_EQUITY_CODE[member.entity_type]
-      investment, intercompany = "elimination_investment", "elimination_intercompany"
-      targets[(eq, investment, m)] = capital
-      targets[("1600", investment, m)] = -parent_part
-      targets[("3200", investment, m)] = -(capital - parent_part)
-      targets[("2150", intercompany, m)] = due[member.ticker]
-      targets[("1150", intercompany, m)] = -due[member.ticker]
-      targets[("2600", intercompany, m)] = member.note_from_parent
-      targets[("1650", intercompany, m)] = -member.note_from_parent
-    count += adjustments.bring_to(
-      end,
-      f"Consolidating entries at {_period(end)}",
-      targets,
-      {members[m.ticker].entity_id: m.name for m in group.members},
-    )
+    # The month's consolidating entries, drafted by the engine now that every
+    # side of it is in the books; the consolidation entity's close posts them.
+    proposed = api.operation("propose-consolidation-entries", {"period": _period(end)})
+    assert proposed is not None
+    count += len(proposed["entries"])
+    for residual in proposed["residuals"]:
+      print(f"  ⚠️  {_period(end)} residual: {residual['explanation']}")
+    for item in proposed["reconciling_items"]:
+      print(f"  ⚠️  {_period(end)} reconciling item: {item['description']}")
 
   print(f"  Activity:     {count} entries over {len(windows)} months, on every side")
 
