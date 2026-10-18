@@ -597,6 +597,28 @@ def test_a_member_outside_its_interval_is_not_consolidated(group):
   assert ASSOCIATE in adjusted
 
 
+def test_a_member_whose_books_are_not_read_leaves_the_month_open(group, monkeypatch):
+  """No chart mapping: the member's capital is not read as zero against the
+  parent's investment, and the month is not up to date."""
+  _form_the_group(group)
+  _january(group)
+  monkeypatch.setattr(
+    engine,
+    "find_entity_mapping",
+    lambda _s, entity_id, _f: (
+      None if entity_id == MEMBER else SimpleNamespace(id=group["mapping"])
+    ),
+  )
+  response = preview()
+
+  assert not response.residuals
+  assert ("elimination_investment", MEMBER) not in {
+    (p.adjustment_kind, p.adjusts_entity_id) for p in response.proposals
+  }
+  assert any("has no chart mapping" in n for n in response.notes)
+  assert not response.up_to_date
+
+
 def test_no_consolidation_entity_is_refused(group):
   with extensions_session(GRAPH) as session:
     session.execute(

@@ -158,6 +158,8 @@ class _Plan:
   reconciling: list[ConsolidationReconcilingItem] = field(default_factory=list)
   withheld: set[tuple[str, str]] = field(default_factory=set)
   notes: list[str] = field(default_factory=list)
+  # Something the month needs was left out, so it cannot be up to date.
+  incomplete: bool = False
 
 
 def month_bounds(period: str) -> tuple[date, date]:
@@ -606,10 +608,13 @@ def preview_consolidation_entries(
 
   plan = _Plan()
   mapping_ids: list[str] = []
+  unmapped: set[str] = set()
   for entity in [*consolidated, *associates, consolidation]:
     mapping = find_entity_mapping(session, entity.id, BOOK_FRAMEWORK)
     if mapping is None:
       plan.notes.append(f"{entity.name} has no chart mapping; its books are not read.")
+      plan.incomplete = True
+      unmapped.add(entity.id)
     else:
       mapping_ids.append(str(mapping.id))
   concepts = _primary_concepts(session, mapping_ids)
@@ -623,8 +628,11 @@ def preview_consolidation_entries(
 
   accounts = _posting_accounts(session, consolidation.id, concepts)
 
-  for member in members:
-    _plan_capital(plan, rows, parent, member)
+  # Unread books would read as zero capital: a residual that misnames the cause.
+  if parent.id not in unmapped:
+    for member in members:
+      if member.id not in unmapped:
+        _plan_capital(plan, rows, parent, member)
   _plan_intercompany(plan, rows, consolidated, set(accounts))
   _plan_income_shares(plan, rows, members, associates)
 
@@ -662,12 +670,14 @@ def preview_consolidation_entries(
         + ", ".join(missing)
         + f"; the {kind} entry for {by_id[member_id].name} is left out."
       )
+      plan.incomplete = True
       continue
     if sum(lines.values()):
       plan.notes.append(
         f"The {kind} entry for {by_id[member_id].name} does not balance against "
         "what is held; a hand entry of that kind may mix members."
       )
+      plan.incomplete = True
       continue
     name = by_id[member_id].name
     memo = _MEMOS.get(kind, kind).format(name=name)
@@ -706,5 +716,5 @@ def preview_consolidation_entries(
     residuals=plan.residuals,
     reconciling_items=plan.reconciling,
     notes=plan.notes,
-    up_to_date=not proposals and not plan.residuals,
+    up_to_date=not proposals and not plan.residuals and not plan.incomplete,
   )

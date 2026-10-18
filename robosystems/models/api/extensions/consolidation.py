@@ -107,7 +107,7 @@ class PreviewConsolidationEntriesResponse(BaseModel):
   up_to_date: bool = Field(
     ...,
     description=(
-      "True when nothing is proposed and nothing is withheld: the "
+      "True when nothing is proposed, withheld or left out: the "
       "consolidation entity already holds what the month needs."
     ),
   )
