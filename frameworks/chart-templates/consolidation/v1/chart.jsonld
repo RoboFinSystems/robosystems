@@ -52,6 +52,14 @@
       "documentation": "Reverses notes one member holds on another; carries a credit balance equal to the principal outstanding."
     },
     {
+      "code": "1700",
+      "label": "Investment in Associates — Equity-Method Adjustment",
+      "hasTrait": "trait:elementsOfFinancialStatements/asset",
+      "subClassification": "other_noncurrent_assets",
+      "balance": "debit",
+      "documentation": "Carries an equity-method member from the parent's cost to its share of the member's net assets: the parent's share of the member's income since the investment, less distributions the parent took as income."
+    },
+    {
       "code": "1800",
       "label": "Goodwill on Consolidation",
       "hasTrait": "trait:elementsOfFinancialStatements/asset",
@@ -138,6 +146,14 @@
       "subClassification": "non_operating_revenue",
       "balance": "credit",
       "documentation": "Reverses distributions a parent booked as income rather than as a return of its investment; carries a debit balance for the period."
+    },
+    {
+      "code": "4500",
+      "label": "Share of Associates' Income",
+      "hasTrait": "trait:elementsOfFinancialStatements/revenue",
+      "subClassification": "non_operating_revenue",
+      "balance": "credit",
+      "documentation": "The parent's share of an equity-method member's income for the period, picked up against the investment; a loss carries a debit balance."
     },
     {
       "code": "5000",

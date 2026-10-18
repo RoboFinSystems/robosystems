@@ -33,6 +33,10 @@
       "to": "rs-gaap:LongTermInvestmentsAndReceivablesNet"
     },
     {
+      "from": "1700",
+      "to": "rs-gaap:EquityMethodInvestments"
+    },
+    {
       "from": "1800",
       "to": "rs-gaap:Goodwill"
     },
@@ -71,6 +75,10 @@
     {
       "from": "4200",
       "to": "rs-gaap:OtherNonoperatingIncomeExpense"
+    },
+    {
+      "from": "4500",
+      "to": "rs-gaap:IncomeLossFromEquityMethodInvestments"
     },
     {
       "from": "5000",
