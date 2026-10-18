@@ -30,7 +30,8 @@ from robosystems.operations.roboledger.reports.fact_grid import (
 def _books_without_an_opening():
   """The sessions here are mocks, so no column is before the books."""
   with patch(
-    "robosystems.operations.roboledger.reads.reports.books_start", return_value=None
+    "robosystems.operations.roboledger.reports.fact_grid.books_start",
+    return_value=None,
   ):
     yield
 

@@ -18,6 +18,15 @@ from robosystems.operations.information_block import statement as statement_hand
 from robosystems.operations.information_block.registry import REGISTRY
 
 
+@pytest.fixture(autouse=True)
+def _books_from_the_start(monkeypatch):
+  """These sessions are mocks with scripted results: no entity's books start
+  from an opening balance."""
+  monkeypatch.setattr(
+    statement_handlers, "_columns_before_the_books", lambda *_a, **_k: set()
+  )
+
+
 def _exec_result(
   *,
   scalars_all: list[Any] | None = None,

@@ -1000,6 +1000,25 @@ class TestEquityStatementValidation:
     # The ending balance is not the sum of the changes; no foot warning.
     assert not any("does not match sum of children" in w for w in result.warnings)
 
+  def test_a_column_before_the_books_is_named_and_not_checked(self):
+    """The comparison column carries only the ending balance the balance
+    sheet holds; it reaches back before the books, so it is named once and
+    the roll-forward runs on the current column alone."""
+    rows = _equity_rows(120000.0, [5000.0], 125000.0)
+    for row in rows:
+      row.values.append(172550.70 if row.period_role == "end" else 0.0)
+    result = validate_report(
+      "equity_statement",
+      rows,
+      period_labels=["Current", "Prior"],
+      before_the_books={1},
+    )
+    assert (result.status, result.passed) == ("passed", True)
+    assert result.warnings == [
+      "Period 'Prior' starts before the books begin: it shows no activity and "
+      "is not checked"
+    ]
+
   def test_a_rollforward_that_misses_its_closing_balance_fails(self):
     """The gap the statement had when it read cash flows only: the owner's
     non-cash contribution and distribution missing."""
