@@ -1464,6 +1464,7 @@ def _emit_flow_facts(
           AND t.identifier IN ('investingActivity', 'financingActivity')
         WHERE li.flow_element_id IS NOT NULL
           AND en.status IN :landed_entry_statuses
+          AND en.type <> 'opening'
           AND (:entity_id IS NULL OR en.entity_id = :entity_id)
           AND en.posting_date BETWEEN :start AND :end
           AND (
@@ -1504,6 +1505,7 @@ def _emit_flow_facts(
           AND t.identifier IN ('investingActivity', 'financingActivity')
         WHERE li.flow_element_id IS NULL
           AND en.status IN :landed_entry_statuses
+          AND en.type <> 'opening'
           AND (:entity_id IS NULL OR en.entity_id = :entity_id)
           AND en.posting_date BETWEEN :start AND :end
           AND COALESCE(racct.qname, acct.qname) <> ALL(:cash_qnames)
@@ -1939,6 +1941,7 @@ def _emit_noncash_and_settlement_facts(
     LEFT JOIN elements c ON c.id = COALESCE(amap.to_element_id, li.element_id)
     LEFT JOIN events ev ON ev.id = en.triggered_by_event_id
     WHERE en.status IN :landed_entry_statuses
+      AND en.type <> 'opening'
       AND (:entity_id IS NULL OR en.entity_id = :entity_id)
       AND {{scope}}
   """)
@@ -2684,6 +2687,7 @@ def _emit_equity_movement_facts(
       AND fmap.structure_id = :mapping_id
     LEFT JOIN elements tag ON tag.id = COALESCE(fmap.to_element_id, li.flow_element_id)
     WHERE en.status IN :landed_entry_statuses
+      AND en.type <> 'opening'
       AND (:entity_id IS NULL OR en.entity_id = :entity_id)
       AND en.posting_date BETWEEN :start AND :end
       AND (target.id = ANY(:equity_ids) OR target.qname = ANY(:reducer_qnames))
@@ -2840,6 +2844,7 @@ def _emit_nci_movement_facts(
       AND fmap.structure_id = :mapping_id
     LEFT JOIN elements tag ON tag.id = COALESCE(fmap.to_element_id, li.flow_element_id)
     WHERE en.status IN :landed_entry_statuses
+      AND en.type <> 'opening'
       AND (:entity_id IS NULL OR en.entity_id = :entity_id)
       AND en.posting_date BETWEEN :start AND :end
       AND target.id = ANY(:nci_ids)

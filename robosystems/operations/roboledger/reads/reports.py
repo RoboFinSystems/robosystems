@@ -39,6 +39,7 @@ from robosystems.models.api.extensions.reports import (
 from robosystems.models.extensions import Entity, Report
 from robosystems.models.extensions.roboledger import Structure
 from robosystems.operations.aws.s3 import S3Client
+from robosystems.operations.roboledger.commands.opening_balances import books_start
 from robosystems.operations.roboledger.entity_scope import (
   GroupMember,
   find_entity_id,
@@ -1292,6 +1293,26 @@ def get_consolidation_worksheet(
   )
 
 
+def _before_the_books(
+  session: Session,
+  statement_type: str,
+  periods: list[FactPeriodSpec],
+  entity_ids: list[str],
+) -> set[int]:
+  """The columns that reach back before the books begin, by index: a flow
+  column starting before the first day an opening balance covers, or a
+  balance sheet dated before the opening itself. Such a column has no
+  activity to show for the months before the books, only a partial figure,
+  so it is left out rather than rendered."""
+  start = books_start(session, entity_ids)
+  if start is None:
+    return set()
+  opening = start - timedelta(days=1)
+  if statement_type == "balance_sheet":
+    return {i for i, p in enumerate(periods) if p.end < opening}
+  return {i for i, p in enumerate(periods) if p.start < start}
+
+
 def get_live_financial_statement(
   session: Session,
   *,
@@ -1346,6 +1367,21 @@ def get_live_financial_statement(
       reporting_style_id=reporting_style_id,
       entity_id=entity_id,
     )
+  omitted = _before_the_books(
+    session,
+    statement_type,
+    periods,
+    combined_entity_ids or [entity_id],
+  )
+  if omitted:
+    keep = [i for i in range(len(periods)) if i not in omitted]
+    for row in grid.rows:
+      row.values = [row.values[i] for i in keep if i < len(row.values)]
+    omitted_periods = [periods[i] for i in sorted(omitted)]
+    periods = [periods[i] for i in keep]
+  else:
+    omitted_periods = []
+
   # Validate the full grid: all-zero children still foot their subtotals.
   validation = validate_report(
     statement_type,
@@ -1353,6 +1389,14 @@ def get_live_financial_statement(
     period_labels=[p.label for p in periods],
     warnings=grid.warnings,
   )
+  if not periods:
+    # Nothing left to check is not a pass.
+    validation.passed = False
+    validation.status = "inconclusive"
+    validation.warnings = [
+      "Every column reaches back before the books begin; record the window "
+      "from the first month the books cover."
+    ]
 
   facts: list[LiveStatementFactRow] = []
   for row in grid.rows:
@@ -1388,6 +1432,9 @@ def get_live_financial_statement(
     combined_entity_ids=combined_entity_ids,
     statement_type=statement_type,
     periods=[PeriodSpec(start=p.start, end=p.end, label=p.label) for p in periods],
+    omitted_periods=[
+      PeriodSpec(start=p.start, end=p.end, label=p.label) for p in omitted_periods
+    ],
     facts=facts,
     fact_count=len(facts),
     validation=ValidationCheckResponse(

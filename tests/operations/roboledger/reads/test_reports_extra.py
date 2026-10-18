@@ -26,6 +26,15 @@ from robosystems.operations.roboledger.reports.fact_grid import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _books_without_an_opening():
+  """The sessions here are mocks, so no column is before the books."""
+  with patch(
+    "robosystems.operations.roboledger.reads.reports.books_start", return_value=None
+  ):
+    yield
+
+
 class TestResolveReportingWindow:
   @pytest.mark.unit
   def test_explicit_dates_win(self):

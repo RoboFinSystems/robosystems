@@ -143,8 +143,11 @@ _INITIATE_SEQUENCE: list[str] = [
   "(a new graph, or a new subsidiary): set it up with "
   "initialize-fiscal-calendar, deciding with the user where these books "
   "start. New or cut-over books pass first_open_period, the first month "
-  "they close (a cutover's opening entry goes in that month, so it must be "
-  "open); books whose history was closed in another system pass "
+  "they close, the month after the cutover; the balance sheet on the "
+  "cutover date is then recorded with record-opening-balance, dated the day "
+  "before that month, never as a journal entry inside it (the statements "
+  "would read it as a month of activity); books whose history was closed in "
+  "another system pass "
   "closed_through, the last month closed there. One-time; until the first "
   "close, change-calendar-start moves the start (earlier for history that "
   "predates it, later to drop empty months).",

@@ -42,6 +42,7 @@ from robosystems.models.api.extensions.agent import (
 from robosystems.models.api.extensions.journal_entries import (
   DeleteJournalEntryRequest,
   JournalEntryResponse,
+  RecordOpeningBalanceRequest,
   UpdateJournalEntryRequest,
 )
 from robosystems.models.api.extensions.reconciliations import (
@@ -136,6 +137,13 @@ from robosystems.operations.roboledger.commands.journal_entries import (
 )
 from robosystems.operations.roboledger.commands.journal_entries import (
   update_journal_entry as cmd_update_journal_entry,
+)
+from robosystems.operations.roboledger.commands.opening_balances import (
+  OpeningBalanceError,
+  OpeningBalanceLockedError,
+)
+from robosystems.operations.roboledger.commands.opening_balances import (
+  record_opening_balance as cmd_record_opening_balance,
 )
 from robosystems.operations.roboledger.commands.reconciliations import (
   NotAGraphMemberError,
@@ -769,7 +777,43 @@ sign_off_reconciliation_op = _registrar.register(
 
 # ── Journal Entries ──────────────────────────────────────────────────────────
 # Update/delete only: all creation goes through
-# `create-event-block(event_type='journal_entry_recorded')`.
+# `create-event-block(event_type='journal_entry_recorded')`, except the
+# opening balance, which has an operation of its own.
+
+record_opening_balance_op = _registrar.register(
+  OperationSpec(
+    name="record-opening-balance",
+    summary="Record Opening Balance",
+    description=(
+      "Record the balance sheet an entity's books start from, when its "
+      "history does not come with them: one balance per balance-sheet "
+      "account (assets, liabilities, equity), in cents, debit or credit in "
+      "the account's normal direction. It posts as one `opening` entry dated "
+      "the day before the entity's first fiscal month, so every month's "
+      "opening balances include it and no month's activity does: the cash "
+      "flow and the equity statement start from it rather than counting it. "
+      "Name the equity account that takes any difference between debits and "
+      "credits (`equity_element_id`, usually Opening Balance Equity); "
+      "unbalanced balances without one are refused, and an income or expense "
+      "account is refused, since income before the books begin is in "
+      "retained earnings. One per entity: recording it again replaces it, "
+      "until the entity's first close, after which a correction is an "
+      "adjusting entry in an open month. Set up the fiscal calendar first; "
+      "moving its start (change-calendar-start) moves the opening with it."
+    ),
+    command=cmd_record_opening_balance,
+    request_model=RecordOpeningBalanceRequest,
+    result_type=JournalEntryResponse,
+    error_map={
+      EntityNotInGraphError: 404,
+      OpeningBalanceLockedError: 409,
+      RowLockedError: 409,
+      OpeningBalanceError: 422,
+      ValueError: 422,
+    },
+    mark_stale_reason="opening_balance_recorded",
+  )
+)
 
 update_journal_entry_op = _registrar.register(
   OperationSpec(

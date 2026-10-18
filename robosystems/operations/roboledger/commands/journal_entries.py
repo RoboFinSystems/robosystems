@@ -805,6 +805,13 @@ def reverse_journal_entry(
     raise JournalEntryNotFoundError(body.entry_id)
   if original.status != "posted":
     raise JournalEntryNotPostedError(original.id, original.status)
+  if original.type == "opening":
+    # Reversed, the books' starting balances would post as a month's activity.
+    raise ValueError(
+      f"Journal entry {original.id} is the opening balance; record it again "
+      "with record-opening-balance before the first close, or correct it with "
+      "an adjusting entry after."
+    )
 
   existing_reversal = session.execute(
     select(Entry.id).where(Entry.reversal_of == original.id)

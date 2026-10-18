@@ -1845,6 +1845,47 @@ def initialize_fiscal_calendar(graph_id: str, scenario: Scenario) -> str:
   return last_completed
 
 
+def record_opening_balances(
+  graph_id: str, scenario: Scenario, element_lookup: dict[str, str]
+) -> int:
+  """The founding balance sheet as the books' opening balance, through
+  ``record-opening-balance``: dated the day before the first month, so the
+  statements start from it rather than reading it as a month's activity.
+  Returns the number of accounts it carries."""
+  import httpx
+
+  net: dict[str, int] = {}
+  for _, _, _, _, lines in scenario.opening:
+    for code, debit, credit in lines:
+      net[code] = net.get(code, 0) + debit - credit
+  balances = [
+    {
+      "element_id": element_lookup[code],
+      "debit_amount": amount if amount > 0 else 0,
+      "credit_amount": -amount if amount < 0 else 0,
+    }
+    for code, amount in net.items()
+    if amount
+  ]
+  if not balances:
+    return 0
+  memo = scenario.opening[0][2]
+  resp = httpx.post(
+    f"{BASE_URL}/extensions/roboledger/{graph_id}/operations/record-opening-balance",
+    json={"balances": balances, "memo": memo},
+    headers={
+      "X-API-Key": _client_config()["token"],
+      "Content-Type": "application/json",
+    },
+    timeout=60.0,
+  )
+  if resp.status_code >= 400:
+    raise RuntimeError(
+      f"record-opening-balance -> HTTP {resp.status_code}: {resp.text[:300]}"
+    )
+  return len(balances)
+
+
 # ---------------------------------------------------------------------------
 # Step 4b: Create schedules (via HTTP API)
 # ---------------------------------------------------------------------------
@@ -2324,8 +2365,13 @@ def run_demo(
   # Create business events (via HTTP API — exercises typed event vocabulary:
   # invoice_issued, payment_received, bill_received, bill_paid,
   # journal_entry_recorded — with REA duality chains)
-  print(f"\nCreating {len(txns)} business events...")
-  entry_counts = create_business_events(graph_id, txns, element_lookup, agent_lookup)
+  # The founding balance sheet is the books' opening balance, recorded once
+  # the calendar exists; everything else is activity.
+  activity = [t for t in txns if t not in scenario.opening]
+  print(f"\nCreating {len(activity)} business events...")
+  entry_counts = create_business_events(
+    graph_id, activity, element_lookup, agent_lookup
+  )
   print(f"  Events:       {entry_counts['entries']}")
   print(f"  Line Items:   {entry_counts['line_items']}")
   for event_type, count in entry_counts["events_by_type"].items():
@@ -2370,6 +2416,11 @@ def run_demo(
   # Initialize fiscal calendar (via HTTP API — exercises initialize op)
   print("\nInitializing fiscal calendar...")
   close_target = initialize_fiscal_calendar(graph_id, scenario)
+
+  if scenario.opening:
+    print("\nRecording the opening balance...")
+    carried = record_opening_balances(graph_id, scenario, element_lookup)
+    print(f"  Accounts:     {carried} (dated the day before the first month)")
 
   # Close the completed history — closing stamps each month's canonical
   # statement FactSets (the monthly series the metrics, forecast, and
