@@ -398,6 +398,13 @@ def _consolidation_lines(adjustments: Sequence[Mapping[str, Any]], has) -> list[
       "`adjustment_kind` and `adjusts_entity_id` in the journal entry's "
       "metadata, so it counts toward what is held."
     )
+  if adjustments and has("propose-consolidation-entries"):
+    lines.append(
+      "- `propose-consolidation-entries(period)` writes them as drafts in the "
+      "consolidation entity, replacing its own earlier drafts of the month; "
+      "the consolidation entity's close posts them. A residual is returned "
+      "beside them, never plugged: explain it or post it by hand with a basis."
+    )
   if adjustments and has("update-journal-entry"):
     lines.append(
       "- A line of the consolidation entity that carries a `flow_qname` counts "

@@ -17,6 +17,13 @@ from sqlalchemy.exc import OperationalError
 import robosystems.models.extensions  # noqa: F401  (register models on the Base)
 from robosystems.config import env
 from robosystems.db.extensions import ExtensionsBase, extensions_session
+from robosystems.models.api.extensions.consolidation import (
+  ProposeConsolidationEntriesRequest,
+)
+from robosystems.models.api.extensions.entity import (
+  CreateEntityRequest,
+  UpdateEntityRequest,
+)
 from robosystems.models.api.extensions.journal_entries import (
   CreateJournalEntryRequest,
   JournalEntryLineItemInput,
@@ -24,12 +31,20 @@ from robosystems.models.api.extensions.journal_entries import (
 from robosystems.models.extensions import Element, Entity
 from robosystems.models.extensions.association import Association
 from robosystems.models.extensions.element_trait import ElementTrait
-from robosystems.models.extensions.roboledger import Entry, LineItem
+from robosystems.models.extensions.roboledger import Entry, FiscalCalendar, LineItem
 from robosystems.models.extensions.roboledger.agent import Agent
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.structure import Structure
 from robosystems.models.extensions.taxonomy import Taxonomy
 from robosystems.models.extensions.trait import Trait
+from robosystems.operations.roboledger.commands.consolidation import (
+  propose_consolidation_entries,
+)
+from robosystems.operations.roboledger.commands.entity import (
+  ConsolidatedHistoryError,
+  create_entity,
+  update_entity,
+)
 from robosystems.operations.roboledger.commands.journal_entries import (
   ConsolidationAdjustmentError,
   create_journal_entry,
@@ -338,17 +353,34 @@ def preview(period: str = "2026-01"):
     return engine.preview_consolidation_entries(session, period=period)
 
 
-def _lines(response, kind: str, *, charges: bool | None = None) -> dict[str, int]:
-  """``{concept: debit-positive cents}`` of the one proposal of ``kind``."""
+def _proposal(
+  response, kind: str, *, charges: bool | None = None, flows: bool | None = None
+):
+  """The one proposal of ``kind``; intercompany ones split by ``charges``
+  (the month's income and expense) and ``flows`` (the lines offsetting a
+  cash flow, posted apart from the rest)."""
   found = [
     p
     for p in response.proposals
     if p.adjustment_kind == kind
     and (charges is None or ("charges" in p.memo) == charges)
+    and (flows is None or ("cash flows" in p.memo) == flows)
   ]
   assert len(found) == 1, [p.memo for p in response.proposals]
+  return found[0]
+
+
+def _lines(response, kind: str, **which: bool) -> dict[str, int]:
+  """``{concept: debit-positive cents}`` of the one proposal of ``kind``."""
   return {
-    line.concept: line.debit_amount - line.credit_amount for line in found[0].lines
+    line.concept: line.debit_amount - line.credit_amount
+    for line in _proposal(response, kind, **which).lines
+  }
+
+
+def _flows(response, kind: str, **which: bool) -> dict[str, str | None]:
+  return {
+    line.concept: line.flow_qname for line in _proposal(response, kind, **which).lines
   }
 
 
@@ -366,10 +398,13 @@ def test_the_month_needs_every_kind_from_the_books(group):
     engine.INVESTMENT_IN_SUBSIDIARIES: -630_000,
     engine.NONCONTROLLING_INTEREST: -270_000,
   }
-  # The 175 owed (fee, interest and the rebill) and the note, on both sides.
-  assert _lines(response, "elimination_intercompany", charges=False) == {
+  # The 175 owed (fee, interest and the rebill) and the note, on both sides:
+  # the note offsets the cash it moved, so it posts apart.
+  assert _lines(response, "elimination_intercompany", charges=False, flows=False) == {
     "rs-gaap:DueToAffiliateCurrent": 17_500,
     "rs-gaap:DueFromAffiliateCurrent": -17_500,
+  }
+  assert _lines(response, "elimination_intercompany", flows=True) == {
     "rs-gaap:LongTermDebtAndCapitalLeaseObligations": 500_000,
     "rs-gaap:LongTermInvestmentsAndReceivablesNet": -500_000,
   }
@@ -400,6 +435,37 @@ def test_the_month_needs_every_kind_from_the_books(group):
   )
   assert equity_line.element_id == group["accounts"][(ADJUSTMENTS, "3020")]
   assert not response.up_to_date
+
+
+def test_eliminations_carry_the_flow_they_offset(group):
+  """Each eliminating line takes the cash flow row the member's own line
+  produced, so the consolidated cash flow nets it; the outside owners' share
+  is the group's real flow. The month's income and expense move no tagged
+  cash."""
+  _form_the_group(group)
+  _january(group)
+  response = preview()
+
+  assert _flows(response, "elimination_investment") == {
+    "rs-gaap:MembersEquity": "rs-gaap:ProceedsFromContributedCapital",
+    engine.INVESTMENT_IN_SUBSIDIARIES: (
+      "rs-gaap:PaymentsToAcquireInterestInSubsidiariesAndAffiliates"
+    ),
+    engine.NONCONTROLLING_INTEREST: "rs-gaap:ProceedsFromMinorityShareholders",
+  }
+  assert _flows(response, "elimination_intercompany", flows=True) == {
+    "rs-gaap:LongTermDebtAndCapitalLeaseObligations": (
+      "rs-gaap:ProceedsFromRelatedPartyDebt"
+    ),
+    "rs-gaap:LongTermInvestmentsAndReceivablesNet": "rs-gaap:PaymentsToAcquireInvestments",
+  }
+  for kind, which in (
+    ("elimination_intercompany", {"charges": False, "flows": False}),
+    ("elimination_intercompany", {"charges": True}),
+    ("nci_allocation", {}),
+    ("equity_method_pickup", {}),
+  ):
+    assert set(_flows(response, kind, **which).values()) == {None}
 
 
 def _post_proposals(group: dict, response) -> None:
@@ -576,7 +642,7 @@ def test_balances_the_two_sides_disagree_on_are_reconciling_items(group):
   )
   response = preview()
 
-  balances = _lines(response, "elimination_intercompany", charges=False)
+  balances = _lines(response, "elimination_intercompany", charges=False, flows=False)
   assert balances["rs-gaap:DueFromAffiliateCurrent"] == -15_000
   assert balances["rs-gaap:DueToAffiliateCurrent"] == 15_000
   assert [(i.entity_id, i.concept, i.amount) for i in response.reconciling_items] == [
@@ -617,6 +683,140 @@ def test_a_member_whose_books_are_not_read_leaves_the_month_open(group, monkeypa
   }
   assert any("has no chart mapping" in n for n in response.notes)
   assert not response.up_to_date
+
+
+def _close_the_consolidation_entity_through(period: str) -> None:
+  with extensions_session(GRAPH) as session:
+    session.add(
+      FiscalCalendar(
+        graph_id=GRAPH,
+        entity_id=ADJUSTMENTS,
+        closed_through_period=period,
+        close_target_period=period,
+      )
+    )
+
+
+def test_a_closed_month_is_as_posted(group):
+  _form_the_group(group)
+  _january(group)
+  _close_the_consolidation_entity_through("2026-01")
+  response = preview()
+
+  assert response.closed
+  assert response.up_to_date
+  assert response.proposals == []
+  with extensions_session(GRAPH) as session:
+    drafted = propose_consolidation_entries(
+      session, ProposeConsolidationEntriesRequest(period="2026-01"), "test"
+    )
+  assert drafted.closed
+  assert drafted.entries == []
+
+
+def _draft_memos() -> list[str]:
+  with extensions_session(GRAPH) as session:
+    return [
+      e.memo
+      for e in session.query(Entry).filter(
+        Entry.entity_id == ADJUSTMENTS, Entry.status == "draft"
+      )
+    ]
+
+
+def _propose():
+  with extensions_session(GRAPH) as session:
+    return propose_consolidation_entries(
+      session, ProposeConsolidationEntriesRequest(period="2026-01"), "test"
+    )
+
+
+def test_proposing_drafts_the_month_and_replaces_its_own_drafts(group, monkeypatch):
+  """The proposals become drafts in the consolidation entity; proposing again
+  replaces them, never a person's; once close posts them the month is up to
+  date."""
+  # The test library has no flow concepts to resolve the tags against.
+  monkeypatch.setattr(engine, "_FLOWS", {})
+  _form_the_group(group)
+  _january(group)
+  with extensions_session(GRAPH) as session:
+    create_journal_entry(
+      session,
+      CreateJournalEntryRequest(
+        posting_date=JAN_31,
+        memo="A person's draft",
+        adjustment_kind="manual",
+        line_items=[
+          JournalEntryLineItemInput(
+            element_id=group["accounts"][(ADJUSTMENTS, "5000")], debit_amount=100
+          ),
+          JournalEntryLineItemInput(
+            element_id=group["accounts"][(ADJUSTMENTS, "2150")], credit_amount=100
+          ),
+        ],
+      ),
+      "test",
+      entity_id=ADJUSTMENTS,
+    )
+  expected = len(preview().proposals)
+
+  first = _propose()
+  assert len(first.entries) == expected
+  assert first.replaced == 0
+  assert {e.status for e in first.entries} == {"draft"}
+  assert set(preview().drafted_entry_ids) == {e.id for e in first.entries}
+  # Drafts are not held until close posts them: the proposals stand.
+  assert len(preview().proposals) == expected
+
+  second = _propose()
+  assert second.replaced == expected
+  assert len(second.entries) == expected
+  memos = _draft_memos()
+  assert len(memos) == expected + 1
+  assert "A person's draft" in memos
+
+  with extensions_session(GRAPH) as session:
+    session.execute(
+      text(
+        "UPDATE entries SET status = 'posted' WHERE entity_id = :e "
+        "AND adjustment_kind <> 'manual'"
+      ),
+      {"e": ADJUSTMENTS},
+    )
+  assert preview().up_to_date
+
+
+def test_a_new_member_gets_its_own_counterparty(group):
+  """create-entity adds the ``self`` agent an intercompany event names, for
+  the member and, once, for the group parent."""
+  with extensions_session(GRAPH) as session:
+    created = create_entity(
+      session, CreateEntityRequest(name="New Member LLC", ownership_pct=60), "test"
+    )
+  with extensions_session(GRAPH) as session:
+    selves = session.execute(
+      text("SELECT external_id FROM agents WHERE agent_type = 'self'")
+    ).scalars()
+    counts: dict[str, int] = {}
+    for external_id in selves:
+      counts[external_id] = counts.get(external_id, 0) + 1
+  assert counts[created.id] == 1
+  assert counts[PARENT_ENTITY_ID] == 1
+
+
+def test_a_method_change_is_refused_once_the_group_has_closed(group):
+  """Whether a member is summed is not an entry, so a closed month cannot
+  hold it; a share that keeps the method changes freely."""
+  _close_the_consolidation_entity_through("2026-01")
+  with extensions_session(GRAPH) as session:
+    updated = update_entity(
+      session, UpdateEntityRequest(entity_id=MEMBER, ownership_pct=85), "test"
+    )
+  assert updated.consolidation_method == "full"
+  with extensions_session(GRAPH) as session, pytest.raises(ConsolidatedHistoryError):
+    update_entity(
+      session, UpdateEntityRequest(entity_id=ASSOCIATE, ownership_pct=60), "test"
+    )
 
 
 def test_no_consolidation_entity_is_refused(group):

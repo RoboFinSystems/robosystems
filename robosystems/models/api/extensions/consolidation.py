@@ -7,17 +7,28 @@ from datetime import date
 
 from pydantic import BaseModel, Field
 
-from robosystems.models.api.extensions.journal_entries import AdjustmentKind
+from robosystems.models.api.extensions.journal_entries import (
+  AdjustmentKind,
+  JournalEntryResponse,
+)
+
+_PERIOD = Field(
+  ...,
+  pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
+  description="The month, as YYYY-MM.",
+)
 
 
 class PreviewConsolidationEntriesRequest(BaseModel):
   """The month to compute the consolidating entries for."""
 
-  period: str = Field(
-    ...,
-    pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
-    description="The month, as YYYY-MM.",
-  )
+  period: str = _PERIOD
+
+
+class ProposeConsolidationEntriesRequest(BaseModel):
+  """The month to draft the consolidating entries for."""
+
+  period: str = _PERIOD
 
 
 class ConsolidationProposalLine(BaseModel):
@@ -29,6 +40,13 @@ class ConsolidationProposalLine(BaseModel):
   concept: str = Field(..., description="The rs-gaap concept the account maps to.")
   debit_amount: int = Field(0, description="Debit, in cents.")
   credit_amount: int = Field(0, description="Credit, in cents.")
+  flow_qname: str | None = Field(
+    None,
+    description=(
+      "The cash flow row the line offsets, when it eliminates one: the row "
+      "the member's own line produced, so the consolidated cash flow nets it."
+    ),
+  )
 
 
 class ConsolidationProposal(BaseModel):
@@ -110,4 +128,47 @@ class PreviewConsolidationEntriesResponse(BaseModel):
       "True when nothing is proposed, withheld or left out: the "
       "consolidation entity already holds what the month needs."
     ),
+  )
+  closed: bool = Field(
+    False,
+    description=(
+      "True when the consolidation entity has closed the month: its entries "
+      "are as posted, and nothing is recomputed."
+    ),
+  )
+  drafted_entry_ids: list[str] = Field(
+    default_factory=list,
+    description=(
+      "The month's drafts propose-consolidation-entries wrote, waiting for "
+      "the consolidation entity's close to post them."
+    ),
+  )
+
+
+class ProposeConsolidationEntriesResponse(BaseModel):
+  """The consolidating entries drafted for a month."""
+
+  period: str = Field(..., description="The month, as YYYY-MM.")
+  consolidation_entity_id: str = Field(..., description="The entity the drafts are in.")
+  closed: bool = Field(
+    False, description="True when the month is closed and nothing was drafted."
+  )
+  entries: list[JournalEntryResponse] = Field(
+    default_factory=list,
+    description="The drafts written; the consolidation entity's close posts them.",
+  )
+  replaced: int = Field(
+    0, description="Earlier drafts of this month's entries, replaced by these."
+  )
+  residuals: list[ConsolidationResidual] = Field(
+    default_factory=list,
+    description="Differences withheld from the drafts until explained.",
+  )
+  reconciling_items: list[ConsolidationReconcilingItem] = Field(
+    default_factory=list,
+    description="Intercompany figures the two sides do not agree on.",
+  )
+  notes: list[str] = Field(
+    default_factory=list,
+    description="Anything the engine left out, and why.",
   )

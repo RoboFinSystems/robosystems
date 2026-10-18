@@ -89,6 +89,8 @@ WRITE_TOOL_HINTS: dict[str, ToolHints] = {
   "delete-journal-entry": _REPLACES,
   # Replaces the entity's one opening balance, until its first close.
   "record-opening-balance": _REPLACES,
+  # Replaces the month's drafts it wrote before.
+  "propose-consolidation-entries": _REPLACES,
   "create-event-handler": _ADDS,
   "update-event-handler": _REPLACES,
   # Schedules.

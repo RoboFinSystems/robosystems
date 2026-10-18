@@ -31,7 +31,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date
 
-from sqlalchemy import bindparam, text
+from sqlalchemy import bindparam, select, text
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.consolidation import (
@@ -41,6 +41,8 @@ from robosystems.models.api.extensions.consolidation import (
   ConsolidationResidual,
   PreviewConsolidationEntriesResponse,
 )
+from robosystems.models.extensions.roboledger import Entry
+from robosystems.operations.roboledger.commands._guards import closed_periods
 from robosystems.operations.roboledger.entity_scope import (
   GroupMember,
   resolve_entity_id,
@@ -48,6 +50,10 @@ from robosystems.operations.roboledger.entity_scope import (
 from robosystems.operations.roboledger.entry_status import landed_entry_bindparam
 from robosystems.operations.roboledger.reports.fact_grid import (
   _infer_classification,
+)
+from robosystems.operations.roboledger.reports.network_picker import (
+  load_entity_reporting_style,
+  taggable_flow_qnames,
 )
 from robosystems.operations.taxonomy_block.coa_mappings import (
   BOOK_FRAMEWORK,
@@ -107,6 +113,72 @@ COMPUTED_KINDS = frozenset(
     "equity_method_pickup",
   }
 )
+
+
+# The cash flow row a cumulative elimination's line takes, by concept and kind,
+# for a debit and for a credit: the row the line it eliminates produced, so the
+# consolidation entity's tagged line offsets it (a credit is an inflow). The
+# outside owners' share of capital is the group's real flow, on the
+# noncontrolling-interest rows. A concept not here moves no tagged cash.
+_FLOWS: dict[tuple[str, str], tuple[str, str]] = {
+  (INVESTMENT_IN_SUBSIDIARIES, "elimination_investment"): (
+    "rs-gaap:ProceedsFromDivestitureOfInterestInSubsidiariesAndAffiliates",
+    "rs-gaap:PaymentsToAcquireInterestInSubsidiariesAndAffiliates",
+  ),
+  (NONCONTROLLING_INTEREST, "elimination_investment"): (
+    "rs-gaap:PaymentsToMinorityShareholders",
+    "rs-gaap:ProceedsFromMinorityShareholders",
+  ),
+  ("rs-gaap:MembersEquity", "elimination_investment"): (
+    "rs-gaap:ProceedsFromContributedCapital",
+    "rs-gaap:PaymentsOfCapitalDistribution",
+  ),
+  ("rs-gaap:PartnersCapital", "elimination_investment"): (
+    "rs-gaap:ProceedsFromPartnershipContribution",
+    "rs-gaap:PaymentsOfCapitalDistribution",
+  ),
+  ("rs-gaap:AdditionalPaidInCapital", "elimination_investment"): (
+    "rs-gaap:ProceedsFromIssuanceOfCommonStock",
+    "rs-gaap:PaymentsOfDividends",
+  ),
+  ("rs-gaap:LongTermDebtAndCapitalLeaseObligations", "elimination_intercompany"): (
+    "rs-gaap:ProceedsFromRelatedPartyDebt",
+    "rs-gaap:RepaymentsOfRelatedPartyDebt",
+  ),
+  ("rs-gaap:LongTermInvestmentsAndReceivablesNet", "elimination_intercompany"): (
+    "rs-gaap:ProceedsFromSaleMaturityAndCollectionsOfInvestments",
+    "rs-gaap:PaymentsToAcquireInvestments",
+  ),
+}
+
+# The engine's drafts: computed, and written by propose-consolidation-entries.
+ENGINE_SOURCE = "system"
+ENGINE_PROVENANCE = "system_computed"
+
+
+def engine_drafts(
+  session: Session, consolidation_id: str, start: date, end: date
+) -> list[Entry]:
+  """The month's drafts the engine wrote in the consolidation entity."""
+  return list(
+    session.execute(
+      select(Entry).where(
+        Entry.entity_id == consolidation_id,
+        Entry.status == "draft",
+        Entry.provenance == ENGINE_PROVENANCE,
+        Entry.adjustment_kind.in_(COMPUTED_KINDS),
+        Entry.posting_date >= start,
+        Entry.posting_date <= end,
+      )
+    ).scalars()
+  )
+
+
+def _flow(qname: str, kind: str, amount: int) -> str | None:
+  flows = _FLOWS.get((qname, kind))
+  if flows is None:
+    return None
+  return flows[0] if amount > 0 else flows[1]
 
 
 class NoConsolidationEntityError(ValueError):
@@ -597,6 +669,19 @@ def preview_consolidation_entries(
       "This group has no consolidation entity; create one with "
       "entity_role 'consolidation' for its consolidating entries."
     )
+  if closed_periods(session, [end], entity_id=consolidation.id):
+    return PreviewConsolidationEntriesResponse(
+      period=period,
+      period_start=start,
+      period_end=end,
+      consolidation_entity_id=consolidation.id,
+      notes=[
+        f"{consolidation.name} has closed {period}; its consolidating entries "
+        "are as posted."
+      ],
+      up_to_date=True,
+      closed=True,
+    )
   parent = by_id[parent_id]
   operating = [e for e in entities if e.role != "consolidation"]
   in_month = [
@@ -627,6 +712,12 @@ def preview_consolidation_entries(
   )
 
   accounts = _posting_accounts(session, consolidation.id, concepts)
+  # The rows the consolidation entity's own statement presents; none is a
+  # Style read by trait alone.
+  taggable = taggable_flow_qnames(
+    session, load_entity_reporting_style(session, consolidation.id)
+  )
+  untaggable: set[str] = set()
 
   # Unread books would read as zero capital: a residual that misnames the cause.
   if parent.id not in unmapped:
@@ -686,27 +777,49 @@ def preview_consolidation_entries(
     basis = plan.basis.get((kind, member_id, periodic)) or [
       f"Reverses {kind} held for {name} that the books no longer support."
     ]
-    proposals.append(
-      ConsolidationProposal(
-        adjustment_kind=kind,
-        adjusts_entity_id=member_id,
-        adjusts_entity_name=name,
-        posting_date=end,
-        memo=f"{memo} ({period})",
-        basis=" ".join(basis),
-        lines=[
-          ConsolidationProposalLine(
-            element_id=accounts[qname][0],
-            account_name=accounts[qname][1],
-            concept=qname,
-            debit_amount=max(amount, 0),
-            credit_amount=max(-amount, 0),
-          )
-          for qname, amount in sorted(lines.items(), key=lambda kv: -kv[1])
-        ],
-      )
+    flows = {q: None if periodic else _flow(q, kind, a) for q, a in lines.items()}
+    for q, flow in flows.items():
+      if flow and taggable and flow not in taggable:
+        untaggable.add(flow)
+        flows[q] = None
+    tagged = {q: a for q, a in lines.items() if flows[q]}
+    untagged = {q: a for q, a in lines.items() if not flows[q]}
+    # Tagged and untagged lines post apart when each part balances, so the
+    # both-lines rule never spreads a tag onto a line that offsets no flow.
+    parts = (
+      [(tagged, " — cash flows"), (untagged, "")]
+      if tagged and untagged and not sum(tagged.values())
+      else [(lines, "")]
     )
+    for part, suffix in parts:
+      proposals.append(
+        ConsolidationProposal(
+          adjustment_kind=kind,
+          adjusts_entity_id=member_id,
+          adjusts_entity_name=name,
+          posting_date=end,
+          memo=f"{memo}{suffix} ({period})",
+          basis=" ".join(basis),
+          lines=[
+            ConsolidationProposalLine(
+              element_id=accounts[qname][0],
+              account_name=accounts[qname][1],
+              concept=qname,
+              debit_amount=max(amount, 0),
+              credit_amount=max(-amount, 0),
+              flow_qname=flows[qname],
+            )
+            for qname, amount in sorted(part.items(), key=lambda kv: -kv[1])
+          ],
+        )
+      )
 
+  if untaggable:
+    plan.notes.append(
+      f"{consolidation.name}'s cash flow statement has no "
+      + ", ".join(sorted(untaggable))
+      + " row; the lines that would offset it are left untagged."
+    )
   return PreviewConsolidationEntriesResponse(
     period=period,
     period_start=start,
@@ -717,4 +830,7 @@ def preview_consolidation_entries(
     reconciling_items=plan.reconciling,
     notes=plan.notes,
     up_to_date=not proposals and not plan.residuals and not plan.incomplete,
+    drafted_entry_ids=[
+      str(e.id) for e in engine_drafts(session, consolidation.id, start, end)
+    ],
   )

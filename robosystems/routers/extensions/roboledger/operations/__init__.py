@@ -155,6 +155,9 @@ from robosystems.routers.extensions.roboledger.operations.ledger import (
   preview_reconciling_item_op as preview_reconciling_item_op,
 )
 from robosystems.routers.extensions.roboledger.operations.ledger import (
+  propose_consolidation_entries_op as propose_consolidation_entries_op,
+)
+from robosystems.routers.extensions.roboledger.operations.ledger import (
   record_opening_balance_op as record_opening_balance_op,
 )
 from robosystems.routers.extensions.roboledger.operations.ledger import (
