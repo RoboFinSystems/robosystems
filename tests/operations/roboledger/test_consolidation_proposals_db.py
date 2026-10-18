@@ -931,6 +931,31 @@ def test_income_that_explains_only_part_of_the_residual_withholds_it(group):
   assert "explains only part" in response.residuals[0].explanation
 
 
+def test_distribution_income_the_residual_does_not_need_is_a_disagreement(group):
+  """The parent took the distribution against its investment and also as
+  income: the investment needs no explaining, so the income is not
+  reversed with it, and it comes back as one-sided intercompany income
+  rather than dropping out."""
+  _form_the_group(group)
+  _january(group)
+  post(
+    group,
+    PARENT_ENTITY_ID,
+    JAN_31,
+    [("cash", 5_000), ("distributions", -5_000)],
+    agent=MEMBER,
+  )
+  response = preview()
+
+  assert response.residuals == []
+  assert "rs-gaap:OtherNonoperatingIncomeExpense" not in _lines(
+    response, "elimination_investment"
+  )
+  assert [(i.entity_id, i.concept, i.amount) for i in response.reconciling_items] == [
+    (PARENT_ENTITY_ID, "rs-gaap:OtherNonoperatingIncomeExpense", -5_000)
+  ]
+
+
 def _override(**fields):
   with extensions_session(GRAPH) as session:
     return set_allocation_override(
@@ -968,6 +993,7 @@ def test_an_allocation_override_replaces_the_pro_rata_share(group):
     {"entity_id": ASSOCIATE, "amount": 1, "basis": "Not in full"},
     {"entity_id": MEMBER, "amount": 1},
     {"entity_id": MEMBER, "amount": 1, "percentage": 10, "basis": "Both"},
+    {"entity_id": MEMBER, "amount": 1, "clear": True},
   ],
 )
 def test_an_override_needs_a_member_in_full_one_share_and_a_basis(group, fields):

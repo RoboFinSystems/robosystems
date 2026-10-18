@@ -247,6 +247,9 @@ class _Plan:
   residuals: list[ConsolidationResidual] = field(default_factory=list)
   reconciling: list[ConsolidationReconcilingItem] = field(default_factory=list)
   withheld: set[tuple[str, str]] = field(default_factory=set)
+  # Members whose distributions the parent took as income, reversed with
+  # their investment elimination.
+  explained: set[str] = field(default_factory=set)
   notes: list[str] = field(default_factory=list)
   # Something the month needs was left out, so it cannot be up to date.
   incomplete: bool = False
@@ -498,6 +501,7 @@ def _plan_capital(
     invested_lines
   ) + len(distributed_lines)
   if explained:
+    plan.explained.add(member.id)
     for qname, amount in distributed_by_concept.items():
       if amount:
         plan.targets[(qname, *key)] += amount
@@ -598,7 +602,11 @@ def _plan_intercompany(
         for r in rows:
           if {r.entity_id, r.counterparty} != {a, b} or r.closing or r.kind:
             continue
-          if r.entity_id == parent_id and r.concept.qname in DISTRIBUTION_INCOME:
+          if (
+            r.entity_id == parent_id
+            and r.counterparty in plan.explained
+            and r.concept.qname in DISTRIBUTION_INCOME
+          ):
             continue
           q = r.concept
           if q.qname not in postable or q.qname in _NOT_INTERCOMPANY:
@@ -659,7 +667,8 @@ def _distribution_income(
   rows: list[_Row], parent: _Entity, member: _Entity
 ) -> list[_Row]:
   """The parent's income lines that name ``member``: its distributions,
-  taken as income."""
+  taken as income. Through the month end, not within it: the capital
+  check that they explain is cumulative."""
   return [
     r
     for r in rows

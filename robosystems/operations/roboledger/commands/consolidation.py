@@ -132,7 +132,10 @@ def set_allocation_override(
       f"{entity.name} is not a member consolidated in full; only such a "
       "member's outside owners have a share of its result to override."
     )
-  if not body.clear:
+  if body.clear:
+    if body.amount is not None or body.percentage is not None:
+      raise AllocationOverrideError("Clearing an override takes no share.")
+  else:
     if (body.amount is None) == (body.percentage is None):
       raise AllocationOverrideError("Give the share as an amount or a percentage.")
     if not (body.basis or "").strip():
@@ -146,6 +149,7 @@ def set_allocation_override(
       "AND source <> 'linked' ORDER BY created_at, id LIMIT 1"
     )
   ).scalar()
+  # A group with no consolidation entity yet has no consolidated month closed.
   if consolidation_id is not None:
     assert_period_not_closed(session, end, entity_id=str(consolidation_id))
 
@@ -172,7 +176,6 @@ def set_allocation_override(
     overrides[body.period] = record
   metadata[ALLOCATION_OVERRIDES] = overrides
   locked.metadata_ = metadata
-  session.flush()
   session.commit()
   return AllocationOverrideResponse(
     entity_id=str(entity.id),
