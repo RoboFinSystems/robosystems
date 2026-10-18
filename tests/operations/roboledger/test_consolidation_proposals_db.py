@@ -863,6 +863,24 @@ def test_drafts_short_of_the_month_leave_it_out_of_date(group, monkeypatch):
   assert not response.up_to_date
 
 
+def test_drafts_left_over_when_the_month_needs_nothing_are_out_of_date(
+  group, monkeypatch
+):
+  """Drafts written, then the same entries posted by hand: the month needs
+  nothing more, and the drafts left over would post it twice at close."""
+  monkeypatch.setattr(engine, "_FLOWS", {})
+  _form_the_group(group)
+  _january(group)
+  needed = preview()
+  _propose()
+  _post_proposals(group, needed)
+
+  response = preview()
+  assert response.proposals == []
+  assert response.drafted_entry_ids
+  assert not response.up_to_date
+
+
 def test_drafts_of_an_earlier_open_month_are_held(group, monkeypatch):
   """January's drafts wait for its close; February's proposal counts them,
   so closing both months eliminates once."""

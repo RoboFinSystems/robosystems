@@ -987,8 +987,8 @@ def preview_consolidation_entries(
       + ", ".join(sorted(untaggable))
       + " row; the lines that would offset it are left untagged."
     )
-  # The month's own drafts are left out of what is held, since drafting again
-  # replaces them; the month is up to date when they hold what it needs.
+  # Drafting again replaces the month's own drafts, so they are not counted as
+  # held; the month is up to date when they hold exactly what is proposed.
   drafts = engine_drafts(session, consolidation.id, start, end)
   return PreviewConsolidationEntriesResponse(
     period=period,
