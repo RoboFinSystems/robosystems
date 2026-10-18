@@ -39,7 +39,6 @@ from robosystems.models.api.extensions.reports import (
 from robosystems.models.extensions import Entity, Report
 from robosystems.models.extensions.roboledger import Structure
 from robosystems.operations.aws.s3 import S3Client
-from robosystems.operations.roboledger.commands.opening_balances import books_start
 from robosystems.operations.roboledger.entity_scope import (
   GroupMember,
   find_entity_id,
@@ -54,6 +53,7 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   FactGrid,
   FactRow,
   _compute_prior_period,
+  columns_before_the_books,
   generate_report_facts,
   render_structure_view,
 )
@@ -855,7 +855,15 @@ def get_statement(
     raise StatementStructureNotFoundError(block_type)
 
   validation = validate_report(
-    block_type, grid.rows, period_labels=[p.label for p in grid.periods]
+    block_type,
+    grid.rows,
+    period_labels=[p.label for p in grid.periods],
+    before_the_books=columns_before_the_books(
+      session,
+      block_type,
+      grid.periods,
+      [resolve_entity_id(session, report_def.entity_id)],
+    ),
   )
 
   # Abstract rows are presentation scaffolding carrying their descendants' sum.
@@ -1293,26 +1301,6 @@ def get_consolidation_worksheet(
   )
 
 
-def _before_the_books(
-  session: Session,
-  statement_type: str,
-  periods: list[FactPeriodSpec],
-  entity_ids: list[str],
-) -> set[int]:
-  """The columns that reach back before the books begin, by index: a flow
-  column starting before the first day an opening balance covers, or a
-  balance sheet dated before the opening itself. Such a column has no
-  activity to show for the months before the books, only a partial figure,
-  so it is left out rather than rendered."""
-  start = books_start(session, entity_ids)
-  if start is None:
-    return set()
-  opening = start - timedelta(days=1)
-  if statement_type == "balance_sheet":
-    return {i for i, p in enumerate(periods) if p.end < opening}
-  return {i for i, p in enumerate(periods) if p.start < start}
-
-
 def get_live_financial_statement(
   session: Session,
   *,
@@ -1367,7 +1355,8 @@ def get_live_financial_statement(
       reporting_style_id=reporting_style_id,
       entity_id=entity_id,
     )
-  omitted = _before_the_books(
+  # Left out rather than rendered.
+  omitted = columns_before_the_books(
     session,
     statement_type,
     periods,

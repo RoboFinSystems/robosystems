@@ -59,14 +59,17 @@ def validate_report(
   rows: list[FactRow],
   period_labels: list[str] | None = None,
   warnings: list[str] | None = None,
+  before_the_books: set[int] | None = None,
 ) -> ValidationResult:
   """Run structural and semantic validation for a rendered structure.
 
   ``period_labels`` names the columns of ``rows[*].values``; missing labels
   fall back to ``column N``. ``warnings`` are findings made while the facts
   were generated (a flow no row presents); they are reported, never
-  failures. Block types with no validators (``comprehensive_income``) come
-  back ``inconclusive``.
+  failures. ``before_the_books`` indexes the columns that reach back before
+  the books begin: they carry at most the balances they end on, so they are
+  named once and not checked. Block types with no validators
+  (``comprehensive_income``) come back ``inconclusive``.
   """
   validator = _VALIDATORS.get(block_type)
   if validator is None:
@@ -81,7 +84,15 @@ def validate_report(
     )
 
   result = ValidationResult(warnings=list(warnings or []))
+  partial = before_the_books or set()
   columns = _columns(rows, period_labels)
+  for column in columns:
+    if column.index in partial:
+      result.warnings.append(
+        f"Period '{column.label}' starts before the books begin: it shows no "
+        "activity and is not checked"
+      )
+  columns = [c for c in columns if c.index not in partial]
   empty_columns = _empty_column_indexes(rows, columns)
   for column in columns:
     validator(rows, result, column)

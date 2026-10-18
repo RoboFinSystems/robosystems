@@ -24,6 +24,7 @@ from robosystems.models.api.extensions.journal_entries import (
   RecordOpeningBalanceRequest,
   ReverseJournalEntryRequest,
 )
+from robosystems.models.api.extensions.reports import CreateReportRequest
 from robosystems.models.extensions import Element, Entity
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.operations.roboledger.commands.chart_of_accounts import (
@@ -39,12 +40,15 @@ from robosystems.operations.roboledger.commands.opening_balances import (
   OpeningBalanceLockedError,
   record_opening_balance,
 )
+from robosystems.operations.roboledger.commands.reports import create_report
 from robosystems.operations.roboledger.fiscal_calendar import (
   FiscalCalendarService,
   PeriodCloseService,
 )
 from robosystems.operations.roboledger.reads.reports import (
   get_live_financial_statement,
+  get_report_package,
+  get_statement,
 )
 from robosystems.operations.roboledger.reports.fact_grid import (
   PeriodSpec,
@@ -407,3 +411,56 @@ def test_a_column_straddling_the_books_start_carries_only_its_balances(tenant):
   assert {f.period_type for f in facts} == {"instant"}
   cash = {f.period_end: f.value for f in facts if f.element_qname == CASH}
   assert cash[JULY[1]] == 65_000.0
+
+
+def test_a_saved_report_checks_only_the_columns_its_books_cover(tenant):
+  """July's report compared with June: June starts before the books, so
+  each statement names it once and checks July alone, and the equity
+  statement rolls July forward from the opening, as a statement or a block."""
+  with extensions_session(GRAPH) as session:
+    record_opening_balance(session, _opening(session, tenant), "usr_1")
+    _july_revenue(session, tenant)
+    session.commit()
+    mapping = find_entity_mapping(session, PARENT, BOOK_FRAMEWORK)
+    assert mapping is not None
+    with patch(
+      "robosystems.operations.roboledger.commands.reports._stamp_report_bundle"
+    ):
+      report = create_report(
+        session,
+        CreateReportRequest(
+          name="July",
+          taxonomy_id="rs-gaap",
+          mapping_id=str(mapping.id),
+          period_start=JULY[0],
+          period_end=JULY[1],
+          period_type="monthly",
+          comparative=True,
+        ),
+        graph_id=GRAPH,
+        created_by="usr_1",
+      )
+    statements = {
+      block_type: get_statement(session, GRAPH, report.id, block_type)
+      for block_type in ("income_statement", "cash_flow_statement", "equity_statement")
+    }
+    package = get_report_package(session, report.id)
+
+  for block_type, statement in statements.items():
+    assert statement is not None and statement.validation is not None, block_type
+    assert statement.validation.status == "passed", (
+      block_type,
+      statement.validation.failures,
+    )
+    assert any("starts before the books" in w for w in statement.validation.warnings)
+  equity = next(
+    i.block for i in package.items if i.block.block_type == "equity_statement"
+  )
+  rendering = equity.view.rendering
+  assert rendering.validation.status == "passed", rendering.validation.failures
+  balances = {
+    r.element_name.rsplit(", ", 1)[-1]: r.values[-1]
+    for r in rendering.rows
+    if r.element_name.endswith(" balance")
+  }
+  assert balances == {"beginning balance": 120_000.0, "ending balance": 125_000.0}

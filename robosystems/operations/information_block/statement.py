@@ -48,6 +48,8 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   _collect_hierarchy_element_ids,  # type: ignore[reportPrivateUsage]
   _HierarchyNode,  # type: ignore[reportPrivateUsage]
   _load_calculations,  # type: ignore[reportPrivateUsage]
+  _with_opening_balance,  # type: ignore[reportPrivateUsage]
+  columns_before_the_books,
 )
 from robosystems.operations.roboledger.reports.guard_rails import validate_report
 
@@ -336,10 +338,16 @@ def _build_statement_rendering(
   rows: list[FactRow] = _build_rows(
     hierarchy, period_balances, calculations, pre_signed=True
   )
+  # The statement view's layout: each roll-forward opens on its balance.
+  if block_type == "equity_statement":
+    rows = _with_opening_balance(rows, report_facts, periods, hierarchy)
 
   # Columns have no display label here, so findings name them by period end.
   validation_result = validate_report(
-    block_type, rows, period_labels=[p.end.isoformat() for p in periods]
+    block_type,
+    rows,
+    period_labels=[p.end.isoformat() for p in periods],
+    before_the_books=_columns_before_the_books(session, block_type, periods, facts),
   )
 
   return RenderingLite(
@@ -368,6 +376,15 @@ def _build_statement_rendering(
       warnings=list(validation_result.warnings),
     ),
     unmapped_count=0,
+  )
+
+
+def _columns_before_the_books(
+  session: Session, block_type: str, periods: list[PeriodSpec], facts: list[Fact]
+) -> set[int]:
+  """The columns of the facts' entities that reach back before their books."""
+  return columns_before_the_books(
+    session, block_type, periods, sorted({f.entity_id for f in facts})
   )
 
 

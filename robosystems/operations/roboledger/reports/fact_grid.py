@@ -248,6 +248,25 @@ def _books_start(session: Session, entity_id: str | None) -> date | None:
   return books_start(session, [entity_id]) if entity_id else None
 
 
+def columns_before_the_books(
+  session: Session,
+  statement_type: str,
+  periods: list[PeriodSpec],
+  entity_ids: list[str],
+) -> set[int]:
+  """The columns that reach back before the books begin, by index: a flow
+  column starting before the first day an opening balance covers, or a
+  balance sheet dated before the opening itself. Such a column has no
+  activity to show for the months before the books, only a partial figure."""
+  start = books_start(session, entity_ids)
+  if start is None:
+    return set()
+  opening = start - timedelta(days=1)
+  if statement_type == "balance_sheet":
+    return {i for i, p in enumerate(periods) if p.end < opening}
+  return {i for i, p in enumerate(periods) if p.start < start}
+
+
 def _within_the_books(fact: ReportFact, start: date) -> bool:
   """A flow from the books' first day on, or a balance from the opening on:
   anything earlier is a partial figure the books cannot support."""
