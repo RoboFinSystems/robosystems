@@ -6,7 +6,11 @@ thirty percent — the outside owner whose share the consolidated statements
 carry as noncontrolling interest. The roaster charges both a management fee,
 lent the first café its fit-out money on a note, and rebilled a utilities
 bill once; every one of those posts on both sides and is eliminated in the
-Consolidation Adjustments entity. The multi-entity beat of the showcase, and
+Consolidation Adjustments entity. Pier Market Kiosk is different: the
+roaster holds forty percent and the market's operator runs it, so the group
+never sums its books; it carries the roaster's share of the kiosk's net assets
+as one investment and its share of the kiosk's income as one line, the
+equity method. The multi-entity beat of the showcase, and
 the target the consolidation engine is built against.
 
 The fee and the distributions are kept small on purpose: the cafés send cash
@@ -62,6 +66,28 @@ GROUP = Group(
       ),
       management_fee_bps=300,
       distribution=150_000,
+    ),
+    Member(
+      name="Pier Market Kiosk LLC",
+      legal_name="Pier Market Kiosk, LLC",
+      ticker="DKIOSK",
+      description=(
+        "A coffee kiosk in the pier market, run by the market's operator; the "
+        "roaster holds forty percent."
+      ),
+      entity_type="llc",
+      template="product",
+      ownership_pct=40,
+      outside_owner="Pier Market Operators LLC",
+      contributed_capital=1_000_000,
+      monthly_revenue=860_000,
+      revenue_memo="Kiosk sales",
+      expenses=(
+        ("Kiosk stall fee", 240_000),
+        ("Kiosk wages", 350_000),
+      ),
+      management_fee_bps=0,
+      distribution=120_000,
     ),
   ),
   consolidation_name="Consolidation Adjustments",
