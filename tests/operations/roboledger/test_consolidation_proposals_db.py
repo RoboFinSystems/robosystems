@@ -1,0 +1,660 @@
+"""The consolidation engine's preview on real Postgres: a parent, a member it
+owns seventy percent of, a forty-percent associate on the equity method and
+the consolidation entity. Every account is found by its concept and every
+intercompany line by the entity its event names, so the targets follow from
+the books; what the consolidation entity already holds for a kind and member
+is subtracted, so posting the proposals leaves the month up to date."""
+
+from __future__ import annotations
+
+from datetime import UTC, date, datetime
+from types import SimpleNamespace
+
+import pytest
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import OperationalError
+
+import robosystems.models.extensions  # noqa: F401  (register models on the Base)
+from robosystems.config import env
+from robosystems.db.extensions import ExtensionsBase, extensions_session
+from robosystems.models.api.extensions.journal_entries import (
+  CreateJournalEntryRequest,
+  JournalEntryLineItemInput,
+)
+from robosystems.models.extensions import Element, Entity
+from robosystems.models.extensions.association import Association
+from robosystems.models.extensions.element_trait import ElementTrait
+from robosystems.models.extensions.roboledger import Entry, LineItem
+from robosystems.models.extensions.roboledger.agent import Agent
+from robosystems.models.extensions.roboledger.event import Event
+from robosystems.models.extensions.structure import Structure
+from robosystems.models.extensions.taxonomy import Taxonomy
+from robosystems.models.extensions.trait import Trait
+from robosystems.operations.roboledger.commands.journal_entries import (
+  ConsolidationAdjustmentError,
+  create_journal_entry,
+)
+from robosystems.operations.roboledger.reads import consolidation as engine
+from tests.ledger_entity import PARENT_ENTITY_ID, entity_account, seed_parent_entity_on
+
+pytestmark = pytest.mark.integration
+
+GRAPH = "kgdddddddddddddddd50"
+MEMBER = "ent_test_member"
+ASSOCIATE = "ent_test_associate"
+ADJUSTMENTS = "ent_test_adjustments"
+
+# Concept → (balance, period type, classification).
+_CONCEPTS = {
+  "rs-gaap:Cash": ("debit", "instant", "asset"),
+  "rs-gaap:MembersEquity": ("credit", "instant", "equity"),
+  "rs-gaap:Revenues": ("credit", "duration", "revenue"),
+  "rs-gaap:UtilitiesCosts": ("debit", "duration", "expense"),
+  "rs-gaap:DueFromAffiliateCurrent": ("debit", "instant", "asset"),
+  "rs-gaap:DueToAffiliateCurrent": ("credit", "instant", "liability"),
+  "rs-gaap:LongTermInvestmentsAndReceivablesNet": ("debit", "instant", "asset"),
+  "rs-gaap:LongTermDebtAndCapitalLeaseObligations": (
+    "credit",
+    "instant",
+    "liability",
+  ),
+  "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax": (
+    "credit",
+    "duration",
+    "revenue",
+  ),
+  "rs-gaap:InvestmentIncomeInterest": ("credit", "duration", "revenue"),
+  "rs-gaap:GeneralAndAdministrativeExpense": ("debit", "duration", "expense"),
+  "rs-gaap:InterestExpense": ("debit", "duration", "expense"),
+  engine.INVESTMENT_IN_SUBSIDIARIES: ("debit", "instant", "asset"),
+  engine.EQUITY_METHOD_INVESTMENT: ("debit", "instant", "asset"),
+  engine.EQUITY_METHOD_INCOME: ("credit", "duration", "revenue"),
+  engine.NONCONTROLLING_INTEREST: ("credit", "instant", "equity"),
+  engine.NCI_SHARE_OF_INCOME: ("debit", "duration", "expense"),
+}
+
+# Each entity's accounts: code → concept.
+_CHARTS = {
+  PARENT_ENTITY_ID: {
+    "cash": "rs-gaap:Cash",
+    "investment": engine.INVESTMENT_IN_SUBSIDIARIES,
+    "associate": engine.EQUITY_METHOD_INVESTMENT,
+    "due_from": "rs-gaap:DueFromAffiliateCurrent",
+    "note": "rs-gaap:LongTermInvestmentsAndReceivablesNet",
+    "fees": "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+    "interest": "rs-gaap:InvestmentIncomeInterest",
+  },
+  MEMBER: {
+    "cash": "rs-gaap:Cash",
+    "equity": "rs-gaap:MembersEquity",
+    "sales": "rs-gaap:Revenues",
+    "due_to": "rs-gaap:DueToAffiliateCurrent",
+    "note": "rs-gaap:LongTermDebtAndCapitalLeaseObligations",
+    "fees": "rs-gaap:GeneralAndAdministrativeExpense",
+    "interest": "rs-gaap:InterestExpense",
+    "utilities": "rs-gaap:UtilitiesCosts",
+  },
+  ASSOCIATE: {
+    "cash": "rs-gaap:Cash",
+    "equity": "rs-gaap:MembersEquity",
+    "sales": "rs-gaap:Revenues",
+  },
+  ADJUSTMENTS: {
+    "1150": "rs-gaap:DueFromAffiliateCurrent",
+    "1600": engine.INVESTMENT_IN_SUBSIDIARIES,
+    "1650": "rs-gaap:LongTermInvestmentsAndReceivablesNet",
+    "1700": engine.EQUITY_METHOD_INVESTMENT,
+    "2150": "rs-gaap:DueToAffiliateCurrent",
+    "2600": "rs-gaap:LongTermDebtAndCapitalLeaseObligations",
+    "3020": "rs-gaap:MembersEquity",
+    "3100": "rs-gaap:MembersEquity",  # the close target, on the same concept
+    "3200": engine.NONCONTROLLING_INTEREST,
+    "4000": "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+    "4100": "rs-gaap:InvestmentIncomeInterest",
+    "4500": engine.EQUITY_METHOD_INCOME,
+    "5000": "rs-gaap:GeneralAndAdministrativeExpense",
+    "5100": "rs-gaap:InterestExpense",
+    "5900": engine.NCI_SHARE_OF_INCOME,
+  },
+}
+
+DEC = date(2025, 12, 31)
+JAN_15 = date(2026, 1, 15)
+JAN_31 = date(2026, 1, 31)
+
+
+@pytest.fixture
+def group(monkeypatch):
+  url = env.EXTENSIONS_DATABASE_URL
+  if not url:
+    pytest.skip("EXTENSIONS_DATABASE_URL not configured")
+  db = create_engine(url)
+  try:
+    with db.connect() as probe:
+      probe.execute(text("SELECT 1"))
+  except OperationalError as exc:
+    db.dispose()
+    pytest.skip(f"extensions database unreachable: {exc.orig}")
+  tables = [t for t in ExtensionsBase.metadata.sorted_tables if t.schema is None]
+  try:
+    with db.begin() as conn:
+      conn.execute(text(f"DROP SCHEMA IF EXISTS {GRAPH} CASCADE"))
+      conn.execute(text(f"CREATE SCHEMA {GRAPH}"))
+      ExtensionsBase.metadata.create_all(
+        bind=conn.execution_options(schema_translate_map={None: GRAPH}),
+        tables=tables,
+      )
+      seed_parent_entity_on(
+        conn.execution_options(schema_translate_map={None: GRAPH}),
+        name="Parent Co",
+      )
+    group = _seed()
+    # One mapping serves every entity's chart here.
+    monkeypatch.setattr(
+      engine,
+      "find_entity_mapping",
+      lambda _s, _e, _f: SimpleNamespace(id=group["mapping"]),
+    )
+    yield group
+  finally:
+    with db.begin() as conn:
+      conn.execute(text(f"DROP SCHEMA IF EXISTS {GRAPH} CASCADE"))
+    db.dispose()
+
+
+def _seed() -> dict:
+  group: dict = {"accounts": {}, "agents": {}}
+  with extensions_session(GRAPH) as session:
+    for entity_id, name, role, method, pct in (
+      (MEMBER, "Member LLC", "operating", "full", 70),
+      (ASSOCIATE, "Associate LLC", "operating", "equity", 40),
+      (ADJUSTMENTS, "Consolidation Adjustments", "consolidation", "none", None),
+    ):
+      session.add(
+        Entity(
+          id=entity_id,
+          name=name,
+          is_parent=False,
+          parent_entity_id=PARENT_ENTITY_ID,
+          source="native",
+          entity_role=role,
+          consolidation_method=method,
+          ownership_pct=pct,
+          created_by="test",
+        )
+      )
+    session.flush()
+
+    traits = {}
+    for identifier in ("asset", "liability", "equity", "revenue", "expense"):
+      trait = Trait(category="elementsOfFinancialStatements", identifier=identifier)
+      session.add(trait)
+      session.flush()
+      traits[identifier] = trait.id
+    taxonomy = Taxonomy(name="mapping", taxonomy_type="mapping", created_by="test")
+    session.add(taxonomy)
+    session.flush()
+    mapping = Structure(
+      name="CoA mapping", block_type="coa_mapping", taxonomy_id=taxonomy.id
+    )
+    session.add(mapping)
+    session.flush()
+    group["mapping"] = mapping.id
+
+    concepts = {}
+    for qname, (balance, period, classification) in _CONCEPTS.items():
+      concept = Element(
+        qname=qname,
+        name=qname.split(":")[1],
+        balance_type=balance,
+        period_type=period,
+        element_type="concept",
+        is_abstract=False,
+        created_by="test",
+      )
+      session.add(concept)
+      session.flush()
+      session.add(
+        ElementTrait(
+          element_id=concept.id, trait_id=traits[classification], is_primary=True
+        )
+      )
+      concepts[qname] = concept.id
+
+    for entity_id, chart in _CHARTS.items():
+      for code, qname in chart.items():
+        account = entity_account(session, entity_id, code)
+        session.add(
+          Association(
+            structure_id=mapping.id,
+            from_element_id=account,
+            to_element_id=concepts[qname],
+            association_type="mapping",
+          )
+        )
+        group["accounts"][(entity_id, code)] = account
+
+    for entity_id, name in (
+      (PARENT_ENTITY_ID, "Parent Co"),
+      (MEMBER, "Member LLC"),
+      (ASSOCIATE, "Associate LLC"),
+    ):
+      agent = Agent(
+        agent_type="self", name=name, external_id=entity_id, created_by="test"
+      )
+      session.add(agent)
+      session.flush()
+      group["agents"][entity_id] = agent.id
+    owner = Agent(agent_type="owner", name="Outside Partner", created_by="test")
+    session.add(owner)
+    session.flush()
+    group["agents"]["owner"] = owner.id
+  return group
+
+
+def post(
+  group: dict,
+  entity_id: str,
+  on: date,
+  lines: list[tuple[str, int]],
+  *,
+  agent: str | None = None,
+  kind: str | None = None,
+  adjusts: str | None = None,
+  entry_type: str = "standard",
+) -> None:
+  """A posted entry in ``entity_id``'s books; ``lines`` are (code, cents),
+  debit-positive. ``agent`` is the entity (or ``"owner"``) the event names."""
+  assert sum(amount for _, amount in lines) == 0
+  with extensions_session(GRAPH) as session:
+    event = Event(
+      entity_id=entity_id,
+      event_type="journal_entry_recorded",
+      event_category="adjustment",
+      occurred_at=datetime(on.year, on.month, on.day, tzinfo=UTC),
+      status="fulfilled",
+      source="manual",
+      agent_id=group["agents"][agent] if agent else None,
+      created_by="test",
+    )
+    session.add(event)
+    session.flush()
+    entry = Entry(
+      entity_id=entity_id,
+      type=entry_type,
+      status="posted",
+      posting_date=on,
+      triggered_by_event_id=event.id,
+      adjustment_kind=kind,
+      adjusts_entity_id=adjusts,
+      created_by="test",
+    )
+    session.add(entry)
+    session.flush()
+    for order, (code, amount) in enumerate(lines, 1):
+      session.add(
+        LineItem(
+          entry_id=entry.id,
+          element_id=group["accounts"][(entity_id, code)],
+          debit_amount=max(amount, 0),
+          credit_amount=max(-amount, 0),
+          line_order=order,
+        )
+      )
+
+
+def _form_the_group(group: dict) -> None:
+  """December: the parent forms the member with an outside partner and lends
+  it 5,000, and buys forty percent of the associate."""
+  P, M, K = PARENT_ENTITY_ID, MEMBER, ASSOCIATE
+  post(group, P, DEC, [("investment", 700_000), ("cash", -700_000)], agent=M)
+  post(group, M, DEC, [("cash", 700_000), ("equity", -700_000)], agent=P)
+  post(group, M, DEC, [("cash", 300_000), ("equity", -300_000)], agent="owner")
+  post(group, P, DEC, [("note", 500_000), ("cash", -500_000)], agent=M)
+  post(group, M, DEC, [("cash", 500_000), ("note", -500_000)], agent=P)
+  post(group, P, DEC, [("associate", 400_000), ("cash", -400_000)], agent=K)
+  post(group, K, DEC, [("cash", 1_000_000), ("equity", -1_000_000)])
+
+
+def _january(group: dict) -> None:
+  """The member sells 2,000 and pays the parent a 100 fee and 25 of
+  interest; the parent pays a 50 utility bill for it and rebills it at cost;
+  the member distributes 1,000; the associate earns 500."""
+  P, M, K = PARENT_ENTITY_ID, MEMBER, ASSOCIATE
+  post(group, M, JAN_15, [("cash", 200_000), ("sales", -200_000)])
+  post(group, P, JAN_31, [("due_from", 10_000), ("fees", -10_000)], agent=M)
+  post(group, M, JAN_31, [("fees", 10_000), ("due_to", -10_000)], agent=P)
+  post(group, P, JAN_31, [("due_from", 2_500), ("interest", -2_500)], agent=M)
+  post(group, M, JAN_31, [("interest", 2_500), ("due_to", -2_500)], agent=P)
+  post(group, P, JAN_31, [("due_from", 5_000), ("cash", -5_000)], agent=M)
+  post(group, M, JAN_31, [("utilities", 5_000), ("due_to", -5_000)], agent=P)
+  post(group, M, JAN_31, [("equity", 100_000), ("cash", -100_000)])
+  post(group, P, JAN_31, [("cash", 70_000), ("investment", -70_000)], agent=M)
+  post(group, K, JAN_15, [("cash", 50_000), ("sales", -50_000)])
+
+
+def preview(period: str = "2026-01"):
+  with extensions_session(GRAPH) as session:
+    return engine.preview_consolidation_entries(session, period=period)
+
+
+def _lines(response, kind: str, *, charges: bool | None = None) -> dict[str, int]:
+  """``{concept: debit-positive cents}`` of the one proposal of ``kind``."""
+  found = [
+    p
+    for p in response.proposals
+    if p.adjustment_kind == kind
+    and (charges is None or ("charges" in p.memo) == charges)
+  ]
+  assert len(found) == 1, [p.memo for p in response.proposals]
+  return {
+    line.concept: line.debit_amount - line.credit_amount for line in found[0].lines
+  }
+
+
+def test_the_month_needs_every_kind_from_the_books(group):
+  _form_the_group(group)
+  _january(group)
+  response = preview()
+
+  assert response.residuals == []
+  assert response.reconciling_items == []
+  # Capital 10,000 less the 1,000 distribution; the parent's 70 % against its
+  # investment, the outside 30 % as noncontrolling interest.
+  assert _lines(response, "elimination_investment") == {
+    "rs-gaap:MembersEquity": 900_000,
+    engine.INVESTMENT_IN_SUBSIDIARIES: -630_000,
+    engine.NONCONTROLLING_INTEREST: -270_000,
+  }
+  # The 175 owed (fee, interest and the rebill) and the note, on both sides.
+  assert _lines(response, "elimination_intercompany", charges=False) == {
+    "rs-gaap:DueToAffiliateCurrent": 17_500,
+    "rs-gaap:DueFromAffiliateCurrent": -17_500,
+    "rs-gaap:LongTermDebtAndCapitalLeaseObligations": 500_000,
+    "rs-gaap:LongTermInvestmentsAndReceivablesNet": -500_000,
+  }
+  # The fee and the interest; the rebilled utilities stay, being a cost the
+  # group really bore.
+  assert _lines(response, "elimination_intercompany", charges=True) == {
+    "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax": 10_000,
+    "rs-gaap:InvestmentIncomeInterest": 2_500,
+    "rs-gaap:GeneralAndAdministrativeExpense": -10_000,
+    "rs-gaap:InterestExpense": -2_500,
+  }
+  # The member's month: 2,000 less 100, 25 and 50 is 1,825; 30 % is 547.50.
+  assert _lines(response, "nci_allocation") == {
+    engine.NCI_SHARE_OF_INCOME: 54_750,
+    engine.NONCONTROLLING_INTEREST: -54_750,
+  }
+  assert _lines(response, "equity_method_pickup") == {
+    engine.EQUITY_METHOD_INVESTMENT: 20_000,
+    engine.EQUITY_METHOD_INCOME: -20_000,
+  }
+  # The eliminated capital posts to the eliminated-equity row, never to the
+  # close target that maps to the same concept.
+  investment = next(
+    p for p in response.proposals if p.adjustment_kind == "elimination_investment"
+  )
+  equity_line = next(
+    line for line in investment.lines if line.concept == "rs-gaap:MembersEquity"
+  )
+  assert equity_line.element_id == group["accounts"][(ADJUSTMENTS, "3020")]
+  assert not response.up_to_date
+
+
+def _post_proposals(group: dict, response) -> None:
+  for proposal in response.proposals:
+    with extensions_session(GRAPH) as session:
+      event = Event(
+        entity_id=ADJUSTMENTS,
+        event_type="journal_entry_recorded",
+        event_category="adjustment",
+        occurred_at=datetime(2026, 1, 31, tzinfo=UTC),
+        status="fulfilled",
+        source="manual",
+        created_by="test",
+      )
+      session.add(event)
+      session.flush()
+      entry = Entry(
+        entity_id=ADJUSTMENTS,
+        status="posted",
+        posting_date=proposal.posting_date,
+        triggered_by_event_id=event.id,
+        adjustment_kind=proposal.adjustment_kind,
+        adjusts_entity_id=proposal.adjusts_entity_id,
+        created_by="test",
+      )
+      session.add(entry)
+      session.flush()
+      for order, line in enumerate(proposal.lines, 1):
+        session.add(
+          LineItem(
+            entry_id=entry.id,
+            element_id=line.element_id,
+            debit_amount=line.debit_amount,
+            credit_amount=line.credit_amount,
+            line_order=order,
+          )
+        )
+
+
+def test_posting_the_proposals_leaves_the_month_up_to_date(group):
+  _form_the_group(group)
+  _january(group)
+  _post_proposals(group, preview())
+
+  again = preview()
+  assert again.proposals == []
+  assert again.up_to_date
+
+
+def test_held_balances_carry_into_the_next_month(group):
+  """A cumulative balance held at January's end is not proposed again in
+  February; only what moved is."""
+  _form_the_group(group)
+  _january(group)
+  _post_proposals(group, preview())
+
+  february = preview("2026-02")
+  kinds = {p.adjustment_kind for p in february.proposals}
+  # Nothing moved the capital, the balances or the note; February has no
+  # income, so no share of it either.
+  assert kinds == set()
+  assert february.up_to_date
+
+
+def test_a_hand_entry_of_the_same_kind_counts(group):
+  """A person's entry carrying the kind it adjusts is held like the
+  engine's own (D8): only the rest is proposed."""
+  _form_the_group(group)
+  _january(group)
+  post(
+    group,
+    ADJUSTMENTS,
+    JAN_31,
+    [("5900", 50_000), ("3200", -50_000)],
+    kind="nci_allocation",
+    adjusts=MEMBER,
+  )
+  assert _lines(preview(), "nci_allocation") == {
+    engine.NCI_SHARE_OF_INCOME: 4_750,
+    engine.NONCONTROLLING_INTEREST: -4_750,
+  }
+
+
+def test_a_manual_entry_is_never_reversed(group):
+  """An entry of the ``manual`` kind is a shape outside the engine's kinds:
+  it is neither counted toward a target nor proposed back out."""
+  _form_the_group(group)
+  _january(group)
+  _post_proposals(group, preview())
+  post(
+    group,
+    ADJUSTMENTS,
+    JAN_31,
+    [("1150", 1_000), ("2150", -1_000)],
+    kind="manual",
+    adjusts=MEMBER,
+  )
+  assert preview().up_to_date
+
+
+def test_an_unexplained_investment_difference_is_withheld(group):
+  """The parent carries 100 more than its share of the member's capital: the
+  investment elimination is withheld with the residual, never plugged, and
+  everything else is still proposed."""
+  _form_the_group(group)
+  _january(group)
+  post(
+    group,
+    PARENT_ENTITY_ID,
+    JAN_31,
+    [("investment", 10_000), ("cash", -10_000)],
+    agent=MEMBER,
+  )
+  response = preview()
+
+  assert [(r.entity_id, r.amount) for r in response.residuals] == [(MEMBER, 10_000)]
+  assert "elimination_investment" not in {p.adjustment_kind for p in response.proposals}
+  assert "nci_allocation" in {p.adjustment_kind for p in response.proposals}
+  assert not response.up_to_date
+
+
+def test_a_recharge_at_cost_is_a_note_not_a_disagreement(group):
+  """When the rebilled cost sits on the same expense concept as the fee, the
+  fee is eliminated against the parent's income and the rest stays, noted."""
+  _form_the_group(group)
+  post(
+    group,
+    PARENT_ENTITY_ID,
+    JAN_31,
+    [("due_from", 10_000), ("fees", -10_000)],
+    agent=MEMBER,
+  )
+  post(
+    group,
+    MEMBER,
+    JAN_31,
+    [("fees", 15_000), ("due_to", -15_000)],
+    agent=PARENT_ENTITY_ID,
+  )
+  post(
+    group,
+    PARENT_ENTITY_ID,
+    JAN_31,
+    [("due_from", 5_000), ("cash", -5_000)],
+    agent=MEMBER,
+  )
+  response = preview()
+
+  assert _lines(response, "elimination_intercompany", charges=True) == {
+    "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax": 10_000,
+    "rs-gaap:GeneralAndAdministrativeExpense": -10_000,
+  }
+  assert response.reconciling_items == []
+  assert any("recharged at cost" in note for note in response.notes)
+
+
+def test_balances_the_two_sides_disagree_on_are_reconciling_items(group):
+  """The parent says the member owes 175; the member's books say 150. The
+  lower amount is eliminated and the difference left visible."""
+  _form_the_group(group)
+  post(
+    group,
+    PARENT_ENTITY_ID,
+    JAN_31,
+    [("due_from", 17_500), ("cash", -17_500)],
+    agent=MEMBER,
+  )
+  post(
+    group,
+    MEMBER,
+    JAN_31,
+    [("cash", 15_000), ("due_to", -15_000)],
+    agent=PARENT_ENTITY_ID,
+  )
+  response = preview()
+
+  balances = _lines(response, "elimination_intercompany", charges=False)
+  assert balances["rs-gaap:DueFromAffiliateCurrent"] == -15_000
+  assert balances["rs-gaap:DueToAffiliateCurrent"] == 15_000
+  assert [(i.entity_id, i.concept, i.amount) for i in response.reconciling_items] == [
+    (PARENT_ENTITY_ID, "rs-gaap:DueFromAffiliateCurrent", 2_500)
+  ]
+
+
+def test_a_member_outside_its_interval_is_not_consolidated(group):
+  _form_the_group(group)
+  _january(group)
+  with extensions_session(GRAPH) as session:
+    session.execute(
+      text("UPDATE entities SET joined_on = '2026-02-01' WHERE id = :id"),
+      {"id": MEMBER},
+    )
+  adjusted = {p.adjusts_entity_id for p in preview().proposals}
+  assert MEMBER not in adjusted
+  assert ASSOCIATE in adjusted
+
+
+def test_a_member_whose_books_are_not_read_leaves_the_month_open(group, monkeypatch):
+  """No chart mapping: the member's capital is not read as zero against the
+  parent's investment, and the month is not up to date."""
+  _form_the_group(group)
+  _january(group)
+  monkeypatch.setattr(
+    engine,
+    "find_entity_mapping",
+    lambda _s, entity_id, _f: (
+      None if entity_id == MEMBER else SimpleNamespace(id=group["mapping"])
+    ),
+  )
+  response = preview()
+
+  assert not response.residuals
+  assert ("elimination_investment", MEMBER) not in {
+    (p.adjustment_kind, p.adjusts_entity_id) for p in response.proposals
+  }
+  assert any("has no chart mapping" in n for n in response.notes)
+  assert not response.up_to_date
+
+
+def test_no_consolidation_entity_is_refused(group):
+  with extensions_session(GRAPH) as session:
+    session.execute(
+      text("UPDATE entities SET entity_role = 'operating' WHERE id = :id"),
+      {"id": ADJUSTMENTS},
+    )
+  with pytest.raises(engine.NoConsolidationEntityError):
+    preview()
+
+
+def _entry(kind: str | None, adjusts: str | None) -> CreateJournalEntryRequest:
+  return CreateJournalEntryRequest(
+    posting_date=JAN_31,
+    memo="consolidating",
+    status="posted",
+    line_items=[
+      JournalEntryLineItemInput(element_id="x", debit_amount=100, credit_amount=0),
+      JournalEntryLineItemInput(element_id="y", debit_amount=0, credit_amount=100),
+    ],
+    adjustment_kind=kind,
+    adjusts_entity_id=adjusts,
+  )
+
+
+@pytest.mark.parametrize(
+  ("entity_id", "kind", "adjusts", "message"),
+  [
+    (PARENT_ENTITY_ID, "nci_allocation", MEMBER, "only for the group's consolidation"),
+    (ADJUSTMENTS, "nci_allocation", None, "names the entity it adjusts"),
+    (ADJUSTMENTS, "nci_allocation", ADJUSTMENTS, "not one of the group's own"),
+    (ADJUSTMENTS, None, MEMBER, "without an adjustment_kind"),
+  ],
+)
+def test_an_adjustment_kind_belongs_on_the_consolidation_entity(
+  group, entity_id, kind, adjusts, message
+):
+  with extensions_session(GRAPH) as session:
+    with pytest.raises(ConsolidationAdjustmentError, match=message):
+      create_journal_entry(session, _entry(kind, adjusts), "test", entity_id=entity_id)

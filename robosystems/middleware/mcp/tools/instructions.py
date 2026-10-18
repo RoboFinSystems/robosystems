@@ -389,6 +389,15 @@ def _consolidation_lines(adjustments: Sequence[Mapping[str, Any]], has) -> list[
       "adjustments, the consolidated total, and an equity-method member "
       "beside the sum. Read it to check a consolidating entry."
     )
+  if adjustments and has("preview-consolidation-entries"):
+    lines.append(
+      "- `preview-consolidation-entries(period)` computes a month's "
+      "consolidating entries from the books: each kind and member brought to "
+      "its month-end balance, less what the consolidation entity already "
+      "holds. A consolidating entry posted by hand carries its "
+      "`adjustment_kind` and `adjusts_entity_id` in the journal entry's "
+      "metadata, so it counts toward what is held."
+    )
   if adjustments and has("update-journal-entry"):
     lines.append(
       "- A line of the consolidation entity that carries a `flow_qname` counts "

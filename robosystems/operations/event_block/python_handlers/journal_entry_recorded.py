@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from robosystems.logger import logger
 from robosystems.models.api.event_block import CreateEventBlockRequest
 from robosystems.models.api.extensions.journal_entries import (
+  AdjustmentKind,
   CreateJournalEntryRequest,
   JournalEntryLineItemInput,
 )
@@ -109,6 +110,9 @@ class JournalEntryRecordedMetadata(BaseModel):
   line_items: list[JournalEntryLineItemInput] | None = None
   type: Literal["standard", "adjusting", "closing", "reversing"] = "standard"
   transaction_id: str | None = None
+  # A consolidating entry: its kind and the entity it adjusts.
+  adjustment_kind: AdjustmentKind | None = None
+  adjusts_entity_id: str | None = None
 
   # Shared
   status: Literal["draft", "posted"] = "draft"
@@ -301,6 +305,8 @@ def _dispatch_flat(
     connection_id=metadata.connection_id,
     # Keep the originating kind (bill_paid, ...) rather than ``journal_entry``.
     transaction_type=event.event_type,
+    adjustment_kind=metadata.adjustment_kind,
+    adjusts_entity_id=metadata.adjusts_entity_id,
   )
   response = create_journal_entry(
     session,

@@ -1,5 +1,5 @@
 """RoboLedger OLTP-backed analytical reads (``live-financial-statement``,
-``consolidation-worksheet``).
+``consolidation-worksheet``, ``preview-consolidation-entries``).
 
 Sibling to the graph-backed `views.py`, but gated by ``ROBOLEDGER_ENABLED``
 rather than staying mounted for SEC-only deployments.
@@ -25,6 +25,10 @@ from robosystems.middleware.operations import (
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import OPERATION_ERROR_RESPONSES
+from robosystems.models.api.extensions.consolidation import (
+  PreviewConsolidationEntriesRequest,
+  PreviewConsolidationEntriesResponse,
+)
 from robosystems.models.api.extensions.reports import (
   ConsolidationWorksheetRequest,
   ConsolidationWorksheetResponse,
@@ -32,6 +36,10 @@ from robosystems.models.api.extensions.reports import (
   LiveFinancialStatementResponse,
 )
 from robosystems.models.core import User
+from robosystems.operations.roboledger.reads.consolidation import (
+  NoConsolidationEntityError,
+  preview_consolidation_entries,
+)
 from robosystems.operations.roboledger.reads.reports import (
   LIVE_STATEMENT_TYPES,
   CoaMappingNotFoundError,
@@ -204,6 +212,68 @@ async def consolidation_worksheet_op(
             limit=body.limit,
           )
         except CoaMappingNotFoundError as exc:
+          raise HTTPException(status_code=422, detail=str(exc))
+    except ProgrammingError:
+      raise _ledger_404()
+
+  return await _dispatch(ctx, _runner, cache)
+
+
+@router.post(
+  "/preview-consolidation-entries",
+  response_model=OperationEnvelope[PreviewConsolidationEntriesResponse],
+  operation_id="previewConsolidationEntries",
+  summary="Preview Consolidation Entries",
+  description=(
+    "The consolidating entries a group's month needs, computed from the "
+    "books and posting nothing. For each member consolidated in full: the "
+    "parent's investment eliminated against the member's capital (its "
+    "contributions net of distributions), the outside owners' share of that "
+    "capital as noncontrolling interest, the intercompany balances, the "
+    "month's intercompany income against the matching expense, and the "
+    "outside owners' share of the month's result; for each member on the "
+    "equity method, the parent's share of its result. Accounts are found by "
+    "the rs-gaap concept they map to, and an intercompany line by the group "
+    "entity its event names as counterparty. Each entry is the difference "
+    "between the balance its kind should hold for the member at the month "
+    "end and what the consolidation entity already holds, so the entries a "
+    "person posted with the same kind count. A difference between the "
+    "parent's investment and its share of a member's capital is returned as "
+    "a residual and its entry withheld, never plugged; intercompany figures "
+    "the two sides do not agree on are returned as reconciling items. "
+    "Rejected on shared-repository graphs."
+  ),
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/preview-consolidation-entries",
+  method="POST",
+  business_event_type="ledger_preview_consolidation_entries",
+)
+async def preview_consolidation_entries_op(
+  body: PreviewConsolidationEntriesRequest,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=str(user.id),
+    op="preview-consolidation-entries",
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+
+  def _runner():
+    try:
+      with extensions_session(graph_id) as session:
+        try:
+          return preview_consolidation_entries(session, period=body.period)
+        except NoConsolidationEntityError as exc:
           raise HTTPException(status_code=422, detail=str(exc))
     except ProgrammingError:
       raise _ledger_404()

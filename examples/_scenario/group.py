@@ -75,24 +75,24 @@ _MEMBER_CAPITAL_FLOWS = {
 # investment and note the other way round; the outside owners' parts are the
 # group's real flows, on the noncontrolling-interest rows.
 _ADJUSTMENT_FLOWS: dict[tuple[str, str], tuple[str, str]] = {
-  ("1600", "capital"): (
+  ("1600", "elimination_investment"): (
     "rs-gaap:ProceedsFromDivestitureOfInterestInSubsidiariesAndAffiliates",
     "rs-gaap:PaymentsToAcquireInterestInSubsidiariesAndAffiliates",
   ),
-  ("3200", "capital"): (
+  ("3200", "elimination_investment"): (
     "rs-gaap:PaymentsToMinorityShareholders",
     "rs-gaap:ProceedsFromMinorityShareholders",
   ),
-  ("2600", "balance"): (
+  ("2600", "elimination_intercompany"): (
     "rs-gaap:ProceedsFromRelatedPartyDebt",
     "rs-gaap:RepaymentsOfRelatedPartyDebt",
   ),
-  ("1650", "balance"): (
+  ("1650", "elimination_intercompany"): (
     "rs-gaap:ProceedsFromSaleMaturityAndCollectionsOfInvestments",
     "rs-gaap:PaymentsToAcquireInvestments",
   ),
   **{
-    (code, "capital"): _MEMBER_CAPITAL_FLOWS[form]
+    (code, "elimination_investment"): _MEMBER_CAPITAL_FLOWS[form]
     for form, code in _ELIMINATED_EQUITY_CODE.items()
   },
 }
@@ -444,8 +444,10 @@ class _Books:
     lines: list[tuple[str, int, int, str | None]],
     *,
     agent_id: str | None = None,
+    adjustment: tuple[str, str] | None = None,
   ) -> None:
-    """A posted journal entry; ``lines`` are (code, debit, credit, flow_qname)."""
+    """A posted journal entry; ``lines`` are (code, debit, credit, flow_qname).
+    ``adjustment`` is a consolidating entry's (kind, entity it adjusts)."""
     items = []
     for code, debit, credit, flow in lines:
       if not debit and not credit:
@@ -485,6 +487,9 @@ class _Books:
         "line_items": items,
       },
     }
+    if adjustment:
+      body["metadata"]["adjustment_kind"] = adjustment[0]
+      body["metadata"]["adjusts_entity_id"] = adjustment[1]
     if agent_id:
       body["agent_id"] = agent_id
     self.api.operation("create-event-block", body)
@@ -506,46 +511,53 @@ class _Books:
 
 
 class _Adjustments:
-  """The consolidation entity's cumulative balances, posted as deltas."""
+  """The consolidation entity's cumulative balances, posted as deltas, one
+  entry per kind and member, so the engine reads what is held for each."""
 
   def __init__(self, books: _Books) -> None:
     self.books = books
-    # Debit-positive balances held per (code, kind); the kind keeps the
-    # capital eliminations apart from the income allocations that share the
-    # noncontrolling-interest row.
-    self.held: dict[tuple[str, str], int] = {}
+    # Debit-positive balances held per (code, kind, member).
+    self.held: dict[tuple[str, str, str], int] = {}
 
   def bring_to(
     self,
     posting_date: date,
     memo: str,
-    targets: dict[tuple[str, str], int],
+    targets: dict[tuple[str, str, str], int],
+    names: dict[str, str],
   ) -> int:
     """Post the deltas to the targets; returns the entries posted. The deltas
     that offset a flow carry its tag (``_ADJUSTMENT_FLOWS``) and post apart
     from the untagged balances, so the both-lines rule never spreads a tag
     onto a line that offsets nothing."""
-    tagged: list[tuple[str, int, int, str | None]] = []
-    untagged: list[tuple[str, int, int, str | None]] = []
+    groups: dict[tuple[str, str], tuple[list, list]] = {}
     for key, target in targets.items():
       delta = target - self.held.get(key, 0)
       if not delta:
         continue
-      code = key[0]
-      flows = _ADJUSTMENT_FLOWS.get(key)
+      code, kind, member = key
+      flows = _ADJUSTMENT_FLOWS.get((code, kind))
       if delta > 0:
         line = (code, delta, 0, flows[0] if flows else None)
       else:
         line = (code, 0, -delta, flows[1] if flows else None)
+      tagged, untagged = groups.setdefault((kind, member), ([], []))
       (tagged if flows else untagged).append(line)
       self.held[key] = target
     posted = 0
-    if tagged:
-      self.books.post(posting_date, memo, tagged)
-      posted += 1
-    if untagged:
-      self.books.post(posting_date, f"{memo} — intercompany balances", untagged)
-      posted += 1
+    for (kind, member), (tagged, untagged) in groups.items():
+      label = f"{memo} — {names[member]}"
+      if tagged:
+        self.books.post(posting_date, label, tagged, adjustment=(kind, member))
+        posted += 1
+      if untagged:
+        self.books.post(
+          posting_date,
+          f"{label} — intercompany balances",
+          untagged,
+          adjustment=(kind, member),
+        )
+        posted += 1
     return posted
 
   def activity(
@@ -554,9 +566,10 @@ class _Adjustments:
     memo: str,
     lines: list[tuple[str, int, int, str | None]],
     *,
+    adjustment: tuple[str, str],
     agent_id: str | None = None,
   ) -> None:
-    self.books.post(posting_date, memo, lines, agent_id=agent_id)
+    self.books.post(posting_date, memo, lines, agent_id=agent_id, adjustment=adjustment)
 
 
 def _statement(
@@ -1228,6 +1241,7 @@ def _post_group(
             ("4100", interest, 0, None),
             ("5100", 0, interest, None),
           ],
+          adjustment=("elimination_intercompany", books.entity_id),
           agent_id=member_agent,
         )
         count += 1
@@ -1245,7 +1259,10 @@ def _post_group(
             else [("4500", -pickup, 0, None), ("1700", 0, -pickup, None)]
           )
           adjustments.activity(
-            end, f"Share of {member.name}'s income — equity method", lines
+            end,
+            f"Share of {member.name}'s income — equity method",
+            lines,
+            adjustment=("equity_method_pickup", books.entity_id),
           )
           count += 1
       elif member.outside_share:
@@ -1265,6 +1282,7 @@ def _post_group(
             end,
             f"Share of {member.name}'s income attributable to {member.outside_owner}",
             lines,
+            adjustment=("nci_allocation", books.entity_id),
           )
           nci_income[member.ticker] += share
           count += 1
@@ -1273,32 +1291,27 @@ def _post_group(
     # parent's investment against each member's contributed capital net of
     # distributions, the outside owners' share of that capital, and the
     # intercompany balances.
-    targets: dict[tuple[str, str], int] = {}
+    targets: dict[tuple[str, str, str], int] = {}
     for member in group.members:
       if member.method != "full":
         continue
+      m = members[member.ticker].entity_id
       capital = member.contributed_capital - distributions[member.ticker]
       parent_part = _share(capital, member.parent_share)
       eq = _ELIMINATED_EQUITY_CODE[member.entity_type]
-      targets[(eq, "capital")] = targets.get((eq, "capital"), 0) + capital
-      targets[("1600", "capital")] = targets.get(("1600", "capital"), 0) - parent_part
-      targets[("3200", "capital")] = targets.get(("3200", "capital"), 0) - (
-        capital - parent_part
-      )
-      targets[("2150", "balance")] = (
-        targets.get(("2150", "balance"), 0) + due[member.ticker]
-      )
-      targets[("1150", "balance")] = (
-        targets.get(("1150", "balance"), 0) - due[member.ticker]
-      )
-      targets[("2600", "balance")] = (
-        targets.get(("2600", "balance"), 0) + member.note_from_parent
-      )
-      targets[("1650", "balance")] = (
-        targets.get(("1650", "balance"), 0) - member.note_from_parent
-      )
+      investment, intercompany = "elimination_investment", "elimination_intercompany"
+      targets[(eq, investment, m)] = capital
+      targets[("1600", investment, m)] = -parent_part
+      targets[("3200", investment, m)] = -(capital - parent_part)
+      targets[("2150", intercompany, m)] = due[member.ticker]
+      targets[("1150", intercompany, m)] = -due[member.ticker]
+      targets[("2600", intercompany, m)] = member.note_from_parent
+      targets[("1650", intercompany, m)] = -member.note_from_parent
     count += adjustments.bring_to(
-      end, f"Consolidating entries at {_period(end)}", targets
+      end,
+      f"Consolidating entries at {_period(end)}",
+      targets,
+      {members[m.ticker].entity_id: m.name for m in group.members},
     )
 
   print(f"  Activity:     {count} entries over {len(windows)} months, on every side")

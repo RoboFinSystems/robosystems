@@ -31,6 +31,24 @@ ENTRY_PROVENANCE_VALUES = (
 )
 
 
+# Entry.adjustment_kind vocabulary: what a consolidating entry in a group's
+# consolidation entity adjusts (spec ``consolidation`` §4.2). Migrations keep
+# their own snapshot.
+ADJUSTMENT_KINDS = (
+  "elimination_investment",
+  "elimination_intercompany",
+  "elimination_unrealized_profit",
+  "nci_allocation",
+  "nci_distribution",
+  "equity_method_pickup",
+  "equity_method_distribution",
+  "acquisition",
+  "deconsolidation",
+  "translation",
+  "manual",
+)
+
+
 class Entry(ExtensionsBase):
   __tablename__ = "entries"
   __table_args__ = (
@@ -84,6 +102,18 @@ class Entry(ExtensionsBase):
       unique=True,
       postgresql_where="type = 'opening'",
     ),
+    CheckConstraint(
+      "adjustment_kind IN ("
+      + ", ".join(f"'{v}'" for v in ADJUSTMENT_KINDS)
+      + ") OR adjustment_kind IS NULL",
+      name="ck_entries_adjustment_kind",
+    ),
+    Index(
+      "idx_entries_adjustment",
+      "adjusts_entity_id",
+      "adjustment_kind",
+      postgresql_where="adjustment_kind IS NOT NULL",
+    ),
     # ``opening`` is the balance sheet a ledger starts from, one per entity,
     # written only by ``record-opening-balance``.
     CheckConstraint(
@@ -119,6 +149,11 @@ class Entry(ExtensionsBase):
   triggered_by_event_id = Column(String, nullable=True)
 
   provenance = Column(String, nullable=True)  # ENTRY_PROVENANCE_VALUES
+
+  # A consolidating entry's kind (ADJUSTMENT_KINDS) and the entity whose
+  # figures it adjusts; only the consolidation entity's entries carry them.
+  adjustment_kind = Column(String, nullable=True)
+  adjusts_entity_id = Column(String, nullable=True)
 
   posting_date = Column(Date, nullable=False)
 
