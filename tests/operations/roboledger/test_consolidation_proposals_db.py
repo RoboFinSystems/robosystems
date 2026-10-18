@@ -1204,3 +1204,22 @@ def _group_codes() -> tuple[str, ...]:
     CloseableGateResult.RESIDUAL_UNEXPLAINED,
     CloseableGateResult.CONSOLIDATED_DOES_NOT_FOOT,
   )
+
+
+def test_a_residual_does_not_excuse_the_other_entries(group, monkeypatch):
+  """A residual on the member and nothing drafted: both hold the close, so
+  overriding the residual alone would still wait for the entries."""
+  monkeypatch.setattr(engine, "_FLOWS", {})
+  _form_the_group(group)
+  _january(group)
+  post(
+    group,
+    PARENT_ENTITY_ID,
+    JAN_31,
+    [("investment", 10_000), ("cash", -10_000)],
+    agent=MEMBER,
+  )
+
+  status = _status()
+  assert status.unexplained
+  assert status.pending_adjustments

@@ -34,6 +34,7 @@ from datetime import date
 from sqlalchemy import bindparam, select, text
 from sqlalchemy.orm import Session
 
+from robosystems.logger import logger
 from robosystems.models.api.extensions.consolidation import (
   ConsolidationProposal,
   ConsolidationProposalLine,
@@ -1065,15 +1066,16 @@ def group_close_status(
   status.unexplained = [
     f"{r.entity_name}: {r.explanation}" for r in preview.residuals
   ] + [item.description for item in preview.reconciling_items]
-  if not preview.residuals and not preview.up_to_date:
-    drafts = engine_drafts(session, preview.consolidation_entity_id, start, end)
-    if _drafted(session, drafts) != _proposed(preview.proposals):
-      status.pending_adjustments = [
-        f"{p.adjustment_kind} for {p.adjusts_entity_name}" for p in preview.proposals
-      ] or ["drafts that no longer match the books"]
-    else:
-      # Held and drafted agree; what is missing is what the engine left out.
-      status.pending_adjustments = list(preview.notes)
+  # Apart from the residuals: overriding them must not let the other
+  # members' entries go undrafted.
+  drafts = engine_drafts(session, preview.consolidation_entity_id, start, end)
+  if _drafted(session, drafts) != _proposed(preview.proposals):
+    status.pending_adjustments = [
+      f"{p.adjustment_kind} for {p.adjusts_entity_name}" for p in preview.proposals
+    ] or ["drafts that no longer match the books"]
+  elif not preview.residuals and not preview.up_to_date:
+    # Held and drafted agree; what is missing is what the engine left out.
+    status.pending_adjustments = list(preview.notes)
 
   for statement_type in ("balance_sheet", "equity_statement"):
     try:
@@ -1089,6 +1091,13 @@ def group_close_status(
     except CoaMappingNotFoundError as exc:
       status.not_footing.append(
         f"The consolidated {statement_type} cannot be read: {exc}"
+      )
+      continue
+    except Exception as exc:
+      # A calendar read must not fail on it; the close still waits.
+      logger.exception("group close: consolidated %s unreadable", statement_type)
+      status.not_footing.append(
+        f"The consolidated {statement_type} could not be read ({type(exc).__name__})"
       )
       continue
     if statement.validation is not None and statement.validation.status == "failed":

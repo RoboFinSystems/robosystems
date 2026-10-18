@@ -9,7 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from sqlalchemy import func as sa_func
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.fiscal_calendar import (
@@ -136,16 +135,20 @@ class GroupClosedError(ReopenOrderError):
 
 def _group_closed(session: Session, entity_id: str, period: str) -> str | None:
   """The consolidation entity's name when it has closed ``period`` and
-  ``entity_id`` is another entity of the group."""
-  row = session.execute(
-    text(
-      "SELECT e.id, e.name, c.closed_through_period FROM entities e "
-      "JOIN fiscal_calendar c ON c.entity_id = e.id "
-      "WHERE e.entity_role = 'consolidation'"
-    )
-  ).first()
+  ``entity_id`` is another entity of the group. A graph is one group, with at
+  most one consolidation entity."""
+  from robosystems.models.extensions import Entity
+  from robosystems.models.extensions.roboledger import FiscalCalendar
+
+  row = (
+    session.query(Entity.id, Entity.name, FiscalCalendar.closed_through_period)
+    .join(FiscalCalendar, FiscalCalendar.entity_id == Entity.id)
+    .filter(Entity.entity_role == "consolidation")
+    .first()
+  )
   if row is None or row.id == entity_id or row.closed_through_period is None:
     return None
+  # Periods are zero-padded YYYY-MM, so they order as strings.
   return str(row.name) if row.closed_through_period >= period else None
 
 
@@ -477,10 +480,11 @@ def _reopen_under_fence(
   Caller holds the exclusive period fence and owns the commit, so the
   backfill can reopen and re-close in one transaction.
 
-  ``enforce_latest`` refuses any period but ``closed_through``: later closed
-  months carry statements stamped from this month's numbers. The backfill
-  restamp opts out because it recloses in the same transaction and walks
-  forward.
+  ``enforce_latest`` refuses any period but ``closed_through``, and a
+  member's month the group has closed: later closed months, and the group's
+  stamp, are made from this month's numbers. The backfill restamp opts out
+  because it recloses in the same transaction from the same ledger and
+  walks forward.
   """
   session.flush()
   with bounded_lock_wait(session, _fence_detail(period)):
@@ -499,7 +503,7 @@ def _reopen_under_fence(
     raise PeriodNotFoundInLedgerError(period)
   if fp.status != "closed":
     raise PeriodNotClosedError(period, fp.status)
-  if (group := _group_closed(session, entity_id, period)) is not None:
+  if enforce_latest and (group := _group_closed(session, entity_id, period)):
     raise GroupClosedError(period, group)
   if enforce_latest:
     # Under the calendar lock (period row first, then calendar, as close's

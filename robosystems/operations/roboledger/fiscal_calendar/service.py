@@ -1166,7 +1166,8 @@ class FiscalCalendarService:
     ]
 
     group = None
-    if _is_consolidation_entity(session, entity_id):
+    already_closed = CloseableGateResult.ALREADY_CLOSED in blockers
+    if not already_closed and _is_consolidation_entity(session, entity_id):
       from robosystems.operations.roboledger.reads.consolidation import (
         group_close_status,
       )
