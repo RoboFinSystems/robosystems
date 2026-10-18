@@ -179,6 +179,7 @@ def generate_report_facts(
   _emit_equity_movement_facts(
     session, facts, periods, mapping_id, arc_type, entity_id, close_target_qname
   )
+  _emit_nci_movement_facts(session, facts, periods, mapping_id, arc_type, entity_id)
 
   # Balances the day before each period starts, where that is not the previous
   # column's end (year-over-year, YTD, rolling). The cash flow measures change
@@ -390,6 +391,11 @@ def render_structure_view(
       periods=periods,
     )
 
+  if block_type == "equity_statement":
+    # The parent's capital rolls forward first and the noncontrolling interest
+    # after it, whatever the roots' qnames sort to.
+    hierarchy = sorted(hierarchy, key=lambda root: root.qname == _NCI_ROOT)
+
   in_structure = _collect_hierarchy_element_ids(hierarchy)
   strays: list[ReportFact] = []
   rolled_up = _roll_up_facts_to_structure(session, facts, in_structure, dropped=strays)
@@ -411,7 +417,7 @@ def render_structure_view(
     )
     rows = _place_strays_by_calculation(rows, strays, periods, ancestry)
   if block_type == "equity_statement":
-    rows = _with_opening_balance(rows, facts, periods)
+    rows = _with_opening_balance(rows, facts, periods, hierarchy)
   if block_type == "cash_flow_statement":
     _show_cash_signed(rows, hierarchy, calculations)
 
@@ -2505,6 +2511,25 @@ _CORPORATE_MOVEMENTS: dict[str, str] = {
   ),
   "other": "rs-gaap:StockholdersEquityOther",
 }
+# The outside owners' share of a consolidated subsidiary, rolled forward
+# beside the parent's capital on a group's statement: its share of income is
+# the income statement's own line; the movements are read off the flow tags of
+# the lines that move it.
+_NCI_ROOT = "rs-gaap:MinorityInterest"
+_NCI_SHARE_OF_INCOME = "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest"
+_NCI_MOVEMENTS: dict[str, str] = {
+  "contribution": "rs-gaap:NoncontrollingInterestIncreaseFromSubsidiaryEquityIssuance",
+  "distribution": (
+    "rs-gaap:MinorityInterestDecreaseFromDistributionsToNoncontrollingInterestHolders"
+  ),
+}
+_NCI_FLOW_KIND: dict[str, str] = {
+  "rs-gaap:ProceedsFromMinorityShareholders": "contribution",
+  "rs-gaap:PaymentsToMinorityShareholders": "distribution",
+  "rs-gaap:PaymentsOfDividendsMinorityInterest": "distribution",
+}
+ROLLFORWARD_ROOTS: frozenset[str] = EQUITY_ROLLFORWARD_ROOTS | {_NCI_ROOT}
+
 # A redemption of units has no row of its own on the capital-account forms.
 _CAPITAL_ACCOUNT_MOVEMENTS: dict[str, str] = {
   "contribution": "rs-gaap:PartnersCapitalAccountContributions",
@@ -2765,50 +2790,170 @@ def _emit_equity_movement_facts(
       )
 
 
+def _emit_nci_movement_facts(
+  session: Session,
+  facts: list[ReportFact],
+  periods: list[PeriodSpec],
+  mapping_id: str,
+  arc_type: str,
+  entity_id: str | None,
+) -> None:
+  """Append the noncontrolling interest's movement rows, per period: a line
+  on an account the interest sums, tagged with the outside owners' flow, is a
+  contribution or a distribution, equity-effect signed. A line in an entry
+  that books the interest's share of income is that income, which the income
+  statement's own fact already carries; any other line has no row, so the
+  roll-forward does not reach its ending balance and the validator says so."""
+  meta = {
+    row.qname: row
+    for row in session.execute(
+      text("SELECT id, qname, name, balance_type FROM elements WHERE qname = ANY(:q)"),
+      {"q": [_NCI_ROOT, *_NCI_MOVEMENTS.values()]},
+    ).fetchall()
+  }
+  root = meta.get(_NCI_ROOT)
+  if root is None:
+    return
+  weights = _equity_descendant_weights(load_rs_gaap_calculations(session), root.id)
+
+  line_sql = text(f"""
+    SELECT
+      target.id AS target_id,
+      target.balance_type AS target_balance_type,
+      li.debit_amount,
+      li.credit_amount,
+      tag.qname AS tag_qname,
+      EXISTS (
+        SELECT 1
+        FROM line_items other
+        LEFT JOIN LATERAL ({_primary_mapping("other")}) omap ON TRUE
+        JOIN elements oe ON oe.id = omap.to_element_id
+        WHERE other.entry_id = li.entry_id AND oe.qname = :share_of_income
+      ) AS books_share_of_income
+    FROM line_items li
+    JOIN entries en ON en.id = li.entry_id
+    LEFT JOIN LATERAL ({_primary_mapping("li")}) amap ON TRUE
+    JOIN elements target ON target.id = amap.to_element_id
+    LEFT JOIN associations fmap
+      ON fmap.from_element_id = li.flow_element_id
+      AND fmap.association_type = :arc_type
+      AND fmap.structure_id = :mapping_id
+    LEFT JOIN elements tag ON tag.id = COALESCE(fmap.to_element_id, li.flow_element_id)
+    WHERE en.status IN :landed_entry_statuses
+      AND (:entity_id IS NULL OR en.entity_id = :entity_id)
+      AND en.posting_date BETWEEN :start AND :end
+      AND target.id = ANY(:nci_ids)
+  """).bindparams(landed_entry_bindparam())
+
+  for period in periods:
+    totals: dict[str, float] = {}
+    for line in session.execute(
+      line_sql,
+      {
+        "arc_type": arc_type,
+        "mapping_id": mapping_id,
+        "entity_id": entity_id,
+        "start": period.start,
+        "end": period.end,
+        "nci_ids": list(weights),
+        "share_of_income": _NCI_SHARE_OF_INCOME,
+      },
+    ):
+      kind = _NCI_FLOW_KIND.get(line.tag_qname or "")
+      if line.books_share_of_income or kind is None:
+        continue
+      net = cents_to_dollars(line.debit_amount - line.credit_amount)
+      effect = weights[line.target_id] * _natural_sign(
+        net, line.target_balance_type or "credit"
+      )
+      qname = _NCI_MOVEMENTS[kind]
+      totals[qname] = totals.get(qname, 0.0) + effect
+
+    for qname, value in totals.items():
+      concept = meta.get(qname)
+      if concept is None or abs(value) < 0.005:
+        continue
+      facts.append(
+        ReportFact(
+          element_id=concept.id,
+          element_qname=qname,
+          element_name=concept.name or qname,
+          classification=None,
+          balance_type=concept.balance_type or "credit",
+          value=value,
+          period_start=period.start,
+          period_end=period.end,
+          period_type="duration",
+        )
+      )
+
+
 def _with_opening_balance(
-  rows: list[FactRow], facts: list[ReportFact], periods: list[PeriodSpec]
+  rows: list[FactRow],
+  facts: list[ReportFact],
+  periods: list[PeriodSpec],
+  hierarchy: list[_HierarchyNode],
 ) -> list[FactRow]:
-  """Open an equity roll-forward on its root's balance the day before each
+  """Open each equity roll-forward on its root's balance the day before each
   column starts, so the statement reads beginning balance + changes = ending
-  balance. The opening is another column's closing where one ends that day,
-  else the instant ``_emit_opening_equity_facts`` stored; none is 0."""
-  closing = next(
-    (r for r in rows if r.element_qname in EQUITY_ROLLFORWARD_ROOTS and r.depth == 0),
-    None,
-  )
-  if closing is None:
+  balance — the Style's capital, and on a group with outside owners the
+  noncontrolling interest beside it. The opening is another column's closing
+  where one ends that day, else the instant ``_emit_opening_equity_facts``
+  stored; none is 0."""
+  # A root's subtree takes the positions just ahead of the root's own, so its
+  # opening goes ahead of all of them — in every grid of the Style alike.
+  subtree_size = {
+    root.element_id: _subtree_size(root) - 1
+    for root in hierarchy
+    if root.qname in ROLLFORWARD_ROOTS
+  }
+  closings = [
+    r
+    for r in rows
+    if r.element_qname in ROLLFORWARD_ROOTS
+    and r.depth == 0
+    and r.element_id in subtree_size
+  ]
+  if not closings:
     return rows
 
-  # (end, start) -> value. Two columns can end the same day; the earliest
-  # start wins, as ``_one_column_per_date`` decides for the cash flow.
-  by_context: dict[tuple[date, date | None], float] = {}
-  for f in facts:
-    if f.element_id != closing.element_id or f.period_type != "instant":
-      continue
-    if f.audit_only:
-      continue
-    key = (f.period_end, f.period_start)
-    by_context[key] = by_context.get(key, 0.0) + f.value
-  balance_on: dict[date, float] = {}
-  for end, start in sorted(by_context, key=lambda k: (k[0], k[1] or date.min)):
-    balance_on.setdefault(end, by_context[(end, start)])
+  openings: list[FactRow] = []
+  for closing in closings:
+    # (end, start) -> value. Two columns can end the same day; the earliest
+    # start wins, as ``_one_column_per_date`` decides for the cash flow.
+    by_context: dict[tuple[date, date | None], float] = {}
+    for f in facts:
+      if f.element_id != closing.element_id or f.period_type != "instant":
+        continue
+      if f.audit_only:
+        continue
+      key = (f.period_end, f.period_start)
+      by_context[key] = by_context.get(key, 0.0) + f.value
+    balance_on: dict[date, float] = {}
+    for end, start in sorted(by_context, key=lambda k: (k[0], k[1] or date.min)):
+      balance_on.setdefault(end, by_context[(end, start)])
 
-  name = closing.element_name
-  closing.element_name = f"{name}, ending balance"
-  closing.period_role = "end"
-  opening = FactRow(
-    element_id=closing.element_id,
-    element_qname=closing.element_qname,
-    element_name=f"{name}, beginning balance",
-    classification=closing.classification,
-    balance_type=closing.balance_type,
-    values=[_unsigned_zero(balance_on.get(_opening_date(p), 0.0)) for p in periods],
-    depth=closing.depth,
-    period_role="start",
-    # Ahead of every row in the Style's order, where a merge keeps it.
-    position=-1.0,
-  )
-  return [opening, *rows]
+    name = closing.element_name
+    closing.element_name = f"{name}, ending balance"
+    closing.period_role = "end"
+    openings.append(
+      FactRow(
+        element_id=closing.element_id,
+        element_qname=closing.element_qname,
+        element_name=f"{name}, beginning balance",
+        classification=closing.classification,
+        balance_type=closing.balance_type,
+        values=[_unsigned_zero(balance_on.get(_opening_date(p), 0.0)) for p in periods],
+        depth=closing.depth,
+        period_role="start",
+        position=closing.position - subtree_size[closing.element_id] - 0.5,
+      )
+    )
+  return sorted([*openings, *rows], key=lambda r: r.position)
+
+
+def _subtree_size(node: _HierarchyNode) -> int:
+  return 1 + sum(_subtree_size(child) for child in node.children)
 
 
 def _emit_opening_equity_facts(
@@ -2820,21 +2965,24 @@ def _emit_opening_equity_facts(
   entity_id: str | None,
   close_target_qname: str,
 ) -> None:
-  """Append the roll-forward root's balance the day before each column opens,
-  where no other column ends that day — the earliest column's opening, or
-  every column's on a YTD or rolling layout. It is the same balance the
+  """Append each roll-forward root's balance the day before each column
+  opens, where no other column ends that day — the earliest column's opening,
+  or every column's on a YTD or rolling layout. It is the same balance the
   balance sheet would report that day, earnings closed to date, at an instant
-  no column renders."""
-  root_qname, _ = _equity_rollforward_form(close_target_qname)
-  root = session.execute(
-    text("SELECT id, name, balance_type FROM elements WHERE qname = :q"),
-    {"q": root_qname},
-  ).fetchone()
-  if root is None:
+  no column renders. The roots are the Style's capital and the
+  noncontrolling interest."""
+  capital_qname, _ = _equity_rollforward_form(close_target_qname)
+  roots = session.execute(
+    text("SELECT id, qname, name, balance_type FROM elements WHERE qname = ANY(:q)"),
+    {"q": [capital_qname, _NCI_ROOT]},
+  ).fetchall()
+  if not roots:
     return
   calculations = load_rs_gaap_calculations(session)
   order = topo_sort_calculations(calculations)
-  summed = _equity_descendant_weights(calculations, root.id)
+  summed = {
+    root.id: _equity_descendant_weights(calculations, root.id) for root in roots
+  }
 
   column_ends = {p.end for p in periods}
   seen: set[date] = set()
@@ -2858,21 +3006,22 @@ def _emit_opening_equity_facts(
         balances[f.element_id] = balances.get(f.element_id, 0.0) + f.value
     present = set(balances)
     computed = resolve_calc_dag(balances, present, calculations, order)
-    if not present & summed.keys():
-      continue
-    facts.append(
-      ReportFact(
-        element_id=root.id,
-        element_qname=root_qname,
-        element_name=root.name or root_qname,
-        classification="equity",
-        balance_type=root.balance_type or "credit",
-        value=computed.get(root.id, 0.0),
-        period_start=opening,
-        period_end=opening,
-        period_type="instant",
+    for root in roots:
+      if not present & summed[root.id].keys():
+        continue
+      facts.append(
+        ReportFact(
+          element_id=root.id,
+          element_qname=root.qname,
+          element_name=root.name or root.qname,
+          classification="equity",
+          balance_type=root.balance_type or "credit",
+          value=computed.get(root.id, 0.0),
+          period_start=opening,
+          period_end=opening,
+          period_type="instant",
+        )
       )
-    )
 
 
 def _count_unmapped(

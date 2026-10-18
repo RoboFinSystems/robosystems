@@ -113982,6 +113982,110 @@
       "to": "rs-gaap:TechnologyServiceMember",
       "associationType": "general-special",
       "arcrole": "http://xbrl.org/int/dim/arcrole/domain-member"
+    },
+    {
+      "@id": "rs-gaap:NoncontrollingInterestIncreaseFromSubsidiaryEquityIssuance",
+      "balance": [
+        {
+          "@value": "credit"
+        }
+      ],
+      "periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "rs-gaap"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Noncontrolling Interest, Increase from Subsidiary Equity Issuance",
+          "@language": "en"
+        }
+      ],
+      "rdfs:comment": [
+        {
+          "@value": "Amount of increase in noncontrolling interest from subsidiary issuance of equity interests to noncontrolling interest holders.",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:MinorityInterestDecreaseFromDistributionsToNoncontrollingInterestHolders",
+      "balance": [
+        {
+          "@value": "debit"
+        }
+      ],
+      "periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "rs-gaap"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Noncontrolling Interest, Decrease from Distributions to Noncontrolling Interest Holders",
+          "@language": "en"
+        }
+      ],
+      "rdfs:comment": [
+        {
+          "@value": "Decrease in noncontrolling interest balance from payment of dividends or other distributions by the non-wholly owned subsidiary or partially owned entity, included in the consolidation of the parent entity, to the noncontrolling interest holders.",
+          "@language": "en"
+        }
+      ]
     }
   ]
 }

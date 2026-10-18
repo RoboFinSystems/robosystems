@@ -23,6 +23,7 @@ from robosystems.models.extensions.trait import Trait
 from robosystems.operations.roboledger.reports.fact_grid import (
   FactRow,
   PeriodSpec,
+  _HierarchyNode,
   _with_opening_balance,
   generate_report_facts,
 )
@@ -47,6 +48,14 @@ CAPITAL_OTHER = "rs-gaap:PartnersCapitalOther"
 LLC_DISTRIBUTIONS = "rs-gaap:DistributionsMadeToLimitedLiabilityCompanyLlcMember"
 APIC_SBC = "rs-gaap:AdjustmentsToAdditionalPaidInCapitalSharebasedCompensationRequisiteServicePeriodRecognitionValue"
 UNIT_SBC = "rs-gaap:PartnersCapitalAccountUnitBasedCompensation"
+NCI = "rs-gaap:MinorityInterest"
+NCI_INCOME = "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest"
+NCI_CONTRIBUTED = "rs-gaap:NoncontrollingInterestIncreaseFromSubsidiaryEquityIssuance"
+NCI_DISTRIBUTED = (
+  "rs-gaap:MinorityInterestDecreaseFromDistributionsToNoncontrollingInterestHolders"
+)
+NCI_IN = "rs-gaap:ProceedsFromMinorityShareholders"
+NCI_OUT = "rs-gaap:PaymentsToMinorityShareholders"
 
 
 @pytest.fixture(scope="module")
@@ -150,6 +159,8 @@ def _seed() -> dict[str, str]:
         _element("rs-gaap:ShareBasedCompensation", "debit", "duration"),
         "expense",
       ),
+      "nci": (_element(NCI, "credit", "instant"), "equity"),
+      "nci_income": (_element(NCI_INCOME, "debit", "duration"), "expense"),
     }
     session.add_all(c for c, _ in concepts.values())
     session.flush()
@@ -186,7 +197,15 @@ def _seed() -> dict[str, str]:
       _element(CAPITAL_OTHER, "credit", "duration"),
       _element(APIC_SBC, "credit", "duration"),
       _element(UNIT_SBC, "credit", "duration"),
+      _element(NCI_CONTRIBUTED, "credit", "duration"),
+      _element(NCI_DISTRIBUTED, "debit", "duration"),
     ]
+    # The outside owners' flows, tagged on the lines that move the interest.
+    for qname in (NCI_IN, NCI_OUT):
+      flow = _element(qname, "credit", "duration")
+      session.add(flow)
+      session.flush()
+      ids[qname] = flow.id
     session.add_all([se, ni, *movements])
     session.flush()
     for child in ("apic", "re"):
@@ -233,7 +252,8 @@ def _seed() -> dict[str, str]:
 
 
 def _post(ids, posting_date, lines):
-  """``lines`` are ``(account key, debit dollars, credit dollars)``."""
+  """``lines`` are ``(account key, debit dollars, credit dollars)``, with the
+  qname of a flow tag as an optional fourth."""
   with extensions_session(GRAPH) as session:
     entry = Entry(
       entity_id=PARENT_ENTITY_ID,
@@ -245,13 +265,14 @@ def _post(ids, posting_date, lines):
     )
     session.add(entry)
     session.flush()
-    for order, (key, debit, credit) in enumerate(lines, start=1):
+    for order, (key, debit, credit, *flow) in enumerate(lines, start=1):
       session.add(
         LineItem(
           entry_id=entry.id,
           element_id=ids[key],
           debit_amount=round(debit * 100),
           credit_amount=round(credit * 100),
+          flow_element_id=ids[flow[0]] if flow else None,
           line_order=order,
         )
       )
@@ -340,7 +361,7 @@ def test_the_rollforward_reaches_its_closing_balance(tenant):
     row(OTHER, 1),
     row(SE, 0, subtotal=True),
   ]
-  rows = _with_opening_balance(rows, facts, periods)
+  rows = _with_opening_balance(rows, facts, periods, _hierarchy(rows))
 
   assert rows[0].period_role == "start"
   assert rows[0].values == [1000.0, 0.0]
@@ -398,3 +419,114 @@ def test_equity_booked_against_share_based_compensation_is_its_own_row(tenant):
   _post(tenant, date(2026, 4, 30), [("stock_comp", 60, 0), ("members", 0, 60)])
   llc = _by_qname(_facts(tenant, [FY26], close_target=MEMBERS), FY26)
   assert llc[UNIT_SBC] == 60.0
+
+
+def _hierarchy(rows: list[FactRow]) -> list[_HierarchyNode]:
+  """The Style's tree over ``rows``: each depth-0 row the root of the depth-1
+  rows before it."""
+  roots: list[_HierarchyNode] = []
+  children: list[_HierarchyNode] = []
+  for r in rows:
+    node = _HierarchyNode(
+      element_id=r.element_id,
+      qname=r.element_qname,
+      name=r.element_name,
+      classification="",
+      balance_type=r.balance_type,
+      is_abstract=False,
+      depth=r.depth,
+    )
+    if r.depth == 0:
+      node.children = children
+      roots.append(node)
+      children = []
+    else:
+      children.append(node)
+  return roots
+
+
+def _group_year(ids, *, unexplained: bool = False) -> None:
+  """The outside owners contribute 600 and are paid 90, and their share of
+  the year's income, 120, is allocated to them; ``unexplained`` adds a line on
+  the interest that carries no owner flow."""
+  _post(ids, date(2026, 1, 10), [("cash", 600, 0), ("nci", 0, 600, NCI_IN)])
+  _post(ids, date(2026, 2, 1), [("cash", 1000, 0), ("revenue", 0, 1000)])
+  _post(ids, date(2026, 12, 31), [("nci_income", 120, 0), ("nci", 0, 120)])
+  _post(ids, date(2026, 9, 30), [("nci", 90, 0, NCI_OUT), ("cash", 0, 90)])
+  if unexplained:
+    _post(ids, date(2026, 10, 1), [("cash", 50, 0), ("nci", 0, 50)])
+
+
+def _rendered(facts, periods) -> list[FactRow]:
+  """The capital's roll-forward and the interest's beside it, in the Style's
+  order (each root after its rows), opened."""
+  by_period = [_by_qname(facts, p) for p in periods]
+  layout = [
+    ("rs-gaap:NetIncomeLoss", 1),
+    (ISSUED, 1),
+    (SE, 0),
+    (NCI_INCOME, 1),
+    (NCI_CONTRIBUTED, 1),
+    (NCI_DISTRIBUTED, 1),
+    (NCI, 0),
+  ]
+  ids = {f.element_qname: f.element_id for f in facts}
+  rows = [
+    FactRow(
+      element_id=ids.get(qname, qname),
+      element_qname=qname,
+      element_name=qname.split(":")[1],
+      classification=None,
+      balance_type="credit",
+      values=[p.get(qname, 0.0) for p in by_period],
+      is_subtotal=depth == 0,
+      depth=depth,
+      position=float(position),
+    )
+    for position, (qname, depth) in enumerate(layout)
+  ]
+  return _with_opening_balance(rows, facts, periods, _hierarchy(rows))
+
+
+def test_the_noncontrolling_interest_rolls_forward_beside_the_capital(tenant):
+  """Contributions and distributions read off the owners' flow tags; the
+  share of income is the income statement's own line; the interest moves by
+  exactly them, and both roll-forwards open on their own balances."""
+  _group_year(tenant)
+  facts = _facts(tenant, [FY26])
+  fy26 = _by_qname(facts, FY26)
+
+  assert fy26[NCI_CONTRIBUTED] == 600.0
+  assert fy26[NCI_DISTRIBUTED] == -90.0
+  assert fy26[NCI_INCOME] == 120.0
+  assert fy26[NCI] == 600.0 + 120.0 - 90.0
+
+  rows = _rendered(facts, [FY26])
+  assert [(r.element_qname, r.period_role) for r in rows] == [
+    (SE, "start"),
+    ("rs-gaap:NetIncomeLoss", None),
+    (ISSUED, None),
+    (SE, "end"),
+    (NCI, "start"),
+    (NCI_INCOME, None),
+    (NCI_CONTRIBUTED, None),
+    (NCI_DISTRIBUTED, None),
+    (NCI, "end"),
+  ]
+  result = validate_report("equity_statement", rows, period_labels=["2026"])
+  assert (result.status, result.failures) == ("passed", [])
+
+
+def test_an_unexplained_movement_of_the_interest_is_not_plugged(tenant):
+  """A line on the interest with no owner flow takes no row: the
+  roll-forward misses its ending balance by it, and the validator names the
+  interest."""
+  _group_year(tenant, unexplained=True)
+  facts = _facts(tenant, [FY26])
+  result = validate_report(
+    "equity_statement", _rendered(facts, [FY26]), period_labels=["2026"]
+  )
+  assert result.status == "failed"
+  assert len(result.failures) == 1
+  assert "MinorityInterest does not roll forward" in result.failures[0]
+  assert "difference: 50.00" in result.failures[0]
