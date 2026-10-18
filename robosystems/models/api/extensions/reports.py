@@ -756,6 +756,144 @@ class LiveFinancialStatementResponse(BaseModel):
   truncated: bool = False
 
 
+# ── Consolidation worksheet (OLTP) ───────────────────────────────────────────
+
+WorksheetColumnKind = Literal[
+  "member", "combined", "adjustments", "consolidated", "not_summed"
+]
+
+
+class ConsolidationWorksheetRequest(BaseModel):
+  """Request for consolidation-worksheet (OLTP, entity graphs only)."""
+
+  statement_type: str = Field(
+    ...,
+    description=(
+      "income_statement | balance_sheet | cash_flow_statement | equity_statement."
+    ),
+  )
+  period_start: date | None = Field(
+    None, description="Explicit window start. Overrides period_type/fiscal_year."
+  )
+  period_end: date | None = Field(
+    None, description="Explicit window end. Overrides period_type/fiscal_year."
+  )
+  period_type: str | None = Field(
+    None, description="annual | quarterly | instant (ignored when dates supplied)"
+  )
+  fiscal_year: int | None = Field(
+    None, description="Fiscal year for annual window (anchored on FiscalCalendar)"
+  )
+  limit: int = Field(
+    1000,
+    ge=1,
+    le=1000,
+    description="Max rows returned. Defaults to the ceiling: the whole statement.",
+  )
+
+
+class WorksheetColumn(BaseModel):
+  """One column of the consolidation worksheet."""
+
+  key: str = Field(
+    ...,
+    description=(
+      "The entity id for an entity's column; `combined` and `consolidated` "
+      "for the two totals."
+    ),
+  )
+  label: str = Field(..., description="The entity's name, or the total's.")
+  kind: WorksheetColumnKind = Field(
+    ...,
+    description=(
+      "`member`: the parent or a member consolidated in full. `combined`: "
+      "the members' sum, nothing eliminated. `adjustments`: the "
+      "consolidation entity's entries. `consolidated`: combined plus the "
+      "adjustments. `not_summed`: an equity-method or cost member, shown "
+      "beside the sum and never in it."
+    ),
+  )
+  entity_id: str | None = Field(
+    None, description="The entity the column reads; null on a total."
+  )
+  consolidation_method: str | None = Field(
+    None, description="The entity's `consolidation_method`; null on a total."
+  )
+  ownership_pct: float | None = Field(
+    None, description="The parent's share of the entity, where it has one."
+  )
+  in_sum: bool = Field(
+    ..., description="Whether the column is part of the consolidated total."
+  )
+
+
+class WorksheetRow(BaseModel):
+  """One line of the consolidation worksheet, a value per column."""
+
+  qname: str = Field(..., description="The rs-gaap concept of the line.")
+  name: str = Field(..., description="The line's label.")
+  trait: str | None = Field(None, description="The concept's classification.")
+  values: list[float | None] = Field(
+    ..., description="One value per column, aligned with `columns`."
+  )
+  depth: int = Field(0, description="Indentation in the statement.")
+  is_subtotal: bool = Field(False, description="Whether the line is a total.")
+  period_role: str | None = Field(
+    None,
+    description=(
+      "On the equity roll-forward, `start` for the beginning-balance row and "
+      "`end` for the ending-balance row. Null elsewhere."
+    ),
+  )
+
+
+class ConsolidationWorksheetResponse(BaseModel):
+  """The group's statement with the entity as the column."""
+
+  graph_id: str = Field(..., description="The graph read.")
+  entity_id: str = Field(..., description="The group parent.")
+  statement_type: str = Field(..., description="The statement rendered.")
+  period: PeriodSpec = Field(
+    ...,
+    description=(
+      "The window every column reads. The cash flow also pivots the prior "
+      "window of equal length as its delta basis; it is not rendered."
+    ),
+  )
+  columns: list[WorksheetColumn] = Field(
+    ...,
+    description=(
+      "The parent, each member consolidated in full, `combined`, the "
+      "consolidation entity's adjustments (when the group has one), "
+      "`consolidated`, then the equity-method and cost members outside the "
+      "sum. A member outside its membership interval for the period has no "
+      "column."
+    ),
+  )
+  rows: list[WorksheetRow] = Field(
+    ...,
+    description=(
+      "The union of every column's lines in the parent's Style order; a line "
+      "zero in every column is left out."
+    ),
+  )
+  validation: ValidationCheckResponse | None = Field(
+    None,
+    description=(
+      "The guard-rail outcome for the consolidated column, the same checks "
+      "live-financial-statement runs."
+    ),
+  )
+  unmapped_entity_ids: list[str] = Field(
+    default_factory=list,
+    description="Entities with no CoA mapping yet, so with no column.",
+  )
+  unmapped_count: int = Field(
+    0, description="Unmapped accounts across the summed columns."
+  )
+  truncated: bool = Field(False, description="Whether `limit` cut rows.")
+
+
 # ── Financial statement analysis (graph Cypher) ─────────────────────────────
 
 

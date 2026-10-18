@@ -309,6 +309,14 @@ class TestConsolidation:
     assert out is not None
     assert "carries a `flow_qname` counts" in out
 
+  def test_the_worksheet_rides_its_tool(self) -> None:
+    out = self._ledger([_PARENT, _ADJUSTMENTS], extra={"consolidation-worksheet"})
+    assert out is not None
+    assert "`consolidation-worksheet` lays the group's statement out" in out
+    without = self._ledger([_PARENT, _ADJUSTMENTS])
+    assert without is not None
+    assert "consolidation-worksheet" not in without
+
   def test_a_plain_group_says_nothing_about_consolidation(self) -> None:
     out = self._ledger([_PARENT, _SUB])
     assert out is not None

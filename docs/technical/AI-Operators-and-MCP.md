@@ -106,6 +106,7 @@ The tool names below are the exact `name` strings for `tools/call`, grouped by f
 | `disclosures` | The map of a report's sections — one row per note or statement; with `topic`, one family's blocks | Graphs with the `roboledger` extension |
 | `information-block` | One section of a report read whole: rows, breakdowns by its own axes, calculation footing, text blocks | Graphs with the `roboledger` extension |
 | `live-financial-statement` | A statement straight from the OLTP books, before materialization | RoboLedger tenant |
+| `consolidation-worksheet` | The group's statement with each entity as a column: members, combined, adjustments, consolidated, and equity-method members beside the sum | RoboLedger tenant |
 
 **SEC filings** — read-only, on the shared repository:
 

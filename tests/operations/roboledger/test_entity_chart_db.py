@@ -51,6 +51,7 @@ from robosystems.operations.roboledger.reads.account_rollups import get_account_
 from robosystems.operations.roboledger.reads.accounts import list_accounts
 from robosystems.operations.roboledger.reads.reports import (
   CombinedViewOnParentOnlyError,
+  get_consolidation_worksheet,
   get_live_financial_statement,
 )
 from robosystems.operations.roboledger.reads.taxonomies import (
@@ -505,3 +506,94 @@ class TestEachEntityStampsItsOwnStatements:
       # June, the prior column, still counts it; from May it is in neither.
       assert response.combined_entity_ids == [PARENT, SUB]
       assert before.combined_entity_ids == [PARENT]
+
+  def test_the_worksheet_lays_the_group_out_by_entity(self, charts):
+    """Each member's own number, the combined sum, the adjustments, the
+    consolidated total, and an equity-method member beside the sum: the
+    totals are the two group scopes' numbers."""
+    service = FiscalCalendarService()
+    with extensions_session(GRAPH) as session:
+      self._open_books(session, charts, service)
+      adjustments = self._open_member(
+        session,
+        charts,
+        service,
+        CreateEntityRequest(
+          name="Consolidation Adjustments", entity_role="consolidation"
+        ),
+      )
+      kiosk = self._open_member(
+        session,
+        charts,
+        service,
+        CreateEntityRequest(name="Pier Market Kiosk LLC", ownership_pct=40),
+      )
+      _revenue(session, charts, adjustments, 30_000)
+      _revenue(session, charts, kiosk, 20_000)
+      session.commit()
+      for entity_id in (SUB, adjustments, kiosk, PARENT):
+        self._close(session, service, entity_id)
+
+      worksheet = get_consolidation_worksheet(
+        session,
+        graph_id=GRAPH,
+        statement_type="balance_sheet",
+        period_start=date(2026, 7, 1),
+        period_end=JULY_END,
+      )
+      _, consolidated = self._live_cash(session, scope="consolidated")
+
+      assert [(c.key, c.kind, c.in_sum) for c in worksheet.columns] == [
+        (PARENT, "member", True),
+        (SUB, "member", True),
+        ("combined", "combined", True),
+        (adjustments, "adjustments", True),
+        ("consolidated", "consolidated", True),
+        (kiosk, "not_summed", False),
+      ]
+      kiosk_column = worksheet.columns[-1]
+      assert (kiosk_column.consolidation_method, kiosk_column.ownership_pct) == (
+        "equity",
+        40.0,
+      )
+      cash = next(r for r in worksheet.rows if r.qname == CASH)
+      assert cash.values == [5000.0, 700.0, 5700.0, 300.0, 6000.0, 200.0]
+      assert worksheet.entity_id == PARENT
+      assert worksheet.validation is not None
+      assert worksheet.validation.status == consolidated.validation.status
+
+  def test_the_worksheet_leaves_out_who_is_not_there(self, charts):
+    """A member that left before the window has no column, an entity with
+    no mapping is named instead of failing the read, and a group with no
+    consolidation entity has no adjustments column: consolidated is
+    combined."""
+    service = FiscalCalendarService()
+    with extensions_session(GRAPH) as session:
+      self._open_books(session, charts, service)
+      unmapped = create_entity(
+        session, CreateEntityRequest(name="Unmapped LLC", ownership_pct=100), "usr_1"
+      ).id
+      self._close(session, service, SUB)
+      self._close(session, service, PARENT)
+      update_entity(
+        session,
+        UpdateEntityRequest(entity_id=SUB, left_on=date(2026, 6, 30)),
+        "usr_1",
+      )
+
+      worksheet = get_consolidation_worksheet(
+        session,
+        graph_id=GRAPH,
+        statement_type="balance_sheet",
+        period_start=date(2026, 7, 1),
+        period_end=JULY_END,
+      )
+
+      assert [(c.key, c.kind) for c in worksheet.columns] == [
+        (PARENT, "member"),
+        ("combined", "combined"),
+        ("consolidated", "consolidated"),
+      ]
+      assert worksheet.unmapped_entity_ids == [unmapped]
+      cash = next(r for r in worksheet.rows if r.qname == CASH)
+      assert cash.values == [5000.0, 5000.0, 5000.0]

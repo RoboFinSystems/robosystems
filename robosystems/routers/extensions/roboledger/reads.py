@@ -1,4 +1,5 @@
-"""RoboLedger OLTP-backed analytical reads (``live-financial-statement``).
+"""RoboLedger OLTP-backed analytical reads (``live-financial-statement``,
+``consolidation-worksheet``).
 
 Sibling to the graph-backed `views.py`, but gated by ``ROBOLEDGER_ENABLED``
 rather than staying mounted for SEC-only deployments.
@@ -25,6 +26,8 @@ from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import OPERATION_ERROR_RESPONSES
 from robosystems.models.api.extensions.reports import (
+  ConsolidationWorksheetRequest,
+  ConsolidationWorksheetResponse,
   LiveFinancialStatementRequest,
   LiveFinancialStatementResponse,
 )
@@ -33,6 +36,7 @@ from robosystems.operations.roboledger.reads.reports import (
   LIVE_STATEMENT_TYPES,
   CoaMappingNotFoundError,
   CombinedViewOnParentOnlyError,
+  get_consolidation_worksheet,
   get_live_financial_statement,
   resolve_reporting_window,
 )
@@ -126,6 +130,80 @@ async def live_financial_statement_op(
             # Reporting Style resolves from the entity on this same session.
           )
         except (CoaMappingNotFoundError, CombinedViewOnParentOnlyError) as exc:
+          raise HTTPException(status_code=422, detail=str(exc))
+    except ProgrammingError:
+      raise _ledger_404()
+
+  return await _dispatch(ctx, _runner, cache)
+
+
+@router.post(
+  "/consolidation-worksheet",
+  response_model=OperationEnvelope[ConsolidationWorksheetResponse],
+  operation_id="consolidationWorksheet",
+  summary="Consolidation Worksheet",
+  description=(
+    "The group's statement for one window with the entity as the column, "
+    "read live from the tenant's OLTP ledger: the parent and each member "
+    "consolidated in full, their combined sum, the consolidation entity's "
+    "adjustments, the consolidated total, and each equity-method or cost "
+    "member beside the sum, never in it. Every column renders under the "
+    "group parent's Reporting Style. Rejected on shared-repository graphs."
+  ),
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/consolidation-worksheet",
+  method="POST",
+  business_event_type="ledger_consolidation_worksheet",
+)
+async def consolidation_worksheet_op(
+  body: ConsolidationWorksheetRequest,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=str(user.id),
+    op="consolidation-worksheet",
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+
+  if body.statement_type not in LIVE_STATEMENT_TYPES:
+    raise HTTPException(
+      status_code=400,
+      detail=(
+        f"Unknown statement_type '{body.statement_type}'. "
+        f"Valid types: {', '.join(LIVE_STATEMENT_TYPES)}."
+      ),
+    )
+
+  def _runner():
+    try:
+      with extensions_session(graph_id) as session:
+        start, end = resolve_reporting_window(
+          session,
+          period_start=body.period_start,
+          period_end=body.period_end,
+          period_type=body.period_type,
+          fiscal_year=body.fiscal_year,
+        )
+        try:
+          return get_consolidation_worksheet(
+            session,
+            graph_id=graph_id,
+            statement_type=body.statement_type,
+            period_start=start,
+            period_end=end,
+            limit=body.limit,
+          )
+        except CoaMappingNotFoundError as exc:
           raise HTTPException(status_code=422, detail=str(exc))
     except ProgrammingError:
       raise _ledger_404()
