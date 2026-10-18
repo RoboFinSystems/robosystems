@@ -53,7 +53,8 @@ class JournalEntryLineItemInput(BaseModel):
       "roll-forwards read the account line. On the group's consolidation "
       "entity, which moves no cash, every tagged line counts on its own, "
       "cash-effect signed (a credit is an inflow), so an elimination offsets "
-      "the flow a member's line produced. Refused when it is not a row of "
+      "the flow a member's line produced, and a tag does not spread to the "
+      "other side. Refused when it is not a row of "
       "the entity's cash flow statement."
     ),
   )

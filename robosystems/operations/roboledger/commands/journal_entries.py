@@ -229,7 +229,8 @@ def resolve_line_flows(
   """Each line's ``flow_element_id``. A first-class ``flow_qname`` must be a
   row of the entity's cash flow statement (``resolve_flows`` refuses one that
   is not, listing the rows); the legacy ``transaction_description_code``
-  metadata key resolves by name only, as before. Then the both-lines rule."""
+  metadata key resolves by name only, as before. Then the both-lines rule,
+  except on the consolidation entity."""
   strict = {li["flow_qname"] for li in normalized if li.get("flow_qname")}
   resolved: dict[str, str] = {}
   if strict:
@@ -247,6 +248,13 @@ def resolve_line_flows(
     )
     for li in normalized
   ]
+  # The consolidation entity moves no cash: each tagged line counts on its
+  # own, so a tag stays on the line it was written on.
+  role = session.execute(
+    text("SELECT entity_role FROM entities WHERE id = :id"), {"id": entity_id}
+  ).scalar()
+  if role == "consolidation":
+    return [flow for _side, flow in tagged]
   return propagate_flows(tagged)
 
 

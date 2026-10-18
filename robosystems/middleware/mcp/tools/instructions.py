@@ -405,11 +405,20 @@ def _consolidation_lines(adjustments: Sequence[Mapping[str, Any]], has) -> list[
       "the consolidation entity's close posts them. A residual is returned "
       "beside them, never plugged: explain it or post it by hand with a basis."
     )
+  if adjustments and has("set-allocation-override"):
+    lines.append(
+      "- A member whose outside owners take a share of its result other than "
+      "their percentage (a preferred return, a waterfall) gets "
+      "`set-allocation-override(entity_id, period, amount or percentage, "
+      "basis)` for the month, never a hand entry of `nci_allocation`, which "
+      "the engine would reverse back to pro rata."
+    )
   if adjustments and has("update-journal-entry"):
     lines.append(
       "- A line of the consolidation entity that carries a `flow_qname` counts "
       "on the cash flow on its own, cash-effect signed (a credit is an inflow), "
-      "so an elimination offsets the flow a member's line produced; tag each "
-      "side with the row it offsets."
+      "so an elimination offsets the flow a member's line produced. A tag "
+      "there stays on the line it is written on: tag each line with the row "
+      "it offsets."
     )
   return ["CONSOLIDATION", *lines] if lines else []

@@ -164,6 +164,7 @@ The tool names below are the exact `name` strings for `tools/call`, grouped by f
 | `rebuild-schedule` / `terminate-schedule` | Regenerate a schedule in place; end one early at a month-end cutoff |
 | `update-journal-entry` / `delete-journal-entry` | Edit or delete a draft entry (posted entries are reversed, never edited) |
 | `propose-consolidation-entries` | Draft a group's consolidating entries for a month in the consolidation entity, replacing the engine's earlier drafts; its close posts them |
+| `set-allocation-override` | Set the outside owners' share of a member's result for a month in place of the pro-rata share, with its basis |
 | `backfill-plan-history` | Compile monthly statement history behind the close boundary |
 
 **Reconciliations** — RoboLedger tenant; how they gate the close is in [Period Close](Period-Close.md#reconciliations):

@@ -43,7 +43,6 @@ from robosystems.models.api.extensions.consolidation import (
 )
 from robosystems.models.extensions.roboledger import Entry
 from robosystems.operations.roboledger.commands._guards import closed_periods
-from robosystems.operations.roboledger.commands.journal_entries import propagate_flows
 from robosystems.operations.roboledger.entity_scope import (
   GroupMember,
   resolve_entity_id,
@@ -69,6 +68,22 @@ EQUITY_METHOD_INCOME = "rs-gaap:IncomeLossFromEquityMethodInvestments"
 NONCONTROLLING_INTEREST = "rs-gaap:MinorityInterest"
 NCI_SHARE_OF_INCOME = "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest"
 GOODWILL = "rs-gaap:Goodwill"
+
+# Income a parent may take a member's distribution to. Its line names the
+# member as counterparty; in the group the distribution is the member's own
+# capital returned, never income.
+DISTRIBUTION_INCOME = frozenset(
+  {
+    "rs-gaap:OtherNonoperatingIncomeExpense",
+    "rs-gaap:OtherNonoperatingIncome",
+    "rs-gaap:InvestmentIncomeDividend",
+    "rs-gaap:DividendIncomeOperating",
+  }
+)
+
+# Where a member's allocation overrides live on its entity row: period →
+# {"amount": cents} or {"percentage": 0 to 100}, with the basis and who set it.
+ALLOCATION_OVERRIDES = "nci_allocation_overrides"
 
 # Concepts the consolidation entity posts for its own reasons, never as an
 # intercompany elimination.
@@ -112,6 +127,7 @@ COMPUTED_KINDS = frozenset(
     "elimination_intercompany",
     "nci_allocation",
     "equity_method_pickup",
+    "equity_method_distribution",
   }
 )
 
@@ -201,6 +217,7 @@ class _Entity:
   method: str
   share: float  # the parent's, as a fraction
   member: GroupMember
+  overrides: dict = field(default_factory=dict)  # period → allocation override
 
 
 @dataclass(frozen=True)
@@ -263,7 +280,7 @@ def _group(session: Session, parent_id: str) -> list[_Entity]:
   rows = session.execute(
     text(
       "SELECT id, name, entity_role, consolidation_method, ownership_pct, "
-      "       joined_on, left_on FROM entities "
+      "       joined_on, left_on, metadata FROM entities "
       "WHERE source <> 'linked' "
       "ORDER BY (id <> :parent), created_at ASC, id ASC"
     ),
@@ -284,6 +301,7 @@ def _group(session: Session, parent_id: str) -> list[_Entity]:
         None if row.id == parent_id else row.joined_on,
         None if row.id == parent_id else row.left_on,
       ),
+      overrides=dict((row.metadata or {}).get(ALLOCATION_OVERRIDES) or {}),
     )
     for row in rows
   ]
@@ -469,9 +487,26 @@ def _plan_capital(
   ]
   invested = sum(r.amount for r in invested_lines)
   residual = invested - parent_part
+  distributed_lines = _distribution_income(rows, parent, member)
+  distributed_by_concept: dict[str, int] = defaultdict(int)
+  for r in distributed_lines:
+    distributed_by_concept[r.concept.qname] -= r.amount
+  distributed = sum(distributed_by_concept.values())
   # Each of the parent's investment entries rounds its own share; a sum of
   # rounded parts may differ from the rounded whole by half a cent each.
-  if abs(residual) * 2 > len(invested_lines):
+  explained = bool(distributed) and abs(residual - distributed) * 2 <= len(
+    invested_lines
+  ) + len(distributed_lines)
+  if explained:
+    for qname, amount in distributed_by_concept.items():
+      if amount:
+        plan.targets[(qname, *key)] += amount
+    plan.basis[key].append(
+      f"{parent.name} took {_money(distributed)} of {member.name}'s "
+      "distributions as income; in the group they are the member's capital "
+      "returned, so that income is reversed against its investment."
+    )
+  elif abs(residual) * 2 > len(invested_lines):
     plan.residuals.append(
       ConsolidationResidual(
         entity_id=member.id,
@@ -481,6 +516,12 @@ def _plan_capital(
           f"{parent.name} carries {_money(invested)} as its investment in "
           f"{member.name}; its {member.share:.0%} of the member's capital "
           f"({_money(capital)}) is {_money(parent_part)}."
+          + (
+            f" {_money(distributed)} of its income names {member.name}, which "
+            "explains only part of the difference."
+            if distributed
+            else ""
+          )
         ),
       )
     )
@@ -490,7 +531,9 @@ def _plan_capital(
   for qname, amount in capital_by_concept.items():
     if amount:
       plan.targets[(qname, *key)] -= amount
-  plan.targets[(INVESTMENT_IN_SUBSIDIARIES, *key)] -= parent_part
+  plan.targets[(INVESTMENT_IN_SUBSIDIARIES, *key)] -= parent_part + (
+    distributed if explained else 0
+  )
   if outside_part:
     plan.targets[(NONCONTROLLING_INTEREST, *key)] -= outside_part
   plan.basis[key].append(
@@ -555,6 +598,8 @@ def _plan_intercompany(
         for r in rows:
           if {r.entity_id, r.counterparty} != {a, b} or r.closing or r.kind:
             continue
+          if r.entity_id == parent_id and r.concept.qname in DISTRIBUTION_INCOME:
+            continue
           q = r.concept
           if q.qname not in postable or q.qname in _NOT_INTERCOMPANY:
             continue
@@ -610,25 +655,63 @@ def _plan_intercompany(
           )
 
 
+def _distribution_income(
+  rows: list[_Row], parent: _Entity, member: _Entity
+) -> list[_Row]:
+  """The parent's income lines that name ``member``: its distributions,
+  taken as income."""
+  return [
+    r
+    for r in rows
+    if r.entity_id == parent.id
+    and r.counterparty == member.id
+    and not r.closing
+    and not r.kind
+    and r.concept.qname in DISTRIBUTION_INCOME
+  ]
+
+
 def _plan_income_shares(
-  plan: _Plan, rows: list[_Row], members: list[_Entity], associates: list[_Entity]
+  plan: _Plan,
+  rows: list[_Row],
+  parent: _Entity,
+  members: list[_Entity],
+  associates: list[_Entity],
+  period: str,
 ) -> None:
   """The outside owners' share of each member's month, and the parent's
   share of each equity-method member's."""
   for member in members:
     outside = 1.0 - member.share
-    if outside <= 0:
+    override = member.overrides.get(period)
+    key = ("nci_allocation", member.id, True)
+    if override:
+      income = _net_income(rows, member.id)
+      if override.get("amount") is not None:
+        share = int(override["amount"])
+        how = _money(share)
+      else:
+        pct = float(override["percentage"])
+        share = _share(income, pct / 100.0)
+        how = f"{pct:g}% of {_money(income)}, {_money(share)}"
+      plan.basis[key].append(
+        f"The outside owners' share of {member.name}'s result for the month, "
+        f"by an allocation override: {how} (pro rata would be "
+        f"{_money(_share(income, max(outside, 0.0)))}). "
+        f"{override.get('basis') or ''}".rstrip()
+      )
+    elif outside <= 0:
       continue
-    share = _share(_net_income(rows, member.id), outside)
+    else:
+      share = _share(_net_income(rows, member.id), outside)
+      plan.basis[key].append(
+        f"The outside owners' {outside:.0%} of {member.name}'s result for the "
+        f"month: {_money(share)}."
+      )
     if not share:
       continue
-    key = ("nci_allocation", member.id, True)
     plan.targets[(NCI_SHARE_OF_INCOME, *key)] += share
     plan.targets[(NONCONTROLLING_INTEREST, *key)] -= share
-    plan.basis[key].append(
-      f"The outside owners' {outside:.0%} of {member.name}'s result for the "
-      f"month: {_money(share)}."
-    )
   for associate in associates:
     pickup = _share(_net_income(rows, associate.id), associate.share)
     if not pickup:
@@ -640,6 +723,22 @@ def _plan_income_shares(
       f"The parent's {associate.share:.0%} of {associate.name}'s result for the "
       f"month: {_money(pickup)}."
     )
+  for associate in associates:
+    # The equity method carries a distribution against the investment; a
+    # parent at cost that took it as income has it reclassed there.
+    key = ("equity_method_distribution", associate.id, True)
+    received = 0
+    for r in _distribution_income(rows, parent, associate):
+      if r.in_period and r.amount:
+        plan.targets[(r.concept.qname, *key)] -= r.amount
+        received -= r.amount
+    if received:
+      plan.targets[(EQUITY_METHOD_INVESTMENT, *key)] -= received
+      plan.basis[key].append(
+        f"{parent.name} took {_money(received)} of {associate.name}'s "
+        "distributions as income; on the equity method they reduce the "
+        "investment."
+      )
 
 
 # ── The preview ─────────────────────────────────────────────────────────
@@ -650,6 +749,7 @@ _MEMOS = {
   "elimination_intercompany": "Eliminate intercompany balances — {name}",
   "nci_allocation": "Share of {name}'s result attributable to outside owners",
   "equity_method_pickup": "Share of {name}'s result — equity method",
+  "equity_method_distribution": "Distributions from {name} — equity method",
 }
 
 
@@ -726,7 +826,7 @@ def preview_consolidation_entries(
       if member.id not in unmapped:
         _plan_capital(plan, rows, parent, member)
   _plan_intercompany(plan, rows, consolidated, set(accounts))
-  _plan_income_shares(plan, rows, members, associates)
+  _plan_income_shares(plan, rows, parent, members, associates, period)
 
   # What the consolidation entity already holds, per kind and member.
   held: dict[tuple[str, str, str, bool], int] = defaultdict(int)
@@ -785,20 +885,12 @@ def preview_consolidation_entries(
         flows[q] = None
     tagged = {q: a for q, a in lines.items() if flows[q]}
     untagged = {q: a for q, a in lines.items() if not flows[q]}
-    # Tagged and untagged lines post apart when each part balances, so the
-    # both-lines rule never spreads a tag onto a line that offsets no flow.
-    # Where they cannot, and the rule would spread one, no line is tagged.
+    # Tagged and untagged lines post apart when each part balances, so each
+    # entry reads as one movement.
     if tagged and untagged and not sum(tagged.values()):
       parts = [(tagged, " — cash flows"), (untagged, "")]
     else:
       parts = [(lines, "")]
-      sides = [("debit" if a > 0 else "credit", flows[q]) for q, a in lines.items()]
-      if propagate_flows(sides) != [flow for _side, flow in sides]:
-        flows = dict.fromkeys(lines)
-        plan.notes.append(
-          f"The {kind} entry for {name} cannot keep its cash flow tags apart "
-          "from its untagged lines; it is proposed untagged."
-        )
     for part, suffix in parts:
       proposals.append(
         ConsolidationProposal(
