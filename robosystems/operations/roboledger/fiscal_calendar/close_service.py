@@ -76,6 +76,10 @@ def gate_finding_counts(gate: CloseableGateResult) -> dict[str, int]:
     CloseableGateResult.RECONCILING_ITEMS: gate.reconciling_item_count,
     CloseableGateResult.UNPOSTED_SOURCE_EVENTS: gate.unposted_source_event_count,
     CloseableGateResult.UNRECONCILED_ACCOUNTS: gate.unreconciled_account_count,
+    CloseableGateResult.ENTITY_OPEN: len(gate.group_open_entities),
+    CloseableGateResult.ADJUSTMENTS_UNPOSTED: len(gate.group_pending_adjustments),
+    CloseableGateResult.RESIDUAL_UNEXPLAINED: len(gate.group_unexplained),
+    CloseableGateResult.CONSOLIDATED_DOES_NOT_FOOT: len(gate.group_not_footing),
   }
   return {code: counts[code] for code in gate.blockers if code in counts}
 
@@ -249,6 +253,7 @@ class PeriodCloseService:
     allow_reconciling_items: bool = False,
     allow_unposted_source_events: bool = False,
     allow_unreconciled_accounts: bool = False,
+    allow_unexplained_residuals: bool = False,
     note: str | None = None,
     entity_id: str | None = None,
     shadow: bool = False,
@@ -268,6 +273,7 @@ class PeriodCloseService:
       allow_reconciling_items=allow_reconciling_items,
       allow_unposted_source_events=allow_unposted_source_events,
       allow_unreconciled_accounts=allow_unreconciled_accounts,
+      allow_unexplained_residuals=allow_unexplained_residuals,
       entity_id=entity_id,
     )
     findings: tuple[str, ...] = ()
@@ -378,6 +384,9 @@ class PeriodCloseService:
       ),
       unreconciled_overridden_count=(
         gate.unreconciled_account_count if allow_unreconciled_accounts else 0
+      ),
+      unexplained_overridden=(
+        gate.group_unexplained if allow_unexplained_residuals else []
       ),
       shadow_findings=findings if shadow else None,
     )
@@ -738,6 +747,7 @@ class PeriodCloseService:
     reconciling_overridden_count: int = 0,
     unposted_overridden_count: int = 0,
     unreconciled_overridden_count: int = 0,
+    unexplained_overridden: list[str] | None = None,
     shadow_findings: tuple[str, ...] | None = None,
   ) -> str | None:
     """Append a marker to the audit note for each overridden close gate, or
@@ -769,6 +779,12 @@ class PeriodCloseService:
       suffixes.append(
         "[reconciliation gate overridden — "
         f"{unreconciled_overridden_count} reconciliation(s) not reconciled]"
+      )
+    if unexplained_overridden:
+      suffixes.append(
+        "[residual gate overridden — left in the consolidated statements: "
+        + "; ".join(unexplained_overridden)
+        + "]"
       )
     if not suffixes:
       return note

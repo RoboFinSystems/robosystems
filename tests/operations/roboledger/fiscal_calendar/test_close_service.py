@@ -1036,3 +1036,17 @@ class TestClosePrePublishWriteback:
     assert len(exc_info.value.failed_events) == 1
     assert exc_info.value.failed_events[0]["event_id"] == "evt_2"
     assert exc_info.value.failed_events[0]["qb_error"]["code"] == "validation"
+
+
+def test_a_residual_override_names_each_item_it_closed_over():
+  """The group close's residual override records what it left in the
+  consolidated statements, item by item."""
+  note = PeriodCloseService._audit_note(
+    "October group close",
+    allow_stale_sync=False,
+    unexplained_overridden=["Harbor Café LLC: 500.00 more than its share"],
+  )
+  assert note == (
+    "October group close [residual gate overridden — left in the consolidated "
+    "statements: Harbor Café LLC: 500.00 more than its share]"
+  )

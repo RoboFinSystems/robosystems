@@ -142,6 +142,13 @@ class GetFiscalCalendarTool:
   - `unreconciled_accounts`: a reconciliation the close waits on is not
     reconciled for the period, or was never compared for it — run
     refresh-reconciliations (count + sample ride on the response)
+  - On the consolidation entity, whose close is the group's (each names
+    its items in the matching `group_*` list): `entity_open` — an entity
+    the month consolidates has not closed it; `adjustments_unposted` — the
+    month's consolidating entries are neither held nor drafted, run
+    propose-consolidation-entries; `residual_unexplained` — a residual or
+    intercompany disagreement is left; `consolidated_does_not_foot` — the
+    consolidated balance sheet or equity statement fails its checks
 - `last_sync_at`: most recent QB sync timestamp (null if no QB connection)
 - `periods`: list of all fiscal period rows with status
 
@@ -541,6 +548,9 @@ class ClosePeriodTool:
 - allow_unreconciled_accounts (optional): lifts the reconciliation gate,
   closing although a reconciliation the close waits on is not reconciled
   for the period. refresh-reconciliations reports what does not tie.
+- allow_unexplained_residuals (optional): on the consolidation entity, lifts
+  the group close's residual gate; each difference stays in the
+  consolidated statements and is named in the audit note.
 
 **RETURNS:**
 Two shapes. Usually the receipt below, returned once the close lands. If the
@@ -583,6 +593,10 @@ The receipt:
   allow_unposted_source_events)
 - a reconciliation the close waits on is not reconciled for the period, or
   was never compared for it (lifted by allow_unreconciled_accounts)
+- on the consolidation entity, the group close: every entity the month
+  consolidates closed it; its consolidating entries posted or drafted; no
+  residual or intercompany disagreement left (lifted by
+  allow_unexplained_residuals); the consolidated statements pass
 - the balance sheet equation does not balance for the period
 
 **NOTES:**
@@ -650,6 +664,13 @@ The receipt:
               "note."
             ),
           },
+          "allow_unexplained_residuals": {
+            "type": "boolean",
+            "description": (
+              "On the consolidation entity, close the group month although a "
+              "residual or intercompany disagreement is left unexplained."
+            ),
+          },
           "note": {
             "type": "string",
             "description": "Optional note captured in the audit event",
@@ -706,6 +727,9 @@ The receipt:
           ),
           "allow_unreconciled_accounts": bool(
             arguments.get("allow_unreconciled_accounts", False)
+          ),
+          "allow_unexplained_residuals": bool(
+            arguments.get("allow_unexplained_residuals", False)
           ),
           "note": arguments.get("note"),
           "entity_id": arguments.get("entity_id"),
@@ -826,6 +850,9 @@ The receipt:
           ),
           allow_unreconciled_accounts=bool(
             arguments.get("allow_unreconciled_accounts", False)
+          ),
+          allow_unexplained_residuals=bool(
+            arguments.get("allow_unexplained_residuals", False)
           ),
         )
         if gate.is_closeable:
@@ -1131,6 +1158,13 @@ class BackfillPlanHistoryTool:
               "existed, which were never compared."
             ),
           },
+          "allow_unexplained_residuals": {
+            "type": "boolean",
+            "description": (
+              "On the consolidation entity, close the group month although a "
+              "residual or intercompany disagreement is left unexplained."
+            ),
+          },
           "allow_stranded_obligations": {
             "type": "boolean",
             "description": (
@@ -1185,6 +1219,9 @@ class BackfillPlanHistoryTool:
       ),
       allow_unreconciled_accounts=bool(
         arguments.get("allow_unreconciled_accounts", False)
+      ),
+      allow_unexplained_residuals=bool(
+        arguments.get("allow_unexplained_residuals", False)
       ),
       restamp=bool(arguments.get("restamp", False)),
       note=arguments.get("note"),

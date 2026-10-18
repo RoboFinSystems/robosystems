@@ -21,6 +21,9 @@ from robosystems.operations.roboledger.fiscal_calendar import (
 from robosystems.operations.roboledger.fiscal_calendar.close_service import (
   WritebackFailed,
 )
+from robosystems.operations.roboledger.fiscal_calendar.service import (
+  GROUP_GATE_FIELDS,
+)
 from robosystems.operations.roboledger.reports.statement_sets import StatementStampError
 
 # Refusals, not faults; anything else should propagate.
@@ -144,6 +147,9 @@ def _gate_payload(exc: CloseGateFailed, *, period: str) -> dict[str, Any]:
   if exc.gate.unreconciled_account_count:
     payload["unreconciled_account_count"] = exc.gate.unreconciled_account_count
     payload["unreconciled_account_sample"] = list(exc.gate.unreconciled_account_sample)
+  for name in GROUP_GATE_FIELDS:
+    if getattr(exc.gate, name):
+      payload[name] = list(getattr(exc.gate, name))
   if exc.gate.sync_stale_days is not None:
     payload["sync_stale_days"] = exc.gate.sync_stale_days
   return payload

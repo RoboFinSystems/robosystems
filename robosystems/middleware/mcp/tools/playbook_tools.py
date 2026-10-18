@@ -312,6 +312,17 @@ _KEY_RULES: list[str] = [
   "subsidiary, pass its entity_id on EVERY call of the sequence — its "
   "siblings stay open, and a close with no entity_id closes the parent. "
   "get-graph-info lists the entities with their ids; create-entity adds one.",
+  "THE GROUP CLOSE: on a group with a consolidation entity, close each "
+  "entity's month first (the parent, every member, and an equity-method "
+  "member too), then propose-consolidation-entries for the month, then "
+  "close-period with the consolidation entity's entity_id. That close is "
+  "the group's: it refuses while an entity is open (entity_open), the "
+  "month's consolidating entries are neither posted nor drafted "
+  "(adjustments_unposted), a residual or intercompany disagreement is left "
+  "(residual_unexplained; allow_unexplained_residuals closes over it, named "
+  "in the audit note), or the consolidated statements fail their checks "
+  "(consolidated_does_not_foot). To change a member's closed month after "
+  "the group has closed it, reopen the group's month first.",
 ]
 
 

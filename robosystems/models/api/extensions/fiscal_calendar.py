@@ -239,6 +239,17 @@ class ClosePeriodRequest(BaseModel):
       "override is recorded in the close audit note."
     ),
   )
+  allow_unexplained_residuals: bool = Field(
+    False,
+    description=(
+      "On the consolidation entity, the group close: close even though a "
+      "residual or an intercompany disagreement is left unexplained. Its "
+      "difference stays in the consolidated statements. Prefer correcting "
+      "the books or posting the explaining entry with its basis. The "
+      "override, and each item it closed over, is recorded in the close "
+      "audit note."
+    ),
+  )
 
 
 class ReopenPeriodRequest(BaseModel):
@@ -356,6 +367,13 @@ class BackfillPlanHistoryRequest(BaseModel):
       "the reconciliation existed."
     ),
   )
+  allow_unexplained_residuals: bool = Field(
+    False,
+    description=(
+      "Override the group close's residual gate on each reclose of the "
+      "consolidation entity's months."
+    ),
+  )
   restamp: bool = Field(
     False,
     description=(
@@ -459,7 +477,9 @@ class FiscalCalendarResponse(BaseModel):
       "'calendar_not_initialized', 'period_already_closed', "
       "'pending_obligations', 'stranded_obligations', "
       "'reconciling_items', 'unposted_source_events', "
-      "'unreconciled_accounts'"
+      "'unreconciled_accounts'; on the consolidation entity, whose close is "
+      "the group's, also 'entity_open', 'adjustments_unposted', "
+      "'residual_unexplained', 'consolidated_does_not_foot'"
     ),
   )
   # Populated only when the matching code is in `blockers`.
@@ -558,6 +578,37 @@ class FiscalCalendarResponse(BaseModel):
     description=(
       "Name and status of up to 5 of those reconciliations, so the blocker "
       "names what is holding the close."
+    ),
+  )
+  group_open_entities: list[str] = Field(
+    default_factory=list,
+    description=(
+      "The group close: the entities the month consolidates, the parent and "
+      "its equity-method members included, that have not closed it. Close "
+      "each first."
+    ),
+  )
+  group_pending_adjustments: list[str] = Field(
+    default_factory=list,
+    description=(
+      "The group close: the consolidating entries the consolidation entity "
+      "neither holds nor has drafted, by kind and member, or what the engine "
+      "left out and why. Run propose-consolidation-entries."
+    ),
+  )
+  group_unexplained: list[str] = Field(
+    default_factory=list,
+    description=(
+      "The group close: residuals and intercompany disagreements left "
+      "unexplained. Correct the books or post the explaining entry, or close "
+      "over them knowingly with allow_unexplained_residuals."
+    ),
+  )
+  group_not_footing: list[str] = Field(
+    default_factory=list,
+    description=(
+      "The group close: the consolidated balance sheet's and equity "
+      "statement's validation failures for the month."
     ),
   )
   last_close_at: datetime | None = None

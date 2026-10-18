@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
@@ -706,18 +707,23 @@ def load_group(
   windows: list[tuple[date, date]],
   parent_taxonomy_id: str | None = None,
   close_history: bool = True,
+  close_parent_history: Callable[[], None] | None = None,
 ) -> GroupResult:
   """Put the group in the graph beside the parent and read it back.
 
   ``windows`` are the parent's month windows; the last one is the open close
   target and stays open here too. Must run before the parent's history
   closes: the parent's side of every intercompany event posts in those
-  months. Re-runs reuse the entities, charts and calendars, and post nothing
+  months. ``close_parent_history`` closes it, between the members' closes and
+  the group's: the consolidation entity's close is the group close, which
+  waits for every entity the month consolidates. Re-runs reuse the entities, charts and calendars, and post nothing
   twice: a group with any posting already in its books is left as it is.
   """
   api = _Api(graph_id, config)
   try:
-    return _load(api, group, windows, parent_taxonomy_id, close_history)
+    return _load(
+      api, group, windows, parent_taxonomy_id, close_history, close_parent_history
+    )
   finally:
     api.close()
 
@@ -728,6 +734,7 @@ def _load(
   windows: list[tuple[date, date]],
   parent_taxonomy_id: str | None,
   close_history: bool,
+  close_parent_history: Callable[[], None] | None,
 ) -> GroupResult:
   parent_entity = next(
     e
@@ -874,12 +881,15 @@ def _load(
   else:
     _post_group(api, group, parent, members, consolidation, agent_of, windows)
 
-  # 4. Close every member's history and the consolidation entity's, month by
-  # month; the close target stays open.
+  # 4. Close every member's history, then the parent's, then the group's (the
+  # consolidation entity's close, which waits for them), month by month; the
+  # close target stays open.
   months_closed = 0
   if close_history:
     for member in group.members:
       months_closed += _close_history(members[member.ticker], windows, member.ticker)
+    if close_parent_history is not None:
+      close_parent_history()
     months_closed += _close_history(consolidation, windows, group.consolidation_ticker)
 
   # 5. Read the group back on the last closed month and check the

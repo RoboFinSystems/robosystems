@@ -277,6 +277,13 @@ class TestClosePeriodResponseMapping:
     assert _noop_exclusive_period_fence.call_args.kwargs["wait_ms"] == 600_000
 
 
+@pytest.fixture(autouse=True)
+def _no_group_close():
+  """These sessions are mocks: no consolidation entity has closed a month."""
+  with patch(f"{_MOD}._group_closed", return_value=None):
+    yield
+
+
 class TestReopenRetractsCanonicalSets:
   def _run(self, fp_status="closed", retracted=("fs_a", "fs_b")):
     session = MagicMock()

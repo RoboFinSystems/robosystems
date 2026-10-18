@@ -1103,3 +1103,104 @@ def test_an_adjustment_kind_belongs_on_the_consolidation_entity(
   with extensions_session(GRAPH) as session:
     with pytest.raises(ConsolidationAdjustmentError, match=message):
       create_journal_entry(session, _entry(kind, adjusts), "test", entity_id=entity_id)
+
+
+def _status(period: str = "2026-01"):
+  with extensions_session(GRAPH) as session:
+    return engine.group_close_status(session, GRAPH, period)
+
+
+def _close_through(entity_id: str, period: str) -> None:
+  with extensions_session(GRAPH) as session:
+    session.add(
+      FiscalCalendar(
+        graph_id=GRAPH,
+        entity_id=entity_id,
+        closed_through_period=period,
+        close_target_period=period,
+      )
+    )
+
+
+def test_the_group_month_waits_on_its_entities_and_entries(group, monkeypatch):
+  """The group close (§4.5) holds until every entity the month consolidates,
+  the equity-method associate included, has closed it and the consolidation
+  entity holds or has drafted the month's entries."""
+  monkeypatch.setattr(engine, "_FLOWS", {})
+  _form_the_group(group)
+  _january(group)
+
+  waiting = _status()
+  with extensions_session(GRAPH) as session:
+    names = dict(session.execute(text("SELECT id, name FROM entities")).all())
+  assert set(waiting.open_entities) == {
+    names[PARENT_ENTITY_ID],
+    names[MEMBER],
+    names[ASSOCIATE],
+  }
+  assert waiting.pending_adjustments
+  assert waiting.unexplained == []
+
+  for entity_id in (PARENT_ENTITY_ID, MEMBER, ASSOCIATE):
+    _close_through(entity_id, "2026-01")
+  _propose()
+  ready = _status()
+  assert ready.open_entities == []
+  assert ready.pending_adjustments == []
+
+
+def test_a_member_month_the_group_closed_reopens_after_the_group(group):
+  """The group's stamp is made from each member's month, so a member reopens
+  it only once the consolidation entity has."""
+  from robosystems.operations.roboledger.commands.fiscal_calendar import (
+    _group_closed,
+  )
+
+  _close_the_consolidation_entity_through("2026-01")
+  with extensions_session(GRAPH) as session:
+    assert _group_closed(session, MEMBER, "2026-01") is not None
+    assert _group_closed(session, MEMBER, "2026-02") is None
+    assert _group_closed(session, ADJUSTMENTS, "2026-01") is None
+
+
+def test_the_consolidation_entity_close_is_the_group_close(group, monkeypatch):
+  """The calendar gate on the consolidation entity names the group's
+  blockers; an operating entity's gate never runs them."""
+  from robosystems.operations.roboledger.fiscal_calendar.service import (
+    CloseableGateResult,
+    FiscalCalendarService,
+  )
+
+  monkeypatch.setattr(engine, "_FLOWS", {})
+  _form_the_group(group)
+  _january(group)
+  _close_the_consolidation_entity_through("2025-12")
+  _close_through(MEMBER, "2025-12")
+
+  with extensions_session(GRAPH) as session:
+    service = FiscalCalendarService()
+    held = service.closeable_gate(
+      session, GRAPH, "2026-01", today=date(2026, 3, 1), entity_id=ADJUSTMENTS
+    )
+    member = service.closeable_gate(
+      session, GRAPH, "2026-01", today=date(2026, 3, 1), entity_id=MEMBER
+    )
+
+  assert CloseableGateResult.ENTITY_OPEN in held.blockers
+  assert CloseableGateResult.ADJUSTMENTS_UNPOSTED in held.blockers
+  assert held.group_open_entities
+  assert not any(b in member.blockers for b in _group_codes())
+  assert member.group_open_entities == []
+
+
+def _group_codes() -> tuple[str, ...]:
+  from robosystems.operations.roboledger.fiscal_calendar.service import (
+    CloseableGateResult,
+  )
+
+  return (
+    CloseableGateResult.ENTITY_OPEN,
+    CloseableGateResult.ADJUSTMENTS_UNPOSTED,
+    CloseableGateResult.RESIDUAL_UNEXPLAINED,
+    CloseableGateResult.CONSOLIDATED_DOES_NOT_FOOT,
+  )

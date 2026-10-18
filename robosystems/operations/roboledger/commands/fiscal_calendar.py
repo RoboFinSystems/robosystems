@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from sqlalchemy import func as sa_func
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.fiscal_calendar import (
@@ -115,6 +116,37 @@ class ReopenOrderError(Exception):
       f"stamped from this month's numbers. Reopen latest-first — {steps} — "
       "then close forward month by month."
     )
+
+
+class GroupClosedError(ReopenOrderError):
+  """A member's month the group has closed: the group's stamp is made from
+  it, so the group month reopens first."""
+
+  def __init__(self, period: str, consolidation_name: str) -> None:
+    Exception.__init__(
+      self,
+      f"Cannot reopen {period!r}: the group has closed it, and its "
+      "consolidated statements are made from this entity's month. Reopen "
+      f"{period!r} on {consolidation_name}, the consolidation entity, first.",
+    )
+    self.period = period
+    self.closed_through = None
+    self.reopen_order = []
+
+
+def _group_closed(session: Session, entity_id: str, period: str) -> str | None:
+  """The consolidation entity's name when it has closed ``period`` and
+  ``entity_id`` is another entity of the group."""
+  row = session.execute(
+    text(
+      "SELECT e.id, e.name, c.closed_through_period FROM entities e "
+      "JOIN fiscal_calendar c ON c.entity_id = e.id "
+      "WHERE e.entity_role = 'consolidation'"
+    )
+  ).first()
+  if row is None or row.id == entity_id or row.closed_through_period is None:
+    return None
+  return str(row.name) if row.closed_through_period >= period else None
 
 
 class BackfillPreconditionError(Exception):
@@ -284,6 +316,7 @@ def close_period(
   allow_reconciling_items: bool = False,
   allow_unposted_source_events: bool = False,
   allow_unreconciled_accounts: bool = False,
+  allow_unexplained_residuals: bool = False,
   fence_wait_ms: int | None = None,
   entity_id: str | None = None,
 ) -> ClosePeriodResponse:
@@ -329,6 +362,7 @@ def close_period(
       allow_reconciling_items=allow_reconciling_items,
       allow_unposted_source_events=allow_unposted_source_events,
       allow_unreconciled_accounts=allow_unreconciled_accounts,
+      allow_unexplained_residuals=allow_unexplained_residuals,
       note=note,
       entity_id=entity_id,
       shadow=shadow,
@@ -465,6 +499,8 @@ def _reopen_under_fence(
     raise PeriodNotFoundInLedgerError(period)
   if fp.status != "closed":
     raise PeriodNotClosedError(period, fp.status)
+  if (group := _group_closed(session, entity_id, period)) is not None:
+    raise GroupClosedError(period, group)
   if enforce_latest:
     # Under the calendar lock (period row first, then calendar, as close's
     # advance takes them): an unlocked read races the next month's close.
@@ -636,6 +672,7 @@ def backfill_plan_history(
           allow_reconciling_items=body.allow_reconciling_items,
           allow_unposted_source_events=body.allow_unposted_source_events,
           allow_unreconciled_accounts=body.allow_unreconciled_accounts,
+          allow_unexplained_residuals=body.allow_unexplained_residuals,
           entity_id=entity_id,
         )
       else:
@@ -654,6 +691,7 @@ def backfill_plan_history(
           allow_reconciling_items=body.allow_reconciling_items,
           allow_unposted_source_events=body.allow_unposted_source_events,
           allow_unreconciled_accounts=body.allow_unreconciled_accounts,
+          allow_unexplained_residuals=body.allow_unexplained_residuals,
           entity_id=entity_id,
         )
       processed.append(
@@ -717,6 +755,7 @@ def _restamp_closed_period(
   entity_id: str,
   allow_unposted_source_events: bool = False,
   allow_unreconciled_accounts: bool = False,
+  allow_unexplained_residuals: bool = False,
 ) -> ClosePeriodResponse:
   """Reopen and re-close an entity's period in one transaction under one
   fence.
@@ -751,6 +790,7 @@ def _restamp_closed_period(
       allow_reconciling_items=allow_reconciling_items,
       allow_unposted_source_events=allow_unposted_source_events,
       allow_unreconciled_accounts=allow_unreconciled_accounts,
+      allow_unexplained_residuals=allow_unexplained_residuals,
       note=note,
       entity_id=entity_id,
       shadow=shadow,
