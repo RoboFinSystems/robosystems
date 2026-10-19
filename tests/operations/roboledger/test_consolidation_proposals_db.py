@@ -11,7 +11,7 @@ from datetime import UTC, date, datetime
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.exc import OperationalError
 
 import robosystems.models.extensions  # noqa: F401  (register models on the Base)
@@ -28,6 +28,7 @@ from robosystems.models.api.extensions.entity import (
 from robosystems.models.api.extensions.journal_entries import (
   CreateJournalEntryRequest,
   JournalEntryLineItemInput,
+  ReverseJournalEntryRequest,
 )
 from robosystems.models.extensions import Element, Entity
 from robosystems.models.extensions.association import Association
@@ -52,6 +53,7 @@ from robosystems.operations.roboledger.commands.entity import (
 from robosystems.operations.roboledger.commands.journal_entries import (
   ConsolidationAdjustmentError,
   create_journal_entry,
+  reverse_journal_entry,
 )
 from robosystems.operations.roboledger.reads import consolidation as engine
 from tests.ledger_entity import PARENT_ENTITY_ID, entity_account, seed_parent_entity_on
@@ -360,29 +362,38 @@ def preview(period: str = "2026-01"):
     return engine.preview_consolidation_entries(session, period=period)
 
 
-def _proposal(
+def _proposals(
   response, kind: str, *, charges: bool | None = None, flows: bool | None = None
 ):
-  """The one proposal of ``kind``; intercompany ones split by ``charges``
-  (the month's income and expense) and ``flows`` (the lines offsetting a
-  cash flow, posted apart from the rest)."""
-  found = [
+  """The proposals of ``kind``; intercompany ones split by ``charges`` (the
+  month's income and expense), and any by ``flows`` (the lines offsetting
+  the month's cash flows, posted apart from the rest)."""
+  return [
     p
     for p in response.proposals
     if p.adjustment_kind == kind
     and (charges is None or ("charges" in p.memo) == charges)
     and (flows is None or ("cash flows" in p.memo) == flows)
   ]
+
+
+def _proposal(response, kind: str, **which: bool):
+  """The one proposal of ``kind``."""
+  found = _proposals(response, kind, **which)
   assert len(found) == 1, [p.memo for p in response.proposals]
   return found[0]
 
 
 def _lines(response, kind: str, **which: bool) -> dict[str, int]:
-  """``{concept: debit-positive cents}`` of the one proposal of ``kind``."""
-  return {
-    line.concept: line.debit_amount - line.credit_amount
-    for line in _proposal(response, kind, **which).lines
-  }
+  """``{concept: debit-positive cents}`` the proposals of ``kind`` hold."""
+  net: dict[str, int] = {}
+  for proposal in _proposals(response, kind, **which):
+    for line in proposal.lines:
+      net[line.concept] = (
+        net.get(line.concept, 0) + line.debit_amount - line.credit_amount
+      )
+  assert net, [p.memo for p in response.proposals]
+  return {concept: amount for concept, amount in net.items() if amount}
 
 
 def _flows(response, kind: str, **which: bool) -> dict[str, str | None]:
@@ -405,13 +416,10 @@ def test_the_month_needs_every_kind_from_the_books(group):
     engine.INVESTMENT_IN_SUBSIDIARIES: -630_000,
     engine.NONCONTROLLING_INTEREST: -270_000,
   }
-  # The 175 owed (fee, interest and the rebill) and the note, on both sides:
-  # the note offsets the cash it moved, so it posts apart.
-  assert _lines(response, "elimination_intercompany", charges=False, flows=False) == {
+  # The 175 owed (fee, interest and the rebill) and the note, on both sides.
+  assert _lines(response, "elimination_intercompany", charges=False) == {
     "rs-gaap:DueToAffiliateCurrent": 17_500,
     "rs-gaap:DueFromAffiliateCurrent": -17_500,
-  }
-  assert _lines(response, "elimination_intercompany", flows=True) == {
     "rs-gaap:LongTermDebtAndCapitalLeaseObligations": 500_000,
     "rs-gaap:LongTermInvestmentsAndReceivablesNet": -500_000,
   }
@@ -450,8 +458,7 @@ def test_eliminations_carry_the_flow_they_offset(group):
   is the group's real flow. The month's income and expense move no tagged
   cash."""
   _form_the_group(group)
-  _january(group)
-  response = preview()
+  response = preview("2025-12")
 
   assert _flows(response, "elimination_investment") == {
     "rs-gaap:MembersEquity": "rs-gaap:ProceedsFromContributedCapital",
@@ -460,19 +467,66 @@ def test_eliminations_carry_the_flow_they_offset(group):
     ),
     engine.NONCONTROLLING_INTEREST: "rs-gaap:ProceedsFromMinorityShareholders",
   }
-  assert _flows(response, "elimination_intercompany", flows=True) == {
+  assert _flows(response, "elimination_intercompany", charges=False) == {
     "rs-gaap:LongTermDebtAndCapitalLeaseObligations": (
       "rs-gaap:ProceedsFromRelatedPartyDebt"
     ),
     "rs-gaap:LongTermInvestmentsAndReceivablesNet": "rs-gaap:PaymentsToAcquireInvestments",
   }
+
+  _january(group)
+  response = preview()
   for kind, which in (
-    ("elimination_intercompany", {"charges": False, "flows": False}),
     ("elimination_intercompany", {"charges": True}),
     ("nci_allocation", {}),
     ("equity_method_pickup", {}),
   ):
     assert set(_flows(response, kind, **which).values()) == {None}
+
+
+def test_a_catch_up_from_earlier_months_moves_no_cash_in_this_one(group):
+  """Nothing held when January is first proposed: December's funding and
+  loan are caught up untagged, and only January's distribution offsets
+  January's cash flows."""
+  _form_the_group(group)
+  _january(group)
+  response = preview()
+
+  assert _lines(response, "elimination_investment", flows=True) == {
+    "rs-gaap:MembersEquity": -100_000,
+    engine.INVESTMENT_IN_SUBSIDIARIES: 70_000,
+    engine.NONCONTROLLING_INTEREST: 30_000,
+  }
+  assert _flows(response, "elimination_investment", flows=True) == {
+    "rs-gaap:MembersEquity": "rs-gaap:PaymentsOfCapitalDistribution",
+    engine.INVESTMENT_IN_SUBSIDIARIES: (
+      "rs-gaap:ProceedsFromDivestitureOfInterestInSubsidiariesAndAffiliates"
+    ),
+    engine.NONCONTROLLING_INTEREST: "rs-gaap:PaymentsToMinorityShareholders",
+  }
+  assert set(_flows(response, "elimination_investment", flows=False).values()) == {None}
+  assert set(_flows(response, "elimination_intercompany", charges=False).values()) == {
+    None
+  }
+
+
+def test_an_entry_that_cannot_offset_every_flow_offsets_none(group, monkeypatch):
+  """With no row for the member's capital on the consolidation entity's
+  statement, tagging the investment and outside owners alone would add a
+  flow nothing offsets."""
+  monkeypatch.setattr(
+    engine,
+    "taggable_flow_qnames",
+    lambda _s, _style: {
+      "rs-gaap:PaymentsToAcquireInterestInSubsidiariesAndAffiliates",
+      "rs-gaap:ProceedsFromMinorityShareholders",
+    },
+  )
+  _form_the_group(group)
+  response = preview("2025-12")
+
+  assert set(_flows(response, "elimination_investment").values()) == {None}
+  assert any("ProceedsFromContributedCapital" in n for n in response.notes)
 
 
 def test_a_tag_stays_on_the_line_it_was_written_on(group):
@@ -1223,3 +1277,89 @@ def test_a_residual_does_not_excuse_the_other_entries(group, monkeypatch):
   status = _status()
   assert status.unexplained
   assert status.pending_adjustments
+
+
+def test_a_reversed_consolidating_entry_is_no_longer_held(group):
+  """A hand entry of a kind, then its reversal: the consolidation entity
+  holds nothing of it, and the month needs the whole share again."""
+  _form_the_group(group)
+  _january(group)
+  post(
+    group,
+    ADJUSTMENTS,
+    JAN_31,
+    [("5900", 50_000), ("3200", -50_000)],
+    kind="nci_allocation",
+    adjusts=MEMBER,
+  )
+  assert _lines(preview(), "nci_allocation")[engine.NCI_SHARE_OF_INCOME] == 4_750
+  with extensions_session(GRAPH) as session:
+    entry_id = session.execute(
+      text(
+        "SELECT id FROM entries WHERE entity_id = :e AND adjustment_kind IS NOT NULL"
+      ),
+      {"e": ADJUSTMENTS},
+    ).scalar_one()
+    reverse_journal_entry(
+      session,
+      ReverseJournalEntryRequest(entry_id=str(entry_id), posting_date=JAN_31),
+      "test",
+    )
+    session.commit()
+
+  assert _lines(preview(), "nci_allocation")[engine.NCI_SHARE_OF_INCOME] == 54_750
+
+
+def test_an_intercompany_balance_the_consolidation_entity_cannot_post_holds_the_month(
+  group,
+):
+  """A fee billed on account to receivables and payables, which the
+  consolidation chart does not carry: the balance is named, never dropped."""
+  _form_the_group(group)
+  with extensions_session(GRAPH) as session:
+    for qname, balance, trait, entity_id, code in (
+      ("rs-gaap:ReceivablesNetCurrent", "debit", "asset", PARENT_ENTITY_ID, "ar"),
+      ("rs-gaap:AccountsPayableCurrent", "credit", "liability", MEMBER, "ap"),
+    ):
+      concept = Element(
+        qname=qname,
+        name=qname.split(":")[1],
+        balance_type=balance,
+        period_type="instant",
+        element_type="concept",
+        is_abstract=False,
+        created_by="test",
+      )
+      session.add(concept)
+      session.flush()
+      session.add(
+        ElementTrait(
+          element_id=concept.id,
+          trait_id=session.execute(
+            select(Trait.id).where(Trait.identifier == trait)
+          ).scalar_one(),
+          is_primary=True,
+        )
+      )
+      account = entity_account(session, entity_id, code)
+      session.add(
+        Association(
+          structure_id=group["mapping"],
+          from_element_id=account,
+          to_element_id=concept.id,
+          association_type="mapping",
+        )
+      )
+      group["accounts"][(entity_id, code)] = account
+    session.commit()
+  post(
+    group, PARENT_ENTITY_ID, JAN_31, [("ar", 10_000), ("fees", -10_000)], agent=MEMBER
+  )
+  post(
+    group, MEMBER, JAN_31, [("fees", 10_000), ("ap", -10_000)], agent=PARENT_ENTITY_ID
+  )
+  response = preview()
+
+  assert not response.up_to_date
+  assert any("ReceivablesNetCurrent" in n for n in response.notes)
+  assert any("AccountsPayableCurrent" in n for n in response.notes)

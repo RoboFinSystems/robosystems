@@ -35,6 +35,7 @@ ADJUSTMENTS = "ent_test_adjustments"
 JAN = PeriodSpec(start=date(2026, 1, 1), end=date(2026, 1, 31), label="Jan")
 NOTE_PROCEEDS = "rs-gaap:ProceedsFromRelatedPartyDebt"
 CONTRIBUTIONS = "rs-gaap:ProceedsFromContributedCapital"
+OTHER_NONCASH = "rs-gaap:OtherNoncashIncomeExpense"
 
 
 @pytest.fixture(scope="module")
@@ -107,15 +108,24 @@ def _seed() -> dict[str, str]:
     financing = Trait(category="activityType", identifier="financingActivity")
     session.add(financing)
     session.flush()
+    revenue = Trait(category="elementsOfFinancialStatements", identifier="revenue")
+    session.add(revenue)
     targets = {
       "cash": _element("rs-gaap:Cash", "debit", "instant"),
       "note": _element("rs-gaap:DebtCurrent", "credit", "instant"),
       "equity": _element("rs-gaap:MembersEquity", "credit", "instant"),
+      "income": _element("rs-gaap:OtherNonoperatingIncome", "credit", "duration"),
     }
     session.add_all(targets.values())
+    session.add(_element(OTHER_NONCASH, "credit", "duration"))
     session.flush()
+    session.add(
+      ElementTrait(
+        element_id=targets["income"].id, trait_id=revenue.id, is_primary=True
+      )
+    )
     for key, target in targets.items():
-      source = _element(f"coa:{key}", target.balance_type, "instant")
+      source = _element(f"coa:{key}", target.balance_type, target.period_type)
       session.add(source)
       session.flush()
       session.add(
@@ -221,3 +231,22 @@ def test_a_whole_graph_pivot_keeps_the_rule_off(tenant):
   count, as for any entity: the consolidation entity's rule is its own."""
   _post(tenant, ADJUSTMENTS, ELIMINATION)
   assert _flows(tenant, None) == {}
+
+
+def test_a_tagged_line_beside_income_is_not_offset_as_well(tenant):
+  """The parent took a member's distribution as income; the elimination
+  reverses the income and restores the capital, tagged with the member's
+  distribution. The tag is the capital line's flow, so the income it sits
+  beside is not also backed out of operating as a non-cash item."""
+  _post(
+    tenant,
+    ADJUSTMENTS,
+    [("income", 70_00, 0, None), ("equity", 0, 70_00, "contribution_flow")],
+  )
+  with extensions_session(GRAPH) as session:
+    facts = generate_report_facts(
+      session, "", tenant["mapping"], [JAN], entity_id=ADJUSTMENTS
+    ).facts
+  values = {f.element_qname: f.value for f in facts if f.period_type == "duration"}
+  assert values.get(OTHER_NONCASH, 0.0) == 0.0
+  assert values[CONTRIBUTIONS] == 70.0

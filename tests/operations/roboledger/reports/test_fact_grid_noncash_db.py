@@ -36,6 +36,7 @@ pytestmark = pytest.mark.integration
 
 GRAPH = "kgdddddddddddddddd48"
 PARENT = "ent_noncash_parent"
+ADJUSTMENTS = "ent_noncash_adjustments"
 JAN = PeriodSpec(start=date(2026, 1, 1), end=date(2026, 1, 31), label="Jan")
 FEB = PeriodSpec(start=date(2026, 2, 1), end=date(2026, 2, 28), label="Feb")
 
@@ -69,6 +70,12 @@ ACCOUNTS = {
   "income_tax": ("rs-gaap:IncomeTaxExpenseBenefit", "debit", "duration"),
   "other_income": ("rs-gaap:OtherNonoperatingIncomeExpense", "credit", "duration"),
   "disposal_gain": (DISPOSAL_GAIN, "credit", "duration"),
+  "accumulated_depreciation": (
+    "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment",
+    "credit",
+    "instant",
+  ),
+  "depreciation": ("rs-gaap:DepreciationDepletionAndAmortization", "debit", "duration"),
   "inventory": (
     "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings",
     "debit",
@@ -116,6 +123,18 @@ def _seed() -> dict[str, str]:
         name="Noncash Corp",
         entity_type="corporation",
         is_parent=True,
+        created_by="usr_1",
+      )
+    )
+    session.add(
+      Entity(
+        id=ADJUSTMENTS,
+        name="Consolidation Adjustments",
+        entity_type="corporation",
+        is_parent=False,
+        parent_entity_id=PARENT,
+        entity_role="consolidation",
+        consolidation_method="none",
         created_by="usr_1",
       )
     )
@@ -208,12 +227,14 @@ def _event(event_type: str, discharges: str | None = None) -> str:
     return str(event.id)
 
 
-def _post(ids, lines, posted=date(2026, 1, 15), event_id=None) -> None:
+def _post(
+  ids, lines, posted=date(2026, 1, 15), event_id=None, entity_id=PARENT
+) -> None:
   """``lines`` are ``(account, debit dollars, credit dollars)``, or with a
   fourth element, the flow qname the line is tagged with."""
   with extensions_session(GRAPH) as session:
     entry = Entry(
-      entity_id=PARENT,
+      entity_id=entity_id,
       type="standard",
       status="posted",
       posting_date=posted,
@@ -236,10 +257,10 @@ def _post(ids, lines, posted=date(2026, 1, 15), event_id=None) -> None:
       )
 
 
-def _cash_flow(ids, period=JAN, periods=None) -> dict[str, float]:
+def _cash_flow(ids, period=JAN, periods=None, entity_id=PARENT) -> dict[str, float]:
   with extensions_session(GRAPH) as session:
     facts = generate_report_facts(
-      session, "", ids["mapping"], periods or [period], entity_id=PARENT
+      session, "", ids["mapping"], periods or [period], entity_id=entity_id
     ).facts
   out: dict[str, float] = {}
   for f in facts:
@@ -361,6 +382,52 @@ def test_a_cash_sale_at_a_gain_puts_all_the_cash_in_investing(tenant):
   assert cf[DISPOSAL_GAIN] == 200.0
   assert cf.get(OPERATING, 0.0) == 0.0
   _assert_no_reconciling_adjustment(cf)
+
+
+@pytest.mark.parametrize(
+  "proceeds, result",
+  [(500, ("disposal_gain", 0, 300)), (200, None), (100, ("disposal_gain", 100, 0))],
+  ids=["at_a_gain", "at_book_value", "at_a_loss"],
+)
+def test_a_depreciated_asset_sold_for_cash_shows_the_cash_received(
+  tenant, proceeds, result
+):
+  """Cost 1,000 with 800 depreciated: the sale writes the depreciation off
+  with the cost, so the proceeds are the cash, not the cost."""
+  _post(tenant, [("equipment", 1000, 0), ("cash", 0, 1000)], posted=date(2026, 1, 5))
+  _post(
+    tenant,
+    [("depreciation", 800, 0), ("accumulated_depreciation", 0, 800)],
+    posted=date(2026, 1, 6),
+  )
+  _post(
+    tenant,
+    [
+      ("cash", proceeds, 0),
+      ("accumulated_depreciation", 800, 0),
+      ("equipment", 0, 1000),
+      *([result] if result else []),
+    ],
+  )
+  cf = _cash_flow(tenant)
+  assert cf[PPE_PROCEEDS] == float(proceeds)
+  assert cf[NET_CHANGE] == float(proceeds - 1000)
+  _assert_no_reconciling_adjustment(cf)
+
+
+def test_the_consolidation_entitys_cash_flow_nets_to_nothing(tenant):
+  """It holds no cash, so a tagged line with nothing offsetting it (a hand
+  entry tagging one side only) cannot move the group's net change in cash:
+  the difference is its reconciling adjustment."""
+  _post(
+    tenant,
+    [("metals", 100, 0), ("credit_line", 0, 100, REPAYMENTS)],
+    entity_id=ADJUSTMENTS,
+  )
+  cf = _cash_flow(tenant, entity_id=ADJUSTMENTS)
+  assert cf[REPAYMENTS] == 100.0, cf
+  assert cf.get(NET_CHANGE, 0.0) == 0.0, cf
+  assert cf[RECONCILING] == -100.0, cf
 
 
 def test_an_owner_paying_the_card_is_not_operating_cash(tenant):

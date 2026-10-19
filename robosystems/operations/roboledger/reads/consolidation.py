@@ -50,6 +50,7 @@ from robosystems.operations.roboledger.entity_scope import (
 )
 from robosystems.operations.roboledger.entry_status import landed_entry_bindparam
 from robosystems.operations.roboledger.reports.fact_grid import (
+  _CASH_ANCHOR_QNAMES,
   _infer_classification,
 )
 from robosystems.operations.roboledger.reports.network_picker import (
@@ -159,6 +160,15 @@ _FLOWS: dict[tuple[str, str], tuple[str, str]] = {
     "rs-gaap:ProceedsFromIssuanceOfCommonStock",
     "rs-gaap:PaymentsOfDividends",
   ),
+  ("rs-gaap:CommonStockValue", "elimination_investment"): (
+    "rs-gaap:ProceedsFromIssuanceOfCommonStock",
+    "rs-gaap:PaymentsForRepurchaseOfCommonStock",
+  ),
+  # A corporation's dividends are its retained earnings' only cash movement.
+  ("rs-gaap:RetainedEarningsAccumulatedDeficit", "elimination_investment"): (
+    "rs-gaap:PaymentsOfDividends",
+    "rs-gaap:PaymentsOfDividends",
+  ),
   ("rs-gaap:LongTermDebtAndCapitalLeaseObligations", "elimination_intercompany"): (
     "rs-gaap:ProceedsFromRelatedPartyDebt",
     "rs-gaap:RepaymentsOfRelatedPartyDebt",
@@ -236,6 +246,37 @@ def _flow(qname: str, kind: str, amount: int) -> str | None:
   if flows is None:
     return None
   return flows[0] if amount > 0 else flows[1]
+
+
+def _tagged_part(
+  lines: dict[str, int],
+  kind: str,
+  periodic: bool,
+  *,
+  carried: dict[str, int],
+  taggable: set[str],
+  untaggable: set[str],
+) -> tuple[dict[str, int], dict[str, str]]:
+  """The part of an entry that offsets the month's own cash flows, with each
+  line's row; the rest posts untagged.
+
+  Only the month's movement is tagged: what an entry catches up from earlier
+  months (``carried``) moved no cash in this one. The tagged lines must net
+  to nothing, as the cash flows they offset do; when one cannot be tagged
+  (the consolidation entity's statement has no row for it) or they would
+  not net, the entry offsets nothing, since half an offset is a flow."""
+  if periodic:
+    return {}, {}
+  movement = {q: a - carried.get(q, 0) for q, a in lines.items()}
+  flows = {q: _flow(q, kind, a) for q, a in movement.items() if a}
+  missing = {f for f in flows.values() if f and taggable and f not in taggable}
+  if missing:
+    untaggable |= missing
+    return {}, {}
+  tagged = {q: movement[q] for q, f in flows.items() if f}
+  if sum(tagged.values()):
+    return {}, {}
+  return tagged, {q: f for q, f in flows.items() if f}
 
 
 class NoConsolidationEntityError(ValueError):
@@ -648,13 +689,16 @@ def _plan_intercompany(
   postable: set[str],
 ) -> None:
   """The balances the group's entities owe each other, and the month's
-  income one earns from another against the other's expense."""
+  income one earns from another against the other's expense. A balance on
+  a concept the consolidation entity has no account for cannot be
+  eliminated, so it is named and the month left incomplete."""
   ids = [e.id for e in consolidated]
   parent_id = ids[0]
   names = {e.id: e.name for e in consolidated}
   for i, a in enumerate(ids):
     for b in ids[i + 1 :]:
       member = b if a == parent_id else a
+      unpostable: dict[tuple[str, str], int] = defaultdict(int)
       for periodic in (False, True):
         sums: dict[tuple[str, str], int] = defaultdict(int)
         for r in rows:
@@ -667,12 +711,16 @@ def _plan_intercompany(
           ):
             continue
           q = r.concept
-          if q.qname not in postable or q.qname in _NOT_INTERCOMPANY:
+          if q.qname in _NOT_INTERCOMPANY or q.qname in _CASH_ANCHOR_QNAMES:
             continue
           if periodic:
             if not r.in_period or q.classification not in _RESULT:
               continue
           elif q.classification not in _BALANCE:
+            continue
+          if q.qname not in postable:
+            if not periodic:
+              unpostable[(r.entity_id, q.qname)] += r.amount
             continue
           sums[(r.entity_id, q.qname)] += r.amount
         items = [(e, q, amt) for (e, q), amt in sums.items() if amt]
@@ -719,6 +767,17 @@ def _plan_intercompany(
               ),
             )
           )
+      for (entity_id, qname), amount in sorted(unpostable.items()):
+        if not amount:
+          continue
+        other = b if entity_id == a else a
+        plan.notes.append(
+          f"{names[entity_id]}'s {qname.split(':')[-1]} with {names[other]} "
+          f"({_money(abs(amount))}) is owed within the group, and the "
+          f"consolidation entity has no account mapped to {qname} to "
+          "eliminate it; the balance is left out."
+        )
+        plan.incomplete = True
 
 
 def _distribution_income(
@@ -896,8 +955,10 @@ def preview_consolidation_entries(
   _plan_intercompany(plan, rows, consolidated, set(accounts))
   _plan_income_shares(plan, rows, parent, members, associates, period)
 
-  # What the consolidation entity already holds, per kind and member.
+  # What the consolidation entity already holds, per kind and member, and of
+  # the balances what it held at the month's start.
   held: dict[tuple[str, str, str, bool], int] = defaultdict(int)
+  held_before: dict[tuple[str, str, str, bool], int] = defaultdict(int)
   for r in rows:
     if (
       r.entity_id != consolidation.id
@@ -909,6 +970,19 @@ def preview_consolidation_entries(
     if periodic and not r.in_period:
       continue
     held[(r.concept.qname, r.kind, r.adjusts, periodic)] += r.amount
+    if not periodic and not r.in_period:
+      held_before[(r.concept.qname, r.kind, r.adjusts, periodic)] += r.amount
+
+  # The balances the month opened needing: what a delta holds beyond the
+  # month's own movement is earlier months', caught up, and moved no cash
+  # in this one.
+  before = _Plan()
+  earlier = [r for r in rows if not r.in_period]
+  if parent.id not in unmapped:
+    for member in members:
+      if member.id not in unmapped:
+        _plan_capital(before, earlier, parent, member)
+  _plan_intercompany(before, earlier, consolidated, set(accounts))
 
   deltas: dict[tuple[str, str, bool], dict[str, int]] = defaultdict(dict)
   for key in set(plan.targets) | set(held):
@@ -946,20 +1020,29 @@ def preview_consolidation_entries(
     basis = plan.basis.get((kind, member_id, periodic)) or [
       f"Reverses {kind} held for {name} that the books no longer support."
     ]
-    flows = {q: None if periodic else _flow(q, kind, a) for q, a in lines.items()}
-    for q, flow in flows.items():
-      if flow and taggable and flow not in taggable:
-        untaggable.add(flow)
-        flows[q] = None
-    tagged = {q: a for q, a in lines.items() if flows[q]}
-    untagged = {q: a for q, a in lines.items() if not flows[q]}
-    # Tagged and untagged lines post apart when each part balances, so each
-    # entry reads as one movement.
-    if tagged and untagged and not sum(tagged.values()):
-      parts = [(tagged, " — cash flows"), (untagged, "")]
-    else:
-      parts = [(lines, "")]
-    for part, suffix in parts:
+    tagged, flows = _tagged_part(
+      lines,
+      kind,
+      periodic,
+      carried={
+        q: before.targets.get((q, kind, member_id, False), 0)
+        - held_before.get((q, kind, member_id, False), 0)
+        for q in lines
+      },
+      taggable=taggable,
+      untaggable=untaggable,
+    )
+    untagged = {q: a - tagged.get(q, 0) for q, a in lines.items()}
+    untagged = {q: a for q, a in untagged.items() if a}
+    parts = [
+      (part, suffix, part_flows)
+      for part, suffix, part_flows in (
+        (tagged, " — cash flows" if untagged else "", flows),
+        (untagged, "", {}),
+      )
+      if part
+    ]
+    for part, suffix, part_flows in parts:
       proposals.append(
         ConsolidationProposal(
           adjustment_kind=kind,
@@ -975,7 +1058,7 @@ def preview_consolidation_entries(
               concept=qname,
               debit_amount=max(amount, 0),
               credit_amount=max(-amount, 0),
-              flow_qname=flows[qname],
+              flow_qname=part_flows.get(qname),
             )
             for qname, amount in sorted(part.items(), key=lambda kv: -kv[1])
           ],
@@ -986,7 +1069,7 @@ def preview_consolidation_entries(
     plan.notes.append(
       f"{consolidation.name}'s cash flow statement has no "
       + ", ".join(sorted(untaggable))
-      + " row; the lines that would offset it are left untagged."
+      + " row; the entries that would offset it are left untagged."
     )
   # Drafting again replaces the month's own drafts, so they are not counted as
   # held; the month is up to date when they hold exactly what is proposed.
