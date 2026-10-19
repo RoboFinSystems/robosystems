@@ -83,17 +83,22 @@ class ConsolidatedHistoryError(EntityHierarchyError):
   """A change of method that would restate months the group has closed."""
 
 
+# A period a close closed, not one the calendar was initialized closed.
+_CLOSED_BY_A_CLOSE = "status = 'closed' AND closed_by IS DISTINCT FROM 'initialize'"
+
+
 def _group_closed_through(session: Session) -> str | None:
-  """The last month the consolidation entity has closed, or None until it
-  has closed one itself: the months a calendar starts out closed through
-  are before the books, with no consolidated statements to restate."""
+  """The last month the consolidation entity has closed itself, or None:
+  the months a calendar starts out closed through are before the books, and
+  a month reopened is no longer closed, so neither has consolidated
+  statements to restate."""
   consolidation = find_consolidation_entity(session)
   if consolidation is None:
     return None
   closed_through = session.execute(
     text(
-      "SELECT closed_through_period FROM fiscal_calendar "
-      "WHERE entity_id = :id AND last_close_at IS NOT NULL"
+      "SELECT max(name) FROM fiscal_periods WHERE entity_id = :id "
+      f"AND {_CLOSED_BY_A_CLOSE}"
     ),
     {"id": str(consolidation.id)},
   ).scalar()
@@ -134,8 +139,8 @@ def _refuse_retyping_a_used_consolidation_entity(
   books and drop every guard on the months the group has closed."""
   used = session.execute(
     text(
-      "SELECT EXISTS (SELECT 1 FROM fiscal_calendar WHERE entity_id = :id "
-      "AND last_close_at IS NOT NULL) "
+      "SELECT EXISTS (SELECT 1 FROM fiscal_periods WHERE entity_id = :id "
+      f"AND {_CLOSED_BY_A_CLOSE}) "
       "OR EXISTS (SELECT 1 FROM entries WHERE entity_id = :id "
       "AND status = 'posted')"
     ),

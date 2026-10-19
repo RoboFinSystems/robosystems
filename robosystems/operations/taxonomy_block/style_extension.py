@@ -247,7 +247,7 @@ def validate_extension_network(session: Session, structure: Structure) -> None:
         f"{_name(parent)!r}, is not on the network it extends."
       )
 
-  _check_calculation_arcs(session, structure, arcs, new_rows, _name)
+  _check_calculation_arcs(session, structure, arcs, new_rows, presented, _name)
   if network.block_type == "equity_statement":
     _check_equity_rows(session, structure, presentation, roots, _name)
   else:
@@ -273,10 +273,14 @@ def _check_equity_rows(session, structure, presentation, roots, name) -> None:
       )
 
 
-def _check_calculation_arcs(session, structure, arcs, new_rows, name) -> None:
+def _check_calculation_arcs(
+  session, structure, arcs, new_rows, presented, name
+) -> None:
   """An extension's calculation arcs join the graph's whole calc DAG, so
-  each one must sum a row the extension adds, and give it its only parent:
-  a second parent counts the row twice."""
+  each one must sum a row the extension adds, and give it its only parent
+  on the statement it extends: a second there counts the row twice. A
+  parent on another statement is that statement's (a cost on the income
+  statement is also a cash flow add-back)."""
   own: dict[str, set[str]] = {}
   for a in arcs:
     if a.association_type != "calculation":
@@ -293,7 +297,11 @@ def _check_calculation_arcs(session, structure, arcs, new_rows, name) -> None:
   others: dict[str, set[str]] = {}
   for parent, children in load_rs_gaap_calculations(session).items():
     for child, _weight in children:
-      if str(child) in own and str(parent) not in own[str(child)]:
+      if (
+        str(child) in own
+        and str(parent) not in own[str(child)]
+        and str(parent) in presented | new_rows
+      ):
         others.setdefault(str(child), set()).add(str(parent))
   for child, parents in own.items():
     if len(parents | others.get(child, set())) > 1:

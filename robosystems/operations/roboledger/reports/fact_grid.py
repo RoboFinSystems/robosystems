@@ -138,7 +138,6 @@ def generate_report_facts(
   periods: list[PeriodSpec],
   close_target_qname: str = "rs-gaap:RetainedEarningsAccumulatedDeficit",
   entity_id: str | None = None,
-  member_since: date | None = None,
 ) -> ReportFacts:
   """Generate structure-agnostic facts for all mapped elements across periods.
 
@@ -152,14 +151,12 @@ def generate_report_facts(
   as a live statement leaves it out: that holds for a column that ends
   inside the books too (a calendar year for books opening in July), whose
   flows would be the months since the opening labelled as the whole year.
-  ``member_since`` is the day a member joined, in a group read: books opening
-  by that month cover everything the group reads of it.
   """
   arc_type = _arc_type_for_taxonomy(session, taxonomy_id)
   facts: list[ReportFact] = []
   # Columns reaching back before the books are computed, since later columns
   # measure change from their balances, but never plugged or reported.
-  start = member_books_start(_books_start(session, entity_id), member_since)
+  start = _books_start(session, entity_id)
   covered = [p for p in periods if start is None or p.start >= start]
 
   for period in periods:
@@ -257,15 +254,6 @@ def _books_start(session: Session, entity_id: str | None) -> date | None:
   return books_start(session, [entity_id]) if entity_id else None
 
 
-def member_books_start(start: date | None, member_since: date | None) -> date | None:
-  """The books' first day as a group reads a member: none when they open by
-  the month it joined, since the group reads nothing of it from before."""
-  if start is not None and member_since is not None:
-    if start <= member_since.replace(day=1):
-      return None
-  return start
-
-
 def columns_before_the_books(
   session: Session,
   statement_type: str,
@@ -296,12 +284,12 @@ def group_columns_before_the_books(
   periods: list[PeriodSpec],
   members: list,
 ) -> set[int]:
-  """``columns_before_the_books`` for a group read: a column is partial only
-  where a member summed in it has books that do not cover what the group
-  reads of it. ``members`` are ``GroupMember``s."""
+  """``columns_before_the_books`` for a group read: a member's books hold
+  back only the columns it is summed in, so one that joins later leaves the
+  earlier comparatives standing. ``members`` are ``GroupMember``s."""
   omitted: set[int] = set()
   for member in members:
-    start = member_books_start(books_start(session, [member.id]), member.joined_on)
+    start = books_start(session, [member.id])
     omitted |= {
       i
       for i in _columns_before(statement_type, periods, start)

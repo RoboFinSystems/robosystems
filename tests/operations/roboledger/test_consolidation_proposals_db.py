@@ -33,7 +33,12 @@ from robosystems.models.api.extensions.journal_entries import (
 from robosystems.models.extensions import Element, Entity
 from robosystems.models.extensions.association import Association
 from robosystems.models.extensions.element_trait import ElementTrait
-from robosystems.models.extensions.roboledger import Entry, FiscalCalendar, LineItem
+from robosystems.models.extensions.roboledger import (
+  Entry,
+  FiscalCalendar,
+  FiscalPeriod,
+  LineItem,
+)
 from robosystems.models.extensions.roboledger.agent import Agent
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.structure import Structure
@@ -792,6 +797,9 @@ def test_a_member_whose_books_are_not_read_leaves_the_month_open(group, monkeypa
 
 
 def _close_the_consolidation_entity_through(period: str) -> None:
+  """The calendar closed through ``period`` and the month closed by a close,
+  not seeded closed."""
+  start, end = engine.month_bounds(period)
   with extensions_session(GRAPH) as session:
     session.add(
       FiscalCalendar(
@@ -800,6 +808,18 @@ def _close_the_consolidation_entity_through(period: str) -> None:
         closed_through_period=period,
         close_target_period=period,
         last_close_at=datetime.now(UTC),
+      )
+    )
+    session.add(
+      FiscalPeriod(
+        graph_id=GRAPH,
+        entity_id=ADJUSTMENTS,
+        name=period,
+        start_date=start,
+        end_date=end,
+        period_type="monthly",
+        status="closed",
+        closed_by="test",
       )
     )
 
@@ -1464,3 +1484,134 @@ def test_an_intercompany_balance_the_consolidation_entity_cannot_post_holds_the_
   assert not response.up_to_date
   assert any("ReceivablesNetCurrent" in n for n in response.notes)
   assert any("AccountsPayableCurrent" in n for n in response.notes)
+
+
+def _map_account(group: dict, entity_id: str, code: str, qname: str, balance: str):
+  """An account of ``entity_id`` mapped to ``qname``, a liability concept
+  the fixture's chart does not carry."""
+  with extensions_session(GRAPH) as session:
+    concept = Element(
+      qname=qname,
+      name=qname.split(":")[1],
+      balance_type=balance,
+      period_type="instant",
+      element_type="concept",
+      is_abstract=False,
+      created_by="test",
+    )
+    session.add(concept)
+    session.flush()
+    session.add(
+      ElementTrait(
+        element_id=concept.id,
+        trait_id=session.execute(
+          select(Trait.id).where(Trait.identifier == "liability")
+        ).scalar_one(),
+        is_primary=True,
+      )
+    )
+    account = entity_account(session, entity_id, code)
+    session.add(
+      Association(
+        structure_id=group["mapping"],
+        from_element_id=account,
+        to_element_id=concept.id,
+        association_type="mapping",
+      )
+    )
+    group["accounts"][(entity_id, code)] = account
+    session.commit()
+
+
+def test_a_third_partys_balance_on_a_rebill_is_not_owed_within_the_group(group):
+  """The parent takes the member's utility bill on its own payables and
+  rebills it: the payable is the vendor's, so nothing is left out."""
+  _form_the_group(group)
+  _map_account(
+    group, PARENT_ENTITY_ID, "ap", "rs-gaap:AccountsPayableCurrent", "credit"
+  )
+  post(
+    group, PARENT_ENTITY_ID, JAN_31, [("due_from", 5_000), ("ap", -5_000)], agent=MEMBER
+  )
+  post(
+    group,
+    MEMBER,
+    JAN_31,
+    [("utilities", 5_000), ("due_to", -5_000)],
+    agent=PARENT_ENTITY_ID,
+  )
+  response = preview()
+
+  assert not response.incomplete
+  assert not any("AccountsPayableCurrent" in n for n in response.notes)
+
+
+def test_a_distribution_taken_as_income_offsets_its_flows(group):
+  """The income reversal rides with the tagged capital lines, as the
+  operating side of the distribution they offset."""
+  _form_the_group(group)
+  _post_proposals(group, preview("2025-12"))
+  _january_with_distributions_as_income(group)
+  flows = _flows(preview(), "elimination_investment")
+
+  assert flows["rs-gaap:MembersEquity"] == "rs-gaap:PaymentsOfCapitalDistribution"
+  assert [q for q, f in flows.items() if f is None] == [
+    "rs-gaap:OtherNonoperatingIncomeExpense"
+  ]
+
+
+def test_a_month_opening_on_a_withheld_residual_tags_nothing(group):
+  """With no opening target to measure from, the whole balance would read
+  as the month's movement."""
+  _form_the_group(group)
+  _post_proposals(group, preview("2025-12"))
+  _january(group)
+  post(
+    group,
+    PARENT_ENTITY_ID,
+    JAN_31,
+    [("investment", 7_000), ("cash", -7_000)],
+    agent=MEMBER,
+  )
+  january = preview()
+  assert [r.entity_id for r in january.residuals] == [MEMBER]
+  _post_proposals(group, january)
+  post(group, MEMBER, date(2026, 2, 2), [("cash", 7_000), ("equity", -7_000)])
+  post(
+    group,
+    MEMBER,
+    date(2026, 2, 2),
+    [("cash", 3_000), ("equity", -3_000)],
+    agent="owner",
+  )
+  february = preview("2026-02")
+
+  assert february.residuals == []
+  assert not _proposals(february, "elimination_investment", flows=True)
+
+
+def test_a_reopened_group_month_no_longer_holds_membership(group):
+  """Reopened, the month is not closed, and the month before it never was."""
+  _close_the_consolidation_entity_through("2026-01")
+  with extensions_session(GRAPH) as session:
+    session.execute(
+      text(
+        "UPDATE fiscal_periods SET status = 'closing', closed_by = NULL "
+        "WHERE entity_id = :e AND name = '2026-01'"
+      ),
+      {"e": ADJUSTMENTS},
+    )
+    session.execute(
+      text(
+        "UPDATE fiscal_calendar SET closed_through_period = '2025-12' "
+        "WHERE entity_id = :e"
+      ),
+      {"e": ADJUSTMENTS},
+    )
+  with extensions_session(GRAPH) as session:
+    updated = update_entity(
+      session,
+      UpdateEntityRequest(entity_id=MEMBER, joined_on=date(2026, 1, 14)),
+      "test",
+    )
+  assert updated.joined_on == date(2026, 1, 14)
