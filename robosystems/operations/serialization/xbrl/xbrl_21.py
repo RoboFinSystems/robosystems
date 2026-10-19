@@ -517,13 +517,22 @@ def _build_definition_linkbase(bundle: StatementBundle) -> etree._Element:
 _ROLE_LINK = "http://www.xbrl.org/2003/role/link"
 _ROLE_LABEL = "http://www.xbrl.org/2003/role/label"
 _ARCROLE_CONCEPT_LABEL = "http://www.xbrl.org/2003/arcrole/concept-label"
+# Label roles outside XBRL 2.1's own set must be declared by a roleRef to the
+# Link Role Registry schema that defines them.
+_LRR_LABEL_ROLES = {
+  "http://www.xbrl.org/2009/role/negatedLabel": (
+    "http://www.xbrl.org/lrr/role/negated-2009-12-16.xsd#negatedLabel"
+  ),
+}
 
 
 _concept_label = concept_label
 
 
 def _has_labels(bundle: StatementBundle) -> bool:
-  return any(_concept_label(c) is not None for c in bundle.schema_concepts)
+  return any(
+    _concept_label(c) is not None or c.role_labels for c in bundle.schema_concepts
+  )
 
 
 def _build_label_linkbase(bundle: StatementBundle) -> etree._Element:
@@ -538,6 +547,17 @@ def _build_label_linkbase(bundle: StatementBundle) -> etree._Element:
       ),
     },
   )
+  roles_used = {role for c in bundle.schema_concepts for role in c.role_labels}
+  for role in sorted(roles_used & _LRR_LABEL_ROLES.keys()):
+    etree.SubElement(
+      root,
+      f"{{{NS_LINK}}}roleRef",
+      attrib={
+        f"{{{NS_XLINK}}}type": "simple",
+        f"{{{NS_XLINK}}}href": _LRR_LABEL_ROLES[role],
+        "roleURI": role,
+      },
+    )
   label_link = etree.SubElement(
     root,
     f"{{{NS_LINK}}}labelLink",
@@ -545,7 +565,9 @@ def _build_label_linkbase(bundle: StatementBundle) -> etree._Element:
   )
   for concept in sorted(bundle.schema_concepts, key=lambda c: c.qname):
     label_text = _concept_label(concept)
-    if label_text is None:
+    # A role label a presentation arc names must exist even when the concept
+    # has no standard label.
+    if label_text is None and not concept.role_labels:
       continue
     cid = _qname_to_id(concept.qname)
     loc_label = _qname_to_label(concept.qname)
@@ -559,17 +581,18 @@ def _build_label_linkbase(bundle: StatementBundle) -> etree._Element:
         f"{{{NS_XLINK}}}label": loc_label,
       },
     )
-    label_el = etree.SubElement(
-      label_link,
-      f"{{{NS_LINK}}}label",
-      attrib={
-        f"{{{NS_XLINK}}}type": "resource",
-        f"{{{NS_XLINK}}}label": res_label,
-        f"{{{NS_XLINK}}}role": _ROLE_LABEL,
-        f"{{{NS_XML}}}lang": "en",
-      },
-    )
-    label_el.text = label_text
+    if label_text is not None:
+      label_el = etree.SubElement(
+        label_link,
+        f"{{{NS_LINK}}}label",
+        attrib={
+          f"{{{NS_XLINK}}}type": "resource",
+          f"{{{NS_XLINK}}}label": res_label,
+          f"{{{NS_XLINK}}}role": _ROLE_LABEL,
+          f"{{{NS_XML}}}lang": "en",
+        },
+      )
+      label_el.text = label_text
     # One arc from the loc to every label resource sharing its xlink:label:
     # the standard one and each preferred-label role (XBRL 2.1 §5.2.4.2.1
     # requires the role a presentation arc names to exist on the concept).
@@ -651,23 +674,35 @@ def _append_link_block(
     link_attrs[f"{{{NS_XLINK}}}role"] = link.role_uri
   link_el = etree.SubElement(parent, f"{{{NS_LINK}}}{link_local}", attrib=link_attrs)
 
-  concept_qnames: set[str] = set()
+  # XLink forbids two arcs between the same pair of labels in one link, so a
+  # concept presented twice under one parent (a roll-forward's opening and
+  # closing balance) takes a second locator for its second arc.
+  locators: dict[str, str] = {}
+  endpoints: list[tuple[str, str]] = []
+  seen: dict[tuple[str, str], int] = {}
   for arc in link.arcs:
-    concept_qnames.add(arc.from_qname)
-    concept_qnames.add(arc.to_qname)
-  for qname in sorted(concept_qnames):
+    from_label = _qname_to_label(arc.from_qname)
+    to_label = _qname_to_label(arc.to_qname)
+    locators.setdefault(from_label, arc.from_qname)
+    occurrence = seen.get((from_label, to_label), 0) + 1
+    seen[(from_label, to_label)] = occurrence
+    if occurrence > 1:
+      to_label = f"{to_label}_{occurrence}"
+    locators.setdefault(to_label, arc.to_qname)
+    endpoints.append((from_label, to_label))
+  for label, qname in sorted(locators.items()):
     etree.SubElement(
       link_el,
       f"{{{NS_LINK}}}loc",
       attrib={
         f"{{{NS_XLINK}}}type": "locator",
         f"{{{NS_XLINK}}}href": f"report.xsd#{_qname_to_id(qname)}",
-        f"{{{NS_XLINK}}}label": _qname_to_label(qname),
+        f"{{{NS_XLINK}}}label": label,
       },
     )
 
-  for arc in link.arcs:
-    _append_arc(link_el, arc, arc_local, include_weight)
+  for arc, (from_label, to_label) in zip(link.arcs, endpoints, strict=True):
+    _append_arc(link_el, arc, arc_local, include_weight, from_label, to_label)
 
 
 def _append_arc(
@@ -675,12 +710,14 @@ def _append_arc(
   arc: BundleArc,
   arc_local: str,
   include_weight: bool,
+  from_label: str,
+  to_label: str,
 ) -> None:
   attrs: dict[str, str] = {
     f"{{{NS_XLINK}}}type": "arc",
     f"{{{NS_XLINK}}}arcrole": arc.arcrole,
-    f"{{{NS_XLINK}}}from": _qname_to_label(arc.from_qname),
-    f"{{{NS_XLINK}}}to": _qname_to_label(arc.to_qname),
+    f"{{{NS_XLINK}}}from": from_label,
+    f"{{{NS_XLINK}}}to": to_label,
   }
   if arc.order_value is not None:
     attrs["order"] = _format_decimal(arc.order_value)

@@ -9,6 +9,8 @@ report components render by), the Tavi and XBRL 2.1.
 from __future__ import annotations
 
 import io
+import subprocess
+import sys
 import zipfile
 
 import pytest
@@ -178,8 +180,12 @@ def test_xbrl_carries_the_preferred_label_and_a_label_in_its_role() -> None:
   names = package.namelist()
   pre = etree.fromstring(package.read(next(n for n in names if n.endswith("-pre.xml"))))
   lab = etree.fromstring(package.read(next(n for n in names if n.endswith("-lab.xml"))))
+  concept_of = {
+    loc.get(f"{{{NS_XLINK}}}label"): loc.get(f"{{{NS_XLINK}}}href").split("#")[1]
+    for loc in pre.iter(f"{{{NS_LINK}}}loc")
+  }
   preferred = {
-    (arc.get(f"{{{NS_XLINK}}}to"), arc.get("preferredLabel"))
+    (concept_of[arc.get(f"{{{NS_XLINK}}}to")], arc.get("preferredLabel"))
     for arc in pre.iter(f"{{{NS_LINK}}}presentationArc")
     if arc.get("preferredLabel")
   }
@@ -198,6 +204,38 @@ def test_xbrl_carries_the_preferred_label_and_a_label_in_its_role() -> None:
     ("rs-gaap_StockholdersEquity", PERIOD_END_LABEL_ROLE),
   ):
     assert (f"{concept}_lbl", role) in roles
+
+
+def test_the_labelled_package_validates_under_arelle(tmp_path) -> None:
+  """The roll-forward presents its capital concept twice under one header,
+  and the negated role comes from the Link Role Registry: both must still
+  make a valid XBRL 2.1 package."""
+  zipfile.ZipFile(io.BytesIO(serialize_to_xbrl_21(_labelled_bundle()))).extractall(
+    tmp_path
+  )
+  result = subprocess.run(
+    [
+      sys.executable,
+      "-m",
+      "arelle.CntlrCmdLine",
+      "--file",
+      str(tmp_path / "instance.xml"),
+      "--validate",
+      "--internetConnectivity=offline",
+    ],
+    capture_output=True,
+    text=True,
+    timeout=120,
+    check=False,
+  )
+  output = result.stdout + result.stderr
+  assert "validated in" in output
+  problems = [
+    line
+    for line in output.splitlines()
+    if line.startswith("[") and not line.startswith("[info]")
+  ]
+  assert problems == []
 
 
 def test_the_holon_round_trips_the_preferred_labels() -> None:
