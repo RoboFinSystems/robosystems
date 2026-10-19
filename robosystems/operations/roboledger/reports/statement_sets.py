@@ -15,7 +15,7 @@ except the leaf ``_guards`` module.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -33,6 +33,7 @@ from robosystems.operations.roboledger.commands._guards import (
 )
 from robosystems.operations.roboledger.entity_scope import (
   NoEntityError,
+  group_members,
   resolve_entity_id,
 )
 from robosystems.operations.roboledger.fact_set import create_fact_set
@@ -41,6 +42,8 @@ from robosystems.operations.roboledger.reports.calc_dag import (
 )
 from robosystems.operations.roboledger.reports.fact_grid import (
   PeriodSpec,
+  ReportFact,
+  ReportFacts,
   generate_report_facts,
 )
 from robosystems.operations.roboledger.reports.network_picker import (
@@ -373,6 +376,75 @@ def _persist_report_facts(
   )
 
 
+def _group_parent_of(session: Session, entity_id: str | None) -> str | None:
+  """The group parent, when ``entity_id`` is the group's consolidation
+  entity."""
+  if entity_id is None:
+    return None
+  role = session.execute(
+    text("SELECT entity_role FROM entities WHERE id = :id"), {"id": entity_id}
+  ).scalar()
+  return resolve_entity_id(session, None) if role == "consolidation" else None
+
+
+def _consolidated_report_facts(
+  session: Session,
+  taxonomy_id: str,
+  mapping_id: str,
+  period: PeriodSpec,
+  close_target: str,
+  parent_id: str,
+) -> ReportFacts:
+  """The group's facts for one month: each entity the consolidated read sums
+  (the parent, every member in full inside its interval, and the
+  consolidation entity's adjustments), pivoted on its own chart under the
+  parent's Style and added concept by concept, as ``live-financial-statement``
+  adds them with ``scope: consolidated``. An entity with no mapping is left
+  out, as there."""
+  summed: dict[tuple, ReportFact] = {}
+  warnings: list[str] = []
+  unmapped = 0
+  for member in group_members(session, parent_id, consolidated=True):
+    if not member.is_member_for(period.start, period.end):
+      continue
+    own = find_entity_mapping(session, member.id, BOOK_FRAMEWORK)
+    if own is None:
+      continue
+    generated = generate_report_facts(
+      session=session,
+      taxonomy_id=taxonomy_id,
+      mapping_id=str(own.id),
+      periods=[period],
+      close_target_qname=close_target,
+      entity_id=member.id,
+    )
+    unmapped += generated.unmapped_count
+    warnings.extend(generated.warnings)
+    for f in generated.facts:
+      key = (f.element_id, f.period_start, f.period_end, f.period_type, f.audit_only)
+      held = summed.get(key)
+      if held is None:
+        summed[key] = replace(
+          f, source_values=dict(f.source_values) if f.source_values else None
+        )
+        continue
+      held_close = held.value if held.close_value is None else held.close_value
+      add_close = f.value if f.close_value is None else f.close_value
+      if held.close_value is not None or f.close_value is not None:
+        held.close_value = held_close + add_close
+      held.value += f.value
+      if f.source_values:
+        held.source_values = {**(held.source_values or {}), **f.source_values}
+  return ReportFacts(
+    facts=list(summed.values()),
+    periods=[period],
+    unmapped_count=unmapped,
+    taxonomy_id=taxonomy_id,
+    mapping_id=mapping_id,
+    warnings=warnings,
+  )
+
+
 def _scope_entity_id(session: Session, entity_id: str | None) -> str | None:
   """The entity a stamp, retract or check acts on; None before any exists."""
   try:
@@ -482,14 +554,18 @@ def stamp_canonical_statement_sets(
   finding on the month (``rule_summary``), not a reason to refuse the close.
   """
   scope = _scope_entity_id(session, entity_id)
-  mapping = find_entity_mapping(session, scope, BOOK_FRAMEWORK)
+  # The consolidation entity's close is the group's, and its stamp is the
+  # group's consolidated statements, under the parent's chart and Style.
+  group_parent = _group_parent_of(session, scope)
+  books = group_parent or scope
+  mapping = find_entity_mapping(session, books, BOOK_FRAMEWORK)
   if mapping is None:
     return StatementStampResult(stamped=False, note="no_coa_mapping")
-  if scope is None:
+  if scope is None or books is None:
     return StatementStampResult(stamped=False, note="no_entity")
   entity_id = scope
 
-  reporting_style_id = load_entity_reporting_style(session, entity_id)
+  reporting_style_id = load_entity_reporting_style(session, books)
   element_to_structures, structure_to_factset = _build_structure_mapping(
     session, reporting_style_id, fact_element_ids=None, taxonomy_id=None
   )
@@ -509,14 +585,20 @@ def stamp_canonical_statement_sets(
   period_label = period_end.strftime("%Y-%m")
   try:
     close_target = load_close_target_concept(session, reporting_style_id)
-    facts = generate_report_facts(
-      session=session,
-      taxonomy_id=taxonomy_row.id,
-      mapping_id=mapping.id,
-      periods=[PeriodSpec(start=period_start, end=period_end, label=period_label)],
-      close_target_qname=close_target,
-      entity_id=entity_id,
-    )
+    period = PeriodSpec(start=period_start, end=period_end, label=period_label)
+    if group_parent is not None:
+      facts = _consolidated_report_facts(
+        session, taxonomy_row.id, mapping.id, period, close_target, group_parent
+      )
+    else:
+      facts = generate_report_facts(
+        session=session,
+        taxonomy_id=taxonomy_row.id,
+        mapping_id=mapping.id,
+        periods=[period],
+        close_target_qname=close_target,
+        entity_id=entity_id,
+      )
     _retract_window(session, period_start, period_end, entity_id)
     _pre_create_report_fact_sets(
       session,

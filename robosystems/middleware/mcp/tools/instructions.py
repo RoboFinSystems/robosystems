@@ -413,7 +413,10 @@ def _consolidation_lines(adjustments: Sequence[Mapping[str, Any]], has) -> list[
       "its consolidating entries are posted or drafted, no residual or "
       "intercompany disagreement is left, and the consolidated statements "
       "pass. Its `get-fiscal-calendar` names what holds it (`group_*`). A "
-      "member's month the group has closed reopens only after the group's."
+      "member's month the group has closed reopens only after the group's. "
+      "The close stamps the group's consolidated statements as the "
+      "consolidation entity's own: read the closed group statements with its "
+      "`entity_id`."
     )
   if adjustments and has("set-allocation-override"):
     lines.append(

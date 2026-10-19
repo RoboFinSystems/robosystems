@@ -39,7 +39,10 @@ from robosystems.operations.roboledger.commands.entity import (
   create_entity,
   update_entity,
 )
-from robosystems.operations.roboledger.commands.fiscal_calendar import close_period
+from robosystems.operations.roboledger.commands.fiscal_calendar import (
+  close_period,
+  reopen_period,
+)
 from robosystems.operations.roboledger.commands.journal_entries import (
   create_journal_entry,
 )
@@ -458,6 +461,26 @@ class TestEachEntityStampsItsOwnStatements:
       assert combined_response.combined_entity_ids == [PARENT, SUB]
       assert response.scope == "consolidated"
       assert response.combined_entity_ids == [PARENT, SUB, adjustments]
+
+      # The group close stamps the consolidated statements on the
+      # consolidation entity; the parent's own stamp keeps its own books.
+      assert self._stamped(session, adjustments, CASH) == [6000.0]
+      assert self._stamped(session, PARENT, CASH) == [5000.0]
+
+      # Reopening the group's month takes its stamp back, and only its own.
+      reopen_period(
+        session,
+        MagicMock(),
+        GRAPH,
+        "2026-07",
+        actor_id="usr_1",
+        reason="restate",
+        note=None,
+        service=service,
+        entity_id=adjustments,
+      )
+      assert self._stamped(session, adjustments, CASH) == []
+      assert self._stamped(session, PARENT, CASH) == [5000.0]
 
   def test_an_equity_method_member_is_not_summed(self, charts):
     service = FiscalCalendarService()
