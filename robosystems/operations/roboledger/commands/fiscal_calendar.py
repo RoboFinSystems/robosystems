@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from sqlalchemy import func as sa_func
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.fiscal_calendar import (
@@ -137,19 +138,23 @@ def _group_closed(session: Session, entity_id: str, period: str) -> str | None:
   """The consolidation entity's name when it has closed ``period`` and
   ``entity_id`` is another entity of the group. A graph is one group, with at
   most one consolidation entity."""
-  from robosystems.models.extensions import Entity
   from robosystems.models.extensions.roboledger import FiscalCalendar
-
-  row = (
-    session.query(Entity.id, Entity.name, FiscalCalendar.closed_through_period)
-    .join(FiscalCalendar, FiscalCalendar.entity_id == Entity.id)
-    .filter(Entity.entity_role == "consolidation")
-    .first()
+  from robosystems.operations.roboledger.entity_scope import (
+    find_consolidation_entity,
   )
-  if row is None or row.id == entity_id or row.closed_through_period is None:
+
+  consolidation = find_consolidation_entity(session)
+  if consolidation is None or consolidation.id == entity_id:
     return None
+  closed_through = session.execute(
+    select(FiscalCalendar.closed_through_period).where(
+      FiscalCalendar.entity_id == consolidation.id
+    )
+  ).scalar()
   # Periods are zero-padded YYYY-MM, so they order as strings.
-  return str(row.name) if row.closed_through_period >= period else None
+  if closed_through is None or closed_through < period:
+    return None
+  return str(consolidation.name)
 
 
 class BackfillPreconditionError(Exception):

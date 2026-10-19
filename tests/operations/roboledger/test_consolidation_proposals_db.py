@@ -46,6 +46,7 @@ from robosystems.operations.roboledger.commands.consolidation import (
 )
 from robosystems.operations.roboledger.commands.entity import (
   ConsolidatedHistoryError,
+  EntityHierarchyError,
   create_entity,
   update_entity,
 )
@@ -744,6 +745,7 @@ def _close_the_consolidation_entity_through(period: str) -> None:
         entity_id=ADJUSTMENTS,
         closed_through_period=period,
         close_target_period=period,
+        last_close_at=datetime.now(UTC),
       )
     )
 
@@ -1223,3 +1225,101 @@ def test_a_residual_does_not_excuse_the_other_entries(group, monkeypatch):
   status = _status()
   assert status.unexplained
   assert status.pending_adjustments
+
+
+def test_an_entry_the_engine_left_out_holds_the_close_beside_a_residual(
+  group, monkeypatch
+):
+  """Overriding the member's residual must not also waive the associate's
+  entry, which the engine could not compute from unread books."""
+  monkeypatch.setattr(engine, "_FLOWS", {})
+  _form_the_group(group)
+  _january(group)
+  post(
+    group,
+    PARENT_ENTITY_ID,
+    JAN_31,
+    [("investment", 10_000), ("cash", -10_000)],
+    agent=MEMBER,
+  )
+  monkeypatch.setattr(
+    engine,
+    "find_entity_mapping",
+    lambda _s, entity_id, _f: (
+      None if entity_id == ASSOCIATE else SimpleNamespace(id=group["mapping"])
+    ),
+  )
+  for entity_id in (PARENT_ENTITY_ID, MEMBER, ASSOCIATE):
+    _close_through(entity_id, "2026-01")
+  _propose()
+
+  assert preview().incomplete
+  status = _status()
+  assert status.unexplained
+  assert any("has no chart mapping" in p for p in status.pending_adjustments)
+
+
+def test_a_graph_has_one_consolidation_entity(group):
+  with (
+    extensions_session(GRAPH) as session,
+    pytest.raises(
+      EntityHierarchyError, match="already this graph's consolidation entity"
+    ),
+  ):
+    create_entity(
+      session,
+      CreateEntityRequest(name="Second Adjustments", entity_role="consolidation"),
+      "test",
+    )
+  with (
+    extensions_session(GRAPH) as session,
+    pytest.raises(
+      EntityHierarchyError, match="already this graph's consolidation entity"
+    ),
+  ):
+    update_entity(
+      session,
+      UpdateEntityRequest(entity_id=ASSOCIATE, entity_role="consolidation"),
+      "test",
+    )
+
+
+def test_the_consolidation_entity_keeps_its_role_once_used(group):
+  """Demoted, its eliminations would sum as an operating company's books and
+  the guards on the group's closed months would fall with it."""
+  _close_the_consolidation_entity_through("2026-01")
+  with extensions_session(GRAPH) as session, pytest.raises(ConsolidatedHistoryError):
+    update_entity(
+      session,
+      UpdateEntityRequest(entity_id=ADJUSTMENTS, entity_role="operating"),
+      "test",
+    )
+
+
+def test_membership_dates_cannot_move_within_closed_months(group):
+  _close_the_consolidation_entity_through("2026-01")
+  for change in ({"joined_on": date(2026, 6, 1)}, {"left_on": date(2026, 1, 15)}):
+    with extensions_session(GRAPH) as session, pytest.raises(ConsolidatedHistoryError):
+      update_entity(session, UpdateEntityRequest(entity_id=MEMBER, **change), "test")
+  with extensions_session(GRAPH) as session:
+    left = update_entity(
+      session, UpdateEntityRequest(entity_id=MEMBER, left_on=date(2026, 6, 30)), "test"
+    )
+  assert left.left_on == date(2026, 6, 30)
+
+
+def test_a_new_member_joins_after_the_months_the_group_closed(group):
+  _close_the_consolidation_entity_through("2026-01")
+  with extensions_session(GRAPH) as session, pytest.raises(ConsolidatedHistoryError):
+    create_entity(
+      session, CreateEntityRequest(name="Late Member", ownership_pct=100), "test"
+    )
+  with extensions_session(GRAPH) as session:
+    created = create_entity(
+      session,
+      CreateEntityRequest(
+        name="Late Member", ownership_pct=100, joined_on=date(2026, 2, 1)
+      ),
+      "test",
+    )
+  assert created.consolidation_method == "full"

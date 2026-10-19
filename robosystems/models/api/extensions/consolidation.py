@@ -138,6 +138,14 @@ class PreviewConsolidationEntriesResponse(BaseModel):
       "are as posted, and nothing is recomputed."
     ),
   )
+  incomplete: bool = Field(
+    False,
+    description=(
+      "True when the engine left an entry out — a member's books it cannot "
+      "read, an account the consolidation entity lacks; `notes` says which. "
+      "The group close waits on it whatever the residuals."
+    ),
+  )
   drafted_entry_ids: list[str] = Field(
     default_factory=list,
     description=(
