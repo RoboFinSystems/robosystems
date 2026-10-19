@@ -29,7 +29,11 @@ from robosystems.models.extensions.roboledger.fact import Fact
 from robosystems.operations.roboledger.commands.taxonomies import (
   assert_mapping_leaf,
 )
-from robosystems.operations.taxonomy_block._helpers import structure_from_request
+from robosystems.operations.roboledger.reports.calc_dag import EXTENDS_NETWORK_KEY
+from robosystems.operations.taxonomy_block._helpers import (
+  structure_from_request,
+  structure_metadata,
+)
 from robosystems.operations.taxonomy_block.coa_mappings import (
   BOOK_FRAMEWORK,
   COA_MAPPING_BLOCK_TYPE,
@@ -138,9 +142,7 @@ def apply_structures_to_add(
   new_structures_by_name: dict[str, Structure] = {}
   for req in payload.structures_to_add:
     if is_chart_mapping(taxonomy, req.block_type):
-      metadata = dict(req.metadata)
-      if req.role_uri:
-        metadata["role_uri"] = req.role_uri
+      metadata = structure_metadata(req)
       structure = create_mapping_structure(
         session,
         chart_id=str(taxonomy.id),
@@ -446,7 +448,11 @@ def apply_structures_to_update(
     if patch.concept_arrangement is not None:
       structure.concept_arrangement = patch.concept_arrangement
     if patch.metadata is not None:
-      structure.metadata_ = dict(patch.metadata)
+      extends = (structure.metadata_ or {}).get(EXTENDS_NETWORK_KEY)
+      metadata = {k: v for k, v in patch.metadata.items() if k != EXTENDS_NETWORK_KEY}
+      if extends is not None:
+        metadata[EXTENDS_NETWORK_KEY] = extends
+      structure.metadata_ = metadata
     if patch.role_uri is not None:
       metadata = dict(structure.metadata_ or {})
       metadata["role_uri"] = patch.role_uri

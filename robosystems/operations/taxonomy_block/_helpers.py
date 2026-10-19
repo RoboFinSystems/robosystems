@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from robosystems.models.extensions.structure import Structure
+from robosystems.operations.roboledger.reports.calc_dag import EXTENDS_NETWORK_KEY
 
 if TYPE_CHECKING:
   from robosystems.models.api.taxonomy_block import TaxonomyBlockStructureRequest
@@ -20,9 +21,6 @@ def structure_from_request(
 
   ``role_uri`` rides in ``metadata_``. The caller ``session.add``s the row.
   """
-  structure_metadata = dict(req.metadata)
-  if req.role_uri:
-    structure_metadata["role_uri"] = req.role_uri
   return Structure(
     name=req.name,
     description=req.description,
@@ -30,9 +28,19 @@ def structure_from_request(
     concept_arrangement=req.concept_arrangement,
     taxonomy_id=taxonomy_id,
     is_active=True,
-    metadata_=structure_metadata,
+    metadata_=structure_metadata(req),
     created_by=created_by,
   )
+
+
+def structure_metadata(req: TaxonomyBlockStructureRequest) -> dict:
+  """The request's metadata with its ``role_uri``. The network a structure
+  extends is resolved from ``extends_network`` and checked, never taken from
+  the caller's metadata."""
+  metadata = {k: v for k, v in req.metadata.items() if k != EXTENDS_NETWORK_KEY}
+  if req.role_uri:
+    metadata["role_uri"] = req.role_uri
+  return metadata
 
 
 def qname_for(
@@ -51,4 +59,4 @@ def qname_for(
   return f"{ns}:{token}"
 
 
-__all__ = ["qname_for", "structure_from_request"]
+__all__ = ["qname_for", "structure_from_request", "structure_metadata"]

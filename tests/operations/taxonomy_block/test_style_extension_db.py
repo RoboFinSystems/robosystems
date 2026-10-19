@@ -264,6 +264,8 @@ def test_a_tenant_row_renders_persists_and_is_mappable(tenant):
     ("tenant_concept_without_parent", "must refine an rs-gaap concept"),
     ("sums_into_a_presented_leaf", "no calculation path"),
     ("placed_twice", "places"),
+    ("sums_a_row_it_does_not_add", "not a row this extension adds"),
+    ("second_calculation_parent", "more than one subtotal"),
   ],
 )
 def test_an_extension_that_would_not_anchor_is_refused(tenant, case, message):
@@ -336,11 +338,84 @@ def test_an_extension_that_would_not_anchor_is_refused(tenant, case, message):
           weight=1.0,
         )
       )
+    # Either arc joins the graph's whole calc DAG: net income would drop the
+    # library fee, or count the new row twice.
+    if case in ("sums_a_row_it_does_not_add", "second_calculation_parent"):
+      associations.append(
+        TaxonomyBlockAssociationRequest(
+          structure_ref="Acme rows",
+          from_ref="rs-gaap:NetIncomeLoss",
+          to_ref=(
+            "rs-gaap:ProfessionalFees"
+            if case == "sums_a_row_it_does_not_add"
+            else child
+          ),
+          association_type="calculation",
+          weight=-1.0,
+        )
+      )
     with pytest.raises(StyleExtensionError, match=message):
       _extension(
         session, elements=elements, structures=[structure], associations=associations
       )
     session.rollback()
+
+
+def test_a_refining_concept_takes_its_parents_balance_and_period(tenant):
+  """A liability refined without types is a credit balance, not the debit
+  duration default, so it sums into liabilities rather than against them."""
+  with extensions_session(GRAPH) as session:
+    _extension(
+      session,
+      elements=[
+        TaxonomyBlockElementRequest(
+          qname="acme:CustomerDeposits",
+          name="Customer Deposits",
+          parent_ref="rs-gaap:OtherLiabilitiesCurrent",
+        )
+      ],
+    )
+    deposits = session.execute(
+      select(Element).where(Element.qname == "acme:CustomerDeposits")
+    ).scalar_one()
+    assert (deposits.balance_type, deposits.period_type) == ("credit", "instant")
+
+
+def test_a_refining_concept_cannot_change_its_parents_period(tenant):
+  with extensions_session(GRAPH) as session:
+    with pytest.raises(StyleExtensionError, match="instant concept"):
+      _extension(
+        session,
+        elements=[
+          TaxonomyBlockElementRequest(
+            qname="acme:CustomerDeposits",
+            name="Customer Deposits",
+            period_type="duration",
+            parent_ref="rs-gaap:OtherLiabilitiesCurrent",
+          )
+        ],
+      )
+    session.rollback()
+
+
+def test_metadata_cannot_name_the_extended_network(tenant):
+  """Only ``extends_network`` makes a structure an extension, through the
+  checks that resolve it."""
+  with extensions_session(GRAPH) as session:
+    _extension(
+      session,
+      structures=[
+        TaxonomyBlockStructureRequest(
+          name="Acme rows",
+          block_type="income_statement",
+          metadata={"extends_network_id": "str_anything"},
+        )
+      ],
+    )
+    structure = session.execute(
+      select(Structure).where(Structure.name == "Acme rows")
+    ).scalar_one()
+    assert "extends_network_id" not in (structure.metadata_ or {})
 
 
 def test_extends_network_must_name_a_style_network_of_its_statement(tenant):
