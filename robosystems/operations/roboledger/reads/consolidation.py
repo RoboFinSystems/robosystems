@@ -264,7 +264,9 @@ def _tagged_part(
   months (``carried``) moved no cash in this one. The tagged lines must net
   to nothing, as the cash flows they offset do; when one cannot be tagged
   (the consolidation entity's statement has no row for it) or they would
-  not net, the entry offsets nothing, since half an offset is a flow."""
+  not net, the entry offsets nothing, since half an offset is a flow. A
+  distribution the parent took as income is reversed beside them untagged:
+  it is the operating side of the flow they offset."""
   if periodic:
     return {}, {}
   movement = {q: a - carried.get(q, 0) for q, a in lines.items()}
@@ -274,6 +276,8 @@ def _tagged_part(
     untaggable |= missing
     return {}, {}
   tagged = {q: movement[q] for q, f in flows.items() if f}
+  if tagged:
+    tagged |= {q: a for q, a in movement.items() if a and q in DISTRIBUTION_INCOME}
   if sum(tagged.values()):
     return {}, {}
   return tagged, {q: f for q, f in flows.items() if f}
@@ -767,6 +771,12 @@ def _plan_intercompany(
               ),
             )
           )
+      # A balance only one side holds is a third party's carried on an
+      # intercompany entry (the vendor's payable on a rebilled bill); only
+      # one both sides hold is owed between them.
+      holders = {entity_id for (entity_id, _q), amount in unpostable.items() if amount}
+      if holders != {a, b}:
+        continue
       for (entity_id, qname), amount in sorted(unpostable.items()):
         if not amount:
           continue
@@ -1020,15 +1030,22 @@ def preview_consolidation_entries(
     basis = plan.basis.get((kind, member_id, periodic)) or [
       f"Reverses {kind} held for {name} that the books no longer support."
     ]
+    # A month that opened on a withheld residual has no opening target to
+    # measure its movement from, so none of it is tagged.
+    carried = (
+      lines
+      if (kind, member_id) in before.withheld
+      else {
+        q: before.targets.get((q, kind, member_id, False), 0)
+        - held_before.get((q, kind, member_id, False), 0)
+        for q in lines
+      }
+    )
     tagged, flows = _tagged_part(
       lines,
       kind,
       periodic,
-      carried={
-        q: before.targets.get((q, kind, member_id, False), 0)
-        - held_before.get((q, kind, member_id, False), 0)
-        for q in lines
-      },
+      carried=carried,
       taggable=taggable,
       untaggable=untaggable,
     )

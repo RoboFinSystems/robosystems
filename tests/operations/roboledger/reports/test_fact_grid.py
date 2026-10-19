@@ -3038,8 +3038,8 @@ class TestNonContiguousPeriods:
 
 
 class TestGroupColumnsBeforeTheBooks:
-  """A member's opening balance holds a group column back only where the
-  member is read in it from before its books."""
+  """A member's opening balance holds back only the group columns the member
+  is summed in."""
 
   FY = PeriodSpec(start=date(2026, 1, 1), end=date(2026, 12, 31), label="FY2026")
   PRIOR = PeriodSpec(start=date(2025, 1, 1), end=date(2025, 12, 31), label="FY2025")
@@ -3054,25 +3054,14 @@ class TestGroupColumnsBeforeTheBooks:
         MagicMock(), statement_type, [self.FY, self.PRIOR], members
       )
 
-  def test_a_member_whose_books_open_when_it_joined_holds_no_column(self) -> None:
+  def test_a_member_that_joined_this_year_leaves_last_years_column(self) -> None:
     from robosystems.operations.roboledger.entity_scope import GroupMember
 
     members = [
       GroupMember("parent", "operating", None, None),
       GroupMember("sub", "operating", date(2026, 7, 1), None),
     ]
-    assert self._omitted(members, {"sub": date(2026, 7, 1)}) == set()
-
-  def test_books_opening_after_the_member_joined_hold_the_columns_it_is_in(
-    self,
-  ) -> None:
-    from robosystems.operations.roboledger.entity_scope import GroupMember
-
-    members = [
-      GroupMember("parent", "operating", None, None),
-      GroupMember("sub", "operating", date(2026, 3, 1), None),
-    ]
-    # Not a member in FY2025, so that column stands.
+    # The year it joined straddles its books; the year before it is not in.
     assert self._omitted(members, {"sub": date(2026, 7, 1)}) == {0}
 
   def test_the_parents_books_hold_every_column_before_them(self) -> None:
@@ -3080,12 +3069,3 @@ class TestGroupColumnsBeforeTheBooks:
 
     members = [GroupMember("parent", "operating", None, None)]
     assert self._omitted(members, {"parent": date(2026, 7, 1)}) == {0, 1}
-
-  def test_a_member_read_from_the_month_it_joined(self) -> None:
-    from robosystems.operations.roboledger.reports.fact_grid import (
-      member_books_start,
-    )
-
-    assert member_books_start(date(2026, 7, 1), date(2026, 7, 14)) is None
-    assert member_books_start(date(2026, 7, 15), date(2026, 7, 14)) == date(2026, 7, 15)
-    assert member_books_start(date(2026, 7, 1), None) == date(2026, 7, 1)

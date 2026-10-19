@@ -499,3 +499,44 @@ def test_an_inactive_extension_adds_no_summands(tenant):
     session.flush()
     summands = _load_calculations(session, element_ids={opex, audit}).get(opex, [])
     assert (audit, 1.0) not in summands
+
+
+def test_a_concept_can_be_a_cost_and_its_cash_flow_add_back(tenant):
+  """A parent on another statement is that statement's: the library's own
+  depreciation is an operating expense and an operating add-back, and a
+  tenant concept refining it may be too."""
+  with extensions_session(GRAPH) as session:
+    is_role = _network_role(session, "income_statement")
+    cf_role = _network_role(session, "cash_flow_statement")
+    _extension(
+      session,
+      elements=[
+        TaxonomyBlockElementRequest(
+          qname="acme:AmortizationOfContractCosts",
+          name="Amortization of contract costs",
+          parent_ref="rs-gaap:DepreciationDepletionAndAmortization",
+        )
+      ],
+      structures=[
+        TaxonomyBlockStructureRequest(
+          name="IS rows", block_type="income_statement", extends_network=is_role
+        ),
+        TaxonomyBlockStructureRequest(
+          name="CF rows", block_type="cash_flow_statement", extends_network=cf_role
+        ),
+      ],
+      associations=[
+        TaxonomyBlockAssociationRequest(
+          structure_ref=structure,
+          from_ref=parent,
+          to_ref="acme:AmortizationOfContractCosts",
+          association_type=association_type,
+          **({"weight": 1.0} if association_type == "calculation" else {}),
+        )
+        for structure, parent in (
+          ("IS rows", "rs-gaap:OperatingExpenses"),
+          ("CF rows", "rs-gaap:NetCashProvidedByUsedInOperatingActivities"),
+        )
+        for association_type in ("presentation", "calculation")
+      ],
+    )
