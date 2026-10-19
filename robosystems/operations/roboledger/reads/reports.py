@@ -55,6 +55,7 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   _compute_prior_period,
   columns_before_the_books,
   generate_report_facts,
+  group_columns_before_the_books,
   render_structure_view,
 )
 from robosystems.operations.roboledger.reports.fact_grid import (
@@ -148,9 +149,11 @@ def generate_adhoc_private_statement(
   periods: list[FactPeriodSpec],
   reporting_style_id: str,
   entity_id: str | None = None,
+  member_since: date | None = None,
 ):
   """Build a one-shot statement from one entity's current ledger, with no
-  saved Report.
+  saved Report. ``member_since`` reads it as a group member (see
+  ``generate_report_facts``).
 
   The Network comes from the entity's Reporting Style. The arc walk is scoped
   to rs-gaap-presentation, where every Default Style Network lives; a Style
@@ -180,6 +183,7 @@ def generate_adhoc_private_statement(
     periods=periods,
     close_target_qname=load_close_target_concept(session, reporting_style_id),
     entity_id=entity_id,
+    member_since=member_since,
   )
 
   grid = render_structure_view(
@@ -1025,6 +1029,7 @@ def _combined_statement(
         periods=periods,
         reporting_style_id=reporting_style_id,
         entity_id=member.id,
+        member_since=member.joined_on,
       )
     except CoaMappingNotFoundError as exc:
       first_error = first_error or exc
@@ -1190,6 +1195,7 @@ def get_consolidation_worksheet(
         periods=periods,
         reporting_style_id=reporting_style_id,
         entity_id=entity.member.id,
+        member_since=entity.member.joined_on,
       )
     except CoaMappingNotFoundError as exc:
       first_error = first_error or exc
@@ -1356,12 +1362,19 @@ def get_live_financial_statement(
       entity_id=entity_id,
     )
   # Left out rather than rendered.
-  omitted = columns_before_the_books(
-    session,
-    statement_type,
-    periods,
-    combined_entity_ids or [entity_id],
-  )
+  if combined_entity_ids:
+    omitted = group_columns_before_the_books(
+      session,
+      statement_type,
+      periods,
+      [
+        m
+        for m in group_members(session, entity_id, consolidated=scope == "consolidated")
+        if m.id in combined_entity_ids
+      ],
+    )
+  else:
+    omitted = columns_before_the_books(session, statement_type, periods, [entity_id])
   if omitted:
     keep = [i for i in range(len(periods)) if i not in omitted]
     for row in grid.rows:

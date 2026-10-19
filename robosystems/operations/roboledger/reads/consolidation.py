@@ -1088,6 +1088,7 @@ def preview_consolidation_entries(
       and not plan.incomplete
       and _drafted(session, drafts) == _proposed(proposals)
     ),
+    incomplete=plan.incomplete,
     drafted_entry_ids=[str(e.id) for e in drafts],
   )
 
@@ -1156,9 +1157,10 @@ def group_close_status(
     status.pending_adjustments = [
       f"{p.adjustment_kind} for {p.adjusts_entity_name}" for p in preview.proposals
     ] or ["drafts that no longer match the books"]
-  elif not preview.residuals and not preview.up_to_date:
-    # Held and drafted agree; what is missing is what the engine left out.
-    status.pending_adjustments = list(preview.notes)
+  # What the engine left out holds the close whatever the residuals: the
+  # residual override must not waive an entry nobody computed.
+  if preview.incomplete:
+    status.pending_adjustments += preview.notes
 
   for statement_type in ("balance_sheet", "equity_statement"):
     try:

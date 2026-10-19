@@ -138,6 +138,7 @@ def generate_report_facts(
   periods: list[PeriodSpec],
   close_target_qname: str = "rs-gaap:RetainedEarningsAccumulatedDeficit",
   entity_id: str | None = None,
+  member_since: date | None = None,
 ) -> ReportFacts:
   """Generate structure-agnostic facts for all mapped elements across periods.
 
@@ -151,12 +152,14 @@ def generate_report_facts(
   as a live statement leaves it out: that holds for a column that ends
   inside the books too (a calendar year for books opening in July), whose
   flows would be the months since the opening labelled as the whole year.
+  ``member_since`` is the day a member joined, in a group read: books opening
+  by that month cover everything the group reads of it.
   """
   arc_type = _arc_type_for_taxonomy(session, taxonomy_id)
   facts: list[ReportFact] = []
   # Columns reaching back before the books are computed, since later columns
   # measure change from their balances, but never plugged or reported.
-  start = _books_start(session, entity_id)
+  start = member_books_start(_books_start(session, entity_id), member_since)
   covered = [p for p in periods if start is None or p.start >= start]
 
   for period in periods:
@@ -254,6 +257,15 @@ def _books_start(session: Session, entity_id: str | None) -> date | None:
   return books_start(session, [entity_id]) if entity_id else None
 
 
+def member_books_start(start: date | None, member_since: date | None) -> date | None:
+  """The books' first day as a group reads a member: none when they open by
+  the month it joined, since the group reads nothing of it from before."""
+  if start is not None and member_since is not None:
+    if start <= member_since.replace(day=1):
+      return None
+  return start
+
+
 def columns_before_the_books(
   session: Session,
   statement_type: str,
@@ -264,13 +276,38 @@ def columns_before_the_books(
   column starting before the first day an opening balance covers, or a
   balance sheet dated before the opening itself. Such a column has no
   activity to show for the months before the books, only a partial figure."""
-  start = books_start(session, entity_ids)
+  return _columns_before(statement_type, periods, books_start(session, entity_ids))
+
+
+def _columns_before(
+  statement_type: str, periods: list[PeriodSpec], start: date | None
+) -> set[int]:
   if start is None:
     return set()
   opening = start - timedelta(days=1)
   if statement_type == "balance_sheet":
     return {i for i, p in enumerate(periods) if p.end < opening}
   return {i for i, p in enumerate(periods) if p.start < start}
+
+
+def group_columns_before_the_books(
+  session: Session,
+  statement_type: str,
+  periods: list[PeriodSpec],
+  members: list,
+) -> set[int]:
+  """``columns_before_the_books`` for a group read: a column is partial only
+  where a member summed in it has books that do not cover what the group
+  reads of it. ``members`` are ``GroupMember``s."""
+  omitted: set[int] = set()
+  for member in members:
+    start = member_books_start(books_start(session, [member.id]), member.joined_on)
+    omitted |= {
+      i
+      for i in _columns_before(statement_type, periods, start)
+      if member.is_member_for(periods[i].start, periods[i].end)
+    }
+  return omitted
 
 
 def _within_the_books(fact: ReportFact, start: date) -> bool:

@@ -22,6 +22,7 @@ from robosystems.operations.roboledger.commands.reporting_style import (
   require_reporting_style,
 )
 from robosystems.operations.roboledger.entity_scope import (
+  find_consolidation_entity,
   find_parent_entity,
   is_group_parent,
   resolve_entity,
@@ -45,6 +46,8 @@ _TICKER_MAX = 10
 # The fields an explicit null clears: membership reopens by clearing left_on.
 CLEARABLE_FIELDS = ("joined_on", "left_on")
 _METHOD_NONE = "none"
+# The methods whose member the group's statements read, summed or picked up.
+_METHODS_READ = ("full", "equity")
 _ROLE_OPERATING = "operating"
 _ROLE_CONSOLIDATION = "consolidation"
 
@@ -53,6 +56,11 @@ _ROLE_CONSOLIDATION = "consolidation"
 # schema, held to the end of the transaction.
 _TICKER_LOCK_SQL = text(
   "SELECT pg_advisory_xact_lock(hashtext('entity_ticker'), hashtext(current_schema()))"
+)
+# Likewise the one consolidation entity a graph may have.
+_CONSOLIDATION_LOCK_SQL = text(
+  "SELECT pg_advisory_xact_lock(hashtext('entity_consolidation'), "
+  "hashtext(current_schema()))"
 )
 
 
@@ -75,24 +83,97 @@ class ConsolidatedHistoryError(EntityHierarchyError):
   """A change of method that would restate months the group has closed."""
 
 
+def _group_closed_through(session: Session) -> str | None:
+  """The last month the consolidation entity has closed, or None until it
+  has closed one itself: the months a calendar starts out closed through
+  are before the books, with no consolidated statements to restate."""
+  consolidation = find_consolidation_entity(session)
+  if consolidation is None:
+    return None
+  closed_through = session.execute(
+    text(
+      "SELECT closed_through_period FROM fiscal_calendar "
+      "WHERE entity_id = :id AND last_close_at IS NOT NULL"
+    ),
+    {"id": str(consolidation.id)},
+  ).scalar()
+  return str(closed_through) if closed_through is not None else None
+
+
 def _closed_through_as_member(session: Session, entity: Entity) -> str | None:
   """The last month the consolidation entity has closed with ``entity`` a
   member of the group, or None."""
-  closed_through = session.execute(
-    text(
-      "SELECT fc.closed_through_period FROM fiscal_calendar fc "
-      "JOIN entities e ON e.id = fc.entity_id "
-      "WHERE e.entity_role = :role AND e.source <> 'linked' "
-      "AND fc.closed_through_period IS NOT NULL "
-      "ORDER BY e.created_at, e.id LIMIT 1"
-    ),
-    {"role": _ROLE_CONSOLIDATION},
-  ).scalar()
+  closed_through = _group_closed_through(session)
   if closed_through is None:
     return None
   if entity.joined_on is not None and f"{entity.joined_on:%Y-%m}" > closed_through:
     return None
-  return str(closed_through)
+  return closed_through
+
+
+def _refuse_second_consolidation_entity(
+  session: Session, exclude_id: str | None = None
+) -> None:
+  session.execute(_CONSOLIDATION_LOCK_SQL)
+  query = select(Entity.name).where(
+    Entity.entity_role == _ROLE_CONSOLIDATION, Entity.source != "linked"
+  )
+  if exclude_id is not None:
+    query = query.where(Entity.id != exclude_id)
+  existing = session.execute(query.limit(1)).scalar()
+  if existing is not None:
+    raise EntityHierarchyError(
+      f"{existing} is already this graph's consolidation entity; a group has one."
+    )
+
+
+def _refuse_retyping_a_used_consolidation_entity(
+  session: Session, entity: Entity
+) -> None:
+  """Leaving the role would sum its eliminations as an operating company's
+  books and drop every guard on the months the group has closed."""
+  used = session.execute(
+    text(
+      "SELECT EXISTS (SELECT 1 FROM fiscal_calendar WHERE entity_id = :id "
+      "AND last_close_at IS NOT NULL) "
+      "OR EXISTS (SELECT 1 FROM entries WHERE entity_id = :id "
+      "AND status = 'posted')"
+    ),
+    {"id": str(entity.id)},
+  ).scalar()
+  if used:
+    raise ConsolidatedHistoryError(
+      f"{entity.name} holds the group's posted consolidating entries or closed "
+      "months; it stays the consolidation entity."
+    )
+
+
+def _month(value) -> str | None:
+  return f"{value:%Y-%m}" if value is not None else None
+
+
+def _refuse_membership_change_in_closed_months(
+  session: Session, entity: Entity, updates: dict[str, Any]
+) -> None:
+  """Whether a member is read in a month is set by its membership dates, so a
+  date may not move within or before the months the group has closed. An
+  unset ``joined_on`` is a member from the start, an unset ``left_on`` one
+  to the end."""
+  closed_through = _group_closed_through(session)
+  if closed_through is None:
+    return
+  for field_name, unset in (("joined_on", ""), ("left_on", "9999-12")):
+    if field_name not in updates or updates[field_name] == getattr(entity, field_name):
+      continue
+    earliest = min(
+      _month(updates[field_name]) or unset, _month(getattr(entity, field_name)) or unset
+    )
+    if earliest <= closed_through:
+      raise ConsolidatedHistoryError(
+        f"The group has closed its consolidated months through {closed_through}; "
+        f"moving {entity.name}'s {field_name} within them would restate them. "
+        f"A {field_name} after {closed_through} can be set."
+      )
 
 
 def ensure_self_agent(session: Session, entity: Entity, created_by: str) -> None:
@@ -159,6 +240,8 @@ def _apply_updates(session: Session, entity: Entity, updates: dict[str, Any]):
     )
   role = updates.get("entity_role", entity.entity_role)
   retyped = role != entity.entity_role
+  if retyped and entity.entity_role == _ROLE_CONSOLIDATION:
+    _refuse_retyping_a_used_consolidation_entity(session, entity)
   if role == _ROLE_CONSOLIDATION and "consolidation_method" not in updates:
     updates["consolidation_method"] = _METHOD_NONE
   if "consolidation_method" in updates:
@@ -196,9 +279,13 @@ def _apply_updates(session: Session, entity: Entity, updates: dict[str, Any]):
         + " would restate them. A change of method from a date is not supported "
         "yet; a change of ownership that keeps the method is."
       )
+  if retyped and role == _ROLE_CONSOLIDATION:
+    _refuse_second_consolidation_entity(session, exclude_id=str(entity.id))
   _check_membership(
     updates.get("joined_on", entity.joined_on), updates.get("left_on", entity.left_on)
   )
+  if not parent and role == _ROLE_OPERATING and method in _METHODS_READ:
+    _refuse_membership_change_in_closed_months(session, entity, updates)
   if "ticker" in updates:
     session.execute(_TICKER_LOCK_SQL)
     ticker = str(updates["ticker"]).strip().upper()
@@ -329,6 +416,18 @@ def create_entity(
     method = body.consolidation_method or derived_consolidation_method(
       body.ownership_pct
     )
+  if role == _ROLE_CONSOLIDATION:
+    _refuse_second_consolidation_entity(session)
+  elif parent is not None and method in _METHODS_READ:
+    closed_through = _group_closed_through(session)
+    if closed_through is not None and (
+      body.joined_on is None or f"{body.joined_on:%Y-%m}" <= closed_through
+    ):
+      raise ConsolidatedHistoryError(
+        f"The group has closed its consolidated months through {closed_through}; "
+        f"a member from before then would restate them. Set joined_on after "
+        f"{closed_through}."
+      )
 
   if body.reporting_style_id:
     require_reporting_style(session, body.reporting_style_id)
