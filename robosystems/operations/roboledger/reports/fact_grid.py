@@ -216,7 +216,13 @@ def generate_report_facts(
 
   # Book ΔCash - Investing - Financing - (NI + DDA + ΔWC) on an operating
   # leaf so the CF foots to actual cash. Must precede the subtotal roll-up.
-  _reconcile_operating_to_cash(session, facts, covered, opening_facts)
+  _reconcile_operating_to_cash(
+    session,
+    facts,
+    covered,
+    opening_facts,
+    holds_no_cash=_is_consolidation_entity(session, entity_id),
+  )
 
   # Calc-DAG subtotals as facts, so rules scoped to a subtotal can bind.
   # Runs after every leaf and derived fact is in place.
@@ -2011,6 +2017,7 @@ def _emit_noncash_and_settlement_facts(
 
   reused = _cash_flow_reused_concepts(session, entity_id)
   cash_qnames = _CASH_ANCHOR_QNAMES
+  holds_no_cash = _is_consolidation_entity(session, entity_id)
 
   line_sql = text(f"""
     SELECT en.id AS entry_id, en.posting_date, en.triggered_by_event_id,
@@ -2187,7 +2194,13 @@ def _emit_noncash_and_settlement_facts(
     untagged = not any(line.tagged for line in lines)
 
     if "cash" not in kinds:
-      nonoperating = sum(ln.net for ln in lines if ln.kind == "nonoperating")
+      # On the consolidation entity a tagged line is its own flow already;
+      # offsetting it here as well would count it twice.
+      nonoperating = sum(
+        ln.net
+        for ln in lines
+        if ln.kind == "nonoperating" and not (holds_no_cash and ln.tagged)
+      )
       if not nonoperating:
         continue
       pnl = sum(ln.net for ln in lines if ln.kind == "pnl")
@@ -2275,7 +2288,14 @@ def _emit_noncash_and_settlement_facts(
           unlinked.setdefault((column.start, column.end), []).append(to_payables)
 
     gains = [ln for ln in lines if ln.kind == "pnl" and ln.concept_id in reused]
-    if gains:
+    # The depreciation a sale writes off moved no cash: the proceeds are the
+    # asset's cost net of it, and it is no depreciation of the period.
+    written_off = [
+      ln
+      for ln in lines
+      if ln.kind == "working" and ln.qname == PPE_ACCUMULATED_DEPRECIATION_QNAME
+    ]
+    if gains or written_off:
       flows = {
         _default_flow(ln.concept_id, -ln.net)
         for ln in lines
@@ -2287,7 +2307,9 @@ def _emit_noncash_and_settlement_facts(
         assert flow_id is not None
         emitted_flows.add(flow_id)
         for column in columns:
-          _add(flow_id, column, -sum(ln.net for ln in gains))
+          _add(flow_id, column, -sum(ln.net for ln in gains + written_off))
+          for ln in written_off:
+            _add(working_leaf[ln.concept_id], column, ln.net)
 
   # An unlinked payment may settle a bill posted before the window, so the
   # warning weighs those still open too. They are no acquisition of any
@@ -2414,8 +2436,15 @@ def _reconcile_operating_to_cash(
   facts: list[ReportFact],
   periods: list[PeriodSpec],
   opening_facts: list[ReportFact] | None = None,
+  *,
+  holds_no_cash: bool = False,
 ) -> None:
   """Foot the indirect CF to the actual cash-balance movement.
+
+  The consolidation entity (``holds_no_cash``) has no cash: its eliminations
+  offset flows its members' own cash moved, so its statement nets to nothing,
+  and an untagged elimination is booked here rather than moving the group's
+  net change in cash.
 
   The indirect operating section reverses only depreciation among non-cash
   items, so gains/losses in net income leave the CF off from ΔCash. True
@@ -2457,9 +2486,12 @@ def _reconcile_operating_to_cash(
   ordered = sorted(periods, key=lambda p: p.end)
   for current in ordered:
     cash_end = cash_by_date.get(current.end)
-    if cash_end is None:
+    if cash_end is not None:
+      cash_delta = cash_end - cash_by_date.get(_opening_date(current), 0.0)
+    elif holds_no_cash:
+      cash_delta = 0.0
+    else:
       continue
-    cash_delta = cash_end - cash_by_date.get(_opening_date(current), 0.0)
 
     balances: dict[str, float] = {}
     present: set[str] = set()

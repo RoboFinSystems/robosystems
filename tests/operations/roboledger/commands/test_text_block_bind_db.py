@@ -26,7 +26,7 @@ from robosystems.operations.roboledger.commands import text_blocks as tb
 
 pytestmark = pytest.mark.integration
 
-GRAPH = "kgdddddddddddddddd31"
+GRAPH = "kgdddddddddddddddd3a"
 STRUCTURE = "struct_policies"
 
 _DOC = SimpleNamespace(

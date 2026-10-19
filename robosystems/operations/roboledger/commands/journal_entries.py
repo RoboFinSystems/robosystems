@@ -890,6 +890,10 @@ def reverse_journal_entry(
     # Not inherited: reversing even a synced entry is a decision made here.
     provenance="manual_entry",
     reversal_of=original.id,
+    # A consolidating entry's reversal undoes what the consolidation entity
+    # holds of that kind and member.
+    adjustment_kind=original.adjustment_kind,
+    adjusts_entity_id=original.adjusts_entity_id,
     posted_at=now,
     created_by=created_by,
   )
