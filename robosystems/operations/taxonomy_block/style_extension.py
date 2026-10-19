@@ -111,6 +111,33 @@ def resolve_extended_network(session: Session, role_uri: str, block_type: str) -
   return str(row.id)
 
 
+def inherit_parent_types(
+  session: Session,
+  element: Element,
+  balance_type: str | None,
+  period_type: str | None,
+) -> None:
+  """Give a tenant concept its parent's balance and period type where the
+  request leaves them out; refuse a period type its parent does not have.
+  No-op without a parent."""
+  if element.parent_id is None:
+    return
+  parent = session.get(Element, element.parent_id)
+  if parent is None:
+    return
+  if (
+    period_type is not None and parent.period_type and period_type != parent.period_type
+  ):
+    raise StyleExtensionError(
+      f"{element.qname!r} refines {parent.qname!r}, a {parent.period_type} "
+      f"concept, so it cannot be {period_type}."
+    )
+  if balance_type is None and parent.balance_type:
+    element.balance_type = parent.balance_type
+  if period_type is None and parent.period_type:
+    element.period_type = parent.period_type
+
+
 def inherit_parent_traits(
   session: Session, element: Element, efs_override: str | None
 ) -> None:
@@ -220,6 +247,7 @@ def validate_extension_network(session: Session, structure: Structure) -> None:
         f"{_name(parent)!r}, is not on the network it extends."
       )
 
+  _check_calculation_arcs(session, structure, arcs, new_rows, _name)
   if network.block_type == "equity_statement":
     _check_equity_rows(session, structure, presentation, roots, _name)
   else:
@@ -242,6 +270,37 @@ def _check_equity_rows(session, structure, presentation, roots, name) -> None:
       raise StyleExtensionError(
         f"{structure.name!r}: {name(str(a.to_element_id))!r} must be a duration "
         f"amount to be a roll-forward movement."
+      )
+
+
+def _check_calculation_arcs(session, structure, arcs, new_rows, name) -> None:
+  """An extension's calculation arcs join the graph's whole calc DAG, so
+  each one must sum a row the extension adds, and give it its only parent:
+  a second parent counts the row twice."""
+  own: dict[str, set[str]] = {}
+  for a in arcs:
+    if a.association_type != "calculation":
+      continue
+    child = str(a.to_element_id)
+    if child not in new_rows:
+      raise StyleExtensionError(
+        f"{structure.name!r}: a calculation arc sums {name(child)!r}, which is "
+        f"not a row this extension adds; an extension sums only its own rows."
+      )
+    own.setdefault(child, set()).add(str(a.from_element_id))
+  if not own:
+    return
+  others: dict[str, set[str]] = {}
+  for parent, children in load_rs_gaap_calculations(session).items():
+    for child, _weight in children:
+      if str(child) in own and str(parent) not in own[str(child)]:
+        others.setdefault(str(child), set()).add(str(parent))
+  for child, parents in own.items():
+    if len(parents | others.get(child, set())) > 1:
+      raise StyleExtensionError(
+        f"{structure.name!r}: {name(child)!r} would sum into more than one "
+        f"subtotal, so totals would count it twice; give it one calculation "
+        f"parent."
       )
 
 

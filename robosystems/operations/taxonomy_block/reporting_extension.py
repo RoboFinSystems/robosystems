@@ -49,6 +49,7 @@ from robosystems.operations.taxonomy_block.rule_persistence import (
 from robosystems.operations.taxonomy_block.rule_reads import project_rules
 from robosystems.operations.taxonomy_block.style_extension import (
   inherit_parent_traits,
+  inherit_parent_types,
   resolve_extended_network,
   validate_extension_network,
 )
@@ -248,7 +249,9 @@ def create(
   session.flush()
   for req in payload.elements:
     qname = req.qname or qname_for(payload.standard, "ext", req.code, req.name)
-    inherit_parent_traits(session, elements_by_qname[qname], req.trait)
+    element = elements_by_qname[qname]
+    inherit_parent_types(session, element, req.balance_type, req.period_type)
+    inherit_parent_traits(session, element, req.trait)
 
   structures_by_name: dict[str, Structure] = {}
   for req in payload.structures:
@@ -392,8 +395,10 @@ def update(
   session.flush()
   added_by_qname = {str(e.qname): e for e in new_elements.values()}
   for req in payload.elements_to_add:
-    element = added_by_qname.get(req.qname)
+    qname = req.qname or qname_for(taxonomy.standard, "ext", req.code, req.name)
+    element = added_by_qname.get(qname)
     if element is not None:
+      inherit_parent_types(session, element, req.balance_type, req.period_type)
       inherit_parent_traits(session, element, req.trait)
   apply_associations_to_add(
     session,
