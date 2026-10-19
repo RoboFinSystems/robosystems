@@ -42,7 +42,7 @@ An entry in a closed month can't be changed until the month is reopened. While Q
 
 **Trial Balance** shows each account's debits and credits, and whether they agree.
 
-**Statements** shows the balance sheet, income statement, cash flow and statement of equity straight from the current ledger, for any period. On a group parent, a Scope control switches between the company's own statement and the combined one across the group. Nothing is saved, and no close is needed.
+**Statements** shows the balance sheet, income statement, cash flow and statement of equity straight from the current ledger, for any period. On a group parent, a Scope control switches between the company's own statement, the combined one across the group, the consolidated one, and a worksheet with each company in its own column. Nothing is saved, and no close is needed.
 
 ![Live statements showing a balance sheet with prior and current columns](images/statements.png)
 

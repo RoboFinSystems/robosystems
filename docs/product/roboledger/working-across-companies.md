@@ -1,6 +1,6 @@
 ---
 title: Work across several companies
-description: For fractional CFOs, controllers and advisors. One graph per client, a group of related companies inside a graph, and moving between them.
+description: For fractional CFOs, controllers and advisors. One graph per client, a group of related companies consolidated inside a graph, and moving between them.
 order: 6
 section: Get started
 ---
@@ -19,11 +19,21 @@ A graph is one **reporting group**: the group parent, the company the graph was 
 
 Ask your assistant to add a subsidiary: its name, its legal form and the share the parent holds. It gets a chart of accounts from a template and a calendar on the group's cadence, and from then on every question or action names the company it's about. When you don't name one, your assistant works on the group parent. In the app, **Entity → All Entities** shows the group and **New Entity** adds a company: its name, legal name, legal form, ticker, the company it's held under and the parent's share. There is no limit on the companies in a group; the graph's tier decides its capacity.
 
-The group's combined statements are the sum of every company's own, line by line at the reporting concepts; nothing is eliminated on its own. To consolidate, add one more company to the group for the consolidating entries — mark it the group's consolidation entity and start its chart from the _Consolidation adjustments_ template. Post the eliminations there: the parent's investment against each subsidiary's contributed capital, the balances the companies owe each other, and an outside owner's share of a subsidiary as noncontrolling interest. That company's entries are the adjustments column of a consolidation worksheet: the consolidated statements read them, the combined statements leave them out, and no operating company's statements ever include them. The consolidated balance sheet then shows the investment and the intercompany balances at zero and noncontrolling interest beside the parent's equity, the income statement shows the share of income attributable to it, and the statement of changes in equity rolls the noncontrolling interest forward beside the parent's equity: its share of income, the outside owners' contributions, and the distributions paid to them. Ask for the consolidated balance sheet on the group parent, the combined one before the adjustments, or any one company's own.
-
-The share the parent holds decides how the group treats a company: half or more is consolidated in full; a fifth to a half takes the equity method and is left out of the sum — the group carries the investment and its share of the associate's result instead, and a distribution it receives reduces the investment and shows in investing; less is an investment; and you can set the treatment yourself where control is not the percentage. A company that joins or leaves the group is summed for the months it was a member; the rest of its history stays readable on its own. In the app, **Ledger → Statements** on the group parent has a Scope control: _This entity_, _Combined_ (the companies summed, nothing eliminated) or _Consolidated_ (with the consolidation entity's adjustments); the group view says which companies it summed.
-
 A reporting group is companies under common control. It is not a way to put several clients in one graph: everyone with access to the graph sees every company in it.
+
+## Consolidate the group
+
+The group's **combined** statements are the sum of every company's own, line by line at the reporting concepts, with nothing eliminated. The **consolidated** statements take one more company in the group, the **consolidation entity**, which holds only the consolidating entries. Add it as a company, mark it the group's consolidation entity, and start its chart from the _Consolidation adjustments_ template. The consolidated statements read its entries, the combined statements leave them out, and no operating company's statements ever include them.
+
+The share the parent holds decides how the group treats a company: half or more is consolidated in full; a fifth to a half takes the equity method and is left out of the sum — the group carries the investment and its share of the associate's result instead, and a distribution it receives reduces the investment and shows in investing; less is an investment; and you can set the treatment yourself where control is not the percentage. A company that joins or leaves the group is summed for the months it was a member; the rest of its history stays readable on its own.
+
+**Your assistant drafts the consolidating entries from the books.** For any month it works out what the group needs: the parent's investment eliminated against each subsidiary's capital, with an outside owner's share of that capital as noncontrolling interest; the balances the companies owe each other; intercompany income against the matching expense; the outside owners' share of the month's result; and the parent's share of an equity-method company's result and distributions. A transaction is intercompany when it names another company in the group as its counterparty, so every company in the group is also one of the group's counterparties. Ask to see the entries first, then have them written as drafts in the consolidation entity; the group close posts them. Each entry brings its balance to what the month needs, less what the consolidation entity already holds, so an entry you post yourself for one of those adjustments counts toward it and drafting a month again replaces only the drafts written before. Where an outside owner's share of a month's result isn't their percentage, as with a preferred return or a waterfall, tell your assistant the amount and why, and the drafts use it.
+
+**What the books don't explain is left for you, never plugged.** When the parent's investment in a subsidiary doesn't match its share of the subsidiary's capital, that elimination is held back and the difference named — unless the parent booked the subsidiary's distributions as income, in which case the draft reverses that income against the investment. When two companies disagree on what one owes the other, the lower amount is eliminated and the difference listed. Correct the books, post the explaining entry yourself, or close over the difference knowingly.
+
+The consolidated balance sheet shows the investment and the intercompany balances at zero and noncontrolling interest beside the parent's equity, the income statement shows the share of income attributable to it, and the statement of changes in equity rolls the noncontrolling interest forward beside the parent's equity: its share of income, the outside owners' contributions, and the distributions paid to them. The consolidation entity's close is the group close, and it saves the month's consolidated statements; see [Close a group of companies](month-end-close.md#close-a-group-of-companies).
+
+In the app, **Ledger → Statements** on the group parent has a Scope control: _This entity_, _Combined_ (the companies summed, nothing eliminated), _Consolidated_ (with the consolidation entity's adjustments) or _Worksheet_ (each company in its own column, then the combined sum, the adjustments and the consolidated total, with an equity-method company beside the sum). The menu at the top right leaves the consolidation entity out; select it under **Entity → All Entities**, and its Closing Book shows the month's **Consolidating entries**, with **Draft entries** to write them and anything held back listed beneath.
 
 ## Who can reach each graph
 
@@ -68,8 +78,10 @@ When a client's investor, lender or board member has a RoboLedger or RoboInvesto
 - "Add Maple Court LLC as a wholly owned subsidiary and set up its chart of accounts."
 - "Close September for Maple Court LLC."
 - "Show me the group's combined balance sheet, then Maple Court on its own."
-- "Add a Consolidation adjustments company and eliminate my investment in Maple Court against its contributed capital."
-- "Where does the noncontrolling interest on the combined balance sheet come from?"
+- "Add a consolidation entity for the group and draft August's consolidating entries."
+- "Show me August as a consolidation worksheet, one column per company."
+- "Where does the noncontrolling interest on the consolidated balance sheet come from?"
+- "What's holding the group's September close?"
 - "What's blocking the close for this client?"
 - "Using the connections for [client] and [client], compare gross margin for the last quarter."
 - "Create the September report for this client and tell me anything that looks off."

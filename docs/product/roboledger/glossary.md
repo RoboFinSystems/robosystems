@@ -19,9 +19,15 @@ The words RoboLedger and your AI assistant use, in plain terms. Where the techni
 
 **Close.** Ending a month: posting its draft entries, locking it, and saving its statements. Months close in order, one at a time, and only once they're over. See [Close the month with your AI assistant](month-end-close.md). In the technical docs: [period close](https://robosystems.ai/docs/technical/period-close).
 
+**Combined statements.** The companies in a reporting group added together, line by line, with nothing eliminated between them. See [Work across several companies](working-across-companies.md#consolidate-the-group).
+
 **Committed.** An event someone approved. Its draft entry posts at the next close. See [Review events in the Inbox](inbox.md).
 
 **Connection.** Two things share the name. A graph's connection to QuickBooks, under **Entity → Connections**, links it to one QuickBooks company; see [Connect your books to your AI assistant](connect-your-books.md). A connection in Claude, ChatGPT or another MCP client reaches one graph; see [Work across several companies](working-across-companies.md).
+
+**Consolidated statements.** A reporting group's statements as one company: the combined statements plus the consolidating entries, which eliminate what the companies owe and invest in each other and carry an outside owner's share as noncontrolling interest. The group close saves them each month. See [Work across several companies](working-across-companies.md#consolidate-the-group).
+
+**Consolidation entity.** The company in a reporting group that holds only the consolidating entries. The consolidated statements read it, and its close is the group's close. See [Work across several companies](working-across-companies.md#consolidate-the-group).
 
 **Credits.** What RoboLedger's own AI uses: mapping your chart of accounts, questions in the Console, and **Ask about this report**. Reading, reporting, forecasting and closing use none, and neither does anything your own AI client does. See [What RoboLedger needs to work well](what-it-needs.md#credits).
 
@@ -50,6 +56,8 @@ The words RoboLedger and your AI assistant use, in plain terms. Where the techni
 **Mapping.** The link from one of your accounts to a reporting concept, which decides where the account lands on the statements. See [Map your chart of accounts](map-your-chart-of-accounts.md). In the technical docs: [mapping association](https://robosystems.ai/docs/technical/chart-of-accounts-mapping).
 
 **Metrics.** A block of ratios or other standing figures, one column a month. Most are computed from closed statements; others, such as usage counts or marketing figures, are values recorded from outside the books. See [Explore statements and metrics over time](explorer.md#metrics). In the technical docs: [metric block](https://robosystems.ai/docs/technical/forecasting-and-metrics).
+
+**Noncontrolling interest.** The share of a subsidiary the parent doesn't own, shown in the consolidated statements beside the parent's equity, with its share of the result on the income statement. See [Work across several companies](working-across-companies.md#consolidate-the-group).
 
 **Plan history.** Past months' statements filled in behind a plan, for books that came over from QuickBooks without being closed month by month in RoboLedger. It never posts an entry. See [Plan and forecast with your AI assistant](plan-and-forecast.md#what-you-need-first).
 

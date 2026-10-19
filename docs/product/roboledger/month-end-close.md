@@ -77,6 +77,12 @@ A few blockers can be closed over on purpose. In the app, **Allow stale sync**, 
 
 Each company in a reporting group closes on its own calendar. Name the company when you ask for a close, a review of its drafts or a reopen, and your assistant works on that company's books; a close you don't name is the group parent's. Closing one company leaves the others open. In the app, pick the company in the menu at the top right and the Closing Book shows its calendar, its drafts and what's blocking its close; **Entity → All Entities** shows the month each company is closed through. See [Work across several companies](working-across-companies.md#several-companies-in-one-graph).
 
+## Close a group of companies
+
+A group with a consolidation entity closes its month as a group, and the consolidation entity's close is that close. It waits until every company the month consolidates has closed the month, including an equity-method company, whose result the group picks up. It also needs the month's consolidating entries drafted or posted, no difference the books don't explain, and the consolidated balance sheet and statement of changes in equity passing their checks. Until then it names what's holding it: the companies still open, the entries not drafted, each unexplained difference, the checks that fail. You can close over an unexplained difference knowingly; it stays in the consolidated statements and each one is written into the close's audit note.
+
+The group close posts the consolidating entries and saves the month's consolidated statements, in the group parent's reporting style, as the consolidation entity's own: ask for the group's closed statements by naming the consolidation entity, and the parent's own statements stay as they were. Once the group has closed a month, a company's month reopens only after the group's. How the entries are drafted is in [Work across several companies](working-across-companies.md#consolidate-the-group).
+
 ## Fixing a closed month
 
 A closed month can be reopened to fix a missed or wrong entry. Reopening works backwards one month at a time, starting from the most recent, and each reopen needs a reason, which is kept in the audit trail. Entries that already posted stay posted. To undo one, post a reversing entry, then close the month again. Its statements are saved fresh.
@@ -89,6 +95,7 @@ A closed month can be reopened to fix a missed or wrong entry. Reopening works b
 - "Close September."
 - "September is closed. Run our forecasts again and create the September report."
 - "Reopen September. We missed an accrual for the October rent."
+- "Every company has closed September. Draft the consolidating entries and close the group."
 
 ## Go deeper
 

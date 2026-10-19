@@ -57,4 +57,4 @@ Your assistant can tie your balances to something outside the ledger: QuickBooks
 
 ## Close the month
 
-When you're ready, your assistant runs the month-end close. It clears what's blocking, drafts the adjusting entries, and shows you what will be written to QuickBooks before anything posts. In a reporting group it closes each company on its own calendar, and shows the group's combined statements beside each company's own. See [Close the month with your AI assistant](month-end-close.md).
+When you're ready, your assistant runs the month-end close. It clears what's blocking, drafts the adjusting entries, and shows you what will be written to QuickBooks before anything posts. In a reporting group it closes each company on its own calendar; with a consolidation entity, it drafts the consolidating entries and closes the group once every company has closed, saving the consolidated statements beside each company's own. See [Close the month with your AI assistant](month-end-close.md).
