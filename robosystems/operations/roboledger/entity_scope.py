@@ -220,7 +220,11 @@ class GroupMember:
   def is_member_for(self, start: date, end: date) -> bool:
     """Whether the period ``start`` to ``end`` falls inside the membership
     interval. Membership is by month: any day of the month joined or left
-    counts, so a sub acquired on the 14th is summed for that month."""
+    counts, so a sub acquired on the 14th is summed for that month. The
+    consolidation entity is the group's own, never a member, so it is read
+    for every period whatever its row says."""
+    if self.role == "consolidation":
+      return True
     return (self.joined_on is None or self.joined_on <= end) and (
       self.left_on is None or self.left_on >= start
     )

@@ -238,6 +238,28 @@ class PeriodCloseService:
     self._fcs = fcs or FiscalCalendarService()
     self._statement_stamper = statement_stamper
 
+  @staticmethod
+  def _refuse_a_group_that_does_not_foot(
+    session: Session, graph_id: str, period: str, gate: CloseableGateResult
+  ) -> None:
+    """The gate read the consolidated statements without the month's
+    consolidating drafts; with them posted, they must still pass, or the
+    close rolls back."""
+    from robosystems.operations.roboledger.reads.consolidation import (
+      consolidated_statement_failures,
+    )
+
+    failures = consolidated_statement_failures(session, graph_id, period)
+    if failures:
+      raise CloseGateFailed(
+        replace(
+          gate,
+          is_closeable=False,
+          blockers=[CloseableGateResult.CONSOLIDATED_DOES_NOT_FOOT],
+          group_not_footing=failures,
+        )
+      )
+
   def close(
     self,
     session: Session,
@@ -363,6 +385,8 @@ class PeriodCloseService:
       )
     entries_posted = posted_locally + published_to_qb
     session.flush()
+    if not shadow and gate.is_group_close:
+      self._refuse_a_group_that_does_not_foot(session, graph_id, period, gate)
 
     # Must run before this period flips to closed: on a never-closed
     # calendar the sequence check resolves the expected close from the

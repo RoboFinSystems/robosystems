@@ -59,11 +59,25 @@ class ConsolidationProposal(BaseModel):
     ..., description="The entity whose figures the entry adjusts."
   )
   adjusts_entity_name: str = Field(..., description="That entity's name.")
-  posting_date: date = Field(..., description="The month's last day.")
+  posting_date: date = Field(
+    ...,
+    description="The month's last day; for an opening, the eve of the "
+    "consolidation entity's first month.",
+  )
   memo: str = Field(..., description="The entry's memo.")
   basis: str = Field(..., description="How the amounts were computed.")
   lines: list[ConsolidationProposalLine] = Field(
     ..., description="The entry's lines; they balance."
+  )
+  opening: bool = Field(
+    False,
+    description=(
+      "Part of the consolidation entity's opening balance: what the members' "
+      "history before the group's first month already needed eliminated, so "
+      "the consolidated statements open on it rather than move by it. "
+      "Proposing records it, posted, replacing the earlier one until the "
+      "first close."
+    ),
   )
 
 

@@ -181,6 +181,13 @@ def _refuse_membership_change_in_closed_months(
       )
 
 
+def _refuse_consolidation_membership() -> None:
+  raise EntityMembershipError(
+    "The consolidation entity belongs to the group for every month it "
+    "consolidates; it takes no joined_on or left_on."
+  )
+
+
 def ensure_self_agent(session: Session, entity: Entity, created_by: str) -> None:
   """The counterparty an intercompany event names for ``entity``: a ``self``
   agent whose ``external_id`` is the entity's id."""
@@ -289,6 +296,11 @@ def _apply_updates(session: Session, entity: Entity, updates: dict[str, Any]):
   _check_membership(
     updates.get("joined_on", entity.joined_on), updates.get("left_on", entity.left_on)
   )
+  if role == _ROLE_CONSOLIDATION and (
+    any(updates.get(f) is not None for f in ("joined_on", "left_on"))
+    or (retyped and (entity.joined_on or entity.left_on))
+  ):
+    _refuse_consolidation_membership()
   if not parent and role == _ROLE_OPERATING and method in _METHODS_READ:
     _refuse_membership_change_in_closed_months(session, entity, updates)
   if "ticker" in updates:
@@ -422,6 +434,8 @@ def create_entity(
       body.ownership_pct
     )
   if role == _ROLE_CONSOLIDATION:
+    if body.joined_on is not None:
+      _refuse_consolidation_membership()
     _refuse_second_consolidation_entity(session)
   elif parent is not None and method in _METHODS_READ:
     closed_through = _group_closed_through(session)

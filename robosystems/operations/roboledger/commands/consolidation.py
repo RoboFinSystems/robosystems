@@ -5,11 +5,14 @@ person sets in place of a member's pro-rata share."""
 
 from __future__ import annotations
 
+from datetime import UTC, date, datetime
+
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.consolidation import (
   AllocationOverrideResponse,
+  ConsolidationProposal,
   ProposeConsolidationEntriesRequest,
   ProposeConsolidationEntriesResponse,
   SetAllocationOverrideRequest,
@@ -17,24 +20,34 @@ from robosystems.models.api.extensions.consolidation import (
 from robosystems.models.api.extensions.journal_entries import (
   CreateJournalEntryRequest,
   JournalEntryLineItemInput,
+  JournalEntryResponse,
 )
 from robosystems.models.extensions import Entity
+from robosystems.models.extensions.roboledger import Entry, LineItem, Transaction
 from robosystems.operations.locking import lock_by_id
 from robosystems.operations.roboledger.commands._guards import (
   assert_period_not_closed,
 )
 from robosystems.operations.roboledger.commands.journal_entries import (
+  _entry_to_response,
+  _flow_qnames,
+  _load_line_items,
   create_journal_entry,
 )
+from robosystems.operations.roboledger.commands.opening_balances import OPENING
 from robosystems.operations.roboledger.entity_scope import (
   is_group_parent,
   resolve_entity,
 )
 from robosystems.operations.roboledger.reads.consolidation import (
   ALLOCATION_OVERRIDES,
+  ENGINE_PROVENANCE,
   ENGINE_SOURCE,
   engine_drafts,
+  engine_opening,
+  first_month_eve,
   month_bounds,
+  opening_is_recorded,
   preview_consolidation_entries,
 )
 
@@ -79,7 +92,23 @@ def propose_consolidation_entries(
   session.flush()
   response.replaced = len(stale)
 
+  eve = first_month_eve(session, consolidation_id, start)
+  if eve is not None and not opening_is_recorded(
+    session, consolidation_id, preview.proposals
+  ):
+    opening = _record_opening(
+      session,
+      consolidation_id,
+      eve,
+      [p for p in preview.proposals if p.opening],
+      created_by,
+    )
+    if opening is not None:
+      response.entries.append(opening)
+
   for proposal in preview.proposals:
+    if proposal.opening:
+      continue
     response.entries.append(
       create_journal_entry(
         session,
@@ -107,6 +136,83 @@ def propose_consolidation_entries(
     )
   session.commit()
   return response
+
+
+def _record_opening(
+  session: Session,
+  consolidation_id: str,
+  eve: date,
+  proposals: list[ConsolidationProposal],
+  created_by: str,
+) -> JournalEntryResponse | None:
+  """Replace the consolidation entity's opening with ``proposals``: one
+  posted ``opening`` entry on the eve of its first month, each line carrying
+  the kind and member it holds. None when the opening needs nothing."""
+  replaced = engine_opening(session, consolidation_id)
+  if replaced is not None:
+    session.execute(
+      text("DELETE FROM line_items WHERE entry_id = :e"), {"e": replaced.id}
+    )
+    transaction_id = replaced.transaction_id
+    session.delete(replaced)
+    session.flush()
+    if transaction_id:
+      txn = session.get(Transaction, transaction_id)
+      if txn is not None:
+        session.delete(txn)
+        session.flush()
+  if not proposals:
+    return None
+
+  memo = "Opening consolidation balances"
+  now = datetime.now(UTC)
+  txn = Transaction(
+    entity_id=consolidation_id,
+    type="opening_balance",
+    amount=sum(line.debit_amount for p in proposals for line in p.lines),
+    date=eve,
+    description=memo,
+    source="native",
+    status="posted",
+    posted_at=now,
+    created_by=created_by,
+  )
+  session.add(txn)
+  session.flush()
+  entry = Entry(
+    entity_id=consolidation_id,
+    transaction_id=txn.id,
+    type=OPENING,
+    status="posted",
+    posting_date=eve,
+    memo=memo,
+    provenance=ENGINE_PROVENANCE,
+    posted_at=now,
+    created_by=created_by,
+  )
+  session.add(entry)
+  session.flush()
+  order = 0
+  for proposal in proposals:
+    for line in proposal.lines:
+      order += 1
+      session.add(
+        LineItem(
+          entry_id=entry.id,
+          element_id=line.element_id,
+          debit_amount=line.debit_amount,
+          credit_amount=line.credit_amount,
+          description=proposal.memo,
+          metadata_={
+            "adjustment_kind": proposal.adjustment_kind,
+            "adjusts_entity_id": proposal.adjusts_entity_id,
+          },
+          line_order=order,
+        )
+      )
+  session.flush()
+  lines = _load_line_items(session, entry.id)
+  return _entry_to_response(entry, lines, _flow_qnames(session, lines))
 
 
 class AllocationOverrideError(ValueError):
