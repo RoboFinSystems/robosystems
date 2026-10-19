@@ -131,6 +131,17 @@ def find_parent_entity(session: Session) -> Entity | None:
     return None
 
 
+def find_consolidation_entity(session: Session) -> Entity | None:
+  """The group's consolidation entity, or None: the first by creation, the
+  one the consolidation engine posts in. A graph has at most one."""
+  return session.execute(
+    select(Entity)
+    .where(Entity.entity_role == "consolidation", Entity.source != "linked")
+    .order_by(Entity.created_at, Entity.id)
+    .limit(1)
+  ).scalar()
+
+
 def own_entity_ids(session: Session, entity_id: str | None = None) -> list[str]:
   """The group's own entities — never a linked counterparty — with the named
   one (default the group parent) first, then the rest by creation."""
