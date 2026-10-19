@@ -22,6 +22,7 @@ from robosystems.operations.roboledger.commands.agent import (
   learn_classification_defaults,
   update_agent,
 )
+from robosystems.operations.roboledger.reads.agent import agent_to_response
 from tests.ledger_entity import entity_account
 
 pytestmark = pytest.mark.unit
@@ -52,14 +53,14 @@ def feed(two_entities):
   return t
 
 
-def _line(t, *, status="captured", **metadata) -> Event:
+def _line(t, *, status="captured", entity=None, cash=None, **metadata) -> Event:
   event = Event(
-    entity_id=t.parent.id,
+    entity_id=entity or t.parent.id,
     event_type="bank_transaction",
     event_category="purchase",
     event_class="economic",
     resource_type="money",
-    resource_element_id=t.cash,
+    resource_element_id=cash or t.cash,
     agent_id=t.agent.id,
     occurred_at=datetime(2026, 10, 2, tzinfo=UTC),
     effective_at=datetime(2026, 10, 2, tzinfo=UTC),
@@ -88,7 +89,7 @@ def _commit(t, event: Event, **metadata) -> None:
 
 def _default(t):
   t.session.refresh(t.agent)
-  return read_default(t.agent.metadata_)
+  return read_default(t.session, t.agent.metadata_)
 
 
 def test_with_no_default_the_banks_category_is_the_suggestion(feed):
@@ -215,16 +216,133 @@ def test_a_default_set_by_hand_resuggests_and_clearing_it_restores_the_banks(fee
   assert waiting.metadata_["suggestion_source"] == "tier0"
 
 
-def test_the_default_is_not_set_through_metadata(feed):
+@pytest.mark.parametrize("key", ["classification", "classifications"])
+def test_the_default_is_not_set_through_metadata(feed, key):
   with pytest.raises(ValueError, match="classification_element_id"):
     update_agent(
       feed.session,
       UpdateAgentRequest(
         agent_id=feed.agent.id,
-        metadata_patch={"classification": {"element_id": feed.payroll}},
+        metadata_patch={key: {"element_id": feed.payroll}},
       ),
       "usr_1",
     )
+
+
+@pytest.fixture()
+def sub_books(feed):
+  """The subsidiary's own bank account and payroll account, on its chart."""
+  feed.sub_cash = entity_account(feed.session, feed.sub.id, "Sub checking")
+  feed.sub_payroll = entity_account(feed.session, feed.sub.id, "Sub payroll")
+  feed.session.commit()
+  return feed
+
+
+def _sub_line(t, **kwargs) -> Event:
+  return _line(t, entity=t.sub.id, cash=t.sub_cash, **kwargs)
+
+
+def test_one_entitys_commit_never_moves_anothers_default(sub_books):
+  t = sub_books
+  parent_waiting = _line(t)
+  sub_waiting = _sub_line(t)
+  _commit(t, _line(t), classified_element_id=t.payroll)
+
+  _commit(
+    t, _sub_line(t), classified_element_id=t.sub_payroll, remember_classification=True
+  )
+
+  t.session.refresh(t.agent)
+  assert read_default(t.session, t.agent.metadata_).element_id == t.payroll
+  assert (
+    read_default(t.session, t.agent.metadata_, t.sub.id).element_id == t.sub_payroll
+  )
+  t.session.refresh(parent_waiting)
+  t.session.refresh(sub_waiting)
+  assert parent_waiting.metadata_["suggested_element_id"] == t.payroll
+  assert sub_waiting.metadata_["suggested_element_id"] == t.sub_payroll
+  assert sub_waiting.metadata_["suggestion_source"] == "agent_default"
+
+
+def test_a_default_from_before_the_entity_key_stays_with_its_charts_entity(sub_books):
+  t = sub_books
+  t.agent.metadata_ = {
+    "classification": {"element_id": t.payroll, "mode": "suggest", "confirmations": 4}
+  }
+  t.session.flush()
+
+  assert read_default(t.session, t.agent.metadata_).element_id == t.payroll
+  assert read_default(t.session, t.agent.metadata_, t.sub.id) is None
+  sub_waiting = _sub_line(t)
+  out = apply_ladder(t.session, dict(sub_waiting.metadata_), t.agent.id, t.sub.id)
+  assert out["suggestion_source"] == "tier0"
+
+  _commit(t, _sub_line(t), classified_element_id=t.sub_payroll)
+
+  t.session.refresh(t.agent)
+  assert "classification" not in t.agent.metadata_
+  parent = read_default(t.session, t.agent.metadata_)
+  assert (parent.element_id, parent.confirmations) == (t.payroll, 4)
+  response = agent_to_response(t.agent)
+  assert response.classification is not None
+  assert response.classification.entity_id == t.parent.id
+  assert {(c.entity_id, c.element_id) for c in response.classifications} == {
+    (t.parent.id, t.payroll),
+    (t.sub.id, t.sub_payroll),
+  }
+
+
+def test_a_default_set_by_hand_for_a_subsidiary_takes_an_account_on_its_chart(
+  sub_books,
+):
+  t = sub_books
+  parent_waiting = _line(t)
+  sub_waiting = _sub_line(t)
+  t.session.commit()
+
+  with pytest.raises(ValueError, match="not on the chart"):
+    update_agent(
+      t.session,
+      UpdateAgentRequest(
+        agent_id=t.agent.id,
+        classification_element_id=t.payroll,
+        classification_entity_id=t.sub.id,
+      ),
+      "usr_1",
+    )
+  t.session.rollback()
+
+  update_agent(
+    t.session,
+    UpdateAgentRequest(
+      agent_id=t.agent.id,
+      classification_element_id=t.sub_payroll,
+      classification_entity_id=t.sub.id,
+    ),
+    "usr_1",
+  )
+  t.session.refresh(parent_waiting)
+  t.session.refresh(sub_waiting)
+  assert parent_waiting.metadata_["suggested_element_id"] == t.software
+  assert sub_waiting.metadata_["suggested_element_id"] == t.sub_payroll
+
+
+def test_history_learns_each_entitys_default_from_its_own_lines(sub_books):
+  t = sub_books
+  _line(t, status="committed", classified_element_id=t.payroll)
+  for _ in range(2):
+    _sub_line(t, status="committed", classified_element_id=t.sub_payroll)
+  t.session.commit()
+
+  learned = learn_classification_defaults(
+    t.session, LearnClassificationDefaultsRequest(), "usr_1"
+  )
+
+  assert learned.agents_learned == 2
+  t.session.refresh(t.agent)
+  assert read_default(t.session, t.agent.metadata_).element_id == t.payroll
+  sub = read_default(t.session, t.agent.metadata_, t.sub.id)
+  assert (sub.element_id, sub.confirmations) == (t.sub_payroll, 2)
 
 
 def test_a_later_pull_keeps_the_learned_suggestion_on_top(feed):

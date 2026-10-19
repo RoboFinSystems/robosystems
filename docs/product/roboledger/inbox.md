@@ -38,7 +38,7 @@ Open a line. **Post to account** holds the suggestion; change it if it's wrong. 
 
 A line that is a financing or investing flow, such as a loan drawn, an owner's contribution or distribution, or equipment bought, also takes a **Cash flow row**: the row of the cash flow statement it belongs on, in place of the one its account defaults to. You can set it on a line that has already posted, and the statement re-reads it in place.
 
-Every approval teaches. Under **Agents**, a customer or vendor shows its **Default account**, how often it held, and **Always ask** for one whose lines go to different accounts, which keeps the default but stops suggesting it.
+Every approval teaches. Under **Agents**, a customer or vendor shows its **Default account**, how often it held, and **Always ask** for one whose lines go to different accounts, which keeps the default but stops suggesting it. In a group, each company keeps its own default for a counterparty, on its own chart, so a subsidiary's approvals never move the parent's.
 
 ### Approve many at once
 

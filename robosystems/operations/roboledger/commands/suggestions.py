@@ -103,6 +103,15 @@ def _skip_before_writing(
   return None
 
 
+def _suggestion_now(session: Session, event_id: str) -> str | None:
+  """The line's suggestion as it stands now: a commit earlier in the walk can
+  teach its counterparty a default and re-suggest it."""
+  metadata = session.execute(
+    select(Event.metadata_).where(Event.id == event_id)
+  ).scalar()
+  return (metadata or {}).get(SUGGESTED_ELEMENT_ID)
+
+
 def accept_suggestions(
   session: Session,
   body: AcceptSuggestionsRequest,
@@ -170,6 +179,21 @@ def accept_suggestions(
       continue
     reason: str | None = None
     detail: str | None = None
+    if _suggestion_now(session, event_id) != element_id:
+      results.append(
+        AcceptSuggestionLine(
+          event_id=event_id,
+          outcome="skipped",
+          reason="suggestion_changed",
+          detail=(
+            "a line taken earlier in this batch moved the counterparty's "
+            "default, so this line's suggestion changed; review it again"
+          ),
+          element_id=str(element_id),
+          description=description,
+        )
+      )
+      continue
     try:
       update_event_block(
         session,

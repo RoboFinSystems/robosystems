@@ -245,8 +245,10 @@ update_agent_op = _registrar.register(
       "lines are suggested (an empty string clears it), and "
       "`classification_mode='always_ask'` stops suggesting one for a "
       "counterparty whose lines go to different accounts; its still-open "
-      "lines are re-suggested at once. A default is also learned as lines "
-      "are committed, so set one by hand only to correct it."
+      "lines are re-suggested at once. Each entity of a group keeps its own "
+      "default, on its own chart: `classification_entity_id` names the one "
+      "these fields are for, omitted the group parent. A default is also "
+      "learned as lines are committed, so set one by hand only to correct it."
     ),
     command=cmd_update_agent,
     request_model=UpdateAgentRequest,
@@ -262,9 +264,9 @@ learn_classification_defaults_op = _registrar.register(
     summary="Learn Classification Defaults",
     description=(
       "Seed each counterparty's default account from the bank lines already "
-      "committed to the books: the account most of its lines went to becomes "
-      "its default, with the lines that agreed counted as confirmations. A "
-      "counterparty that already has a default keeps it. Its still-open lines "
+      "committed to the books, one for each entity whose lines it has: the "
+      "account most of those lines went to becomes the default, with the lines "
+      "that agreed counted as confirmations. A default already there is kept. Its still-open lines "
       "are then suggested from the default. Run it once on books that were "
       "classified before defaults were learned; after that, every commit "
       "teaches the default by itself. `dry_run` reports what would be learned "

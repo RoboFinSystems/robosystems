@@ -276,6 +276,7 @@ class Agent:
   is_active: bool
   is_1099_recipient: bool
   classification: AgentClassification | None
+  classifications: list[AgentClassification]
   created_at: datetime | None
   updated_at: datetime | None
   created_by: str | None
@@ -303,6 +304,9 @@ class Agent:
         if row.classification is not None
         else None
       ),
+      classifications=[
+        AgentClassification.from_pydantic(c) for c in row.classifications
+      ],
       created_at=row.created_at,
       updated_at=row.updated_at,
       created_by=row.created_by,

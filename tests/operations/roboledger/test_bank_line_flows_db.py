@@ -9,6 +9,10 @@ from datetime import UTC, date, datetime
 import pytest
 
 from robosystems.models.api.event_block import UpdateEventBlockRequest
+from robosystems.models.api.extensions.journal_entries import (
+  JournalEntryLineFlow,
+  UpdateJournalEntryRequest,
+)
 from robosystems.models.extensions import ElementTrait, Trait
 from robosystems.models.extensions.element import Element
 from robosystems.models.extensions.roboledger import Entry, Event, LineItem
@@ -19,6 +23,9 @@ from robosystems.operations.event_block.python_handlers.types import (
 )
 from robosystems.operations.roboledger.commands._guards import (
   AccountOutsideEntityChartError,
+)
+from robosystems.operations.roboledger.commands.journal_entries import (
+  update_journal_entry,
 )
 from tests.ledger_entity import entity_account
 
@@ -122,6 +129,69 @@ def test_a_flow_given_at_commit_tags_both_sides(books):
   lines = _lines(books, event)
   assert {str(li.element_id) for li in lines} == {books.cash, books.note}
   assert {str(li.flow_element_id) for li in lines} == {books.note_flow}
+
+
+def _retag(t, event: Event, flows: dict[str, str | None]) -> None:
+  lines = _lines(t, event)
+  update_journal_entry(
+    t.session,
+    UpdateJournalEntryRequest(
+      entry_id=str(lines[0].entry_id),
+      line_flows=[
+        JournalEntryLineFlow(line_id=str(li.id), flow_qname=flows[str(li.element_id)])
+        for li in lines
+        if str(li.element_id) in flows
+      ],
+    ),
+  )
+  t.session.commit()
+  t.session.refresh(event)
+
+
+def test_a_retag_of_its_entry_is_written_back_to_the_bank_line(books):
+  event = _deposit(books)
+  _update(
+    books,
+    event,
+    transition_to="committed",
+    metadata_patch={
+      "classified_element_id": books.note,
+      "classified_flow_qname": NOTE_PROCEEDS,
+    },
+  )
+
+  _retag(books, event, {books.note: CONTRIBUTIONS})
+
+  assert event.metadata_["classified_flow_qname"] == CONTRIBUTIONS
+  assert {str(li.flow_element_id) for li in _lines(books, event)} == {
+    books.contribution_flow
+  }
+
+  _retag(books, event, {books.note: None})
+
+  assert "classified_flow_qname" not in event.metadata_
+
+
+def test_a_retag_of_a_splits_entry_is_written_back_to_each_part(books):
+  event = _deposit(books, cents=1_010_000)
+  _update(
+    books,
+    event,
+    transition_to="committed",
+    metadata_patch={
+      "classified_allocations": [
+        {"element_id": books.note, "amount": 1_000_000, "flow_qname": NOTE_PROCEEDS},
+        {"element_id": books.equity, "amount": 10_000, "flow_qname": CONTRIBUTIONS},
+      ]
+    },
+  )
+
+  _retag(books, event, {books.note: CONTRIBUTIONS})
+
+  assert [
+    (a["element_id"], a["flow_qname"])
+    for a in event.metadata_["classified_allocations"]
+  ] == [(books.note, CONTRIBUTIONS), (books.equity, CONTRIBUTIONS)]
 
 
 def test_a_line_with_no_flow_stays_on_the_accounts_default(books):

@@ -17,6 +17,7 @@ from robosystems.models.api.extensions.agent import (
 from robosystems.models.extensions.roboledger.agent import Agent
 from robosystems.operations.roboledger.classification import (
   CLASSIFICATION_KEY,
+  CLASSIFICATIONS_KEY,
   learn_from_history,
   set_default,
 )
@@ -111,7 +112,7 @@ def update_agent(
       setattr(agent, field, value)
 
   if body.metadata_patch:
-    if CLASSIFICATION_KEY in body.metadata_patch:
+    if {CLASSIFICATION_KEY, CLASSIFICATIONS_KEY} & body.metadata_patch.keys():
       raise ValueError(
         "Set the default classification with classification_element_id and "
         "classification_mode, not metadata_patch."
@@ -127,6 +128,7 @@ def update_agent(
       element_id=body.classification_element_id,
       mode=body.classification_mode,
       set_by=created_by,
+      entity_id=body.classification_entity_id,
     )
 
   agent.updated_at = datetime.now(UTC)
