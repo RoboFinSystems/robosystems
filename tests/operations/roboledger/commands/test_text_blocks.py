@@ -62,12 +62,18 @@ def _structure(cap: str = "text_block") -> MagicMock:
   return s
 
 
-def _element(*, is_abstract: bool = False, item_type: str | None = None) -> MagicMock:
+def _element(
+  *,
+  is_abstract: bool = False,
+  item_type: str | None = None,
+  created_by: str = "usr_1",
+) -> MagicMock:
   e = MagicMock()
   e.id = "elem_policy"
   e.qname = "driftline:InventoryPolicyTextBlock"
   e.is_abstract = is_abstract
   e.item_type = item_type
+  e.created_by = created_by
   return e
 
 
@@ -75,14 +81,19 @@ def _session(
   structure: MagicMock | None,
   element: MagicMock | None,
   standing=None,
+  *,
+  on_structure: bool = True,
 ) -> MagicMock:
   """Extensions-session mock: session.get returns structure then element;
-  the standing-FactSet lookup returns ``standing``."""
+  the standing-FactSet lookup returns ``standing``, and the arc lookup finds
+  the element on the structure unless ``on_structure`` is False."""
   session = MagicMock()
   session.get.side_effect = [structure, element]
-  standing_result = MagicMock()
-  standing_result.scalar_one_or_none.return_value = standing
-  session.execute.return_value = standing_result
+  result = MagicMock()
+  result.scalar_one_or_none.return_value = standing
+  if not on_structure:
+    result.first.return_value = None
+  session.execute.return_value = result
   return session
 
 
@@ -173,6 +184,28 @@ class TestBindTextBlock:
       with pytest.raises(tb.TextBlockElementError):
         tb.bind_text_block(session, MagicMock(), "kg_x", _request(), "usr_1")
 
+  def test_rejects_element_not_on_structure(self) -> None:
+    session = _session(_structure(), _element(), on_structure=False)
+    with patch.object(tb.Document, "get_by_id_and_graph", return_value=_doc()):
+      with pytest.raises(tb.TextBlockElementError, match="not on structure"):
+        tb.bind_text_block(session, MagicMock(), "kg_x", _request(), "usr_1")
+
+  def test_rejects_library_concept_without_item_type(self) -> None:
+    element = _element(item_type=None, created_by="library-seeder")
+    session = _session(_structure(), element)
+    with patch.object(tb.Document, "get_by_id_and_graph", return_value=_doc()):
+      with pytest.raises(tb.TextBlockElementError, match="library concept"):
+        tb.bind_text_block(session, MagicMock(), "kg_x", _request(), "usr_1")
+    assert element.item_type is None
+
+  def test_binds_library_text_block_concept_unchanged(self) -> None:
+    element = _element(item_type="text_block", created_by="library-seeder")
+    session = _session(_structure(), element)
+    with patch.object(tb.Document, "get_by_id_and_graph", return_value=_doc()):
+      resp = tb.bind_text_block(session, MagicMock(), "kg_x", _request(), "usr_1")
+    assert resp.element_id == "elem_policy"
+    assert element.item_type == "text_block"
+
   def test_stamps_element_item_type_when_null(self) -> None:
     element = _element(item_type=None)
     session = _session(_structure(), element)
@@ -200,7 +233,12 @@ class TestBindTextBlock:
     existing_result.scalars.return_value.all.return_value = [old_fact]
     named_entity = MagicMock()
     named_entity.fetchone.return_value = MagicMock(id="ent_1")
-    session.execute.side_effect = [named_entity, standing_result, existing_result]
+    session.execute.side_effect = [
+      MagicMock(),  # the element is on the structure
+      named_entity,
+      standing_result,
+      existing_result,
+    ]
 
     with patch.object(tb.Document, "get_by_id_and_graph", return_value=_doc()):
       resp = tb.bind_text_block(session, MagicMock(), "kg_x", _request(), "usr_1")
