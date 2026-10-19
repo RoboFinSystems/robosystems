@@ -156,6 +156,13 @@ class UpdateAgentRequest(BaseModel):
       "for a counterparty whose lines go to different accounts. Omit to keep."
     ),
   )
+  classification_entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity whose bank lines the default above is for. Each entity "
+      "keeps its own default, on its own chart. Omit for the group parent."
+    ),
+  )
   metadata_patch: dict = Field(
     default_factory=dict,
     description=(
@@ -182,9 +189,10 @@ class UpdateAgentRequest(BaseModel):
 
 
 class AgentClassification(BaseModel):
-  """A counterparty's default account, learned from committed lines or set by
-  hand."""
+  """A counterparty's default account for one entity's lines, learned from
+  committed lines or set by hand."""
 
+  entity_id: str = Field(..., description="The entity whose lines it is for.")
   element_id: str = Field(..., description="The default chart account.")
   account_name: str | None = Field(None, description="The account's name.")
   mode: str = Field(
@@ -216,10 +224,16 @@ class LearnClassificationDefaultsResponse(BaseModel):
   """What seeding the defaults learned."""
 
   agents_learned: int = Field(
-    ..., description="Counterparties given a default from their committed lines."
+    ...,
+    description=(
+      "Defaults learned from committed lines, one per counterparty and entity."
+    ),
   )
   agents_kept: int = Field(
-    ..., description="Counterparties that already had a default, left as they were."
+    ...,
+    description=(
+      "Counterparty and entity pairs that already had a default, left as they were."
+    ),
   )
   lines_read: int = Field(
     ..., description="Committed lines classified to a single account that were read."
@@ -253,7 +267,12 @@ class LedgerAgentResponse(BaseModel):
   is_active: bool
   is_1099_recipient: bool
   classification: AgentClassification | None = Field(
-    None, description="The default account its bank lines are suggested."
+    None,
+    description="The default account the group parent's bank lines are suggested.",
+  )
+  classifications: list[AgentClassification] = Field(
+    default_factory=list,
+    description="The default account for each entity's bank lines, one per entity.",
   )
 
   created_at: datetime | None = None
@@ -355,8 +374,10 @@ class AcceptSuggestionLine(BaseModel):
       "Why a skipped line was not taken: `not_open` (already classified, "
       "posted or retracted), `no_suggestion` (nothing to take, or a name that "
       "matches no account), `source_changed` (the feed changed it after "
-      "capture), `closed_period`, `locked` (another process holds it; retry), "
-      "or `refused` (the handler would not post the choice)."
+      "capture), `suggestion_changed` (a line taken earlier in the batch moved "
+      "the counterparty's default, so this one's suggestion is not the one "
+      "selected; review it again), `closed_period`, `locked` (another process "
+      "holds it; retry), or `refused` (the handler would not post the choice)."
     ),
   )
   detail: str | None = Field(

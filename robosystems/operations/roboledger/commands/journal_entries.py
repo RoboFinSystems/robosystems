@@ -368,7 +368,7 @@ def _retag_lines(
 ) -> JournalEntryResponse:
   """The flow-only update: no period fence and no draft rule, since a flow
   moves no balance; the entry is still locked while its lines change."""
-  _lock_owning_event(session, peek)
+  event = _lock_owning_event(session, peek)
   entry = lock_by_id(
     session,
     Entry,
@@ -381,7 +381,44 @@ def _retag_lines(
     raise JournalEntryNotDraftError(entry.id, entry.status)
   _apply_line_flows(session, entry, line_flows)
   line_items = _load_line_items(session, entry.id)
+  _mirror_flows_onto_bank_event(session, event, line_items)
   return _entry_to_response(entry, line_items, _flow_qnames(session, line_items))
+
+
+def _mirror_flows_onto_bank_event(
+  session: Session, event: Event | None, line_items: list[LineItem]
+) -> None:
+  """A bank line's flows are held on its event too: the inbox shows them, and
+  a restatement re-posts from them. A re-tag of its entry is written back
+  there, so neither puts the old flow back."""
+  from robosystems.operations.event_block.python_handlers.bank_feed import (
+    BANK_FEED_HANDLERS,
+  )
+
+  if event is None or event.event_type not in BANK_FEED_HANDLERS:
+    return
+  metadata = dict(event.metadata_ or {})
+  if not any(
+    metadata.get(key)
+    for key in ("classified_element_id", "accept_suggestion", "classified_allocations")
+  ):
+    return
+  contra = [li for li in line_items if li.element_id != event.resource_element_id]
+  qnames = _flow_qnames(session, contra)
+  flow_of = {str(li.element_id): qnames.get(str(li.flow_element_id)) for li in contra}
+  if metadata.get("classified_allocations"):
+    metadata["classified_allocations"] = [
+      {**allocation, "flow_qname": flow_of.get(str(allocation.get("element_id")))}
+      for allocation in metadata["classified_allocations"]
+    ]
+  else:
+    flow = flow_of.get(str(contra[0].element_id)) if contra else None
+    if flow:
+      metadata["classified_flow_qname"] = flow
+    else:
+      metadata.pop("classified_flow_qname", None)
+  event.metadata_ = metadata
+  session.flush()
 
 
 def validate_and_normalize_lines(

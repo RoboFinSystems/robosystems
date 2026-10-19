@@ -184,6 +184,7 @@ def refresh_hints(event: Event, metadata: dict[str, Any], keys: Iterable[str]) -
     SUGGESTED_ELEMENT_ID,
     apply_ladder,
   )
+  from robosystems.operations.roboledger.entity_scope import owner_entity_id
 
   before = dict(event.metadata_ or {})
   current = dict(before)
@@ -201,7 +202,9 @@ def refresh_hints(event: Event, metadata: dict[str, Any], keys: Iterable[str]) -
   if session is not None and event.event_type in LEARNED_EVENT_TYPES:
     current[FEED_SUGGESTED_ELEMENT_ID] = metadata.get(SUGGESTED_ELEMENT_ID)
     current[FEED_SUGGESTED_ACCOUNT_NAME] = metadata.get(SUGGESTED_ACCOUNT_NAME)
-    current = apply_ladder(session, current, event.agent_id)
+    current = apply_ladder(
+      session, current, event.agent_id, owner_entity_id(session, event)
+    )
   if current == before:
     return False
   event.metadata_ = current
@@ -227,7 +230,10 @@ def capture_event(
     payload = {
       **payload,
       "metadata": apply_ladder(
-        session, dict(payload.get("metadata") or {}), payload.get("agent_id")
+        session,
+        dict(payload.get("metadata") or {}),
+        payload.get("agent_id"),
+        payload.get("entity_id"),
       ),
     }
   try:

@@ -14,33 +14,46 @@ from robosystems.models.api.extensions.agent import (
 from robosystems.models.extensions.roboledger.agent import Agent
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.transaction import Transaction
-from robosystems.operations.roboledger.entity_scope import find_entity_id
+from robosystems.operations.roboledger.entity_scope import (
+  find_entity_id,
+  resolve_entity_id,
+)
 
 
-def _classification(agent: Agent) -> AgentClassification | None:
+def _classifications(agent: Agent) -> list[AgentClassification]:
   from sqlalchemy.orm import object_session
 
   from robosystems.models.extensions.element import Element
-  from robosystems.operations.roboledger.classification import read_default
+  from robosystems.operations.roboledger.classification import read_defaults
 
-  default = read_default(agent.metadata_)
-  if default is None:
-    return None
   session = object_session(agent)
-  element = session.get(Element, default.element_id) if session is not None else None
-  return AgentClassification(
-    element_id=default.element_id,
-    account_name=element.name if element is not None else None,
-    mode=default.mode,
-    confirmations=default.confirmations,
-    overrides=default.overrides,
-    set_by=default.set_by,
-    set_at=default.set_at,
-    learned_from=default.learned_from,
-  )
+  if session is None:
+    return []
+  out = []
+  for entity_id, default in sorted(read_defaults(session, agent.metadata_).items()):
+    element = session.get(Element, default.element_id)
+    out.append(
+      AgentClassification(
+        entity_id=entity_id,
+        element_id=default.element_id,
+        account_name=element.name if element is not None else None,
+        mode=default.mode,
+        confirmations=default.confirmations,
+        overrides=default.overrides,
+        set_by=default.set_by,
+        set_at=default.set_at,
+        learned_from=default.learned_from,
+      )
+    )
+  return out
 
 
 def agent_to_response(agent: Agent) -> LedgerAgentResponse:
+  from sqlalchemy.orm import object_session
+
+  classifications = _classifications(agent)
+  session = object_session(agent)
+  parent_id = resolve_entity_id(session) if classifications and session else None
   return LedgerAgentResponse(
     id=agent.id,
     agent_type=agent.agent_type,
@@ -57,7 +70,8 @@ def agent_to_response(agent: Agent) -> LedgerAgentResponse:
     external_id=agent.external_id,
     is_active=agent.is_active,
     is_1099_recipient=agent.is_1099_recipient,
-    classification=_classification(agent),
+    classification=next((c for c in classifications if c.entity_id == parent_id), None),
+    classifications=classifications,
     created_at=agent.created_at,
     updated_at=agent.updated_at,
     created_by=agent.created_by,

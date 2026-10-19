@@ -146,12 +146,26 @@ def test_commit_posts_each_line_and_teaches_the_default(feed):
       == 1
     )
   feed.session.refresh(feed.agent)
-  default = read_default(feed.agent.metadata_)
+  default = read_default(feed.session, feed.agent.metadata_)
   assert (default.element_id, default.confirmations, default.overrides) == (
     feed.software,
     2,
     0,
   )
+
+
+def test_a_line_whose_suggestion_the_batch_moved_is_skipped_not_reposted(feed):
+  first = _line(feed, day=1)
+  second = _line(feed, day=2, suggested="payroll")
+
+  out = _run(feed, commit=True)
+
+  assert (out.committed, out.skipped) == (1, 1)
+  skipped = next(r for r in out.lines if r.event_id == second.id)
+  assert (skipped.reason, skipped.element_id) == ("suggestion_changed", feed.payroll)
+  assert _status(feed, first) == "committed"
+  assert _status(feed, second) == "captured"
+  assert _metadata(feed, second)["suggested_element_id"] == feed.software
 
 
 def test_explicit_ids_answer_every_line(feed):

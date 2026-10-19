@@ -2,8 +2,12 @@
 to, kept on the counterparty and offered as the next line's suggestion.
 
 A bank line resolves to an agent at capture, and the agent carries a default
-in ``metadata.classification``: the account, whether to suggest it or always
-ask, and how often committed lines agreed with it. The suggestion ladder puts
+for each entity whose books its lines go into, in
+``metadata.classifications[entity_id]``: the account, whether to suggest it or
+always ask, and how often committed lines agreed with it. Each entity keeps
+its own chart, so one entity's lines never teach another's default. A default
+from before the entity key (``metadata.classification``) belongs to the entity
+whose chart holds its account. The suggestion ladder puts
 a learned default above the feed's own category hint, which is kept beside it
 (``feed_suggested_*``) so it returns when the default goes. Only a committed
 line teaches, and a default never posts by itself: the inbox is the gate.
@@ -16,14 +20,19 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from robosystems.models.extensions.element import Element
 from robosystems.models.extensions.roboledger import Agent, Event
 from robosystems.operations.locking import lock_by_id
+from robosystems.operations.roboledger.entity_scope import (
+  owner_entity_id,
+  resolve_entity_id,
+)
 
 CLASSIFICATION_KEY = "classification"
+CLASSIFICATIONS_KEY = "classifications"
 # Lines that are classified into the chart: an internal transfer knows both
 # legs and is never classified.
 LEARNED_EVENT_TYPES = frozenset({"bank_transaction", "bank_fee", "external_transfer"})
@@ -80,8 +89,7 @@ class AgentDefault:
     }
 
 
-def read_default(metadata: dict[str, Any] | None) -> AgentDefault | None:
-  raw = (metadata or {}).get(CLASSIFICATION_KEY)
+def _parse_default(raw: Any) -> AgentDefault | None:
   if not isinstance(raw, dict) or not raw.get("element_id"):
     return None
   mode = raw.get("mode")
@@ -96,12 +104,69 @@ def read_default(metadata: dict[str, Any] | None) -> AgentDefault | None:
   )
 
 
-def write_default(agent: Agent, default: AgentDefault | None) -> None:
+def _chart_owner(session: Session, element_id: str) -> str:
+  """The entity whose chart holds an account; an account in no entity's
+  chart is the group parent's."""
+  owner = session.execute(
+    text(
+      "SELECT own.entity_id FROM elements e "
+      "JOIN entity_taxonomies own ON own.taxonomy_id = e.taxonomy_id "
+      "AND own.basis = 'chart_of_accounts' "
+      "WHERE e.id = :element_id ORDER BY own.entity_id LIMIT 1"
+    ),
+    {"element_id": element_id},
+  ).scalar()
+  return str(owner) if owner else resolve_entity_id(session)
+
+
+def read_defaults(
+  session: Session, metadata: dict[str, Any] | None
+) -> dict[str, AgentDefault]:
+  """Every entity's default for one counterparty, by entity id."""
+  meta = metadata or {}
+  out: dict[str, AgentDefault] = {}
+  by_entity = meta.get(CLASSIFICATIONS_KEY)
+  if isinstance(by_entity, dict):
+    for entity_id, raw in by_entity.items():
+      default = _parse_default(raw)
+      if default is not None:
+        out[str(entity_id)] = default
+  legacy = _parse_default(meta.get(CLASSIFICATION_KEY))
+  if legacy is not None:
+    out.setdefault(_chart_owner(session, legacy.element_id), legacy)
+  return out
+
+
+def read_default(
+  session: Session, metadata: dict[str, Any] | None, entity_id: str | None = None
+) -> AgentDefault | None:
+  """A counterparty's default for one entity's lines; the group parent's when
+  no entity is named."""
+  return read_defaults(session, metadata).get(resolve_entity_id(session, entity_id))
+
+
+def write_default(
+  session: Session,
+  agent: Agent,
+  default: AgentDefault | None,
+  entity_id: str | None = None,
+) -> None:
+  """Set or clear one entity's default. A default from before the entity key
+  moves under its entity first, so it is never read twice."""
   metadata = dict(agent.metadata_ or {})
+  defaults = read_defaults(session, metadata)
+  entity_id = resolve_entity_id(session, entity_id)
   if default is None:
-    metadata.pop(CLASSIFICATION_KEY, None)
+    defaults.pop(entity_id, None)
   else:
-    metadata[CLASSIFICATION_KEY] = default.to_metadata()
+    defaults[entity_id] = default
+  metadata.pop(CLASSIFICATION_KEY, None)
+  if defaults:
+    metadata[CLASSIFICATIONS_KEY] = {
+      key: value.to_metadata() for key, value in sorted(defaults.items())
+    }
+  else:
+    metadata.pop(CLASSIFICATIONS_KEY, None)
   agent.metadata_ = metadata
   agent.updated_at = datetime.now(UTC)
 
@@ -129,10 +194,14 @@ def _basis(agent: Agent, element: Element, default: AgentDefault) -> str:
 
 
 def apply_ladder(
-  session: Session, metadata: dict[str, Any], agent_id: str | None
+  session: Session,
+  metadata: dict[str, Any],
+  agent_id: str | None,
+  entity_id: str | None = None,
 ) -> dict[str, Any]:
   """A captured line's metadata with the highest suggestion available: the
-  agent's learned default, else the feed's category hint, else none.
+  agent's learned default for the line's entity, else the feed's category
+  hint, else none.
 
   The feed's hint is first read from the line's own suggestion and kept in
   ``feed_suggested_*``, so applying the ladder again is idempotent.
@@ -144,7 +213,9 @@ def apply_ladder(
       out[FEED_SUGGESTED_ACCOUNT_NAME] = out.get(SUGGESTED_ACCOUNT_NAME)
 
   agent = session.get(Agent, agent_id) if agent_id else None
-  default = read_default(agent.metadata_) if agent is not None else None
+  default = (
+    read_default(session, agent.metadata_, entity_id) if agent is not None else None
+  )
   element = (
     _postable(session, default.element_id)
     if default is not None and default.mode == SUGGEST
@@ -178,8 +249,9 @@ def apply_ladder(
   return out
 
 
-def resuggest_open_lines(session: Session, agent_id: str) -> int:
-  """Re-run the ladder on the agent's still-captured lines. A line another
+def resuggest_open_lines(session: Session, agent_id: str, entity_id: str) -> int:
+  """Re-run the ladder on the agent's still-captured lines in one entity's
+  books. A line another
   transaction holds is skipped rather than waited on: it is being written
   (most likely committed), and waiting could deadlock with that commit's
   learning, which locks the agent. Returns how many lines changed."""
@@ -188,6 +260,7 @@ def resuggest_open_lines(session: Session, agent_id: str) -> int:
       select(Event)
       .where(
         Event.agent_id == agent_id,
+        Event.entity_id == entity_id,
         Event.status == "captured",
         Event.event_type.in_(sorted(LEARNED_EVENT_TYPES)),
       )
@@ -200,7 +273,7 @@ def resuggest_open_lines(session: Session, agent_id: str) -> int:
   changed = 0
   for event in events:
     before = dict(event.metadata_ or {})
-    after = apply_ladder(session, before, agent_id)
+    after = apply_ladder(session, before, agent_id, entity_id)
     if after != before:
       event.metadata_ = after
       changed += 1
@@ -253,7 +326,8 @@ def learn_from_commit(session: Session, event: Event, created_by: str) -> None:
   )
   if agent is None:
     return
-  default = read_default(agent.metadata_)
+  entity_id = owner_entity_id(session, event)
+  default = read_default(session, agent.metadata_, entity_id)
   remember = metadata.get(REMEMBER_CLASSIFICATION)
   learned: AgentDefault | None = None
   if default is None:
@@ -285,10 +359,10 @@ def learn_from_commit(session: Session, event: Event, created_by: str) -> None:
   if learned is None:
     return
   moved = default is None or learned.element_id != default.element_id
-  write_default(agent, learned)
+  write_default(session, agent, learned, entity_id)
   session.flush()
   if moved:
-    resuggest_open_lines(session, str(agent.id))
+    resuggest_open_lines(session, str(agent.id), entity_id)
 
 
 def set_default(
@@ -298,14 +372,22 @@ def set_default(
   element_id: str | None,
   mode: ClassificationMode | None,
   set_by: str,
+  entity_id: str | None = None,
 ) -> None:
-  """Set, change or clear a counterparty's default by hand, then re-suggest
-  its open lines. ``element_id=""`` clears it; ``None`` keeps the account and
+  """Set, change or clear a counterparty's default for one entity's lines
+  (the group parent's when none is named) by hand, then re-suggest its open
+  lines there. ``element_id=""`` clears it; ``None`` keeps the account and
   changes only the mode. Raises ``ValueError`` for an account that cannot be
-  posted to, or a mode with no account to apply to."""
-  current = read_default(agent.metadata_)
+  posted to, one outside the entity's chart, or a mode with no account to
+  apply to."""
+  from robosystems.operations.roboledger.commands._guards import (
+    _accounts_outside_entity_chart,
+  )
+
+  entity_id = resolve_entity_id(session, entity_id)
+  current = read_default(session, agent.metadata_, entity_id)
   if element_id == "":
-    write_default(agent, None)
+    write_default(session, agent, None, entity_id)
   else:
     target = element_id or (current.element_id if current else None)
     if target is None:
@@ -317,8 +399,16 @@ def set_default(
       raise ValueError(
         f"{element_id!r} is not an active account that can be posted to."
       )
+    if element_id is not None and _accounts_outside_entity_chart(
+      session, [element_id], entity_id
+    ):
+      raise ValueError(
+        f"{element_id!r} is not on the chart of the entity whose lines this "
+        "default is for; name that entity with classification_entity_id."
+      )
     same_account = current is not None and current.element_id == target
     write_default(
+      session,
       agent,
       AgentDefault(
         element_id=target,
@@ -329,9 +419,10 @@ def set_default(
         set_at=_now(),
         learned_from=current.learned_from if same_account and current else None,
       ),
+      entity_id,
     )
   session.flush()
-  resuggest_open_lines(session, str(agent.id))
+  resuggest_open_lines(session, str(agent.id), entity_id)
 
 
 @dataclass(frozen=True)
@@ -346,11 +437,11 @@ def learn_from_history(
   session: Session, created_by: str, *, dry_run: bool = False
 ) -> LearnedDefaults:
   """Seed defaults from the bank lines already committed, for each
-  counterparty that has none: its most-used account becomes the default, with
-  the lines that agreed as confirmations and the rest as overrides. A
-  counterparty that already has a default keeps it."""
+  counterparty and entity with none: the most-used account in that entity's
+  lines becomes the default, with the lines that agreed as confirmations and
+  the rest as overrides. A default already there is kept."""
   rows = session.execute(
-    select(Event.agent_id, Event.id, Event.metadata_)
+    select(Event.agent_id, Event.entity_id, Event.id, Event.metadata_)
     .where(
       Event.status.in_(("committed", "fulfilled")),
       Event.agent_id.is_not(None),
@@ -358,23 +449,24 @@ def learn_from_history(
     )
     .order_by(Event.effective_at, Event.id)
   ).all()
-  by_agent: dict[str, Counter[str]] = {}
-  latest: dict[tuple[str, str], str] = {}
+  by_pair: dict[tuple[str, str], Counter[str]] = {}
+  latest: dict[tuple[str, str, str], str] = {}
   lines_read = 0
-  for agent_id, event_id, metadata in rows:
+  for agent_id, entity_id, event_id, metadata in rows:
     chosen = chosen_account(metadata or {})
     if chosen is None:
       continue
     lines_read += 1
-    by_agent.setdefault(str(agent_id), Counter())[chosen] += 1
-    latest[(str(agent_id), chosen)] = str(event_id)
+    pair = (str(agent_id), str(entity_id))
+    by_pair.setdefault(pair, Counter())[chosen] += 1
+    latest[(*pair, chosen)] = str(event_id)
 
   learned = kept = resuggested = 0
-  for agent_id, counts in sorted(by_agent.items()):
+  for (agent_id, entity_id), counts in sorted(by_pair.items()):
     agent = session.get(Agent, agent_id)
     if agent is None:
       continue
-    if read_default(agent.metadata_) is not None:
+    if read_default(session, agent.metadata_, entity_id) is not None:
       kept += 1
       continue
     element_id, agreed = counts.most_common(1)[0]
@@ -384,6 +476,7 @@ def learn_from_history(
     if dry_run:
       continue
     write_default(
+      session,
       agent,
       AgentDefault(
         element_id=element_id,
@@ -392,11 +485,12 @@ def learn_from_history(
         overrides=sum(counts.values()) - agreed,
         set_by=created_by,
         set_at=_now(),
-        learned_from=latest[(agent_id, element_id)],
+        learned_from=latest[(agent_id, entity_id, element_id)],
       ),
+      entity_id,
     )
     session.flush()
-    resuggested += resuggest_open_lines(session, agent_id)
+    resuggested += resuggest_open_lines(session, agent_id, entity_id)
   return LearnedDefaults(
     agents_learned=learned,
     agents_kept=kept,
