@@ -187,7 +187,7 @@ The tool names below are the exact `name` strings for `tools/call`, grouped by f
 | `create-mapping-association` / `delete-mapping-association` | Add or remove one account → reporting-concept mapping |
 | `initialize-chart-of-accounts` | Create the chart from a shipped template, for a graph that has none |
 | `create-taxonomy-block` / `update-taxonomy-block` / `delete-taxonomy-block` | Author a taxonomy — a chart of accounts, a reporting extension, a custom ontology — as one envelope |
-| `link-entity-taxonomy` | Point the entity at a different primary chart, or link a reporting extension |
+| `link-entity-taxonomy` | Point the entity at a different primary chart |
 
 **Information blocks, metrics and forecasts** — RoboLedger tenant:
 

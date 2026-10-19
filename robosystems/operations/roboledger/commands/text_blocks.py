@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import hashlib
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.text_blocks import (
@@ -21,6 +21,7 @@ from robosystems.models.api.extensions.text_blocks import (
 )
 from robosystems.models.api.fact_provenance import DocumentProvenance
 from robosystems.models.core.document.document import Document
+from robosystems.models.extensions.association import Association
 from robosystems.models.extensions.element import Element
 from robosystems.models.extensions.roboledger.fact import Fact
 from robosystems.models.extensions.roboledger.fact_set import FactSet
@@ -36,6 +37,8 @@ from robosystems.utils.ulid import generate_prefixed_ulid
 # Mirrors DocumentService's update cap — the bind snapshots at most one
 # document's worth of text.
 _MAX_TEXT_CHARS = 500_000
+
+_LIBRARY_SEEDER = "library-seeder"
 
 
 class DocumentNotFoundError(Exception):
@@ -85,15 +88,37 @@ def _resolve_element(session: Session, body: BindTextBlockRequest) -> Element:
     element = session.get(Element, body.element_id)
   else:
     element = session.execute(
-      select(Element).where(Element.qname == body.element_qname).limit(1)
+      select(Element).where(Element.qname == body.element_qname)
     ).scalar_one_or_none()
   if element is None:
     ref = body.element_id or body.element_qname
     raise TextBlockElementError(f"Element '{ref}' not found")
+  ref = element.qname or element.id
   if element.is_abstract:
     raise TextBlockElementError(
-      f"Element '{element.qname or element.id}' is abstract — text binds to "
-      "a concrete text-block concept"
+      f"Element '{ref}' is abstract — text binds to a concrete text-block concept"
+    )
+  # A structure's elements are its arcs' endpoints, as the envelope reads them.
+  on_structure = session.execute(
+    select(Association.id)
+    .where(
+      Association.structure_id == body.structure_id,
+      or_(
+        Association.from_element_id == element.id,
+        Association.to_element_id == element.id,
+      ),
+    )
+    .limit(1)
+  ).first()
+  if on_structure is None:
+    raise TextBlockElementError(
+      f"Element '{ref}' is not on structure '{body.structure_id}' — bind an "
+      "element the disclosure structure arranges"
+    )
+  if element.item_type is None and element.created_by == _LIBRARY_SEEDER:
+    raise TextBlockElementError(
+      f"Element '{ref}' is a library concept that is not a text block — "
+      "author a text-block element on the structure instead"
     )
   return element
 
