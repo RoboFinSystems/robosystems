@@ -12,6 +12,7 @@ each the reconciling adjustment is zero.
 from __future__ import annotations
 
 from datetime import date, datetime
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine, select, text
@@ -82,6 +83,12 @@ ACCOUNTS = {
     "instant",
   ),
   "cogs": ("rs-gaap:CostOfGoodsAndServicesSold", "debit", "duration"),
+  "receivable": ("rs-gaap:ReceivablesNetCurrent", "debit", "instant"),
+  "extinguishment_gain": (
+    "rs-gaap:GainsLossesOnExtinguishmentOfDebt",
+    "credit",
+    "duration",
+  ),
 }
 
 # A tenant-authored disclosure member the inventory account is also mapped to,
@@ -415,6 +422,133 @@ def test_a_depreciated_asset_sold_for_cash_shows_the_cash_received(
   _assert_no_reconciling_adjustment(cf)
 
 
+@pytest.mark.parametrize(
+  "proceeds, result",
+  [(900, ("disposal_gain", 0, 300)), (500, ("disposal_gain", 100, 0))],
+  ids=["at_a_gain", "at_a_loss"],
+)
+@pytest.mark.parametrize("collected", [date(2026, 2, 10), date(2026, 1, 25)])
+def test_an_asset_sold_on_account_shows_the_cash_when_collected(
+  tenant, proceeds, result, collected
+):
+  """Cost 1,000 with 400 depreciated, sold on account and collected later
+  (or in the same month): the receivable is the proceeds, never working
+  capital, and the collection is investing cash of exactly what came in."""
+  _post(tenant, [("equipment", 1000, 0), ("cash", 0, 1000)], posted=date(2026, 1, 5))
+  _post(
+    tenant,
+    [("depreciation", 400, 0), ("accumulated_depreciation", 0, 400)],
+    posted=date(2026, 1, 6),
+  )
+  invoice = _event("invoice_issued")
+  _post(
+    tenant,
+    [
+      ("receivable", proceeds, 0),
+      ("accumulated_depreciation", 400, 0),
+      ("equipment", 0, 1000),
+      result,
+    ],
+    event_id=invoice,
+  )
+  receipt = _event("payment_received", discharges=invoice)
+  _post(
+    tenant,
+    [("cash", proceeds, 0), ("receivable", 0, proceeds)],
+    posted=collected,
+    event_id=receipt,
+  )
+  jan = _cash_flow(tenant, JAN, [JAN, FEB])
+  feb = _cash_flow(tenant, FEB, [JAN, FEB])
+  paid_in = feb if collected.month == 2 else jan
+
+  assert paid_in[PPE_PROCEEDS] == float(proceeds)
+  assert jan.get(OPERATING, 0.0) == 0.0
+  assert feb.get(OPERATING, 0.0) == 0.0
+  if collected.month == 2:
+    assert PPE_PROCEEDS not in jan
+  _assert_no_reconciling_adjustment(jan)
+  _assert_no_reconciling_adjustment(feb)
+
+
+def test_depreciation_charged_on_the_sale_invoice_is_no_write_off(tenant):
+  """The invoice also books the month's last depreciation, to an expense the
+  cash flow does not present on its own row: that credit to accumulated
+  depreciation is a charge, not part of the disposal, so the collection is
+  still exactly the cash received."""
+  _post(tenant, [("equipment", 1000, 0), ("cash", 0, 1000)], posted=date(2026, 1, 5))
+  _post(
+    tenant,
+    [("depreciation", 400, 0), ("accumulated_depreciation", 0, 400)],
+    posted=date(2026, 1, 6),
+  )
+  invoice = _event("invoice_issued")
+  _post(
+    tenant,
+    [
+      ("receivable", 500, 0),
+      ("cogs", 50, 0),
+      ("accumulated_depreciation", 0, 50),
+      ("accumulated_depreciation", 450, 0),
+      ("equipment", 0, 1000),
+      ("disposal_gain", 50, 0),
+    ],
+    event_id=invoice,
+  )
+  receipt = _event("payment_received", discharges=invoice)
+  _post(
+    tenant,
+    [("cash", 500, 0), ("receivable", 0, 500)],
+    posted=date(2026, 2, 10),
+    event_id=receipt,
+  )
+  feb = _cash_flow(tenant, FEB, [JAN, FEB])
+  assert feb[PPE_PROCEEDS] == 500.0
+  assert feb.get(OPERATING, 0.0) == 0.0
+
+
+def test_a_linked_payment_through_clearing_still_routes_the_bill(tenant):
+  """The cash leg lands in clearing, on none of the bill's accounts: the
+  payment is still measured against the whole bill, so the equipment it
+  pays for is investing cash."""
+  bill = _event("bill_received")
+  _post(tenant, [("equipment", 1000, 0), ("payable", 0, 1000)], event_id=bill)
+  payment = _event("bill_paid", discharges=bill)
+  _post(
+    tenant,
+    [("clearing", 1000, 0), ("cash", 0, 1000)],
+    posted=date(2026, 1, 20),
+    event_id=payment,
+  )
+  cf = _cash_flow(tenant)
+  assert cf[CAPEX] == -1000.0
+  _assert_no_reconciling_adjustment(cf)
+
+
+def test_a_debt_retired_through_a_payable_at_a_gain_shows_the_cash_paid(tenant):
+  _post(tenant, [("cash", 1000, 0), ("credit_line", 0, 1000)], posted=date(2026, 1, 2))
+  bill = _event("bill_received")
+  _post(
+    tenant,
+    [("credit_line", 1000, 0), ("payable", 0, 800), ("extinguishment_gain", 0, 200)],
+    event_id=bill,
+  )
+  payment = _event("bill_paid", discharges=bill)
+  _post(
+    tenant,
+    [("payable", 800, 0), ("cash", 0, 800)],
+    posted=date(2026, 2, 10),
+    event_id=payment,
+  )
+  jan = _cash_flow(tenant, JAN, [JAN, FEB])
+  feb = _cash_flow(tenant, FEB, [JAN, FEB])
+
+  assert feb[REPAYMENTS] == -800.0
+  assert feb.get(OPERATING, 0.0) == 0.0
+  _assert_no_reconciling_adjustment(jan)
+  _assert_no_reconciling_adjustment(feb)
+
+
 def test_the_consolidation_entitys_cash_flow_nets_to_nothing(tenant):
   """It holds no cash, so a tagged line with nothing offsetting it (a hand
   entry tagging one side only) cannot move the group's net change in cash:
@@ -715,3 +849,45 @@ def test_a_multi_mapped_account_counts_once(tenant):
   assert cf.get(OTHER_NONCASH, 0.0) == 0.0, cf
   assert cf["rs-gaap:IncreaseDecreaseInInventories"] == 364.0
   _assert_no_reconciling_adjustment(cf)
+
+
+def test_the_exported_cash_flow_negates_what_its_summation_subtracts(tenant):
+  """On the library's own networks: the indirect cash flow's operating
+  summation is not legal XBRL and does not ship, yet the rows it subtracts
+  (the gain the in-app grid shows at its cash effect) are still named, so
+  the export can negate them as the grid does."""
+  from robosystems.models.extensions.association import Association
+  from robosystems.operations.graph.reporting_style_defaults import (
+    default_style_for,
+  )
+  from robosystems.operations.roboledger.reports.network_picker import (
+    get_render_network,
+  )
+  from robosystems.operations.serialization.bundle import _source_calculation_arcs
+
+  with extensions_session(GRAPH) as session:
+    network = get_render_network(
+      session, default_style_for("corporation"), "cash_flow_statement"
+    )
+    arcs = list(
+      session.execute(
+        select(Association).where(
+          Association.structure_id == network.structure_id,
+          Association.association_type == "presentation",
+        )
+      ).scalars()
+    )
+    ids = {str(a.from_element_id) for a in arcs} | {str(a.to_element_id) for a in arcs}
+    elements = {
+      str(e.id): e
+      for e in session.execute(select(Element).where(Element.id.in_(ids))).scalars()
+    }
+    structures = {
+      network.structure_id: SimpleNamespace(block_type="cash_flow_statement")
+    }
+    subtracted: set[tuple[str, str]] = set()
+    sourced = _source_calculation_arcs(session, arcs, structures, elements, subtracted)
+    operating = next(i for i, e in elements.items() if e.qname == OPERATING)
+
+  assert (OPERATING, DISPOSAL_GAIN) in subtracted
+  assert not any(str(a.from_element_id) == operating for a in sourced)

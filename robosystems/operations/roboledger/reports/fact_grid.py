@@ -2129,6 +2129,15 @@ def _emit_noncash_and_settlement_facts(
   bills: dict[str, _Bill] = {}
   unlinked: dict[tuple[date, date], list[int]] = {}
 
+  def _disposes(line: _CfLine) -> bool:
+    """A gain the cash flow presents on its own row, or the depreciation a
+    sale writes off."""
+    return (line.kind == "pnl" and line.concept_id in reused) or (
+      line.kind == "working"
+      and line.qname == PPE_ACCUMULATED_DEPRECIATION_QNAME
+      and line.net > 0
+    )
+
   def _add(element_id: str, period: PeriodSpec, cents: float) -> None:
     key = (element_id, period.start, period.end)
     adjustments[key] = adjustments.get(key, 0.0) + cents
@@ -2197,11 +2206,17 @@ def _emit_noncash_and_settlement_facts(
       )
       if not nonoperating:
         continue
-      pnl = sum(ln.net for ln in lines if ln.kind == "pnl")
-      working = sum(ln.net for ln in lines if ln.kind == "working")
-      pnl_matched = _matched(pnl, nonoperating)
-      working_matched = _matched(working, nonoperating + pnl_matched)
-      for line in lines:
+      # A disposal's gain and the depreciation it writes off belong to the
+      # asset side, so a receivable for the proceeds is matched against all
+      # of it and none of it reads as working capital.
+      disposal = [ln for ln in lines if _disposes(ln)]
+      side = nonoperating + sum(ln.net for ln in disposal)
+      rest = [ln for ln in lines if ln not in disposal]
+      pnl = sum(ln.net for ln in rest if ln.kind == "pnl")
+      working = sum(ln.net for ln in rest if ln.kind == "working")
+      pnl_matched = _matched(pnl, side)
+      working_matched = _matched(working, side + pnl_matched)
+      for line in rest:
         if line.kind == "pnl" and pnl_matched and line.concept_id not in reused:
           if other_noncash_id is not None:
             share = -line.net * pnl_matched / pnl
@@ -2211,6 +2226,10 @@ def _emit_noncash_and_settlement_facts(
           share = -line.net * working_matched / working
           for column in columns:
             _add(working_leaf[line.concept_id], column, -share)
+      for line in disposal:
+        if line.kind == "working":
+          for column in columns:
+            _add(working_leaf[line.concept_id], column, line.net)
 
       if entry_key in event_of and _hold_bill(
         event_of[entry_key], lines, posted, columns
@@ -2248,23 +2267,40 @@ def _emit_noncash_and_settlement_facts(
 
     bill = settled.get(discharges.get(entry_key, ""))
     if bill and "nonoperating" not in kinds:
-      payable = abs(sum(ln.net for ln in bill if ln.kind == "working"))
       paid_lines = [ln for ln in lines if ln.kind == "working"]
       paid = sum(ln.net for ln in paid_lines)
+      # Only the balance this payment settles: a disposal's written-off
+      # depreciation is a working line of the bill, not part of what is owed.
+      settles = {ln.concept_id for ln in paid_lines}
+      owed = [ln for ln in bill if ln.kind == "working"]
+      # Paid through clearing, the payment's line is on none of the bill's.
+      if any(ln.concept_id in settles for ln in owed):
+        owed = [ln for ln in owed if ln.concept_id in settles]
+      payable = abs(sum(ln.net for ln in owed))
       if payable and paid:
         fraction = min(abs(paid), payable) / payable
         _add_paid(bill, columns, fraction)
         routed = 0.0
+        bill_flows: set[str] = set()
         for line in bill:
           if line.kind != "nonoperating":
             continue
           flow_id = _default_flow(line.concept_id, -line.net)
           if flow_id is None:
             continue
+          bill_flows.add(flow_id)
           routed += line.net * fraction
           emitted_flows.add(flow_id)
           for column in columns:
             _add(flow_id, column, -line.net * fraction)
+        if routed and len(bill_flows) == 1:
+          # The cash a disposal brought in, or a retirement paid, is the
+          # asset or debt net of the gain and the depreciation written off.
+          flow_id = bill_flows.pop()
+          extra = sum(ln.net for ln in bill if _disposes(ln)) * fraction
+          routed += extra
+          for column in columns:
+            _add(flow_id, column, -extra)
         if routed:
           for line in paid_lines:
             for column in columns:

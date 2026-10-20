@@ -393,6 +393,7 @@ def build_report_bundle(
   }
   associations: list[Any] = []
   structures_by_id: dict[str, Structure] = {}
+  subtracted: set[tuple[str, str]] = set()
   if structure_ids:
     associations = list(
       session.execute(
@@ -420,7 +421,9 @@ def build_report_bundle(
     # Library calc arcs live on separate rs-gaap-calculation Structures, so
     # they must be pulled in or the calculation linkbase ships empty.
     associations.extend(
-      _source_calculation_arcs(session, associations, structures_by_id, elements_by_id)
+      _source_calculation_arcs(
+        session, associations, structures_by_id, elements_by_id, subtracted
+      )
     )
 
   # Reuse the read-side renderer so envelopes match the API response shape.
@@ -492,7 +495,9 @@ def build_report_bundle(
     for eid in sorted(elements_by_id)
   ]
   linkbases = _associations_to_linkbases(associations, structures_by_id, elements_by_id)
-  schema_concepts.extend(_apply_preferred_labels(linkbases, schema_concepts))
+  schema_concepts.extend(
+    _apply_preferred_labels(linkbases, schema_concepts, subtracted)
+  )
   period_nodes, period_ref_for_fact = _mint_periods(facts)
   units, unit_ref_for_fact = _mint_units(facts)
   bundle_facts = [
@@ -718,6 +723,7 @@ def _source_calculation_arcs(
   loaded_associations: list[Any],
   structures_by_id: dict[str, Any],
   elements_by_id: dict[str, Any],
+  subtracted: set[tuple[str, str]] | None = None,
 ) -> list[Any]:
   """Calculation arcs for the declared concepts, re-hosted on rendered Networks.
 
@@ -729,6 +735,10 @@ def _source_calculation_arcs(
   Arcs already in ``loaded_associations`` on the same structure (a tenant
   disclosure's own calc arcs) are skipped, or they would emit twice and
   double the footing.
+
+  ``subtracted`` collects the (parent, child) qnames of every hosted arc
+  whose child its parent subtracts, emitted or not: an indirect cash flow's
+  summation is dropped, but its subtracted rows still render negated.
   """
   from robosystems.models.extensions.association import Association
 
@@ -797,6 +807,12 @@ def _source_calculation_arcs(
   # rollups, where real filers omit the calc linkbase too.
   sourced: list[Any] = []
   for (host, subtotal), arcs in groups.items():
+    if subtracted is not None:
+      subtracted.update(
+        (elements_by_id[subtotal].qname, elements_by_id[str(a.to_element_id)].qname)
+        for a in arcs
+        if a.weight is not None and float(a.weight) < 0
+      )
     parent_balance = _balance(subtotal)
     if parent_balance not in ("debit", "credit"):
       continue
@@ -939,6 +955,8 @@ PERIOD_START_LABEL_ROLE = "http://www.xbrl.org/2003/role/periodStartLabel"
 PERIOD_END_LABEL_ROLE = "http://www.xbrl.org/2003/role/periodEndLabel"
 _PARENT_CHILD = "http://www.xbrl.org/2003/arcrole/parent-child"
 
+_NCI_ROOT = "rs-gaap:MinorityInterest"
+
 # The roll-forward's capital concept -> the us-gaap header it sits under.
 _ROLLFORWARD_ABSTRACTS: dict[str, tuple[str, str]] = {
   "rs-gaap:StockholdersEquity": (
@@ -957,14 +975,17 @@ _ROLLFORWARD_ABSTRACTS: dict[str, tuple[str, str]] = {
 
 
 def _apply_preferred_labels(
-  linkbases: BundleLinkbases, concepts: list[BundleElement]
+  linkbases: BundleLinkbases,
+  concepts: list[BundleElement],
+  subtracted: set[tuple[str, str]] | None = None,
 ) -> list[BundleElement]:
   """Give the exported statements the preferred labels XBRL renders by.
 
   The engine keeps neither in its networks, so the export adds them:
 
   - a cash flow row its parent subtracts (a gain presented from its income
-    statement fact) takes ``negatedLabel``, shown at its cash effect;
+    statement fact) takes ``negatedLabel``, shown at its cash effect, whether
+    or not the summation ships (``subtracted``);
   - an equity roll-forward, whose capital concept the engine holds as the
     parent of its movements, takes the XBRL shape: a header with the capital
     concept first under ``periodStartLabel``, the movements, and the capital
@@ -980,6 +1001,8 @@ def _apply_preferred_labels(
     for arc in link.arcs
     if arc.weight is not None
   }
+  for pair in subtracted or ():
+    weights.setdefault(pair, -1.0)
   added: dict[str, BundleElement] = {}
   for link in linkbases.presentation_links:
     if link.block_type == "cash_flow_statement":
@@ -1022,37 +1045,16 @@ def _as_rollforward(
   if root is None or capital is None:
     return None
   header_qname, header_label = _ROLLFORWARD_ABSTRACTS[root]
-  movements = [arc for arc in link.arcs if arc.from_qname == root]
-  # An unordered movement would sort ahead of the opening balance.
-  for position, arc in enumerate(movements, start=1):
-    if arc.order_value is None:
-      arc.order_value = float(position)
-  orders = [arc.order_value for arc in movements if arc.order_value is not None]
-  first = min(orders, default=0.0)
-  last = max(orders, default=0.0)
-  for arc in movements:
-    arc.from_qname = header_qname
-  link.arcs = [
-    BundleArc(
-      arc_type="presentationArc",
-      arcrole=_PARENT_CHILD,
-      from_qname=header_qname,
-      to_qname=root,
-      order_value=first - 1,
-      preferred_label=PERIOD_START_LABEL_ROLE,
-    ),
-    *link.arcs,
-    BundleArc(
-      arc_type="presentationArc",
-      arcrole=_PARENT_CHILD,
-      from_qname=header_qname,
-      to_qname=root,
-      order_value=last + 1,
-      preferred_label=PERIOD_END_LABEL_ROLE,
-    ),
-  ]
-  _add_role_label(capital, PERIOD_START_LABEL_ROLE, ", beginning balance")
-  _add_role_label(capital, PERIOD_END_LABEL_ROLE, ", ending balance")
+  balances: list[BundleArc] = []
+  # The outside owners' interest rolls forward beside the capital, under the
+  # same header, as the statement presents it.
+  for balance in (root, _NCI_ROOT):
+    if balance != root and (balance in targets or balance not in by_qname):
+      continue
+    balances += _balances_around(link, balance, header_qname)
+    _add_role_label(by_qname[balance], PERIOD_START_LABEL_ROLE, ", beginning balance")
+    _add_role_label(by_qname[balance], PERIOD_END_LABEL_ROLE, ", ending balance")
+  link.arcs = [*balances, *link.arcs]
   return BundleElement(
     id=header_qname,
     qname=header_qname,
@@ -1067,6 +1069,41 @@ def _as_rollforward(
     substitution_group=capital.substitution_group,
     source=capital.source,
   )
+
+
+def _balances_around(
+  link: BundleLinkbaseLink, root: str, header_qname: str
+) -> list[BundleArc]:
+  """Move ``root``'s movements under the header and return the arcs that
+  open and close them on ``root``."""
+  movements = [arc for arc in link.arcs if arc.from_qname == root]
+  if not movements:
+    return []
+  # An unordered movement would sort ahead of the opening balance.
+  for position, arc in enumerate(movements, start=1):
+    if arc.order_value is None:
+      arc.order_value = float(position)
+  orders = [arc.order_value for arc in movements if arc.order_value is not None]
+  for arc in movements:
+    arc.from_qname = header_qname
+  return [
+    BundleArc(
+      arc_type="presentationArc",
+      arcrole=_PARENT_CHILD,
+      from_qname=header_qname,
+      to_qname=root,
+      order_value=min(orders) - 1,
+      preferred_label=PERIOD_START_LABEL_ROLE,
+    ),
+    BundleArc(
+      arc_type="presentationArc",
+      arcrole=_PARENT_CHILD,
+      from_qname=header_qname,
+      to_qname=root,
+      order_value=max(orders) + 1,
+      preferred_label=PERIOD_END_LABEL_ROLE,
+    ),
+  ]
 
 
 def _mint_periods(
