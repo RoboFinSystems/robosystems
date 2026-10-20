@@ -8,6 +8,7 @@ from intuitlib.client import AuthClient
 from quickbooks import QuickBooks
 
 from robosystems.adapters.quickbooks import QBClient
+from robosystems.adapters.quickbooks.client.api import JOURNAL_REPORT_COLUMNS
 
 
 class TestQBClient:
@@ -328,7 +329,12 @@ class TestQBClient:
     # Verify
     assert result == mock_transactions
     mock_qb_client.get_report.assert_called_once_with(
-      "JournalReport", {"start_date": "2023-01-01", "end_date": "2023-12-31"}
+      "JournalReport",
+      {
+        "columns": ",".join(JOURNAL_REPORT_COLUMNS),
+        "start_date": "2023-01-01",
+        "end_date": "2023-12-31",
+      },
     )
 
   def test_get_transactions_no_dates(self, mock_qb_client):
@@ -345,7 +351,9 @@ class TestQBClient:
 
     # Verify
     assert result == mock_transactions
-    mock_qb_client.get_report.assert_called_once_with("JournalReport", {})
+    mock_qb_client.get_report.assert_called_once_with(
+      "JournalReport", {"columns": ",".join(JOURNAL_REPORT_COLUMNS)}
+    )
 
   def test_get_transactions_partial_dates(self, mock_qb_client):
     """Test transaction retrieval with only start date."""
@@ -362,7 +370,8 @@ class TestQBClient:
     # Verify
     assert result == mock_transactions
     mock_qb_client.get_report.assert_called_once_with(
-      "JournalReport", {"start_date": "2023-01-01"}
+      "JournalReport",
+      {"columns": ",".join(JOURNAL_REPORT_COLUMNS), "start_date": "2023-01-01"},
     )
 
   # ---- CDC endpoint -----------------------------------------------------

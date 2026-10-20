@@ -240,11 +240,28 @@ def comparable_payload(metadata: dict | None) -> dict:
   Shared with ``resolve_reconciling_item`` so a resolved item's accepted
   payload compares equal to the next sync.
   """
-  return {
+  payload = {
     k: v
     for k, v in (metadata or {}).items()
     if k not in DRIFT_EXCLUDED_KEYS and not k.startswith(DRIFT_EXCLUDED_PREFIXES)
   }
+  # A line's class or location never touches a balance: it is re-tagged in
+  # place, so a tag changed in QuickBooks is never a drift item.
+  if isinstance(payload.get("entries"), list):
+    payload["entries"] = [
+      {
+        **entry,
+        "line_items": [
+          {k: v for k, v in li.items() if k != "dimension_refs"}
+          for li in entry.get("line_items") or []
+          if isinstance(li, dict)
+        ],
+      }
+      if isinstance(entry, dict)
+      else entry
+      for entry in payload["entries"]
+    ]
+  return payload
 
 
 def _reopened(metadata: dict) -> bool:
@@ -374,6 +391,8 @@ class LoadResult:
   dropped_empty_transactions: int = 0
   # Payments whose settled documents were written as allocations.
   payments_allocated: int = 0
+  # Posted lines whose class or location the source changed, re-tagged in place.
+  lines_retagged: int = 0
   errors: list[str] = field(default_factory=list)
 
   @property
@@ -406,6 +425,7 @@ class _CaptureResult:
   dropped_unbalanced_entries: int = 0
   dropped_empty_transactions: int = 0
   payments_allocated: int = 0
+  lines_retagged: int = 0
 
 
 @dataclass
@@ -786,6 +806,13 @@ class OLTPLoader:
         agent_capture.updated,
       )
 
+      # Before capture: a line posts with the members its tags name.
+      if "dimensions" in dbt_data:
+        result.dimensions = _upsert_dimensions(
+          session, dbt_data["dimensions"], source=source, now=now
+        )
+        logger.info(f"Upserted {result.dimensions} dimensions")
+
       capture_result = self._capture_transactions_as_events(
         session,
         dbt_data,
@@ -807,6 +834,7 @@ class OLTPLoader:
       result.dropped_unbalanced_entries = capture_result.dropped_unbalanced_entries
       result.dropped_empty_transactions = capture_result.dropped_empty_transactions
       result.payments_allocated = capture_result.payments_allocated
+      result.lines_retagged = capture_result.lines_retagged
       logger.info(
         "Captured %d new event_blocks, updated %d existing, "
         "flagged %d drift, matched %d cross-source round-trips, "
@@ -822,14 +850,6 @@ class OLTPLoader:
         capture_result.dropped_unbalanced_entries,
         capture_result.dropped_empty_transactions,
       )
-
-      # TODO: populate the line_item_dimensions junction table (needed for
-      # graph materialization).
-      if "dimensions" in dbt_data:
-        result.dimensions = _upsert_dimensions(
-          session, dbt_data["dimensions"], source=source, now=now
-        )
-        logger.info(f"Upserted {result.dimensions} dimensions")
 
     self._update_entity_from_company_info(
       graph_id=graph_id,
@@ -1179,15 +1199,17 @@ class OLTPLoader:
       # Skip zero-amount lines (QB tax/memo placeholders)
       if debit == 0 and credit == 0:
         continue
-      entries_by_ext[entry_ext_id]["line_items"].append(
-        {
-          "element_external_id": str(row["element_external_id"]),
-          "debit_amount": debit,
-          "credit_amount": credit,
-          "description": str(row["description"]) if row.get("description") else None,
-          "line_order": int(row.get("line_order", 0)),
-        }
-      )
+      line = {
+        "element_external_id": str(row["element_external_id"]),
+        "debit_amount": debit,
+        "credit_amount": credit,
+        "description": str(row["description"]) if row.get("description") else None,
+        "line_order": int(row.get("line_order", 0)),
+      }
+      refs = _dimension_refs(row.get("dimension_refs"))
+      if refs:
+        line["dimension_refs"] = refs
+      entries_by_ext[entry_ext_id]["line_items"].append(line)
 
     if not txns_by_ext:
       return _CaptureResult()
@@ -1388,6 +1410,21 @@ class OLTPLoader:
         # guarding against out-of-order CDC delivery and replayed batches.
         existing_token = (evt.metadata_ or {}).get("qb_sync_token")
         freshness = _compare_sync_tokens(existing_token, qb_sync_token)
+        # Whatever the SyncToken says short of stale (an earlier sync never
+        # carried tags): when only a line's class or location differs, the
+        # held entries take the new tags, and posted lines are re-tagged in
+        # place. A tag moves no balance, so it is never a drift item.
+        if (
+          freshness != "stale"
+          and _line_tags((evt.metadata_ or {}).get("entries"))
+          != _line_tags(hardened_entries)
+          and comparable_payload(evt.metadata_) == comparable_payload(metadata_blob)
+        ):
+          if evt.status in ("committed", "fulfilled"):
+            out.lines_retagged += _retag_synced_lines(
+              session, evt, hardened_entries, source
+            )
+          evt.metadata_ = {**(evt.metadata_ or {}), "entries": hardened_entries}
         if freshness == "stale":
           logger.info(
             "QB SyncToken stale for event ext_id=%s: live=%s, incoming=%s "
@@ -1890,6 +1927,108 @@ def _upsert_dimensions(session, rows: list[dict], *, source: str, now) -> int:
   )
   session.flush()
   return len(by_key)
+
+
+def _dimension_refs(raw) -> list[dict[str, str]]:
+  """A line's ``[{type, value}]`` tags from dbt's JSON column."""
+  if not raw:
+    return []
+  if isinstance(raw, str):
+    try:
+      raw = json.loads(raw)
+    except ValueError:
+      return []
+  return [
+    {"type": str(r["type"]), "value": str(r["value"])}
+    for r in raw
+    if isinstance(r, dict) and r.get("type") and r.get("value")
+  ]
+
+
+def _line_tags(entries: list[dict]) -> list[tuple[str, int, int, tuple]]:
+  """Each line's account, amounts and tags, the shape a re-tag matches on."""
+  return [
+    (
+      str(li.get("element_external_id")),
+      int(li.get("debit_amount") or 0),
+      int(li.get("credit_amount") or 0),
+      tuple(sorted((r["type"], r["value"]) for r in li.get("dimension_refs") or [])),
+    )
+    for entry in entries or []
+    if isinstance(entry, dict)
+    for li in entry.get("line_items") or []
+    if isinstance(li, dict)
+  ]
+
+
+def _retag_synced_lines(session, event, entries: list[dict], source: str) -> int:
+  """Give an event's posted lines the class and location its source now
+  tags them with, in place: a tag moves no balance. Lines are matched on
+  account and amounts. Returns the lines re-tagged."""
+  from robosystems.models.extensions.element import Element
+  from robosystems.models.extensions.roboledger.entry import Entry
+  from robosystems.models.extensions.roboledger.line_item import LineItem
+  from robosystems.operations.roboledger.line_dimensions import (
+    line_dimension_ids,
+    resolve_dimension_refs,
+    set_source_dimensions,
+  )
+
+  incoming = _line_tags(entries)
+  members = resolve_dimension_refs(
+    session, (ref for *_amounts, refs in incoming for ref in refs)
+  )
+  rows = (
+    session.query(
+      LineItem.id, Element.external_id, LineItem.debit_amount, LineItem.credit_amount
+    )
+    .join(Entry, Entry.id == LineItem.entry_id)
+    .outerjoin(Element, Element.id == LineItem.element_id)
+    .filter(
+      Entry.triggered_by_event_id == event.id,
+      Entry.reversal_of.is_(None),
+      Entry.status.in_(("draft", "posted", "shadowed")),
+    )
+    .order_by(LineItem.entry_id, LineItem.line_order)
+    .all()
+  )
+  pool = list(incoming)
+  tags: dict[str, list[str]] = {}
+  for line_id, external_id, debit, credit in rows:
+    match = next(
+      (
+        candidate
+        for candidate in pool
+        if candidate[:3] == (str(external_id), int(debit), int(credit))
+      ),
+      None,
+    )
+    if match is None:
+      continue
+    pool.remove(match)
+    tags[str(line_id)] = [members[ref] for ref in match[3] if ref in members]
+  held = line_dimension_ids(session, tags)
+  from_source = _held_from(session, [i for ids in held.values() for i in ids], source)
+  changed = {
+    line_id: ids
+    for line_id, ids in tags.items()
+    if {i for i in held.get(line_id, []) if i in from_source} != set(ids)
+  }
+  set_source_dimensions(session, changed, source)
+  return len(changed)
+
+
+def _held_from(session, ids: list[str], source: str) -> set[str]:
+  """The members among ``ids`` that came from ``source``."""
+  if not ids:
+    return set()
+  from robosystems.models.extensions import Dimension
+
+  return {
+    str(d.id)
+    for d in session.query(Dimension).filter(Dimension.id.in_(ids)).all()
+    if (d.metadata_ or {}).get("source") == source
+  }
 
 
 def _round_trip_shape(entries: list[dict]) -> dict[str, list]:

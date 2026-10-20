@@ -8,6 +8,7 @@ from .configs import QBSyncConfig
 from .load import end_failed_sync
 from .utils import (
   JournalReportTruncatedError,
+  department_axis,
   flatten_bill_headers,
   flatten_bill_payment_headers,
   flatten_company_info,
@@ -20,6 +21,7 @@ from .utils import (
   flatten_vendors,
   get_pipeline_work_dir,
   journal_report_truncated,
+  normalize_journal_report,
   parse_journal_report,
   write_extract_parquet,
 )
@@ -73,7 +75,10 @@ def fetch_journal_report(client, start_date: str, end_date: str, log=None) -> di
         log.warning(f"JournalReport {lo}..{hi} too large for one call; splitting")
       pending[:0] = [(lo, mid), (mid + timedelta(days=1), hi)]
       continue
-    rows.extend(((report or {}).get("Rows") or {}).get("Row") or [])
+    # Each window in the parser's column order, so the merge needs no Columns.
+    rows.extend(
+      ((normalize_journal_report(report) or {}).get("Rows") or {}).get("Row") or []
+    )
   return {"Rows": {"Row": rows}}
 
 
@@ -228,13 +233,20 @@ def _run_qb_extract(
   # missing from the report is not inferred deleted.
   cdc_plan = plan_cdc(client, watermark, start_date, log=context.log)
 
+  try:
+    department_as = department_axis(client.get_department_terminology())
+  except Exception as exc:
+    # Only names the axis; QuickBooks's own default stands in.
+    context.log.warning(f"Could not read the department terminology: {exc}")
+    department_as = department_axis(None)
+
   windows = [(start_date, end_date), *(tuple(w) for w in cdc_plan.extra_windows)]
   journal_entries: list[dict] = []
   journal_lines: list[dict] = []
   headers: dict[str, list[dict]] = {key: [] for key in _HEADER_KEYS}
   for lo, hi in windows:
     report = fetch_journal_report(client, lo, hi, log=context.log)
-    entries, lines = parse_journal_report(report)
+    entries, lines = parse_journal_report(report, department_as=department_as)
     journal_entries.extend(entries)
     journal_lines.extend(lines)
     for key, rows in _fetch_headers(client, lo, hi).items():

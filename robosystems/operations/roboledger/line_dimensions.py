@@ -114,6 +114,54 @@ def validate_line_dimensions(
   ]
 
 
+def resolve_dimension_refs(
+  session: Session, refs: Iterable[tuple[str, str]]
+) -> dict[tuple[str, str], str]:
+  """Member ids for a source's ``(axis, value)`` tags. A tag the catalog does
+  not hold is left out: the line posts untagged on that axis rather than not
+  at all."""
+  wanted = set(refs)
+  if not wanted:
+    return {}
+  rows = session.execute(
+    select(Dimension.id, Dimension.dimension_type, Dimension.value).where(
+      Dimension.dimension_type.in_({t for t, _v in wanted}),
+      Dimension.value.in_({v for _t, v in wanted}),
+    )
+  ).all()
+  return {(str(t), str(v)): str(i) for i, t, v in rows if (str(t), str(v)) in wanted}
+
+
+def set_source_dimensions(
+  session: Session, tags: dict[str, list[str]], source: str
+) -> None:
+  """Set the members a source gives each line, replacing only that source's:
+  a member added here by hand on another axis stays."""
+  if not tags:
+    return
+  held = line_dimension_ids(session, tags)
+  sources = {
+    str(d.id): (d.metadata_ or {}).get("source") or "native"
+    for d in session.execute(
+      select(Dimension).where(
+        Dimension.id.in_({i for ids in held.values() for i in ids})
+      )
+    )
+    .scalars()
+    .all()
+  }
+  write_line_dimensions(
+    session,
+    {
+      line_id: [
+        *(i for i in held.get(line_id, []) if sources.get(i) != source),
+        *ids,
+      ]
+      for line_id, ids in tags.items()
+    },
+  )
+
+
 def write_line_dimensions(session: Session, tags: dict[str, list[str]]) -> None:
   """Set each line's members, replacing what it carried. ``tags`` maps line
   id to member ids, already validated."""

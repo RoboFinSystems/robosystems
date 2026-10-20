@@ -111,6 +111,21 @@ def _is_retryable_qb_error(exc: BaseException) -> bool:
 
 
 # Jitter spreads concurrent syncs against the same realm.
+# The JournalReport's columns, by key, in the order the parser reads them: the
+# eight defaults, then the line's class and department.
+JOURNAL_REPORT_COLUMNS: tuple[str, ...] = (
+  "tx_date",
+  "txn_type",
+  "doc_num",
+  "name",
+  "memo",
+  "account_name",
+  "debt_amt",
+  "credit_amt",
+  "klass_name",
+  "dept_name",
+)
+
 _QB_RETRY = retry(
   retry_on_exception=_is_retryable_qb_error,
   stop_max_attempt_number=5,
@@ -568,14 +583,27 @@ class QBClient:
 
   @_QB_REPORT_RETRY
   def get_transactions(self, start_date=None, end_date=None):
-    """Fetch JournalReport, the live GL posting source."""
-    params = {}
+    """Fetch JournalReport, the live GL posting source, with each line's class
+    and department (QuickBooks's Location). A company that tracks neither
+    gets the default columns back; asked for by name, Intuit reorders them,
+    so readers go by each column's key (``normalize_journal_report``)."""
+    params = {"columns": ",".join(JOURNAL_REPORT_COLUMNS)}
     if start_date:
       params["start_date"] = start_date
     if end_date:
       params["end_date"] = end_date
     transactions = self.client.get_report("JournalReport", params)
     return transactions
+
+  def get_department_terminology(self) -> str:
+    """What the company calls QuickBooks's department: Location unless it
+    renamed it (Department, Division, Property, Store, Territory)."""
+    from quickbooks.objects.preferences import Preferences
+
+    prefs = Preferences.get(qb=self.client).to_dict()
+    return str(
+      (prefs.get("AccountingInfoPrefs") or {}).get("DepartmentTerminology") or ""
+    )
 
   @_QB_REPORT_RETRY
   def get_trial_balance(self, start_date: str, end_date: str):

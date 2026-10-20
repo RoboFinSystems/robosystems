@@ -47,12 +47,22 @@ from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
   ShadowLedgerPostingError,
   assert_local_posting_allowed,
 )
+from robosystems.operations.roboledger.line_dimensions import (
+  resolve_dimension_refs,
+)
 
 from .types import (
   EventBlockPythonHandler,
   HandlerPreview,
   HandlerResult,
 )
+
+
+class DimensionRef(BaseModel):
+  """A source's tag on a line: the axis, and the member's id at the source."""
+
+  type: str
+  value: str
 
 
 class NestedJournalEntryLineItem(BaseModel):
@@ -67,6 +77,9 @@ class NestedJournalEntryLineItem(BaseModel):
   credit_amount: int = 0
   description: str | None = None
   metadata: dict[str, Any] | None = None
+  # The source's own tags, by axis and the source's id: a QuickBooks class
+  # or location. Resolved against the dimension catalog at posting.
+  dimension_refs: list[DimensionRef] | None = None
 
   @model_validator(mode="after")
   def _exactly_one_element_ref(self) -> NestedJournalEntryLineItem:
@@ -240,6 +253,15 @@ def _resolve_nested_line_items(
       f"then approve again."
     )
 
+  members = resolve_dimension_refs(
+    session,
+    (
+      (ref.type, ref.value)
+      for entry in entries
+      for line in entry.line_items
+      for ref in line.dimension_refs or []
+    ),
+  )
   out: list[list[JournalEntryLineItemInput]] = []
   for entry in entries:
     line_items: list[JournalEntryLineItemInput] = []
@@ -252,6 +274,12 @@ def _resolve_nested_line_items(
           credit_amount=line.credit_amount,
           description=line.description,
           metadata=line.metadata,
+          dimension_ids=[
+            members[(ref.type, ref.value)]
+            for ref in line.dimension_refs or []
+            if (ref.type, ref.value) in members
+          ]
+          or None,
         )
       )
     out.append(line_items)
