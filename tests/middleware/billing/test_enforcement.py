@@ -744,3 +744,87 @@ class TestRequireGraphAccessLifecycle:
     with pytest.raises(HTTPException) as exc:
       require_graph_access("kg_parent_dev", mock_session)
     assert exc.value.status_code == 404
+
+
+class TestRequireGraphAccessExport:
+  """A backup is an export: refused while a tier upgrade migrates the volume,
+  allowed in a cancellation grace period so the customer can take their data."""
+
+  @pytest.fixture
+  def mock_session(self):
+    return Mock()
+
+  @pytest.fixture(autouse=True)
+  def clear_subscription_cache(self):
+    from robosystems.middleware.billing import enforcement
+
+    enforcement._subscription_cache.clear()
+    yield
+    enforcement._subscription_cache.clear()
+
+  def _graph(self):
+    graph = Mock()
+    graph.status = "active"
+    graph.is_repository = False
+    graph.deleted_at = None
+    graph.is_subgraph = False
+    graph.parent_graph_id = None
+    graph.graph_id = "kg_export"
+    return graph
+
+  def _subscription(self, status, ends_at=None):
+    subscription = Mock()
+    subscription.status = status
+    subscription.ends_at = ends_at
+    return subscription
+
+  @patch("robosystems.middleware.billing.enforcement.env")
+  @patch("robosystems.middleware.billing.enforcement.BillingSubscription")
+  @patch("robosystems.middleware.billing.enforcement.Graph")
+  def test_an_export_is_refused_during_an_upgrade(
+    self, mock_graph_class, mock_subscription_class, mock_env, mock_session
+  ):
+    mock_env.BILLING_ENABLED = True
+    mock_graph_class.get_by_id.return_value = self._graph()
+    mock_subscription_class.get_by_resource.return_value = self._subscription(
+      "upgrading"
+    )
+
+    for _ in range(2):  # the second call is answered from the cache
+      with pytest.raises(HTTPException) as exc:
+        require_graph_access("kg_export", mock_session, export=True)
+      assert exc.value.status_code == 403
+      assert "upgrade" in exc.value.detail.lower()
+
+  @patch("robosystems.middleware.billing.enforcement.env")
+  @patch("robosystems.middleware.billing.enforcement.BillingSubscription")
+  @patch("robosystems.middleware.billing.enforcement.Graph")
+  def test_an_export_is_allowed_in_a_cancellation_grace_period(
+    self, mock_graph_class, mock_subscription_class, mock_env, mock_session
+  ):
+    mock_env.BILLING_ENABLED = True
+    mock_graph_class.get_by_id.return_value = self._graph()
+    mock_subscription_class.get_by_resource.return_value = self._subscription(
+      "canceled", datetime.now(UTC) + timedelta(days=5)
+    )
+
+    graph = require_graph_access("kg_export", mock_session, export=True)
+
+    assert graph is mock_graph_class.get_by_id.return_value
+
+  @patch("robosystems.middleware.billing.enforcement.env")
+  @patch("robosystems.middleware.billing.enforcement.BillingSubscription")
+  @patch("robosystems.middleware.billing.enforcement.Graph")
+  def test_an_export_is_refused_once_the_grace_period_ends(
+    self, mock_graph_class, mock_subscription_class, mock_env, mock_session
+  ):
+    mock_env.BILLING_ENABLED = True
+    mock_graph_class.get_by_id.return_value = self._graph()
+    mock_subscription_class.get_by_resource.return_value = self._subscription(
+      "canceled", datetime.now(UTC) - timedelta(days=1)
+    )
+
+    with pytest.raises(HTTPException) as exc:
+      require_graph_access("kg_export", mock_session, export=True)
+
+    assert exc.value.status_code == 403
