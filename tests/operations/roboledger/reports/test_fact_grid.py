@@ -3061,8 +3061,11 @@ class TestGroupColumnsBeforeTheBooks:
       GroupMember("parent", "operating", None, None),
       GroupMember("sub", "operating", date(2026, 7, 1), None),
     ]
-    # The year it joined straddles its books; the year before it is not in.
-    assert self._omitted(members, {"sub": date(2026, 7, 1)}) == {0}
+    # Its months of the year it joined are within its books; the year before
+    # it is not in.
+    assert self._omitted(members, {"sub": date(2026, 7, 1)}) == set()
+    # Books that start after it joined leave its months short of them.
+    assert self._omitted(members, {"sub": date(2026, 8, 1)}) == {0}
 
   def test_the_parents_books_hold_every_column_before_them(self) -> None:
     from robosystems.operations.roboledger.entity_scope import GroupMember

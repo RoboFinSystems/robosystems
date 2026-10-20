@@ -1021,8 +1021,10 @@ def _combined_statement(
   first_error: CoaMappingNotFoundError | None = None
   for member in group_members(session, parent_id, consolidated=consolidated):
     windows, partial = member_windows(member, statement_type, periods)
-    omitted |= partial
     summed = [w is not None for w in windows]
+    # An unmapped member is never summed, so it holds no column back.
+    if partial and find_entity_mapping(session, member.id, BOOK_FRAMEWORK):
+      omitted |= partial
     if not any(summed):
       continue
     try:
@@ -1229,7 +1231,11 @@ def get_consolidation_worksheet(
     summed = [w is not None for w in windows]
     # A member outside the sum matters only as its own column.
     needed = summed[0] if entity.kind == "not_summed" else any(summed)
-    if entity.kind != "not_summed":
+    if (
+      entity.kind != "not_summed"
+      and partial
+      and find_entity_mapping(session, entity.member.id, BOOK_FRAMEWORK)
+    ):
       partly |= partial
     if not needed:
       continue
@@ -1319,7 +1325,9 @@ def get_consolidation_worksheet(
   if 0 in omitted:
     validation.passed = False
     validation.status = "inconclusive"
-    validation.warnings = [_NOTHING_TO_STATE if partly else _BEFORE_THE_BOOKS]
+    validation.warnings = [
+      _NOTHING_TO_STATE if omitted <= partly else _BEFORE_THE_BOOKS
+    ]
 
   # Every column's lines in the Style's order: the consolidated sum and the
   # members outside it hold each line once, where the Style puts it.
@@ -1461,7 +1469,9 @@ def get_live_financial_statement(
     # Nothing left to check is not a pass.
     validation.passed = False
     validation.status = "inconclusive"
-    validation.warnings = [_NOTHING_TO_STATE if partly else _BEFORE_THE_BOOKS]
+    validation.warnings = [
+      _NOTHING_TO_STATE if omitted <= partly else _BEFORE_THE_BOOKS
+    ]
 
   facts: list[LiveStatementFactRow] = []
   for row in grid.rows:

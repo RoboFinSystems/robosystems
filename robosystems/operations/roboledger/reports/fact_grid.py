@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from robosystems.logger import logger
 from robosystems.models.api.extensions import cents_to_dollars
 from robosystems.operations.roboledger.commands.opening_balances import books_start
+from robosystems.operations.roboledger.entity_scope import membership_window
 from robosystems.operations.roboledger.entry_status import (
   landed_entry_bindparam,
 )
@@ -285,16 +286,26 @@ def group_columns_before_the_books(
   members: list,
 ) -> set[int]:
   """``columns_before_the_books`` for a group read: a member's books hold
-  back only the columns it is summed in, so one that joins later leaves the
-  earlier comparatives standing. ``members`` are ``GroupMember``s."""
+  back only the part of a column it is summed for, so one that joins later,
+  from an opening balance, leaves the earlier comparatives standing and its
+  own months stated. ``members`` are ``GroupMember``s."""
   omitted: set[int] = set()
   for member in members:
     start = books_start(session, [member.id])
-    omitted |= {
-      i
-      for i in _columns_before(statement_type, periods, start)
-      if member.is_member_for(periods[i].start, periods[i].end)
-    }
+    if start is None:
+      continue
+    for i, period in enumerate(periods):
+      if statement_type == "balance_sheet":
+        struck = membership_window(member, period.end.replace(day=1), period.end)
+        window = (period.start, period.end) if struck else None
+      else:
+        window = membership_window(member, period.start, period.end)
+      if window is not None and _columns_before(
+        statement_type,
+        [PeriodSpec(start=window[0], end=window[1], label=period.label)],
+        start,
+      ):
+        omitted.add(i)
   return omitted
 
 

@@ -745,10 +745,9 @@ class TestMembershipWindows:
     assert worksheet.rows == []
     assert worksheet.validation.status == "inconclusive"
 
-  def test_the_worksheet_leaves_out_a_window_before_a_members_books(self, charts):
-    """A member whose books open on July 1 from an opening balance: the
-    June-July income statement is left out of the worksheet, as the live
-    statement leaves it out, instead of totalling the parent's months alone."""
+  def _late_member(self, session, charts, *, joined_on: date | None) -> str:
+    """A member whose books open on July 1 from an opening balance and that
+    earns 100 in July."""
     from robosystems.models.api.extensions.journal_entries import (
       OpeningBalanceInput,
       RecordOpeningBalanceRequest,
@@ -757,40 +756,65 @@ class TestMembershipWindows:
       record_opening_balance,
     )
 
+    service = FiscalCalendarService()
+    late = create_entity(
+      session,
+      CreateEntityRequest(name="Late LLC", ownership_pct=100, joined_on=joined_on),
+      "usr_1",
+    ).id
+    charts[late] = initialize_chart_of_accounts(
+      session,
+      InitializeChartOfAccountsRequest(template="services", entity_id=late),
+      "usr_1",
+    ).taxonomy_id
+    service.initialize(session, GRAPH, actor_id="usr_1", entity_id=late)
+    service.ensure_fiscal_periods(
+      session, GRAPH, start_period="2026-07", end_period="2026-07", entity_id=late
+    )
+    record_opening_balance(
+      session,
+      RecordOpeningBalanceRequest(
+        entity_id=late,
+        balances=[
+          OpeningBalanceInput(
+            element_id=_account(session, charts[late], "1000"), debit_amount=50_000
+          ),
+          OpeningBalanceInput(
+            element_id=_account(session, charts[late], "3000"), credit_amount=50_000
+          ),
+        ],
+      ),
+      "usr_1",
+    )
+    self._posted(session, charts, late, date(2026, 7, 12), 10_000)
+    session.commit()
+    return late
+
+  def test_a_member_acquired_with_an_opening_balance_adds_its_months(self, charts):
+    """Joined July 1 with books from that day: the June-July income
+    statement adds its July, instead of being left out for reaching back
+    before its books."""
     with extensions_session(GRAPH) as session:
       self._june_and_july(session, charts)
-      service = FiscalCalendarService()
-      late = create_entity(
-        session, CreateEntityRequest(name="Late LLC", ownership_pct=100), "usr_1"
-      ).id
-      charts[late] = initialize_chart_of_accounts(
-        session,
-        InitializeChartOfAccountsRequest(template="services", entity_id=late),
-        "usr_1",
-      ).taxonomy_id
-      service.initialize(session, GRAPH, actor_id="usr_1", entity_id=late)
-      service.ensure_fiscal_periods(
-        session, GRAPH, start_period="2026-07", end_period="2026-07", entity_id=late
-      )
-      record_opening_balance(
-        session,
-        RecordOpeningBalanceRequest(
-          entity_id=late,
-          balances=[
-            OpeningBalanceInput(
-              element_id=_account(session, charts[late], "1000"),
-              debit_amount=50_000,
-            ),
-            OpeningBalanceInput(
-              element_id=_account(session, charts[late], "3000"),
-              credit_amount=50_000,
-            ),
-          ],
-        ),
-        "usr_1",
-      )
-      self._posted(session, charts, late, date(2026, 7, 12), 10_000)
-      session.commit()
+      self._late_member(session, charts, joined_on=date(2026, 7, 1))
+      live = self._live(session, "income_statement")
+      worksheet = self._worksheet(session, "income_statement")
+
+    assert live.omitted_periods == []
+    assert self._current(live, REVENUE) == 3400.0
+    assert worksheet.omitted_periods == []
+    revenue = next(r for r in worksheet.rows if r.qname == REVENUE)
+    combined = [c.key for c in worksheet.columns].index("combined")
+    assert revenue.values[combined] == 3400.0
+
+  def test_the_worksheet_leaves_out_a_window_before_a_members_books(self, charts):
+    """A member whose books open on July 1 from an opening balance, a member
+    since before then: the June-July income statement is left out of the
+    worksheet, as the live statement leaves it out, instead of totalling the
+    parent's months alone."""
+    with extensions_session(GRAPH) as session:
+      self._june_and_july(session, charts)
+      self._late_member(session, charts, joined_on=None)
       live = self._live(session, "income_statement")
       worksheet = self._worksheet(session, "income_statement")
 
