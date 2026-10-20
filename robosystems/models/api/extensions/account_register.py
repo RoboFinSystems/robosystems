@@ -121,7 +121,12 @@ class AccountRegisterResponse(BaseModel):
   total_debits: float = Field(..., description="The window's debits, in dollars.")
   total_credits: float = Field(..., description="The window's credits, in dollars.")
   closing_balance: float = Field(
-    ..., description="The balance after the window's last line, natural sign."
+    ...,
+    description=(
+      "The balance after the window's last line, natural sign. A window "
+      "spanning fiscal years carries an income or expense account's balance "
+      "across the year end rather than resetting it."
+    ),
   )
   line_count: int = Field(..., description="How many lines the window holds.")
   page_opening_balance: float = Field(
@@ -134,9 +139,14 @@ class AccountRegisterResponse(BaseModel):
   drafts: list[RegisterLine] = Field(
     default_factory=list,
     description=(
-      "With `include_drafts`: the window's draft lines on the account, "
+      "With `include_drafts`, on the first page only: the window's draft "
+      "lines on the account, oldest first and at most a page of them, "
       "outside every balance above."
     ),
+  )
+  drafts_truncated: bool = Field(
+    False,
+    description="True when the window holds more drafts than `drafts` lists.",
   )
   sliced: bool = Field(
     False,

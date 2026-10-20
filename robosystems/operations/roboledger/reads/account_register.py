@@ -202,7 +202,7 @@ def get_account_register(
   ``entity_id`` defaults to the group parent. ``line_slice`` and
   ``flow_element_id`` read only the lines carrying that member or flow row,
   and every balance is then the slice's. ``after`` is the ``next_cursor`` of
-  the page before."""
+  the page before; drafts come with the first page only."""
   account = session.get(Element, account_id)
   if account is None:
     raise AccountNotFoundError(f"Account {account_id!r} not found in this graph.")
@@ -243,7 +243,13 @@ def get_account_register(
       last.posting_date, last.entry_id, last.line_order, last.line_id
     )
 
-  draft_rows = session.execute(_DRAFTS_SQL, params).all() if include_drafts else []
+  draft_rows = (
+    session.execute(_DRAFTS_SQL, params).all()
+    if include_drafts and after is None
+    else []
+  )
+  drafts_truncated = len(draft_rows) > limit
+  draft_rows = draft_rows[:limit]
   dims = line_dimensions(session, [r.line_id for r in (*rows, *draft_rows)])
 
   running = page_opening
@@ -276,5 +282,6 @@ def get_account_register(
     lines=lines,
     next_cursor=next_cursor,
     drafts=[_line(row, None, sign, dims) for row in draft_rows],
+    drafts_truncated=drafts_truncated,
     sliced=line_slice is not None or flow_element_id is not None,
   )

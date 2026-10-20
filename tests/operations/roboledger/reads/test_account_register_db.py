@@ -357,3 +357,54 @@ def test_an_unknown_account_or_cursor_is_refused(session, books):
     get_account_register(session, "elem_missing")
   with pytest.raises(InvalidCursorError):
     get_account_register(session, cash, after="not-a-cursor")
+
+
+def test_drafts_come_with_the_first_page_only_and_say_when_cut(session, books):
+  cash, revenue = books
+  for day in range(1, 4):
+    _entry(session, [(cash, 1000, 0), (revenue, 0, 1000)], date(2026, 9, day))
+    _entry(
+      session,
+      [(cash, 500, 0), (revenue, 0, 500)],
+      date(2026, 9, day + 10),
+      status="draft",
+    )
+
+  first = get_account_register(
+    session, cash, date(2026, 9, 1), date(2026, 9, 30), include_drafts=True, limit=2
+  )
+  second = get_account_register(
+    session,
+    cash,
+    date(2026, 9, 1),
+    date(2026, 9, 30),
+    include_drafts=True,
+    limit=2,
+    after=first.next_cursor,
+  )
+
+  assert [d.posting_date.day for d in first.drafts] == [11, 12]
+  assert first.drafts_truncated is True
+  assert (second.drafts, second.drafts_truncated) == ([], False)
+
+
+def test_an_income_account_pages_from_its_fiscal_year_opening(session, books):
+  cash, revenue = books
+  session.add(
+    FiscalCalendar(graph_id="g", entity_id=PARENT_ENTITY_ID, fiscal_year_start_month=7)
+  )
+  _entry(session, [(cash, 90000, 0), (revenue, 0, 90000)], date(2026, 6, 30))
+  _entry(session, [(cash, 10000, 0), (revenue, 0, 10000)], date(2026, 7, 15))
+  for day in range(1, 4):
+    _entry(session, [(cash, 1000, 0), (revenue, 0, 1000)], date(2026, 9, day))
+
+  first = get_account_register(session, revenue, date(2026, 9, 1), limit=2)
+  second = get_account_register(
+    session, revenue, date(2026, 9, 1), limit=2, after=first.next_cursor
+  )
+
+  assert first.opening_balance == 100.0
+  assert [line.balance for line in first.lines] == [110.0, 120.0]
+  assert second.page_opening_balance == 120.0
+  assert [line.balance for line in second.lines] == [130.0]
+  assert second.closing_balance == 130.0
