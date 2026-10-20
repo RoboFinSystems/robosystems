@@ -1,16 +1,15 @@
-"""A QuickBooks line's class and location reach the posted line, never as drift.
+"""The QuickBooks dimension catalog across syncs, against a real database.
 
-A tag moves no balance, so the loader carries it to the line the handler
-posts, re-tags a posted line in place when QuickBooks changes it, fills the
-tags an earlier sync never carried whatever the SyncToken says, and still
-flags a real edit as drift.
+The catalog is unique on ``(dimension_type, value)``, so a loader that inserts
+it fresh each sync fails every sync after the first. It is upserted instead,
+and a member keeps its id, which the line junctions reference.
 """
 
 from __future__ import annotations
 
 import os
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -19,26 +18,9 @@ from sqlalchemy.orm import sessionmaker
 import robosystems.models.extensions  # noqa: F401  (register models on ExtensionsBase)
 from robosystems.db.extensions import ExtensionsBase
 from robosystems.models.extensions import Dimension
-from robosystems.models.extensions.element import Element
-from robosystems.models.extensions.roboledger.entry import Entry
-from robosystems.models.extensions.roboledger.event import Event
-from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
-from robosystems.models.extensions.roboledger.line_item import LineItem
-from robosystems.operations.extensions.loader import OLTPLoader, _upsert_dimensions
-from robosystems.operations.roboledger.line_dimensions import line_dimensions
-from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
+from robosystems.operations.extensions.loader import _upsert_dimensions
 
 pytestmark = pytest.mark.unit
-
-GRAPH_ID = "kg_test"
-CONN = "conn_test"
-AR, REVENUE = "11", "40"
-INVOICE = "Invoice_42"
-CATALOG = [
-  {"dimension_type": "class", "name": "Retail", "value": "7"},
-  {"dimension_type": "class", "name": "Wholesale", "value": "8"},
-  {"dimension_type": "location", "name": "Downtown", "value": "1"},
-]
 
 
 @pytest.fixture()
@@ -53,29 +35,6 @@ def db():
   session = sessionmaker(bind=engine)()
   session.execute(text(f'SET search_path TO "{schema}"'))
   ExtensionsBase.metadata.create_all(bind=session.connection())
-  seed_parent_entity(session)
-  for ext, code, name in ((AR, "1100", "Receivables"), (REVENUE, "4000", "Sales")):
-    session.add(
-      Element(
-        name=name,
-        code=code,
-        external_id=ext,
-        external_source="quickbooks",
-        connection_id=CONN,
-        created_by="t",
-      )
-    )
-  session.add(
-    FiscalPeriod(
-      entity_id=PARENT_ENTITY_ID,
-      graph_id=GRAPH_ID,
-      name="2026-07",
-      start_date=date(2026, 7, 1),
-      end_date=date(2026, 7, 31),
-      period_type="month",
-      status="open",
-    )
-  )
   session.commit()
   session.execute(text(f'SET search_path TO "{schema}"'))
   try:
@@ -88,158 +47,70 @@ def db():
     engine.dispose()
 
 
-@pytest.fixture(autouse=True)
-def _no_platform(monkeypatch):
-  monkeypatch.setattr(
-    "robosystems.operations.event_block.commands._validate_event_source",
-    lambda source, graph_id: None,
+def _catalog(*rows: tuple[str, str, str]) -> list[dict]:
+  return [
+    {"dimension_type": t, "name": name, "value": value} for t, name, value in rows
+  ]
+
+
+def _held(session) -> dict[tuple[str, str], Dimension]:
+  return {(d.dimension_type, d.value): d for d in session.query(Dimension).all()}
+
+
+def test_second_sync_lands_on_the_same_rows(db):
+  catalog = _catalog(("class", "Retail", "1"), ("department", "Sales", "7"))
+  now = datetime.now(UTC)
+
+  assert _upsert_dimensions(db, catalog, source="quickbooks", now=now) == 2
+  first = {key: d.id for key, d in _held(db).items()}
+
+  assert _upsert_dimensions(db, catalog, source="quickbooks", now=now) == 2
+  second = {key: d.id for key, d in _held(db).items()}
+
+  assert second == first
+
+
+def test_a_rename_updates_the_member_in_place(db):
+  now = datetime.now(UTC)
+  _upsert_dimensions(
+    db, _catalog(("class", "Retail", "1")), source="quickbooks", now=now
   )
-  monkeypatch.setattr(
-    "robosystems.operations.event_block.commands._validate_routed_connection",
-    lambda metadata, graph_id: None,
+  original = _held(db)[("class", "1")].id
+
+  _upsert_dimensions(
+    db, _catalog(("class", "Retail stores", "1")), source="quickbooks", now=now
   )
+  db.expire_all()
+  member = _held(db)[("class", "1")]
+
+  assert member.id == original
+  assert member.name == "Retail stores"
 
 
-def _invoice(token: str, revenue_tags: list[dict], amount: int = 120000) -> dict:
-  """Invoice 42 as the dbt mart hands it to the loader, its revenue line
-  tagged."""
-  return {
-    "transactions": [
-      {
-        "external_id": INVOICE,
-        "type": "Invoice",
-        "event_type": "invoice_issued",
-        "event_category": "sales",
-        "amount": amount,
-        "date": date(2026, 7, 10),
-        "sync_token": token,
-        "description": "Consulting",
-      }
-    ],
-    "entries": [
-      {
-        "external_id": INVOICE,
-        "external_transaction_id": INVOICE,
-        "type": "standard",
-        "posting_date": date(2026, 7, 10),
-        "memo": "Consulting",
-      }
-    ],
-    "line_items": [
-      {
-        "entry_external_id": INVOICE,
-        "element_external_id": AR,
-        "debit_amount": amount,
-        "credit_amount": 0,
-        "line_order": 1,
-      },
-      {
-        "entry_external_id": INVOICE,
-        "element_external_id": REVENUE,
-        "debit_amount": 0,
-        "credit_amount": amount,
-        "line_order": 2,
-        "dimension_refs": revenue_tags or None,
-      },
-    ],
-  }
-
-
-RETAIL = [{"type": "class", "value": "7"}, {"type": "location", "value": "1"}]
-WHOLESALE = [{"type": "class", "value": "8"}, {"type": "location", "value": "1"}]
-
-
-def _sync(db, data):
-  _upsert_dimensions(db, CATALOG, source="quickbooks", now=datetime.now(UTC))
-  OLTPLoader()._capture_transactions_as_events(
-    db,
-    data,
-    source="quickbooks",
-    connection_id=CONN,
-    created_by="sync",
-    now=datetime.now(UTC),
+def test_a_retired_member_stays_retired(db):
+  now = datetime.now(UTC)
+  _upsert_dimensions(
+    db, _catalog(("location", "Pier", "3")), source="quickbooks", now=now
   )
+  db.query(Dimension).update({Dimension.is_active: False})
   db.flush()
 
-
-def _event(db) -> Event:
-  event = db.query(Event).filter(Event.external_id == INVOICE).one()
-  db.refresh(event)
-  return event
-
-
-def _revenue_tags(db) -> list[str]:
-  line = (
-    db.query(LineItem)
-    .join(Entry, Entry.id == LineItem.entry_id)
-    .join(Element, Element.id == LineItem.element_id)
-    .filter(
-      Entry.triggered_by_event_id == _event(db).id, Element.external_id == REVENUE
-    )
-    .one()
+  _upsert_dimensions(
+    db, _catalog(("location", "Pier", "3")), source="quickbooks", now=now
   )
-  return sorted(d.name for d in line_dimensions(db, [line.id]).get(str(line.id), []))
+  db.expire_all()
+
+  assert _held(db)[("location", "3")].is_active is False
 
 
-def test_a_new_invoice_posts_its_revenue_line_tagged(db):
-  _sync(db, _invoice("0", RETAIL))
+def test_a_key_named_twice_in_one_batch_is_written_once(db):
+  now = datetime.now(UTC)
+  catalog = _catalog(("class", "Retail", "1"), ("class", "Retail (renamed)", "1"))
 
-  assert _event(db).status in ("committed", "fulfilled")
-  assert _revenue_tags(db) == ["Downtown", "Retail"]
-
-
-def test_a_class_changed_in_quickbooks_re_tags_the_posted_line(db):
-  _sync(db, _invoice("0", RETAIL))
-
-  _sync(db, _invoice("1", WHOLESALE))
-
-  event = _event(db)
-  assert event.payload_drift is False
-  assert _revenue_tags(db) == ["Downtown", "Wholesale"]
+  assert _upsert_dimensions(db, catalog, source="quickbooks", now=now) == 1
+  assert _held(db)[("class", "1")].name == "Retail (renamed)"
 
 
-def test_tags_an_earlier_sync_missed_are_filled_at_the_same_version(db):
-  _sync(db, _invoice("0", []))
-  assert _revenue_tags(db) == []
-
-  _sync(db, _invoice("0", RETAIL))
-
-  assert _event(db).payload_drift is False
-  assert _revenue_tags(db) == ["Downtown", "Retail"]
-
-
-def test_a_member_added_by_hand_on_another_axis_stays(db):
-  _sync(db, _invoice("0", RETAIL))
-  project = Dimension(dimension_type="project", name="Launch", value="launch")
-  db.add(project)
-  db.flush()
-  line_id = (
-    db.query(LineItem.id)
-    .join(Entry, Entry.id == LineItem.entry_id)
-    .join(Element, Element.id == LineItem.element_id)
-    .filter(
-      Entry.triggered_by_event_id == _event(db).id, Element.external_id == REVENUE
-    )
-    .scalar()
-  )
-  from robosystems.models.extensions.roboledger.dimension_junctions import (
-    line_item_dimensions,
-  )
-
-  db.execute(
-    line_item_dimensions.insert(),
-    [{"line_item_id": line_id, "dimension_id": project.id}],
-  )
-
-  _sync(db, _invoice("1", WHOLESALE))
-
-  assert _revenue_tags(db) == ["Downtown", "Launch", "Wholesale"]
-
-
-def test_a_real_edit_still_drifts(db):
-  _sync(db, _invoice("0", RETAIL))
-
-  _sync(db, _invoice("1", WHOLESALE, amount=150000))
-
-  assert _event(db).payload_drift is True
-  assert _revenue_tags(db) == ["Downtown", "Retail"]
+def test_an_empty_catalog_writes_nothing(db):
+  assert _upsert_dimensions(db, [], source="quickbooks", now=datetime.now(UTC)) == 0
+  assert _held(db) == {}
