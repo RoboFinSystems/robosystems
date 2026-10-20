@@ -1571,6 +1571,16 @@ def _by_member(
     for key, row_values in values.items():
       found = by_key.get(key) or [0.0]
       row_values.append(float(found[0] or 0.0))
+  # A member tagged only on balance-sheet lines has nothing on this statement.
+  kept = [
+    i
+    for i, column in enumerate(columns)
+    if column.member_id == UNALLOCATED
+    or any(row_values[i] != 0.0 for row_values in values.values())
+  ]
+  columns = [columns[i] for i in kept]
+  for key, row_values in values.items():
+    values[key] = [row_values[i] for i in kept]
   columns.append(StatementDimensionColumn(member_id=None, name="Total"))
   differences: list[str] = []
   for row in total.grid.rows:

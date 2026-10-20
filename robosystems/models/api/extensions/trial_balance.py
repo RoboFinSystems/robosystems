@@ -1,6 +1,6 @@
 """Trial balance response models."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class TrialBalanceRow(BaseModel):
@@ -28,3 +28,11 @@ class TrialBalanceResponse(BaseModel):
   rows: list[TrialBalanceRow]
   total_debits: float
   total_credits: float
+  sliced: bool = Field(
+    False,
+    description=(
+      "True when read for one management dimension member (or its axis's "
+      "Unallocated). Such a balance need not foot: an entry's other side may "
+      "carry another member or none."
+    ),
+  )

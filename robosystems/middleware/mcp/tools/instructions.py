@@ -183,7 +183,10 @@ def build_instructions(
         "A journal line carries one member per axis (`dimension_ids`); "
         "`update-journal-entry(line_dimensions=...)` re-tags a posted line in "
         "place. `live-financial-statement(dimension={type})` reads the income "
-        "statement with a column per member, plus Unallocated and Total."
+        "statement with a column per member, plus Unallocated and Total. "
+        "A bank line's department goes beside its account: "
+        "`metadata_patch.classified_dimension_ids` (or `dimension_ids` on a "
+        "split part), and on a posted line the same patch re-tags it in place."
       )
     if has("aged-balances"):
       inbox_lines.append(

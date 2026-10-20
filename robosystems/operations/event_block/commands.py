@@ -51,6 +51,10 @@ from robosystems.operations.roboledger.entity_scope import (
 from robosystems.operations.roboledger.entry_status import (
   LANDED_ENTRY_STATUSES,
 )
+from robosystems.operations.roboledger.line_dimensions import (
+  inherit_event_dimensions,
+  validate_line_dimensions,
+)
 from robosystems.operations.roboledger.reads.event_block import (
   _load_dimension_ids,
   _to_envelope,
@@ -570,13 +574,10 @@ def create_event_block_in_session(
       session.add(event)
       _flush_new_event(session, event, body)
 
-      if body.dimension_ids:
-        session.execute(
-          event_dimensions.insert(),
-          [{"event_id": event.id, "dimension_id": d} for d in body.dimension_ids],
-        )
+      _tag_event(session, event, body.dimension_ids)
 
       python_handler.dispatch(session, event, typed_metadata, created_by)
+      inherit_event_dimensions(session, str(event.id))
       _acknowledge_settled_items(
         session, event, typed_metadata, created_by, graph_id=graph_id
       )
@@ -599,13 +600,10 @@ def create_event_block_in_session(
     session.add(event)
     _flush_new_event(session, event, body)
 
-    if body.dimension_ids:
-      session.execute(
-        event_dimensions.insert(),
-        [{"event_id": event.id, "dimension_id": d} for d in body.dimension_ids],
-      )
+    _tag_event(session, event, body.dimension_ids)
 
     apply_handler(session, event, handler, created_by=created_by)
+    inherit_event_dimensions(session, str(event.id))
 
     envelope = _to_envelope(event, body.dimension_ids)
     return event, envelope
@@ -614,14 +612,22 @@ def create_event_block_in_session(
   session.add(event)
   _flush_new_event(session, event, body)
 
-  if body.dimension_ids:
-    session.execute(
-      event_dimensions.insert(),
-      [{"event_id": event.id, "dimension_id": d} for d in body.dimension_ids],
-    )
+  _tag_event(session, event, body.dimension_ids)
 
   envelope = _to_envelope(event, body.dimension_ids)
   return event, envelope
+
+
+def _tag_event(session: Session, event: Event, dimension_ids: list[str]) -> None:
+  """Record the event's management dimension members, checked as a line's
+  are: live members, one per axis. Its handler's lines inherit them."""
+  if not dimension_ids:
+    return
+  (checked,) = validate_line_dimensions(session, [dimension_ids])
+  session.execute(
+    event_dimensions.insert(),
+    [{"event_id": event.id, "dimension_id": d} for d in checked],
+  )
 
 
 def fire_handler_on_commit(
@@ -650,6 +656,7 @@ def fire_handler_on_commit(
     )
 
   python_handler.dispatch(session, event, typed_metadata, created_by)
+  inherit_event_dimensions(session, str(event.id))
   return typed_metadata
 
 
@@ -657,6 +664,7 @@ def fire_handler_on_commit(
 _CLASSIFICATION_KEYS = (
   "classified_element_id",
   "classified_allocations",
+  "classified_dimension_ids",
   "accept_suggestion",
   "from_element_id",
   "to_element_id",
@@ -962,7 +970,9 @@ def update_event_block(
   if body.metadata_patch:
     from robosystems.operations.event_block.python_handlers.bank_feed import (
       BANK_EVENT_TYPES,
+      DIMENSION_KEYS,
       FLOW_KEYS,
+      apply_dimension_patch,
       apply_flow_patch,
     )
 
@@ -970,6 +980,10 @@ def update_event_block(
       key in body.metadata_patch for key in FLOW_KEYS
     ):
       apply_flow_patch(session, event, before_patch, created_by)
+    if event.event_type in BANK_EVENT_TYPES and any(
+      key in body.metadata_patch for key in DIMENSION_KEYS
+    ):
+      apply_dimension_patch(session, event, before_patch, created_by)
 
   if fire_handler:
     # After the metadata patch so the handler sees the final shape.

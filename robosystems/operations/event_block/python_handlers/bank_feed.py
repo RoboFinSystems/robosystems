@@ -44,6 +44,12 @@ from robosystems.operations.roboledger.commands._guards import (
   assert_accounts_postable,
 )
 from robosystems.operations.roboledger.entity_scope import owner_entity_id
+from robosystems.operations.roboledger.line_dimensions import (
+  inherit_event_dimensions,
+  line_dimension_ids,
+  validate_line_dimensions,
+  write_line_dimensions,
+)
 
 from .journal_entry_recorded import JournalEntryRecordedMetadata
 from .journal_entry_recorded import dispatch as journal_dispatch
@@ -82,6 +88,14 @@ class BankAllocation(BaseModel):
       "lines for the cash flow and equity statements."
     ),
   )
+  dimension_ids: list[str] | None = Field(
+    None,
+    description=(
+      "The management dimension members this part carries (department, "
+      "class, location, project), one per axis; omitted, the line's "
+      "`classified_dimension_ids`."
+    ),
+  )
 
 
 class BankFeedMetadata(BaseModel):
@@ -93,6 +107,8 @@ class BankFeedMetadata(BaseModel):
   classified_allocations: list[BankAllocation] | None = None
   # The flow a single-account line is, overriding the account's default.
   classified_flow_qname: str | None = None
+  # The management dimension members the line's account side carries.
+  classified_dimension_ids: list[str] | None = None
   accept_suggestion: bool = False
   suggested_element_id: str | None = None
   suggested_account_name: str | None = None
@@ -123,7 +139,12 @@ def contra_allocations(
         f"classified_allocations sum to {total} but the transaction is "
         f"{magnitude}; a split must account for the whole amount."
       )
-    return list(metadata.classified_allocations)
+    return [
+      a
+      if a.dimension_ids is not None
+      else a.model_copy(update={"dimension_ids": metadata.classified_dimension_ids})
+      for a in metadata.classified_allocations
+    ]
   element_id = metadata.classified_element_id
   if not element_id and metadata.accept_suggestion:
     element_id = metadata.suggested_element_id
@@ -134,6 +155,7 @@ def contra_allocations(
       element_id=element_id,
       amount=magnitude,
       flow_qname=metadata.classified_flow_qname or None,
+      dimension_ids=metadata.classified_dimension_ids,
     )
   ]
 
@@ -220,6 +242,7 @@ def plan_lines(
       debit_amount=0 if money_in else allocation.amount,
       credit_amount=allocation.amount if money_in else 0,
       metadata=_flow_tag(allocation.flow_qname),
+      dimension_ids=allocation.dimension_ids,
     )
     for allocation in contras
   ]
@@ -484,9 +507,11 @@ def validate_classification(
     [line.element_id for line in lines],
     entity_id=owner_entity_id(session, event),
   )
+  validate_line_dimensions(session, [list(line.dimension_ids or []) for line in lines])
 
 
 FLOW_KEYS = ("classified_flow_qname", "classified_allocations")
+DIMENSION_KEYS = ("classified_dimension_ids", "classified_allocations")
 
 
 def _flow_qnames(metadata: BankFeedMetadata) -> set[str]:
@@ -660,6 +685,86 @@ def apply_flow_patch(
     }
   )
   event.metadata_ = {**(event.metadata_ or {}), "flow_retags": history}
+  session.flush()
+
+
+def _posted_entries(session: Session, event: Event) -> list[Entry]:
+  return list(
+    session.execute(
+      select(Entry).where(
+        Entry.triggered_by_event_id == event.id,
+        Entry.reversal_of.is_(None),
+        Entry.status.in_(("draft", "posted", "shadowed")),
+      )
+    )
+    .scalars()
+    .all()
+  )
+
+
+def apply_dimension_patch(
+  session: Session, event: Event, before: dict[str, Any], created_by: str
+) -> None:
+  """Once a bank line has posted, re-tag its account side with the members
+  its metadata now names.
+
+  A dimension moves no balance, so a posted line is re-tagged in place,
+  closed month or not, and the change is recorded on the event. The event's
+  own members then fill the axes the new tags leave open."""
+  entries = _posted_entries(session, event)
+  if not entries:
+    return
+  if _without_flows(dict(event.metadata_ or {})) != _without_flows(before):
+    raise HandlerMetadataValidationError(
+      f"Bank event {event.id} has posted, so only its tags can change here; "
+      "reverse the entry to change the account or the split."
+    )
+  metadata = BankFeedMetadata.model_validate(dict(event.metadata_ or {}))
+  contras = contra_allocations(
+    metadata, amount=source_amount(metadata, event.amount) or 0
+  )
+  if contras is None:
+    return
+  by_account: dict[str, list[str]] = {}
+  for allocation in contras:
+    ids = sorted(allocation.dimension_ids or [])
+    if by_account.get(allocation.element_id, ids) != ids:
+      raise HandlerMetadataValidationError(
+        "Two parts of this split go to the same account with different "
+        "dimension members; give them the same members."
+      )
+    by_account[allocation.element_id] = ids
+
+  lines = (
+    session.execute(
+      select(LineItem).where(
+        LineItem.entry_id.in_([e.id for e in entries]),
+        LineItem.element_id != event.resource_element_id,
+      )
+    )
+    .scalars()
+    .all()
+  )
+  held = line_dimension_ids(session, (li.id for li in lines))
+  tags = [by_account.get(str(li.element_id), []) for li in lines]
+  checked = validate_line_dimensions(
+    session, tags, kept=[held.get(str(li.id), []) for li in lines]
+  )
+  write_line_dimensions(
+    session, {str(li.id): ids for li, ids in zip(lines, checked, strict=True)}
+  )
+  inherit_event_dimensions(session, str(event.id))
+
+  history = list((event.metadata_ or {}).get("dimension_retags") or [])
+  history.append(
+    {
+      "at": datetime.now(UTC).isoformat(),
+      "by": created_by,
+      "entry_ids": [str(e.id) for e in entries],
+      "from": held,
+    }
+  )
+  event.metadata_ = {**(event.metadata_ or {}), "dimension_retags": history}
   session.flush()
 
 

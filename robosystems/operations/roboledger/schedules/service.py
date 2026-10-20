@@ -5,7 +5,7 @@ Taxonomy → Structure → Association → Fact.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time
 
 from sqlalchemy import bindparam, func, select, text, update
@@ -47,6 +47,7 @@ from robosystems.operations.roboledger.entry_status import (
   terminal_entry_bindparam,
 )
 from robosystems.operations.roboledger.fact_set import create_fact_set
+from robosystems.operations.roboledger.line_dimensions import write_line_dimensions
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 # Charlie Hoffman's Seattle Method "universal" conceptual-model has-part
@@ -68,6 +69,7 @@ class EntryTemplate:
   entry_type: str = "closing"
   memo_template: str = ""
   auto_reverse: bool = False
+  dimension_ids: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -250,6 +252,11 @@ class ScheduleService:
         "entry_type": entry_template.entry_type,
         "memo_template": entry_template.memo_template or f"Monthly schedule - {name}",
         "auto_reverse": entry_template.auto_reverse,
+        **(
+          {"dimension_ids": list(entry_template.dimension_ids)}
+          if entry_template.dimension_ids
+          else {}
+        ),
       },
       "monthly_amount": monthly_amount,
       "period_start": period_start.isoformat(),
@@ -1288,6 +1295,20 @@ class ScheduleService:
       )
 
       if not is_stale:
+        # A tag moves no balance, so the template's members re-tag the draft
+        # and its auto-reversal in place rather than regenerate them, members
+        # taken off the template included.
+        reversal_ids = [
+          str(i)
+          for (i,) in session.execute(
+            select(Entry.id).where(
+              Entry.reversal_of == existing_entry_id, Entry.status == "draft"
+            )
+          ).all()
+        ]
+        self._tag_entries(
+          session, [existing_entry_id, *reversal_ids], template, clear=True
+        )
         return ClosingEntryResult(
           outcome="unchanged",
           entry_id=existing_entry_id,
@@ -1340,6 +1361,7 @@ class ScheduleService:
     )
 
     session.flush()
+    self._tag_entries(session, [entry.id], template)
 
     # Auto-reverse on the first day of the next period.
     reversal_result = None
@@ -1384,6 +1406,7 @@ class ScheduleService:
         )
       )
       session.flush()
+      self._tag_entries(session, [reversal_entry.id], template)
 
       reversal_result = ClosingEntryResult(
         outcome="created",
@@ -1711,6 +1734,26 @@ class ScheduleService:
       "facts_deleted": facts_deleted,
       "reason": reason,
     }
+
+  @staticmethod
+  def _tag_entries(
+    session: Session, entry_ids: list[str], template: dict, *, clear: bool = False
+  ) -> None:
+    """Every line of the schedule's entries carries the template's members,
+    and with ``clear`` no others: a draft follows its template."""
+    members = list(template.get("dimension_ids") or [])
+    if not members and not clear:
+      return
+    line_ids = [
+      str(i)
+      for (i,) in session.execute(
+        select(LineItem.id).where(LineItem.entry_id.in_(entry_ids))
+      ).all()
+    ]
+    write_line_dimensions(
+      session,
+      dict.fromkeys(line_ids, members),
+    )
 
   def _delete_draft_entry(self, session: Session, entry_id: str) -> None:
     """Delete a draft entry, its draft auto-reversal, and their line items.

@@ -90,11 +90,25 @@ def validate_line_dimensions(
   session: Session,
   lines: list[list[str]],
   *,
-  kept: Iterable[str] = (),
+  kept: list[list[str]] | None = None,
 ) -> list[list[str]]:
   """Each line's members, checked: every id a live member of an open axis,
-  one per axis. ``kept`` are members already on the lines being rewritten."""
-  members = resolve_members(session, (i for ids in lines for i in ids), kept=kept)
+  one per axis. ``kept[n]`` are the members line ``n`` already carries, which
+  it may keep after they retire; a retired member goes on no other line."""
+  held = kept or [[] for _ in lines]
+  members = resolve_members(
+    session,
+    (i for ids in lines for i in ids),
+    kept={i for ids in held for i in ids},
+  )
+  for n, ids in enumerate(lines):
+    own = set(held[n]) if n < len(held) else set()
+    retired = sorted(i for i in ids if not members[i].is_active and i not in own)
+    if retired:
+      raise ValueError(
+        f"Dimension member {', '.join(retired)} is retired; it stays on the "
+        "lines that carry it and goes on no new ones."
+      )
   return [
     check_one_per_axis(f"Line item {n}", ids, members) for n, ids in enumerate(lines)
   ]
@@ -118,6 +132,67 @@ def write_line_dimensions(session: Session, tags: dict[str, list[str]]) -> None:
   if rows:
     session.execute(insert(line_item_dimensions), rows)
   session.flush()
+
+
+def add_line_dimensions(session: Session, tags: dict[str, list[str]]) -> None:
+  """Add members to lines that carry none on their axes; a member on an axis
+  the line already has is left off, so a line's own tag wins."""
+  if not tags:
+    return
+  held = line_dimensions(session, tags)
+  wanted = {
+    str(m.id): m
+    for m in session.execute(
+      select(Dimension).where(
+        Dimension.id.in_({i for ids in tags.values() for i in ids})
+      )
+    )
+    .scalars()
+    .all()
+  }
+  rows = []
+  for line_id, ids in tags.items():
+    axes = {d.dimension_type for d in held.get(line_id, [])}
+    for dimension_id in ids:
+      member = wanted.get(dimension_id)
+      if member is None or member.dimension_type in axes:
+        continue
+      axes.add(member.dimension_type)
+      rows.append({"line_item_id": line_id, "dimension_id": dimension_id})
+  if rows:
+    session.execute(insert(line_item_dimensions), rows)
+    session.flush()
+
+
+def inherit_event_dimensions(session: Session, event_id: str) -> None:
+  """Give the lines an event's handler wrote the event's own members, on the
+  axes each line does not already carry: an event tagged to a department
+  posts to it, and a line tagged otherwise keeps its own."""
+  from robosystems.models.extensions.roboledger.dimension_junctions import (
+    event_dimensions,
+  )
+  from robosystems.models.extensions.roboledger.entry import Entry
+  from robosystems.models.extensions.roboledger.line_item import LineItem
+
+  members = [
+    str(i)
+    for (i,) in session.execute(
+      select(event_dimensions.c.dimension_id).where(
+        event_dimensions.c.event_id == event_id
+      )
+    ).all()
+  ]
+  if not members:
+    return
+  line_ids = [
+    str(i)
+    for (i,) in session.execute(
+      select(LineItem.id)
+      .join(Entry, Entry.id == LineItem.entry_id)
+      .where(Entry.triggered_by_event_id == event_id)
+    ).all()
+  ]
+  add_line_dimensions(session, dict.fromkeys(line_ids, members))
 
 
 def line_dimension_ids(
