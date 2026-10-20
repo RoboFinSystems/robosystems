@@ -34,6 +34,10 @@ from robosystems.operations.roboledger.reads.account_register import (
   InvalidCursorError,
   get_account_register,
 )
+from robosystems.operations.roboledger.reads.journal_entries import (
+  entries_by_event,
+  list_journal_entries,
+)
 from robosystems.operations.roboledger.reads.trial_balance import (
   get_net_balances_cents,
 )
@@ -307,11 +311,12 @@ def test_a_line_names_the_counterparty_its_event_does(session, books):
     session, cash, date(2026, 9, 1), date(2026, 9, 30)
   ).lines
 
-  assert (line.triggered_by_event_id, line.agent_id, line.agent_name) == (
-    "evt_sale",
-    "agt_acme",
-    "Acme",
-  )
+  assert (
+    line.triggered_by_event_id,
+    line.triggered_by_event_type,
+    line.agent_id,
+    line.agent_name,
+  ) == ("evt_sale", "sale", "agt_acme", "Acme")
 
 
 def test_a_dimension_slice_reads_only_its_lines(session, books):
@@ -408,3 +413,46 @@ def test_an_income_account_pages_from_its_fiscal_year_opening(session, books):
   assert second.page_opening_balance == 120.0
   assert [line.balance for line in second.lines] == [130.0]
   assert second.closing_balance == 130.0
+
+
+def test_an_event_lists_the_entries_it_wrote_and_the_journal_names_it(session, books):
+  cash, revenue = books
+  for event_id in ("evt_a", "evt_b"):
+    session.add(
+      Event(
+        id=event_id,
+        entity_id=PARENT_ENTITY_ID,
+        event_type="invoice_issued",
+        event_category="sales",
+        occurred_at=datetime(2026, 9, 3),
+        source="native",
+        amount=10000,
+        status="committed",
+        created_by="t",
+      )
+    )
+  session.flush()
+  first, _ = _entry(
+    session, [(cash, 10000, 0), (revenue, 0, 10000)], date(2026, 9, 3), event_id="evt_a"
+  )
+  second, _ = _entry(
+    session, [(cash, 500, 0), (revenue, 0, 500)], date(2026, 9, 4), event_id="evt_a"
+  )
+  superseded, _ = _entry(
+    session,
+    [(cash, 900, 0), (revenue, 0, 900)],
+    date(2026, 9, 2),
+    status="superseded",
+    event_id="evt_a",
+  )
+  _entry(session, [(cash, 100, 0), (revenue, 0, 100)], date(2026, 9, 5))
+
+  by_event = entries_by_event(session, ["evt_a", "evt_b"])
+  journal = list_journal_entries(session)
+
+  assert [entry.id for entry in by_event["evt_a"]] == [first, second]
+  assert "evt_b" not in by_event
+  assert superseded not in {entry.id for entry in by_event["evt_a"]}
+  named = {entry.id: entry.triggered_by_event_type for entry in journal.entries}
+  assert named[first] == "invoice_issued"
+  assert sorted(v for v in named.values() if v is None) == [None]

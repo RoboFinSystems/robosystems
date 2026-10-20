@@ -72,6 +72,9 @@ class RegisterLine(BaseModel):
   triggered_by_event_id: str | None = Field(
     None, description="The event whose handler wrote the entry."
   )
+  triggered_by_event_type: str | None = Field(
+    None, description="That event's type, such as `invoice_issued`."
+  )
   reversal_of: str | None = Field(
     None, description="The entry this one reverses, when it is a reversal."
   )

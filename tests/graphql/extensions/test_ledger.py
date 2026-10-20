@@ -545,6 +545,56 @@ class TestEventBlockResolvers:
       created_by="system",
     )
 
+  @pytest.mark.asyncio
+  async def test_triggered_entries_load_once_for_every_event_listed(self) -> None:
+    """What each event posted, from one query for the whole list."""
+    from robosystems.models.api.extensions.transactions import (
+      LedgerJournalEntryResponse,
+    )
+
+    entry = LedgerJournalEntryResponse(
+      id="je_1",
+      type="standard",
+      status="posted",
+      posting_date=date(2026, 4, 15),
+      triggered_by_event_id="evt_01",
+      triggered_by_event_type="journal_entry_recorded",
+      line_items=[],
+      total_debit=0.0,
+      total_credit=0.0,
+      balanced=True,
+    )
+    with (
+      _patch_session(),
+      patch(
+        "robosystems.operations.roboledger.reads.event_block.list_event_blocks",
+        return_value=[self._event(id="evt_01"), self._event(id="evt_02")],
+      ),
+      patch(
+        "robosystems.operations.roboledger.reads.journal_entries.entries_by_event",
+        return_value={"evt_01": [entry]},
+      ) as read,
+    ):
+      result = await schema.execute(
+        "query { eventBlocks { id triggeredEntries { id triggeredByEventType } } }",
+        context_value=_ctx(),
+      )
+
+    assert result.errors is None, result.errors
+    assert read.call_count == 1
+    assert sorted(read.call_args.args[1]) == ["evt_01", "evt_02"]
+    assert result.data == {
+      "eventBlocks": [
+        {
+          "id": "evt_01",
+          "triggeredEntries": [
+            {"id": "je_1", "triggeredByEventType": "journal_entry_recorded"}
+          ],
+        },
+        {"id": "evt_02", "triggeredEntries": []},
+      ]
+    }
+
   def test_returns_event_when_found(self) -> None:
     with (
       _patch_session(),

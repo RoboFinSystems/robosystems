@@ -38,6 +38,7 @@ def _line_row(entry_id: str, line_item_id: str, debit: int, credit: int):
     source_structure_id=None,
     source_structure_name=None,
     triggered_by_event_id=None,
+    triggered_by_event_type=None,
     reversal_of=None,
     posted_at=None,
     line_item_id=line_item_id,

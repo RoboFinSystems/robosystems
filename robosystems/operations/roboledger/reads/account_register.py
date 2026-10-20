@@ -92,7 +92,8 @@ _LINE_COLUMNS = """
   li.id AS line_id, e.id AS entry_id, e.number, e.posting_date, e.type,
   e.provenance, e.status, e.memo, li.description, li.debit_amount,
   li.credit_amount, li.line_order, li.flow_element_id,
-  e.triggered_by_event_id, e.reversal_of, ev.agent_id, ag.name AS agent_name
+  e.triggered_by_event_id, ev.event_type AS triggered_by_event_type,
+  e.reversal_of, ev.agent_id, ag.name AS agent_name
 """
 
 _LINE_JOINS = """
@@ -176,6 +177,7 @@ def _line(row, balance_cents: int | None, sign: int, dims) -> RegisterLine:
     credit=cents_to_dollars(row.credit_amount),
     balance=None if balance_cents is None else cents_to_dollars(sign * balance_cents),
     triggered_by_event_id=row.triggered_by_event_id,
+    triggered_by_event_type=row.triggered_by_event_type,
     reversal_of=row.reversal_of,
     reversed_by=row.reversed_by,
     agent_id=row.agent_id,
