@@ -466,6 +466,64 @@ class TestAnAccountBelongsToOneEntity:
     assert disposal.count() == 1
     assert disposal.one().entity_id == t.sub.id
 
+  def test_a_due_entry_event_is_filed_in_its_schedules_books(self, two_entities):
+    """Created the way the facade does, naming no entity."""
+    t = two_entities
+    structure_id = _depreciation(t.session, entity_id=t.sub.id)
+
+    event, _ = create_event_block_in_session(
+      t.session,
+      CreateEventBlockRequest(
+        event_type="schedule_entry_due",
+        event_category="recognition",
+        source="manual",
+        occurred_at=datetime(2026, 7, 31, tzinfo=UTC),
+        apply_handlers=True,
+        metadata={
+          "schedule_id": structure_id,
+          "posting_date": "2026-07-31",
+          "period_start": "2026-07-01",
+          "period_end": "2026-07-31",
+        },
+      ),
+      "usr_1",
+      graph_id=GRAPH_ID,
+    )
+
+    assert event.entity_id == t.sub.id
+    drafted = t.session.query(Entry).filter(Entry.triggered_by_event_id == event.id)
+    assert {entry.entity_id for entry in drafted} == {t.sub.id}
+
+
+def test_a_reversal_event_is_filed_in_the_books_it_reverses(two_entities):
+  """Created the way the facade does, naming no entity."""
+  t = two_entities
+  cash, rent = _pair(t.session, owner=t.sub.id)
+  posted = create_journal_entry(
+    t.session,
+    _journal_body(cash, rent, status="posted"),
+    "usr_1",
+    entity_id=t.sub.id,
+  )
+
+  event, _ = create_event_block_in_session(
+    t.session,
+    CreateEventBlockRequest(
+      event_type="journal_entry_reversed",
+      event_category="adjustment",
+      source="manual",
+      occurred_at=datetime(2026, 9, 15, tzinfo=UTC),
+      apply_handlers=True,
+      metadata={"entry_id": posted.id, "posting_date": "2026-09-15"},
+    ),
+    "usr_1",
+    graph_id=GRAPH_ID,
+  )
+
+  assert event.entity_id == t.sub.id
+  reversing = t.session.query(Entry).filter(Entry.triggered_by_event_id == event.id)
+  assert reversing.one().entity_id == t.sub.id
+
 
 def test_a_reconciliation_block_belongs_to_the_entity_it_is_made_for(two_entities):
   t = two_entities

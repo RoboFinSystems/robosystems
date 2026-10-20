@@ -1409,6 +1409,7 @@ class TestProviderCompatibility:
     with (
       patch(f"{MODULE}.Connection") as MockConn,
       patch(f"{MODULE}._is_group_parent", return_value=False) as parent,
+      patch(f"{MODULE}._is_consolidation_entity", return_value=False),
       patch(f"{MODULE}._graph_has_chart", return_value=True) as has_chart,
     ):
       MockConn.get_all_for_graph.return_value = self._live("quickbooks")
@@ -1426,12 +1427,38 @@ class TestProviderCompatibility:
     with (
       patch(f"{MODULE}.Connection") as MockConn,
       patch(f"{MODULE}._is_group_parent", return_value=True),
+      patch(f"{MODULE}._is_consolidation_entity", return_value=False),
       patch(f"{MODULE}._graph_has_chart", return_value=True),
     ):
       MockConn.get_all_for_graph.return_value = self._live("quickbooks")
       with pytest.raises(ProviderConflictError) as exc:
         assert_provider_compatible("kg_test", "plaid", MagicMock(), entity_id="ent_p")
     assert exc.value.code == "QUICKBOOKS_ACTIVE"
+
+  @pytest.mark.unit
+  def test_bank_feed_for_the_consolidation_entity_is_refused(self):
+    """Its books hold the group's consolidating entries; it has a chart, so
+    only its role stops a feed booking there."""
+    from robosystems.operations.connection_service import (
+      ProviderConflictError,
+      assert_provider_compatible,
+    )
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}._is_group_parent", return_value=False),
+      patch(f"{MODULE}._is_consolidation_entity", return_value=True) as role,
+      patch(f"{MODULE}._graph_has_chart", return_value=True) as has_chart,
+    ):
+      MockConn.get_all_for_graph.return_value = []
+      with pytest.raises(ProviderConflictError) as exc:
+        assert_provider_compatible(
+          "kg_test", "plaid", MagicMock(), entity_id="ent_cons"
+        )
+    assert exc.value.code == "CONSOLIDATION_ENTITY"
+    assert exc.value.http_status == 409
+    role.assert_called_once_with("kg_test", "ent_cons")
+    has_chart.assert_not_called()
 
   @pytest.mark.unit
   @pytest.mark.parametrize("live", [("quickbooks",), ()])

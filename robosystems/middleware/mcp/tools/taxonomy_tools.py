@@ -228,8 +228,10 @@ BS / IS / CF / SE reports under the active Reporting Style.
     return await run_off_loop(self._execute_sync, arguments)
 
   def _execute_sync(self, arguments: dict[str, Any]) -> Any:
+    from robosystems.adapters.bank_feed.accounts import account_entities
+    from robosystems.operations.roboledger.entity_scope import resolve_entity_id
     from robosystems.operations.roboledger.reports.network_picker import (
-      load_primary_reporting_style,
+      load_entity_reporting_style,
     )
 
     graph_id = self.client.graph_id
@@ -238,16 +240,20 @@ BS / IS / CF / SE reports under the active Reporting Style.
 
     try:
       with extensions_session(graph_id) as session:
-        # Filter candidates by the active Reporting Style, as the renderer
-        # walks; the wider taxonomy when the tenant has no entity yet.
-        try:
-          reporting_style_id = load_primary_reporting_style(session)
-        except LookupError:
-          reporting_style_id = None
-
         source = get_element(session, element_id)
         if source is None:
           return {"error": f"Element {element_id} not found"}
+
+        # Filter candidates by the Reporting Style the account's own entity
+        # renders under, as the renderer walks; the wider taxonomy when the
+        # tenant has no entity yet.
+        owner = account_entities(session, [element_id], parent_id=None).get(element_id)
+        try:
+          reporting_style_id = load_entity_reporting_style(
+            session, resolve_entity_id(session, owner)
+          )
+        except LookupError:
+          reporting_style_id = None
 
         classification = classification_override or source.trait
         # Default to the element's own liquidity; None narrows by EFS only.

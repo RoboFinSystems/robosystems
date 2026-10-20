@@ -287,7 +287,7 @@ def create(
         f"envelope or in parent_taxonomy_id {payload.parent_taxonomy_id!r}."
       )
     if req.association_type == "mapping":
-      assert_mapping_leaf(session, to_id)
+      assert_mapping_leaf(session, to_id, str(structure.id))
     association = Association(
       structure_id=structure.id,
       from_element_id=from_id,

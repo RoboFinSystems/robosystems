@@ -35,6 +35,7 @@ from robosystems.models.extensions.roboledger.event import Event
 from robosystems.operations.event_block.commands import create_event_block_in_session
 from robosystems.operations.roboledger.commands.bank_accounts import (
   AccountAlreadyFedError,
+  ConsolidationEntityFeedError,
   FeedAccountNotFoundError,
   NotAChartAccountError,
   QuickBooksKeptEntityError,
@@ -591,3 +592,29 @@ def test_an_entity_quickbooks_keeps_is_refused(session):
   # Still on the subsidiary.
   link = session.get(Element, moved.element_id).metadata_[BANK_FEED_KEY]
   assert link["account_id"] == ACCOUNT
+
+
+def test_the_consolidation_entity_takes_no_feed(session):
+  """Its books hold the group's consolidating entries; a feed account moves
+  to a company's chart, never there, whether created or linked to one."""
+  _chart, _checking, _supplies, sub, rent = _seed(session)
+  session.get(Entity, sub).entity_role = "consolidation"
+  session.flush()
+  with pytest.raises(ConsolidationEntityFeedError):
+    link_bank_account(
+      session,
+      LinkBankAccountRequest(
+        connection_id=CONNECTION, account_id=ACCOUNT, entity_id=sub
+      ),
+      "user_test",
+      graph_id=GRAPH_ID,
+    )
+  with pytest.raises(ConsolidationEntityFeedError):
+    link_bank_account(
+      session,
+      LinkBankAccountRequest(
+        connection_id=CONNECTION, account_id=ACCOUNT, element_id=rent
+      ),
+      "user_test",
+      graph_id=GRAPH_ID,
+    )

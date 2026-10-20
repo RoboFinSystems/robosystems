@@ -80,6 +80,11 @@ def dispatch(
     memo=metadata.memo,
   )
   reversing = reverse_journal_entry(session, body, created_by)
+  # The reversal is the original entry's entity's, whichever entity the
+  # event was filed under (the create path defaults it to the group parent).
+  original = session.get(Entry, metadata.entry_id)
+  if original is not None and original.entity_id:
+    event.entity_id = original.entity_id
 
   session.execute(
     update(Entry).where(Entry.id == reversing.id).values(triggered_by_event_id=event.id)

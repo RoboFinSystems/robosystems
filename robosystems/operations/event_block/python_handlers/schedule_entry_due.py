@@ -12,8 +12,10 @@ from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
 from robosystems.models.api.event_block import CreateEventBlockRequest
+from robosystems.models.extensions import Structure
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
+from robosystems.operations.roboledger.entity_scope import owner_entity_id
 from robosystems.operations.roboledger.schedules.service import ScheduleService
 
 from .types import (
@@ -48,6 +50,11 @@ def dispatch(
   created_by: str,
 ) -> HandlerResult:
   """Draft or refresh the closing entry; link it to the event."""
+  # The entry is the schedule's entity's, whichever entity the event was
+  # filed under (the create path defaults it to the group parent).
+  schedule = session.get(Structure, metadata.schedule_id)
+  if schedule is not None:
+    event.entity_id = owner_entity_id(session, schedule)
   service = ScheduleService()
   result = service.create_closing_entry(
     session,

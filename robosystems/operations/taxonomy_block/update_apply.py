@@ -236,7 +236,7 @@ def apply_associations_to_add(
     if to_id is None:
       raise ValueError(f"association to_ref {req.to_ref!r} did not resolve.")
     if req.association_type == "mapping":
-      assert_mapping_leaf(session, to_id)
+      assert_mapping_leaf(session, to_id, structure_id)
     assoc = Association(
       structure_id=structure_id,
       from_element_id=from_id,

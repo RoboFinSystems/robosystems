@@ -37,7 +37,10 @@ from robosystems.operations.roboledger.commands._guards import (
   LibraryImmutableError,
   assert_not_library_origin,
 )
-from robosystems.operations.roboledger.entity_scope import resolve_entity
+from robosystems.operations.roboledger.entity_scope import (
+  resolve_entity,
+  resolve_entity_id,
+)
 from robosystems.operations.taxonomy_block.coa_mappings import COA_MAPPING_BLOCK_TYPE
 from robosystems.operations.taxonomy_block.immutability import (
   assert_history_undisturbed,
@@ -103,12 +106,16 @@ class MappingTargetIsRollupError(ValueError):
     self.qname = qname
 
 
-def assert_leaf_target(session: Session, target: Element) -> None:
-  """Refuse a mapping target the graph's statements compute from children.
+def assert_leaf_target(
+  session: Session, target: Element, mapping_id: str | None = None
+) -> None:
+  """Refuse a mapping target the statements compute from children.
 
   A direct fact on a computed concept overrides it at render, so the
-  statement no longer articulates. Same rule as the suggester. A graph with
-  no entity yet is judged on the default Style.
+  statement no longer articulates. Same rule as the suggester. The
+  statements are those of the entity whose chart ``mapping_id`` maps from,
+  under its own Reporting Style (the group parent's without one). A graph
+  with no entity yet is judged on the default Style.
   """
   from robosystems.operations.roboledger.reads.taxonomies import (
     is_subtotal_target,
@@ -116,22 +123,26 @@ def assert_leaf_target(session: Session, target: Element) -> None:
   )
   from robosystems.operations.roboledger.reports.network_picker import (
     DEFAULT_STYLE_ID,
-    load_primary_reporting_style,
+    load_entity_reporting_style,
   )
+  from robosystems.operations.taxonomy_block.coa_mappings import mapping_owner_id
 
+  owner = mapping_owner_id(session, mapping_id) if mapping_id else None
   try:
-    style_id = load_primary_reporting_style(session)
+    style_id = load_entity_reporting_style(session, resolve_entity_id(session, owner))
   except LookupError:
     style_id = DEFAULT_STYLE_ID
   if is_subtotal_target(target, load_subtotal_concepts(session, style_id)):
     raise MappingTargetIsRollupError(target.qname)
 
 
-def assert_mapping_leaf(session: Session, to_element_id: str) -> None:
+def assert_mapping_leaf(
+  session: Session, to_element_id: str, mapping_id: str | None = None
+) -> None:
   """``assert_leaf_target`` for a write path that holds only the target's id."""
   target = session.get(Element, to_element_id)
   if target is not None:
-    assert_leaf_target(session, target)
+    assert_leaf_target(session, target, mapping_id)
 
 
 class ReplacedArcMismatchError(ValueError):
@@ -235,7 +246,7 @@ def create_mapping_association(
     assert_history_undisturbed(session, account_ids=[body.from_element_id])
 
   if body.association_type == "mapping":
-    assert_leaf_target(session, to_elem)
+    assert_leaf_target(session, to_elem, body.mapping_id)
 
   existing = session.execute(
     select(Association).where(

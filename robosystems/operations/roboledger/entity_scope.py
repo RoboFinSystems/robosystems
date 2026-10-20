@@ -115,6 +115,13 @@ def is_group_parent(session: Session, entity_id: str) -> bool:
   return find_entity_id(session) == entity_id
 
 
+def is_consolidation_entity(session: Session, entity_id: str) -> bool:
+  """Whether ``entity_id`` is the group's consolidation entity, whose books
+  hold the consolidating entries and nothing a company transacts."""
+  entity = session.get(Entity, entity_id)
+  return entity is not None and entity.entity_role == "consolidation"
+
+
 def resolve_entity(session: Session, entity_id: str | None = None) -> Entity:
   """The ORM row for :func:`resolve_entity_id`."""
   resolved_id = resolve_entity_id(session, entity_id)
