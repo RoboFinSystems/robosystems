@@ -30,6 +30,31 @@ class ExtensionsMaterializeConfig(Config):
   rebuild: bool = True
 
 
+def _tier_upgrade_in_progress(session, graph) -> bool:
+  """Whether the graph's subscription (its parent's, for a subgraph) is mid
+  tier upgrade. The migration snapshots and moves the volume, so the API
+  refuses every write meanwhile; a materialization holds off the same way,
+  or its rows land after the snapshot and vanish on a rollback while the
+  staleness flag says the graph is fresh."""
+  from robosystems.models.core.billing.subscription import (
+    BillingSubscription,
+    SubscriptionStatus,
+  )
+
+  billing_graph_id = (
+    graph.parent_graph_id
+    if graph.is_subgraph and graph.parent_graph_id
+    else graph.graph_id
+  )
+  subscription = BillingSubscription.get_by_resource(
+    "graph", str(billing_graph_id), session
+  )
+  return (
+    subscription is not None
+    and subscription.status == SubscriptionStatus.UPGRADING.value
+  )
+
+
 @op(out={"materialize_result": Out(dict)})
 def materialize_extensions_to_graph(
   context: OpExecutionContext,
@@ -67,6 +92,12 @@ def materialize_extensions_to_graph(
     db_session = next(db_gen)
     try:
       graph_row = db_session.query(Graph).filter(Graph.graph_id == graph_id).first()
+      if graph_row is not None and _tier_upgrade_in_progress(db_session, graph_row):
+        context.log.warning(
+          f"Extensions materialization for {graph_id} deferred: a tier upgrade "
+          "is moving the volume; the graph stays stale"
+        )
+        return {"graph_id": graph_id, "status": "deferred"}
       graph_tier = (
         str(graph_row.graph_tier)
         if graph_row and graph_row.graph_tier

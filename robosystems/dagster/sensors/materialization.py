@@ -11,7 +11,7 @@ from dagster import (
   sensor,
 )
 from dateutil import parser as date_parser
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 
 from robosystems.config.tuning import TuningConfig
 from robosystems.dagster.jobs.extensions import extensions_materialize_job
@@ -111,6 +111,10 @@ def stale_graph_materialization_sensor(context: SensorEvaluationContext):
   cursor alone, so stale graphs are picked up as soon as the pause ends.
   """
   from robosystems.middleware.graph.write_pause import graph_writes_paused_until
+  from robosystems.models.core.billing.subscription import (
+    BillingSubscription,
+    SubscriptionStatus,
+  )
   from robosystems.models.core.graph import Graph
 
   paused_until = graph_writes_paused_until()
@@ -139,6 +143,20 @@ def stale_graph_materialization_sensor(context: SensorEvaluationContext):
       except json.JSONDecodeError, TypeError, AttributeError:
         submitted = {}
 
+    # A tier upgrade snapshots and moves the volume, so the API refuses every
+    # write meanwhile; the sweep holds off the same way. The graph stays stale
+    # and is picked up once its subscription (its parent's, for a subgraph)
+    # is active again.
+    upgrading = (
+      db.query(BillingSubscription.id)
+      .filter(
+        BillingSubscription.resource_type == "graph",
+        BillingSubscription.resource_id
+        == func.coalesce(Graph.parent_graph_id, Graph.graph_id),
+        BillingSubscription.status == SubscriptionStatus.UPGRADING.value,
+      )
+      .exists()
+    )
     stale_graphs = (
       db.query(Graph)
       .filter(
@@ -152,6 +170,7 @@ def stale_graph_materialization_sensor(context: SensorEvaluationContext):
         Graph.graph_type == "entity",
         Graph.status == "active",
         Graph.is_repository.is_(False),
+        ~upgrading,
       )
       .all()
     )
