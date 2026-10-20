@@ -21,6 +21,15 @@ from robosystems.graphql.types.common import PaginationInfo  # noqa: F401
 from robosystems.models.api.event_block import (
   EventBlockEnvelope as PydanticEventBlockEnvelope,
 )
+from robosystems.models.api.extensions.account_register import (
+  AccountRegisterResponse as PydanticAccountRegisterResponse,
+)
+from robosystems.models.api.extensions.account_register import (
+  RegisterAccount as PydanticRegisterAccount,
+)
+from robosystems.models.api.extensions.account_register import (
+  RegisterLine as PydanticRegisterLine,
+)
 from robosystems.models.api.extensions.account_rollups import (
   AccountRollupGroup as PydanticAccountRollupGroup,
 )
@@ -664,6 +673,25 @@ class LedgerTransactionList:
 @pydantic_type(model=PydanticLineDimension, all_fields=True)
 class LineDimension:
   """A management dimension member a ledger line carries."""
+
+
+# ── Account register ──────────────────────────────────────────────────────
+
+
+@pydantic_type(model=PydanticRegisterAccount, all_fields=True)
+class RegisterAccount:
+  """The account a register reads."""
+
+
+@pydantic_type(model=PydanticRegisterLine, all_fields=True)
+class RegisterLine:
+  """One line of an account register, with the balance it leaves."""
+
+
+@pydantic_type(model=PydanticAccountRegisterResponse, all_fields=True)
+class AccountRegister:
+  """One account's landed lines over a window, oldest first, with a running
+  balance."""
 
 
 @pydantic_type(model=PydanticDimensionResponse, all_fields=True)

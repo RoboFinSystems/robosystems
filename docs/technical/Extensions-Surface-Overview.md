@@ -92,7 +92,7 @@ The database that engine opens is configured with **`EXTENSIONS_DATABASE_URL`** 
 
 **The GraphQL schema is composed per deployment.** A baseline set of query fields is always present (information blocks, taxonomy blocks, and the library), and the domain-specific field sets are added only when their flag is on:
 
-- `ROBOLEDGER_ENABLED` adds the 42 ledger query fields (`entity`, `trialBalance`, `fiscalCalendar`, `reconciliations`, `reports`, `mappings`, and more).
+- `ROBOLEDGER_ENABLED` adds the ledger query fields (`entity`, `trialBalance`, `fiscalCalendar`, `reconciliations`, `reports`, `mappings`, and more).
 - `ROBOINVESTOR_ENABLED` adds the investor query fields (`portfolios`, `securities`, `positions`, `holdings`, and related).
 
 Because the schema is built at construction time, a ledger-only deployment literally has no `portfolios` field — introspection never reveals it, and clients should branch on the introspected schema rather than discovering disabled domains through trial-and-error runtime errors. Note that the analytical view operations in `views.py` are gated by `FACT_GRID_ENABLED` independently of `ROBOLEDGER_ENABLED`: they are mounted under the `/extensions/roboledger/...` path but stay available on deployments (such as SEC-only setups) that have no RoboLedger tenants. The OLTP-backed read operation `live-financial-statement` sits on the same path but follows `ROBOLEDGER_ENABLED`.
