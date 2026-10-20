@@ -653,3 +653,30 @@ async def test_rejected_queue_submission_fails_its_operation(
   assert response.status_code == 503, response.text
   op_manager.fail_operation.assert_awaited_once()
   assert op_manager.fail_operation.call_args.args[0] == "op_01J0000000000000000000000A"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rows, truncated", [(10_000, True), (9_999, False)])
+@patch("robosystems.routers.graphs.query.execute.get_universal_repository")
+async def test_a_result_at_the_row_cap_is_flagged_truncated(
+  mock_get_repo,
+  rows: int,
+  truncated: bool,
+  async_client: AsyncClient,
+  test_user: User,
+  test_graph_with_credits: dict,
+):
+  repo = AsyncMock()
+  repo.execute_query = AsyncMock(return_value=[{"n": i} for i in range(rows)])
+  repo.execute_query_streaming = None
+  mock_get_repo.return_value = repo
+  graph_id = test_graph_with_credits["user_graph"].graph_id
+
+  response = await async_client.post(
+    f"/v1/graphs/{graph_id}/query/cypher",
+    json={"query": "MATCH (n) RETURN n.id AS n"},
+    headers={"Authorization": f"Bearer {create_jwt_token(test_user.id)}"},
+  )
+
+  assert response.status_code == 200, response.text
+  assert response.json()["truncated"] is truncated

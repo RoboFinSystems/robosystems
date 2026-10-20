@@ -32,7 +32,8 @@ class GraphSubscriptionTier(BaseModel):
   backend: str = Field(..., description="Database backend identifier")
   instance_type: str | None = Field(None, description="Instance type")
   instance_storage_limit_gb: float = Field(
-    0, description="Soft storage cap for the instance in GB"
+    0,
+    description="Instance storage cap in GB; ingest and materialize are refused above it",
   )
 
 

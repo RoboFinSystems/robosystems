@@ -20,7 +20,6 @@ from ...models.api.admin import (
 )
 from ...models.core import Graph, User
 from ...models.core.graph.graph_backup import GraphBackup
-from ...models.core.graph.graph_credits import GraphCredits
 from ...models.core.graph.graph_usage import GraphUsage, UsageEventType
 
 logger = get_logger(__name__)
@@ -467,14 +466,8 @@ async def get_graph_storage(request: Request, graph_id: str):
       else 0.0
     )
 
-    # The tier's `instance_storage_limit_gb` (what ingestion enforces), unless
-    # the credit pool carries a `storage_override_gb`.
-    credits = GraphCredits.get_by_graph_id(graph_id, session)
-    storage_limit = (
-      float(credits.storage_override_gb)
-      if credits and credits.storage_override_gb
-      else GraphTierConfig.get_instance_storage_limit_gb(graph.graph_tier)
-    )
+    # The tier's `instance_storage_limit_gb`: what ingestion enforces.
+    storage_limit = GraphTierConfig.get_instance_storage_limit_gb(graph.graph_tier)
 
     usage_percentage = (
       (current_storage / storage_limit * 100) if storage_limit > 0 else 0

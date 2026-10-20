@@ -9,7 +9,10 @@ class StorageLimits(BaseModel):
   current_usage_gb: float | None = Field(
     None, description="Current storage usage in GB"
   )
-  max_storage_gb: float = Field(..., description="Maximum storage limit in GB")
+  max_storage_gb: float = Field(
+    ...,
+    description="Instance storage cap in GB; ingest and materialize are refused above it",
+  )
   approaching_limit: bool = Field(
     ..., description="Whether approaching storage limit (>80%)"
   )
@@ -18,29 +21,40 @@ class StorageLimits(BaseModel):
 class QueryLimits(BaseModel):
   """Query operation limits."""
 
-  max_timeout_seconds: int = Field(..., description="Maximum query timeout in seconds")
-  chunk_size: int = Field(..., description="Maximum chunk size for result streaming")
-  max_rows_per_query: int = Field(..., description="Maximum rows returned per query")
-  concurrent_queries: int = Field(..., description="Maximum concurrent queries allowed")
+  max_timeout_seconds: int = Field(
+    ..., description="Per-query time ceiling the graph engine enforces, in seconds"
+  )
+  chunk_size: int = Field(
+    ...,
+    description="Default rows per streamed chunk (a request may set chunk_size, 10-10,000)",
+  )
+  max_rows_per_query: int = Field(
+    ...,
+    description=(
+      "Rows a non-streaming Cypher query returns before it stops (the response "
+      "sets `truncated`); a streamed query returns up to 1,000,000"
+    ),
+  )
 
 
 class CopyOperationLimits(BaseModel):
-  """Copy/ingestion operation limits."""
+  """File upload limits."""
 
-  max_file_size_gb: float = Field(..., description="Maximum file size in GB")
-  timeout_seconds: int = Field(..., description="Operation timeout in seconds")
-  concurrent_operations: int = Field(..., description="Maximum concurrent operations")
-  max_files_per_operation: int = Field(..., description="Maximum files per operation")
-  daily_copy_operations: int = Field(..., description="Daily operation limit")
+  max_file_size_gb: float = Field(..., description="Maximum upload file size in GB")
   supported_formats: list[str] = Field(..., description="Supported file formats")
 
 
 class BackupLimits(BaseModel):
   """Backup operation limits."""
 
-  max_backup_size_gb: float = Field(..., description="Maximum backup size in GB")
   backup_retention_days: int = Field(..., description="Backup retention period in days")
-  max_backups_per_day: int = Field(..., description="Maximum backups per day")
+  max_backups_per_day: int = Field(
+    ..., description="Maximum user-initiated backups per day (-1 for unlimited)"
+  )
+  max_downloads_per_month: int | None = Field(
+    None,
+    description="Backup downloads allowed per user per calendar month (UTC)",
+  )
 
 
 class RateLimits(BaseModel):
@@ -144,7 +158,10 @@ class InstanceUsage(BaseModel):
   total_storage_gb: float | None = Field(
     None, description="Total storage used across all databases in GB"
   )
-  limit_gb: float = Field(..., description="Soft storage limit for this tier in GB")
+  limit_gb: float = Field(
+    ...,
+    description="Instance storage cap in GB; ingest and materialize are refused above it",
+  )
   usage_percentage: float | None = Field(
     None,
     description=(
@@ -190,23 +207,18 @@ class GraphLimitsResponse(BaseModel):
             "approaching_limit": False,
           },
           "queries": {
-            "max_timeout_seconds": 45,
+            "max_timeout_seconds": 120,
             "chunk_size": 500,
             "max_rows_per_query": 10000,
-            "concurrent_queries": 1,
           },
           "copy_operations": {
-            "max_file_size_gb": 1.0,
-            "timeout_seconds": 900,
-            "concurrent_operations": 1,
-            "max_files_per_operation": 100,
-            "daily_copy_operations": 25,
-            "supported_formats": ["parquet", "csv", "json", "delta", "iceberg"],
+            "max_file_size_gb": 0.09765625,
+            "supported_formats": ["parquet", "csv", "json"],
           },
           "backups": {
-            "max_backup_size_gb": 10,
             "backup_retention_days": 7,
             "max_backups_per_day": 2,
+            "max_downloads_per_month": 10,
           },
           "rate_limits": {
             "requests_per_minute": 60,
@@ -250,29 +262,10 @@ class GraphLimitsResponse(BaseModel):
           "subscription_tier": "ladybug-standard",
           "graph_tier": "ladybug-shared",
           "is_shared_repository": True,
-          "storage": {
-            "current_usage_gb": None,
-            "max_storage_gb": 20.0,
-            "approaching_limit": False,
-          },
           "queries": {
-            "max_timeout_seconds": 300,
+            "max_timeout_seconds": 120,
             "chunk_size": 2500,
             "max_rows_per_query": 10000,
-            "concurrent_queries": 1,
-          },
-          "copy_operations": {
-            "max_file_size_gb": 10.0,
-            "timeout_seconds": 3600,
-            "concurrent_operations": 3,
-            "max_files_per_operation": 10000,
-            "daily_copy_operations": -1,
-            "supported_formats": ["parquet", "csv", "json", "delta", "iceberg"],
-          },
-          "backups": {
-            "max_backup_size_gb": 100,
-            "backup_retention_days": 90,
-            "max_backups_per_day": 5,
           },
           "rate_limits": {
             "requests_per_minute": 60,
@@ -292,12 +285,16 @@ class GraphLimitsResponse(BaseModel):
   is_shared_repository: bool = Field(
     ..., description="Whether this is a shared repository"
   )
-  storage: StorageLimits = Field(..., description="Storage limits and usage")
-  queries: QueryLimits = Field(..., description="Query operation limits")
-  copy_operations: CopyOperationLimits = Field(
-    ..., description="Copy/ingestion operation limits"
+  storage: StorageLimits | None = Field(
+    None, description="Storage limits and usage (user graphs only)"
   )
-  backups: BackupLimits = Field(..., description="Backup operation limits")
+  queries: QueryLimits = Field(..., description="Query operation limits")
+  copy_operations: CopyOperationLimits | None = Field(
+    None, description="File upload limits (user graphs only)"
+  )
+  backups: BackupLimits | None = Field(
+    None, description="Backup operation limits (user graphs only)"
+  )
   rate_limits: RateLimits = Field(..., description="API rate limits")
   credits: CreditLimits | None = Field(
     None, description="AI credit limits (if applicable)"

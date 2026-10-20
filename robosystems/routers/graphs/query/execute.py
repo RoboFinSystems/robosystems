@@ -25,6 +25,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 
+from robosystems.config.constants import MAX_ROWS_PER_QUERY
 from robosystems.config.graph_tier import GraphTier
 from robosystems.database import get_db_session
 from robosystems.graph_api.client.exceptions import GraphTransientError
@@ -379,34 +380,6 @@ async def execute_cypher_query(
           source="query_cypher",
         )
 
-        if (
-          client_info["is_interactive"]
-          and len(result) > 10000
-          and not query_analysis["has_limit"]
-        ):
-          logger.warning(f"Large result ({len(result)} rows) for testing tool")
-
-          return JSONResponse(
-            content={
-              "success": True,
-              "data": result[:1000],
-              "columns": columns,
-              "row_count": len(result),
-              "truncated": True,
-              "truncated_at": 1000,
-              "execution_time_ms": execution_time,
-              "graph_id": graph_id,
-              "warning": (
-                f"Result truncated from {len(result)} to 1000 rows for testing. "
-                f"Use 'LIMIT' in your query or mode=stream for full results."
-              ),
-              "suggestion": {
-                "add_limit": f"{request.query} LIMIT 1000",
-                "use_streaming": "Set mode=stream or Accept: text/event-stream",
-              },
-            }
-          )
-
         circuit_breaker.record_success(graph_id, "cypher_query")
 
         metrics_instance = get_endpoint_metrics()
@@ -460,6 +433,7 @@ async def execute_cypher_query(
           data=result,
           columns=columns,
           row_count=len(result),
+          truncated=len(result) >= MAX_ROWS_PER_QUERY,
           execution_time_ms=execution_time,
           graph_id=graph_id,
           timestamp=start_time.isoformat(),

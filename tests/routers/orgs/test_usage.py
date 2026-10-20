@@ -13,6 +13,7 @@ from uuid import uuid4
 
 import pytest
 
+from robosystems.config.graph_tier import GraphTierConfig
 from robosystems.models.core import (
   Graph,
   GraphUsage,
@@ -211,6 +212,12 @@ class TestOrgUsageEndpoints:
     assert summary["total_credits_used"] == pytest.approx(10.0)
     assert summary["total_ai_operations"] == 1
     assert summary["total_storage_gb"] == pytest.approx(7.5, rel=1e-2)
+    # Were always null: now the org's monthly allocation and its instances'
+    # storage caps.
+    assert summary["credits_limit"] == 120
+    assert summary["storage_limit_gb"] == int(
+      GraphTierConfig.get_instance_storage_limit_gb(str(graph.graph_tier))
+    )
 
     assert len(body["graph_details"]) == 1
     graph_detail = body["graph_details"][0]

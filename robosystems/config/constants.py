@@ -31,6 +31,19 @@ MAX_BATCH_SIZE = 10000
 # File Processing
 MAX_FILES_PER_TASK = 1000
 MAX_FILE_SIZE_MB = 100
+
+# Upload content types and the file format each one is. `/limits` publishes
+# the formats, so the list is what create-file-upload accepts.
+UPLOAD_CONTENT_TYPES = {
+  "application/x-parquet": "parquet",
+  "text/csv": "csv",
+  "application/json": "json",
+}
+SUPPORTED_UPLOAD_FORMATS = tuple(UPLOAD_CONTENT_TYPES.values())
+
+# Rows a non-streaming Cypher result returns before it stops; the API flags a
+# result that reaches it `truncated`. Streaming has its own, larger backstop.
+MAX_ROWS_PER_QUERY = 10_000
 PRESIGNED_URL_EXPIRY_SECONDS = 3600
 
 # Stored document files (a bank statement kept as evidence). Read whole on

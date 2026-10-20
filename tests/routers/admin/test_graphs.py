@@ -241,7 +241,7 @@ class TestGraphStorageReporting:
   AttributeError 500 for any graph with a credit pool.
   """
 
-  def _add_credit_pool(self, db_session, test_graph, test_user, override=None):
+  def _add_credit_pool(self, db_session, test_graph, test_user):
     from datetime import UTC, datetime
     from decimal import Decimal
 
@@ -255,7 +255,6 @@ class TestGraphStorageReporting:
       current_balance=Decimal("1000"),
       monthly_allocation=Decimal("1000"),
       last_allocation_date=datetime.now(UTC),
-      storage_override_gb=override,
     )
     db_session.add(credits)
     db_session.commit()
@@ -283,21 +282,6 @@ class TestGraphStorageReporting:
 
     assert response.status_code == 200
     assert response.json()["storage_limit_gb"] == 20.0
-
-  def test_admin_storage_override_wins(
-    self, client, db_session, test_graph, test_user, mock_admin_auth
-  ):
-    from decimal import Decimal
-
-    self._add_credit_pool(db_session, test_graph, test_user, override=Decimal("75"))
-
-    response = client.get(
-      f"/admin/v1/graphs/{test_graph.graph_id}/storage",
-      headers={"Authorization": "Bearer test-admin-key"},
-    )
-
-    assert response.status_code == 200
-    assert response.json()["storage_limit_gb"] == 75.0
 
   def test_graph_list_reports_the_enforced_tier_limit(
     self, client, test_graph, mock_admin_auth

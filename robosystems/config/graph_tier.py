@@ -127,13 +127,6 @@ class GraphTierConfig:
     return tier_config.get("max_subgraphs")
 
   @classmethod
-  def get_query_timeout(cls, tier: str, environment: str | None = None) -> int:
-    """Get query timeout for a tier, in seconds."""
-    tier_config = cls.get_tier_config(tier, environment)
-    instance_config = tier_config.get("instance", {})
-    return instance_config.get("query_timeout", 30)
-
-  @classmethod
   def get_memory_per_db_mb(cls, tier: str, environment: str | None = None) -> int:
     """Get per-database memory allocation for a tier, in MB."""
     tier_config = cls.get_tier_config(tier, environment)
@@ -245,35 +238,29 @@ class GraphTierConfig:
   def get_copy_operation_limits(
     cls, tier: str, environment: str | None = None
   ) -> dict[str, Any]:
-    """Get copy operation limits for a tier.
+    """Get the upload limits for a tier.
 
-    ``max_file_size_gb`` comes from the enforced MAX_FILE_SIZE_MB, not
-    graph.yml: uploads are processed in the shared API container, so the limit
-    is the same for every tier.
+    ``max_file_size_gb`` is the enforced MAX_FILE_SIZE_MB: uploads are
+    processed in the shared API container, so the limit is the same for every
+    tier. ``tier`` and ``environment`` are kept for the accessor's shape.
     """
-    tier_config = cls.get_tier_config(tier, environment)
-    default_limits = {
-      "timeout_seconds": 300,
-      "concurrent_operations": 1,
-      "max_files_per_operation": 100,
-      "daily_copy_operations": 10,
-    }
-    limits = dict(tier_config.get("copy_operations", default_limits))
-    limits["max_file_size_gb"] = MAX_FILE_SIZE_MB / 1024
-    return limits
+    return {"max_file_size_gb": MAX_FILE_SIZE_MB / 1024}
 
   @classmethod
   def get_backup_limits(
     cls, tier: str, environment: str | None = None
   ) -> dict[str, Any]:
-    """Get backup limits for a tier."""
+    """Get the enforced backup limits for a tier: retention and daily count.
+
+    A backup's size is bounded by the instance storage cap, so graph.yml's
+    ``max_backup_size_gb`` is not published.
+    """
     tier_config = cls.get_tier_config(tier, environment)
-    default_limits = {
-      "max_backup_size_gb": 10,
-      "backup_retention_days": 7,
-      "max_backups_per_day": 2,
+    limits = tier_config.get("backup_limits", {})
+    return {
+      "backup_retention_days": limits.get("backup_retention_days", 7),
+      "max_backups_per_day": limits.get("max_backups_per_day", 2),
     }
-    return tier_config.get("backup_limits", default_limits)
 
   @classmethod
   def get_graph_limits(
@@ -332,8 +319,6 @@ class GraphTierConfig:
       features.append("No subgraph support")
     elif max_subgraphs == 0:
       features.append("Single database only")
-    elif max_subgraphs >= 25:
-      features.append("Unlimited subgraphs")
     elif max_subgraphs > 0:
       features.append(f"Up to {max_subgraphs} subgraphs")
 
@@ -452,7 +437,7 @@ class GraphTierConfig:
           # the enforced figure here too — reading `writer` directly is how the
           # two surfaces drifted apart in the first place.
           "copy_operations": cls.get_copy_operation_limits(tier_name, environment),
-          "backup": writer.get("backup_limits", {}),
+          "backup": cls.get_backup_limits(tier_name, environment),
           "graph_limits": writer.get("graph_limits", {}),
         },
       }

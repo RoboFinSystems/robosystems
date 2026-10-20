@@ -440,9 +440,6 @@ def get_credits(client, graph_id):
   click.echo(f"  Monthly Allocation: {pool['monthly_allocation']:,.2f}")
   click.echo(f"  Credit Multiplier: {pool['credit_multiplier']:.2f}x")
 
-  if pool.get("storage_limit_override_gb"):
-    click.echo(f"  Storage Limit Override: {pool['storage_limit_override_gb']:.2f} GB")
-
 
 @credits.command("bonus")
 @click.argument("graph_id")

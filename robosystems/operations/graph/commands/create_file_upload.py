@@ -13,7 +13,11 @@ from pathlib import Path as PathLib
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from robosystems.config.constants import MAX_FILE_SIZE_MB, PRESIGNED_URL_EXPIRY_SECONDS
+from robosystems.config.constants import (
+  MAX_FILE_SIZE_MB,
+  PRESIGNED_URL_EXPIRY_SECONDS,
+  UPLOAD_CONTENT_TYPES,
+)
 from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 from robosystems.logger import api_logger, logger
 from robosystems.middleware.graph import get_universal_repository
@@ -111,7 +115,7 @@ async def create_file_upload_cmd(
         session=db,
       )
 
-    allowed_formats = ["application/x-parquet", "text/csv", "application/json"]
+    allowed_formats = list(UPLOAD_CONTENT_TYPES)
     if request.content_type not in allowed_formats:
       raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -119,12 +123,7 @@ async def create_file_upload_cmd(
       )
 
     file_extension = PathLib(request.file_name).suffix.lstrip(".").lower()
-    expected_extensions = {
-      "application/x-parquet": "parquet",
-      "text/csv": "csv",
-      "application/json": "json",
-    }
-    expected_ext = expected_extensions.get(request.content_type, "")
+    expected_ext = UPLOAD_CONTENT_TYPES.get(request.content_type, "")
     if expected_ext and file_extension != expected_ext:
       raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -166,12 +165,7 @@ async def create_file_upload_cmd(
       expires_in=PRESIGNED_URL_EXPIRY_SECONDS,
     )
 
-    file_format_map = {
-      "application/x-parquet": "parquet",
-      "text/csv": "csv",
-      "application/json": "json",
-    }
-    file_format = file_format_map.get(request.content_type, "unknown")
+    file_format = UPLOAD_CONTENT_TYPES.get(request.content_type, "unknown")
 
     graph_file = GraphFile.create(
       graph_id=graph_id,

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from ...config.graph_tier import GraphTierConfig
 from ...database import get_db_session
 from ...logger import get_logger
 from ...middleware.auth.dependencies import get_current_user
@@ -129,6 +130,8 @@ async def get_org_usage(
     total_credits_used = Decimal(0)
     total_ai_operations = 0
     total_storage_gb = 0.0
+    total_credits_allocated = Decimal(0)
+    total_storage_limit_gb = 0.0
 
     graph_usage_details = []
 
@@ -185,6 +188,12 @@ async def get_org_usage(
       total_credits_used += graph_credits_used
       total_ai_operations += graph_ai_ops
       total_storage_gb += graph_storage
+      total_credits_allocated += Decimal(str(credits.monthly_allocation or 0))
+      # Subgraphs live on their parent's instance, so only parents add a cap.
+      if not graph.is_subgraph:
+        total_storage_limit_gb += GraphTierConfig.get_instance_storage_limit_gb(
+          str(graph.graph_tier)
+        )
 
     daily_avg_credits = float(total_credits_used) / max(days, 1)
 
@@ -196,8 +205,8 @@ async def get_org_usage(
       total_storage_gb=float(total_storage_gb),
       daily_avg_credits=daily_avg_credits,
       projected_monthly_credits=projected_monthly_credits,
-      credits_limit=None,  # We'll expand this later
-      storage_limit_gb=None,  # We'll expand this later
+      credits_limit=int(total_credits_allocated) if graph_usage_details else None,
+      storage_limit_gb=int(total_storage_limit_gb) if graph_usage_details else None,
     )
 
     daily_usage = []

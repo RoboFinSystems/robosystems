@@ -20,13 +20,11 @@ the codebase. If you are writing a new endpoint and reaching for credits, first
 check that it actually calls a model.
 
 **Storage is limit-enforced, not metered.** There is no storage-to-credits and
-no storage-to-USD path in the code. `GraphCredits.check_storage_limit()` — a
-method on the model in `models/core/graph/graph_credits.py`, not on
-`CreditService` — reports usage against the graph's `storage_limit_gb` (or
-`storage_override_gb` when an admin has set one) and returns usage, limit,
-percentage, and the `within_limit` / `approaching_limit` / `needs_warning`
-booleans. It never computes a charge. Exceeding the limit gates the write path;
-it does not bill.
+no storage-to-USD path in the code. `IngestionLimitChecker.check_instance_storage`
+(`middleware/graph/ingestion_limits.py`) measures the whole instance against the
+tier's `instance_storage_limit_gb`, and ingest and materialize are refused above
+it. It never computes a charge. Exceeding the limit gates the write path; it
+does not bill.
 
 ## Credits
 

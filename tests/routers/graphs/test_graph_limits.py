@@ -362,6 +362,10 @@ class TestGraphLimitsEndpoint:
     assert data["subscription_tier"] == "ladybug-standard"
     assert data["rate_limits"]["requests_per_minute"] == 60
     assert data["credits"] is None
+    # Read-only: no storage, upload or backup of the tenant's own applies.
+    assert data["storage"] is None
+    assert data["copy_operations"] is None
+    assert data["backups"] is None
 
   async def test_legacy_tier_string_floors_at_standard_not_base(
     self, async_client: AsyncClient, test_db, test_org, test_user
@@ -412,3 +416,41 @@ class TestGraphLimitsEndpoint:
     assert data["documents"] is None
     assert data["content"] is None
     assert data["instance"] is None
+
+  async def test_publishes_only_enforced_query_upload_and_backup_limits(
+    self, async_client: AsyncClient, test_db, test_org, test_user
+  ):
+    """Every number in the response is one the platform enforces."""
+    from robosystems.config.constants import (
+      MAX_FILE_SIZE_MB,
+      MAX_ROWS_PER_QUERY,
+      SUPPORTED_UPLOAD_FORMATS,
+    )
+    from robosystems.config.graph_tier import GraphTier
+    from robosystems.config.tuning import TuningConfig
+    from robosystems.middleware.rate_limits.download_limits import (
+      DownloadRateLimiter,
+    )
+
+    graph = self._make_graph(test_db, test_org, test_user, GraphTier.LADYBUG_STANDARD)
+    self._use_test_db(test_db)
+
+    repo, client, storage = self._no_graph_api()
+    with repo, client, storage:
+      response = await async_client.get(f"/v1/graphs/{graph.graph_id}/limits")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["queries"]["max_timeout_seconds"] == (
+      TuningConfig.get_graph_engine_query_timeout()
+    )
+    assert data["queries"]["max_rows_per_query"] == MAX_ROWS_PER_QUERY
+    assert "concurrent_queries" not in data["queries"]
+    assert data["copy_operations"] == {
+      "max_file_size_gb": MAX_FILE_SIZE_MB / 1024,
+      "supported_formats": list(SUPPORTED_UPLOAD_FORMATS),
+    }
+    assert data["backups"]["max_downloads_per_month"] == (
+      DownloadRateLimiter.get_graph_tier_monthly_limit("ladybug-standard")
+    )
+    assert "max_backup_size_gb" not in data["backups"]

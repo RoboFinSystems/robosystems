@@ -24,7 +24,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Session, relationship
 
-from robosystems.config.graph_tier import GraphTier, GraphTierConfig
+from robosystems.config.graph_tier import GraphTier
 from robosystems.database import Base
 from robosystems.utils.ulid import generate_prefixed_ulid
 
@@ -60,8 +60,6 @@ class GraphCredits(Base):
   current_balance = Column(Numeric(10, 2), nullable=False, default=0)
   monthly_allocation = Column(Numeric(10, 2), nullable=False, default=0)
 
-  storage_limit_gb = Column(Numeric(10, 2), nullable=False, default=500)
-  storage_override_gb = Column(Numeric(10, 2), nullable=True)  # Admin override
   auto_expand_enabled = Column(Boolean, nullable=False, default=False)
   last_storage_warning_at = Column(DateTime(timezone=True), nullable=True)
   storage_warning_threshold = Column(
@@ -88,7 +86,6 @@ class GraphCredits(Base):
     Index("idx_graph_credits_user_id", user_id),
     Index("idx_graph_credits_billing_admin", billing_admin_id),
     Index("idx_graph_credits_graph_id", graph_id),
-    Index("idx_graph_credits_storage_monitoring", storage_limit_gb),
   )
 
   def __repr__(self):
@@ -124,17 +121,11 @@ class GraphCredits(Base):
 
     graph_tier = GraphTier(graph.graph_tier)
 
-    # Storage is included in the tier rather than billed, so the backup cap
-    # doubles as the storage safety cap.
-    backup_limits = GraphTierConfig.get_backup_limits(graph_tier.value)
-    storage_limit_gb = backup_limits.get("max_backup_size_gb", 10)
-
     credits = cls(
       id=generate_prefixed_ulid("crd"),
       graph_id=graph_id,
       user_id=user_id,
       billing_admin_id=billing_admin_id,
-      storage_limit_gb=Decimal(str(storage_limit_gb)),
       monthly_allocation=monthly_allocation,
       current_balance=monthly_allocation,  # Start with full allocation
       last_allocation_date=datetime.now(UTC),
@@ -547,69 +538,8 @@ class GraphCredits(Base):
       "last_allocation_date": self.last_allocation_date.isoformat()
       if self.last_allocation_date is not None
       else None,
-      "storage_limit_gb": safe_float(self.storage_limit_gb),
-      "storage_override_gb": safe_float(self.storage_override_gb)
-      if self.storage_override_gb is not None
-      else None,
-      "effective_storage_limit_gb": safe_float(self.get_effective_storage_limit()),
       "auto_expand_enabled": self.auto_expand_enabled,
     }
-
-  def get_effective_storage_limit(self) -> Decimal:
-    """Get the effective storage limit (override or default)."""
-    return (
-      self.storage_override_gb
-      if self.storage_override_gb is not None
-      else self.storage_limit_gb
-    )
-
-  def check_storage_limit(self, current_storage_gb: Decimal) -> dict[str, Any]:
-    """Check if current storage is within limits."""
-    effective_limit = self.get_effective_storage_limit()
-    usage_percentage = (
-      (current_storage_gb / effective_limit) * 100 if effective_limit > 0 else 0
-    )
-
-    return {
-      "current_storage_gb": safe_float(current_storage_gb),
-      "effective_limit_gb": safe_float(effective_limit),
-      "usage_percentage": safe_float(usage_percentage),
-      "within_limit": current_storage_gb <= effective_limit,
-      "approaching_limit": usage_percentage
-      >= safe_float(self.storage_warning_threshold) * 100,
-      "needs_warning": usage_percentage
-      >= safe_float(self.storage_warning_threshold) * 100
-      and (
-        self.last_storage_warning_at is None
-        or (datetime.now(UTC) - self.last_storage_warning_at).days >= 1
-      ),
-      "has_override": self.storage_override_gb is not None,
-    }
-
-  def set_storage_override(
-    self, new_limit_gb: Decimal, admin_user_id: str, reason: str, session: Session
-  ) -> None:
-    """Set storage override limit (admin only)."""
-    old_limit = self.get_effective_storage_limit()
-    self.storage_override_gb = new_limit_gb
-    self.updated_at = datetime.now(UTC)
-
-    # Zero-amount BONUS row: carries the admin action into the audit trail
-    # without moving the balance.
-    GraphCreditTransaction.create_transaction(
-      graph_credits_id=self.id,
-      transaction_type=CreditTransactionType.BONUS,
-      amount=Decimal("0"),
-      description=f"Storage limit override: {old_limit}GB → {new_limit_gb}GB",
-      metadata={
-        "admin_user_id": admin_user_id,
-        "reason": reason,
-        "old_limit_gb": str(old_limit),
-        "new_limit_gb": str(new_limit_gb),
-        "action_type": "storage_override",
-      },
-      session=session,
-    )
 
   def update_storage_warning(self, session: Session) -> None:
     """Update last storage warning timestamp."""

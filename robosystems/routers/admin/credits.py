@@ -79,9 +79,6 @@ async def list_graph_credit_pools(
           current_balance=float(pool.current_balance),
           monthly_allocation=float(pool.monthly_allocation),
           credit_multiplier=1.0,
-          storage_limit_override_gb=float(pool.storage_override_gb)
-          if pool.storage_override_gb
-          else None,
           created_at=pool.created_at,
           updated_at=pool.updated_at,
         )
@@ -134,9 +131,6 @@ async def get_graph_credit_pool(request: Request, graph_id: str):
       current_balance=float(pool.current_balance),
       monthly_allocation=float(pool.monthly_allocation),
       credit_multiplier=1.0,
-      storage_limit_override_gb=float(pool.storage_override_gb)
-      if pool.storage_override_gb
-      else None,
       created_at=pool.created_at,
       updated_at=pool.updated_at,
     )
@@ -197,9 +191,6 @@ async def add_bonus_credits_to_graph(
       current_balance=float(pool.current_balance),
       monthly_allocation=float(pool.monthly_allocation),
       credit_multiplier=1.0,
-      storage_limit_override_gb=float(pool.storage_override_gb)
-      if pool.storage_override_gb
-      else None,
       created_at=pool.created_at,
       updated_at=pool.updated_at,
     )
@@ -261,9 +252,6 @@ async def reset_graph_credit_pool(
       current_balance=float(pool.current_balance),
       monthly_allocation=float(pool.monthly_allocation),
       credit_multiplier=1.0,
-      storage_limit_override_gb=float(pool.storage_override_gb)
-      if pool.storage_override_gb
-      else None,
       created_at=pool.created_at,
       updated_at=pool.updated_at,
     )

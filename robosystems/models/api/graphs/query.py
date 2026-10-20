@@ -152,6 +152,14 @@ class CypherStatementResponse(BaseModel):
     default=None, description="Column names from the query result"
   )
   row_count: int = Field(..., description="Number of rows returned")
+  truncated: bool = Field(
+    default=False,
+    description=(
+      "True when the result reached the 10,000-row cap of a non-streaming "
+      "query, so more rows may exist. Add LIMIT/SKIP, or stream the query "
+      "(mode=stream) for up to 1,000,000 rows."
+    ),
+  )
   execution_time_ms: float = Field(
     ..., description="Query execution time in milliseconds"
   )

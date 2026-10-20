@@ -150,6 +150,8 @@ curl -N "https://api.robosystems.ai/v1/operations/{operation_id}/stream" \
 
 Streaming result delivery is available by setting `Accept: application/x-ndjson` or `Accept: text/event-stream`, and `chunk_size` (10–10,000) tunes the streamed batch size.
 
+A non-streaming result stops at **10,000 rows**. When it reaches that cap the response sets `"truncated": true`, because more rows may exist; page with `SKIP`/`LIMIT`, or stream the query for up to 1,000,000 rows. `GET /v1/graphs/{graph_id}/limits` publishes the cap as `queries.max_rows_per_query`, beside the engine's per-query time ceiling.
+
 For the full request/response schema and every query parameter, see the API reference at [https://robosystems.ai/docs/api](https://robosystems.ai/docs/api) (operation `executeCypher`; its SQL peer below is `executeSql`).
 
 ## Querying the Staging Tables

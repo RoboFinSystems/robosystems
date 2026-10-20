@@ -15,7 +15,6 @@ class CreditPoolResponse(BaseModel):
   current_balance: float
   monthly_allocation: float
   credit_multiplier: float
-  storage_limit_override_gb: float | None
   created_at: datetime
   updated_at: datetime
 

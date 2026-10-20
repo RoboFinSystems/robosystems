@@ -5,6 +5,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
+from robosystems.config.constants import SUPPORTED_UPLOAD_FORMATS
 from robosystems.database import get_async_db_session
 from robosystems.graph_api.client import GraphClient
 from robosystems.logger import logger
@@ -166,15 +167,27 @@ async def get_graph_limits(
 
     copy_limits = get_tier_copy_operation_limits(graph_tier)
 
+    from robosystems.config.constants import MAX_ROWS_PER_QUERY
+    from robosystems.config.tuning import TuningConfig
+
     query_limits = {
-      "max_timeout_seconds": GraphTierConfig.get_query_timeout(graph_tier),
+      # The engine's per-query ceiling, the one actually enforced (same for
+      # every tier).
+      "max_timeout_seconds": TuningConfig.get_graph_engine_query_timeout(),
       "chunk_size": GraphTierConfig.get_chunk_size(graph_tier),
-      # Application-level limits, not in the YAML config.
-      "max_rows_per_query": 10000,
-      "concurrent_queries": 1,
+      "max_rows_per_query": MAX_ROWS_PER_QUERY,
     }
 
-    backup_limits = get_tier_backup_limits(graph_tier)
+    from robosystems.middleware.rate_limits.download_limits import (
+      DownloadRateLimiter,
+    )
+
+    backup_limits = {
+      **get_tier_backup_limits(graph_tier),
+      "max_downloads_per_month": DownloadRateLimiter.get_graph_tier_monthly_limit(
+        graph_tier
+      ),
+    }
 
     # Read from the limiter's own table; deriving from api_rate_multiplier
     # would advertise a ceiling no tier is granted.
@@ -310,17 +323,17 @@ async def get_graph_limits(
       subscription_tier=enforced_tier,
       graph_tier=graph_tier,
       is_shared_repository=is_shared,
-      storage=StorageLimits(**storage_limits),
+      # A shared repository is read-only: no storage, upload or backup of
+      # the tenant's own applies to it.
+      storage=None if is_shared else StorageLimits(**storage_limits),
       queries=QueryLimits(**query_limits),
-      copy_operations=CopyOperationLimits(
+      copy_operations=None
+      if is_shared
+      else CopyOperationLimits(
         max_file_size_gb=copy_limits["max_file_size_gb"],
-        timeout_seconds=copy_limits["timeout_seconds"],
-        concurrent_operations=copy_limits["concurrent_operations"],
-        max_files_per_operation=copy_limits["max_files_per_operation"],
-        daily_copy_operations=copy_limits["daily_copy_operations"],
-        supported_formats=["parquet", "csv", "json", "delta", "iceberg"],
+        supported_formats=list(SUPPORTED_UPLOAD_FORMATS),
       ),
-      backups=BackupLimits(**backup_limits),
+      backups=None if is_shared else BackupLimits(**backup_limits),
       rate_limits=RateLimits(**rate_limits),
       credits=CreditLimits(**credit_limits) if credit_limits else None,
       documents=document_limits,
