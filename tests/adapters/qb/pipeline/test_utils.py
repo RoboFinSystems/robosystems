@@ -120,6 +120,22 @@ class TestFlattenPaymentHeaders:
 
     rows = flatten_invoice_headers([_FakeInvoice()])
     assert rows[0]["linked_txns"] == "[]"
+    assert rows[0]["due_date"] == ""
+
+  def test_invoice_header_carries_its_due_date(self):
+    from robosystems.adapters.quickbooks.pipeline.utils import flatten_invoice_headers
+
+    rows = flatten_invoice_headers(
+      [
+        {
+          "Id": "42",
+          "TxnDate": "2026-03-31",
+          "DueDate": "2026-04-30",
+          "TotalAmt": 100.0,
+        }
+      ]
+    )
+    assert rows[0]["due_date"] == "2026-04-30"
 
 
 @pytest.mark.unit

@@ -12,6 +12,7 @@ from sqlalchemy import (
   Boolean,
   CheckConstraint,
   Column,
+  Date,
   DateTime,
   Index,
   String,
@@ -159,6 +160,9 @@ class Event(ExtensionsBase):
 
   occurred_at = Column(DateTime, nullable=False)
   effective_at = Column(DateTime, nullable=True)
+  # When an obligation (an invoice issued, a bill received) falls due: what
+  # the aged receivables and payables bucket on. Null on everything else.
+  due_date = Column(Date, nullable=True)
 
   status = Column(String, nullable=False, default="captured")
 

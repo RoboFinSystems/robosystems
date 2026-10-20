@@ -43,7 +43,7 @@ class GetEventBlockTool:
 An EventBlockEnvelope with:
 - event_type, event_category, status
 - REA primitives: agent_id, resource_type
-- Occurrence: occurred_at, effective_at
+- Occurrence: occurred_at, effective_at, and due_date on an invoice or bill
 - Provenance: source, external_id
 - Economic value: amount, currency
 - metadata (event-type-specific payload)

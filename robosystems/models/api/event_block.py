@@ -7,10 +7,10 @@ registry, turning them into GL transactions. The storage model is
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 EventClass = Literal["economic", "support"]
 EventCategory = Literal[
@@ -62,6 +62,10 @@ EventAction = Literal[
   "separate",
   "copy",
 ]
+
+
+# The event types that are obligations, which a due date belongs to.
+OBLIGATION_EVENT_TYPES: frozenset[str] = frozenset({"invoice_issued", "bill_received"})
 
 
 class CreateEventBlockRequest(BaseModel):
@@ -194,6 +198,23 @@ class CreateEventBlockRequest(BaseModel):
     None,
     description="Accounting recognition date, if different from occurred_at",
   )
+  due_date: date | None = Field(
+    None,
+    description=(
+      "When an obligation falls due: an `invoice_issued` or a "
+      "`bill_received`. Give it, or `terms_days`; with neither, the "
+      "obligation is due on receipt. Refused on any other event type."
+    ),
+  )
+  terms_days: int | None = Field(
+    None,
+    ge=0,
+    le=3650,
+    description=(
+      "Net terms in days from `occurred_at` (30 for net 30), in place of "
+      "`due_date`. Only on an `invoice_issued` or a `bill_received`."
+    ),
+  )
 
   # Provenance
   source: str = Field(
@@ -290,6 +311,25 @@ class CreateEventBlockRequest(BaseModel):
     ),
   )
 
+  @model_validator(mode="after")
+  def _due_date_is_an_obligations(self) -> CreateEventBlockRequest:
+    if self.due_date is None and self.terms_days is None:
+      return self
+    if self.event_type not in OBLIGATION_EVENT_TYPES:
+      raise ValueError(
+        "due_date and terms_days belong to an obligation (an invoice_issued "
+        f"or a bill_received), not a {self.event_type}."
+      )
+    if self.due_date is not None and self.terms_days is not None:
+      raise ValueError("Give due_date or terms_days, not both.")
+    return self
+
+  def resolved_due_date(self) -> date | None:
+    """The stated due date, or ``occurred_at`` plus ``terms_days``."""
+    if self.terms_days is not None:
+      return self.occurred_at.date() + timedelta(days=self.terms_days)
+    return self.due_date
+
 
 class EventBlockEnvelope(BaseModel):
   """Read projection for a single event block.
@@ -340,6 +380,14 @@ class EventBlockEnvelope(BaseModel):
   effective_at: datetime | None = Field(
     None,
     description="Accounting recognition date, when different from `occurred_at`.",
+  )
+  due_date: date | None = Field(
+    None,
+    description=(
+      "When the obligation falls due (an `invoice_issued` or a "
+      "`bill_received`); null when none was stated, which reads as due on "
+      "receipt, and on every other event type."
+    ),
   )
   source: str = Field(
     ...,
@@ -553,6 +601,14 @@ class UpdateEventBlockRequest(BaseModel):
     description=(
       "New accounting recognition date. Unset = unchanged. Useful "
       "when an event was captured against the wrong period."
+    ),
+  )
+  due_date: date | None = Field(
+    None,
+    description=(
+      "New due date of an obligation (an `invoice_issued` or a "
+      "`bill_received`), such as an extension granted. Unset = unchanged. "
+      "It moves no ledger row, so it is accepted in a closed period."
     ),
   )
   metadata_patch: dict[str, Any] = Field(

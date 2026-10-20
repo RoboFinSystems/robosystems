@@ -327,6 +327,8 @@ def _flatten_txn_header(
         "agent_type": agent_type,
         "linked_txns": _extract_linked_txns(data) if extract_linked_txns else "[]",
         "sync_token": str(data.get("SyncToken", "") or ""),
+        # Set on an Invoice or a Bill (QuickBooks defaults it to TxnDate).
+        "due_date": data.get("DueDate", "") or "",
       }
     )
   return rows
@@ -398,6 +400,7 @@ def flatten_purchase_headers(raw: list[Any]) -> list[dict[str, Any]]:
       "agent_type": agent_type,
       "linked_txns": "[]",
       "sync_token": str(data.get("SyncToken", "") or ""),
+      "due_date": "",
     }
     for candidate in candidate_tx_types:
       rows.append({**base_row, "tx_type": candidate})
@@ -482,6 +485,7 @@ _TXN_HEADER_SCHEMA = {
   "agent_type": "str",
   "linked_txns": "str",
   "sync_token": "str",
+  "due_date": "str",
 }
 
 
