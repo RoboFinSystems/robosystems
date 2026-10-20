@@ -46,6 +46,9 @@ from robosystems.operations.roboledger.entity_scope import (
 from robosystems.operations.roboledger.entry_status import (
   terminal_entry_bindparam,
 )
+from robosystems.operations.roboledger.line_dimensions import (
+  validate_line_dimensions,
+)
 from robosystems.operations.roboledger.schedules import ScheduleService
 from robosystems.operations.roboledger.schedules.service import (
   BEFORE_CALENDAR,
@@ -338,6 +341,14 @@ def reinstate_reopened_schedule_scopes(session: Session, entity_id: str) -> int:
   return result.rowcount or 0
 
 
+def _checked_dimensions(session: Session, dimension_ids: list[str]) -> list[str]:
+  """A template's members, checked as a line's are: live, one per axis."""
+  if not dimension_ids:
+    return []
+  (checked,) = validate_line_dimensions(session, [dimension_ids])
+  return checked
+
+
 def _validate_element_references(session: Session, body: CreateScheduleRequest) -> None:
   """Fail fast on element ids that don't exist or template accounts missing
   from ``element_ids``; otherwise facts land on phantom elements."""
@@ -416,6 +427,7 @@ def create_schedule(
     entry_type=body.entry_template.entry_type,
     memo_template=body.entry_template.memo_template,
     auto_reverse=body.entry_template.auto_reverse,
+    dimension_ids=_checked_dimensions(session, body.entry_template.dimension_ids),
   )
 
   sm = None
@@ -589,6 +601,11 @@ def update_schedule(
       "memo_template": body.entry_template.memo_template,
       "auto_reverse": body.entry_template.auto_reverse,
     }
+    # Stored only when there are members, so a template saved before they
+    # existed reads as unchanged when submitted again as it was.
+    dimension_ids = _checked_dimensions(session, body.entry_template.dimension_ids)
+    if dimension_ids:
+      new_template["dimension_ids"] = dimension_ids
     template_changed = new_template != existing_template
     metadata["entry_template"] = new_template
 
@@ -969,6 +986,7 @@ def _reconstruct_schedule_definition(
     entry_type=raw_template.get("entry_type", "closing"),
     memo_template=raw_template.get("memo_template", ""),
     auto_reverse=raw_template.get("auto_reverse", False),
+    dimension_ids=list(raw_template.get("dimension_ids") or []),
   )
 
   raw_meta = metadata.get("schedule_metadata")

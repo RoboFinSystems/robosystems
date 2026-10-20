@@ -36,6 +36,7 @@ from robosystems.operations.roboledger.commands._guards import (
   assert_period_not_closed,
   assert_within_calendar,
 )
+from robosystems.operations.roboledger.line_dimensions import inherit_event_dimensions
 
 
 @dataclass
@@ -352,6 +353,7 @@ def promote_pending_obligations(
       # whole transaction.
       with session.begin_nested():
         handler.dispatch(session, event, typed_metadata, created_by)
+        inherit_event_dimensions(session, str(event.id))
       result.dispatched_event_ids.append(event.id)
     except HandlerMetadataValidationError as e:
       result.errors.append((event.id, f"handler validation failed: {e}"))

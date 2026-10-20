@@ -390,7 +390,7 @@ def _apply_line_dimensions(
   checked = validate_line_dimensions(
     session,
     [d.dimension_ids for d in line_dimensions],
-    kept={i for tags in before.values() for i in tags},
+    kept=[before.get(line_id, []) for line_id in ids],
   )
   after = dict(zip(ids, checked, strict=True))
   changed = sorted(
@@ -440,6 +440,8 @@ def _retag_lines(
   line_items = _load_line_items(session, entry.id)
   if line_flows is not None:
     _mirror_flows_onto_bank_event(session, event, line_items)
+  if line_dimensions is not None:
+    _mirror_dimensions_onto_bank_event(session, event, line_items)
   return _respond(session, entry, line_items)
 
 
@@ -475,6 +477,39 @@ def _mirror_flows_onto_bank_event(
       metadata["classified_flow_qname"] = flow
     else:
       metadata.pop("classified_flow_qname", None)
+  event.metadata_ = metadata
+  session.flush()
+
+
+def _mirror_dimensions_onto_bank_event(
+  session: Session, event: Event | None, line_items: list[LineItem]
+) -> None:
+  """A bank line's account-side members are held on its event too, so a
+  restatement re-posting from the event keeps a re-tag made here."""
+  from robosystems.operations.event_block.python_handlers.bank_feed import (
+    BANK_FEED_HANDLERS,
+  )
+
+  if event is None or event.event_type not in BANK_FEED_HANDLERS:
+    return
+  metadata = dict(event.metadata_ or {})
+  if not any(
+    metadata.get(key)
+    for key in ("classified_element_id", "accept_suggestion", "classified_allocations")
+  ):
+    return
+  contra = [li for li in line_items if li.element_id != event.resource_element_id]
+  tags = line_dimension_ids(session, (li.id for li in contra))
+  of_account = {str(li.element_id): tags.get(str(li.id), []) for li in contra}
+  if metadata.get("classified_allocations"):
+    metadata["classified_allocations"] = [
+      {**allocation, "dimension_ids": of_account.get(str(allocation.get("element_id")))}
+      for allocation in metadata["classified_allocations"]
+    ]
+  else:
+    metadata["classified_dimension_ids"] = (
+      of_account.get(str(contra[0].element_id)) if contra else None
+    ) or None
   event.metadata_ = metadata
   session.flush()
 
@@ -871,16 +906,18 @@ def update_journal_entry(
     assert_accounts_postable(
       session, (li["element_id"] for li in normalized), entity_id=entry.entity_id
     )
-    # A retired member the old lines carried may stay on their replacements.
-    held = line_dimension_ids(
-      session, (li.id for li in _load_line_items(session, entry.id))
+    # A retired member an old line carried may stay on the replacement at
+    # its position.
+    old_lines = sorted(
+      _load_line_items(session, entry.id), key=lambda li: li.line_order
     )
+    held = line_dimension_ids(session, (li.id for li in old_lines))
     for li, ids in zip(
       normalized,
       validate_line_dimensions(
         session,
         [li["dimension_ids"] for li in normalized],
-        kept={i for tags in held.values() for i in tags},
+        kept=[held.get(str(old.id), []) for old in old_lines],
       ),
       strict=True,
     ):

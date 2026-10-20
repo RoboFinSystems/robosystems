@@ -42,6 +42,14 @@ class EntryTemplateRequest(BaseModel):
     False,
     description="Auto-generate a reversing entry on the first day of the next period",
   )
+  dimension_ids: list[str] = Field(
+    default_factory=list,
+    description=(
+      "The management dimension members (department, class, location, "
+      "project) every entry the schedule drafts carries on both lines, one "
+      "per axis: a department's depreciation lands in that department."
+    ),
+  )
 
 
 class ScheduleMetadataRequest(BaseModel):

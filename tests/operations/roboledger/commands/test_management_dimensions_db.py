@@ -474,3 +474,54 @@ class TestTheSlice:
 
       assert by_code == {"4000": -500.0}
       assert untagged == {"1000": 600.0, "4000": -100.0}
+
+  def test_a_member_on_balance_sheet_lines_only_has_no_column(self, books):
+    chart_id, sales, ops = books
+    with extensions_session(GRAPH) as session:
+      _fees(session, chart_id, 50_000, [sales])
+      create_journal_entry(
+        session,
+        CreateJournalEntryRequest(
+          posting_date=date(2026, 7, 16),
+          memo="Cash moved",
+          status="posted",
+          line_items=[
+            JournalEntryLineItemInput(
+              element_id=_account(session, chart_id, "1000"),
+              debit_amount=100,
+              dimension_ids=[ops],
+            ),
+            JournalEntryLineItemInput(
+              element_id=_account(session, chart_id, "1100"), credit_amount=100
+            ),
+          ],
+        ),
+        "usr_1",
+        entity_id=PARENT,
+      )
+
+      response = self._july(session, dimension=StatementDimension(type="department"))
+
+      assert [c.name for c in response.dimension.columns] == [
+        "Sales",
+        "Unallocated",
+        "Total",
+      ]
+
+  def test_a_sliced_trial_balance_says_so(self, books):
+    chart_id, sales, _ops = books
+    with extensions_session(GRAPH) as session:
+      _fees(session, chart_id, 50_000, [sales])
+      assert (
+        get_trial_balance(session, JULY[0], JULY[1], entity_id=PARENT).sliced is False
+      )
+      assert (
+        get_trial_balance(
+          session,
+          JULY[0],
+          JULY[1],
+          entity_id=PARENT,
+          line_slice=LineSlice("department", sales),
+        ).sliced
+        is True
+      )

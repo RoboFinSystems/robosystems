@@ -33,16 +33,22 @@ from robosystems.operations.roboledger.reads.dimensions import (
 
 
 class DuplicateDimensionError(Exception):
-  def __init__(self, dimension_type: str, value: str) -> None:
+  def __init__(self, dimension_type: str, value: str, retired_id: str | None) -> None:
     super().__init__(
       f"The {dimension_type} axis already has a member with value {value!r}."
+      + (
+        f" It is retired ({retired_id}); bring it back with update-dimension "
+        "is_active=true."
+        if retired_id
+        else ""
+      )
     )
     self.dimension_type = dimension_type
     self.value = value
 
 
 def _slug(name: str) -> str:
-  return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or name
+  return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
 
 
 def create_dimension(
@@ -54,6 +60,19 @@ def create_dimension(
       "take department, class, location, project or an axis of your own."
     )
   value = body.value or _slug(body.name)
+  if not value:
+    raise ValueError(
+      f"{body.name!r} makes no key of letters or digits; give the member a value."
+    )
+  held = session.execute(
+    select(Dimension).where(
+      Dimension.dimension_type == body.dimension_type, Dimension.value == value
+    )
+  ).scalar_one_or_none()
+  if held is not None:
+    raise DuplicateDimensionError(
+      body.dimension_type, value, None if held.is_active else str(held.id)
+    )
   now = datetime.now(UTC)
   dimension = Dimension(
     dimension_type=body.dimension_type,
@@ -68,8 +87,11 @@ def create_dimension(
     with session.begin_nested():
       session.add(dimension)
       session.flush()
-  except IntegrityError:
-    raise DuplicateDimensionError(body.dimension_type, value)
+  except IntegrityError as exc:
+    # Only the race a concurrent create of the same key loses.
+    if "uq_dimension_type_value" not in str(exc.orig):
+      raise
+    raise DuplicateDimensionError(body.dimension_type, value, None) from exc
   session.commit()
   return dimension_to_response(dimension)
 

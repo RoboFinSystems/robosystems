@@ -282,9 +282,9 @@ class CreateEventBlockRequest(BaseModel):
   dimension_ids: list[str] = Field(
     default_factory=list,
     description=(
-      "IDs of dimension members tagging this event (e.g. "
-      "department, fund, project). Propagate to the GL entries "
-      "produced by the handler."
+      "Management dimension members tagging this event (department, "
+      "class, location, project), one per axis. Every line its handler "
+      "writes carries them on the axes the line does not tag itself."
     ),
   )
 

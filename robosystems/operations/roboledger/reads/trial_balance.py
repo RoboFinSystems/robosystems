@@ -122,4 +122,5 @@ def get_trial_balance(
     rows=rows,
     total_debits=grand_debits,
     total_credits=grand_credits,
+    sliced=line_slice is not None,
   )
