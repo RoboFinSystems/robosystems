@@ -40,6 +40,7 @@ from robosystems.operations.information_block.envelope import (
   window_series_sets,
 )
 from robosystems.operations.roboledger.reports.fact_grid import (
+  ROLLFORWARD_ROOTS,
   FactRow,
   PeriodSpec,
   ReportFact,
@@ -336,7 +337,11 @@ def _build_statement_rendering(
   ]
 
   rows: list[FactRow] = _build_rows(
-    hierarchy, period_balances, calculations, pre_signed=True
+    hierarchy,
+    period_balances,
+    calculations,
+    pre_signed=True,
+    keep=ROLLFORWARD_ROOTS if block_type == "equity_statement" else frozenset(),
   )
   # The statement view's layout: each roll-forward opens on its balance.
   if block_type == "equity_statement":

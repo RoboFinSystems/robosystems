@@ -89,6 +89,7 @@ class CloseableGateResult:
   group_pending_adjustments: list[str] = field(default_factory=list)
   group_unexplained: list[str] = field(default_factory=list)
   group_not_footing: list[str] = field(default_factory=list)
+  is_group_close: bool = False
 
   SEQUENCE = "sequence_violation"
   PERIOD_INCOMPLETE = "period_incomplete"
@@ -1189,6 +1190,7 @@ class FiscalCalendarService:
       group_pending_adjustments=group.pending_adjustments if group else [],
       group_unexplained=group.unexplained if group else [],
       group_not_footing=group.not_footing if group else [],
+      is_group_close=group is not None,
       pending_obligation_count=pending_count,
       pending_obligation_sample=pending_sample,
       earliest_pending_period=earliest_pending_period,

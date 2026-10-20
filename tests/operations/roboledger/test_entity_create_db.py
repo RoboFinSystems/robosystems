@@ -502,6 +502,13 @@ class TestGroupMembers:
     q3 = (date(2026, 7, 1), date(2026, 9, 30))
     assert membership_window(member, *q3) == q3
 
+  def test_the_consolidation_entity_is_read_for_every_month(self):
+    adjustments = GroupMember(
+      "ent", "consolidation", date(2026, 3, 1), date(2026, 3, 31)
+    )
+    assert adjustments.is_member_for(date(2026, 1, 1), date(2026, 1, 31))
+    assert adjustments.is_member_for(date(2026, 12, 1), date(2026, 12, 31))
+
 
 class TestConsolidationFollowUps:
   def test_leaving_the_consolidation_role_re_derives_the_method(self, two_entities):

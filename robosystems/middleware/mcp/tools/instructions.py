@@ -402,8 +402,10 @@ def _consolidation_lines(adjustments: Sequence[Mapping[str, Any]], has) -> list[
     lines.append(
       "- `propose-consolidation-entries(period)` writes them as drafts in the "
       "consolidation entity, replacing its own earlier drafts of the month; "
-      "the consolidation entity's close posts them. A residual is returned "
-      "beside them, never plugged: explain it or post it by hand with a basis."
+      "the consolidation entity's close posts them. On its first month, what "
+      "earlier history already needed is recorded as its opening, posted. A "
+      "residual is returned beside them, never plugged: explain it or post it "
+      "by hand with a basis."
     )
   if adjustments and has("close-period"):
     lines.append(
