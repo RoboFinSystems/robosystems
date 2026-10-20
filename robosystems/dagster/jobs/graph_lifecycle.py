@@ -14,6 +14,39 @@ class SuspendGraphsConfig(Config):
   graph_ids: list[str]
 
 
+def _lapsed_subscription(session, graph_id: str, *, ends_before):
+  """The graph's subscription while it is still lapsed with ``ends_at`` before
+  ``ends_before`` or canceled immediately; None once a payment revived it.
+
+  The lifecycle sensors select on this predicate. The ops read it again
+  because a payment can land between the sensor's tick and the run: the
+  webhook then makes the subscription active, and acting on the tick's
+  selection would suspend or tear down a paid graph.
+  """
+  from sqlalchemy import or_
+
+  from robosystems.models.core.billing.subscription import (
+    LAPSED_SUBSCRIPTION_STATUSES,
+    BillingSubscription,
+    CancellationType,
+  )
+
+  return (
+    session.query(BillingSubscription)
+    .filter(
+      BillingSubscription.resource_type == "graph",
+      BillingSubscription.resource_id == graph_id,
+      BillingSubscription.status.in_(LAPSED_SUBSCRIPTION_STATUSES),
+      BillingSubscription.ends_at.isnot(None),
+      or_(
+        BillingSubscription.ends_at < ends_before,
+        BillingSubscription.cancellation_type == CancellationType.IMMEDIATE.value,
+      ),
+    )
+    .first()
+  )
+
+
 @op
 def suspend_expired_graphs(
   context: OpExecutionContext,
@@ -21,9 +54,12 @@ def suspend_expired_graphs(
   config: SuspendGraphsConfig,
 ) -> dict:
   """Suspend graphs whose subscriptions have expired."""
+  from datetime import UTC, datetime
+
   from robosystems.models.core.graph import Graph, GraphStatus
 
   suspended_count = 0
+  now = datetime.now(UTC)
 
   with db.get_session() as session:
     for graph_id in config.graph_ids:
@@ -34,6 +70,12 @@ def suspend_expired_graphs(
 
       if graph.status != GraphStatus.ACTIVE.value:
         context.log.info(f"Graph {graph_id} is already {graph.status}, skipping")
+        continue
+
+      if _lapsed_subscription(session, graph_id, ends_before=now) is None:
+        context.log.info(
+          f"Graph {graph_id}: its subscription is no longer lapsed, skipping"
+        )
         continue
 
       graph.transition_status(GraphStatus.SUSPENDED, session)
@@ -124,8 +166,11 @@ def deprovision_suspended_graphs(
 ) -> dict:
   """Deprovision graphs that have been suspended past the retention period."""
   import asyncio
+  from datetime import UTC, datetime, timedelta
 
   from robosystems.config import env
+  from robosystems.config.deprovisioning import get_deprovisioning_config
+  from robosystems.models.core.graph import Graph, GraphStatus
   from robosystems.operations.graph.deprovision_service import (
     GraphDeprovisionService,
   )
@@ -133,10 +178,34 @@ def deprovision_suspended_graphs(
   service = GraphDeprovisionService(environment=env.ENVIRONMENT)
   deprovisioned_count = 0
   errors: list[str] = []
+  retention_cutoff = datetime.now(UTC) - timedelta(
+    days=get_deprovisioning_config().retention_days
+  )
 
   with db.get_session() as session:
     for graph_id in config.graph_ids:
       try:
+        graph = Graph.get_by_id(graph_id, session, include_deprovisioned=True)
+        if graph is None:
+          context.log.warning(f"Graph {graph_id} not found, skipping")
+          continue
+        # A teardown already under way (deleted_at stamped, or deprovisioned
+        # with disposal steps left) is retried whatever the subscription says.
+        if graph.deleted_at is None:
+          if graph.status != GraphStatus.SUSPENDED.value:
+            context.log.info(
+              f"Graph {graph_id} is {graph.status}, not suspended; skipping"
+            )
+            continue
+          if (
+            _lapsed_subscription(session, graph_id, ends_before=retention_cutoff)
+            is None
+          ):
+            context.log.info(
+              f"Graph {graph_id}: its subscription is no longer lapsed past "
+              "retention, skipping"
+            )
+            continue
         if not _end_unpaid_subscription(graph_id, session, context):
           errors.append(
             f"Skipped {graph_id}: its unpaid Stripe subscription could not be "
