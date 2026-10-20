@@ -48,15 +48,11 @@ from robosystems.operations.roboledger.reads.blocked_source_graphs import (
 )
 from robosystems.operations.roboledger.reads.reports import (
   build_periods,
+  consolidated_name,
   load_structures,
   periods_to_json,
   report_to_response,
   resolve_entity_name,
-)
-from robosystems.operations.roboledger.reports.fact_grid import generate_report_facts
-from robosystems.operations.roboledger.reports.network_picker import (
-  load_close_target_concept,
-  load_entity_reporting_style,
 )
 
 # Re-exported: tests and the router import these names from this module.
@@ -68,6 +64,7 @@ from robosystems.operations.roboledger.reports.statement_sets import (  # noqa: 
   _persist_report_facts,
   _pick_disclosure_structures,
   _pre_create_report_fact_sets,
+  generate_entity_report_facts,
 )
 from robosystems.operations.serialization import (
   StatementBundle,
@@ -344,15 +341,13 @@ def create_report(
   session.add(report_def)
   session.flush()
 
-  reporting_style_id = load_entity_reporting_style(session, entity_id)
-  close_target = load_close_target_concept(session, reporting_style_id)
-
-  facts = generate_report_facts(
-    session=session,
+  # The consolidation entity's report is the group's consolidated
+  # statements, under the group parent's Style.
+  facts, reporting_style_id = generate_entity_report_facts(
+    session,
     taxonomy_id=resolved_taxonomy_id,
     mapping_id=body.mapping_id,
     periods=periods,
-    close_target_qname=close_target,
     entity_id=entity_id,
   )
 
@@ -488,18 +483,16 @@ def regenerate_report(
   report_def.generation_status = "generating"
   session.flush()
 
-  # The report keeps the entity it was generated for; a report with no facts
-  # yet takes the group parent, as ``create_report`` does.
-  entity_id = resolve_entity_id(session, report_entity_id(session, report_def.id))
-  reporting_style_id = load_entity_reporting_style(session, entity_id)
-  close_target = load_close_target_concept(session, reporting_style_id)
-
-  facts = generate_report_facts(
-    session=session,
+  # The report keeps the entity it was generated for; one from before the
+  # column, its facts' entity, and with no facts the group parent.
+  entity_id = resolve_entity_id(
+    session, report_def.entity_id or report_entity_id(session, report_def.id)
+  )
+  facts, reporting_style_id = generate_entity_report_facts(
+    session,
     taxonomy_id=report_def.taxonomy_id,
     mapping_id=report_def.mapping_id or "",
     periods=periods,
-    close_target_qname=close_target,
     entity_id=entity_id,
   )
 
@@ -1788,15 +1781,22 @@ def _ensure_linked_entity(
       is_source_parent = (
         source_parent is not None and source_parent.id == source_entity.id
       )
+      # A consolidated report states the group, so the recipient's row for it
+      # is the group parent's identity, apart from the parent's own reports.
+      stated = source_entity
+      name = source_entity.name
+      if source_entity.entity_role == "consolidation" and source_parent is not None:
+        stated = source_parent
+        name = consolidated_name(source_parent.name)
 
       entity_data = {
-        "name": source_entity.name,
-        "legal_name": source_entity.legal_name,
-        "entity_type": source_entity.entity_type,
-        "industry": source_entity.industry,
-        "cik": source_entity.cik,
-        "ticker": source_entity.ticker,
-        "state_of_incorporation": source_entity.state_of_incorporation,
+        "name": name,
+        "legal_name": stated.legal_name,
+        "entity_type": stated.entity_type,
+        "industry": stated.industry,
+        "cik": stated.cik,
+        "ticker": stated.ticker,
+        "state_of_incorporation": stated.state_of_incorporation,
       }
   except Exception:
     logger.warning(f"Could not read source entity from {source_graph_id}")

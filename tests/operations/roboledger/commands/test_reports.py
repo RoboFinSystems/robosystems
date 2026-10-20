@@ -962,9 +962,7 @@ _CREATE_REPORT_COLLABORATORS = (
   "build_periods",
   "periods_to_json",
   "resolve_entity_id",
-  "load_entity_reporting_style",
-  "load_close_target_concept",
-  "generate_report_facts",
+  "generate_entity_report_facts",
   "_pre_create_report_fact_sets",
   "_persist_report_facts",
   "_snapshot_text_block_facts",
@@ -976,6 +974,12 @@ _CREATE_REPORT_COLLABORATORS = (
 )
 
 
+# The generator hands back the facts and the Style they render under.
+_COLLABORATOR_DEFAULTS = {
+  "generate_entity_report_facts": {"return_value": (MagicMock(), "style_1")},
+}
+
+
 def _create_report(body: MagicMock, **replacements) -> dict[str, MagicMock]:
   """Run create_report with its collaborators mocked. Returns the mocks."""
   from robosystems.operations.roboledger.commands import reports as mod
@@ -984,7 +988,13 @@ def _create_report(body: MagicMock, **replacements) -> dict[str, MagicMock]:
   session.execute.return_value.fetchone.return_value = ("tax_resolved", "rs-gaap")
   with ExitStack() as stack:
     mocks = {
-      name: stack.enter_context(patch.object(mod, name, **replacements.get(name, {})))
+      name: stack.enter_context(
+        patch.object(
+          mod,
+          name,
+          **{**_COLLABORATOR_DEFAULTS.get(name, {}), **replacements.get(name, {})},
+        )
+      )
       for name in _CREATE_REPORT_COLLABORATORS
     }
     stack.enter_context(patch.object(mod, "Report"))
@@ -1018,7 +1028,9 @@ def test_create_report_is_for_the_entity_whose_chart_the_mapping_maps_from() -> 
     resolve_entity_id={"side_effect": lambda session, entity_id=None: entity_id},
   )
 
-  assert mocks["generate_report_facts"].call_args.kwargs["entity_id"] == "ent_sub"
+  assert (
+    mocks["generate_entity_report_facts"].call_args.kwargs["entity_id"] == "ent_sub"
+  )
   assert mocks["_pre_create_report_fact_sets"].call_args.args[2] == "ent_sub"
 
 
@@ -1034,7 +1046,9 @@ def test_create_report_takes_the_entity_the_mapping_is_for() -> None:
     resolve_entity_id={"side_effect": lambda session, entity_id=None: entity_id},
   )
 
-  assert mocks["generate_report_facts"].call_args.kwargs["entity_id"] == "ent_sub"
+  assert (
+    mocks["generate_entity_report_facts"].call_args.kwargs["entity_id"] == "ent_sub"
+  )
 
 
 def test_create_report_refuses_an_entity_the_mapping_is_not_for() -> None:

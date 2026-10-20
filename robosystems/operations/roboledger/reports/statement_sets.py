@@ -16,7 +16,7 @@ except the leaf ``_guards`` module.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import delete, text
@@ -32,6 +32,7 @@ from robosystems.operations.roboledger.commands._guards import (
   rule_summary as _rule_summary,
 )
 from robosystems.operations.roboledger.entity_scope import (
+  GroupMember,
   NoEntityError,
   group_members,
   resolve_entity_id,
@@ -387,25 +388,63 @@ def _group_parent_of(session: Session, entity_id: str | None) -> str | None:
   return resolve_entity_id(session, None) if role == "consolidation" else None
 
 
-def _consolidated_report_facts(
+class ConsolidatedPeriodSpansMembershipError(ValueError):
+  """A consolidated column spans a member joining or leaving the group."""
+
+  def __init__(self, member_id: str, period: PeriodSpec) -> None:
+    super().__init__(
+      f"Entity {member_id!r} joins or leaves the group during {period.label} "
+      f"({period.start} to {period.end}); a consolidated column cannot state "
+      "part of a member's time. Report the months on either side."
+    )
+    self.member_id = member_id
+    self.period = period
+
+
+def _month(day: date) -> tuple[int, int]:
+  return (day.year, day.month)
+
+
+def _member_covers(member: GroupMember, period: PeriodSpec) -> bool | None:
+  """True when ``member`` is in the group for all of ``period``, False when
+  for none of it, None when for part. By month, as ``is_member_for``."""
+  if not member.is_member_for(period.start, period.end):
+    return False
+  if member.role == "consolidation":
+    return True
+  joined = member.joined_on is None or _month(member.joined_on) <= _month(period.start)
+  stays = member.left_on is None or _month(member.left_on) >= _month(period.end)
+  return True if joined and stays else None
+
+
+def consolidated_report_facts(
   session: Session,
+  *,
   taxonomy_id: str,
   mapping_id: str,
-  period: PeriodSpec,
+  periods: list[PeriodSpec],
   close_target: str,
   parent_id: str,
 ) -> ReportFacts:
-  """The group's facts for one month: each entity the consolidated read sums
-  (the parent, every member in full inside its interval, and the
+  """The group's facts for each period: each entity the consolidated read
+  sums (the parent, every member in full inside its interval, and the
   consolidation entity's adjustments), pivoted on its own chart under the
   parent's Style and added concept by concept, as ``live-financial-statement``
   adds them with ``scope: consolidated``. An entity with no mapping is left
-  out, as there."""
+  out, as there. Raises :class:`ConsolidatedPeriodSpansMembershipError` for a
+  period a member is in the group for only part of."""
   summed: dict[tuple, ReportFact] = {}
   warnings: list[str] = []
   unmapped = 0
   for member in group_members(session, parent_id, consolidated=True):
-    if not member.is_member_for(period.start, period.end):
+    covered: list[PeriodSpec] = []
+    for period in periods:
+      covers = _member_covers(member, period)
+      if covers is None:
+        raise ConsolidatedPeriodSpansMembershipError(member.id, period)
+      if covers:
+        covered.append(period)
+    if not covered:
       continue
     own = find_entity_mapping(session, member.id, BOOK_FRAMEWORK)
     if own is None:
@@ -414,7 +453,7 @@ def _consolidated_report_facts(
       session=session,
       taxonomy_id=taxonomy_id,
       mapping_id=str(own.id),
-      periods=[period],
+      periods=covered,
       close_target_qname=close_target,
       entity_id=member.id,
     )
@@ -437,12 +476,48 @@ def _consolidated_report_facts(
         held.source_values = {**(held.source_values or {}), **f.source_values}
   return ReportFacts(
     facts=list(summed.values()),
-    periods=[period],
+    periods=periods,
     unmapped_count=unmapped,
     taxonomy_id=taxonomy_id,
     mapping_id=mapping_id,
     warnings=warnings,
   )
+
+
+def generate_entity_report_facts(
+  session: Session,
+  *,
+  taxonomy_id: str,
+  mapping_id: str,
+  periods: list[PeriodSpec],
+  entity_id: str,
+) -> tuple[ReportFacts, str]:
+  """One entity's report facts for ``periods`` and the Reporting Style they
+  render under. The consolidation entity's are the group's consolidated
+  statements, under the group parent's Style; any other entity's are its own
+  books, under its own."""
+  group_parent = _group_parent_of(session, entity_id)
+  reporting_style_id = load_entity_reporting_style(session, group_parent or entity_id)
+  close_target = load_close_target_concept(session, reporting_style_id)
+  if group_parent is not None:
+    facts = consolidated_report_facts(
+      session,
+      taxonomy_id=taxonomy_id,
+      mapping_id=mapping_id,
+      periods=periods,
+      close_target=close_target,
+      parent_id=group_parent,
+    )
+  else:
+    facts = generate_report_facts(
+      session=session,
+      taxonomy_id=taxonomy_id,
+      mapping_id=mapping_id,
+      periods=periods,
+      close_target_qname=close_target,
+      entity_id=entity_id,
+    )
+  return facts, reporting_style_id
 
 
 def _scope_entity_id(session: Session, entity_id: str | None) -> str | None:
@@ -587,8 +662,13 @@ def stamp_canonical_statement_sets(
     close_target = load_close_target_concept(session, reporting_style_id)
     period = PeriodSpec(start=period_start, end=period_end, label=period_label)
     if group_parent is not None:
-      facts = _consolidated_report_facts(
-        session, taxonomy_row.id, mapping.id, period, close_target, group_parent
+      facts = consolidated_report_facts(
+        session,
+        taxonomy_id=taxonomy_row.id,
+        mapping_id=mapping.id,
+        periods=[period],
+        close_target=close_target,
+        parent_id=group_parent,
       )
     else:
       facts = generate_report_facts(
@@ -645,9 +725,12 @@ def stamp_canonical_statement_sets(
 
 
 __all__ = [
+  "ConsolidatedPeriodSpansMembershipError",
   "NoEntityError",
   "StatementStampError",
   "StatementStampResult",
+  "consolidated_report_facts",
+  "generate_entity_report_facts",
   "retract_canonical_statement_sets",
   "stamp_canonical_statement_sets",
 ]

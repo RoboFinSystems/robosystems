@@ -107,12 +107,12 @@ def _stamp(session, **patches):
       return_value={"pass": 2, "fail": 0, "error": 0, "skipped": 0}
     ),
     "_group_parent_of": MagicMock(return_value=None),
-    "_consolidated_report_facts": MagicMock(return_value=_fake_facts()),
+    "consolidated_report_facts": MagicMock(return_value=_fake_facts()),
   }
   defaults.update(patches)
   with (
     patch(f"{_MOD}._group_parent_of", defaults["_group_parent_of"]),
-    patch(f"{_MOD}._consolidated_report_facts", defaults["_consolidated_report_facts"]),
+    patch(f"{_MOD}.consolidated_report_facts", defaults["consolidated_report_facts"]),
     patch(f"{_MOD}.find_entity_mapping", MagicMock(return_value=session.book_mapping)),
     patch(
       f"{_MOD}.load_entity_reporting_style", defaults["load_entity_reporting_style"]
@@ -215,14 +215,14 @@ class TestStampHappyPath:
     result = _stamp(
       session,
       _group_parent_of=MagicMock(return_value="ent_parent"),
-      _consolidated_report_facts=consolidated,
+      consolidated_report_facts=consolidated,
       generate_report_facts=own,
       load_entity_reporting_style=style,
     )
 
     assert result.stamped is True
     own.assert_not_called()
-    assert consolidated.call_args.args[-1] == "ent_parent"
+    assert consolidated.call_args.kwargs["parent_id"] == "ent_parent"
     style.assert_called_once_with(session, "ent_parent")
     assert {fs.entity_id for fs in self._added_fact_sets(session)} == {"ent_1"}
 

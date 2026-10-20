@@ -58,7 +58,9 @@ class CreateReportRequest(BaseModel):
     description=(
       "The entity the report is for, by id. Omit for the entity whose chart "
       "`mapping_id` maps from (the group parent on a one-entity graph). "
-      "Named alongside a mapping of another entity's chart, it is refused."
+      "Named alongside a mapping of another entity's chart, it is refused. "
+      "The consolidation entity's report is the group's consolidated "
+      "statements."
     ),
   )
   name: str = Field(
