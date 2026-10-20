@@ -96,15 +96,67 @@ def journal_report_truncated(report: dict[str, Any] | None) -> bool:
   return open_group and len(rows) * width >= _NEAR_CAP_CELLS
 
 
+def normalize_journal_report(report: dict[str, Any] | None) -> dict[str, Any] | None:
+  """Each row's ColData in ``JOURNAL_REPORT_COLUMNS`` order, by the keys the
+  report's own ``Columns`` carry: asked for by name, Intuit reorders them,
+  and drops class and department for a company that tracks neither. A
+  report with no ``Columns`` is taken as already in that order."""
+  from robosystems.adapters.quickbooks.client.api import JOURNAL_REPORT_COLUMNS
+
+  if not report:
+    return report
+  columns = (report.get("Columns") or {}).get("Column") or []
+  if not columns:
+    return report
+  keys = [
+    next(
+      (m.get("Value") for m in c.get("MetaData") or [] if m.get("Name") == "ColKey"),
+      None,
+    )
+    for c in columns
+  ]
+  at = {key: i for i, key in enumerate(keys) if key}
+
+  def reorder(cells: list[dict]) -> list[dict]:
+    return [
+      cells[at[key]] if key in at and at[key] < len(cells) else {"value": ""}
+      for key in JOURNAL_REPORT_COLUMNS
+    ]
+
+  rows = []
+  for row in (report.get("Rows") or {}).get("Row") or []:
+    if "ColData" in row:
+      row = {**row, "ColData": reorder(row["ColData"])}
+    if "Summary" in row and "ColData" in row["Summary"]:
+      row = {
+        **row,
+        "Summary": {**row["Summary"], "ColData": reorder(row["Summary"]["ColData"])},
+      }
+    rows.append(row)
+  return {**report, "Rows": {**(report.get("Rows") or {}), "Row": rows}}
+
+
+def department_axis(terminology: str | None) -> str:
+  """The dimension QuickBooks's department lands on: ``department`` for a
+  company that calls it that, else ``location``, QuickBooks's default name."""
+  return (
+    "department" if (terminology or "").strip().lower() == "department" else "location"
+  )
+
+
 def parse_journal_report(
   report: dict[str, Any],
+  *,
+  department_as: str = "location",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
   """Parse a JournalReport (every transaction type, double-entry) into rows
   for raw_journal_entries and raw_journal_lines.
 
-  ColData: [0] Date, [1] Type (.id = tx id), [2] Num, [3] Name, [4] Memo,
-  [5] Account (.id = account id), [6] Debit, [7] Credit. "Summary" rows
-  close each transaction group.
+  ColData, normalized: [0] Date, [1] Type (.id = tx id), [2] Num, [3] Name,
+  [4] Memo, [5] Account (.id = account id), [6] Debit, [7] Credit, and when
+  the company tracks them [8] Class and [9] Department (.id each).
+  "Summary" rows close each transaction group. ``department_as`` is the
+  dimension a department lands on (``department_axis``).
   """
   entries: list[dict[str, Any]] = []
   lines: list[dict[str, Any]] = []
@@ -156,6 +208,11 @@ def parse_journal_report(
 
     account_id = col_data[5].get("id", "")
     account_name = col_data[5].get("value", "")
+    klass = col_data[8] if len(col_data) > 8 else {}
+    dept = col_data[9] if len(col_data) > 9 else {}
+    dept_id = str(dept.get("id") or "")
+    dept_name = dept.get("value", "") if dept_id else ""
+    as_department = department_as == "department"
 
     lines.append(
       {
@@ -167,12 +224,12 @@ def parse_journal_report(
         "AccountRef_name": account_name,
         "Description": col_data[4].get("value", ""),
         "DetailType": "JournalEntryLineDetail",
-        "DepartmentRef_value": "",
-        "DepartmentRef_name": "",
-        "ClassRef_value": "",
-        "ClassRef_name": "",
-        "LocationRef_value": "",
-        "LocationRef_name": "",
+        "DepartmentRef_value": dept_id if as_department else "",
+        "DepartmentRef_name": dept_name if as_department else "",
+        "ClassRef_value": str(klass.get("id") or ""),
+        "ClassRef_name": klass.get("value", "") if klass.get("id") else "",
+        "LocationRef_value": "" if as_department else dept_id,
+        "LocationRef_name": "" if as_department else dept_name,
       }
     )
     tx_li_num += 1

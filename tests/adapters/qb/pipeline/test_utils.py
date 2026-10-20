@@ -639,3 +639,112 @@ class TestToDataframe:
 
     df = _to_dataframe([])
     assert len(df) == 0
+
+
+# The shape the sandbox returned with class and location tracking on: asked
+# for by name, Intuit moves memo and account to the end.
+def _col(key: str) -> dict:
+  return {"MetaData": [{"Name": "ColKey", "Value": key}]}
+
+
+_TRACKED_REPORT = {
+  "Columns": {
+    "Column": [
+      _col(k)
+      for k in (
+        "tx_date",
+        "txn_type",
+        "doc_num",
+        "name",
+        "dept_name",
+        "klass_name",
+        "debt_amt",
+        "credit_amt",
+        "memo",
+        "account_name",
+      )
+    ]
+  },
+  "Rows": {
+    "Row": [
+      {
+        "ColData": [
+          {"value": "2026-10-15"},
+          {"value": "Journal Entry", "id": "154"},
+          {"value": ""},
+          {"value": "", "id": ""},
+          {"value": "Downtown", "id": "1"},
+          {"value": "Retail", "id": "737125"},
+          {"value": "120.00"},
+          {"value": ""},
+          {"value": "retail cost"},
+          {"value": "Accounting", "id": "69"},
+        ],
+        "type": "Data",
+      },
+      {
+        "ColData": [
+          {"value": "0-00-00"},
+          {"value": "", "id": "154"},
+          {"value": ""},
+          {"value": "", "id": ""},
+          {"value": "", "id": ""},
+          {"value": "", "id": ""},
+          {"value": ""},
+          {"value": "120.00"},
+          {"value": "paid"},
+          {"value": "Checking", "id": "35"},
+        ],
+        "type": "Data",
+      },
+      {"Summary": {"ColData": [{"value": ""}] * 10}},
+    ]
+  },
+}
+
+
+class TestTrackedJournalReport:
+  def test_columns_are_read_by_key_and_lines_carry_class_and_location(self):
+    from robosystems.adapters.quickbooks.pipeline.utils import (
+      normalize_journal_report,
+      parse_journal_report,
+    )
+
+    _entries, lines = parse_journal_report(normalize_journal_report(_TRACKED_REPORT))
+
+    tagged, cash = lines
+    assert (tagged["AccountRef_value"], tagged["Amount"], tagged["Description"]) == (
+      "69",
+      120.0,
+      "retail cost",
+    )
+    assert (tagged["ClassRef_value"], tagged["ClassRef_name"]) == ("737125", "Retail")
+    assert (tagged["LocationRef_value"], tagged["LocationRef_name"]) == (
+      "1",
+      "Downtown",
+    )
+    assert tagged["DepartmentRef_value"] == ""
+    assert (cash["ClassRef_value"], cash["LocationRef_value"]) == ("", "")
+
+  def test_a_company_that_calls_it_department_gets_departments(self):
+    from robosystems.adapters.quickbooks.pipeline.utils import (
+      department_axis,
+      normalize_journal_report,
+      parse_journal_report,
+    )
+
+    _entries, lines = parse_journal_report(
+      normalize_journal_report(_TRACKED_REPORT),
+      department_as=department_axis("Department"),
+    )
+
+    assert (lines[0]["DepartmentRef_value"], lines[0]["LocationRef_value"]) == ("1", "")
+    assert department_axis("") == department_axis("Location") == "location"
+
+  def test_a_report_with_no_columns_is_read_in_the_default_order(self):
+    from robosystems.adapters.quickbooks.pipeline.utils import (
+      normalize_journal_report,
+    )
+
+    plain = {"Rows": {"Row": []}}
+    assert normalize_journal_report(plain) is plain

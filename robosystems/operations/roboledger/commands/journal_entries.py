@@ -772,9 +772,14 @@ def create_journal_entry(
     assert_local_posting_allowed(session, entity_id, "Posting this journal entry")
 
   normalized, total_debit, _total_credit = validate_and_normalize_lines(body.line_items)
+  wanted = [li["dimension_ids"] for li in normalized]
   for li, ids in zip(
     normalized,
-    validate_line_dimensions(session, [li["dimension_ids"] for li in normalized]),
+    # Replayed history keeps what the source tagged, retired here or not,
+    # as it keeps a retired account.
+    validate_line_dimensions(
+      session, wanted, kept=wanted if synced and body.status == "posted" else None
+    ),
     strict=True,
   ):
     li["dimension_ids"] = ids
