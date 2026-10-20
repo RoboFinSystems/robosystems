@@ -1295,9 +1295,20 @@ class ScheduleService:
       )
 
       if not is_stale:
-        # A tag moves no balance, so a template's new members re-tag the
-        # draft in place rather than regenerate it.
-        self._tag_entries(session, [existing_entry_id], template)
+        # A tag moves no balance, so the template's members re-tag the draft
+        # and its auto-reversal in place rather than regenerate them, members
+        # taken off the template included.
+        reversal_ids = [
+          str(i)
+          for (i,) in session.execute(
+            select(Entry.id).where(
+              Entry.reversal_of == existing_entry_id, Entry.status == "draft"
+            )
+          ).all()
+        ]
+        self._tag_entries(
+          session, [existing_entry_id, *reversal_ids], template, clear=True
+        )
         return ClosingEntryResult(
           outcome="unchanged",
           entry_id=existing_entry_id,
@@ -1725,10 +1736,13 @@ class ScheduleService:
     }
 
   @staticmethod
-  def _tag_entries(session: Session, entry_ids: list[str], template: dict) -> None:
-    """Every line of the schedule's entries carries the template's members."""
+  def _tag_entries(
+    session: Session, entry_ids: list[str], template: dict, *, clear: bool = False
+  ) -> None:
+    """Every line of the schedule's entries carries the template's members,
+    and with ``clear`` no others: a draft follows its template."""
     members = list(template.get("dimension_ids") or [])
-    if not members:
+    if not members and not clear:
       return
     line_ids = [
       str(i)

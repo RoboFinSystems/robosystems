@@ -89,7 +89,8 @@ def create_dimension(
       session.flush()
   except IntegrityError as exc:
     # Only the race a concurrent create of the same key loses.
-    if "uq_dimension_type_value" not in str(exc.orig):
+    constraint = getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
+    if constraint != "uq_dimension_type_value":
       raise
     raise DuplicateDimensionError(body.dimension_type, value, None) from exc
   session.commit()

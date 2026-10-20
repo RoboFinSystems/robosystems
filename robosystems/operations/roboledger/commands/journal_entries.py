@@ -489,6 +489,9 @@ def _mirror_dimensions_onto_bank_event(
   from robosystems.operations.event_block.python_handlers.bank_feed import (
     BANK_FEED_HANDLERS,
   )
+  from robosystems.operations.roboledger.reads.event_block import (
+    _load_dimension_ids,
+  )
 
   if event is None or event.event_type not in BANK_FEED_HANDLERS:
     return
@@ -499,8 +502,14 @@ def _mirror_dimensions_onto_bank_event(
   ):
     return
   contra = [li for li in line_items if li.element_id != event.resource_element_id]
+  # The event's own members reach the lines anyway; holding them on the
+  # classification too would pin them there past a change to the event's.
+  inherited = set(_load_dimension_ids(session, str(event.id)))
   tags = line_dimension_ids(session, (li.id for li in contra))
-  of_account = {str(li.element_id): tags.get(str(li.id), []) for li in contra}
+  of_account = {
+    str(li.element_id): [i for i in tags.get(str(li.id), []) if i not in inherited]
+    for li in contra
+  }
   if metadata.get("classified_allocations"):
     metadata["classified_allocations"] = [
       {**allocation, "dimension_ids": of_account.get(str(allocation.get("element_id")))}

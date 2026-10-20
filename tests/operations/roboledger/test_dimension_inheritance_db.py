@@ -31,7 +31,11 @@ from robosystems.models.api.extensions.schedules import (
   EntryTemplateRequest,
   ScheduleMetadataRequest,
 )
+from robosystems.models.extensions import Structure
 from robosystems.models.extensions.roboledger import Entry, Event, LineItem
+from robosystems.models.extensions.roboledger.dimension_junctions import (
+  event_dimensions,
+)
 from robosystems.operations.event_block.commands import (
   create_event_block,
   update_event_block,
@@ -286,6 +290,38 @@ class TestBankLines:
     t.session.refresh(event)
     assert event.metadata_["classified_dimension_ids"] == [t.ops]
 
+  def test_the_events_own_members_are_not_copied_onto_its_classification(self, books):
+    t = books
+    event = _deposit(t)
+    t.session.execute(
+      event_dimensions.insert(), [{"event_id": event.id, "dimension_id": t.retail}]
+    )
+    _update(
+      t,
+      event,
+      transition_to="committed",
+      metadata_patch={"classified_element_id": t.rent},
+    )
+    entry_id = _event_entry(t, str(event.id))
+    rent_line = t.session.execute(
+      select(LineItem.id).where(
+        LineItem.entry_id == entry_id, LineItem.element_id == t.rent
+      )
+    ).scalar_one()
+
+    update_journal_entry(
+      t.session,
+      UpdateJournalEntryRequest(
+        entry_id=entry_id,
+        line_dimensions=[
+          {"line_id": str(rent_line), "dimension_ids": [t.ops, t.retail]}
+        ],
+      ),
+    )
+
+    t.session.refresh(event)
+    assert event.metadata_["classified_dimension_ids"] == [t.ops]
+
 
 class TestSchedules:
   def test_a_schedules_drafts_carry_its_templates_members(self, books):
@@ -319,6 +355,63 @@ class TestSchedules:
     )
 
     assert _tags(t, result.entry_id) == [[t.ops], [t.ops]]
+
+  def test_a_kept_draft_and_its_reversal_follow_the_template(self, books):
+    """Members added to the template reach a draft that is not regenerated,
+    and its auto-reversal; members taken off it come off both."""
+    t = books
+    created = create_schedule(
+      t.session,
+      CreateScheduleRequest(
+        name="Accrued rent",
+        element_ids=[t.rent, t.cash],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 12, 31),
+        monthly_amount=10_000,
+        entry_template=EntryTemplateRequest(
+          debit_element_id=t.rent, credit_element_id=t.cash, auto_reverse=True
+        ),
+        schedule_metadata=ScheduleMetadataRequest(original_amount=120_000),
+      ),
+      created_by="usr_1",
+    )
+    t.session.commit()
+
+    def march():
+      return ScheduleService().create_closing_entry(
+        t.session,
+        structure_id=created.structure_id,
+        posting_date=date(2026, 3, 31),
+        period_start=date(2026, 3, 1),
+        period_end=date(2026, 3, 31),
+        created_by="usr_1",
+      )
+
+    def retemplate(dimension_ids: list[str]):
+      structure = t.session.get(Structure, created.structure_id)
+      structure.metadata_ = {
+        **structure.metadata_,
+        "entry_template": {
+          **structure.metadata_["entry_template"],
+          "dimension_ids": dimension_ids,
+        },
+      }
+      t.session.commit()
+
+    first = march()
+    reversal = first.reversal.entry_id
+    retemplate([t.ops])
+    kept = march()
+
+    assert kept.outcome == "unchanged"
+    assert _tags(t, kept.entry_id) == [[t.ops], [t.ops]]
+    assert _tags(t, reversal) == [[t.ops], [t.ops]]
+
+    retemplate([])
+    march()
+
+    assert _tags(t, kept.entry_id) == [[], []]
+    assert _tags(t, reversal) == [[], []]
 
 
 class TestReviewFollowUps:
