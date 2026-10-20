@@ -93,6 +93,34 @@ class OpenItem(BaseModel):
     ),
   )
   currency: str = Field("USD", description="Currency code.")
+  due_date: date = Field(
+    ...,
+    description=(
+      "When it falls due: the stated due date, else the date it was issued "
+      "(due on receipt)."
+    ),
+  )
+  due_date_basis: str = Field(
+    ...,
+    description=(
+      "`stated` when the obligation carries its own due date; `defaulted` when "
+      "it has none and is read as due on receipt."
+    ),
+  )
+  days_past_due: int = Field(
+    ...,
+    description=(
+      "Days from the due date to the as-of date; zero or negative when not yet due."
+    ),
+  )
+  bucket: str = Field(
+    ...,
+    description=(
+      "The aging bucket: `current`, `one_to_thirty`, `thirty_one_to_sixty`, "
+      "`sixty_one_to_ninety`, `over_ninety`, or `unapplied_credit` when "
+      "overpaid."
+    ),
+  )
 
 
 class IntercompanyPair(BaseModel):
@@ -130,4 +158,112 @@ class GroupOpenItems(BaseModel):
   )
   pairs: list[IntercompanyPair] = Field(
     ..., description="Each pair of members, both sides of what they owe each other."
+  )
+
+
+class AgingBuckets(BaseModel):
+  """Open amounts by how far past due they are at the as-of date. An
+  overpayment is an unapplied credit, never netted into a bucket."""
+
+  current_cents: int = Field(0, description="Not yet due.")
+  one_to_thirty_cents: int = Field(0, description="1 to 30 days past due.")
+  thirty_one_to_sixty_cents: int = Field(0, description="31 to 60 days past due.")
+  sixty_one_to_ninety_cents: int = Field(0, description="61 to 90 days past due.")
+  over_ninety_cents: int = Field(0, description="More than 90 days past due.")
+  unapplied_credit_cents: int = Field(
+    0, description="Overpayments, negative: credit owed back or still to apply."
+  )
+  total_cents: int = Field(
+    0, description="Every bucket and the unapplied credit together."
+  )
+
+
+class AgedAgentRow(BaseModel):
+  """One counterparty's open items, bucketed."""
+
+  agent_id: str | None = Field(None, description="The counterparty; null when none.")
+  agent_name: str | None = Field(None, description="The counterparty's name.")
+  buckets: AgingBuckets = Field(..., description="Its open amounts by age.")
+  open_item_count: int = Field(..., description="Its open invoices or bills.")
+  oldest_due_date: date | None = Field(
+    None, description="The earliest due date among its open items."
+  )
+
+
+class ControlAccount(BaseModel):
+  """An account the open items are tied out against."""
+
+  element_id: str = Field(..., description="The account's element id.")
+  code: str | None = Field(None, description="The account code.")
+  name: str = Field(..., description="The account name.")
+
+
+class ControlTieOut(BaseModel):
+  """One entity's open items against its receivables or payables accounts at
+  the as-of date. The difference is everything that moved the accounts
+  without a document behind it, or a document whose entry has not posted:
+  never plugged."""
+
+  entity_id: str = Field(..., description="The entity whose books are compared.")
+  accounts: list[ControlAccount] = Field(
+    ...,
+    description=(
+      "The control accounts: those mapped to the receivables or payables "
+      "concept, and QuickBooks' own A/R or A/P accounts."
+    ),
+  )
+  control_balance_cents: int | None = Field(
+    None,
+    description=(
+      "The accounts' posted balance at the as-of date, in their natural sign; "
+      "null when the entity has no control account."
+    ),
+  )
+  open_items_cents: int = Field(
+    ..., description="The entity's open items at the as-of date, intercompany included."
+  )
+  difference_cents: int | None = Field(
+    None,
+    description=(
+      "Open items less the control balance; null when there is no control "
+      "account to compare with."
+    ),
+  )
+
+
+class AgedBalances(BaseModel):
+  """Receivables or payables aged at a date: bucket totals, a row per
+  counterparty, and each entity's tie-out to its control accounts. For a group,
+  the items the members owe each other are set apart, since consolidation
+  eliminates them."""
+
+  kind: str = Field(..., description="`receivables` or `payables`.")
+  as_of: date = Field(..., description="The date the items are aged at.")
+  scope: str = Field(..., description="`entity` or `group`.")
+  entity_id: str | None = Field(
+    None, description="The entity read, or the group parent for a group."
+  )
+  member_entity_ids: list[str] = Field(
+    ..., description="The entities summed: one, or the parent and its full members."
+  )
+  buckets: AgingBuckets = Field(
+    ..., description="The totals by age, intercompany items excluded for a group."
+  )
+  agents: list[AgedAgentRow] = Field(
+    ..., description="A row per counterparty, largest open balance first."
+  )
+  defaulted_due_date_count: int = Field(
+    ...,
+    description=("Open items with no due date of their own, aged as due on receipt."),
+  )
+  intercompany: list[OpenItem] = Field(
+    default_factory=list,
+    description="For a group: open items with another summed member as counterparty.",
+  )
+  pairs: list[IntercompanyPair] = Field(
+    default_factory=list,
+    description="For a group: each pair of members, both sides of what they owe each other.",
+  )
+  tie_outs: list[ControlTieOut] = Field(
+    ..., description="Each summed entity's open items against its control accounts."
   )

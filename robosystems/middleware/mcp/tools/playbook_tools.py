@@ -100,6 +100,12 @@ _RECURRING_SEQUENCE: list[str] = [
   "list-period-drafts (period as YYYY-MM) — review every draft with DR/CR "
   "detail; check all_balanced and the QB outbox fields "
   "(will_publish_to_qb / qb_publish_count / local_only_count).",
+  "aged-balances (kind='receivables', then 'payables'; as_of the month-end) — "
+  "the aging, and each entity's open items tied out to its control account. "
+  "A difference_cents is a document never settled or a movement with no "
+  "document behind it (a write-off, an unlinked payment, an opening balance); "
+  "explain it, never plug it. An obligation whose entry is still a draft "
+  "shows in it until the close posts the entry.",
   "Summarize to the user (totals, balance check, per-schedule amounts, what "
   "will publish to QuickBooks) and get explicit approval.",
   "close-period (period as YYYY-MM) — atomic: posts the drafts, runs the "

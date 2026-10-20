@@ -243,6 +243,7 @@ class TestGetToolDefinitionHelpers:
     assert tools.get_agent_tool is None
     assert tools.list_agents_tool is None
     assert tools.agent_activity_tool is None
+    assert tools.aged_balances_tool is None
     assert tools.get_event_handler_tool is None
     assert tools.list_event_handlers_tool is None
     assert tools.get_event_block_tool is None
@@ -256,6 +257,7 @@ class TestGetToolDefinitionHelpers:
       "list-agents",
       "get-agent",
       "agent-activity",
+      "aged-balances",
       "list-event-handlers",
       "get-event-handler",
       "list-event-blocks",

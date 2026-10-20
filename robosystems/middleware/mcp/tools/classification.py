@@ -49,6 +49,7 @@ READ_ONLY_MCP_TOOLS: frozenset[str] = frozenset(
     "get-agent",
     "list-agents",
     "agent-activity",
+    "aged-balances",
     # Event block / handler reads
     "get-event-block",
     "list-event-blocks",

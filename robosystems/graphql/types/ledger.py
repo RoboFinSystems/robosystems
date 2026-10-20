@@ -52,10 +52,31 @@ from robosystems.models.api.extensions.agent import (
   LedgerAgentResponse as PydanticAgentResponse,
 )
 from robosystems.models.api.extensions.ar_ap import (
+  AgedAgentRow as PydanticAgedAgentRow,
+)
+from robosystems.models.api.extensions.ar_ap import (
+  AgedBalances as PydanticAgedBalances,
+)
+from robosystems.models.api.extensions.ar_ap import (
+  AgingBuckets as PydanticAgingBuckets,
+)
+from robosystems.models.api.extensions.ar_ap import (
+  ControlAccount as PydanticControlAccount,
+)
+from robosystems.models.api.extensions.ar_ap import (
+  ControlTieOut as PydanticControlTieOut,
+)
+from robosystems.models.api.extensions.ar_ap import (
+  IntercompanyPair as PydanticIntercompanyPair,
+)
+from robosystems.models.api.extensions.ar_ap import (
   OpenBalanceAggregate as PydanticOpenBalanceAggregate,
 )
 from robosystems.models.api.extensions.ar_ap import (
   OpenBalanceByAgent as PydanticOpenBalanceByAgent,
+)
+from robosystems.models.api.extensions.ar_ap import (
+  OpenItem as PydanticOpenItem,
 )
 from robosystems.models.api.extensions.bank_accounts import (
   BankAccountListResponse as PydanticBankAccountListResponse,
@@ -362,6 +383,41 @@ class OpenBalanceAggregate:
 @pydantic_type(model=PydanticOpenBalanceByAgent, all_fields=True)
 class OpenBalanceByAgent:
   """Per-counterparty open balance row."""
+
+
+@pydantic_type(model=PydanticOpenItem, all_fields=True)
+class OpenItem:
+  """One open invoice or bill as of a date."""
+
+
+@pydantic_type(model=PydanticIntercompanyPair, all_fields=True)
+class IntercompanyPair:
+  """Both sides of what two group members owe each other."""
+
+
+@pydantic_type(model=PydanticAgingBuckets, all_fields=True)
+class AgingBuckets:
+  """Open amounts by how far past due they are."""
+
+
+@pydantic_type(model=PydanticAgedAgentRow, all_fields=True)
+class AgedAgentRow:
+  """One counterparty's open items, bucketed."""
+
+
+@pydantic_type(model=PydanticControlAccount, all_fields=True)
+class ControlAccount:
+  """An account open items are tied out against."""
+
+
+@pydantic_type(model=PydanticControlTieOut, all_fields=True)
+class ControlTieOut:
+  """One entity's open items against its control accounts."""
+
+
+@pydantic_type(model=PydanticAgedBalances, all_fields=True)
+class AgedBalances:
+  """Receivables or payables aged at a date."""
 
 
 # ── Event blocks (inbox) ──────────────────────────────────────────────────

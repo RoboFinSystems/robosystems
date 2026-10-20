@@ -185,7 +185,8 @@ tool module before assuming a name.
 Plus REA reads and event writes: `get-event-block` / `list-event-blocks` /
 `create-event-block`, `get-event-handler` / `list-event-handlers` (tenant
 event-handler DSL rows), and `get-agent` / `list-agents` / `agent-activity`
-(REA Agent counterparty reads). `get-close-playbook` returns close-workflow
+(REA Agent counterparty reads), with `aged-balances` aging the open invoices
+and bills against them. `get-close-playbook` returns close-workflow
 guidance. `bind-text-block` binds a Document to a disclosure element — it is
 hand-written rather than registrar-generated because it needs both the platform
 session (Documents live there) and the tenant extensions session.

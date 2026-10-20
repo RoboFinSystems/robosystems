@@ -1953,6 +1953,150 @@ class TestBooksReadsNameTheirEntity:
       assert read.call_args.kwargs["entity_id"] == "ent_sub"
 
 
+class TestAgedBalancesResolvers:
+  """`agedReceivables` / `agedPayables` age one entity's or a group's open
+  items at a date; `openItemsForAgent` lists one counterparty's."""
+
+  @staticmethod
+  def _item():
+    from robosystems.models.api.extensions.ar_ap import OpenItem
+
+    return OpenItem(
+      event_id="evt_1",
+      entity_id="ent_sub",
+      agent_id="agt_acme",
+      occurred_on=date(2026, 8, 15),
+      original_cents=10000,
+      settled_cents=0,
+      open_cents=10000,
+      due_date=date(2026, 8, 15),
+      due_date_basis="defaulted",
+      days_past_due=46,
+      bucket="thirty_one_to_sixty",
+    )
+
+  def _aged(self):
+    from robosystems.models.api.extensions.ar_ap import (
+      AgedAgentRow,
+      AgedBalances,
+      AgingBuckets,
+      ControlTieOut,
+    )
+
+    buckets = AgingBuckets(thirty_one_to_sixty_cents=10000, total_cents=10000)
+    return AgedBalances(
+      kind="receivables",
+      as_of=date(2026, 9, 30),
+      scope="group",
+      entity_id="ent_parent",
+      member_entity_ids=["ent_parent", "ent_sub"],
+      buckets=buckets,
+      agents=[
+        AgedAgentRow(
+          agent_id="agt_acme",
+          agent_name="Acme",
+          buckets=buckets,
+          open_item_count=1,
+          oldest_due_date=date(2026, 8, 15),
+        )
+      ],
+      defaulted_due_date_count=1,
+      intercompany=[self._item()],
+      tie_outs=[
+        ControlTieOut(
+          entity_id="ent_sub",
+          accounts=[],
+          open_items_cents=10000,
+        )
+      ],
+    )
+
+  def test_ages_the_named_scope_at_the_date(self) -> None:
+    with patch(f"{_OPS}.ar_ap.get_aged_balances", return_value=self._aged()) as read:
+      result = _run(
+        'query { agedReceivables(asOf: "2026-09-30", entityId: "ent_parent", '
+        'scope: "group") { scope buckets { thirtyOneToSixtyCents totalCents } '
+        "agents { agentName oldestDueDate } defaultedDueDateCount "
+        "intercompany { dueDateBasis bucket daysPastDue } "
+        "tieOuts { entityId controlBalanceCents differenceCents } } }"
+      )
+    assert result.errors is None, result.errors
+    assert read.call_args.args[1] == "receivables"
+    assert read.call_args.kwargs == {
+      "as_of": date(2026, 9, 30),
+      "entity_id": "ent_parent",
+      "scope": "group",
+    }
+    assert result.data == {
+      "agedReceivables": {
+        "scope": "group",
+        "buckets": {"thirtyOneToSixtyCents": 10000, "totalCents": 10000},
+        "agents": [{"agentName": "Acme", "oldestDueDate": "2026-08-15"}],
+        "defaultedDueDateCount": 1,
+        "intercompany": [
+          {
+            "dueDateBasis": "defaulted",
+            "bucket": "thirty_one_to_sixty",
+            "daysPastDue": 46,
+          }
+        ],
+        "tieOuts": [
+          {
+            "entityId": "ent_sub",
+            "controlBalanceCents": None,
+            "differenceCents": None,
+          }
+        ],
+      }
+    }
+
+  def test_payables_default_to_one_entity_today(self) -> None:
+    with patch(f"{_OPS}.ar_ap.get_aged_balances", return_value=self._aged()) as read:
+      result = _run("query { agedPayables { kind } }")
+    assert result.errors is None, result.errors
+    assert read.call_args.args[1] == "payables"
+    assert read.call_args.kwargs == {
+      "as_of": date.today(),
+      "entity_id": None,
+      "scope": "entity",
+    }
+
+  def test_an_unknown_scope_is_refused(self) -> None:
+    with patch(f"{_OPS}.ar_ap.get_aged_balances") as read:
+      result = _run('query { agedReceivables(scope: "world") { kind } }')
+    assert result.errors is not None
+    assert "scope must be" in result.errors[0].message
+    read.assert_not_called()
+
+  def test_one_counterpartys_open_items(self) -> None:
+    with patch(f"{_OPS}.ar_ap.list_open_items", return_value=[self._item()]) as read:
+      result = _run(
+        'query { openItemsForAgent(agentId: "agt_acme", kind: "receivables", '
+        'asOf: "2026-09-30", entityId: "ent_sub") { eventId openCents dueDate } }'
+      )
+    assert result.errors is None, result.errors
+    assert read.call_args.args[1] == "receivables"
+    assert read.call_args.kwargs == {
+      "as_of": date(2026, 9, 30),
+      "entity_id": "ent_sub",
+      "agent_id": "agt_acme",
+    }
+    assert result.data == {
+      "openItemsForAgent": [
+        {"eventId": "evt_1", "openCents": 10000, "dueDate": "2026-08-15"}
+      ]
+    }
+
+  def test_an_unknown_kind_is_refused(self) -> None:
+    with patch(f"{_OPS}.ar_ap.list_open_items") as read:
+      result = _run(
+        'query { openItemsForAgent(agentId: "agt_acme", kind: "loans") { eventId } }'
+      )
+    assert result.errors is not None
+    assert "kind must be" in result.errors[0].message
+    read.assert_not_called()
+
+
 class TestClassificationStatsResolver:
   """`classificationStats` counts one month's bank lines per suggestion
   source, read from the lines' own outcome stamps."""
