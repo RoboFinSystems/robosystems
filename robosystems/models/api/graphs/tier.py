@@ -4,19 +4,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class GraphTierCopyOperations(BaseModel):
-  """Copy operation limits for a tier."""
+  """File upload limits for a tier."""
 
-  max_file_size_gb: float = Field(..., description="Maximum file size in GB")
-  timeout_seconds: int = Field(..., description="Operation timeout in seconds")
-  concurrent_operations: int = Field(..., description="Maximum concurrent operations")
-  max_files_per_operation: int = Field(..., description="Maximum files per operation")
-  daily_copy_operations: int = Field(..., description="Daily operation limit")
+  max_file_size_gb: float = Field(..., description="Maximum upload file size in GB")
 
 
 class GraphTierBackup(BaseModel):
   """Backup configuration for a tier."""
 
-  max_backup_size_gb: int = Field(..., description="Maximum backup size in GB")
   backup_retention_days: int = Field(..., description="Backup retention period in days")
   max_backups_per_day: int = Field(..., description="Maximum backups per day")
 
@@ -29,7 +24,7 @@ class GraphTierLimits(BaseModel):
     ..., description="Maximum subgraphs (null for unlimited)"
   )
   copy_operations: GraphTierCopyOperations = Field(
-    ..., description="Copy operation limits"
+    ..., description="File upload limits"
   )
   backup: GraphTierBackup = Field(..., description="Backup configuration")
 

@@ -739,3 +739,30 @@ async def test_a_cypher_read_is_held_only_to_the_read_gate(
 
   assert response.status_code == 200, response.text
   assert not any(call.kwargs.get("require_write") for call in gate.call_args_list)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rows, truncated", [(10_000, True), (9_999, False)])
+@patch("robosystems.routers.graphs.query.execute.get_universal_repository")
+async def test_a_result_at_the_row_cap_is_flagged_truncated(
+  mock_get_repo,
+  rows: int,
+  truncated: bool,
+  async_client: AsyncClient,
+  test_user: User,
+  test_graph_with_credits: dict,
+):
+  repo = AsyncMock()
+  repo.execute_query = AsyncMock(return_value=[{"n": i} for i in range(rows)])
+  repo.execute_query_streaming = None
+  mock_get_repo.return_value = repo
+  graph_id = test_graph_with_credits["user_graph"].graph_id
+
+  response = await async_client.post(
+    f"/v1/graphs/{graph_id}/query/cypher",
+    json={"query": "MATCH (n) RETURN n.id AS n"},
+    headers={"Authorization": f"Bearer {create_jwt_token(test_user.id)}"},
+  )
+
+  assert response.status_code == 200, response.text
+  assert response.json()["truncated"] is truncated

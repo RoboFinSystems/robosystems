@@ -192,7 +192,7 @@ async def get_service_offerings(
           "Organizations can create multiple graphs with different infrastructure tiers",
           "Credits are allocated per graph, not shared across the organization",
           "Higher tiers provide dedicated infrastructure with better performance",
-          "Graph content limits (nodes, relationships, rows) vary by tier",
+          "Storage, row and subgraph limits vary by tier",
         ],
       },
       repository_subscriptions={

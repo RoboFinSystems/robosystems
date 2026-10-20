@@ -812,42 +812,6 @@ class CreditService:
       "addon_tier": shared_credits.user_repository.repository_plan,
     }
 
-  def set_storage_override(
-    self,
-    graph_id: str,
-    new_limit_gb: Decimal,
-    admin_user_id: str,
-    reason: str,
-  ) -> dict[str, Any]:
-    """Raise or lower a graph's storage limit above its tier default.
-
-    Admin-only; this method does not itself check the caller's role.
-    """
-    credits = GraphCredits.get_by_graph_id(graph_id, self.session)
-    if not credits:
-      return {"error": "No credit pool found for graph"}
-
-    old_limit = credits.get_effective_storage_limit()
-
-    credits.set_storage_override(
-      new_limit_gb=new_limit_gb,
-      admin_user_id=admin_user_id,
-      reason=reason,
-      session=self.session,
-    )
-
-    self.session.commit()
-
-    return {
-      "success": True,
-      "graph_id": graph_id,
-      "old_limit_gb": float(old_limit),
-      "new_limit_gb": float(new_limit_gb),
-      "admin_user_id": admin_user_id,
-      "reason": reason,
-      "override_set_at": datetime.now(UTC).isoformat(),
-    }
-
   def consume_ai_tokens(
     self,
     graph_id: str,

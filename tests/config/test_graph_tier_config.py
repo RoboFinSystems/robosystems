@@ -141,18 +141,17 @@ def test_accessors_return_configured_values(mock_graph_config):
   # stops the published figure drifting from the enforced one again.
   from robosystems.config.constants import MAX_FILE_SIZE_MB
 
-  assert copy_limits["max_file_size_gb"] == MAX_FILE_SIZE_MB / 1024
-  assert copy_limits["timeout_seconds"] == 600
-  assert copy_limits["daily_copy_operations"] == 20
+  # The YAML's copy-operation figures are enforced nowhere, so only the
+  # upload size is published.
+  assert copy_limits == {"max_file_size_gb": MAX_FILE_SIZE_MB / 1024}
 
   backup_limits = get_tier_backup_limits("ladybug-standard")
-  assert backup_limits["max_backup_size_gb"] == 20
-  assert backup_limits["max_backups_per_day"] == 4
+  # A backup is bounded by the storage cap; max_backup_size_gb is not published.
+  assert backup_limits == {"backup_retention_days": 14, "max_backups_per_day": 4}
 
   instance_config = GraphTierConfig.get_instance_config("ladybug-standard")
   assert instance_config["memory_per_db_mb"] == 512
   assert instance_config["max_memory_mb"] == 4096
-  assert GraphTierConfig.get_query_timeout("ladybug-standard") == 120
   assert GraphTierConfig.get_chunk_size("ladybug-standard") == 256
 
 
@@ -167,11 +166,9 @@ def test_accessors_fall_back_to_defaults_when_missing(mock_graph_config):
   from robosystems.config.constants import MAX_FILE_SIZE_MB
 
   assert default_copy["max_file_size_gb"] == MAX_FILE_SIZE_MB / 1024
-  assert default_copy["concurrent_operations"] == 1
 
   default_backup = get_tier_backup_limits("ladybug-large")
-  assert default_backup["max_backup_size_gb"] == 10
-  assert default_backup["max_backups_per_day"] == 2
+  assert default_backup == {"backup_retention_days": 7, "max_backups_per_day": 2}
 
 
 def test_environment_default_switches_to_staging(monkeypatch, mock_graph_config):
@@ -180,7 +177,6 @@ def test_environment_default_switches_to_staging(monkeypatch, mock_graph_config)
 
   staging_config = GraphTierConfig.get_tier_config("ladybug-standard")
   assert staging_config["monthly_credits"] == 900
-  assert GraphTierConfig.get_query_timeout("ladybug-standard") == 90
 
 
 def test_get_graph_limits_returns_configured_values(mock_graph_config):
@@ -401,3 +397,13 @@ def test_tiers_listing_reports_the_same_file_size_as_the_limits_endpoint():
   for tier in tiers:
     copy_ops = tier["limits"]["copy_operations"]
     assert copy_ops["max_file_size_gb"] == MAX_FILE_SIZE_MB / 1024
+
+
+def test_the_largest_tier_names_its_real_subgraph_cap():
+  """XLarge refuses the 26th subgraph, so it must not read "Unlimited"."""
+  features = GraphTierConfig._generate_tier_features(
+    {"tier": "ladybug-xlarge", "max_subgraphs": 25, "instance": {}}
+  )
+
+  assert "Up to 25 subgraphs" in features
+  assert "Unlimited subgraphs" not in features

@@ -23,6 +23,7 @@ from robosystems.config.constants import (
   LBUG_CONNECTION_TTL_MINUTES,
   LBUG_MAX_CONNECTIONS_PER_DB,
   MAX_QUERY_LENGTH,
+  MAX_ROWS_PER_QUERY,
 )
 from robosystems.config.tuning import TuningConfig
 from robosystems.exceptions import (
@@ -151,8 +152,8 @@ def _extract_column_aliases_from_cypher(cypher_query: str) -> list[str]:
 # cannot pin the instance. On hit the final chunk is flagged `truncated`.
 MAX_STREAMING_ROWS = 1_000_000
 
-# Rows one non-streaming result buffers before it stops, unflagged.
-MAX_BUFFERED_ROWS = 10_000
+# Rows one non-streaming result buffers before it stops.
+MAX_BUFFERED_ROWS = MAX_ROWS_PER_QUERY
 
 
 def validate_cypher_query(cypher: str) -> None:

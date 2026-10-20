@@ -79,7 +79,6 @@ class TestGraphCredits:
       billing_admin_id=self.billing_admin.id,
       current_balance=Decimal("1000"),
       monthly_allocation=Decimal("1000"),
-      storage_limit_gb=Decimal("500"),
     )
 
     assert credits.graph_id == self.graph.graph_id
@@ -140,7 +139,6 @@ class TestGraphCredits:
     assert credits.monthly_allocation == Decimal("5000")
     assert credits.current_balance == Decimal("5000")
     # Storage limit now comes from GraphTierConfig backup limits (safety cap)
-    assert credits.storage_limit_gb > 0
     assert credits.last_allocation_date is not None
 
     # Check that initial allocation transaction was created
@@ -627,80 +625,6 @@ class TestGraphCredits:
     assert result is True
     assert credits.current_balance == Decimal("2000000")
 
-  def test_get_effective_storage_limit(self):
-    """Test getting effective storage limit."""
-    credits = GraphCredits(
-      graph_id=self.graph.graph_id,
-      user_id=self.user.id,
-      billing_admin_id=self.billing_admin.id,
-      storage_limit_gb=Decimal("500"),
-      storage_override_gb=None,
-    )
-
-    # Without override
-    assert credits.get_effective_storage_limit() == Decimal("500")
-
-    # With override
-    credits.storage_override_gb = Decimal("1000")
-    assert credits.get_effective_storage_limit() == Decimal("1000")
-
-  def test_check_storage_limit(self):
-    """Test storage limit checking."""
-    credits = GraphCredits(
-      graph_id=self.graph.graph_id,
-      user_id=self.user.id,
-      billing_admin_id=self.billing_admin.id,
-      storage_limit_gb=Decimal("100"),
-      storage_warning_threshold=Decimal("0.8"),
-    )
-
-    # Within limit
-    result = credits.check_storage_limit(Decimal("50"))
-    assert result["within_limit"] is True
-    assert result["approaching_limit"] is False
-    assert result["usage_percentage"] == 50.0
-
-    # Approaching limit
-    result = credits.check_storage_limit(Decimal("85"))
-    assert result["within_limit"] is True
-    assert result["approaching_limit"] is True
-    assert result["needs_warning"] is True
-
-    # Over limit
-    result = credits.check_storage_limit(Decimal("150"))
-    assert result["within_limit"] is False
-    assert result["approaching_limit"] is True
-
-  def test_set_storage_override(self):
-    """Test setting storage override limit."""
-    credits = GraphCredits(
-      graph_id=self.graph.graph_id,
-      user_id=self.user.id,
-      billing_admin_id=self.billing_admin.id,
-      storage_limit_gb=Decimal("500"),
-    )
-    self.session.add(credits)
-    self.session.commit()
-
-    credits.set_storage_override(
-      new_limit_gb=Decimal("1000"),
-      admin_user_id=self.billing_admin.id,
-      reason="Customer requested increase",
-      session=self.session,
-    )
-
-    assert credits.storage_override_gb == Decimal("1000")
-    assert credits.get_effective_storage_limit() == Decimal("1000")
-
-    # Check audit transaction was created
-    transaction = (
-      self.session.query(GraphCreditTransaction)
-      .filter_by(graph_credits_id=credits.id)
-      .first()
-    )
-    assert transaction is not None
-    assert "Storage limit override" in transaction.description
-
   def test_update_storage_warning(self):
     """Test updating storage warning timestamp."""
     credits = GraphCredits(
@@ -724,7 +648,6 @@ class TestGraphCredits:
       billing_admin_id=self.billing_admin.id,
       monthly_allocation=Decimal("1000"),
       current_balance=Decimal("700"),
-      storage_limit_gb=Decimal("500"),
       last_allocation_date=datetime.now(UTC),
     )
     credits.graph = self.graph
@@ -750,8 +673,7 @@ class TestGraphCredits:
     assert summary["monthly_allocation"] == 1000.0
     assert summary["consumed_this_month"] == 300.0
     assert summary["transaction_count"] == 3
-    assert summary["storage_limit_gb"] == 500.0
-    assert summary["effective_storage_limit_gb"] == 500.0
+    assert "storage_limit_gb" not in summary
 
   def test_repr_method(self):
     """Test string representation."""

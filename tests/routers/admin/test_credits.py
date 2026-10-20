@@ -58,7 +58,6 @@ def _make_graph_credit_pool(
   graph_tier="ladybug-standard",
   current_balance=Decimal("800.0"),
   monthly_allocation=Decimal("1000.0"),
-  storage_override_gb=None,
 ):
   """Helper to create a mock GraphCredits pool object."""
   pool = MagicMock()
@@ -67,7 +66,6 @@ def _make_graph_credit_pool(
   pool.graph_tier = graph_tier
   pool.current_balance = current_balance
   pool.monthly_allocation = monthly_allocation
-  pool.storage_override_gb = storage_override_gb
   pool.created_at = datetime(2024, 1, 1, tzinfo=UTC)
   pool.updated_at = datetime(2024, 1, 15, tzinfo=UTC)
   return pool
@@ -149,7 +147,6 @@ class TestListGraphCreditPools:
     assert item.current_balance == 800.0
     assert item.monthly_allocation == 1000.0
     assert item.credit_multiplier == 1.0
-    assert item.storage_limit_override_gb is None
     mock_session.close.assert_called_once()
 
   @pytest.mark.unit
@@ -227,29 +224,6 @@ class TestListGraphCreditPools:
       )
 
     assert result == []
-
-  @pytest.mark.unit
-  async def test_storage_override_gb_present(self, mock_request, mock_session):
-    """When storage_override_gb is set, it appears in the response."""
-    from robosystems.routers.admin.credits import list_graph_credit_pools
-
-    pool = _make_graph_credit_pool(storage_override_gb=Decimal("50.0"))
-
-    mock_query = mock_session.query.return_value
-    mock_query.count.return_value = 1
-    mock_query.offset.return_value.limit.return_value.all.return_value = [pool]
-
-    with patch(f"{MODULE}.get_db_session", return_value=iter([mock_session])):
-      result = await list_graph_credit_pools(
-        request=mock_request,
-        user_email=None,
-        tier=None,
-        low_balance_only=False,
-        limit=100,
-        offset=0,
-      )
-
-    assert result[0].storage_limit_override_gb == 50.0
 
 
 # ===========================================================================
