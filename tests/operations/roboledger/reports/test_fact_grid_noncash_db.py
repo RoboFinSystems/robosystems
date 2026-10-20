@@ -471,6 +471,60 @@ def test_an_asset_sold_on_account_shows_the_cash_when_collected(
   _assert_no_reconciling_adjustment(feb)
 
 
+def test_depreciation_charged_on_the_sale_invoice_is_no_write_off(tenant):
+  """The invoice also books the month's last depreciation, to an expense the
+  cash flow does not present on its own row: that credit to accumulated
+  depreciation is a charge, not part of the disposal, so the collection is
+  still exactly the cash received."""
+  _post(tenant, [("equipment", 1000, 0), ("cash", 0, 1000)], posted=date(2026, 1, 5))
+  _post(
+    tenant,
+    [("depreciation", 400, 0), ("accumulated_depreciation", 0, 400)],
+    posted=date(2026, 1, 6),
+  )
+  invoice = _event("invoice_issued")
+  _post(
+    tenant,
+    [
+      ("receivable", 500, 0),
+      ("cogs", 50, 0),
+      ("accumulated_depreciation", 0, 50),
+      ("accumulated_depreciation", 450, 0),
+      ("equipment", 0, 1000),
+      ("disposal_gain", 50, 0),
+    ],
+    event_id=invoice,
+  )
+  receipt = _event("payment_received", discharges=invoice)
+  _post(
+    tenant,
+    [("cash", 500, 0), ("receivable", 0, 500)],
+    posted=date(2026, 2, 10),
+    event_id=receipt,
+  )
+  feb = _cash_flow(tenant, FEB, [JAN, FEB])
+  assert feb[PPE_PROCEEDS] == 500.0
+  assert feb.get(OPERATING, 0.0) == 0.0
+
+
+def test_a_linked_payment_through_clearing_still_routes_the_bill(tenant):
+  """The cash leg lands in clearing, on none of the bill's accounts: the
+  payment is still measured against the whole bill, so the equipment it
+  pays for is investing cash."""
+  bill = _event("bill_received")
+  _post(tenant, [("equipment", 1000, 0), ("payable", 0, 1000)], event_id=bill)
+  payment = _event("bill_paid", discharges=bill)
+  _post(
+    tenant,
+    [("clearing", 1000, 0), ("cash", 0, 1000)],
+    posted=date(2026, 1, 20),
+    event_id=payment,
+  )
+  cf = _cash_flow(tenant)
+  assert cf[CAPEX] == -1000.0
+  _assert_no_reconciling_adjustment(cf)
+
+
 def test_a_debt_retired_through_a_payable_at_a_gain_shows_the_cash_paid(tenant):
   _post(tenant, [("cash", 1000, 0), ("credit_line", 0, 1000)], posted=date(2026, 1, 2))
   bill = _event("bill_received")

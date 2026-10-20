@@ -2127,7 +2127,9 @@ def _emit_noncash_and_settlement_facts(
     """A gain the cash flow presents on its own row, or the depreciation a
     sale writes off."""
     return (line.kind == "pnl" and line.concept_id in reused) or (
-      line.kind == "working" and line.qname == PPE_ACCUMULATED_DEPRECIATION_QNAME
+      line.kind == "working"
+      and line.qname == PPE_ACCUMULATED_DEPRECIATION_QNAME
+      and line.net > 0
     )
 
   def _add(element_id: str, period: PeriodSpec, cents: float) -> None:
@@ -2264,9 +2266,11 @@ def _emit_noncash_and_settlement_facts(
       # Only the balance this payment settles: a disposal's written-off
       # depreciation is a working line of the bill, not part of what is owed.
       settles = {ln.concept_id for ln in paid_lines}
-      payable = abs(
-        sum(ln.net for ln in bill if ln.kind == "working" and ln.concept_id in settles)
-      )
+      owed = [ln for ln in bill if ln.kind == "working"]
+      # Paid through clearing, the payment's line is on none of the bill's.
+      if any(ln.concept_id in settles for ln in owed):
+        owed = [ln for ln in owed if ln.concept_id in settles]
+      payable = abs(sum(ln.net for ln in owed))
       if payable and paid:
         fraction = min(abs(paid), payable) / payable
         _add_paid(bill, columns, fraction)
