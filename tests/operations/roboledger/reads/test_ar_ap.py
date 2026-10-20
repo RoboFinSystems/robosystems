@@ -29,7 +29,8 @@ def test_originating_type_sets_are_disjoint_and_explicit() -> None:
   event can't be both a receivable and a payable."""
   assert set(_AR_ORIGINATING_TYPES).isdisjoint(set(_AP_ORIGINATING_TYPES))
   assert "invoice_issued" in _AR_ORIGINATING_TYPES
-  assert "sales_receipt_recorded" in _AR_ORIGINATING_TYPES
+  # Paid at the sale, never posted to receivables.
+  assert "sales_receipt_recorded" not in _AR_ORIGINATING_TYPES
   assert "bill_received" in _AP_ORIGINATING_TYPES
 
 
@@ -48,7 +49,9 @@ def test_subquery_filters_on_originating_types() -> None:
     stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
   )
   assert "invoice_issued" in compiled
-  assert "sales_receipt_recorded" in compiled
+  assert "sales_receipt_recorded" not in compiled
+  # Both sides in magnitude: a bank line paying a bill carries a negative amount.
+  assert "abs(discharges_e.amount)" in compiled
   # The subquery should sum discharges via a LEFT OUTER JOIN onto Event itself.
   assert "LEFT OUTER JOIN events" in compiled
   assert "discharges_event_id" in compiled

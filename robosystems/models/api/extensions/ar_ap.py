@@ -13,6 +13,8 @@ preserve that for backend math. UI layers display-format on render.
 
 from __future__ import annotations
 
+from datetime import date
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -63,3 +65,69 @@ class OpenBalanceByAgent(BaseModel):
     ..., description="Number of originating events with nonzero balance for this agent."
   )
   currency: str = Field("USD")
+
+
+class OpenItem(BaseModel):
+  """One open invoice or bill as of a date: what it was for, what has been
+  settled against it by then, and what is left."""
+
+  model_config = ConfigDict(from_attributes=True)
+
+  event_id: str = Field(..., description="The obligation's event id.")
+  entity_id: str = Field(..., description="The entity whose books hold it.")
+  agent_id: str | None = Field(None, description="The counterparty.")
+  occurred_on: date = Field(..., description="The date it was issued or received.")
+  document_number: str | None = Field(
+    None, description="The invoice or bill number, where the source has one."
+  )
+  description: str | None = Field(None, description="The event's description.")
+  original_cents: int = Field(..., description="The obligation's amount.")
+  settled_cents: int = Field(
+    ..., description="Settled against it on or before the as-of date."
+  )
+  open_cents: int = Field(
+    ...,
+    description=(
+      "What is left: original less settled. Negative when overpaid, an "
+      "unapplied credit."
+    ),
+  )
+  currency: str = Field("USD", description="Currency code.")
+
+
+class IntercompanyPair(BaseModel):
+  """What one group entity says another owes it, beside what that entity says
+  it owes; consolidation eliminates both, so a difference is a disagreement."""
+
+  creditor_entity_id: str = Field(..., description="The entity owed.")
+  debtor_entity_id: str = Field(..., description="The entity that owes.")
+  receivable_cents: int = Field(
+    ..., description="The creditor's open receivables from the debtor."
+  )
+  payable_cents: int = Field(
+    ..., description="The debtor's open payables to the creditor."
+  )
+  difference_cents: int = Field(
+    ..., description="Receivable less payable; zero when the two books agree."
+  )
+
+
+class GroupOpenItems(BaseModel):
+  """A group's open receivables or payables as of a date: the external items
+  of every member consolidated in full, and the intercompany ones set apart,
+  since consolidation eliminates them."""
+
+  kind: str = Field(..., description="`receivables` or `payables`.")
+  as_of: date = Field(..., description="The date the items are open at.")
+  member_entity_ids: list[str] = Field(
+    ..., description="The entities summed: the parent and its full members."
+  )
+  external: list[OpenItem] = Field(
+    ..., description="Open items with a counterparty outside the group."
+  )
+  intercompany: list[OpenItem] = Field(
+    ..., description="Open items with another summed member as counterparty."
+  )
+  pairs: list[IntercompanyPair] = Field(
+    ..., description="Each pair of members, both sides of what they owe each other."
+  )
