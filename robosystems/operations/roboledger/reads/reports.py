@@ -1679,21 +1679,23 @@ def _row_sources(
     if value is None or abs(sum(cell.values()) - value) > 0.005:
       listed.append([])
       continue
-    listed.append(
-      [
+    column: list[StatementRowSource] = []
+    for (entity_id, account_id), amount in sorted(
+      cell.items(), key=lambda item: -abs(item[1])
+    ):
+      if amount == 0.0:
+        continue
+      code, name = accounts.get(account_id, (None, account_id))
+      column.append(
         StatementRowSource(
           entity_id=entity_id,
           account_id=account_id,
-          code=accounts.get(account_id, (None, account_id))[0],
-          name=accounts.get(account_id, (None, account_id))[1],
+          code=code,
+          name=name,
           value=round(amount, 2),
         )
-        for (entity_id, account_id), amount in sorted(
-          cell.items(), key=lambda item: -abs(item[1])
-        )
-        if amount != 0.0
-      ]
-    )
+      )
+    listed.append(column)
   return ("accounts" if any(listed) else "computed"), listed
 
 

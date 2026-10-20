@@ -417,3 +417,33 @@ def test_a_consolidated_figure_opens_on_each_entitys_own_accounts(group):
   [nci] = rows[NCI].sources[july]
   assert (nci.entity_id, nci.value) == (ids["adjustments"], 3_300.0)
   assert rows["rs-gaap:Assets"].origin == "subtotal"
+
+
+def test_a_member_lists_sources_only_in_the_columns_it_is_summed_into(group):
+  """Joined in July, the member's cash is in July's balance sheet and not
+  June's, and so are its accounts."""
+  ids = group["ids"]
+  member = group["session"].get(Entity, ids["member"])
+  member.joined_on = date(2026, 7, 1)
+  group["session"].commit()
+
+  live = get_live_financial_statement(
+    group["session"],
+    graph_id=GRAPH,
+    statement_type="balance_sheet",
+    period_start=JULY[0],
+    period_end=JULY[1],
+    entity_id=ids["parent"],
+    scope="combined",
+    include_sources=True,
+  )
+  cash = next(
+    f for f in live.facts if f.qname == "rs-gaap:CashAndCashEquivalentsAtCarryingValue"
+  )
+
+  july, june = (
+    [(s.entity_id, s.value) for s in cash.sources[i]] for i in range(len(cash.values))
+  )
+  assert cash.values == [4_000.0, -7_000.0]
+  assert july == [(ids["member"], 11_000.0), (ids["parent"], -7_000.0)]
+  assert june == [(ids["parent"], -7_000.0)]

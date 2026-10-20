@@ -748,13 +748,14 @@ class LiveStatementFactRow(BaseModel):
       "`end` for the ending-balance row. Null elsewhere."
     ),
   )
-  origin: str | None = Field(
+  origin: Literal["accounts", "subtotal", "computed"] | None = Field(
     None,
     description=(
       "With `include_sources`, how the figure was made: `accounts` (summed "
-      "from the accounts in `sources`), `subtotal` (the rows beneath it), or "
-      "`computed` (derived from other figures, or a flow, with no accounts "
-      "of its own). Null without `include_sources`."
+      "from accounts in at least one column; read each column's `sources`, "
+      "which may be empty where they do not add up), `subtotal` (the rows "
+      "beneath it), or `computed` (derived from other figures, or a flow, "
+      "with no accounts of its own). Null without `include_sources`."
     ),
   )
   sources: list[list[StatementRowSource]] | None = Field(
