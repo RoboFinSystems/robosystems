@@ -22,6 +22,11 @@ from robosystems.operations.roboledger.entity_scope import membership_window
 from robosystems.operations.roboledger.entry_status import (
   landed_entry_bindparam,
 )
+from robosystems.operations.roboledger.line_dimensions import (
+  LINE_SLICE_SQL,
+  LineSlice,
+  slice_params,
+)
 from robosystems.operations.roboledger.reports.calc_dag import (
   EXTENDS_NETWORK_KEY,
   PPE_ACCUMULATED_DEPRECIATION_QNAME,
@@ -139,6 +144,7 @@ def generate_report_facts(
   periods: list[PeriodSpec],
   close_target_qname: str = "rs-gaap:RetainedEarningsAccumulatedDeficit",
   entity_id: str | None = None,
+  line_slice: LineSlice | None = None,
 ) -> ReportFacts:
   """Generate structure-agnostic facts for all mapped elements across periods.
 
@@ -152,6 +158,11 @@ def generate_report_facts(
   as a live statement leaves it out: that holds for a column that ends
   inside the books too (a calendar year for books opening in July), whose
   flows would be the months since the opening labelled as the whole year.
+
+  ``line_slice`` sums only one management dimension member's lines (or the
+  axis's Unallocated). A slice states the income statement: the mapped
+  balances, net income and the subtotals, never the cash flow or equity
+  derivations, whose cash and equity lines are not tagged.
   """
   arc_type = _arc_type_for_taxonomy(session, taxonomy_id)
   facts: list[ReportFact] = []
@@ -170,12 +181,26 @@ def generate_report_facts(
         arc_type=arc_type,
         close_target_qname=close_target_qname,
         entity_id=entity_id,
+        line_slice=line_slice,
       )
     )
 
   # NetIncomeLoss as its own fact: the IS bottom line and the first child
   # of the CF Operating rollup.
   _emit_net_income_facts(session, facts, periods)
+
+  if line_slice is not None:
+    _emit_subtotal_facts(session, facts, periods)
+    if start is not None:
+      facts = [f for f in facts if _within_the_books(f, start)]
+    return ReportFacts(
+      facts=facts,
+      periods=periods,
+      unmapped_count=_count_unmapped(session, mapping_id, arc_type=arc_type),
+      taxonomy_id=taxonomy_id,
+      mapping_id=mapping_id,
+      warnings=[],
+    )
 
   # PPE Net = Gross - AccumulatedDepreciation for gross + contra mappings;
   # skipped when a direct PPE Net fact exists.
@@ -376,6 +401,7 @@ def _period_balance_facts(
   arc_type: str,
   close_target_qname: str,
   entity_id: str | None,
+  line_slice: LineSlice | None = None,
 ) -> list[ReportFact]:
   """One column's mapped balances, with earnings closed to the Style's
   earnings home: instants through ``period_end``, durations over the period.
@@ -389,6 +415,7 @@ def _period_balance_facts(
     period_end,
     arc_type=arc_type,
     entity_id=entity_id,
+    line_slice=line_slice,
   )
   for balance in balances.values():
     facts.append(
@@ -966,9 +993,11 @@ def _read_mapped_balances(
   period_end: date,
   arc_type: str = "mapping",
   entity_id: str | None = None,
+  line_slice: LineSlice | None = None,
 ) -> dict[str, _Balance]:
   """Mapped trial balance per reporting target (same join as /trial-balance/mapped),
-  for one entity's entries when ``entity_id`` is given.
+  for one entity's entries when ``entity_id`` is given, and only one
+  management dimension member's lines when ``line_slice`` is.
 
   Windowing keys off the target's ``period_type``, not its SFAC 6 trait
   (which can be NULL or contra-*): instant concepts load cumulatively
@@ -980,7 +1009,8 @@ def _read_mapped_balances(
   over inferred, qname tiebreak — so the RE/NI close counts each posting once.
   """
   result = session.execute(
-    text("""
+    text(
+      """
       SELECT
         source_elem.id AS source_id,
         target.id AS reporting_element_id,
@@ -1016,16 +1046,21 @@ def _read_mapped_balances(
           OR e.posting_date >= :start_date
           OR :start_date IS NULL
         )
+        AND """
+      + LINE_SLICE_SQL
+      + """
       GROUP BY source_elem.id, target.id, target.qname, target.name,
                tcls.identifier, target.balance_type, target.period_type
       ORDER BY target.qname
-    """).bindparams(landed_entry_bindparam()),
+    """
+    ).bindparams(landed_entry_bindparam()),
     {
       "mapping_id": mapping_id,
       "arc_type": arc_type,
       "start_date": period_start,
       "end_date": period_end,
       "entity_id": entity_id,
+      **slice_params(line_slice),
     },
   )
 

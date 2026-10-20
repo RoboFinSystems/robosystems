@@ -177,6 +177,14 @@ def build_instructions(
         "`learn-classification-defaults` once seeds each counterparty from its "
         "committed lines."
       )
+    if has("list-dimensions"):
+      inbox_lines.append(
+        "- Departments, classes, locations and projects → `list-dimensions`. "
+        "A journal line carries one member per axis (`dimension_ids`); "
+        "`update-journal-entry(line_dimensions=...)` re-tags a posted line in "
+        "place. `live-financial-statement(dimension={type})` reads the income "
+        "statement with a column per member, plus Unallocated and Total."
+      )
     if has("aged-balances"):
       inbox_lines.append(
         "- Who owes the company, and whom it owes → `aged-balances(kind, "

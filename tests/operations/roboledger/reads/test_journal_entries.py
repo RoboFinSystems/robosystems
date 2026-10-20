@@ -100,7 +100,8 @@ def _empty_line_row(entry_id: str):
 
 
 def _session(rows, total=None):
-  """Mock session serving the count query then the entry query."""
+  """Mock session serving the count query, the entry query, then the lines'
+  dimension members (none)."""
   session = MagicMock()
   count_result = MagicMock()
   count_result.scalar.return_value = (
@@ -108,7 +109,9 @@ def _session(rows, total=None):
   )
   rows_result = MagicMock()
   rows_result.fetchall.return_value = rows
-  session.execute.side_effect = [count_result, rows_result]
+  tags_result = MagicMock()
+  tags_result.all.return_value = []
+  session.execute.side_effect = [count_result, rows_result, tags_result]
   return session
 
 

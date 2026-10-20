@@ -103,6 +103,9 @@ WRITE_TOOL_HINTS: dict[str, ToolHints] = {
   # Counterparties and the reporting entity.
   "create-agent": _ADDS,
   "update-agent": _REPLACES,
+  # Management dimension members; a second create of the same key is refused.
+  "create-dimension": _ADDS,
+  "update-dimension": _REPLACES,
   "learn-classification-defaults": _REPLACES,
   "accept-suggestions": _REPLACES_ONCE_PER_STATE,
   "create-entity": _ADDS,

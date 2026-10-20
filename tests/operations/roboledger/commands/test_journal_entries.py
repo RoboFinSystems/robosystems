@@ -754,6 +754,12 @@ class TestDeleteJournalEntry:
 
 
 class TestReverseJournalEntry:
+  @pytest.fixture(autouse=True)
+  def _untagged(self):
+    """No line carries a dimension member, so no junction query runs."""
+    with patch(f"{MODULE}.line_dimension_ids", return_value={}):
+      yield
+
   def _body(self, entry_id: str = "entry_01"):
     return ReverseJournalEntryRequest(entry_id=entry_id, posting_date=_DATE)
 

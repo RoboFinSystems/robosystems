@@ -374,6 +374,7 @@ class GraphMCPTools:
     self.list_agents_tool = None
     self.agent_activity_tool = None
     self.aged_balances_tool = None
+    self.list_dimensions_tool = None
     if (
       self._has_extension("roboledger")
       and env.ROBOLEDGER_ENABLED
@@ -381,11 +382,13 @@ class GraphMCPTools:
     ):
       from .agent_tools import AgentActivityTool, GetAgentTool, ListAgentsTool
       from .aging_tools import AgedBalancesTool
+      from .dimension_tools import ListDimensionsTool
 
       self.get_agent_tool = GetAgentTool(graph_client)
       self.list_agents_tool = ListAgentsTool(graph_client)
       self.agent_activity_tool = AgentActivityTool(graph_client)
       self.aged_balances_tool = AgedBalancesTool(graph_client)
+      self.list_dimensions_tool = ListDimensionsTool(graph_client)
 
     self.get_event_handler_tool = None
     self.list_event_handlers_tool = None
@@ -732,6 +735,8 @@ class GraphMCPTools:
       tools.append(self.agent_activity_tool.get_tool_definition())
     if self.aged_balances_tool is not None:
       tools.append(self.aged_balances_tool.get_tool_definition())
+    if self.list_dimensions_tool is not None:
+      tools.append(self.list_dimensions_tool.get_tool_definition())
     return tools
 
   def _get_event_handler_tool_definitions(self) -> list[dict[str, Any]]:
@@ -1303,6 +1308,15 @@ class GraphMCPTools:
             "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.aged_balances_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "list-dimensions":
+        if self.list_dimensions_tool is None:
+          raise ValueError(
+            "list-dimensions tool is not available. "
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
+          )
+        result = await self.list_dimensions_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "get-event-handler":

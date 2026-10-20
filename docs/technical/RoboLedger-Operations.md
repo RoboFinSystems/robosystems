@@ -89,6 +89,7 @@ The registered command-write operations, grouped by workflow stage. They live in
 | **Information Blocks** | `create-information-block`, `update-information-block`, `delete-information-block`, `bind-text-block`, `evaluate-rules` |
 | **Forecasting and Metrics** | `compute-forecast`, `backfill-plan-history`, `compute-metrics`, `assert-metrics` |
 | **Agents** | `create-agent`, `update-agent` |
+| **Management Dimensions** | `create-dimension`, `update-dimension` |
 | **Event Blocks** | `create-event-block`, `update-event-block`, `execute-event-block`, `preview-event-block` |
 | **Reconciling Items** | `preview-reconciling-item`, `resolve-reconciling-item` |
 | **Reconciliations** | `preview-reconciliations`, `refresh-reconciliations`, `record-statement-balance`, `set-reconciliation-policy`, `sign-off-reconciliation` |
@@ -307,6 +308,8 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
 `statement_type` is one of `income_statement`, `balance_sheet`, `cash_flow_statement`, or `equity_statement`. Scope the window either explicitly (`period_start` / `period_end`) or by fiscal context (`period_type`, `fiscal_year`), anchored on the graph's fiscal calendar; explicit dates win. `limit` caps the fact rows returned. The result carries the resolved `periods[]` (current plus prior comparative), the rendered `facts[]` with `depth` and `is_subtotal` for indentation, and an `unmapped_count`.
 
 `entity_id` names one entity's books; omitted, the statement is the group parent's. On the group parent, `scope` reads the group: `combined` sums every member consolidated in full, at the rs-gaap concepts and for the months each was a member, with nothing eliminated; `consolidated` adds the consolidation entity, whose entries are the eliminations and noncontrolling interest. A member on the equity method or at cost is never summed. `combined_entity_ids` on the response names the entities summed.
+
+`dimension` slices an income statement by a management dimension: department, class, location, project, or an axis of your own. `{"type": "department"}` reads the current window with one column per member, then `Unallocated` (the lines no department tags), then `Total`, and `dimension.ties_out` says whether every row's members plus Unallocated equal its Total. `{"type": "department", "member_id": "<id>"}` reads one member's lines, current and prior, and `member_id: "unallocated"` the untagged ones. A line carries at most one member per axis, set through `dimension_ids` on a journal line and changed in place, posted or not, through `update-journal-entry`'s `line_dimensions`. The slice composes with `scope`; the consolidation entity's lines are untagged, so eliminations read as Unallocated. Any other statement returns `422`, since its cash and equity lines carry no tag; the GraphQL `trialBalance` takes `dimensionType` and `dimensionMemberId` for balances.
 
 Membership is by whole month, so a window longer than a month counts each member for its own months: a balance sheet holds the members of the month it is struck in, an income statement sums each member's months of the window, and a cash flow or equity statement column a member joined or left within is left out and named in `omitted_periods`, since it would show the member's balances arriving or leaving with no line for them.
 

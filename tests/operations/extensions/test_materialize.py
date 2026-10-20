@@ -1244,6 +1244,19 @@ class TestScenarioExclusion:
     assert "COALESCE(fd.n, 0) > 0" in sql
     assert "COALESCE(fd.n, 0)::BIGINT" in sql
 
+  def test_a_line_items_dimension_flag_comes_from_its_members(self):
+    """A line carries department, class, location and project members; the
+    graph's flag and count are read from them, never a literal."""
+    sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["LineItem"]
+    assert "line_item_dimensions" in sql
+    assert "COALESCE(lid.n, 0) > 0" in sql
+    assert "COALESCE(lid.n, 0)::BIGINT" in sql
+
+  def test_a_retired_member_keeps_its_node(self):
+    """Lines that carry a retired member keep their edge, so its node stays."""
+    sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["Dimension"]
+    assert "is_active" not in sql
+
   def test_no_unguarded_facts_scan_anywhere(self):
     """Completeness sweep: any projection reading facts or fact_sets must
     carry a scenario filter — catches future projections added without one."""

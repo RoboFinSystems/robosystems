@@ -13,6 +13,7 @@ from datetime import date, datetime
 from pydantic import BaseModel, Field
 
 from robosystems.models.api.common import PaginationInfo
+from robosystems.models.api.extensions.dimensions import LineDimension
 
 # ── Read ──────────────────────────────────────────────────────────────────
 
@@ -64,6 +65,13 @@ class LedgerLineItemResponse(BaseModel):
   # The cash flow row the line carries when tagged; None is the account's
   # default flow.
   flow_qname: str | None = None
+  dimensions: list[LineDimension] = Field(
+    default_factory=list,
+    description=(
+      "The management dimension members the line carries (department, "
+      "class, location, project); empty when untagged."
+    ),
+  )
 
 
 class LedgerEntryResponse(BaseModel):

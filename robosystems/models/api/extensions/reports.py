@@ -6,6 +6,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from robosystems.models.api.extensions.dimensions import (
+  StatementDimension,
+  StatementDimensionResponse,
+)
+
 LiveStatementScope = Literal["entity", "combined", "consolidated"]
 
 # ── Period specification ─────────────────────────────────────────────────────
@@ -685,6 +690,20 @@ class LiveFinancialStatementRequest(BaseModel):
       "subtotals. Lower it only for a preview."
     ),
   )
+  dimension: StatementDimension | None = Field(
+    None,
+    description=(
+      "Slice an income statement by a management dimension (department, "
+      "class, location, project). `{type, member_id}` reads one member's "
+      "lines, current and prior; `member_id: unallocated` reads the lines no "
+      "member of the axis tags. `{type}` alone reads the current window with "
+      "one column per member, then Unallocated, then Total, and says in "
+      "`dimension.ties_out` whether every row's members plus Unallocated "
+      "equal its Total. Composes with `scope` and `entity_id`; a "
+      "consolidation entity's lines are untagged, so eliminations read as "
+      "Unallocated. Refused (422) on any other statement."
+    ),
+  )
 
 
 class LiveStatementFactRow(BaseModel):
@@ -767,6 +786,14 @@ class LiveFinancialStatementResponse(BaseModel):
   )
   unmapped_count: int = 0
   truncated: bool = False
+  dimension: StatementDimensionResponse | None = Field(
+    None,
+    description=(
+      "How the statement was sliced by a management dimension, when it was: "
+      "the axis, the one member read, or the columns and whether they tie "
+      "out to the Total."
+    ),
+  )
 
 
 # ── Consolidation worksheet (OLTP) ───────────────────────────────────────────

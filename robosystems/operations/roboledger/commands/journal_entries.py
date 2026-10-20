@@ -19,6 +19,7 @@ from robosystems.logger import logger
 from robosystems.models.api.extensions.journal_entries import (
   CreateJournalEntryRequest,
   DeleteJournalEntryRequest,
+  JournalEntryLineDimensions,
   JournalEntryLineFlow,
   JournalEntryLineItemInput,
   JournalEntryLineItemResponse,
@@ -41,6 +42,11 @@ from robosystems.operations.roboledger.entity_scope import ensure_entity_id
 from robosystems.operations.roboledger.entry_status import SUPERSEDED_ENTRY_STATUS
 from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
   assert_local_posting_allowed,
+)
+from robosystems.operations.roboledger.line_dimensions import (
+  line_dimension_ids,
+  validate_line_dimensions,
+  write_line_dimensions,
 )
 
 
@@ -364,11 +370,58 @@ def _apply_line_flows(
   session.flush()
 
 
+def _apply_line_dimensions(
+  session: Session, entry: Entry, line_dimensions: list[JournalEntryLineDimensions]
+) -> None:
+  """Set the named lines' management dimensions in place, recording on the
+  entry what each changed line carried before. A dimension moves no balance,
+  so a posted entry's lines are re-tagged, closed month or not. A line named
+  twice or not this entry's refuses the request whole; a retired member may
+  stay on a line already carrying it."""
+  by_id = {str(li.id) for li in _load_line_items(session, entry.id)}
+  ids = [d.line_id for d in line_dimensions]
+  twice = sorted({line_id for line_id in ids if ids.count(line_id) > 1})
+  if twice:
+    raise ValueError(f"line_dimensions names {', '.join(twice)} more than once.")
+  unknown = sorted(line_id for line_id in ids if line_id not in by_id)
+  if unknown:
+    raise ValueError(f"Journal entry {entry.id} has no line {', '.join(unknown)}.")
+  before = line_dimension_ids(session, ids)
+  checked = validate_line_dimensions(
+    session,
+    [d.dimension_ids for d in line_dimensions],
+    kept={i for tags in before.values() for i in tags},
+  )
+  after = dict(zip(ids, checked, strict=True))
+  changed = sorted(
+    line_id
+    for line_id in ids
+    if sorted(after[line_id]) != sorted(before.get(line_id, []))
+  )
+  if not changed:
+    return
+  write_line_dimensions(session, {line_id: after[line_id] for line_id in changed})
+  history = list((entry.metadata_ or {}).get("dimension_retags") or [])
+  history.append(
+    {
+      "at": datetime.now(UTC).isoformat(),
+      "line_ids": changed,
+      "from": {line_id: before.get(line_id, []) for line_id in changed},
+    }
+  )
+  entry.metadata_ = {**(entry.metadata_ or {}), "dimension_retags": history}
+  session.flush()
+
+
 def _retag_lines(
-  session: Session, peek: Entry, line_flows: list[JournalEntryLineFlow]
+  session: Session,
+  peek: Entry,
+  line_flows: list[JournalEntryLineFlow] | None,
+  line_dimensions: list[JournalEntryLineDimensions] | None = None,
 ) -> JournalEntryResponse:
-  """The flow-only update: no period fence and no draft rule, since a flow
-  moves no balance; the entry is still locked while its lines change."""
+  """The tag-only update: no period fence and no draft rule, since neither a
+  flow nor a dimension moves a balance; the entry is still locked while its
+  lines change."""
   event = _lock_owning_event(session, peek)
   entry = lock_by_id(
     session,
@@ -380,10 +433,14 @@ def _retag_lines(
     raise JournalEntryNotFoundError(peek.id)
   if entry.status not in _RETAGGABLE_STATUSES:
     raise JournalEntryNotDraftError(entry.id, entry.status)
-  _apply_line_flows(session, entry, line_flows)
+  if line_flows is not None:
+    _apply_line_flows(session, entry, line_flows)
+  if line_dimensions is not None:
+    _apply_line_dimensions(session, entry, line_dimensions)
   line_items = _load_line_items(session, entry.id)
-  _mirror_flows_onto_bank_event(session, event, line_items)
-  return _entry_to_response(entry, line_items, _flow_qnames(session, line_items))
+  if line_flows is not None:
+    _mirror_flows_onto_bank_event(session, event, line_items)
+  return _respond(session, entry, line_items)
 
 
 def _mirror_flows_onto_bank_event(
@@ -453,6 +510,7 @@ def validate_and_normalize_lines(
         "credit_amount": credit,
         "description": li.description,
         "flow_qname": li.flow_qname,
+        "dimension_ids": list(li.dimension_ids or []),
         "metadata": li.metadata or {},
       }
     )
@@ -467,8 +525,10 @@ def _entry_to_response(
   entry: Entry,
   line_items: list[LineItem],
   flow_qnames: dict[str, str] | None = None,
+  dimension_ids: dict[str, list[str]] | None = None,
 ) -> JournalEntryResponse:
   flows = flow_qnames or {}
+  dimensions = dimension_ids or {}
   line_item_responses = [
     JournalEntryLineItemResponse(
       id=li.id,
@@ -478,6 +538,7 @@ def _entry_to_response(
       description=li.description,
       line_order=int(li.line_order),
       flow_qname=flows.get(str(li.flow_element_id)) if li.flow_element_id else None,
+      dimension_ids=dimensions.get(str(li.id), []),
     )
     for li in sorted(line_items, key=lambda li: li.line_order)
   ]
@@ -498,6 +559,47 @@ def _entry_to_response(
     total_credit=total_credit,
     adjustment_kind=entry.adjustment_kind,
     adjusts_entity_id=entry.adjusts_entity_id,
+  )
+
+
+def _respond(
+  session: Session, entry: Entry, line_items: list[LineItem]
+) -> JournalEntryResponse:
+  return _entry_to_response(
+    entry,
+    line_items,
+    _flow_qnames(session, line_items),
+    line_dimension_ids(session, (li.id for li in line_items)),
+  )
+
+
+def _insert_lines(
+  session: Session, entry_id: str, normalized: list[dict], flow_ids: list[str | None]
+) -> None:
+  """Write an entry's lines in order, with the members each carries."""
+  lines = [
+    LineItem(
+      entry_id=entry_id,
+      element_id=li["element_id"],
+      flow_element_id=flow_id,
+      debit_amount=li["debit_amount"],
+      credit_amount=li["credit_amount"],
+      description=li["description"],
+      line_order=order,
+      metadata_=_split_flow_tag(li.get("metadata")),
+    )
+    for order, (li, flow_id) in enumerate(zip(normalized, flow_ids, strict=True), 1)
+  ]
+  for line in lines:
+    session.add(line)
+  session.flush()
+  write_line_dimensions(
+    session,
+    {
+      str(line.id): li["dimension_ids"]
+      for line, li in zip(lines, normalized, strict=True)
+      if li.get("dimension_ids")
+    },
   )
 
 
@@ -626,6 +728,12 @@ def create_journal_entry(
     assert_local_posting_allowed(session, entity_id, "Posting this journal entry")
 
   normalized, total_debit, _total_credit = validate_and_normalize_lines(body.line_items)
+  for li, ids in zip(
+    normalized,
+    validate_line_dimensions(session, [li["dimension_ids"] for li in normalized]),
+    strict=True,
+  ):
+    li["dimension_ids"] = ids
   # Only posted (replayed) history carries the source into the exemption; a
   # draft is authored whatever source it names.
   assert_accounts_postable(
@@ -673,23 +781,9 @@ def create_journal_entry(
   session.flush()
 
   flow_ids = resolve_line_flows(session, normalized, entity_id=entity_id)
-  for order, (li, flow_id) in enumerate(zip(normalized, flow_ids, strict=True), 1):
-    session.add(
-      LineItem(
-        entry_id=entry.id,
-        element_id=li["element_id"],
-        flow_element_id=flow_id,
-        debit_amount=li["debit_amount"],
-        credit_amount=li["credit_amount"],
-        description=li["description"],
-        line_order=order,
-        metadata_=_split_flow_tag(li.get("metadata")),
-      )
-    )
-  session.flush()
+  _insert_lines(session, entry.id, normalized, flow_ids)
 
-  line_items = _load_line_items(session, entry.id)
-  return _entry_to_response(entry, line_items, _flow_qnames(session, line_items))
+  return _respond(session, entry, _load_line_items(session, entry.id))
 
 
 # ── Update ───────────────────────────────────────────────────────────────
@@ -699,17 +793,18 @@ def update_journal_entry(
   session: Session, body: UpdateJournalEntryRequest
 ) -> JournalEntryResponse:
   """Update a draft journal entry; omitted fields are unchanged, and
-  ``line_items`` replaces the whole set. ``line_flows`` re-tags lines in
-  place; alone, it is allowed on a posted entry in a closed month too, since
-  a flow moves no balance.
+  ``line_items`` replaces the whole set. ``line_flows`` and
+  ``line_dimensions`` re-tag lines in place; alone, either is allowed on a
+  posted entry in a closed month too, since neither moves a balance.
 
   Raises:
     `JournalEntryNotFoundError`, `JournalEntryNotDraftError`,
     `UnbalancedJournalEntryError`.
     `ClosedPeriodError` if the existing or new `posting_date` is closed.
     `RowLockedError` if another writer holds the entry or its date moved.
-    `ValueError` for `line_flows` beside `line_items`, or naming a line
-      that is not the entry's; `HandlerMetadataValidationError` for a flow
+    `ValueError` for `line_flows` or `line_dimensions` beside `line_items`,
+      naming a line that is not the entry's, or a dimension member that is
+      unknown, retired or a second on its axis; `HandlerMetadataValidationError` for a flow
       that is not a row of the entity's cash flow statement.
   """
   # Peek, fence, then lock and re-check status. Keep the peeked date as a
@@ -719,13 +814,21 @@ def update_journal_entry(
   updates = body.model_dump(exclude_unset=True)
   updates.pop("entry_id", None)
   line_flows = body.line_flows if updates.pop("line_flows", None) is not None else None
+  line_dimensions = (
+    body.line_dimensions if updates.pop("line_dimensions", None) is not None else None
+  )
   if line_flows is not None and "line_items" in updates:
     raise ValueError(
       "line_flows names lines by id, and line_items replaces the lines; "
       "set flow_qname on the new lines instead."
     )
-  if line_flows is not None and not updates:
-    return _retag_lines(session, peek, line_flows)
+  if line_dimensions is not None and "line_items" in updates:
+    raise ValueError(
+      "line_dimensions names lines by id, and line_items replaces the lines; "
+      "set dimension_ids on the new lines instead."
+    )
+  if (line_flows is not None or line_dimensions is not None) and not updates:
+    return _retag_lines(session, peek, line_flows, line_dimensions)
   peeked_date = peek.posting_date
   dates = [peeked_date]
   if body.posting_date is not None:
@@ -768,6 +871,20 @@ def update_journal_entry(
     assert_accounts_postable(
       session, (li["element_id"] for li in normalized), entity_id=entry.entity_id
     )
+    # A retired member the old lines carried may stay on their replacements.
+    held = line_dimension_ids(
+      session, (li.id for li in _load_line_items(session, entry.id))
+    )
+    for li, ids in zip(
+      normalized,
+      validate_line_dimensions(
+        session,
+        [li["dimension_ids"] for li in normalized],
+        kept={i for tags in held.values() for i in tags},
+      ),
+      strict=True,
+    ):
+      li["dimension_ids"] = ids
 
     session.query(LineItem).filter(LineItem.entry_id == entry.id).delete(
       synchronize_session=False
@@ -775,26 +892,15 @@ def update_journal_entry(
     session.flush()
 
     flow_ids = resolve_line_flows(session, normalized, entity_id=str(entry.entity_id))
-    for order, (li, flow_id) in enumerate(zip(normalized, flow_ids, strict=True), 1):
-      session.add(
-        LineItem(
-          entry_id=entry.id,
-          element_id=li["element_id"],
-          flow_element_id=flow_id,
-          debit_amount=li["debit_amount"],
-          credit_amount=li["credit_amount"],
-          description=li["description"],
-          line_order=order,
-          metadata_=_split_flow_tag(li.get("metadata")),
-        )
-      )
+    _insert_lines(session, entry.id, normalized, flow_ids)
 
   if line_flows is not None:
     _apply_line_flows(session, entry, line_flows)
+  if line_dimensions is not None:
+    _apply_line_dimensions(session, entry, line_dimensions)
 
   session.flush()
-  line_items = _load_line_items(session, entry.id)
-  return _entry_to_response(entry, line_items, _flow_qnames(session, line_items))
+  return _respond(session, entry, _load_line_items(session, entry.id))
 
 
 # ── Delete ───────────────────────────────────────────────────────────────
@@ -940,23 +1046,40 @@ def reverse_journal_entry(
   session.add(reversing_entry)
   session.flush()
 
-  for order, li in enumerate(sorted(original_lines, key=lambda x: x.line_order), 1):
-    session.add(
-      LineItem(
-        entry_id=reversing_entry.id,
-        element_id=li.element_id,
-        # Rollforwards need the offsetting flow on the reversal period.
-        flow_element_id=li.flow_element_id,
-        debit_amount=int(li.credit_amount),
-        credit_amount=int(li.debit_amount),
-        metadata_=dict(li.metadata_ or {}),
-        description=(
-          f"Reversal of line {li.line_order}"
-          + (f": {li.description}" if li.description else "")
-        ),
-        line_order=order,
-      )
+  reversing_lines = [
+    LineItem(
+      entry_id=reversing_entry.id,
+      element_id=li.element_id,
+      # Rollforwards need the offsetting flow on the reversal period.
+      flow_element_id=li.flow_element_id,
+      debit_amount=int(li.credit_amount),
+      credit_amount=int(li.debit_amount),
+      metadata_=dict(li.metadata_ or {}),
+      description=(
+        f"Reversal of line {li.line_order}"
+        + (f": {li.description}" if li.description else "")
+      ),
+      line_order=order,
     )
+    for order, li in enumerate(sorted(original_lines, key=lambda x: x.line_order), 1)
+  ]
+  for line in reversing_lines:
+    session.add(line)
+  session.flush()
+  # The reversal carries the original's members, so each slice nets to zero.
+  held = line_dimension_ids(session, (li.id for li in original_lines))
+  write_line_dimensions(
+    session,
+    {
+      str(new.id): held[str(old.id)]
+      for new, old in zip(
+        reversing_lines,
+        sorted(original_lines, key=lambda x: x.line_order),
+        strict=True,
+      )
+      if str(old.id) in held
+    },
+  )
 
   original.status = "reversed"
   session.flush()
@@ -971,7 +1094,6 @@ def reverse_journal_entry(
       session, str(original.triggered_by_event_id), created_by, reason="reversed"
     )
 
-  reversing_lines = _load_line_items(session, reversing_entry.id)
-  return _entry_to_response(
-    reversing_entry, reversing_lines, _flow_qnames(session, reversing_lines)
+  return _respond(
+    session, reversing_entry, _load_line_items(session, reversing_entry.id)
   )

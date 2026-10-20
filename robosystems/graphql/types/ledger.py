@@ -102,6 +102,15 @@ from robosystems.models.api.extensions.closing_book import (
 from robosystems.models.api.extensions.closing_book import (
   ClosingBookStructuresResponse as PydanticClosingBookStructuresResponse,
 )
+from robosystems.models.api.extensions.dimensions import (
+  DimensionListResponse as PydanticDimensionListResponse,
+)
+from robosystems.models.api.extensions.dimensions import (
+  DimensionResponse as PydanticDimensionResponse,
+)
+from robosystems.models.api.extensions.dimensions import (
+  LineDimension as PydanticLineDimension,
+)
 from robosystems.models.api.extensions.entity import (
   LedgerEntityResponse as PydanticLedgerEntity,
 )
@@ -650,6 +659,22 @@ class LedgerTransactionSummary:
 @pydantic_type(model=PydanticLedgerTransactionListResponse, all_fields=True)
 class LedgerTransactionList:
   """Paginated list of transactions."""
+
+
+@pydantic_type(model=PydanticLineDimension, all_fields=True)
+class LineDimension:
+  """A management dimension member a ledger line carries."""
+
+
+@pydantic_type(model=PydanticDimensionResponse, all_fields=True)
+class Dimension:
+  """One member of a management dimension (department, class, location,
+  project)."""
+
+
+@pydantic_type(model=PydanticDimensionListResponse, all_fields=True)
+class DimensionList:
+  """The graph's management dimension members, by axis then name."""
 
 
 @pydantic_type(model=PydanticLedgerLineItemResponse, all_fields=True)

@@ -614,14 +614,20 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       li.description,
       CAST(li.debit_amount AS DOUBLE) / 100.0    AS debit_amount,
       CAST(li.credit_amount AS DOUBLE) / 100.0   AS credit_amount,
-      false                                      AS has_dimensions,
-      0::BIGINT                                  AS dimension_count,
+      COALESCE(lid.n, 0) > 0                     AS has_dimensions,
+      COALESCE(lid.n, 0)::BIGINT                 AS dimension_count,
       {lineitem_is_live} AS is_live,
       CAST(li.updated_at AS VARCHAR)             AS updated_at
     FROM postgres_scan('{c}', '{s}', 'line_items') li
     JOIN postgres_scan('{c}', '{s}', 'entries') e ON e.id = li.entry_id
+    LEFT JOIN (
+      SELECT line_item_id, COUNT(*) AS n
+      FROM postgres_scan('{c}', '{s}', 'line_item_dimensions')
+      GROUP BY line_item_id
+    ) lid ON lid.line_item_id = li.id
   """
 
+  # Every member, retired ones too: the lines that carry one keep their edge.
   tables["Dimension"] = f"""
     CREATE OR REPLACE TABLE Dimension AS
     SELECT
@@ -635,7 +641,6 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       false                           AS is_explicit,
       false                           AS is_typed
     FROM postgres_scan('{c}', '{s}', 'dimensions')
-    WHERE is_active = true
   """
 
   # Structure: synthetic CoA + seed reporting structures (IS, BS, CF)

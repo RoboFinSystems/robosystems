@@ -134,6 +134,9 @@ from robosystems.routers.extensions.roboledger.operations.ledger import (
   create_agent_op as create_agent_op,
 )
 from robosystems.routers.extensions.roboledger.operations.ledger import (
+  create_dimension_op as create_dimension_op,
+)
+from robosystems.routers.extensions.roboledger.operations.ledger import (
   create_event_block_op as create_event_block_op,
 )
 from robosystems.routers.extensions.roboledger.operations.ledger import (
@@ -180,6 +183,9 @@ from robosystems.routers.extensions.roboledger.operations.ledger import (
 )
 from robosystems.routers.extensions.roboledger.operations.ledger import (
   update_agent_op as update_agent_op,
+)
+from robosystems.routers.extensions.roboledger.operations.ledger import (
+  update_dimension_op as update_dimension_op,
 )
 from robosystems.routers.extensions.roboledger.operations.ledger import (
   update_event_block_op as update_event_block_op,
