@@ -18,6 +18,7 @@ from robosystems.models.api.extensions.transactions import (
 )
 from robosystems.models.extensions import Element, Entry, LineItem, Transaction
 from robosystems.operations.roboledger.entity_scope import find_entity_id
+from robosystems.operations.roboledger.line_dimensions import line_dimensions
 
 
 def _txn_to_summary(row: Transaction) -> LedgerTransactionSummaryResponse:
@@ -113,6 +114,7 @@ def get_transaction(
       .where(LineItem.entry_id == entry.id)
       .order_by(LineItem.line_order)
     ).all()
+    tags = line_dimensions(session, (li.id for li, _name, _code in line_items))
 
     li_responses = [
       LedgerLineItemResponse(
@@ -124,6 +126,7 @@ def get_transaction(
         credit_amount=cents_to_dollars(li.credit_amount),
         description=li.description,
         line_order=li.line_order,
+        dimensions=tags.get(str(li.id), []),
       )
       for li, acct_name, acct_code in line_items
     ]

@@ -58,6 +58,14 @@ class JournalEntryLineItemInput(BaseModel):
       "the entity's cash flow statement."
     ),
   )
+  dimension_ids: list[str] | None = Field(
+    None,
+    description=(
+      "The management dimension members this line carries (department, "
+      "class, location, project), by id from `dimensions`; at most one per "
+      "axis. An untagged line is read as the axis's Unallocated."
+    ),
+  )
   metadata: dict[str, Any] | None = Field(
     None,
     description=(
@@ -88,6 +96,10 @@ class JournalEntryLineItemResponse(BaseModel):
       "The cash flow row this line carries, when tagged; null means the "
       "account's default flow."
     ),
+  )
+  dimension_ids: list[str] = Field(
+    default_factory=list,
+    description="The management dimension members the line carries, by id.",
   )
 
 
@@ -182,12 +194,25 @@ class JournalEntryLineFlow(BaseModel):
   )
 
 
+class JournalEntryLineDimensions(BaseModel):
+  """A line's management dimension members, set in place."""
+
+  line_id: str = Field(..., description="The line to re-tag, by id.")
+  dimension_ids: list[str] = Field(
+    ...,
+    description=(
+      "The members the line carries from now on, replacing what it carried; "
+      "empty clears them. At most one per axis."
+    ),
+  )
+
+
 class UpdateJournalEntryRequest(BaseModel):
   """Update a draft journal entry, or re-tag any entry's flows.
 
-  Posted entries accept only `line_flows`: a flow moves no balance, so it
-  changes in place, closed month or not. Anything else on a posted entry is
-  a reversal and a corrected entry.
+  Posted entries accept only `line_flows` and `line_dimensions`: neither
+  moves a balance, so each changes in place, closed month or not. Anything
+  else on a posted entry is a reversal and a corrected entry.
 
   Omitted fields are left unchanged. If `line_items` is provided, the
   existing line items are replaced entirely (atomic delete + insert)
@@ -224,6 +249,18 @@ class UpdateJournalEntryRequest(BaseModel):
       "accepts; recorded on the entry as `flow_retags`, with what each "
       "changed line carried before. Not combinable with `line_items`, which "
       "replaces the lines (set `flow_qname` on them)."
+    ),
+  )
+  line_dimensions: list[JournalEntryLineDimensions] | None = Field(
+    None,
+    min_length=1,
+    description=(
+      "Re-tag lines' management dimensions in place: each named line carries "
+      "exactly the members given (empty clears them). A dimension moves no "
+      "balance, so this is allowed on a posted entry, closed month included; "
+      "recorded on the entry as `dimension_retags`, with what each line "
+      "carried before. Not combinable with `line_items` (set "
+      "`dimension_ids` on the new lines)."
     ),
   )
 

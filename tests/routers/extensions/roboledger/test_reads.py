@@ -182,6 +182,45 @@ class TestLiveFinancialStatementOp:
     assert "cash_flow_statement" in exc_info.value.detail
 
   @pytest.mark.unit
+  async def test_a_dimension_slice_reaches_the_read_and_a_bad_one_is_a_422(self):
+    from robosystems.models.api.extensions.dimensions import StatementDimension
+    from robosystems.operations.roboledger.reads.reports import (
+      DimensionalStatementError,
+    )
+
+    body = LiveFinancialStatementRequest(
+      statement_type="balance_sheet",
+      dimension=StatementDimension(type="department"),
+    )
+    cm = MagicMock()
+    cm.__enter__.return_value = MagicMock()
+    cm.__exit__.return_value = False
+    with (
+      patch(f"{MODULE}.extensions_session", return_value=cm),
+      patch(
+        f"{MODULE}.resolve_reporting_window",
+        return_value=(date(2026, 1, 1), date(2026, 3, 31)),
+      ),
+      patch(
+        f"{MODULE}.get_live_financial_statement",
+        side_effect=DimensionalStatementError("income statement only"),
+      ) as read,
+    ):
+      with pytest.raises(HTTPException) as exc_info:
+        await live_financial_statement_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          _ext=MagicMock(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+
+    assert read.call_args.kwargs["dimension"].type == "department"
+    assert exc_info.value.status_code == 422
+    assert "income statement only" in exc_info.value.detail
+
+  @pytest.mark.unit
   async def test_missing_mapping_translated_to_422(self):
     """CoaMappingNotFoundError should surface as 422 with the exception message."""
     body = LiveFinancialStatementRequest(statement_type="income_statement")

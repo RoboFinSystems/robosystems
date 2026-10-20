@@ -44,6 +44,7 @@ from robosystems.operations.roboledger.reads.reports import (
   LIVE_STATEMENT_TYPES,
   CoaMappingNotFoundError,
   CombinedViewOnParentOnlyError,
+  DimensionalStatementError,
   get_consolidation_worksheet,
   get_live_financial_statement,
   resolve_reporting_window,
@@ -76,7 +77,9 @@ _require_roboledger = require_graph_extension("roboledger")
     "combined` sums every member consolidated in full at the rs-gaap "
     "concepts for the months each was a member, nothing eliminated, and "
     "`scope: consolidated` adds the consolidation entity's entries — the "
-    "eliminations and noncontrolling interest. Rejected on "
+    "eliminations and noncontrolling interest. `dimension` slices an income "
+    "statement by department, class, location or project: one member's "
+    "lines, or a column per member with Unallocated and Total. Rejected on "
     "shared-repository graphs; those should use "
     "`financial-statement-analysis` instead."
   ),
@@ -135,9 +138,14 @@ async def live_financial_statement_op(
             entity_id=body.entity_id,
             consolidated=body.consolidated,
             scope=body.scope,
+            dimension=body.dimension,
             # Reporting Style resolves from the entity on this same session.
           )
-        except (CoaMappingNotFoundError, CombinedViewOnParentOnlyError) as exc:
+        except (
+          CoaMappingNotFoundError,
+          CombinedViewOnParentOnlyError,
+          DimensionalStatementError,
+        ) as exc:
           raise HTTPException(status_code=422, detail=str(exc))
     except ProgrammingError:
       raise _ledger_404()

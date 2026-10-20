@@ -20,6 +20,12 @@ from sqlalchemy import ColumnElement, or_, true
 from robosystems.config import env
 from robosystems.config.storage.graph import get_report_bundle_key
 from robosystems.logger import logger
+from robosystems.models.api.extensions.dimensions import (
+  UNALLOCATED,
+  StatementDimension,
+  StatementDimensionColumn,
+  StatementDimensionResponse,
+)
 from robosystems.models.api.extensions.reports import (
   ConsolidationWorksheetResponse,
   FactRowResponse,
@@ -36,7 +42,7 @@ from robosystems.models.api.extensions.reports import (
   WorksheetColumn,
   WorksheetRow,
 )
-from robosystems.models.extensions import Entity, Report
+from robosystems.models.extensions import Dimension, Entity, Report
 from robosystems.models.extensions.roboledger import Structure
 from robosystems.operations.aws.s3 import S3Client
 from robosystems.operations.roboledger.entity_scope import (
@@ -47,6 +53,11 @@ from robosystems.operations.roboledger.entity_scope import (
   is_group_parent,
   membership_window,
   resolve_entity_id,
+)
+from robosystems.operations.roboledger.entry_status import landed_entry_bindparam
+from robosystems.operations.roboledger.line_dimensions import (
+  RESERVED_DIMENSION_TYPES,
+  LineSlice,
 )
 from robosystems.operations.roboledger.reads.fiscal_calendar import (
   get_fiscal_year_start_month,
@@ -151,9 +162,10 @@ def generate_adhoc_private_statement(
   periods: list[FactPeriodSpec],
   reporting_style_id: str,
   entity_id: str | None = None,
+  line_slice: LineSlice | None = None,
 ):
   """Build a one-shot statement from one entity's current ledger, with no
-  saved Report.
+  saved Report; ``line_slice`` sums one management dimension member's lines.
 
   The Network comes from the entity's Reporting Style. The arc walk is scoped
   to rs-gaap-presentation, where every Default Style Network lives; a Style
@@ -183,6 +195,7 @@ def generate_adhoc_private_statement(
     periods=periods,
     close_target_qname=load_close_target_concept(session, reporting_style_id),
     entity_id=entity_id,
+    line_slice=line_slice,
   )
 
   grid = render_structure_view(
@@ -1023,6 +1036,7 @@ def _combined_statement(
   reporting_style_id: str,
   parent_id: str,
   consolidated: bool,
+  line_slice: LineSlice | None = None,
 ):
   """The group's statement under the parent's Style, summed row by row at
   the rs-gaap concepts, where every entity's own chart has been mapped: the
@@ -1057,6 +1071,7 @@ def _combined_statement(
         periods=[w or p for w, p in zip(windows, periods, strict=True)],
         reporting_style_id=reporting_style_id,
         entity_id=member.id,
+        line_slice=line_slice,
       )
     except CoaMappingNotFoundError as exc:
       first_error = first_error or exc
@@ -1403,6 +1418,170 @@ def get_consolidation_worksheet(
   )
 
 
+class DimensionalStatementError(ValueError):
+  """A management slice asked of a statement it cannot slice, or of an axis or
+  member the graph does not have."""
+
+
+@dataclass
+class _Rendered:
+  grid: FactGrid
+  unmapped_count: int
+  combined_entity_ids: list[str]
+  # Columns a member belongs to only part of (group scopes).
+  partly: set[int]
+
+
+def _render_live(
+  session: Session,
+  *,
+  statement_type: str,
+  periods: list[FactPeriodSpec],
+  reporting_style_id: str,
+  entity_id: str,
+  scope: str,
+  line_slice: LineSlice | None = None,
+) -> _Rendered:
+  if scope != "entity":
+    grid, unmapped_count, combined_entity_ids, partly = _combined_statement(
+      session,
+      statement_type=statement_type,
+      periods=periods,
+      reporting_style_id=reporting_style_id,
+      parent_id=entity_id,
+      consolidated=scope == "consolidated",
+      line_slice=line_slice,
+    )
+    return _Rendered(grid, unmapped_count, combined_entity_ids, partly)
+  grid, unmapped_count = generate_adhoc_private_statement(
+    session,
+    statement_type=statement_type,
+    periods=periods,
+    reporting_style_id=reporting_style_id,
+    entity_id=entity_id,
+    line_slice=line_slice,
+  )
+  return _Rendered(grid, unmapped_count, [], set())
+
+
+def _check_dimension(
+  session: Session, statement_type: str, dimension: StatementDimension
+) -> None:
+  if statement_type != "income_statement":
+    raise DimensionalStatementError(
+      "A statement is read by dimension on the income statement only: the "
+      "cash and equity lines a balance sheet, cash flow or equity statement "
+      "sums are not tagged. Read the trial balance by dimension for balances."
+    )
+  if dimension.type in RESERVED_DIMENSION_TYPES:
+    raise DimensionalStatementError(
+      f"The {dimension.type} axis tags forecast facts, not ledger lines."
+    )
+  if dimension.member_id in (None, UNALLOCATED):
+    return
+  member = session.get(Dimension, dimension.member_id)
+  if member is None or member.dimension_type != dimension.type:
+    raise DimensionalStatementError(
+      f"No {dimension.type} member {dimension.member_id}."
+    )
+
+
+def _slice_of(dimension: StatementDimension) -> LineSlice:
+  member = dimension.member_id
+  return LineSlice(dimension.type, None if member == UNALLOCATED else member)
+
+
+def _members_in_window(
+  session: Session,
+  dimension_type: str,
+  entity_ids: list[str],
+  start: date,
+  end: date,
+) -> list[tuple[str, str]]:
+  """The axis's members on landed lines of these entities in the window, by
+  name: the columns of a statement read by member."""
+  rows = session.execute(
+    text("""
+      SELECT DISTINCT d.id, d.name
+      FROM dimensions d
+      JOIN line_item_dimensions lid ON lid.dimension_id = d.id
+      JOIN line_items li ON li.id = lid.line_item_id
+      JOIN entries e ON e.id = li.entry_id
+      WHERE d.dimension_type = :dimension_type
+        AND e.status IN :landed_entry_statuses
+        AND e.entity_id = ANY(:entity_ids)
+        AND e.posting_date BETWEEN :start AND :end
+      ORDER BY d.name, d.id
+    """).bindparams(landed_entry_bindparam()),
+    {
+      "dimension_type": dimension_type,
+      "entity_ids": entity_ids,
+      "start": start,
+      "end": end,
+    },
+  ).all()
+  return [(str(r.id), r.name) for r in rows]
+
+
+def _by_member(
+  session: Session,
+  *,
+  statement_type: str,
+  window: FactPeriodSpec,
+  reporting_style_id: str,
+  entity_id: str,
+  scope: str,
+  dimension_type: str,
+) -> tuple[_Rendered, list[StatementDimensionColumn], list[str]]:
+  """One column per member, then Unallocated, then Total, for one window,
+  and the rows whose members plus Unallocated miss the Total."""
+  total = _render_live(
+    session,
+    statement_type=statement_type,
+    periods=[window],
+    reporting_style_id=reporting_style_id,
+    entity_id=entity_id,
+    scope=scope,
+  )
+  entity_ids = total.combined_entity_ids or [entity_id]
+  columns = [
+    StatementDimensionColumn(member_id=member_id, name=name)
+    for member_id, name in _members_in_window(
+      session, dimension_type, entity_ids, window.start, window.end
+    )
+  ]
+  columns.append(StatementDimensionColumn(member_id=UNALLOCATED, name="Unallocated"))
+  values: dict[tuple[str, str | None], list[float]] = {
+    _row_key(row): [] for row in total.grid.rows
+  }
+  for column in columns:
+    sliced = _render_live(
+      session,
+      statement_type=statement_type,
+      periods=[window],
+      reporting_style_id=reporting_style_id,
+      entity_id=entity_id,
+      scope=scope,
+      line_slice=LineSlice(
+        dimension_type,
+        None if column.member_id == UNALLOCATED else column.member_id,
+      ),
+    )
+    by_key = {_row_key(row): row.values for row in sliced.grid.rows}
+    for key, row_values in values.items():
+      found = by_key.get(key) or [0.0]
+      row_values.append(float(found[0] or 0.0))
+  columns.append(StatementDimensionColumn(member_id=None, name="Total"))
+  differences: list[str] = []
+  for row in total.grid.rows:
+    row_total = float((row.values or [0.0])[0] or 0.0)
+    parts = values[_row_key(row)]
+    if abs(sum(parts) - row_total) > 0.005:
+      differences.append(row.element_qname)
+    row.values = [*parts, row_total]
+  return total, columns, differences
+
+
 def get_live_financial_statement(
   session: Session,
   *,
@@ -1415,6 +1594,7 @@ def get_live_financial_statement(
   entity_id: str | None = None,
   consolidated: bool = False,
   scope: str | None = None,
+  dimension: StatementDimension | None = None,
 ) -> LiveFinancialStatementResponse:
   """Render a current + prior ad-hoc statement from OLTP data: ``scope``
   ``entity`` (the default) is one entity's books, default the group
@@ -1424,40 +1604,60 @@ def get_live_financial_statement(
   adds the consolidation entity, whose entries are the adjustments column.
   ``consolidated=True`` is the older spelling of ``scope="consolidated"``.
 
+  ``dimension`` slices an income statement by a management dimension: with
+  a ``member_id``, that member's lines only (``unallocated``: the lines no
+  member of the axis tags), current and prior; without one, the current
+  window with one column per member, then Unallocated, then Total, and
+  whether every row's members plus Unallocated equal its Total.
+
   Drops abstract and all-zero rows and caps at ``limit`` (``truncated``).
   ``reporting_style_id`` defaults to the entity's Style. Raises
   ``CoaMappingNotFoundError`` when no CoA→GAAP mapping exists,
-  ``CombinedViewOnParentOnlyError`` for a group scope on a subsidiary, and
-  ``InvalidStatementScopeError`` for a scope not in ``LIVE_STATEMENT_SCOPES``.
+  ``CombinedViewOnParentOnlyError`` for a group scope on a subsidiary,
+  ``InvalidStatementScopeError`` for a scope not in ``LIVE_STATEMENT_SCOPES``,
+  and ``DimensionalStatementError`` for a slice of another statement, a
+  reserved axis, or a member not of the axis.
   """
   scope = scope or ("consolidated" if consolidated else "entity")
   if scope not in LIVE_STATEMENT_SCOPES:
     raise InvalidStatementScopeError(scope)
+  if dimension is not None:
+    _check_dimension(session, statement_type, dimension)
   entity_id = resolve_entity_id(session, entity_id)
   if reporting_style_id is None:
     reporting_style_id = load_entity_reporting_style(session, entity_id)
+  if scope != "entity" and not is_group_parent(session, entity_id):
+    raise CombinedViewOnParentOnlyError(entity_id)
   periods = build_current_and_prior_periods(period_start, period_end)
-  combined_entity_ids: list[str] = []
-  if scope != "entity":
-    if not is_group_parent(session, entity_id):
-      raise CombinedViewOnParentOnlyError(entity_id)
-    grid, unmapped_count, combined_entity_ids, partly = _combined_statement(
+  by_member = dimension is not None and dimension.member_id is None
+  columns: list[StatementDimensionColumn] = []
+  differences: list[str] = []
+  if by_member:
+    assert dimension is not None
+    periods = periods[:1]
+    rendered, columns, differences = _by_member(
       session,
       statement_type=statement_type,
-      periods=periods,
+      window=periods[0],
       reporting_style_id=reporting_style_id,
-      parent_id=entity_id,
-      consolidated=scope == "consolidated",
+      entity_id=entity_id,
+      scope=scope,
+      dimension_type=dimension.type,
     )
   else:
-    partly = set()
-    grid, unmapped_count = generate_adhoc_private_statement(
+    rendered = _render_live(
       session,
       statement_type=statement_type,
       periods=periods,
       reporting_style_id=reporting_style_id,
       entity_id=entity_id,
+      scope=scope,
+      line_slice=_slice_of(dimension) if dimension is not None else None,
     )
+  grid = rendered.grid
+  unmapped_count = rendered.unmapped_count
+  combined_entity_ids = rendered.combined_entity_ids
+  partly = rendered.partly
   # Left out rather than rendered.
   if scope != "entity":
     omitted = partly | group_columns_before_the_books(
@@ -1472,7 +1672,22 @@ def get_live_financial_statement(
     )
   else:
     omitted = columns_before_the_books(session, statement_type, periods, [entity_id])
-  if omitted:
+  if by_member:
+    # One window spread across the members: its columns stand or fall together.
+    if omitted:
+      for row in grid.rows:
+        row.values = []
+      omitted_periods = list(periods)
+      columns = []
+      differences = []
+      periods = []
+    else:
+      omitted_periods = []
+      periods = [
+        FactPeriodSpec(start=periods[0].start, end=periods[0].end, label=c.name)
+        for c in columns
+      ]
+  elif omitted:
     keep = [i for i in range(len(periods)) if i not in omitted]
     for row in grid.rows:
       row.values = [row.values[i] for i in keep if i < len(row.values)]
@@ -1544,4 +1759,15 @@ def get_live_financial_statement(
     ),
     unmapped_count=unmapped_count,
     truncated=truncated,
+    dimension=(
+      StatementDimensionResponse(
+        type=dimension.type,
+        member_id=dimension.member_id,
+        columns=columns,
+        ties_out=not differences if columns else None,
+        differences=differences,
+      )
+      if dimension is not None
+      else None
+    ),
   )

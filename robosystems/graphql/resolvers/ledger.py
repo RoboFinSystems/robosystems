@@ -36,6 +36,7 @@ from robosystems.graphql.types.ledger import (
   ChartTemplate,
   ClassificationStats,
   ClosingBookStructures,
+  DimensionList,
   DischargeCandidates,
   Element,
   ElementList,
@@ -71,6 +72,7 @@ from robosystems.graphql.types.ledger import (
   UnmappedElement,
 )
 from robosystems.graphql.types.report_package import ReportPackage
+from robosystems.models.api.extensions.dimensions import UNALLOCATED
 from robosystems.models.api.extensions.reports import (
   ReportLifecycle as PydanticReportLifecycle,
 )
@@ -83,6 +85,7 @@ from robosystems.operations.roboledger.fiscal_calendar import (
   FiscalCalendarService,
   parse_period,
 )
+from robosystems.operations.roboledger.line_dimensions import LineSlice
 from robosystems.operations.roboledger.reads import (
   account_rollups as reads_account_rollups,
 )
@@ -106,6 +109,9 @@ from robosystems.operations.roboledger.reads import (
 )
 from robosystems.operations.roboledger.reads import (
   closing_book as reads_closing_book,
+)
+from robosystems.operations.roboledger.reads import (
+  dimensions as reads_dimensions,
 )
 from robosystems.operations.roboledger.reads import (
   entity as reads_entity,
@@ -809,6 +815,8 @@ class LedgerQuery:
     start_date: date | None = None,
     end_date: date | None = None,
     entity_id: str | None = None,
+    dimension_type: str | None = None,
+    dimension_member_id: str | None = None,
   ) -> TrialBalance | None:
     """One entity's trial balance for posted entries in a date range.
 
@@ -816,15 +824,65 @@ class LedgerQuery:
       start_date: Start of the posting window (inclusive).
       end_date: End of the posting window (inclusive).
       entity_id: The entity whose books to read. Omit for the group parent.
+      dimension_type: A management dimension axis (department, class,
+        location, project) to slice by, with dimension_member_id.
+      dimension_member_id: The one member whose lines to sum, or
+        `unallocated` for the lines no member of the axis tags.
     """
+    if (dimension_type is None) != (dimension_member_id is None):
+      raise strawberry.exceptions.StrawberryGraphQLError(
+        "dimensionType and dimensionMemberId go together: the axis, and the "
+        "member (or `unallocated`) whose lines to sum.",
+        extensions={"code": "BAD_USER_INPUT"},
+      )
+    line_slice = (
+      LineSlice(
+        dimension_type,
+        None if dimension_member_id == UNALLOCATED else dimension_member_id,
+      )
+      if dimension_type is not None
+      else None
+    )
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_trial_balance.get_trial_balance(
-          session, start_date=start_date, end_date=end_date, entity_id=entity_id
+          session,
+          start_date=start_date,
+          end_date=end_date,
+          entity_id=entity_id,
+          line_slice=line_slice,
         )
     except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return TrialBalance.from_pydantic(response)
+
+  # ── Management dimensions ───────────────────────────────────────────────
+
+  @strawberry.field
+  def dimensions(
+    self,
+    info: Info[GraphQLContext, None],
+    dimension_type: str | None = None,
+    include_inactive: bool = False,
+  ) -> DimensionList | None:
+    """The graph's management dimension members (departments, classes,
+    locations, projects), by axis then name, each with how many lines carry
+    it.
+
+    Args:
+      dimension_type: One axis; omit for all.
+      include_inactive: Also list retired members.
+    """
+    try:
+      with _open_session(info, "roboledger") as session:
+        response = reads_dimensions.list_dimensions(
+          session,
+          dimension_type=dimension_type,
+          include_inactive=include_inactive,
+        )
+    except ProgrammingError:
+      _raise_ledger_not_initialized()
+    return DimensionList.from_pydantic(response)
 
   # ── Transactions ────────────────────────────────────────────────────────
 

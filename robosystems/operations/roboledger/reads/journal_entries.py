@@ -23,6 +23,7 @@ from robosystems.models.api.extensions.transactions import (
   LedgerLineItemResponse,
 )
 from robosystems.operations.roboledger.entity_scope import find_entity_id
+from robosystems.operations.roboledger.line_dimensions import line_dimensions
 
 # ORDER BY cannot be a bind parameter, so it is interpolated, only ever from
 # the fixed `EntryOrder` values, never caller input.
@@ -204,6 +205,14 @@ def fetch_entry_rows(
       }
     )
 
+  tags = line_dimensions(
+    session,
+    (li["line_item_id"] for entry in by_entry.values() for li in entry["line_items"]),
+  )
+  for entry in by_entry.values():
+    for li in entry["line_items"]:
+      li["dimensions"] = tags.get(str(li["line_item_id"]), [])
+
   return [EntryRow(**by_entry[entry_id]) for entry_id in order]
 
 
@@ -275,6 +284,7 @@ def list_journal_entries(
             description=li["description"],
             line_order=li["line_order"],
             flow_qname=li["flow_qname"],
+            dimensions=li["dimensions"],
           )
           for li in entry.line_items
         ],

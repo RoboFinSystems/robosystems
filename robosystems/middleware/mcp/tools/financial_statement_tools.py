@@ -20,6 +20,7 @@ from robosystems.middleware.operations import run_off_loop
 from robosystems.models.api.extensions.consolidation import (
   PreviewConsolidationEntriesRequest,
 )
+from robosystems.models.api.extensions.dimensions import StatementDimension
 from robosystems.operations.roboledger.reads.consolidation import (
   NoConsolidationEntityError,
   preview_consolidation_entries,
@@ -30,6 +31,7 @@ from robosystems.operations.roboledger.reads.reports import (
   MCP_LIVE_STATEMENT_TYPES,
   CoaMappingNotFoundError,
   CombinedViewOnParentOnlyError,
+  DimensionalStatementError,
   InvalidStatementScopeError,
   get_consolidation_worksheet,
   get_live_financial_statement,
@@ -139,6 +141,7 @@ class LiveFinancialStatementTool(BaseTool):
 **PARAMETERS:**
 - `entity_id` (optional) — the entity whose books to render; omit for the group parent
 - `scope` (optional, default `entity`) — `entity` is one entity's own books. On the group parent, `combined` sums every member consolidated in full under the parent's Reporting Style, per rs-gaap concept, for the months each was a member — the pre-adjustment total, nothing eliminated; `consolidated` adds the consolidation entity, whose eliminations and noncontrolling interest are the adjustments column, so a group that posts its consolidating entries there reads its consolidated statement. An equity-method or cost member (its `consolidation_method`) is never summed. A question about "the group" reads `consolidated`; `combined` is the worksheet's first total. `combined_entity_ids` on the response names who was summed, and an entity with no mapping yet is left out. `consolidated: true` is the older spelling of `scope: consolidated`
+- `dimension` (optional, income statement only) — a management slice: `{"type": "department"}` returns the current window with one column per department, then `Unallocated` (lines no department tags), then `Total`, and `dimension.ties_out` says whether every row's members plus Unallocated equal its Total; `{"type": "department", "member_id": "<id>"}` reads one member's lines, current and prior (`member_id: "unallocated"` the untagged ones). `list-dimensions` names the axes and members. A consolidation entity's lines are untagged, so on `scope: consolidated` the eliminations read as Unallocated
 - `statement_type` (required) — one of the four below
 - income_statement — Revenue, expenses, net income
 - balance_sheet — Assets, liabilities, equity (instant periods)
@@ -205,6 +208,26 @@ Facts with element qnames, names, classifications, and values aligned with `peri
               "both are given."
             ),
           },
+          "dimension": {
+            "type": "object",
+            "description": (
+              "Income statement only: slice by a management dimension. "
+              "type alone gives a column per member plus Unallocated and "
+              "Total; with member_id, one member's lines (or 'unallocated')."
+            ),
+            "properties": {
+              "type": {
+                "type": "string",
+                "description": "The axis: department, class, location, project, or another.",
+              },
+              "member_id": {
+                "type": "string",
+                "description": "One member's id, or 'unallocated'. Omit for a column per member.",
+              },
+            },
+            "required": ["type"],
+            "additionalProperties": False,
+          },
         },
         "required": ["statement_type"],
         "additionalProperties": False,
@@ -257,10 +280,16 @@ Facts with element qnames, names, classifications, and values aligned with `peri
           entity_id=arguments.get("entity_id"),
           consolidated=bool(arguments.get("consolidated", False)),
           scope=arguments.get("scope"),
+          dimension=(
+            StatementDimension.model_validate(arguments["dimension"])
+            if arguments.get("dimension")
+            else None
+          ),
         )
       except (
         CoaMappingNotFoundError,
         CombinedViewOnParentOnlyError,
+        DimensionalStatementError,
         InvalidStatementScopeError,
       ) as exc:
         return {

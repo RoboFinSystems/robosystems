@@ -16,8 +16,14 @@ from robosystems.operations.roboledger.entity_scope import find_entity_id
 from robosystems.operations.roboledger.entry_status import (
   landed_entry_bindparam,
 )
+from robosystems.operations.roboledger.line_dimensions import (
+  LINE_SLICE_SQL,
+  LineSlice,
+  slice_params,
+)
 
-_TRIAL_BALANCE_SQL = text("""
+_TRIAL_BALANCE_SQL = text(
+  """
   SELECT a.id, a.code, a.name,
          t.identifier AS trait,
          a.metadata->>'account_type' AS account_type,
@@ -37,9 +43,13 @@ _TRIAL_BALANCE_SQL = text("""
     AND (:entity_id IS NULL OR e.entity_id = :entity_id)
     AND (e.posting_date >= :start_date OR :start_date IS NULL)
     AND (e.posting_date <= :end_date OR :end_date IS NULL)
+    AND """
+  + LINE_SLICE_SQL
+  + """
   GROUP BY a.id, a.code, a.name, t.identifier, a.metadata->>'account_type'
   ORDER BY a.code
-""").bindparams(landed_entry_bindparam())
+"""
+).bindparams(landed_entry_bindparam())
 
 
 def get_net_balances_cents(
@@ -53,7 +63,12 @@ def get_net_balances_cents(
   in one entity's books or, with no ``entity_id``, across the graph."""
   result = session.execute(
     _TRIAL_BALANCE_SQL,
-    {"start_date": start_date, "end_date": end_date, "entity_id": entity_id},
+    {
+      "start_date": start_date,
+      "end_date": end_date,
+      "entity_id": entity_id,
+      **slice_params(None),
+    },
   )
   return {str(row.id): int(row.total_debits) - int(row.total_credits) for row in result}
 
@@ -64,15 +79,20 @@ def get_trial_balance(
   end_date: date | None = None,
   *,
   entity_id: str | None = None,
+  line_slice: LineSlice | None = None,
 ) -> TrialBalanceResponse:
   """Return one entity's trial balance for posted entries in the given date
-  range. ``entity_id`` defaults to the group parent."""
+  range. ``entity_id`` defaults to the group parent. ``line_slice`` sums one
+  management dimension member's lines, or the axis's Unallocated; such a
+  balance need not foot, since an entry's other side may be tagged
+  differently or not at all."""
   result = session.execute(
     _TRIAL_BALANCE_SQL,
     {
       "start_date": start_date,
       "end_date": end_date,
       "entity_id": find_entity_id(session, entity_id),
+      **slice_params(line_slice),
     },
   )
 

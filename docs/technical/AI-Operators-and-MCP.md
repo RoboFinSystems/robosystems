@@ -218,6 +218,13 @@ The tool names below are the exact `name` strings for `tools/call`, grouped by f
 | `aged-balances` | Receivables or payables aged at a date: by days past due, per counterparty, tied out to each entity's control account; or one counterparty's open items |
 | `create-agent` / `update-agent` | Add or patch one (agents are deactivated, never deleted) |
 
+**Management dimensions** — RoboLedger tenant. Departments, classes, locations and projects that ledger lines carry, one member per axis:
+
+| Tool | Purpose |
+| --- | --- |
+| `list-dimensions` | The axes and their members, with how many lines carry each |
+| `create-dimension` / `update-dimension` | Add a member; rename or retire one (members are retired, never deleted) |
+
 **Reports and entity** — RoboLedger tenant:
 
 | Tool | Purpose |

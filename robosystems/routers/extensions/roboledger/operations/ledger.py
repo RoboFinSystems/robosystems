@@ -45,6 +45,11 @@ from robosystems.models.api.extensions.consolidation import (
   ProposeConsolidationEntriesResponse,
   SetAllocationOverrideRequest,
 )
+from robosystems.models.api.extensions.dimensions import (
+  CreateDimensionRequest,
+  DimensionResponse,
+  UpdateDimensionRequest,
+)
 from robosystems.models.api.extensions.journal_entries import (
   DeleteJournalEntryRequest,
   JournalEntryResponse,
@@ -129,6 +134,15 @@ from robosystems.operations.roboledger.commands.consolidation import (
 from robosystems.operations.roboledger.commands.consolidation import (
   set_allocation_override as cmd_set_allocation_override,
 )
+from robosystems.operations.roboledger.commands.dimensions import (
+  DuplicateDimensionError,
+)
+from robosystems.operations.roboledger.commands.dimensions import (
+  create_dimension as cmd_create_dimension,
+)
+from robosystems.operations.roboledger.commands.dimensions import (
+  update_dimension as cmd_update_dimension,
+)
 from robosystems.operations.roboledger.commands.event_handler import (
   EventHandlerNotFoundError,
   TemplateValidationError,
@@ -200,6 +214,7 @@ from robosystems.operations.roboledger.commands.suggestions import (
   accept_suggestions as cmd_accept_suggestions,
 )
 from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
+from robosystems.operations.roboledger.line_dimensions import DimensionNotFoundError
 from robosystems.operations.roboledger.reads.consolidation import (
   NoConsolidationEntityError,
 )
@@ -256,6 +271,47 @@ update_agent_op = _registrar.register(
     result_type=LedgerAgentResponse,
     error_map={AgentNotFoundError: 404, RowLockedError: 409, ValueError: 422},
     mark_stale_reason="agent_updated",
+  )
+)
+
+# ── Management dimensions: departments, classes, locations, projects ───────────
+
+create_dimension_op = _registrar.register(
+  OperationSpec(
+    name="create-dimension",
+    summary="Create Dimension",
+    description=(
+      "Add a member to a management dimension: a department, class, "
+      "location or project (or an axis of your own) that ledger lines can "
+      "carry, one member per axis per line. `value` is the member's stable "
+      "key within its axis, a slug of the name when omitted; a second "
+      "member with the same key returns 409. Tag lines with its id through "
+      "`dimension_ids` on a journal line, and read the income statement by "
+      "it with `live-financial-statement`'s `dimension`."
+    ),
+    command=cmd_create_dimension,
+    request_model=CreateDimensionRequest,
+    result_type=DimensionResponse,
+    error_map={DuplicateDimensionError: 409, ValueError: 422},
+    mark_stale_reason="dimension_created",
+  )
+)
+
+update_dimension_op = _registrar.register(
+  OperationSpec(
+    name="update-dimension",
+    summary="Update Dimension",
+    description=(
+      "Rename a management dimension member, or retire it with "
+      "`is_active=false`. Members are never deleted: a retired member stays "
+      "on the lines that carry it and goes on no new ones. A member synced "
+      "from QuickBooks keeps QuickBooks's name."
+    ),
+    command=cmd_update_dimension,
+    request_model=UpdateDimensionRequest,
+    result_type=DimensionResponse,
+    error_map={DimensionNotFoundError: 404, RowLockedError: 409, ValueError: 422},
+    mark_stale_reason="dimension_updated",
   )
 )
 
@@ -910,13 +966,17 @@ update_journal_entry_op = _registrar.register(
     name="update-journal-entry",
     summary="Update Journal Entry",
     description=(
-      "Update a draft journal entry, or re-tag any entry's flows. If "
+      "Update a draft journal entry, or re-tag any entry's flows or "
+      "management dimensions. If "
       "line_items is provided, existing line items are replaced "
       "atomically, the new set must balance, and a line on a retired "
       "(`is_active=false`) account is refused. `line_flows` sets the cash "
       "flow row of the named lines in place, on a posted entry too, closed "
       "month included, since a flow moves no balance; the lines on the "
       "other side of the entry that were in step with it follow. "
+      "`line_dimensions` sets the department, class, location or project "
+      "members the named lines carry, in place, on a posted entry and a "
+      "closed month too, since a dimension moves no balance either. "
       "Posted entries accept nothing else and are corrected via "
       "`create-event-block(event_type='journal_entry_reversed')`."
     ),
