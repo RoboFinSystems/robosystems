@@ -8,6 +8,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.consolidation import (
@@ -24,7 +25,7 @@ from robosystems.models.api.extensions.journal_entries import (
 )
 from robosystems.models.extensions import Entity
 from robosystems.models.extensions.roboledger import Entry, LineItem, Transaction
-from robosystems.operations.locking import lock_by_id
+from robosystems.operations.locking import RowLockedError, lock_by_id
 from robosystems.operations.roboledger.commands._guards import (
   assert_period_not_closed,
 )
@@ -191,7 +192,13 @@ def _record_opening(
     created_by=created_by,
   )
   session.add(entry)
-  session.flush()
+  try:
+    session.flush()
+  except IntegrityError as exc:
+    raise RowLockedError(
+      "Another opening balance was recorded for the consolidation entity at "
+      "the same time. Propose the month again."
+    ) from exc
   order = 0
   for proposal in proposals:
     for line in proposal.lines:

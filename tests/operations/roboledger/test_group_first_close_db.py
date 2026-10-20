@@ -71,8 +71,8 @@ JULY_15 = date(2026, 7, 15)
 NCI = "rs-gaap:MinorityInterest"
 
 
-@pytest.fixture()
-def group():
+@pytest.fixture(params=["fresh", "baseline"])
+def group(request):
   url = env.EXTENSIONS_DATABASE_URL
   if not url:
     pytest.skip("EXTENSIONS_DATABASE_URL not configured")
@@ -96,14 +96,17 @@ def group():
       ),
       extensions_session(GRAPH) as session,
     ):
-      yield _seed(session)
+      yield _seed(session, baseline=request.param == "baseline")
   finally:
     with db.begin() as conn:
       conn.execute(text(f"DROP SCHEMA IF EXISTS {GRAPH} CASCADE"))
     db.dispose()
 
 
-def _seed(session) -> dict:
+def _seed(session, *, baseline: bool) -> dict:
+  """``baseline`` seeds the consolidation entity's calendar closed through
+  June, the way initialize-fiscal-calendar does with a closed_through; else
+  it is a fresh calendar whose first month is July."""
   service = FiscalCalendarService()
   ids = {}
   for key, body in (
@@ -141,16 +144,24 @@ def _seed(session) -> dict:
       session,
       GRAPH,
       start_period="2026-05",
-      end_period="2026-07",
+      end_period="2026-08",
       closed_through="2026-05",
       entity_id=ids[key],
     )
-  service.initialize(session, GRAPH, actor_id="usr_1", entity_id=ids["adjustments"])
+  closed_through = "2026-06" if baseline else None
+  service.initialize(
+    session,
+    GRAPH,
+    closed_through=closed_through,
+    actor_id="usr_1",
+    entity_id=ids["adjustments"],
+  )
   service.ensure_fiscal_periods(
     session,
     GRAPH,
-    start_period="2026-07",
-    end_period="2026-07",
+    start_period="2026-05" if baseline else "2026-07",
+    end_period="2026-08",
+    closed_through=closed_through,
     entity_id=ids["adjustments"],
   )
   session.commit()
@@ -276,9 +287,9 @@ def _books(g) -> None:
     _close(g, "parent", period)
 
 
-def _propose(g):
+def _propose(g, period: str = "2026-07"):
   return propose_consolidation_entries(
-    g["session"], ProposeConsolidationEntriesRequest(period="2026-07"), "usr_1"
+    g["session"], ProposeConsolidationEntriesRequest(period=period), "usr_1"
   )
 
 
@@ -323,6 +334,26 @@ def test_the_first_close_opens_on_what_the_history_needed(group):
   assert equity.validation.status != "failed", equity.validation.failures
   assert _july(equity, "beginning") == 3000.0
   assert _july(equity, "ending") == 3300.0
+
+
+def test_the_month_after_holds_the_opening_and_closes(group):
+  """August holds July's opening like any posted entry: nothing is owed for
+  it, and the group closes August."""
+  _books(group)
+  _propose(group)
+  _close(group, "adjustments", "2026-07")
+  _post(group, "member", date(2026, 8, 12), [("1000", 50_000), ("4000", -50_000)], None)
+  for key in ("member", "parent"):
+    _close(group, key, "2026-08")
+
+  _propose(group, "2026-08")
+  with group["session"].begin_nested():
+    august = engine.preview_consolidation_entries(group["session"], period="2026-08")
+    status = engine.group_close_status(group["session"], GRAPH, "2026-08")
+  assert not any(p.opening for p in august.proposals)
+  assert august.up_to_date, august.notes
+  assert status.pending_adjustments == []
+  assert _close(group, "adjustments", "2026-08").statements_stamped
 
 
 def test_proposing_again_replaces_the_opening(group):

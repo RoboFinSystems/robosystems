@@ -44,15 +44,13 @@ from robosystems.models.api.extensions.consolidation import (
 )
 from robosystems.models.extensions.roboledger import Entry, LineItem
 from robosystems.operations.roboledger.commands._guards import closed_periods
-from robosystems.operations.roboledger.commands.opening_balances import (
-  OPENING,
-  opening_date,
-)
+from robosystems.operations.roboledger.commands.opening_balances import OPENING
 from robosystems.operations.roboledger.entity_scope import (
   GroupMember,
   resolve_entity_id,
 )
 from robosystems.operations.roboledger.entry_status import landed_entry_bindparam
+from robosystems.operations.roboledger.fiscal_calendar.periods import next_period
 from robosystems.operations.roboledger.reports.fact_grid import (
   _CASH_ANCHOR_QNAMES,
   _infer_classification,
@@ -467,10 +465,12 @@ def _rows(
       SELECT e.entity_id, li.element_id, src.name AS account_name,
              COALESCE(oag.external_id, ag.external_id) AS counterparty,
              (e.type = 'closing') AS closing,
-             COALESCE(li.metadata->>'adjustment_kind', e.adjustment_kind)
-               AS adjustment_kind,
-             COALESCE(li.metadata->>'adjusts_entity_id', e.adjusts_entity_id)
-               AS adjusts_entity_id,
+             CASE WHEN e.type = 'opening' AND e.provenance = :engine
+                  THEN li.metadata->>'adjustment_kind'
+                  ELSE e.adjustment_kind END AS adjustment_kind,
+             CASE WHEN e.type = 'opening' AND e.provenance = :engine
+                  THEN li.metadata->>'adjusts_entity_id'
+                  ELSE e.adjusts_entity_id END AS adjusts_entity_id,
              (e.type = 'opening' AND e.provenance = :engine) AS opening,
              (e.posting_date >= :start) AS in_period,
              SUM(li.debit_amount - li.credit_amount) AS amount
@@ -495,9 +495,9 @@ def _rows(
       GROUP BY e.entity_id, li.element_id, src.name,
                COALESCE(oag.external_id, ag.external_id),
                (e.type = 'closing'),
-               COALESCE(li.metadata->>'adjustment_kind', e.adjustment_kind),
-               COALESCE(li.metadata->>'adjusts_entity_id', e.adjusts_entity_id),
                (e.type = 'opening' AND e.provenance = :engine),
+               e.adjustment_kind, e.adjusts_entity_id,
+               li.metadata->>'adjustment_kind', li.metadata->>'adjusts_entity_id',
                (e.posting_date >= :start)
       """
     ).bindparams(landed_entry_bindparam(), bindparam("entities", expanding=True)),
@@ -1021,6 +1021,8 @@ def preview_consolidation_entries(
   opening = (
     _opening(before, held_before, rows, set(accounts)) if eve is not None else {}
   )
+  if eve is not None:
+    _note_what_cannot_open(plan, before, held_before, opening, by_id, period)
   for (kind, member_id), lines in opening.items():
     for qname, amount in lines.items():
       held[(qname, kind, member_id, False)] += amount
@@ -1165,7 +1167,7 @@ def preview_consolidation_entries(
       not plan.residuals
       and not plan.incomplete
       and _drafted(session, drafts) == _proposed(proposals)
-      and opening_is_recorded(session, consolidation.id, proposals)
+      and (eve is None or opening_is_recorded(session, consolidation.id, proposals))
     ),
     incomplete=plan.incomplete,
     drafted_entry_ids=[str(e.id) for e in drafts],
@@ -1175,19 +1177,40 @@ def preview_consolidation_entries(
 def first_month_eve(
   session: Session, consolidation_id: str, start: date
 ) -> date | None:
-  """The eve of the consolidation entity's first month when ``start`` opens
-  it and its opening is the engine's to write: none recorded by a person."""
-  eve = opening_date(session, consolidation_id)
-  if eve is None or eve + timedelta(days=1) != start:
-    return None
+  """The eve of ``start`` when it is the consolidation entity's first month,
+  whose opening the engine writes: the first open month of a calendar never
+  closed, or the month an engine opening already opens (reopened back to).
+  None when a person recorded the opening."""
   hand = session.execute(
     select(Entry.id).where(
       Entry.entity_id == consolidation_id,
       Entry.type == OPENING,
-      Entry.provenance != ENGINE_PROVENANCE,
+      Entry.provenance.is_distinct_from(ENGINE_PROVENANCE),
     )
   ).first()
-  return None if hand else eve
+  if hand:
+    return None
+  eve = start - timedelta(days=1)
+  recorded = engine_opening(session, consolidation_id)
+  if recorded is not None:
+    return eve if recorded.posting_date == eve else None
+  calendar = session.execute(
+    text(
+      "SELECT closed_through_period, last_close_at FROM fiscal_calendar "
+      "WHERE entity_id = :e"
+    ),
+    {"e": consolidation_id},
+  ).first()
+  if calendar is None or calendar.last_close_at is not None:
+    return None
+  if calendar.closed_through_period:
+    first = next_period(calendar.closed_through_period)
+  else:
+    first = session.execute(
+      text("SELECT min(name) FROM fiscal_periods WHERE entity_id = :e"),
+      {"e": consolidation_id},
+    ).scalar()
+  return eve if first == f"{start:%Y-%m}" else None
 
 
 def engine_opening(session: Session, consolidation_id: str) -> Entry | None:
@@ -1254,6 +1277,32 @@ def _opening(
     if not sum(lines.values())
     and all(q in postable and classification.get(q) not in _RESULT for q in lines)
   }
+
+
+def _note_what_cannot_open(
+  plan: _Plan,
+  before: _Plan,
+  held_before: dict[tuple[str, str, str, bool], int],
+  opening: dict[tuple[str, str], dict[str, int]],
+  by_id: dict[str, _Entity],
+  period: str,
+) -> None:
+  """Name the earlier history the first month needs but cannot open on (a
+  pair withheld at the eve, income taken before the books, a concept the
+  consolidation entity cannot post): it is caught up within the month, where
+  the consolidated equity statement may not roll forward over it."""
+  needed = {
+    (kind, member_id)
+    for (qname, kind, member_id, periodic), target in before.targets.items()
+    if not periodic and target != held_before.get((qname, kind, member_id, False), 0)
+  } | {(kind, member_id) for kind, member_id in before.withheld}
+  for kind, member_id in sorted(needed - set(opening)):
+    if member_id in by_id:
+      plan.notes.append(
+        f"{by_id[member_id].name}'s {kind} from before {period} cannot be "
+        "the consolidation entity's opening, so it is caught up within the "
+        "month; the consolidated equity statement may not roll forward over it."
+      )
 
 
 def _hold_what_a_former_member_leaves(
@@ -1364,7 +1413,9 @@ def group_close_status(
       for p in preview.proposals
       if not p.opening
     ] or ["drafts that no longer match the books"]
-  if not opening_is_recorded(
+  if first_month_eve(
+    session, preview.consolidation_entity_id, start
+  ) is not None and not opening_is_recorded(
     session, preview.consolidation_entity_id, preview.proposals
   ):
     status.pending_adjustments.append(

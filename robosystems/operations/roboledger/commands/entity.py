@@ -296,9 +296,8 @@ def _apply_updates(session: Session, entity: Entity, updates: dict[str, Any]):
   _check_membership(
     updates.get("joined_on", entity.joined_on), updates.get("left_on", entity.left_on)
   )
-  if role == _ROLE_CONSOLIDATION and (
-    any(updates.get(f) is not None for f in ("joined_on", "left_on"))
-    or (retyped and (entity.joined_on or entity.left_on))
+  if role == _ROLE_CONSOLIDATION and any(
+    updates.get(f, getattr(entity, f)) is not None for f in ("joined_on", "left_on")
   ):
     _refuse_consolidation_membership()
   if not parent and role == _ROLE_OPERATING and method in _METHODS_READ:
