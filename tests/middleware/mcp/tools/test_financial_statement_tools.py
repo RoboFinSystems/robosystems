@@ -147,6 +147,51 @@ class TestLiveFinancialStatementToolExecute:
     assert read.call_args.kwargs["scope"] == "combined"
 
   @pytest.mark.unit
+  @pytest.mark.parametrize("asked", [True, False])
+  async def test_sources_come_only_when_asked(self, asked):
+    tool = LiveFinancialStatementTool(_make_client("kg_123"))
+    from robosystems.models.api.extensions.reports import (
+      LiveFinancialStatementResponse,
+      LiveStatementFactRow,
+    )
+
+    row = LiveStatementFactRow(
+      qname="rs-gaap:Revenues",
+      name="Revenues",
+      values=[700.0],
+      origin="accounts" if asked else None,
+      sources=[[]] if asked else None,
+    )
+    cm = MagicMock()
+    cm.__enter__.return_value = MagicMock()
+    cm.__exit__.return_value = False
+    with (
+      patch(f"{MODULE}.extensions_session", return_value=cm),
+      patch(
+        f"{MODULE}.resolve_reporting_window",
+        return_value=(date(2026, 4, 1), date(2026, 4, 30)),
+      ),
+      patch(
+        f"{MODULE}.get_live_financial_statement",
+        return_value=LiveFinancialStatementResponse(
+          graph_id="kg_123",
+          statement_type="income_statement",
+          periods=[],
+          facts=[row],
+          fact_count=1,
+          unmapped_count=0,
+        ),
+      ) as read,
+    ):
+      result = await tool.execute(
+        {"statement_type": "income_statement", "include_sources": asked}
+      )
+
+    assert read.call_args.kwargs["include_sources"] is asked
+    [fact] = result["facts"]
+    assert ("origin" in fact, "sources" in fact) == (asked, asked)
+
+  @pytest.mark.unit
   async def test_validation_rides_the_payload(self):
     """The guard-rail outcome reaches the model verbatim — it is the only
     signal that a returned number does not foot."""

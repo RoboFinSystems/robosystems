@@ -704,6 +704,32 @@ class LiveFinancialStatementRequest(BaseModel):
       "Unallocated. Refused (422) on any other statement."
     ),
   )
+  include_sources: bool = Field(
+    False,
+    description=(
+      "Add each row's `origin` and, per column, the accounts its figure was "
+      "summed from (`sources`), each keyed by the entity whose books hold "
+      "it, so a figure opens on the account registers behind it. Consolidated "
+      "figures list each member's accounts and the consolidation entity's. "
+      "Off by default: it multiplies the response. Refused (422) with a "
+      "`dimension` read by column."
+    ),
+  )
+
+
+class StatementRowSource(BaseModel):
+  """One account's part in a statement figure: what that account, in that
+  entity's books, contributed to the column."""
+
+  entity_id: str = Field(
+    ..., description="The entity whose books hold the lines, the register to open."
+  )
+  account_id: str = Field(..., description="The account.")
+  code: str | None = Field(None, description="The account's code.")
+  name: str = Field(..., description="The account's name.")
+  value: float = Field(
+    ..., description="What the account contributed, in the figure's sign."
+  )
 
 
 class LiveStatementFactRow(BaseModel):
@@ -720,6 +746,25 @@ class LiveStatementFactRow(BaseModel):
     description=(
       "On the equity roll-forward, `start` for the beginning-balance row and "
       "`end` for the ending-balance row. Null elsewhere."
+    ),
+  )
+  origin: Literal["accounts", "subtotal", "computed"] | None = Field(
+    None,
+    description=(
+      "With `include_sources`, how the figure was made: `accounts` (summed "
+      "from accounts in at least one column; read each column's `sources`, "
+      "which may be empty where they do not add up), `subtotal` (the rows "
+      "beneath it), or `computed` (derived from other figures, or a flow, "
+      "with no accounts of its own). Null without `include_sources`."
+    ),
+  )
+  sources: list[list[StatementRowSource]] | None = Field(
+    None,
+    description=(
+      "With `include_sources`, per column (aligned with `values`), the "
+      "accounts the figure was summed from, largest first; their values add "
+      "up to the figure. Empty for a column with nothing to show, and for a "
+      "subtotal or computed row."
     ),
   )
 
