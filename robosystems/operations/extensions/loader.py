@@ -426,10 +426,7 @@ class OLTPLoader:
     import duckdb
 
     from robosystems.db.extensions import ensure_tenant_schema, extensions_session
-    from robosystems.models.extensions import (
-      Dimension,
-      Element,
-    )
+    from robosystems.models.extensions import Element
     from robosystems.utils.ulid import generate_prefixed_ulid
 
     result = LoadResult(graph_id=graph_id, source=source, connection_id=connection_id)
@@ -537,10 +534,8 @@ class OLTPLoader:
           ElementTrait.element_id.in_(element_subq)
         ).delete(synchronize_session=False)
 
-        session.query(Dimension).filter(
-          Dimension.metadata_.contains({"source": source}),
-        ).delete(synchronize_session=False)
-
+        # Dimensions are upserted like elements, keeping their dim_* ids for
+        # the line junctions, which reference them ON DELETE RESTRICT.
         session.flush()
         logger.info(
           f"Full-rebuild pre-sync cleanup complete for source={source}, "
@@ -789,28 +784,10 @@ class OLTPLoader:
       # TODO: populate the line_item_dimensions junction table (needed for
       # graph materialization).
       if "dimensions" in dbt_data:
-        rows = dbt_data["dimensions"]
-        dim_objects = []
-        for row in rows:
-          oltp_id = generate_prefixed_ulid("dim")
-
-          dim_objects.append(
-            Dimension(
-              id=oltp_id,
-              dimension_type=str(row["dimension_type"]),
-              name=str(row["name"]),
-              value=str(row["value"]),
-              metadata_={"source": source},
-              is_active=True,
-              created_at=now,
-              updated_at=now,
-            )
-          )
-
-        session.add_all(dim_objects)
-        session.flush()
-        result.dimensions = len(rows)
-        logger.info(f"Inserted {result.dimensions} dimensions")
+        result.dimensions = _upsert_dimensions(
+          session, dbt_data["dimensions"], source=source, now=now
+        )
+        logger.info(f"Upserted {result.dimensions} dimensions")
 
     self._update_entity_from_company_info(
       graph_id=graph_id,
@@ -1694,6 +1671,50 @@ class OLTPLoader:
 
     except Exception as e:
       logger.warning(f"Could not update entity from CompanyInfo: {e}")
+
+
+def _upsert_dimensions(session, rows: list[dict], *, source: str, now) -> int:
+  """Write the source's dimension catalog, one row per ``(dimension_type,
+  value)``: a member already held keeps its id and takes the latest name, so
+  every sync after the first lands on the same rows. Returns the rows written."""
+  if not rows:
+    return 0
+
+  from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+  from robosystems.models.extensions import Dimension
+  from robosystems.utils.ulid import generate_prefixed_ulid
+
+  # One row per key: Postgres refuses an upsert that names a key twice.
+  by_key = {(str(r["dimension_type"]), str(r["value"])): r for r in rows}
+  table = Dimension.__table__
+  stmt = pg_insert(table).values(
+    [
+      {
+        "id": generate_prefixed_ulid("dim"),
+        "dimension_type": dimension_type,
+        "name": str(row["name"]),
+        "value": value,
+        "metadata": {"source": source},
+        "is_active": True,
+        "created_at": now,
+        "updated_at": now,
+      }
+      for (dimension_type, value), row in by_key.items()
+    ]
+  )
+  session.execute(
+    stmt.on_conflict_do_update(
+      constraint="uq_dimension_type_value",
+      set_={
+        "name": stmt.excluded.name,
+        "metadata": table.c.metadata.concat(stmt.excluded.metadata),
+        "updated_at": stmt.excluded.updated_at,
+      },
+    )
+  )
+  session.flush()
+  return len(by_key)
 
 
 def _round_trip_shape(entries: list[dict]) -> dict[str, list]:
