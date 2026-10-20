@@ -1564,12 +1564,12 @@ class TestHandleSubscriptionUpdated:
 
       await _handle_subscription_updated(sub_data, mock_db_session, mock_context)
 
-    mock_subscription.cancel.assert_called_once_with(mock_db_session, immediate=True)
+    mock_subscription.cancel.assert_called_once_with(mock_db_session, lapsed=True)
 
   async def test_canceled_stripe_status_calls_immediate_cancel(
     self, mock_db_session, mock_context, mock_subscription
   ):
-    """Calls cancel(immediate=True) when Stripe sends 'canceled' status."""
+    """Calls cancel(lapsed=True) when Stripe sends 'canceled' status: retention applies."""
     mock_subscription.status = "active"
     sub_data = make_subscription_data(status="canceled", cancel_at_period_end=False)
 
@@ -1580,7 +1580,7 @@ class TestHandleSubscriptionUpdated:
 
       await _handle_subscription_updated(sub_data, mock_db_session, mock_context)
 
-    mock_subscription.cancel.assert_called_once_with(mock_db_session, immediate=True)
+    mock_subscription.cancel.assert_called_once_with(mock_db_session, lapsed=True)
 
   async def test_same_status_still_commits_period_dates(
     self, mock_db_session, mock_context, mock_subscription
@@ -1792,10 +1792,10 @@ class TestHandleSubscriptionDeleted:
     )
     mock_db_session.commit.assert_called_once()
 
-  async def test_unexpected_deletion_calls_immediate_cancel(
+  async def test_unexpected_deletion_lapses_the_subscription(
     self, mock_db_session, mock_context, mock_subscription
   ):
-    """Calls cancel(immediate=True) for non-canceled subscriptions."""
+    """Calls cancel(lapsed=True) for non-canceled subscriptions: retention applies."""
     mock_subscription.status = "active"
     sub_data = {"id": "sub_stripe_abc"}
 
@@ -1806,13 +1806,13 @@ class TestHandleSubscriptionDeleted:
 
       await _handle_subscription_deleted(sub_data, mock_db_session, mock_context)
 
-    mock_subscription.cancel.assert_called_once_with(mock_db_session, immediate=True)
+    mock_subscription.cancel.assert_called_once_with(mock_db_session, lapsed=True)
     mock_context.log.info.assert_called_once()
 
-  async def test_pending_payment_subscription_immediate_cancel(
+  async def test_pending_payment_subscription_lapses_on_deletion(
     self, mock_db_session, mock_context, mock_subscription
   ):
-    """Handles deletion of pending_payment subscription via immediate cancel."""
+    """Handles deletion of a pending_payment subscription as a lapse."""
     mock_subscription.status = "pending_payment"
     sub_data = {"id": "sub_stripe_abc"}
 
@@ -1823,7 +1823,7 @@ class TestHandleSubscriptionDeleted:
 
       await _handle_subscription_deleted(sub_data, mock_db_session, mock_context)
 
-    mock_subscription.cancel.assert_called_once_with(mock_db_session, immediate=True)
+    mock_subscription.cancel.assert_called_once_with(mock_db_session, lapsed=True)
 
   async def test_subscription_not_found_raises_error(
     self, mock_db_session, mock_context
@@ -1849,10 +1849,10 @@ class TestHandleSubscriptionDeleted:
 
     mock_db_session.commit.assert_not_called()
 
-  async def test_provisioning_subscription_immediate_cancel(
+  async def test_provisioning_subscription_lapses_on_deletion(
     self, mock_db_session, mock_context, mock_subscription
   ):
-    """Handles deletion of provisioning subscription via immediate cancel."""
+    """Handles deletion of a provisioning subscription as a lapse."""
     mock_subscription.status = "provisioning"
     sub_data = {"id": "sub_stripe_abc"}
 
@@ -1863,7 +1863,7 @@ class TestHandleSubscriptionDeleted:
 
       await _handle_subscription_deleted(sub_data, mock_db_session, mock_context)
 
-    mock_subscription.cancel.assert_called_once_with(mock_db_session, immediate=True)
+    mock_subscription.cancel.assert_called_once_with(mock_db_session, lapsed=True)
 
 
 # ---------------------------------------------------------------------------
