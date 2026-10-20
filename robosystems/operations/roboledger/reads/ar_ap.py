@@ -16,22 +16,39 @@ from collections.abc import Iterable
 from datetime import date, datetime, time, timedelta
 from typing import Literal
 
-from sqlalchemy import case, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy import case, func, or_, select
+from sqlalchemy.orm import Session, aliased
 
 from robosystems.models.api.extensions.ar_ap import (
+  AgedAgentRow,
+  AgedBalances,
+  AgingBuckets,
+  ControlAccount,
+  ControlTieOut,
   GroupOpenItems,
   IntercompanyPair,
   OpenBalanceAggregate,
   OpenBalanceByAgent,
   OpenItem,
 )
+from robosystems.models.extensions import Association, Element
 from robosystems.models.extensions.roboledger.agent import Agent
+from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
+from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.operations.roboledger.entity_scope import (
   find_entity_id,
   group_members,
   resolve_entity_id,
+)
+from robosystems.operations.roboledger.entry_status import LANDED_ENTRY_STATUSES
+from robosystems.operations.roboledger.reads.accounts import (
+  account_scope,
+  entity_accounts_clause,
+)
+from robosystems.operations.taxonomy_block.coa_mappings import (
+  BOOK_FRAMEWORK,
+  find_entity_mapping,
 )
 
 # A sales receipt is paid at the sale and never posts to receivables, so it is
@@ -246,6 +263,25 @@ def _end_of(day: date) -> datetime:
   return datetime.combine(day + timedelta(days=1), time.min)
 
 
+_BUCKET_BOUNDS: tuple[tuple[int, str], ...] = (
+  (0, "current"),
+  (30, "one_to_thirty"),
+  (60, "thirty_one_to_sixty"),
+  (90, "sixty_one_to_ninety"),
+)
+
+
+def _bucket(open_cents: int, days_past_due: int) -> str:
+  """An item's aging bucket. An overpayment is an unapplied credit, whatever
+  its age."""
+  if open_cents < 0:
+    return "unapplied_credit"
+  for bound, name in _BUCKET_BOUNDS:
+    if days_past_due <= bound:
+      return name
+  return "over_ninety"
+
+
 def _open_items(
   session: Session,
   kind: OpenItemKind,
@@ -270,6 +306,7 @@ def _open_items(
       originating.c.entity_id,
       originating.c.agent_id,
       originating.c.occurred_at,
+      originating.c.due_date,
       originating.c.metadata["qb_doc_number"].astext.label("document_number"),
       originating.c.description,
       original.label("original"),
@@ -297,21 +334,31 @@ def _open_items(
   )
   if agent_id is not None:
     stmt = stmt.where(originating.c.agent_id == agent_id)
-  return [
-    OpenItem(
-      event_id=str(row.id),
-      entity_id=str(row.entity_id),
-      agent_id=str(row.agent_id) if row.agent_id else None,
-      occurred_on=row.occurred_at.date(),
-      document_number=row.document_number or None,
-      description=row.description,
-      original_cents=int(row.original),
-      settled_cents=int(row.settled),
-      open_cents=int(row.original) - int(row.settled),
-      currency=str(row.currency or "USD"),
+  items = []
+  for row in session.execute(stmt):
+    issued = row.occurred_at.date()
+    due = row.due_date or issued
+    open_cents = int(row.original) - int(row.settled)
+    days_past_due = (as_of - due).days
+    items.append(
+      OpenItem(
+        event_id=str(row.id),
+        entity_id=str(row.entity_id),
+        agent_id=str(row.agent_id) if row.agent_id else None,
+        occurred_on=issued,
+        document_number=row.document_number or None,
+        description=row.description,
+        original_cents=int(row.original),
+        settled_cents=int(row.settled),
+        open_cents=open_cents,
+        currency=str(row.currency or "USD"),
+        due_date=due,
+        due_date_basis="stated" if row.due_date else "defaulted",
+        days_past_due=days_past_due,
+        bucket=_bucket(open_cents, days_past_due),
+      )
     )
-    for row in session.execute(stmt)
-  ]
+  return items
 
 
 def list_open_items(
@@ -413,5 +460,173 @@ def list_group_open_items(
         difference_cents=receivable - payable,
       )
       for (creditor, debtor), (receivable, payable) in sorted(pairs.items())
+    ],
+  )
+
+
+# ---- Aged balances ----------------------------------------------------------
+
+# The concept each kind's control accounts map to in the book framework, the
+# one a tenant chart can map to, and QuickBooks' own account type for it.
+_CONTROL: dict[str, tuple[str, str]] = {
+  "receivables": ("rs-gaap:ReceivablesNetCurrent", "Accounts Receivable"),
+  "payables": ("rs-gaap:AccountsPayableCurrent", "Accounts Payable"),
+}
+
+AgingScope = Literal["entity", "group"]
+
+
+def _buckets(items: list[OpenItem]) -> AgingBuckets:
+  totals: dict[str, int] = defaultdict(int)
+  for item in items:
+    totals[item.bucket] += item.open_cents
+  return AgingBuckets(
+    current_cents=totals["current"],
+    one_to_thirty_cents=totals["one_to_thirty"],
+    thirty_one_to_sixty_cents=totals["thirty_one_to_sixty"],
+    sixty_one_to_ninety_cents=totals["sixty_one_to_ninety"],
+    over_ninety_cents=totals["over_ninety"],
+    unapplied_credit_cents=totals["unapplied_credit"],
+    total_cents=sum(totals.values()),
+  )
+
+
+def _agent_rows(session: Session, items: list[OpenItem]) -> list[AgedAgentRow]:
+  """A row per counterparty, largest open balance first."""
+  by_agent: dict[str | None, list[OpenItem]] = defaultdict(list)
+  for item in items:
+    by_agent[item.agent_id].append(item)
+  ids = [agent_id for agent_id in by_agent if agent_id]
+  names = (
+    dict(session.execute(select(Agent.id, Agent.name).where(Agent.id.in_(ids))).all())
+    if ids
+    else {}
+  )
+  rows = [
+    AgedAgentRow(
+      agent_id=agent_id,
+      agent_name=names.get(agent_id) if agent_id else None,
+      buckets=_buckets(agent_items),
+      open_item_count=len(agent_items),
+      oldest_due_date=min(i.due_date for i in agent_items if i.open_cents > 0)
+      if any(i.open_cents > 0 for i in agent_items)
+      else None,
+    )
+    for agent_id, agent_items in by_agent.items()
+  ]
+  return sorted(rows, key=lambda r: (-abs(r.buckets.total_cents), r.agent_name or ""))
+
+
+def _control_accounts(
+  session: Session, kind: OpenItemKind, entity_id: str
+) -> list[Element]:
+  """The entity's accounts for ``kind``: mapped to its concept in the entity's
+  book mapping, or QuickBooks' own A/R or A/P account."""
+  concept, source_type = _CONTROL[kind]
+  matches = [Element.metadata_["account_type"].astext == source_type]
+  mapping = find_entity_mapping(session, entity_id, BOOK_FRAMEWORK)
+  if mapping is not None:
+    target = aliased(Element)
+    matches.append(
+      Element.id.in_(
+        select(Association.from_element_id)
+        .join(target, target.id == Association.to_element_id)
+        .where(
+          Association.structure_id == mapping.id,
+          Association.association_type == "mapping",
+          target.qname == concept,
+        )
+      )
+    )
+  return list(
+    session.execute(
+      select(Element)
+      .where(entity_accounts_clause(account_scope(session, entity_id)), or_(*matches))
+      .order_by(Element.code)
+    ).scalars()
+  )
+
+
+def _tie_out(
+  session: Session,
+  kind: OpenItemKind,
+  *,
+  as_of: date,
+  entity_id: str,
+  open_items_cents: int,
+) -> ControlTieOut:
+  accounts = _control_accounts(session, kind, entity_id)
+  balance: int | None = None
+  if accounts:
+    net = session.execute(
+      select(func.coalesce(func.sum(LineItem.debit_amount - LineItem.credit_amount), 0))
+      .join(Entry, Entry.id == LineItem.entry_id)
+      .where(
+        LineItem.element_id.in_([a.id for a in accounts]),
+        Entry.entity_id == entity_id,
+        Entry.status.in_(LANDED_ENTRY_STATUSES),
+        Entry.posting_date <= as_of,
+      )
+    ).scalar_one()
+    balance = int(net) if kind == "receivables" else -int(net)
+  return ControlTieOut(
+    entity_id=entity_id,
+    accounts=[
+      ControlAccount(element_id=str(a.id), code=a.code, name=str(a.name))
+      for a in accounts
+    ],
+    control_balance_cents=balance,
+    open_items_cents=open_items_cents,
+    difference_cents=None if balance is None else open_items_cents - balance,
+  )
+
+
+def get_aged_balances(
+  session: Session,
+  kind: OpenItemKind,
+  *,
+  as_of: date,
+  entity_id: str | None = None,
+  scope: AgingScope = "entity",
+) -> AgedBalances:
+  """Receivables or payables aged at ``as_of``: one entity's, default the
+  group parent's, or with ``scope='group'`` the group's, intercompany items
+  set apart. Each summed entity's open items are tied out against its control
+  accounts."""
+  if scope == "group":
+    group = list_group_open_items(session, kind, as_of=as_of, parent_id=entity_id)
+    resolved: str | None = resolve_entity_id(session, entity_id)
+    members = group.member_entity_ids
+    external, intercompany, pairs = group.external, group.intercompany, group.pairs
+  else:
+    resolved = find_entity_id(session, entity_id)
+    members = [resolved] if resolved else []
+    external = _open_items(session, kind, as_of=as_of, entity_ids=members)
+    intercompany, pairs = [], []
+  per_entity: dict[str, int] = defaultdict(int)
+  for item in (*external, *intercompany):
+    per_entity[item.entity_id] += item.open_cents
+  return AgedBalances(
+    kind=kind,
+    as_of=as_of,
+    scope=scope,
+    entity_id=resolved,
+    member_entity_ids=members,
+    buckets=_buckets(external),
+    agents=_agent_rows(session, external),
+    defaulted_due_date_count=sum(
+      1 for item in external if item.due_date_basis == "defaulted"
+    ),
+    intercompany=intercompany,
+    pairs=pairs,
+    tie_outs=[
+      _tie_out(
+        session,
+        kind,
+        as_of=as_of,
+        entity_id=member,
+        open_items_cents=per_entity[member],
+      )
+      for member in members
     ],
   )

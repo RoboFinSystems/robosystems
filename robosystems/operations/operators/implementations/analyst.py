@@ -80,6 +80,7 @@ class AnalystOperator(Operator):
     "get-agent",
     "list-agents",
     "agent-activity",
+    "aged-balances",
     "get-event-block",
     "list-event-blocks",
     "get-event-handler",

@@ -216,6 +216,7 @@ This page does not repeat that list. What follows is the orientation the generat
 | Whether the books tie to their independent sources for a month | `reconciliations(period: "YYYY-MM")` — each reconciliation's `status`, `unreconciledDifference`, balances and sign-off. See [Period Close](Period-Close.md#reconciliations) |
 | Which schedules are drafted, posted or pending for a period | `periodCloseStatus`, then `periodDrafts` for the entries themselves |
 | Who owes us, and how concentrated it is | `agents(agentType: "customer")` with `openReceivable` on each — names and balances together. `openReceivablesByAgent` gives the same balances keyed by id only |
+| Who owes us and how late, at a date | `agedReceivables(asOf:, scope:)` — bucket totals by days past due, a row per customer, each entity's tie-out to its receivables account, and for `scope: "group"` the intercompany items set apart. `agedPayables` is the same for bills; `openItemsForAgent(agentId:, kind:)` lists one counterparty's open documents |
 | What a counterparty has done | `agent`, then the event and transaction history behind the balance |
 | The chart of accounts, and what is still unmapped | `accounts` / `accountTree`, then `unmappedElements` and `mappingCoverage` |
 | Balances rolled up to reporting concepts | `mappedTrialBalance`, or `accountRollups` for the CoA-level view |

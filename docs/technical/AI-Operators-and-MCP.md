@@ -215,6 +215,7 @@ The tool names below are the exact `name` strings for `tools/call`, grouped by f
 | --- | --- |
 | `list-agents` / `get-agent` | Find and read counterparties |
 | `agent-activity` | A counterparty's recent events and transactions |
+| `aged-balances` | Receivables or payables aged at a date: by days past due, per counterparty, tied out to each entity's control account; or one counterparty's open items |
 | `create-agent` / `update-agent` | Add or patch one (agents are deactivated, never deleted) |
 
 **Reports and entity** — RoboLedger tenant:

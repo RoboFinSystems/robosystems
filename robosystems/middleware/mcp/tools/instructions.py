@@ -177,6 +177,14 @@ def build_instructions(
         "`learn-classification-defaults` once seeds each counterparty from its "
         "committed lines."
       )
+    if has("aged-balances"):
+      inbox_lines.append(
+        "- Who owes the company, and whom it owes → `aged-balances(kind, "
+        "as_of)`: open invoices or bills by days past due, a row per "
+        "counterparty, and each entity's tie-out to its control account. "
+        "An invoice or bill recorded here takes `due_date` or `terms_days`; "
+        "without either it is due on receipt."
+      )
     if has("preview-event-block"):
       inbox_lines.append(
         "- Unsure what a commit would write? `preview-event-block` with the "

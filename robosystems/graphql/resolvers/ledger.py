@@ -29,6 +29,7 @@ from robosystems.graphql.types.ledger import (
   AccountRollups,
   AccountTree,
   AccountTreeNode,
+  AgedBalances,
   Agent,
   BankAccountList,
   BlockedSourceGraphList,
@@ -50,6 +51,7 @@ from robosystems.graphql.types.ledger import (
   MappingDetail,
   OpenBalanceAggregate,
   OpenBalanceByAgent,
+  OpenItem,
   PeriodCloseStatus,
   PeriodDrafts,
   PublishListDetail,
@@ -176,6 +178,33 @@ def _raise_ledger_not_initialized() -> NoReturn:
   ) from None
 
 
+def _aged(
+  info: Info[GraphQLContext, None],
+  kind: reads_ar_ap.OpenItemKind,
+  as_of: date | None,
+  entity_id: str | None,
+  scope: str,
+) -> AgedBalances:
+  if scope not in ("entity", "group"):
+    raise strawberry.exceptions.StrawberryGraphQLError(
+      "scope must be 'entity' or 'group'."
+    )
+  try:
+    with _open_session(info, "roboledger") as session:
+      response = reads_ar_ap.get_aged_balances(
+        session,
+        kind,
+        as_of=as_of or date.today(),
+        entity_id=entity_id,
+        scope="group" if scope == "group" else "entity",
+      )
+  except EntityNotInGraphError as exc:
+    raise strawberry.exceptions.StrawberryGraphQLError(str(exc)) from exc
+  except ValueError, ProgrammingError:
+    _raise_ledger_not_initialized()
+  return AgedBalances.from_pydantic(response)
+
+
 @strawberry.type
 class LedgerQuery:
   """Read-only fields for the roboledger domain.
@@ -289,9 +318,8 @@ class LedgerQuery:
   ) -> OpenBalanceAggregate:
     """One entity's open AR — total + counterparty count + open invoice count.
 
-    Derived from the event duality chain: sum of unsettled
-    `invoice_issued` / `sales_receipt_recorded` amounts minus
-    discharges pointed at them.
+    Derived from the event duality chain: unsettled `invoice_issued`
+    amounts less the discharges pointed at them.
 
     Args:
       entity_id: The entity whose books to read. Omit for the group parent.
@@ -350,6 +378,81 @@ class LedgerQuery:
     except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return [OpenBalanceByAgent.from_pydantic(r) for r in responses]
+
+  @strawberry.field
+  def aged_receivables(
+    self,
+    info: Info[GraphQLContext, None],
+    as_of: date | None = None,
+    entity_id: str | None = None,
+    scope: str = "entity",
+  ) -> AgedBalances:
+    """Receivables aged at a date: bucket totals, a row per customer, and each
+    entity's tie-out to its receivables accounts.
+
+    Args:
+      as_of: The date to age at. Omit for today.
+      entity_id: The entity whose books to read, or the group parent for a
+        group. Omit for the group parent.
+      scope: `entity` for one entity's books, `group` for the parent and the
+        members consolidated in full, intercompany items set apart.
+    """
+    return _aged(info, "receivables", as_of, entity_id, scope)
+
+  @strawberry.field
+  def aged_payables(
+    self,
+    info: Info[GraphQLContext, None],
+    as_of: date | None = None,
+    entity_id: str | None = None,
+    scope: str = "entity",
+  ) -> AgedBalances:
+    """Payables aged at a date — symmetric to `aged_receivables`.
+
+    Args:
+      as_of: The date to age at. Omit for today.
+      entity_id: The entity whose books to read, or the group parent for a
+        group. Omit for the group parent.
+      scope: `entity` or `group`.
+    """
+    return _aged(info, "payables", as_of, entity_id, scope)
+
+  @strawberry.field
+  def open_items_for_agent(
+    self,
+    info: Info[GraphQLContext, None],
+    agent_id: str,
+    kind: str,
+    as_of: date | None = None,
+    entity_id: str | None = None,
+  ) -> list[OpenItem]:
+    """One counterparty's open invoices or bills at a date, oldest first,
+    each with its due date, age and bucket.
+
+    Args:
+      agent_id: The counterparty.
+      kind: `receivables` or `payables`.
+      as_of: The date the items are open at. Omit for today.
+      entity_id: The entity whose books to read. Omit for the group parent.
+    """
+    if kind not in ("receivables", "payables"):
+      raise strawberry.exceptions.StrawberryGraphQLError(
+        "kind must be 'receivables' or 'payables'."
+      )
+    try:
+      with _open_session(info, "roboledger") as session:
+        items = reads_ar_ap.list_open_items(
+          session,
+          kind,
+          as_of=as_of or date.today(),
+          entity_id=entity_id,
+          agent_id=agent_id,
+        )
+    except EntityNotInGraphError as exc:
+      raise strawberry.exceptions.StrawberryGraphQLError(str(exc)) from exc
+    except ValueError, ProgrammingError:
+      _raise_ledger_not_initialized()
+    return [OpenItem.from_pydantic(item) for item in items]
 
   # ── Event blocks (inbox) ────────────────────────────────────────────────
 
