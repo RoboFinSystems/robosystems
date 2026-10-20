@@ -299,6 +299,7 @@ class ConsolidationWorksheetTool(BaseTool):
 - `rows` — every line in the parent's Reporting Style order, `values` aligned with `columns`; a line zero in every column is left out
 - `validation` — the guard rails on the consolidated column; read it before quoting a number
 - A member outside its membership interval for the window has no column; `unmapped_entity_ids` names any entity with no mapping yet
+- `omitted_periods` — a window the live statement would leave out (before a summed entity's books begin, or a cash flow or equity statement a member joined or left within) is named here and not totalled; when it is the worksheet's own window, `rows` is empty
 """,
       "inputSchema": {
         "type": "object",

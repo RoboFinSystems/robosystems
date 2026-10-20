@@ -308,6 +308,8 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
 
 `entity_id` names one entity's books; omitted, the statement is the group parent's. On the group parent, `scope` reads the group: `combined` sums every member consolidated in full, at the rs-gaap concepts and for the months each was a member, with nothing eliminated; `consolidated` adds the consolidation entity, whose entries are the eliminations and noncontrolling interest. A member on the equity method or at cost is never summed. `combined_entity_ids` on the response names the entities summed.
 
+Membership is by whole month, so a window longer than a month counts each member for its own months: a balance sheet holds the members of the month it is struck in, an income statement sums each member's months of the window, and a cash flow or equity statement column a member joined or left within is left out and named in `omitted_periods`, since it would show the member's balances arriving or leaving with no line for them.
+
 ### consolidation-worksheet — tenant graphs
 
 `consolidation-worksheet` reads the same ledger for one window with the entity as the column: the group parent, each member consolidated in full, their `combined` sum, the consolidation entity's adjustments, the `consolidated` total, and then each equity-method or cost member beside the sum (`in_sum: false`), never in it. Every column renders under the group parent's Reporting Style, and the two totals are the numbers `live-financial-statement` returns for its two group scopes. It is the read to check a consolidating entry against.
@@ -319,7 +321,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
   -d '{"statement_type": "balance_sheet", "period_start": "2026-08-01", "period_end": "2026-08-31"}'
 ```
 
-It takes the same `statement_type` and window fields. The result carries `columns[]` (each with its `kind`, `entity_id`, `consolidation_method` and `ownership_pct`), `rows[]` with one value per column in the Style's order, and `validation` for the consolidated column. A member outside its membership interval for the window has no column, and `unmapped_entity_ids` names any entity with no mapping yet.
+It takes the same `statement_type` and window fields. The result carries `columns[]` (each with its `kind`, `entity_id`, `consolidation_method` and `ownership_pct`), `rows[]` with one value per column in the Style's order, and `validation` for the consolidated column. A member outside its membership interval for the window has no column, and `unmapped_entity_ids` names any entity with no mapping yet. A window the live statement would leave out (before a summed entity's books begin, or a cash flow or equity statement a member joined or left within) is named in `omitted_periods` instead of totalled; when it is the worksheet's own window, `rows` is empty.
 
 ### preview-consolidation-entries — tenant graphs
 

@@ -627,3 +627,197 @@ class TestEachEntityStampsItsOwnStatements:
       assert worksheet.unmapped_entity_ids == [unmapped]
       cash = next(r for r in worksheet.rows if r.qname == CASH)
       assert cash.values == [5000.0, 5000.0, 5000.0]
+
+
+class TestMembershipWindows:
+  """A window wider than a month counts each member for its own months: a
+  balance sheet holds the members of the month it is struck in, an income
+  statement sums each member's months, and a cash flow or equity statement a
+  member joined or left within is left out, on the live statement and the
+  worksheet alike."""
+
+  JUNE_JULY = (date(2026, 6, 1), JULY_END)
+
+  @pytest.fixture(autouse=True)
+  def _no_platform(self):
+    with patch(
+      "robosystems.operations.roboledger.reads.fiscal_calendar.qb_sync_state",
+      return_value=(False, None),
+    ):
+      yield
+
+  def _posted(self, session, charts, entity_id, on: date, cents: int) -> None:
+    chart_id = charts[entity_id]
+    create_journal_entry(
+      session,
+      CreateJournalEntryRequest(
+        posting_date=on,
+        memo="Consulting fees received",
+        status="posted",
+        line_items=[
+          JournalEntryLineItemInput(
+            element_id=_account(session, chart_id, "1000"), debit_amount=cents
+          ),
+          JournalEntryLineItemInput(
+            element_id=_account(session, chart_id, "4000"), credit_amount=cents
+          ),
+        ],
+      ),
+      "usr_1",
+      entity_id=entity_id,
+    )
+
+  def _june_and_july(self, session, charts) -> None:
+    """The parent earns 1,000 in June and 2,000 in July; the member 300 and
+    400, and leaves the group at June's end."""
+    service = FiscalCalendarService()
+    for entity_id in (PARENT, SUB):
+      service.initialize(
+        session, GRAPH, closed_through="2026-05", actor_id="usr_1", entity_id=entity_id
+      )
+      service.ensure_fiscal_periods(
+        session,
+        GRAPH,
+        start_period="2026-05",
+        end_period="2026-07",
+        closed_through="2026-05",
+        entity_id=entity_id,
+      )
+    self._posted(session, charts, PARENT, date(2026, 6, 10), 100_000)
+    self._posted(session, charts, PARENT, date(2026, 7, 10), 200_000)
+    self._posted(session, charts, SUB, date(2026, 6, 10), 30_000)
+    self._posted(session, charts, SUB, date(2026, 7, 10), 40_000)
+    session.commit()
+    update_entity(
+      session, UpdateEntityRequest(entity_id=SUB, left_on=date(2026, 6, 30)), "usr_1"
+    )
+
+  def _live(self, session, statement_type: str):
+    start, end = self.JUNE_JULY
+    return get_live_financial_statement(
+      session,
+      graph_id=GRAPH,
+      statement_type=statement_type,
+      period_start=start,
+      period_end=end,
+      scope="combined",
+    )
+
+  def _worksheet(self, session, statement_type: str):
+    start, end = self.JUNE_JULY
+    return get_consolidation_worksheet(
+      session,
+      graph_id=GRAPH,
+      statement_type=statement_type,
+      period_start=start,
+      period_end=end,
+    )
+
+  @staticmethod
+  def _current(response, qname: str) -> float:
+    return {f.qname: f.values[0] for f in response.facts}[qname]
+
+  def test_a_member_that_left_is_off_the_window_end_balance_sheet(self, charts):
+    with extensions_session(GRAPH) as session:
+      self._june_and_july(session, charts)
+      assert self._current(self._live(session, "balance_sheet"), CASH) == 3000.0
+
+  def test_the_income_statement_sums_only_the_members_own_months(self, charts):
+    with extensions_session(GRAPH) as session:
+      self._june_and_july(session, charts)
+      live = self._live(session, "income_statement")
+      worksheet = self._worksheet(session, "income_statement")
+
+    assert self._current(live, REVENUE) == 3300.0
+    revenue = next(r for r in worksheet.rows if r.qname == REVENUE)
+    by_key = dict(zip([c.key for c in worksheet.columns], revenue.values, strict=True))
+    assert (by_key[PARENT], by_key[SUB], by_key["combined"]) == (3000.0, 300.0, 3300.0)
+
+  def test_a_cash_flow_the_member_left_within_is_left_out(self, charts):
+    with extensions_session(GRAPH) as session:
+      self._june_and_july(session, charts)
+      live = self._live(session, "cash_flow_statement")
+      worksheet = self._worksheet(session, "cash_flow_statement")
+
+    assert [p.label for p in live.omitted_periods] == ["Current"]
+    assert [p.label for p in live.periods] == ["Prior"]
+    assert [p.label for p in worksheet.omitted_periods] == ["Current"]
+    assert worksheet.rows == []
+    assert worksheet.validation.status == "inconclusive"
+
+  def _late_member(self, session, charts, *, joined_on: date | None) -> str:
+    """A member whose books open on July 1 from an opening balance and that
+    earns 100 in July."""
+    from robosystems.models.api.extensions.journal_entries import (
+      OpeningBalanceInput,
+      RecordOpeningBalanceRequest,
+    )
+    from robosystems.operations.roboledger.commands.opening_balances import (
+      record_opening_balance,
+    )
+
+    service = FiscalCalendarService()
+    late = create_entity(
+      session,
+      CreateEntityRequest(name="Late LLC", ownership_pct=100, joined_on=joined_on),
+      "usr_1",
+    ).id
+    charts[late] = initialize_chart_of_accounts(
+      session,
+      InitializeChartOfAccountsRequest(template="services", entity_id=late),
+      "usr_1",
+    ).taxonomy_id
+    service.initialize(session, GRAPH, actor_id="usr_1", entity_id=late)
+    service.ensure_fiscal_periods(
+      session, GRAPH, start_period="2026-07", end_period="2026-07", entity_id=late
+    )
+    record_opening_balance(
+      session,
+      RecordOpeningBalanceRequest(
+        entity_id=late,
+        balances=[
+          OpeningBalanceInput(
+            element_id=_account(session, charts[late], "1000"), debit_amount=50_000
+          ),
+          OpeningBalanceInput(
+            element_id=_account(session, charts[late], "3000"), credit_amount=50_000
+          ),
+        ],
+      ),
+      "usr_1",
+    )
+    self._posted(session, charts, late, date(2026, 7, 12), 10_000)
+    session.commit()
+    return late
+
+  def test_a_member_acquired_with_an_opening_balance_adds_its_months(self, charts):
+    """Joined July 1 with books from that day: the June-July income
+    statement adds its July, instead of being left out for reaching back
+    before its books."""
+    with extensions_session(GRAPH) as session:
+      self._june_and_july(session, charts)
+      self._late_member(session, charts, joined_on=date(2026, 7, 1))
+      live = self._live(session, "income_statement")
+      worksheet = self._worksheet(session, "income_statement")
+
+    assert live.omitted_periods == []
+    assert self._current(live, REVENUE) == 3400.0
+    assert worksheet.omitted_periods == []
+    revenue = next(r for r in worksheet.rows if r.qname == REVENUE)
+    combined = [c.key for c in worksheet.columns].index("combined")
+    assert revenue.values[combined] == 3400.0
+
+  def test_the_worksheet_leaves_out_a_window_before_a_members_books(self, charts):
+    """A member whose books open on July 1 from an opening balance, a member
+    since before then: the June-July income statement is left out of the
+    worksheet, as the live statement leaves it out, instead of totalling the
+    parent's months alone."""
+    with extensions_session(GRAPH) as session:
+      self._june_and_july(session, charts)
+      self._late_member(session, charts, joined_on=None)
+      live = self._live(session, "income_statement")
+      worksheet = self._worksheet(session, "income_statement")
+
+    assert [p.label for p in live.omitted_periods] == ["Current", "Prior"]
+    assert worksheet.omitted_periods == live.omitted_periods
+    assert worksheet.rows == []

@@ -7,6 +7,7 @@ companies received with a shared report, never a scope of this ledger.
 
 from __future__ import annotations
 
+import calendar
 from dataclasses import dataclass
 from datetime import date
 
@@ -258,3 +259,22 @@ def group_members(
       for row in rows
     ),
   ]
+
+
+def membership_window(
+  member: GroupMember, start: date, end: date
+) -> tuple[date, date] | None:
+  """The part of ``start`` to ``end`` the member belongs to, by whole months:
+  from the first day of the month it joined to the last of the month it
+  left. None when it belongs to none of it. The consolidation entity is the
+  group's own, read for all of it."""
+  if member.role == "consolidation":
+    return start, end
+  first = start
+  if member.joined_on is not None:
+    first = max(start, member.joined_on.replace(day=1))
+  last = end
+  if member.left_on is not None:
+    left = member.left_on
+    last = min(end, left.replace(day=calendar.monthrange(left.year, left.month)[1]))
+  return (first, last) if first <= last else None
