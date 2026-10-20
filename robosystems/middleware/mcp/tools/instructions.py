@@ -96,14 +96,20 @@ def build_instructions(
 
   # Chart-of-accounts mapping.
   if has("suggest-mapping") or has("get-unmapped-elements"):
-    sections.append(
-      _block(
-        "CHART OF ACCOUNTS / MAPPING",
-        "- See what's unmapped → `get-unmapped-elements`; get suggestions → "
-        "`suggest-mapping`; inspect structures → `list-mapping-structures` / "
-        "`get-mapping-summary`.",
+    coa_lines = [
+      "CHART OF ACCOUNTS / MAPPING",
+      "- See what's unmapped → `get-unmapped-elements`; get suggestions → "
+      "`suggest-mapping`; inspect structures → `list-mapping-structures` / "
+      "`get-mapping-summary`.",
+    ]
+    if has("query-graphql"):
+      coa_lines.append(
+        "- Why an account's balance is what it is → `accountRegister(accountId, "
+        "startDate, endDate, entityId)` over `query-graphql`: its posted lines, "
+        "oldest first, each with the balance it leaves and the entry and event "
+        "behind it."
       )
-    )
+    sections.append(_block(*coa_lines))
 
   # The inbox loop for bank-feed lines: classify, then commit.
   if has("update-event-block") and has("list-event-blocks"):
