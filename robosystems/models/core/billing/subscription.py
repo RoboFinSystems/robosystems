@@ -15,6 +15,11 @@ from robosystems.utils.ulid import generate_prefixed_ulid
 logger = get_logger(__name__)
 
 
+def _as_utc(value: datetime) -> datetime:
+  """Timestamp columns load naive; compare them as the UTC they were stored."""
+  return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
 class SubscriptionStatus(str, Enum):
   """Subscription status states."""
 
@@ -38,6 +43,15 @@ TERMINAL_SUBSCRIPTION_STATUSES = (
   SubscriptionStatus.FAILED.value,
 )
 
+# Statuses whose graph is on the teardown clock: the terminal ones, plus
+# ``unpaid`` — Stripe has stopped retrying the card, so the graph is suspended
+# at ``ends_at`` and deprovisioned after retention unless a payment revives it.
+# Not terminal: an unpaid row still blocks a second subscription to the graph.
+LAPSED_SUBSCRIPTION_STATUSES = (
+  *TERMINAL_SUBSCRIPTION_STATUSES,
+  SubscriptionStatus.UNPAID.value,
+)
+
 # How long a subscription may sit in ``provisioning`` before another trigger
 # may re-claim it, and before the reaper writes it off as stalled. Provisioning
 # is a seconds-to-minutes operation; anything still holding the claim past this
@@ -58,6 +72,9 @@ class CancellationType(str, Enum):
 
   PERIOD_END = "period_end"
   IMMEDIATE = "immediate"
+  # Ended by the payment provider (non-payment, or a cancel that began at
+  # Stripe): access ends now, but teardown waits out the standard retention.
+  LAPSED = "lapsed"
 
 
 class BillingSubscription(Base):
@@ -452,6 +469,22 @@ class BillingSubscription(Base):
     graph.transition_status(GraphStatus.ACTIVE, session)
     return True
 
+  def enter_unpaid(self, session: Session) -> None:
+    """Stripe stopped retrying the card: start the teardown clock.
+
+    The lifecycle sensors suspend the graph once ``ends_at`` passes and
+    deprovision it after retention; a payment before then clears the clock
+    (the ``subscription.updated`` handler).
+    """
+    now = datetime.now(UTC)
+    self.status = SubscriptionStatus.UNPAID.value
+    if self.ends_at is None:
+      self.ends_at = now
+    self.cancellation_type = None
+    self.updated_at = now
+    session.commit()
+    self._invalidate_access_cache()
+
   def activate(self, session: Session) -> None:
     """Activate the subscription."""
     now = datetime.now(UTC)
@@ -478,13 +511,32 @@ class BillingSubscription(Base):
 
     logger.info(f"Paused subscription {self.id}")
 
-  def cancel(self, session: Session, immediate: bool = False) -> None:
+  def cancel(
+    self, session: Session, immediate: bool = False, lapsed: bool = False
+  ) -> None:
     """Cancel the subscription, recording ``cancellation_type`` for sensors.
+
+    ``lapsed`` is a cancel the payment provider made: access ends now (or
+    stays ended, if an unpaid lapse already started the clock) but teardown
+    waits out retention, unlike ``immediate``.
 
     Raises ValueError for a period-end cancel with no ``current_period_end``:
     without ``ends_at`` the deprovision sensor would skip the row forever.
     """
     now = datetime.now(UTC)
+
+    if lapsed:
+      self.status = SubscriptionStatus.CANCELED.value
+      self.canceled_at = now
+      if self.ends_at is None or _as_utc(self.ends_at) > now:
+        self.ends_at = now
+      self.cancellation_type = CancellationType.LAPSED.value
+      self.updated_at = now
+      session.commit()
+      session.refresh(self)
+      self._invalidate_access_cache()
+      logger.info(f"Subscription {self.id} lapsed (ends={self.ends_at})")
+      return
 
     if not immediate and self.current_period_end is None:
       raise ValueError(

@@ -205,9 +205,15 @@ class TestDeprovisionSuspendedGraphsSessionIsolation:
         raise RuntimeError("PG delete blew up mid-transaction")
       return ok
 
-    with patch(
-      "robosystems.operations.graph.deprovision_service.GraphDeprovisionService"
-    ) as svc_cls:
+    with (
+      patch(
+        "robosystems.operations.graph.deprovision_service.GraphDeprovisionService"
+      ) as svc_cls,
+      patch(
+        "robosystems.dagster.jobs.graph_lifecycle._end_unpaid_subscription",
+        return_value=True,
+      ),
+    ):
       svc_cls.return_value.deprovision_graph = _deprovision
 
       result = deprovision_suspended_graphs(

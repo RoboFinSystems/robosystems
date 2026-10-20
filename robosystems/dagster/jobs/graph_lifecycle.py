@@ -71,6 +71,51 @@ class DeprovisionGraphsConfig(Config):
   graph_ids: list[str]
 
 
+def _end_unpaid_subscription(graph_id: str, session, context) -> bool:
+  """Cancel a graph's unpaid subscription at Stripe before its teardown.
+
+  An unpaid Stripe subscription can still collect if the card is fixed, so it
+  must end before the graph does. False when the Stripe cancel failed: the
+  graph is skipped and the next tick retries.
+  """
+  from robosystems.config import env
+  from robosystems.models.core.billing.subscription import (
+    BillingSubscription,
+    SubscriptionStatus,
+  )
+
+  subscription = (
+    session.query(BillingSubscription)
+    .filter(
+      BillingSubscription.resource_type == "graph",
+      BillingSubscription.resource_id == graph_id,
+      BillingSubscription.status == SubscriptionStatus.UNPAID.value,
+    )
+    .first()
+  )
+  if subscription is None:
+    return True
+
+  if subscription.stripe_subscription_id and env.BILLING_ENABLED:
+    from robosystems.operations.providers.payment_provider import (
+      get_payment_provider,
+    )
+
+    try:
+      get_payment_provider("stripe").cancel_subscription(
+        subscription.stripe_subscription_id
+      )
+    except Exception as e:
+      context.log.error(
+        f"Could not cancel unpaid Stripe subscription for {graph_id}: {e}"
+      )
+      return False
+
+  subscription.cancel(session, lapsed=True)
+  context.log.info(f"Canceled unpaid subscription {subscription.id} for {graph_id}")
+  return True
+
+
 @op
 def deprovision_suspended_graphs(
   context: OpExecutionContext,
@@ -92,6 +137,12 @@ def deprovision_suspended_graphs(
   with db.get_session() as session:
     for graph_id in config.graph_ids:
       try:
+        if not _end_unpaid_subscription(graph_id, session, context):
+          errors.append(
+            f"Skipped {graph_id}: its unpaid Stripe subscription could not be "
+            "canceled; retrying next tick"
+          )
+          continue
         result = asyncio.run(
           service.deprovision_graph(graph_id, session, create_backup=True)
         )
