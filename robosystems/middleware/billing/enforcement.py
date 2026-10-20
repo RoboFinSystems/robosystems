@@ -152,15 +152,26 @@ def _assert_graph_live(graph: Graph | None) -> Graph:
   return graph
 
 
+_UPGRADE_EXPORT_DETAIL = (
+  "Graph tier upgrade in progress. Backups are temporarily disabled."
+)
+
+
 def require_graph_access(
-  graph_id: str, session: Session, require_write: bool = False
+  graph_id: str,
+  session: Session,
+  require_write: bool = False,
+  export: bool = False,
 ) -> Graph:
   """Validate the graph is accessible for the requested operation type.
 
   Layer 1 is lifecycle (gone -> 404, suspended -> 403); layer 2 is the
   subscription (a canceled grace period or an upgrade allows reads only). A
   subgraph is held to its parent's lifecycle and subscription as well as its
-  own. Returns the row for ``graph_id`` itself.
+  own. ``export`` is a read that must not run during a tier upgrade (a backup:
+  the migration snapshots the volume), but stays open during a cancellation
+  grace period, which exists so the customer can take their data. Returns the
+  row for ``graph_id`` itself.
   """
   graph = _assert_graph_live(
     Graph.get_by_id(graph_id, session, include_deprovisioned=True)
@@ -187,6 +198,10 @@ def require_graph_access(
       raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Graph tier upgrade in progress. Write operations are temporarily disabled.",
+      )
+    if export:
+      raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN, detail=_UPGRADE_EXPORT_DETAIL
       )
     return graph
   elif cached == "canceled_grace":
@@ -225,6 +240,10 @@ def require_graph_access(
       raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Graph tier upgrade in progress. Write operations are temporarily disabled.",
+      )
+    if export:
+      raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN, detail=_UPGRADE_EXPORT_DETAIL
       )
     return graph
 

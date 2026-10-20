@@ -263,6 +263,9 @@ async def delete_subgraph_op(
       )
 
     subgraph_id = subgraph.graph_id
+    from robosystems.middleware.billing.enforcement import require_graph_access
+
+    require_graph_access(subgraph_id, db, require_write=True)
     subgraph_service = get_subgraph_service()
     deletion_result = await subgraph_service.delete_subgraph_database(
       subgraph_id=subgraph_id, force=body.force, create_backup=body.backup_first
@@ -662,6 +665,10 @@ async def create_backup_op(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Backup creation is currently disabled.",
       )
+
+    from robosystems.middleware.billing.enforcement import require_graph_access
+
+    require_graph_access(graph_id, db, export=True)
 
     if body.backup_format != "full_dump":
       raise HTTPException(

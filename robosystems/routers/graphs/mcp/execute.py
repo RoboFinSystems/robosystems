@@ -21,7 +21,10 @@ from robosystems.middleware.graph.statement_kernel import (
   statement_kernel,
 )
 from robosystems.middleware.graph.utils import MultiTenantUtils
-from robosystems.middleware.mcp.tools.classification import READ_ONLY_MCP_TOOLS
+from robosystems.middleware.mcp.tools.classification import (
+  EXPORT_MCP_TOOLS,
+  READ_ONLY_MCP_TOOLS,
+)
 from robosystems.middleware.robustness import (
   CircuitBreakerManager,
 )
@@ -174,7 +177,13 @@ async def authorize_mcp_tool_call(
         is_write_query = authz.is_write
 
     access_type = "write" if is_write_query else "read"
-    await validate_mcp_access(graph_id, current_user, sess, access_type)
+    await validate_mcp_access(
+      graph_id,
+      current_user,
+      sess,
+      access_type,
+      export=tool_call.name in EXPORT_MCP_TOOLS,
+    )
 
     # Subscriptions live on the parent repository.
     if MultiTenantUtils.is_shared_repository_or_subgraph(graph_id):

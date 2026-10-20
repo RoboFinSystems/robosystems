@@ -7,6 +7,11 @@ mutation audit on every surface. Tools and operations share names."""
 # registrar-generated command ops) defaults to write. The `read-*-cypher` tools
 # are absent on purpose: the StatementKernel classifies them per statement.
 # A new read tool must be added here, or viewers can't call it.
+# Writes whose billing check is the export strength rather than the write one:
+# refused during a tier upgrade, allowed in a cancellation grace period so the
+# customer can still take a backup of their data.
+EXPORT_MCP_TOOLS: frozenset[str] = frozenset({"create-backup"})
+
 READ_ONLY_MCP_TOOLS: frozenset[str] = frozenset(
   {
     # Graph introspection / exploration
