@@ -62,7 +62,7 @@ The event model rests on **REA** (Resources, Events, Agents), the accounting ont
 | **Event** | `Event` (`evt_…`), the Event Block | A business occurrence that exchanges value, optionally named by one of 19 action verbs (`event_action`) |
 | **Resource** | `resource_type`, optionally `resource_element_id` | What is exchanged: goods, services, money, a right, an obligation, information, labor |
 
-Events also link to each other. An invoice **obligates** a later payment, and the payment **discharges** it (`obligated_by_event_id`, `discharges_event_id`); a correction **replaces** the event it supersedes. Once materialized to the graph, the whole chain from event to transaction to entry to line item is walkable in one Cypher query.
+Events also link to each other. An invoice **obligates** a later payment, and the payment **discharges** it (`obligated_by_event_id`, `discharges_event_id`); a payment that settles several documents, or part of one, records what it applied to each as allocations, which the open receivables and payables read before the single link. A correction **replaces** the event it supersedes. Once materialized to the graph, the whole chain from event to transaction to entry to line item is walkable in one Cypher query.
 
 ## The Event Lifecycle
 

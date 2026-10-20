@@ -4,8 +4,9 @@ discharge link (``event.discharges_event_id`` → the invoice it settles).
 The invoice is matched by ``metadata.qb_linked_txns`` first, then by
 ``qb_reference_number`` ↔ ``qb_doc_number`` within the same agent.
 
-Limitation: a payment settling several invoices links only the first match,
-so the AR query undercounts for splits (all refs stay in metadata).
+A payment settling several invoices links only the first here; the loader
+writes what it applied to each as ``event_discharges`` rows from the same
+LinkedTxn lines, and the open-items read prefers those.
 """
 
 from __future__ import annotations

@@ -67,6 +67,9 @@ from robosystems.models.api.extensions.ar_ap import (
   ControlTieOut as PydanticControlTieOut,
 )
 from robosystems.models.api.extensions.ar_ap import (
+  DischargeCandidates as PydanticDischargeCandidates,
+)
+from robosystems.models.api.extensions.ar_ap import (
   IntercompanyPair as PydanticIntercompanyPair,
 )
 from robosystems.models.api.extensions.ar_ap import (
@@ -418,6 +421,11 @@ class ControlTieOut:
 @pydantic_type(model=PydanticAgedBalances, all_fields=True)
 class AgedBalances:
   """Receivables or payables aged at a date."""
+
+
+@pydantic_type(model=PydanticDischargeCandidates, all_fields=True)
+class DischargeCandidates:
+  """The open invoices or bills a payment may settle."""
 
 
 # ── Event blocks (inbox) ──────────────────────────────────────────────────

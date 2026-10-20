@@ -499,9 +499,11 @@ class TestCreateDualityFields:
       discharges_event_id="evt_invoice_issued",
     )
 
-    envelope = create_event_block(
-      session, body, created_by="usr_test", graph_id="kg0123456789abcdef"
-    )
+    # The settlement's checks run against real rows in test_discharges_db.
+    with patch("robosystems.operations.event_block.discharges.check_settlement"):
+      envelope = create_event_block(
+        session, body, created_by="usr_test", graph_id="kg0123456789abcdef"
+      )
 
     added_event = session.add.call_args.args[0]
     assert added_event.discharges_event_id == "evt_invoice_issued"

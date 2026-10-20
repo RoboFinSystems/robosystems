@@ -278,18 +278,23 @@ def flatten_employees(raw: list[Any]) -> list[dict[str, Any]]:
 
 def _extract_linked_txns(data: dict[str, Any]) -> str:
   """The Invoices / Bills a Payment / BillPayment settles, as a JSON string
-  of ``{txn_id, txn_type}`` (a scalar column for parquet → DuckDB → dbt).
+  of ``{txn_id, txn_type, amount}`` (a scalar column for parquet → DuckDB →
+  dbt).
 
   QB's TxnType matches this pipeline's composite-id prefix, so the discharge
   handler rebuilds the settled event's ``external_id`` as ``{TxnType}_{TxnId}``.
+  ``amount`` is the line's, what the payment applied to that document; a line
+  linking several documents does not say how it splits, so it carries none.
   """
   refs: list[dict[str, str]] = []
   for line in data.get("Line", []) or []:
-    for linked in line.get("LinkedTxn", []) or []:
+    linked_txns = line.get("LinkedTxn", []) or []
+    amount = str(line.get("Amount", "") or "") if len(linked_txns) == 1 else ""
+    for linked in linked_txns:
       txn_id = str(linked.get("TxnId", "") or "")
       txn_type = str(linked.get("TxnType", "") or "")
       if txn_id and txn_type:
-        refs.append({"txn_id": txn_id, "txn_type": txn_type})
+        refs.append({"txn_id": txn_id, "txn_type": txn_type, "amount": amount})
   return json.dumps(refs)
 
 

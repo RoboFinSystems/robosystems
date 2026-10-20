@@ -2097,6 +2097,45 @@ class TestAgedBalancesResolvers:
     read.assert_not_called()
 
 
+class TestDischargeCandidatesResolver:
+  """`dischargeCandidates` lists the open items a payment may settle."""
+
+  def test_ranks_the_lines_candidates(self) -> None:
+    from robosystems.models.api.extensions.ar_ap import DischargeCandidates
+
+    item = TestAgedBalancesResolvers._item()
+    response = DischargeCandidates(
+      event_id="evt_line",
+      kind="receivables",
+      amount_cents=10000,
+      classified_to_control=True,
+      candidates=[item],
+    )
+    with patch(
+      f"{_OPS}.ar_ap.list_discharge_candidates", return_value=response
+    ) as read:
+      result = _run(
+        'query { dischargeCandidates(eventId: "evt_line") { kind amountCents '
+        "classifiedToControl candidates { eventId openCents } } }"
+      )
+    assert result.errors is None, result.errors
+    assert read.call_args.args[1] == "evt_line"
+    assert result.data == {
+      "dischargeCandidates": {
+        "kind": "receivables",
+        "amountCents": 10000,
+        "classifiedToControl": True,
+        "candidates": [{"eventId": "evt_1", "openCents": 10000}],
+      }
+    }
+
+  def test_no_such_event_is_null(self) -> None:
+    with patch(f"{_OPS}.ar_ap.list_discharge_candidates", return_value=None):
+      result = _run('query { dischargeCandidates(eventId: "evt_x") { kind } }')
+    assert result.errors is None
+    assert result.data == {"dischargeCandidates": None}
+
+
 class TestClassificationStatsResolver:
   """`classificationStats` counts one month's bank lines per suggestion
   source, read from the lines' own outcome stamps."""

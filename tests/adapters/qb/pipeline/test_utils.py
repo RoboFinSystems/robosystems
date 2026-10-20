@@ -23,7 +23,7 @@ class TestExtractLinkedTxns:
     }
 
     refs = json.loads(_extract_linked_txns(payment))
-    assert refs == [{"txn_id": "5", "txn_type": "Invoice"}]
+    assert refs == [{"txn_id": "5", "txn_type": "Invoice", "amount": "100.0"}]
 
   def test_aggregates_refs_across_multiple_lines(self):
     """One payment applied to two invoices surfaces both refs in order."""
@@ -38,8 +38,8 @@ class TestExtractLinkedTxns:
 
     refs = json.loads(_extract_linked_txns(payment))
     assert refs == [
-      {"txn_id": "5", "txn_type": "Invoice"},
-      {"txn_id": "6", "txn_type": "Invoice"},
+      {"txn_id": "5", "txn_type": "Invoice", "amount": "100.0"},
+      {"txn_id": "6", "txn_type": "Invoice", "amount": "50.0"},
     ]
 
   def test_empty_line_array_yields_empty_json_list(self):
@@ -66,8 +66,9 @@ class TestExtractLinkedTxns:
       ],
     }
 
+    # One line naming several documents does not say how it splits.
     refs = json.loads(_extract_linked_txns(payment))
-    assert refs == [{"txn_id": "5", "txn_type": "Invoice"}]
+    assert refs == [{"txn_id": "5", "txn_type": "Invoice", "amount": ""}]
 
 
 @pytest.mark.unit
@@ -100,7 +101,9 @@ class TestFlattenPaymentHeaders:
     assert row["external_id"] == "Payment_789"
     assert row["agent_external_id"] == "C-1"
     assert row["agent_type"] == "customer"
-    assert json.loads(row["linked_txns"]) == [{"txn_id": "5", "txn_type": "Invoice"}]
+    assert json.loads(row["linked_txns"]) == [
+      {"txn_id": "5", "txn_type": "Invoice", "amount": "100.0"}
+    ]
 
   def test_invoice_header_carries_empty_linked_txns(self):
     """Non-payment headers default linked_txns to '[]' for UNION shape parity."""

@@ -88,6 +88,7 @@ from robosystems.operations.event_block import (
 from robosystems.operations.event_block import (
   update_event_block as cmd_update_event_block,
 )
+from robosystems.operations.event_block.discharges import DischargeRefusedError
 from robosystems.operations.event_block.engine import EngineValidationError
 from robosystems.operations.event_block.python_handlers._disposal_plan import (
   ScheduleNotFoundError as DisposalScheduleNotFoundError,
@@ -353,6 +354,7 @@ create_event_block_op = _registrar.register(
       JournalEntryNotPostedError: 422,
       ClosedPeriodError: 422,
       UnbalancedJournalEntryError: 422,
+      DischargeRefusedError: 422,
       ValueError: 422,
     },
     # Source validation reads the graph's Connections (platform DB).
@@ -385,7 +387,11 @@ update_event_block_op = _registrar.register(
       "`classified_allocations` part) with an rs-gaap flow concept such as "
       "`rs-gaap:ProceedsFromIssuanceOfLongTermDebt`. On a line that has already posted, "
       "this re-tags its lines in place, in a closed month too, since no "
-      "balance moves; an empty string clears it."
+      "balance moves; an empty string clears it. A payment or bank line "
+      "records the invoices or bills it settles with `discharge_allocations` "
+      "(positive cents per document, together at most its amount) or one "
+      "`discharges_event_id`; each is checked: an invoice for money in, a "
+      "bill for money out, on its own entity, not voided."
     ),
     command=cmd_update_event_block,
     request_model=UpdateEventBlockRequest,
@@ -395,6 +401,7 @@ update_event_block_op = _registrar.register(
       EventNotFoundError: 404,
       ReservedEventTypeError: 422,
       InvalidEventTransitionError: 422,
+      DischargeRefusedError: 422,
       # The event's rows already posted (or published to QB): reverse instead.
       EventEffectsAlreadyLandedError: 422,
       HandlerMetadataValidationError: 422,

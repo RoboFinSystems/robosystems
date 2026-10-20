@@ -22,6 +22,7 @@ from .dimension_junctions import (
 )
 from .entry import Entry
 from .event import Event
+from .event_discharge import EventDischarge
 from .event_handler import EventHandler
 from .fact import Fact
 from .fact_set import FactSet
@@ -47,6 +48,7 @@ __all__ = [
   "Element",
   "Entry",
   "Event",
+  "EventDischarge",
   "EventHandler",
   "Fact",
   "FactSet",
