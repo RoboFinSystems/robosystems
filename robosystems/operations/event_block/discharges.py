@@ -7,6 +7,8 @@ of its amount. The documents must be the payment's own entity's and not
 retracted. A different counterparty is allowed, since a parent can pay a
 subsidiary's bill. Allocations may not apply more than the payment's
 magnitude; an overpayment shows as unapplied credit on the document instead.
+A QuickBooks payment's settlement is QuickBooks', written by the sync, and is
+changed there.
 """
 
 from __future__ import annotations
@@ -29,6 +31,10 @@ _SETTLES_BY_TYPE: dict[str, str] = {
 }
 
 _RETRACTED = ("voided", "superseded")
+
+# Sources whose sync writes what a payment settles from the source's own
+# links: a hand edit would be overwritten, so it is made there.
+_SETTLED_AT_SOURCE = frozenset({"quickbooks"})
 
 
 class DischargeRefusedError(ValueError):
@@ -87,6 +93,14 @@ def check_settlement(
       )
 
 
+def _refuse_an_edit_the_sync_owns(payment: Event) -> None:
+  if payment.source in _SETTLED_AT_SOURCE and payment.event_type in _SETTLES_BY_TYPE:
+    raise DischargeRefusedError(
+      f"{payment.source} says what this {payment.event_type} settles: change it "
+      "there and the next sync carries it."
+    )
+
+
 def _clear_allocations(session: Session, payment: Event) -> None:
   session.execute(
     delete(EventDischarge).where(EventDischarge.payment_event_id == payment.id)
@@ -96,6 +110,7 @@ def _clear_allocations(session: Session, payment: Event) -> None:
 def set_settlement_link(session: Session, payment: Event, obligation_id: str) -> None:
   """Point ``payment`` at one obligation, settled at the payment's full
   magnitude; an empty id clears the link. Either replaces its allocations."""
+  _refuse_an_edit_the_sync_owns(payment)
   if obligation_id:
     check_settlement(session, payment, [obligation_id])
   _clear_allocations(session, payment)
@@ -110,6 +125,7 @@ def allocate(
 ) -> None:
   """Replace what ``payment`` settles with ``allocations``; an empty list
   clears it. The settlement link names the first."""
+  _refuse_an_edit_the_sync_owns(payment)
   if not allocations:
     _clear_allocations(session, payment)
     payment.discharges_event_id = None

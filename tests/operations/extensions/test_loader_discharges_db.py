@@ -241,3 +241,10 @@ def test_a_line_that_does_not_say_how_it_splits_leaves_the_single_link(db):
   assert _allocations(db) == {}
   payment = db.query(Event).filter(Event.external_id == "Payment_7").one()
   assert payment.discharges_event_id is not None
+
+
+def test_lines_applying_more_than_the_payment_leave_the_single_link(db):
+  _sync(db, _invoice(42, 120000), _invoice(43, 50000))
+  _sync(db, _payment([(42, "1200.00"), (43, "500.00")]))
+
+  assert _allocations(db) == {}

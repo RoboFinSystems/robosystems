@@ -1770,8 +1770,10 @@ def _apply_linked_allocations(
   """Write what each payment settled, document by document, as
   ``event_discharges`` rows. A payment holding none gets them whatever its
   status, which is also the backfill; a newer version replaces them. A
-  payment naming a document not loaded yet is left for the next sync.
-  Returns the payments written."""
+  payment naming a document not loaded yet is left for the next sync, and one
+  whose lines apply more than it paid is left on its single link. Hand edits
+  to a synced payment's settlement are refused, so these rows are the
+  source's. Returns the payments written."""
   from sqlalchemy import delete, select
 
   from robosystems.models.extensions.roboledger.event import Event
@@ -1781,13 +1783,14 @@ def _apply_linked_allocations(
 
   if not pending:
     return 0
-  payments = dict(
-    session.execute(
-      select(Event.external_id, Event.id).where(
+  payments = {
+    ext_id: (payment_id, abs(amount or 0))
+    for ext_id, payment_id, amount in session.execute(
+      select(Event.external_id, Event.id, Event.amount).where(
         Event.source == source, Event.external_id.in_(list(pending))
       )
     ).all()
-  )
+  }
   documents = dict(
     session.execute(
       select(Event.external_id, Event.id).where(
@@ -1802,16 +1805,26 @@ def _apply_linked_allocations(
   held = set(
     session.execute(
       select(EventDischarge.payment_event_id)
-      .where(EventDischarge.payment_event_id.in_(list(payments.values())))
+      .where(EventDischarge.payment_event_id.in_([p for p, _ in payments.values()]))
       .distinct()
     ).scalars()
   )
   written = 0
   for ext_id, (refs, replace) in pending.items():
-    payment_id = payments.get(ext_id)
-    if payment_id is None or (payment_id in held and not replace):
+    if ext_id not in payments:
       continue
-    if any(ext not in documents for ext, _ in refs):
+    payment_id, magnitude = payments[ext_id]
+    if (payment_id in held and not replace) or any(
+      ext not in documents for ext, _ in refs
+    ):
+      continue
+    if sum(cents for _, cents in refs) > magnitude:
+      logger.warning(
+        "Payment %s applies more than its %d cents across its linked "
+        "documents — left on its single link",
+        ext_id,
+        magnitude,
+      )
       continue
     applied: dict[str, int] = {}
     for ext, cents in refs:

@@ -338,6 +338,49 @@ def test_candidates_say_when_the_line_is_classified_to_payables(session):
   assert not list_discharge_candidates(session, elsewhere.id).classified_to_control
 
 
+def test_a_committed_line_still_sees_what_it_settles(session):
+  """Re-picking a line's settlement offers the bill it already pays."""
+  bill = _event(session, "bill_received", 420000)
+  line = _bank_line(session, -420000)
+  allocate(
+    session,
+    line,
+    [DischargeAllocation(obligation_event_id=bill.id, amount=420000)],
+    "usr",
+  )
+  session.flush()
+
+  result = list_discharge_candidates(session, line.id)
+
+  assert result is not None
+  assert [(c.event_id, c.open_cents) for c in result.candidates] == [(bill.id, 420000)]
+  # Everywhere else the bill is settled.
+  assert _open(session) == {}
+
+
+@pytest.mark.parametrize("edit", ["link", "clear", "allocate", "clear_allocations"])
+def test_a_quickbooks_payments_settlement_is_changed_in_quickbooks(session, edit):
+  invoice = _event(session, "invoice_issued", 100000)
+  payment = _event(session, "payment_received", 100000)
+  payment.source = "quickbooks"
+  session.flush()
+
+  with pytest.raises(DischargeRefusedError, match="change it there"):
+    if edit == "link":
+      set_settlement_link(session, payment, invoice.id)
+    elif edit == "clear":
+      set_settlement_link(session, payment, "")
+    elif edit == "allocate":
+      allocate(
+        session,
+        payment,
+        [DischargeAllocation(obligation_event_id=invoice.id, amount=100000)],
+        "usr",
+      )
+    else:
+      allocate(session, payment, [], "usr")
+
+
 def test_no_event_no_candidates(session):
   assert list_discharge_candidates(session, "evt_missing") is None
 

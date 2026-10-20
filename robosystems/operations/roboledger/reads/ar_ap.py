@@ -65,14 +65,17 @@ _AP_ORIGINATING_TYPES: tuple[str, ...] = ("bill_received",)
 _OPEN_BALANCE_STATUSES: tuple[str, ...] = ("committed", "fulfilled")
 
 
-def _settled(bound: datetime | None = None):
+def _settled(bound: datetime | None = None, *, excluding: str | None = None):
   """``(obligation_id, settled)``: what committed payments, dated before
   ``bound`` when one is given, have applied to each obligation. A payment with
   allocation rows settles through them; one without settles the obligation its
-  ``discharges_event_id`` names, at its full magnitude."""
+  ``discharges_event_id`` names, at its full magnitude. ``excluding`` leaves
+  one payment out, so its own settlement does not hide what it may settle."""
   payments = Event.__table__.alias("payments_e")
   allocations = EventDischarge.__table__
   dated = (payments.c.occurred_at < bound,) if bound is not None else ()
+  if excluding is not None:
+    dated = (*dated, payments.c.id != excluding)
   allocated = (
     select(
       allocations.c.obligation_event_id.label("obligation_id"),
@@ -317,6 +320,7 @@ def _open_items(
   as_of: date,
   entity_ids: list[str],
   agent_id: str | None = None,
+  excluding_payment: str | None = None,
 ) -> list[OpenItem]:
   """Every obligation of ``kind`` in ``entity_ids`` issued on or before
   ``as_of`` with something left open at ``as_of``: a settlement dated after it
@@ -325,7 +329,7 @@ def _open_items(
     return []
   originating = Event.__table__
   bound = _end_of(as_of)
-  by_obligation = _settled(bound)
+  by_obligation = _settled(bound, excluding=excluding_payment)
   original = func.abs(originating.c.amount)
   settled = func.coalesce(by_obligation.c.settled, 0)
   stmt = (
@@ -688,6 +692,7 @@ def list_discharge_candidates(
       as_of=payment.occurred_at.date(),
       entity_ids=[str(payment.entity_id)],
       agent_id=payment.agent_id,
+      excluding_payment=event_id,
     )
     if item.open_cents > 0
   ]
