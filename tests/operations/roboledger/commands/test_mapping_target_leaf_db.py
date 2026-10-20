@@ -68,6 +68,7 @@ def ledger(tenant):
     for table in (
       "associations",
       "reporting_style_networks",
+      "entity_taxonomies",
       "entities",
       "structures",
       "elements",
@@ -295,6 +296,125 @@ def test_with_no_entity_the_default_style_decides():
   assert _map("el_costs").to_element_id == "el_costs"
   with pytest.raises(MappingTargetIsRollupError):
     _map("el_opex")
+
+
+def test_a_subsidiarys_mapping_is_judged_on_its_own_style():
+  """The parent's Style sums OpEx from a leaf; the subsidiary's presents
+  OpEx as a leaf. A mapping from the subsidiary's chart follows its Style."""
+  from robosystems.models.extensions import (
+    Association,
+    Element,
+    EntityTaxonomy,
+    Structure,
+    Taxonomy,
+  )
+  from robosystems.models.extensions.entity import Entity
+  from robosystems.models.extensions.reporting_style_network import (
+    ReportingStyleNetwork,
+  )
+
+  _seed_style()
+  with extensions_session(GRAPH) as session:
+    session.get(Entity, "ent_sr3").is_parent = True
+    session.add(
+      Entity(
+        id="ent_sub",
+        name="Driftline Cafe",
+        parent_entity_id="ent_sr3",
+        reporting_style_id="style_sub",
+        created_by="u",
+      )
+    )
+    session.add_all(
+      [
+        Taxonomy(
+          id="tax_subchart",
+          name="Cafe chart",
+          taxonomy_type="chart_of_accounts",
+          created_by="u",
+        ),
+        Taxonomy(
+          id="tax_sub_is", name="Cafe IS", taxonomy_type="reporting", created_by="u"
+        ),
+      ]
+    )
+    session.flush()
+    session.add_all(
+      [
+        Taxonomy(
+          id="tax_submap",
+          name="Cafe mapping",
+          taxonomy_type="mapping",
+          source_taxonomy_id="tax_subchart",
+          created_by="u",
+        ),
+        EntityTaxonomy(
+          entity_id="ent_sub",
+          taxonomy_id="tax_subchart",
+          basis="chart_of_accounts",
+          is_primary=True,
+        ),
+        Element(
+          id="el_sub_office",
+          name="Office expense",
+          code="6100",
+          qname="coa-cafe:6100",
+          taxonomy_id="tax_subchart",
+          created_by="u",
+        ),
+        Structure(
+          id="net_is_sub",
+          name="Income statement",
+          block_type="income_statement",
+          taxonomy_id="tax_sub_is",
+          created_by="library-seeder",
+        ),
+      ]
+    )
+    session.flush()
+    session.add_all(
+      [
+        Structure(
+          id="map_sub",
+          name="CoA mapping",
+          block_type="coa_mapping",
+          taxonomy_id="tax_submap",
+          created_by="u",
+        ),
+        ReportingStyleNetwork(
+          reporting_style_id="style_sub",
+          statement_type="income_statement",
+          network_id="net_is_sub",
+        ),
+        Association(
+          id="assoc_sub_pres",
+          structure_id="net_is_sub",
+          from_element_id="el_costs",
+          to_element_id="el_opex",
+          association_type="presentation",
+          created_by="library-seeder",
+        ),
+      ]
+    )
+    session.commit()
+
+  # A subtotal under the parent's Style...
+  with pytest.raises(MappingTargetIsRollupError):
+    _map("el_opex")
+  # ...and a leaf under the subsidiary's.
+  with extensions_session(GRAPH) as session:
+    result = create_mapping_association(
+      session,
+      CreateMappingAssociationOperation(
+        mapping_id="map_sub",
+        from_element_id="el_sub_office",
+        to_element_id="el_opex",
+        association_type="mapping",
+      ),
+      created_by="u",
+    )
+    session.commit()
+  assert result.to_element_id == "el_opex"
 
 
 def test_a_taxonomy_block_update_obeys_the_same_rule():

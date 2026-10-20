@@ -32,6 +32,7 @@ from robosystems.models.extensions import Element
 from robosystems.models.extensions.roboledger import Event
 from robosystems.operations.roboledger.entity_scope import (
   ensure_entity_id,
+  is_consolidation_entity,
   is_group_parent,
   resolve_entity_id,
 )
@@ -77,6 +78,16 @@ class ChartAccountNotFoundError(LookupError):
 
 class NotAChartAccountError(ValueError):
   """The target is not an active account of a chart, or not of the entity named."""
+
+
+class ConsolidationEntityFeedError(ValueError):
+  """The target is the consolidation entity, whose books take no feed."""
+
+  def __init__(self, entity_id: str) -> None:
+    super().__init__(
+      f"Entity {entity_id!r} is the group's consolidation entity; its books "
+      "hold the consolidating entries, so a bank feed cannot book there."
+    )
 
 
 class QuickBooksKeptEntityError(ValueError):
@@ -234,12 +245,15 @@ def _linked_element(session: Session, connection_id: str, account_id: str):
 
 
 def _assert_not_synced(session: Session, graph_id: str, entity_id: str) -> None:
-  """A feed account never books where a synced ledger keeps the books: the
-  group parent, while QuickBooks is connected."""
+  """A feed account never books where a synced ledger keeps the books (the
+  group parent, while QuickBooks is connected) or in the consolidation
+  entity."""
   # Imported here: the connection service reaches back into the ledger's
   # commands, so a module-level import would be a cycle waiting to happen.
   from robosystems.operations.connection_service import synced_ledger_live
 
+  if is_consolidation_entity(session, entity_id):
+    raise ConsolidationEntityFeedError(entity_id)
   if is_group_parent(session, entity_id) and synced_ledger_live(graph_id):
     raise QuickBooksKeptEntityError(entity_id)
 

@@ -462,7 +462,8 @@ class ProviderConflictError(Exception):
   """A provider cannot be connected given the books the graph keeps.
 
   ``code`` is stable for clients: ``QUICKBOOKS_ACTIVE``, ``CHART_REQUIRED``,
-  ``NATIVE_BOOKS_PRESENT``, ``OTHER_COMPANY_BOOKS``, ``ENTITY_NOT_FOUND``.
+  ``NATIVE_BOOKS_PRESENT``, ``OTHER_COMPANY_BOOKS``, ``ENTITY_NOT_FOUND``,
+  ``CONSOLIDATION_ENTITY``.
   """
 
   def __init__(self, code: str, message: str) -> None:
@@ -494,6 +495,8 @@ def assert_provider_compatible(
   - a bank feed whose accounts would land on the parent while a synced GL
     is live → ``QUICKBOOKS_ACTIVE`` (a subsidiary's feed is fine);
   - a bank feed for an entity with no chart of accounts → ``CHART_REQUIRED``;
+  - a bank feed for the consolidation entity, whose books hold the
+    consolidating entries → ``CONSOLIDATION_ENTITY``;
   - a synced GL when the parent's books are native (posted line items on
     elements it did not create, a chart it did not build, a feed account
     bound to the parent, or a live feed whose accounts land on the parent)
@@ -517,6 +520,13 @@ def assert_provider_compatible(
     # A named entity is resolved first, whatever else is live: one the graph
     # lacks is refused as such, never reached by a later probe.
     lands_on_parent = _is_group_parent(graph_id, entity_id)
+    if _is_consolidation_entity(graph_id, entity_id):
+      raise ProviderConflictError(
+        "CONSOLIDATION_ENTITY",
+        "The consolidation entity's books hold the group's consolidating "
+        "entries, so a bank feed cannot book there. Connect the bank for the "
+        "company whose account it is.",
+      )
     blocking = sorted(live & SYNCED_LEDGER_PROVIDERS)
     if blocking and lands_on_parent:
       raise ProviderConflictError(
@@ -643,6 +653,18 @@ def _is_group_parent(graph_id: str, entity_id: str | None) -> bool:
       ) from exc
 
   return _probe_books(graph_id, probe)
+
+
+def _is_consolidation_entity(graph_id: str, entity_id: str | None) -> bool:
+  """Whether a feed landing on ``entity_id`` lands on the consolidation
+  entity. Run after :func:`_is_group_parent`, which refuses an unknown id."""
+  from robosystems.operations.roboledger.entity_scope import (
+    is_consolidation_entity,
+  )
+
+  if entity_id is None:
+    return False
+  return _probe_books(graph_id, lambda ext: is_consolidation_entity(ext, entity_id))
 
 
 def _feed_lands_on_parent(
