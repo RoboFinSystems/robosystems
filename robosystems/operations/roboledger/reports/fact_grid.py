@@ -1842,6 +1842,20 @@ def _derive_cash_flow_facts(
   return derived
 
 
+# Income-statement charges the cash flow presents from their own fact as an
+# add-back. One booked on a disposal entry (the month's last depreciation,
+# beside the write-off) is the period's charge, not part of the disposal.
+_CF_PERIOD_CHARGE_QNAMES = frozenset(
+  {
+    "rs-gaap:DepreciationDepletionAndAmortization",
+    "rs-gaap:DepreciationAndAmortization",
+    "rs-gaap:Depreciation",
+    "rs-gaap:DepreciationNonproduction",
+    "rs-gaap:CostOfGoodsAndServicesSoldDepreciationAndAmortization",
+    "rs-gaap:OtherDepreciationAndAmortization",
+    "rs-gaap:AmortizationOfIntangibleAssets",
+  }
+)
 _CF_OTHER_NONCASH_QNAME = "rs-gaap:OtherNoncashIncomeExpense"
 _CF_CAPEX_UNPAID_QNAME = "rs-gaap:CapitalExpendituresIncurredButNotYetPaid"
 _CF_NONCASH_ACQUISITION_QNAME = (
@@ -2141,9 +2155,15 @@ def _emit_noncash_and_settlement_facts(
   unlinked: dict[tuple[date, date], list[int]] = {}
 
   def _disposes(line: _CfLine) -> bool:
-    """A gain the cash flow presents on its own row, or the depreciation a
-    sale writes off."""
-    return (line.kind == "pnl" and line.concept_id in reused) or (
+    """A gain or loss the cash flow presents on its own row, or the
+    depreciation a sale writes off. The period's charge booked on the same
+    entry is neither: its expense is the add-back, and its credit to
+    accumulated depreciation is no write-off."""
+    return (
+      line.kind == "pnl"
+      and line.concept_id in reused
+      and line.qname not in _CF_PERIOD_CHARGE_QNAMES
+    ) or (
       line.kind == "working"
       and line.qname == PPE_ACCUMULATED_DEPRECIATION_QNAME
       and line.net > 0
@@ -2328,15 +2348,11 @@ def _emit_noncash_and_settlement_facts(
         for column in columns:
           unlinked.setdefault((column.start, column.end), []).append(to_payables)
 
-    gains = [ln for ln in lines if ln.kind == "pnl" and ln.concept_id in reused]
     # The depreciation a sale writes off moved no cash: the proceeds are the
-    # asset's cost net of it, and it is no depreciation of the period.
-    written_off = [
-      ln
-      for ln in lines
-      if ln.kind == "working" and ln.qname == PPE_ACCUMULATED_DEPRECIATION_QNAME
-    ]
-    if gains or written_off:
+    # asset's cost net of it and of the gain, and it is no depreciation of
+    # the period.
+    disposal = [ln for ln in lines if _disposes(ln)]
+    if disposal:
       flows = {
         _default_flow(ln.concept_id, -ln.net)
         for ln in lines
@@ -2348,9 +2364,10 @@ def _emit_noncash_and_settlement_facts(
         assert flow_id is not None
         emitted_flows.add(flow_id)
         for column in columns:
-          _add(flow_id, column, -sum(ln.net for ln in gains + written_off))
-          for ln in written_off:
-            _add(working_leaf[ln.concept_id], column, ln.net)
+          _add(flow_id, column, -sum(ln.net for ln in disposal))
+          for ln in disposal:
+            if ln.kind == "working":
+              _add(working_leaf[ln.concept_id], column, ln.net)
 
   # An unlinked payment may settle a bill posted before the window, so the
   # warning weighs those still open too. They are no acquisition of any
