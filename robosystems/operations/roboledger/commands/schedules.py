@@ -185,11 +185,14 @@ def retire_schedule_history(
   if drafts:
     ids = bindparam("ids", expanding=True)
     session.execute(
-      text("DELETE FROM line_items WHERE entry_id IN :ids").bindparams(ids),
+      text(
+        "DELETE FROM line_items WHERE entry_id IN "
+        "(SELECT id FROM entries WHERE id IN :ids AND status = 'draft')"
+      ).bindparams(ids),
       {"ids": drafts},
     )
     session.execute(
-      text("DELETE FROM entries WHERE id IN :ids").bindparams(ids),
+      text("DELETE FROM entries WHERE id IN :ids AND status = 'draft'").bindparams(ids),
       {"ids": drafts},
     )
   session.execute(

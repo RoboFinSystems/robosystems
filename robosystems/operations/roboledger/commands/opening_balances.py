@@ -246,6 +246,11 @@ def record_opening_balance(
   lines = _lines(session, body, entity_id)
 
   replaced = opening_entry(session, entity_id)
+  if replaced is not None and replaced.status != "posted":
+    raise OpeningBalanceError(
+      f"The opening balance entry is {replaced.status}, so it cannot be "
+      "replaced; record the correction as a journal entry."
+    )
   superseded = (
     supersede_entries(
       session,

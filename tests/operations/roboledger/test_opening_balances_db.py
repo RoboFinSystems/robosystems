@@ -328,6 +328,18 @@ def test_the_opening_cannot_be_reversed(tenant):
       )
 
 
+def test_an_opening_that_is_not_posted_is_never_replaced(tenant):
+  """Only a posted opening is superseded; anything else is refused, never
+  left in the books beside a second opening."""
+  with extensions_session(GRAPH) as session:
+    entry = record_opening_balance(session, _opening(session, tenant), "usr_1")
+    session.execute(
+      text("UPDATE entries SET status = 'reversed' WHERE id = :e"), {"e": entry.id}
+    )
+    with pytest.raises(OpeningBalanceError, match="reversed"):
+      record_opening_balance(session, _opening(session, tenant), "usr_1")
+
+
 def test_the_database_holds_an_entity_to_one_opening(tenant):
   """Two records that race past the read still leave one: the second
   opening entry for the entity is refused at insert."""

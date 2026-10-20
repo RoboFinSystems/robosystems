@@ -151,6 +151,13 @@ def test_status_moves_forward_only(tenant):
   _refused("DELETE FROM entries WHERE id = :e", e=rows["entry"])
 
 
+def test_a_draft_lands_only_by_posting_or_a_shadow_close(tenant):
+  rows = _write("draft")
+  _refused("UPDATE entries SET status = 'reversed' WHERE id = :e", e=rows["entry"])
+  _refused("UPDATE entries SET status = 'superseded' WHERE id = :e", e=rows["entry"])
+  _allowed("UPDATE entries SET status = 'shadowed' WHERE id = :e", e=rows["entry"])
+
+
 def test_drafts_stay_free(tenant):
   rows = _write("draft")
   _allowed("UPDATE line_items SET debit_amount = 99 WHERE id = :l", l=rows["line"])

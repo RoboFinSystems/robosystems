@@ -15,7 +15,7 @@ would block its replacement.
 Triggers make the rule hold whatever path writes (§3.3): a landed entry, line
 item or transaction is never deleted; a landed entry's balance-bearing columns
 never change, and its status only moves ``posted → reversed`` or ``posted →
-superseded``; a landed line keeps its amounts, account and entry; an event is
+superseded`` (a draft only to ``posted`` or ``shadowed``); a landed line keeps its amounts, account and entry; an event is
 not deleted while it owns a landed row. A purge of an entity's books (entity
 removal) opts out for its own transaction with ``SET LOCAL
 robosystems.ledger_purge = 'on'``. The functions live in ``public``; each
@@ -60,6 +60,12 @@ BEGIN
     RETURN COALESCE(NEW, OLD);
   END IF;
   IF OLD.status = 'draft' THEN
+    -- A draft lands by posting or a shadow close; it is never reversed or
+    -- superseded before it has landed.
+    IF TG_OP = 'UPDATE' AND NEW.status NOT IN ('draft', 'posted', 'shadowed') THEN
+      RAISE EXCEPTION 'ledger row permanent: draft entry % cannot move to %', OLD.id, NEW.status
+        USING ERRCODE = 'restrict_violation';
+    END IF;
     RETURN COALESCE(NEW, OLD);
   END IF;
   IF TG_OP = 'DELETE' THEN

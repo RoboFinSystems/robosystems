@@ -21,6 +21,17 @@ from robosystems.models.extensions.roboledger.transaction import Transaction
 from robosystems.operations.roboledger.entry_status import SUPERSEDED_ENTRY_STATUS
 
 
+class EntryNotSupersedableError(ValueError):
+  """Entries asked to be superseded that are not posted: a reversed one is
+  corrected by its reversal, and a draft has not landed."""
+
+  def __init__(self, entry_ids: list[str]) -> None:
+    super().__init__(
+      f"Only posted entries can be superseded; {', '.join(entry_ids)} is not posted."
+    )
+    self.entry_ids = entry_ids
+
+
 def supersede_entries(
   session: Session,
   entry_ids: list[str],
@@ -30,11 +41,20 @@ def supersede_entries(
   reason: str | None = None,
   event_id: str | None = None,
 ) -> list[str]:
-  """Supersede the posted entries among ``entry_ids`` and void each
-  transaction none of whose entries is still live. Returns the ids
-  superseded. Record what replaced them with :func:`record_replacements`."""
+  """Supersede ``entry_ids``, all of them posted, and void each transaction
+  none of whose entries is still live. Returns the ids superseded; raises
+  :class:`EntryNotSupersedableError` before writing if any is not posted.
+  Record what replaced them with :func:`record_replacements`."""
   if not entry_ids:
     return []
+  not_posted = sorted(
+    str(entry_id)
+    for entry_id in session.scalars(
+      select(Entry.id).where(Entry.id.in_(entry_ids), Entry.status != "posted")
+    )
+  )
+  if not_posted:
+    raise EntryNotSupersedableError(not_posted)
   now = datetime.now(UTC)
   record: dict[str, Any] = {"op": op, "actor": actor, "reason": reason}
   if event_id is not None:
