@@ -541,14 +541,19 @@ def build_report_bundle(
 
 
 def _report_entity(session: Session, report_id: str) -> Entity:
-  """The entity the report's facts belong to, else the group parent. Raises
-  ``LookupError`` when the tenant has no entity."""
+  """The entity the report states, else the group parent: the one its facts
+  belong to, and for the consolidation entity's, which are the group's
+  consolidated statements, the group parent. Raises ``LookupError`` when the
+  tenant has no entity."""
   from robosystems.operations.roboledger.entity_scope import (
+    books_entity_id,
     report_entity_id,
     resolve_entity,
+    resolve_entity_id,
   )
 
-  return resolve_entity(session, report_entity_id(session, report_id))
+  entity_id = resolve_entity_id(session, report_entity_id(session, report_id))
+  return resolve_entity(session, books_entity_id(session, entity_id))
 
 
 def _disclosure_sort_key(structure: Any) -> tuple[int, float, str, str]:

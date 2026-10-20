@@ -56,6 +56,9 @@ from robosystems.operations.roboledger.commands.reports import (
 from robosystems.operations.roboledger.commands.reports import (
   transition_filing_status as cmd_transition_filing_status,
 )
+from robosystems.operations.roboledger.reports.statement_sets import (
+  ConsolidatedPeriodSpansMembershipError,
+)
 from robosystems.routers.extensions.roboledger._common import (
   _RATE_LIMIT,
   _ctx,
@@ -119,7 +122,12 @@ create_report_op = _registrar.register(
     name="create-report",
     summary="Create Report",
     description=(
-      "Generates report facts from the ledger and marks the report as published."
+      "Generates report facts from the ledger and marks the report as "
+      "published. The report is the entity's whose chart `mapping_id` maps "
+      "from; made from the consolidation entity's mapping it is the group's "
+      "consolidated statements: every member summed in full with the "
+      "consolidating entries, under the group parent's Reporting Style. A "
+      "consolidated column cannot span a member joining or leaving the group."
     ),
     command=cmd_create_report,
     request_model=CreateReportRequest,
@@ -131,6 +139,7 @@ create_report_op = _registrar.register(
       TaxonomyNotFoundError: (422, lambda e: f"Taxonomy '{e}' not found."),
       NoEntityError: 422,
       ReportEntityMismatchError: 422,
+      ConsolidatedPeriodSpansMembershipError: 422,
       # `_stamp_report_bundle` aborted the publish (S3 unavailable) to keep
       # "every published Report has a stored bundle"; 502 so the client retries.
       BundleUploadError: 502,
@@ -160,6 +169,7 @@ regenerate_report_op = _registrar.register(
       ReportNotFoundError: (404, lambda e: f"Report '{e}' not found."),
       NotAuthorizedError: (403, lambda _e: "Not authorized to modify this report."),
       InvalidFilingTransitionError: 422,
+      ConsolidatedPeriodSpansMembershipError: 422,
       # Fail loud like create-report, or ``bundle_url`` would lag the facts.
       BundleUploadError: 502,
     },

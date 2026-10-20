@@ -122,6 +122,16 @@ def is_consolidation_entity(session: Session, entity_id: str) -> bool:
   return entity is not None and entity.entity_role == "consolidation"
 
 
+def books_entity_id(session: Session, entity_id: str) -> str:
+  """The entity whose chart and Reporting Style ``entity_id``'s statements
+  are read under. The consolidation entity's statements are the group's
+  consolidated ones, read under the group parent's; any other entity's are
+  its own."""
+  if is_consolidation_entity(session, entity_id):
+    return resolve_entity_id(session)
+  return entity_id
+
+
 def resolve_entity(session: Session, entity_id: str | None = None) -> Entity:
   """The ORM row for :func:`resolve_entity_id`."""
   resolved_id = resolve_entity_id(session, entity_id)

@@ -41,6 +41,7 @@ from robosystems.models.extensions.roboledger import Structure
 from robosystems.operations.aws.s3 import S3Client
 from robosystems.operations.roboledger.entity_scope import (
   GroupMember,
+  books_entity_id,
   find_entity_id,
   group_members,
   is_group_parent,
@@ -257,7 +258,8 @@ def load_structures(session: Session, taxonomy_id: str) -> list[StructureSummary
 def resolve_entity_name(session: Session, report_def: Report) -> str | None:
   """The name of the entity the report is about: for a shared-in report, the
   linked row standing for the sender's entity; else the report's own entity,
-  falling back to the group parent."""
+  falling back to the group parent. The consolidation entity's report is the
+  group's consolidated statements, named for the group parent."""
   from robosystems.operations.roboledger.entity_scope import (
     find_linked_entity_id,
     find_parent_entity,
@@ -271,10 +273,19 @@ def resolve_entity_name(session: Session, report_def: Report) -> str | None:
     )
     entity = session.get(Entity, linked_id) if linked_id else None
   else:
-    entity = session.get(Entity, facts_entity_id) if facts_entity_id else None
+    own_id = report_def.entity_id or facts_entity_id
+    entity = session.get(Entity, own_id) if own_id else None
     if entity is None:
       entity = find_parent_entity(session)
+    elif entity.entity_role == "consolidation":
+      parent = find_parent_entity(session)
+      return consolidated_name(parent.name) if parent else entity.name
   return entity.name if entity else None
+
+
+def consolidated_name(group_name: str) -> str:
+  """How a consolidated report names the group it reports."""
+  return f"{group_name} (consolidated)"
 
 
 def report_to_response(
@@ -324,7 +335,16 @@ def report_entity_clause(entity_id: str | None, is_parent: bool) -> ColumnElemen
   if entity_id is None:
     return true()
   if is_parent:
-    return or_(Report.entity_id == entity_id, Report.entity_id.is_(None))
+    # The group's consolidated reports, the consolidation entity's, are the
+    # parent's to see too: the group is reported from its parent.
+    consolidated = select(Entity.id).where(
+      Entity.entity_role == "consolidation", Entity.source != "linked"
+    )
+    return or_(
+      Report.entity_id == entity_id,
+      Report.entity_id.is_(None),
+      Report.entity_id.in_(consolidated),
+    )
   return Report.entity_id == entity_id
 
 
@@ -840,8 +860,11 @@ def get_statement(
     )
 
   if reporting_style_id is None:
+    # A consolidated report renders under the group parent's Style.
     reporting_style_id = (
-      load_entity_reporting_style(session, report_def.entity_id)
+      load_entity_reporting_style(
+        session, books_entity_id(session, report_def.entity_id)
+      )
       if report_def.entity_id
       else load_primary_reporting_style(session)
     )

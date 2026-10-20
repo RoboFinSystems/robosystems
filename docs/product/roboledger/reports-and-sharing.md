@@ -15,6 +15,8 @@ Ask your AI assistant, or open **Reports → Create Report**. The report is buil
 
 In the app, choose the period: this month or last, this quarter or last, monthly year to date, the trailing twelve months by month, year over year, or dates of your own.
 
+A report is one company's. In a reporting group with a consolidation entity, the group parent's **Create Report** also offers _Consolidated group_: the group's consolidated statements, every company consolidated in full with the consolidating entries, in the parent's reporting style. It lists on the group parent beside the parent's own reports and is shared as the group. Each of its columns must fall wholly before or after a company joins or leaves the group. See [Work across several companies](working-across-companies.md#consolidate-the-group).
+
 - "Create a report for September."
 - "Create a report for the third quarter and tell me anything that looks off."
 
