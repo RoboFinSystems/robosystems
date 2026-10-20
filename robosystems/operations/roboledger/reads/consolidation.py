@@ -49,7 +49,10 @@ from robosystems.operations.roboledger.entity_scope import (
   GroupMember,
   resolve_entity_id,
 )
-from robosystems.operations.roboledger.entry_status import landed_entry_bindparam
+from robosystems.operations.roboledger.entry_status import (
+  SUPERSEDED_ENTRY_STATUS,
+  landed_entry_bindparam,
+)
 from robosystems.operations.roboledger.fiscal_calendar.periods import next_period
 from robosystems.operations.roboledger.reports.fact_grid import (
   _CASH_ANCHOR_QNAMES,
@@ -1186,6 +1189,7 @@ def first_month_eve(
       Entry.entity_id == consolidation_id,
       Entry.type == OPENING,
       Entry.provenance.is_distinct_from(ENGINE_PROVENANCE),
+      Entry.status != SUPERSEDED_ENTRY_STATUS,
     )
   ).first()
   if hand:
@@ -1219,6 +1223,7 @@ def engine_opening(session: Session, consolidation_id: str) -> Entry | None:
       Entry.entity_id == consolidation_id,
       Entry.type == OPENING,
       Entry.provenance == ENGINE_PROVENANCE,
+      Entry.status != SUPERSEDED_ENTRY_STATUS,
     )
   ).scalar_one_or_none()
 

@@ -1453,8 +1453,9 @@ def execute_event_block(
   )
   if remaining is None:
     event.status = "fulfilled"
+    # A superseded entry's transaction stays void.
     session.query(Transaction).filter(
-      Transaction.triggered_by_event_id == event.id
+      Transaction.triggered_by_event_id == event.id, Transaction.status != "void"
     ).update(
       {Transaction.status: "posted", Transaction.posted_at: now},
       synchronize_session=False,

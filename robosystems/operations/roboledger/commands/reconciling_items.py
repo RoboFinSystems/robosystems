@@ -42,7 +42,6 @@ from robosystems.models.extensions.roboledger.dimension_junctions import (
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.line_item import LineItem
-from robosystems.models.extensions.roboledger.transaction import Transaction
 from robosystems.operations.event_block.commands import (
   create_event_block_in_session,
   fire_handler_on_commit,
@@ -60,6 +59,7 @@ from robosystems.operations.roboledger.commands._guards import (
 )
 from robosystems.operations.roboledger.commands.connections import SEVERABLE_SOURCES
 from robosystems.operations.roboledger.entity_scope import owner_entity_id
+from robosystems.operations.roboledger.entry_status import SUPERSEDED_ENTRY_STATUS
 from robosystems.operations.roboledger.fiscal_calendar.periods import period_date_range
 from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
   PUBLISH_TO_SOURCE_KEY,
@@ -67,6 +67,10 @@ from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
 )
 from robosystems.operations.roboledger.fiscal_calendar.service import (
   FiscalCalendarService,
+)
+from robosystems.operations.roboledger.supersede import (
+  record_replacements,
+  supersede_entries,
 )
 
 RECONCILIATION_HISTORY_KEY = "reconciliation_history"
@@ -226,10 +230,15 @@ def _catch_up_entry_ids(session: Session, event_id: str) -> list[str]:
     Event.metadata_["reconciles_event_id"].astext == event_id,
     Event.status.notin_(("voided", "superseded")),
   )
-  own = select(Entry.id).where(Entry.triggered_by_event_id == event_id)
+  own = select(Entry.id).where(
+    Entry.triggered_by_event_id == event_id, Entry.status != SUPERSEDED_ENTRY_STATUS
+  )
   ids = set(
     session.execute(
-      select(Entry.id).where(Entry.triggered_by_event_id.in_(catch_up_events))
+      select(Entry.id).where(
+        Entry.triggered_by_event_id.in_(catch_up_events),
+        Entry.status != SUPERSEDED_ENTRY_STATUS,
+      )
     ).scalars()
   )
   ids |= set(
@@ -532,7 +541,12 @@ def _reference_refusal(
   if not _standing_events(session, {reference_id}):
     return "it is voided, superseded or reversed"
   if not session.execute(
-    select(Entry.id).where(Entry.triggered_by_event_id == reference_id).limit(1)
+    select(Entry.id)
+    .where(
+      Entry.triggered_by_event_id == reference_id,
+      Entry.status != SUPERSEDED_ENTRY_STATUS,
+    )
+    .limit(1)
   ).first():
     return "it books no journal entry"
   return None
@@ -682,9 +696,13 @@ def _require_flagged(event: Event) -> dict:
 
 
 def _event_entries(session: Session, event_id: str) -> list[Entry]:
+  """The event's entries, less those an earlier restate superseded."""
   return (
     session.query(Entry)
-    .filter(Entry.triggered_by_event_id == event_id)
+    .filter(
+      Entry.triggered_by_event_id == event_id,
+      Entry.status != SUPERSEDED_ENTRY_STATUS,
+    )
     .order_by(Entry.id.asc())
     .all()
   )
@@ -848,7 +866,11 @@ def find_unresolved_reconciling_items(
   query = (
     session.query(Event.id, Event.external_id)
     .join(Entry, Entry.triggered_by_event_id == Event.id)
-    .filter(Event.payload_drift.is_(True), Entry.posting_date <= as_of)
+    .filter(
+      Event.payload_drift.is_(True),
+      Entry.posting_date <= as_of,
+      Entry.status != SUPERSEDED_ENTRY_STATUS,
+    )
   )
   if entity_id is not None:
     query = query.filter(Event.entity_id == entity_id)
@@ -1035,23 +1057,6 @@ def _accepted_metadata(
   return {**accepted, RECONCILIATION_HISTORY_KEY: history}
 
 
-def _delete_event_gl_rows(
-  session: Session, event_id: str, entry_ids: list[str]
-) -> None:
-  """Remove the event's line items, entries, and transactions, in FK order."""
-  if entry_ids:
-    session.query(LineItem).filter(LineItem.entry_id.in_(entry_ids)).delete(
-      synchronize_session=False
-    )
-  session.query(Entry).filter(Entry.triggered_by_event_id == event_id).delete(
-    synchronize_session=False
-  )
-  session.query(Transaction).filter(
-    Transaction.triggered_by_event_id == event_id
-  ).delete(synchronize_session=False)
-  session.flush()
-
-
 def resolve_reconciling_item(
   session: Session,
   body: ResolveReconcilingItemRequest,
@@ -1155,7 +1160,14 @@ def resolve_reconciling_item(
     blockers = _restate_blockers(session, event, entries, accepted)
     if blockers:
       raise RestateBlockedError(str(event.id), blockers)
-    _delete_event_gl_rows(session, str(event.id), entry_ids)
+    superseded = supersede_entries(
+      session,
+      entry_ids,
+      op="restate",
+      actor=created_by,
+      reason=body.note,
+      event_id=str(event.id),
+    )
     # Written before dispatch (the handler reads it) and again below with the
     # rebuilt ids; both build from the pre-mutation `live`, so the second
     # replaces rather than appends.
@@ -1164,16 +1176,21 @@ def resolve_reconciling_item(
     session.flush()
     rebuilt = session.execute(
       select(Entry.id, Entry.transaction_id).where(
-        Entry.triggered_by_event_id == str(event.id)
+        Entry.triggered_by_event_id == str(event.id),
+        Entry.status != SUPERSEDED_ENTRY_STATUS,
       )
     ).all()
+    record_replacements(session, superseded, [str(entry_id) for entry_id, _ in rebuilt])
     regenerated = ReconcilingItemRegenerated(
       entry_ids=[str(entry_id) for entry_id, _ in rebuilt],
       transaction_ids=sorted(
         {str(txn_id) for _, txn_id in rebuilt if txn_id is not None}
       ),
     )
-    record["regenerated"] = regenerated.model_dump(mode="json")
+    record["regenerated"] = {
+      **regenerated.model_dump(mode="json"),
+      "superseded_entry_ids": superseded,
+    }
     event.metadata_ = _accepted_metadata(live=live, accepted=accepted, record=record)
 
   elif disposition == "catch_up":
@@ -1344,7 +1361,10 @@ def _event_nets(
     [
       str(entry_id)
       for entry_id in session.execute(
-        select(Entry.id).where(Entry.triggered_by_event_id == event_id)
+        select(Entry.id).where(
+          Entry.triggered_by_event_id == event_id,
+          Entry.status != SUPERSEDED_ENTRY_STATUS,
+        )
       ).scalars()
     ],
   )

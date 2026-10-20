@@ -141,7 +141,11 @@ def get_agent_activity(
     txns = (
       session.execute(
         select(Transaction)
-        .where(Transaction.triggered_by_event_id.in_(event_ids))
+        .where(
+          Transaction.triggered_by_event_id.in_(event_ids),
+          # A superseded entry's transaction, left beside its replacement.
+          Transaction.status != "void",
+        )
         .order_by(Transaction.date.desc())
         .limit(limit)
       )
@@ -170,7 +174,7 @@ def get_agent_activity(
     select(func.count(Transaction.id))
     .select_from(Transaction)
     .join(Event, Transaction.triggered_by_event_id == Event.id)
-    .where(*scope)
+    .where(*scope, Transaction.status != "void")
   ).scalar_one()
 
   from robosystems.operations.roboledger.reads.event_block import list_event_blocks

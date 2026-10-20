@@ -10,6 +10,7 @@ balance; a window that starts before the books begin has no flows to show.
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
+from typing import NamedTuple
 
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
@@ -32,11 +33,28 @@ from robosystems.operations.roboledger.commands.journal_entries import (
   provenance_for_source,
 )
 from robosystems.operations.roboledger.entity_scope import ensure_entity_id
+from robosystems.operations.roboledger.entry_status import SUPERSEDED_ENTRY_STATUS
+from robosystems.operations.roboledger.supersede import (
+  record_replacements,
+  supersede_entries,
+)
 
 OPENING = "opening"
 
 # Income and expense before the books begin is already in retained earnings.
 _PROFIT_AND_LOSS = frozenset({"revenue", "expense", "gain", "loss"})
+
+
+class _OpeningLine(NamedTuple):
+  """A line of an opening entry. A moved opening carries its lines whole,
+  metadata included: the consolidation engine tags each line there."""
+
+  element_id: str
+  debit: int
+  credit: int
+  flow_element_id: str | None = None
+  description: str | None = None
+  metadata: dict | None = None
 
 
 class OpeningBalanceError(ValueError):
@@ -50,7 +68,11 @@ class OpeningBalanceLockedError(ValueError):
 
 def opening_entry(session: Session, entity_id: str) -> Entry | None:
   return session.execute(
-    select(Entry).where(Entry.entity_id == entity_id, Entry.type == OPENING)
+    select(Entry).where(
+      Entry.entity_id == entity_id,
+      Entry.type == OPENING,
+      Entry.status != SUPERSEDED_ENTRY_STATUS,
+    )
   ).scalar_one_or_none()
 
 
@@ -61,7 +83,9 @@ def books_start(session: Session, entity_ids: list[str]) -> date | None:
     return None
   eve = session.execute(
     select(func.max(Entry.posting_date)).where(
-      Entry.entity_id.in_(entity_ids), Entry.type == OPENING
+      Entry.entity_id.in_(entity_ids),
+      Entry.type == OPENING,
+      Entry.status != SUPERSEDED_ENTRY_STATUS,
     )
   ).scalar()
   return eve + timedelta(days=1) if eve else None
@@ -76,18 +100,42 @@ def opening_date(session: Session, entity_id: str) -> date | None:
   return first_start - timedelta(days=1) if first_start else None
 
 
-def move_opening_entry(session: Session, entity_id: str) -> None:
+def move_opening_entry(session: Session, entity_id: str, actor: str) -> None:
   """Keep the opening entry on the eve of the first period after the
-  calendar's start moves (allowed only before the first close)."""
+  calendar's start moves (allowed only before the first close): the entry is
+  superseded and posted again, unchanged, on the new eve."""
   entry = opening_entry(session, entity_id)
   eve = opening_date(session, entity_id)
   if entry is None or eve is None or entry.posting_date == eve:
     return
-  entry.posting_date = eve
-  if entry.transaction_id:
-    txn = session.get(Transaction, entry.transaction_id)
-    if txn is not None:
-      txn.date = eve
+  old_lines = _load_line_items(session, entry.id)
+  superseded = supersede_entries(
+    session,
+    [entry.id],
+    op="opening_moved",
+    actor=actor,
+    reason=f"The calendar's start moved; the opening balance is now dated {eve}.",
+  )
+  moved = _post_opening(
+    session,
+    entity_id=entity_id,
+    eve=eve,
+    memo=entry.memo or "Opening balances",
+    lines=[
+      _OpeningLine(
+        li.element_id,
+        li.debit_amount,
+        li.credit_amount,
+        li.flow_element_id,
+        li.description,
+        dict(li.metadata_ or {}),
+      )
+      for li in old_lines
+    ],
+    provenance=entry.provenance,
+    created_by=actor,
+  )
+  record_replacements(session, superseded, [moved.id])
 
 
 def _assert_not_closed(session: Session, entity_id: str) -> str:
@@ -198,26 +246,50 @@ def record_opening_balance(
   lines = _lines(session, body, entity_id)
 
   replaced = opening_entry(session, entity_id)
-  if replaced is not None:
-    session.execute(
-      text("DELETE FROM line_items WHERE entry_id = :e"), {"e": replaced.id}
+  superseded = (
+    supersede_entries(
+      session,
+      [replaced.id],
+      op="opening_replaced",
+      actor=created_by,
+      reason="A new opening balance was recorded for the entity.",
     )
-    transaction_id = replaced.transaction_id
-    session.delete(replaced)
-    session.flush()
-    if transaction_id:
-      txn = session.get(Transaction, transaction_id)
-      if txn is not None:
-        session.delete(txn)
-        session.flush()
+    if replaced is not None
+    else []
+  )
+  entry = _post_opening(
+    session,
+    entity_id=entity_id,
+    eve=eve,
+    memo=body.memo or "Opening balances",
+    lines=[
+      _OpeningLine(element_id, debit, credit) for element_id, debit, credit in lines
+    ],
+    provenance=provenance_for_source(None),
+    created_by=created_by,
+  )
+  record_replacements(session, superseded, [entry.id])
+  line_items = _load_line_items(session, entry.id)
+  return _entry_to_response(entry, line_items, _flow_qnames(session, line_items))
 
-  memo = body.memo or "Opening balances"
+
+def _post_opening(
+  session: Session,
+  *,
+  entity_id: str,
+  eve: date,
+  memo: str,
+  lines: list[_OpeningLine],
+  provenance: str | None,
+  created_by: str,
+) -> Entry:
+  """Write the entity's opening entry, its transaction and its lines,
+  posted on ``eve``."""
   now = datetime.now(UTC)
-  total = sum(d for _, d, _ in lines)
   txn = Transaction(
     entity_id=entity_id,
     type="opening_balance",
-    amount=total,
+    amount=sum(line.debit for line in lines),
     date=eve,
     description=memo,
     source="native",
@@ -234,7 +306,7 @@ def record_opening_balance(
     status="posted",
     posting_date=eve,
     memo=memo,
-    provenance=provenance_for_source(None),
+    provenance=provenance,
     posted_at=now,
     created_by=created_by,
   )
@@ -247,16 +319,18 @@ def record_opening_balance(
       "Another opening balance was recorded for this entity at the same time. "
       "Retry to replace it."
     ) from exc
-  for order, (element_id, debit, credit) in enumerate(lines, start=1):
+  for order, line in enumerate(lines, start=1):
     session.add(
       LineItem(
         entry_id=entry.id,
-        element_id=element_id,
-        debit_amount=debit,
-        credit_amount=credit,
+        element_id=line.element_id,
+        flow_element_id=line.flow_element_id,
+        debit_amount=line.debit,
+        credit_amount=line.credit,
+        description=line.description,
+        metadata_=line.metadata or {},
         line_order=order,
       )
     )
   session.flush()
-  line_items = _load_line_items(session, entry.id)
-  return _entry_to_response(entry, line_items, _flow_qnames(session, line_items))
+  return entry

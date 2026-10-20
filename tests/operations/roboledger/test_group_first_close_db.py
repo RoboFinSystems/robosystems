@@ -368,6 +368,82 @@ def test_proposing_again_replaces_the_opening(group):
   assert len(openings.all()) == 1
 
 
+def test_a_replaced_opening_is_kept_out_of_the_books(group):
+  from robosystems.operations.roboledger.commands.consolidation import (
+    _record_opening,
+  )
+  from robosystems.operations.roboledger.reads.consolidation import (
+    preview_consolidation_entries,
+  )
+
+  _books(group)
+  _propose(group)
+  session = group["session"]
+  adjustments = group["ids"]["adjustments"]
+  first = session.execute(
+    select(Entry).where(Entry.entity_id == adjustments, Entry.type == "opening")
+  ).scalar_one()
+  first_id, eve = first.id, first.posting_date
+
+  preview = preview_consolidation_entries(session, period="2026-07")
+  replacement = _record_opening(
+    session, adjustments, eve, [p for p in preview.proposals if p.opening], "usr_1"
+  )
+  session.flush()
+
+  assert replacement is not None
+  rows = {
+    row.id: row
+    for row in session.execute(
+      select(Entry.id, Entry.status, Entry.supersession).where(
+        Entry.entity_id == adjustments, Entry.type == "opening"
+      )
+    )
+  }
+  assert rows[first_id].status == "superseded"
+  assert rows[first_id].supersession["op"] == "opening_replaced"
+  assert rows[first_id].supersession["replacement_entry_ids"] == [replacement.id]
+  assert rows[replacement.id].status == "posted"
+
+
+def test_a_moved_opening_keeps_the_engines_tags(group):
+  _books(group)
+  _propose(group)
+  session = group["session"]
+  adjustments = group["ids"]["adjustments"]
+
+  def opening_lines(status: str):
+    return sorted(
+      (li.element_id, li.debit_amount, li.credit_amount, li.metadata_)
+      for li in session.execute(
+        select(LineItem)
+        .join(Entry, Entry.id == LineItem.entry_id)
+        .where(
+          Entry.entity_id == adjustments,
+          Entry.type == "opening",
+          Entry.status == status,
+        )
+      ).scalars()
+    )
+
+  closed = session.execute(
+    text("SELECT closed_through_period FROM fiscal_calendar WHERE entity_id = :e"),
+    {"e": adjustments},
+  ).scalar()
+  if closed:
+    pytest.skip("The calendar's start only moves before its first close.")
+  before = opening_lines("posted")
+  assert all(meta.get("adjustment_kind") for *_, meta in before)
+
+  group["service"].change_start(
+    session, GRAPH, "2026-06", actor_id="usr_1", entity_id=adjustments
+  )
+  session.flush()
+
+  assert opening_lines("posted") == before
+  assert opening_lines("superseded") == before
+
+
 def test_without_its_opening_the_group_close_refuses(group, monkeypatch):
   """The catch-up posted inside the month moves the outside owners' share
   with no row for it; the gate read the statements before the drafts posted,

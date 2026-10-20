@@ -38,6 +38,7 @@ from robosystems.operations.roboledger.commands._guards import (
 )
 from robosystems.operations.roboledger.commands.connections import SEVERABLE_SOURCES
 from robosystems.operations.roboledger.entity_scope import ensure_entity_id
+from robosystems.operations.roboledger.entry_status import SUPERSEDED_ENTRY_STATUS
 from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
   assert_local_posting_allowed,
 )
@@ -831,7 +832,9 @@ def delete_journal_entry(session: Session, body: DeleteJournalEntryRequest) -> d
     siblings = session.execute(
       select(func.count())
       .select_from(Entry)
-      .where(Entry.triggered_by_event_id == owner.id)
+      .where(
+        Entry.triggered_by_event_id == owner.id, Entry.status != SUPERSEDED_ENTRY_STATUS
+      )
     ).scalar_one()
     if siblings <= 1:
       raise JournalEntryOwnedByEventError(

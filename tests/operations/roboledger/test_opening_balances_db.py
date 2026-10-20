@@ -27,6 +27,7 @@ from robosystems.models.api.extensions.journal_entries import (
 from robosystems.models.api.extensions.reports import CreateReportRequest
 from robosystems.models.extensions import Element, Entity
 from robosystems.models.extensions.roboledger.entry import Entry
+from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.operations.roboledger.commands.chart_of_accounts import (
   initialize_chart_of_accounts,
 )
@@ -255,10 +256,18 @@ def test_recording_again_replaces_it_until_the_first_close(tenant):
       session, _opening(session, tenant, memo="Opening balances, corrected"), "usr_1"
     )
     session.commit()
-    openings = session.execute(
-      select(Entry.memo).where(Entry.entity_id == PARENT, Entry.type == "opening")
-    ).all()
-    assert [m for (m,) in openings] == ["Opening balances, corrected"]
+    openings = dict(
+      session.execute(
+        select(Entry.memo, Entry.status).where(
+          Entry.entity_id == PARENT, Entry.type == "opening"
+        )
+      ).all()
+    )
+    # The first is kept, out of the books; the second is the opening.
+    assert openings == {
+      "Opening balances": "superseded",
+      "Opening balances, corrected": "posted",
+    }
 
     close_period(
       session,
@@ -283,10 +292,29 @@ def test_moving_the_calendar_start_moves_the_opening(tenant):
       session, GRAPH, "2026-06", actor_id="usr_1", entity_id=PARENT
     )
     session.commit()
-    eve = session.execute(
-      select(Entry.posting_date).where(Entry.type == "opening")
-    ).scalar_one()
-    assert eve == date(2026, 5, 31)
+    openings = session.execute(
+      select(Entry.id, Entry.posting_date, Entry.status, Entry.supersession).where(
+        Entry.type == "opening"
+      )
+    ).all()
+    live = [o for o in openings if o.status == "posted"]
+    moved = [o for o in openings if o.status == "superseded"]
+    assert [o.posting_date for o in live] == [date(2026, 5, 31)]
+    # The old one is kept on its old date, naming the entry that replaced it.
+    assert [o.posting_date for o in moved] == [date(2026, 6, 30)]
+    assert moved[0].supersession["op"] == "opening_moved"
+    assert moved[0].supersession["replacement_entry_ids"] == [live[0].id]
+
+    def lines(entry_id):
+      return sorted(
+        session.execute(
+          select(
+            LineItem.element_id, LineItem.debit_amount, LineItem.credit_amount
+          ).where(LineItem.entry_id == entry_id)
+        ).all()
+      )
+
+    assert lines(live[0].id) == lines(moved[0].id)
 
 
 def test_the_opening_cannot_be_reversed(tenant):

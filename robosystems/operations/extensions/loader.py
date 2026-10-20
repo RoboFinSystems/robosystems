@@ -13,6 +13,7 @@ from pathlib import Path
 from robosystems.logger import logger
 from robosystems.operations.event_block.commands import fire_handler_on_commit
 from robosystems.operations.locking import ordered_lock_column
+from robosystems.operations.roboledger.entry_status import SUPERSEDED_ENTRY_STATUS
 
 # Sources whose inbound events commit to GL on sync instead of landing in
 # the inbox. A property of the source, not of write_policy (which governs
@@ -322,6 +323,17 @@ def _stamp_dispatch_error(evt, exc: BaseException, now: datetime) -> None:
   evt.metadata_ = meta
 
 
+class LandedRowsOnUncommittedEventsError(RuntimeError):
+  """A full rebuild found ledger rows past draft on events it would wipe."""
+
+  def __init__(self, entry_ids: list[str]) -> None:
+    super().__init__(
+      "A full rebuild would delete entries that are past draft on events that "
+      f"never committed ({', '.join(entry_ids)}); the sync stops instead."
+    )
+    self.entry_ids = entry_ids
+
+
 @dataclass
 class LoadResult:
   """Counts from an OLTP load.
@@ -485,7 +497,8 @@ class OLTPLoader:
           Event.status.in_(("captured", "classified")),
         )
         entry_subq = session.query(Entry.id).filter(
-          Entry.triggered_by_event_id.in_(events_to_wipe_subq)
+          Entry.triggered_by_event_id.in_(events_to_wipe_subq),
+          Entry.status == "draft",
         )
         # Fence before the deletes take row locks, the order every ledger
         # writer keeps against close. A refusal means a close is in flight;
@@ -507,14 +520,35 @@ class OLTPLoader:
           assert_period_not_closed(
             session, *posting_dates, entity_id=wipe_entity_id or None
           )
+        # Under the fence, so the deletes below see what this saw. An event
+        # that has not committed owns drafts only, so the wipe never
+        # meets a landed row; if it does, the sync stops rather than delete
+        # posted history.
+        landed = [
+          str(entry_id)
+          for (entry_id,) in session.query(Entry.id)
+          .filter(
+            Entry.triggered_by_event_id.in_(events_to_wipe_subq),
+            Entry.status != "draft",
+          )
+          .limit(10)
+        ]
+        if landed:
+          logger.error(
+            f"Full rebuild for source={source}, connection_id={connection_id} "
+            f"found entries past draft on uncommitted events: {landed}"
+          )
+          raise LandedRowsOnUncommittedEventsError(landed)
         session.query(LineItem).filter(LineItem.entry_id.in_(entry_subq)).delete(
           synchronize_session=False
         )
         session.query(Entry).filter(
-          Entry.triggered_by_event_id.in_(events_to_wipe_subq)
+          Entry.triggered_by_event_id.in_(events_to_wipe_subq),
+          Entry.status == "draft",
         ).delete(synchronize_session=False)
         session.query(Transaction).filter(
-          Transaction.triggered_by_event_id.in_(events_to_wipe_subq)
+          Transaction.triggered_by_event_id.in_(events_to_wipe_subq),
+          Transaction.status != "posted",
         ).delete(synchronize_session=False)
         # connection_id lives in metadata_; filtering on it spares sibling
         # connections on the same graph.
@@ -1815,7 +1849,8 @@ def _round_trip_update(
         entry_ids = [
           str(entry_id)
           for (entry_id,) in session.query(Entry.id).filter(
-            Entry.triggered_by_event_id == event.id
+            Entry.triggered_by_event_id == event.id,
+            Entry.status != SUPERSEDED_ENTRY_STATUS,
           )
         ]
       baseline = _local_round_trip_shape(session, entry_ids or []) or {

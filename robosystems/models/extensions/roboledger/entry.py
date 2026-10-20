@@ -68,7 +68,7 @@ class Entry(ExtensionsBase):
       postgresql_where="triggered_by_event_id IS NOT NULL",
     ),
     CheckConstraint(
-      "status IN ('draft', 'posted', 'reversed', 'shadowed')",
+      "status IN ('draft', 'posted', 'reversed', 'shadowed', 'superseded')",
       name="check_entry_status",
     ),
     # An entry is reversed at most once. `reverse_journal_entry` also locks the
@@ -95,12 +95,13 @@ class Entry(ExtensionsBase):
       unique=True,
       postgresql_where="source_structure_id IS NOT NULL AND reversal_of IS NULL",
     ),
-    # One opening balance per entity, whatever writes it.
+    # One opening balance per entity, whatever writes it. A superseded one is
+    # kept beside its replacement.
     Index(
       "uq_entries_one_opening_per_entity",
       "entity_id",
       unique=True,
-      postgresql_where="type = 'opening'",
+      postgresql_where="type = 'opening' AND status <> 'superseded'",
     ),
     CheckConstraint(
       "adjustment_kind IN ("
@@ -161,6 +162,11 @@ class Entry(ExtensionsBase):
 
   status = Column(String, nullable=False, default="draft")
   posted_at = Column(DateTime, nullable=True)
+
+  # A posted entry taken out of an open month's books without a reversal
+  # (`supersede_entries`): when, and the record of why and what replaced it.
+  superseded_at = Column(DateTime, nullable=True)
+  supersession = Column(JSONB, nullable=True)
 
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
   version = Column(Integer, nullable=False, default=1)

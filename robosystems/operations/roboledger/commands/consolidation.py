@@ -51,6 +51,10 @@ from robosystems.operations.roboledger.reads.consolidation import (
   opening_is_recorded,
   preview_consolidation_entries,
 )
+from robosystems.operations.roboledger.supersede import (
+  record_replacements,
+  supersede_entries,
+)
 
 
 def propose_consolidation_entries(
@@ -150,18 +154,17 @@ def _record_opening(
   posted ``opening`` entry on the eve of its first month, each line carrying
   the kind and member it holds. None when the opening needs nothing."""
   replaced = engine_opening(session, consolidation_id)
-  if replaced is not None:
-    session.execute(
-      text("DELETE FROM line_items WHERE entry_id = :e"), {"e": replaced.id}
+  superseded = (
+    supersede_entries(
+      session,
+      [replaced.id],
+      op="opening_replaced",
+      actor=created_by,
+      reason="The engine proposed the consolidation entity's opening again.",
     )
-    transaction_id = replaced.transaction_id
-    session.delete(replaced)
-    session.flush()
-    if transaction_id:
-      txn = session.get(Transaction, transaction_id)
-      if txn is not None:
-        session.delete(txn)
-        session.flush()
+    if replaced is not None
+    else []
+  )
   if not proposals:
     return None
 
@@ -218,6 +221,7 @@ def _record_opening(
         )
       )
   session.flush()
+  record_replacements(session, superseded, [entry.id])
   lines = _load_line_items(session, entry.id)
   return _entry_to_response(entry, lines, _flow_qnames(session, lines))
 
