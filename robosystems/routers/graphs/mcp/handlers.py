@@ -49,7 +49,11 @@ def tool_error_kind(result: Any) -> str | None:
 
 
 async def validate_mcp_access(
-  graph_id: str, current_user: Any, db: Session, operation_type: str = "read"
+  graph_id: str,
+  current_user: Any,
+  db: Session,
+  operation_type: str = "read",
+  export: bool = False,
 ) -> None:
   """Raise 403 unless the user may perform ``operation_type`` on the graph.
 
@@ -102,9 +106,12 @@ async def validate_mcp_access(
 
     from robosystems.middleware.billing.enforcement import require_graph_access
 
-    require_graph_access(
-      graph_id, db, require_write=operation_type in ("write", "admin")
-    )
+    if export:
+      require_graph_access(graph_id, db, export=True)
+    else:
+      require_graph_access(
+        graph_id, db, require_write=operation_type in ("write", "admin")
+      )
 
 
 # Core tools whose authored description gets the graph scope prepended.

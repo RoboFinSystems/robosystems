@@ -451,6 +451,26 @@ class TestMCPAccessValidation:
     except HTTPException:
       raise AssertionError("User should have write access")
 
+  @pytest.mark.asyncio
+  async def test_an_export_tool_uses_the_export_billing_strength(
+    self, db_session, test_user, test_graph_with_credits
+  ):
+    """A backup over MCP gets the same check as REST: open in a cancellation
+    grace period, refused during an upgrade."""
+    graph_id = test_graph_with_credits["graph"].graph_id
+    with patch(
+      "robosystems.middleware.billing.enforcement.require_graph_access"
+    ) as gate:
+      await validate_mcp_access(
+        graph_id=graph_id,
+        current_user=test_user,
+        db=db_session,
+        operation_type="write",
+        export=True,
+      )
+
+    gate.assert_called_once_with(graph_id, db_session, export=True)
+
 
 class TestMCPErrorSanitization:
   """Test error message sanitization for security."""

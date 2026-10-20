@@ -49,8 +49,9 @@ def _unfinished_run(
   description="Suspends graphs whose subscriptions have expired",
 )
 def expired_graph_subscription_sensor(context: SensorEvaluationContext):
-  """Suspend active graphs whose subscription is terminal (canceled or failed)
-  and past ends_at, or was canceled immediately."""
+  """Suspend active graphs whose subscription has lapsed (canceled, failed, or
+  unpaid once Stripe stops retrying) and is past ends_at, or was canceled
+  immediately."""
   skip = _unfinished_run(context, suspend_expired_graphs_job.name)
   if skip is not None:
     yield skip
@@ -62,7 +63,7 @@ def expired_graph_subscription_sensor(context: SensorEvaluationContext):
 
   from robosystems.database import session as db_session_factory
   from robosystems.models.core.billing.subscription import (
-    TERMINAL_SUBSCRIPTION_STATUSES,
+    LAPSED_SUBSCRIPTION_STATUSES,
     BillingSubscription,
     CancellationType,
   )
@@ -79,7 +80,7 @@ def expired_graph_subscription_sensor(context: SensorEvaluationContext):
       .join(Graph, BillingSubscription.resource_id == Graph.graph_id)
       .filter(
         BillingSubscription.resource_type == "graph",
-        BillingSubscription.status.in_(TERMINAL_SUBSCRIPTION_STATUSES),
+        BillingSubscription.status.in_(LAPSED_SUBSCRIPTION_STATUSES),
         BillingSubscription.ends_at.isnot(None),
         or_(
           BillingSubscription.ends_at < now,
@@ -135,7 +136,7 @@ def suspended_graph_deprovisioning_sensor(context: SensorEvaluationContext):
   from robosystems.config.deprovisioning import get_deprovisioning_config
   from robosystems.database import session as db_session_factory
   from robosystems.models.core.billing.subscription import (
-    TERMINAL_SUBSCRIPTION_STATUSES,
+    LAPSED_SUBSCRIPTION_STATUSES,
     BillingSubscription,
     CancellationType,
   )
@@ -154,7 +155,7 @@ def suspended_graph_deprovisioning_sensor(context: SensorEvaluationContext):
       .join(Graph, BillingSubscription.resource_id == Graph.graph_id)
       .filter(
         BillingSubscription.resource_type == "graph",
-        BillingSubscription.status.in_(TERMINAL_SUBSCRIPTION_STATUSES),
+        BillingSubscription.status.in_(LAPSED_SUBSCRIPTION_STATUSES),
         BillingSubscription.ends_at.isnot(None),
         or_(
           BillingSubscription.ends_at < cutoff,

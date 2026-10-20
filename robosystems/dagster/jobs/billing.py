@@ -858,8 +858,22 @@ async def _apply_subscription_updated(
   if new_status != subscription.status:
     old_status = subscription.status
     if new_status == "canceled":
-      # cancel() sets canceled_at/ends_at and invalidates the access cache.
-      subscription.cancel(db_session, immediate=True)
+      # Stripe ended it: access ends now, teardown waits out retention.
+      subscription.cancel(db_session, lapsed=True)
+    elif new_status == "unpaid":
+      subscription.enter_unpaid(db_session)
+    elif old_status == "unpaid":
+      # A payment revived it: stop the clock, and lift the graph's suspension
+      # once it is active again.
+      subscription.status = new_status
+      subscription.ends_at = None
+      subscription.updated_at = datetime.now(UTC)
+      db_session.commit()
+      if new_status == "active" and subscription.restore_suspended_graph(db_session):
+        context.log.info(
+          f"Restored graph {subscription.resource_id} from suspended to active"
+        )
+      subscription._invalidate_access_cache()
     else:
       subscription.status = new_status
       subscription.updated_at = datetime.now(UTC)
@@ -888,9 +902,12 @@ async def _apply_subscription_deleted(
     from robosystems.models.core.billing.subscription import CancellationType
 
     now = datetime.now(UTC)
-    if subscription.cancellation_type == CancellationType.IMMEDIATE.value:
-      # Don't extend an immediate cancel to period end: the lifecycle sensors
-      # gate teardown on ends_at < now.
+    if subscription.cancellation_type in (
+      CancellationType.IMMEDIATE.value,
+      CancellationType.LAPSED.value,
+    ):
+      # Don't extend an immediate or lapsed cancel to period end: the
+      # lifecycle sensors gate teardown on ends_at.
       if subscription.ends_at is None or _as_utc(subscription.ends_at) > now:
         subscription.ends_at = now
     else:
@@ -913,7 +930,7 @@ async def _apply_subscription_deleted(
       f"(was canceled at {subscription.canceled_at})"
     )
   else:
-    subscription.cancel(db_session, immediate=True)
+    subscription.cancel(db_session, lapsed=True)
     context.log.info(f"Subscription {subscription.id} canceled via Stripe deletion")
 
 

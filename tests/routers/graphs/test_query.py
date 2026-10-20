@@ -655,6 +655,92 @@ async def test_rejected_queue_submission_fails_its_operation(
   assert op_manager.fail_operation.call_args.args[0] == "op_01J0000000000000000000000A"
 
 
+def _add_subgraph(db_session: Session, parent: Graph) -> str:
+  subgraph_id = f"{parent.graph_id}_gate"
+  db_session.add(
+    Graph(
+      graph_id=subgraph_id,
+      org_id=parent.org_id,
+      graph_name="gate",
+      graph_type=parent.graph_type,
+      base_schema=parent.base_schema,
+      graph_tier=parent.graph_tier,
+      parent_graph_id=parent.graph_id,
+      subgraph_index=2,
+      subgraph_name="gate",
+      is_subgraph=True,
+    )
+  )
+  db_session.commit()
+  return subgraph_id
+
+
+def _gate_refusing_writes():
+  from fastapi import HTTPException
+
+  def _gate(graph_id, session, require_write=False, export=False):
+    if require_write:
+      raise HTTPException(status_code=403, detail="Write operations disabled")
+    return Graph.get_by_id(graph_id, session)
+
+  return Mock(side_effect=_gate)
+
+
+@pytest.mark.asyncio
+@patch("robosystems.routers.graphs.query.execute.get_universal_repository")
+async def test_a_cypher_write_is_held_to_the_write_gate(
+  mock_get_repo,
+  async_client: AsyncClient,
+  test_user: User,
+  test_graph_with_credits: dict,
+  db_session: Session,
+):
+  repo = AsyncMock()
+  mock_get_repo.return_value = repo
+  parent = Graph.get_by_id(test_graph_with_credits["user_graph"].graph_id, db_session)
+  subgraph_id = _add_subgraph(db_session, parent)
+  gate = _gate_refusing_writes()
+
+  with patch("robosystems.middleware.billing.enforcement.require_graph_access", gate):
+    response = await async_client.post(
+      f"/v1/graphs/{subgraph_id}/query/cypher",
+      json={"query": "CREATE (n:Widget {id: 1})"},
+      headers={"Authorization": f"Bearer {create_jwt_token(test_user.id)}"},
+    )
+
+  assert response.status_code == 403, response.text
+  assert any(call.kwargs.get("require_write") for call in gate.call_args_list)
+  repo.execute_query.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("robosystems.routers.graphs.query.execute.get_universal_repository")
+async def test_a_cypher_read_is_held_only_to_the_read_gate(
+  mock_get_repo,
+  async_client: AsyncClient,
+  test_user: User,
+  test_graph_with_credits: dict,
+  db_session: Session,
+):
+  repo = AsyncMock()
+  repo.execute_query = AsyncMock(return_value=[{"n": 1}])
+  repo.execute_query_streaming = None
+  mock_get_repo.return_value = repo
+  parent = Graph.get_by_id(test_graph_with_credits["user_graph"].graph_id, db_session)
+  subgraph_id = _add_subgraph(db_session, parent)
+  gate = _gate_refusing_writes()
+
+  with patch("robosystems.middleware.billing.enforcement.require_graph_access", gate):
+    response = await async_client.post(
+      f"/v1/graphs/{subgraph_id}/query/cypher",
+      json={"query": "MATCH (n) RETURN count(n) AS n"},
+      headers={"Authorization": f"Bearer {create_jwt_token(test_user.id)}"},
+    )
+
+  assert response.status_code == 200, response.text
+  assert not any(call.kwargs.get("require_write") for call in gate.call_args_list)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("rows, truncated", [(10_000, True), (9_999, False)])
 @patch("robosystems.routers.graphs.query.execute.get_universal_repository")

@@ -165,6 +165,8 @@ async def execute_cypher_query(
     )
     is_write = auth.is_write
     access_type = auth.access_type
+    if is_write:
+      require_graph_access(graph_id, session, require_write=True)
 
     await _check_shared_repository_limits(
       graph_id=graph_id, user=current_user, session=session, endpoint="query"
