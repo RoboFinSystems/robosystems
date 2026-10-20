@@ -26,6 +26,7 @@ from robosystems.graphql.resolvers._common import (
 )
 from robosystems.graphql.types.ledger import (
   AccountList,
+  AccountRegister,
   AccountRollups,
   AccountTree,
   AccountTreeNode,
@@ -86,6 +87,9 @@ from robosystems.operations.roboledger.fiscal_calendar import (
   parse_period,
 )
 from robosystems.operations.roboledger.line_dimensions import LineSlice
+from robosystems.operations.roboledger.reads import (
+  account_register as reads_account_register,
+)
 from robosystems.operations.roboledger.reads import (
   account_rollups as reads_account_rollups,
 )
@@ -210,6 +214,24 @@ def _aged(
   except ValueError, ProgrammingError:
     _raise_ledger_not_initialized()
   return AgedBalances.from_pydantic(response)
+
+
+def _line_slice(
+  dimension_type: str | None, dimension_member_id: str | None
+) -> LineSlice | None:
+  """The management slice a read takes from its dimension pair."""
+  if (dimension_type is None) != (dimension_member_id is None):
+    raise strawberry.exceptions.StrawberryGraphQLError(
+      "dimensionType and dimensionMemberId go together: the axis, and the "
+      "member (or `unallocated`) whose lines to read.",
+      extensions={"code": "BAD_USER_INPUT"},
+    )
+  if dimension_type is None:
+    return None
+  return LineSlice(
+    dimension_type,
+    None if dimension_member_id == UNALLOCATED else dimension_member_id,
+  )
 
 
 @strawberry.type
@@ -829,20 +851,7 @@ class LedgerQuery:
       dimension_member_id: The one member whose lines to sum, or
         `unallocated` for the lines no member of the axis tags.
     """
-    if (dimension_type is None) != (dimension_member_id is None):
-      raise strawberry.exceptions.StrawberryGraphQLError(
-        "dimensionType and dimensionMemberId go together: the axis, and the "
-        "member (or `unallocated`) whose lines to sum.",
-        extensions={"code": "BAD_USER_INPUT"},
-      )
-    line_slice = (
-      LineSlice(
-        dimension_type,
-        None if dimension_member_id == UNALLOCATED else dimension_member_id,
-      )
-      if dimension_type is not None
-      else None
-    )
+    line_slice = _line_slice(dimension_type, dimension_member_id)
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_trial_balance.get_trial_balance(
@@ -855,6 +864,75 @@ class LedgerQuery:
     except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return TrialBalance.from_pydantic(response)
+
+  # ── Account register ────────────────────────────────────────────────────
+
+  @strawberry.field
+  def account_register(
+    self,
+    info: Info[GraphQLContext, None],
+    account_id: str,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    entity_id: str | None = None,
+    dimension_type: str | None = None,
+    dimension_member_id: str | None = None,
+    flow_element_id: str | None = None,
+    include_drafts: bool = False,
+    after: str | None = None,
+    limit: int | None = None,
+  ) -> AccountRegister | None:
+    """One entity's posted lines on one account, oldest first, each with the
+    balance it leaves.
+
+    The lines run from an opening balance to a closing one, which is the
+    trial balance's for the same window added to the opening. An income or
+    expense account's opening counts from the fiscal year's start.
+
+    Args:
+      account_id: The account.
+      start_date: Start of the window (inclusive). Omit from the first line.
+      end_date: End of the window (inclusive). Omit through the last line.
+      entity_id: The entity whose books to read. Omit for the group parent.
+      dimension_type: A management dimension axis to slice by, with
+        dimension_member_id.
+      dimension_member_id: The one member whose lines to read, or
+        `unallocated` for the lines no member of the axis tags.
+      flow_element_id: Only the lines tagged to this cash flow or equity
+        movement row.
+      include_drafts: Also return the window's draft lines, outside every
+        balance.
+      after: The `nextCursor` of the page before.
+    """
+    page_size, _ = _resolve_pagination(
+      limit, 0, default_limit=reads_account_register.DEFAULT_PAGE_SIZE
+    )
+    line_slice = _line_slice(dimension_type, dimension_member_id)
+    try:
+      with _open_session(info, "roboledger") as session:
+        response = reads_account_register.get_account_register(
+          session,
+          account_id,
+          start_date=start_date,
+          end_date=end_date,
+          entity_id=entity_id,
+          line_slice=line_slice,
+          flow_element_id=flow_element_id,
+          include_drafts=include_drafts,
+          after=after,
+          limit=page_size,
+        )
+    except (
+      EntityNotInGraphError,
+      reads_account_register.AccountNotFoundError,
+      reads_account_register.InvalidCursorError,
+    ) as exc:
+      raise strawberry.exceptions.StrawberryGraphQLError(
+        str(exc), extensions={"code": "BAD_USER_INPUT"}
+      ) from exc
+    except ValueError, ProgrammingError:
+      _raise_ledger_not_initialized()
+    return AccountRegister.from_pydantic(response)
 
   # ── Management dimensions ───────────────────────────────────────────────
 

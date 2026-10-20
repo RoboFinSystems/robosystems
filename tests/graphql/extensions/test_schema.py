@@ -39,6 +39,7 @@ class TestSchemaComposition:
       "accountTree",
       "accountRollups",
       "trialBalance",
+      "accountRegister",
       "transactions",
       "transaction",
       "taxonomies",

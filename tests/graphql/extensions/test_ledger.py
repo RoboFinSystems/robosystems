@@ -2234,3 +2234,106 @@ class TestClassificationStatsResolver:
       )
     assert result.errors is not None
     assert "not found in this graph" in result.errors[0].message
+
+
+class TestAccountRegisterResolver:
+  """`accountRegister` reads one entity's lines on one account, sliced by a
+  dimension pair that goes together."""
+
+  @staticmethod
+  def _register():
+    from robosystems.models.api.extensions.account_register import (
+      AccountRegisterResponse,
+      RegisterAccount,
+      RegisterLine,
+    )
+
+    return AccountRegisterResponse(
+      account=RegisterAccount(
+        id="elem_cash", name="Cash", balance_type="debit", temporary=False
+      ),
+      entity_id="ent_parent",
+      opening_balance=100.0,
+      total_debits=25.0,
+      total_credits=0.0,
+      closing_balance=125.0,
+      line_count=1,
+      page_opening_balance=100.0,
+      lines=[
+        RegisterLine(
+          line_id="li_1",
+          entry_id="je_1",
+          posting_date=date(2026, 9, 3),
+          entry_type="standard",
+          status="posted",
+          debit=25.0,
+          credit=0.0,
+          balance=125.0,
+          agent_name="Acme",
+        )
+      ],
+    )
+
+  def test_reads_the_named_window_and_slice(self) -> None:
+    with patch(
+      f"{_OPS}.account_register.get_account_register",
+      return_value=self._register(),
+    ) as read:
+      result = _run(
+        'query { accountRegister(accountId: "elem_cash", startDate: "2026-09-01", '
+        'endDate: "2026-09-30", entityId: "ent_sub", dimensionType: "department", '
+        'dimensionMemberId: "unallocated", includeDrafts: true, limit: 50) '
+        "{ openingBalance closingBalance account { name temporary } "
+        "lines { balance agentName } nextCursor } }"
+      )
+    assert result.errors is None, result.errors
+    kwargs = read.call_args.kwargs
+    assert read.call_args.args[1] == "elem_cash"
+    assert kwargs["entity_id"] == "ent_sub"
+    assert (kwargs["line_slice"].dimension_type, kwargs["line_slice"].member_id) == (
+      "department",
+      None,
+    )
+    assert (kwargs["include_drafts"], kwargs["limit"]) == (True, 50)
+    assert result.data == {
+      "accountRegister": {
+        "openingBalance": 100.0,
+        "closingBalance": 125.0,
+        "account": {"name": "Cash", "temporary": False},
+        "lines": [{"balance": 125.0, "agentName": "Acme"}],
+        "nextCursor": None,
+      }
+    }
+
+  def test_half_a_dimension_pair_is_refused(self) -> None:
+    with patch(f"{_OPS}.account_register.get_account_register") as read:
+      result = _run(
+        'query { accountRegister(accountId: "elem_cash", dimensionType: "class") '
+        "{ closingBalance } }"
+      )
+    assert result.errors is not None
+    assert "go together" in result.errors[0].message
+    read.assert_not_called()
+
+  def test_an_unknown_account_is_a_bad_input_not_a_missing_ledger(self) -> None:
+    from robosystems.operations.roboledger.reads.account_register import (
+      AccountNotFoundError,
+    )
+
+    with patch(
+      f"{_OPS}.account_register.get_account_register",
+      side_effect=AccountNotFoundError("Account 'x' not found in this graph."),
+    ):
+      result = _run('query { accountRegister(accountId: "x") { closingBalance } }')
+    assert result.errors is not None
+    assert "not found in this graph" in result.errors[0].message
+
+  def test_a_page_size_out_of_range_is_invalid_pagination(self) -> None:
+    with patch(f"{_OPS}.account_register.get_account_register") as read:
+      result = _run(
+        'query { accountRegister(accountId: "elem_cash", limit: 5000) '
+        "{ closingBalance } }"
+      )
+    assert result.errors is not None
+    assert result.errors[0].extensions["code"] == "INVALID_PAGINATION"
+    read.assert_not_called()

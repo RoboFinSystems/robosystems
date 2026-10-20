@@ -220,6 +220,7 @@ This page does not repeat that list. What follows is the orientation the generat
 | Which bill or invoice a bank line pays | `dischargeCandidates(eventId:)` — the line's counterparty's open items at its date, an exact amount first, then the oldest due date, and whether the line is classified to a receivables or payables account. The choice is recorded with `discharge_allocations` on `update-event-block` |
 | What a counterparty has done | `agent`, then the event and transaction history behind the balance |
 | The chart of accounts, and what is still unmapped | `accounts` / `accountTree`, then `unmappedElements` and `mappingCoverage` |
+| How an account's balance got there | `accountRegister(accountId:, startDate:, endDate:)` — one entity's posted lines on the account, oldest first, each with the balance it leaves, between an opening and a closing balance that agree with `trialBalance`. An income or expense account opens at the fiscal year's start. Each line names its entry, the event that wrote it and that event's counterparty; pages carry their own opening (`after:` takes the last page's `nextCursor`), and `includeDrafts` lists the window's drafts outside every balance |
 | Balances rolled up to reporting concepts | `mappedTrialBalance`, or `accountRollups` for the CoA-level view |
 | A published report, whole | `reportPackage` — metadata plus every rendered block in one round trip |
 | A single statement out of a report | `statement(reportId:, blockType:)` |
