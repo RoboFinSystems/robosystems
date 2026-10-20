@@ -283,6 +283,41 @@ class TestOLTPLoader:
   @patch("robosystems.db.extensions.ensure_tenant_schema")
   @patch("robosystems.db.extensions.extensions_session")
   @patch("duckdb.connect")
+  def test_full_rebuild_stops_before_deleting_a_landed_entry(
+    self,
+    mock_duckdb_connect,
+    mock_ext_session,
+    mock_provision,
+  ):
+    """An uncommitted event owns drafts only; a landed entry under one stops
+    the sync rather than being deleted with it."""
+    from robosystems.operations.extensions.loader import (
+      LandedRowsOnUncommittedEventsError,
+      OLTPLoader,
+    )
+
+    mock_duckdb_connect.return_value = _make_duckdb_mock({})
+    mock_session = MagicMock()
+    mock_session.query.return_value.filter.return_value.limit.return_value = [
+      ("je_posted",)
+    ]
+    mock_ext_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+    mock_ext_session.return_value.__exit__ = MagicMock(return_value=False)
+
+    with pytest.raises(LandedRowsOnUncommittedEventsError, match="je_posted"):
+      OLTPLoader().load(
+        graph_id="kg0123456789abcdef",
+        source="quickbooks",
+        connection_id="conn_123",
+        duckdb_path="/tmp/test.duckdb",
+        created_by="user_123",
+        full_rebuild=True,
+      )
+    mock_session.query.return_value.filter.return_value.delete.assert_not_called()
+
+  @patch("robosystems.db.extensions.ensure_tenant_schema")
+  @patch("robosystems.db.extensions.extensions_session")
+  @patch("duckdb.connect")
   def test_load_incremental_skips_pre_sync_wipe(
     self,
     mock_duckdb_connect,

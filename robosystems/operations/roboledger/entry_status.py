@@ -5,7 +5,7 @@ the books because `reverse_journal_entry` writes a full offsetting entry
 against it, and the pair nets to zero only if both halves are summed;
 filtering on `posted` alone leaves the offset without its original and
 misstates both accounts while the trial balance still foots. `draft` has not
-landed (entries of voided events stay `draft`).
+landed (entries of voided events stay `draft`), nor has `superseded`.
 
 Readers interpolate these forms rather than restating the predicate; a
 different question ("entries not yet corrected") asks `status` explicitly.
@@ -21,6 +21,12 @@ LANDED_ENTRY_STATUSES: frozenset[str] = frozenset({"posted", "reversed"})
 # redrafted or deleted. It is the expectation the close compares with what
 # the source ledger holds, so it is terminal without being in the books.
 SHADOWED_ENTRY_STATUS = "shadowed"
+
+# A posted entry taken out of an open month's books by a correction that
+# rebuilds it (a restate, a replaced opening balance). Kept, with its lines and
+# ids, so a reference to it still resolves; neither landed nor terminal, so
+# every reader of the books drops it.
+SUPERSEDED_ENTRY_STATUS = "superseded"
 
 # Statuses a schedule never drafts over again: landed, or shadowed.
 TERMINAL_ENTRY_STATUSES: frozenset[str] = LANDED_ENTRY_STATUSES | {

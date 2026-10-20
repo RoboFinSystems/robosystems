@@ -261,7 +261,7 @@ def _line_nets(db, event_id: str) -> dict[str, int]:
       SELECT li.element_id, SUM(li.debit_amount - li.credit_amount) AS net
       FROM line_items li
       JOIN entries e ON e.id = li.entry_id
-      WHERE e.triggered_by_event_id = :event_id
+      WHERE e.triggered_by_event_id = :event_id AND e.status <> 'superseded'
       GROUP BY li.element_id
     """),
     {"event_id": event_id},
@@ -416,11 +416,78 @@ def test_restate_rebuilds_the_entries_on_the_new_account(session):
   assert nets[elements[NEW_EXPENSE]] == AMOUNT
   assert elements[OLD_EXPENSE] not in nets
   assert nets[elements[CASH]] == -AMOUNT
-  # The old rows are gone rather than sitting alongside the new ones.
+  # The old rows are kept, out of the books, and name what replaced them.
   rebuilt = set(result.regenerated.entry_ids)
   assert rebuilt and rebuilt.isdisjoint(original_entry_ids)
-  assert session.query(Entry).filter(Entry.id.in_(original_entry_ids)).count() == 0
+  kept = session.query(Entry).filter(Entry.id.in_(original_entry_ids)).all()
+  assert {str(e.id) for e in kept} == original_entry_ids
+  for entry in kept:
+    session.refresh(entry)
+    assert entry.status == "superseded"
+    assert entry.superseded_at is not None
+    assert entry.supersession["op"] == "restate"
+    assert set(entry.supersession["replacement_entry_ids"]) == rebuilt
+  old_transactions = (
+    session.execute(
+      text(
+        "SELECT DISTINCT t.status FROM transactions t "
+        "JOIN entries e ON e.transaction_id = t.id WHERE e.id = ANY(:ids)"
+      ),
+      {"ids": list(original_entry_ids)},
+    )
+    .scalars()
+    .all()
+  )
+  assert old_transactions == ["void"]
   assert result.catch_up is None
+
+
+def test_a_second_restate_supersedes_the_first_rebuild(session):
+  elements, event, _accepted = _setup(session)
+  original = {
+    str(row_id)
+    for (row_id,) in session.execute(
+      text("SELECT id FROM entries WHERE triggered_by_event_id = :e"),
+      {"e": str(event.id)},
+    ).all()
+  }
+
+  def restate():
+    return resolve_reconciling_item(
+      session,
+      ResolveReconcilingItemRequest(
+        event_id=str(event.id),
+        expected_drift_detected_at=_previewed(session, str(event.id)),
+        disposition="restate",
+      ),
+      "user_test",
+      graph_id=GRAPH_ID,
+    )
+
+  first = set(restate().regenerated.entry_ids)
+  session.flush()
+  # QuickBooks moves the expense back: the event drifts again.
+  event.payload_drift = True
+  event.metadata_ = {
+    **dict(event.metadata_ or {}),
+    "drift_payload": _incoming_payload(expense_account=OLD_EXPENSE),
+    "drift_detected_at": datetime(2026, 8, 21, 9, 0).isoformat(),
+  }
+  session.flush()
+  second = set(restate().regenerated.entry_ids)
+  session.flush()
+
+  nets = _line_nets(session, str(event.id))
+  assert nets[elements[OLD_EXPENSE]] == AMOUNT
+  assert elements[NEW_EXPENSE] not in nets
+  statuses = dict(
+    session.execute(
+      text("SELECT id, status FROM entries WHERE triggered_by_event_id = :e"),
+      {"e": str(event.id)},
+    ).all()
+  )
+  assert {statuses[i] for i in original | first} == {"superseded"}
+  assert {statuses[i] for i in second} == {"posted"}
 
 
 def test_catch_up_leaves_history_alone_and_posts_the_difference(session):
@@ -1029,7 +1096,9 @@ def test_restate_reposts_a_bank_line_at_the_banks_amount_and_date(session):
     ids[OLD_EXPENSE]: 1500,
   }
   entry = (
-    session.query(Entry).filter(Entry.triggered_by_event_id == str(event.id)).one()
+    session.query(Entry)
+    .filter(Entry.triggered_by_event_id == str(event.id), Entry.status != "superseded")
+    .one()
   )
   assert entry.posting_date == date(2026, 7, 10)
 

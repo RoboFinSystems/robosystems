@@ -28,6 +28,7 @@ from robosystems.operations.roboledger.entity_scope import (
   ensure_entity_id,
   find_entity_id,
 )
+from robosystems.operations.roboledger.entry_status import SUPERSEDED_ENTRY_STATUS
 
 from .periods import (
   current_month_period,
@@ -250,6 +251,7 @@ def _activity_before(
     Entry.entity_id == entity_id,
     Entry.posting_date < start,
     Entry.type != "opening",
+    Entry.status != SUPERSEDED_ENTRY_STATUS,
   ]
   if at_opening:
     entry_filters.append(Entry.status == "draft")
@@ -668,7 +670,7 @@ class FiscalCalendarService:
       move_opening_entry,
     )
 
-    move_opening_entry(session, entity_id)
+    move_opening_entry(session, entity_id, actor_id or "system")
     self.record_event(
       session,
       calendar,

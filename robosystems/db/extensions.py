@@ -292,6 +292,38 @@ def _install_library_immutability_triggers(conn, schema: str) -> None:
   )
 
 
+# (trigger, table, events, function): landed ledger rows are never deleted or
+# rewritten (spec ``posted-rows-permanent`` §3.3). Mirrors migration 0056,
+# which owns the functions.
+_LEDGER_PERMANENCE_TRIGGERS = (
+  ("entries_landed_permanent", "entries", "UPDATE OR DELETE", "guard_landed_entry"),
+  (
+    "line_items_landed_permanent",
+    "line_items",
+    "UPDATE OR DELETE",
+    "guard_landed_line_item",
+  ),
+  (
+    "transactions_landed_permanent",
+    "transactions",
+    "DELETE",
+    "guard_landed_transaction",
+  ),
+  ("events_landed_permanent", "events", "DELETE", "guard_event_with_landed_rows"),
+)
+
+
+def _install_ledger_permanence_triggers(conn, schema: str) -> None:
+  for trigger, table, events, function in _LEDGER_PERMANENCE_TRIGGERS:
+    conn.execute(text(f'DROP TRIGGER IF EXISTS {trigger} ON "{schema}".{table}'))
+    conn.execute(
+      text(
+        f'CREATE TRIGGER {trigger} BEFORE {events} ON "{schema}".{table} '
+        f"FOR EACH ROW EXECUTE FUNCTION public.{function}()"
+      )
+    )
+
+
 def _widen_library_checks(conn, schema: str) -> None:
   """Align tenant CHECKs with the library vocabulary (mirrors migration 0002),
   using the models' value lists so the two cannot drift.
@@ -429,6 +461,7 @@ def provision_tenant_schema(graph_id: str) -> None:
     if not library_copied:
       copy_library_into_tenant(conn, schema, pin)
     _install_library_immutability_triggers(conn, schema)
+    _install_ledger_permanence_triggers(conn, schema)
 
     conn.commit()
 

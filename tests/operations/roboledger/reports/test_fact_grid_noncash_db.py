@@ -212,6 +212,9 @@ def _seed() -> dict[str, str]:
 @pytest.fixture(autouse=True)
 def empty_ledger(tenant):
   with extensions_session(GRAPH) as session:
+    # A purge of the tenant's books, which the permanence triggers allow only
+    # under the purge setting.
+    session.execute(text("SET LOCAL robosystems.ledger_purge = 'on'"))
     session.execute(text("DELETE FROM line_items"))
     session.execute(text("DELETE FROM entries"))
     session.execute(text("DELETE FROM events"))

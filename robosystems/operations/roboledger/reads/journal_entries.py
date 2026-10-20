@@ -26,6 +26,8 @@ from robosystems.operations.roboledger.entity_scope import find_entity_id
 
 # ORDER BY cannot be a bind parameter, so it is interpolated, only ever from
 # the fixed `EntryOrder` values, never caller input.
+# A superseded entry is listed only when asked for by status: the journal is
+# the books, and the trail it left is read by id or by asking for it.
 _ENTRY_ROWS_TEMPLATE = """
   WITH matched AS (
     SELECT e.id
@@ -33,7 +35,10 @@ _ENTRY_ROWS_TEMPLATE = """
     LEFT JOIN structures s ON s.id = e.source_structure_id
     WHERE (:start_date IS NULL OR e.posting_date >= :start_date)
       AND (:end_date IS NULL OR e.posting_date <= :end_date)
-      AND (:status IS NULL OR e.status = :status)
+      AND (
+        e.status = :status
+        OR (:status IS NULL AND e.status <> 'superseded')
+      )
       AND (:type IS NULL OR e.type = :type)
       AND (:provenance IS NULL OR e.provenance = :provenance)
       AND (:transaction_id IS NULL OR e.transaction_id = :transaction_id)
@@ -84,7 +89,10 @@ _COUNT_SQL = text("""
   FROM entries e
   WHERE (:start_date IS NULL OR e.posting_date >= :start_date)
     AND (:end_date IS NULL OR e.posting_date <= :end_date)
-    AND (:status IS NULL OR e.status = :status)
+    AND (
+      e.status = :status
+      OR (:status IS NULL AND e.status <> 'superseded')
+    )
     AND (:type IS NULL OR e.type = :type)
     AND (:provenance IS NULL OR e.provenance = :provenance)
     AND (:transaction_id IS NULL OR e.transaction_id = :transaction_id)
