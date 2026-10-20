@@ -383,9 +383,11 @@ class TestDualityLateBinding:
       event_id="evt_payment",
       discharges_event_id="evt_invoice",
     )
-    envelope = update_event_block(
-      session, body, created_by="usr_test", graph_id="kg00000000000000aa"
-    )
+    # The settlement's checks run against real rows in test_discharges_db.
+    with patch("robosystems.operations.event_block.discharges.check_settlement"):
+      envelope = update_event_block(
+        session, body, created_by="usr_test", graph_id="kg00000000000000aa"
+      )
 
     assert payment.discharges_event_id == "evt_invoice"
     assert envelope.discharges_event_id == "evt_invoice"

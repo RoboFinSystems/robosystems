@@ -185,6 +185,14 @@ def build_instructions(
         "An invoice or bill recorded here takes `due_date` or `terms_days`; "
         "without either it is due on receipt."
       )
+      inbox_lines.append(
+        "- A bank line that pays a bill or an invoice settles it only by a "
+        "person's choice: `dischargeCandidates(eventId)` over `query-graphql` "
+        "ranks the open items (exact amount first), and the commit records "
+        "the pick with `discharge_allocations: [{obligation_event_id, "
+        "amount}]`, several for a split. A line with no pick commits as it is, "
+        "and its bill stays open."
+      )
     if has("preview-event-block"):
       inbox_lines.append(
         "- Unsure what a commit would write? `preview-event-block` with the "

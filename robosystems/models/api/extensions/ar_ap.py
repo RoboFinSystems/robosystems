@@ -267,3 +267,31 @@ class AgedBalances(BaseModel):
   tie_outs: list[ControlTieOut] = Field(
     ..., description="Each summed entity's open items against its control accounts."
   )
+
+
+class DischargeCandidates(BaseModel):
+  """The open invoices or bills a payment may settle, best match first."""
+
+  event_id: str = Field(..., description="The payment or bank line.")
+  kind: str | None = Field(
+    None,
+    description=(
+      "`receivables` for money in, `payables` for money out; null when the "
+      "line has no amount to say which."
+    ),
+  )
+  amount_cents: int = Field(..., description="The payment's magnitude.")
+  classified_to_control: bool = Field(
+    ...,
+    description=(
+      "Whether the line is classified to a receivables or payables control "
+      "account, where a settlement is expected."
+    ),
+  )
+  candidates: list[OpenItem] = Field(
+    ...,
+    description=(
+      "Open items of the same entity and counterparty at the line's date: an "
+      "exact amount match first, then the oldest due date."
+    ),
+  )

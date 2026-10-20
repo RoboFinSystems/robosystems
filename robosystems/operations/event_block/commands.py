@@ -56,6 +56,7 @@ from robosystems.operations.roboledger.reads.event_block import (
   _to_envelope,
 )
 
+from . import discharges
 from .engine import (
   EngineValidationError,
   apply_handler,
@@ -546,6 +547,12 @@ def create_event_block_in_session(
   # line with its account's entity), else the group parent.
   entity_id = ensure_entity_id(session, entity_id or body.entity_id)
   _assert_not_duplicate(session, body)
+  if body.discharges_event_id:
+    discharges.check_settlement(
+      session,
+      Event(event_type=body.event_type, amount=body.amount, entity_id=entity_id),
+      [body.discharges_event_id],
+    )
 
   if body.apply_handlers:
     python_handler = get_python_handler(body.event_type)
@@ -721,6 +728,7 @@ def _has_field_corrections(body: UpdateEventBlockRequest) -> bool:
       body.metadata_patch or None,
       body.obligated_by_event_id,
       body.discharges_event_id,
+      body.discharge_allocations,
       body.document_id,
       body.event_action,
     )
@@ -929,7 +937,10 @@ def update_event_block(
     event.obligated_by_event_id = body.obligated_by_event_id
 
   if body.discharges_event_id is not None:
-    event.discharges_event_id = body.discharges_event_id
+    discharges.set_settlement_link(session, event, body.discharges_event_id)
+
+  if body.discharge_allocations is not None:
+    discharges.allocate(session, event, body.discharge_allocations, created_by)
 
   if body.document_id is not None:
     # Checked before the lock; an empty string detaches the document.

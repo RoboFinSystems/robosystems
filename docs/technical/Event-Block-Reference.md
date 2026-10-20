@@ -107,7 +107,8 @@ Support events record value-chain and audit-trail steps and have no ledger effec
 | `effective_at` | New recognition date |
 | `metadata_patch` | Merged into `metadata` key by key (a supplied key replaces that key's value) |
 | `event_action` | Set or correct the verb |
-| `obligated_by_event_id`, `discharges_event_id` | Late-bind the duality links, for example marking a payment as settling an invoice after the fact |
+| `obligated_by_event_id`, `discharges_event_id` | Late-bind the duality links, for example marking a payment as settling an invoice after the fact. A settlement is checked: an invoice for money in, a bill for money out, on the payment's own entity, not voided. An empty `discharges_event_id` clears it |
+| `discharge_allocations` | What a payment settles, document by document: `[{obligation_event_id, amount}]` in positive cents, together at most the payment's amount. Replaces any held; an empty list clears them. Use it when one payment, or one bank line, pays several invoices or bills, or only part of one. A QuickBooks payment's settlement comes from its sync and is changed in QuickBooks, so both fields refuse it |
 
 The metadata patch is applied before the handler runs, so a commit sees the final shape. A handler error rolls back the whole update, status change included. Returns the updated envelope.
 

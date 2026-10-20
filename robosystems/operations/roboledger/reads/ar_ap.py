@@ -1,11 +1,13 @@
 """Open AR / AP from the event duality chain, not the GL.
 
-Open balance = originating event amounts minus the amounts of events whose
-``discharges_event_id`` points at them (the FK is the contract, so payment
-event types need not be enumerated). Only ``committed`` and ``fulfilled``
-events count; inbox-pending and voided/superseded ones do not. Both sides are
-taken in magnitude: a bank line paying a bill carries a negative amount (money
-out), and its sign says which way the cash went, not how much it settles.
+Open balance = originating event amounts minus what payments applied to them:
+a payment's ``event_discharges`` rows where it has them, else its full amount
+against the obligation its ``discharges_event_id`` names (the FK is the
+contract, so payment event types need not be enumerated). Only ``committed``
+and ``fulfilled`` events count; inbox-pending and voided/superseded ones do
+not. Both sides are taken in magnitude: a bank line paying a bill carries a
+negative amount (money out), and its sign says which way the cash went, not
+how much it settles.
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ from collections.abc import Iterable
 from datetime import date, datetime, time, timedelta
 from typing import Literal
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import case, exists, func, or_, select, union_all
 from sqlalchemy.orm import Session, aliased
 
 from robosystems.models.api.extensions.ar_ap import (
@@ -25,6 +27,7 @@ from robosystems.models.api.extensions.ar_ap import (
   AgingBuckets,
   ControlAccount,
   ControlTieOut,
+  DischargeCandidates,
   GroupOpenItems,
   IntercompanyPair,
   OpenBalanceAggregate,
@@ -35,7 +38,9 @@ from robosystems.models.extensions import Association, Element
 from robosystems.models.extensions.roboledger.agent import Agent
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
+from robosystems.models.extensions.roboledger.event_discharge import EventDischarge
 from robosystems.models.extensions.roboledger.line_item import LineItem
+from robosystems.operations.event_block.discharges import settles_type
 from robosystems.operations.roboledger.entity_scope import (
   find_entity_id,
   group_members,
@@ -60,20 +65,56 @@ _AP_ORIGINATING_TYPES: tuple[str, ...] = ("bill_received",)
 _OPEN_BALANCE_STATUSES: tuple[str, ...] = ("committed", "fulfilled")
 
 
+def _settled(bound: datetime | None = None, *, excluding: str | None = None):
+  """``(obligation_id, settled)``: what committed payments, dated before
+  ``bound`` when one is given, have applied to each obligation. A payment with
+  allocation rows settles through them; one without settles the obligation its
+  ``discharges_event_id`` names, at its full magnitude. ``excluding`` leaves
+  one payment out, so its own settlement does not hide what it may settle."""
+  payments = Event.__table__.alias("payments_e")
+  allocations = EventDischarge.__table__
+  dated = (payments.c.occurred_at < bound,) if bound is not None else ()
+  if excluding is not None:
+    dated = (*dated, payments.c.id != excluding)
+  allocated = (
+    select(
+      allocations.c.obligation_event_id.label("obligation_id"),
+      allocations.c.amount.label("amount"),
+    )
+    .select_from(
+      allocations.join(payments, payments.c.id == allocations.c.payment_event_id)
+    )
+    .where(payments.c.status.in_(_OPEN_BALANCE_STATUSES), *dated)
+  )
+  linked = select(
+    payments.c.discharges_event_id.label("obligation_id"),
+    func.abs(payments.c.amount).label("amount"),
+  ).where(
+    payments.c.discharges_event_id.is_not(None),
+    payments.c.status.in_(_OPEN_BALANCE_STATUSES),
+    ~exists().where(allocations.c.payment_event_id == payments.c.id),
+    *dated,
+  )
+  settlements = union_all(allocated, linked).subquery("settlements")
+  return (
+    select(
+      settlements.c.obligation_id,
+      func.sum(settlements.c.amount).label("settled"),
+    )
+    .group_by(settlements.c.obligation_id)
+    .subquery("settled")
+  )
+
+
 def _build_open_balance_subquery(
   *,
   originating_types: Iterable[str],
   entity_id: str | None = None,
 ):
   """``(originating_id, agent_id, open_amount, currency)`` per originating
-  event; ``open_amount`` is negative when overpaid.
-
-  The self-join aliases at the Core level: ORM ``aliased(Event)`` does not
-  propagate through ``Event.__table__.outerjoin`` and Postgres rejects the
-  duplicate table name.
-  """
+  event; ``open_amount`` is negative when overpaid."""
   originating = Event.__table__
-  discharges = Event.__table__.alias("discharges_e")
+  settled = _settled()
   scope = (originating.c.entity_id == entity_id,) if entity_id is not None else ()
   return (
     select(
@@ -81,28 +122,18 @@ def _build_open_balance_subquery(
       originating.c.agent_id.label("agent_id"),
       (
         func.abs(func.coalesce(originating.c.amount, 0))
-        - func.coalesce(func.sum(func.abs(discharges.c.amount)), 0)
+        - func.coalesce(settled.c.settled, 0)
       ).label("open_amount"),
       originating.c.currency.label("currency"),
     )
     .select_from(
-      originating.outerjoin(
-        discharges,
-        (discharges.c.discharges_event_id == originating.c.id)
-        & (discharges.c.status.in_(_OPEN_BALANCE_STATUSES)),
-      )
+      originating.outerjoin(settled, settled.c.obligation_id == originating.c.id)
     )
     .where(
       originating.c.event_type.in_(tuple(originating_types)),
       originating.c.status.in_(_OPEN_BALANCE_STATUSES),
       originating.c.amount.is_not(None),
       *scope,
-    )
-    .group_by(
-      originating.c.id,
-      originating.c.agent_id,
-      originating.c.amount,
-      originating.c.currency,
     )
   )
 
@@ -289,6 +320,7 @@ def _open_items(
   as_of: date,
   entity_ids: list[str],
   agent_id: str | None = None,
+  excluding_payment: str | None = None,
 ) -> list[OpenItem]:
   """Every obligation of ``kind`` in ``entity_ids`` issued on or before
   ``as_of`` with something left open at ``as_of``: a settlement dated after it
@@ -296,10 +328,10 @@ def _open_items(
   if not entity_ids:
     return []
   originating = Event.__table__
-  discharges = Event.__table__.alias("discharges_e")
   bound = _end_of(as_of)
+  by_obligation = _settled(bound, excluding=excluding_payment)
   original = func.abs(originating.c.amount)
-  settled = func.coalesce(func.sum(func.abs(discharges.c.amount)), 0)
+  settled = func.coalesce(by_obligation.c.settled, 0)
   stmt = (
     select(
       originating.c.id,
@@ -315,10 +347,7 @@ def _open_items(
     )
     .select_from(
       originating.outerjoin(
-        discharges,
-        (discharges.c.discharges_event_id == originating.c.id)
-        & discharges.c.status.in_(_OPEN_BALANCE_STATUSES)
-        & (discharges.c.occurred_at < bound),
+        by_obligation, by_obligation.c.obligation_id == originating.c.id
       )
     )
     .where(
@@ -327,9 +356,8 @@ def _open_items(
       originating.c.amount.is_not(None),
       originating.c.entity_id.in_(entity_ids),
       originating.c.occurred_at < bound,
+      original != settled,
     )
-    .group_by(originating.c.id)
-    .having(original != settled)
     .order_by(originating.c.occurred_at.asc(), originating.c.id.asc())
   )
   if agent_id is not None:
@@ -629,4 +657,61 @@ def get_aged_balances(
       )
       for member in members
     ],
+  )
+
+
+# ---- Discharge candidates ---------------------------------------------------
+
+
+def list_discharge_candidates(
+  session: Session, event_id: str
+) -> DischargeCandidates | None:
+  """The open items a payment or bank line may settle: its own entity's, its
+  counterparty's when it names one, open at its date. An exact amount match
+  first, then the oldest due date. None when there is no such event."""
+  payment = session.get(Event, event_id)
+  if payment is None:
+    return None
+  magnitude = abs(payment.amount or 0)
+  obligation_type = settles_type(payment)
+  if obligation_type is None:
+    return DischargeCandidates(
+      event_id=event_id,
+      amount_cents=magnitude,
+      classified_to_control=False,
+      candidates=[],
+    )
+  kind: OpenItemKind = (
+    "payables" if obligation_type == "bill_received" else "receivables"
+  )
+  items = [
+    item
+    for item in _open_items(
+      session,
+      kind,
+      as_of=payment.occurred_at.date(),
+      entity_ids=[str(payment.entity_id)],
+      agent_id=payment.agent_id,
+      excluding_payment=event_id,
+    )
+    if item.open_cents > 0
+  ]
+  metadata = payment.metadata_ or {}
+  chosen = {metadata.get("classified_element_id")} | {
+    part.get("element_id")
+    for part in metadata.get("classified_allocations") or []
+    if isinstance(part, dict)
+  }
+  control = {
+    str(a.id) for a in _control_accounts(session, kind, str(payment.entity_id))
+  }
+  return DischargeCandidates(
+    event_id=event_id,
+    kind=kind,
+    amount_cents=magnitude,
+    classified_to_control=bool(chosen & control),
+    candidates=sorted(
+      items,
+      key=lambda i: (i.open_cents != magnitude, i.due_date, i.occurred_on),
+    ),
   )

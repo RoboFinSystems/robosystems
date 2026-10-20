@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from robosystems.logger import logger
@@ -371,6 +372,8 @@ class LoadResult:
   # Rows the loader dropped as malformed, surfaced so a lossy sync is visible.
   dropped_unbalanced_entries: int = 0
   dropped_empty_transactions: int = 0
+  # Payments whose settled documents were written as allocations.
+  payments_allocated: int = 0
   errors: list[str] = field(default_factory=list)
 
   @property
@@ -402,6 +405,7 @@ class _CaptureResult:
   skipped_same_sync_token: int = 0
   dropped_unbalanced_entries: int = 0
   dropped_empty_transactions: int = 0
+  payments_allocated: int = 0
 
 
 @dataclass
@@ -802,6 +806,7 @@ class OLTPLoader:
       result.events_skipped_same_sync_token = capture_result.skipped_same_sync_token
       result.dropped_unbalanced_entries = capture_result.dropped_unbalanced_entries
       result.dropped_empty_transactions = capture_result.dropped_empty_transactions
+      result.payments_allocated = capture_result.payments_allocated
       logger.info(
         "Captured %d new event_blocks, updated %d existing, "
         "flagged %d drift, matched %d cross-source round-trips, "
@@ -1222,6 +1227,9 @@ class OLTPLoader:
         if copy is not None:
           _retire_round_trip_copy(copy, cross_source_external_ids[ext_id], now, out)
 
+    # ext_id → (the documents a payment settles with the cents applied to
+    # each, and whether a newer version replaces rows already held).
+    allocations: dict[str, tuple[list[tuple[str, int]], bool]] = {}
     for ext_id, txn in txns_by_ext.items():
       if ext_id in cross_source_external_ids:
         continue
@@ -1323,6 +1331,7 @@ class OLTPLoader:
       # The invoices/bills a Payment/BillPayment settles; dbt emits JSON text.
       linked_txns_raw = txn.get("linked_txns")
       qb_linked_txns: list[dict[str, str]] = []
+      linked_amounts: list[tuple[str, int]] = []
       if linked_txns_raw:
         try:
           parsed = json.loads(linked_txns_raw)
@@ -1335,6 +1344,7 @@ class OLTPLoader:
               for r in parsed
               if isinstance(r, dict) and r.get("txn_id") and r.get("txn_type")
             ]
+            linked_amounts = _linked_amounts(parsed)
         except (ValueError, TypeError) as e:
           logger.warning(
             "Failed to parse linked_txns for QB event %s: %s — proceeding with empty list",
@@ -1370,6 +1380,10 @@ class OLTPLoader:
         # SyncToken says: it writes the column only, never the GL.
         if due_date is not None and evt.due_date is None:
           evt.due_date = due_date
+        # Likewise what a payment settled: rows are written only where none
+        # are held yet, below, once the documents it names are loaded.
+        if linked_amounts:
+          allocations[ext_id] = (linked_amounts, False)
         # Freshness gate first: a stale or same-version row skips everything,
         # guarding against out-of-order CDC delivery and replayed batches.
         existing_token = (evt.metadata_ or {}).get("qb_sync_token")
@@ -1392,6 +1406,8 @@ class OLTPLoader:
         # granted after the invoice was posted).
         if due_date is not None and evt.due_date != due_date:
           evt.due_date = due_date
+        if linked_amounts:
+          allocations[ext_id] = (linked_amounts, True)
 
         if evt.status in ("captured", "classified"):
           evt.event_type = event_type
@@ -1452,6 +1468,8 @@ class OLTPLoader:
           if meta_changed:
             evt.metadata_ = new_meta
       else:
+        if linked_amounts:
+          allocations[ext_id] = (linked_amounts, True)
         new_events.append(
           Event(
             entity_id=entity_id,
@@ -1528,6 +1546,9 @@ class OLTPLoader:
 
         session.flush()
 
+    out.payments_allocated = _apply_linked_allocations(
+      session, source=source, pending=allocations, created_by=created_by, now=now
+    )
     return out
 
   # Adopts whatever active chart_of_accounts taxonomy exists, or creates one.
@@ -1719,6 +1740,112 @@ class OLTPLoader:
 
     except Exception as e:
       logger.warning(f"Could not update entity from CompanyInfo: {e}")
+
+
+def _linked_amounts(linked: list) -> list[tuple[str, int]]:
+  """``(external_id, cents)`` for each settled document whose applied amount
+  the source states; one it does not state leaves the payment unallocated."""
+  amounts: list[tuple[str, int]] = []
+  for ref in linked:
+    if not (isinstance(ref, dict) and ref.get("txn_id") and ref.get("txn_type")):
+      continue
+    try:
+      cents = int((Decimal(str(ref.get("amount") or "")) * 100).quantize(Decimal(1)))
+    except InvalidOperation:
+      return []
+    if cents <= 0:
+      return []
+    amounts.append((f"{ref['txn_type']}_{ref['txn_id']}", cents))
+  return amounts
+
+
+def _apply_linked_allocations(
+  session,
+  *,
+  source: str,
+  pending: dict[str, tuple[list[tuple[str, int]], bool]],
+  created_by: str,
+  now: datetime,
+) -> int:
+  """Write what each payment settled, document by document, as
+  ``event_discharges`` rows. A payment holding none gets them whatever its
+  status, which is also the backfill; a newer version replaces them. A
+  payment naming a document not loaded yet is left for the next sync, and one
+  whose lines apply more than it paid is left on its single link. Hand edits
+  to a synced payment's settlement are refused, so these rows are the
+  source's. Returns the payments written."""
+  from sqlalchemy import delete, select
+
+  from robosystems.models.extensions.roboledger.event import Event
+  from robosystems.models.extensions.roboledger.event_discharge import (
+    EventDischarge,
+  )
+
+  if not pending:
+    return 0
+  payments = {
+    ext_id: (payment_id, abs(amount or 0))
+    for ext_id, payment_id, amount in session.execute(
+      select(Event.external_id, Event.id, Event.amount).where(
+        Event.source == source, Event.external_id.in_(list(pending))
+      )
+    ).all()
+  }
+  documents = dict(
+    session.execute(
+      select(Event.external_id, Event.id).where(
+        Event.source == source,
+        Event.external_id.in_(
+          sorted({ext for refs, _ in pending.values() for ext, _ in refs})
+        ),
+        Event.status.notin_(("voided", "superseded")),
+      )
+    ).all()
+  )
+  held = set(
+    session.execute(
+      select(EventDischarge.payment_event_id)
+      .where(EventDischarge.payment_event_id.in_([p for p, _ in payments.values()]))
+      .distinct()
+    ).scalars()
+  )
+  written = 0
+  for ext_id, (refs, replace) in pending.items():
+    if ext_id not in payments:
+      continue
+    payment_id, magnitude = payments[ext_id]
+    if (payment_id in held and not replace) or any(
+      ext not in documents for ext, _ in refs
+    ):
+      continue
+    if sum(cents for _, cents in refs) > magnitude:
+      logger.warning(
+        "Payment %s applies more than its %d cents across its linked "
+        "documents — left on its single link",
+        ext_id,
+        magnitude,
+      )
+      continue
+    applied: dict[str, int] = {}
+    for ext, cents in refs:
+      applied[documents[ext]] = applied.get(documents[ext], 0) + cents
+    if payment_id in held:
+      session.execute(
+        delete(EventDischarge).where(EventDischarge.payment_event_id == payment_id)
+      )
+    session.add_all(
+      EventDischarge(
+        payment_event_id=payment_id,
+        obligation_event_id=obligation_id,
+        amount=cents,
+        created_at=now,
+        created_by=created_by,
+      )
+      for obligation_id, cents in applied.items()
+    )
+    written += 1
+  session.flush()
+  return written
 
 
 def _upsert_dimensions(session, rows: list[dict], *, source: str, now) -> int:

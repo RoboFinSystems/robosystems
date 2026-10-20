@@ -36,6 +36,7 @@ from robosystems.graphql.types.ledger import (
   ChartTemplate,
   ClassificationStats,
   ClosingBookStructures,
+  DischargeCandidates,
   Element,
   ElementList,
   EventBlock,
@@ -453,6 +454,26 @@ class LedgerQuery:
     except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
     return [OpenItem.from_pydantic(item) for item in items]
+
+  @strawberry.field
+  def discharge_candidates(
+    self, info: Info[GraphQLContext, None], event_id: str
+  ) -> DischargeCandidates | None:
+    """The open invoices or bills a payment or bank line may settle.
+
+    Its own entity's and counterparty's, open at its date: an exact amount
+    match first, then the oldest due date. A person picks; the commit records
+    the choice with `discharge_allocations`. Null when there is no such event.
+
+    Args:
+      event_id: The payment or bank line.
+    """
+    try:
+      with _open_session(info, "roboledger") as session:
+        response = reads_ar_ap.list_discharge_candidates(session, event_id)
+    except ValueError, ProgrammingError:
+      _raise_ledger_not_initialized()
+    return None if response is None else DischargeCandidates.from_pydantic(response)
 
   # ── Event blocks (inbox) ────────────────────────────────────────────────
 

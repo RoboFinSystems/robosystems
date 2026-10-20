@@ -68,6 +68,17 @@ EventAction = Literal[
 OBLIGATION_EVENT_TYPES: frozenset[str] = frozenset({"invoice_issued", "bill_received"})
 
 
+class DischargeAllocation(BaseModel):
+  """How much of a payment went to one invoice or bill."""
+
+  obligation_event_id: str = Field(
+    ..., description="The `invoice_issued` or `bill_received` event it settles."
+  )
+  amount: int = Field(
+    ..., gt=0, description="Positive cents of the payment applied to it."
+  )
+
+
 class CreateEventBlockRequest(BaseModel):
   """Write surface for a single business event."""
 
@@ -630,7 +641,25 @@ class UpdateEventBlockRequest(BaseModel):
     None, description="Set/update the forward-materialization link."
   )
   discharges_event_id: str | None = Field(
-    None, description="Set/update the settlement link."
+    None,
+    description=(
+      "Set the settlement link: the one invoice or bill this payment "
+      "settles, at its full amount; an empty string clears it. Replaces any "
+      "`discharge_allocations`. Checked as they are."
+    ),
+  )
+  discharge_allocations: list[DischargeAllocation] | None = Field(
+    None,
+    description=(
+      "What this payment settles, document by document: one row per "
+      "invoice or bill with the positive cents applied to it, together at "
+      "most the payment's amount (the rest is unapplied). Replaces any held; "
+      "an empty list clears them, and the settlement link becomes the first "
+      "row's. Each must be an obligation of this event's entity, not voided: "
+      "an invoice for money in, a bill for money out. A person chooses them; "
+      "the open items a bank line may settle are `dischargeCandidates` over "
+      "GraphQL."
+    ),
   )
   document_id: str | None = Field(
     None,
@@ -640,6 +669,12 @@ class UpdateEventBlockRequest(BaseModel):
       "unchanged."
     ),
   )
+
+  @model_validator(mode="after")
+  def _one_way_to_settle(self) -> UpdateEventBlockRequest:
+    if self.discharges_event_id is not None and self.discharge_allocations is not None:
+      raise ValueError("Give discharges_event_id or discharge_allocations, not both.")
+    return self
 
 
 # ───────────────────────────────────────────────────────────────────────────

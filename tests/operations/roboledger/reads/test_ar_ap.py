@@ -1,6 +1,6 @@
 """Smoke tests for AR/AP read operations.
 
-The math is one SQL query with a subquery + filtered aggregate — too
+The math is one SQL query over a settlements subquery — too
 complex to mock meaningfully without re-implementing it in the
 assertions. These tests verify (a) the SQL compiles against a real
 Postgres dialect, (b) the candidate event-type sets are wired
@@ -51,10 +51,11 @@ def test_subquery_filters_on_originating_types() -> None:
   assert "invoice_issued" in compiled
   assert "sales_receipt_recorded" not in compiled
   # Both sides in magnitude: a bank line paying a bill carries a negative amount.
-  assert "abs(discharges_e.amount)" in compiled
-  # The subquery should sum discharges via a LEFT OUTER JOIN onto Event itself.
-  assert "LEFT OUTER JOIN events" in compiled
+  assert "abs(payments_e.amount)" in compiled
+  # Settled through a payment's allocations, else through its single link.
+  assert "event_discharges" in compiled
   assert "discharges_event_id" in compiled
+  assert "LEFT OUTER JOIN" in compiled
 
 
 def test_aggregate_compiles_against_postgres() -> None:
