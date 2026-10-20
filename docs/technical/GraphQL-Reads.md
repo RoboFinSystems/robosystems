@@ -221,6 +221,7 @@ This page does not repeat that list. What follows is the orientation the generat
 | What a counterparty has done | `agent`, then the event and transaction history behind the balance |
 | The chart of accounts, and what is still unmapped | `accounts` / `accountTree`, then `unmappedElements` and `mappingCoverage` |
 | How an account's balance got there | `accountRegister(accountId:, startDate:, endDate:)` — one entity's posted lines on the account, oldest first, each with the balance it leaves, between an opening and a closing balance that agree with `trialBalance`. An income or expense account opens at the fiscal year's start. Each line names its entry, the event that wrote it and that event's counterparty; pages carry their own opening (`after:` takes the last page's `nextCursor`), and `includeDrafts` lists the window's drafts outside every balance |
+| What an event posted, and which event a posting came from | `eventBlock(id:) { triggeredEntries { … } }` — the journal entries the event's handler wrote, oldest first (what did post, where `previewEventBlock` is what would). The other way, every `journalEntries` entry and `accountRegister` line carries `triggeredByEventId` and `triggeredByEventType` |
 | Balances rolled up to reporting concepts | `mappedTrialBalance`, or `accountRollups` for the CoA-level view |
 | A published report, whole | `reportPackage` — metadata plus every rendered block in one round trip |
 | A single statement out of a report | `statement(reportId:, blockType:)` |

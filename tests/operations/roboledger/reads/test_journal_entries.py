@@ -67,6 +67,7 @@ def _line_row(
     source_structure_id=source_structure_id,
     source_structure_name=source_structure_name,
     triggered_by_event_id=None,
+    triggered_by_event_type=None,
     reversal_of=None,
     posted_at=datetime(2026, 8, 1, 12, 0, 0),
     line_item_id=line_item_id,

@@ -44,6 +44,10 @@ _ENTRY_ROWS_TEMPLATE = """
       AND (:provenance IS NULL OR e.provenance = :provenance)
       AND (:transaction_id IS NULL OR e.transaction_id = :transaction_id)
       AND (:entity_id IS NULL OR e.entity_id = :entity_id)
+      AND (
+        CAST(:event_ids AS TEXT[]) IS NULL
+        OR e.triggered_by_event_id = ANY(CAST(:event_ids AS TEXT[]))
+      )
     ORDER BY {order_by}
     LIMIT :limit OFFSET :offset
   )
@@ -58,6 +62,7 @@ _ENTRY_ROWS_TEMPLATE = """
     e.provenance          AS provenance,
     e.source_structure_id AS source_structure_id,
     e.triggered_by_event_id AS triggered_by_event_id,
+    ev.event_type         AS triggered_by_event_type,
     e.reversal_of         AS reversal_of,
     e.posted_at           AS posted_at,
     s.name                AS source_structure_name,
@@ -79,6 +84,7 @@ _ENTRY_ROWS_TEMPLATE = """
   FROM entries e
   JOIN matched m ON m.id = e.id
   LEFT JOIN structures s ON s.id = e.source_structure_id
+  LEFT JOIN events ev ON ev.id = e.triggered_by_event_id
   LEFT JOIN line_items li ON li.entry_id = e.id
   LEFT JOIN elements el ON el.id = li.element_id
   LEFT JOIN elements fl ON fl.id = li.flow_element_id
@@ -130,6 +136,7 @@ class EntryRow(NamedTuple):
   source_structure_id: str | None
   source_structure_name: str | None
   triggered_by_event_id: str | None
+  triggered_by_event_type: str | None
   reversal_of: str | None
   posted_at: Any
   line_items: list[dict[str, Any]]
@@ -145,13 +152,15 @@ def fetch_entry_rows(
   provenance: str | None = None,
   transaction_id: str | None = None,
   entity_id: str | None = None,
+  event_ids: list[str] | None = None,
   limit: int | None = None,
   offset: int = 0,
   order_by: EntryOrder = EntryOrder.RECENT_FIRST,
 ) -> list[EntryRow]:
   """Fetch entries with their line items, in cents. Without a
   ``transaction_id`` filter, parentless entries are included; without an
-  ``entity_id``, every entity's."""
+  ``entity_id``, every entity's. ``event_ids`` keeps the entries those events'
+  handlers wrote."""
   rows = session.execute(
     _SQL_BY_ORDER[order_by],
     {
@@ -162,6 +171,7 @@ def fetch_entry_rows(
       "provenance": provenance,
       "transaction_id": transaction_id,
       "entity_id": entity_id,
+      "event_ids": event_ids,
       "limit": limit if limit is not None else _NO_LIMIT,
       "offset": offset,
     },
@@ -185,6 +195,7 @@ def fetch_entry_rows(
         "source_structure_id": row.source_structure_id,
         "source_structure_name": row.source_structure_name,
         "triggered_by_event_id": row.triggered_by_event_id,
+        "triggered_by_event_type": row.triggered_by_event_type,
         "reversal_of": row.reversal_of,
         "posted_at": row.posted_at,
         "line_items": [],
@@ -254,47 +265,66 @@ def list_journal_entries(
     **params,
   )
 
-  entries: list[LedgerJournalEntryResponse] = []
-  for entry in entry_rows:
-    total_debit = sum(li["debit_amount"] for li in entry.line_items)
-    total_credit = sum(li["credit_amount"] for li in entry.line_items)
-    entries.append(
-      LedgerJournalEntryResponse(
-        id=entry.entry_id,
-        number=entry.number,
-        transaction_id=entry.transaction_id,
-        type=entry.type,
-        status=entry.status,
-        posting_date=entry.posting_date,
-        memo=entry.memo,
-        provenance=entry.provenance,
-        source_structure_id=entry.source_structure_id,
-        source_structure_name=entry.source_structure_name,
-        triggered_by_event_id=entry.triggered_by_event_id,
-        reversal_of=entry.reversal_of,
-        posted_at=entry.posted_at,
-        line_items=[
-          LedgerLineItemResponse(
-            id=li["line_item_id"],
-            account_id=li["element_id"],
-            account_name=li["element_name"],
-            account_code=li["element_code"],
-            debit_amount=cents_to_dollars(li["debit_amount"]),
-            credit_amount=cents_to_dollars(li["credit_amount"]),
-            description=li["description"],
-            line_order=li["line_order"],
-            flow_qname=li["flow_qname"],
-            dimensions=li["dimensions"],
-          )
-          for li in entry.line_items
-        ],
-        total_debit=cents_to_dollars(total_debit),
-        total_credit=cents_to_dollars(total_credit),
-        balanced=total_debit == total_credit,
-      )
-    )
-
   return LedgerJournalEntryListResponse(
-    entries=entries,
+    entries=[journal_entry_response(entry) for entry in entry_rows],
     pagination=create_pagination_info(total, limit, offset),
+  )
+
+
+def entries_by_event(
+  session: Session, event_ids: list[str]
+) -> dict[str, list[LedgerJournalEntryResponse]]:
+  """The entries each event's handler wrote, oldest first, by event id. An
+  entry a restatement superseded is left out, as the journal leaves it out."""
+  if not event_ids:
+    return {}
+  rows = fetch_entry_rows(
+    session, event_ids=list(event_ids), order_by=EntryOrder.PERIOD_REVIEW
+  )
+  out: dict[str, list[LedgerJournalEntryResponse]] = {}
+  for entry in rows:
+    assert entry.triggered_by_event_id is not None
+    out.setdefault(entry.triggered_by_event_id, []).append(
+      journal_entry_response(entry)
+    )
+  return out
+
+
+def journal_entry_response(entry: EntryRow) -> LedgerJournalEntryResponse:
+  """One fetched entry as the journal reads it, amounts in dollars."""
+  total_debit = sum(li["debit_amount"] for li in entry.line_items)
+  total_credit = sum(li["credit_amount"] for li in entry.line_items)
+  return LedgerJournalEntryResponse(
+    id=entry.entry_id,
+    number=entry.number,
+    transaction_id=entry.transaction_id,
+    type=entry.type,
+    status=entry.status,
+    posting_date=entry.posting_date,
+    memo=entry.memo,
+    provenance=entry.provenance,
+    source_structure_id=entry.source_structure_id,
+    source_structure_name=entry.source_structure_name,
+    triggered_by_event_id=entry.triggered_by_event_id,
+    triggered_by_event_type=entry.triggered_by_event_type,
+    reversal_of=entry.reversal_of,
+    posted_at=entry.posted_at,
+    line_items=[
+      LedgerLineItemResponse(
+        id=li["line_item_id"],
+        account_id=li["element_id"],
+        account_name=li["element_name"],
+        account_code=li["element_code"],
+        debit_amount=cents_to_dollars(li["debit_amount"]),
+        credit_amount=cents_to_dollars(li["credit_amount"]),
+        description=li["description"],
+        line_order=li["line_order"],
+        flow_qname=li["flow_qname"],
+        dimensions=li["dimensions"],
+      )
+      for li in entry.line_items
+    ],
+    total_debit=cents_to_dollars(total_debit),
+    total_credit=cents_to_dollars(total_credit),
+    balanced=total_debit == total_credit,
   )

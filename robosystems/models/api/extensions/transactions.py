@@ -162,6 +162,14 @@ class LedgerJournalEntryResponse(BaseModel):
   triggered_by_event_id: str | None = Field(
     None, description="Business event that caused this entry (if any)"
   )
+  triggered_by_event_type: str | None = Field(
+    None,
+    description=(
+      "That event's type (`invoice_issued`, `bill_received`, "
+      "`journal_entry_recorded`, ...), so a list can label the entry's "
+      "source without fetching the event"
+    ),
+  )
   reversal_of: str | None = Field(
     None, description="The entry this one reverses (if any)"
   )

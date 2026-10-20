@@ -11,6 +11,7 @@ from enum import Enum
 
 import strawberry
 from sqlalchemy.orm import Session
+from strawberry.dataloader import DataLoader
 from strawberry.scalars import JSON
 
 from robosystems.graphql.types._pydantic import pydantic_type
@@ -520,6 +521,44 @@ class EventBlock:
       created_at=row.created_at,
       created_by=row.created_by,
     )
+
+  @strawberry.field
+  async def triggered_entries(self, info: strawberry.Info) -> list[LedgerJournalEntry]:
+    """The journal entries this event's handler wrote, oldest first.
+
+    What did post, where `previewEventBlock` is what would. Empty for an event
+    still in the inbox; an entry a restatement superseded is left out.
+    """
+    rows = await _event_entries_loader(info).load(self.id)
+    return [LedgerJournalEntry.from_pydantic(row) for row in rows]
+
+
+def _event_entries_loader(
+  info: strawberry.Info,
+) -> DataLoader[str, list[PydanticLedgerJournalEntryResponse]]:
+  """One query per request for every event's entries, however many events a
+  list returns."""
+  loaders = info.context.setdefault("dataloaders", {})
+  if "event_entries" not in loaders:
+
+    async def load(
+      event_ids: list[str],
+    ) -> list[list[PydanticLedgerJournalEntryResponse]]:
+      from robosystems.graphql.resolvers._common import open_extensions_session
+      from robosystems.middleware.operations import run_off_loop
+      from robosystems.operations.roboledger.reads.journal_entries import (
+        entries_by_event,
+      )
+
+      def run() -> dict[str, list[PydanticLedgerJournalEntryResponse]]:
+        with open_extensions_session(info, "roboledger") as session:
+          return entries_by_event(session, list(event_ids))
+
+      found = await run_off_loop(run)
+      return [found.get(event_id, []) for event_id in event_ids]
+
+    loaders["event_entries"] = DataLoader(load_fn=load)
+  return loaders["event_entries"]
 
 
 # ── Summary ───────────────────────────────────────────────────────────────
