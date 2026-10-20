@@ -507,6 +507,72 @@ def test_depreciation_charged_on_the_sale_invoice_is_no_write_off(tenant):
   assert feb.get(OPERATING, 0.0) == 0.0
 
 
+def test_depreciation_presented_on_the_cash_flow_is_still_no_write_off(tenant):
+  """The same invoice, with the month's charge booked to the depreciation the
+  cash flow presents on its own row: that line is the period's add-back, not
+  part of the disposal, so the proceeds are still exactly the cash received."""
+  _post(tenant, [("equipment", 1000, 0), ("cash", 0, 1000)], posted=date(2026, 1, 5))
+  _post(
+    tenant,
+    [("depreciation", 400, 0), ("accumulated_depreciation", 0, 400)],
+    posted=date(2026, 1, 6),
+  )
+  invoice = _event("invoice_issued")
+  _post(
+    tenant,
+    [
+      ("receivable", 500, 0),
+      ("depreciation", 50, 0),
+      ("accumulated_depreciation", 0, 50),
+      ("accumulated_depreciation", 450, 0),
+      ("equipment", 0, 1000),
+      ("disposal_gain", 50, 0),
+    ],
+    event_id=invoice,
+  )
+  receipt = _event("payment_received", discharges=invoice)
+  _post(
+    tenant,
+    [("cash", 500, 0), ("receivable", 0, 500)],
+    posted=date(2026, 2, 10),
+    event_id=receipt,
+  )
+  jan = _cash_flow(tenant, JAN, [JAN, FEB])
+  feb = _cash_flow(tenant, FEB, [JAN, FEB])
+  assert feb[PPE_PROCEEDS] == 500.0
+  assert feb.get(OPERATING, 0.0) == 0.0
+  assert jan.get(OPERATING, 0.0) == 0.0
+  _assert_no_reconciling_adjustment(jan)
+  _assert_no_reconciling_adjustment(feb)
+
+
+def test_depreciation_charged_on_a_cash_sale_is_no_write_off(tenant):
+  """A cash sale that also books the month's charge: the proceeds are the
+  cost net of the write-off and the loss, not net of the charge too."""
+  _post(tenant, [("equipment", 1000, 0), ("cash", 0, 1000)], posted=date(2026, 1, 5))
+  _post(
+    tenant,
+    [("depreciation", 400, 0), ("accumulated_depreciation", 0, 400)],
+    posted=date(2026, 1, 6),
+  )
+  _post(
+    tenant,
+    [
+      ("cash", 500, 0),
+      ("depreciation", 50, 0),
+      ("accumulated_depreciation", 0, 50),
+      ("accumulated_depreciation", 450, 0),
+      ("equipment", 0, 1000),
+      ("disposal_gain", 50, 0),
+    ],
+    posted=date(2026, 1, 20),
+  )
+  jan = _cash_flow(tenant)
+  assert jan[PPE_PROCEEDS] == 500.0
+  assert jan.get(OPERATING, 0.0) == 0.0
+  _assert_no_reconciling_adjustment(jan)
+
+
 def test_a_linked_payment_through_clearing_still_routes_the_bill(tenant):
   """The cash leg lands in clearing, on none of the bill's accounts: the
   payment is still measured against the whole bill, so the equipment it
