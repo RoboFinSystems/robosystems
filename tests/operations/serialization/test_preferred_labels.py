@@ -280,3 +280,58 @@ def test_unordered_movements_still_sit_between_the_balances() -> None:
     (DIVIDENDS, None),
     (EQUITY, PERIOD_END_LABEL_ROLE),
   ]
+
+
+def test_a_row_subtracted_by_a_dropped_summation_is_negated() -> None:
+  """No calculation link ships for the indirect cash flow; the subtracted
+  pairs still give the gain its negated label."""
+  linkbases, concepts = _linkbases(), _concepts()
+  linkbases.calculation_links = []
+  _apply_preferred_labels(linkbases, concepts, {(OPERATING, GAIN)})
+  labels = {
+    arc.to_qname: arc.preferred_label for arc in linkbases.presentation_links[0].arcs
+  }
+  assert labels == {NET_INCOME: None, GAIN: NEGATED_LABEL_ROLE}
+
+
+NCI = "rs-gaap:MinorityInterest"
+NCI_IN = "rs-gaap:NoncontrollingInterestIncreaseFromSubsidiaryEquityIssuance"
+
+
+def test_the_outside_owners_interest_opens_and_closes_beside_the_capital() -> None:
+  linkbases = BundleLinkbases(
+    presentation_links=[
+      _link(
+        "presentation",
+        "equity_statement",
+        [
+          _arc("presentation", EQUITY, ISSUED, 10.0),
+          _arc("presentation", NCI, NCI_IN, 30.0),
+        ],
+      )
+    ]
+  )
+  concepts = [
+    *_concepts(),
+    _element(NCI, balance_type="credit", label="Noncontrolling interest"),
+    _element(NCI_IN, period_type="duration", label="Interest issued"),
+  ]
+  _apply_preferred_labels(linkbases, concepts)
+  rows = [
+    (arc.from_qname, arc.to_qname, arc.preferred_label)
+    for arc in sorted(
+      linkbases.presentation_links[0].arcs, key=lambda a: a.order_value or 0.0
+    )
+  ]
+  assert rows == [
+    (HEADER, EQUITY, PERIOD_START_LABEL_ROLE),
+    (HEADER, ISSUED, None),
+    (HEADER, EQUITY, PERIOD_END_LABEL_ROLE),
+    (HEADER, NCI, PERIOD_START_LABEL_ROLE),
+    (HEADER, NCI_IN, None),
+    (HEADER, NCI, PERIOD_END_LABEL_ROLE),
+  ]
+  nci = next(c for c in concepts if c.qname == NCI)
+  assert nci.role_labels[PERIOD_END_LABEL_ROLE] == (
+    "Noncontrolling interest, ending balance"
+  )

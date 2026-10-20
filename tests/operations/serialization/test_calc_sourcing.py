@@ -223,3 +223,24 @@ def test_library_statement_arcs_still_sourced() -> None:
   )
   assert len(result) == 2
   assert all(r.structure_id == "bs_struct" for r in result)
+
+
+def test_a_dropped_summation_still_names_its_subtracted_rows() -> None:
+  """The indirect cash flow's summation is illegal XBRL and does not ship,
+  but the gain it subtracts must still render negated."""
+  elements = {
+    key: SimpleNamespace(balance_type=e.balance_type, qname=f"rs-gaap:{key}")
+    for key, e in _ELEMENTS.items()
+  }
+  subtracted: set[tuple[str, str]] = set()
+  # Net income (credit) at +1 under the debit operating total is illegal, so
+  # the whole summation drops, the subtracted receivable change with it.
+  result = _source_calculation_arcs(
+    _Session([_calc("ncf_op", "ni"), _calc("ncf_op", "inc_ar", weight=-1.0)]),
+    [*_PRES, _pres("cf_struct", "ncf_op", "ni")],
+    _STRUCTURES,
+    elements,
+    subtracted,
+  )
+  assert result == []
+  assert subtracted == {("rs-gaap:ncf_op", "rs-gaap:inc_ar")}
