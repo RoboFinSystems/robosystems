@@ -487,7 +487,13 @@ def render_structure_view(
     calculations = _load_calculations(session, structure_id=structure_id)
 
   # Facts are already natural-signed.
-  rows = _build_rows(hierarchy, period_balances, calculations, pre_signed=True)
+  rows = _build_rows(
+    hierarchy,
+    period_balances,
+    calculations,
+    pre_signed=True,
+    keep=ROLLFORWARD_ROOTS if block_type == "equity_statement" else frozenset(),
+  )
   if strays and block_type in _PLACED_BY_CALCULATION:
     ancestry = _calculation_ancestry(
       session, {f.element_id for f in strays}, {row.element_id for row in rows}
@@ -3026,6 +3032,7 @@ def _with_opening_balance(
     return rows
 
   openings: list[FactRow] = []
+  dropped: set[int] = set()
   for closing in closings:
     # (end, start) -> value. Two columns can end the same day; the earliest
     # start wins, as ``_one_column_per_date`` decides for the cash flow.
@@ -3041,6 +3048,19 @@ def _with_opening_balance(
     for end, start in sorted(by_context, key=lambda k: (k[0], k[1] or date.min)):
       balance_on.setdefault(end, by_context[(end, start)])
 
+    opening_values = [
+      _unsigned_zero(balance_on.get(_opening_date(p), 0.0)) for p in periods
+    ]
+    first = closing.position - subtree_size[closing.element_id]
+    if (
+      not any(opening_values)
+      and not any(closing.values)
+      and not any(first <= r.position < closing.position for r in rows)
+    ):
+      # Kept only to place its opening: a roll-forward with nothing in it.
+      dropped.add(id(closing))
+      continue
+
     name = closing.element_name
     closing.element_name = f"{name}, ending balance"
     closing.period_role = "end"
@@ -3051,13 +3071,14 @@ def _with_opening_balance(
         element_name=f"{name}, beginning balance",
         classification=closing.classification,
         balance_type=closing.balance_type,
-        values=[_unsigned_zero(balance_on.get(_opening_date(p), 0.0)) for p in periods],
+        values=opening_values,
         depth=closing.depth,
         period_role="start",
-        position=closing.position - subtree_size[closing.element_id] - 0.5,
+        position=first - 0.5,
       )
     )
-  return sorted([*openings, *rows], key=lambda r: r.position)
+  kept = [r for r in rows if id(r) not in dropped]
+  return sorted([*openings, *kept], key=lambda r: r.position)
 
 
 def _subtree_size(node: _HierarchyNode) -> int:
@@ -3809,11 +3830,13 @@ def _build_rows(
   period_balances: list[dict[str, _Balance]],
   calculations: dict[str, list[tuple[str, float]]],
   pre_signed: bool = False,
+  keep: frozenset[str] = frozenset(),
 ) -> list[FactRow]:
   """Build FactRows (one value per period) in presentation order.
 
   Pass 1 collects leaf balances and parent rollups, then calc subtotals are
-  resolved; pass 2 emits rows post-order.
+  resolved; pass 2 emits rows post-order. A root in ``keep`` stays at zero:
+  a roll-forward's ending balance, whose opening is placed after.
   """
   n_periods = len(period_balances)
 
@@ -3927,7 +3950,12 @@ def _build_rows(
     _emit(root)
 
   # The full presentation tree is hundreds of concepts; keep only populated rows.
-  rows = [r for r in rows if any(v not in (None, 0, 0.0) for v in r.values)]
+  rows = [
+    r
+    for r in rows
+    if any(v not in (None, 0, 0.0) for v in r.values)
+    or (r.depth == 0 and r.element_qname in keep)
+  ]
 
   # ASC 205-20: without discontinued ops, the continuing-operations subtotal
   # duplicates net income.

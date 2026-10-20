@@ -29,7 +29,7 @@ from __future__ import annotations
 import calendar
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import bindparam, select, text
 from sqlalchemy.orm import Session
@@ -42,13 +42,15 @@ from robosystems.models.api.extensions.consolidation import (
   ConsolidationResidual,
   PreviewConsolidationEntriesResponse,
 )
-from robosystems.models.extensions.roboledger import Entry
+from robosystems.models.extensions.roboledger import Entry, LineItem
 from robosystems.operations.roboledger.commands._guards import closed_periods
+from robosystems.operations.roboledger.commands.opening_balances import OPENING
 from robosystems.operations.roboledger.entity_scope import (
   GroupMember,
   resolve_entity_id,
 )
 from robosystems.operations.roboledger.entry_status import landed_entry_bindparam
+from robosystems.operations.roboledger.fiscal_calendar.periods import next_period
 from robosystems.operations.roboledger.reports.fact_grid import (
   _CASH_ANCHOR_QNAMES,
   _infer_classification,
@@ -235,6 +237,8 @@ def _proposed(proposals: list[ConsolidationProposal]) -> dict[_DraftKey, int]:
   """What drafting the proposals would hold, keyed as ``_drafted``."""
   held: dict[_DraftKey, int] = defaultdict(int)
   for p in proposals:
+    if p.opening:
+      continue
     for line in p.lines:
       key = (p.adjustment_kind, p.adjusts_entity_id, line.element_id, line.flow_qname)
       held[key] += line.debit_amount - line.credit_amount
@@ -317,6 +321,7 @@ class _Row:
   adjusts: str | None
   in_period: bool
   amount: int  # cents, debit-positive
+  opening: bool = False  # the engine's opening of the consolidation entity
 
 
 @dataclass
@@ -449,7 +454,8 @@ def _rows(
   drafts_of: str,
 ) -> list[_Row]:
   """Every landed line of the group's entities through ``end``, summed by
-  account, counterparty, kind and whether it falls in the month. The
+  account, counterparty, kind and whether it falls in the month. A reversal
+  names the counterparty its original did, so the two net. The
   consolidation entity's (``drafts_of``) drafts count as well, since its
   close will post them, but not the engine's own drafts of this month,
   which the proposal replaces: so two open months never eliminate twice."""
@@ -457,9 +463,15 @@ def _rows(
     text(
       """
       SELECT e.entity_id, li.element_id, src.name AS account_name,
-             ag.external_id AS counterparty,
+             COALESCE(oag.external_id, ag.external_id) AS counterparty,
              (e.type = 'closing') AS closing,
-             e.adjustment_kind, e.adjusts_entity_id,
+             CASE WHEN e.type = 'opening' AND e.provenance = :engine
+                  THEN li.metadata->>'adjustment_kind'
+                  ELSE e.adjustment_kind END AS adjustment_kind,
+             CASE WHEN e.type = 'opening' AND e.provenance = :engine
+                  THEN li.metadata->>'adjusts_entity_id'
+                  ELSE e.adjusts_entity_id END AS adjusts_entity_id,
+             (e.type = 'opening' AND e.provenance = :engine) AS opening,
              (e.posting_date >= :start) AS in_period,
              SUM(li.debit_amount - li.credit_amount) AS amount
       FROM line_items li
@@ -467,6 +479,9 @@ def _rows(
       JOIN elements src ON src.id = li.element_id
       LEFT JOIN events ev ON ev.id = e.triggered_by_event_id
       LEFT JOIN agents ag ON ag.id = ev.agent_id AND ag.agent_type = 'self'
+      LEFT JOIN entries orig ON orig.id = e.reversal_of
+      LEFT JOIN events oev ON oev.id = orig.triggered_by_event_id
+      LEFT JOIN agents oag ON oag.id = oev.agent_id AND oag.agent_type = 'self'
       WHERE (
           e.status IN :landed_entry_statuses
           OR (
@@ -477,8 +492,12 @@ def _rows(
         )
         AND e.posting_date <= :end
         AND e.entity_id IN :entities
-      GROUP BY e.entity_id, li.element_id, src.name, ag.external_id,
-               (e.type = 'closing'), e.adjustment_kind, e.adjusts_entity_id,
+      GROUP BY e.entity_id, li.element_id, src.name,
+               COALESCE(oag.external_id, ag.external_id),
+               (e.type = 'closing'),
+               (e.type = 'opening' AND e.provenance = :engine),
+               e.adjustment_kind, e.adjusts_entity_id,
+               li.metadata->>'adjustment_kind', li.metadata->>'adjusts_entity_id',
                (e.posting_date >= :start)
       """
     ).bindparams(landed_entry_bindparam(), bindparam("entities", expanding=True)),
@@ -509,6 +528,7 @@ def _rows(
         adjusts=row.adjusts_entity_id,
         in_period=bool(row.in_period),
         amount=int(row.amount),
+        opening=bool(row.opening),
       )
     )
   return rows
@@ -967,6 +987,9 @@ def preview_consolidation_entries(
 
   # What the consolidation entity already holds, per kind and member, and of
   # the balances what it held at the month's start.
+  # On the consolidation entity's first month its opening is recomputed, so
+  # the one recorded earlier is not held.
+  eve = first_month_eve(session, consolidation.id, start)
   held: dict[tuple[str, str, str, bool], int] = defaultdict(int)
   held_before: dict[tuple[str, str, str, bool], int] = defaultdict(int)
   for r in rows:
@@ -974,6 +997,7 @@ def preview_consolidation_entries(
       r.entity_id != consolidation.id
       or r.kind not in COMPUTED_KINDS
       or r.adjusts not in by_id
+      or (eve is not None and r.opening)
     ):
       continue
     periodic = _is_periodic(r.kind, r.concept)
@@ -994,6 +1018,16 @@ def preview_consolidation_entries(
         _plan_capital(before, earlier, parent, member)
   _plan_intercompany(before, earlier, consolidated, set(accounts))
 
+  opening = (
+    _opening(before, held_before, rows, set(accounts)) if eve is not None else {}
+  )
+  if eve is not None:
+    _note_what_cannot_open(plan, before, held_before, opening, by_id, period)
+  for (kind, member_id), lines in opening.items():
+    for qname, amount in lines.items():
+      held[(qname, kind, member_id, False)] += amount
+      held_before[(qname, kind, member_id, False)] += amount
+
   deltas: dict[tuple[str, str, bool], dict[str, int]] = defaultdict(dict)
   for key in set(plan.targets) | set(held):
     qname, kind, member_id, periodic = key
@@ -1003,7 +1037,33 @@ def preview_consolidation_entries(
     if delta:
       deltas[(kind, member_id, periodic)][qname] = delta
 
-  proposals: list[ConsolidationProposal] = []
+  proposals: list[ConsolidationProposal] = [
+    ConsolidationProposal(
+      adjustment_kind=kind,
+      adjusts_entity_id=member_id,
+      adjusts_entity_name=by_id[member_id].name,
+      posting_date=eve,
+      memo=f"Opening balance — {_MEMOS[kind].format(name=by_id[member_id].name)}",
+      basis=(
+        f"What {by_id[member_id].name}'s history before {period} already "
+        "needed when the group's first month opened; the consolidated "
+        "statements open on it."
+      ),
+      lines=[
+        ConsolidationProposalLine(
+          element_id=accounts[qname][0],
+          account_name=accounts[qname][1],
+          concept=qname,
+          debit_amount=max(amount, 0),
+          credit_amount=max(-amount, 0),
+        )
+        for qname, amount in sorted(lines.items(), key=lambda kv: -kv[1])
+      ],
+      opening=True,
+    )
+    for (kind, member_id), lines in sorted(opening.items(), key=lambda kv: kv[0][::-1])
+    if eve is not None
+  ]
   for (kind, member_id, periodic), lines in sorted(
     deltas.items(), key=lambda item: (item[0][1], item[0][0], item[0][2])
   ):
@@ -1082,6 +1142,9 @@ def preview_consolidation_entries(
         )
       )
 
+  _hold_what_a_former_member_leaves(
+    plan, rows, proposals, [e for e in operating if e not in in_month], consolidation
+  )
   if untaggable:
     plan.notes.append(
       f"{consolidation.name}'s cash flow statement has no "
@@ -1104,10 +1167,188 @@ def preview_consolidation_entries(
       not plan.residuals
       and not plan.incomplete
       and _drafted(session, drafts) == _proposed(proposals)
+      and (eve is None or opening_is_recorded(session, consolidation.id, proposals))
     ),
     incomplete=plan.incomplete,
     drafted_entry_ids=[str(e.id) for e in drafts],
   )
+
+
+def first_month_eve(
+  session: Session, consolidation_id: str, start: date
+) -> date | None:
+  """The eve of ``start`` when it is the consolidation entity's first month,
+  whose opening the engine writes: the first open month of a calendar never
+  closed, or the month an engine opening already opens (reopened back to).
+  None when a person recorded the opening."""
+  hand = session.execute(
+    select(Entry.id).where(
+      Entry.entity_id == consolidation_id,
+      Entry.type == OPENING,
+      Entry.provenance.is_distinct_from(ENGINE_PROVENANCE),
+    )
+  ).first()
+  if hand:
+    return None
+  eve = start - timedelta(days=1)
+  recorded = engine_opening(session, consolidation_id)
+  if recorded is not None:
+    return eve if recorded.posting_date == eve else None
+  calendar = session.execute(
+    text(
+      "SELECT closed_through_period, last_close_at FROM fiscal_calendar "
+      "WHERE entity_id = :e"
+    ),
+    {"e": consolidation_id},
+  ).first()
+  if calendar is None or calendar.last_close_at is not None:
+    return None
+  if calendar.closed_through_period:
+    first = next_period(calendar.closed_through_period)
+  else:
+    first = session.execute(
+      text("SELECT min(name) FROM fiscal_periods WHERE entity_id = :e"),
+      {"e": consolidation_id},
+    ).scalar()
+  return eve if first == f"{start:%Y-%m}" else None
+
+
+def engine_opening(session: Session, consolidation_id: str) -> Entry | None:
+  return session.execute(
+    select(Entry).where(
+      Entry.entity_id == consolidation_id,
+      Entry.type == OPENING,
+      Entry.provenance == ENGINE_PROVENANCE,
+    )
+  ).scalar_one_or_none()
+
+
+def opening_is_recorded(
+  session: Session, consolidation_id: str, proposals: list[ConsolidationProposal]
+) -> bool:
+  """Whether the engine's recorded opening holds exactly the opening
+  proposals, both empty included."""
+  wanted: dict[_DraftKey, int] = defaultdict(int)
+  for p in proposals:
+    if p.opening:
+      for line in p.lines:
+        key = (p.adjustment_kind, p.adjusts_entity_id, line.element_id, None)
+        wanted[key] += line.debit_amount - line.credit_amount
+  entry = engine_opening(session, consolidation_id)
+  recorded: dict[_DraftKey, int] = defaultdict(int)
+  if entry is not None:
+    for line in session.execute(
+      select(LineItem).where(LineItem.entry_id == entry.id)
+    ).scalars():
+      meta = line.metadata_ or {}
+      key = (
+        meta.get("adjustment_kind"),
+        meta.get("adjusts_entity_id"),
+        str(line.element_id),
+        None,
+      )
+      recorded[key] += int(line.debit_amount) - int(line.credit_amount)
+  return {k: v for k, v in wanted.items() if v} == {
+    k: v for k, v in recorded.items() if v
+  }
+
+
+def _opening(
+  before: _Plan,
+  held_before: dict[tuple[str, str, str, bool], int],
+  rows: list[_Row],
+  postable: set[str],
+) -> dict[tuple[str, str], dict[str, int]]:
+  """What the first month opened needing, per kind and member: the balances
+  the members' earlier history already called for. A part the consolidation
+  entity cannot post, that does not balance, or that reverses income (which
+  an opening balance sheet cannot hold) is left to the month's entry."""
+  classification = {r.concept.qname: r.concept.classification for r in rows}
+  parts: dict[tuple[str, str], dict[str, int]] = defaultdict(dict)
+  for (qname, kind, member_id, periodic), target in before.targets.items():
+    if periodic or (kind, member_id) in before.withheld:
+      continue
+    amount = target - held_before.get((qname, kind, member_id, False), 0)
+    if amount:
+      parts[(kind, member_id)][qname] = amount
+  return {
+    key: lines
+    for key, lines in parts.items()
+    if not sum(lines.values())
+    and all(q in postable and classification.get(q) not in _RESULT for q in lines)
+  }
+
+
+def _note_what_cannot_open(
+  plan: _Plan,
+  before: _Plan,
+  held_before: dict[tuple[str, str, str, bool], int],
+  opening: dict[tuple[str, str], dict[str, int]],
+  by_id: dict[str, _Entity],
+  period: str,
+) -> None:
+  """Name the earlier history the first month needs but cannot open on (a
+  pair withheld at the eve, income taken before the books, a concept the
+  consolidation entity cannot post): it is caught up within the month, where
+  the consolidated equity statement may not roll forward over it."""
+  needed = {
+    (kind, member_id)
+    for (qname, kind, member_id, periodic), target in before.targets.items()
+    if not periodic and target != held_before.get((qname, kind, member_id, False), 0)
+  } | {(kind, member_id) for kind, member_id in before.withheld}
+  for kind, member_id in sorted(needed - set(opening)):
+    if member_id in by_id:
+      plan.notes.append(
+        f"{by_id[member_id].name}'s {kind} from before {period} cannot be "
+        "the consolidation entity's opening, so it is caught up within the "
+        "month; the consolidated equity statement may not roll forward over it."
+      )
+
+
+def _hold_what_a_former_member_leaves(
+  plan: _Plan,
+  rows: list[_Row],
+  proposals: list[ConsolidationProposal],
+  outside: list[_Entity],
+  consolidation: _Entity,
+) -> None:
+  """A member out of the month's group needs nothing from the engine, which
+  reverses its cumulative eliminations; what the months' own entries built
+  up (the outside owners' share of its results, an associate's pickups)
+  stays on the balance sheet until a person posts the deconsolidation, so
+  the month is left incomplete until no asset, liability or outside owners'
+  share is held for it. The group's own equity is where that entry lands."""
+  for entity in outside:
+    left: dict[str, int] = defaultdict(int)
+    for r in rows:
+      if (
+        r.entity_id == consolidation.id
+        and r.adjusts == entity.id
+        and (
+          r.concept.classification in _BALANCE
+          or r.concept.qname == NONCONTROLLING_INTEREST
+        )
+      ):
+        left[r.concept.qname] += r.amount
+    for p in proposals:
+      if p.adjusts_entity_id == entity.id:
+        for line in p.lines:
+          if line.concept in left:
+            left[line.concept] += line.debit_amount - line.credit_amount
+    held = {q: a for q, a in left.items() if a}
+    if not held:
+      continue
+    plan.notes.append(
+      f"{entity.name} is no longer in the group, and {consolidation.name} "
+      "still holds "
+      + ", ".join(
+        f"{q.split(':')[-1]} {_money(abs(a))} {'debit' if a > 0 else 'credit'}"
+        for q, a in sorted(held.items())
+      )
+      + " for it beyond the eliminations proposed here; post its "
+      "deconsolidation (adjustment_kind deconsolidation) for those amounts."
+    )
+    plan.incomplete = True
 
 
 @dataclass
@@ -1131,12 +1372,8 @@ def group_close_status(
   consolidates, the parent and its equity-method members included, closed
   through it; the month's consolidating entries posted or drafted; no
   residual or disagreement left; the consolidated balance sheet and equity
-  statement passing their checks."""
-  from robosystems.operations.roboledger.reads.reports import (
-    CoaMappingNotFoundError,
-    get_live_financial_statement,
-  )
-
+  statement passing their checks. Those read what has landed, without the
+  month's drafts; the close checks them again once it has posted them."""
   start, end = month_bounds(period)
   parent_id = resolve_entity_id(session, None)
   status = GroupCloseStatus()
@@ -1172,13 +1409,39 @@ def group_close_status(
   drafts = engine_drafts(session, preview.consolidation_entity_id, start, end)
   if _drafted(session, drafts) != _proposed(preview.proposals):
     status.pending_adjustments = [
-      f"{p.adjustment_kind} for {p.adjusts_entity_name}" for p in preview.proposals
+      f"{p.adjustment_kind} for {p.adjusts_entity_name}"
+      for p in preview.proposals
+      if not p.opening
     ] or ["drafts that no longer match the books"]
+  if first_month_eve(
+    session, preview.consolidation_entity_id, start
+  ) is not None and not opening_is_recorded(
+    session, preview.consolidation_entity_id, preview.proposals
+  ):
+    status.pending_adjustments.append(
+      "the consolidation entity's opening balances, which propose records"
+    )
   # What the engine left out holds the close whatever the residuals: the
   # residual override must not waive an entry nobody computed.
   if preview.incomplete:
     status.pending_adjustments += preview.notes
 
+  status.not_footing = consolidated_statement_failures(session, graph_id, period)
+  return status
+
+
+def consolidated_statement_failures(
+  session: Session, graph_id: str, period: str
+) -> list[str]:
+  """The consolidated balance sheet's and equity statement's validation
+  failures for ``period``, over what has landed."""
+  from robosystems.operations.roboledger.reads.reports import (
+    CoaMappingNotFoundError,
+    get_live_financial_statement,
+  )
+
+  start, end = month_bounds(period)
+  failures: list[str] = []
   for statement_type in ("balance_sheet", "equity_statement"):
     try:
       statement = get_live_financial_statement(
@@ -1187,25 +1450,23 @@ def group_close_status(
         statement_type=statement_type,
         period_start=start,
         period_end=end,
-        entity_id=parent_id,
+        entity_id=resolve_entity_id(session, None),
         scope="consolidated",
       )
     except CoaMappingNotFoundError as exc:
-      status.not_footing.append(
-        f"The consolidated {statement_type} cannot be read: {exc}"
-      )
+      failures.append(f"The consolidated {statement_type} cannot be read: {exc}")
       continue
     except Exception as exc:
       # A calendar read must not fail on it; the close still waits.
       logger.exception("group close: consolidated %s unreadable", statement_type)
-      status.not_footing.append(
+      failures.append(
         f"The consolidated {statement_type} could not be read ({type(exc).__name__})"
       )
       continue
     if statement.validation is not None and statement.validation.status == "failed":
       # A check that could not run (a chart with no rollup for a class) is
       # not a disagreement; the close waits only on numbers that do not tie.
-      status.not_footing.extend(
+      failures.extend(
         f for f in statement.validation.failures if "validation inconclusive" not in f
       )
-  return status
+  return failures

@@ -21,8 +21,11 @@ from robosystems.models.extensions.structure import Structure
 from robosystems.models.extensions.taxonomy import Taxonomy
 from robosystems.models.extensions.trait import Trait
 from robosystems.operations.roboledger.reports.fact_grid import (
+  ROLLFORWARD_ROOTS,
   FactRow,
   PeriodSpec,
+  _build_rows,
+  _facts_to_balance_dict,
   _HierarchyNode,
   _with_opening_balance,
   generate_report_facts,
@@ -530,3 +533,72 @@ def test_an_unexplained_movement_of_the_interest_is_not_plugged(tenant):
   assert len(result.failures) == 1
   assert "MinorityInterest does not roll forward" in result.failures[0]
   assert "difference: 50.00" in result.failures[0]
+
+
+def test_an_interest_wound_down_to_nothing_still_rolls_forward(tenant):
+  """The outside owners' 500 is paid out in 2026 with no owner flow on the
+  line: the interest ends at zero, and its roll-forward stays to open on the
+  500 and fail by it rather than vanish beside a capital that ties."""
+  _post(tenant, date(2025, 3, 1), [("cash", 1000, 0), ("apic", 0, 1000)])
+  _post(tenant, date(2025, 6, 1), [("cash", 500, 0), ("nci", 0, 500, NCI_IN)])
+  _post(tenant, date(2026, 6, 1), [("nci", 500, 0), ("cash", 0, 500)])
+  facts = _facts(tenant, [FY26])
+  ids = {f.element_qname: f.element_id for f in facts}
+  hierarchy = [
+    _HierarchyNode(
+      element_id=ids[root],
+      qname=root,
+      name=root.split(":")[1],
+      classification="",
+      balance_type="credit",
+      is_abstract=False,
+      depth=0,
+    )
+    for root in (SE, NCI)
+  ]
+  rows = _build_rows(
+    hierarchy,
+    [_facts_to_balance_dict(facts, FY26.start, FY26.end)],
+    {},
+    pre_signed=True,
+    keep=ROLLFORWARD_ROOTS,
+  )
+  rows = _with_opening_balance(rows, facts, [FY26], hierarchy)
+
+  assert [
+    (r.element_qname, r.period_role, r.values) for r in rows if r.element_qname == NCI
+  ] == [
+    (NCI, "start", [500.0]),
+    (NCI, "end", [0.0]),
+  ]
+  result = validate_report("equity_statement", rows, period_labels=["2026"])
+  assert result.status == "failed"
+  assert any("MinorityInterest does not roll forward" in f for f in result.failures)
+
+
+def test_a_roll_forward_with_nothing_in_it_is_left_out(tenant):
+  """A company with no outside owners shows no interest at all."""
+  _post(tenant, date(2025, 3, 1), [("cash", 1000, 0), ("apic", 0, 1000)])
+  facts = _facts(tenant, [FY26])
+  ids = {f.element_qname: f.element_id for f in facts}
+  hierarchy = [
+    _HierarchyNode(
+      element_id=ids.get(root, root),
+      qname=root,
+      name=root.split(":")[1],
+      classification="",
+      balance_type="credit",
+      is_abstract=False,
+      depth=0,
+    )
+    for root in (SE, NCI)
+  ]
+  rows = _build_rows(
+    hierarchy,
+    [_facts_to_balance_dict(facts, FY26.start, FY26.end)],
+    {},
+    pre_signed=True,
+    keep=ROLLFORWARD_ROOTS,
+  )
+  rows = _with_opening_balance(rows, facts, [FY26], hierarchy)
+  assert {r.element_qname for r in rows} == {SE}

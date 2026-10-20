@@ -218,14 +218,17 @@ class UpdateEntityRequest(BaseModel):
     "its method to `none`.",
   )
   joined_on: date | None = Field(
-    None, description=_JOINED_DESCRIPTION + " Pass null to clear it."
+    None,
+    description=_JOINED_DESCRIPTION
+    + " Pass null to clear it. Refused on the consolidation entity.",
   )
   left_on: date | None = Field(
     None,
     description=_LEFT_DESCRIPTION
     + " Must not precede `joined_on`. Set it when a subsidiary is sold, "
     "dissolved or deconsolidated; its closed months and stamped statements "
-    "stay readable under the group. Pass null to reopen membership.",
+    "stay readable under the group. Pass null to reopen membership. Refused "
+    "on the consolidation entity.",
   )
 
   model_config = ConfigDict(
@@ -326,7 +329,7 @@ class CreateEntityRequest(BaseModel):
     description=_JOINED_DESCRIPTION
     + " Omit for a subsidiary formed by the parent; give the acquisition "
     "month for one acquired, whose books in this graph then hold only what "
-    "follows it.",
+    "follows it. Refused on the consolidation entity.",
   )
   ticker: str | None = Field(
     None,

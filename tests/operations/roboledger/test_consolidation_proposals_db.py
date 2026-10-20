@@ -53,6 +53,7 @@ from robosystems.operations.roboledger.commands.consolidation import (
 from robosystems.operations.roboledger.commands.entity import (
   ConsolidatedHistoryError,
   EntityHierarchyError,
+  EntityMembershipError,
   create_entity,
   update_entity,
 )
@@ -774,6 +775,55 @@ def test_a_member_outside_its_interval_is_not_consolidated(group):
   assert ASSOCIATE in adjusted
 
 
+def test_a_member_that_left_holds_the_month_until_its_deconsolidation(group):
+  """January is consolidated and posted; the member and the associate leave
+  at its end. February reverses the capital elimination, but the outside
+  owners' share of January's result and the associate's pickup are still
+  held, so the month stays incomplete until a person deconsolidates them."""
+  _form_the_group(group)
+  _january(group)
+  _post_proposals(group, preview())
+  with extensions_session(GRAPH) as session:
+    session.execute(
+      text("UPDATE entities SET left_on = '2026-01-31' WHERE id IN (:m, :k)"),
+      {"m": MEMBER, "k": ASSOCIATE},
+    )
+  february = preview("2026-02")
+
+  assert (
+    _lines(february, "elimination_investment")[engine.NONCONTROLLING_INTEREST]
+    == 270_000
+  )
+  assert february.incomplete and not february.up_to_date
+  held = [n for n in february.notes if "no longer in the group" in n]
+  assert any("Member LLC" in n and "MinorityInterest 547.50 credit" in n for n in held)
+  assert any(
+    "Associate LLC" in n and "EquityMethodInvestments 200.00 debit" in n for n in held
+  )
+
+  _post_proposals(group, february)
+  feb_28 = date(2026, 2, 28)
+  post(
+    group,
+    ADJUSTMENTS,
+    feb_28,
+    [("3200", 54_750), ("3100", -54_750)],
+    kind="deconsolidation",
+    adjusts=MEMBER,
+  )
+  post(
+    group,
+    ADJUSTMENTS,
+    feb_28,
+    [("3100", 20_000), ("1700", -20_000)],
+    kind="deconsolidation",
+    adjusts=ASSOCIATE,
+  )
+  settled = preview("2026-02")
+  assert not settled.incomplete
+  assert settled.up_to_date
+
+
 def test_a_member_whose_books_are_not_read_leaves_the_month_open(group, monkeypatch):
   """No chart mapping: the member's capital is not read as zero against the
   parent's investment, and the month is not up to date."""
@@ -1382,6 +1432,32 @@ def test_membership_dates_cannot_move_within_closed_months(group):
   assert left.left_on == date(2026, 6, 30)
 
 
+def test_the_consolidation_entity_takes_no_membership_dates(group):
+  """Dated, it would drop out of the consolidated reads of a month it had
+  closed and stamped, while its eliminations still stood."""
+  for change in ({"left_on": date(2025, 12, 31)}, {"joined_on": date(2026, 2, 1)}):
+    with extensions_session(GRAPH) as session, pytest.raises(EntityMembershipError):
+      update_entity(
+        session, UpdateEntityRequest(entity_id=ADJUSTMENTS, **change), "test"
+      )
+  with extensions_session(GRAPH) as session:
+    session.execute(
+      text("UPDATE entities SET entity_role = 'operating' WHERE id = :id"),
+      {"id": ADJUSTMENTS},
+    )
+    session.commit()
+  with extensions_session(GRAPH) as session, pytest.raises(EntityMembershipError):
+    create_entity(
+      session,
+      CreateEntityRequest(
+        name="Dated Adjustments",
+        entity_role="consolidation",
+        joined_on=date(2026, 2, 1),
+      ),
+      "test",
+    )
+
+
 def test_a_new_member_joins_after_the_months_the_group_closed(group):
   _close_the_consolidation_entity_through("2026-01")
   with extensions_session(GRAPH) as session, pytest.raises(ConsolidatedHistoryError):
@@ -1428,6 +1504,96 @@ def test_a_reversed_consolidating_entry_is_no_longer_held(group):
     session.commit()
 
   assert _lines(preview(), "nci_allocation")[engine.NCI_SHARE_OF_INCOME] == 54_750
+
+
+def _reverse(group: dict, entity_id: str, code: str, on: date) -> None:
+  """Reverse the posted entry of ``entity_id`` that touches ``code``."""
+  with extensions_session(GRAPH) as session:
+    entry_id = session.execute(
+      text(
+        "SELECT e.id FROM entries e JOIN line_items li ON li.entry_id = e.id "
+        "WHERE e.entity_id = :e AND li.element_id = :a AND e.status = 'posted'"
+      ),
+      {"e": entity_id, "a": group["accounts"][(entity_id, code)]},
+    ).scalar_one()
+    reverse_journal_entry(
+      session,
+      ReverseJournalEntryRequest(entry_id=str(entry_id), posting_date=on),
+      "test",
+    )
+    session.commit()
+
+
+def _fee_on_account(group: dict) -> None:
+  post(
+    group,
+    PARENT_ENTITY_ID,
+    JAN_15,
+    [("due_from", 10_000), ("fees", -10_000)],
+    agent=MEMBER,
+  )
+  post(
+    group,
+    MEMBER,
+    JAN_15,
+    [("fees", 10_000), ("due_to", -10_000)],
+    agent=PARENT_ENTITY_ID,
+  )
+
+
+def test_an_intercompany_entry_reversed_on_both_sides_is_not_eliminated(group):
+  """A fee booked in error and reversed by both companies nets to nothing:
+  there is nothing left to eliminate."""
+  _form_the_group(group)
+  _fee_on_account(group)
+  _reverse(group, PARENT_ENTITY_ID, "due_from", JAN_31)
+  _reverse(group, MEMBER, "due_to", JAN_31)
+  response = preview()
+
+  assert _proposals(response, "elimination_intercompany", charges=True) == []
+  balances = _lines(response, "elimination_intercompany", charges=False)
+  assert "rs-gaap:DueFromAffiliateCurrent" not in balances
+  assert "rs-gaap:DueToAffiliateCurrent" not in balances
+  assert response.reconciling_items == []
+
+
+def test_an_intercompany_entry_reversed_on_one_side_is_a_disagreement(group):
+  """The parent reverses its receivable, the member still owes: the member's
+  payable has no counterpart, and nothing is eliminated against it."""
+  _form_the_group(group)
+  _fee_on_account(group)
+  _reverse(group, PARENT_ENTITY_ID, "due_from", JAN_31)
+  response = preview()
+
+  assert {(i.entity_id, i.concept, i.amount) for i in response.reconciling_items} >= {
+    (MEMBER, "rs-gaap:DueToAffiliateCurrent", -10_000)
+  }
+  balances = _lines(response, "elimination_intercompany", charges=False)
+  assert "rs-gaap:DueFromAffiliateCurrent" not in balances
+
+
+def test_an_intercompany_entry_reversed_a_month_later_releases_its_elimination(
+  group,
+):
+  """January's fee is eliminated and posted; both sides reverse it in
+  February, so February takes the elimination back out."""
+  _form_the_group(group)
+  _fee_on_account(group)
+  _post_proposals(group, preview())
+  feb = date(2026, 2, 10)
+  _reverse(group, PARENT_ENTITY_ID, "due_from", feb)
+  _reverse(group, MEMBER, "due_to", feb)
+  february = preview("2026-02")
+
+  assert _lines(february, "elimination_intercompany", charges=False) == {
+    "rs-gaap:DueFromAffiliateCurrent": 10_000,
+    "rs-gaap:DueToAffiliateCurrent": -10_000,
+  }
+  assert _lines(february, "elimination_intercompany", charges=True) == {
+    "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax": -10_000,
+    "rs-gaap:GeneralAndAdministrativeExpense": 10_000,
+  }
+  assert february.reconciling_items == []
 
 
 def test_an_intercompany_balance_the_consolidation_entity_cannot_post_holds_the_month(
