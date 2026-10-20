@@ -139,6 +139,7 @@ async def live_financial_statement_op(
             consolidated=body.consolidated,
             scope=body.scope,
             dimension=body.dimension,
+            include_sources=body.include_sources,
             # Reporting Style resolves from the entity on this same session.
           )
         except (

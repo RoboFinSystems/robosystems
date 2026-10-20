@@ -142,6 +142,7 @@ class LiveFinancialStatementTool(BaseTool):
 - `entity_id` (optional) — the entity whose books to render; omit for the group parent
 - `scope` (optional, default `entity`) — `entity` is one entity's own books. On the group parent, `combined` sums every member consolidated in full under the parent's Reporting Style, per rs-gaap concept, for the months each was a member — the pre-adjustment total, nothing eliminated; `consolidated` adds the consolidation entity, whose eliminations and noncontrolling interest are the adjustments column, so a group that posts its consolidating entries there reads its consolidated statement. An equity-method or cost member (its `consolidation_method`) is never summed. A question about "the group" reads `consolidated`; `combined` is the worksheet's first total. `combined_entity_ids` on the response names who was summed, and an entity with no mapping yet is left out. `consolidated: true` is the older spelling of `scope: consolidated`
 - `dimension` (optional, income statement only) — a management slice: `{"type": "department"}` returns the current window with one column per department, then `Unallocated` (lines no department tags), then `Total`, and `dimension.ties_out` says whether every row's members plus Unallocated equal its Total; `{"type": "department", "member_id": "<id>"}` reads one member's lines, current and prior (`member_id: "unallocated"` the untagged ones). `list-dimensions` names the axes and members. A consolidation entity's lines are untagged, so on `scope: consolidated` the eliminations read as Unallocated
+- `include_sources` (optional, default false) — "why is this number what it is?": each row gains `origin` (`accounts`, `subtotal` or `computed`) and, per column, the accounts its figure was summed from with each one's value and the `entity_id` whose books hold it. Open one with `accountRegister(accountId, startDate, endDate, entityId)` over `query-graphql`. Ask it for the statement you are explaining, not for every read: it multiplies the response
 - `statement_type` (required) — one of the four below
 - income_statement — Revenue, expenses, net income
 - balance_sheet — Assets, liabilities, equity (instant periods)
@@ -228,6 +229,14 @@ Facts with element qnames, names, classifications, and values aligned with `peri
             "required": ["type"],
             "additionalProperties": False,
           },
+          "include_sources": {
+            "type": "boolean",
+            "default": False,
+            "description": (
+              "Add each row's origin and, per column, the accounts its "
+              "figure was summed from, each with its entity."
+            ),
+          },
         },
         "required": ["statement_type"],
         "additionalProperties": False,
@@ -285,6 +294,7 @@ Facts with element qnames, names, classifications, and values aligned with `peri
             if arguments.get("dimension")
             else None
           ),
+          include_sources=bool(arguments.get("include_sources", False)),
         )
       except (
         CoaMappingNotFoundError,
@@ -298,6 +308,10 @@ Facts with element qnames, names, classifications, and values aligned with `peri
         }
 
     result = response.model_dump(mode="json")
+    if not arguments.get("include_sources"):
+      for fact in result["facts"]:
+        fact.pop("origin", None)
+        fact.pop("sources", None)
     if not result["facts"]:
       result["tip"] = (
         f"No facts found for {statement_type}. "

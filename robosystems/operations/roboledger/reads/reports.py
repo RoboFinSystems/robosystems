@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -37,12 +37,13 @@ from robosystems.models.api.extensions.reports import (
   ReportListResponse,
   ReportResponse,
   StatementResponse,
+  StatementRowSource,
   StructureSummary,
   ValidationCheckResponse,
   WorksheetColumn,
   WorksheetRow,
 )
-from robosystems.models.extensions import Dimension, Entity, Report
+from robosystems.models.extensions import Dimension, Element, Entity, Report
 from robosystems.models.extensions.roboledger import Structure
 from robosystems.operations.aws.s3 import S3Client
 from robosystems.operations.roboledger.entity_scope import (
@@ -155,6 +156,40 @@ _ALL_DOWNLOAD_FLAVORS: tuple[str, ...] = tuple(
 )
 
 
+@dataclass
+class StatementSources:
+  """Each concept's accounts per column, keyed by the entity whose pivot
+  summed them, never by whose chart holds the account: a consolidation
+  entity's line on a parent-chart account is the consolidation entity's."""
+
+  columns: int
+  by_concept: dict[str, list[dict[tuple[str, str], float]]] = field(
+    default_factory=dict
+  )
+
+  def record(
+    self,
+    entity_id: str,
+    facts: list[ReportFactData],
+    windows: list[FactPeriodSpec],
+    summed: list[bool] | None = None,
+  ) -> None:
+    for fact in facts:
+      if fact.source_values is None or fact.audit_only:
+        continue
+      for i, window in enumerate(windows):
+        if summed is not None and not summed[i]:
+          continue
+        if (window.start, window.end) != (fact.period_start, fact.period_end):
+          continue
+        cells = self.by_concept.setdefault(
+          fact.element_qname, [{} for _ in range(self.columns)]
+        )
+        for account_id, value in fact.source_values.items():
+          key = (entity_id, account_id)
+          cells[i][key] = cells[i].get(key, 0.0) + value
+
+
 def generate_adhoc_private_statement(
   session: Session,
   *,
@@ -163,6 +198,8 @@ def generate_adhoc_private_statement(
   reporting_style_id: str,
   entity_id: str | None = None,
   line_slice: LineSlice | None = None,
+  sources: StatementSources | None = None,
+  summed: list[bool] | None = None,
 ):
   """Build a one-shot statement from one entity's current ledger, with no
   saved Report; ``line_slice`` sums one management dimension member's lines.
@@ -170,6 +207,9 @@ def generate_adhoc_private_statement(
   The Network comes from the entity's Reporting Style. The arc walk is scoped
   to rs-gaap-presentation, where every Default Style Network lives; a Style
   citing Networks from another taxonomy is not yet supported.
+
+  ``sources``, when given, records each figure's accounts for the columns
+  ``summed`` marks (all of them by default).
 
   Returns ``(grid, unmapped_count)``. Raises `CoaMappingNotFoundError` if the
   tenant has no CoA→GAAP mapping yet.
@@ -207,6 +247,8 @@ def generate_adhoc_private_statement(
   )
   if statement_type == "cash_flow_statement":
     grid.warnings = facts.warnings
+  if sources is not None and entity_id is not None:
+    sources.record(entity_id, facts.facts, periods, summed)
 
   return grid, facts.unmapped_count
 
@@ -1037,6 +1079,7 @@ def _combined_statement(
   parent_id: str,
   consolidated: bool,
   line_slice: LineSlice | None = None,
+  sources: StatementSources | None = None,
 ):
   """The group's statement under the parent's Style, summed row by row at
   the rs-gaap concepts, where every entity's own chart has been mapped: the
@@ -1072,6 +1115,8 @@ def _combined_statement(
         reporting_style_id=reporting_style_id,
         entity_id=member.id,
         line_slice=line_slice,
+        sources=sources,
+        summed=summed,
       )
     except CoaMappingNotFoundError as exc:
       first_error = first_error or exc
@@ -1441,6 +1486,7 @@ def _render_live(
   entity_id: str,
   scope: str,
   line_slice: LineSlice | None = None,
+  sources: StatementSources | None = None,
 ) -> _Rendered:
   if scope != "entity":
     grid, unmapped_count, combined_entity_ids, partly = _combined_statement(
@@ -1451,6 +1497,7 @@ def _render_live(
       parent_id=entity_id,
       consolidated=scope == "consolidated",
       line_slice=line_slice,
+      sources=sources,
     )
     return _Rendered(grid, unmapped_count, combined_entity_ids, partly)
   grid, unmapped_count = generate_adhoc_private_statement(
@@ -1460,6 +1507,7 @@ def _render_live(
     reporting_style_id=reporting_style_id,
     entity_id=entity_id,
     line_slice=line_slice,
+    sources=sources,
   )
   return _Rendered(grid, unmapped_count, [], set())
 
@@ -1592,6 +1640,63 @@ def _by_member(
   return total, columns, differences
 
 
+def _source_accounts(
+  session: Session, sources: StatementSources
+) -> dict[str, tuple[str | None, str]]:
+  """Each source account's code and name."""
+  ids = {
+    account_id
+    for cells in sources.by_concept.values()
+    for cell in cells
+    for _, account_id in cell
+  }
+  if not ids:
+    return {}
+  rows = session.execute(
+    select(Element.id, Element.code, Element.name).where(Element.id.in_(ids))
+  ).all()
+  return {str(r.id): (r.code, r.name) for r in rows}
+
+
+def _row_sources(
+  row: FactRow,
+  keep: list[int],
+  sources: StatementSources,
+  accounts: dict[str, tuple[str | None, str]],
+) -> tuple[str, list[list[StatementRowSource]]]:
+  """A row's origin and, per kept column, the accounts that sum to its
+  figure. A column whose accounts miss the figure (a flow, a derivation
+  sharing the concept) lists none rather than lines it did not sum."""
+  empty: list[list[StatementRowSource]] = [[] for _ in row.values]
+  if row.is_subtotal:
+    return "subtotal", empty
+  cells = sources.by_concept.get(row.element_qname)
+  if cells is None or row.period_role is not None:
+    return "computed", empty
+  listed: list[list[StatementRowSource]] = []
+  for value, index in zip(row.values, keep, strict=False):
+    cell = cells[index]
+    if value is None or abs(sum(cell.values()) - value) > 0.005:
+      listed.append([])
+      continue
+    listed.append(
+      [
+        StatementRowSource(
+          entity_id=entity_id,
+          account_id=account_id,
+          code=accounts.get(account_id, (None, account_id))[0],
+          name=accounts.get(account_id, (None, account_id))[1],
+          value=round(amount, 2),
+        )
+        for (entity_id, account_id), amount in sorted(
+          cell.items(), key=lambda item: -abs(item[1])
+        )
+        if amount != 0.0
+      ]
+    )
+  return ("accounts" if any(listed) else "computed"), listed
+
+
 def get_live_financial_statement(
   session: Session,
   *,
@@ -1605,6 +1710,7 @@ def get_live_financial_statement(
   consolidated: bool = False,
   scope: str | None = None,
   dimension: StatementDimension | None = None,
+  include_sources: bool = False,
 ) -> LiveFinancialStatementResponse:
   """Render a current + prior ad-hoc statement from OLTP data: ``scope``
   ``entity`` (the default) is one entity's books, default the group
@@ -1620,6 +1726,10 @@ def get_live_financial_statement(
   window with one column per member, then Unallocated, then Total, and
   whether every row's members plus Unallocated equal its Total.
 
+  ``include_sources`` adds each row's ``origin`` and, per column, the
+  accounts its figure was summed from, keyed by the entity whose books hold
+  them. A column's accounts are listed only when they add up to the figure.
+
   Drops abstract and all-zero rows and caps at ``limit`` (``truncated``).
   ``reporting_style_id`` defaults to the entity's Style. Raises
   ``CoaMappingNotFoundError`` when no CoA→GAAP mapping exists,
@@ -1633,6 +1743,11 @@ def get_live_financial_statement(
     raise InvalidStatementScopeError(scope)
   if dimension is not None:
     _check_dimension(session, statement_type, dimension)
+    if include_sources and dimension.member_id is None:
+      raise DimensionalStatementError(
+        "A statement read by column has members for columns, not periods; "
+        "ask one member's sources with `member_id`."
+      )
   entity_id = resolve_entity_id(session, entity_id)
   if reporting_style_id is None:
     reporting_style_id = load_entity_reporting_style(session, entity_id)
@@ -1642,6 +1757,7 @@ def get_live_financial_statement(
   by_member = dimension is not None and dimension.member_id is None
   columns: list[StatementDimensionColumn] = []
   differences: list[str] = []
+  sources = StatementSources(len(periods)) if include_sources else None
   if by_member:
     assert dimension is not None
     periods = periods[:1]
@@ -1663,6 +1779,7 @@ def get_live_financial_statement(
       entity_id=entity_id,
       scope=scope,
       line_slice=_slice_of(dimension) if dimension is not None else None,
+      sources=sources,
     )
   grid = rendered.grid
   unmapped_count = rendered.unmapped_count
@@ -1682,6 +1799,7 @@ def get_live_financial_statement(
     )
   else:
     omitted = columns_before_the_books(session, statement_type, periods, [entity_id])
+  keep = list(range(len(periods)))
   if by_member:
     # One window spread across the members: its columns stand or fall together.
     if omitted:
@@ -1705,6 +1823,7 @@ def get_live_financial_statement(
     periods = [periods[i] for i in keep]
   else:
     omitted_periods = []
+  accounts = _source_accounts(session, sources) if sources is not None else {}
 
   # Validate the full grid: all-zero children still foot their subtotals.
   validation = validate_report(
@@ -1731,6 +1850,11 @@ def get_live_financial_statement(
     # opens on nothing.
     if row.period_role is None and not any(v != 0.0 for v in values):
       continue
+    origin, row_sources = (
+      _row_sources(row, keep, sources, accounts)
+      if sources is not None
+      else (None, None)
+    )
     facts.append(
       LiveStatementFactRow(
         qname=row.element_qname,
@@ -1740,6 +1864,8 @@ def get_live_financial_statement(
         depth=row.depth,
         is_subtotal=row.is_subtotal,
         period_role=row.period_role,
+        origin=origin,
+        sources=row_sources,
       )
     )
 

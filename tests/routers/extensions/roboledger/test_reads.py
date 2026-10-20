@@ -191,6 +191,7 @@ class TestLiveFinancialStatementOp:
     body = LiveFinancialStatementRequest(
       statement_type="balance_sheet",
       dimension=StatementDimension(type="department"),
+      include_sources=True,
     )
     cm = MagicMock()
     cm.__enter__.return_value = MagicMock()
@@ -217,6 +218,7 @@ class TestLiveFinancialStatementOp:
         )
 
     assert read.call_args.kwargs["dimension"].type == "department"
+    assert read.call_args.kwargs["include_sources"] is True
     assert exc_info.value.status_code == 422
     assert "income statement only" in exc_info.value.detail
 

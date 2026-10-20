@@ -391,3 +391,29 @@ def test_a_column_spanning_a_member_joining_is_refused(group):
 
   with pytest.raises(ConsolidatedPeriodSpansMembershipError):
     _report(group, "adjustments", start=date(2026, 6, 1))
+
+
+def test_a_consolidated_figure_opens_on_each_entitys_own_accounts(group):
+  ids = group["ids"]
+  live = get_live_financial_statement(
+    group["session"],
+    graph_id=GRAPH,
+    statement_type="balance_sheet",
+    period_start=JULY[0],
+    period_end=JULY[1],
+    entity_id=ids["parent"],
+    scope="consolidated",
+    include_sources=True,
+  )
+  rows = {f.qname: f for f in live.facts}
+  july = next(i for i, p in enumerate(live.periods) if p.end == JULY[1])
+
+  cash = rows["rs-gaap:CashAndCashEquivalentsAtCarryingValue"]
+  assert cash.origin == "accounts"
+  assert [(s.entity_id, s.code, s.value) for s in cash.sources[july]] == [
+    (ids["member"], "1000", 11_000.0),
+    (ids["parent"], "1000", -7_000.0),
+  ]
+  [nci] = rows[NCI].sources[july]
+  assert (nci.entity_id, nci.value) == (ids["adjustments"], 3_300.0)
+  assert rows["rs-gaap:Assets"].origin == "subtotal"
