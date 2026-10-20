@@ -12,29 +12,29 @@ with entries as (
   select * from {{ ref('stg_qb_journal_entries') }}
 ),
 invoice_headers as (
-  select tx_type, tx_id, agent_external_id, agent_type, linked_txns, sync_token
+  select tx_type, tx_id, agent_external_id, agent_type, linked_txns, sync_token, due_date
   from {{ ref('stg_qb_invoice_headers') }}
 ),
 bill_headers as (
-  select tx_type, tx_id, agent_external_id, agent_type, linked_txns, sync_token
+  select tx_type, tx_id, agent_external_id, agent_type, linked_txns, sync_token, due_date
   from {{ ref('stg_qb_bill_headers') }}
 ),
 payment_headers as (
-  select tx_type, tx_id, agent_external_id, agent_type, linked_txns, sync_token
+  select tx_type, tx_id, agent_external_id, agent_type, linked_txns, sync_token, due_date
   from {{ ref('stg_qb_payment_headers') }}
 ),
 bill_payment_headers as (
-  select tx_type, tx_id, agent_external_id, agent_type, linked_txns, sync_token
+  select tx_type, tx_id, agent_external_id, agent_type, linked_txns, sync_token, due_date
   from {{ ref('stg_qb_bill_payment_headers') }}
 ),
 sales_receipt_headers as (
-  select tx_type, tx_id, agent_external_id, agent_type, linked_txns, sync_token
+  select tx_type, tx_id, agent_external_id, agent_type, linked_txns, sync_token, due_date
   from {{ ref('stg_qb_sales_receipt_headers') }}
 ),
 purchase_headers as (
   -- One row per candidate tx_type label, so the join matches whichever one
   -- JournalReport used.
-  select tx_type, tx_id, agent_external_id, agent_type, linked_txns, sync_token
+  select tx_type, tx_id, agent_external_id, agent_type, linked_txns, sync_token, due_date
   from {{ ref('stg_qb_purchase_headers') }}
 ),
 all_headers as (
@@ -59,7 +59,7 @@ select
     cast(round(e.total_amount * 100, 0) as bigint)     as amount,
     'USD'                                              as currency,
     e.txn_date                                         as date,
-    null                                               as due_date,
+    try_cast(nullif(h.due_date, '') as date)           as due_date,
     null                                               as merchant_name,
     e.doc_number                                       as reference_number,
     e.private_note                                     as description,

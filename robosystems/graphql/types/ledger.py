@@ -6,7 +6,7 @@ pydantic decorator cannot resolve self-references.
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 
 import strawberry
@@ -384,6 +384,8 @@ class EventBlock:
   status: str
   occurred_at: datetime
   effective_at: datetime | None
+  # When an obligation (an invoice issued, a bill received) falls due.
+  due_date: date | None
   source: str
   external_id: str | None
   external_url: str | None
@@ -415,6 +417,7 @@ class EventBlock:
       status=row.status,
       occurred_at=row.occurred_at,
       effective_at=row.effective_at,
+      due_date=row.due_date,
       source=row.source,
       external_id=row.external_id,
       external_url=row.external_url,

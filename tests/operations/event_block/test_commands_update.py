@@ -48,6 +48,7 @@ def _event(event_id: str, status: str = "classified") -> SimpleNamespace:
     status=status,
     occurred_at=datetime(2026, 3, 1, tzinfo=UTC),
     effective_at=None,
+    due_date=None,
     source="native",
     external_id=None,
     external_url=None,

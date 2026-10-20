@@ -266,8 +266,10 @@ def _link_entry_and_txn(
   transaction_id: str | None,
   entry_ids: list[str],
   transaction_ids: list[str],
+  due_date: date | None = None,
 ) -> None:
-  """Stamp triggered_by_event_id on the freshly-created Entry + Transaction."""
+  """Stamp triggered_by_event_id on the freshly-created Entry + Transaction,
+  and the obligation's due date on the Transaction."""
   if entry_id:
     session.execute(
       update(Entry).where(Entry.id == entry_id).values(triggered_by_event_id=event_id)
@@ -277,7 +279,7 @@ def _link_entry_and_txn(
     session.execute(
       update(Transaction)
       .where(Transaction.id == transaction_id)
-      .values(triggered_by_event_id=event_id)
+      .values(triggered_by_event_id=event_id, due_date=due_date)
     )
     transaction_ids.append(transaction_id)
 
@@ -325,6 +327,7 @@ def _dispatch_flat(
     transaction_id=response.transaction_id,
     entry_ids=entry_ids,
     transaction_ids=transaction_ids,
+    due_date=event.due_date,
   )
 
   logger.info(
@@ -385,6 +388,7 @@ def _dispatch_nested(
       transaction_id=response.transaction_id,
       entry_ids=entry_ids,
       transaction_ids=transaction_ids,
+      due_date=event.due_date,
     )
 
   logger.info(

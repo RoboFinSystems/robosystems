@@ -323,7 +323,10 @@ create_event_block_op = _registrar.register(
       "connected source system follows `source` (schedule/manual publish; "
       "system does not) unless metadata.publish_to_source says otherwise — "
       "set it false for an alignment entry mirroring a change already made "
-      "upstream, which would otherwise be applied twice."
+      "upstream, which would otherwise be applied twice. "
+      "An invoice_issued or bill_received takes due_date, or terms_days "
+      "(net N from occurred_at); with neither it is due on receipt. A later "
+      "due date is a field correction on update-event-block."
     ),
     command=cmd_create_event_block,
     request_model=CreateEventBlockRequest,

@@ -6,13 +6,14 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from pydantic import ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from robosystems.db.integrity import violates
 from robosystems.logger import logger
 from robosystems.models.api.event_block import (
+  OBLIGATION_EVENT_TYPES,
   CreateEventBlockRequest,
   EventBlockEnvelope,
   ExecuteEventBlockRequest,
@@ -384,6 +385,7 @@ def _build_event_row(
     resource_element_id=body.resource_element_id,
     occurred_at=body.occurred_at,
     effective_at=body.effective_at,
+    due_date=body.resolved_due_date(),
     source=body.source,
     external_id=body.external_id,
     external_url=body.external_url,
@@ -715,6 +717,7 @@ def _has_field_corrections(body: UpdateEventBlockRequest) -> bool:
     for value in (
       body.description,
       body.effective_at,
+      body.due_date,
       body.metadata_patch or None,
       body.obligated_by_event_id,
       body.discharges_event_id,
@@ -892,6 +895,22 @@ def update_event_block(
 
   if body.effective_at is not None:
     event.effective_at = body.effective_at
+
+  if body.due_date is not None:
+    if event.event_type not in OBLIGATION_EVENT_TYPES:
+      raise InvalidEventTransitionError(
+        f"A due date belongs to an invoice_issued or a bill_received, not a "
+        f"{event.event_type}."
+      )
+    event.due_date = body.due_date
+    # The obligation's transaction carries it too; a voided one is history.
+    session.execute(
+      update(Transaction)
+      .where(
+        Transaction.triggered_by_event_id == event.id, Transaction.status != "void"
+      )
+      .values(due_date=body.due_date)
+    )
 
   before_patch = dict(event.metadata_ or {})
   if body.metadata_patch:

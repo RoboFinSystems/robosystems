@@ -163,54 +163,35 @@ class TestDbtBuild:
       assert abs(result[0] - result[1]) <= 1, (
         f"Debits ({result[0]}) != Credits ({result[1]})"
       )
+
     finally:
       con.close()
 
 
-def test_a_negative_line_keeps_its_entry_balanced(tmp_path):
-  """A payout deposited net of its fee: QuickBooks shows the fee as a
-  negative credit. Dropped, it unbalanced the window and failed the build."""
-  import os
-
-  import duckdb
-
-  from robosystems.adapters.quickbooks.pipeline.utils import (
-    parse_journal_report,
-    write_extract_parquet,
-  )
-
-  def row(date, typ, tid, acct, aid, debit, credit):
-    return {
-      "ColData": [
-        {"value": date},
-        {"value": typ, "id": tid},
-        {"value": ""},
-        {"value": ""},
-        {"value": ""},
-        {"value": acct, "id": aid},
-        {"value": debit},
-        {"value": credit},
-      ]
-    }
-
-  def summary(debit, credit):
-    return {
-      "Summary": {
-        "ColData": [{"value": ""}] * 6 + [{"value": debit}, {"value": credit}]
-      }
-    }
-
-  report = {
-    "Rows": {
-      "Row": [
-        row("2026-09-03", "Deposit", "201", "Checking", "35", "970.00", ""),
-        row("", "", "", "Undeposited Funds", "4", "", "1000.00"),
-        row("", "", "", "Merchant Fees", "60", "", "-30.00"),
-        summary("970.00", "970.00"),
-      ]
-    }
+def _row(date, typ, tid, acct, aid, debit, credit):
+  """One JournalReport row."""
+  return {
+    "ColData": [
+      {"value": date},
+      {"value": typ, "id": tid},
+      {"value": ""},
+      {"value": ""},
+      {"value": ""},
+      {"value": acct, "id": aid},
+      {"value": debit},
+      {"value": credit},
+    ]
   }
-  accounts = [
+
+
+def _summary(debit, credit):
+  return {
+    "Summary": {"ColData": [{"value": ""}] * 6 + [{"value": debit}, {"value": credit}]}
+  }
+
+
+def _accounts(rows):
+  return [
     {
       "Id": aid,
       "Name": name,
@@ -224,32 +205,32 @@ def test_a_negative_line_keeps_its_entry_balanced(tmp_path):
       "AcctNum": None,
       "SubAccount": False,
     }
-    for aid, name, kind, cls in [
-      ("35", "Checking", "Bank", "Asset"),
-      ("4", "Undeposited Funds", "Other Current Asset", "Asset"),
-      ("60", "Merchant Fees", "Expense", "Expense"),
-    ]
+    for aid, name, kind, cls in rows
   ]
-  company = [
-    {
-      "Id": "1",
-      "CompanyName": "Fictional Widgets LLC",
-      "LegalName": "Fictional Widgets LLC",
-      "CompanyAddr_Line1": "",
-      "CompanyAddr_City": "",
-      "CompanyAddr_CountrySubDivisionCode": "",
-      "CompanyAddr_PostalCode": "",
-      "CompanyAddr_Country": "US",
-      "PrimaryPhone_FreeFormNumber": "",
-      "WebAddr_URI": "",
-      "FiscalYearStartMonth": "January",
-    }
-  ]
-  extract = tmp_path / "extract"
-  entries, lines = parse_journal_report(report)
-  write_extract_parquet(extract, accounts, entries, lines, company)
-  duckdb_path = tmp_path / "quickbooks.duckdb"
 
+
+_COMPANY = [
+  {
+    "Id": "1",
+    "CompanyName": "Fictional Widgets LLC",
+    "LegalName": "Fictional Widgets LLC",
+    "CompanyAddr_Line1": "",
+    "CompanyAddr_City": "",
+    "CompanyAddr_CountrySubDivisionCode": "",
+    "CompanyAddr_PostalCode": "",
+    "CompanyAddr_Country": "US",
+    "PrimaryPhone_FreeFormNumber": "",
+    "WebAddr_URI": "",
+    "FiscalYearStartMonth": "January",
+  }
+]
+
+
+def _build(tmp_path, extract):
+  """``dbt build`` over an extract written to ``extract``; the DuckDB path."""
+  import os
+
+  duckdb_path = tmp_path / "quickbooks.duckdb"
   result = subprocess.run(
     [
       "uv",
@@ -270,9 +251,42 @@ def test_a_negative_line_keeps_its_entry_balanced(tmp_path):
     cwd=str(DBT_PROJECT_DIR),
     env={**os.environ, "DBT_DUCKDB_PATH": str(duckdb_path)},
   )
-
   assert result.returncode == 0, result.stdout[-2000:]
-  con = duckdb.connect(str(duckdb_path), read_only=True)
+  return duckdb_path
+
+
+def test_a_negative_line_keeps_its_entry_balanced(tmp_path):
+  """A payout deposited net of its fee: QuickBooks shows the fee as a
+  negative credit. Dropped, it unbalanced the window and failed the build."""
+  import duckdb
+
+  from robosystems.adapters.quickbooks.pipeline.utils import (
+    parse_journal_report,
+    write_extract_parquet,
+  )
+
+  report = {
+    "Rows": {
+      "Row": [
+        _row("2026-09-03", "Deposit", "201", "Checking", "35", "970.00", ""),
+        _row("", "", "", "Undeposited Funds", "4", "", "1000.00"),
+        _row("", "", "", "Merchant Fees", "60", "", "-30.00"),
+        _summary("970.00", "970.00"),
+      ]
+    }
+  }
+  accounts = _accounts(
+    [
+      ("35", "Checking", "Bank", "Asset"),
+      ("4", "Undeposited Funds", "Other Current Asset", "Asset"),
+      ("60", "Merchant Fees", "Expense", "Expense"),
+    ]
+  )
+  extract = tmp_path / "extract"
+  entries, lines = parse_journal_report(report)
+  write_extract_parquet(extract, accounts, entries, lines, _COMPANY)
+
+  con = duckdb.connect(str(_build(tmp_path, extract)), read_only=True)
   try:
     sides = con.execute(
       "SELECT element_external_id, debit_amount, credit_amount FROM line_items "
@@ -281,3 +295,65 @@ def test_a_negative_line_keeps_its_entry_balanced(tmp_path):
   finally:
     con.close()
   assert sides == [("35", 97000, 0), ("4", 0, 100000), ("60", 3000, 0)]
+
+
+def test_an_invoices_due_date_reaches_the_mart(tmp_path):
+  """QuickBooks' DueDate rides the invoice header to `transactions.due_date`;
+  a journal entry, with no header, has none."""
+  import duckdb
+
+  from robosystems.adapters.quickbooks.pipeline.utils import (
+    flatten_invoice_headers,
+    parse_journal_report,
+    write_extract_parquet,
+  )
+
+  report = {
+    "Rows": {
+      "Row": [
+        _row("2026-09-03", "Invoice", "42", "Accounts Receivable", "11", "1200.00", ""),
+        _row("", "", "", "Sales", "40", "", "1200.00"),
+        _summary("1200.00", "1200.00"),
+        _row(
+          "2026-09-04", "Journal Entry", "7", "Accounts Receivable", "11", "5.00", ""
+        ),
+        _row("", "", "", "Sales", "40", "", "5.00"),
+        _summary("5.00", "5.00"),
+      ]
+    }
+  }
+  accounts = _accounts(
+    [
+      ("11", "Accounts Receivable", "Accounts Receivable", "Asset"),
+      ("40", "Sales", "Income", "Revenue"),
+    ]
+  )
+  invoice = {
+    "Id": "42",
+    "TxnDate": "2026-09-03",
+    "DueDate": "2026-10-03",
+    "TotalAmt": 1200.0,
+    "CustomerRef": {"value": "C-1"},
+  }
+  extract = tmp_path / "extract"
+  entries, lines = parse_journal_report(report)
+  write_extract_parquet(
+    extract,
+    accounts,
+    entries,
+    lines,
+    _COMPANY,
+    invoice_headers=flatten_invoice_headers([invoice]),
+  )
+
+  con = duckdb.connect(str(_build(tmp_path, extract)), read_only=True)
+  try:
+    due = con.execute(
+      "SELECT type, due_date FROM transactions ORDER BY type"
+    ).fetchall()
+  finally:
+    con.close()
+  assert [(t, str(d) if d else None) for t, d in due] == [
+    ("Invoice", "2026-10-03"),
+    ("JournalEntry", None),
+  ]

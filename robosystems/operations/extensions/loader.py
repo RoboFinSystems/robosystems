@@ -222,6 +222,9 @@ DRIFT_EXCLUDED_KEYS: frozenset[str] = frozenset(
     "qb_sync_token",
     "connection_id",
     "reconciliation_history",
+    # A due date never touches the GL: it is applied to `events.due_date` in
+    # place, so an extension granted in QuickBooks is never a drift item.
+    "qb_due_date",
   }
 )
 
@@ -1234,8 +1237,10 @@ class OLTPLoader:
         description = str(description)
 
       due_date_iso = None
+      due_date = None
       if txn.get("due_date") and hasattr(txn["due_date"], "isoformat"):
-        due_date_iso = txn["due_date"].isoformat()
+        due_date = txn["due_date"]
+        due_date_iso = due_date.isoformat()
 
       qb_txn_type = str(txn.get("type")) if txn.get("type") else None
       qb_doc_number = str(txn.get("number")) if txn.get("number") else None
@@ -1361,6 +1366,10 @@ class OLTPLoader:
 
       if ext_id in existing:
         evt = existing[ext_id]
+        # Fills a due date an earlier sync never carried, whatever the
+        # SyncToken says: it writes the column only, never the GL.
+        if due_date is not None and evt.due_date is None:
+          evt.due_date = due_date
         # Freshness gate first: a stale or same-version row skips everything,
         # guarding against out-of-order CDC delivery and replayed batches.
         existing_token = (evt.metadata_ or {}).get("qb_sync_token")
@@ -1379,6 +1388,10 @@ class OLTPLoader:
         if freshness == "same":
           out.skipped_same_sync_token += 1
           continue
+        # A newer version's due date applies at any status (an extension
+        # granted after the invoice was posted).
+        if due_date is not None and evt.due_date != due_date:
+          evt.due_date = due_date
 
         if evt.status in ("captured", "classified"):
           evt.event_type = event_type
@@ -1448,6 +1461,7 @@ class OLTPLoader:
             event_action=event_action,
             agent_id=agent_id,
             occurred_at=occurred_at,
+            due_date=due_date,
             status="captured",
             source=source,
             external_id=ext_id,
