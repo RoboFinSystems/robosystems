@@ -28,6 +28,7 @@ from robosystems.operations.roboledger.entity_scope import (
   EntityNotInGraphError,
   GroupMember,
   group_members,
+  membership_window,
   resolve_entity_id,
 )
 from robosystems.operations.roboledger.reads.entity import get_entity, list_entities
@@ -492,6 +493,14 @@ class TestGroupMembers:
     assert not member.is_member_for(date(2026, 10, 1), date(2026, 10, 31))
     always = GroupMember("ent", "operating", None, None)
     assert always.is_member_for(date(2000, 1, 1), date(2000, 1, 31))
+
+  def test_a_wide_window_holds_only_the_member_months(self):
+    member = GroupMember("ent", "operating", date(2026, 3, 14), date(2026, 9, 20))
+    year = (date(2026, 1, 1), date(2026, 12, 31))
+    assert membership_window(member, *year) == (date(2026, 3, 1), date(2026, 9, 30))
+    assert membership_window(member, date(2026, 10, 1), date(2026, 12, 31)) is None
+    q3 = (date(2026, 7, 1), date(2026, 9, 30))
+    assert membership_window(member, *q3) == q3
 
 
 class TestConsolidationFollowUps:

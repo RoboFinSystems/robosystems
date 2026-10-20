@@ -44,6 +44,7 @@ from robosystems.operations.roboledger.entity_scope import (
   find_entity_id,
   group_members,
   is_group_parent,
+  membership_window,
   resolve_entity_id,
 )
 from robosystems.operations.roboledger.reads.fiscal_calendar import (
@@ -1009,21 +1010,26 @@ def _combined_statement(
   summed. An entity with no mapping is left out; with none mapped at all
   the parent's error stands.
 
-  Returns ``(grid, unmapped_count, combined_entity_ids)``.
+  Returns ``(grid, unmapped_count, combined_entity_ids, omitted)``, where
+  ``omitted`` are the columns a member belongs to only part of, which the
+  statement cannot state (``member_windows``).
   """
   base: FactGrid | None = None
   unmapped_count = 0
   combined: list[str] = []
+  omitted: set[int] = set()
   first_error: CoaMappingNotFoundError | None = None
   for member in group_members(session, parent_id, consolidated=consolidated):
-    summed = [member.is_member_for(p.start, p.end) for p in periods]
+    windows, partial = member_windows(member, statement_type, periods)
+    omitted |= partial
+    summed = [w is not None for w in windows]
     if not any(summed):
       continue
     try:
       grid, unmapped = generate_adhoc_private_statement(
         session,
         statement_type=statement_type,
-        periods=periods,
+        periods=[w or p for w, p in zip(windows, periods, strict=True)],
         reporting_style_id=reporting_style_id,
         entity_id=member.id,
       )
@@ -1041,7 +1047,45 @@ def _combined_statement(
   if base is None:
     assert first_error is not None
     raise first_error
-  return base, unmapped_count, combined
+  return base, unmapped_count, combined, omitted
+
+
+_BEFORE_THE_BOOKS = (
+  "Every column reaches back before the books begin; record the window "
+  "from the first month the books cover."
+)
+_NOTHING_TO_STATE = (
+  "Every column spans a member joining or leaving the group, which a cash "
+  "flow or equity statement cannot state; read the months on either side."
+)
+
+
+def member_windows(
+  member: GroupMember, statement_type: str, periods: list[FactPeriodSpec]
+) -> tuple[list[FactPeriodSpec | None], set[int]]:
+  """Per column, the window a member is read over, None where it is not
+  summed, and the columns it belongs to only part of that the statement
+  cannot state. A balance sheet holds the members of the month it is struck
+  in; an income statement sums a member's own months of the column; a cash
+  flow or equity statement over part of a member's time would show balances
+  arriving or leaving with no line for them (an acquisition, a
+  deconsolidation), so that column is left out."""
+  windows: list[FactPeriodSpec | None] = []
+  partial: set[int] = set()
+  for i, p in enumerate(periods):
+    if statement_type == "balance_sheet":
+      held = membership_window(member, p.end.replace(day=1), p.end)
+      windows.append(p if held is not None else None)
+      continue
+    window = membership_window(member, p.start, p.end)
+    if window is None or window == (p.start, p.end):
+      windows.append(p if window is not None else None)
+    elif statement_type == "income_statement":
+      windows.append(FactPeriodSpec(start=window[0], end=window[1], label=p.label))
+    else:
+      partial.add(i)
+      windows.append(None)
+  return windows, partial
 
 
 def _keep_periods(grid: FactGrid, summed: list[bool]) -> None:
@@ -1178,17 +1222,22 @@ def get_consolidation_worksheet(
   unmapped_entity_ids: list[str] = []
   unmapped_count = 0
   first_error: CoaMappingNotFoundError | None = None
+  partly: set[int] = set()
+  summed_members: list[GroupMember] = []
   for entity in _worksheet_entities(session, parent_id):
-    summed = [entity.member.is_member_for(p.start, p.end) for p in periods]
+    windows, partial = member_windows(entity.member, statement_type, periods)
+    summed = [w is not None for w in windows]
     # A member outside the sum matters only as its own column.
     needed = summed[0] if entity.kind == "not_summed" else any(summed)
+    if entity.kind != "not_summed":
+      partly |= partial
     if not needed:
       continue
     try:
       grid, unmapped = generate_adhoc_private_statement(
         session,
         statement_type=statement_type,
-        periods=periods,
+        periods=[w or p for w, p in zip(windows, periods, strict=True)],
         reporting_style_id=reporting_style_id,
         entity_id=entity.member.id,
       )
@@ -1201,6 +1250,7 @@ def get_consolidation_worksheet(
     kind = entity.kind
     if kind != "not_summed":
       unmapped_count += unmapped
+      summed_members.append(entity.member)
       (members if kind == "member" else adjustments).append(grid)
     # The prior window still counts a member that joined in this one; only a
     # member for the window itself gets a column.
@@ -1246,12 +1296,30 @@ def get_consolidation_worksheet(
     *outside_columns,
   ]
 
+  # The live statement's omissions: a column it would leave out is not a
+  # total here either.
+  window = periods[0]
+  omitted = partly | group_columns_before_the_books(
+    session, statement_type, periods, summed_members
+  )
+  if omitted:
+    kept = [i for i in range(len(periods)) if i not in omitted]
+    for _, grid in ordered:
+      for row in grid.rows:
+        row.values = [row.values[i] for i in kept if i < len(row.values)]
+  omitted_periods = [periods[i] for i in sorted(omitted)]
+  periods = [p for i, p in enumerate(periods) if i not in omitted]
+
   validation = validate_report(
     statement_type,
     consolidated.rows,
     period_labels=[p.label for p in periods],
     warnings=consolidated.warnings,
   )
+  if 0 in omitted:
+    validation.passed = False
+    validation.status = "inconclusive"
+    validation.warnings = [_NOTHING_TO_STATE if partly else _BEFORE_THE_BOOKS]
 
   # Every column's lines in the Style's order: the consolidated sum and the
   # members outside it hold each line once, where the Style puts it.
@@ -1259,7 +1327,7 @@ def get_consolidation_worksheet(
   assert skeleton is not None
   by_column = [{_row_key(r): r for r in g.rows} for _, g in ordered]
   rows: list[WorksheetRow] = []
-  for line in skeleton.rows:
+  for line in [] if 0 in omitted else skeleton.rows:
     if line.is_abstract:
       continue
     values: list[float | None] = []
@@ -1281,12 +1349,14 @@ def get_consolidation_worksheet(
     )
 
   truncated = len(rows) > limit
-  current = periods[0]
   return ConsolidationWorksheetResponse(
     graph_id=graph_id,
     entity_id=parent_id,
     statement_type=statement_type,
-    period=PeriodSpec(start=current.start, end=current.end, label=current.label),
+    period=PeriodSpec(start=window.start, end=window.end, label=window.label),
+    omitted_periods=[
+      PeriodSpec(start=p.start, end=p.end, label=p.label) for p in omitted_periods
+    ],
     columns=[c for c, _ in ordered],
     rows=rows[:limit],
     validation=ValidationCheckResponse(
@@ -1340,7 +1410,7 @@ def get_live_financial_statement(
   if scope != "entity":
     if not is_group_parent(session, entity_id):
       raise CombinedViewOnParentOnlyError(entity_id)
-    grid, unmapped_count, combined_entity_ids = _combined_statement(
+    grid, unmapped_count, combined_entity_ids, partly = _combined_statement(
       session,
       statement_type=statement_type,
       periods=periods,
@@ -1349,6 +1419,7 @@ def get_live_financial_statement(
       consolidated=scope == "consolidated",
     )
   else:
+    partly = set()
     grid, unmapped_count = generate_adhoc_private_statement(
       session,
       statement_type=statement_type,
@@ -1357,8 +1428,8 @@ def get_live_financial_statement(
       entity_id=entity_id,
     )
   # Left out rather than rendered.
-  if combined_entity_ids:
-    omitted = group_columns_before_the_books(
+  if scope != "entity":
+    omitted = partly | group_columns_before_the_books(
       session,
       statement_type,
       periods,
@@ -1390,10 +1461,7 @@ def get_live_financial_statement(
     # Nothing left to check is not a pass.
     validation.passed = False
     validation.status = "inconclusive"
-    validation.warnings = [
-      "Every column reaches back before the books begin; record the window "
-      "from the first month the books cover."
-    ]
+    validation.warnings = [_NOTHING_TO_STATE if partly else _BEFORE_THE_BOOKS]
 
   facts: list[LiveStatementFactRow] = []
   for row in grid.rows:

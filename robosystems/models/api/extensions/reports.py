@@ -749,7 +749,8 @@ class LiveFinancialStatementResponse(BaseModel):
       "books that start from an opening balance, a flow statement column "
       "that starts before the first day it covers, or a balance sheet dated "
       "before it. They would show a partial figure, not the months before "
-      "the books."
+      "the books. On a group read, also a cash flow or equity statement "
+      "column a member joined or left the group within."
     ),
   )
   facts: list[LiveStatementFactRow]
@@ -868,6 +869,15 @@ class ConsolidationWorksheetResponse(BaseModel):
     description=(
       "The window every column reads. The cash flow also pivots the prior "
       "window of equal length as its delta basis; it is not rendered."
+    ),
+  )
+  omitted_periods: list[PeriodSpec] = Field(
+    default_factory=list,
+    description=(
+      "Windows the worksheet does not total, as live-financial-statement "
+      "leaves them out: before a summed entity's books begin, or, on a cash "
+      "flow or equity statement, one a member joined or left the group "
+      "within. When it names `period`, `rows` is empty."
     ),
   )
   columns: list[WorksheetColumn] = Field(
