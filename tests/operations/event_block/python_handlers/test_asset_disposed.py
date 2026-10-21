@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -86,9 +86,18 @@ class TestDispatchPreview:
     )
 
     plan = _make_plan()
-    with patch(
-      "robosystems.operations.event_block.python_handlers.asset_disposed.compute_disposal_plan",
-      return_value=plan,
+    with (
+      patch(
+        "robosystems.operations.event_block.python_handlers.asset_disposed.compute_disposal_plan",
+        return_value=plan,
+      ),
+      patch(
+        "robosystems.operations.roboledger.commands._guards.assert_accounts_postable"
+      ),
+      patch(
+        "robosystems.operations.event_block.python_handlers.asset_disposed.ScheduleService.count_landed_entries_after",
+        return_value=0,
+      ),
     ):
       result = dispatch_preview(session, body, metadata)
 
@@ -153,7 +162,7 @@ class TestDispatchPreview:
 
 class TestDispatch:
   def test_dispatch_happy_path_invokes_all_steps(self) -> None:
-    """Full atomic disposal: void obligations → drop rule → post entry → link event."""
+    """Full atomic disposal: retire later months → drop rule → post entry → link event."""
     session = MagicMock()
     event = _make_event()
     metadata = AssetDisposedMetadata(
@@ -181,7 +190,7 @@ class TestDispatch:
         return_value=service_mock,
       ),
       patch(
-        "robosystems.operations.event_block.python_handlers.asset_disposed._void_pending_obligations_for_schedule",
+        "robosystems.operations.event_block.python_handlers.asset_disposed._end_schedule_at",
         return_value=12,
       ) as void_mock,
       patch(
@@ -192,13 +201,14 @@ class TestDispatch:
 
     # compute was called
     compute_mock.assert_called_once()
-    # Pending obligations were voided
+    # The months after the disposal (a month-end) were retired
     void_mock.assert_called_once_with(
       session,
       structure_id="struct_schedule",
+      cutoff=date(2026, 3, 31),
       disposal_event_id=event.id,
     )
-    # truncate_schedule is no longer called — the void chain replaces it
+    # truncate_schedule is not called: the facts stay, the months are retired
     assert not service_mock.truncate_schedule.called
     # SumEquals rule was deleted
     delete_rule_mock.assert_called_once_with(session, "struct_schedule")
@@ -236,7 +246,7 @@ class TestDispatch:
         return_value=service_mock,
       ),
       patch(
-        "robosystems.operations.event_block.python_handlers.asset_disposed._void_pending_obligations_for_schedule",
+        "robosystems.operations.event_block.python_handlers.asset_disposed._end_schedule_at",
         return_value=0,
       ),
       patch(
@@ -270,7 +280,7 @@ class TestDispatch:
         return_value=service_mock,
       ),
       patch(
-        "robosystems.operations.event_block.python_handlers.asset_disposed._void_pending_obligations_for_schedule",
+        "robosystems.operations.event_block.python_handlers.asset_disposed._end_schedule_at",
         return_value=0,
       ),
       patch(
@@ -292,93 +302,91 @@ class TestDispatch:
       dispatch(session, event, metadata, created_by="usr_test")
 
 
-class TestVoidPendingObligationsForSchedule:
-  """Stream 2.C — disposal voids the obligation chain instead of truncating facts."""
+class TestEndScheduleAt:
+  """Disposal retires the months after its cutoff and keeps the ones before;
+  the behavior itself runs against a real database in test_disposal_db.py."""
 
-  @staticmethod
-  def _structure_with_event(schedule_created_event_id: str | None) -> MagicMock:
-    structure = MagicMock()
-    structure.metadata_ = (
-      {"schedule_created_event_id": schedule_created_event_id}
-      if schedule_created_event_id is not None
-      else {}
-    )
-    return structure
-
-  def test_voids_pending_obligations_linked_via_obligated_by(self) -> None:
-    """Update query targets pending events on the schedule's originator chain."""
+  def test_deletes_later_drafts_and_voids_later_obligations(self) -> None:
     from robosystems.operations.event_block.python_handlers.asset_disposed import (
-      _void_pending_obligations_for_schedule,
+      _end_schedule_at,
     )
 
     session = MagicMock()
-    session.get.return_value = self._structure_with_event("evt_schedule_created")
-    locked = MagicMock()
-    locked.scalars.return_value = iter([f"evt_due_{i}" for i in range(11)])
-    update_result = MagicMock(rowcount=11)
-    session.execute.side_effect = [locked, update_result]
+    service_mock = MagicMock()
+    service_mock.void_pending_obligations.return_value = 9
+    with patch(
+      "robosystems.operations.event_block.python_handlers.asset_disposed.ScheduleService",
+      return_value=service_mock,
+    ):
+      voided = _end_schedule_at(
+        session,
+        structure_id="struct_schedule",
+        cutoff=date(2026, 2, 28),
+        disposal_event_id="evt_disposal",
+      )
 
-    voided = _void_pending_obligations_for_schedule(
+    assert voided == 9
+    structure = session.get.return_value
+    service_mock.fence_drafts_after.assert_called_once_with(
       session,
-      structure_id="struct_schedule",
-      disposal_event_id="evt_disposal",
+      structure=structure,
+      cutoff=date(2026, 2, 28),
+      action="dispose of the asset",
     )
-
-    assert voided == 11
-    # The locking select targets pending events on the schedule's originator
-    # chain, in the shared lock order; the UPDATE then goes by id.
-    lock_stmt = session.execute.call_args_list[0].args[0]
-    lock_sql = str(lock_stmt.compile(compile_kwargs={"literal_binds": True}))
-    assert "events.obligated_by_event_id = 'evt_schedule_created'" in lock_sql
-    assert "events.status IN ('pending')" in lock_sql
-    assert "FOR UPDATE" in lock_sql and "ORDER BY events.id" in lock_sql
-    update_stmt = session.execute.call_args_list[1].args[0]
-    rendered = str(update_stmt.compile(compile_kwargs={"literal_binds": True}))
-    assert "events.id IN (" in rendered
-    assert "events.status IN ('pending')" in rendered
-    assert "status='voided'" in rendered.replace(" = ", "=")
-    assert "replaced_by_event_id='evt_disposal'" in rendered.replace(" = ", "=")
+    service_mock.delete_drafts_after.assert_called_once_with(
+      session,
+      structure=structure,
+      cutoff=date(2026, 2, 28),
+      action="dispose of the asset",
+      fenced=True,
+    )
+    # Fenced, voided, then deleted.
+    assert [c[0] for c in service_mock.method_calls] == [
+      "fence_drafts_after",
+      "void_pending_obligations",
+      "delete_drafts_after",
+    ]
+    void_kwargs = service_mock.void_pending_obligations.call_args.kwargs
+    assert void_kwargs["period_start_after"] == date(2026, 2, 28)
+    assert void_kwargs["include_classified"] is True
+    assert void_kwargs["voided_by_event_id"] == "evt_disposal"
 
   def test_returns_zero_when_structure_missing(self) -> None:
-    """Defensive no-op when the structure can't be loaded."""
     from robosystems.operations.event_block.python_handlers.asset_disposed import (
-      _void_pending_obligations_for_schedule,
+      _end_schedule_at,
     )
 
     session = MagicMock()
     session.get.return_value = None
 
-    voided = _void_pending_obligations_for_schedule(
+    voided = _end_schedule_at(
       session,
       structure_id="struct_missing",
+      cutoff=date(2026, 2, 28),
       disposal_event_id="evt_disposal",
     )
 
     assert voided == 0
     session.execute.assert_not_called()
 
-  def test_returns_zero_when_structure_predates_stream_2a(self) -> None:
-    """Schedules created before the originator-id stamping land: with no stamp
-    AND no recoverable obligations, the robust fallback finds nothing, so
-    disposal is a clean no-op (returns 0)."""
-    from robosystems.operations.event_block.python_handlers.asset_disposed import (
-      _void_pending_obligations_for_schedule,
-    )
 
-    session = MagicMock()
-    session.get.return_value = self._structure_with_event(None)
-    # No stamp on the structure AND the fallback recovery finds no obligations.
-    session.execute.return_value.scalar.return_value = None
+@pytest.mark.parametrize(
+  ("disposed_on", "cutoff"),
+  [
+    (date(2026, 3, 31), date(2026, 3, 31)),
+    (date(2026, 3, 15), date(2026, 2, 28)),
+    (date(2026, 1, 1), date(2025, 12, 31)),
+    (date(2028, 2, 29), date(2028, 2, 29)),
+  ],
+)
+def test_the_cutoff_is_the_month_end_on_or_before_the_disposal(
+  disposed_on: date, cutoff: date
+) -> None:
+  from robosystems.operations.event_block.python_handlers._disposal_plan import (
+    disposal_cutoff,
+  )
 
-    voided = _void_pending_obligations_for_schedule(
-      session,
-      structure_id="struct_old",
-      disposal_event_id="evt_disposal",
-    )
-
-    assert voided == 0
-    # The fallback recovery select ran; no UPDATE followed.
-    assert session.execute.call_count == 1
+  assert disposal_cutoff(disposed_on) == cutoff
 
 
 class TestComputeDisposalPlanShapes:

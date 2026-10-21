@@ -1544,6 +1544,122 @@ class ScheduleService:
       amount=round(total_debit / 100.0, 2),
     )
 
+  def count_landed_entries_after(
+    self, session: Session, structure_id: str, cutoff: date
+  ) -> int:
+    """The schedule's posted or shadowed entries posting after ``cutoff``:
+    each is its period's record, so nothing may end the schedule before it."""
+    row = session.execute(
+      text("""
+        SELECT COUNT(*) AS c
+        FROM entries
+        WHERE source_structure_id = :sid
+          AND status IN :terminal_entry_statuses
+          AND posting_date > :cutoff
+      """).bindparams(terminal_entry_bindparam()),
+      {"sid": structure_id, "cutoff": cutoff},
+    ).fetchone()
+    return int(row.c) if row else 0
+
+  def fence_drafts_after(
+    self,
+    session: Session,
+    *,
+    structure: Structure,
+    cutoff: date,
+    action: str,
+  ) -> None:
+    """Take the period fence on the schedule's drafts posting after
+    ``cutoff``, and refuse when a posted or shadowed entry exists after it
+    (``action`` names the refused operation). Before any row lock."""
+    # Fence before the deletes take row locks: fence, then rows, as every
+    # ledger writer does against close. A kept period's auto-reversal is dated
+    # after the cutoff but belongs to that period, so it stays. A retracted
+    # event's leftover is a draft no close posts, so it is not fenced.
+    from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+      WRITEBACK_EXCLUDED_EVENT_STATUSES,
+    )
+
+    stale_dates = (
+      session.execute(
+        text("""
+          SELECT DISTINCT e.posting_date FROM entries e
+          LEFT JOIN events ev ON ev.id = e.triggered_by_event_id
+          WHERE e.source_structure_id = :sid
+            AND e.status = 'draft'
+            AND e.posting_date > :new_end
+            AND (ev.id IS NULL OR ev.status NOT IN :retracted)
+            AND (e.reversal_of IS NULL
+                 OR e.reversal_of NOT IN (SELECT id FROM entries WHERE posting_date <= :new_end))
+        """).bindparams(bindparam("retracted", expanding=True)),
+        {
+          "sid": structure.id,
+          "new_end": cutoff,
+          "retracted": list(WRITEBACK_EXCLUDED_EVENT_STATUSES),
+        },
+      )
+      .scalars()
+      .all()
+    )
+    assert_period_not_closed(
+      session, *stale_dates, entity_id=owner_entity_id(session, structure)
+    )
+
+    # A landed entry (reversed included) after the cutoff is the record of
+    # that period's recognition, and a shadowed one is what a shadow close's
+    # receipt expected; truncating under either would orphan it. Counted
+    # under the fence, so a close posting one of the drafts has either
+    # finished, and is counted, or waits.
+    landed = self.count_landed_entries_after(session, str(structure.id), cutoff)
+    if landed:
+      raise ValueError(
+        f"Cannot {action}: {landed} posted or shadowed entries exist for "
+        f"periods after {cutoff}. Each is that period's record (a "
+        "reversed entry included), so the schedule cannot end before it: end "
+        "it on or after the last period with a posted or shadowed entry."
+      )
+
+  def delete_drafts_after(
+    self,
+    session: Session,
+    *,
+    structure: Structure,
+    cutoff: date,
+    action: str,
+    fenced: bool = False,
+  ) -> None:
+    """Hard-delete the schedule's draft entries posting after ``cutoff``,
+    fencing first unless the caller already ran :meth:`fence_drafts_after`."""
+    if not fenced:
+      self.fence_drafts_after(
+        session, structure=structure, cutoff=cutoff, action=action
+      )
+    session.execute(
+      text("""
+        DELETE FROM line_items
+        WHERE entry_id IN (
+          SELECT id FROM entries
+          WHERE source_structure_id = :sid
+            AND status = 'draft'
+            AND posting_date > :new_end
+            AND (reversal_of IS NULL
+                 OR reversal_of NOT IN (SELECT id FROM entries WHERE posting_date <= :new_end))
+        )
+      """),
+      {"sid": structure.id, "new_end": cutoff},
+    )
+    session.execute(
+      text("""
+        DELETE FROM entries
+        WHERE source_structure_id = :sid
+          AND status = 'draft'
+          AND posting_date > :new_end
+          AND (reversal_of IS NULL
+               OR reversal_of NOT IN (SELECT id FROM entries WHERE posting_date <= :new_end))
+      """),
+      {"sid": structure.id, "new_end": cutoff},
+    )
+
   def truncate_schedule(
     self,
     session: Session,
@@ -1602,86 +1718,8 @@ class ScheduleService:
         f"fact ({bounds.first_start}). Deactivate the schedule instead."
       )
 
-    # Fence before the deletes take row locks: fence, then rows, as every
-    # ledger writer does against close. A kept period's auto-reversal is dated
-    # after the cutoff but belongs to that period, so it stays. A retracted
-    # event's leftover is a draft no close posts, so it is not fenced.
-    from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
-      WRITEBACK_EXCLUDED_EVENT_STATUSES,
-    )
-
-    stale_dates = (
-      session.execute(
-        text("""
-          SELECT DISTINCT e.posting_date FROM entries e
-          LEFT JOIN events ev ON ev.id = e.triggered_by_event_id
-          WHERE e.source_structure_id = :sid
-            AND e.status = 'draft'
-            AND e.posting_date > :new_end
-            AND (ev.id IS NULL OR ev.status NOT IN :retracted)
-            AND (e.reversal_of IS NULL
-                 OR e.reversal_of NOT IN (SELECT id FROM entries WHERE posting_date <= :new_end))
-        """).bindparams(bindparam("retracted", expanding=True)),
-        {
-          "sid": structure_id,
-          "new_end": new_end_date,
-          "retracted": list(WRITEBACK_EXCLUDED_EVENT_STATUSES),
-        },
-      )
-      .scalars()
-      .all()
-    )
-    assert_period_not_closed(
-      session, *stale_dates, entity_id=owner_entity_id(session, structure)
-    )
-
-    # A landed entry (reversed included) after the cutoff is the record of
-    # that period's recognition, and a shadowed one is what a shadow close's
-    # receipt expected; truncating under either would orphan it. Counted
-    # under the fence, so a close posting one of the drafts has either
-    # finished, and is counted, or waits.
-    overlap = session.execute(
-      text("""
-        SELECT COUNT(*) AS c
-        FROM entries
-        WHERE source_structure_id = :sid
-          AND status IN :terminal_entry_statuses
-          AND posting_date > :new_end
-      """).bindparams(terminal_entry_bindparam()),
-      {"sid": structure_id, "new_end": new_end_date},
-    ).fetchone()
-    if overlap and overlap.c:
-      raise ValueError(
-        f"Cannot truncate: {overlap.c} posted or shadowed entries exist for "
-        f"periods after {new_end_date}. Each is that period's record (a "
-        "reversed entry included), so the schedule cannot end before it: end "
-        "it on or after the last period with a posted or shadowed entry."
-      )
-
-    session.execute(
-      text("""
-        DELETE FROM line_items
-        WHERE entry_id IN (
-          SELECT id FROM entries
-          WHERE source_structure_id = :sid
-            AND status = 'draft'
-            AND posting_date > :new_end
-            AND (reversal_of IS NULL
-                 OR reversal_of NOT IN (SELECT id FROM entries WHERE posting_date <= :new_end))
-        )
-      """),
-      {"sid": structure_id, "new_end": new_end_date},
-    )
-    session.execute(
-      text("""
-        DELETE FROM entries
-        WHERE source_structure_id = :sid
-          AND status = 'draft'
-          AND posting_date > :new_end
-          AND (reversal_of IS NULL
-               OR reversal_of NOT IN (SELECT id FROM entries WHERE posting_date <= :new_end))
-      """),
-      {"sid": structure_id, "new_end": new_end_date},
+    self.delete_drafts_after(
+      session, structure=structure, cutoff=new_end_date, action="truncate"
     )
 
     del_result = session.execute(

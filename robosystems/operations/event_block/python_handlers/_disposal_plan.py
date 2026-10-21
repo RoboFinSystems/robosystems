@@ -4,7 +4,7 @@ and its preview."""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -35,6 +35,15 @@ class DisposalPlan:
   line_items: list[dict]  # 2-4 entries, balanced
 
 
+def disposal_cutoff(disposal_date: date) -> date:
+  """The last schedule month the disposal keeps: the month-end on or before
+  the disposal date. The plan reads accumulated depreciation through it, so
+  every month after it is no longer the schedule's to post."""
+  if (disposal_date + timedelta(days=1)).month != disposal_date.month:
+    return disposal_date
+  return disposal_date.replace(day=1) - timedelta(days=1)
+
+
 def compute_disposal_plan(
   session: Session,
   *,
@@ -62,7 +71,11 @@ def compute_disposal_plan(
   sm = mechanics.get("schedule_metadata") or {}
   et = mechanics.get("entry_template") or {}
 
-  original_amount = int(sm.get("original_amount") or 0)
+  # A terminated schedule re-anchors original_amount to what it recognized;
+  # the asset's cost is what it started from.
+  original_amount = int(
+    sm.get("original_amount_at_start") or sm.get("original_amount") or 0
+  )
   asset_element_id = sm.get("asset_element_id")
   credit_element_id = et.get("credit_element_id")  # accumulated depreciation
 
@@ -76,8 +89,8 @@ def compute_disposal_plan(
   if not credit_element_id:
     raise ValueError("Disposal requires entry_template.credit_element_id.")
 
-  # Latest in-scope instant fact on the credited element (out-of-scope facts
-  # left by truncation would give a wrong NBV). For a contra account it is
+  # Latest instant fact on the credited element, months before the calendar
+  # included (out-of-scope facts left by truncation would give a wrong NBV). For a contra account it is
   # the rising accumulated balance; for a self-carried (prepaid-style)
   # schedule, where the credited element is the asset, it is the declining
   # remaining balance.
@@ -86,7 +99,7 @@ def compute_disposal_plan(
       "SELECT value FROM facts "
       "WHERE structure_id = :sid AND element_id = :eid "
       "AND period_type = 'instant' AND period_end <= :d "
-      "AND fact_scope = 'in_scope' "
+      "AND fact_scope IN ('in_scope', 'historical') "
       "ORDER BY period_end DESC LIMIT 1"
     ),
     {"sid": structure_id, "eid": credit_element_id, "d": disposal_date},
@@ -100,16 +113,25 @@ def compute_disposal_plan(
     nbv = carried_cents
     accumulated_depreciation = max(original_amount - nbv, 0)
   else:
+    # Without the cost there is no asset to remove, and the book value would
+    # come out negative.
+    if original_amount <= 0:
+      raise ValueError(
+        "Disposal requires schedule_metadata.original_amount (the asset's "
+        "cost in cents). Update the schedule first."
+      )
     accumulated_depreciation = carried_cents
     nbv = original_amount - accumulated_depreciation
   gain_loss = sale_proceeds - nbv
 
   if sale_proceeds > 0 and not proceeds_element_id:
     raise ValueError("proceeds_element_id is required when sale_proceeds > 0.")
-  if nbv != 0 and gain_loss != 0 and not gain_loss_element_id:
+  # Fully depreciated with proceeds is all gain: the account is needed
+  # whenever proceeds differ from book value, or the entry cannot balance.
+  if gain_loss != 0 and not gain_loss_element_id:
     raise ValueError(
-      "gain_loss_element_id is required when net book value > 0 and "
-      "the disposal produces a gain or loss."
+      "gain_loss_element_id is required when the proceeds differ from the "
+      "net book value (the disposal produces a gain or loss)."
     )
 
   if self_carried:
@@ -170,6 +192,17 @@ def compute_disposal_plan(
         "credit_amount": 0,
         "description": "Loss on disposal",
       }
+    )
+
+  # A first-month disposal has no accumulated depreciation to remove; the
+  # entry takes no zero line.
+  line_items = [li for li in line_items if li["debit_amount"] or li["credit_amount"]]
+  debits = sum(li["debit_amount"] for li in line_items)
+  credits = sum(li["credit_amount"] for li in line_items)
+  if debits != credits:
+    raise ValueError(
+      f"The disposal entry does not balance (debits {debits}, credits "
+      f"{credits}); check the schedule's original_amount and asset_element_id."
     )
 
   return DisposalPlan(

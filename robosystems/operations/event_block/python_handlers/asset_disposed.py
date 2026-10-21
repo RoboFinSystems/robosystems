@@ -1,11 +1,14 @@
-"""asset_disposed handler: atomically voids the schedule's pending
-obligations, drops its SumEquals rule, and posts the disposal entry.
+"""asset_disposed handler: atomically retires the schedule's months after
+the disposal (their drafts deleted, their obligations voided), drops its
+SumEquals rule, and posts the disposal entry.
 
 The obligation register is the source of truth for what is still due, so
-disposal voids pending obligations rather than deleting facts.
+disposal voids obligations rather than deleting facts.
 """
 
 from __future__ import annotations
+
+from datetime import date
 
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, text, update
@@ -19,7 +22,11 @@ from robosystems.models.extensions.roboledger.event import Event
 from robosystems.operations.roboledger.entity_scope import owner_entity_id
 from robosystems.operations.roboledger.schedules.service import ScheduleService
 
-from ._disposal_plan import ScheduleNotFoundError, compute_disposal_plan
+from ._disposal_plan import (
+  ScheduleNotFoundError,
+  compute_disposal_plan,
+  disposal_cutoff,
+)
 from .types import (
   EventBlockPythonHandler,
   HandlerPreview,
@@ -44,8 +51,8 @@ class AssetDisposedMetadata(BaseModel):
   gain_loss_element_id: str | None = Field(
     None,
     description=(
-      "Gain/Loss on Disposal element. Required when NBV > 0 and "
-      "proceeds differ from NBV."
+      "Gain/Loss on Disposal element. Required whenever proceeds differ "
+      "from the net book value."
     ),
   )
   memo: str | None = Field(None, description="Closing entry memo (optional)")
@@ -58,23 +65,45 @@ class AssetDisposedMetadata(BaseModel):
   )
 
 
-def _void_pending_obligations_for_schedule(
+def _end_schedule_at(
   session: Session,
   *,
   structure_id: str,
+  cutoff: date,
   disposal_event_id: str,
 ) -> int:
-  """Void a disposed schedule's `pending` obligations; 0 if the structure is
-  missing."""
+  """Retire every month after ``cutoff``: delete its drafts and void its
+  obligations, `classified` included (a backdated disposal finds them already
+  drafted). Months up to the cutoff stay, since the plan counts their
+  depreciation as booked. Returns the obligations voided."""
+  from robosystems.operations.locking import bounded_lock_wait
+
   structure = session.get(Structure, structure_id)
   if structure is None:
     return 0
-  return ScheduleService().void_pending_obligations(
+  service = ScheduleService()
+  action = "dispose of the asset"
+  service.fence_drafts_after(session, structure=structure, cutoff=cutoff, action=action)
+  # Void before deleting: a promotion sweep drafting a later month waits on
+  # the voided rows and then finds nothing to promote, where deleting first
+  # would let its draft land after the delete. Bounded: the sweep holds them.
+  with bounded_lock_wait(
     session,
-    structure=structure,
-    void_reason="asset_disposed",
-    voided_by_event_id=disposal_event_id,
+    "This schedule's obligations are being written by another process. "
+    "Retry in a moment.",
+  ):
+    voided = service.void_pending_obligations(
+      session,
+      structure=structure,
+      void_reason="asset_disposed",
+      voided_by_event_id=disposal_event_id,
+      period_start_after=cutoff,
+      include_classified=True,
+    )
+  service.delete_drafts_after(
+    session, structure=structure, cutoff=cutoff, action=action, fenced=True
   )
+  return voided
 
 
 def _schedule_entity_id(session: Session, structure_id: str) -> str:
@@ -125,9 +154,10 @@ def dispatch(
     gain_loss_element_id=metadata.gain_loss_element_id,
   )
 
-  voided_count = _void_pending_obligations_for_schedule(
+  voided_count = _end_schedule_at(
     session,
     structure_id=metadata.schedule_id,
+    cutoff=disposal_cutoff(disposal_date),
     disposal_event_id=event.id,
   )
 
@@ -181,6 +211,7 @@ def dispatch_preview(
   from robosystems.operations.locking import RowLockedError
   from robosystems.operations.roboledger.commands._guards import (
     ClosedPeriodError,
+    assert_accounts_postable,
     assert_period_not_closed,
     assert_within_calendar,
   )
@@ -203,6 +234,22 @@ def dispatch_preview(
     assert_within_calendar(
       session, body.occurred_at.date(), entity_id=disposal_entity_id
     )
+    assert_accounts_postable(
+      session,
+      (li["element_id"] for li in plan.line_items),
+      entity_id=disposal_entity_id,
+    )
+    # dispatch refuses to retire a month whose entry already posted.
+    cutoff = disposal_cutoff(body.occurred_at.date())
+    landed = ScheduleService().count_landed_entries_after(
+      session, metadata.schedule_id, cutoff
+    )
+    if landed:
+      raise ValueError(
+        f"Cannot dispose of the asset: {landed} posted or shadowed entries "
+        f"exist for periods after {cutoff}; reverse them or dispose on a "
+        "later date."
+      )
   except (ValueError, ClosedPeriodError, RowLockedError, ScheduleNotFoundError) as e:
     return HandlerPreview(
       would_succeed=False,
