@@ -44,6 +44,7 @@ from robosystems.models.api.extensions.reports import (
 from robosystems.operations.roboledger.views import information_blocks as module
 from robosystems.operations.roboledger.views.information_blocks import (
   BlockNotFoundError,
+  ReceivedReportUnavailableError,
   ReportNotFoundError,
   ReportNotPublishedError,
   ReportSelectorError,
@@ -547,6 +548,8 @@ def tenant(monkeypatch: pytest.MonkeyPatch):
   session = MagicMock()
   session.__enter__ = MagicMock(return_value=session)
   session.__exit__ = MagicMock(return_value=False)
+  # The ledger's own report: authored here, so it is built from its rows.
+  session.get.return_value = MagicMock(source_graph_id=None, generation_count=1)
   monkeypatch.setattr(extensions_db, "extensions_session", lambda graph_id: session)
   builder = MagicMock(return_value=_bundle())
   monkeypatch.setattr(serialization, "build_report_bundle", builder)
@@ -554,6 +557,24 @@ def tenant(monkeypatch: pytest.MonkeyPatch):
     module, "is_shared_repository_or_subgraph", lambda graph_id: False
   )
   return builder
+
+
+RECEIVED_HOLON_KEY = f"report-bundles/kg1234567890abcdef/{REPORT_ID}/g3.holon.jsonld"
+
+
+@pytest.fixture
+def received(monkeypatch: pytest.MonkeyPatch, tenant):
+  """A report shared in from another graph: the row carries its provenance,
+  and the bucket holds the publication the share copied under this graph's
+  own bundle key (generation 3, as the sender published it)."""
+  import robosystems.db.extensions as extensions_db
+
+  session = extensions_db.extensions_session("kg1234567890abcdef")
+  session.get.return_value = MagicMock(source_graph_id="kgsender", generation_count=3)
+  bucket = _FakeBucket({RECEIVED_HOLON_KEY: to_holon(_model())})
+  monkeypatch.setattr(module, "S3Client", lambda: bucket)
+  monkeypatch.setattr(module.env, "USER_DATA_BUCKET", "user-data-test")
+  return bucket
 
 
 # ── the shared repository: the published filing ─────────────────────────────
@@ -781,6 +802,70 @@ class TestTenantReport:
     tenant.side_effect = LookupError("Report 'nope' not found")
     with pytest.raises(ReportNotFoundError, match="nope"):
       await query_disclosures("kg1234567890abcdef", "nope")
+
+  async def test_a_report_the_row_does_not_name_is_not_found(
+    self, tenant, no_cache
+  ) -> None:
+    import robosystems.db.extensions as extensions_db
+
+    extensions_db.extensions_session("kg1234567890abcdef").get.return_value = None
+    with pytest.raises(ReportNotFoundError, match="nope"):
+      await query_disclosures("kg1234567890abcdef", "nope")
+    tenant.assert_not_called()
+
+
+# ── a received report: the sender's publication, never the rows ──────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+class TestReceivedReport:
+  async def test_the_map_reads_the_copied_publication_not_the_rows(
+    self, received, tenant, no_cache
+  ) -> None:
+    out = await query_disclosures("kg1234567890abcdef", REPORT_ID)
+    assert [row["disclosure"] for row in out["disclosures"]] == [
+      "Balance Sheet",
+      "Segments",
+    ]
+    assert received.reads == [RECEIVED_HOLON_KEY]
+    tenant.assert_not_called()
+
+  async def test_the_block_reads_the_copied_publication_not_the_rows(
+    self, received, tenant, no_cache
+  ) -> None:
+    fam = await query_disclosures("kg1234567890abcdef", REPORT_ID, topic="balance")
+    [block] = fam["blocks"]
+    out = await query_information_block("kg1234567890abcdef", REPORT_ID, block["id"])
+    assert [row["label"] for row in out["rows"]] == [
+      "Assets [Abstract]",
+      "Cash",
+      "Other assets",
+      "Assets",
+    ]
+    assert set(received.reads) == {RECEIVED_HOLON_KEY}
+    tenant.assert_not_called()
+
+  async def test_a_copy_gone_from_storage_is_refused_not_rebuilt(
+    self, received, tenant, no_cache
+  ) -> None:
+    """The downloads' rule: the rows a share leaves are a partial projection
+    of the sender's artifact, so a miss asks for a re-share, never a build."""
+    received.objects.clear()
+    with pytest.raises(ReceivedReportUnavailableError, match="share it again"):
+      await query_disclosures("kg1234567890abcdef", REPORT_ID)
+    tenant.assert_not_called()
+
+  async def test_a_storage_fault_is_not_a_missing_copy(
+    self, received, tenant, no_cache
+  ) -> None:
+    def fail(bucket: str, key: str) -> str | None:
+      raise OSError("connection reset")
+
+    received.read_string = fail
+    with pytest.raises(module.PublicStorageError, match="try again"):
+      await query_disclosures("kg1234567890abcdef", REPORT_ID)
+    tenant.assert_not_called()
 
 
 # ── the cache ─────────────────────────────────────────────────────────────

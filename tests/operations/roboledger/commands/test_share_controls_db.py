@@ -1147,3 +1147,156 @@ def test_a_delete_cannot_slip_between_the_snapshot_and_the_share_rows() -> None:
   with extensions_session(SOURCE_GRAPH) as session:
     with pytest.raises(ReportHasActiveSharesError):
       delete_report(session, _REPORT_SNAPSHOT["id"], acting_user_id=_SENDER)
+
+
+# ─── The sender's read: where a report went ──────────────────────────────────
+
+
+def _patch_platform_graph_names():
+  """`enrich_shares` reads recipient names off the platform DB, which these
+  graph ids are not in."""
+  platform = MagicMock()
+  platform.__enter__.return_value.execute.return_value.all.return_value = []
+  return patch("robosystems.db.platform.SessionFactory", return_value=platform)
+
+
+def _share_through_the_list(list_id: str) -> None:
+  with (
+    _patch_platform_graph_lookup(),
+    patch(
+      "robosystems.operations.roboledger.commands.reports._load_publication_artifacts",
+      return_value={},
+    ),
+  ):
+    share_report(
+      SOURCE_GRAPH,
+      _REPORT_SNAPSHOT["id"],
+      ShareReportRequest(publish_list_id=list_id),
+      acting_user_id=_SENDER,
+    )
+
+
+def test_the_sender_reads_a_recipient_shared_revoked_and_shared_again() -> None:
+  """The state a naive read filters away: a re-share after a revoke is a new
+  row, so the recipient has one revoked row and one live. The picker reads the
+  live one; an audit reads both, newest first."""
+  from robosystems.operations.roboledger.reads.report_shares import (
+    list_report_shares,
+  )
+
+  list_id = _seed_publishable_report()
+  _share_through_the_list(list_id)
+  revoke_report_share(
+    SOURCE_GRAPH,
+    _REPORT_SNAPSHOT["id"],
+    RevokeReportShareRequest(target_graph_id=TARGET_GRAPH),
+    acting_user_id=_SENDER,
+  )
+  _share_through_the_list(list_id)
+
+  with _patch_platform_graph_names(), extensions_session(SOURCE_GRAPH) as session:
+    live = list_report_shares(session, report_id=_REPORT_SNAPSHOT["id"])
+    everything = list_report_shares(
+      session, report_id=_REPORT_SNAPSHOT["id"], include_revoked=True
+    )
+    other_report = list_report_shares(session, report_id="rpt_other")
+
+  assert [s.target_graph_id for s in live.report_shares] == [TARGET_GRAPH]
+  assert live.report_shares[0].revoked_at is None
+  assert live.report_shares[0].fact_count == 1
+  assert live.pagination.total == 1
+
+  assert [s.revoked_at is None for s in everything.report_shares] == [True, False]
+  assert everything.report_shares[0].shared_at >= everything.report_shares[1].shared_at
+  assert everything.pagination.total == 2
+
+  assert other_report.report_shares == []
+
+
+def test_without_a_report_the_read_is_the_graphs_distribution_log() -> None:
+  from robosystems.operations.roboledger.reads.report_shares import (
+    list_report_shares,
+  )
+
+  list_id = _seed_publishable_report()
+  _share_through_the_list(list_id)
+  with extensions_session(SOURCE_GRAPH) as session:
+    session.add(
+      ReportShare(
+        id="share_other",
+        report_id="rpt_other",
+        target_graph_id=TARGET_GRAPH,
+        shared_by=_SENDER,
+        fact_count=3,
+      )
+    )
+
+  with _patch_platform_graph_names(), extensions_session(SOURCE_GRAPH) as session:
+    log = list_report_shares(session)
+
+  assert sorted(s.report_id for s in log.report_shares) == sorted(
+    [_REPORT_SNAPSHOT["id"], "rpt_other"]
+  )
+
+
+def test_a_resend_cannot_slip_between_the_copys_deletion_and_the_stamp() -> None:
+  """Revoke used to read the share, delete the copy and stamp `revoked_at` in
+  three transactions with no lock on the report. A share landing between the
+  delete and the stamp left a live copy under a share marked revoked — a
+  receipt for a withdrawal that did not happen. Now the revoke holds the
+  report's row lock across the whole thing, and the resend waits on it and
+  gives up with a retryable error."""
+  import threading
+
+  from robosystems.operations.locking import RowLockedError
+  from robosystems.operations.roboledger.commands import reports as reports_module
+
+  list_id = _seed_publishable_report()
+  _share_through_the_list(list_id)
+
+  real_delete_shared_copy = reports_module._delete_shared_copy
+  deleting = threading.Event()
+  release = threading.Event()
+
+  def _paused_delete_shared_copy(**kwargs):
+    deleted = real_delete_shared_copy(**kwargs)
+    deleting.set()
+    release.wait(timeout=10)
+    return deleted
+
+  outcome: dict[str, object] = {}
+
+  def _run_revoke():
+    with patch(
+      "robosystems.operations.roboledger.commands.reports._delete_shared_copy",
+      side_effect=_paused_delete_shared_copy,
+    ):
+      outcome["response"] = revoke_report_share(
+        SOURCE_GRAPH,
+        _REPORT_SNAPSHOT["id"],
+        RevokeReportShareRequest(target_graph_id=TARGET_GRAPH),
+        acting_user_id=_SENDER,
+      )
+
+  worker = threading.Thread(target=_run_revoke)
+  worker.start()
+  try:
+    assert deleting.wait(timeout=10), "revoke never reached the copy's deletion"
+    with pytest.raises(RowLockedError, match=_REPORT_SNAPSHOT["id"]):
+      _share_through_the_list(list_id)
+  finally:
+    release.set()
+    worker.join(timeout=30)
+
+  response = outcome["response"]
+  assert response.copy_deleted is True  # type: ignore[attr-defined]
+  assert _counts(TARGET_GRAPH) == (0, 0, 0)
+  with extensions_session(SOURCE_GRAPH) as session:
+    live = session.execute(
+      text("SELECT count(*) FROM report_shares WHERE revoked_at IS NULL")
+    ).scalar_one()
+  assert live == 0
+
+  # Once the revoke has committed, the resend goes through as a new share.
+  _share_through_the_list(list_id)
+  assert _counts(TARGET_GRAPH)[0] == 1

@@ -2416,3 +2416,99 @@ class TestReportDownloadUrlLineage:
     assert result.data == {"reportDownloadUrl": {"format": "holon-jsonld-lineage"}}
     assert m.call_args.kwargs["flavor"] == "holon-jsonld-lineage"
     assert m.call_args.kwargs["actor_id"] == "usr_9"
+
+
+class TestReportSharesResolver:
+  """`reportShares` is the sender's record of where a report went."""
+
+  @staticmethod
+  def _share(**overrides):
+    from robosystems.models.api.extensions.report_shares import ReportShareResponse
+
+    fields = {
+      "id": "share_1",
+      "report_id": "rpt_1",
+      "target_graph_id": "kgtarget",
+      "target_graph_name": "Harbor Fund",
+      "shared_by": "usr_sender",
+      "shared_at": datetime(2026, 10, 1, tzinfo=UTC),
+      "revoked_at": None,
+      "fact_count": 47,
+    }
+    fields.update(overrides)
+    return ReportShareResponse(**fields)
+
+  def test_lists_a_reports_recipients_with_their_revocation_state(self) -> None:
+    from robosystems.models.api.common import create_pagination_info
+    from robosystems.models.api.extensions.report_shares import (
+      ReportShareListResponse,
+    )
+
+    response = ReportShareListResponse(
+      report_shares=[
+        self._share(),
+        self._share(
+          id="share_0", revoked_at=datetime(2026, 9, 1, tzinfo=UTC), fact_count=40
+        ),
+      ],
+      pagination=create_pagination_info(2, 100, 0),
+    )
+    with patch(
+      f"{_OPS}.report_shares.list_report_shares", return_value=response
+    ) as read:
+      result = _run(
+        'query { reportShares(reportId: "rpt_1", includeRevoked: true) { '
+        "reportShares { id targetGraphId targetGraphName factCount revokedAt } "
+        "pagination { total } } }"
+      )
+    assert result.errors is None, result.errors
+    assert read.call_args.kwargs == {
+      "report_id": "rpt_1",
+      "include_revoked": True,
+      "limit": 100,
+      "offset": 0,
+    }
+    assert result.data == {
+      "reportShares": {
+        "reportShares": [
+          {
+            "id": "share_1",
+            "targetGraphId": "kgtarget",
+            "targetGraphName": "Harbor Fund",
+            "factCount": 47,
+            "revokedAt": None,
+          },
+          {
+            "id": "share_0",
+            "targetGraphId": "kgtarget",
+            "targetGraphName": "Harbor Fund",
+            "factCount": 40,
+            "revokedAt": "2026-09-01T00:00:00+00:00",
+          },
+        ],
+        "pagination": {"total": 2},
+      }
+    }
+
+  def test_defaults_to_the_live_shares_of_every_report(self) -> None:
+    from robosystems.models.api.common import create_pagination_info
+    from robosystems.models.api.extensions.report_shares import (
+      ReportShareListResponse,
+    )
+
+    response = ReportShareListResponse(
+      report_shares=[], pagination=create_pagination_info(0, 100, 0)
+    )
+    with patch(
+      f"{_OPS}.report_shares.list_report_shares", return_value=response
+    ) as read:
+      result = _run("query { reportShares { reportShares { id } } }")
+    assert result.errors is None, result.errors
+    assert read.call_args.kwargs["report_id"] is None
+    assert read.call_args.kwargs["include_revoked"] is False
+
+  def test_schema_missing_is_a_typed_error(self) -> None:
+    with patch(f"{_OPS}.report_shares.list_report_shares", side_effect=_SCHEMA_MISSING):
+      result = _run("query { reportShares { reportShares { id } } }")
+    assert result.errors is not None
+    assert result.errors[0].extensions == {"code": "LEDGER_NOT_INITIALIZED"}

@@ -445,14 +445,13 @@ def test_share_to_an_unblocking_recipient_proceeds_to_the_copy() -> None:
 def _revoke_sessions(*, report, shares: list | None = None) -> MagicMock:
   """extensions_session stand-in for the source graph.
 
-  `revoke_report_share` probes for any active share with `.first()`, then
-  loads them all to stamp — plural on both, because a report can legitimately
-  have been shared to one recipient more than once.
+  `revoke_report_share` locks the report (`session.get` under `lock_by_id`),
+  then loads every active share to the recipient to stamp — plural, because a
+  report can legitimately have been shared to one recipient more than once.
   """
   shares = shares or []
   source_session = MagicMock()
   source_session.get.return_value = report
-  source_session.execute.return_value.first.return_value = shares[0] if shares else None
   source_session.execute.return_value.scalars.return_value.all.return_value = shares
 
   factory = MagicMock()

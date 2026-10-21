@@ -30,6 +30,7 @@ from xbrlkit.serve import LoadedFiling, ToolError
 
 from robosystems.config import env
 from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
+from robosystems.config.storage.graph import get_report_bundle_key
 from robosystems.config.storage.shared import (
   FILING_ARTIFACT_HOLON,
   FILING_ARTIFACT_MANIFEST,
@@ -61,6 +62,12 @@ class ReportNotPublishedError(ReportNotFoundError):
   reprocess."""
 
 
+class ReceivedReportUnavailableError(ReportNotFoundError):
+  """A report shared in from another graph whose copied publication is not in
+  storage, or cannot be read as one. A received report is the sender's
+  artifact and is never re-derived from the rows the copy left behind."""
+
+
 class BlockNotFoundError(ValueError):
   """No block (or disclosure family) by that name on the report."""
 
@@ -70,8 +77,9 @@ class ReportTooLargeError(ValueError):
 
 
 class PublicStorageError(RuntimeError):
-  """The public bucket could not be read. Not a ``ValueError``: nothing about
-  the request is wrong, and "the file is not there" would be a wrong answer."""
+  """The bucket behind a report could not be read. Not a ``ValueError``:
+  nothing about the request is wrong, and "the file is not there" would be a
+  wrong answer."""
 
 
 # The repository the public catalog describes. A subgraph of it, or another
@@ -423,12 +431,18 @@ def _is_external_text(model: XbrlModel, fact: Any) -> bool:
 
 def _tenant_model(graph_id: str, report_id: str) -> XbrlModel:
   from robosystems.db.extensions import extensions_session
+  from robosystems.models.extensions import Report
   from robosystems.operations.serialization import (
     build_report_bundle,
     bundle_to_xbrl_model,
   )
 
   with extensions_session(graph_id) as session:
+    report = session.get(Report, report_id)
+    if report is None:
+      raise ReportNotFoundError(f"No report {report_id!r} on graph {graph_id}.")
+    if report.source_graph_id is not None:
+      return _received_model(graph_id, report_id, int(report.generation_count or 0))
     try:
       bundle = build_report_bundle(session, graph_id, report_id)
     except LookupError as exc:
@@ -436,6 +450,34 @@ def _tenant_model(graph_id: str, report_id: str) -> XbrlModel:
         f"No report {report_id!r} on graph {graph_id}: {exc}"
       ) from exc
   return bundle_to_xbrl_model(bundle)
+
+
+def _received_model(graph_id: str, report_id: str, generation_count: int) -> XbrlModel:
+  """A report shared in from another graph, from the publication the share
+  copied under this graph's own bundle key. The rows that came with it are a
+  partial projection of that artifact, so a miss is a miss, never a build
+  order — the same rule the downloads apply."""
+  key = get_report_bundle_key(graph_id, report_id, generation_count)
+  try:
+    text = S3Client().read_string(env.USER_DATA_BUCKET, key)
+  except Exception as exc:
+    raise PublicStorageError(
+      f"The publication behind report {report_id!r} could not be read; try again."
+    ) from exc
+  if text is None:
+    raise ReceivedReportUnavailableError(
+      f"Report {report_id!r} was shared from another graph and its publication "
+      f"is no longer in storage. A received report is read as the sender's "
+      f"published artifact and is never re-derived locally; ask the sender to "
+      f"share it again."
+    )
+  try:
+    model, _gaps = from_holon_report(text)
+  except HolonError as exc:
+    raise ReceivedReportUnavailableError(
+      f"The publication behind report {report_id!r} could not be read: {exc}"
+    ) from exc
+  return model
 
 
 async def resolve_report(
