@@ -8,11 +8,12 @@ agent that was deleted. The models declare both now, under the names 0005
 used, so new tenants get them; this adds them to the tenants built between.
 
 Each schema is counted first, read-only. The constraint is always added
-`NOT VALID`, which holds every new row to it at once and blocks writes only
-for the moment of the catalog change; with no orphaned rows it is then
-validated, a scan that does not block writes. With orphans it stays
-`NOT VALID` and the count is printed; `VALIDATE CONSTRAINT` once they are
-repaired.
+`NOT VALID`, which holds every new row to it at once; with no orphaned rows
+it is then validated. With orphans it stays `NOT VALID` and the count is
+printed; `VALIDATE CONSTRAINT` once they are repaired. Every tenant runs in
+the migration's one transaction, so the lock the add takes on each tenant's
+`entries`, `events` and `agents` holds writes there until it commits: run it
+in a quiet window.
 
 Revision ID: 0060
 Revises: 0059

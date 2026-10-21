@@ -108,7 +108,14 @@ def load_feed(
         report.events_existing += 1
       continue
     if str(payload["external_id"]) in closed:
-      report.skipped["closed_period"] += 1
+      capture_event(
+        session,
+        payload,
+        graph_id=graph_id,
+        created_by=created_by,
+        report=report,
+        held=True,
+      )
       continue
     capture_event(
       session, payload, graph_id=graph_id, created_by=created_by, report=report

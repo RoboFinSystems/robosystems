@@ -305,6 +305,7 @@ async def close_period_op(
           allow_unposted_source_events=body.allow_unposted_source_events,
           allow_unreconciled_accounts=body.allow_unreconciled_accounts,
           allow_unexplained_residuals=body.allow_unexplained_residuals,
+          allow_held_bank_lines=body.allow_held_bank_lines,
           entity_id=body.entity_id,
         )
     except CloseGateFailed as e:
@@ -351,6 +352,9 @@ async def close_period_op(
         detail["unposted_source_event_sample"] = list(
           e.gate.unposted_source_event_sample
         )
+      if e.gate.held_bank_line_count:
+        detail["held_bank_line_count"] = e.gate.held_bank_line_count
+        detail["held_bank_line_sample"] = list(e.gate.held_bank_line_sample)
       if e.gate.unreconciled_account_count:
         detail["unreconciled_account_count"] = e.gate.unreconciled_account_count
         detail["unreconciled_account_sample"] = list(e.gate.unreconciled_account_sample)

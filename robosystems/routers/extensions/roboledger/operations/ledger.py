@@ -1008,7 +1008,6 @@ update_journal_entry_op = _registrar.register(
       UnbalancedJournalEntryError: 422,
       ValueError: 422,
     },
-    requires_created_by=False,
     mark_stale_reason="journal_entry_updated",
   )
 )

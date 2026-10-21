@@ -350,6 +350,7 @@ def load_statement_fact_set_series(
         FactSet.structure_id == structure_id,
         FactSet.factset_type == "report",
         scenario_predicate,
+        FactSet.retracted_at.is_(None),
         *_entity_filter(entity_id),
       )
       .order_by(

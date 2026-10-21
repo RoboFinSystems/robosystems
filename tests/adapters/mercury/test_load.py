@@ -108,15 +108,18 @@ class TestLoadFeed:
     assert session.nested == 9
     assert report.earliest_by_entity == {None: "2026-03-14T15:04:05Z"}
 
-  def test_a_new_line_in_a_closed_month_is_not_captured(self, _no_closed_months):
+  def test_a_new_line_in_a_closed_month_is_held_out_of_it(self, _no_closed_months):
     session = _Session()
     _report, create = _run(session)
     first = create.call_args_list[0].args[1].external_id
     _no_closed_months.return_value = {first}
-    report, create = _run(_Session())
+    with patch("robosystems.adapters.bank_feed.load.hold") as hold:
+      report, create = _run(_Session())
     assert report.events_created == 8
     assert report.skipped["closed_period"] == 1
-    assert first not in {call.args[1].external_id for call in create.call_args_list}
+    # Written, so it is not lost, and held so it never posts there.
+    assert create.call_count == 9
+    hold.assert_called_once()
 
   def test_earliest_posting_ignores_placeholder_dates(self):
     session = _Session()

@@ -107,6 +107,7 @@ def newest_actual_structure_id(
     .where(
       FactSet.factset_type == "report",
       FactSet.scenario_id.is_(None),
+      FactSet.retracted_at.is_(None),
       FactSet.entity_id == entity_id,
       Structure.block_type == block_type,
     )

@@ -144,6 +144,9 @@ def _gate_payload(exc: CloseGateFailed, *, period: str) -> dict[str, Any]:
     payload["unposted_source_event_sample"] = list(
       exc.gate.unposted_source_event_sample
     )
+  if exc.gate.held_bank_line_count:
+    payload["held_bank_line_count"] = exc.gate.held_bank_line_count
+    payload["held_bank_line_sample"] = list(exc.gate.held_bank_line_sample)
   if exc.gate.unreconciled_account_count:
     payload["unreconciled_account_count"] = exc.gate.unreconciled_account_count
     payload["unreconciled_account_sample"] = list(exc.gate.unreconciled_account_sample)

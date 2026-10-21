@@ -1199,8 +1199,10 @@ class TestLineFlowsOnUpdate:
       )
 
     mock_guard.assert_not_called()
-    # A correction to the month's statements, not a reopen.
+    # A correction to the month's statements, not a reopen, stamped by the
+    # entry's author when no caller is named.
     self.restamp.assert_called_once()
+    assert self.restamp.call_args.kwargs["actor_id"] == str(entry.created_by)
     assert [li.flow_element_id for li in lines] == ["el_debt_in", "el_debt_in"]
     assert [li.flow_qname for li in response.line_items] == [
       "rs-gaap:Debt",
@@ -1208,6 +1210,27 @@ class TestLineFlowsOnUpdate:
     ]
     (record,) = entry.metadata_["flow_retags"]
     assert (record["line_ids"], record["flows"]) == (["li_02"], ["rs-gaap:Debt"])
+
+  @patch(f"{MODULE}._flow_qnames", return_value={"el_debt_in": "rs-gaap:Debt"})
+  @patch(
+    "robosystems.operations.event_block.python_handlers.bank_feed.resolve_flows",
+    return_value={"rs-gaap:Debt": "el_debt_in"},
+  )
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_the_restamp_is_credited_to_whoever_retagged(self, _guard, _resolve, _names):
+    entry = _mock_entry(status="posted")
+    entry.metadata_ = {}
+    with patch(f"{MODULE}._load_line_items", return_value=_flow_lines()):
+      update_journal_entry(
+        _session_for_entry(entry),
+        UpdateJournalEntryRequest(
+          entry_id="entry_01",
+          line_flows=[{"line_id": "li_02", "flow_qname": "rs-gaap:Debt"}],
+        ),
+        created_by="usr_reviewer",
+      )
+
+    assert self.restamp.call_args.kwargs["actor_id"] == "usr_reviewer"
 
   @patch(f"{MODULE}._flow_qnames", return_value={})
   @patch(

@@ -282,6 +282,59 @@ class TestSharedStatement:
     assert _cash_values(envelope) == [7.0, 9.0]
 
 
+class TestAsClosedColumns:
+  def test_a_series_column_the_close_stamped_says_so(self, ext_session) -> None:
+    group = _Group(ext_session)
+    group.add_report_set(PARENT, JUNE, 100.0)
+
+    envelope = get_information_block(ext_session, group.balance_sheet.id, series=True)
+
+    assert envelope is not None and envelope.view.rendering is not None
+    (june,) = envelope.view.rendering.periods
+    assert june.presentation == "as_closed"
+    assert june.stamped_at is not None
+
+
+class TestARetractedStamp:
+  """A reopen retracts the month's stamp in place, kept as the month as it was
+  closed. Nothing current reads it: the series and a metric's operands skip
+  it until the reclose stamps again."""
+
+  def _retract(self, session, fact_set_id: str) -> None:
+    session.execute(
+      text("UPDATE fact_sets SET retracted_at = now() WHERE id = :id"),
+      {"id": fact_set_id},
+    )
+    session.flush()
+
+  def test_the_series_leaves_a_reopened_month_out(self, ext_session) -> None:
+    group = _Group(ext_session)
+    group.add_report_set(PARENT, JUNE, 100.0)
+    self._retract(ext_session, group.add_report_set(PARENT, JULY, 200.0))
+
+    envelope = get_information_block(ext_session, group.balance_sheet.id, series=True)
+
+    assert envelope is not None
+    assert _cash_values(envelope) == [100.0]
+
+  def test_a_metric_operand_does_not_bind_to_it(self, ext_session) -> None:
+    from robosystems.operations.information_block.metrics import _bind_operand
+
+    group = _Group(ext_session)
+    self._retract(ext_session, group.add_report_set(PARENT, JULY, 200.0))
+
+    assert (
+      _bind_operand(
+        ext_session,
+        element_id=group.cash.id,
+        entity_id=PARENT,
+        period_end=JULY[1],
+        period_start=None,
+      )
+      is None
+    )
+
+
 class TestListing:
   def test_lists_only_the_entitys_own_forecasts(self, ext_session) -> None:
     group = _Group(ext_session)

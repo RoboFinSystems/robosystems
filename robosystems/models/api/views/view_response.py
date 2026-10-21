@@ -32,6 +32,19 @@ class FactRecord(BaseModel):
   entity_name: str | None = Field(
     None, description="Entity name; present only when an entity filter was applied"
   )
+  presentation: str | None = Field(
+    None,
+    description=(
+      "'as_closed' when the value is the one the period's close stamped, kept "
+      "as the month closed; null otherwise. A live read of the books "
+      "(live-financial-statement) can differ from it once a mapping is "
+      "reclassified after the close."
+    ),
+  )
+  stamped_at: str | None = Field(
+    None,
+    description="When the close stamped the value (ISO 8601); set with 'as_closed'.",
+  )
 
 
 class ElementSummary(BaseModel):

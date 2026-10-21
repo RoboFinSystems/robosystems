@@ -239,6 +239,17 @@ class ClosePeriodRequest(BaseModel):
       "override is recorded in the close audit note."
     ),
   )
+  allow_held_bank_lines: bool = Field(
+    False,
+    description=(
+      "Override the held-bank-line gate — close even though bank lines a sync "
+      "held out of an earlier, closed month (dated there, arriving after it "
+      "closed) are still undecided. Each is recorded as decided by this close "
+      "and stops blocking; none posts. Prefer reopening the month they are "
+      "dated in, which gives them back to classify and commit. The override "
+      "is recorded in the close audit note."
+    ),
+  )
   allow_unexplained_residuals: bool = Field(
     False,
     description=(
@@ -477,7 +488,7 @@ class FiscalCalendarResponse(BaseModel):
       "'calendar_not_initialized', 'period_already_closed', "
       "'pending_obligations', 'stranded_obligations', "
       "'reconciling_items', 'unposted_source_events', "
-      "'unreconciled_accounts'; on the consolidation entity, whose close is "
+      "'unreconciled_accounts', 'held_bank_lines'; on the consolidation entity, whose close is "
       "the group's, also 'entity_open', 'adjustments_unposted', "
       "'residual_unexplained', 'consolidated_does_not_foot'"
     ),
@@ -561,6 +572,24 @@ class FiscalCalendarResponse(BaseModel):
     description=(
       "Source identifiers (or event ids) of up to 5 unposted source events, "
       "so the blocker names what is holding the close."
+    ),
+  )
+  held_bank_line_count: int = Field(
+    0,
+    description=(
+      "Bank lines a sync held out of an earlier, closed month — dated there, "
+      "arriving after it closed — that no close has decided on. They block "
+      "the next close: reopen the month they are dated in, which gives them "
+      "back to post, or close over them knowingly with allow_held_bank_lines. "
+      "Listed by list-event-blocks with status='voided' and "
+      "void_reason 'feed_in_closed_month'."
+    ),
+  )
+  held_bank_line_sample: list[str] = Field(
+    default_factory=list,
+    description=(
+      "Up to 5 held lines, oldest first, as 'date: description amount "
+      "[event id]', so the blocker names what is holding the close."
     ),
   )
   unreconciled_account_count: int = Field(
@@ -720,8 +749,8 @@ class ClosePeriodResponse(BaseModel):
     description=(
       "Blocker codes a shadow close recorded instead of enforcing: "
       "sync_stale, pending_obligations, stranded_obligations, "
-      "reconciling_items, unposted_source_events, unreconciled_accounts. "
-      "Empty outside shadow."
+      "reconciling_items, unposted_source_events, unreconciled_accounts, "
+      "held_bank_lines. Empty outside shadow."
     ),
   )
   gate_finding_counts: dict[str, int] = Field(

@@ -19,6 +19,7 @@ from sqlalchemy import select, text
 
 from robosystems.models.api.information_block import (
   ArtifactResponse,
+  FactSetLite,
   InformationBlockEnvelope,
   InformationModelResponse,
   RenderingLite,
@@ -116,6 +117,7 @@ def _build_statement_envelope(
   series_mode = series and fact_set_id is None
   forecast_period_ends: set[date] = set()
   facts: list[Fact] = []
+  series_sets: list[FactSetLite] = []
   if element_ids and series_mode:
     series_sets = load_statement_fact_set_series(
       session, structure_id, scenario_id, entity_id
@@ -207,6 +209,29 @@ def _build_statement_envelope(
           p.model_copy(
             update={"label": _forecast_period_label(p.end), "forecast": True}
           )
+          for p in rendering.periods
+        ]
+      }
+    )
+
+  # A column whose set the close stamped is the month as it closed.
+  if series_mode:
+    stamped = {
+      fs.period_end: fs.created_at for fs in series_sets if _is_close_stamp(fs)
+    }
+  elif atoms.fact_set is not None and _is_close_stamp(atoms.fact_set):
+    stamped = {p.end: atoms.fact_set.created_at for p in rendering.periods}
+  else:
+    stamped = {}
+  if stamped:
+    rendering = rendering.model_copy(
+      update={
+        "periods": [
+          p.model_copy(
+            update={"presentation": "as_closed", "stamped_at": stamped[p.end]}
+          )
+          if p.end in stamped
+          else p
           for p in rendering.periods
         ]
       }
@@ -557,3 +582,11 @@ __all__ = [
   "STATEMENT_DISPLAY",
   "make_statement_handlers",
 ]
+
+
+def _is_close_stamp(fact_set: FactSetLite) -> bool:
+  return (
+    fact_set.factset_type == "report"
+    and fact_set.report_id is None
+    and fact_set.scenario_id is None
+  )

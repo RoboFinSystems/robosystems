@@ -418,6 +418,7 @@ def _retag_lines(
   peek: Entry,
   line_flows: list[JournalEntryLineFlow] | None,
   line_dimensions: list[JournalEntryLineDimensions] | None = None,
+  actor_id: str | None = None,
 ) -> JournalEntryResponse:
   """The tag-only update: no draft rule and no reopen, since neither a flow
   nor a dimension moves a balance; the entry is still locked while its lines
@@ -463,7 +464,7 @@ def _retag_lines(
       session,
       [entry.posting_date],
       entity_id=str(entry.entity_id),
-      actor_id=str(entry.created_by or "retag"),
+      actor_id=actor_id or str(entry.created_by),
     )
   return _respond(session, entry, line_items)
 
@@ -862,7 +863,7 @@ def create_journal_entry(
 
 
 def update_journal_entry(
-  session: Session, body: UpdateJournalEntryRequest
+  session: Session, body: UpdateJournalEntryRequest, created_by: str | None = None
 ) -> JournalEntryResponse:
   """Update a draft journal entry; omitted fields are unchanged, and
   ``line_items`` replaces the whole set. ``line_flows`` and
@@ -900,7 +901,7 @@ def update_journal_entry(
       "set dimension_ids on the new lines instead."
     )
   if (line_flows is not None or line_dimensions is not None) and not updates:
-    return _retag_lines(session, peek, line_flows, line_dimensions)
+    return _retag_lines(session, peek, line_flows, line_dimensions, actor_id=created_by)
   peeked_date = peek.posting_date
   dates = [peeked_date]
   if body.posting_date is not None:

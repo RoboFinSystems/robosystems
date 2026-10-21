@@ -56,9 +56,11 @@ from robosystems.operations.information_block.rules.expressions import (
   lhs_variable_names,
   parse_arithmetic_expression,
 )
-from robosystems.operations.locking import lock_by_id
 from robosystems.operations.roboledger.entity_scope import resolve_entity_id
-from robosystems.operations.roboledger.fact_set import create_fact_set
+from robosystems.operations.roboledger.fact_set import (
+  create_fact_set,
+  lock_for_standing_set,
+)
 from robosystems.operations.roboledger.reports.calc_dag import topo_sort_calculations
 from robosystems.utils.ulid import generate_prefixed_ulid
 
@@ -96,6 +98,7 @@ def _bind_operand(
       FactSet.scenario_id.is_(None)
       if scenario_id is None
       else or_(FactSet.scenario_id.is_(None), FactSet.scenario_id == scenario_id),
+      FactSet.retracted_at.is_(None),
       Fact.entity_id == entity_id,
       Fact.element_id == element_id,
       Fact.period_end == period_end,
@@ -141,6 +144,7 @@ def _latest_report_period_end_before(
       FactSet.scenario_id.is_(None)
       if scenario_id is None
       else or_(FactSet.scenario_id.is_(None), FactSet.scenario_id == scenario_id),
+      FactSet.retracted_at.is_(None),
       Fact.entity_id == entity_id,
       Fact.period_end < before,
       Fact.fact_scope == "in_scope",
@@ -438,17 +442,7 @@ def cmd_compute_metrics(
 
   provenance = DerivedProvenance(computation="compute-metrics", source_fact_ids=[])
 
-  # Locked before the lookup: two writers resolving "no standing set" would
-  # each insert one. No-key, so a close stamping sets on this structure is
-  # not held. Contention raises `RowLockedError` (409).
-  lock_by_id(
-    session,
-    Structure,
-    body.structure_id,
-    f"Metrics structure {body.structure_id} is being written by another process. "
-    "Retry in a moment.",
-    key_share=True,
-  )
+  lock_for_standing_set(session, body.structure_id, "Metrics")
   standing = session.execute(
     select(FactSet)
     .where(
@@ -667,17 +661,7 @@ def cmd_assert_metrics(
     basis_note=body.basis_note,
   )
 
-  # Locked before the lookup: two writers resolving "no standing set" would
-  # each insert one. No-key, so a close stamping sets on this structure is
-  # not held. Contention raises `RowLockedError` (409).
-  lock_by_id(
-    session,
-    Structure,
-    body.structure_id,
-    f"Metrics structure {body.structure_id} is being written by another process. "
-    "Retry in a moment.",
-    key_share=True,
-  )
+  lock_for_standing_set(session, body.structure_id, "Metrics")
   standing = session.execute(
     select(FactSet)
     .where(

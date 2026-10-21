@@ -400,7 +400,9 @@ class CreateTaxonomyBlockRequest(BaseModel):
         "parent_taxonomy_id is required when taxonomy_type == 'reporting_extension'."
       )
     if self.entity_id is not None and self.taxonomy_type != "chart_of_accounts":
-      raise ValueError("entity_id is read only for taxonomy_type 'chart_of_accounts'.")
+      raise ValueError(
+        "entity_id is only accepted for taxonomy_type 'chart_of_accounts'."
+      )
     return self
 
   model_config = ConfigDict(

@@ -72,6 +72,7 @@ class ReopenPeriodResult:
 
   fiscal_calendar: FiscalCalendarResponse
   statement_sets_retracted: int = 0
+  held_bank_lines_restored: int = 0
 
 
 class PeriodNotFoundInLedgerError(LookupError):
@@ -325,6 +326,7 @@ def close_period(
   allow_unposted_source_events: bool = False,
   allow_unreconciled_accounts: bool = False,
   allow_unexplained_residuals: bool = False,
+  allow_held_bank_lines: bool = False,
   fence_wait_ms: int | None = None,
   entity_id: str | None = None,
 ) -> ClosePeriodResponse:
@@ -371,6 +373,7 @@ def close_period(
       allow_unposted_source_events=allow_unposted_source_events,
       allow_unreconciled_accounts=allow_unreconciled_accounts,
       allow_unexplained_residuals=allow_unexplained_residuals,
+      allow_held_bank_lines=allow_held_bank_lines,
       note=note,
       entity_id=entity_id,
       shadow=shadow,
@@ -445,6 +448,15 @@ def reopen_period(
       actor_type=actor_type,
       entity_id=entity_id,
     )
+    # The bank lines a sync held out of the month come back to be posted.
+    # Not the backfill's reopen: it recloses the same books at once.
+    from robosystems.operations.roboledger.fiscal_calendar.held_feed_lines import (
+      restore_held_lines,
+    )
+
+    restored = restore_held_lines(
+      session, str(calendar.entity_id), *period_date_range(period)
+    )
     session.commit()
 
   from robosystems.operations.extensions.staleness import mark_graph_stale
@@ -457,6 +469,7 @@ def reopen_period(
       session, graph_id, calendar, has_sync, last_sync_at, service
     ),
     statement_sets_retracted=len(retracted),
+    held_bank_lines_restored=restored,
   )
 
 

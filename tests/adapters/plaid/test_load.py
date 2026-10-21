@@ -499,6 +499,7 @@ class TestLoadSync:
     closed=frozenset(),
   ):
     captured: list[dict] = []
+    held: list[dict] = []
     session = _Session()
     sync = TransactionsSync(
       added=transactions(), modified=list(modified), removed=list(removed)
@@ -514,7 +515,9 @@ class TestLoadSync:
       patch(f"{MODULE}.in_closed_months", return_value=set(closed)) as fence,
       patch(
         f"{MODULE}.capture_event",
-        side_effect=lambda s, payload, **kw: captured.append(payload) or True,
+        side_effect=lambda s, payload, **kw: (
+          (held if kw.get("held") else captured).append(payload) or True
+        ),
       ),
     ):
       report = load_sync(
@@ -532,6 +535,7 @@ class TestLoadSync:
       )
     session.agent_specs = agents.call_args.args[1]
     session.fenced = fence.call_args.args[1]
+    session.held = held
     return report, captured, removals, merge, session
 
   def test_fresh_item_captures_every_event(self):
@@ -543,11 +547,11 @@ class TestLoadSync:
     merge.assert_not_called()
     assert session.flushes == 1
 
-  def test_a_new_line_in_a_closed_month_is_not_captured(self):
-    report, captured, *_ = self._load(closed={"plaid_txn_t_coffee"})
+  def test_a_new_line_in_a_closed_month_is_held_out_of_it(self):
+    _report, captured, *_rest, session = self._load(closed={"plaid_txn_t_coffee"})
     assert "plaid_txn_t_coffee" not in {p["external_id"] for p in captured}
     assert len(captured) == 7
-    assert report.skipped["closed_period"] == 1
+    assert [p["external_id"] for p in session.held] == ["plaid_txn_t_coffee"]
 
   def test_the_closed_month_fence_reads_only_new_lines(self):
     existing = {"plaid_txn_t_coffee": _event()}
