@@ -389,7 +389,7 @@ def balance_digest(comparison: ReconciliationPreviewResponse) -> str:
     + "".join(
       f"|out:{c.entry_id}:{round(c.amount * 100)}"
       for c in row.components
-      if c.kind == "outstanding"
+      if c.kind in ("outstanding", "stale_outstanding")
     )
     + (
       f"|carried:{round(row.roll_forward.bank_balance * 100)}"

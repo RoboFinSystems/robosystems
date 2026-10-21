@@ -228,6 +228,38 @@ def test_a_statement_balance_names_its_document_the_same_way(session):
     assert len(events_citing(GRAPH_ID, "doc_other")) == 1
 
 
+def test_a_corrected_statement_balance_keeps_its_document(session):
+  """A correction to the figure alone keeps the statement on the record; an
+  empty document_id drops it."""
+  from robosystems.operations.roboledger.reconciliations.observations import (
+    record_statement_observation,
+  )
+  from tests.ledger_entity import entity_account
+
+  cash = session.get(
+    robosystems.models.extensions.Element,
+    entity_account(session, PARENT_ENTITY_ID, "Checking"),
+  )
+  cash.period_type = "instant"
+  cash.balance_type = "debit"
+
+  def _record(cents: int, document_id: str | None):
+    return record_statement_observation(
+      session,
+      element=cash,
+      entity_id=PARENT_ENTITY_ID,
+      as_of=datetime(2026, 9, 30).date(),
+      stated_cents=cents,
+      document_id=document_id,
+      note=None,
+      created_by="usr_1",
+    )
+
+  _record(3_204_88, "doc_invoice")
+  assert _record(3_204_89, None).document_id == "doc_invoice"
+  assert _record(3_204_89, "").document_id is None
+
+
 def test_a_bill_still_in_the_inbox_keeps_its_document(session):
   """Before events could cite documents, only a committed statement balance
   held one; now a captured bill does too, and the refusal names it."""

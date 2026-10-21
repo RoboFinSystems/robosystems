@@ -419,9 +419,18 @@ def _retag_lines(
   line_flows: list[JournalEntryLineFlow] | None,
   line_dimensions: list[JournalEntryLineDimensions] | None = None,
 ) -> JournalEntryResponse:
-  """The tag-only update: no period fence and no draft rule, since neither a
-  flow nor a dimension moves a balance; the entry is still locked while its
-  lines change."""
+  """The tag-only update: no draft rule and no reopen, since neither a flow
+  nor a dimension moves a balance; the entry is still locked while its lines
+  change. A posted entry's month is fenced and, where closed, its statements
+  re-stamped: the tag changes what they present (`retag_restamp`)."""
+  from robosystems.operations.roboledger.commands.retag_restamp import (
+    fence_retag_months,
+    restamp_retagged_months,
+  )
+
+  landed = peek.status != "draft"
+  if landed:
+    fence_retag_months(session, [peek.posting_date])
   event = _lock_owning_event(session, peek)
   entry = lock_by_id(
     session,
@@ -433,6 +442,12 @@ def _retag_lines(
     raise JournalEntryNotFoundError(peek.id)
   if entry.status not in _RETAGGABLE_STATUSES:
     raise JournalEntryNotDraftError(entry.id, entry.status)
+  if (entry.status != "draft") != landed:
+    # A close posted it between the peek and the lock; its month went
+    # unfenced.
+    raise RowLockedError(
+      f"Journal entry {entry.id} was posted by another process. Retry."
+    )
   if line_flows is not None:
     _apply_line_flows(session, entry, line_flows)
   if line_dimensions is not None:
@@ -442,6 +457,14 @@ def _retag_lines(
     _mirror_flows_onto_bank_event(session, event, line_items)
   if line_dimensions is not None:
     _mirror_dimensions_onto_bank_event(session, event, line_items)
+  if landed:
+    session.flush()
+    restamp_retagged_months(
+      session,
+      [entry.posting_date],
+      entity_id=str(entry.entity_id),
+      actor_id=str(entry.created_by or "retag"),
+    )
   return _respond(session, entry, line_items)
 
 
