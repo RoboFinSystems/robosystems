@@ -366,6 +366,15 @@ class CreateTaxonomyBlockRequest(BaseModel):
       "of the library `reporting_standard` being extended."
     ),
   )
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "For a `chart_of_accounts`: the entity whose books it keeps, default "
+      "the group parent. It becomes that entity's primary chart only if the "
+      "entity has none; otherwise it is linked beside the primary, which "
+      "stays. Not read by other types."
+    ),
+  )
   version: str | None = None
   description: str | None = None
   standard: str | None = None
@@ -390,6 +399,8 @@ class CreateTaxonomyBlockRequest(BaseModel):
       raise ValueError(
         "parent_taxonomy_id is required when taxonomy_type == 'reporting_extension'."
       )
+    if self.entity_id is not None and self.taxonomy_type != "chart_of_accounts":
+      raise ValueError("entity_id is read only for taxonomy_type 'chart_of_accounts'.")
     return self
 
   model_config = ConfigDict(

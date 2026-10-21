@@ -180,13 +180,44 @@ def _namespace_taken(session: Session, namespace: str) -> bool:
 def _auto_link_entity(
   session: Session, taxonomy_id: str, entity_id: str | None
 ) -> None:
-  """Link the chart to the entity that keeps its books in it, as that
-  entity's primary chart_of_accounts.
+  """Link the chart to the entity that keeps its books in it: as its primary
+  chart_of_accounts when it has none, else beside the primary, which a new
+  chart never displaces (`link-entity-taxonomy` is how a primary changes).
 
-  No-op without an entity. Demotes the entity's existing primary CoA link
-  (one primary per entity) and promotes an existing non-primary link.
+  No-op without an entity. Promotes an existing non-primary link only when
+  the entity has no primary.
   """
   if entity_id is None:
+    return
+
+  has_primary = session.execute(
+    select(EntityTaxonomy.taxonomy_id).where(
+      EntityTaxonomy.entity_id == entity_id,
+      EntityTaxonomy.basis == "chart_of_accounts",
+      EntityTaxonomy.is_primary.is_(True),
+      EntityTaxonomy.taxonomy_id != taxonomy_id,
+    )
+  ).first()
+  if has_primary is not None:
+    if (
+      session.execute(
+        select(EntityTaxonomy.id).where(
+          EntityTaxonomy.entity_id == entity_id,
+          EntityTaxonomy.taxonomy_id == taxonomy_id,
+          EntityTaxonomy.basis == "chart_of_accounts",
+        )
+      ).first()
+      is None
+    ):
+      session.add(
+        EntityTaxonomy(
+          entity_id=entity_id,
+          taxonomy_id=taxonomy_id,
+          basis="chart_of_accounts",
+          is_primary=False,
+        )
+      )
+      session.flush()
     return
 
   existing = session.execute(
@@ -258,7 +289,7 @@ def create(
       f"{payload.taxonomy_type!r}"
     )
 
-  owner_id = find_entity_id(session, entity_id)
+  owner_id = find_entity_id(session, entity_id or payload.entity_id)
   if payload.standard is None:
     namespace = chart_namespace(session, owner_id)
     if namespace is not None:

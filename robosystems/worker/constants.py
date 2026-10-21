@@ -28,6 +28,8 @@ TASK_TIMEOUTS: dict[str, int] = {
   # per-request timeout. This value is also run_blocking's join grace and the
   # close fence wait (fence_wait_ms).
   "period_close": 600,
+  # Up to 24 recloses, each a close's own work.
+  "plan_history_backfill": 1800,
 }
 DEFAULT_TASK_TIMEOUT = 120
 

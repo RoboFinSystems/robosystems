@@ -724,90 +724,152 @@ def _backfill_response(**overrides) -> BackfillPlanHistoryResponse:
   return BackfillPlanHistoryResponse(**defaults)
 
 
+@contextmanager
+def _patch_backfill_dispatch(storage, *, gate_error=None):
+  enqueue = AsyncMock(return_value={"operation_id": "op_backfill_1"})
+  gate = (
+    patch(f"{MODULE}.require_graph_extension_mcp", side_effect=gate_error)
+    if gate_error
+    else patch(f"{MODULE}.require_graph_extension_mcp", return_value=MagicMock())
+  )
+  with (
+    gate,
+    patch("robosystems.worker.client.enqueue_task", enqueue),
+    patch(
+      "robosystems.middleware.sse.event_storage.get_event_storage",
+      return_value=storage,
+    ),
+  ):
+    yield enqueue
+
+
 class TestBackfillPlanHistoryTool:
-  @pytest.mark.asyncio
-  async def test_delegates_and_reshapes(self):
-    tool = BackfillPlanHistoryTool(_client(user_id="usr_abc"))
-    with (
-      _patch_sessions(),
-      patch(
-        f"{MODULE}.ops_backfill_plan_history", return_value=_backfill_response()
-      ) as ops,
-    ):
-      result = await tool.execute({"start_period": "2024-07", "max_periods": 1})
-
-    ops.assert_called_once()
-    body = ops.call_args.args[3]
-    assert body.start_period == "2024-07"
-    assert body.max_periods == 1
-    assert ops.call_args.kwargs["actor_type"] == "agent"
-    assert result["effective_start_period"] == "2024-07"
-    assert result["remaining_periods"] == ["2024-08", "2024-09"]
-    assert result["processed"][0]["period"] == "2024-07"
-    assert result["processed"][0]["status"] == "stamped"
-    assert result["fiscal_calendar"]["graph_id"] == GRAPH_ID
+  """The backfill recloses up to 24 months, so it runs on the worker as a
+  close does, and the tool hands back what the task produced."""
 
   @pytest.mark.asyncio
-  async def test_the_named_entity_reaches_the_backfill(self):
+  async def test_the_backfill_is_dispatched_with_its_arguments(self):
     tool = BackfillPlanHistoryTool(_client(user_id="usr_abc"))
-    with (
-      _patch_sessions(),
-      patch(
-        f"{MODULE}.ops_backfill_plan_history", return_value=_backfill_response()
-      ) as ops,
-    ):
-      await tool.execute({"entity_id": "ent_sub"})
+    storage = _Storage((OperationStatus.COMPLETED, {"remaining_periods": []}))
 
-    assert ops.call_args.args[3].entity_id == "ent_sub"
-    assert ops.call_args.kwargs["entity_id"] == "ent_sub"
+    with _patch_backfill_dispatch(storage) as enqueue:
+      result = await tool.execute(
+        {"start_period": "2024-07", "max_periods": 1, "entity_id": "ent_sub"}
+      )
+
+    kwargs = enqueue.await_args.kwargs
+    assert kwargs["task_type"] == "plan_history_backfill"
+    assert kwargs["params"]["start_period"] == "2024-07"
+    assert kwargs["params"]["max_periods"] == 1
+    assert kwargs["params"]["entity_id"] == "ent_sub"
+    assert kwargs["params"]["actor_id"] == "usr_abc"
+    assert result == {"remaining_periods": []}
 
   @pytest.mark.asyncio
   async def test_defaults_apply_when_arguments_empty(self):
     tool = BackfillPlanHistoryTool(_client(user_id="usr_abc"))
-    with (
-      _patch_sessions(),
-      patch(
-        f"{MODULE}.ops_backfill_plan_history", return_value=_backfill_response()
-      ) as ops,
-    ):
+    storage = _Storage((OperationStatus.COMPLETED, {}))
+
+    with _patch_backfill_dispatch(storage) as enqueue:
       await tool.execute({})
 
-    body = ops.call_args.args[3]
-    assert body.start_period is None
-    assert body.max_periods == 12
-    assert body.allow_stale_sync is False
+    params = enqueue.await_args.kwargs["params"]
+    assert params["start_period"] is None
+    assert params["max_periods"] == 12
+    assert params["allow_stale_sync"] is False
 
   @pytest.mark.asyncio
-  async def test_precondition_error_maps_to_code(self):
+  async def test_a_backfill_past_the_budget_reports_it_is_running(self, monkeypatch):
+    monkeypatch.setattr(BackfillPlanHistoryTool, "POLL_BUDGET_S", 0.05)
+    monkeypatch.setattr(BackfillPlanHistoryTool, "POLL_INTERVAL_S", 0.01)
     tool = BackfillPlanHistoryTool(_client(user_id="usr_abc"))
+    storage = _Storage((OperationStatus.RUNNING, None))
+
+    with _patch_backfill_dispatch(storage):
+      result = await tool.execute({})
+
+    assert result["status"] == "in_progress"
+    assert result["worker_started"] is True
+    assert result["operation_id"] == "op_backfill_1"
+
+  @pytest.mark.asyncio
+  async def test_rejects_on_repo_graph_before_dispatch(self):
+    tool = BackfillPlanHistoryTool(_client(user_id="usr_abc"))
+    storage = _Storage((OperationStatus.COMPLETED, {}))
+
+    with _patch_backfill_dispatch(
+      storage,
+      gate_error=MCPExtensionGateError(
+        "repository_write_forbidden",
+        "roboledger commands are not available on repository graphs",
+      ),
+    ) as enqueue:
+      result = await tool.execute({})
+
+    assert result["error"] == "repository_write_forbidden"
+    enqueue.assert_not_awaited()
+
+
+class TestPlanHistoryBackfillTask:
+  """What the worker task runs and hands back."""
+
+  @contextmanager
+  def _sessions(self):
+    cm = MagicMock()
+    cm.__enter__ = MagicMock(return_value=MagicMock())
+    cm.__exit__ = MagicMock(return_value=False)
     with (
-      _patch_sessions(),
+      patch("robosystems.db.extensions.extensions_session", return_value=cm),
+      patch("robosystems.db.platform.platform_session", return_value=cm),
       patch(
-        f"{MODULE}.ops_backfill_plan_history",
+        "robosystems.operations.roboledger.reads.fiscal_calendar.entity_sync_state",
+        return_value=(False, None),
+      ),
+      patch(
+        "robosystems.operations.roboledger.entity_scope.find_entity_id",
+        return_value="ent_parent",
+      ),
+    ):
+      yield
+
+  def test_delegates_and_reshapes(self):
+    from robosystems.operations.roboledger.tasks.plan_history_backfill import (
+      backfill_payload,
+    )
+
+    with (
+      self._sessions(),
+      patch(
+        "robosystems.operations.roboledger.commands.fiscal_calendar.backfill_plan_history",
+        return_value=_backfill_response(),
+      ) as ops,
+    ):
+      result = backfill_payload(
+        GRAPH_ID, {"start_period": "2024-07", "max_periods": 1}, "usr_abc"
+      )
+
+    body = ops.call_args.args[3]
+    assert body.start_period == "2024-07"
+    assert ops.call_args.kwargs["actor_type"] == "agent"
+    assert ops.call_args.kwargs["actor_id"] == "usr_abc"
+    assert result["remaining_periods"] == ["2024-08", "2024-09"]
+    assert result["processed"][0]["status"] == "stamped"
+    assert result["fiscal_calendar"]["graph_id"] == GRAPH_ID
+
+  def test_precondition_error_maps_to_code(self):
+    from robosystems.operations.roboledger.tasks.plan_history_backfill import (
+      backfill_payload,
+    )
+
+    with (
+      self._sessions(),
+      patch(
+        "robosystems.operations.roboledger.commands.fiscal_calendar.backfill_plan_history",
         side_effect=BackfillPreconditionError(
           "nothing_closed", "Nothing is closed yet."
         ),
       ),
     ):
-      result = await tool.execute({})
+      result = backfill_payload(GRAPH_ID, {}, "usr_abc")
 
-    assert result["error"] == "nothing_closed"
-    assert "closed" in result["message"]
-
-  @pytest.mark.asyncio
-  async def test_rejects_on_repo_graph_before_ops(self):
-    tool = BackfillPlanHistoryTool(_client(user_id="usr_abc"))
-    with (
-      patch(
-        f"{MODULE}.require_graph_extension_mcp",
-        side_effect=MCPExtensionGateError(
-          "repository_write_forbidden",
-          "roboledger commands are not available on repository graphs",
-        ),
-      ),
-      patch(f"{MODULE}.ops_backfill_plan_history") as ops,
-    ):
-      result = await tool.execute({})
-
-    assert result["error"] == "repository_write_forbidden"
-    ops.assert_not_called()
+    assert result == {"error": "nothing_closed", "message": "Nothing is closed yet."}

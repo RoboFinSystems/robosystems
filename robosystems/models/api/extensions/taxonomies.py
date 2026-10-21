@@ -114,16 +114,17 @@ class AssociationResponse(BaseModel):
   replaced_association_id: str | None = Field(
     None,
     description=(
-      "The arc this write removed in the same transaction, when the call "
-      "named one in `replaces_association_id`."
+      "The arc this one replaced, when the write named one in "
+      "`replaces_association_id`. On a read, set for an arc whose move "
+      "reached a closed month."
     ),
   )
   reclassified_periods: list[str] = Field(
     default_factory=list,
     description=(
-      "Closed months whose live statements now read through this arc while "
-      "their stamped sets keep the answer as closed. Empty unless the write "
-      "replaced an arc on an account with landed history in a closed month."
+      "Closed months whose live statements read through this arc while "
+      "their stamped sets keep the answer as closed. Empty unless the arc "
+      "replaced one on an account with landed history in a closed month."
     ),
   )
 

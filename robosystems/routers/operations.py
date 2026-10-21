@@ -333,6 +333,7 @@ _RUNS_TO_COMPLETION = frozenset(
     "graph_materialization",
     "extensions_materialize",
     "period_close",
+    "plan_history_backfill",
   }
 )
 

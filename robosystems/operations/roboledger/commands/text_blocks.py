@@ -27,6 +27,7 @@ from robosystems.models.extensions.roboledger.fact import Fact
 from robosystems.models.extensions.roboledger.fact_set import FactSet
 from robosystems.models.extensions.structure import TEXT_BLOCK_CAPS, Structure
 from robosystems.operations.information_block.envelope import DISCLOSURE_BLOCK_TYPE
+from robosystems.operations.locking import lock_by_id
 from robosystems.operations.roboledger.fact_set import create_fact_set
 from robosystems.operations.search.markdown_parser import (
   parse_frontmatter,
@@ -173,6 +174,17 @@ def bind_text_block(
     asserted_by=created_by,
   )
 
+  # Locked before the lookup: two writers resolving "no standing set" would
+  # each insert one. No-key, so a close stamping sets on this structure is
+  # not held. Contention raises `RowLockedError` (409).
+  lock_by_id(
+    session,
+    Structure,
+    body.structure_id,
+    f"Disclosure structure {body.structure_id} is being written by another process. "
+    "Retry in a moment.",
+    key_share=True,
+  )
   standing = session.execute(
     select(FactSet)
     .where(

@@ -32,6 +32,7 @@ class TestAutoLinkEntity:
   def test_no_prior_link_creates_primary(self) -> None:
     """Entity exists but no CoA link yet → new primary row added."""
     session = MagicMock()
+    session.execute.return_value.first.return_value = None  # no other primary
     session.execute.return_value.scalar_one_or_none.side_effect = [None]
     _auto_link_entity(session, "tx_1", ENTITY_ID)
     session.add.assert_called_once()
@@ -44,6 +45,7 @@ class TestAutoLinkEntity:
     """Link already exists and is primary → early return, no writes."""
     existing = _entity_taxonomy(taxonomy_id="tx_1", is_primary=True)
     session = MagicMock()
+    session.execute.return_value.first.return_value = None
     session.execute.return_value.scalar_one_or_none.side_effect = [existing]
     _auto_link_entity(session, "tx_1", ENTITY_ID)
     session.add.assert_not_called()
@@ -53,27 +55,30 @@ class TestAutoLinkEntity:
     """Link exists but is non-primary → flip is_primary, no new row."""
     existing = _entity_taxonomy(taxonomy_id="tx_1", is_primary=False)
     session = MagicMock()
+    session.execute.return_value.first.return_value = None
     session.execute.return_value.scalar_one_or_none.side_effect = [existing]
     _auto_link_entity(session, "tx_1", ENTITY_ID)
     assert existing.is_primary is True
     session.add.assert_not_called()
     session.flush.assert_called()
 
-  def test_new_primary_demotes_old_primary(self) -> None:
-    """Creating a new primary link calls query().filter().update() to demote others."""
+  def test_a_chart_beside_a_primary_never_demotes_it(self) -> None:
+    """The entity already keeps its books in another chart: the new one is
+    linked beside it, non-primary, and nothing is demoted."""
     session = MagicMock()
-    session.execute.return_value.scalar_one_or_none.side_effect = [None]
+    # The other primary, then no link of this chart yet.
+    session.execute.return_value.first.side_effect = [("tx_old",), None]
     _auto_link_entity(session, "tx_new", ENTITY_ID)
-    session.query.assert_called()
-    update_call = session.query.return_value.filter.return_value.update
-    update_call.assert_called_once_with(
-      {"is_primary": False}, synchronize_session=False
-    )
+    added = session.add.call_args[0][0]
+    assert added.taxonomy_id == "tx_new"
+    assert added.is_primary is False
+    session.query.return_value.filter.return_value.update.assert_not_called()
 
   def test_idempotent_second_call(self) -> None:
     """Calling _auto_link_entity twice for the same taxonomy is a no-op on second call."""
     existing = _entity_taxonomy(taxonomy_id="tx_1", is_primary=True)
     session = MagicMock()
+    session.execute.return_value.first.return_value = None
     session.execute.return_value.scalar_one_or_none.side_effect = [existing, existing]
     _auto_link_entity(session, "tx_1", ENTITY_ID)
     _auto_link_entity(session, "tx_1", ENTITY_ID)

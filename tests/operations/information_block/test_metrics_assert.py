@@ -12,6 +12,15 @@ import pytest
 from robosystems.models.api.information_block import AssertMetricsRequest
 from robosystems.operations.information_block import metrics as metrics_mod
 
+
+@pytest.fixture(autouse=True)
+def _structure_lock():
+  """A mock session cannot hold the structure's row lock; the lock's own
+  behavior runs against a real database in test_text_block_bind_db.py."""
+  with patch("robosystems.operations.information_block.metrics.lock_by_id"):
+    yield
+
+
 PERIOD_START = date(2026, 7, 1)
 PERIOD_END = date(2026, 7, 31)
 

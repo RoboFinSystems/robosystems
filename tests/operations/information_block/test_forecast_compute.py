@@ -903,6 +903,13 @@ class TestScheduleDeltaComposition:
 
 
 class TestUpsertMonthSet:
+  @pytest.fixture(autouse=True)
+  def _structure_lock(self):
+    """A mock session cannot hold the structure's row lock; the lock's own
+    behavior runs against a real database in test_text_block_bind_db.py."""
+    with patch.object(fc, "lock_by_id"):
+      yield
+
   def test_creates_scenario_keyed_set_with_typed_facts(self) -> None:
     session = MagicMock()
     session.execute.return_value.scalar_one_or_none.return_value = None

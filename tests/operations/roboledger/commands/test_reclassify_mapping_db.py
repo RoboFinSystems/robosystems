@@ -123,6 +123,21 @@ def test_a_move_within_the_statement_replaces_the_arc_and_records_it(
   }
 
 
+def test_the_move_reads_back_on_the_mapping(ext_session, mapped):
+  """The replaced arc and the closed months it reaches are visible after the
+  write, not only in its response."""
+  from robosystems.operations.roboledger.reads.taxonomies import get_mapping_detail
+
+  old_id = mapped["card_arc"].id
+  _move(ext_session, mapped, to=mapped["other"], replaces=old_id)
+  ext_session.commit()
+
+  detail = get_mapping_detail(ext_session, mapped["mapping"].id)
+  [moved] = [a for a in detail.associations if a.from_element_id == mapped["card"].id]
+  assert moved.replaced_association_id == old_id
+  assert moved.reclassified_periods == ["2026-06"]
+
+
 def test_a_move_across_statements_leaves_the_mapping_as_it_was(ext_session, mapped):
   with pytest.raises(
     ProtectedFactsError, match="a restatement, not a reclassification"
