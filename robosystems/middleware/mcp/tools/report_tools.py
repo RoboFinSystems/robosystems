@@ -194,7 +194,11 @@ class GetReportBundleTool:
     try:
       with extensions_session(graph_id) as session:
         response = reads_reports.get_report_download_url(
-          session, graph_id, report_id, flavor=flavor
+          session,
+          graph_id,
+          report_id,
+          flavor=flavor,
+          actor_id=_resolve_acting_user(self.client, graph_id),
         )
     except reads_reports.ReportBundleNotAvailableError as e:
       return {"error": "not_available", "message": str(e)}

@@ -15,6 +15,7 @@ import pytest
 from xbrlkit.deserialize.holon import from_holon_report
 from xbrlkit.serialize import to_holon
 
+import robosystems.operations.serialization.rdf.lineage as lineage_module
 from robosystems.operations.serialization.bundle import BundleFact
 from robosystems.operations.serialization.flavors import RdfFlavor
 from robosystems.operations.serialization.rdf import serialize_to_rdf
@@ -29,8 +30,10 @@ from robosystems.operations.serialization.rdf.lineage import (
   EventRow,
   Lineage,
   LineageContextClashError,
+  LineageTooLargeError,
   LineRow,
   TransactionRow,
+  _flow_as_of,
   build_lineage,
   report_span,
   splice_lineage,
@@ -224,6 +227,9 @@ def ledger() -> _Ledger:
     "acct_ic": ElementRow(
       "acct_ic", "Intercompany Revenue — Eliminated", "4900", None, "credit", "duration"
     ),
+    "acct_other": ElementRow(
+      "acct_other", "Petty Cash", "1010", None, "debit", "instant"
+    ),
     "flow_new": ElementRow(
       "flow_new", "Repayments", None, "rs-gaap:RepaymentsOfDebt", None, "duration"
     ),
@@ -265,6 +271,7 @@ def ledger() -> _Ledger:
         adjustment_kind="elimination_intercompany",
         adjusts_entity_id="ent_03",
       ),
+      _entry("je_7", date(2024, 4, 1), event="evt_7"),
     )
   }
   led._transactions = {
@@ -336,6 +343,7 @@ def ledger() -> _Ledger:
         amount=4_000,
       ),
       _event("evt_sched", date(2024, 1, 15), "schedule_entry_due"),
+      _event("evt_7", date(2024, 4, 1), "journal_entry_recorded"),
     )
   }
   led._discharges = [DischargeRow("evt_2", "evt_5", 2_500)]
@@ -346,6 +354,7 @@ def ledger() -> _Ledger:
     _line("li_4", "je_4", "acct_cash", date(2024, 5, 2), credit=500),
     _line("li_5", "je_5", "acct_rev", date(2024, 2, 1), credit=4_000),
     _line("li_6", "je_6", "acct_ic", date(2024, 12, 31), debit=600, entity_id="ent_02"),
+    _line("li_7", "je_7", "acct_other", date(2024, 4, 1), debit=100),
   ]
   led._dims = {"li_6": ["department=Roastery"]}
   return led
@@ -386,13 +395,14 @@ def bundle():
       id="f_bad",
       element_id="AssetsCurrent",
       element_qname="rs-gaap:AssetsCurrent",
-      value=75.0,
+      value=1.0,
       period_ref="p_instant",
       unit_ref="u_USD",
       entity_ref="ent_01",
+      # Its own account and line, so a refusal can be seen to leave nothing.
       provenance=_pivot(
-        [{"entity_id": "ent_01", "account_id": "acct_cash", "value": 75.0}],
-        cash_lines,
+        [{"entity_id": "ent_01", "account_id": "acct_other", "value": "1.00"}],
+        ["li_7"],
         content_hash="sha256:deadbeef",
       ),
       frozen_at=FROZEN,
@@ -422,7 +432,7 @@ def bundle():
       provenance=_pivot(
         [
           {"entity_id": "ent_01", "account_id": "acct_rev", "value": 40.0},
-          {"entity_id": "ent_02", "account_id": "acct_ic", "value": -6.0},
+          {"entity_id": "ent_02", "account_id": "acct_ic", "value": "-6.00"},
         ],
         ["li_5", "li_6"],
         period="2024-01-01/2024-12-31",
@@ -477,8 +487,11 @@ class TestTheHashIsTheContract:
     nodes = _by_id(lineage)
     assert not any("f_live" in iri or "f_rollup" in iri for iri in nodes)
 
-  def test_a_refused_fact_leaves_no_contribution_behind(self, lineage) -> None:
-    assert not any("f_bad" in iri for iri in _by_id(lineage))
+  def test_a_refused_fact_leaves_nothing_of_its_own_behind(self, lineage) -> None:
+    nodes = _by_id(lineage)
+    assert not any("f_bad" in iri for iri in nodes)
+    for orphan in ("line/li_7", "entry/je_7", "event/evt_7", "account/acct_other"):
+      assert f"{ROOT}/{orphan}" not in nodes
 
 
 @pytest.mark.unit
@@ -649,3 +662,52 @@ class TestTheSplice:
   def test_the_rdf_dispatch_names_the_session_bound_entry_point(self, bundle) -> None:
     with pytest.raises(ValueError, match="serialize_to_lineage_holon_jsonld"):
       serialize_to_rdf(bundle, RdfFlavor.HOLON_JSONLD_LINEAGE)
+
+
+@pytest.mark.unit
+class TestTheReviewsEdges:
+  def test_the_flow_tag_cutoff_is_a_moment_not_a_string(self) -> None:
+    """A retag a microsecond after the freeze, written with an offset and
+    microseconds, is after it; one at the very moment is not."""
+    after = _entry(
+      "je_r",
+      date(2024, 3, 1),
+      flow_retags=(
+        {
+          "at": "2025-01-05T12:00:00.000001+00:00",
+          "from": {"li_r": "rs-gaap:Before"},
+        },
+      ),
+    )
+    at_the_moment = _entry(
+      "je_s",
+      date(2024, 3, 1),
+      flow_retags=({"at": "2025-01-05T12:00:00+00:00", "from": {"li_r": "x"}},),
+    )
+    unparsable = _entry(
+      "je_t",
+      date(2024, 3, 1),
+      flow_retags=({"at": "yesterday", "from": {"li_r": "x"}},),
+    )
+    assert _flow_as_of(after, "li_r", "rs-gaap:Now", FROZEN) == "rs-gaap:Before"
+    assert _flow_as_of(at_the_moment, "li_r", "rs-gaap:Now", FROZEN) == "rs-gaap:Now"
+    assert _flow_as_of(unparsable, "li_r", "rs-gaap:Now", FROZEN) == "rs-gaap:Now"
+
+  def test_a_descriptor_amount_may_be_a_string(self, lineage) -> None:
+    c = _by_id(lineage)[f"{ROOT}/contribution/f_widgets/ent_02/acct_ic"]
+    assert c["amount"] == "-6.00"
+
+  def test_more_lines_than_one_file_carries_is_refused(
+    self, bundle, ledger, monkeypatch
+  ) -> None:
+    monkeypatch.setattr(lineage_module, "LINEAGE_LINE_CEILING", 1)
+    with pytest.raises(LineageTooLargeError, match="narrower span"):
+      build_lineage(bundle, ledger, root=ROOT, describe_from=None)
+
+  def test_a_holon_that_does_not_bind_a_reused_term_is_refused(
+    self, bundle, lineage
+  ) -> None:
+    document = json.loads(serialize_to_holon_jsonld(bundle))
+    del document["@context"]["prefLabel"]
+    with pytest.raises(LineageContextClashError, match="prefLabel"):
+      splice_lineage(json.dumps(document), lineage, root=ROOT)

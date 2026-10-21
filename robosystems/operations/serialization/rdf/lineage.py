@@ -492,8 +492,18 @@ def _dollars(cents: int) -> str:
   return str((Decimal(int(cents)) / 100).quantize(Decimal("0.01")))
 
 
-def _amount(value: float) -> str:
+def _amount(value: Any) -> str:
+  """A descriptor amount (a float, a Decimal or a string) to the cent."""
   return str(Decimal(str(value)).quantize(Decimal("0.01")))
+
+
+def _when(text_value: Any) -> datetime | None:
+  """An ISO-8601 stamp as an aware datetime, or None when it does not parse."""
+  try:
+    stamp = datetime.fromisoformat(str(text_value))
+  except TypeError, ValueError:
+    return None
+  return stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)
 
 
 def _iso(value: date | datetime | None) -> str | None:
@@ -551,15 +561,28 @@ def _flow_as_of(
   earliest such record is the tag the frozen column was pivoted with."""
   if frozen_at is None or not entry.flow_retags:
     return current
-  cutoff = _iso(frozen_at) or ""
-  for record in sorted(entry.flow_retags, key=lambda r: str(r.get("at", ""))):
-    at = str(record.get("at", ""))
+  cutoff = frozen_at if frozen_at.tzinfo else frozen_at.replace(tzinfo=UTC)
+  dated = [
+    (at, record)
+    for record in entry.flow_retags
+    if (at := _when(record.get("at"))) is not None
+  ]
+  for at, record in sorted(dated, key=lambda pair: pair[0]):
     if at <= cutoff:
       continue
     before = record.get("from") or {}
     if line_id in before:
       return before[line_id]
   return current
+
+
+# The most lines one file describes. Past it the export refuses rather than
+# build an unbounded graph inside a request; a narrower report is the answer.
+LINEAGE_LINE_CEILING = 25_000
+
+
+class LineageTooLargeError(ValueError):
+  """The report's lineage would describe more lines than one file carries."""
 
 
 def build_lineage(
@@ -600,6 +623,11 @@ def build_lineage(
     window_end = period.period_end
     all_ids: list[str] = []
     fact_contributions: list[dict[str, Any]] = []
+    # Collected per fact and merged only once its hash checks out, so a
+    # refused fact leaves no line, entry or event of its own in the file.
+    fact_members: dict[str, LineRow] = {}
+    fact_described: set[str] = set()
+    fact_prior: dict[str, list[LineRow]] = {}
     for src in descriptor["sources"]:
       entity_id, account_id = str(src["entity_id"]), str(src["account_id"])
       rows = reader.lines(entity_id, window_start, window_end, [account_id]).get(
@@ -622,7 +650,7 @@ def build_lineage(
           "substantiates": iri("fact", fact.id),
           "entity": iri("entity", entity_id),
           "account": iri("account", account_id),
-          "amount": _amount(float(src["value"])),
+          "amount": _amount(src["value"]),
           "frozenAt": _iso(fact.frozen_at),
           "windowStart": _iso(window_start),
           "windowEnd": _iso(window_end),
@@ -634,16 +662,12 @@ def build_lineage(
       if prior:
         node["describedFrom"] = _iso(describe_from)
         node["priorLineCount"] = len(prior)
-        prior_rows[contribution_iri] = prior
+        fact_prior[contribution_iri] = prior
       fact_contributions.append(node)
       for r in rows:
-        members[r.id] = r
-        if fact.frozen_at is not None:
-          held = frozen_at_by_line.get(r.id)
-          if held is None or fact.frozen_at < held:
-            frozen_at_by_line[r.id] = fact.frozen_at
+        fact_members[r.id] = r
       for r in described:
-        described_ids.add(r.id)
+        fact_described.add(r.id)
     digest = "sha256:" + hashlib.sha256("\n".join(sorted(all_ids)).encode()).hexdigest()
     if digest != descriptor.get("content_hash") or len(all_ids) != descriptor.get(
       "line_count"
@@ -652,6 +676,20 @@ def build_lineage(
       continue
     contributions.extend(fact_contributions)
     bridges[fact.id] = [c["@id"] for c in fact_contributions]
+    members.update(fact_members)
+    described_ids |= fact_described
+    prior_rows.update(fact_prior)
+    if fact.frozen_at is not None:
+      for line_id in fact_members:
+        held = frozen_at_by_line.get(line_id)
+        if held is None or fact.frozen_at < held:
+          frozen_at_by_line[line_id] = fact.frozen_at
+
+  if len(described_ids) > LINEAGE_LINE_CEILING:
+    raise LineageTooLargeError(
+      f"The lineage would describe {len(described_ids):,} lines; one file carries "
+      f"at most {LINEAGE_LINE_CEILING:,}. Publish a report over a narrower span."
+    )
 
   # The closure of the described lines, one hop of duality beyond their events.
   described = [members[i] for i in described_ids]
@@ -899,7 +937,22 @@ def build_lineage(
 
 
 class LineageContextClashError(ValueError):
-  """A lineage term already means something else in the holon's context."""
+  """A lineage term already means something else in the holon's context, or
+  a holon term the lineage nodes reuse is not bound there."""
+
+
+# Terms the lineage nodes reuse from the holon's own context rather than
+# redeclare. A document that does not bind them would drop the properties.
+REUSED_HOLON_TERMS = (
+  "balance",
+  "category",
+  "documentation",
+  "entity",
+  "internalId",
+  "periodType",
+  "prefLabel",
+  "source",
+)
 
 
 def splice_lineage(holon: str, lineage: Lineage, *, root: str) -> str:
@@ -918,6 +971,11 @@ def splice_lineage(holon: str, lineage: Lineage, *, root: str) -> str:
     raise LineageContextClashError(
       f"lineage terms already bound in the holon context: {', '.join(clashes)}"
     )
+  unbound = sorted(term for term in REUSED_HOLON_TERMS if term not in context)
+  if unbound:
+    raise LineageContextClashError(
+      f"holon terms the lineage reuses are not in its context: {', '.join(unbound)}"
+    )
   context.update(LINEAGE_CONTEXT)
   for graph in document["@graph"]:
     if str(graph.get("@id", "")).endswith("#scene"):
@@ -929,17 +987,20 @@ def splice_lineage(holon: str, lineage: Lineage, *, root: str) -> str:
   return json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False)
 
 
-def serialize_to_lineage_holon_jsonld(
+def build_lineage_holon(
   session: Session,
   bundle: StatementBundle,
   *,
   describe: Literal["span", "full"] = "span",
-) -> str:
-  """The entitled holon: xbrlkit's three graphs plus ``#lineage``.
+) -> tuple[str, Lineage]:
+  """The entitled holon — xbrlkit's three graphs plus ``#lineage`` — and the
+  lineage it was built from, whose ``refused`` names any figure left without
+  a bridge because its reconstruction missed the frozen hash.
 
   ``describe`` bounds the lines that get a node: ``"span"`` (the default)
   those dated inside the report's own columns, ``"full"`` every member line
   back to the opening of the books. Members are listed by IRI either way.
+  Raises :class:`LineageTooLargeError` past :data:`LINEAGE_LINE_CEILING`.
   """
   root = str(holon_root(report_identifier(bundle)))
   describe_from: date | None = None
@@ -957,17 +1018,30 @@ def serialize_to_lineage_holon_jsonld(
       bundle.report_meta.report_id if bundle.report_meta else "?",
       ", ".join(lineage.refused[:5]),
     )
-  return splice_lineage(serialize_to_holon_jsonld(bundle), lineage, root=root)
+  return splice_lineage(serialize_to_holon_jsonld(bundle), lineage, root=root), lineage
+
+
+def serialize_to_lineage_holon_jsonld(
+  session: Session,
+  bundle: StatementBundle,
+  *,
+  describe: Literal["span", "full"] = "span",
+) -> str:
+  """The entitled holon as text; see :func:`build_lineage_holon`."""
+  return build_lineage_holon(session, bundle, describe=describe)[0]
 
 
 __all__ = [
   "LINEAGE_CONTEXT",
   "LINEAGE_GRAPH",
+  "LINEAGE_LINE_CEILING",
   "LedgerReader",
   "Lineage",
   "LineageContextClashError",
+  "LineageTooLargeError",
   "SqlLedgerReader",
   "build_lineage",
+  "build_lineage_holon",
   "report_span",
   "serialize_to_lineage_holon_jsonld",
   "splice_lineage",

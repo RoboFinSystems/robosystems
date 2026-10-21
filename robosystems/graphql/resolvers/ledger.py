@@ -13,7 +13,11 @@ import strawberry
 from sqlalchemy.exc import ProgrammingError
 from strawberry.types import Info
 
-from robosystems.graphql.context import GraphQLContext, require_graph_id
+from robosystems.graphql.context import (
+  GraphQLContext,
+  require_graph_id,
+  require_user,
+)
 from robosystems.graphql.execution import log_masked_fault
 from robosystems.graphql.resolvers._common import (
   open_extensions_session as _open_session,
@@ -1640,7 +1644,7 @@ class LedgerQuery:
         extensions={"code": "INVALID_EXPIRES_IN"},
       )
     graph_id = require_graph_id(info)
-    user = info.context.get("user")
+    actor_id = str(require_user(info).id)
     try:
       with _open_session_for_any(info, _REPORT_EXTENSIONS) as session:
         response = reads_reports.get_report_download_url(
@@ -1649,7 +1653,7 @@ class LedgerQuery:
           report_id,
           flavor=format.value,
           expires_in=expires_in,
-          actor_id=str(user.id) if user is not None else None,
+          actor_id=actor_id,
         )
     except reads_reports.ReportBundleNotAvailableError as exc:
       raise strawberry.exceptions.StrawberryGraphQLError(

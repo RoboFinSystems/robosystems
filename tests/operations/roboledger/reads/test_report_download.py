@@ -429,14 +429,17 @@ class TestLineageHolon:
 
   @pytest.mark.unit
   def test_cache_miss_builds_the_holon_with_lineage_from_the_books(self):
+    from robosystems.operations.serialization.rdf.lineage import Lineage
+
     session = _session(_report())
+    complete = Lineage(nodes=[], bridges={"f_1": ["c_1"]})
     with (
       patch(f"{_REPORTS}.S3Client") as s3_cls,
       patch("robosystems.operations.serialization.build_report_bundle") as build,
       patch(
-        "robosystems.operations.serialization.serialize_to_lineage_holon_jsonld",
-        return_value='{"@graph": []}',
-      ) as serialize,
+        "robosystems.operations.serialization.rdf.lineage.build_lineage_holon",
+        return_value=('{"@graph": []}', complete),
+      ) as built,
     ):
       s3 = s3_cls.return_value
       s3.object_exists.return_value = False
@@ -447,11 +450,64 @@ class TestLineageHolon:
       )
 
     assert resp is not None
+    assert resp.omitted_content == []
     build.assert_called_once_with(session, "kg1", "rpt_1")
-    serialize.assert_called_once_with(session, build.return_value)
+    built.assert_called_once_with(session, build.return_value)
     _, kwargs = s3.upload_string.call_args
     assert kwargs["key"] == "report-bundles/kg1/rpt_1/g3.lineage.holon.jsonld"
     assert kwargs["content"] == '{"@graph": []}'
+
+  @pytest.mark.unit
+  def test_a_file_with_refused_figures_is_served_but_never_cached(self):
+    """A figure whose reconstruction missed its hash is named in
+    `omitted_content`, and the file goes under a partial key the next
+    download rebuilds instead of the generation's cache key."""
+    from robosystems.operations.serialization.rdf.lineage import Lineage
+
+    session = _session(_report())
+    partial = Lineage(nodes=[], bridges={"f_1": ["c_1"]}, refused=["f_2", "f_3"])
+    with (
+      patch(f"{_REPORTS}.S3Client") as s3_cls,
+      patch("robosystems.operations.serialization.build_report_bundle"),
+      patch(
+        "robosystems.operations.serialization.rdf.lineage.build_lineage_holon",
+        return_value=('{"@graph": []}', partial),
+      ),
+    ):
+      s3 = s3_cls.return_value
+      s3.object_exists.return_value = False
+      s3.upload_string.return_value = True
+      s3.generate_presigned_url.return_value = "https://signed.example/partial"
+      resp = get_report_download_url(
+        session, "kg1", "rpt_1", flavor="holon-jsonld-lineage"
+      )
+
+    assert resp is not None
+    assert resp.omitted_content == ["lineage:f_2", "lineage:f_3"]
+    _, kwargs = s3.upload_string.call_args
+    assert kwargs["key"] == "report-bundles/kg1/rpt_1/g3.lineage.partial.holon.jsonld"
+    _, signed = s3.generate_presigned_url.call_args
+    assert signed["key"] == kwargs["key"]
+
+  @pytest.mark.unit
+  def test_a_lineage_too_large_for_one_file_is_not_available(self):
+    from robosystems.operations.serialization.rdf.lineage import (
+      LineageTooLargeError,
+    )
+
+    session = _session(_report())
+    with (
+      patch(f"{_REPORTS}.S3Client") as s3_cls,
+      patch("robosystems.operations.serialization.build_report_bundle"),
+      patch(
+        "robosystems.operations.serialization.rdf.lineage.build_lineage_holon",
+        side_effect=LineageTooLargeError("too many lines; narrower span"),
+      ),
+    ):
+      s3_cls.return_value.object_exists.return_value = False
+      with pytest.raises(ReportBundleNotAvailableError, match="narrower span"):
+        get_report_download_url(session, "kg1", "rpt_1", flavor="holon-jsonld-lineage")
+    s3_cls.return_value.upload_string.assert_not_called()
 
   @pytest.mark.unit
   def test_a_received_report_has_no_lineage_even_when_a_file_exists(self):
