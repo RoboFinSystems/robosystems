@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from unittest.mock import MagicMock
 
+import pytest
+
 from robosystems.models.api.extensions.schedules import (
   DeleteScheduleRequest,
   RebuildScheduleRequest,
@@ -640,6 +642,18 @@ def _rebuild_session(
 
   session.query.side_effect = _query
   return session, deleted_models
+
+
+@pytest.fixture(autouse=True)
+def _no_disposal():
+  """A mock session answers every lookup, so the disposal check would always
+  find one; it runs against a real database in test_schedule_rebuild_db.py."""
+  from unittest.mock import patch
+
+  with patch(
+    "robosystems.operations.roboledger.commands.schedules._refuse_a_disposed_schedule"
+  ):
+    yield
 
 
 def test_rebuild_schedule_voids_old_obligations_and_regenerates() -> None:

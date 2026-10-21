@@ -490,6 +490,26 @@ class ScheduleService:
           f"less residual_value ({depreciable_dollars}); the final month would "
           f"be negative."
         )
+      # It absorbs at most a cent of rounding per month, not the rest of the
+      # cost: a shortfall means the window or the amount is wrong.
+      final_dollars = round(
+        depreciable_dollars - amount_dollars * (len(periods) - 1), 2
+      )
+      if final_dollars > round(amount_dollars + 0.01 * len(periods), 2):
+        raise ValueError(
+          f"monthly_amount x {len(periods)} months does not reach original_amount "
+          f"less residual_value ({depreciable_dollars}): the final month would "
+          f"book {final_dollars}, more than a month's amount. Correct "
+          f"monthly_amount or the schedule's period_end."
+        )
+
+    # The asset's carrying value runs from cost, or without one from the
+    # curve's total, so it ends at the residual and never below zero.
+    nbv_basis = (
+      original_dollars
+      if original_dollars is not None
+      else round(amount_dollars * len(periods), 2)
+    )
 
     # Opening-balance instant facts at the first period start, so the
     # roll-forward reads Begin → movements → End. Same formulas as the loop at
@@ -526,7 +546,7 @@ class ScheduleService:
         session.add(
           Fact(
             element_id=schedule_metadata.asset_element_id,
-            value=original_dollars or amount_dollars,
+            value=nbv_basis,
             period_start=None,
             period_end=opening_instant,
             period_type="instant",
@@ -604,7 +624,7 @@ class ScheduleService:
         session.add(
           Fact(
             element_id=schedule_metadata.asset_element_id,
-            value=round((original_dollars or amount_dollars) - accumulated_debit, 2),
+            value=round(nbv_basis - accumulated_debit, 2),
             period_start=p_start,
             period_end=p_end,
             period_type="instant",
