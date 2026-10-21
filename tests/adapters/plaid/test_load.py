@@ -538,7 +538,7 @@ class TestLoadSync:
     report, captured, removals, merge, session = self._load()
     assert report.agents_created == 3
     assert len(captured) == 8
-    assert report.earliest_occurred_at == "2025-12-30T00:00:00Z"
+    assert report.earliest_by_entity == {None: "2025-12-30T00:00:00Z"}
     removals.assert_called_once()
     merge.assert_not_called()
     assert session.flushes == 1

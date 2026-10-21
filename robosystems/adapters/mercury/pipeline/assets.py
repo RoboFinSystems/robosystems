@@ -186,7 +186,11 @@ def _run_mercury_sync(
   }
   update_last_sync(context, config, summary)
   bootstrap_fiscal_calendar_if_needed(
-    context, config, report.earliest_occurred_at, source_label=SOURCE_LABEL
+    context,
+    config,
+    report.earliest_by_entity,
+    source_label=SOURCE_LABEL,
+    entity_id=sync_config.get("entity_id") or None,
   )
   mark_graph_stale(context, config, source_label=SOURCE_LABEL)
 

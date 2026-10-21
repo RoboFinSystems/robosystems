@@ -12,6 +12,7 @@ from robosystems.adapters.bank_feed.load import (
   LoadReport,
   capture_event,
   earliest_plausible,
+  earliest_plausible_by_entity,
   existing_events,
   refresh_hints,
 )
@@ -104,3 +105,16 @@ def test_existing_events_locks_the_rows_a_run_will_write():
   statement = session.execute.call_args.args[0]
   sql = str(statement.compile(dialect=postgresql.dialect()))
   assert "FOR UPDATE" in sql
+
+
+def test_earliest_is_kept_per_entity():
+  events = [
+    {"occurred_at": "2026-04-03T00:00:00Z", "entity_id": "ent_sub"},
+    {"occurred_at": "2026-02-01T00:00:00Z", "entity_id": None},
+    {"occurred_at": "2026-03-09T00:00:00Z", "entity_id": "ent_sub"},
+    {"occurred_at": "0001-01-01T00:00:00Z", "entity_id": "ent_other"},
+  ]
+  assert earliest_plausible_by_entity(events) == {
+    "ent_sub": "2026-03-09T00:00:00Z",
+    None: "2026-02-01T00:00:00Z",
+  }

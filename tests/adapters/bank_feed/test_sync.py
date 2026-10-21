@@ -48,10 +48,65 @@ class TestFirstPeriod:
 
 @pytest.mark.unit
 class TestFiscalCalendarBootstrap:
+  @pytest.fixture(autouse=True)
+  def _nothing_captured_before(self):
+    """Lines earlier syncs captured are read from the tenant schema; this
+    suite has none unless a test says so."""
+    with patch(
+      "robosystems.adapters.bank_feed.sync._earliest_captured_line",
+      return_value=None,
+    ) as earlier:
+      yield earlier
+
+  def test_an_earlier_syncs_lines_set_the_opening_month(self, _nothing_captured_before):
+    """A sync after a failed bootstrap carries only its own short window."""
+    _nothing_captured_before.return_value = "2024-11-02"
+    service = self._service()
+    _session, cm = self._session_cm()
+    with (
+      patch("robosystems.db.extensions.extensions_session", return_value=cm),
+      patch(
+        "robosystems.operations.roboledger.fiscal_calendar.FiscalCalendarService",
+        return_value=service,
+      ),
+      patch(
+        "robosystems.operations.roboledger.fiscal_calendar.current_month_period",
+        return_value="2026-09",
+      ),
+    ):
+      bootstrap_fiscal_calendar_if_needed(
+        MagicMock(), _config(), {None: "2026-09-14T00:00:00Z"}, source_label="Mercury"
+      )
+    assert service.initialize.call_args.kwargs["closed_through"] == "2024-10"
+
+  def test_a_subsidiary_takes_the_groups_fiscal_year(self):
+    service = self._service()
+    service.group_fiscal_year_start_month.return_value = 7
+    _session, cm = self._session_cm()
+    with (
+      patch("robosystems.db.extensions.extensions_session", return_value=cm),
+      patch(
+        "robosystems.operations.roboledger.fiscal_calendar.FiscalCalendarService",
+        return_value=service,
+      ),
+      patch(
+        "robosystems.operations.roboledger.fiscal_calendar.current_month_period",
+        return_value="2026-09",
+      ),
+    ):
+      bootstrap_fiscal_calendar_if_needed(
+        MagicMock(),
+        _config(),
+        {"ent_sub": "2026-03-01T00:00:00Z"},
+        source_label="Plaid",
+      )
+    assert service.initialize.call_args.kwargs["fiscal_year_start_month"] == 7
+
   def _service(self, existing=None):
     service = MagicMock()
     service.get.return_value = existing
     service.ensure_fiscal_periods.return_value = 7
+    service.group_fiscal_year_start_month.return_value = None
     return service
 
   def _session_cm(self):
@@ -76,7 +131,10 @@ class TestFiscalCalendarBootstrap:
       ),
     ):
       bootstrap_fiscal_calendar_if_needed(
-        MagicMock(), _config(), "2026-03-14T15:04:05Z", source_label="Plaid"
+        MagicMock(),
+        _config(),
+        {None: "2026-03-14T15:04:05Z"},
+        source_label="Plaid",
       )
     kwargs = service.initialize.call_args.kwargs
     assert kwargs["closed_through"] == "2026-02"
@@ -103,7 +161,7 @@ class TestFiscalCalendarBootstrap:
       ),
     ):
       bootstrap_fiscal_calendar_if_needed(
-        MagicMock(), _config(), None, source_label="Plaid"
+        MagicMock(), _config(), {}, source_label="Plaid"
       )
     assert service.initialize.call_args.kwargs["closed_through"] == "2026-07"
 
@@ -119,19 +177,71 @@ class TestFiscalCalendarBootstrap:
       ),
     ):
       bootstrap_fiscal_calendar_if_needed(
-        MagicMock(), _config(), "2026-03-01T00:00:00Z", source_label="Plaid"
+        MagicMock(),
+        _config(),
+        {None: "2026-03-01T00:00:00Z"},
+        source_label="Plaid",
       )
     service.initialize.assert_not_called()
     session.commit.assert_not_called()
+
+  def test_each_entity_opens_at_its_own_first_month(self):
+    """BF4: a feed whose accounts belong to a subsidiary opens the
+    subsidiary's books, at its lines' first month, never the parent's."""
+    service = self._service()
+    _session, cm = self._session_cm()
+    with (
+      patch("robosystems.db.extensions.extensions_session", return_value=cm),
+      patch(
+        "robosystems.operations.roboledger.fiscal_calendar.FiscalCalendarService",
+        return_value=service,
+      ),
+      patch(
+        "robosystems.operations.roboledger.fiscal_calendar.current_month_period",
+        return_value="2026-09",
+      ),
+    ):
+      bootstrap_fiscal_calendar_if_needed(
+        MagicMock(),
+        _config(),
+        {"ent_sub": "2026-05-02T00:00:00Z", "ent_parent": "2026-03-14T00:00:00Z"},
+        source_label="Mercury",
+      )
+    opened = {
+      call.kwargs["entity_id"]: call.kwargs["closed_through"]
+      for call in service.initialize.call_args_list
+    }
+    assert opened == {"ent_sub": "2026-04", "ent_parent": "2026-02"}
+    for method in ("get", "open_books_at", "ensure_fiscal_periods"):
+      assert {
+        call.kwargs["entity_id"] for call in getattr(service, method).call_args_list
+      } == {"ent_sub", "ent_parent"}
+
+  def test_a_sync_with_no_lines_opens_the_connections_entity(self):
+    service = self._service()
+    _session, cm = self._session_cm()
+    with (
+      patch("robosystems.db.extensions.extensions_session", return_value=cm),
+      patch(
+        "robosystems.operations.roboledger.fiscal_calendar.FiscalCalendarService",
+        return_value=service,
+      ),
+      patch(
+        "robosystems.operations.roboledger.fiscal_calendar.current_month_period",
+        return_value="2026-09",
+      ),
+    ):
+      bootstrap_fiscal_calendar_if_needed(
+        MagicMock(), _config(), {}, source_label="Mercury", entity_id="ent_sub"
+      )
+    assert service.initialize.call_args.kwargs["entity_id"] == "ent_sub"
 
   def test_failure_is_non_fatal(self):
     context = MagicMock()
     with patch(
       "robosystems.db.extensions.extensions_session", side_effect=RuntimeError("db")
     ):
-      bootstrap_fiscal_calendar_if_needed(
-        context, _config(), None, source_label="Plaid"
-      )
+      bootstrap_fiscal_calendar_if_needed(context, _config(), {}, source_label="Plaid")
     context.log.warning.assert_called()
 
 

@@ -419,7 +419,7 @@ def _run_body(
     transfers_matched=0,
     events_failed=failed,
     errors=list(errors),
-    earliest_occurred_at="2026-08-20T00:00:00Z",
+    earliest_by_entity={None: "2026-08-20T00:00:00Z"},
   )
   report.as_counts.return_value = {}
   run = SimpleNamespace(client=client, session=session, error=None, result=None)

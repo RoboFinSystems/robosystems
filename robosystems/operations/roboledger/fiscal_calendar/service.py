@@ -221,6 +221,95 @@ def _fence_months(
     month = next_period(month)
 
 
+# A bank line a calendar's opening retired: unlike a schedule's months
+# (`before_calendar`), restored as the line it was if the start moves earlier.
+FEED_BEFORE_CALENDAR = "feed_before_calendar"
+
+
+def _unclassified_feed_lines(entity_id: str, start: date):
+  """The entity's bank lines dated before ``start`` that nobody classified and
+  that wrote no rows: history a calendar opening after them never posts. An
+  internal transfer arrives with both legs known, so it is not among them."""
+  from robosystems.models.extensions.roboledger.entry import Entry
+  from robosystems.operations.event_block.python_handlers.bank_feed import (
+    BANK_EVENT_TYPES,
+    INTERNAL_TRANSFER,
+  )
+
+  posting_date = func.date(func.coalesce(Event.effective_at, Event.occurred_at))
+  has_rows = select(Entry.id).where(Entry.triggered_by_event_id == Event.id).exists()
+  return select(Event.id).where(
+    Event.entity_id == entity_id,
+    Event.event_type.in_(BANK_EVENT_TYPES),
+    Event.event_type != INTERNAL_TRANSFER,
+    Event.status == "captured",
+    posting_date < start,
+    ~has_rows,
+  )
+
+
+def _retire_feed_history(session: Session, entity_id: str, start: date) -> int:
+  """Void the bank lines :func:`_unclassified_feed_lines` names, each marked
+  ``feed_before_calendar``. Returns how many."""
+  from robosystems.models.extensions.roboledger.entry import Entry
+  from robosystems.operations.locking import ordered_lock_column
+
+  lines = (
+    session.query(Event)
+    .filter(Event.id.in_(_unclassified_feed_lines(entity_id, start)))
+    .order_by(ordered_lock_column())
+    .populate_existing()
+    .with_for_update()
+    .all()
+  )
+  retired = 0
+  for line in lines:
+    # Re-read under the lock: a classify or commit that held the row first
+    # has made it a person's line.
+    if (
+      line.status != "captured"
+      or session.query(
+        select(Entry.id).where(Entry.triggered_by_event_id == line.id).exists()
+      ).scalar()
+    ):
+      continue
+    line.status = "voided"
+    line.metadata_ = {
+      **dict(line.metadata_ or {}),
+      "void_reason": FEED_BEFORE_CALENDAR,
+    }
+    retired += 1
+  session.flush()
+  return retired
+
+
+def _restore_feed_history(session: Session, entity_id: str, since: date) -> int:
+  """Give back the bank lines a calendar's opening retired, once its start
+  moves earlier to ``since``: each returns to ``captured``. Returns how many."""
+  from robosystems.operations.locking import ordered_lock_column
+
+  posting_date = func.date(func.coalesce(Event.effective_at, Event.occurred_at))
+  lines = (
+    session.query(Event)
+    .filter(
+      Event.entity_id == entity_id,
+      Event.status == "voided",
+      Event.metadata_["void_reason"].astext == FEED_BEFORE_CALENDAR,
+      posting_date >= since,
+    )
+    .order_by(ordered_lock_column())
+    .with_for_update()
+    .all()
+  )
+  for line in lines:
+    metadata = dict(line.metadata_ or {})
+    metadata.pop("void_reason", None)
+    line.metadata_ = metadata
+    line.status = "captured"
+  session.flush()
+  return len(lines)
+
+
 def _activity_before(
   session: Session, entity_id: str, start: date, *, at_opening: bool = False
 ) -> tuple[int, int, date | None]:
@@ -281,6 +370,9 @@ def _activity_before(
     event_filters.append(
       func.coalesce(Event.source, "").notin_(tuple(SEVERABLE_SOURCES))
     )
+    # Bank lines nobody has classified are retired as history
+    # (`_retire_feed_history`); a classified one is a person's choice.
+    event_filters.append(Event.id.notin_(_unclassified_feed_lines(entity_id, start)))
   unposted, earliest_event = (
     session.query(func.count(Event.id), func.min(posting_date))
     .filter(*event_filters)
@@ -417,6 +509,18 @@ class FiscalCalendarService:
     return calendar
 
   @staticmethod
+  def group_fiscal_year_start_month(session: Session, graph_id: str) -> int | None:
+    """The month every calendar on the graph starts its fiscal year in, or
+    ``None`` before the first calendar exists."""
+    month = (
+      session.query(FiscalCalendar.fiscal_year_start_month)
+      .filter(FiscalCalendar.graph_id == graph_id)
+      .limit(1)
+      .scalar()
+    )
+    return int(month) if month is not None else None
+
+  @staticmethod
   def _assert_group_cadence(
     session: Session, graph_id: str, entity_id: str, fiscal_year_start_month: int
   ) -> None:
@@ -529,8 +633,9 @@ class FiscalCalendarService:
     post are dated before ``first_open_period`` (the month after
     ``closed_through``, or the first month of a fresh calendar). Otherwise
     retires the entity's schedule months before it as history, the way the
-    generator treats months on or before ``closed_through``, and returns the
-    number of obligations voided. Runs in the setup's transaction, before it
+    generator treats months on or before ``closed_through``, and the bank
+    lines before it nobody classified, and returns the number of obligations
+    voided. Runs in the setup's transaction, before it
     commits.
     """
     from robosystems.operations.locking import bounded_lock_wait
@@ -554,9 +659,10 @@ class FiscalCalendarService:
     booked = calendar is not None and calendar.closed_through_period
     with bounded_lock_wait(
       session,
-      "A schedule's obligations are being written by another process. Retry "
-      "in a moment.",
+      "A schedule's obligations or the bank feed's lines are being written by "
+      "another process. Retry in a moment.",
     ):
+      _retire_feed_history(session, entity_id, start)
       return retire_schedule_history(
         session,
         entity_id,
@@ -608,6 +714,11 @@ class FiscalCalendarService:
     # new start.
     seen_earliest = periods.with_entities(func.min(FiscalPeriod.name)).scalar()
     _fence_months(session, graph_id, seen_earliest, first_open_period)
+    # An earlier start seeds months before the earliest, which is the month a
+    # first close closes: fenced too, the move waits for a close in flight
+    # and then sees it closed.
+    if seen_earliest is not None and first_open_period < seen_earliest:
+      _fence_months(session, graph_id, seen_earliest, next_period(seen_earliest))
     calendar = self.require_locked(session, graph_id, entity_id=entity_id)
     if (
       calendar.closed_through_period
@@ -622,6 +733,14 @@ class FiscalCalendarService:
     earliest = periods.with_entities(func.min(FiscalPeriod.name)).scalar()
     if earliest == first_open_period:
       return calendar, 0, 0
+    # Re-fenced from the locked read: a no-op unless another move changed the
+    # earliest month in between.
+    if (
+      earliest is not None
+      and earliest != seen_earliest
+      and first_open_period < earliest
+    ):
+      _fence_months(session, graph_id, earliest, next_period(earliest))
 
     created = removed = restored = 0
     if earliest is None or first_open_period < earliest:
@@ -640,12 +759,12 @@ class FiscalCalendarService:
 
       with bounded_lock_wait(
         session,
-        "A schedule's obligations are being written by another process. Retry "
-        "in a moment.",
+        "A schedule's obligations or the bank feed's lines are being written by "
+        "another process. Retry in a moment.",
       ):
-        restored = restore_schedule_history(
-          session, entity_id, since=period_date_range(first_open_period)[0]
-        )
+        since = period_date_range(first_open_period)[0]
+        restored = restore_schedule_history(session, entity_id, since=since)
+        _restore_feed_history(session, entity_id, since)
     else:
       # Re-fenced from the locked read: a no-op unless the start moved
       # earlier in between.
