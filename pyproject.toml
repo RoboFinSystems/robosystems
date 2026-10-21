@@ -94,7 +94,7 @@ dependencies = [
     "httpx>=0.28.0",
     "lxml>=6.1.0,<7.0",
     "markdown-it-py>=3.0",
-    "pillow>=12.3.0",
+    "pillow>=13.0.0",
     "psutil>=7.2.1,<8.0",
     "pydantic[email]>=2.13.4,<3.0",
     "pyjwt>=2.10.0,<3.0",
@@ -153,6 +153,11 @@ lambda = [
 # pins one, so every Python update job dies and security updates go silent. Pin uv where it
 # runs instead — setup-uv in test.yml, create-release.yml and publish-docs.yml, the
 # ghcr.io/astral-sh/uv tag in Dockerfile (twice) and Dockerfile.lambda — and move those together.
+#
+# fastembed (through 0.9.0) caps pillow<13, which holds us below the security fixes; we use only
+# its TextEmbedding, which never touches PIL. Drop this once a fastembed release lifts the cap
+# (qdrant/fastembed#830).
+override-dependencies = ["pillow>=13.0.0"]
 
 [tool.setuptools]
 packages = ["robosystems"]
