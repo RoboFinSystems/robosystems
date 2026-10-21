@@ -397,3 +397,43 @@ def test_months_before_the_calendar_count_as_depreciated(session, accounts):
   plan = _plan(session, created.structure_id, date(2026, 4, 15), accounts)
 
   assert plan.accumulated_depreciation == 30_000
+
+
+def test_a_drawn_down_credit_account_is_read_as_the_remaining_balance(
+  session, accounts
+):
+  """The generator writes a debit-balanced, non-contra credit account's facts
+  as the balance left, whichever account the asset is; the plan must read them
+  the same way, or a separate prepaid asset disposes at the wrong value."""
+  prepaid = Element(
+    name="Prepaid Lease", code="1400", balance_type="debit", created_by="t"
+  )
+  session.add(prepaid)
+  session.commit()
+  created = create_schedule(
+    session,
+    CreateScheduleRequest(
+      name="Lease",
+      element_ids=[accounts["depreciation"], str(prepaid.id)],
+      period_start=date(2026, 1, 1),
+      period_end=date(2026, 12, 31),
+      monthly_amount=10_000,
+      entry_template=EntryTemplateRequest(
+        debit_element_id=accounts["depreciation"], credit_element_id=str(prepaid.id)
+      ),
+      schedule_metadata=ScheduleMetadataRequest(
+        original_amount=120_000, asset_element_id=accounts["equipment"]
+      ),
+    ),
+    created_by="usr",
+  )
+  session.commit()
+
+  plan = _plan(session, created.structure_id, date(2026, 3, 31), accounts)
+
+  assert plan.nbv == 90_000
+  assert plan.accumulated_depreciation == 30_000
+  # The remaining balance leaves the account that carried it.
+  (derecognized,) = [li for li in plan.line_items if li["credit_amount"]]
+  assert derecognized["element_id"] == str(prepaid.id)
+  assert derecognized["credit_amount"] == 90_000

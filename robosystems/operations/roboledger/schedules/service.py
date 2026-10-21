@@ -430,13 +430,9 @@ class ScheduleService:
     # or credit-balance account accumulates up from zero; a directly-credited
     # asset (a prepaid) draws down from cost. QuickBooks types contra-assets as
     # debit-normal, so the contraAsset trait decides, not balance_type.
-    credit_balance_type = session.execute(
-      select(Element.balance_type).where(Element.id == entry_template.credit_element_id)
-    ).scalar()
-    credit_is_contra = credit_balance_type == "debit" and _element_is_contra_asset(
+    credit_draws_down = credit_account_draws_down(
       session, entry_template.credit_element_id
     )
-    credit_draws_down = credit_balance_type == "debit" and not credit_is_contra
     # Drawing down needs a cost basis; without original_amount, derive it from
     # the straight-line curve (custom curves always carry one).
     if credit_draws_down and original_dollars is None and periods:
@@ -490,6 +486,26 @@ class ScheduleService:
           f"less residual_value ({depreciable_dollars}); the final month would "
           f"be negative."
         )
+      # It absorbs at most a cent of rounding per month, not the rest of the
+      # cost: a shortfall means the window or the amount is wrong.
+      final_dollars = round(
+        depreciable_dollars - amount_dollars * (len(periods) - 1), 2
+      )
+      if final_dollars > round(amount_dollars + 0.01 * len(periods), 2):
+        raise ValueError(
+          f"monthly_amount x {len(periods)} months does not reach original_amount "
+          f"less residual_value ({depreciable_dollars}): the final month would "
+          f"book {final_dollars}, more than a month's amount. Correct "
+          f"monthly_amount or the schedule's period_end."
+        )
+
+    # The asset's carrying value runs from cost, or without one from the
+    # curve's total, so it ends at the residual and never below zero.
+    nbv_basis = (
+      original_dollars
+      if original_dollars is not None
+      else round(amount_dollars * len(periods), 2)
+    )
 
     # Opening-balance instant facts at the first period start, so the
     # roll-forward reads Begin → movements → End. Same formulas as the loop at
@@ -526,7 +542,7 @@ class ScheduleService:
         session.add(
           Fact(
             element_id=schedule_metadata.asset_element_id,
-            value=original_dollars or amount_dollars,
+            value=nbv_basis,
             period_start=None,
             period_end=opening_instant,
             period_type="instant",
@@ -604,7 +620,7 @@ class ScheduleService:
         session.add(
           Fact(
             element_id=schedule_metadata.asset_element_id,
-            value=round((original_dollars or amount_dollars) - accumulated_debit, 2),
+            value=round(nbv_basis - accumulated_debit, 2),
             period_start=p_start,
             period_end=p_end,
             period_type="instant",
@@ -673,12 +689,12 @@ class ScheduleService:
     artifact_mechanics["pending_event_count"] = pending_event_count
     structure.artifact_mechanics = artifact_mechanics
 
-    # A persisted Structure needs the JSONB change flagged to emit an UPDATE.
-    if existing_structure is not None:
-      from sqlalchemy.orm.attributes import flag_modified
+    # The blobs were flushed already, and these keys go into the same dicts:
+    # without the flag no UPDATE is written, on a new structure too.
+    from sqlalchemy.orm.attributes import flag_modified
 
-      flag_modified(structure, "metadata_")
-      flag_modified(structure, "artifact_mechanics")
+    flag_modified(structure, "metadata_")
+    flag_modified(structure, "artifact_mechanics")
 
     session.flush()
     return structure
@@ -1864,6 +1880,17 @@ class ScheduleService:
     session.add(taxonomy)
     session.flush()
     return taxonomy.id
+
+
+def credit_account_draws_down(session: Session, element_id: str) -> bool:
+  """Whether a schedule's credited account runs down from cost (a prepaid, a
+  directly credited asset) rather than accumulating up from zero (a contra or
+  credit-balance account). The generator writes its instant facts by this,
+  and whatever reads them back reads them by it too."""
+  balance_type = session.execute(
+    select(Element.balance_type).where(Element.id == element_id)
+  ).scalar()
+  return balance_type == "debit" and not _element_is_contra_asset(session, element_id)
 
 
 def _element_is_contra_asset(session: Session, element_id: str) -> bool:

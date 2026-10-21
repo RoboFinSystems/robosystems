@@ -927,13 +927,44 @@ def terminate_schedule(
   Raises ``ScheduleNotFoundError``, or ``ValueError`` on the truncation guards.
   """
   structure = _load_schedule_or_404(session, body.structure_id)
-  service = ScheduleService()
+  truncation, obligations_voided, rule_updated = _end_schedule_at(
+    session,
+    ScheduleService(),
+    structure,
+    new_end_date=body.new_end_date,
+    reason=body.reason,
+    created_by=created_by,
+  )
+  session.commit()
 
+  return TerminateScheduleResponse(
+    structure_id=structure.id,
+    name=structure.name,
+    new_end_date=truncation["new_end_date"],
+    facts_deleted=truncation["facts_deleted"],
+    obligations_voided=obligations_voided,
+    rule_updated=rule_updated,
+    reason=body.reason,
+  )
+
+
+def _end_schedule_at(
+  session: Session,
+  service: ScheduleService,
+  structure: Structure,
+  *,
+  new_end_date: date,
+  reason: str,
+  created_by: str,
+) -> tuple[dict, int, bool]:
+  """Terminate's writes: truncate facts and drafts past the cutoff, void the
+  obligations past it, re-anchor the SumEquals rule. Returns the truncation,
+  the obligations voided and whether the rule changed."""
   truncation = service.truncate_schedule(
     session,
     structure_id=structure.id,
-    new_end_date=body.new_end_date,
-    reason=body.reason,
+    new_end_date=new_end_date,
+    reason=reason,
     updated_by=created_by,
   )
 
@@ -948,23 +979,11 @@ def terminate_schedule(
     obligations_voided = service.void_pending_obligations(
       session,
       structure=structure,
-      void_reason=f"schedule_terminated: {body.reason}",
-      period_start_after=body.new_end_date,
+      void_reason=f"schedule_terminated: {reason}",
+      period_start_after=new_end_date,
       include_classified=True,
     )
-
-  rule_updated = _rewrite_sum_equals_rule(session, structure)
-  session.commit()
-
-  return TerminateScheduleResponse(
-    structure_id=structure.id,
-    name=structure.name,
-    new_end_date=truncation["new_end_date"],
-    facts_deleted=truncation["facts_deleted"],
-    obligations_voided=obligations_voided,
-    rule_updated=rule_updated,
-    reason=body.reason,
-  )
+  return truncation, obligations_voided, _rewrite_sum_equals_rule(session, structure)
 
 
 def _reconstruct_schedule_definition(
@@ -993,7 +1012,10 @@ def _reconstruct_schedule_definition(
   schedule_metadata = (
     ScheduleMetadata(
       method=raw_meta.get("method", "straight_line"),
-      original_amount=raw_meta.get("original_amount", 0),
+      # A termination re-anchors original_amount to what it recognized; the
+      # rebuild generates from the cost and ends at the cutoff again.
+      original_amount=raw_meta.get("original_amount_at_start")
+      or raw_meta.get("original_amount", 0),
       residual_value=raw_meta.get("residual_value", 0),
       useful_life_months=raw_meta.get("useful_life_months", 0),
       asset_element_id=raw_meta.get("asset_element_id"),
@@ -1069,6 +1091,24 @@ def _reconstruct_schedule_definition(
   )
 
 
+def _refuse_a_disposed_schedule(session: Session, structure_id: str) -> None:
+  """A disposal derecognized the asset and ended the schedule without marking
+  it, so a rebuild would book depreciation past the disposal. Void the
+  disposal first."""
+  disposal = session.execute(
+    select(Event.id).where(
+      Event.event_type == "asset_disposed",
+      Event.status.notin_(("voided", "superseded")),
+      Event.metadata_["schedule_id"].astext == structure_id,
+    )
+  ).first()
+  if disposal is not None:
+    raise ValueError(
+      f"Cannot rebuild schedule {structure_id!r}: asset disposal {disposal.id} "
+      "ended it. Void the disposal first to rebuild the schedule whole."
+    )
+
+
 def _before_calendar_note(session: Session, structure_id: str) -> str:
   """For a refused rebuild: where the schedule's months before the calendar
   went, since a rebuild is not the way back for them. Empty when it has none."""
@@ -1132,9 +1172,16 @@ def rebuild_schedule(
       + _before_calendar_note(session, structure.id)
     )
 
+  _refuse_a_disposed_schedule(session, structure.id)
+
   old_schedule_created_event_id = (structure.metadata_ or {}).get(
     "schedule_created_event_id"
   )
+  # A terminated schedule regenerates as created, then ends where it was
+  # ended: its kept months carry the same amounts and balances as before.
+  prior_metadata = dict(structure.metadata_ or {})
+  ended_iso = (prior_metadata.get("schedule_metadata") or {}).get("end_date")
+  ended_on = date.fromisoformat(ended_iso) if ended_iso else None
 
   owner = owner_entity_id(session, structure)
   # As create_schedule does: the later of the months the caller said were
@@ -1211,6 +1258,25 @@ def rebuild_schedule(
     existing_structure=structure,
     source_transaction_id=source_transaction_id,
   )
+  if ended_on is not None and ended_on < period_end:
+    _end_schedule_at(
+      session,
+      service,
+      structure,
+      new_end_date=ended_on,
+      reason="kept on rebuild",
+      created_by=created_by,
+    )
+    # The log is the record of what a person ended; the re-application is
+    # not one.
+    metadata = dict(structure.metadata_ or {})
+    metadata["truncations"] = list(prior_metadata.get("truncations") or [])
+    structure.metadata_ = metadata
+    from sqlalchemy.orm.attributes import flag_modified
+
+    flag_modified(structure, "metadata_")
+    session.flush()
+    period_end = ended_on
 
   # Void the old originator and link it to the new one.
   new_schedule_created_event_id = (structure.metadata_ or {}).get(

@@ -74,7 +74,10 @@ AUGUST = (date(2026, 8, 1), date(2026, 8, 31))
 
 
 @pytest.fixture()
-def books():
+def books(request):
+  # Each module that uses these books provisions its own tenant: xdist runs
+  # files on separate workers, and two on one schema drop it under each other.
+  graph = getattr(request.module, "GRAPH", GRAPH)
   url = env.EXTENSIONS_DATABASE_URL
   if not url:
     pytest.skip("EXTENSIONS_DATABASE_URL not configured")
@@ -86,9 +89,9 @@ def books():
     db.dispose()
     pytest.skip(f"extensions database unreachable: {exc.orig}")
   with db.begin() as conn:
-    conn.execute(text(f"DROP SCHEMA IF EXISTS {GRAPH} CASCADE"))
+    conn.execute(text(f"DROP SCHEMA IF EXISTS {graph} CASCADE"))
   try:
-    provision_tenant_schema(GRAPH)
+    provision_tenant_schema(graph)
     with (
       patch(f"{_COMMANDS}.exclusive_period_fence"),
       patch("robosystems.operations.extensions.staleness.mark_graph_stale"),
@@ -97,16 +100,16 @@ def books():
         return_value=(False, None),
       ),
       patch(_BUNDLE),
-      extensions_session(GRAPH) as session,
+      extensions_session(graph) as session,
     ):
-      yield _seed(session)
+      yield _seed(session, graph)
   finally:
     with db.begin() as conn:
-      conn.execute(text(f"DROP SCHEMA IF EXISTS {GRAPH} CASCADE"))
+      conn.execute(text(f"DROP SCHEMA IF EXISTS {graph} CASCADE"))
     db.dispose()
 
 
-def _seed(session) -> dict:
+def _seed(session, graph: str) -> dict:
   service = FiscalCalendarService()
   entity_id = create_entity(
     session, CreateEntityRequest(name="Harbor Holdings", entity_type="llc"), "usr_1"
@@ -117,18 +120,24 @@ def _seed(session) -> dict:
     "usr_1",
   ).taxonomy_id
   service.initialize(
-    session, GRAPH, closed_through="2026-05", actor_id="usr_1", entity_id=entity_id
+    session, graph, closed_through="2026-05", actor_id="usr_1", entity_id=entity_id
   )
   service.ensure_fiscal_periods(
     session,
-    GRAPH,
+    graph,
     start_period="2026-05",
     end_period="2026-09",
     closed_through="2026-05",
     entity_id=entity_id,
   )
   session.commit()
-  g = {"session": session, "entity": entity_id, "chart": chart, "service": service}
+  g = {
+    "session": session,
+    "entity": entity_id,
+    "chart": chart,
+    "service": service,
+    "graph": graph,
+  }
   _post(g, date(2026, 6, 10), [("1000", 100_000), ("4000", -100_000)])
   _post(g, date(2026, 7, 15), [("1000", 50_000), ("4000", -50_000)])
   return g
@@ -183,7 +192,7 @@ def _close(g, period: str):
   return close_period(
     g["session"],
     MagicMock(),
-    GRAPH,
+    g["graph"],
     period,
     actor_id="usr_1",
     allow_stale_sync=False,
@@ -198,7 +207,7 @@ def _reopen(g, period: str):
   return reopen_period(
     g["session"],
     MagicMock(),
-    GRAPH,
+    g["graph"],
     period,
     actor_id="usr_1",
     reason="correction",
@@ -228,7 +237,7 @@ def _report(g, *windows):
       comparative=False,
       periods=_columns(*windows),
     ),
-    graph_id=GRAPH,
+    graph_id=g["graph"],
     created_by="usr_1",
   )
 

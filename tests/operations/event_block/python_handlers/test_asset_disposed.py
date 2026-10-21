@@ -20,6 +20,20 @@ from robosystems.operations.event_block.python_handlers.asset_disposed import (
 
 
 @pytest.fixture(autouse=True)
+def _accumulating_credit_account():
+  """These mocks answer the plan's queries in order; the credit account's
+  draws-down test is one more, so it is pinned to the contra shape they model.
+  The drawn-down read runs against a real database in test_disposal_db.py."""
+  from unittest.mock import patch
+
+  with patch(
+    "robosystems.operations.roboledger.schedules.service.credit_account_draws_down",
+    return_value=False,
+  ):
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _period_gate_open():
   """Mock sessions cannot answer the period gate; it runs against a real
   database in test_guards_db.py and test_state_transition_locks_db.py."""

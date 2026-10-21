@@ -150,7 +150,7 @@ class TestCreateSchedule:
         taxonomy_id=None,
         element_ids=["elem_depr_expense", "elem_accum_depr"],
         period_start=date(2026, 1, 1),
-        period_end=date(2026, 3, 31),
+        period_end=date(2032, 12, 31),
         monthly_amount=41667,
         entry_template=_make_entry_template(),
         schedule_metadata=_make_schedule_metadata(),
@@ -2406,7 +2406,12 @@ class TestCreateScheduleResidualValue:
   net book value ends at the residual."""
 
   def _run(
-    self, *, monthly_amount=40_000, periodic_amounts=None, original_amount=130_000
+    self,
+    *,
+    monthly_amount=40_000,
+    periodic_amounts=None,
+    original_amount=130_000,
+    residual_value=10_000,
   ):
     session = _mock_session()
     svc = ScheduleService()
@@ -2433,7 +2438,7 @@ class TestCreateScheduleResidualValue:
         schedule_metadata=ScheduleMetadata(
           method="straight_line",
           original_amount=original_amount,  # $1,300 cost
-          residual_value=10_000,  # $100 salvage
+          residual_value=residual_value,  # $100 salvage by default
           useful_life_months=3,
           asset_element_id="elem_ppe",
           periodic_amounts=periodic_amounts,
@@ -2471,6 +2476,18 @@ class TestCreateScheduleResidualValue:
     # would be negative and fail drafting at close.
     with pytest.raises(ValueError, match="final month would be negative"):
       self._run(monthly_amount=70_000)
+
+  def test_monthly_amount_that_falls_short_of_the_base_is_refused(self):
+    # $100 x 2 months leaves $1,000 of the $1,200 base for the final month:
+    # the plug absorbs rounding, not the rest of the cost.
+    with pytest.raises(ValueError, match="more than a month's amount"):
+      self._run(monthly_amount=10_000)
+
+  def test_net_book_value_without_a_cost_runs_from_the_curve(self):
+    """No original_amount: the asset's value runs down from the curve's total,
+    never below zero."""
+    added = self._run(original_amount=0, residual_value=0)
+    assert self._values(added, "elem_ppe", "instant") == [1200.0, 800.0, 400.0, 0.0]
 
   def test_residual_without_a_cost_basis_is_refused(self):
     with pytest.raises(ValueError, match="requires original_amount"):
