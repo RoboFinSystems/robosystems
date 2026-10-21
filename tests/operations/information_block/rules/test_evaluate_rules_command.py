@@ -84,6 +84,8 @@ class TestCmdEvaluateRules:
       session,
       "struct_bs",
       fact_set_id="fs_1",
+      # A pinned set is one entity's already.
+      entity_id=None,
       period_start=date(2025, 1, 1),
       period_end=date(2025, 12, 31),
       created_by="sys",

@@ -235,6 +235,39 @@ class TestRuleDeltaPushDown:
     assert current["sku_1"] == pytest.approx(132.0)
     assert current["sku_2"] == pytest.approx(88.0)
 
+  def test_leaves_under_an_unvalued_subtotal_scale_too(self):
+    """Subtotals derive after scaling, so the one between the driven parent
+    and its leaves is not valued yet; the leaves under it still scale."""
+    from robosystems.operations.information_block.forecast_compute import (
+      _scale_rule_target_children,
+    )
+
+    calcs = {
+      "revenues": [("product", 1.0), ("services", 1.0)],
+      "product": [("sku_1", 1.0), ("sku_2", 1.0)],
+    }
+    current = {"revenues": 330.0, "sku_1": 120.0, "sku_2": 80.0, "services": 100.0}
+    _scale_rule_target_children(current, {"revenues"}, calcs)
+    assert current["sku_1"] == pytest.approx(132.0)
+    assert current["sku_2"] == pytest.approx(88.0)
+    assert current["services"] == pytest.approx(110.0)
+
+  def test_a_pinned_leaf_under_a_subtotal_keeps_its_value(self):
+    from robosystems.operations.information_block.forecast_compute import (
+      _scale_rule_target_children,
+    )
+
+    calcs = {
+      "revenues": [("product", 1.0), ("services", 1.0)],
+      "product": [("sku_1", 1.0), ("sku_2", 1.0)],
+    }
+    current = {"revenues": 380.0, "sku_1": 120.0, "sku_2": 80.0, "services": 100.0}
+    _scale_rule_target_children(current, {"revenues"}, calcs, pinned={"sku_1"})
+    assert current["sku_1"] == 120.0
+    # 380 - 120 pinned = 260 over the 180 free: a factor of 13/9.
+    assert current["sku_2"] + current["services"] == pytest.approx(260.0)
+    assert current["sku_2"] == pytest.approx(80.0 * 260 / 180)
+
   def test_zero_children_sum_left_untouched(self):
     from robosystems.operations.information_block.forecast_compute import (
       _scale_rule_target_children,

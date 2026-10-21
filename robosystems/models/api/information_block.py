@@ -1837,6 +1837,14 @@ class EvaluateRulesRequest(BaseModel):
     None,
     description="Upper bound on the fact period window (inclusive).",
   )
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity whose facts bind, when no `fact_set_id` pins them; "
+      "default the group parent. On a group, each entity's statements "
+      "share the structure."
+    ),
+  )
 
   model_config = ConfigDict(
     json_schema_extra={

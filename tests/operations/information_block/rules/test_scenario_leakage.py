@@ -140,7 +140,9 @@ class _Books:
     self.session.flush()
     return rule
 
-  def add_set(self, *, scenario: bool, period, values: dict) -> str:
+  def add_set(
+    self, *, scenario: bool, period, values: dict, entity_id: str = "ent_1"
+  ) -> str:
     from robosystems.models.extensions.roboledger import Fact, FactSet
 
     period_start, period_end = period
@@ -149,7 +151,7 @@ class _Books:
       period_start=period_start,
       period_end=period_end,
       factset_type="report",
-      entity_id="ent_1",
+      entity_id=entity_id,
       scenario_id=self.scenario.id if scenario else None,
     )
     fact_set.provenance = (
@@ -175,7 +177,7 @@ class _Books:
           period_start=period_start,
           period_end=period_end,
           period_type="instant",
-          entity_id="ent_1",
+          entity_id=entity_id,
           structure_id=self.structure.id,
           fact_set_id=fact_set.id,
         )
@@ -313,3 +315,44 @@ class TestUnpinnedRollupIgnoresScenarios:
     results = _evaluate(ext_session, books.structure.id)
 
     assert [r.status for r in results] == ["fail"]
+
+
+class TestUnpinnedBindingStaysOnOneEntity:
+  """On a group every entity's statements share the structure; unpinned, the
+  newest fact of any entity used to bind."""
+
+  def test_the_named_entitys_books_are_checked(self, ext_session) -> None:
+    from robosystems.operations.information_block.rules.engine import (
+      evaluate_rules_for_structure,
+    )
+
+    books = _Books(ext_session)
+    books.add_rule(
+      "EqualTo",
+      "$Assets = ($Liabilities + $Equity)",
+      [
+        ("Assets", books.assets.qname),
+        ("Liabilities", books.liabilities.qname),
+        ("Equity", books.equity.qname),
+      ],
+    )
+    books.add_set(
+      scenario=False,
+      period=(ACTUAL_START, ACTUAL_END),
+      values={books.assets: 100.0, books.liabilities: 40.0, books.equity: 60.0},
+    )
+    # A subsidiary's later set, with figures that are not the parent's.
+    books.add_set(
+      scenario=False,
+      period=(FORECAST_START, FORECAST_END),
+      values={books.assets: 70.0, books.liabilities: 50.0},
+      entity_id="ent_2",
+    )
+
+    results = evaluate_rules_for_structure(
+      ext_session, books.structure.id, global_calculations={}, entity_id="ent_1"
+    )
+
+    assert [r.status for r in results] == ["pass"], [
+      (r.status, r.message) for r in results
+    ]

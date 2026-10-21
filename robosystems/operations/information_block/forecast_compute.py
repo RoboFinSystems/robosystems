@@ -1240,28 +1240,44 @@ def _scale_rule_target_children(
   """
   pinned = pinned or set()
 
+  def _contributions(
+    parent: str, multiplier: float, seen: set[str]
+  ) -> tuple[float, float]:
+    """``(pinned, free)`` weighted sums under ``parent``. A subtotal not
+    yet valued (subtotals derive after this step) is walked through to its
+    leaves, so a leaf two levels down counts and scales like a direct one."""
+    pinned_total = free_total = 0.0
+    for child, weight in calculations.get(parent, ()):
+      if child in seen:
+        continue
+      seen.add(child)
+      factor = multiplier * weight
+      if child in pinned:
+        value = current.get(child)
+        if value is None:
+          value = _derive_from_children(child, calculations, current)
+        pinned_total += (value or 0.0) * factor
+      elif child in current:
+        free_total += current[child] * factor
+      else:
+        sub_pinned, sub_free = _contributions(child, factor, seen)
+        pinned_total += sub_pinned
+        free_total += sub_free
+    return pinned_total, free_total
+
   def _scale_subtree(parent: str, factor: float, visited: set[str]) -> None:
     for child, _weight in calculations.get(parent, ()):
-      if child in visited or child not in current or child in pinned:
+      if child in visited or child in pinned:
         continue
       visited.add(child)
-      current[child] *= factor
+      if child in current:
+        current[child] *= factor
       _scale_subtree(child, factor, visited)
 
   for target in active_target_ids:
-    children = calculations.get(target)
-    if not children or target not in current:
+    if not calculations.get(target) or target not in current:
       continue
-    pinned_sum = sum(
-      current[child] * weight
-      for child, weight in children
-      if child in current and child in pinned
-    )
-    children_sum = sum(
-      current[child] * weight
-      for child, weight in children
-      if child in current and child not in pinned
-    )
+    pinned_sum, children_sum = _contributions(target, 1.0, set())
     if abs(children_sum) < 1e-9:
       continue
     factor = (current[target] - pinned_sum) / children_sum

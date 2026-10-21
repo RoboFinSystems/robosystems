@@ -1184,7 +1184,8 @@ def resolve_reporting_window(
 
   - ``annual`` — fiscal year aligned on the graph's
     ``fiscal_year_start_month`` (January when no calendar exists).
-    ``fiscal_year`` selects which year; defaults to the current year.
+    ``fiscal_year`` (the calendar year it starts in) selects which year;
+    defaults to the fiscal year containing today.
   - ``quarterly`` — current calendar quarter (3 months).
   - anything else (``instant`` or unset) — current calendar month.
   """
@@ -1197,7 +1198,13 @@ def resolve_reporting_window(
 
   if period_type == "annual":
     fy_start_month = get_fiscal_year_start_month(session)
-    year = fiscal_year if fiscal_year is not None else today.year
+    # Unnamed, the fiscal year containing today: one starting in July is
+    # last calendar year's until July comes round.
+    year = (
+      fiscal_year
+      if fiscal_year is not None
+      else today.year - (today.month < fy_start_month)
+    )
     start = date(year, fy_start_month, 1)
     end_year = year if fy_start_month == 1 else year + 1
     end_month = fy_start_month - 1 if fy_start_month > 1 else 12

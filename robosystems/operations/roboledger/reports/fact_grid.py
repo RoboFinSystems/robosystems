@@ -2008,6 +2008,7 @@ _CF_NONCASH_ACQUISITION_QNAME = (
 _CF_PAYABLES_LEAF_QNAME = (
   "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities"
 )
+_CF_RECEIVABLES_LEAF_QNAME = "rs-gaap:IncreaseDecreaseInAccountsReceivable"
 _CF_INTEREST_PAID_QNAME = "rs-gaap:InterestPaidNet"
 _CF_TAXES_PAID_QNAME = "rs-gaap:IncomeTaxesPaidNet"
 # The expense concepts whose cash settlement is a supplemental disclosure.
@@ -2166,6 +2167,7 @@ def _emit_noncash_and_settlement_facts(
   ).fetchall()
   working_leaf: dict[str, str] = {}
   payable_concepts: set[str] = set()
+  receivable_concepts: set[str] = set()
   default_flows: dict[str, list[tuple[str, float, str]]] = {}
   for row in derivation_rows:
     concept = str(row.to_element_id)
@@ -2177,6 +2179,8 @@ def _emit_noncash_and_settlement_facts(
       working_leaf.setdefault(concept, str(row.from_element_id))
       if row.from_qname == _CF_PAYABLES_LEAF_QNAME:
         payable_concepts.add(concept)
+      elif row.from_qname == _CF_RECEIVABLES_LEAF_QNAME:
+        receivable_concepts.add(concept)
 
   reused = _cash_flow_reused_concepts(session, entity_id)
   cash_qnames = _CASH_ANCHOR_QNAMES
@@ -2313,6 +2317,28 @@ def _emit_noncash_and_settlement_facts(
       and line.net > 0
     )
 
+  def _on_account(lines: list[_CfLine]) -> tuple[float, list[_CfLine], float]:
+    """The part of an investing or financing price an entry with cash left
+    on a receivable or payable: ``(owed, those lines, their sum)``. Only an
+    account on the cash's own side counts, so a payment that also clears an
+    accrual or an old bill owes nothing."""
+    cash = sum(ln.net for ln in lines if ln.kind == "cash")
+    if not cash:
+      return 0.0, [], 0.0
+    disposal = [ln for ln in lines if _disposes(ln)]
+    side = sum(ln.net for ln in lines if ln.kind in ("nonoperating", "cash"))
+    side += sum(ln.net for ln in disposal)
+    owing = [
+      ln
+      for ln in lines
+      if ln.kind == "working"
+      and ln not in disposal
+      and ln.concept_id in payable_concepts | receivable_concepts
+      and _sign(ln.net) == _sign(cash)
+    ]
+    working = sum(ln.net for ln in owing)
+    return _matched(working, side), owing, working
+
   def _add(element_id: str, period: PeriodSpec, cents: float) -> None:
     key = (element_id, period.start, period.end)
     adjustments[key] = adjustments.get(key, 0.0) + cents
@@ -2329,7 +2355,11 @@ def _emit_noncash_and_settlement_facts(
           _add(str(paid_id), column, line.net * share)
 
   def _hold_bill(
-    event_id: str, lines: list[_CfLine], posted: date, columns: list[PeriodSpec]
+    event_id: str,
+    lines: list[_CfLine],
+    posted: date,
+    columns: list[PeriodSpec],
+    capex_share: float = 1.0,
   ) -> bool:
     """Record ``lines`` as (part of) a bill when a payable settles investing
     or financing lines; an event's entries accumulate."""
@@ -2344,12 +2374,15 @@ def _emit_noncash_and_settlement_facts(
     )
     if not payable or not settles_flows:
       return False
-    capex = sum(
-      ln.net
-      for ln in lines
-      if ln.kind == "nonoperating"
-      and ln.net > 0
-      and _default_flow(ln.concept_id, -ln.net, "investingActivity")
+    capex = round(
+      capex_share
+      * sum(
+        ln.net
+        for ln in lines
+        if ln.kind == "nonoperating"
+        and ln.net > 0
+        and _default_flow(ln.concept_id, -ln.net, "investingActivity")
+      )
     )
     held = bills.get(event_id)
     if held is None:
@@ -2454,6 +2487,11 @@ def _emit_noncash_and_settlement_facts(
       payable = abs(sum(ln.net for ln in owed))
       if payable and paid:
         fraction = min(abs(paid), payable) / payable
+        # A bill that took cash when it posted routed that part on its own
+        # entry; the payments settle only what it left owing.
+        if _on_account(bill)[0]:
+          paid_on_posting = abs(sum(ln.net for ln in bill if ln.kind == "cash"))
+          fraction *= payable / (payable + paid_on_posting)
         _add_paid(bill, columns, fraction)
         routed = 0.0
         bill_flows: set[str] = set()
@@ -2496,22 +2534,40 @@ def _emit_noncash_and_settlement_facts(
     # asset's cost net of it and of the gain, and it is no depreciation of
     # the period.
     disposal = [ln for ln in lines if _disposes(ln)]
-    if disposal:
-      flows = {
-        _default_flow(ln.concept_id, -ln.net)
-        for ln in lines
-        if ln.kind == "nonoperating"
-      }
-      flows.discard(None)
-      if len(flows) == 1:
-        flow_id = flows.pop()
-        assert flow_id is not None
-        emitted_flows.add(flow_id)
-        for column in columns:
-          _add(flow_id, column, -sum(ln.net for ln in disposal))
-          for ln in disposal:
-            if ln.kind == "working":
-              _add(working_leaf[ln.concept_id], column, ln.net)
+    flows = {
+      _default_flow(ln.concept_id, -ln.net) for ln in lines if ln.kind == "nonoperating"
+    }
+    flows.discard(None)
+    if len(flows) != 1:
+      continue
+    flow_id = flows.pop()
+    assert flow_id is not None
+    # A receivable or payable for the rest of the price is no cash yet and no
+    # working capital: it comes off the flow, which its settlement routes.
+    owed, on_account, working = _on_account(lines)
+    if not disposal and not owed:
+      continue
+    emitted_flows.add(flow_id)
+    for column in columns:
+      _add(flow_id, column, -sum(ln.net for ln in disposal) - owed)
+      for ln in disposal:
+        if ln.kind == "working":
+          _add(working_leaf[ln.concept_id], column, ln.net)
+      if owed:
+        for ln in on_account:
+          _add(working_leaf[ln.concept_id], column, ln.net * owed / working)
+    priced = sum(ln.net for ln in lines if ln.kind == "nonoperating")
+    priced += sum(ln.net for ln in disposal)
+    if owed and priced and entry_key in event_of:
+      # Its unpaid part is a bill like any other: capex left owing at period
+      # end is disclosed, at the share of the price the payable carries.
+      _hold_bill(
+        event_of[entry_key],
+        lines,
+        posted,
+        columns,
+        capex_share=min(1.0, abs(owed) / abs(priced)),
+      )
 
   # An unlinked payment may settle a bill posted before the window, so the
   # warning weighs those still open too. They are no acquisition of any
