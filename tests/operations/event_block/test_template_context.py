@@ -22,3 +22,16 @@ def test_a_signed_bank_amount_is_offered_as_its_magnitude():
 def test_an_event_without_an_amount_offers_zero():
   context = build_event_context(Event(id="evt_2", event_type="note", amount=None))
   assert context["amount_abs"] == 0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+  ("amount", "expected"),
+  [(1001, 501), (1000, 500), (999, 500), (10**40 + 1, (10**40 + 2) // 2)],
+)
+def test_a_split_rounds_half_up_at_any_size(amount, expected):
+  from robosystems.operations.event_block.template import interpolate
+
+  assert (
+    interpolate("{{ event.amount }} / 2", {"event": {"amount": amount}}) == expected
+  )
