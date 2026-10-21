@@ -46,6 +46,8 @@ class _FakeFact:
     self.period_type = period_type
     self.source_values = None
     self.source_shares = None
+    self.origin = None
+    self.derivation = None
 
 
 class _FakeFacts:
@@ -418,6 +420,8 @@ def test_pre_create_report_fact_sets_one_row_per_picked_structure() -> None:
     "arc_type": None,
     "posting_filter": None,
     "sources": None,
+    "content_hash": None,
+    "line_count": None,
   }
 
 

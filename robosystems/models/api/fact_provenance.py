@@ -18,8 +18,14 @@ discipline as `ArtifactMechanics`, which discriminates on `kind`):
 * `schedule` — forward facts generated from a schedule template
                  (straight-line depreciation, amortization); projected,
                  no posted event yet.
+* `rollup`   — a fact that is Σ child·weight over facts in its own set:
+                 a statement subtotal through the calculation arcs, or net
+                 income through the income signs. Checkable from the set
+                 alone.
 * `derived`  — a set computed from other facts via a formula or
-                 computation (metrics).
+                 computation (metrics); on a fact, a value a formula or a
+                 rule produced — the indirect cash flow from balance-sheet
+                 deltas, PP&E net, the earnings close added into equity.
 * `asserted` — provided/manual/external/cross-graph-share; the value is
                  the assertion, with no ledger lineage in this graph.
 * `document` — text-block fact bound from a platform Document; the
@@ -110,8 +116,45 @@ class PivotProvenance(BaseModel):
     None,
     description=(
       "On a fact's own descriptor: the accounts the pivot summed into this "
-      "value, largest first, footing to it. None on a set's descriptor."
+      "value, largest first, footing to it. None on a set's descriptor, and "
+      "on a fact pivoted through a posting filter rather than its accounts."
     ),
+  )
+  content_hash: str | None = Field(
+    None,
+    description=(
+      "On a frozen fact: 'sha256:<hex>' over the ids of the landed lines "
+      "under its accounts in its window, so a reconstruction can be checked."
+    ),
+  )
+  line_count: int | None = Field(
+    None, description="On a frozen fact: how many landed lines the hash covers."
+  )
+
+
+class RollupChild(BaseModel):
+  """One arc of a rollup: the child concept and the weight it was summed at."""
+
+  qname: str = Field(..., description="The child concept's qname.")
+  weight: float = Field(..., description="Signed weight the child was summed at.")
+
+
+class RollupProvenance(BaseModel):
+  """A fact that is Σ child·weight over facts in its own set — a statement
+  subtotal through the calculation arcs, or net income through the income
+  signs. Its inputs are beside it, so a reader with no ledger access can
+  re-add them."""
+
+  origin: Literal["rollup"] = "rollup"
+  rule: str = Field(
+    ...,
+    description="What summed the children: 'calculation' (the arcs) or 'net_income'.",
+  )
+  structure_id: str | None = Field(
+    None, description="The calculation structure the arcs came from, when one did."
+  )
+  children: list[RollupChild] = Field(
+    default_factory=list, description="The concepts summed, with their weights."
   )
 
 
@@ -137,10 +180,12 @@ class ScheduleProvenance(BaseModel):
 
 
 class DerivedProvenance(BaseModel):
-  """Facts computed from other facts via a formula/computation — today only
-  `compute-metrics`. Statement subtotals and the retained-earnings close ride
-  under `pivot`. At least one of `formula` / `computation` / `source_fact_ids`
-  must be present; computation-only covers a result with no single source row.
+  """Facts computed from other facts via a formula/computation: a set from
+  `compute-metrics`, or a fact a formula or a rule produced — the indirect
+  cash flow from balance-sheet deltas, PP&E net, a value the earnings close
+  added into. At least one of `formula` / `computation` / `source_fact_ids` /
+  `source_concepts` must be present; computation-only covers a result with no
+  single source row.
   """
 
   origin: Literal["derived"] = "derived"
@@ -153,12 +198,33 @@ class DerivedProvenance(BaseModel):
     default_factory=list,
     description="Contributing fact ids, when materialized.",
   )
+  source_concepts: list[str] = Field(
+    default_factory=list,
+    description="Concepts the computation read, by qname, when it read facts.",
+  )
+  sources: list[FactSource] | None = Field(
+    None,
+    description=(
+      "The accounts of the pivoted part, when the computation added into a "
+      "pivoted value (the earnings close into equity)."
+    ),
+  )
+  amounts: dict[str, float] | None = Field(
+    None,
+    description=(
+      "The parts the value is made of, by name: 'pivot' for the pivoted part, "
+      "else the computation that produced each."
+    ),
+  )
 
   @model_validator(mode="after")
   def _require_some_derivation(self) -> DerivedProvenance:
-    if not (self.formula or self.computation or self.source_fact_ids):
+    if not (
+      self.formula or self.computation or self.source_fact_ids or self.source_concepts
+    ):
       raise ValueError(
-        "DerivedProvenance requires one of formula / computation / source_fact_ids"
+        "DerivedProvenance requires one of formula / computation / "
+        "source_fact_ids / source_concepts"
       )
     return self
 
@@ -297,6 +363,7 @@ class ObservedProvenance(BaseModel):
 # Pydantic dispatches on `origin` via the discriminator tag.
 FactProvenance = Annotated[
   PivotProvenance
+  | RollupProvenance
   | ScheduleProvenance
   | DerivedProvenance
   | AssertedProvenance

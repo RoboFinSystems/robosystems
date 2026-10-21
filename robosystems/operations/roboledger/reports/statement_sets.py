@@ -15,6 +15,8 @@ except the leaf ``_guards`` module.
 
 from __future__ import annotations
 
+import hashlib
+from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING
@@ -22,7 +24,13 @@ from typing import TYPE_CHECKING
 from sqlalchemy import text
 
 from robosystems.logger import logger
-from robosystems.models.api.fact_provenance import FactSource, PivotProvenance
+from robosystems.models.api.fact_provenance import (
+  DerivedProvenance,
+  FactSource,
+  PivotProvenance,
+  RollupChild,
+  RollupProvenance,
+)
 from robosystems.models.extensions import Fact
 from robosystems.operations.information_block.envelope import DISCLOSURE_BLOCK_TYPE
 from robosystems.operations.information_block.rules.engine import (
@@ -37,6 +45,7 @@ from robosystems.operations.roboledger.entity_scope import (
   group_members,
   resolve_entity_id,
 )
+from robosystems.operations.roboledger.entry_status import landed_entry_bindparam
 from robosystems.operations.roboledger.fact_set import create_fact_set
 from robosystems.operations.roboledger.reports.calc_dag import (
   load_rs_gaap_calculations,
@@ -331,53 +340,45 @@ def _stamp_facts_into_sets(
   land on a leaf the ΔBS derivation filled, and two values in one context
   would be an inconsistent duplicate in each export.
 
-  Each row carries its own descriptor when it is a pivot that foots to its
-  accounts: ``PivotProvenance`` with ``sources``, keyed by the entity whose
-  pivot summed each account. Footing is checked on the pivot's own values;
-  the listed amounts are then rounded to cents each, the way the live drill
-  lists them, so a long list can differ from the value by a cent or two in
-  display. Any other construction — a subtotal, a derivation, a leaf a
-  derivation added into — is left NULL, unknown, until it is stamped
-  honestly. A row whose column has closed (``period_end`` on or before
-  ``freeze_through``) is written frozen at ``frozen_at``.
+  Each row carries its own descriptor, built from what the facts summed into
+  it say about themselves (``ReportFact.origin``): a pivot that foots to its
+  accounts carries them, keyed by the entity whose pivot summed each (a
+  pivot through a flow filter carries the filter instead); a rollup carries
+  the concepts and weights it summed; a derivation carries its computations,
+  formula, source concepts and the amounts that make up the value, with the
+  accounts of any pivoted part. Facts of mixed construction summed into one
+  row are a derivation whose amounts name each part. A fact that does not
+  say how it was made is stamped nothing — unknown, never a claim. Footing is
+  checked on the pivot's own values; the listed amounts are rounded to cents
+  each, the way the live drill lists them. A row whose column has closed
+  (``period_end`` on or before ``freeze_through``) is written frozen at
+  ``frozen_at``, and a frozen pivot records the hash of the landed lines
+  under its accounts in its window.
   """
   totals: dict[tuple, float] = {}
-  # The accounts summed into each key, or None once a value without any
-  # joined it: a pivot is a pivot only while every contributor was one.
-  sources: dict[tuple, dict[tuple[str, str], float] | None] = {}
+  contributors: dict[tuple, list] = {}
   for fact in facts.facts:
     key = (fact.element_id, fact.period_start, fact.period_end, fact.period_type)
     totals[key] = totals.get(key, 0.0) + fact.value
-    if sources.get(key, {}) is None:
-      continue
-    if fact.source_values is None:
-      sources[key] = None
-      continue
-    cell = sources.get(key)
-    if cell is None:
-      cell = sources[key] = {}
-    shares = (
-      fact.source_shares
-      if fact.source_shares is not None
-      else {(entity_id, a): v for a, v in fact.source_values.items()}
-    )
-    for owner, amount in shares.items():
-      cell[owner] = cell.get(owner, 0.0) + amount
+    contributors.setdefault(key, []).append(fact)
 
   stamped_at = datetime.now(UTC)
+  lines = _LineSets(session) if frozen_at is not None else None
   for key, value in totals.items():
     element_id, period_start, period_end, period_type = key
-    provenance = _pivot_descriptor(
-      sources.get(key),
+    frozen = (
+      frozen_at if freeze_through is not None and period_end <= freeze_through else None
+    )
+    provenance = _fact_descriptor(
+      contributors[key],
       value,
+      entity_id,
       mapping_id,
       period_start,
       period_end,
       period_type,
       stamped_at,
-    )
-    frozen = (
-      frozen_at if freeze_through is not None and period_end <= freeze_through else None
+      lines if frozen is not None else None,
     )
     for structure_id in element_to_structures.get(element_id, ()):
       fact_set_id = structure_to_factset.get(structure_id)
@@ -404,37 +405,223 @@ def _stamp_facts_into_sets(
   session.flush()
 
 
-def _pivot_descriptor(
-  cell: dict[tuple[str, str], float] | None,
-  value: float,
-  mapping_id: str | None,
-  period_start: date | None,
-  period_end: date,
-  period_type: str,
-  stamped_at: datetime,
-) -> dict | None:
-  """A fact's own ``pivot`` descriptor, when its accounts foot to its value;
-  None — unknown — for a subtotal, a derivation, or a leaf a derivation
-  added into (the retained-earnings close, the cash-flow plug)."""
-  if cell is None or mapping_id is None:
+def _shares(fact, entity_id: str) -> dict[tuple[str, str], float] | None:
+  """A fact's account contributions keyed by (entity, account); None when the
+  fact has no account map."""
+  if fact.source_shares is not None:
+    return dict(fact.source_shares)
+  if fact.source_values is None:
     return None
-  if abs(sum(cell.values()) - value) > 0.005:
-    return None
-  listed = [
+  return {
+    (entity_id, account): amount for account, amount in fact.source_values.items()
+  }
+
+
+def _merge_shares(
+  into: dict[tuple[str, str], float], shares: dict[tuple[str, str], float]
+) -> None:
+  for owner, amount in shares.items():
+    into[owner] = into.get(owner, 0.0) + amount
+
+
+def _listed(cell: dict[tuple[str, str], float]) -> list[FactSource]:
+  return [
     FactSource(entity_id=owner, account_id=account_id, value=round(amount, 2))
     for (owner, account_id), amount in sorted(
       cell.items(), key=lambda item: -abs(item[1])
     )
     if amount != 0.0
   ]
+
+
+def _fact_descriptor(
+  contributors: list,
+  value: float,
+  entity_id: str,
+  mapping_id: str | None,
+  period_start: date | None,
+  period_end: date,
+  period_type: str,
+  stamped_at: datetime,
+  lines: _LineSets | None,
+) -> dict | None:
+  """The row's own descriptor from its contributors' origins; None — unknown
+  — when any of them has none."""
+  origins = [c.origin for c in contributors]
+  if any(origin is None for origin in origins):
+    return None
+  if all(origin == "pivot" for origin in origins):
+    return _pivot_descriptor(
+      contributors,
+      value,
+      entity_id,
+      mapping_id,
+      period_start,
+      period_end,
+      period_type,
+      stamped_at,
+      lines,
+    )
+  if len(contributors) == 1 and origins[0] == "rollup":
+    derivation = contributors[0].derivation or {}
+    return RollupProvenance(
+      rule=derivation.get("rule", "calculation"),
+      structure_id=derivation.get("structure_id"),
+      children=[RollupChild(**child) for child in derivation.get("children", [])],
+    ).model_dump(mode="json")
+  return _derived_descriptor(contributors, entity_id)
+
+
+def _pivot_descriptor(
+  contributors: list,
+  value: float,
+  entity_id: str,
+  mapping_id: str | None,
+  period_start: date | None,
+  period_end: date,
+  period_type: str,
+  stamped_at: datetime,
+  lines: _LineSets | None,
+) -> dict | None:
+  """A ``pivot`` descriptor: the accounts that foot to the value, or the
+  posting filter the pivot ran through when it summed lines by something
+  other than their account. None — unknown — when the accounts do not foot:
+  something added into the value without saying so."""
+  if mapping_id is None:
+    return None
+  cell: dict[tuple[str, str], float] = {}
+  filters: list[dict] = []
+  for fact in contributors:
+    shares = _shares(fact, entity_id)
+    if shares is None:
+      posting_filter = (fact.derivation or {}).get("posting_filter")
+      if posting_filter is None:
+        return None
+      filters.append(posting_filter)
+      continue
+    _merge_shares(cell, shares)
   period = (
     str(period_end)
     if period_type == "instant" or period_start is None
     else f"{period_start}/{period_end}"
   )
+  if filters:
+    if cell:
+      return None
+    return PivotProvenance(
+      mapping_id=mapping_id,
+      period=period,
+      stamped_at=stamped_at,
+      posting_filter=filters[0],
+    ).model_dump(mode="json")
+  if abs(sum(cell.values()) - value) > 0.005:
+    return None
+  content_hash = line_count = None
+  if lines is not None and cell:
+    content_hash, line_count = lines.hash(
+      cell.keys(), period_start, period_end, period_type
+    )
   return PivotProvenance(
-    mapping_id=mapping_id, period=period, stamped_at=stamped_at, sources=listed
+    mapping_id=mapping_id,
+    period=period,
+    stamped_at=stamped_at,
+    sources=_listed(cell),
+    content_hash=content_hash,
+    line_count=line_count,
   ).model_dump(mode="json")
+
+
+def _derived_descriptor(contributors: list, entity_id: str) -> dict:
+  """A ``derived`` descriptor over everything summed into the row: each
+  contributor's computations, the amounts by part, the source concepts, and
+  the accounts of whatever was pivoted."""
+  computations: list[str] = []
+  amounts: dict[str, float] = {}
+  concepts: set[str] = set()
+  formulas: list[str] = []
+  cell: dict[tuple[str, str], float] = {}
+
+  def add(name: str, amount: float) -> None:
+    if name not in computations:
+      computations.append(name)
+    amounts[name] = amounts.get(name, 0.0) + amount
+
+  for fact in contributors:
+    derivation = fact.derivation or {}
+    shares = _shares(fact, entity_id)
+    if fact.origin == "pivot":
+      add("pivot", fact.value)
+    elif fact.origin == "rollup":
+      add(f"rollup:{derivation.get('rule', 'calculation')}", fact.value)
+    else:
+      names = list(derivation.get("computations", [])) or ["derived"]
+      known = derivation.get("amounts")
+      if known:
+        for name, amount in known.items():
+          add(name, amount)
+      else:
+        add("+".join(names), fact.value)
+      concepts.update(derivation.get("source_concepts", []))
+      if derivation.get("formula"):
+        formulas.append(derivation["formula"])
+    if shares:
+      _merge_shares(cell, shares)
+  return DerivedProvenance(
+    computation="+".join(computations),
+    formula=formulas[0] if len(set(formulas)) == 1 else None,
+    source_concepts=sorted(concepts),
+    sources=_listed(cell) if cell else None,
+    amounts={name: round(amount, 2) for name, amount in amounts.items()},
+  ).model_dump(mode="json")
+
+
+class _LineSets:
+  """The landed lines under each account of an entity in a window, read
+  once per window and hashed per fact: ``sha256`` over the sorted line ids,
+  so a reconstruction through the register can be checked against the
+  frozen row."""
+
+  _SQL = text(
+    "SELECT li.element_id, array_agg(li.id ORDER BY li.id) AS ids "
+    "FROM line_items li JOIN entries e ON e.id = li.entry_id "
+    "WHERE e.entity_id = :entity_id AND e.status IN :landed_entry_statuses "
+    "  AND e.posting_date <= :end_date "
+    "  AND (CAST(:start_date AS DATE) IS NULL OR e.posting_date >= :start_date) "
+    "GROUP BY li.element_id"
+  ).bindparams(landed_entry_bindparam())
+
+  def __init__(self, session: Session) -> None:
+    self._session = session
+    self._cache: dict[tuple[str, date | None, date], dict[str, list[str]]] = {}
+
+  def hash(
+    self,
+    owners: Iterable[tuple[str, str]],
+    period_start: date | None,
+    period_end: date,
+    period_type: str,
+  ) -> tuple[str, int]:
+    window_start = None if period_type == "instant" else period_start
+    ids: list[str] = []
+    for entity_id, account_id in owners:
+      ids.extend(self._lines(entity_id, window_start, period_end).get(account_id, ()))
+    ids.sort()
+    digest = hashlib.sha256("\n".join(ids).encode()).hexdigest()
+    return f"sha256:{digest}", len(ids)
+
+  def _lines(
+    self, entity_id: str, window_start: date | None, window_end: date
+  ) -> dict[str, list[str]]:
+    key = (entity_id, window_start, window_end)
+    if key not in self._cache:
+      rows = self._session.execute(
+        self._SQL,
+        {"entity_id": entity_id, "start_date": window_start, "end_date": window_end},
+      ).fetchall()
+      self._cache[key] = {
+        str(row.element_id): [str(line_id) for line_id in row.ids] for row in rows
+      }
+    return self._cache[key]
 
 
 def _persist_report_facts(

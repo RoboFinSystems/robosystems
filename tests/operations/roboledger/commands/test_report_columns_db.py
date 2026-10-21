@@ -8,6 +8,7 @@ regenerate keeps the frozen columns' rows."""
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
 
@@ -289,7 +290,8 @@ def test_columns_freeze_as_the_calendar_closes_and_open_ones_accrue(books):
   ]
 
   # June closes: the close brings the column up to the books and freezes it
-  # there; July stays live. From here June's row is the record.
+  # there; July stays live. From here June's row is the record, and it
+  # carries the hash of the one landed line under its account.
   assert _close(g, "2026-06").statements_stamped
   session.expire_all()
   frozen = _frozen(g, report.id)
@@ -297,6 +299,48 @@ def test_columns_freeze_as_the_calendar_closes_and_open_ones_accrue(books):
   revenue = _revenue_rows(g, report.id)
   assert revenue[JUNE[1]].value == 1_000.0
   june_id = revenue[JUNE[1]].id
+  descriptor = revenue[JUNE[1]].provenance
+  june_lines = (
+    session.execute(
+      text(
+        "SELECT li.id FROM line_items li JOIN entries e ON e.id = li.entry_id "
+        "WHERE li.element_id = :account AND e.posting_date BETWEEN :s AND :e "
+        "ORDER BY li.id"
+      ),
+      {"account": _account(g, "4000"), "s": JUNE[0], "e": JUNE[1]},
+    )
+    .scalars()
+    .all()
+  )
+  assert descriptor["line_count"] == len(june_lines) == 1
+  assert (
+    descriptor["content_hash"]
+    == "sha256:" + hashlib.sha256("\n".join(june_lines).encode()).hexdigest()
+  )
+  assert revenue[JULY[1]].provenance["content_hash"] is None
+  # Every row says how it was made: the subtotals and net income are rollups
+  # naming their children, and nothing is left unknown.
+  origins = session.execute(
+    text(
+      "SELECT provenance->>'origin', count(*) FROM facts "
+      "WHERE fact_set_id IN (SELECT id FROM fact_sets WHERE report_id = :rid) "
+      "GROUP BY 1"
+    ),
+    {"rid": report.id},
+  ).all()
+  by_origin = dict(origins)
+  assert None not in by_origin, by_origin
+  assert by_origin.get("rollup", 0) > 0
+  net_income = session.execute(
+    text(
+      "SELECT f.provenance FROM facts f JOIN elements el ON el.id = f.element_id "
+      "WHERE f.fact_set_id IN (SELECT id FROM fact_sets WHERE report_id = :rid) "
+      "  AND el.qname = 'rs-gaap:NetIncomeLoss' AND f.period_end = :end LIMIT 1"
+    ),
+    {"rid": report.id, "end": JUNE[1]},
+  ).scalar()
+  assert net_income["origin"] == "rollup" and net_income["rule"] == "net_income"
+  assert any(c["weight"] == 1.0 for c in net_income["children"])
 
   # A July posting reaches July on the report's next read, and June's row
   # is the one written at the close.
