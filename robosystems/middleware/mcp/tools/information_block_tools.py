@@ -118,6 +118,15 @@ included.""",
               "(nearest the seam). Omitted = the full horizon."
             ),
           },
+          "include_provenance": {
+            "type": "boolean",
+            "description": (
+              "Carry each fact's own provenance descriptor and frozen_at: "
+              "how the value was made (a pivot's accounts, a rollup's "
+              "children, a derivation's parts) and whether its column is "
+              "frozen. Off by default; the facts are the same either way."
+            ),
+          },
           "entity_id": ENTITY_ID_ARGUMENT,
         },
         "required": ["id"],
@@ -130,6 +139,7 @@ included.""",
   def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
     block_id = arguments["id"]
+    include_provenance = bool(arguments.get("include_provenance", False))
     scenario_id = arguments.get("scenario_id")
     series = bool(arguments.get("series", False))
     series_history = arguments.get("series_history")
@@ -152,7 +162,12 @@ included.""",
             "error": "not_found",
             "message": f"Information Block not found: {block_id}",
           }
-        return envelope.model_dump(mode="json")
+        payload = envelope.model_dump(mode="json")
+        if not include_provenance:
+          for fact in payload.get("facts", []):
+            fact.pop("provenance", None)
+            fact.pop("frozen_at", None)
+        return payload
     except EntityNotInGraphError as exc:
       return {"error": "entity_not_found", "message": str(exc)}
     except SQLAlchemyError as exc:

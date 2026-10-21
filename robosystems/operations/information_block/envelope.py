@@ -157,6 +157,8 @@ def fact_to_lite(
     unit=fact.unit,
     fact_scope=fact.fact_scope,
     fact_set_id=fact.fact_set_id,
+    provenance=fact.provenance,
+    frozen_at=fact.frozen_at,
   )
 
 

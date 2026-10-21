@@ -63,6 +63,8 @@ def _fact(
     period_type=period_type,
     unit="USD",
     fact_scope=fact_scope,
+    provenance=None,
+    frozen_at=None,
     fact_set_id="fs_01",
   )
 

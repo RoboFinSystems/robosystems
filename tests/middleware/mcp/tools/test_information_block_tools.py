@@ -105,6 +105,41 @@ class TestGetInformationBlockTool:
     assert result["name"] == "Test Schedule"
 
   @pytest.mark.asyncio
+  async def test_a_facts_descriptor_rides_only_when_asked(self, mock_graph_client):
+    """The facts are the same either way; the descriptor and the freeze are
+    the reader's to ask for, so a routine read stays small."""
+    from datetime import UTC, date, datetime
+
+    from robosystems.models.api.information_block import FactLite
+
+    tool = GetInformationBlockTool(mock_graph_client)
+    envelope = _envelope("struct_facts")
+    envelope.facts = [
+      FactLite(
+        id="fact_1",
+        element_id="el_rev",
+        value=1_000.0,
+        period_end=date(2026, 6, 30),
+        period_type="duration",
+        fact_scope="in_scope",
+        provenance={"origin": "pivot", "mapping_id": "map_1", "period": "x"},
+        frozen_at=datetime(2026, 7, 2, tzinfo=UTC),
+      )
+    ]
+    with (
+      _patch_session(),
+      patch(f"{MODULE}.ops_get_information_block", return_value=envelope),
+    ):
+      plain = await tool.execute({"id": "struct_facts"})
+      asked = await tool.execute({"id": "struct_facts", "include_provenance": True})
+
+    assert plain["facts"][0]["value"] == 1_000.0
+    assert "provenance" not in plain["facts"][0]
+    assert "frozen_at" not in plain["facts"][0]
+    assert asked["facts"][0]["provenance"]["origin"] == "pivot"
+    assert asked["facts"][0]["frozen_at"] == "2026-07-02T00:00:00Z"
+
+  @pytest.mark.asyncio
   async def test_returns_not_found_when_ops_returns_none(self, mock_graph_client):
     tool = GetInformationBlockTool(mock_graph_client)
     with (

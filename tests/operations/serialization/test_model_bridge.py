@@ -32,6 +32,7 @@ from robosystems.operations.serialization.bundle import (
 from robosystems.operations.serialization.model import (
   ITEM_TYPE_TO_XBRL,
   STATEMENT_TITLES,
+  _fact,
   bundle_to_xbrl_model,
   lexical_value,
   markdown_to_html,
@@ -541,3 +542,77 @@ def test_network_definition_is_verbatim_when_unshaped() -> None:
     "0004 - Statement - Statement of Changes in Equity",
     None,
   )
+
+
+# ── A fact's own descriptor reaches the holon as kind, hash and attribution ──
+
+
+def _numeric_bundle_fact(provenance: dict | None) -> BundleFact:
+  return BundleFact(
+    id="f_rev",
+    element_id="Revenues",
+    element_qname="rs-gaap:Revenues",
+    value=1_000.0,
+    period_ref="p_duration",
+    entity_ref="ent_01",
+    decimals="2",
+    provenance=provenance,
+  )
+
+
+@pytest.mark.parametrize(
+  ("descriptor", "kind", "content_hash", "attributed_to"),
+  [
+    (
+      {
+        "origin": "pivot",
+        "mapping_id": "map_1",
+        "period": "2026-06-01/2026-06-30",
+        "sources": [
+          {"entity_id": "ent_01", "account_id": "acct_4000", "value": 1000.0}
+        ],
+        "content_hash": "sha256:abc",
+        "line_count": 1,
+      },
+      "pivot",
+      "sha256:abc",
+      "posted ledger",
+    ),
+    (
+      {"origin": "rollup", "rule": "net_income", "children": []},
+      "rollup",
+      None,
+      "rollup:net_income",
+    ),
+    (
+      {"origin": "derived", "computation": "pivot+close_to_retained_earnings"},
+      "derived",
+      None,
+      "pivot+close_to_retained_earnings",
+    ),
+    (
+      {"origin": "document", "document_id": "doc_1", "asserted_by": "usr_1"},
+      "document",
+      None,
+      "usr_1",
+    ),
+  ],
+)
+def test_a_facts_own_descriptor_reaches_the_holon_without_its_accounts(
+  descriptor, kind, content_hash, attributed_to
+) -> None:
+  """The un-entitled projection: what kind of construction, the hash a
+  reconstruction can be checked against, and what asserted it — never the
+  mapping, the filter or an account."""
+  fact = _fact(_numeric_bundle_fact(descriptor), {})
+  assert fact.provenance is not None
+  assert fact.provenance.kind == kind
+  assert fact.provenance.content_hash == content_hash
+  assert fact.provenance.attributed_to == attributed_to
+  assert fact.provenance.source is None
+  assert "acct_4000" not in fact.model_dump_json()
+
+
+def test_a_fact_with_no_descriptor_claims_nothing_in_the_holon() -> None:
+  assert _fact(_numeric_bundle_fact(None), {}).provenance is None
+  assert _fact(_numeric_bundle_fact({"mapping_id": "x"}), {}).provenance is None
