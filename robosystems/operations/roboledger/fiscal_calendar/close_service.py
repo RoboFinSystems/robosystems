@@ -227,16 +227,19 @@ class PeriodCloseService:
 
   The one exception is the QB pre-publish step, which commits its own
   qb_external_id markers: they record external writes that must survive a
-  failed close. ``statement_stamper`` is injectable for tests.
+  failed close. ``statement_stamper`` and ``report_freezer`` are injectable
+  for tests.
   """
 
   def __init__(
     self,
     fcs: FiscalCalendarService | None = None,
     statement_stamper: Callable[..., StatementStampResult] | None = None,
+    report_freezer: Callable[..., int] | None = None,
   ):
     self._fcs = fcs or FiscalCalendarService()
     self._statement_stamper = statement_stamper
+    self._report_freezer = report_freezer
 
   @staticmethod
   def _refuse_a_group_that_does_not_foot(
@@ -464,6 +467,13 @@ class PeriodCloseService:
       entity_id=entity_id,
     )
 
+    # A report whose column this month completes is brought up to the books
+    # and frozen there, as closed; one that cannot be is left for its next
+    # read, never a reason to refuse the close.
+    reports_frozen = self._freeze_report_columns(
+      session, entity_id=entity_id, actor_id=actor_id
+    )
+
     # Rule failures never fail the close; they surface in rule_summary.
     rule_summary, evaluated_ids = self._evaluate_schedule_rules_in_period(
       session,
@@ -482,6 +492,7 @@ class PeriodCloseService:
       f"target_auto_advanced={target_auto_advanced} "
       f"statements_stamped={stamp.stamped} "
       f"stamp_note={stamp.note} "
+      f"reports_frozen={reports_frozen} "
       f"rule_summary={rule_summary}"
     )
 
@@ -539,6 +550,25 @@ class PeriodCloseService:
       actor_id=actor_id,
       entity_id=entity_id,
     )
+
+  def _freeze_report_columns(
+    self, session: Session, *, entity_id: str, actor_id: str
+  ) -> int:
+    freezer = self._report_freezer
+    if freezer is None:
+      from robosystems.operations.roboledger.commands.report_columns import (
+        freeze_reports_for_close,
+      )
+
+      freezer = freeze_reports_for_close
+    try:
+      return freezer(session, entity_id=entity_id, actor_id=actor_id)
+    except Exception as exc:
+      logger.warning(
+        f"Reports of entity {entity_id} were not frozen at the close; "
+        f"their next read will: {exc}"
+      )
+      return 0
 
   def _publish_drafts_to_qb(
     self,

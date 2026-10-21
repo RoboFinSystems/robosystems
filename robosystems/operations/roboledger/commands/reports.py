@@ -38,6 +38,11 @@ from robosystems.models.extensions import (
 from robosystems.models.extensions.structure import TEXT_BLOCK_CAPS
 from robosystems.operations.aws.s3 import S3Client
 from robosystems.operations.information_block.envelope import DISCLOSURE_BLOCK_TYPE
+from robosystems.operations.roboledger.commands.report_columns import (
+  closed_through_end,
+  open_columns,
+  refresh_report_columns,
+)
 from robosystems.operations.roboledger.entity_scope import (
   report_entity_id,
   resolve_entity_id,
@@ -271,6 +276,7 @@ def _stamp_report_bundle(
   report_def.bundle_url = get_report_bundle_uri(
     bucket, graph_id, report_def.id, report_def.generation_count
   )
+  report_def.bundle_stamped_at = datetime.now(UTC)
   logger.info(
     "Stamped bundle for report %s (g%d) at %s",
     report_def.id,
@@ -374,6 +380,9 @@ def create_report(
     entity_id,
     element_to_structures,
     structure_to_factset,
+    mapping_id=report_def.mapping_id or None,
+    frozen_at=datetime.now(UTC),
+    freeze_through=closed_through_end(session, entity_id),
   )
   _snapshot_text_block_facts(
     session,
@@ -393,10 +402,10 @@ def create_report(
     created_by,
   )
 
+  report_def.last_generated = datetime.now(UTC)
   _stamp_report_bundle(session, graph_id, report_def)
 
   report_def.generation_status = "published"
-  report_def.last_generated = datetime.now(UTC)
   session.commit()
 
   structures = load_structures(session, resolved_taxonomy_id)
@@ -483,43 +492,25 @@ def regenerate_report(
   report_def.generation_status = "generating"
   session.flush()
 
+  # The live columns are rewritten from the books and the columns the
+  # calendar has closed are frozen; a frozen column that is still a column
+  # keeps its facts, and the frozen facts of a window no column states any
+  # more go. The text-block snapshots are taken again.
+  refreshed = refresh_report_columns(
+    session, report_def.id, actor_id=created_by, force=True, prune=True
+  )
+  if not refreshed.rewritten:
+    raise InvalidFilingTransitionError(
+      f"Report '{body.report_id}' was not regenerated: it was filed, archived "
+      "or shared out from under the request."
+    )
+  summary = refreshed.rule_summary
   # The report keeps the entity it was generated for; one from before the
   # column, its facts' entity, and with no facts the group parent.
   entity_id = resolve_entity_id(
     session, report_def.entity_id or report_entity_id(session, report_def.id)
   )
-  facts, reporting_style_id = generate_entity_report_facts(
-    session,
-    taxonomy_id=report_def.taxonomy_id,
-    mapping_id=report_def.mapping_id or "",
-    periods=periods,
-    entity_id=entity_id,
-  )
-
-  element_to_structures, structure_to_factset = _build_structure_mapping(
-    session,
-    reporting_style_id,
-    fact_element_ids={f.element_id for f in facts.facts},
-    taxonomy_id=report_def.taxonomy_id,
-  )
-  delete_report_fact_sets(session, [report_def.id])
-  _pre_create_report_fact_sets(
-    session,
-    report_def.id,
-    entity_id,
-    created_by,
-    periods,
-    structure_to_factset,
-    report_def.mapping_id or "",
-  )
-  _persist_report_facts(
-    session,
-    report_def.id,
-    facts,
-    entity_id,
-    element_to_structures,
-    structure_to_factset,
-  )
+  _delete_report_snapshots(session, report_def.id)
   _snapshot_text_block_facts(
     session,
     report_def.id,
@@ -528,20 +519,10 @@ def regenerate_report(
     report_def.taxonomy_id,
     periods,
   )
-  summary = _evaluate_report_structures(
-    session,
-    facts,
-    element_to_structures,
-    structure_to_factset,
-    report_def.period_start,
-    report_def.period_end,
-    created_by,
-  )
 
   _stamp_report_bundle(session, graph_id, report_def)
 
   report_def.generation_status = "published"
-  report_def.last_generated = datetime.now(UTC)
   session.commit()
 
   structures = load_structures(session, report_def.taxonomy_id)
@@ -620,6 +601,19 @@ def file_report(
       f"Report '{report_id}' has generation_status="
       f"'{report_def.generation_status}'; can only file once generation "
       f"has reached 'complete' or 'published'."
+    )
+
+  # A filed report states closed periods only: its live columns are brought
+  # up to the books and frozen where the calendar allows, and a column the
+  # books have not closed through refuses the filing.
+  refresh_report_columns(session, report_def.id, actor_id=filed_by)
+  still_open = open_columns(session, report_def)
+  if still_open:
+    column = still_open[0]
+    raise InvalidFilingTransitionError(
+      f"Report '{report_id}' states {column.label} ({column.start} to "
+      f"{column.end}), which the books have not closed through. Close the "
+      "period, then file."
     )
 
   report_def.filing_status = "filed"
@@ -1114,6 +1108,26 @@ def delete_report_fact_sets(session: Session, report_ids: Sequence[str]) -> None
   session.execute(
     text("DELETE FROM fact_sets WHERE report_id = ANY(:report_ids)"),
     {"report_ids": ids},
+  )
+
+
+def _delete_report_snapshots(session: Session, report_id: str) -> None:
+  """Drop the report's text-block snapshots (its document sets); a
+  regenerate takes them again. Its statement sets are kept."""
+  session.execute(
+    text(
+      "DELETE FROM verification_results WHERE fact_set_id IN "
+      "(SELECT id FROM fact_sets WHERE report_id = :rid "
+      " AND provenance->>'origin' = 'document')"
+    ),
+    {"rid": report_id},
+  )
+  session.execute(
+    text(
+      "DELETE FROM fact_sets WHERE report_id = :rid "
+      "AND provenance->>'origin' = 'document'"
+    ),
+    {"rid": report_id},
   )
 
 

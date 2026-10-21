@@ -138,6 +138,10 @@ Package membership is **implicit in fact dual-stamping**: a Report owns FactSets
 
 This is why a statement is a view, not a stored artifact: the Report holds facts; the envelope renders them on demand.
 
+**Columns freeze by the calendar.** A report's column is frozen once its period is fully closed — `period_end` on or before the entity's `closed_through` — and its facts are the record: written at the close (or at the first read after it), each carrying `frozen_at`, and never rewritten. A column for an open period is live: a read of the report refreshes it when entries of the report's entities landed in it since `last_generated`, so postings accrue into the report as they land. Filing requires every column frozen; a reopen puts the columns the month was part of back to live. A download is a snapshot of that moment, and the holon is rebuilt when a live column has moved since it was last built.
+
+Each fact also carries its own `provenance`, beside the FactSet's: a pivoted leaf names the accounts that foot to it (`sources`, keyed by the entity whose pivot summed them), and a subtotal or a derivation carries none yet — a null reads as *unknown*, never as the set's descriptor.
+
 ## How to Request a Rendered Report
 
 There are several addressable surfaces, depending on whether you want a saved Report, a live ad-hoc statement, or a slice of facts. All authenticated `curl` examples target `https://api.robosystems.ai` and send your API key from `$ROBOSYSTEMS_API_KEY` in the `X-API-Key` header; to get an account, a key, and a graph, see [Quick Start](Quick-Start.md). Replace `$GRAPH_ID` with your tenant graph id. The read surfaces `build-fact-grid` and `financial-statement-analysis` also take `sec`, the shared SEC repository; `create-report` and `live-financial-statement` need a tenant graph with a RoboLedger ledger, so `sec` is not valid there.

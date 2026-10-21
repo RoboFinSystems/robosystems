@@ -308,6 +308,7 @@ def load_latest_fact_set_for_structure(
       FactSet.scenario_id.is_(None)
       if scenario_id is None
       else FactSet.scenario_id == scenario_id,
+      FactSet.retracted_at.is_(None),
       *_entity_filter(entity_id),
     )
     .order_by(

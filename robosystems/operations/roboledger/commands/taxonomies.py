@@ -9,6 +9,8 @@ row writer that bypasses them.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -304,6 +306,8 @@ def create_mapping_association(
     raise MappingAssociationExistsError(
       body.mapping_id, body.from_element_id, body.to_element_id
     ) from exc
+  # The mapping moved: a report's live columns read it on their next read.
+  structure.updated_at = datetime.now(UTC)
 
   return AssociationResponse(
     id=assoc.id,
@@ -356,6 +360,10 @@ def delete_mapping_association(
     Association.id == body.association_id,
     Association.structure_id == body.mapping_id,
   ).delete(synchronize_session=False)
+  # The mapping moved: a report's live columns read it on their next read.
+  session.query(Structure).filter(Structure.id == body.mapping_id).update(
+    {"updated_at": datetime.now(UTC)}, synchronize_session=False
+  )
   return DeleteResult(deleted=True)
 
 

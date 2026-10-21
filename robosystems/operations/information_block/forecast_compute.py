@@ -150,6 +150,7 @@ def _actual_set_at(
     FactSet.structure_id == structure_id,
     FactSet.factset_type == "report",
     FactSet.scenario_id.is_(None),
+    FactSet.retracted_at.is_(None),
     FactSet.entity_id == entity_id,
     FactSet.period_end == period_end,
     FactSet.period_start >= period_start,
@@ -179,6 +180,7 @@ def _newest_actual_month(
       FactSet.factset_type == "report",
       FactSet.scenario_id.is_(None),
       FactSet.report_id.is_(None),
+      FactSet.retracted_at.is_(None),
       FactSet.entity_id == entity_id,
     )
     .order_by(FactSet.period_end.desc())

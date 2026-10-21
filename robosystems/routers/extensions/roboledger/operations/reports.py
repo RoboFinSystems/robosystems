@@ -154,9 +154,11 @@ regenerate_report_op = _registrar.register(
     name="regenerate-report",
     summary="Regenerate Report",
     description=(
-      "Re-runs fact generation for an existing Report against the latest "
-      "ledger state. Pass `period_start`/`period_end`/`periods` only if "
-      "you want to change the reporting window."
+      "Rewrites a Report's live columns from the latest ledger state. A "
+      "column whose period the books have closed is frozen and keeps its "
+      "facts; an open column already follows the ledger on every read, so "
+      "pass `period_start`/`period_end`/`periods` to change the reporting "
+      "window, which drops the frozen facts of any window no column states."
     ),
     command=cmd_regenerate_report,
     request_model=RegenerateReportOperation,
@@ -262,7 +264,8 @@ async def delete_report_op(
   summary="File Report",
   description=(
     "Transitions the Report's filing_status to 'filed' — locks the package. "
-    "Allowed from 'draft' or 'under_review'. Stamps filed_at + filed_by."
+    "Allowed from 'draft' or 'under_review', and only once the books are "
+    "closed through every period the Report states. Stamps filed_at + filed_by."
   ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],

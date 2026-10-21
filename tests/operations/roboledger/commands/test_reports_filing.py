@@ -51,20 +51,44 @@ def _make_report_def(
   return r
 
 
-def _patch_response_helpers():
+def _patch_response_helpers(open_columns: list | None = None):
   """Patch the helpers report_to_response calls so we don't need real DB data.
 
   ``file_report`` / ``transition_filing_status`` import these helpers at
   call time (lazy import to break a module-level cycle), so the patch
   has to land on the source module — patching the importer's namespace
-  is too late.
+  is too late. The column freeze is patched where ``file_report`` binds it:
+  the books are closed through every column unless ``open_columns`` says
+  otherwise.
   """
-  return patch.multiple(
-    "robosystems.operations.roboledger.reads.reports",
-    load_structures=MagicMock(return_value=[]),
-    resolve_entity_name=MagicMock(return_value=None),
-    report_to_response=MagicMock(side_effect=lambda r, _s, _e: r),
+  return _Patches(
+    patch.multiple(
+      "robosystems.operations.roboledger.reads.reports",
+      load_structures=MagicMock(return_value=[]),
+      resolve_entity_name=MagicMock(return_value=None),
+      report_to_response=MagicMock(side_effect=lambda r, _s, _e: r),
+    ),
+    patch.multiple(
+      "robosystems.operations.roboledger.commands.reports",
+      refresh_report_columns=MagicMock(),
+      open_columns=MagicMock(return_value=open_columns or []),
+    ),
   )
+
+
+class _Patches:
+  def __init__(self, *patches) -> None:
+    self._patches = patches
+
+  def __enter__(self):
+    for p in self._patches:
+      p.__enter__()
+    return self
+
+  def __exit__(self, *exc):
+    for p in reversed(self._patches):
+      p.__exit__(*exc)
+    return False
 
 
 # ── file_report ────────────────────────────────────────────────────────────
@@ -146,6 +170,22 @@ def test_filing_fails_when_the_bundle_cannot_be_stored() -> None:
       side_effect=BundleUploadError("no storage"),
     ),
     pytest.raises(BundleUploadError),
+  ):
+    file_report(session, "rpt_01", filed_by="user_01", graph_id="kg1")
+
+
+def test_file_report_refuses_a_column_the_books_have_not_closed() -> None:
+  """A filed report states closed periods only: a column past the books'
+  closed-through date refuses the filing, naming the column."""
+  from robosystems.operations.roboledger.reports.fact_grid import PeriodSpec
+
+  session = MagicMock()
+  session.get.return_value = _make_report_def(filing_status="draft")
+  still_open = PeriodSpec(start=date(2026, 1, 1), end=date(2026, 3, 31), label="Q1")
+
+  with (
+    _patch_response_helpers(open_columns=[still_open]),
+    pytest.raises(InvalidFilingTransitionError, match=r"Q1 .*not closed through"),
   ):
     file_report(session, "rpt_01", filed_by="user_01", graph_id="kg1")
 

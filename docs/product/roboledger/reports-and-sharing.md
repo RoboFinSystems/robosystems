@@ -7,7 +7,7 @@ section: Work with your books
 
 A report turns your ledger for a period into financial statements: the balance sheet, income statement, cash flow and statement of equity. It lives in your graph, and you choose who else gets a copy.
 
-A report is a snapshot. Live statements move with every sync and every entry, and a report stays as it was when you created it. That's what makes it safe to send.
+A report's columns lock one by one as you close their months. A column for a closed month is the month as it was closed, and it never changes; a column for an open month keeps up with the books, so a late entry shows the next time you open the report. What you send is a snapshot: a copy or a download carries the report as it stood at that moment.
 
 ## Create a report
 
@@ -28,7 +28,7 @@ Open a report in **Reports → View Reports**. The statements, and any notes att
 
 **Ask about this report** answers questions from the report inside the app. It runs on RoboLedger's own AI, so it uses credits. Asking your assistant about the same report through your own connection doesn't.
 
-If the ledger changed after you created a report, because of a late entry or a restated month, regenerate it: ask your assistant, or open the report and choose **Regenerate** from its menu (⋮). The report is rebuilt from the ledger as it stands now. Copies you've already shared don't change.
+An open month's column follows the ledger on its own, and a reopened month's column follows it again until the month is closed. To change a report's periods, regenerate it: ask your assistant, or open the report and choose **Regenerate** from its menu (⋮). Columns for closed months keep the figures they were closed with. Copies you've already shared don't change.
 
 ## Download it
 
@@ -46,7 +46,7 @@ An assistant that works with files on your computer, such as Claude Code, can al
 
 When the statements are final, file the report. Filing happens in the app, not through your assistant: open the report and choose **File report** from its menu (⋮).
 
-A filed report is a record. It can't be regenerated or deleted, only archived, so wait to file if the books for the period may still change. To replace one, archive it and create a new report for the period. Filing rebuilds the report's downloads, so the files carry the filing date.
+A filed report is a record. Every month it states must be closed before it can be filed, and once filed it can't be regenerated or deleted, only archived. To replace one, archive it and create a new report for the period. Filing rebuilds the report's downloads, so the files carry the filing date.
 
 Before you file, the same menu marks a draft as under review, and returns it to draft.
 
@@ -70,7 +70,7 @@ Someone without a RoboLedger or RoboInvestor graph can still read your report. D
 
 - "Create a report for September and tell me anything that looks off."
 - "What changed between the August and September reports?"
-- "We posted a late entry to September. Regenerate the September report."
+- "We posted a late entry to September. Does the September report show it yet?"
 
 ## Go deeper
 

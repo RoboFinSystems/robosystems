@@ -294,8 +294,11 @@ class TestEachEntityStampsItsOwnStatements:
       entity_id=entity_id,
     )
 
-  def _stamped(self, session, entity_id: str, qname: str) -> list[float]:
-    """The values of ``qname`` in the entity's canonical July statements."""
+  def _stamped(
+    self, session, entity_id: str, qname: str, *, retracted: bool = False
+  ) -> list[float]:
+    """The values of ``qname`` in the entity's canonical July statements —
+    the current ones, or with ``retracted`` the ones a reopen took back."""
     return [
       value
       for (value,) in session.execute(
@@ -307,6 +310,9 @@ class TestEachEntityStampsItsOwnStatements:
           FactSet.report_id.is_(None),
           FactSet.factset_type == "report",
           FactSet.period_end == JULY_END,
+          FactSet.retracted_at.is_not(None)
+          if retracted
+          else FactSet.retracted_at.is_(None),
           Element.qname == qname,
         )
       )
@@ -481,6 +487,8 @@ class TestEachEntityStampsItsOwnStatements:
       )
       assert self._stamped(session, adjustments, CASH) == []
       assert self._stamped(session, PARENT, CASH) == [5000.0]
+      # The stamp it took back is kept, as the month as it was closed.
+      assert self._stamped(session, adjustments, CASH, retracted=True) == [6000.0]
 
   def test_an_equity_method_member_is_not_summed(self, charts):
     service = FiscalCalendarService()

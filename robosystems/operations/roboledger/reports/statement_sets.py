@@ -19,11 +19,11 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import delete, text
+from sqlalchemy import text
 
 from robosystems.logger import logger
-from robosystems.models.api.fact_provenance import PivotProvenance
-from robosystems.models.extensions import Fact, VerificationResult
+from robosystems.models.api.fact_provenance import FactSource, PivotProvenance
+from robosystems.models.extensions import Fact
 from robosystems.operations.information_block.envelope import DISCLOSURE_BLOCK_TYPE
 from robosystems.operations.information_block.rules.engine import (
   evaluate_rules_for_structure,
@@ -313,6 +313,10 @@ def _stamp_facts_into_sets(
   entity_id: str,
   element_to_structures: dict[str, list[str]],
   structure_to_factset: dict[str, str],
+  *,
+  mapping_id: str | None = None,
+  frozen_at: datetime | None = None,
+  freeze_through: date | None = None,
 ) -> None:
   """Persist generated report facts into their pre-created FactSets.
 
@@ -326,13 +330,55 @@ def _stamp_facts_into_sets(
   reader of generated facts already combines them: the cash-flow plug can
   land on a leaf the ΔBS derivation filled, and two values in one context
   would be an inconsistent duplicate in each export.
+
+  Each row carries its own descriptor when it is a pivot that foots to its
+  accounts: ``PivotProvenance`` with ``sources``, keyed by the entity whose
+  pivot summed each account. Footing is checked on the pivot's own values;
+  the listed amounts are then rounded to cents each, the way the live drill
+  lists them, so a long list can differ from the value by a cent or two in
+  display. Any other construction — a subtotal, a derivation, a leaf a
+  derivation added into — is left NULL, unknown, until it is stamped
+  honestly. A row whose column has closed (``period_end`` on or before
+  ``freeze_through``) is written frozen at ``frozen_at``.
   """
   totals: dict[tuple, float] = {}
+  # The accounts summed into each key, or None once a value without any
+  # joined it: a pivot is a pivot only while every contributor was one.
+  sources: dict[tuple, dict[tuple[str, str], float] | None] = {}
   for fact in facts.facts:
     key = (fact.element_id, fact.period_start, fact.period_end, fact.period_type)
     totals[key] = totals.get(key, 0.0) + fact.value
+    if sources.get(key, {}) is None:
+      continue
+    if fact.source_values is None:
+      sources[key] = None
+      continue
+    cell = sources.get(key)
+    if cell is None:
+      cell = sources[key] = {}
+    shares = (
+      fact.source_shares
+      if fact.source_shares is not None
+      else {(entity_id, a): v for a, v in fact.source_values.items()}
+    )
+    for owner, amount in shares.items():
+      cell[owner] = cell.get(owner, 0.0) + amount
 
-  for (element_id, period_start, period_end, period_type), value in totals.items():
+  stamped_at = datetime.now(UTC)
+  for key, value in totals.items():
+    element_id, period_start, period_end, period_type = key
+    provenance = _pivot_descriptor(
+      sources.get(key),
+      value,
+      mapping_id,
+      period_start,
+      period_end,
+      period_type,
+      stamped_at,
+    )
+    frozen = (
+      frozen_at if freeze_through is not None and period_end <= freeze_through else None
+    )
     for structure_id in element_to_structures.get(element_id, ()):
       fact_set_id = structure_to_factset.get(structure_id)
       if fact_set_id is None:
@@ -348,12 +394,47 @@ def _stamp_facts_into_sets(
         entity_id=entity_id,
         structure_id=structure_id,
         fact_set_id=fact_set_id,
+        provenance=provenance,
+        frozen_at=frozen,
       )
       session.add(rf)
 
   # autoflush=False: without this the first structure evaluated binds
   # against unflushed facts and skips every rule.
   session.flush()
+
+
+def _pivot_descriptor(
+  cell: dict[tuple[str, str], float] | None,
+  value: float,
+  mapping_id: str | None,
+  period_start: date | None,
+  period_end: date,
+  period_type: str,
+  stamped_at: datetime,
+) -> dict | None:
+  """A fact's own ``pivot`` descriptor, when its accounts foot to its value;
+  None — unknown — for a subtotal, a derivation, or a leaf a derivation
+  added into (the retained-earnings close, the cash-flow plug)."""
+  if cell is None or mapping_id is None:
+    return None
+  if abs(sum(cell.values()) - value) > 0.005:
+    return None
+  listed = [
+    FactSource(entity_id=owner, account_id=account_id, value=round(amount, 2))
+    for (owner, account_id), amount in sorted(
+      cell.items(), key=lambda item: -abs(item[1])
+    )
+    if amount != 0.0
+  ]
+  period = (
+    str(period_end)
+    if period_type == "instant" or period_start is None
+    else f"{period_start}/{period_end}"
+  )
+  return PivotProvenance(
+    mapping_id=mapping_id, period=period, stamped_at=stamped_at, sources=listed
+  ).model_dump(mode="json")
 
 
 def _persist_report_facts(
@@ -363,8 +444,13 @@ def _persist_report_facts(
   entity_id: str,
   element_to_structures: dict[str, list[str]],
   structure_to_factset: dict[str, str],
+  *,
+  mapping_id: str | None = None,
+  frozen_at: datetime | None = None,
+  freeze_through: date | None = None,
 ) -> None:
-  """Replace this report's facts; canonical (report_id NULL) sets are untouched."""
+  """Replace this report's facts; canonical (report_id NULL) sets are
+  untouched. Columns closed through ``freeze_through`` are written frozen."""
   session.execute(
     text(
       "DELETE FROM facts WHERE fact_set_id IN "
@@ -373,7 +459,14 @@ def _persist_report_facts(
     {"report_id": report_id},
   )
   _stamp_facts_into_sets(
-    session, facts, entity_id, element_to_structures, structure_to_factset
+    session,
+    facts,
+    entity_id,
+    element_to_structures,
+    structure_to_factset,
+    mapping_id=mapping_id,
+    frozen_at=frozen_at,
+    freeze_through=freeze_through,
   )
 
 
@@ -461,10 +554,16 @@ def consolidated_report_facts(
     warnings.extend(generated.warnings)
     for f in generated.facts:
       key = (f.element_id, f.period_start, f.period_end, f.period_type, f.audit_only)
+      # Keyed by the member whose pivot summed each account: the consolidation
+      # entity posts on the parent's chart, so an account id alone is not one
+      # member's.
+      shares = {(member.id, a): v for a, v in (f.source_values or {}).items()}
       held = summed.get(key)
       if held is None:
         summed[key] = replace(
-          f, source_values=dict(f.source_values) if f.source_values else None
+          f,
+          source_values=dict(f.source_values) if f.source_values else None,
+          source_shares=shares if f.source_values is not None else None,
         )
         continue
       held_close = held.value if held.close_value is None else held.close_value
@@ -472,8 +571,15 @@ def consolidated_report_facts(
       if held.close_value is not None or f.close_value is not None:
         held.close_value = held_close + add_close
       held.value += f.value
-      if f.source_values:
-        held.source_values = {**(held.source_values or {}), **f.source_values}
+      if f.source_values is not None:
+        merged = dict(held.source_values or {})
+        for account_id, amount in f.source_values.items():
+          merged[account_id] = merged.get(account_id, 0.0) + amount
+        held.source_values = merged
+        held_shares = dict(held.source_shares or {})
+        for owner, amount in shares.items():
+          held_shares[owner] = held_shares.get(owner, 0.0) + amount
+        held.source_shares = held_shares
   return ReportFacts(
     facts=list(summed.values()),
     periods=periods,
@@ -535,7 +641,8 @@ def _canonical_set_ids_in_window(
 
   Window-scoped, not per-structure: a reclose after a reporting-style change
   must retire the old style's sets too. Entity-scoped: closing one entity
-  never touches another's. Excludes publication snapshots and scenario months.
+  never touches another's. Excludes publication snapshots, scenario months
+  and the sets a reopen retracted.
   """
   return list(
     session.execute(
@@ -544,7 +651,8 @@ def _canonical_set_ids_in_window(
         "WHERE period_start = :ps AND period_end = :pe "
         "  AND entity_id = :eid "
         "  AND factset_type = 'report' "
-        "  AND report_id IS NULL AND scenario_id IS NULL"
+        "  AND report_id IS NULL AND scenario_id IS NULL "
+        "  AND retracted_at IS NULL"
       ),
       {"ps": period_start, "pe": period_end, "eid": entity_id},
     )
@@ -577,11 +685,12 @@ def retract_canonical_statement_sets(
   period_end: date,
   entity_id: str | None = None,
 ) -> list[str]:
-  """Delete one entity's canonical statement sets for the window (reopen /
+  """Retract one entity's canonical statement sets for the window (reopen /
   replace path). ``entity_id`` defaults to the group parent.
 
-  VerificationResults have no FK to fact_sets, so they are swept first; facts
-  cascade. Returns the retracted fact_set ids.
+  The sets stay, with their facts and verification results, as the month as
+  it was closed: marked ``retracted_at`` and read by nothing current. Returns
+  the retracted fact_set ids.
   """
   scope = _scope_entity_id(session, entity_id)
   if scope is None:
@@ -597,9 +706,9 @@ def _retract_window(
   if not set_ids:
     return []
   session.execute(
-    delete(VerificationResult).where(VerificationResult.fact_set_id.in_(set_ids))
+    text("UPDATE fact_sets SET retracted_at = :now WHERE id = ANY(:ids)"),
+    {"ids": set_ids, "now": datetime.now(UTC)},
   )
-  session.execute(text("DELETE FROM fact_sets WHERE id = ANY(:ids)"), {"ids": set_ids})
   session.flush()
   return set_ids
 
@@ -617,7 +726,8 @@ def stamp_canonical_statement_sets(
   for the period. ``entity_id`` defaults to the group parent.
 
   Statements only; disclosures and text blocks are publication concerns.
-  Idempotent: the window's existing canonical sets are replaced.
+  Idempotent: the window's existing canonical sets are retracted and
+  replaced, and every fact is written frozen at the stamp.
 
   - **Soft-skip** (``stamped=False`` with a note): reporting isn't set up.
     The close proceeds.
@@ -690,7 +800,14 @@ def stamp_canonical_statement_sets(
       mapping.id,
     )
     _stamp_facts_into_sets(
-      session, facts, entity_id, element_to_structures, structure_to_factset
+      session,
+      facts,
+      entity_id,
+      element_to_structures,
+      structure_to_factset,
+      mapping_id=str(mapping.id),
+      frozen_at=datetime.now(UTC),
+      freeze_through=period_end,
     )
   except Exception as exc:
     raise StatementStampError(

@@ -44,6 +44,8 @@ class _FakeFact:
     self.period_start = period_start
     self.period_end = period_end
     self.period_type = period_type
+    self.source_values = None
+    self.source_shares = None
 
 
 class _FakeFacts:
@@ -415,6 +417,7 @@ def test_pre_create_report_fact_sets_one_row_per_picked_structure() -> None:
     "period": "2025-10-01/2026-03-31",
     "arc_type": None,
     "posting_filter": None,
+    "sources": None,
   }
 
 
@@ -1002,6 +1005,7 @@ def _create_report(body: MagicMock, **replacements) -> dict[str, MagicMock]:
       patch.object(mod, "_build_structure_mapping", return_value=({}, {}))
     )
     stack.enter_context(patch.object(mod, "mapping_owner_id", return_value="ent_sub"))
+    stack.enter_context(patch.object(mod, "closed_through_end", return_value=None))
     mod.create_report(session, body, graph_id="kg_demo", created_by="usr_test")
   mocks["session"] = session
   return mocks

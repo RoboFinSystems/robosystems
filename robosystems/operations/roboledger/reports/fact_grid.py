@@ -65,6 +65,10 @@ class ReportFact:
   # Natural-sign value per mapped source account, for a mapped balance fact;
   # None for derived facts.
   source_values: dict[str, float] | None = None
+  # Each entity's contribution per source account, when the fact sums several
+  # entities' pivots (a consolidated fact); None means ``source_values`` is
+  # the fact's own entity's.
+  source_shares: dict[tuple[str, str], float] | None = None
 
 
 @dataclass

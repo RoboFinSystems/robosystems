@@ -159,6 +159,7 @@ def _closed_canonical_predicates():
   return (
     FactSet.report_id.is_(None),
     FactSet.scenario_id.is_(None),
+    FactSet.retracted_at.is_(None),
     FactSet.factset_type == "report",
     FactSet.period_start.is_not(None),
     closed_period,
