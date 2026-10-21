@@ -18,7 +18,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # ── Line item shapes ─────────────────────────────────────────────────────
 
@@ -263,6 +263,19 @@ class UpdateJournalEntryRequest(BaseModel):
       "`dimension_ids` on the new lines)."
     ),
   )
+
+  @model_validator(mode="after")
+  def _refuse_nulls_on_required_fields(self) -> UpdateJournalEntryRequest:
+    # Omitted leaves a field unchanged; an explicit null would clear a column
+    # the entry cannot be without.
+    nulled = [
+      name
+      for name in ("posting_date", "type")
+      if name in self.model_fields_set and getattr(self, name) is None
+    ]
+    if nulled:
+      raise ValueError(f"{', '.join(nulled)} cannot be null; omit it to keep it.")
+    return self
 
   model_config = ConfigDict(
     json_schema_extra={

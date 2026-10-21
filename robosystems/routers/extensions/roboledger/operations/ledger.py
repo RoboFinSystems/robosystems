@@ -430,9 +430,11 @@ update_event_block_op = _registrar.register(
       "captured → classified records an account choice without posting — "
       "for a bank-feed line, patch metadata.classified_element_id (or "
       "accept_suggestion: true) in the same call. When the transition is "
-      "captured/classified → committed, the registered Python handler fires "
-      "against the captured metadata to produce the GL rows, unless it "
-      "already wrote them when the event was created; a bank-feed "
+      "captured/classified → committed, the registered Python handler (else "
+      "the matching event handler's template) fires against the captured "
+      "metadata to produce the GL rows, unless it already wrote them when "
+      "the event was created; an event with a handler cannot skip to "
+      "pending or fulfilled without rows. A bank-feed "
       "line with no account chosen and no matching rule is refused. Errors "
       "from the handler (validation, element resolution, closed period, "
       "unbalanced lines) surface as 422 here so the inbox UI can display "
@@ -469,6 +471,9 @@ update_event_block_op = _registrar.register(
       # A running sync holds the row lock: the one retryable error here.
       RowLockedError: 409,
       # The rest mirrors create-event-block: approve fires the same handler.
+      HandlerAmbiguousError: 409,
+      TemplateInterpolationError: 422,
+      EngineValidationError: 422,
       DisposalScheduleNotFoundError: 404,
       JournalEntryNotFoundError: 404,
       JournalEntryNotPostedError: 422,

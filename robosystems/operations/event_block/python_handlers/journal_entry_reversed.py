@@ -17,6 +17,7 @@ from robosystems.models.api.extensions.journal_entries import (
 )
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
+from robosystems.operations.event_block.engine import posting_date_for_event
 from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands._guards import (
   ClosedPeriodError,
@@ -47,7 +48,8 @@ class JournalEntryReversedMetadata(BaseModel):
   posting_date: date | None = Field(
     None,
     description=(
-      "Posting date for the reversing entry. Defaults to today when omitted."
+      "Posting date for the reversing entry. Defaults to the event's own "
+      "date (`effective_at`, else `occurred_at`) when omitted."
     ),
   )
   memo: str | None = Field(
@@ -76,7 +78,10 @@ def dispatch(
   """Reverse the original entry; link the reversing entry to the event."""
   body = ReverseJournalEntryRequest(
     entry_id=metadata.entry_id,
-    posting_date=metadata.posting_date,
+    posting_date=metadata.posting_date
+    or posting_date_for_event(
+      effective_at=event.effective_at, occurred_at=event.occurred_at
+    ),
     memo=metadata.memo,
   )
   reversing = reverse_journal_entry(session, body, created_by)
@@ -150,7 +155,9 @@ def dispatch_preview(
   except ShadowLedgerPostingError as e:
     errors.append(str(e))
 
-  posting_date = metadata.posting_date or body.occurred_at.date()
+  posting_date = metadata.posting_date or posting_date_for_event(
+    effective_at=body.effective_at, occurred_at=body.occurred_at
+  )
   try:
     # Both months, as the command fences them: reversing marks the original
     # `reversed`, a change to its month.

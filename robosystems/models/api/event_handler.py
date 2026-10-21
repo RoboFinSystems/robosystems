@@ -151,8 +151,8 @@ class CreateEventHandlerRequest(BaseModel):
   origin: Literal["hub", "tenant"] = Field(
     "tenant",
     description=(
-      "Provenance of the handler. `tenant` = author by graph owner; "
-      "`hub` = platform-shipped template (immutable for tenants)."
+      "Provenance of the handler. `tenant` = authored on this graph, the "
+      "only value a caller may set; `hub` = platform-shipped template."
     ),
   )
 

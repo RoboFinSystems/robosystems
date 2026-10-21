@@ -9,6 +9,7 @@ failures roll back cleanly.
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from sqlalchemy.orm import Session
 
@@ -25,7 +26,6 @@ from robosystems.operations.roboledger.commands._guards import (
 )
 
 from .template import (
-  TemplateInterpolationError,
   build_event_context,
   build_handler_context,
   interpolate,
@@ -61,21 +61,35 @@ def posting_date_for_event(
   return date.today()
 
 
+_MAX_CENTS = 2**63 - 1
+
+
 def _resolve_amount(expr: str, context: dict) -> int:
-  """Resolve a template amount expression to a non-negative int (cents)."""
-  try:
-    value = interpolate(expr, context)
-  except TemplateInterpolationError:
-    raise
+  """Resolve a template amount expression to a non-negative int (cents).
+
+  A fractional number rounds half up, never truncates. A string must spell
+  whole cents: ``"12.50"`` is more likely dollars than cents, so it is
+  refused rather than posted as 13.
+  """
+  value = interpolate(expr, context)
   if value is None:
     raise EngineValidationError(
       f"Amount expression '{expr}' resolved to None — event field may be missing"
     )
   try:
-    cents = int(value)
-  except TypeError, ValueError:
+    if isinstance(value, bool):
+      raise ValueError(value)
+    if isinstance(value, str):
+      cents = int(value)
+    else:
+      cents = int(Decimal(str(value)).to_integral_value(rounding=ROUND_HALF_UP))
+  except InvalidOperation, ValueError, OverflowError:
     raise EngineValidationError(
       f"Amount expression '{expr}' resolved to non-numeric value: {value!r}"
+    )
+  if cents > _MAX_CENTS:
+    raise EngineValidationError(
+      f"Amount expression '{expr}' resolved to {cents}, past the largest amount."
     )
   if cents < 0:
     raise EngineValidationError(
@@ -83,6 +97,48 @@ def _resolve_amount(expr: str, context: dict) -> int:
       "Amounts must be non-negative cents. Use a separate event type for reversals."
     )
   return cents
+
+
+def plan_template_entry(
+  i: int, entry_spec: dict, handler_name: str, context: dict
+) -> tuple[str, str, int]:
+  """One template entry resolved to ``(debit_element_id, credit_element_id,
+  cents)``, with every check the write applies; shared with the preview so
+  the two cannot disagree. Account postability is the caller's, on its
+  entity's chart."""
+  entry_template = entry_spec.get("entry_template")
+  if not entry_template:
+    raise EngineValidationError(
+      f"Template entry {i} is missing 'entry_template' key in handler '{handler_name}'"
+    )
+
+  debit_spec = entry_template.get("debit")
+  credit_spec = entry_template.get("credit")
+  if not debit_spec or not credit_spec:
+    raise EngineValidationError(
+      f"Template entry {i} must have both 'debit' and 'credit' keys"
+    )
+
+  debit_element_id = debit_spec.get("element_id", "")
+  credit_element_id = credit_spec.get("element_id", "")
+  # element_ids may themselves be template expressions
+  if "{{" in debit_element_id:
+    debit_element_id = str(interpolate(debit_element_id, context) or "")
+  if "{{" in credit_element_id:
+    credit_element_id = str(interpolate(credit_element_id, context) or "")
+  if not debit_element_id or not credit_element_id:
+    raise EngineValidationError(
+      f"Template entry {i} debit/credit must each have an 'element_id'"
+    )
+
+  debit_cents = _resolve_amount(debit_spec.get("amount", ""), context)
+  credit_cents = _resolve_amount(credit_spec.get("amount", ""), context)
+  if debit_cents != credit_cents:
+    raise EngineValidationError(
+      f"Template entry {i} is unbalanced: debit={debit_cents} != credit={credit_cents}. "
+      "Every entry must have equal debit and credit amounts."
+    )
+  return debit_element_id, credit_element_id, debit_cents
 
 
 def apply_handler(
@@ -129,48 +185,17 @@ def apply_handler(
   created_transactions: list[Transaction] = []
 
   for i, entry_spec in enumerate(template["transactions"]):
-    entry_template = entry_spec.get("entry_template")
-    if not entry_template:
-      raise EngineValidationError(
-        f"Template entry {i} is missing 'entry_template' key in handler '{handler.name}'"
-      )
-
-    debit_spec = entry_template.get("debit")
-    credit_spec = entry_template.get("credit")
-    if not debit_spec or not credit_spec:
-      raise EngineValidationError(
-        f"Template entry {i} must have both 'debit' and 'credit' keys"
-      )
-
-    debit_element_id = debit_spec.get("element_id", "")
-    credit_element_id = credit_spec.get("element_id", "")
-    if not debit_element_id or not credit_element_id:
-      raise EngineValidationError(
-        f"Template entry {i} debit/credit must each have an 'element_id'"
-      )
-
-    # element_ids may themselves be template expressions
-    if "{{" in debit_element_id:
-      debit_element_id = str(interpolate(debit_element_id, context))
-    if "{{" in credit_element_id:
-      credit_element_id = str(interpolate(credit_element_id, context))
+    debit_element_id, credit_element_id, cents = plan_template_entry(
+      i, entry_spec, handler.name, context
+    )
     assert_accounts_postable(
       session, (debit_element_id, credit_element_id), entity_id=event.entity_id
     )
 
-    debit_cents = _resolve_amount(debit_spec["amount"], context)
-    credit_cents = _resolve_amount(credit_spec["amount"], context)
-
-    if debit_cents != credit_cents:
-      raise EngineValidationError(
-        f"Template entry {i} is unbalanced: debit={debit_cents} != credit={credit_cents}. "
-        "Every entry must have equal debit and credit amounts."
-      )
-
     txn = Transaction(
       entity_id=event.entity_id,
       type=event.event_type,
-      amount=debit_cents,
+      amount=cents,
       currency=event.currency or "USD",
       date=posting_date,
       source=event.source,
@@ -203,7 +228,7 @@ def apply_handler(
     debit_li = LineItem(
       entry_id=entry.id,
       element_id=debit_element_id,
-      debit_amount=debit_cents,
+      debit_amount=cents,
       credit_amount=0,
       line_order=0,
       created_at=now,
@@ -213,7 +238,7 @@ def apply_handler(
       entry_id=entry.id,
       element_id=credit_element_id,
       debit_amount=0,
-      credit_amount=credit_cents,
+      credit_amount=cents,
       line_order=1,
       created_at=now,
       updated_at=now,

@@ -64,6 +64,7 @@ from . import discharges
 from .engine import (
   EngineValidationError,
   apply_handler,
+  plan_template_entry,
   posting_date_for_event,
   resolve_agent_type,
 )
@@ -80,8 +81,8 @@ from .registry import (
 from .reserved import refuse_reserved_event_type
 from .template import (
   TemplateInterpolationError,
+  build_event_context,
   build_handler_context,
-  interpolate,
 )
 
 
@@ -635,15 +636,20 @@ def fire_handler_on_commit(
   event: Event,
   created_by: str,
 ) -> Any:
-  """Fire the event's Python handler against its captured metadata, and
-  return that metadata as the handler typed it.
+  """Fire the event's handler against its captured metadata, and return that
+  metadata as a Python handler typed it.
 
-  Called on ``captured``/``classified`` → ``committed``. Event types with no
-  Python handler are a silent no-op. Errors propagate so the transaction
+  Called on ``captured``/``classified`` → ``committed``. With no Python
+  handler, the matching DSL handler's template runs; with neither, the event
+  is capture-only and nothing is written. Errors propagate so the transaction
   rolls back rather than leave a ``committed`` event with no GL rows.
   """
   python_handler = get_python_handler(event.event_type)
   if python_handler is None:
+    dsl_handler = _matching_dsl_handler(session, event)
+    if dsl_handler is not None:
+      apply_handler(session, event, dsl_handler, created_by=created_by)
+      inherit_event_dimensions(session, str(event.id))
     return None
 
   raw_metadata = dict(event.metadata_ or {})
@@ -658,6 +664,35 @@ def fire_handler_on_commit(
   python_handler.dispatch(session, event, typed_metadata, created_by)
   inherit_event_dimensions(session, str(event.id))
   return typed_metadata
+
+
+def _matching_dsl_handler(session: Session, event: Event) -> Any:
+  """The DSL handler that would fire for the event, or None when none matches
+  (a capture-only event). A tie raises, as at creation."""
+  try:
+    return resolve_handler(
+      session,
+      event_type=event.event_type,
+      event_category=event.event_category,
+      source=event.source,
+      agent_type=resolve_agent_type(session, event.agent_id),
+      resource_type=event.resource_type,
+      metadata=dict(event.metadata_ or {}),
+    )
+  except HandlerNotFoundError:
+    return None
+
+
+def _writes_ledger_rows(session: Session, event: Event) -> bool:
+  """Whether committing the event would write ledger rows: it has a Python
+  handler or a DSL handler matches it. An event with neither is meant to have
+  none (capture-only, an operational event)."""
+  if get_python_handler(event.event_type) is not None:
+    return True
+  try:
+    return _matching_dsl_handler(session, event) is not None
+  except HandlerAmbiguousError:
+    return True
 
 
 # The metadata keys that choose where a classified line posts.
@@ -849,6 +884,19 @@ def update_event_block(
 
     if body.transition_to in _RETRACTED_STATUSES:
       _assert_retractable(session, event)
+
+    # Past `committed` without committing: a financial event would leave the
+    # inbox and the close's unposted gate with no rows ever written.
+    if (
+      body.transition_to in ("pending", "fulfilled")
+      and event.status in ("captured", "classified")
+      and not _has_linked_entries(session, str(event.id))
+      and _writes_ledger_rows(session, event)
+    ):
+      raise InvalidEventTransitionError(
+        f"Event {event.id} has written no ledger rows; commit it "
+        "(transition_to='committed') so its handler posts them, or void it."
+      )
 
     if body.transition_to == "superseded":
       if body.superseded_by_id is None:
@@ -1122,61 +1170,34 @@ def preview_event_block(
     errors.append(str(e))
 
   template = handler.transaction_template or {}
-  event_ctx = {
-    "id": "preview",
-    "event_type": body.event_type,
-    "event_category": body.event_category,
-    "agent_id": body.agent_id,
-    "resource_type": body.resource_type,
-    "resource_element_id": body.resource_element_id,
-    "occurred_at": str(body.occurred_at),
-    "effective_at": str(body.effective_at) if body.effective_at else None,
-    "source": body.source,
-    "external_id": body.external_id,
-    "amount": body.amount,
-    "currency": body.currency,
-    "description": body.description,
-    "metadata": body.metadata,
-  }
+  # The context the write builds, from the row the create would write.
+  event_ctx = build_event_context(
+    _build_event_row(body, created_by, "captured", entity_id)
+  )
+  event_ctx["id"] = "preview"
   context = {
     "event": event_ctx,
     "handler": build_handler_context(handler),
   }
 
   for i, entry_spec in enumerate(template.get("transactions", [])):
-    et = entry_spec.get("entry_template", {})
     try:
-      debit_amount_str = et.get("debit", {}).get("amount", "")
-      credit_amount_str = et.get("credit", {}).get("amount", "")
-      debit_raw = interpolate(debit_amount_str, context)
-      credit_raw = interpolate(credit_amount_str, context)
-      try:
-        debit_cents = int(debit_raw)
-        credit_cents = int(credit_raw)
-      except TypeError, ValueError:
-        errors.append(
-          f"Entry {i}: amount expression resolved to non-numeric value "
-          f"(debit={debit_raw!r}, credit={credit_raw!r})"
-        )
-        continue
-
-      if debit_cents != credit_cents:
-        errors.append(
-          f"Entry {i}: unbalanced — debit {debit_cents} ≠ credit {credit_cents}"
-        )
-
-      planned.append(
-        TransactionPreview(
-          entry_index=i,
-          debit_element_id=et.get("debit", {}).get("element_id", ""),
-          credit_element_id=et.get("credit", {}).get("element_id", ""),
-          amount_cents=debit_cents,
-          interpolated_debit_amount=str(debit_cents),
-          interpolated_credit_amount=str(credit_cents),
-        )
+      debit_element_id, credit_element_id, cents = plan_template_entry(
+        i, entry_spec, handler.name, context
       )
     except (TemplateInterpolationError, EngineValidationError) as e:
-      errors.append(f"Entry {i}: {e}")
+      errors.append(str(e))
+      continue
+    planned.append(
+      TransactionPreview(
+        entry_index=i,
+        debit_element_id=debit_element_id,
+        credit_element_id=credit_element_id,
+        amount_cents=cents,
+        interpolated_debit_amount=str(cents),
+        interpolated_credit_amount=str(cents),
+      )
+    )
 
   try:
     assert_accounts_postable(
@@ -1223,8 +1244,7 @@ def execute_event_block(
   draft Entry posts as its own QB JournalEntry, recorded in
   ``metadata.qb_entry_ids`` and promoted to ``posted``; once no draft
   remains the event goes ``fulfilled``. On rejection what landed is kept,
-  ``metadata.last_outbound_error`` is stamped, and the event moves to
-  ``pending`` where legal.
+  ``metadata.last_outbound_error`` is stamped, and the status is unchanged.
 
   Idempotent: each POST carries the entry id as its RequestId, and an entry
   already in ``qb_entry_ids`` is never re-posted. ``voided``/``superseded``
@@ -1472,10 +1492,11 @@ def execute_event_block(
     )
 
   if error_payload is not None:
+    # The status stays: a `classified` obligation moved to `pending` would
+    # block the retried close on `pending_obligations`, which no override
+    # clears. The error is the record.
     new_meta["last_outbound_error"] = error_payload
     event.metadata_ = new_meta
-    if "pending" in _VALID_TRANSITIONS.get(str(event.status), frozenset()):
-      event.status = "pending"
     session.flush()
     return ExecuteEventBlockResponse(
       event_id=str(event.id),

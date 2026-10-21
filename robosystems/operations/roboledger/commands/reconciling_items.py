@@ -46,6 +46,7 @@ from robosystems.operations.event_block.commands import (
   create_event_block_in_session,
   fire_handler_on_commit,
 )
+from robosystems.operations.event_block.python_handlers import get_python_handler
 from robosystems.operations.event_block.qb_writeback import ROUND_TRIP_BASELINE_KEY
 from robosystems.operations.locking import (
   RowLockedError,
@@ -717,7 +718,14 @@ def _restate_blockers(
   blockers: list[str] = []
   entry_ids = [str(e.id) for e in entries]
 
-  if _round_trip(accepted) is not None:
+  # Only a Python handler rebuilds rows from the source's payload; a template
+  # rule would rebuild them from the event's own amount.
+  if get_python_handler(str(event.event_type)) is None:
+    blockers.append(
+      f"a {event.event_type} event has no handler that rebuilds its entries "
+      "from the source — catch up instead"
+    )
+  elif _round_trip(accepted) is not None:
     blockers.append(
       "this entry was written to QuickBooks and edited there, so QuickBooks "
       "already holds the change — catch up, or acknowledge it as handled"

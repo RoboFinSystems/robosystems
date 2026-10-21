@@ -53,3 +53,11 @@ def test_a_handler_on_an_ordinary_type_is_created() -> None:
     create_event_handler(session, _request("bank_transaction"), "user_test")
   session.add.assert_called_once()
   to_response.assert_called_once()
+
+
+def test_a_caller_cannot_mark_a_handler_platform_shipped() -> None:
+  session = MagicMock()
+  body = _request("bank_transaction").model_copy(update={"origin": "hub"})
+  with pytest.raises(ValueError, match="origin='hub'"):
+    create_event_handler(session, body, "user_test")
+  session.add.assert_not_called()
