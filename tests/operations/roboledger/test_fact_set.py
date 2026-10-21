@@ -73,6 +73,8 @@ class TestCreateFactSetHelper:
       "arc_type": None,
       "posting_filter": None,
       "sources": None,
+      "content_hash": None,
+      "line_count": None,
       "stamped_at": None,
     }
     assert fs.factset_type == "report"

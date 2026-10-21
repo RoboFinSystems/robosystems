@@ -69,6 +69,12 @@ class ReportFact:
   # entities' pivots (a consolidated fact); None means ``source_values`` is
   # the fact's own entity's.
   source_shares: dict[tuple[str, str], float] | None = None
+  # How the value was made — "pivot", "rollup" or "derived" — and what the
+  # construction knew: a rollup's rule and children, a derivation's
+  # computations, formula, source concepts and the amounts that make up the
+  # value. None is unknown, and is stamped as nothing.
+  origin: str | None = None
+  derivation: dict | None = None
 
 
 @dataclass
@@ -92,6 +98,50 @@ class ReportFacts:
   # Findings made while generating (a flow no row presents); reported with
   # the rendered statement's validation, never failures.
   warnings: list[str] = field(default_factory=list)
+
+
+def _mark_derived(
+  fact: ReportFact,
+  computation: str,
+  *,
+  amount: float | None = None,
+  formula: str | None = None,
+  source_concepts: tuple[str, ...] | list[str] = (),
+) -> None:
+  """Record that ``computation`` produced this fact, or is about to add
+  ``amount`` into it: call before the addition, so the value the fact
+  already had — pivoted, rolled up or derived — is kept as its own part and
+  the parts always sum to the value."""
+  derivation = dict(fact.derivation or {})
+  computations = list(derivation.get("computations", []))
+  if amount is not None:
+    amounts = dict(derivation.get("amounts", {}))
+    if not amounts and fact.origin is not None:
+      amounts[_part_name(fact)] = fact.value
+    amounts[computation] = amounts.get(computation, 0.0) + amount
+    derivation["amounts"] = amounts
+  if computation not in computations:
+    computations.append(computation)
+  derivation["computations"] = computations
+  if formula:
+    derivation["formula"] = formula
+  if source_concepts:
+    derivation["source_concepts"] = sorted(
+      set(derivation.get("source_concepts", [])) | set(source_concepts)
+    )
+  fact.origin = "derived"
+  fact.derivation = derivation
+
+
+def _part_name(fact: ReportFact) -> str:
+  """The name a fact's value goes under in ``amounts`` when something is
+  added into it: ``pivot``, ``rollup:<rule>``, or what derived it."""
+  derivation = fact.derivation or {}
+  if fact.origin == "pivot":
+    return "pivot"
+  if fact.origin == "rollup":
+    return f"rollup:{derivation.get('rule', 'calculation')}"
+  return "+".join(derivation.get("computations", [])) or "derived"
 
 
 @dataclass
@@ -442,6 +492,7 @@ def _period_balance_facts(
           source_id: _natural_sign(net, balance.balance_type)
           for source_id, net in balance.by_source.items()
         },
+        origin="pivot",
       )
     )
 
@@ -851,6 +902,10 @@ def _roll_up_facts_to_structure(
         period_start=fact.period_start,
         period_end=fact.period_end,
         period_type=fact.period_type,
+        source_values=fact.source_values,
+        source_shares=fact.source_shares,
+        origin=fact.origin,
+        derivation=fact.derivation,
       )
     )
   return rolled
@@ -1176,6 +1231,8 @@ def _append_empty_equity_facts(
         period_start=period_start,
         period_end=period_end,
         period_type="instant",
+        source_values={},
+        origin="pivot",
       )
     )
 
@@ -1212,6 +1269,8 @@ def _append_empty_equity_facts(
           period_start=period_start,
           period_end=period_end,
           period_type="instant",
+          source_values={},
+          origin="pivot",
         )
       )
 
@@ -1243,12 +1302,14 @@ def _emit_net_income_facts(
     if already_present:
       continue
     net_income = 0.0
+    children: dict[str, float] = {}
     for f in facts:
       if f.period_start != period.start or f.period_end != period.end:
         continue
       sign = _INCOME_SIGN.get(f.classification or "")
       if sign is not None:
         net_income += sign * _close_value(f)
+        children[f.element_qname] = float(sign)
     if net_income == 0.0:
       continue
     facts.append(
@@ -1262,6 +1323,11 @@ def _emit_net_income_facts(
         period_start=period.start,
         period_end=period.end,
         period_type="duration",
+        origin="rollup",
+        derivation={
+          "rule": "net_income",
+          "children": [{"qname": q, "weight": w} for q, w in children.items()],
+        },
       )
     )
 
@@ -1285,6 +1351,8 @@ def _emit_subtotal_facts(
     return
 
   target_ids = list(calculations.keys())
+  # The children too, so each subtotal can name the concepts it summed.
+  child_ids = sorted({src for arcs in calculations.values() for src, _ in arcs})
   meta = {
     m.id: m
     for m in session.execute(
@@ -1292,7 +1360,7 @@ def _emit_subtotal_facts(
         "SELECT id, qname, name, balance_type, period_type "
         "FROM elements WHERE id = ANY(:ids)"
       ),
-      {"ids": target_ids},
+      {"ids": sorted({*target_ids, *child_ids})},
     ).fetchall()
   }
 
@@ -1331,6 +1399,15 @@ def _emit_subtotal_facts(
           period_start=period.start,
           period_end=period.end,
           period_type=m.period_type or "instant",
+          origin="rollup",
+          derivation={
+            "rule": "calculation",
+            "children": [
+              {"qname": meta[src].qname, "weight": float(weight)}
+              for src, weight in calculations.get(elem_id, ())
+              if src in reported and src in meta
+            ],
+          },
         )
       )
 
@@ -1473,6 +1550,15 @@ def _synthesize_ppe_net_facts(
         period_start=period.start,
         period_end=period.end,
         period_type="instant",
+        origin="derived",
+        derivation={
+          "computations": ["ppe_net"],
+          "formula": "PropertyPlantAndEquipmentGross - AccumulatedDepreciation",
+          "source_concepts": [
+            "rs-gaap:PropertyPlantAndEquipmentGross",
+            "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment",
+          ],
+        },
       )
     )
     # Still read by the CF derivation (capex = ΔGross), which ignores the flag.
@@ -1705,6 +1791,8 @@ def _emit_flow_facts(
           period_start=period.start,
           period_end=period.end,
           period_type="duration",
+          origin="pivot",
+          derivation={"posting_filter": {"flow_element": qname}},
         )
       )
   return emitted
@@ -1770,6 +1858,11 @@ def _load_opening_facts(
           period_start=opening,
           period_end=opening,
           period_type=balance.period_type or _infer_period_type(balance.classification),
+          source_values={
+            source_id: _natural_sign(net, balance.balance_type)
+            for source_id, net in balance.by_source.items()
+          },
+          origin="pivot",
         )
       )
   return opening_facts
@@ -1829,7 +1922,11 @@ def _derive_cash_flow_facts(
       FROM elements
       WHERE id = ANY(:ids)
     """),
-    {"ids": cf_leaf_ids},
+    {
+      "ids": sorted(
+        {*cf_leaf_ids, *(s for arcs in derivations.values() for s, _ in arcs)}
+      )
+    },
   ).fetchall()
   cf_meta: dict[str, tuple[str, str, str]] = {
     row[0]: (row[1], row[2], row[3] or "debit") for row in meta_rows
@@ -1876,6 +1973,14 @@ def _derive_cash_flow_facts(
           period_start=current.start,
           period_end=current.end,
           period_type="duration",
+          origin="derived",
+          derivation={
+            "computations": ["indirect_cash_flow"],
+            "formula": "Σ weight × (balance at period end − balance at opening)",
+            "source_concepts": sorted(
+              cf_meta[s][0] for s, _ in sources if s in cf_meta
+            ),
+          },
         )
       )
   return derived
@@ -2509,6 +2614,8 @@ def _emit_noncash_and_settlement_facts(
     value = cents_to_dollars(round(cents))
     for f in facts:
       if f.element_id == element_id and f.period_start == start and f.period_end == end:
+        # Marked before the addition: the mark keeps the value as it was.
+        _mark_derived(f, "noncash_and_settlement", amount=value)
         f.value += value
         break
     else:
@@ -2523,6 +2630,8 @@ def _emit_noncash_and_settlement_facts(
           period_start=start,
           period_end=end,
           period_type="duration",
+          origin="derived",
+          derivation={"computations": ["noncash_and_settlement"]},
         )
       )
   return emitted_flows, warnings
@@ -2637,6 +2746,8 @@ def _reconcile_operating_to_cash(
         period_start=current.start,
         period_end=current.end,
         period_type="duration",
+        origin="derived",
+        derivation={"computations": ["cash_reconciliation"]},
       )
     )
 
@@ -3002,6 +3113,8 @@ def _emit_equity_movement_facts(
           period_start=period.start,
           period_end=period.end,
           period_type="duration",
+          origin="derived",
+          derivation={"computations": ["equity_movement"]},
         )
       )
 
@@ -3101,6 +3214,8 @@ def _emit_nci_movement_facts(
           period_start=period.start,
           period_end=period.end,
           period_type="duration",
+          origin="derived",
+          derivation={"computations": ["nci_movement"]},
         )
       )
 
@@ -3252,6 +3367,8 @@ def _emit_opening_equity_facts(
           period_start=opening,
           period_end=opening,
           period_type="instant",
+          origin="derived",
+          derivation={"computations": ["opening_equity"]},
         )
       )
 
@@ -3520,6 +3637,8 @@ def _close_to_retained_earnings(
     facts, period_start, period_end, close_target_qname=close_target_qname
   )
   if target is not None:
+    # Marked before the addition: the mark keeps the value as it was.
+    _mark_derived(target, "close_to_retained_earnings", amount=net_income)
     target.value += net_income
     return
 
@@ -3542,6 +3661,11 @@ def _close_to_retained_earnings(
       period_start=period_start,
       period_end=period_end,
       period_type="instant",
+      origin="derived",
+      derivation={
+        "computations": ["close_to_retained_earnings"],
+        "amounts": {"close_to_retained_earnings": net_income},
+      },
     )
   )
 
@@ -3595,6 +3719,12 @@ def _close_prior_periods_to_retained_earnings(
     facts, period_start, period_end, close_target_qname=close_target_qname
   )
   if target is not None:
+    # Marked before the addition: the mark keeps the value as it was.
+    _mark_derived(
+      target,
+      "close_prior_periods_to_retained_earnings",
+      amount=prior_periods_net_income,
+    )
     target.value += prior_periods_net_income
   else:
     logger.warning(
@@ -3616,6 +3746,13 @@ def _close_prior_periods_to_retained_earnings(
         period_start=period_start,
         period_end=period_end,
         period_type="instant",
+        origin="derived",
+        derivation={
+          "computations": ["close_prior_periods_to_retained_earnings"],
+          "amounts": {
+            "close_prior_periods_to_retained_earnings": prior_periods_net_income
+          },
+        },
       )
     )
 
