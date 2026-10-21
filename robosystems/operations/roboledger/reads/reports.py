@@ -472,13 +472,18 @@ def get_report_download_url(
   report_id: str,
   flavor: str = RdfFlavor.HOLON_JSONLD.value,
   expires_in: int = PRESIGN_DEFAULT_SECONDS,
+  actor_id: str | None = None,
 ) -> ReportBundleDownloadResponse | None:
   """Resolve a presigned URL for a published Report's serialization bundle.
 
   The API never streams bytes. The holon is stamped at publish and again at
-  filing; the Tavi and XBRL 2.1 are materialized on first download and cached
-  under a ``generation_count``-versioned key, which never goes stale. (A generation
-  stamped before the holon became the anchor materializes it the same way.)
+  filing; the Tavi, the XBRL 2.1 and the holon with lineage are materialized
+  on first download and cached under a ``generation_count``-versioned key,
+  which never goes stale. (A generation stamped before the holon became the
+  anchor materializes it the same way.) The holon with lineage is the books
+  behind the report, so the download is logged with ``actor_id``, and a report
+  shared in from another graph never has one: lineage does not cross the
+  graph boundary.
 
   Returns ``None`` when ``report_id`` doesn't resolve. Raises
   :class:`ReportBundleNotAvailableError` when the report exists but has
@@ -514,6 +519,36 @@ def get_report_download_url(
 
   # The holon and the Tavi gate on publication, not ``bundle_url``, because a
   # shared-in copy can carry either without the other.
+  if flavor == RdfFlavor.HOLON_JSONLD_LINEAGE.value:
+    if report.generation_status != "published":
+      raise ReportBundleNotAvailableError(
+        f"Report '{report_id}' is not published — publish or regenerate the "
+        f"report to produce a holon."
+      )
+    if report.source_graph_id is not None:
+      raise ReportBundleNotAvailableError(
+        f"Report '{report_id}' was shared in from another graph and carries no "
+        f"lineage: the books behind a report never leave the graph that keeps "
+        f"them. Ask the sender for the file with lineage."
+      )
+    response = _materialize_and_presign_lineage_holon(
+      session=session,
+      graph_id=graph_id,
+      report_id=report_id,
+      generation_count=generation_count,
+      expires_in=expires_in,
+    )
+    logger.info(
+      "Lineage holon served for report %s (g%d) on graph %s to %s%s",
+      report_id,
+      generation_count,
+      graph_id,
+      actor_id or "unknown",
+      f" ({len(response.omitted_content)} figure(s) without lineage)"
+      if response.omitted_content
+      else "",
+    )
+    return response
   if flavor == RdfFlavor.HOLON_JSONLD.value:
     if report.generation_status != "published":
       raise ReportBundleNotAvailableError(
@@ -710,6 +745,90 @@ def _materialize_and_presign_holon(
     content_type="application/ld+json",
     format=RdfFlavor.HOLON_JSONLD.value,
     generation_count=generation_count,
+  )
+
+
+def _materialize_and_presign_lineage_holon(
+  session: Session,
+  graph_id: str,
+  report_id: str,
+  generation_count: int,
+  expires_in: int,
+) -> ReportBundleDownloadResponse:
+  """Presign the holon with its ``#lineage`` graph, materializing + caching it
+  on first download under the same generation as the anchor it extends.
+
+  A file with every frozen figure bridged is cached like the Tavi. A file in
+  which some figure's reconstruction missed its frozen hash is still served,
+  but under a partial key that the next download rebuilds, and the response
+  names the figures left without lineage in ``omitted_content``.
+  """
+  bucket = env.USER_DATA_BUCKET
+  key = get_report_bundle_key(
+    graph_id, report_id, generation_count, extension=".lineage.holon.jsonld"
+  )
+  s3 = S3Client()
+  omitted: list[str] = []
+
+  if not s3.object_exists(bucket, key):
+    from robosystems.operations.serialization import build_report_bundle
+    from robosystems.operations.serialization.rdf.lineage import (
+      LineageTooLargeError,
+      build_lineage_holon,
+    )
+
+    bundle = build_report_bundle(session, graph_id, report_id)
+    try:
+      holon, lineage = build_lineage_holon(session, bundle)
+    except LineageTooLargeError as exc:
+      raise ReportBundleNotAvailableError(str(exc)) from exc
+    if lineage.refused:
+      omitted = [f"lineage:{fact_id}" for fact_id in lineage.refused]
+      key = get_report_bundle_key(
+        graph_id,
+        report_id,
+        generation_count,
+        extension=".lineage.partial.holon.jsonld",
+      )
+    uploaded = s3.upload_string(
+      content=holon,
+      bucket=bucket,
+      key=key,
+      content_type="application/ld+json",
+      metadata={"report-id": report_id, "graph-id": graph_id},
+    )
+    if not uploaded:
+      logger.error(
+        "Lineage holon upload failed for report %s at s3://%s/%s",
+        report_id,
+        bucket,
+        key,
+      )
+      raise BundleSigningError(
+        f"Failed to materialize the holon with lineage for report '{report_id}'."
+      )
+
+  download_url = s3.generate_presigned_url(
+    bucket=bucket,
+    key=key,
+    expires_in=expires_in,
+    response_content_type="application/ld+json",
+    response_content_disposition=(
+      f'attachment; filename="{report_id}-g{generation_count}.lineage.holon.jsonld"'
+    ),
+  )
+  if download_url is None:
+    raise BundleSigningError(
+      f"Failed to sign download URL for report '{report_id}' holon with lineage."
+    )
+
+  return ReportBundleDownloadResponse(
+    download_url=download_url,
+    expires_at=datetime.now(UTC) + timedelta(seconds=expires_in),
+    content_type="application/ld+json",
+    format=RdfFlavor.HOLON_JSONLD_LINEAGE.value,
+    generation_count=generation_count,
+    omitted_content=omitted,
   )
 
 

@@ -982,12 +982,17 @@ class ReportDownloadFormat(Enum):
 
   `HOLON_JSONLD` is the dataset-form named-graph holon (scene / boundary /
   projection), stamped at publish — the one flavor that carries the whole
-  report; `TAVI` is the Project Tavi compiled model, the standards form the
-  SEC pipeline also publishes per filing, and `XBRL_2_1` the XBRL 2.1
-  package, both materialized on first download off the same bundle.
+  report; `HOLON_JSONLD_LINEAGE` is the same holon with its fourth graph,
+  `#lineage`: the ledger lines, entries and events behind every frozen
+  figure, for this graph's own members and never carried by a report shared
+  in from another graph; `TAVI` is the Project Tavi compiled model, the
+  standards form the SEC pipeline also publishes per filing, and `XBRL_2_1`
+  the XBRL 2.1 package. The last three are materialized on first download
+  off the same bundle.
   """
 
   HOLON_JSONLD = "holon-jsonld"
+  HOLON_JSONLD_LINEAGE = "holon-jsonld-lineage"
   XBRL_2_1 = "xbrl-2.1"
   TAVI = "tavi"
 

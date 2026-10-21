@@ -13,7 +13,11 @@ import strawberry
 from sqlalchemy.exc import ProgrammingError
 from strawberry.types import Info
 
-from robosystems.graphql.context import GraphQLContext, require_graph_id
+from robosystems.graphql.context import (
+  GraphQLContext,
+  require_graph_id,
+  require_user,
+)
 from robosystems.graphql.execution import log_masked_fault
 from robosystems.graphql.resolvers._common import (
   open_extensions_session as _open_session,
@@ -1610,8 +1614,11 @@ class LedgerQuery:
     The only way to download a report's bundle. Every format resolves to a
     short-lived presigned S3 URL which the client follows directly — the
     field returns the URL, never the bytes. The holon is stamped at
-    publish time; the Tavi and XBRL are materialized and cached on first
-    request. `expiresIn`
+    publish time; the Tavi, the XBRL and the holon with lineage are
+    materialized and cached on first request. `HOLON_JSONLD_LINEAGE` carries
+    the books behind the report's frozen figures, so it is for this graph's
+    members only: a report shared in from another graph raises
+    `REPORT_BUNDLE_NOT_AVAILABLE` for it. `expiresIn`
     is the URL's lifetime in seconds, bounded 60-3600.
 
     Returns null when the report doesn't exist; raises
@@ -1637,6 +1644,7 @@ class LedgerQuery:
         extensions={"code": "INVALID_EXPIRES_IN"},
       )
     graph_id = require_graph_id(info)
+    actor_id = str(require_user(info).id)
     try:
       with _open_session_for_any(info, _REPORT_EXTENSIONS) as session:
         response = reads_reports.get_report_download_url(
@@ -1645,6 +1653,7 @@ class LedgerQuery:
           report_id,
           flavor=format.value,
           expires_in=expires_in,
+          actor_id=actor_id,
         )
     except reads_reports.ReportBundleNotAvailableError as exc:
       raise strawberry.exceptions.StrawberryGraphQLError(

@@ -122,6 +122,7 @@ class DeleteReportTool:
 
 _BUNDLE_FORMATS = (
   RdfFlavor.HOLON_JSONLD.value,
+  RdfFlavor.HOLON_JSONLD_LINEAGE.value,
   XbrlFlavor.TAVI.value,
   XbrlFlavor.XBRL_2_1.value,
 )
@@ -144,7 +145,7 @@ class GetReportBundleTool:
 
 **PARAMETERS:**
 - `report_id`: the report. List them with query-graphql: `{ reports { reports { id name generationStatus } } }`
-- `format`: `holon-jsonld` (default) is the JSON-LD holon, the one format that carries the whole report; `tavi` the Project Tavi compiled model; `xbrl-2.1` the XBRL 2.1 package
+- `format`: `holon-jsonld` (default) is the JSON-LD holon, the one format that carries the whole report; `holon-jsonld-lineage` the same holon with its `#lineage` graph — the ledger lines, entries and events behind every frozen figure, for this graph's own members, never shared to another graph; `tavi` the Project Tavi compiled model; `xbrl-2.1` the XBRL 2.1 package
 
 **RETURNS:** `download_url`, `expires_at`, `content_type`, `format`, and `omitted_content` — what the report carries that this format does not.
 
@@ -193,7 +194,11 @@ class GetReportBundleTool:
     try:
       with extensions_session(graph_id) as session:
         response = reads_reports.get_report_download_url(
-          session, graph_id, report_id, flavor=flavor
+          session,
+          graph_id,
+          report_id,
+          flavor=flavor,
+          actor_id=_resolve_acting_user(self.client, graph_id),
         )
     except reads_reports.ReportBundleNotAvailableError as e:
       return {"error": "not_available", "message": str(e)}

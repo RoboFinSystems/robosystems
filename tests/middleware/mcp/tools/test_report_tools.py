@@ -172,6 +172,7 @@ def test_bundle_definition_warns_the_link_is_a_credential(client):
   assert defn["inputSchema"]["required"] == ["report_id"]
   assert defn["inputSchema"]["properties"]["format"]["enum"] == [
     "holon-jsonld",
+    "holon-jsonld-lineage",
     "tavi",
     "xbrl-2.1",
   ]
@@ -189,7 +190,7 @@ async def test_bundle_defaults_to_the_holon_on_a_read_check(client):
 
   access.assert_called_once_with("kgtest123")
   assert signed.call_args.args[1:] == ("kgtest123", "rpt_01")
-  assert signed.call_args.kwargs == {"flavor": "holon-jsonld"}
+  assert signed.call_args.kwargs == {"flavor": "holon-jsonld", "actor_id": "user_01"}
   assert result["report_id"] == "rpt_01"
   assert result["format"] == "holon-jsonld"
   assert result["download_url"].startswith("https://")
@@ -203,7 +204,8 @@ async def test_bundle_passes_the_format_through(client):
       {"report_id": "rpt_01", "format": "holon-jsonld"}
     )
 
-  assert signed.call_args.kwargs == {"flavor": "holon-jsonld"}
+  # The acting user rides along so a lineage download names who pulled it.
+  assert signed.call_args.kwargs == {"flavor": "holon-jsonld", "actor_id": "user_01"}
 
 
 @pytest.mark.asyncio
