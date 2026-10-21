@@ -14,6 +14,7 @@ from sqlalchemy import (
   Column,
   Date,
   DateTime,
+  ForeignKey,
   Index,
   String,
   text,
@@ -153,8 +154,9 @@ class Event(ExtensionsBase):
 
   event_action = Column(String, nullable=True)
 
-  # agent_id FKs agents(id) in the DB only.
-  agent_id = Column(String, nullable=True)
+  agent_id = Column(
+    String, ForeignKey("agents.id", name="fk_events_agent_id"), nullable=True
+  )
   resource_type = Column(String, nullable=True)
   resource_element_id = Column(String, nullable=True)
 
