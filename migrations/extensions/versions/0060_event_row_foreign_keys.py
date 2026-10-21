@@ -7,10 +7,12 @@ neither: an entry can name an event that does not exist, and an event an
 agent that was deleted. The models declare both now, under the names 0005
 used, so new tenants get them; this adds them to the tenants built between.
 
-Each schema is counted first, read-only. With no orphaned rows the
-constraint is added and validated. With orphans it is added `NOT VALID`,
-which holds every new row to it without failing the deploy on old ones, and
-the count is printed; `VALIDATE CONSTRAINT` once they are repaired.
+Each schema is counted first, read-only. The constraint is always added
+`NOT VALID`, which holds every new row to it at once and blocks writes only
+for the moment of the catalog change; with no orphaned rows it is then
+validated, a scan that does not block writes. With orphans it stays
+`NOT VALID` and the count is printed; `VALIDATE CONSTRAINT` once they are
+repaired.
 
 Revision ID: 0060
 Revises: 0059
@@ -69,15 +71,16 @@ def _add(conn: Connection, schema: str) -> None:
         f'(SELECT 1 FROM "{schema}".{target} t WHERE t.id = r.{column})'
       )
     ).scalar_one()
-    validity = " NOT VALID" if orphans else ""
     conn.execute(
       text(
         f'ALTER TABLE "{schema}".{table} ADD CONSTRAINT "{name}" '
         f'FOREIGN KEY ({column}) REFERENCES "{schema}".{target}(id)'
-        f"{on_delete}{validity}"
+        f"{on_delete} NOT VALID"
       )
     )
-    if orphans:
+    if not orphans:
+      conn.execute(text(f'ALTER TABLE "{schema}".{table} VALIDATE CONSTRAINT "{name}"'))
+    else:
       print(
         f"{schema}.{table}.{column}: {orphans} rows name a missing {target} "
         f'row; "{name}" added NOT VALID, validate once they are repaired.'
