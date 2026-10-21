@@ -147,7 +147,11 @@ class Entry(ExtensionsBase):
 
   # The business event that caused this entry. Parallel to
   # transactions.triggered_by_event_id, for entries with no Transaction row.
-  triggered_by_event_id = Column(String, nullable=True)
+  triggered_by_event_id = Column(
+    String,
+    ForeignKey("events.id", ondelete="RESTRICT", name="fk_entries_triggered_by_event"),
+    nullable=True,
+  )
 
   provenance = Column(String, nullable=True)  # ENTRY_PROVENANCE_VALUES
 
