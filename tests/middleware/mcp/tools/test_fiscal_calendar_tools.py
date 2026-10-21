@@ -856,6 +856,23 @@ class TestPlanHistoryBackfillTask:
     assert result["processed"][0]["status"] == "stamped"
     assert result["fiscal_calendar"]["graph_id"] == GRAPH_ID
 
+  def test_a_person_dispatching_it_closes_as_themselves(self):
+    from robosystems.operations.roboledger.tasks.plan_history_backfill import (
+      PlanHistoryBackfillTask,
+    )
+
+    task = PlanHistoryBackfillTask.__new__(PlanHistoryBackfillTask)
+    task.graph_id = GRAPH_ID
+    task.user_id = "usr_abc"
+    task.params = {"actor_id": "usr_abc", "actor_type": "user", "max_periods": 2}
+    with patch(
+      "robosystems.operations.roboledger.tasks.plan_history_backfill.backfill_payload",
+      return_value={},
+    ) as payload:
+      task._run()
+
+    assert payload.call_args.args == (GRAPH_ID, {"max_periods": 2}, "usr_abc", "user")
+
   def test_precondition_error_maps_to_code(self):
     from robosystems.operations.roboledger.tasks.plan_history_backfill import (
       backfill_payload,

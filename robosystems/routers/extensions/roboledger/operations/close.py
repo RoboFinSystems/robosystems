@@ -17,13 +17,16 @@ from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.operations import (
   IdempotencyCache,
   OperationEnvelope,
+  fingerprint_body,
   get_idempotency_cache,
+  idempotent_dispatch,
+  log_operation_audit,
+  wrap_pending,
 )
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.models.api.common import OPERATION_ERROR_RESPONSES
 from robosystems.models.api.extensions.fiscal_calendar import (
   BackfillPlanHistoryRequest,
-  BackfillPlanHistoryResponse,
   ClosePeriodRequest,
   ClosePeriodResponse,
   FiscalCalendarResponse,
@@ -42,13 +45,9 @@ from robosystems.models.api.extensions.schedules import (
 from robosystems.models.core import User
 from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
-  BackfillPreconditionError,
   PeriodNotClosedError,
   PeriodNotFoundInLedgerError,
   ReopenOrderError,
-)
-from robosystems.operations.roboledger.commands.fiscal_calendar import (
-  backfill_plan_history as cmd_backfill_plan_history,
 )
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
   close_period as cmd_close_period,
@@ -489,7 +488,8 @@ async def reopen_period_op(
 
 @router.post(
   "/backfill-plan-history",
-  response_model=OperationEnvelope[BackfillPlanHistoryResponse],
+  response_model=OperationEnvelope,
+  status_code=202,
   operation_id="backfillPlanHistory",
   summary="Backfill Plan History",
   description=(
@@ -504,7 +504,10 @@ async def reopen_period_op(
     "months are never touched. Months holding draft entries are "
     "skipped, never posted. `start_period` is clamped to the earliest "
     "month with ledger data, so deep-history tenants only backfill "
-    "what actually exists."
+    "what actually exists. Runs on the background worker, since a chunk "
+    "recloses up to 24 months: returns a `pending` envelope at once, and "
+    "the result — the outcome per month and `remaining_periods`, or a "
+    "refusal under `error` — arrives on `/v1/operations/{operation_id}/stream`."
   ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
@@ -521,41 +524,54 @@ async def backfill_plan_history_op(
   user: User = Depends(_require_roboledger_write),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
-  platform_db: Session = Depends(get_db_session),
 ) -> OperationEnvelope:
-  ctx = _ctx(
-    graph_id=graph_id,
-    user_id=str(user.id),
-    op="backfill-plan-history",
-    idempotency_key=idempotency_key,
-    body=body,
-  )
+  from robosystems.worker.client import enqueue_task
 
-  def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        return cmd_backfill_plan_history(
-          session,
-          platform_db,
-          graph_id,
-          body,
-          actor_id=str(user.id),
-          service=_fiscal_svc,
-          close_service=_close_svc,
-          entity_id=body.entity_id,
-        )
-    except RowLockedError as e:
-      # The internal reopen locks the period; another writer may hold it.
-      raise HTTPException(status_code=409, detail=str(e))
-    except BackfillPreconditionError as e:
-      raise HTTPException(
-        status_code=422,
-        detail={"message": str(e), "code": e.code},
-      )
-    except FiscalCalendarError as e:
-      raise HTTPException(status_code=404, detail=str(e))
+  op_name = "backfill-plan-history"
+  user_id = str(user.id)
+  async with idempotent_dispatch(
+    cache,
+    user_id,
+    graph_id,
+    op_name,
+    idempotency_key,
+    fingerprint_body(body),
+    event="extensions.operation",
+  ) as idem:
+    if idem.replay is not None:
+      return idem.replay
 
-  return await _dispatch(ctx, _runner, cache)
+    task_response = await enqueue_task(
+      task_type="plan_history_backfill",
+      graph_id=graph_id,
+      user_id=user_id,
+      params={
+        **body.model_dump(mode="json"),
+        "actor_id": user_id,
+        "actor_type": "user",
+      },
+    )
+    envelope = wrap_pending(
+      op_name,
+      operation_id=task_response["operation_id"],
+      partial_result={
+        "operation_type": task_response.get("operation_type"),
+        "links": task_response.get("_links"),
+        "deduplicated": task_response.get("deduplicated", False),
+      },
+      created_by=user_id,
+    )
+    await idem.record(envelope)
+    log_operation_audit(
+      operation_name=op_name,
+      operation_id=envelope.operation_id,
+      user_id=user_id,
+      graph_id=graph_id,
+      duration_ms=0.0,
+      status="pending",
+      idempotency_key=idempotency_key,
+    )
+    return envelope
 
 
 # The `scheduled_obligation_promoter` sensor's sweep, on demand, so a close can
