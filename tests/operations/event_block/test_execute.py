@@ -6,7 +6,7 @@ Covers the four observable behaviors of the write-back path:
 2. QB-authoritative + QB accepts → per-entry ids and `qb_external_id`
    stamped, entries promoted, status = 'fulfilled' once no draft remains.
 3. QB-authoritative + QB rejects → `last_outbound_error` stamped,
-   status = 'pending', unpublished drafts STAY draft.
+   status unchanged, unpublished drafts STAY draft.
 4. Missing connection_id on event metadata → fast-path with status
    unchanged (event is RL-native; nothing to publish).
 """
@@ -455,7 +455,7 @@ class TestExecuteEventBlockQBAuthoritativeAccept:
 
 @pytest.mark.unit
 class TestExecuteEventBlockQBReject:
-  """QB-authoritative connection + QB rejects → pending status,
+  """QB-authoritative connection + QB rejects → status unchanged,
   drafts stay draft, last_outbound_error captured."""
 
   def test_invalid_amount_type_raises_qbwritebackerror(self):
@@ -481,7 +481,7 @@ class TestExecuteEventBlockQBReject:
     assert exc_info.value.payload["code"] == "invalid_amount_type"
     assert "debit_amount" in exc_info.value.payload["message"]
 
-  def test_qb_reject_path_stamps_error_and_stays_pending(self):
+  def test_qb_reject_path_stamps_error_and_keeps_the_status(self):
     from robosystems.models.api.event_block import ExecuteEventBlockRequest
     from robosystems.operations.event_block.commands import execute_event_block
     from robosystems.operations.event_block.qb_writeback import QBWritebackError
@@ -531,11 +531,13 @@ class TestExecuteEventBlockQBReject:
         graph_id=GRAPH_ID,
       )
 
-    assert result.status == "pending"
+    # A `classified` obligation moved to `pending` would block the retried
+    # close on `pending_obligations`.
+    assert result.status == "classified"
     assert result.qb_external_id is None
     assert result.qb_error == rejection
     # Live event state.
-    assert evt.status == "pending"
+    assert evt.status == "classified"
     assert evt.metadata_["last_outbound_error"] == rejection
     # qb_external_id should NOT be stamped on rejection.
     assert "qb_external_id" not in evt.metadata_
@@ -797,7 +799,7 @@ class TestExecutePublishesLedgerEntries:
     assert result.qb_error == {"code": "qb_validation_error"}
     assert evt.metadata_["qb_entry_ids"] == {"je_1": "JournalEntry_AA"}
     assert evt.metadata_["qb_external_id"] == "JournalEntry_AA"
-    assert evt.status == "pending"
+    assert evt.status == "classified"
 
   def test_a_draft_left_for_a_later_period_keeps_the_event_open(self):
     evt = _make_event()

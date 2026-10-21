@@ -10,7 +10,7 @@ from dataclasses import field as dataclass_field
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import or_, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Query, Session
 
 from robosystems.logger import logger
@@ -18,6 +18,7 @@ from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
+from robosystems.models.extensions.roboledger.transaction import Transaction
 from robosystems.operations.locking import bounded_lock_wait
 from robosystems.operations.roboledger.entity_scope import (
   is_group_parent,
@@ -146,6 +147,32 @@ def drafts_close_posts(
   if entity_id is not None:
     in_window.append(Entry.entity_id == entity_id)
   return session.query(Entry).filter(*in_window)
+
+
+def _post_transactions_with_no_draft(
+  session: Session, transaction_ids: list[str], now: datetime
+) -> None:
+  """Post the transactions behind the entries close just posted, once none of
+  their entries is still a draft (one in a later period keeps it open) or was
+  shadowed, as the QuickBooks publish does. A voided transaction stays void."""
+  if not transaction_ids:
+    return
+  still_draft = (
+    select(Entry.id)
+    .where(
+      Entry.transaction_id == Transaction.id,
+      Entry.status.in_(("draft", SHADOWED_ENTRY_STATUS)),
+    )
+    .exists()
+  )
+  session.query(Transaction).filter(
+    Transaction.id.in_(transaction_ids),
+    Transaction.status == "pending",
+    ~still_draft,
+  ).update(
+    {Transaction.status: "posted", Transaction.posted_at: now},
+    synchronize_session=False,
+  )
 
 
 @dataclass
@@ -382,10 +409,17 @@ class PeriodCloseService:
       posted_locally = 0
     else:
       shadowed = 0
+      transaction_ids = [
+        txn_id
+        for (txn_id,) in in_window.with_entities(Entry.transaction_id)
+        .filter(Entry.transaction_id.isnot(None))
+        .distinct()
+      ]
       posted_locally = in_window.update(
         {Entry.status: "posted", Entry.posted_at: now},
         synchronize_session=False,
       )
+      _post_transactions_with_no_draft(session, transaction_ids, now)
     entries_posted = posted_locally + published_to_qb
     session.flush()
     if not shadow and gate.is_group_close:

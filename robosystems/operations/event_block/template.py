@@ -16,6 +16,7 @@ Rules:
 from __future__ import annotations
 
 import re
+from decimal import ROUND_HALF_UP, Decimal
 
 _TOKEN_RE = re.compile(r"\{\{\s*([^}]+?)\s*\}\}")
 _DIV_RE = re.compile(r"^(.*?)\s*/\s*(\d+)$")
@@ -64,7 +65,8 @@ def interpolate(expression: str, context: dict) -> int | str:
       raise TemplateInterpolationError(
         f"Division applied to non-integer value '{base}' in expression: {expression}"
       )
-    return base // divisor
+    # Rounded half up, as `_resolve_amount` rounds: a split never truncates.
+    return int((Decimal(base) / divisor).to_integral_value(rounding=ROUND_HALF_UP))
 
   # Replace all {{ ... }} tokens with resolved values
   tokens = _TOKEN_RE.findall(expression)

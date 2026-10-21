@@ -60,6 +60,9 @@ def create_event_handler(
   body: CreateEventHandlerRequest,
   created_by: str,
 ) -> EventHandlerResponse:
+  # `hub` marks a platform-shipped handler; no tenant call ships one.
+  if body.origin == "hub":
+    raise ValueError("origin='hub' is set only by the platform; omit it.")
   template_dict = body.transaction_template.model_dump()
   _validate_template(template_dict)
   # A reserved type is written by its own operation and never dispatched, so

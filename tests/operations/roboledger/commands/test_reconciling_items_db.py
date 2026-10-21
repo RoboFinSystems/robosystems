@@ -838,6 +838,18 @@ def test_restate_refuses_to_draft_entries_under_a_fulfilled_event(session):
   assert result.catch_up is not None
 
 
+def test_restate_refuses_an_event_no_handler_rebuilds_from_the_source(session):
+  """Only a Python handler rebuilds rows from the accepted payload; a template
+  rule would rebuild them from the event's own amount, so restate refuses."""
+  _elements, event, _accepted = _setup(session)
+  event.event_type = "royalty_accrued"
+  session.flush()
+
+  plan = plan_reconciling_item(session, str(event.id), graph_id=GRAPH_ID)
+
+  assert any("rebuilds its entries" in blocker for blocker in plan.restate_blockers)
+
+
 def test_a_reflag_between_preview_and_resolve_is_refused(session):
   """Resolving would otherwise accept a payload the operator never saw."""
   _elements, event, _accepted = _setup(session)
