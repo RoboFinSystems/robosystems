@@ -19,6 +19,7 @@ from sqlalchemy import (
   Text,
   text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 
 from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
@@ -81,6 +82,14 @@ class Fact(ExtensionsBase):
   # "historical" facts are already in opening balances and ignored by close;
   # "in_scope" facts are drafted into entries.
   fact_scope = Column(String, nullable=False, default="in_scope")
+  # Typed ``FactProvenance`` for this fact alone: how this value was made —
+  # a pivot with the accounts it summed, a rollup, a derivation. NULL is
+  # *unknown*, never read as the set's descriptor.
+  provenance = Column(JSONB, nullable=True)
+  # When the column this fact sits in froze: its period fully closed, so the
+  # value is the record and is never rewritten. NULL is a live column, a
+  # cache the report read refreshes as postings land.
+  frozen_at = Column(DateTime(timezone=True), nullable=True)
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
 
   def __repr__(self) -> str:

@@ -51,6 +51,10 @@ def _one_entity():
     yield
 
 
+def _noop_freezer(session, **kwargs):
+  return 0
+
+
 def _noop_stamper(session, **kwargs):
   """Stub statement stamper for tests exercising the close flow itself.
 
@@ -680,7 +684,9 @@ class TestCloseAutoRunsRules:
 
   def test_rule_summary_aggregates_across_schedules(self):
     fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
-    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
+    svc = PeriodCloseService(
+      fcs, statement_stamper=_noop_stamper, report_freezer=_noop_freezer
+    )
 
     _r = lambda status: MagicMock(status=status)  # noqa: E731
     session, eval_patcher = self._session_with_schedules_and_rule_results(
@@ -708,7 +714,9 @@ class TestCloseAutoRunsRules:
 
   def test_no_schedules_returns_none_summary(self):
     fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
-    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
+    svc = PeriodCloseService(
+      fcs, statement_stamper=_noop_stamper, report_freezer=_noop_freezer
+    )
 
     session, eval_patcher = self._session_with_schedules_and_rule_results(
       _fp(status="open"), schedule_ids=[], rule_results_per_struct={}
@@ -732,7 +740,9 @@ class TestCloseAutoRunsRules:
     """A bare exception out of the rule engine is logged and skipped — the
     close still succeeds with whatever results were tallied beforehand."""
     fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
-    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
+    svc = PeriodCloseService(
+      fcs, statement_stamper=_noop_stamper, report_freezer=_noop_freezer
+    )
 
     _r = lambda status: MagicMock(status=status)  # noqa: E731
     session = _mock_session_with_fp(_fp(status="open"))

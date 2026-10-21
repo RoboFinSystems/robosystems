@@ -71,6 +71,9 @@ class Report(ExtensionsBase):
   generation_status = Column(String, nullable=False, default="pending")
   generation_count = Column(Integer, nullable=False, default=0, server_default="0")
   bundle_url = Column(String, nullable=True)
+  # When ``bundle_url``'s holon was built. A live column refreshed after it
+  # makes the file stale, and the download restamps before it signs.
+  bundle_stamped_at = Column(DateTime, nullable=True)
 
   # ``archived`` is for superseded versions.
   filing_status = Column(String, nullable=False, default="draft")

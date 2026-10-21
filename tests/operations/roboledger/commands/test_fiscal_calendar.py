@@ -301,6 +301,10 @@ class TestReopenRetractsCanonicalSets:
         "reinstate_reopened_schedule_scopes"
       ),
       patch(
+        "robosystems.operations.roboledger.commands.report_columns."
+        "unfreeze_reports_after_reopen"
+      ),
+      patch(
         "robosystems.operations.roboledger.reports.statement_sets."
         "retract_canonical_statement_sets",
         retract,
@@ -707,6 +711,10 @@ class TestReopenUnderAClosedGroup:
       patch(
         "robosystems.operations.roboledger.commands.schedules."
         "reinstate_reopened_schedule_scopes"
+      ),
+      patch(
+        "robosystems.operations.roboledger.commands.report_columns."
+        "unfreeze_reports_after_reopen"
       ),
       patch(
         "robosystems.operations.roboledger.reports.statement_sets."

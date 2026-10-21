@@ -49,7 +49,7 @@ class DeleteReportTool:
 **NOTES:**
 - Refused for a filed or archived report: filing makes it a record, and a record is archived, not deleted. Archiving and unarchiving are done by a person
 - A generated draft can be deleted; generation does not lock a report, filing does
-- To refresh a draft against newer ledger data, use regenerate-report instead
+- A report's open columns follow the ledger on their own; to change its periods, use regenerate-report instead
 - Refused while the report is shared to other graphs; revoke the shares first
 - Only the report's author can delete it
 

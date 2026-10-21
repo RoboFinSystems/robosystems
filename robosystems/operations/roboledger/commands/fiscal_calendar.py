@@ -550,6 +550,13 @@ def _reopen_under_fence(
   retracted = retract_canonical_statement_sets(
     session, period_start=ps, period_end=pe, entity_id=entity_id
   )
+
+  # The entity's report columns the month was part of go back to live.
+  from robosystems.operations.roboledger.commands.report_columns import (
+    unfreeze_reports_after_reopen,
+  )
+
+  unfreeze_reports_after_reopen(session, entity_id=entity_id)
   return calendar, retracted
 
 

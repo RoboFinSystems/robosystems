@@ -9,7 +9,7 @@ shape, non-fatal verification, and ``retract_canonical_statement_sets``
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -70,6 +70,8 @@ def _fake_facts():
         period_start=None,
         period_end=PE,
         period_type="instant",
+        source_values=None,
+        source_entities=None,
       ),
       SimpleNamespace(
         element_id="el_rev",
@@ -77,6 +79,8 @@ def _fake_facts():
         period_start=PS,
         period_end=PE,
         period_type="duration",
+        source_values=None,
+        source_entities=None,
       ),
       # Prior-month pivot output — the indirect-CF delta basis. Must be
       # consumed by the derivation, never stamped into the close month.
@@ -86,6 +90,8 @@ def _fake_facts():
         period_start=None,
         period_end=PRIOR_PE,
         period_type="instant",
+        source_values=None,
+        source_entities=None,
       ),
     ]
   )
@@ -194,8 +200,7 @@ class TestStampHappyPath:
       _exec_scalars(list(existing_canonical_ids)),  # retract: window select
     ]
     if existing_canonical_ids:
-      effects.append(MagicMock())  # VerificationResult sweep
-      effects.append(MagicMock())  # fact_sets delete
+      effects.append(MagicMock())  # fact_sets retract
     return _session(mapping=_row(id="map_1"), execute_side_effects=effects)
 
   def _added_fact_sets(self, session) -> list[FactSet]:
@@ -247,7 +252,9 @@ class TestStampHappyPath:
       assert fs.provenance["mapping_id"] == "map_1"
       assert fs.provenance["period"] == f"{PS}/{PE}"
 
-  def test_replace_deletes_prior_canonical_sets_and_sweeps_results(self):
+  def test_replace_retracts_prior_canonical_sets(self):
+    """The month's earlier sets stay as it was closed before, retracted and
+    read by nothing current; their verification results stay with them."""
     session = self._happy_session(existing_canonical_ids=["fs_old_bs", "fs_old_is"])
     result = _stamp(session)
     assert result.stamped is True
@@ -259,15 +266,14 @@ class TestStampHappyPath:
     assert "factset_type = 'report'" in window_sql
     assert "report_id IS NULL" in window_sql
     assert "scenario_id IS NULL" in window_sql
+    assert "retracted_at IS NULL" in window_sql
     assert "period_start = :ps" in window_sql
     assert "period_end = :pe" in window_sql
-    # 4th: VerificationResult sweep (no DB FK ties results to sets).
-    sweep_sql = str(calls[3].args[0])
-    assert "verification_results" in sweep_sql.lower()
-    # 5th: the canonical sets themselves.
-    delete_sql = str(calls[4].args[0])
-    assert "DELETE FROM fact_sets" in delete_sql
-    assert calls[4].args[1] == {"ids": ["fs_old_bs", "fs_old_is"]}
+    # 4th: the retract itself — an update, never a delete.
+    retract_sql = str(calls[3].args[0])
+    assert "UPDATE fact_sets SET retracted_at" in retract_sql
+    assert calls[3].args[1]["ids"] == ["fs_old_bs", "fs_old_is"]
+    assert not any("DELETE" in str(c.args[0]) for c in calls)
 
   def test_verification_failure_is_non_fatal(self):
     session = self._happy_session()
@@ -336,13 +342,12 @@ class TestRetractCanonicalSets:
     assert retracted == []
     assert session.execute.call_count == 1
 
-  def test_sweeps_results_then_deletes_sets(self):
+  def test_retracts_the_sets_and_keeps_their_results(self):
     session = MagicMock()
     session.execute.side_effect = [
       _exec_fetchone(_row(id="ent_1")),  # resolve_entity_id
       _exec_scalars(["fs_a", "fs_b"]),
-      MagicMock(),  # VerificationResult sweep
-      MagicMock(),  # fact_sets delete
+      MagicMock(),  # fact_sets retract
     ]
     retracted = retract_canonical_statement_sets(
       session, period_start=PS, period_end=PE
@@ -350,11 +355,11 @@ class TestRetractCanonicalSets:
     assert retracted == ["fs_a", "fs_b"]
 
     calls = session.execute.call_args_list
-    sweep_sql = str(calls[2].args[0])
-    assert "verification_results" in sweep_sql.lower()
-    delete_sql = str(calls[3].args[0])
-    assert "DELETE FROM fact_sets" in delete_sql
-    assert calls[3].args[1] == {"ids": ["fs_a", "fs_b"]}
+    assert len(calls) == 3
+    retract_sql = str(calls[2].args[0])
+    assert "UPDATE fact_sets SET retracted_at = :now" in retract_sql
+    assert calls[2].args[1]["ids"] == ["fs_a", "fs_b"]
+    assert calls[2].args[1]["now"] is not None
     session.flush.assert_called_once()
 
   def test_window_predicates_protect_other_producers_and_entities(self):
@@ -368,6 +373,7 @@ class TestRetractCanonicalSets:
     sql = str(window.args[0])
     assert "factset_type = 'report'" in sql
     assert "report_id IS NULL" in sql
+    assert "retracted_at IS NULL" in sql
     assert "scenario_id IS NULL" in sql
     assert "entity_id = :eid" in sql
     assert window.args[1]["eid"] == "ent_1"
@@ -387,6 +393,8 @@ class TestStampRoundsToCents:
       period_start=date(2025, 12, 31),
       period_end=date(2025, 12, 31),
       period_type="instant",
+      source_values=None,
+      source_entities=None,
     )
     _stamp_facts_into_sets(
       session,
@@ -431,6 +439,8 @@ class TestStampOneFactPerContext:
       period_start=start or self.FY_START,
       period_end=self.FY_END,
       period_type="duration",
+      source_values=None,
+      source_entities=None,
     )
 
   def _stamp(self, facts) -> list:
@@ -469,3 +479,130 @@ class TestStampOneFactPerContext:
       ]
     )
     assert sorted(r.value for r in rows) == [5.0, 7.0]
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# The fact's own descriptor and the column freeze (fact-lineage §9.6)
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class TestPerFactDescriptor:
+  """Every row ``_stamp_facts_into_sets`` writes says how it was made, when
+  it can say so honestly: a pivot whose accounts foot to it carries them;
+  anything else stays unknown. A row in a closed column is frozen."""
+
+  JUNE = (date(2026, 6, 1), date(2026, 6, 30))
+  JULY = (date(2026, 7, 1), date(2026, 7, 31))
+
+  def _fact(self, element_id, value, window, sources=None, owners=None):
+    start, end = window
+    return SimpleNamespace(
+      element_id=element_id,
+      value=value,
+      period_start=start,
+      period_end=end,
+      period_type="duration",
+      source_values=sources,
+      source_entities=owners,
+    )
+
+  def _stamp(self, facts, **kwargs) -> list:
+    session = MagicMock()
+    _stamp_facts_into_sets(
+      session,
+      SimpleNamespace(facts=facts),
+      "ent_1",
+      {"el_rev": ["struct_is"], "el_equity": ["struct_bs"]},
+      {"struct_is": "fs_is", "struct_bs": "fs_bs"},
+      mapping_id="map_1",
+      **kwargs,
+    )
+    return [call.args[0] for call in session.add.call_args_list]
+
+  def test_a_pivot_that_foots_carries_its_accounts_largest_first(self):
+    rows = self._stamp(
+      [self._fact("el_rev", 150.0, self.JUNE, {"acct_a": 50.0, "acct_b": 100.0})]
+    )
+    assert len(rows) == 1
+    descriptor = rows[0].provenance
+    assert descriptor["origin"] == "pivot"
+    assert descriptor["mapping_id"] == "map_1"
+    assert descriptor["period"] == "2026-06-01/2026-06-30"
+    assert [
+      (s["entity_id"], s["account_id"], s["value"]) for s in descriptor["sources"]
+    ] == [
+      ("ent_1", "acct_b", 100.0),
+      ("ent_1", "acct_a", 50.0),
+    ]
+
+  def test_a_value_a_derivation_added_into_is_unknown(self):
+    """The equity leaf the retained-earnings close adds net income into no
+    longer foots to its accounts, so it makes no pivot claim."""
+    rows = self._stamp(
+      [self._fact("el_equity", 1_250.0, self.JUNE, {"acct_capital": 1_000.0})]
+    )
+    assert rows[0].provenance is None
+
+  def test_a_key_one_contributor_without_accounts_joined_is_unknown(self):
+    """The cash-flow plug lands on a leaf the pivot also filled: the summed
+    row was not pivoted whole."""
+    rows = self._stamp(
+      [
+        self._fact("el_rev", 100.0, self.JUNE, {"acct_a": 100.0}),
+        self._fact("el_rev", 7.0, self.JUNE, None),
+      ]
+    )
+    assert len(rows) == 1
+    assert rows[0].value == 107.0
+    assert rows[0].provenance is None
+
+  def test_a_consolidated_sum_keys_each_account_by_its_member(self):
+    rows = self._stamp(
+      [
+        self._fact(
+          "el_rev",
+          300.0,
+          self.JUNE,
+          {"acct_parent": 100.0, "acct_member": 200.0},
+          {"acct_parent": "ent_parent", "acct_member": "ent_member"},
+        )
+      ]
+    )
+    assert {
+      (s["entity_id"], s["account_id"]) for s in rows[0].provenance["sources"]
+    } == {
+      ("ent_parent", "acct_parent"),
+      ("ent_member", "acct_member"),
+    }
+
+  def test_without_a_mapping_nothing_is_claimed(self):
+    session = MagicMock()
+    _stamp_facts_into_sets(
+      session,
+      SimpleNamespace(facts=[self._fact("el_rev", 1.0, self.JUNE, {"a": 1.0})]),
+      "ent_1",
+      {"el_rev": ["struct_is"]},
+      {"struct_is": "fs_is"},
+    )
+    assert session.add.call_args[0][0].provenance is None
+
+  def test_a_closed_column_is_written_frozen_and_an_open_one_live(self):
+    frozen_at = datetime(2026, 7, 2, 9, 0, tzinfo=UTC)
+    rows = self._stamp(
+      [
+        self._fact("el_rev", 100.0, self.JUNE, {"a": 100.0}),
+        self._fact("el_rev", 120.0, self.JULY, {"a": 120.0}),
+      ],
+      frozen_at=frozen_at,
+      freeze_through=self.JUNE[1],
+    )
+    by_end = {row.period_end: row for row in rows}
+    assert by_end[self.JUNE[1]].frozen_at == frozen_at
+    assert by_end[self.JULY[1]].frozen_at is None
+
+  def test_nothing_freezes_without_a_cutoff(self):
+    rows = self._stamp(
+      [self._fact("el_rev", 100.0, self.JUNE, {"a": 100.0})],
+      frozen_at=datetime(2026, 7, 2, tzinfo=UTC),
+    )
+    assert rows[0].frozen_at is None

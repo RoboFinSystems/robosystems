@@ -35,6 +35,10 @@ def _report(
     generation_count=generation_count,
     generation_status=generation_status,
     source_graph_id=source_graph_id,
+    source_report_id=None,
+    filing_status="draft",
+    last_generated=None,
+    bundle_stamped_at=None,
   )
 
 

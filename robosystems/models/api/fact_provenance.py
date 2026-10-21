@@ -39,11 +39,14 @@ discipline as `ArtifactMechanics`, which discriminates on `kind`):
                  the ledger's own for a reconciliation. The reading is the
                  origin; it is neither a user's assertion nor a filing.
 
-Carried at the **FactSet grain** (one descriptor per period-construction);
-facts inherit their parent FactSet's provenance. Stamping is mandatory at
-emission — see `operations/roboledger/fact_set.create_fact_set` (the
-blessed construction path) and the `before_insert` backstop on the
-`FactSet` model.
+Carried at two grains. The **FactSet** carries one descriptor per
+period-construction, mandatory at emission — see
+`operations/roboledger/fact_set.create_fact_set` (the blessed construction
+path) and the `before_insert` backstop on the `FactSet` model. Each **fact**
+may carry its own (`facts.provenance`): a statement set pivots its leaves and
+computes its subtotals and derivations, and only the fact's own descriptor
+says which this one is. A fact without one is *unknown* — never read as
+inheriting the set's.
 """
 
 from __future__ import annotations
@@ -54,12 +57,25 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, model_validator
 
 
+class FactSource(BaseModel):
+  """One account's contribution to a pivoted fact, keyed by the entity whose
+  pivot summed it: a consolidation entity's line on a parent-chart account
+  is the consolidation entity's."""
+
+  entity_id: str = Field(..., description="Entity whose pivot summed the account.")
+  account_id: str = Field(..., description="Chart-of-accounts element id.")
+  value: float = Field(
+    ..., description="Natural-sign dollars this account contributed."
+  )
+
+
 class PivotProvenance(BaseModel):
   """A set built by pivoting the posted ledger (statements / reports).
 
-  Describes the set's construction, not each fact: only the mapped leaves
-  and flow facts aggregate posted line items; the set's subtotals and
-  derivations are computed from those leaves.
+  On a set, describes its construction, not each fact: only the mapped
+  leaves and flow facts aggregate posted line items; the set's subtotals and
+  derivations are computed from those leaves. On a fact, says the fact is one
+  of those leaves, and ``sources`` names the accounts that foot to it.
   """
 
   origin: Literal["pivot"] = "pivot"
@@ -89,6 +105,13 @@ class PivotProvenance(BaseModel):
   posting_filter: dict | None = Field(
     None,
     description="Optional posting filter applied to the source ledger.",
+  )
+  sources: list[FactSource] | None = Field(
+    None,
+    description=(
+      "On a fact's own descriptor: the accounts the pivot summed into this "
+      "value, largest first, footing to it. None on a set's descriptor."
+    ),
   )
 
 

@@ -325,13 +325,13 @@ One close runs these steps in order. The ordering carries the atomicity guarante
 4. **Post the rest.** Every remaining draft dated in the month is posted in one transition. Drafts belonging to voided or superseded events are left alone.
 5. **Advance the calendar.** `closed_through` moves to this month, and `close_target` advances if the close reached it.
 6. **Lock the month.** The `FiscalPeriod` row becomes `closed`, with `closed_at` and `closed_by`.
-7. **Stamp the statements.** The posted ledger is read through the mapping, and the month's canonical balance sheet, income statement, cash flow and equity FactSets are written (`report_id` null), replacing any from an earlier close of the same month. If reporting isn't set up, this step is skipped with a note. If reporting is set up and stamping fails, the whole close rolls back.
+7. **Stamp the statements.** The posted ledger is read through the mapping, and the month's canonical balance sheet, income statement, cash flow and equity FactSets are written (`report_id` null), every fact frozen at the stamp; any from an earlier close of the same month are retracted, not deleted. If reporting isn't set up, this step is skipped with a note. If reporting is set up and stamping fails, the whole close rolls back.
 8. **Verify the schedules.** Rules on schedules with facts in the month run. A failing rule shows up in `rule_summary` but doesn't fail the close.
 9. **Write the receipt.** A versioned JSON receipt is stored on the period row in the same transaction as the lock. A committed close always has its receipt, and a rolled-back one never does.
 
 After the commit, the graph is marked stale so the analytical graph rematerializes with the posted entries and stamped statements.
 
-The stamped statements are the month's closed record. The Plan page, forecasts and metrics read them, and they don't change when the live ledger does. Reopening a month removes them, and closing it again stamps new ones.
+The stamped statements are the month's closed record. The Plan page, forecasts and metrics read them, and they don't change when the live ledger does. Reopening a month retracts them — they stay, as the month as it was closed, read by nothing current — and closing it again stamps new ones beside them. The close also freezes the columns of any saved report the month completes: a report's columns freeze one by one as the calendar closes their periods, and the rest stay live (see [Reporting and Rendering § The Report Is the Package](Reporting-and-Rendering.md#the-report-is-the-package)).
 
 ### The receipt
 
@@ -384,7 +384,8 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
 
 A reopen does three things besides moving the boundary:
 
-- **Retracts the month's stamped statements.** A reopened month no longer makes a closed statement, and its next close stamps new ones.
+- **Retracts the month's stamped statements.** A reopened month no longer makes a closed statement, and its next close stamps new ones. The retracted sets are kept as the month as it was closed, and nothing current reads them.
+- **Puts the month's report columns back to live.** A saved report's column the month was part of is no longer frozen; it refreshes from the books on its next read and freezes again at the re-close.
 - **Returns schedule facts for the month to scope**, so the re-close drafts and verifies them again.
 - **Leaves posted entries posted.** Reopening does not un-post anything. To undo a posted entry, record a reversal (`create-event-block` with `event_type: "journal_entry_reversed"`), then close the month again.
 

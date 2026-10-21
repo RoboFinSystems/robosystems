@@ -88,6 +88,10 @@ class FactSet(ExtensionsBase):
   # rows; required on insert by the backstop below.
   provenance = Column(JSONB, nullable=True)
 
+  # A close-stamped set a reopen retired: kept as the month as it was closed,
+  # read by nothing current. The re-close writes a new set beside it.
+  retracted_at = Column(DateTime(timezone=True), nullable=True)
+
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   updated_at = Column(
     DateTime,

@@ -436,12 +436,13 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
   # Forecast (scenario_id set) facts and fact sets stay OLTP-only: the graph
   # has no scenario discriminator, so they would blend plan into history.
   # Every projection reading `facts` goes through this derived table, and
-  # every `fact_sets` projection filters `scenario_id IS NULL`.
+  # every `fact_sets` projection filters `scenario_id IS NULL`. A set a
+  # reopen retracted is history the graph never shows.
   actual_facts = (
     f"(SELECT f.* FROM postgres_scan('{c}', '{s}', 'facts') f "
     f"LEFT JOIN postgres_scan('{c}', '{s}', 'fact_sets') sfs "
     f"ON sfs.id = f.fact_set_id "
-    f"WHERE sfs.scenario_id IS NULL)"
+    f"WHERE sfs.scenario_id IS NULL AND sfs.retracted_at IS NULL)"
   )
 
   tables["Element"] = f"""
@@ -1078,7 +1079,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       COALESCE(factset_type, '')      AS factset_type,
       COALESCE(CAST(provenance AS VARCHAR), '')  AS provenance
     FROM postgres_scan('{c}', '{s}', 'fact_sets')
-    WHERE scenario_id IS NULL
+    WHERE scenario_id IS NULL AND retracted_at IS NULL
   """
 
   # ── Base Ontology Relationships (Entity ↔ Taxonomy) ────────────────────

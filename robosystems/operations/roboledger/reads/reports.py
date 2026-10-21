@@ -449,6 +449,23 @@ def get_report(session: Session, report_id: str) -> ReportResponse | None:
   return report_to_response(report_def, structures, entity_name)
 
 
+def _bundle_outran(report: Report) -> bool:
+  """Whether the report's columns moved after its holon was built: the file
+  is a snapshot, and a download takes a fresh one. A shared-in copy keeps
+  the file it was given."""
+  if report.source_report_id is not None or report.generation_status != "published":
+    return False
+  if report.last_generated is None:
+    return False
+  if report.bundle_stamped_at is None:
+    return True
+  return _naive(report.last_generated) > _naive(report.bundle_stamped_at)
+
+
+def _naive(stamp: datetime) -> datetime:
+  return stamp.astimezone(UTC).replace(tzinfo=None) if stamp.tzinfo else stamp
+
+
 def get_report_download_url(
   session: Session,
   graph_id: str,
@@ -468,9 +485,31 @@ def get_report_download_url(
   no published bundle, :class:`BundleSigningError` on a signing /
   materialization fault, and ``ValueError`` for an unrecognized flavor.
   """
+  # The live columns move with the books: a read brings them up to date and
+  # freezes what the calendar closed since. Local import: commands import
+  # this module.
+  from robosystems.operations.roboledger.commands.report_columns import (
+    refresh_for_read,
+  )
+
+  refresh_for_read(session, report_id)
+
   report = session.get(Report, report_id)
   if report is None:
     return None
+  if _bundle_outran(report):
+    # A file that cannot be rebuilt right now is served as last built: older
+    # than the screen, still a snapshot the report once was.
+    from robosystems.operations.roboledger.commands.reports import (
+      BundleUploadError,
+      _stamp_report_bundle,
+    )
+
+    try:
+      with session.begin_nested():
+        _stamp_report_bundle(session, graph_id, report)
+    except BundleUploadError as exc:
+      logger.warning(f"Report {report_id} downloads as last built: {exc}")
   generation_count = int(report.generation_count or 0)
 
   # The holon and the Tavi gate on publication, not ``bundle_url``, because a
@@ -766,6 +805,14 @@ def get_report_package(
     get_information_block_for_fact_set,
   )
 
+  # The live columns move with the books: a read brings them up to date and
+  # freezes what the calendar closed since. Local import: commands import
+  # this module.
+  from robosystems.operations.roboledger.commands.report_columns import (
+    refresh_for_read,
+  )
+
+  refresh_for_read(session, report_id)
   report_def = session.get(Report, report_id)
   if report_def is None:
     return None
@@ -844,6 +891,14 @@ def get_statement(
       f"Must be one of: {', '.join(sorted(VALID_BLOCK_TYPES))}"
     )
 
+  # The live columns move with the books: a read brings them up to date and
+  # freezes what the calendar closed since. Local import: commands import
+  # this module.
+  from robosystems.operations.roboledger.commands.report_columns import (
+    refresh_for_read,
+  )
+
+  refresh_for_read(session, report_id)
   report_def = session.get(Report, report_id)
   if report_def is None:
     return None
