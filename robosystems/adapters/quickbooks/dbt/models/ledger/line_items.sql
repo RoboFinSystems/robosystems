@@ -42,7 +42,7 @@ select
           case when location_ref_id is not null
             then {'type': 'location', 'value': location_ref_id} end
         ],
-        x -> x is not null
+        lambda x: x is not null
       ))
     end                                         as dimension_refs
 from sided
