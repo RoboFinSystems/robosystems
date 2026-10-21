@@ -915,42 +915,55 @@ def revoke_report_share(
   The author or a graph admin may revoke, so an author's departure does not
   strand delivered copies.
 
-  Raises `ReportNotFoundError`, `NotAuthorizedError`, or
-  `ReportShareNotFoundError`.
+  The source report stays row-locked for the whole revoke, as it does for a
+  share: a resend cannot land between the copy's deletion and the stamp and
+  leave a live copy under a share marked revoked.
+
+  Raises `ReportNotFoundError`, `NotAuthorizedError`,
+  `ReportShareNotFoundError`, or `RowLockedError`.
   """
   from robosystems.db.extensions import extensions_session
-
-  active_shares = (
-    ReportShare.report_id == report_id,
-    ReportShare.target_graph_id == body.target_graph_id,
-    ReportShare.revoked_at.is_(None),
-  )
+  from robosystems.operations.locking import lock_by_id
 
   with extensions_session(graph_id) as source_session:
-    report_def = source_session.get(Report, report_id)
+    report_def = lock_by_id(
+      source_session,
+      Report,
+      report_id,
+      f"Report {report_id} is being written by another process. Retry in a moment.",
+    )
     if report_def is None:
       raise ReportNotFoundError(report_id)
     if report_def.created_by != acting_user_id and not acting_user_is_graph_admin:
       raise NotAuthorizedError("Not authorized to revoke shares of this report.")
 
-    if not source_session.execute(select(ReportShare.id).where(*active_shares)).first():
+    shares = (
+      source_session.execute(
+        select(ReportShare).where(
+          ReportShare.report_id == report_id,
+          ReportShare.target_graph_id == body.target_graph_id,
+          ReportShare.revoked_at.is_(None),
+        )
+      )
+      .scalars()
+      .all()
+    )
+    if not shares:
       raise ReportShareNotFoundError(
         f"No active share of report '{report_id}' to '{body.target_graph_id}'."
       )
 
-  copy_deleted = _delete_shared_copy(
-    source_graph_id=graph_id,
-    source_report_id=report_id,
-    target_graph_id=body.target_graph_id,
-  )
+    copy_deleted = _delete_shared_copy(
+      source_graph_id=graph_id,
+      source_report_id=report_id,
+      target_graph_id=body.target_graph_id,
+    )
 
-  # Stamp only after the copy is gone, so a failed target write stays
-  # retryable instead of recording a withdrawal that did not happen.
-  now = datetime.now(UTC)
-  with extensions_session(graph_id) as source_session:
-    for share in (
-      source_session.execute(select(ReportShare).where(*active_shares)).scalars().all()
-    ):
+    # Stamped in the lock's transaction, after the copy is gone: a failed
+    # target write rolls the stamp back, so the revoke stays retryable instead
+    # of recording a withdrawal that did not happen.
+    now = datetime.now(UTC)
+    for share in shares:
       share.revoked_at = now
     source_session.commit()
 

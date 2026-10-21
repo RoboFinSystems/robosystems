@@ -169,6 +169,12 @@ from robosystems.models.api.extensions.reconciliations import (
 from robosystems.models.api.extensions.reconciliations import (
   ReconciliationSummary as PydanticReconciliationSummary,
 )
+from robosystems.models.api.extensions.report_shares import (
+  ReportShareListResponse as PydanticReportShareListResponse,
+)
+from robosystems.models.api.extensions.report_shares import (
+  ReportShareResponse as PydanticReportShareResponse,
+)
 from robosystems.models.api.extensions.reports import (
   FactRowResponse as PydanticFactRowResponse,
 )
@@ -1038,6 +1044,19 @@ class PublishListDetail:
 @pydantic_type(model=PydanticPublishListListResponse, all_fields=True)
 class PublishListList:
   """Paginated list of publish lists."""
+
+
+# ── Report shares ─────────────────────────────────────────────────────────
+
+
+@pydantic_type(model=PydanticReportShareResponse, all_fields=True)
+class ReportShare:
+  """One delivery of a report to a recipient graph, with its revocation state."""
+
+
+@pydantic_type(model=PydanticReportShareListResponse, all_fields=True)
+class ReportShareList:
+  """Paginated list of a report's shares, newest first."""
 
 
 # ── Blocked source graphs ─────────────────────────────────────────────────

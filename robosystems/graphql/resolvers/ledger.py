@@ -69,6 +69,7 @@ from robosystems.graphql.types.ledger import (
   ReportDownloadFormat,
   ReportLifecycle,
   ReportList,
+  ReportShareList,
   Statement,
   StructureList,
   Taxonomy,
@@ -141,6 +142,9 @@ from robosystems.operations.roboledger.reads import (
 )
 from robosystems.operations.roboledger.reads import (
   reconciliations as reads_reconciliations,
+)
+from robosystems.operations.roboledger.reads import (
+  report_shares as reads_report_shares,
 )
 from robosystems.operations.roboledger.reads import (
   reports as reads_reports,
@@ -1742,6 +1746,43 @@ class LedgerQuery:
     if response is None:
       return None
     return PublishListDetail.from_pydantic(response)
+
+  # ── Report shares ───────────────────────────────────────────────────────
+
+  @strawberry.field
+  def report_shares(
+    self,
+    info: Info[GraphQLContext, None],
+    report_id: str | None = None,
+    include_revoked: bool = False,
+    limit: int | None = None,
+    offset: int | None = None,
+  ) -> ReportShareList | None:
+    """Where this graph's reports have been shared: each recipient graph, when,
+    by whom, how many facts it received, and whether the share was revoked.
+
+    The sender's record behind `share-report` and `revoke-report-share`.
+    Revoked shares are history: a recipient shared to, revoked, and shared to
+    again has two rows, one revoked and one live.
+
+    Args:
+      report_id: One report's shares. Omit for the graph's whole distribution log.
+      include_revoked: Also list revoked shares. Off by default, so the list is
+        the copies recipients still hold.
+    """
+    limit, offset = _resolve_pagination(limit, offset, default_limit=100)
+    try:
+      with _open_session(info, "roboledger") as session:
+        response = reads_report_shares.list_report_shares(
+          session,
+          report_id=report_id,
+          include_revoked=include_revoked,
+          limit=limit,
+          offset=offset,
+        )
+    except ValueError, ProgrammingError:
+      _raise_ledger_not_initialized()
+    return ReportShareList.from_pydantic(response)
 
   # ── Blocked source graphs ───────────────────────────────────────────────
 
