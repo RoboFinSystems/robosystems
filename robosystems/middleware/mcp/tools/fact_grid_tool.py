@@ -61,6 +61,7 @@ class BuildFactGridTool:
 - Only consolidated totals (dimensional breakdowns excluded)
 - `truncated: true` when more facts matched than `limit` allowed; the ones returned are the most recent by period
 - A figure a filer reports in two units (its own currency and a US-dollar translation) comes back once per unit, and `units_note` says so — never put two units in one series
+- On a tenant graph, a value a period's close stamped carries `presentation: 'as_closed'` and `stamped_at`: the month as it closed, which a live read of the books (live-financial-statement) can differ from once a mapping was reclassified after the close
 
 **NOTES:**
 On shared repositories (e.g. SEC) entity or entities is REQUIRED — those graphs host thousands of filers, so an unscoped query returns an arbitrary slice of arbitrary companies. On a tenant graph the URL already scopes to one entity, so the filter is optional there.

@@ -121,6 +121,27 @@ async def test_the_account_value_is_the_close_not_a_schedule(graph):
   assert truncated is False
 
 
+async def test_a_value_the_close_stamped_says_so(graph):
+  def standing(_graph_id, fact_ids):
+    return {
+      fact_id: fact_query._Standing(2, "", "2026-08-01T09:00:00")
+      for fact_id in fact_ids
+    }
+
+  with (
+    patch.object(
+      fact_query, "get_graph_repository", AsyncMock(return_value=_repository(graph))
+    ),
+    patch.object(fact_query, "_has_ledger_schema", return_value=True),
+    patch.object(fact_query, "_report_standing", side_effect=standing),
+  ):
+    (fact,), _ = await fact_query.query_fact_grid(GRAPH, elements=["coa:7000"])
+
+  assert fact["presentation"] == "as_closed"
+  assert fact["stamped_at"] == "2026-08-01T09:00:00"
+  assert "fact_id" not in fact
+
+
 class _PgError(Exception):
   def __init__(self, pgcode: str) -> None:
     super().__init__(pgcode)

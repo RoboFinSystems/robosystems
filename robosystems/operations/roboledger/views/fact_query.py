@@ -14,7 +14,7 @@ sorts every match, which times out on large anchored patterns).
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, NamedTuple
 
 from sqlalchemy.exc import DBAPIError
 
@@ -181,8 +181,16 @@ def _build_entity_match(
 _REPORT_STANDING = {"filed": 3, None: 2, "draft": 1, "under_review": 1, "archived": 0}
 
 
-def _report_standing(graph_id: str, fact_ids: list[str]) -> dict[str, tuple]:
-  """``fact_id -> (standing, last_generated)`` from the tenant's OLTP."""
+class _Standing(NamedTuple):
+  rank: int
+  generated: str
+  # When the close stamped the fact's set: a value kept as the month closed,
+  # which a live read of the books after a reclassification can differ from.
+  stamped_at: str | None = None
+
+
+def _report_standing(graph_id: str, fact_ids: list[str]) -> dict[str, _Standing]:
+  """``fact_id -> standing`` from the tenant's OLTP."""
   from sqlalchemy import text
 
   from robosystems.db.extensions import extensions_session
@@ -190,7 +198,9 @@ def _report_standing(graph_id: str, fact_ids: list[str]) -> dict[str, tuple]:
   with extensions_session(graph_id) as session:
     rows = session.execute(
       text("""
-        SELECT f.id, r.filing_status, r.last_generated
+        SELECT f.id, r.filing_status, r.last_generated,
+          CASE WHEN fs.factset_type = 'report' AND fs.report_id IS NULL
+            AND fs.scenario_id IS NULL THEN fs.created_at END AS stamped_at
         FROM facts f
         LEFT JOIN fact_sets fs ON fs.id = f.fact_set_id
         LEFT JOIN reports r ON r.id = fs.report_id
@@ -199,7 +209,11 @@ def _report_standing(graph_id: str, fact_ids: list[str]) -> dict[str, tuple]:
       {"ids": fact_ids},
     ).fetchall()
   return {
-    row.id: (_REPORT_STANDING.get(row.filing_status, 1), str(row.last_generated or ""))
+    row.id: _Standing(
+      _REPORT_STANDING.get(row.filing_status, 1),
+      str(row.last_generated or ""),
+      row.stamped_at.isoformat() if row.stamped_at else None,
+    )
     for row in rows
   }
 
@@ -227,7 +241,7 @@ _NOT_A_SCHEDULE_FACT = (
 
 
 def _deduplicate_fact_rows(
-  rows: list[dict[str, Any]], standing: dict[str, tuple] | None = None
+  rows: list[dict[str, Any]], standing: dict[str, _Standing] | None = None
 ) -> list[dict[str, Any]]:
   """Dedup on ``(element, period_start, period_end, entity, unit)``, then sort
   by ``period_end`` descending.
@@ -244,7 +258,10 @@ def _deduplicate_fact_rows(
     precision = precision_rank(row.get("decimals"))
     if standing is None:
       return (precision,)
-    return (*standing.get(row.get("fact_id"), (_REPORT_STANDING[None], "")), precision)
+    entry = standing.get(row.get("fact_id"))
+    if entry is None:
+      return (_REPORT_STANDING[None], "", precision)
+    return (entry.rank, entry.generated, precision)
 
   deduped = keep_most_precise(
     rows,
@@ -397,7 +414,10 @@ async def query_fact_grid(
       logger.warning(f"No ledger schema for {graph_id}; report standing skipped")
   deduped = _deduplicate_fact_rows(results, standing)
   for row in deduped:
-    row.pop("fact_id", None)
+    entry = (standing or {}).get(row.pop("fact_id", None))
+    if entry is not None and entry.stamped_at:
+      row["presentation"] = "as_closed"
+      row["stamped_at"] = entry.stamped_at
   if len(deduped) > limit:
     return deduped[:limit], True
   return deduped, False

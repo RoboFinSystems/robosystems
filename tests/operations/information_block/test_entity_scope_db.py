@@ -282,6 +282,19 @@ class TestSharedStatement:
     assert _cash_values(envelope) == [7.0, 9.0]
 
 
+class TestAsClosedColumns:
+  def test_a_series_column_the_close_stamped_says_so(self, ext_session) -> None:
+    group = _Group(ext_session)
+    group.add_report_set(PARENT, JUNE, 100.0)
+
+    envelope = get_information_block(ext_session, group.balance_sheet.id, series=True)
+
+    assert envelope is not None and envelope.view.rendering is not None
+    (june,) = envelope.view.rendering.periods
+    assert june.presentation == "as_closed"
+    assert june.stamped_at is not None
+
+
 class TestARetractedStamp:
   """A reopen retracts the month's stamp in place, kept as the month as it was
   closed. Nothing current reads it: the series and a metric's operands skip

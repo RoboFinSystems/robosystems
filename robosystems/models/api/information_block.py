@@ -1011,6 +1011,19 @@ class RenderingPeriodLite(BaseModel):
       "flag, not label parsing). None/absent = an actuals column."
     ),
   )
+  presentation: str | None = Field(
+    None,
+    description=(
+      "'as_closed' when the column's figures are the ones its month's close "
+      "stamped, kept as the month closed; a live read of the books "
+      "(live-financial-statement) can differ from them once a mapping is "
+      "reclassified after the close. None for a report's own snapshot or a "
+      "forecast column."
+    ),
+  )
+  stamped_at: datetime | None = Field(
+    None, description="When the close stamped the column; set with 'as_closed'."
+  )
 
 
 class ValidationLite(BaseModel):

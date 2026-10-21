@@ -798,6 +798,15 @@ class LiveFinancialStatementResponse(BaseModel):
       "consolidation entity comes last."
     ),
   )
+  presentation: str = Field(
+    "live",
+    description=(
+      "Always 'live': the books as they stand, through the current mapping. "
+      "A closed month's figures as its close stamped them (`as_closed` on "
+      "build-fact-grid and on statement columns) can differ once a mapping "
+      "was reclassified after the close."
+    ),
+  )
   statement_type: str
   periods: list[PeriodSpec] = Field(
     ...,

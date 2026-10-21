@@ -137,3 +137,50 @@ def test_the_filed_report_wins_over_a_newer_more_precise_draft(tenant):
 
   (only,) = _deduplicate_fact_rows(rows, standing)
   assert only["value"] == 1_200_000.0
+
+
+def test_a_value_the_close_stamped_is_labelled_as_closed(tenant):
+  from robosystems.models.api.fact_provenance import PivotProvenance
+  from robosystems.models.extensions.entity import Entity
+  from robosystems.models.extensions.roboledger.fact import Fact
+  from robosystems.models.extensions.roboledger.report import Report
+  from robosystems.operations.roboledger.fact_set import create_fact_set
+
+  june_end = date(2025, 6, 30)
+  with extensions_session(GRAPH) as session:
+    session.merge(Entity(id=ENTITY, name="Driftline", created_by="u"))
+    session.add(
+      Report(id="rpt_june", name="June", taxonomy_id="tax_sr2", created_by="u")
+    )
+    session.flush()
+    for set_id, report_id in (("fs_close_stamp", None), ("fs_june_report", "rpt_june")):
+      create_fact_set(
+        session,
+        id=set_id,
+        period_end=june_end,
+        factset_type="report",
+        entity_id=ENTITY,
+        report_id=report_id,
+        provenance=PivotProvenance(mapping_id="map_1", period="2025-06"),
+        created_by="u",
+      )
+      session.flush()
+      session.add(
+        Fact(
+          id=f"fact_{set_id}",
+          element_id="el_revenue",
+          value=1.0,
+          period_start=date(2025, 6, 1),
+          period_end=june_end,
+          period_type="duration",
+          entity_id=ENTITY,
+          fact_set_id=set_id,
+        )
+      )
+    session.commit()
+
+  standing = _report_standing(GRAPH, ["fact_fs_close_stamp", "fact_fs_june_report"])
+
+  assert standing["fact_fs_close_stamp"].stamped_at is not None
+  # A report's own snapshot is not the close's stamp.
+  assert standing["fact_fs_june_report"].stamped_at is None
