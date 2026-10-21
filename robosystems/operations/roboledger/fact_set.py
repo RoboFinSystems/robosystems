@@ -54,3 +54,21 @@ def create_fact_set(
   fact_set.created_by = created_by
   session.add(fact_set)
   return fact_set
+
+
+def lock_for_standing_set(session: Session, structure_id: str, kind: str) -> None:
+  """Lock the Structure a standing FactSet hangs off, before looking the set
+  up: two writers resolving "no standing set" would each insert one. No-key,
+  so a close stamping sets on the structure is not held. Contention raises
+  `RowLockedError` (409)."""
+  from robosystems.models.extensions import Structure
+  from robosystems.operations.locking import lock_by_id
+
+  lock_by_id(
+    session,
+    Structure,
+    structure_id,
+    f"{kind} structure {structure_id} is being written by another process. "
+    "Retry in a moment.",
+    key_share=True,
+  )

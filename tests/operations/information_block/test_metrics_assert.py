@@ -17,7 +17,7 @@ from robosystems.operations.information_block import metrics as metrics_mod
 def _structure_lock():
   """A mock session cannot hold the structure's row lock; the lock's own
   behavior runs against a real database in test_text_block_bind_db.py."""
-  with patch("robosystems.operations.information_block.metrics.lock_by_id"):
+  with patch("robosystems.operations.information_block.metrics.lock_for_standing_set"):
     yield
 
 

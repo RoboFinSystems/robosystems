@@ -639,9 +639,9 @@ class FiscalCalendarService:
     ``closed_through``, or the first month of a fresh calendar). Otherwise
     retires the entity's schedule months before it as history, the way the
     generator treats months on or before ``closed_through``, and the bank
-    lines before it nobody classified, and returns the number of obligations
-    voided. Runs in the setup's transaction, before it
-    commits.
+    lines before it nobody classified, and returns the number of schedule
+    obligations it retired (bank lines are not counted). Runs in the setup's
+    transaction, before it commits.
     """
     from robosystems.operations.locking import bounded_lock_wait
     from robosystems.operations.roboledger.commands.schedules import (
