@@ -96,6 +96,7 @@ def _bind_operand(
       FactSet.scenario_id.is_(None)
       if scenario_id is None
       else or_(FactSet.scenario_id.is_(None), FactSet.scenario_id == scenario_id),
+      FactSet.retracted_at.is_(None),
       Fact.entity_id == entity_id,
       Fact.element_id == element_id,
       Fact.period_end == period_end,
@@ -141,6 +142,7 @@ def _latest_report_period_end_before(
       FactSet.scenario_id.is_(None)
       if scenario_id is None
       else or_(FactSet.scenario_id.is_(None), FactSet.scenario_id == scenario_id),
+      FactSet.retracted_at.is_(None),
       Fact.entity_id == entity_id,
       Fact.period_end < before,
       Fact.fact_scope == "in_scope",
