@@ -121,11 +121,17 @@ def record_statement_observation(
   ``stated_cents`` is the balance as the statement shows it, positive in the
   account's normal direction. Recording the same account and date again
   supersedes the earlier observation; recording it unchanged returns it.
+  ``document_id`` ``None`` keeps a superseded observation's document, as a
+  correction to the figure is no reason to lose the statement; ``""`` drops
+  it.
   """
   amount = stated_cents if element.balance_type == "debit" else -stated_cents
   live = session.execute(
     _live_statements({str(element.id)}, as_of, as_of).limit(1)
   ).scalar_one_or_none()
+  if document_id is None and live is not None:
+    document_id = _observation(live).document_id
+  document_id = document_id or None
   if live is not None:
     current = _observation(live)
     if (current.amount_cents, current.document_id, current.note) == (

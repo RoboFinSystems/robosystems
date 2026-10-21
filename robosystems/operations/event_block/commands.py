@@ -695,6 +695,19 @@ def _writes_ledger_rows(session: Session, event: Event) -> bool:
     return True
 
 
+def _retags_lines(event_type: str, patch: dict) -> bool:
+  """Whether a metadata patch re-tags a bank line's flows or dimensions."""
+  from robosystems.operations.event_block.python_handlers.bank_feed import (
+    BANK_EVENT_TYPES,
+    DIMENSION_KEYS,
+    FLOW_KEYS,
+  )
+
+  return event_type in BANK_EVENT_TYPES and any(
+    key in patch for key in (*FLOW_KEYS, *DIMENSION_KEYS)
+  )
+
+
 # The metadata keys that choose where a classified line posts.
 _CLASSIFICATION_KEYS = (
   "classified_element_id",
@@ -837,6 +850,16 @@ def update_event_block(
       ),
       entity_id=peek.entity_id,
     )
+  # A posted bank line's flow or dimension re-tag corrects its months'
+  # statements (`retag_restamp`): fenced exclusive here, re-stamped after.
+  retag_dates: list[date] = []
+  if body.metadata_patch and _retags_lines(str(peek.event_type), body.metadata_patch):
+    from robosystems.operations.roboledger.commands.retag_restamp import (
+      fence_retag_months,
+    )
+
+    retag_dates = _retraction_fence_dates(session, peek.id)
+    fence_retag_months(session, retag_dates)
   # Retraction fence (see `_assert_retractable`), on the rows' own posting
   # dates: an event with no ledger rows stays retractable in a closed period.
   if body.transition_to in _RETRACTED_STATUSES:
@@ -1032,6 +1055,15 @@ def update_event_block(
       key in body.metadata_patch for key in DIMENSION_KEYS
     ):
       apply_dimension_patch(session, event, before_patch, created_by)
+    if retag_dates:
+      from robosystems.operations.roboledger.commands.retag_restamp import (
+        restamp_retagged_months,
+      )
+
+      session.flush()
+      restamp_retagged_months(
+        session, retag_dates, entity_id=str(event.entity_id), actor_id=created_by
+      )
 
   if fire_handler:
     # After the metadata patch so the handler sees the final shape.

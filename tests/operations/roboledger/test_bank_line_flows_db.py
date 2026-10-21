@@ -272,6 +272,56 @@ def test_a_posted_line_in_a_closed_month_is_retagged_in_place(books):
   assert all(li.flow_element_id is None for li in _lines(books, event))
 
 
+def test_a_retag_in_a_closed_month_restamps_its_statements(books):
+  """CL2: the re-tag is a correction to the closed month's statements, which
+  are re-stamped from the books as they now stand; an open month's are not."""
+  from unittest.mock import patch
+
+  event = _deposit(books)
+  _update(
+    books,
+    event,
+    transition_to="committed",
+    metadata_patch={"classified_element_id": books.note},
+  )
+  _update(books, event, metadata_patch={"classified_flow_qname": NOTE_PROCEEDS})
+  stamp = "robosystems.operations.roboledger.reports.statement_sets.stamp_canonical_statement_sets"
+  with patch(stamp) as open_month:
+    _update(books, event, metadata_patch={"classified_flow_qname": ""})
+  open_month.assert_not_called()
+
+  books.session.add(
+    FiscalPeriod(
+      graph_id=GRAPH_ID,
+      entity_id=books.parent.id,
+      name="2026-08",
+      start_date=date(2026, 8, 1),
+      end_date=date(2026, 8, 31),
+      period_type="month",
+      status="closed",
+    )
+  )
+  books.session.commit()
+  stamped = (
+    "robosystems.operations.roboledger.reports.statement_sets."
+    "has_canonical_statement_sets"
+  )
+  # A month the calendar was set up behind has no close-stamped statements.
+  with patch(stamped, return_value=False), patch(stamp) as never_stamped:
+    _update(books, event, metadata_patch={"classified_flow_qname": ""})
+  never_stamped.assert_not_called()
+
+  with patch(stamped, return_value=True), patch(stamp) as closed_month:
+    _update(books, event, metadata_patch={"classified_flow_qname": NOTE_PROCEEDS})
+
+  (call,) = closed_month.call_args_list
+  assert call.kwargs["entity_id"] == books.parent.id
+  assert (call.kwargs["period_start"], call.kwargs["period_end"]) == (
+    date(2026, 8, 1),
+    date(2026, 8, 31),
+  )
+
+
 def test_the_account_of_a_posted_line_cannot_change_here(books):
   event = _deposit(books)
   _update(

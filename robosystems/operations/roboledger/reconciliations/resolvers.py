@@ -517,6 +517,19 @@ def cycle_start(period_end: date, cycle: StatementCycle) -> date:
   return date(months // 12, months % 12 + 1, 1)
 
 
+def statement_cycle_start(as_of: date, cycle: StatementCycle) -> date:
+  """The first day a statement ending ``as_of`` covers: the day after the same
+  day one cycle earlier (a card statement ending the 15th covers from the
+  16th of the month before), the earlier month's last day where it is
+  shorter."""
+  from calendar import monthrange
+
+  months = as_of.year * 12 + as_of.month - 1 - _CYCLE_MONTHS[cycle]
+  year, month = months // 12, months % 12 + 1
+  day = min(as_of.day, monthrange(year, month)[1])
+  return date(year, month, day) + timedelta(days=1)
+
+
 def statement_cycles(
   session: Session, element_ids: frozenset[str], entity_id: str | None
 ) -> dict[str, StatementCycle]:
@@ -591,11 +604,18 @@ class StatementResolver:
         entity_id=window.entity_id,
         landed_only=window.shadow,
       )
+      # A line the bank should have cleared within a cycle and has not is no
+      # explanation any more: it stays listed, counted as unexplained.
+      stale_before = statement_cycle_start(obs.as_of, cycles[eid])
       parts.extend(
         IndependentComponent(
           name=line.description,
           amount_cents=line.net_cents,
-          kind="outstanding",
+          kind=(
+            "stale_outstanding"
+            if not line.from_feed and line.posting_date < stale_before
+            else "outstanding"
+          ),
           posting_date=line.posting_date,
           entry_id=line.entry_id,
           event_id=line.event_id,
@@ -603,7 +623,9 @@ class StatementResolver:
         for line in lines.outstanding(obs.as_of)
       )
       components[eid] = parts
-      balances[eid] = sum(part.amount_cents for part in parts)
+      balances[eid] = sum(
+        part.amount_cents for part in parts if part.kind != "stale_outstanding"
+      )
       if lines.feed_start is not None and obs.as_of < window.period_end:
         roll_forward[eid] = _roll_forward(
           session, eid, obs.as_of, obs.amount_cents, lines, window

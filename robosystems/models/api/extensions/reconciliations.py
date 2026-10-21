@@ -23,8 +23,12 @@ ReconciliationMethod = Literal["source_ledger", "schedule_register", "statement"
 StatementCycle = Literal["monthly", "quarterly", "annual"]
 
 # What a part of an account's independent balance is. `outstanding` is a
-# ledger cash line the bank had not seen by the statement's date.
-ReconciliationComponentKind = Literal["schedule", "statement", "outstanding"]
+# ledger cash line the bank had not seen by the statement's date;
+# `stale_outstanding` one it should have within the statement's cycle, listed
+# but not counted, so the difference stays unexplained.
+ReconciliationComponentKind = Literal[
+  "schedule", "statement", "outstanding", "stale_outstanding"
+]
 
 # Far above any real balance; keeps a typo or a non-number out of the books.
 _MAX_AMOUNT = 1e13
@@ -84,9 +88,13 @@ class ReconciliationComponent(BaseModel):
   kind: str | None = Field(
     None,
     description=(
-      "`schedule`, `statement`, or `outstanding`: a ledger line on a "
+      "`schedule`, `statement`, `outstanding`: a ledger line on a "
       "bank-fed account that did not come from the feed, dated on or before "
-      "the statement, so the bank had not cleared it."
+      "the statement, so the bank had not cleared it; or "
+      "`stale_outstanding`: such a line dated before the statement's cycle, "
+      "which the bank should have cleared by now. A stale line is listed but "
+      "not counted toward the balance, so the difference it would explain "
+      "stays unexplained until it clears, is voided or is re-dated."
     ),
   )
   posting_date: date | None = Field(
@@ -394,7 +402,9 @@ class RecordStatementBalanceRequest(BaseModel):
     None,
     description=(
       "The statement itself, as a document already added with "
-      "create-document. Kept on the record as evidence."
+      "create-document. Kept on the record as evidence. Recording the same "
+      "account and date again keeps the earlier record's document when this "
+      "is omitted; an empty string drops it."
     ),
   )
   note: str | None = Field(
