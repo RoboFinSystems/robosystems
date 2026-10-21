@@ -222,6 +222,9 @@ from robosystems.operations.roboledger.reconciliations import (
   NoSourceLedgerError,
   SourceLedgerUnavailableError,
 )
+from robosystems.operations.roboledger.reports.statement_sets import (
+  StatementStampError,
+)
 from robosystems.routers.extensions.roboledger._common import make_registrar
 
 router = APIRouter()
@@ -455,6 +458,8 @@ update_event_block_op = _registrar.register(
     request_model=UpdateEventBlockRequest,
     result_type=EventBlockEnvelope,
     error_map={
+      # A re-tag in a closed month could not re-stamp its statements.
+      StatementStampError: 422,
       EventDocumentNotFoundError: 404,
       EventNotFoundError: 404,
       ReservedEventTypeError: 422,
@@ -769,10 +774,15 @@ record_statement_balance_op = _registrar.register(
       "in. On an account a bank feed keeps, ledger lines that did not come "
       "from the feed and are dated on or before the statement are listed as "
       "outstanding and adjust the statement balance, since the bank had not "
-      "cleared them; a statement ending before the period's last day is "
+      "cleared them; one dated before the statement's own cycle is listed as "
+      "`stale_outstanding` and does not, since the bank should have cleared "
+      "it by now, so the difference stays until it clears, is voided or is "
+      "re-dated; a statement ending before the period's last day is "
       "carried to it by the feed's own lines (`roll_forward`). Attach the statement as evidence by passing the `document_id` of "
       "its stored file (create-document-upload, then complete-document-upload); "
-      "recording it again with another document lapses a sign-off. Writes no "
+      "recording it again with another document lapses a sign-off, and "
+      "recording it again without one keeps the document already attached "
+      "(an empty string detaches it). Writes no "
       "books. The first "
       "statement recorded for an account creates its reconciliation, which "
       "does not hold the close: turn `required_for_close` on with "
@@ -989,6 +999,8 @@ update_journal_entry_op = _registrar.register(
     request_model=UpdateJournalEntryRequest,
     result_type=JournalEntryResponse,
     error_map={
+      # A re-tag in a closed month could not re-stamp its statements.
+      StatementStampError: 422,
       JournalEntryNotFoundError: 404,
       JournalEntryNotDraftError: 422,
       ClosedPeriodError: 422,

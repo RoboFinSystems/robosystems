@@ -217,6 +217,55 @@ def test_a_hand_recorded_payment_is_outstanding_and_explains_the_difference(bank
   assert outstanding.entry_id is not None
 
 
+def test_a_payment_still_outstanding_a_cycle_later_is_unexplained(bank):
+  """RC5: by October's statement the bank should have cleared the 09-12
+  payment. It stays listed, as stale, but no longer explains the 50.00, so
+  the account does not read reconciled."""
+  session, accounts = bank
+
+  rec = _record(session, accounts["cash"], 1_300.00, as_of=date(2026, 10, 31))
+
+  assert rec.status != "reconciled"
+  assert (rec.ledger_balance, rec.independent_balance) == (1_250.00, 1_300.00)
+  assert [(c.kind, c.amount) for c in rec.components] == [
+    ("statement", 1_300.00),
+    ("stale_outstanding", -50.00),
+  ]
+
+
+@pytest.mark.parametrize(
+  ("as_of", "kind"),
+  [(date(2026, 10, 11), "outstanding"), (date(2026, 10, 12), "stale_outstanding")],
+  ids=["inside_its_cycle", "a_cycle_later"],
+)
+def test_a_mid_month_statement_dates_its_own_cycle(bank, as_of, kind):
+  """A statement ending the 11th covers from the 12th of the month before, so
+  the 09-12 payment is inside it; ending the 12th, it is not."""
+  session, accounts = bank
+
+  rec = _record(session, accounts["cash"], 1_300.00, as_of=as_of)
+
+  assert [c.kind for c in rec.components if c.kind != "statement"] == [kind]
+
+
+@pytest.mark.parametrize(
+  ("as_of", "cycle", "start"),
+  [
+    (date(2026, 8, 15), "monthly", date(2026, 7, 16)),
+    (date(2026, 10, 31), "monthly", date(2026, 10, 1)),
+    (date(2026, 3, 31), "monthly", date(2026, 3, 1)),
+    (date(2026, 9, 30), "quarterly", date(2026, 7, 1)),
+    (date(2026, 12, 31), "annual", date(2026, 1, 1)),
+  ],
+)
+def test_the_first_day_a_statement_covers(as_of, cycle, start):
+  from robosystems.operations.roboledger.reconciliations.resolvers import (
+    statement_cycle_start,
+  )
+
+  assert statement_cycle_start(as_of, cycle) == start
+
+
 def test_history_before_the_feed_began_is_not_outstanding(bank):
   """The opening balance was entered by hand, but before the feed's first
   line, so it is what the feed started from, not a line the bank owes."""

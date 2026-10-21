@@ -1159,6 +1159,21 @@ def _flow_lines():
 
 
 class TestLineFlowsOnUpdate:
+  @pytest.fixture(autouse=True)
+  def _retag_correction(self):
+    """A mock session cannot hold the fence or stamp statements; both run
+    against a real database in test_bank_line_flows_db.py."""
+    with (
+      patch(
+        "robosystems.operations.roboledger.commands.retag_restamp.fence_retag_months"
+      ),
+      patch(
+        "robosystems.operations.roboledger.commands.retag_restamp.restamp_retagged_months"
+      ) as restamp,
+    ):
+      self.restamp = restamp
+      yield
+
   @patch(f"{MODULE}._flow_qnames", return_value={"el_debt_in": "rs-gaap:Debt"})
   @patch(
     "robosystems.operations.event_block.python_handlers.bank_feed.resolve_flows",
@@ -1184,6 +1199,8 @@ class TestLineFlowsOnUpdate:
       )
 
     mock_guard.assert_not_called()
+    # A correction to the month's statements, not a reopen.
+    self.restamp.assert_called_once()
     assert [li.flow_element_id for li in lines] == ["el_debt_in", "el_debt_in"]
     assert [li.flow_qname for li in response.line_items] == [
       "rs-gaap:Debt",
