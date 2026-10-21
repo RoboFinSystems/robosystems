@@ -603,37 +603,35 @@ def create_library_arcs(
   element_id_map = _bulk_resolve_element_ids(session, all_qnames)
 
   unresolved = plan.unresolved
+  assoc_insert = pg_insert(Association.__table__)
+  # The id excludes weight/order/arcrole, so edits to them update in
+  # place. Keep in lockstep with ``writer._RESYNC_ASSOCIATION_CONFLICT``.
+  assoc_upsert = assoc_insert.on_conflict_do_update(
+    index_elements=["id"],
+    set_={
+      col: assoc_insert.excluded[col]
+      for col in ("weight", "order_value", "arcrole", "confidence", "metadata")
+    },
+  )
   for arc in plan.arcs:
     assoc = arc.spec
     session.execute(
-      pg_insert(Association.__table__)
-      .values(
-        id=arc.id,
-        structure_id=arc.structure_id,
-        from_element_id=arc.from_element_id,
-        to_element_id=arc.to_element_id,
-        association_type=assoc.association_type,
-        arcrole=assoc.arcrole,
-        order_value=assoc.order,
-        weight=assoc.weight,
-        confidence=1.0,
-        suggested_by="library",
-        approved_by="library",
-        metadata={},
-        created_by=created_by,
-      )
-      # The id excludes weight/order/arcrole, so edits to them update in
-      # place. Keep in lockstep with ``writer._RESYNC_ASSOCIATION_CONFLICT``.
-      .on_conflict_do_update(
-        index_elements=["id"],
-        set_={
-          "weight": pg_insert(Association.__table__).excluded["weight"],
-          "order_value": pg_insert(Association.__table__).excluded["order_value"],
-          "arcrole": pg_insert(Association.__table__).excluded["arcrole"],
-          "confidence": pg_insert(Association.__table__).excluded["confidence"],
-          "metadata": pg_insert(Association.__table__).excluded["metadata"],
-        },
-      )
+      assoc_upsert,
+      {
+        "id": arc.id,
+        "structure_id": arc.structure_id,
+        "from_element_id": arc.from_element_id,
+        "to_element_id": arc.to_element_id,
+        "association_type": assoc.association_type,
+        "arcrole": assoc.arcrole,
+        "order_value": assoc.order,
+        "weight": assoc.weight,
+        "confidence": 1.0,
+        "suggested_by": "library",
+        "approved_by": "library",
+        "metadata": {},
+        "created_by": created_by,
+      },
     )
     counts["associations"] += 1
 
@@ -664,34 +662,37 @@ def create_library_arcs(
       "" if len(unresolved) <= 5 else f" (+{len(unresolved) - 5} more)",
     )
 
+  trait_insert = pg_insert(ElementTrait.__table__)
+  trait_upsert = trait_insert.on_conflict_do_update(
+    index_elements=["element_id", "trait_id"],
+    set_={
+      col: trait_insert.excluded[col] for col in ("is_primary", "confidence", "source")
+    },
+  )
+  trait_ids: dict[tuple[str, str], str | None] = {}
   skipped_trait_assignments: list[TraitAssignmentSpec] = []
   for asn in package.trait_assignments:
     elem_id = element_id_map.get(asn.element_qname)
     if elem_id is None:
       skipped_trait_assignments.append(asn)
       continue
-    trt_id = _resolve_trait_id(session, asn.category, asn.identifier)
+    trait_key = (asn.category, asn.identifier)
+    if trait_key not in trait_ids:
+      trait_ids[trait_key] = _resolve_trait_id(session, *trait_key)
+    trt_id = trait_ids[trait_key]
     if trt_id is None:
       skipped_trait_assignments.append(asn)
       continue
     session.execute(
-      pg_insert(ElementTrait.__table__)
-      .values(
-        element_id=elem_id,
-        trait_id=trt_id,
-        is_primary=asn.is_primary,
-        confidence=asn.confidence,
-        source=asn.source,
-        created_by=created_by,
-      )
-      .on_conflict_do_update(
-        index_elements=["element_id", "trait_id"],
-        set_={
-          "is_primary": pg_insert(ElementTrait.__table__).excluded.is_primary,
-          "confidence": pg_insert(ElementTrait.__table__).excluded.confidence,
-          "source": pg_insert(ElementTrait.__table__).excluded.source,
-        },
-      )
+      trait_upsert,
+      {
+        "element_id": elem_id,
+        "trait_id": trt_id,
+        "is_primary": asn.is_primary,
+        "confidence": asn.confidence,
+        "source": asn.source,
+        "created_by": created_by,
+      },
     )
     counts["trait_assignments"] += 1
 

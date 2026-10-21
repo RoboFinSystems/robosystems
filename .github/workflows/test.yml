@@ -12,12 +12,126 @@ on:
         type: string
         description: "Runner configuration JSON (from runner availability check)"
 jobs:
+  # The required check. The suite and the static gates run as parallel jobs;
+  # this one fails unless both passed, so the ruleset keeps a single context.
   test:
+    needs: [pytest, quality]
+    if: always()
+    runs-on: ${{ fromJSON(inputs.runner_config) }}
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require the suite and the static gates
+        env:
+          PYTEST_RESULT: ${{ needs.pytest.result }}
+          QUALITY_RESULT: ${{ needs.quality.result }}
+        run: |
+          echo "pytest: $PYTEST_RESULT, quality: $QUALITY_RESULT"
+          [[ "$PYTEST_RESULT" == "success" && "$QUALITY_RESULT" == "success" ]]
+
+  # Lint, type checking, dbt and the dependency scan need no services.
+  quality:
+    runs-on: ${{ fromJSON(inputs.runner_config) }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write  # Required for Trivy SARIF upload
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ github.token }}
+
+      - name: Setup Python (GitHub-hosted runners only)
+        if: runner.os == 'Linux' && !contains(runner.name, 'robosystems')
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ inputs.python-version || '3.14' }}
+
+      - name: Install uv (GitHub-hosted runners only)
+        if: runner.os == 'Linux' && !contains(runner.name, 'robosystems')
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.12.24" # keep in step with the ghcr.io/astral-sh/uv tag in Dockerfile and Dockerfile.lambda
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies
+        run: |
+          uv venv .venv
+          uv sync --frozen --all-extras
+
+      - name: Validate lockfile
+        run: |
+          uv lock --locked
+
+      - name: Run dbt tests
+        timeout-minutes: 1
+        run: |
+          echo "🔍 Running QuickBooks dbt models and tests..."
+          DBT_DIR="robosystems/adapters/quickbooks/dbt"
+          TMPDIR=$(mktemp -d)
+          DBT_DUCKDB_PATH="$TMPDIR/quickbooks.duckdb" uv run dbt build \
+            --profiles-dir "$DBT_DIR" \
+            --project-dir "$DBT_DIR" \
+            --target-path "$TMPDIR/target" \
+            --vars '{"use_seeds": true}'
+          echo "✅ dbt: all models and tests passed"
+
+      - name: Run linting
+        timeout-minutes: 1
+        run: uv run ruff check . --output-format=github
+
+      - name: Run type checking
+        timeout-minutes: 3
+        env:
+          NODE_OPTIONS: "--max-old-space-size=2048"
+        run: uv run basedpyright
+
+      - name: Lint CloudFormation templates
+        timeout-minutes: 1
+        run: |
+          echo "🔍 Linting CloudFormation templates..."
+          uv run cfn-lint
+
+      - name: Lint GitHub Actions workflows
+        timeout-minutes: 1
+        run: |
+          echo "🔍 Linting GitHub Actions workflows..."
+          # GitHub validates a workflow only when it runs, so catch malformed
+          # expressions here. Accepted findings are baselined in .github/actionlint.yaml.
+          uv run actionlint -shellcheck=
+
+      - name: Scan dependencies for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+          scanners: 'vuln'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+          category: 'dependency-scan'
+
+      - name: Clean cache (CI optimization)
+        if: always() && !contains(runner.name, 'robosystems')
+        run: |
+          uv cache prune --ci
+
+  pytest:
     runs-on: ${{ fromJSON(inputs.runner_config) }}
     timeout-minutes: 25
     permissions:
       contents: read
-      security-events: write  # Required for Trivy SARIF upload
     env:
       # Environment setup
       ENVIRONMENT: test
@@ -169,10 +283,6 @@ jobs:
           uv venv .venv
           uv sync --frozen --all-extras
 
-      - name: Validate lockfile
-        run: |
-          uv lock --locked
-
       - name: Create and migrate the extensions database
         run: |
           # The service container only creates the platform DB. DB-backed
@@ -247,61 +357,6 @@ jobs:
           # (tests/xdist_workers.py); the extensions DB stays shared, which
           # `--dist loadfile` makes safe. Same flags as `just test`.
           uv run pytest -n logical --dist loadfile --tb=short -m "not slow"
-
-      - name: Run dbt tests
-        timeout-minutes: 1
-        run: |
-          echo "🔍 Running QuickBooks dbt models and tests..."
-          DBT_DIR="robosystems/adapters/quickbooks/dbt"
-          TMPDIR=$(mktemp -d)
-          DBT_DUCKDB_PATH="$TMPDIR/quickbooks.duckdb" uv run dbt build \
-            --profiles-dir "$DBT_DIR" \
-            --project-dir "$DBT_DIR" \
-            --target-path "$TMPDIR/target" \
-            --vars '{"use_seeds": true}'
-          echo "✅ dbt: all models and tests passed"
-
-      - name: Run linting
-        timeout-minutes: 1
-        run: uv run ruff check . --output-format=github
-
-      - name: Run type checking
-        timeout-minutes: 3
-        env:
-          NODE_OPTIONS: "--max-old-space-size=2048"
-        run: uv run basedpyright
-
-      - name: Lint CloudFormation templates
-        timeout-minutes: 1
-        run: |
-          echo "🔍 Linting CloudFormation templates..."
-          uv run cfn-lint
-
-      - name: Lint GitHub Actions workflows
-        timeout-minutes: 1
-        run: |
-          echo "🔍 Linting GitHub Actions workflows..."
-          # GitHub validates a workflow only when it runs, so catch malformed
-          # expressions here. Accepted findings are baselined in .github/actionlint.yaml.
-          uv run actionlint -shellcheck=
-
-      - name: Scan dependencies for vulnerabilities
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          ignore-unfixed: true
-          severity: 'CRITICAL,HIGH'
-          scanners: 'vuln'
-
-      - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
-        if: always()
-        with:
-          sarif_file: 'trivy-results.sarif'
-          category: 'dependency-scan'
 
       - name: Post-test cleanup
         if: always()
