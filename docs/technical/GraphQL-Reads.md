@@ -225,7 +225,7 @@ This page does not repeat that list. What follows is the orientation the generat
 | Balances rolled up to reporting concepts | `mappedTrialBalance`, or `accountRollups` for the CoA-level view |
 | A published report, whole | `reportPackage` — metadata plus every rendered block in one round trip |
 | A single statement out of a report | `statement(reportId:, blockType:)` |
-| A rendered schedule, rollforward or statement block | `informationBlock`; pass `scenarioId` for a forecast slice and `series` for the whole period series |
+| A rendered schedule or statement block | `informationBlock`; pass `scenarioId` for a forecast slice and `series` for the whole period series |
 | The books' scale and sync freshness | `summary` |
 | What the taxonomy says about a concept | `libraryElement` / `searchLibraryElements`, then `libraryElementTree` and `libraryElementClassifications` |
 

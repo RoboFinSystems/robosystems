@@ -361,24 +361,6 @@ class TestListing:
     assert blocks[0].fact_set is not None
     assert blocks[0].fact_set.id == sub_set
 
-  def test_a_subsidiarys_schedule_reads_its_own_books_by_id(self, ext_session) -> None:
-    group = _Group(ext_session)
-    schedule = group.structure(
-      "Sub prepaid",
-      "rollforward",
-      entity_id=SUB,
-      artifact_mechanics={
-        "kind": "rollforward",
-        "bs_source_element_id": group.cash.id,
-        "bs_source_qname": group.cash.qname,
-      },
-    )
-
-    assert list_information_blocks(ext_session, block_type="rollforward") == []
-    envelope = get_information_block(ext_session, schedule.id)
-    assert envelope is not None
-    assert envelope.entity_id == SUB
-
 
 class TestForecastHistory:
   def test_newest_actual_structure_is_the_entitys_own(self, ext_session) -> None:

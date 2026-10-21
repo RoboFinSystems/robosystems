@@ -344,7 +344,6 @@ def build_report_bundle(
     _build_statement_envelope,
   )
   from robosystems.operations.roboledger.reports.network_picker import (
-    get_render_network,
     load_entity_reporting_style,
   )
   from robosystems.taxonomy.pins import resolve_pin
@@ -432,23 +431,27 @@ def build_report_bundle(
     )
 
   # Reuse the read-side renderer so envelopes match the API response shape.
+  # Each statement is the report's own set on the Structure that set pinned
+  # when the report was generated — never the entity's current Style, which
+  # says nothing about a report drafted under an earlier one, and never a
+  # fallback to another set: a filed report downloads with the numbers it
+  # was filed with.
   ib_envelopes: list[Any] = []
-  for block_type in _STATEMENT_BLOCK_TYPES:
-    try:
-      network = get_render_network(session, reporting_style_id, block_type)
-    except Exception as exc:
-      logger.debug(
-        "build_report_bundle: skipping %s — no render network: %s",
-        block_type,
-        exc,
-      )
-      continue
-    fact_set_id = structure_to_fact_set.get(network.structure_id)
+  statement_sets = sorted(
+    (
+      (structure, fact_set_id)
+      for structure_id, fact_set_id in structure_to_fact_set.items()
+      if (structure := structures_by_id.get(structure_id)) is not None
+      and structure.block_type in _STATEMENT_BLOCK_TYPES
+    ),
+    key=lambda pair: _STATEMENT_BLOCK_TYPES.index(pair[0].block_type),
+  )
+  for structure, fact_set_id in statement_sets:
     envelope = _build_statement_envelope(
       session,
-      network.structure_id,
+      str(structure.id),
       fact_set_id,
-      block_type=block_type,
+      block_type=structure.block_type,
     )
     if envelope is not None:
       ib_envelopes.append(envelope)

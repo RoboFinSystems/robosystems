@@ -503,7 +503,6 @@ operations/information_block/  # Cross-domain; not nested under roboledger
 ├── disclosure.py   # regulatory_disclosure notes (compositional mode)
 ├── text_block.py   # Narrative text-block disclosures bound from a Document
 ├── schedule.py     # Schedule handler (declarative construction mode)
-├── rollforward.py  # Attribution blocks over ledger LineItems (declarative mode)
 ├── metric.py       # Metric handler (derivative mode) — standing metric time series
 ├── metrics.py      # compute-metrics / assert-metrics write paths
 ├── chart.py        # Chart View projection over a rendering

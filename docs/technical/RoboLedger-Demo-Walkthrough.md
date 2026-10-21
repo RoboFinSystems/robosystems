@@ -508,7 +508,7 @@ Once you're comfortable with the demo:
 
 - **Connect a real QB company** — see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally.md) to layer real data on top of the same workflow
 - **Customize the demo** — modify `data.py` to demo a different vertical for a specific prospect, or start from one of the [showcase scenarios](#showcase-scenarios)
-- **Author your own Information Blocks** — `create-information-block` builds `schedule` and `rollforward` blocks, each carrying its own verification rules
+- **Author your own Information Blocks** — `create-information-block` builds `schedule` and `forecast` blocks, a schedule carrying its own verification rules
 - **Build a custom MCP workflow** — the close prompt at `examples/roboledger_demo/prompt.md` is one starting point; you can build vertical-specific agent workflows on the same MCP surface
 - **Go deeper on the model** — [RoboLedger Operations](RoboLedger-Operations.md) (command writes and the fact grid), [Reporting & Rendering](Reporting-and-Rendering.md) (how statements are built), and [Information Blocks](Information-Blocks.md) (the unifying envelope)
 

@@ -123,7 +123,7 @@ class TestDeriveInputSchema:
   def test_create_information_block_schema_has_no_top_level_union(self) -> None:
     """Regression check for the production case that triggered the
     Anthropic API rejection — ``CreateInformationBlockRequest`` is a
-    3-arm discriminated union after the rollforward block-type landed.
+    discriminated union with a typed arm per authored block type.
     """
     from robosystems.models.api.information_block import (
       CreateInformationBlockRequest,
@@ -135,7 +135,7 @@ class TestDeriveInputSchema:
     assert "allOf" not in schema
     assert schema["type"] == "object"
     # block_type enum covers every registered block type
-    assert "rollforward" in schema["properties"]["block_type"]["enum"]
+    assert "forecast" in schema["properties"]["block_type"]["enum"]
     assert "schedule" in schema["properties"]["block_type"]["enum"]
 
   def test_typed_arm_union_exposes_payload_fields(self) -> None:

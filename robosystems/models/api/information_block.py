@@ -25,12 +25,6 @@ from robosystems.models.api.extensions.reconciliations import (
   ReconciliationMethod,
   StatementCycle,
 )
-from robosystems.models.api.extensions.rollforward import (
-  AttributionFilter,
-  CreateRollforwardRequest,
-  DeleteRollforwardRequest,
-  UpdateRollforwardRequest,
-)
 from robosystems.models.api.extensions.schedules import (
   CreateScheduleRequest,
   DeleteScheduleRequest,
@@ -549,78 +543,6 @@ class MetricMechanics(BaseModel):
   )
 
 
-class RollforwardMechanics(BaseModel):
-  """Filter-based attribution mechanics for `block_type='rollforward'`.
-
-  Filter-based attribution: each block decomposes one BS source
-  element's period delta into a list of flow concepts via declared
-  :class:`AttributionFilter` predicates. The renderer evaluates the
-  filters against ledger LineItems at envelope-build time, emits one
-  attributed fact per filter per period, and arbitrates any residual
-  against the default change tag fallback.
-
-  Reads directly from the typed `structures.artifact_mechanics` JSONB
-  column. `attribution_filters` rides as nested JSON; the predicate
-  union widens as new predicate shapes are added — currently only
-  `line_item_metadata_field` is carried.
-  """
-
-  kind: Literal["rollforward"] = "rollforward"
-  bs_source_element_id: str = Field(
-    ...,
-    description=(
-      "Element id of the balance-sheet source whose period delta this "
-      "block decomposes. Resolved from `bs_source_qname` at create "
-      "time."
-    ),
-  )
-  bs_source_qname: str = Field(
-    ...,
-    description=(
-      "QName of the BS source element (e.g. "
-      "`mini:CashAndCashEquivalents`). Round-tripped for caller "
-      "convenience; `bs_source_element_id` is authoritative."
-    ),
-  )
-  default_change_tag_element_id: str | None = Field(
-    None,
-    description=(
-      "Element id of the default change tag — the fallback flow "
-      "concept that receives any residual (Δ BS − Σ filter matches). "
-      "Null when no default is declared; behavior on residual then "
-      "follows `validation_mode`."
-    ),
-  )
-  default_change_tag_qname: str | None = Field(
-    None,
-    description=(
-      "QName of the default change tag (e.g. "
-      "`rs-gaap:IncreaseDecreaseInCashAndCashEquivalents`). "
-      "Round-tripped for caller convenience and operator-readable "
-      "envelopes; `default_change_tag_element_id` is authoritative. "
-      "Null iff `default_change_tag_element_id` is null."
-    ),
-  )
-  attribution_filters: list[AttributionFilter] = Field(
-    default_factory=list,
-    description=(
-      "Filter predicates routing LineItems to flow concepts. The "
-      "renderer evaluates each filter against the period's LineItems, "
-      "aggregates signed amounts, and emits one fact per filter per "
-      "period."
-    ),
-  )
-  validation_mode: Literal["strict", "residual_as_default", "warn_only"] = Field(
-    "residual_as_default",
-    description=(
-      "Renderer arbitration policy when Σ filter matches != Δ BS. "
-      "`strict` raises; `residual_as_default` emits the residual "
-      "as a default-tag fact (the common case); `warn_only` logs and "
-      "lets the imbalance pass."
-    ),
-  )
-
-
 class LeverAssertionLite(BaseModel):
   """One lever's persisted assertion inside `ForecastMechanics`.
 
@@ -896,7 +818,6 @@ ArtifactMechanics = Annotated[
   ScheduleMechanics
   | StatementMechanics
   | MetricMechanics
-  | RollforwardMechanics
   | ForecastMechanics
   | ReconciliationMechanics,
   Field(discriminator="kind"),
@@ -1386,49 +1307,6 @@ class _CreateLegacyArm(BaseModel):
   )
 
 
-class _CreateRollforwardArm(BaseModel):
-  """Create-information-block body for `block_type="rollforward"`.
-
-  Carries a typed rollforward payload. The block decomposes the period
-  change in a BS source element across the declared attribution
-  filters.
-  """
-
-  model_config = ConfigDict(
-    json_schema_extra={
-      "examples": [
-        {
-          "block_type": "rollforward",
-          "payload": {
-            "name": "Cash and Cash Equivalents Rollforward",
-            "bs_source_qname": "mini:CashAndCashEquivalents",
-            "default_change_tag_qname": None,
-            "attribution_filters": [
-              {
-                "target_qname": "mini:ProceedsFromInvestmentsByOwner",
-                "predicate": {
-                  "kind": "line_item_metadata_field",
-                  "field": "transaction_description_code",
-                  "values": ["mini:ProceedsFromInvestmentsByOwner"],
-                },
-              }
-            ],
-          },
-        }
-      ]
-    }
-  )
-
-  block_type: Literal["rollforward"] = Field(
-    ...,
-    description="Discriminator value selecting this arm.",
-  )
-  payload: CreateRollforwardRequest = Field(
-    ...,
-    description="Rollforward creation payload.",
-  )
-
-
 class _CreateForecastArm(BaseModel):
   """Create-information-block body for `block_type="forecast"`.
 
@@ -1470,7 +1348,7 @@ class _CreateForecastArm(BaseModel):
 
 
 _CreateInformationBlockArms = Annotated[
-  _CreateScheduleArm | _CreateRollforwardArm | _CreateForecastArm | _CreateLegacyArm,
+  _CreateScheduleArm | _CreateForecastArm | _CreateLegacyArm,
   Discriminator("block_type"),
 ]
 
@@ -1491,14 +1369,9 @@ class CreateInformationBlockRequest(RootModel[_CreateInformationBlockArms]):
   @property
   def payload(
     self,
-  ) -> (
-    CreateScheduleRequest
-    | CreateRollforwardRequest
-    | CreateForecastRequest
-    | dict[str, Any]
-  ):
-    """Payload of the resolved arm. Typed for the schedule, rollforward,
-    and forecast arms; a raw dict for the legacy arms (the dispatch
+  ) -> CreateScheduleRequest | CreateForecastRequest | dict[str, Any]:
+    """Payload of the resolved arm. Typed for the schedule and forecast
+    arms; a raw dict for the legacy arms (the dispatch
     handler validates it at runtime against the registry entry's
     request model)."""
     return self.root.payload
@@ -1561,37 +1434,6 @@ class _UpdateLegacyArm(BaseModel):
   )
 
 
-class _UpdateRollforwardArm(BaseModel):
-  """Update-information-block body for `block_type="rollforward"`.
-
-  Carries a typed rollforward update payload. Mutable fields: name,
-  default_change_tag_qname, attribution_filters, validation_mode.
-  """
-
-  model_config = ConfigDict(
-    json_schema_extra={
-      "examples": [
-        {
-          "block_type": "rollforward",
-          "payload": {
-            "structure_id": "struct_rf_cash_2026",
-            "name": "Cash Rollforward (Renamed)",
-          },
-        }
-      ]
-    }
-  )
-
-  block_type: Literal["rollforward"] = Field(
-    ...,
-    description="Discriminator value selecting this arm.",
-  )
-  payload: UpdateRollforwardRequest = Field(
-    ...,
-    description="Rollforward update payload.",
-  )
-
-
 class _UpdateForecastArm(BaseModel):
   """Update-information-block body for `block_type="forecast"`.
 
@@ -1634,7 +1476,7 @@ class _UpdateForecastArm(BaseModel):
 
 
 _UpdateInformationBlockArms = Annotated[
-  _UpdateScheduleArm | _UpdateRollforwardArm | _UpdateForecastArm | _UpdateLegacyArm,
+  _UpdateScheduleArm | _UpdateForecastArm | _UpdateLegacyArm,
   Discriminator("block_type"),
 ]
 
@@ -1653,12 +1495,7 @@ class UpdateInformationBlockRequest(RootModel[_UpdateInformationBlockArms]):
   @property
   def payload(
     self,
-  ) -> (
-    UpdateScheduleRequest
-    | UpdateRollforwardRequest
-    | UpdateForecastRequest
-    | dict[str, Any]
-  ):
+  ) -> UpdateScheduleRequest | UpdateForecastRequest | dict[str, Any]:
     return self.root.payload
 
 
@@ -1715,34 +1552,6 @@ class _DeleteLegacyArm(BaseModel):
   )
 
 
-class _DeleteRollforwardArm(BaseModel):
-  """Delete-information-block body for `block_type="rollforward"`.
-
-  Cascades through any synthetic facts produced by this block's filter
-  evaluations. The underlying ledger LineItems are not touched.
-  """
-
-  model_config = ConfigDict(
-    json_schema_extra={
-      "examples": [
-        {
-          "block_type": "rollforward",
-          "payload": {"structure_id": "struct_rf_cash_2026"},
-        }
-      ]
-    }
-  )
-
-  block_type: Literal["rollforward"] = Field(
-    ...,
-    description="Discriminator value selecting this arm.",
-  )
-  payload: DeleteRollforwardRequest = Field(
-    ...,
-    description="Rollforward delete payload.",
-  )
-
-
 class _DeleteForecastArm(BaseModel):
   """Delete-information-block body for `block_type="forecast"`.
 
@@ -1772,7 +1581,7 @@ class _DeleteForecastArm(BaseModel):
 
 
 _DeleteInformationBlockArms = Annotated[
-  _DeleteScheduleArm | _DeleteRollforwardArm | _DeleteForecastArm | _DeleteLegacyArm,
+  _DeleteScheduleArm | _DeleteForecastArm | _DeleteLegacyArm,
   Discriminator("block_type"),
 ]
 
@@ -1790,12 +1599,7 @@ class DeleteInformationBlockRequest(RootModel[_DeleteInformationBlockArms]):
   @property
   def payload(
     self,
-  ) -> (
-    DeleteScheduleRequest
-    | DeleteRollforwardRequest
-    | DeleteForecastRequest
-    | dict[str, Any]
-  ):
+  ) -> DeleteScheduleRequest | DeleteForecastRequest | dict[str, Any]:
     return self.root.payload
 
 

@@ -53,7 +53,7 @@ Every type belongs to one of three **construction modes**, and the mode decides 
 
 | Mode | How it is made | Block types |
 | --- | --- | --- |
-| **declarative** | You declare the mechanics and parameters; the platform generates the facts. You **author** these. | `schedule`, `rollforward`, `forecast` |
+| **declarative** | You declare the mechanics and parameters; the platform generates the facts. You **author** these. | `schedule`, `forecast` |
 | **compositional** | The facts already exist from the ledger; the block is assembled when you read it. You **render** these, through a Report. | `balance_sheet`, `income_statement`, `cash_flow_statement`, `equity_statement`, `comprehensive_income`, `regulatory_disclosure` |
 | **derivative** | Facts are computed from other blocks, asserted from outside, or observed from a source outside the ledger. | `metric`, `reconciliation` |
 
@@ -218,7 +218,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
 
 ### Where to go next
 
-- The other declarative types: [Information Block Reference § Per-Type Mechanics](Information-Block-Reference.md#per-type-mechanics) for rollforwards; [Forecasting and Metrics](Forecasting-and-Metrics.md) for forecast scenarios and metric blocks.
+- The other declarative type: [Forecasting and Metrics](Forecasting-and-Metrics.md) for forecast scenarios, and metric blocks beside them; every type's mechanics are in [Information Block Reference § Per-Type Mechanics](Information-Block-Reference.md#per-type-mechanics).
 - How schedule drafts post: [Period Close](Period-Close.md).
 - Reconciliation blocks, which the close maintains rather than you authoring them: [Period Close § Reconciliations](Period-Close.md#reconciliations).
 - Producing statements: [Reporting and Rendering](Reporting-and-Rendering.md).

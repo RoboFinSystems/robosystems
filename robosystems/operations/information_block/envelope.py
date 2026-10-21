@@ -642,10 +642,11 @@ def load_base_envelope_atoms(
 
 _DISCLOSURE_ROLE_PREFIX = "https://robosystems.ai/seattle/cm-roles/roles/disclosures/"
 
-# block_type → disclosure qname, cached for the process (disclosure rows are
-# library-seeded and immutable). Misses cache None.
-_DISCLOSURE_QNAME_BY_TYPE: dict[str, str | None] = {}
-_MISSING: object = object()
+# block_type → disclosure qname, cached for the process: the disclosure rows
+# are library-seeded under the same role URIs in every tenant. A miss is not
+# cached — the process serves every tenant, and one provisioned before a
+# disclosure row existed must not hide it from the rest.
+_DISCLOSURE_QNAME_BY_TYPE: dict[str, str] = {}
 
 
 def _structure_role_uri(structure: Structure) -> str | None:
@@ -664,9 +665,9 @@ def _disclosure_qname_for_type(session: Session, block_type: str) -> str | None:
   if block_type == DISCLOSURE_BLOCK_TYPE:
     return None
 
-  cached = _DISCLOSURE_QNAME_BY_TYPE.get(block_type, _MISSING)
-  if cached is not _MISSING:
-    return cached  # type: ignore[return-value]
+  cached = _DISCLOSURE_QNAME_BY_TYPE.get(block_type)
+  if cached is not None:
+    return cached
 
   role_uri = session.execute(
     select(Structure.metadata_["role_uri"].astext)
@@ -677,12 +678,9 @@ def _disclosure_qname_for_type(session: Session, block_type: str) -> str | None:
     .limit(1)
   ).scalar()
 
-  qname: str | None
   if role_uri is None:
-    qname = None
-  else:
-    qname = f"disclosures:{role_uri[len(_DISCLOSURE_ROLE_PREFIX) :]}"
-
+    return None
+  qname = f"disclosures:{role_uri[len(_DISCLOSURE_ROLE_PREFIX) :]}"
   _DISCLOSURE_QNAME_BY_TYPE[block_type] = qname
   return qname
 
