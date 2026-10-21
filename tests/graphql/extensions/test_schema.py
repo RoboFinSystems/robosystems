@@ -116,6 +116,18 @@ class TestSchemaComposition:
     block = sdl[start:end]
     assert "terms: JSON!" in block
 
+  def test_information_block_fact_carries_its_provenance_as_json(self) -> None:
+    """The fact's own descriptor is a discriminated union on `origin`,
+    exposed as JSON with the tag embedded, like the set's; `frozenAt` says
+    whether the column it sits in is the record or live."""
+    sdl = str(schema)
+    start = sdl.find("type InformationBlockFact {")
+    assert start >= 0
+    end = sdl.find("}", start)
+    block = sdl[start:end]
+    assert "provenance: JSON" in block
+    assert "frozenAt: DateTime" in block
+
   def test_hello_field_kept_for_auth_probe(self) -> None:
     sdl = str(schema)
     assert "hello: String!" in sdl

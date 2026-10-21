@@ -616,3 +616,39 @@ def test_a_facts_own_descriptor_reaches_the_holon_without_its_accounts(
 def test_a_fact_with_no_descriptor_claims_nothing_in_the_holon() -> None:
   assert _fact(_numeric_bundle_fact(None), {}).provenance is None
   assert _fact(_numeric_bundle_fact({"mapping_id": "x"}), {}).provenance is None
+
+
+def test_a_bound_text_blocks_descriptor_reaches_the_holon_too() -> None:
+  """A document fact is text: its origin, the section's content hash and
+  who bound it ride the text branch as they ride the numeric one."""
+  fact = _fact(
+    BundleFact(
+      id="f_policy",
+      element_id="InventoryPolicy",
+      element_qname="rs-gaap:InventoryPolicyTextBlock",
+      value=None,
+      text_value="FIFO, lower of cost or NRV.",
+      fact_type="Nonnumeric",
+      period_ref="p_duration",
+      entity_ref="ent_01",
+      provenance={
+        "origin": "document",
+        "document_id": "doc_1",
+        "section_id": "sec_2",
+        "content_hash": "sha256:doc",
+        "asserted_by": "usr_1",
+      },
+    ),
+    {},
+  )
+  assert fact.value_kind == "text"
+  assert fact.provenance is not None
+  assert (
+    fact.provenance.kind,
+    fact.provenance.content_hash,
+    fact.provenance.attributed_to,
+  ) == (
+    "document",
+    "sha256:doc",
+    "usr_1",
+  )

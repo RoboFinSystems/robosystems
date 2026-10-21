@@ -244,6 +244,7 @@ def _fact(fact: BundleFact, concepts: dict[str, Concept]) -> XbrlFact:
       is_nil=text is None,
       language=TEXT_LANGUAGE if is_text else None,
       structure_id=fact.structure_id,
+      provenance=_fact_provenance(fact.provenance),
     )
   return XbrlFact(
     id=fact.id,
@@ -273,8 +274,9 @@ _ATTRIBUTION_KEYS = {
 
 def _fact_provenance(descriptor: dict | None) -> FactProvenance | None:
   """The un-entitled projection of a fact's own descriptor: the kind of
-  construction, the hash of the lines behind a frozen pivot, and what
-  asserted it. A fact with no descriptor claims nothing."""
+  construction, the hash a reader can check the evidence against (the lines
+  behind a frozen pivot; the document section behind a bound text block),
+  and what asserted it. A fact with no descriptor claims nothing."""
   if not descriptor or not descriptor.get("origin"):
     return None
   origin = str(descriptor["origin"])
