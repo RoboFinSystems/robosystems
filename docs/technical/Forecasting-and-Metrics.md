@@ -205,7 +205,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
   -d '{"start_period": "2024-09", "max_periods": 24}'
 ```
 
-It seeds any missing months of the fiscal calendar back to `start_period`, as already closed. It then works oldest-first through months that lack stamped statements, running the real reopen → re-close cycle on each. Balance validation, statement rules and audit events all apply to every month. Behavior to plan around:
+It runs on the background worker, since a chunk recloses up to 24 months: the call returns `202` with a `pending` envelope, and the result arrives on the operation's stream at `/v1/operations/{operation_id}/stream`. It seeds any missing months of the fiscal calendar back to `start_period`, as already closed. It then works oldest-first through months that lack stamped statements, running the real reopen → re-close cycle on each. Balance validation, statement rules and audit events all apply to every month. Behavior to plan around:
 
 - **Chunked.** At most `max_periods` months per call: default 12, maximum **24**. Loop until `remaining_periods` comes back empty.
 - **Idempotent.** Months that already have stamped statements are skipped. `restamp: true` re-derives them too, after an engine change; a restamp run doesn't resume on its own, so advance `start_period` between chunks.
@@ -213,7 +213,7 @@ It seeds any missing months of the fiscal calendar back to `start_period`, as al
 - **Never posts.** A month holding draft entries is reported `skipped_drafts` and left alone.
 - **Stops on failure.** A month whose re-close fails is reported `failed` and the chunk halts, because continuing would leave a hole in the series. Untried months stay in `remaining_periods`.
 
-Each month's outcome is in `processed[]` (`stamped`, `skipped_drafts` or `failed`, with detail). Preconditions return `422` with a `code`: `nothing_closed` (close one month first), `no_ledger_data`, or `start_after_boundary`. The same five override flags as `close-period` (`allow_stale_sync`, `allow_stranded_obligations`, `allow_reconciling_items`, `allow_unposted_source_events`, `allow_unreconciled_accounts`) apply to each re-close. On a ledger with a reconciliation the close waits on, `allow_unreconciled_accounts` is needed for any month closed before that reconciliation existed, because it was never compared for that month. See [Period Close](Period-Close.md#reconciliations).
+Each month's outcome is in `processed[]` (`stamped`, `skipped_drafts` or `failed`, with detail). A precondition comes back as the operation's result under `error`: `nothing_closed` (close one month first), `no_ledger_data`, or `start_after_boundary`. The same five override flags as `close-period` (`allow_stale_sync`, `allow_stranded_obligations`, `allow_reconciling_items`, `allow_unposted_source_events`, `allow_unreconciled_accounts`) apply to each re-close. On a ledger with a reconciliation the close waits on, `allow_unreconciled_accounts` is needed for any month closed before that reconciliation existed, because it was never compared for that month. See [Period Close](Period-Close.md#reconciliations).
 
 ## Metrics
 

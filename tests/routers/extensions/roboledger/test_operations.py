@@ -26,7 +26,6 @@ from robosystems.models.api.extensions.entity import (
   UpdateEntityRequest,
 )
 from robosystems.models.api.extensions.fiscal_calendar import (
-  BackfillPlanHistoryResponse,
   ChangeCalendarStartRequest,
   ChangeCalendarStartResponse,
   ClosePeriodRequest,
@@ -2349,22 +2348,8 @@ class TestCloseHandlersForwardTheEntity:
         f"{_CLOSE}.cmd_reopen_period",
         ReopenPeriodResult(fiscal_calendar=_calendar(), statement_sets_retracted=0),
       ),
-      (
-        backfill_plan_history_op,
-        BackfillPlanHistoryOperation(entity_id="ent_sub"),
-        f"{_CLOSE}.cmd_backfill_plan_history",
-        BackfillPlanHistoryResponse(
-          fiscal_calendar=_calendar(),
-          earliest_available_period="2024-07",
-          effective_start_period="2024-07",
-          closed_through="2026-05",
-          period_rows_created=0,
-          processed=[],
-          remaining_periods=[],
-        ),
-      ),
     ],
-    ids=["initialize", "set-close-target", "close-period", "reopen-period", "backfill"],
+    ids=["initialize", "set-close-target", "close-period", "reopen-period"],
   )
   async def test_the_named_entity_reaches_the_kernel(
     self, op, body, target, result
@@ -2388,6 +2373,38 @@ class TestCloseHandlersForwardTheEntity:
 
     assert envelope.status == "completed"
     assert cmd.call_args.kwargs["entity_id"] == "ent_sub"
+
+
+class TestBackfillPlanHistoryOp:
+  @pytest.mark.asyncio
+  async def test_runs_on_the_worker_as_the_caller(self) -> None:
+    """A chunk recloses up to 24 months, longer than a request should hold:
+    it is handed to the worker, and the caller reads it as a person's."""
+    task_response = {
+      "operation_id": "op_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "operation_type": "plan_history_backfill",
+      "_links": {"stream": "/v1/operations/op_01ARZ.../stream"},
+      "deduplicated": False,
+    }
+    with patch(
+      "robosystems.worker.client.enqueue_task", return_value=task_response
+    ) as enqueue:
+      envelope = await backfill_plan_history_op(
+        body=BackfillPlanHistoryOperation(entity_id="ent_sub", max_periods=6),
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert envelope.status == "pending"
+    assert envelope.operation_id == task_response["operation_id"]
+    kwargs = enqueue.call_args.kwargs
+    assert kwargs["task_type"] == "plan_history_backfill"
+    params = kwargs["params"]
+    assert (params["entity_id"], params["max_periods"]) == ("ent_sub", 6)
+    assert params["actor_type"] == "user"
+    assert params["actor_id"] == "usr_test123"
 
 
 class TestChangeCalendarStartOperation:

@@ -1,5 +1,6 @@
 """Worker task for backfill-plan-history, which recloses up to 24 months and
-outlasts the MCP tool budget as one close can.
+outlasts a request as one close can; the REST op and the MCP tool both
+dispatch here.
 
 Refusals are returned as results with an ``error`` key; only faults raise.
 """
@@ -13,7 +14,7 @@ from robosystems.worker.tasks.base import BaseTask
 
 
 def backfill_payload(
-  graph_id: str, params: dict[str, Any], actor_id: str
+  graph_id: str, params: dict[str, Any], actor_id: str, actor_type: str = "agent"
 ) -> dict[str, Any]:
   """Run the backfill and shape what a caller reads back: the outcome per
   month and what remains, or the refusal."""
@@ -53,7 +54,7 @@ def backfill_payload(
         actor_id=actor_id,
         service=service,
         close_service=PeriodCloseService(service),
-        actor_type="agent",
+        actor_type=actor_type,
         entity_id=body.entity_id,
       )
       calendar = result.fiscal_calendar.model_dump(mode="json")
@@ -100,4 +101,5 @@ class PlanHistoryBackfillTask(BaseTask):
       raise ValueError("plan_history_backfill requires a graph_id")
     params = dict(self.params)
     actor_id = params.pop("actor_id", None) or self.user_id or f"mcp:{self.graph_id}"
-    return backfill_payload(self.graph_id, params, str(actor_id))
+    actor_type = str(params.pop("actor_type", None) or "agent")
+    return backfill_payload(self.graph_id, params, str(actor_id), actor_type)
