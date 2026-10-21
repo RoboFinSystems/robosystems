@@ -2387,3 +2387,32 @@ class TestAccountRegisterResolver:
     assert result.errors is not None
     assert result.errors[0].extensions["code"] == "INVALID_PAGINATION"
     read.assert_not_called()
+
+
+class TestReportDownloadUrlLineage:
+  """The holon with lineage is a format like the others on the wire, and the
+  resolver names who asked for it."""
+
+  _TARGET = "robosystems.operations.roboledger.reads.reports.get_report_download_url"
+
+  def test_passes_the_lineage_format_and_the_actor_through(self) -> None:
+    mock_response = ReportBundleDownloadResponse(
+      download_url="https://signed.example/lineage",
+      expires_at=datetime(2030, 1, 1, tzinfo=UTC),
+      content_type="application/ld+json",
+      format="holon-jsonld-lineage",
+      generation_count=3,
+    )
+    user = MagicMock()
+    user.id = "usr_9"
+    with _patch_session(), patch(self._TARGET, return_value=mock_response) as m:
+      result = schema.execute_sync(
+        'query { reportDownloadUrl(reportId: "rpt_1", format: HOLON_JSONLD_LINEAGE) '
+        "{ format } }",
+        context_value=_ctx(user),
+      )
+
+    assert result.errors is None
+    assert result.data == {"reportDownloadUrl": {"format": "holon-jsonld-lineage"}}
+    assert m.call_args.kwargs["flavor"] == "holon-jsonld-lineage"
+    assert m.call_args.kwargs["actor_id"] == "usr_9"

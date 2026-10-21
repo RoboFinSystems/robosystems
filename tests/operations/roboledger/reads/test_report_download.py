@@ -402,3 +402,96 @@ class TestTavi:
       with pytest.raises(BundleSigningError, match="materialize") as excinfo:
         get_report_download_url(session, "kg1", "rpt_1", flavor="tavi")
       assert "s3://" not in str(excinfo.value)
+
+
+class TestLineageHolon:
+  """`holon-jsonld-lineage`: the holon with its fourth graph, built on first
+  download for the graph's own members, logged, and never served for a report
+  that was shared in from another graph."""
+
+  @pytest.mark.unit
+  def test_cache_hit_presigns_under_the_lineage_key(self):
+    session = _session(_report())
+    with patch(f"{_REPORTS}.S3Client") as s3_cls:
+      s3 = s3_cls.return_value
+      s3.object_exists.return_value = True
+      s3.generate_presigned_url.return_value = "https://signed.example/lineage"
+      resp = get_report_download_url(
+        session, "kg1", "rpt_1", flavor="holon-jsonld-lineage"
+      )
+
+    assert resp is not None
+    assert resp.format == "holon-jsonld-lineage"
+    assert resp.content_type == "application/ld+json"
+    _, kwargs = s3.generate_presigned_url.call_args
+    assert kwargs["key"] == "report-bundles/kg1/rpt_1/g3.lineage.holon.jsonld"
+    assert "g3.lineage.holon.jsonld" in kwargs["response_content_disposition"]
+
+  @pytest.mark.unit
+  def test_cache_miss_builds_the_holon_with_lineage_from_the_books(self):
+    session = _session(_report())
+    with (
+      patch(f"{_REPORTS}.S3Client") as s3_cls,
+      patch("robosystems.operations.serialization.build_report_bundle") as build,
+      patch(
+        "robosystems.operations.serialization.serialize_to_lineage_holon_jsonld",
+        return_value='{"@graph": []}',
+      ) as serialize,
+    ):
+      s3 = s3_cls.return_value
+      s3.object_exists.return_value = False
+      s3.upload_string.return_value = True
+      s3.generate_presigned_url.return_value = "https://signed.example/lineage"
+      resp = get_report_download_url(
+        session, "kg1", "rpt_1", flavor="holon-jsonld-lineage"
+      )
+
+    assert resp is not None
+    build.assert_called_once_with(session, "kg1", "rpt_1")
+    serialize.assert_called_once_with(session, build.return_value)
+    _, kwargs = s3.upload_string.call_args
+    assert kwargs["key"] == "report-bundles/kg1/rpt_1/g3.lineage.holon.jsonld"
+    assert kwargs["content"] == '{"@graph": []}'
+
+  @pytest.mark.unit
+  def test_a_received_report_has_no_lineage_even_when_a_file_exists(self):
+    """Lineage does not cross the graph boundary: the refusal is about the
+    report's origin, not about a cache miss."""
+    session = _session(_report(source_graph_id="kg_sender"))
+    with (
+      patch(f"{_REPORTS}.S3Client") as s3_cls,
+      patch("robosystems.operations.serialization.build_report_bundle") as build,
+    ):
+      s3_cls.return_value.object_exists.return_value = True
+      with pytest.raises(ReportBundleNotAvailableError, match="shared in"):
+        get_report_download_url(session, "kg1", "rpt_1", flavor="holon-jsonld-lineage")
+
+    build.assert_not_called()
+    s3_cls.return_value.generate_presigned_url.assert_not_called()
+
+  @pytest.mark.unit
+  def test_an_unpublished_report_has_no_lineage(self):
+    session = _session(
+      _report(bundle_url=None, generation_count=0, generation_status="draft")
+    )
+    with pytest.raises(ReportBundleNotAvailableError, match="not published"):
+      get_report_download_url(session, "kg1", "rpt_1", flavor="holon-jsonld-lineage")
+
+  @pytest.mark.unit
+  def test_the_download_is_logged_with_the_actor(self):
+    session = _session(_report())
+    with (
+      patch(f"{_REPORTS}.S3Client") as s3_cls,
+      patch(f"{_REPORTS}.logger") as log,
+    ):
+      s3 = s3_cls.return_value
+      s3.object_exists.return_value = True
+      s3.generate_presigned_url.return_value = "https://signed.example/lineage"
+      get_report_download_url(
+        session, "kg1", "rpt_1", flavor="holon-jsonld-lineage", actor_id="usr_9"
+      )
+
+    served = [c for c in log.info.call_args_list if "Lineage holon served" in c.args[0]]
+    assert len(served) == 1
+    message = served[0].args[0] % served[0].args[1:]
+    assert "usr_9" in message and "rpt_1" in message and "g3" in message

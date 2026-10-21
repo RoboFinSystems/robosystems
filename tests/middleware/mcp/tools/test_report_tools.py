@@ -172,6 +172,7 @@ def test_bundle_definition_warns_the_link_is_a_credential(client):
   assert defn["inputSchema"]["required"] == ["report_id"]
   assert defn["inputSchema"]["properties"]["format"]["enum"] == [
     "holon-jsonld",
+    "holon-jsonld-lineage",
     "tavi",
     "xbrl-2.1",
   ]

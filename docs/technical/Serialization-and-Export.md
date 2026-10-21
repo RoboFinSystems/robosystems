@@ -30,6 +30,7 @@ A published report is not a rendered document. It is a structured object: the re
 | Format | `format` value | What it is for |
 | --- | --- | --- |
 | **Holon JSON-LD** | `HOLON_JSONLD` | The report's anchor file, stored at publish, and the default download: JSON-LD in dataset form, as named graphs, and the one format that carries the whole report; opens in xbrlkit |
+| **Holon JSON-LD with lineage** | `HOLON_JSONLD_LINEAGE` | The same holon with a fourth named graph, `#lineage`: the ledger lines, entries and events behind every frozen figure, so a reader with the file can trace a number to the books. For the graph's own members; built on first download. See [Lineage](#lineage) |
 | **Tavi** | `TAVI` | A compact compiled model in XBRL International's Project Tavi form, the form the SEC pipeline also publishes beside each filing; opens in xbrlkit |
 | **XBRL 2.1** | `XBRL_2_1` | A standard XBRL 2.1 package for regulators and XBRL tooling |
 
@@ -162,6 +163,41 @@ print(bundle.filename, bundle.generation_count, len(bundle.content))
 ### Holon JSON-LD
 
 The report as JSON-LD in **dataset form**: named graphs for the report's scene, boundary, and projection. It is the file stored at publish, and the one format that keeps every platform-specific item: the Information Block envelopes, definition arcs, framework pins, and filing lifecycle that the Tavi leaves out, and the disclosure notes that XBRL 2.1 leaves out.
+
+### Lineage
+
+`HOLON_JSONLD_LINEAGE` is the holon above with one more named graph, `<report>#lineage`, and one more edge on the facts in `#scene`. A published report is an aggregation of the books; the lineage is the slice of the books that the report's frozen figures stand on, exported with them, so a reader who holds the file can trace a figure to its lines without an account. Only a figure whose column has closed carries lineage: an open column is still accruing, and a live figure has nothing frozen to stand on.
+
+The shape, in PROV-O where PROV-O has the word and `rs:` where it does not:
+
+```
+rs:Fact  ─prov:wasDerivedFrom─▶  rs:Contribution          one per account the figure summed, per entity
+                                   └─prov:hadMember─▶  rs:LineItem …   every landed line under the account in the window
+rs:LineItem  ─rs:entry─▶  rs:Entry  ─rs:transaction─▶  rs:Transaction
+     └─prov:wasGeneratedBy─▶  rs:Event  ─prov:wasAssociatedWith─▶  rs:Agent
+rs:Event  ─rs:obligatedBy / rs:discharges / rs:replaces─▶  rs:Event         one hop
+rs:LineItem / rs:Entry / rs:Transaction / rs:Event  ─rs:entity─▶  rs:LedgerEntity
+rs:LineItem  ─rs:account─▶  rs:Account
+```
+
+| Node | What it carries |
+| --- | --- |
+| `rs:Contribution` | `substantiates` (the fact), `entity`, `account`, `amount` (the account's share of the figure, in its natural sign), `lineCount`, `describedLineCount`, `windowStart`/`windowEnd`, `frozenAt`, `hadMember` (every member line, by IRI); when the description is bounded, `describedFrom`, `priorLineCount` and `priorBalance` |
+| `rs:LineItem` | `entry`, `account`, `entity`, `debit` or `credit` (dollars), `lineOrder`, `lineDescription`, `flowConcept` (the cash-flow tag as of the freeze), `dimensionMember`, `generatedBy` (its event) |
+| `rs:Entry` | `entity`, `entryNumber`, `postingDate`, `postedAt`, `entryType`, `entryStatus` (`posted` or `reversed`), `recordedBy` (how it was recorded: `manual_entry`, `source_sync`, `schedule_derived`, …), `memo`, `transaction`, `generatedBy`, `reversalOf` / `reversedBy`, and on a consolidating entry `adjustmentKind` and `adjustsEntity` |
+| `rs:Transaction` | `entity`, `transactionType`, `category`, `amount`, `currency`, `transactionDate`, `dueDate`, `merchantName`, `referenceNumber`, `source`, `generatedBy` |
+| `rs:Event` | `entity`, `eventType`, `eventCategory`, `eventClass`, `eventAction`, `eventStatus`, `occurredAt`, `dueDate`, `amount`, `currency`, `source`, `associatedWith` (the counterparty), `obligatedBy`, `discharges`, `replaces`; `rs:Discharge` reifies a split settlement with its `amount` |
+| `rs:Agent` | `prefLabel` (the counterparty's name) and `agentType`; never contact or tax details |
+| `rs:LedgerEntity` | `prefLabel`, `entityRole` (`operating` or `consolidation`), `parentEntity` — a member of the reporting group; the report's own entity is the `rs:Entity` in `#scene` |
+| `rs:Account` | `prefLabel`, `code`, `balance`, `periodType` — a chart-of-accounts account, distinct from the `rs:Element` concepts the report is presented in |
+
+Three rules decide what is in the graph:
+
+- **Members are complete; descriptions are bounded.** Every contribution lists all of its member lines, so the figure's `rs:contentHash` (a SHA-256 over the sorted member ids, the last segment of each `hadMember` IRI) can be recomputed from the file. The lines *described* as nodes, with their entry, transaction, event and counterparty, are those dated inside the report's own columns; a balance-sheet figure reaches back to the opening of the books, and its contribution states `priorBalance` and `priorLineCount` for the lines before `describedFrom`, the way a register states an opening balance.
+- **Only landed rows.** `posted` and `reversed` entries, both halves of a reversal naming each other. A superseded row is outside the frozen hash and outside the graph.
+- **The hash is the contract.** A figure whose reconstruction does not reproduce its frozen hash gets no `derivedFrom` edge and no contributions; the refusal is logged. Nothing in the lineage is stored: it is derived from the frozen descriptors and the permanent ledger rows on first download, and cached under the report's generation like the Tavi.
+
+The lineage does not cross a graph boundary. A report shared to another graph is shared without it, and `HOLON_JSONLD_LINEAGE` is refused for a report that was shared in. A reader outside the company gets the file itself, and opens it in the xbrlkit viewer.
 
 ### Tavi
 

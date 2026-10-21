@@ -16,4 +16,9 @@ def serialize_to_rdf(
     )
 
     return serialize_to_holon_jsonld(bundle)
+  if flavor is RdfFlavor.HOLON_JSONLD_LINEAGE:
+    raise ValueError(
+      "The lineage holon reads the ledger; use "
+      "serialize_to_lineage_holon_jsonld(session, bundle)."
+    )
   raise ValueError(f"Unsupported RDF flavor: {flavor!r}")
