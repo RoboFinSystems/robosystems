@@ -1,6 +1,6 @@
 """API request models for the `forecast` Information Block type.
 
-Mirrors the shape of `rollforward.py` — request bodies live here, the
+Mirrors the shape of `schedules.py` — request bodies live here, the
 typed `ForecastMechanics` envelope lives in
 `robosystems.models.api.information_block` alongside the other block-
 type mechanics shapes.

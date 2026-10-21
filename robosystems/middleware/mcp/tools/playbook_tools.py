@@ -202,9 +202,7 @@ _SCHEDULE_AUTHORING: list[str] = [
   "get-unmapped-elements / get-graph-schema), NOT taxonomy qnames like "
   "'us-gaap:Depreciation'. Discover the real ids first with "
   "get-unmapped-elements (match by name/code), get-graph-schema, "
-  "suggest-mapping, or read-graph-cypher — never invent them. (The "
-  "rollforward block type is the exception: it takes *_qname fields and "
-  "resolves them server-side.)",
+  "suggest-mapping, or read-graph-cypher — never invent them.",
   "PERIOD HORIZON: period_start..period_end is the schedule's full life — "
   "for depreciation/amortization that's period_start + useful life; for a "
   "prepaid it's the roll-off horizon. These schedules are finite by design, "
@@ -253,7 +251,7 @@ _KEY_RULES: list[str] = [
   "promote-obligations (sweep) or "
   "create-event-block(event_type='schedule_entry_due') (single schedule); "
   "manual entries from create-event-block(event_type='journal_entry_recorded').",
-  "block_type ENUM OVERSTATES CAPABILITY: only 'schedule' and 'rollforward' "
+  "block_type ENUM OVERSTATES CAPABILITY: only 'schedule' and 'forecast' "
   "are constructible via create-information-block. The statement types "
   "(balance_sheet, income_statement, cash_flow_statement, equity_statement, "
   "comprehensive_income) and 'metric' return HTTP 501 — statements are built "

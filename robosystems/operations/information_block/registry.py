@@ -16,11 +16,6 @@ from robosystems.models.api.extensions.forecasts import (
   DeleteForecastRequest,
   UpdateForecastRequest,
 )
-from robosystems.models.api.extensions.rollforward import (
-  CreateRollforwardRequest,
-  DeleteRollforwardRequest,
-  UpdateRollforwardRequest,
-)
 from robosystems.models.api.extensions.schedules import (
   CreateScheduleRequest,
   DeleteScheduleRequest,
@@ -30,7 +25,6 @@ from robosystems.models.api.information_block import (
   ForecastMechanics,
   MetricMechanics,
   ReconciliationMechanics,
-  RollforwardMechanics,
   ScheduleMechanics,
   StatementMechanics,
 )
@@ -40,7 +34,6 @@ from robosystems.operations.information_block import metric as metric_handlers
 from robosystems.operations.information_block import (
   reconciliation as reconciliation_handlers,
 )
-from robosystems.operations.information_block import rollforward as rollforward_handlers
 from robosystems.operations.information_block import schedule as schedule_handlers
 from robosystems.operations.information_block.statement import (
   STATEMENT_CATEGORY,
@@ -150,35 +143,6 @@ def _make_statement_entry(block_type: str, icon: str) -> BlockTypeRegistryEntry:
     # Library-seeded, so they surface on the library sentinel (with no facts).
     surfaces_in_library=True,
   )
-
-
-ROLLFORWARD_BLOCK = BlockTypeRegistryEntry(
-  id=rollforward_handlers.ROLLFORWARD_BLOCK_TYPE,
-  display_name=rollforward_handlers.ROLLFORWARD_DISPLAY_NAME,
-  display_plural="Rollforwards",
-  category=rollforward_handlers.ROLLFORWARD_CATEGORY,
-  icon="arrow-right-left",
-  description=(
-    "Filter-based attribution block — decomposes a balance-sheet account's "
-    "period change across declared flow concepts (Cash Flow Statement and "
-    "Statement of Changes in Equity lines). The author declares the BS "
-    "source + a list of attribution filters; the renderer evaluates the "
-    "filters against ledger LineItems at read time and emits one fact per "
-    "filter per period."
-  ),
-  concept_arrangement_default="roll_forward",
-  member_arrangement_default=None,
-  mechanics_schema=RollforwardMechanics,
-  create_request_model=CreateRollforwardRequest,
-  update_request_model=UpdateRollforwardRequest,
-  delete_request_model=DeleteRollforwardRequest,
-  construction_mode="declarative",
-  dispatch_create=rollforward_handlers.create,
-  dispatch_update=rollforward_handlers.update,
-  dispatch_delete=rollforward_handlers.delete,
-  dispatch_build_envelope=rollforward_handlers.build_envelope,
-  surfaces_in_library=False,
-)
 
 
 FORECAST_BLOCK = BlockTypeRegistryEntry(
@@ -360,7 +324,6 @@ RECONCILIATION_BLOCK = BlockTypeRegistryEntry(
 
 REGISTRY: dict[str, BlockTypeRegistryEntry] = {
   SCHEDULE_BLOCK.id: SCHEDULE_BLOCK,
-  ROLLFORWARD_BLOCK.id: ROLLFORWARD_BLOCK,
   FORECAST_BLOCK.id: FORECAST_BLOCK,
   BALANCE_SHEET_BLOCK.id: BALANCE_SHEET_BLOCK,
   INCOME_STATEMENT_BLOCK.id: INCOME_STATEMENT_BLOCK,
@@ -398,7 +361,6 @@ __all__ = [
   "METRIC_BLOCK",
   "RECONCILIATION_BLOCK",
   "REGISTRY",
-  "ROLLFORWARD_BLOCK",
   "SCHEDULE_BLOCK",
   "get",
   "list_registered",

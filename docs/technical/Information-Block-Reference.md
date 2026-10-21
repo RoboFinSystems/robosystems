@@ -123,7 +123,6 @@ One registry maps each `block_type` to its construction mode, default arrangemen
 | `block_type` | Display | Category | Mode | Mechanics `kind` | Default arrangement | create / update / delete | How it is actually made |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `schedule` | Schedule | Close | declarative | `closing_entry_generator` | `roll_forward` | yes / yes / yes | `create-information-block` |
-| `rollforward` | Rollforward | Reporting | declarative | `rollforward` | `roll_forward` | yes / yes / yes | `create-information-block` |
 | `forecast` | Forecast | Planning | declarative | `forecast` | `set` | yes / yes / yes | `create-information-block`, then `compute-forecast` |
 | `balance_sheet` | Balance Sheet | Reporting | compositional | `statement_renderer` | `roll_up` / `whole_part` | 501 | `create-report`, or stamped by `close-period` |
 | `income_statement` | Income Statement | Reporting | compositional | `statement_renderer` | `roll_up` / `whole_part` | 501 | same |
@@ -136,7 +135,7 @@ One registry maps each `block_type` to its construction mode, default arrangemen
 
 A 501 carries a message naming the right path. An unknown `block_type` is a 422.
 
-The statement Structures are seeded from the taxonomy library and cannot be deleted per tenant; to remove their facts, delete the originating Report. On the library graph, only the statement types are listed; schedules, rollforwards, forecasts, disclosures, metrics, and reconciliations exist only on tenant graphs.
+The statement Structures are seeded from the taxonomy library and cannot be deleted per tenant; to remove their facts, delete the originating Report. On the library graph, only the statement types are listed; schedules, forecasts, disclosures, metrics, and reconciliations exist only on tenant graphs.
 
 ## Per-Type Mechanics
 
@@ -175,18 +174,6 @@ A closing-entry generator: one fact per element per month across a window, and a
 `ScheduleMechanics` on the envelope: `kind: "closing_entry_generator"`, `entry_template`, `schedule_metadata`, and `periods_with_entries` (months that already have a closing entry, computed at read time).
 
 Update takes `structure_id` plus any of `name`, `entry_template`, `schedule_metadata`; delete takes `structure_id`. Two further operations change a live schedule: `terminate-schedule` (end it early with a `new_end_date` and a `reason`; removes the facts and voids the obligations past that date) and `rebuild-schedule` (re-run the generator in place from the stored definition, keeping the structure id: the old facts, rules, and pending obligations are replaced, and the historical/in-scope split is re-derived from the current close state). How schedule drafts post is in [Period Close](Period-Close.md).
-
-### Rollforward
-
-Decomposes one balance-sheet account's period change across declared flow concepts (cash-flow and equity-statement lines), evaluated against ledger line items when the block is read.
-
-Payload: `name`, `bs_source_qname`, `default_change_tag_qname` (the flow concept that receives any residual), `attribution_filters[]`, `validation_mode`, `taxonomy_id`. Each filter has a `target_qname` (the flow concept it produces) and a `predicate` of `kind: "line_item_metadata_field"` whose `values` are flow-concept qnames; a line item matches when its flow tag is one of them.
-
-`RollforwardMechanics`: `kind: "rollforward"`, `bs_source_element_id`, `bs_source_qname`, `default_change_tag_element_id`, `default_change_tag_qname`, `attribution_filters`, `validation_mode`:
-
-- `residual_as_default` (default): the unattributed remainder becomes a fact on the default change tag
-- `strict`: a remainder is an error
-- `warn_only`: the imbalance is logged and allowed
 
 ### Forecast
 
@@ -256,7 +243,7 @@ A rule whose variables have no bound fact reports `skipped` rather than failing.
 
 | View | Source | Status |
 | --- | --- | --- |
-| Rendering | `view.rendering` | Server-computed for the statement family, disclosures, metrics, forecast blocks, and reconciliations (one column per period end). Null for schedules and rollforwards, whose facts a client groups by period. |
+| Rendering | `view.rendering` | Server-computed for the statement family, disclosures, metrics, forecast blocks, and reconciliations (one column per period end). Null for schedules, whose facts a client groups by period. |
 | Chart | `view.chart` | Server-computed for metric blocks: panels grouped by format family, each with series keyed by element id. Values join the rendering rows by element id. |
 | Facts | `facts` | Client-side projection of the envelope |
 | Elements | `elements` (with `facts`) | Client-side projection of the envelope |
@@ -280,7 +267,7 @@ MCP: `get-information-block` (`id`, `scenario_id`, `series`, `series_history`, `
 ## Gotchas
 
 - **Cents in, dollars out.** Request amounts (`monthly_amount`, `original_amount`, `residual_value`, `periodic_amounts`) are integer cents. Fact `value`s on the envelope are in the unit, so a `monthly_amount` of `83333` reads back as `833.33`.
-- **Statements are rendered, not created.** `create-information-block` with a statement, disclosure, metric, or reconciliation type returns 501. Author a `schedule`, `rollforward`, or `forecast`; produce statements with `create-report`.
+- **Statements are rendered, not created.** `create-information-block` with a statement, disclosure, metric, or reconciliation type returns 501. Author a `schedule` or a `forecast`; produce statements with `create-report`.
 - **Element ids, not qnames.** Schedule templates take chart-of-accounts element ids. A qname such as `us-gaap:Depreciation` does not resolve there.
 - **`periodic_amounts` is strict.** One entry per month in the window, none negative, summing exactly to `original_amount` less `residual_value`; anything else is rejected at create.
 - **The graph is the URL.** `informationBlock`, `informationBlocks` and `informationBlockSummaries` take no `graphId` argument.

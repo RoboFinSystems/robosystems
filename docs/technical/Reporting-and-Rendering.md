@@ -93,7 +93,7 @@ An Information Block carries facts plus the structure around them. A **View** is
 | **Validation** | Each rule's last result, and the summary | The envelope's `verification_results`, `verification_summary`, and `rules` |
 | **Rules** | The rules bound to the block and their severity, evaluated or not | The envelope's `rules` |
 
-These are the six views the RoboLedger Explorer offers. A model-structure view of the presentation and calculation tree is not shipped. Schedules and rollforwards carry no server rendering; a client groups their facts by period.
+These are the six views the RoboLedger Explorer offers. A model-structure view of the presentation and calculation tree is not shipped. Schedules carry no server rendering; a client groups their facts by period.
 
 A `RenderingLite` payload is intentionally small:
 

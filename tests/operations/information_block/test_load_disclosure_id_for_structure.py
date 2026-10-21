@@ -9,7 +9,7 @@ Three branches covered:
 3. No match (validation_rules, taxonomy_mapping, schedules) -> ``None``.
 
 Also confirms the module-level type cache short-circuits subsequent
-calls for the same block_type.
+calls for the same block_type, and that a miss is never cached.
 """
 
 from __future__ import annotations
@@ -147,11 +147,18 @@ class TestNoMatch:
     session.execute.return_value.scalar.return_value = None
 
     assert load_disclosure_id_for_structure(session, "struct_calc") is None
-    # The None result is cached as well — second call doesn't requery.
+    # A miss is not cached: the cache is process-wide across tenants, so a
+    # tenant without the row must not hide it from one that has it.
     session2 = MagicMock()
     session2.get.return_value = _make_structure(
       role_uri="https://.../rs-gaap-calculations/IS-COR",
       block_type="validation_rules",
     )
-    assert load_disclosure_id_for_structure(session2, "struct_calc2") is None
-    session2.execute.assert_not_called()
+    session2.execute.return_value.scalar.return_value = (
+      f"{_DISCLOSURE_ROLE_PREFIX}ValidationRules"
+    )
+    assert (
+      load_disclosure_id_for_structure(session2, "struct_calc2")
+      == "disclosures:ValidationRules"
+    )
+    assert session2.execute.call_count == 1

@@ -28,7 +28,6 @@ import pytest
 
 # Modules whose writes build a response from an ORM instance.
 GUARDED = [
-  "robosystems/operations/information_block/rollforward.py",
   "robosystems/operations/information_block/forecast.py",
   "robosystems/operations/roboledger/commands/schedules.py",
   "robosystems/operations/roboledger/commands/entity.py",
