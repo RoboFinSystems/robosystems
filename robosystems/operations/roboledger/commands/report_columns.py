@@ -111,7 +111,10 @@ def live_columns_stale(
 ) -> bool:
   """Whether what the live columns read moved since the last generation: an
   entry of the report's entities posted past the closed-through date, or a
-  line on one, written since; or an association added to the mapping."""
+  line on one, written since; or the mapping touched (an association added,
+  removed or re-pointed bumps its structure). Landed rows are never deleted
+  or re-dated — a correction is a reversal, which is a new row — and a
+  draft is not in the pivot, so a draft's deletion changes nothing."""
   if report_def.last_generated is None:
     return True
   since = _naive_utc(report_def.last_generated)
@@ -136,14 +139,17 @@ def live_columns_stale(
     return True
   if not report_def.mapping_id:
     return False
-  grew = session.execute(
+  touched = session.execute(
     text(
+      "SELECT 1 FROM structures WHERE id = :mapping AND updated_at > :since "
+      "UNION ALL "
       "SELECT 1 FROM associations "
-      "WHERE structure_id = :mapping AND created_at > :since LIMIT 1"
+      "WHERE structure_id = :mapping AND created_at > :since "
+      "LIMIT 1"
     ),
     {"mapping": report_def.mapping_id, "since": since},
   ).first()
-  return grew is not None
+  return touched is not None
 
 
 def _statement_sets(session: Session, report_id: str) -> dict[str, str]:
@@ -265,7 +271,10 @@ def refresh_report_columns(
       new_sets,
       report_def.mapping_id or "",
     )
-  set_ids = list(structure_to_factset.values())
+  # Every set the report had is cleared of live rows, not only the ones
+  # picked this time: a structure the style no longer composes must not keep
+  # serving last generation's numbers.
+  set_ids = list(dict.fromkeys([*sets.values(), *structure_to_factset.values()]))
   session.execute(
     text("DELETE FROM verification_results WHERE fact_set_id = ANY(:ids)"),
     {"ids": set_ids},
@@ -325,6 +334,17 @@ def refresh_report_columns(
     report_def.period_end,
     actor_id,
   )
+  # A set no structure fills any more goes once nothing frozen is left in it;
+  # one holding a frozen column stays, as that column's record.
+  abandoned = [fsid for sid, fsid in sets.items() if sid not in structure_to_factset]
+  if abandoned:
+    session.execute(
+      text(
+        "DELETE FROM fact_sets WHERE id = ANY(:ids) "
+        "AND NOT EXISTS (SELECT 1 FROM facts WHERE facts.fact_set_id = fact_sets.id)"
+      ),
+      {"ids": abandoned},
+    )
   report_def.last_generated = now
   session.flush()
   return RefreshResult(rewritten=True, rule_summary=summary)
@@ -334,9 +354,14 @@ def refresh_for_read(session: Session, report_id: str) -> None:
   """A read's refresh: on its own savepoint, so a refresh that fails midway
   leaves the cached rows as they were and the read serves them; the failure
   is logged, never the reader's."""
+  from robosystems.operations.locking import RowLockedError
+
   try:
     with session.begin_nested():
       refresh_report_columns(session, report_id, actor_id="system")
+  except RowLockedError:
+    # Another read or write is refreshing it now; this one serves the rows.
+    logger.debug(f"Report {report_id} was read as last generated: being written.")
   except Exception as exc:
     logger.warning(
       f"Report {report_id} was read as last generated; its refresh failed: {exc}"
@@ -348,6 +373,8 @@ def freeze_reports_for_close(session: Session, *, entity_id: str, actor_id: str)
   and the columns the month completed are frozen there. Each report on its
   own savepoint: one that cannot be is logged and left for its next read,
   and the close stands. Returns how many were rewritten."""
+  # A report from before the entity column has none; its sets name the
+  # entity, and ``report_entity`` resolves it the way its generation did.
   rows = session.execute(
     text(
       "SELECT id FROM reports "
@@ -378,7 +405,9 @@ def freeze_reports_for_close(session: Session, *, entity_id: str, actor_id: str)
 
 def unfreeze_reports_after_reopen(session: Session, *, entity_id: str) -> int:
   """After a reopen: the entity's report columns whose period is no longer
-  fully closed go back to live. Returns the facts unfrozen."""
+  fully closed go back to live. Returns the facts unfrozen. Scoped by the
+  sets' entity, which every report's sets carry, a legacy report with no
+  ``entity_id`` of its own included."""
   cutoff = closed_through_end(session, entity_id)
   result = session.execute(
     text(

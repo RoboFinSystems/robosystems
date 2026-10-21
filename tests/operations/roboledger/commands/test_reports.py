@@ -45,7 +45,7 @@ class _FakeFact:
     self.period_end = period_end
     self.period_type = period_type
     self.source_values = None
-    self.source_entities = None
+    self.source_shares = None
 
 
 class _FakeFacts:

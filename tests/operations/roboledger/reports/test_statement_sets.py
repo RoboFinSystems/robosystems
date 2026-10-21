@@ -71,7 +71,7 @@ def _fake_facts():
         period_end=PE,
         period_type="instant",
         source_values=None,
-        source_entities=None,
+        source_shares=None,
       ),
       SimpleNamespace(
         element_id="el_rev",
@@ -80,7 +80,7 @@ def _fake_facts():
         period_end=PE,
         period_type="duration",
         source_values=None,
-        source_entities=None,
+        source_shares=None,
       ),
       # Prior-month pivot output — the indirect-CF delta basis. Must be
       # consumed by the derivation, never stamped into the close month.
@@ -91,7 +91,7 @@ def _fake_facts():
         period_end=PRIOR_PE,
         period_type="instant",
         source_values=None,
-        source_entities=None,
+        source_shares=None,
       ),
     ]
   )
@@ -394,7 +394,7 @@ class TestStampRoundsToCents:
       period_end=date(2025, 12, 31),
       period_type="instant",
       source_values=None,
-      source_entities=None,
+      source_shares=None,
     )
     _stamp_facts_into_sets(
       session,
@@ -440,7 +440,7 @@ class TestStampOneFactPerContext:
       period_end=self.FY_END,
       period_type="duration",
       source_values=None,
-      source_entities=None,
+      source_shares=None,
     )
 
   def _stamp(self, facts) -> list:
@@ -494,7 +494,7 @@ class TestPerFactDescriptor:
   JUNE = (date(2026, 6, 1), date(2026, 6, 30))
   JULY = (date(2026, 7, 1), date(2026, 7, 31))
 
-  def _fact(self, element_id, value, window, sources=None, owners=None):
+  def _fact(self, element_id, value, window, sources=None, shares=None):
     start, end = window
     return SimpleNamespace(
       element_id=element_id,
@@ -503,7 +503,7 @@ class TestPerFactDescriptor:
       period_end=end,
       period_type="duration",
       source_values=sources,
-      source_entities=owners,
+      source_shares=shares,
     )
 
   def _stamp(self, facts, **kwargs) -> list:
@@ -557,23 +557,31 @@ class TestPerFactDescriptor:
     assert rows[0].provenance is None
 
   def test_a_consolidated_sum_keys_each_account_by_its_member(self):
+    """The consolidation entity posts on the parent's chart: the same account
+    id is two members' lines, and each keeps its own."""
     rows = self._stamp(
       [
         self._fact(
           "el_rev",
           300.0,
           self.JUNE,
-          {"acct_parent": 100.0, "acct_member": 200.0},
-          {"acct_parent": "ent_parent", "acct_member": "ent_member"},
+          {"acct_shared": 250.0, "acct_member": 50.0},
+          {
+            ("ent_parent", "acct_shared"): 100.0,
+            ("ent_adjustments", "acct_shared"): 150.0,
+            ("ent_member", "acct_member"): 50.0,
+          },
         )
       ]
     )
-    assert {
-      (s["entity_id"], s["account_id"]) for s in rows[0].provenance["sources"]
-    } == {
-      ("ent_parent", "acct_parent"),
-      ("ent_member", "acct_member"),
-    }
+    assert [
+      (s["entity_id"], s["account_id"], s["value"])
+      for s in rows[0].provenance["sources"]
+    ] == [
+      ("ent_adjustments", "acct_shared", 150.0),
+      ("ent_parent", "acct_shared", 100.0),
+      ("ent_member", "acct_member", 50.0),
+    ]
 
   def test_without_a_mapping_nothing_is_claimed(self):
     session = MagicMock()

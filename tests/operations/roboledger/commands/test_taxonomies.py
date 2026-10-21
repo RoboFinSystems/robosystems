@@ -60,6 +60,9 @@ class _Query:
     self.deleted_models.append(self.model)
     return 1
 
+  def update(self, _values: dict, *, synchronize_session: bool = False) -> int:
+    return 1
+
 
 def test_delete_association_removes_information_block_dependents_first() -> None:
   assoc = MagicMock()

@@ -496,9 +496,15 @@ def regenerate_report(
   # calendar has closed are frozen; a frozen column that is still a column
   # keeps its facts, and the frozen facts of a window no column states any
   # more go. The text-block snapshots are taken again.
-  summary = refresh_report_columns(
+  refreshed = refresh_report_columns(
     session, report_def.id, actor_id=created_by, force=True, prune=True
-  ).rule_summary
+  )
+  if not refreshed.rewritten:
+    raise InvalidFilingTransitionError(
+      f"Report '{body.report_id}' was not regenerated: it was filed, archived "
+      "or shared out from under the request."
+    )
+  summary = refreshed.rule_summary
   # The report keeps the entity it was generated for; one from before the
   # column, its facts' entity, and with no facts the group parent.
   entity_id = resolve_entity_id(

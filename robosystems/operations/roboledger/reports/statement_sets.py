@@ -333,10 +333,13 @@ def _stamp_facts_into_sets(
 
   Each row carries its own descriptor when it is a pivot that foots to its
   accounts: ``PivotProvenance`` with ``sources``, keyed by the entity whose
-  pivot summed each account. Any other construction — a subtotal, a
-  derivation, a leaf a derivation added into — is left NULL, unknown, until
-  it is stamped honestly. A row whose column has closed (``period_end`` on
-  or before ``freeze_through``) is written frozen at ``frozen_at``.
+  pivot summed each account. Footing is checked on the pivot's own values;
+  the listed amounts are then rounded to cents each, the way the live drill
+  lists them, so a long list can differ from the value by a cent or two in
+  display. Any other construction — a subtotal, a derivation, a leaf a
+  derivation added into — is left NULL, unknown, until it is stamped
+  honestly. A row whose column has closed (``period_end`` on or before
+  ``freeze_through``) is written frozen at ``frozen_at``.
   """
   totals: dict[tuple, float] = {}
   # The accounts summed into each key, or None once a value without any
@@ -353,9 +356,12 @@ def _stamp_facts_into_sets(
     cell = sources.get(key)
     if cell is None:
       cell = sources[key] = {}
-    owners = fact.source_entities or {}
-    for account_id, amount in fact.source_values.items():
-      owner = (owners.get(account_id, entity_id), account_id)
+    shares = (
+      fact.source_shares
+      if fact.source_shares is not None
+      else {(entity_id, a): v for a, v in fact.source_values.items()}
+    )
+    for owner, amount in shares.items():
       cell[owner] = cell.get(owner, 0.0) + amount
 
   stamped_at = datetime.now(UTC)
@@ -548,15 +554,16 @@ def consolidated_report_facts(
     warnings.extend(generated.warnings)
     for f in generated.facts:
       key = (f.element_id, f.period_start, f.period_end, f.period_type, f.audit_only)
-      # Each member posts only to its own chart, so every source account
-      # names the member whose pivot summed it.
-      owners = dict.fromkeys(f.source_values or (), member.id)
+      # Keyed by the member whose pivot summed each account: the consolidation
+      # entity posts on the parent's chart, so an account id alone is not one
+      # member's.
+      shares = {(member.id, a): v for a, v in (f.source_values or {}).items()}
       held = summed.get(key)
       if held is None:
         summed[key] = replace(
           f,
           source_values=dict(f.source_values) if f.source_values else None,
-          source_entities=owners or None,
+          source_shares=shares if f.source_values is not None else None,
         )
         continue
       held_close = held.value if held.close_value is None else held.close_value
@@ -564,9 +571,15 @@ def consolidated_report_facts(
       if held.close_value is not None or f.close_value is not None:
         held.close_value = held_close + add_close
       held.value += f.value
-      if f.source_values:
-        held.source_values = {**(held.source_values or {}), **f.source_values}
-        held.source_entities = {**(held.source_entities or {}), **owners}
+      if f.source_values is not None:
+        merged = dict(held.source_values or {})
+        for account_id, amount in f.source_values.items():
+          merged[account_id] = merged.get(account_id, 0.0) + amount
+        held.source_values = merged
+        held_shares = dict(held.source_shares or {})
+        for owner, amount in shares.items():
+          held_shares[owner] = held_shares.get(owner, 0.0) + amount
+        held.source_shares = held_shares
   return ReportFacts(
     facts=list(summed.values()),
     periods=periods,
