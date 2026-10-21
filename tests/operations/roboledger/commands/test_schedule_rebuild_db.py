@@ -264,3 +264,22 @@ def test_a_disposed_schedule_is_not_rebuilt(ext_session):
 
   with pytest.raises(ValueError, match="Void the disposal first"):
     rebuild_schedule(session, RebuildScheduleRequest(structure_id=structure_id))
+
+
+def test_a_new_schedule_keeps_its_originator(ext_session):
+  """The originator id is what a rebuild supersedes; written only in memory, a
+  first rebuild would leave the old schedule_created event live."""
+  from robosystems.models.extensions.structure import Structure
+
+  session = ext_session
+  structure_id = _depreciation(session)
+  session.commit()
+  session.expire_all()
+
+  structure = session.get(Structure, structure_id)
+  originator = (structure.metadata_ or {}).get("schedule_created_event_id")
+  assert originator is not None
+  assert (structure.artifact_mechanics or {}).get("schedule_created_event_id") == (
+    originator
+  )
+  assert session.get(Event, originator).event_type == "schedule_created"

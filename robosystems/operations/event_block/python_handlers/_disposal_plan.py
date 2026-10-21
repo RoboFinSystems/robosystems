@@ -107,7 +107,15 @@ def compute_disposal_plan(
   carried_dollars = float(acc_row.value) if acc_row else 0.0
   carried_cents = round(carried_dollars * 100)
 
-  self_carried = asset_element_id == credit_element_id
+  from robosystems.operations.roboledger.schedules.service import (
+    credit_account_draws_down,
+  )
+
+  # Read the credit account's facts as the generator wrote them: a drawn-down
+  # account carries the balance left, whether or not it is the asset itself.
+  self_carried = asset_element_id == credit_element_id or credit_account_draws_down(
+    session, credit_element_id
+  )
   if self_carried:
     # Prepaid-style: the instant fact is the remaining balance = NBV.
     nbv = carried_cents
@@ -145,7 +153,8 @@ def compute_disposal_plan(
     if nbv > 0:
       line_items.append(
         {
-          "element_id": asset_element_id,
+          # The account that carried the remaining balance.
+          "element_id": credit_element_id,
           "debit_amount": 0,
           "credit_amount": nbv,
           "description": "Derecognize asset at remaining balance",

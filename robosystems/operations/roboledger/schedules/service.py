@@ -430,13 +430,9 @@ class ScheduleService:
     # or credit-balance account accumulates up from zero; a directly-credited
     # asset (a prepaid) draws down from cost. QuickBooks types contra-assets as
     # debit-normal, so the contraAsset trait decides, not balance_type.
-    credit_balance_type = session.execute(
-      select(Element.balance_type).where(Element.id == entry_template.credit_element_id)
-    ).scalar()
-    credit_is_contra = credit_balance_type == "debit" and _element_is_contra_asset(
+    credit_draws_down = credit_account_draws_down(
       session, entry_template.credit_element_id
     )
-    credit_draws_down = credit_balance_type == "debit" and not credit_is_contra
     # Drawing down needs a cost basis; without original_amount, derive it from
     # the straight-line curve (custom curves always carry one).
     if credit_draws_down and original_dollars is None and periods:
@@ -693,12 +689,12 @@ class ScheduleService:
     artifact_mechanics["pending_event_count"] = pending_event_count
     structure.artifact_mechanics = artifact_mechanics
 
-    # A persisted Structure needs the JSONB change flagged to emit an UPDATE.
-    if existing_structure is not None:
-      from sqlalchemy.orm.attributes import flag_modified
+    # The blobs were flushed already, and these keys go into the same dicts:
+    # without the flag no UPDATE is written, on a new structure too.
+    from sqlalchemy.orm.attributes import flag_modified
 
-      flag_modified(structure, "metadata_")
-      flag_modified(structure, "artifact_mechanics")
+    flag_modified(structure, "metadata_")
+    flag_modified(structure, "artifact_mechanics")
 
     session.flush()
     return structure
@@ -1884,6 +1880,17 @@ class ScheduleService:
     session.add(taxonomy)
     session.flush()
     return taxonomy.id
+
+
+def credit_account_draws_down(session: Session, element_id: str) -> bool:
+  """Whether a schedule's credited account runs down from cost (a prepaid, a
+  directly credited asset) rather than accumulating up from zero (a contra or
+  credit-balance account). The generator writes its instant facts by this,
+  and whatever reads them back reads them by it too."""
+  balance_type = session.execute(
+    select(Element.balance_type).where(Element.id == element_id)
+  ).scalar()
+  return balance_type == "debit" and not _element_is_contra_asset(session, element_id)
 
 
 def _element_is_contra_asset(session: Session, element_id: str) -> bool:

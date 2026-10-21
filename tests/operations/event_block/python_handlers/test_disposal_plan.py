@@ -14,6 +14,20 @@ from robosystems.operations.event_block.python_handlers._disposal_plan import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _accumulating_credit_account():
+  """These mocks answer the plan's queries in order; the credit account's
+  draws-down test is one more, so it is pinned to the contra shape they model.
+  The drawn-down read runs against a real database in test_disposal_db.py."""
+  from unittest.mock import patch
+
+  with patch(
+    "robosystems.operations.roboledger.schedules.service.credit_account_draws_down",
+    return_value=False,
+  ):
+    yield
+
+
 def _make_structure(
   original_amount: int = 20000,
   asset_element_id: str = "elem_asset",
