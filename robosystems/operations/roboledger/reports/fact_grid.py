@@ -109,10 +109,17 @@ def _mark_derived(
   source_concepts: tuple[str, ...] | list[str] = (),
 ) -> None:
   """Record that ``computation`` produced this fact, or is about to add
-  ``amount`` into it: call before the addition, so a pivoted value keeps
-  what it was before the derivation touched it."""
+  ``amount`` into it: call before the addition, so the value the fact
+  already had — pivoted, rolled up or derived — is kept as its own part and
+  the parts always sum to the value."""
   derivation = dict(fact.derivation or {})
   computations = list(derivation.get("computations", []))
+  if amount is not None:
+    amounts = dict(derivation.get("amounts", {}))
+    if not amounts and fact.origin is not None:
+      amounts[_part_name(fact)] = fact.value
+    amounts[computation] = amounts.get(computation, 0.0) + amount
+    derivation["amounts"] = amounts
   if computation not in computations:
     computations.append(computation)
   derivation["computations"] = computations
@@ -122,14 +129,19 @@ def _mark_derived(
     derivation["source_concepts"] = sorted(
       set(derivation.get("source_concepts", [])) | set(source_concepts)
     )
-  if amount is not None:
-    amounts = dict(derivation.get("amounts", {}))
-    if fact.origin == "pivot" and "pivot" not in amounts:
-      amounts["pivot"] = fact.value
-    amounts[computation] = amounts.get(computation, 0.0) + amount
-    derivation["amounts"] = amounts
   fact.origin = "derived"
   fact.derivation = derivation
+
+
+def _part_name(fact: ReportFact) -> str:
+  """The name a fact's value goes under in ``amounts`` when something is
+  added into it: ``pivot``, ``rollup:<rule>``, or what derived it."""
+  derivation = fact.derivation or {}
+  if fact.origin == "pivot":
+    return "pivot"
+  if fact.origin == "rollup":
+    return f"rollup:{derivation.get('rule', 'calculation')}"
+  return "+".join(derivation.get("computations", [])) or "derived"
 
 
 @dataclass
@@ -2602,6 +2614,7 @@ def _emit_noncash_and_settlement_facts(
     value = cents_to_dollars(round(cents))
     for f in facts:
       if f.element_id == element_id and f.period_start == start and f.period_end == end:
+        # Marked before the addition: the mark keeps the value as it was.
         _mark_derived(f, "noncash_and_settlement", amount=value)
         f.value += value
         break
@@ -3624,6 +3637,7 @@ def _close_to_retained_earnings(
     facts, period_start, period_end, close_target_qname=close_target_qname
   )
   if target is not None:
+    # Marked before the addition: the mark keeps the value as it was.
     _mark_derived(target, "close_to_retained_earnings", amount=net_income)
     target.value += net_income
     return
@@ -3705,6 +3719,7 @@ def _close_prior_periods_to_retained_earnings(
     facts, period_start, period_end, close_target_qname=close_target_qname
   )
   if target is not None:
+    # Marked before the addition: the mark keeps the value as it was.
     _mark_derived(
       target,
       "close_prior_periods_to_retained_earnings",

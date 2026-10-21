@@ -518,6 +518,7 @@ class TestPerFactDescriptor:
     start, end = window
     return SimpleNamespace(
       element_id=element_id,
+      element_qname=element_id,
       value=value,
       period_start=start,
       period_end=end,
@@ -776,3 +777,96 @@ class TestPerFactDescriptor:
     rows = self._stamp([self._fact("el_rev", 1.0, self.JUNE, {"a": 1.0})])
     assert rows[0].provenance["content_hash"] is None
     assert rows[0].provenance["line_count"] is None
+
+  def test_the_parts_of_a_derived_row_always_sum_to_its_value(self):
+    """A non-cash effect added into an indirect cash-flow leaf: the leaf's
+    own part is kept under what derived it, beside the effect."""
+    from robosystems.operations.roboledger.reports.fact_grid import (
+      ReportFact,
+      _mark_derived,
+    )
+
+    # Stamped under the income statement's structure, like every fake here.
+    leaf = ReportFact(
+      element_id="el_rev",
+      element_qname="rs-gaap:IncreaseDecreaseInAccountsReceivable",
+      element_name="Change in receivables",
+      classification=None,
+      balance_type="debit",
+      value=-40.0,
+      period_start=self.JUNE[0],
+      period_end=self.JUNE[1],
+      period_type="duration",
+      origin="derived",
+      derivation={
+        "computations": ["indirect_cash_flow"],
+        "source_concepts": ["rs-gaap:AccountsReceivable"],
+      },
+    )
+    _mark_derived(leaf, "noncash_and_settlement", amount=15.0)
+    leaf.value += 15.0
+    assert leaf.derivation["amounts"] == {
+      "indirect_cash_flow": -40.0,
+      "noncash_and_settlement": 15.0,
+    }
+    rows = self._stamp([leaf])
+    descriptor = rows[0].provenance
+    assert descriptor["computation"] == "indirect_cash_flow+noncash_and_settlement"
+    assert sum(descriptor["amounts"].values()) == rows[0].value == -25.0
+    assert descriptor["source_concepts"] == ["rs-gaap:AccountsReceivable"]
+
+  def test_a_rollup_a_close_lands_on_keeps_its_rolled_part(self):
+    from robosystems.operations.roboledger.reports.fact_grid import (
+      ReportFact,
+      _mark_derived,
+    )
+
+    subtotal = ReportFact(
+      element_id="el_eq",
+      element_qname="rs-gaap:StockholdersEquity",
+      element_name="Equity",
+      classification=None,
+      balance_type="credit",
+      value=900.0,
+      period_start=self.JUNE[0],
+      period_end=self.JUNE[1],
+      period_type="instant",
+      origin="rollup",
+      derivation={"rule": "calculation", "children": []},
+    )
+    _mark_derived(subtotal, "close_to_retained_earnings", amount=100.0)
+    assert subtotal.derivation["amounts"] == {
+      "rollup:calculation": 900.0,
+      "close_to_retained_earnings": 100.0,
+    }
+
+  def test_a_frozen_pivot_lists_the_zero_net_account_its_hash_covers(self):
+    session = MagicMock()
+    session.execute.return_value.fetchall.return_value = [
+      SimpleNamespace(element_id="acct_a", ids=["li_1"]),
+      SimpleNamespace(element_id="acct_zero", ids=["li_2", "li_3"]),
+    ]
+    _stamp_facts_into_sets(
+      session,
+      SimpleNamespace(
+        facts=[self._fact("el_rev", 6.0, self.JUNE, {"acct_a": 6.0, "acct_zero": 0.0})]
+      ),
+      "ent_1",
+      {"el_rev": ["struct_is"]},
+      {"struct_is": "fs_is"},
+      mapping_id="map_1",
+      frozen_at=datetime(2026, 7, 2, tzinfo=UTC),
+      freeze_through=self.JUNE[1],
+    )
+    descriptor = session.add.call_args[0][0].provenance
+    assert [(s["account_id"], s["value"]) for s in descriptor["sources"]] == [
+      ("acct_a", 6.0),
+      ("acct_zero", 0.0),
+    ]
+    assert descriptor["line_count"] == 3
+    # The read asked for exactly the fact's accounts.
+    assert session.execute.call_args.args[1]["account_ids"] == ["acct_a", "acct_zero"]
+
+  def test_a_live_pivot_leaves_a_zero_net_account_out(self):
+    rows = self._stamp([self._fact("el_rev", 6.0, self.JUNE, {"a": 6.0, "z": 0.0})])
+    assert [s["account_id"] for s in rows[0].provenance["sources"]] == ["a"]

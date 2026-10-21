@@ -424,13 +424,17 @@ def _merge_shares(
     into[owner] = into.get(owner, 0.0) + amount
 
 
-def _listed(cell: dict[tuple[str, str], float]) -> list[FactSource]:
+def _listed(
+  cell: dict[tuple[str, str], float], *, keep_zero: bool = False
+) -> list[FactSource]:
+  """The accounts largest first. A live row leaves out one that nets to
+  zero; a frozen row keeps it, so the list is exactly what its hash covers."""
   return [
     FactSource(entity_id=owner, account_id=account_id, value=round(amount, 2))
     for (owner, account_id), amount in sorted(
       cell.items(), key=lambda item: -abs(item[1])
     )
-    if amount != 0.0
+    if keep_zero or amount != 0.0
   ]
 
 
@@ -466,7 +470,6 @@ def _fact_descriptor(
     derivation = contributors[0].derivation or {}
     return RollupProvenance(
       rule=derivation.get("rule", "calculation"),
-      structure_id=derivation.get("structure_id"),
       children=[RollupChild(**child) for child in derivation.get("children", [])],
     ).model_dump(mode="json")
   return _derived_descriptor(contributors, entity_id)
@@ -507,6 +510,11 @@ def _pivot_descriptor(
   )
   if filters:
     if cell:
+      logger.debug(
+        "Fact row unknown: a pivot through a filter and one over accounts summed "
+        "into one value (%s)",
+        contributors[0].element_qname,
+      )
       return None
     return PivotProvenance(
       mapping_id=mapping_id,
@@ -515,6 +523,10 @@ def _pivot_descriptor(
       posting_filter=filters[0],
     ).model_dump(mode="json")
   if abs(sum(cell.values()) - value) > 0.005:
+    logger.debug(
+      "Fact row unknown: its accounts do not foot to it (%s)",
+      contributors[0].element_qname,
+    )
     return None
   content_hash = line_count = None
   if lines is not None and cell:
@@ -525,7 +537,7 @@ def _pivot_descriptor(
     mapping_id=mapping_id,
     period=period,
     stamped_at=stamped_at,
-    sources=_listed(cell),
+    sources=_listed(cell, keep_zero=lines is not None),
     content_hash=content_hash,
     line_count=line_count,
   ).model_dump(mode="json")
@@ -554,13 +566,15 @@ def _derived_descriptor(contributors: list, entity_id: str) -> dict:
     elif fact.origin == "rollup":
       add(f"rollup:{derivation.get('rule', 'calculation')}", fact.value)
     else:
-      names = list(derivation.get("computations", [])) or ["derived"]
       known = derivation.get("amounts")
+      names = list(derivation.get("computations", []))
       if known:
         for name, amount in known.items():
           add(name, amount)
-      else:
+      elif names:
         add("+".join(names), fact.value)
+      else:
+        amounts["unnamed"] = amounts.get("unnamed", 0.0) + fact.value
       concepts.update(derivation.get("source_concepts", []))
       if derivation.get("formula"):
         formulas.append(derivation["formula"])
@@ -576,15 +590,16 @@ def _derived_descriptor(contributors: list, entity_id: str) -> dict:
 
 
 class _LineSets:
-  """The landed lines under each account of an entity in a window, read
-  once per window and hashed per fact: ``sha256`` over the sorted line ids,
-  so a reconstruction through the register can be checked against the
-  frozen row."""
+  """The landed lines under the accounts a frozen fact names, per entity and
+  window, read for the accounts not yet held and hashed per fact: ``sha256``
+  over the sorted line ids, so a reconstruction through the register can be
+  checked against the frozen row."""
 
   _SQL = text(
     "SELECT li.element_id, array_agg(li.id ORDER BY li.id) AS ids "
     "FROM line_items li JOIN entries e ON e.id = li.entry_id "
     "WHERE e.entity_id = :entity_id AND e.status IN :landed_entry_statuses "
+    "  AND li.element_id = ANY(:account_ids) "
     "  AND e.posting_date <= :end_date "
     "  AND (CAST(:start_date AS DATE) IS NULL OR e.posting_date >= :start_date) "
     "GROUP BY li.element_id"
@@ -592,6 +607,7 @@ class _LineSets:
 
   def __init__(self, session: Session) -> None:
     self._session = session
+    # (entity, window start, window end) → account → its landed line ids.
     self._cache: dict[tuple[str, date | None, date], dict[str, list[str]]] = {}
 
   def hash(
@@ -602,26 +618,42 @@ class _LineSets:
     period_type: str,
   ) -> tuple[str, int]:
     window_start = None if period_type == "instant" else period_start
-    ids: list[str] = []
+    wanted: dict[str, list[str]] = {}
     for entity_id, account_id in owners:
-      ids.extend(self._lines(entity_id, window_start, period_end).get(account_id, ()))
+      wanted.setdefault(entity_id, []).append(account_id)
+    ids: list[str] = []
+    for entity_id, account_ids in wanted.items():
+      lines = self._lines(entity_id, window_start, period_end, account_ids)
+      for account_id in account_ids:
+        ids.extend(lines.get(account_id, ()))
     ids.sort()
     digest = hashlib.sha256("\n".join(ids).encode()).hexdigest()
     return f"sha256:{digest}", len(ids)
 
   def _lines(
-    self, entity_id: str, window_start: date | None, window_end: date
+    self,
+    entity_id: str,
+    window_start: date | None,
+    window_end: date,
+    account_ids: list[str],
   ) -> dict[str, list[str]]:
-    key = (entity_id, window_start, window_end)
-    if key not in self._cache:
+    held = self._cache.setdefault((entity_id, window_start, window_end), {})
+    missing = sorted({a for a in account_ids if a not in held})
+    if missing:
       rows = self._session.execute(
         self._SQL,
-        {"entity_id": entity_id, "start_date": window_start, "end_date": window_end},
+        {
+          "entity_id": entity_id,
+          "account_ids": missing,
+          "start_date": window_start,
+          "end_date": window_end,
+        },
       ).fetchall()
-      self._cache[key] = {
-        str(row.element_id): [str(line_id) for line_id in row.ids] for row in rows
-      }
-    return self._cache[key]
+      for account_id in missing:
+        held[account_id] = []
+      for row in rows:
+        held[str(row.element_id)] = [str(line_id) for line_id in row.ids]
+    return held
 
 
 def _persist_report_facts(

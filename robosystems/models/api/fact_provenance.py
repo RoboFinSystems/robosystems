@@ -150,9 +150,6 @@ class RollupProvenance(BaseModel):
     ...,
     description="What summed the children: 'calculation' (the arcs) or 'net_income'.",
   )
-  structure_id: str | None = Field(
-    None, description="The calculation structure the arcs came from, when one did."
-  )
   children: list[RollupChild] = Field(
     default_factory=list, description="The concepts summed, with their weights."
   )
