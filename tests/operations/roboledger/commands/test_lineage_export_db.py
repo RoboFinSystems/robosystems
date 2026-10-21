@@ -19,7 +19,6 @@ from robosystems.operations.serialization import (
   serialize_to_lineage_holon_jsonld,
 )
 from tests.operations.roboledger.commands.test_report_columns_db import (
-  GRAPH,
   JULY,
   JUNE,
   _close,
@@ -29,6 +28,9 @@ from tests.operations.roboledger.commands.test_report_columns_db import (
 )
 
 pytestmark = pytest.mark.integration
+
+# Its own tenant: the books fixture provisions the requesting module's GRAPH.
+GRAPH = "kgdddddddddddddddd66"
 
 
 def _platform_graph():
@@ -50,7 +52,7 @@ def test_the_lineage_holon_carries_the_frozen_column_and_checks_out(books):  # n
     _platform_graph(),
     patch("robosystems.taxonomy.pins.resolve_pin", return_value={"rs-gaap": "v1"}),
   ):
-    bundle = build_report_bundle(session, GRAPH, report.id)
+    bundle = build_report_bundle(session, g["graph"], report.id)
   entitled = serialize_to_lineage_holon_jsonld(session, bundle)
   document = json.loads(entitled)
   graphs = {gr["@id"].rsplit("#", 1)[1]: gr["@graph"] for gr in document["@graph"]}
