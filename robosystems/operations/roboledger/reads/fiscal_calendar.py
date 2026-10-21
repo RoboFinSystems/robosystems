@@ -201,6 +201,8 @@ def build_fiscal_calendar_response(
     unposted_source_event_sample=(
       list(gate.unposted_source_event_sample) if gate else []
     ),
+    held_bank_line_count=gate.held_bank_line_count if gate else 0,
+    held_bank_line_sample=list(gate.held_bank_line_sample) if gate else [],
     unreconciled_account_count=gate.unreconciled_account_count if gate else 0,
     unreconciled_account_sample=(
       list(gate.unreconciled_account_sample) if gate else []

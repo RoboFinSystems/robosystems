@@ -24,6 +24,7 @@ from robosystems.models.extensions import Agent, Event
 from robosystems.operations.event_block.commands import (
   create_event_block_in_session,
 )
+from robosystems.operations.roboledger.fiscal_calendar.held_feed_lines import hold
 
 # The earliest plausible posting year. A feed can carry a placeholder date
 # (the Mercury sandbox posts transactions dated year 1), and the calendar
@@ -64,8 +65,8 @@ def in_closed_months(session: Session, payloads: Iterable[dict[str, Any]]) -> se
   """The external ids of lines dated in a month their entity has closed.
 
   A closed month takes no new bank lines: they could never post there, and
-  the books it closed on would change under the receipt. To bring one in,
-  reopen the month and sync again from its first day.
+  the books it closed on would change under the receipt. The sync writes
+  each one held out of the month, and reopening the month gives it back.
   """
   from robosystems.operations.roboledger.commands._guards import closed_periods
 
@@ -233,9 +234,13 @@ def capture_event(
   graph_id: str,
   created_by: str,
   report: LoadReport,
+  held: bool = False,
 ) -> bool:
   """Capture one event in its own savepoint; a bad row never stops the batch.
-  A classifiable line gets the highest suggestion the ladder has for it."""
+  A classifiable line gets the highest suggestion the ladder has for it.
+
+  ``held`` writes a line dated in a closed month as held out of it
+  (`held_feed_lines`), counted under ``skipped.closed_period``."""
   from robosystems.operations.roboledger.classification import (
     LEARNED_EVENT_TYPES,
     apply_ladder,
@@ -253,13 +258,18 @@ def capture_event(
     }
   try:
     with session.begin_nested():
-      create_event_block_in_session(
+      created = create_event_block_in_session(
         session,
         CreateEventBlockRequest.model_validate(payload),
         created_by,
         graph_id=graph_id,
       )
-    report.events_created += 1
+      if held:
+        hold(created[0])
+    if held:
+      report.skipped["closed_period"] += 1
+    else:
+      report.events_created += 1
     return True
   except Exception as exc:
     report.events_failed += 1

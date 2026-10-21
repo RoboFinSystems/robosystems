@@ -135,6 +135,10 @@ class GetFiscalCalendarTool:
   - `unreconciled_accounts`: a reconciliation the close waits on is not
     reconciled for the period, or was never compared for it — run
     refresh-reconciliations (count + sample ride on the response)
+  - `held_bank_lines`: bank lines a sync held out of an earlier, closed
+    month (dated there, arriving after it closed) that no close has decided
+    on — reopen that month, which gives them back to post, or close over
+    them with allow_held_bank_lines (count + sample ride on the response)
   - On the consolidation entity, whose close is the group's (each names
     its items in the matching `group_*` list): `entity_open` — an entity
     the month consolidates has not closed it; `adjustments_unposted` — the
@@ -583,6 +587,9 @@ class ClosePeriodTool:
 - allow_unexplained_residuals (optional): on the consolidation entity, lifts
   the group close's residual gate; each difference stays in the
   consolidated statements and is named in the audit note.
+- allow_held_bank_lines (optional): lifts the held-bank-line gate, closing
+  although bank lines a sync held out of an earlier closed month are
+  undecided; each is recorded as decided by this close and none posts.
 
 **RETURNS:**
 Two shapes. Usually the receipt below, returned once the close lands. If the
@@ -625,6 +632,8 @@ The receipt:
   allow_unposted_source_events)
 - a reconciliation the close waits on is not reconciled for the period, or
   was never compared for it (lifted by allow_unreconciled_accounts)
+- bank lines a sync held out of an earlier closed month, undecided (lifted
+  by allow_held_bank_lines)
 - on the consolidation entity, the group close: every entity the month
   consolidates closed it; its consolidating entries posted or drafted; no
   residual or intercompany disagreement left (lifted by
@@ -696,6 +705,15 @@ The receipt:
               "note."
             ),
           },
+          "allow_held_bank_lines": {
+            "type": "boolean",
+            "description": (
+              "Override the held-bank-line gate (default false). Closes "
+              "although bank lines a sync held out of an earlier closed month "
+              "are undecided; each is recorded as decided and none posts. "
+              "Prefer reopening the month they are dated in."
+            ),
+          },
           "allow_unexplained_residuals": {
             "type": "boolean",
             "description": (
@@ -759,6 +777,7 @@ The receipt:
           "allow_unexplained_residuals": bool(
             arguments.get("allow_unexplained_residuals", False)
           ),
+          "allow_held_bank_lines": bool(arguments.get("allow_held_bank_lines", False)),
           "note": arguments.get("note"),
           "entity_id": arguments.get("entity_id"),
         },
@@ -865,6 +884,7 @@ The receipt:
           allow_unexplained_residuals=bool(
             arguments.get("allow_unexplained_residuals", False)
           ),
+          allow_held_bank_lines=bool(arguments.get("allow_held_bank_lines", False)),
         )
         if gate.is_closeable:
           return None
@@ -927,6 +947,8 @@ class ReopenPeriodTool:
 - Updated fiscal_calendar state
 - statement_sets_retracted: how many canonical statement FactSets the
   reopen deleted (0 for months whose statement sets were never stamped)
+- held_bank_lines_restored: bank lines a sync held out of the month while it
+  was closed, given back as captured to classify and commit
 """,
       "inputSchema": {
         "type": "object",
@@ -1021,6 +1043,7 @@ class ReopenPeriodTool:
           "reason": reason,
           "fiscal_calendar": fc_payload,
           "statement_sets_retracted": result.statement_sets_retracted,
+          "held_bank_lines_restored": result.held_bank_lines_restored,
         }
     except FiscalCalendarError as exc:
       return {"error": "calendar_error", "message": str(exc)}

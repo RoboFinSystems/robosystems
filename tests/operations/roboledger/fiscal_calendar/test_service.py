@@ -122,6 +122,7 @@ class _Query:
     "lt": lambda v, c: v is not None and v < c,
     "ge": lambda v, c: v is not None and v >= c,
     "gt": lambda v, c: v is not None and v > c,
+    "in_op": lambda v, c: v in c,
   }
 
   def __init__(self, session: _InMemorySession, model):

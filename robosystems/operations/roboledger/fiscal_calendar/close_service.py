@@ -65,6 +65,7 @@ SHADOW_FINDING_BLOCKERS = (
   CloseableGateResult.RECONCILING_ITEMS,
   CloseableGateResult.UNPOSTED_SOURCE_EVENTS,
   CloseableGateResult.UNRECONCILED_ACCOUNTS,
+  CloseableGateResult.HELD_BANK_LINES,
 )
 
 
@@ -77,6 +78,7 @@ def gate_finding_counts(gate: CloseableGateResult) -> dict[str, int]:
     CloseableGateResult.RECONCILING_ITEMS: gate.reconciling_item_count,
     CloseableGateResult.UNPOSTED_SOURCE_EVENTS: gate.unposted_source_event_count,
     CloseableGateResult.UNRECONCILED_ACCOUNTS: gate.unreconciled_account_count,
+    CloseableGateResult.HELD_BANK_LINES: gate.held_bank_line_count,
     CloseableGateResult.ENTITY_OPEN: len(gate.group_open_entities),
     CloseableGateResult.ADJUSTMENTS_UNPOSTED: len(gate.group_pending_adjustments),
     CloseableGateResult.RESIDUAL_UNEXPLAINED: len(gate.group_unexplained),
@@ -306,6 +308,7 @@ class PeriodCloseService:
     allow_unposted_source_events: bool = False,
     allow_unreconciled_accounts: bool = False,
     allow_unexplained_residuals: bool = False,
+    allow_held_bank_lines: bool = False,
     note: str | None = None,
     entity_id: str | None = None,
     shadow: bool = False,
@@ -326,6 +329,7 @@ class PeriodCloseService:
       allow_unposted_source_events=allow_unposted_source_events,
       allow_unreconciled_accounts=allow_unreconciled_accounts,
       allow_unexplained_residuals=allow_unexplained_residuals,
+      allow_held_bank_lines=allow_held_bank_lines,
       entity_id=entity_id,
     )
     findings: tuple[str, ...] = ()
@@ -449,8 +453,19 @@ class PeriodCloseService:
       unexplained_overridden=(
         gate.group_unexplained if allow_unexplained_residuals else []
       ),
+      held_overridden_count=(
+        gate.held_bank_line_count if allow_held_bank_lines and not shadow else 0
+      ),
       shadow_findings=findings if shadow else None,
     )
+    # The decision is recorded on each line, so the next close is not held
+    # by lines this one went over. A shadow close decides nothing.
+    if allow_held_bank_lines and gate.held_bank_line_count and not shadow:
+      from robosystems.operations.roboledger.fiscal_calendar.held_feed_lines import (
+        acknowledge_held_lines,
+      )
+
+      acknowledge_held_lines(session, entity_id, period=period, actor_id=actor_id)
 
     if is_reclose and not self._fcs.is_latest_sequential_close(
       session,
@@ -836,6 +851,7 @@ class PeriodCloseService:
     unposted_overridden_count: int = 0,
     unreconciled_overridden_count: int = 0,
     unexplained_overridden: list[str] | None = None,
+    held_overridden_count: int = 0,
     shadow_findings: tuple[str, ...] | None = None,
   ) -> str | None:
     """Append a marker to the audit note for each overridden close gate, or
@@ -867,6 +883,11 @@ class PeriodCloseService:
       suffixes.append(
         "[reconciliation gate overridden — "
         f"{unreconciled_overridden_count} reconciliation(s) not reconciled]"
+      )
+    if held_overridden_count > 0:
+      suffixes.append(
+        "[held-bank-line gate overridden — "
+        f"{held_overridden_count} line(s) held out of a closed month left out]"
       )
     if unexplained_overridden:
       suffixes.append(

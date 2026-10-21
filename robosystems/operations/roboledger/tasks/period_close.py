@@ -109,6 +109,7 @@ class PeriodCloseTask(BaseTask):
           allow_unexplained_residuals=bool(
             self.params.get("allow_unexplained_residuals", False)
           ),
+          allow_held_bank_lines=bool(self.params.get("allow_held_bank_lines", False)),
           # Usually what holds the fence is another close of the same
           # period; waiting it out yields "already closed" with a receipt.
           fence_wait_ms=self.budget_seconds * 1000,

@@ -84,6 +84,10 @@ class CloseableGateResult:
   unreconciled_account_count: int = 0
   unreconciled_account_sample: list[str] = field(default_factory=list)
 
+  # Bank lines a sync held out of an earlier, closed month.
+  held_bank_line_count: int = 0
+  held_bank_line_sample: list[str] = field(default_factory=list)
+
   # The group close (the consolidation entity's): named items, populated
   # whenever their blocker would be, so an override is recorded with them.
   group_open_entities: list[str] = field(default_factory=list)
@@ -102,6 +106,7 @@ class CloseableGateResult:
   RECONCILING_ITEMS = "reconciling_items"
   UNPOSTED_SOURCE_EVENTS = "unposted_source_events"
   UNRECONCILED_ACCOUNTS = "unreconciled_accounts"
+  HELD_BANK_LINES = "held_bank_lines"
   ENTITY_OPEN = "entity_open"
   ADJUSTMENTS_UNPOSTED = "adjustments_unposted"
   RESIDUAL_UNEXPLAINED = "residual_unexplained"
@@ -1088,6 +1093,7 @@ class FiscalCalendarService:
     allow_unposted_source_events: bool = False,
     allow_unreconciled_accounts: bool = False,
     allow_unexplained_residuals: bool = False,
+    allow_held_bank_lines: bool = False,
     entity_id: str | None = None,
   ) -> CloseableGateResult:
     """Check whether `period` can be closed now in one entity's books.
@@ -1099,7 +1105,9 @@ class FiscalCalendarService:
     unresolved reconciling items (bypass: `allow_reconciling_items`); no
     source event dated in the period left uncommitted (bypass:
     `allow_unposted_source_events`); every reconciliation the close waits on
-    is reconciled for the period (bypass: `allow_unreconciled_accounts`).
+    is reconciled for the period (bypass: `allow_unreconciled_accounts`);
+    on a forward close, no bank line a sync held out of an earlier closed
+    month left undecided (bypass: `allow_held_bank_lines`).
     On the consolidation entity the close is the group's: every entity the
     month consolidates closed; its consolidating entries posted or drafted;
     no residual or intercompany disagreement left (bypass:
@@ -1287,6 +1295,18 @@ class FiscalCalendarService:
       for rec in unreconciled[:5]
     ]
 
+    # A reclose fills a month the held lines may belong to; the next forward
+    # close is where they are decided.
+    held_count, held_sample = 0, []
+    if not is_reclose:
+      from robosystems.operations.roboledger.fiscal_calendar.held_feed_lines import (
+        undecided_held_lines,
+      )
+
+      held_count, held_sample = undecided_held_lines(session, entity_id)
+      if held_count and not allow_held_bank_lines:
+        blockers.append(CloseableGateResult.HELD_BANK_LINES)
+
     group = None
     already_closed = CloseableGateResult.ALREADY_CLOSED in blockers
     if not already_closed and _is_consolidation_entity(session, entity_id):
@@ -1324,6 +1344,8 @@ class FiscalCalendarService:
       unposted_source_event_sample=unposted_sample,
       unreconciled_account_count=unreconciled_count,
       unreconciled_account_sample=unreconciled_sample,
+      held_bank_line_count=held_count,
+      held_bank_line_sample=held_sample,
     )
 
   @staticmethod
