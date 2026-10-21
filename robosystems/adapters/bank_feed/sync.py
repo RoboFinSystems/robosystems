@@ -275,12 +275,14 @@ def _earliest_captured_line(session: Any, entity_id: str | None) -> str | None:
   owner = find_entity_id(session, entity_id)
   if owner is None:
     return None
+  # The date a line posts on, as the opening's retirement reads it.
+  posted_on = func.coalesce(Event.effective_at, Event.occurred_at)
   earliest = session.execute(
-    select(func.min(Event.occurred_at)).where(
+    select(func.min(posted_on)).where(
       Event.entity_id == owner,
       Event.event_type.in_(BANK_EVENT_TYPES),
       Event.status.notin_(("voided", "superseded")),
-      Event.occurred_at >= datetime(int(PLAUSIBLE_YEAR_FLOOR), 1, 1),
+      posted_on >= datetime(int(PLAUSIBLE_YEAR_FLOOR), 1, 1),
     )
   ).scalar()
   return earliest.date().isoformat() if earliest is not None else None
