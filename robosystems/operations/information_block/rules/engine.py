@@ -32,17 +32,22 @@ from robosystems.operations.information_block.rules.expressions import (
 )
 
 
-def _actual_set_ids(structure_id: str):
-  """The structure's actual (``scenario_id IS NULL``) FactSets.
+def _actual_set_ids(structure_id: str, entity_id: str | None = None):
+  """The structure's actual (``scenario_id IS NULL``) FactSets, of
+  ``entity_id`` when given.
 
   Every unpinned fact read here goes through this: scenario month sets are
   stamped with the statement structure's id, so ``structure_id`` alone
-  would bind forecast months. Rules evaluate the books, actuals only.
+  would bind forecast months, and on a group another entity's. Rules
+  evaluate the books, actuals only.
   """
-  return select(FactSet.id).where(
+  stmt = select(FactSet.id).where(
     FactSet.structure_id == structure_id,
     FactSet.scenario_id.is_(None),
   )
+  if entity_id is not None:
+    stmt = stmt.where(FactSet.entity_id == entity_id)
+  return stmt
 
 
 def _bind_variables(
@@ -52,6 +57,7 @@ def _bind_variables(
   period_start: date | None,
   period_end: date | None,
   fact_set_id: str | None = None,
+  entity_id: str | None = None,
 ) -> dict[str, float | None]:
   """Resolve each ``$Variable`` in a rule to a fact value or ``None``."""
   bindings: dict[str, float | None] = {}
@@ -98,7 +104,7 @@ def _bind_variables(
     else:
       stmt = base_stmt.where(
         Fact.structure_id == structure_id,
-        Fact.fact_set_id.in_(_actual_set_ids(structure_id)),
+        Fact.fact_set_id.in_(_actual_set_ids(structure_id, entity_id)),
       )
     bindings[name] = session.execute(stmt).scalar()
 
@@ -109,6 +115,7 @@ def _bind_sum_variables(
   session: Session,
   rule: Rule,
   structure_id: str,
+  entity_id: str | None = None,
 ) -> dict[str, float | None]:
   """Aggregate SUM of duration facts per variable — SumEquals rules only."""
   bindings: dict[str, float | None] = {}
@@ -140,9 +147,10 @@ def _bind_sum_variables(
         "JOIN fact_sets fs ON fs.id = f.fact_set_id "
         "WHERE f.element_id = :eid AND f.structure_id = :sid "
         "AND f.period_type = 'duration' AND f.fact_type = 'Numeric' "
-        "AND fs.scenario_id IS NULL"
+        "AND fs.scenario_id IS NULL "
+        "AND (CAST(:ent AS TEXT) IS NULL OR fs.entity_id = :ent)"
       ),
-      {"eid": element_id, "sid": structure_id},
+      {"eid": element_id, "sid": structure_id, "ent": entity_id},
     ).fetchone()
     bindings[name] = float(row.total) if row and row.total is not None else None
   return bindings
@@ -154,21 +162,18 @@ def _load_period_balances(
   fact_set_id: str | None,
   period_start: date | None,
   period_end: date | None,
+  entity_id: str | None = None,
 ) -> dict[tuple[date | None, date | None], tuple[dict[str, float], set[str]]]:
   """Group in-scope facts into per-period ``(balances, present)``, summing
   multiple facts per element+period (e.g. a derived flow plus a plug).
 
-  Scoped to one FactSet (``fact_set_id``, else the latest actual set): two
-  reports over the same period both stamp this structure, so a
+  Scoped to one FactSet (``fact_set_id``, else ``entity_id``'s latest actual
+  set): two reports over the same period both stamp this structure, so a
   ``structure_id`` scope would double every balance.
   """
   if fact_set_id is None:
     fact_set_id = session.execute(
-      select(FactSet.id)
-      .where(
-        FactSet.structure_id == structure_id,
-        FactSet.scenario_id.is_(None),
-      )
+      _actual_set_ids(structure_id, entity_id)
       .order_by(FactSet.created_at.desc(), FactSet.id.desc())
       .limit(1)
     ).scalar()
@@ -186,7 +191,7 @@ def _load_period_balances(
     # still matters: the structure may carry forecast-only sets.
     stmt = stmt.where(
       Fact.structure_id == structure_id,
-      Fact.fact_set_id.in_(_actual_set_ids(structure_id)),
+      Fact.fact_set_id.in_(_actual_set_ids(structure_id, entity_id)),
     )
   if period_end is not None:
     stmt = stmt.where(Fact.period_end <= period_end)
@@ -335,9 +340,11 @@ def evaluate_rules_for_structure(
   period_end: date | None = None,
   created_by: str = "engine",
   global_calculations: dict[str, list[tuple[str, float]]] | None = None,
+  entity_id: str | None = None,
 ) -> list[VerificationResult]:
   """Evaluate every rule scoped to ``structure_id`` (including element- and
-  association-scoped ones) and persist one result per rule.
+  association-scoped ones) and persist one result per rule. Unpinned by
+  ``fact_set_id``, facts bind from ``entity_id``'s sets when given.
 
   A per-rule failure writes ``status='error'`` rather than propagating.
   Flushes; the caller owns the commit.
@@ -408,7 +415,7 @@ def evaluate_rules_for_structure(
       )
     calculations = merge_calculations(calculations, local_calcs)
     by_period = _load_period_balances(
-      session, structure_id, fact_set_id, period_start, period_end
+      session, structure_id, fact_set_id, period_start, period_end, entity_id
     )
 
   results: list[VerificationResult] = []
@@ -427,7 +434,7 @@ def evaluate_rules_for_structure(
         )
       if outcome is None:
         if rule.rule_pattern == "SumEquals":
-          bindings = _bind_sum_variables(session, rule, structure_id)
+          bindings = _bind_sum_variables(session, rule, structure_id, entity_id)
         else:
           bindings = _bind_variables(
             session,
@@ -436,6 +443,7 @@ def evaluate_rules_for_structure(
             period_start,
             period_end,
             fact_set_id=fact_set_id,
+            entity_id=entity_id,
           )
         outcome = evaluate_rule(rule, bindings)
     except Exception as exc:

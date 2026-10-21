@@ -474,6 +474,100 @@ def test_an_asset_sold_on_account_shows_the_cash_when_collected(
   _assert_no_reconciling_adjustment(feb)
 
 
+@pytest.mark.parametrize("collected", [date(2026, 2, 10), date(2026, 1, 25)])
+def test_a_down_payment_on_a_sale_is_counted_once(tenant, collected):
+  """Sold for 900 with 300 down and 600 on account: the down payment is
+  investing cash on the sale, and the collection routes only the 600 the
+  sale left unpaid, not the asset's whole value again."""
+  _post(tenant, [("equipment", 1000, 0), ("cash", 0, 1000)], posted=date(2026, 1, 5))
+  _post(
+    tenant,
+    [("depreciation", 400, 0), ("accumulated_depreciation", 0, 400)],
+    posted=date(2026, 1, 6),
+  )
+  invoice = _event("invoice_issued")
+  _post(
+    tenant,
+    [
+      ("cash", 300, 0),
+      ("receivable", 600, 0),
+      ("accumulated_depreciation", 400, 0),
+      ("equipment", 0, 1000),
+      ("disposal_gain", 0, 300),
+    ],
+    event_id=invoice,
+  )
+  receipt = _event("payment_received", discharges=invoice)
+  _post(
+    tenant,
+    [("cash", 600, 0), ("receivable", 0, 600)],
+    posted=collected,
+    event_id=receipt,
+  )
+  jan = _cash_flow(tenant, JAN, [JAN, FEB])
+  feb = _cash_flow(tenant, FEB, [JAN, FEB])
+
+  if collected.month == 2:
+    assert jan[PPE_PROCEEDS] == 300.0
+    assert feb[PPE_PROCEEDS] == 600.0
+  else:
+    assert jan[PPE_PROCEEDS] == 900.0
+  assert jan.get(OPERATING, 0.0) == 0.0
+  assert feb.get(OPERATING, 0.0) == 0.0
+  _assert_no_reconciling_adjustment(jan)
+  _assert_no_reconciling_adjustment(feb)
+
+
+def test_a_down_payment_on_capex_is_counted_once(tenant):
+  """Equipment for 1,000 with 300 down and 700 on the bill: the payment of
+  the 700 is capex of 700, not of the equipment's whole cost again."""
+  bill = _event("bill_received")
+  _post(
+    tenant,
+    [("equipment", 1000, 0), ("cash", 0, 300), ("payable", 0, 700)],
+    event_id=bill,
+  )
+  payment = _event("bill_paid", discharges=bill)
+  _post(
+    tenant,
+    [("payable", 700, 0), ("cash", 0, 700)],
+    posted=date(2026, 2, 10),
+    event_id=payment,
+  )
+  jan = _cash_flow(tenant, JAN, [JAN, FEB])
+  feb = _cash_flow(tenant, FEB, [JAN, FEB])
+
+  assert jan[CAPEX] == -300.0
+  assert jan[CAPEX_UNPAID] == 700.0
+  assert feb[CAPEX] == -700.0
+  assert CAPEX_UNPAID not in feb
+  assert feb.get(OPERATING, 0.0) == 0.0
+  _assert_no_reconciling_adjustment(jan)
+  _assert_no_reconciling_adjustment(feb)
+
+
+def test_a_check_that_buys_equipment_and_pays_an_old_bill_keeps_them_apart(
+  tenant,
+):
+  """The payable this check pays down is on the other side from its cash, so
+  it is an operating payment, not part of the equipment's price."""
+  _post(tenant, [("equipment", 1000, 0), ("payable", 200, 0), ("cash", 0, 1200)])
+  cf = _cash_flow(tenant)
+  assert cf[CAPEX] == -1000.0
+  assert cf[PAYABLES_ROW] == -200.0
+  _assert_no_reconciling_adjustment(cf)
+
+
+def test_a_deposit_of_capital_and_a_collection_keeps_them_apart(tenant):
+  """One deposit of an owner's contribution and a customer's payment: the
+  collection is operating cash, not more contributed capital."""
+  _post(tenant, [("cash", 6000, 0), ("capital", 0, 5000), ("receivable", 0, 1000)])
+  cf = _cash_flow(tenant)
+  assert cf[OPERATING] == 1000.0
+  assert cf[NET_CHANGE] == 6000.0
+  _assert_no_reconciling_adjustment(cf)
+
+
 def test_depreciation_charged_on_the_sale_invoice_is_no_write_off(tenant):
   """The invoice also books the month's last depreciation, to an expense the
   cash flow does not present on its own row: that credit to accumulated

@@ -16,6 +16,7 @@ from robosystems.operations.information_block.envelope import (
 from robosystems.operations.information_block.rules.engine import (
   evaluate_rules_for_structure,
 )
+from robosystems.operations.roboledger.entity_scope import find_entity_id
 
 
 def cmd_evaluate_rules(
@@ -34,10 +35,16 @@ def cmd_evaluate_rules(
       raise ValueError(
         f"Fact set {body.fact_set_id} does not belong to structure {body.structure_id}."
       )
+  # Unpinned, the facts bind from one entity's sets: on a group every
+  # entity's statements share the structure.
+  entity_id = (
+    None if body.fact_set_id is not None else find_entity_id(session, body.entity_id)
+  )
   rows = evaluate_rules_for_structure(
     session,
     body.structure_id,
     fact_set_id=body.fact_set_id,
+    entity_id=entity_id,
     period_start=body.period_start,
     period_end=body.period_end,
     created_by=created_by,
