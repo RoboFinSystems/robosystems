@@ -56,6 +56,7 @@ from robosystems.operations.information_block.rules.expressions import (
   lhs_variable_names,
   parse_arithmetic_expression,
 )
+from robosystems.operations.locking import lock_by_id
 from robosystems.operations.roboledger.entity_scope import resolve_entity_id
 from robosystems.operations.roboledger.fact_set import create_fact_set
 from robosystems.operations.roboledger.reports.calc_dag import topo_sort_calculations
@@ -437,6 +438,17 @@ def cmd_compute_metrics(
 
   provenance = DerivedProvenance(computation="compute-metrics", source_fact_ids=[])
 
+  # Locked before the lookup: two writers resolving "no standing set" would
+  # each insert one. No-key, so a close stamping sets on this structure is
+  # not held. Contention raises `RowLockedError` (409).
+  lock_by_id(
+    session,
+    Structure,
+    body.structure_id,
+    f"Metrics structure {body.structure_id} is being written by another process. "
+    "Retry in a moment.",
+    key_share=True,
+  )
   standing = session.execute(
     select(FactSet)
     .where(
@@ -655,6 +667,17 @@ def cmd_assert_metrics(
     basis_note=body.basis_note,
   )
 
+  # Locked before the lookup: two writers resolving "no standing set" would
+  # each insert one. No-key, so a close stamping sets on this structure is
+  # not held. Contention raises `RowLockedError` (409).
+  lock_by_id(
+    session,
+    Structure,
+    body.structure_id,
+    f"Metrics structure {body.structure_id} is being written by another process. "
+    "Retry in a moment.",
+    key_share=True,
+  )
   standing = session.execute(
     select(FactSet)
     .where(

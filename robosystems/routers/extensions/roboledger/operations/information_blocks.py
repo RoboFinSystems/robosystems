@@ -191,7 +191,7 @@ compute_metrics_op = _registrar.register(
     command=cmd_compute_metrics,
     request_model=ComputeMetricsRequest,
     result_type=ComputeMetricsResponse,
-    error_map={ValueError: 422},
+    error_map={RowLockedError: 409, ValueError: 422},
     mark_stale_reason="metrics_computed",
     requires_created_by=True,
   )
@@ -216,7 +216,7 @@ assert_metrics_op = _registrar.register(
     command=cmd_assert_metrics,
     request_model=AssertMetricsRequest,
     result_type=AssertMetricsResponse,
-    error_map={ValueError: 422},
+    error_map={RowLockedError: 409, ValueError: 422},
     mark_stale_reason="metrics_asserted",
     requires_created_by=True,
   )
@@ -242,7 +242,7 @@ compute_forecast_op = _registrar.register(
     command=cmd_compute_forecast,
     request_model=ComputeForecastRequest,
     result_type=ComputeForecastResponse,
-    error_map={ValueError: 422},
+    error_map={RowLockedError: 409, ValueError: 422},
     mark_stale_reason="forecast_computed",
     requires_created_by=True,
   )
@@ -304,6 +304,8 @@ async def bind_text_block_op(
         )
     except TextBlockDocumentNotFoundError as e:
       raise HTTPException(status_code=404, detail=str(e))
+    except RowLockedError as e:
+      raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
       # SectionNotFound / TextBlockStructure / TextBlockElement / size cap
       raise HTTPException(status_code=422, detail=str(e))

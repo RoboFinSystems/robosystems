@@ -12,6 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from robosystems.db.extensions import extensions_session
 from robosystems.logger import logger
 from robosystems.middleware.operations import run_off_loop
+from robosystems.operations.locking import RowLockedError
 
 from ._errors import database_failure
 from .document_tools import (
@@ -137,6 +138,8 @@ hash used as the drift signal.
       return response.model_dump(mode="json")
     except DocumentNotFoundError as e:
       return {"error": "not_found", "message": str(e)}
+    except RowLockedError as e:
+      return {"error": "row_locked", "message": str(e)}
     except ValueError as e:
       return {"error": "invalid_input", "message": str(e)}
     except SQLAlchemyError as e:

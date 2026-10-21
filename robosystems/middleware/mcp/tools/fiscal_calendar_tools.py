@@ -25,13 +25,9 @@ from robosystems.models.api.extensions.fiscal_calendar import (
 )
 from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
-  BackfillPreconditionError,
   PeriodNotClosedError,
   PeriodNotFoundInLedgerError,
   ReopenOrderError,
-)
-from robosystems.operations.roboledger.commands.fiscal_calendar import (
-  backfill_plan_history as ops_backfill_plan_history,
 )
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
   change_calendar_start as ops_change_calendar_start,
@@ -54,9 +50,6 @@ from robosystems.operations.roboledger.fiscal_calendar import (
 )
 from robosystems.operations.roboledger.fiscal_calendar.close_outcomes import (
   close_error_payload,
-)
-from robosystems.operations.roboledger.fiscal_calendar.close_service import (
-  PeriodCloseService,
 )
 from robosystems.operations.roboledger.fiscal_calendar.service import (
   CalendarAlreadyInitializedError,
@@ -494,6 +487,45 @@ class ChangeCalendarStartTool:
 # ────────────────────────────────────────────────────────────────────────────
 
 
+async def _await_operation(
+  operation_id: str, budget_s: float, interval_s: float
+) -> tuple[str, Any, float]:
+  """Poll a worker operation until it ends or ``budget_s`` runs out.
+
+  Returns ``(outcome, detail, waited_seconds)``: ``completed`` with the
+  task's result, ``failed`` with its error message, ``cancelled``, or, still
+  going, ``running`` or ``queued``. Losing sight of the operation reads as
+  still going: it is running, and that is no reason to redo it.
+  """
+  from robosystems.middleware.sse.event_storage import (
+    OperationStatus,
+    get_event_storage,
+  )
+
+  storage = get_event_storage()
+  # Wall-clock deadline, so a tiny interval still exhausts the budget.
+  loop = asyncio.get_running_loop()
+  deadline = loop.time() + budget_s
+  started_at = loop.time()
+  status = None
+  while loop.time() < deadline:
+    try:
+      metadata = await storage.get_operation_metadata(operation_id)
+    except Exception as exc:
+      logger.warning("lost track of operation %s: %s", operation_id, exc, exc_info=True)
+      break
+    status = metadata.status if metadata else None
+    if metadata and status == OperationStatus.COMPLETED:
+      return "completed", metadata.result_data, round(loop.time() - started_at, 1)
+    if metadata and status == OperationStatus.FAILED:
+      return "failed", metadata.error_message, round(loop.time() - started_at, 1)
+    if metadata and status == OperationStatus.CANCELLED:
+      return "cancelled", None, round(loop.time() - started_at, 1)
+    await asyncio.sleep(interval_s)
+  outcome = "running" if status == OperationStatus.RUNNING else "queued"
+  return outcome, None, round(loop.time() - started_at, 1)
+
+
 class ClosePeriodTool:
   """Close a fiscal period — the final commit action of the close workflow."""
 
@@ -685,10 +717,6 @@ The receipt:
   POLL_BUDGET_S = 18.0
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    from robosystems.middleware.sse.event_storage import (
-      OperationStatus,
-      get_event_storage,
-    )
     from robosystems.worker.client import enqueue_task
 
     graph_id = self.client.graph_id
@@ -749,56 +777,39 @@ The receipt:
       }
     operation_id = dispatch["operation_id"]
 
-    storage = get_event_storage()
-    # Wall-clock deadline, so a tiny interval still exhausts the budget.
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + self.POLL_BUDGET_S
-    started_at = loop.time()
-    status = None
-    while loop.time() < deadline:
-      try:
-        metadata = await storage.get_operation_metadata(operation_id)
-      except Exception as exc:
-        # The close is running; losing sight of it is no reason to redo it.
-        logger.warning(
-          "close-period lost track of operation %s: %s",
-          operation_id,
-          exc,
-          exc_info=True,
-        )
-        break
-      status = metadata.status if metadata else None
-      if metadata and status == OperationStatus.COMPLETED:
-        # Already shaped by the task, so fast and slow closes read the same.
-        return metadata.result_data or {}
-      if metadata and status == OperationStatus.FAILED:
-        return {
-          "error": "close_failed",
-          "operation_id": operation_id,
-          "period": period,
-          "message": (
-            f"{metadata.error_message or 'The close failed.'} If it ran out of "
-            "time rather than erroring, the close may still have landed — "
-            "check get-period-close-status before retrying."
-          ),
-        }
-      if metadata and status == OperationStatus.CANCELLED:
-        return {
-          "error": "cancelled",
-          "operation_id": operation_id,
-          "period": period,
-          "message": "The close was cancelled.",
-        }
-      await asyncio.sleep(self.POLL_INTERVAL_S)
+    outcome, detail, waited = await _await_operation(
+      operation_id, self.POLL_BUDGET_S, self.POLL_INTERVAL_S
+    )
+    if outcome == "completed":
+      # Already shaped by the task, so fast and slow closes read the same.
+      return detail or {}
+    if outcome == "failed":
+      return {
+        "error": "close_failed",
+        "operation_id": operation_id,
+        "period": period,
+        "message": (
+          f"{detail or 'The close failed.'} If it ran out of "
+          "time rather than erroring, the close may still have landed — "
+          "check get-period-close-status before retrying."
+        ),
+      }
+    if outcome == "cancelled":
+      return {
+        "error": "cancelled",
+        "operation_id": operation_id,
+        "period": period,
+        "message": "The close was cancelled.",
+      }
 
-    started = status == OperationStatus.RUNNING
+    started = outcome == "running"
     return {
       "status": "in_progress",
       "operation_id": operation_id,
       "period": period,
       "worker_started": started,
       "deduplicated": bool(dispatch.get("deduplicated", False)),
-      "waited_seconds": round(loop.time() - started_at, 1),
+      "waited_seconds": waited,
       "message": (
         (
           f"The close of {period} is running on the worker and is atomic — "
@@ -1194,12 +1205,15 @@ class BackfillPlanHistoryTool:
       },
     }
 
+  # As close-period: the server cuts a tool call at 25s, and the backfill
+  # recloses up to 24 months, so it runs on the worker.
+  POLL_INTERVAL_S = 1.0
+  POLL_BUDGET_S = 18.0
+
   async def execute(self, arguments: dict[str, Any]) -> Any:
-    return await run_off_loop(self._execute_sync, arguments)
+    from robosystems.worker.client import enqueue_task
 
-  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
-
     try:
       require_graph_extension_mcp("roboledger", graph_id)
     except MCPExtensionGateError as exc:
@@ -1226,46 +1240,72 @@ class BackfillPlanHistoryTool:
       restamp=bool(arguments.get("restamp", False)),
       note=arguments.get("note"),
     )
-    actor_id = getattr(self.client, "user_id", None) or f"mcp:{graph_id}"
-
-    svc = FiscalCalendarService()
-    close_svc = PeriodCloseService(svc)
-
+    # No sentinel fallback: only the creating user can read the operation.
+    user_id = getattr(self.client, "user_id", None)
+    if not user_id:
+      return {
+        "error": "authentication_required",
+        "message": "User context required to backfill plan history.",
+      }
     try:
-      with extensions_session(graph_id) as session, _platform_session() as platform_db:
-        result = ops_backfill_plan_history(
-          session,
-          platform_db,
-          graph_id,
-          body,
-          actor_id=actor_id,
-          service=svc,
-          close_service=close_svc,
-          actor_type="agent",
-          entity_id=body.entity_id,
-        )
-        fc_payload = result.fiscal_calendar.model_dump(mode="json")
-        has_sync, _ = entity_sync_state(
-          session, platform_db, graph_id, find_entity_id(session, body.entity_id)
-        )
-        fc_payload["has_sync_connection"] = has_sync
-        return {
-          "earliest_available_period": result.earliest_available_period,
-          "effective_start_period": result.effective_start_period,
-          "closed_through": result.closed_through,
-          "period_rows_created": result.period_rows_created,
-          "processed": [
-            outcome.model_dump(mode="json") for outcome in result.processed
-          ],
-          "remaining_periods": result.remaining_periods,
-          "fiscal_calendar": fc_payload,
-        }
-    except BackfillPreconditionError as exc:
-      return {"error": exc.code, "message": str(exc)}
-    except FiscalCalendarError as exc:
-      return {"error": "calendar_error", "message": str(exc)}
-    except SQLAlchemyError as exc:
-      return database_failure("backfill-plan-history", exc)
+      dispatch = await enqueue_task(
+        task_type="plan_history_backfill",
+        graph_id=graph_id,
+        user_id=str(user_id),
+        params={**body.model_dump(mode="json"), "actor_id": str(user_id)},
+      )
     except Exception as exc:
-      logger.warning(f"backfill-plan-history failed: {exc}")
-      return {"error": str(exc)}
+      logger.warning("backfill-plan-history could not dispatch: %s", exc, exc_info=True)
+      return {
+        "error": "dispatch_failed",
+        "message": (
+          "The backfill could not be handed to the worker, so it has NOT "
+          "started and nothing was written. Retry; if it keeps failing, the "
+          "task queue is unavailable."
+        ),
+      }
+    operation_id = dispatch["operation_id"]
+
+    outcome, detail, waited = await _await_operation(
+      operation_id, self.POLL_BUDGET_S, self.POLL_INTERVAL_S
+    )
+    if outcome == "completed":
+      if not dispatch.get("deduplicated"):
+        return detail or {}
+      # The queue folds an identical call within 30s into the one before, so
+      # this is that call's answer, not a new chunk.
+      return {
+        **(detail or {}),
+        "deduplicated": True,
+        "note": (
+          "This repeats a call made in the last 30 seconds and returns its "
+          "result; to continue with remaining_periods, call again after that."
+        ),
+      }
+    if outcome == "failed":
+      return {
+        "error": "backfill_failed",
+        "operation_id": operation_id,
+        "message": (
+          f"{detail or 'The backfill failed.'} Months it reclosed before "
+          "failing stay closed; call again to continue from the rest."
+        ),
+      }
+    if outcome == "cancelled":
+      return {
+        "error": "cancelled",
+        "operation_id": operation_id,
+        "message": "The backfill was cancelled.",
+      }
+    return {
+      "status": "in_progress",
+      "operation_id": operation_id,
+      "worker_started": outcome == "running",
+      "deduplicated": bool(dispatch.get("deduplicated", False)),
+      "waited_seconds": waited,
+      "message": (
+        "The backfill is running on the worker; do not call it again until it "
+        "lands. Poll get-fiscal-calendar every ~10s: the months it recloses "
+        "gain their close receipts as it goes."
+      ),
+    }

@@ -2,7 +2,7 @@
 
 An Agent is any economic counterparty the entity transacts with —
 customers, vendors, employees, lenders, government bodies, etc. Agents
-are referenced by transactions, events, and 1099 reporting. They carry
+are referenced by transactions and events. They carry
 identity (legal name, tax ID, DUNS, LEI) and contact details, plus
 source-system linkage for sync from QuickBooks / Xero / Plaid.
 
@@ -44,7 +44,11 @@ class CreateAgentRequest(BaseModel):
 
   # Economic identifiers
   tax_id: str | None = Field(
-    None, description="Tax ID (EIN / SSN / VAT). Used for 1099 / withholding reporting."
+    None,
+    description=(
+      "Tax ID (EIN / SSN / VAT), kept for 1099 and withholding reporting; no "
+      "report reads it yet."
+    ),
   )
   registration_number: str | None = Field(
     None, description="Registry-issued company number (e.g. state corp file number)."
@@ -83,7 +87,10 @@ class CreateAgentRequest(BaseModel):
   )
   is_1099_recipient: bool = Field(
     False,
-    description=("Marks a vendor as 1099-eligible. Drives year-end 1099 reporting."),
+    description=(
+      "Marks a vendor as 1099-eligible: a flag a year-end 1099 summary will "
+      "read. No report reads it yet."
+    ),
   )
 
   metadata: dict = Field(default_factory=dict)

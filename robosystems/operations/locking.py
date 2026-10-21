@@ -61,8 +61,14 @@ def bounded_lock_wait(session: Session, detail: str):
     raise
 
 
-def lock_by_id(session: Session, entity, ident, detail: str):
+def lock_by_id(
+  session: Session, entity, ident, detail: str, *, key_share: bool = False
+):
   """Load one row by primary key, `FOR UPDATE` and refreshed, with a bounded wait.
+
+  ``key_share`` takes `FOR NO KEY UPDATE` instead: it serializes the callers
+  that take it, but not the writers inserting rows that reference this one,
+  whose foreign-key check holds `FOR KEY SHARE`.
 
   Flushes first: extensions sessions are `autoflush=False`, and
   `populate_existing` would otherwise silently discard an in-flight change.
@@ -71,7 +77,12 @@ def lock_by_id(session: Session, entity, ident, detail: str):
   """
   session.flush()
   with bounded_lock_wait(session, detail):
-    return session.get(entity, ident, with_for_update=True, populate_existing=True)
+    return session.get(
+      entity,
+      ident,
+      with_for_update={"key_share": True} if key_share else True,
+      populate_existing=True,
+    )
 
 
 # ── Period write fence ───────────────────────────────────────────────────

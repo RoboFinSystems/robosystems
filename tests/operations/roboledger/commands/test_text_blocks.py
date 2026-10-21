@@ -106,6 +106,13 @@ class TestRequestModel:
 
 
 class TestBindTextBlock:
+  @pytest.fixture(autouse=True)
+  def _structure_lock(self):
+    """A mock session cannot hold the structure's row lock; the lock's own
+    behavior runs against a real database in test_text_block_bind_db.py."""
+    with patch("robosystems.operations.roboledger.commands.text_blocks.lock_by_id"):
+      yield
+
   def test_creates_standing_fact_set_and_nonnumeric_fact(self) -> None:
     session = _session(_structure(), _element())
     platform_db = MagicMock()

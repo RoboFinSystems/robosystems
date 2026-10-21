@@ -175,3 +175,40 @@ def test_refuses_an_element_the_structure_does_not_arrange():
 def test_refuses_a_library_concept_before_the_immutability_trigger():
   with pytest.raises(tb.TextBlockElementError, match="library concept"):
     _bind(element_qname="rs-gaap:Cash")
+
+
+def test_a_bind_waits_on_a_writer_holding_the_structure():
+  """Two binds resolving "no standing set" at once would each insert one; the
+  structure's row lock serializes them, a held one refusing with RowLockedError."""
+  from robosystems.models.extensions import Structure
+  from robosystems.operations.locking import RowLockedError
+
+  with extensions_session(GRAPH) as holder:
+    holder.query(Structure).filter(Structure.id == STRUCTURE).with_for_update().one()
+    with pytest.raises(RowLockedError):
+      _bind(element_qname="acme:RevenuePolicyTextBlock")
+
+
+def test_the_lock_does_not_hold_a_close_stamping_the_structure():
+  """A close inserts fact sets on the same structure; their foreign-key check
+  takes the row FOR KEY SHARE, which the bind's no-key lock does not block."""
+  from robosystems.models.api.fact_provenance import AssertedProvenance
+  from robosystems.models.extensions import Structure
+  from robosystems.operations.locking import lock_by_id
+  from robosystems.operations.roboledger.fact_set import create_fact_set
+
+  with extensions_session(GRAPH) as holder:
+    lock_by_id(holder, Structure, STRUCTURE, "held", key_share=True)
+    with extensions_session(GRAPH) as closer:
+      closer.execute(text("SET LOCAL lock_timeout = '2s'"))
+      create_fact_set(
+        closer,
+        structure_id=STRUCTURE,
+        period_end=date(2026, 12, 31),
+        factset_type="report",
+        entity_id="ent_1",
+        provenance=AssertedProvenance(source_system="test", asserted_by="u"),
+        created_by="u",
+      )
+      closer.flush()
+      closer.rollback()

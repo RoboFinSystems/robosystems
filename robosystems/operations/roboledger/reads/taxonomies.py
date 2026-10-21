@@ -668,6 +668,10 @@ def list_mappings(
   )
 
 
+def _reclassification(association: Association) -> dict:
+  return (association.metadata_ or {}).get("reclassification") or {}
+
+
 def get_mapping_detail(
   session: Session, mapping_id: str
 ) -> MappingDetailResponse | None:
@@ -711,6 +715,10 @@ def get_mapping_detail(
       confidence=a.confidence,
       suggested_by=a.suggested_by,
       approved_by=a.approved_by,
+      # The record the remap kept on the arc, so the move reads back after
+      # the write that made it.
+      replaced_association_id=_reclassification(a).get("replaces"),
+      reclassified_periods=list(_reclassification(a).get("closed_periods") or []),
     )
     for a, from_name, from_qname, to_name, to_qname in assoc_rows
   ]

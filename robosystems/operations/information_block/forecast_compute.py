@@ -93,6 +93,7 @@ from robosystems.operations.information_block.rules.expressions import (
   lhs_variable_names,
   parse_arithmetic_expression,
 )
+from robosystems.operations.locking import lock_by_id
 from robosystems.operations.roboledger.entity_scope import resolve_entity_id
 from robosystems.operations.roboledger.fact_set import create_fact_set
 from robosystems.operations.roboledger.fiscal_calendar.periods import (
@@ -1444,6 +1445,17 @@ def _upsert_month_set(
   consolidated (``has_dimensions: false``) reads."""
   if not facts:
     return None
+  # Locked before the lookup: two writers resolving "no standing set" would
+  # each insert one. No-key, so a close stamping sets on this structure is
+  # not held. Contention raises `RowLockedError` (409).
+  lock_by_id(
+    session,
+    Structure,
+    structure_id,
+    f"Statement structure {structure_id} is being written by another process. "
+    "Retry in a moment.",
+    key_share=True,
+  )
   standing = session.execute(
     select(FactSet)
     .where(
