@@ -43,7 +43,9 @@ class LoadReport:
   skipped: Counter[str] = field(default_factory=Counter)
   classification: Counter[str] = field(default_factory=Counter)
   resolved: Counter[str] = field(default_factory=Counter)
-  earliest_occurred_at: str | None = None
+  # Each entity's earliest plausible line: a feed's accounts can belong to
+  # different entities, and each one's books open at its own first month.
+  earliest_by_entity: dict[str | None, str] = field(default_factory=dict)
 
   def as_counts(self) -> dict[str, Any]:
     return {
@@ -87,6 +89,19 @@ def in_closed_months(session: Session, payloads: Iterable[dict[str, Any]]) -> se
     }
     closed.update(eid for eid, day in dates.items() if f"{day:%Y-%m}" in months)
   return closed
+
+
+def earliest_plausible_by_entity(
+  events: Iterable[dict[str, Any]],
+) -> dict[str | None, str]:
+  """:func:`earliest_plausible` per entity (``None`` for a line with none)."""
+  by_entity: dict[str | None, list[dict[str, Any]]] = {}
+  for event in events:
+    by_entity.setdefault(event.get("entity_id") or None, []).append(event)
+  earliest = {
+    entity_id: earliest_plausible(rows) for entity_id, rows in by_entity.items()
+  }
+  return {entity_id: day for entity_id, day in earliest.items() if day is not None}
 
 
 def earliest_plausible(events: Iterable[dict[str, Any]]) -> str | None:

@@ -106,7 +106,7 @@ class TestLoadFeed:
     assert body.source == "mercury"
     assert create.call_args.kwargs["graph_id"] == "kg_test"
     assert session.nested == 9
-    assert report.earliest_occurred_at == "2026-03-14T15:04:05Z"
+    assert report.earliest_by_entity == {None: "2026-03-14T15:04:05Z"}
 
   def test_a_new_line_in_a_closed_month_is_not_captured(self, _no_closed_months):
     session = _Session()
@@ -134,7 +134,7 @@ class TestLoadFeed:
         account_elements=ELEMENTS,
         chart=ChartIndex(),
       )
-    assert report.earliest_occurred_at == "2026-03-14T15:04:05Z"
+    assert report.earliest_by_entity == {None: "2026-03-14T15:04:05Z"}
 
   def test_agent_ids_flow_into_events(self):
     session = _Session(existing_agents=[("cp_stripe", "agt_existing")])

@@ -7,6 +7,7 @@ Everything past the body is best-effort and never fails the run.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -149,17 +150,35 @@ def update_last_sync(
 def bootstrap_fiscal_calendar_if_needed(
   context: AssetExecutionContext,
   config: BankFeedSyncConfig,
+  earliest_by_entity: Mapping[str | None, str],
+  *,
+  source_label: str,
+  entity_id: str | None = None,
+) -> None:
+  """Initialize the fiscal calendar of each entity the sync brought lines for,
+  on its first sync.
+
+  A bank-feed-only tenant has no history closed elsewhere, so each entity's
+  books open at its own first posted month: ``closed_through`` is the period
+  before it. A sync with no lines bootstraps the connection's ``entity_id``
+  (default the group parent). Idempotent per entity — a calendar that already
+  exists (a severed QuickBooks tenant, a second feed, or a re-sync) is left
+  alone.
+  """
+  for owner, earliest in (earliest_by_entity or {entity_id: None}).items():
+    _bootstrap_entity_calendar(
+      context, config, owner, earliest, source_label=source_label
+    )
+
+
+def _bootstrap_entity_calendar(
+  context: AssetExecutionContext,
+  config: BankFeedSyncConfig,
+  entity_id: str | None,
   earliest_occurred_at: str | None,
   *,
   source_label: str,
 ) -> None:
-  """Initialize the fiscal calendar on the first sync of a fresh company.
-
-  A bank-feed-only tenant has no history closed elsewhere, so the books open
-  at the first posted month: ``closed_through`` is the period before it.
-  Idempotent — a calendar that already exists (a severed QuickBooks tenant,
-  a second feed, or a re-sync) is left alone.
-  """
   from robosystems.db.extensions import extensions_session
   from robosystems.operations.roboledger.fiscal_calendar import (
     FiscalCalendarService,
@@ -172,15 +191,29 @@ def bootstrap_fiscal_calendar_if_needed(
     CalendarAlreadyInitializedError,
   )
 
+  label = f" for {entity_id}" if entity_id else ""
   try:
     service = FiscalCalendarService()
     with extensions_session(config.graph_id, statement_timeout_ms=None) as session:
-      existing = service.get(session, config.graph_id)
+      existing = service.get(session, config.graph_id, entity_id=entity_id)
       if existing is not None and existing.initialized_at is not None:
-        context.log.info("Fiscal calendar already initialized; skipping bootstrap")
+        context.log.info(f"Fiscal calendar{label} already initialized; skipping")
         return
       current = current_month_period()
-      opening = first_period(earliest_occurred_at, current)
+      # The lines an earlier sync captured count too: a sync after a failed
+      # bootstrap carries only its own short window.
+      earliest = min(
+        (
+          day
+          for day in (
+            earliest_occurred_at,
+            _earliest_captured_line(session, entity_id),
+          )
+          if day
+        ),
+        default=None,
+      )
+      opening = first_period(earliest, current)
       if opening is not None:
         closed_through = previous_period(opening)
       else:
@@ -192,10 +225,18 @@ def bootstrap_fiscal_calendar_if_needed(
         actor_id=config.user_id,
         actor_type="system",
         note=f"Auto-initialized on first {source_label} sync",
+        entity_id=entity_id,
+        # A subsidiary keeps the group's cadence.
+        fiscal_year_start_month=service.group_fiscal_year_start_month(
+          session, config.graph_id
+        )
+        or 1,
       )
       # The books open at the month of this sync's earliest line, so none of
       # its own lines falls before them; only rows written before any calendar.
-      service.open_books_at(session, config.graph_id, next_period(closed_through))
+      service.open_books_at(
+        session, config.graph_id, next_period(closed_through), entity_id=entity_id
+      )
       start = min(closed_through, add_months(current, -23))
       inserted = service.ensure_fiscal_periods(
         session,
@@ -203,16 +244,48 @@ def bootstrap_fiscal_calendar_if_needed(
         start_period=start,
         end_period=current,
         closed_through=closed_through,
+        entity_id=entity_id,
       )
       session.commit()
       context.log.info(
-        f"Initialized fiscal calendar on first sync: closed_through={closed_through} "
+        f"Initialized fiscal calendar{label} on first sync: "
+        f"closed_through={closed_through} "
         f"({inserted} FiscalPeriod rows seeded {start} → {current})"
       )
   except CalendarAlreadyInitializedError:
-    context.log.info("Fiscal calendar already initialized (race); skipping bootstrap")
+    context.log.info(f"Fiscal calendar{label} already initialized (race); skipping")
   except Exception as exc:
-    context.log.warning(f"Failed to bootstrap fiscal calendar (non-fatal): {exc}")
+    context.log.warning(
+      f"Failed to bootstrap fiscal calendar{label} (non-fatal): {exc}"
+    )
+
+
+def _earliest_captured_line(session: Any, entity_id: str | None) -> str | None:
+  """The entity's earliest live bank line already on the books, as an ISO
+  date, ignoring placeholder years."""
+  from sqlalchemy import func, select
+
+  from robosystems.adapters.bank_feed.load import PLAUSIBLE_YEAR_FLOOR
+  from robosystems.models.extensions.roboledger.event import Event
+  from robosystems.operations.event_block.python_handlers.bank_feed import (
+    BANK_EVENT_TYPES,
+  )
+  from robosystems.operations.roboledger.entity_scope import find_entity_id
+
+  owner = find_entity_id(session, entity_id)
+  if owner is None:
+    return None
+  # The date a line posts on, as the opening's retirement reads it.
+  posted_on = func.coalesce(Event.effective_at, Event.occurred_at)
+  earliest = session.execute(
+    select(func.min(posted_on)).where(
+      Event.entity_id == owner,
+      Event.event_type.in_(BANK_EVENT_TYPES),
+      Event.status.notin_(("voided", "superseded")),
+      posted_on >= datetime(int(PLAUSIBLE_YEAR_FLOOR), 1, 1),
+    )
+  ).scalar()
+  return earliest.date().isoformat() if earliest is not None else None
 
 
 def first_period(earliest_occurred_at: str | None, current: str) -> str | None:

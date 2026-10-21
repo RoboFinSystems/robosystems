@@ -161,6 +161,118 @@ def test_the_new_first_month_is_the_one_the_close_expects(session):
   assert "sequence_violation" not in gate.blockers
 
 
+def test_moving_earlier_waits_for_a_first_close_in_flight(session):
+  """A first close holds the fence on the earliest month. Seeding months
+  before it while it closes would leave open months ahead of a closed one."""
+  from sqlalchemy.orm import Session
+
+  from robosystems.operations.locking import (
+    RowLockedError,
+    acquire_exclusive_period_fence_xact,
+  )
+
+  schema = session.execute(text("SELECT current_schema()")).scalar_one()
+  closer = Session(bind=session.get_bind())
+  try:
+    closer.execute(text(f'SET search_path TO "{schema}"'))
+    acquire_exclusive_period_fence_xact(
+      closer, GRAPH_ID, "2026-09", detail="Period 2026-09 is being closed"
+    )
+    with pytest.raises(RowLockedError, match="2026-09"):
+      _move(session, "2026-07")
+  finally:
+    closer.rollback()
+    closer.close()
+  session.rollback()
+  session.execute(text(f'SET search_path TO "{schema}"'))
+  assert _periods(session)[0][0] == "2026-09"
+
+
+def _bank_line(
+  session, on: date, *, status: str, event_type: str = "bank_transaction"
+) -> str:
+  event = Event(
+    entity_id=PARENT_ENTITY_ID,
+    event_type=event_type,
+    event_category="treasury",
+    event_class="economic",
+    occurred_at=datetime(on.year, on.month, on.day, tzinfo=UTC),
+    source="mercury",
+    external_id=f"txn_{uuid.uuid4().hex[:8]}",
+    amount=-4_200,
+    status=status,
+    created_by="usr_1",
+  )
+  session.add(event)
+  session.flush()
+  return str(event.id)
+
+
+def test_opening_retires_unclassified_bank_lines_before_it(session):
+  """A feed line nobody classified, dated before the books open, is history:
+  retired with the reason, rather than blocking the opening."""
+  from robosystems.operations.roboledger.fiscal_calendar.service import (
+    FEED_BEFORE_CALENDAR,
+  )
+
+  line = _bank_line(session, BEFORE_START, status="captured")
+  inside = _bank_line(session, INSIDE, status="captured")
+
+  FiscalCalendarService().open_books_at(session, GRAPH_ID, "2026-09")
+
+  retired = session.get(Event, line)
+  assert retired.status == "voided"
+  assert retired.metadata_["void_reason"] == FEED_BEFORE_CALENDAR
+  assert session.get(Event, inside).status == "captured"
+
+
+def test_an_internal_transfer_before_the_opening_still_blocks_it(session):
+  """Both legs known, a transfer arrives as good as classified."""
+  from robosystems.operations.roboledger.fiscal_calendar.service import (
+    CalendarOpeningBlockedError,
+  )
+
+  _bank_line(session, BEFORE_START, status="captured", event_type="internal_transfer")
+
+  with pytest.raises(CalendarOpeningBlockedError):
+    FiscalCalendarService().open_books_at(session, GRAPH_ID, "2026-09")
+
+
+def test_moving_the_start_earlier_gives_retired_bank_lines_back(session):
+  line = _bank_line(session, BEFORE_START, status="captured")
+  FiscalCalendarService().open_books_at(session, GRAPH_ID, "2026-09")
+  session.commit()
+
+  _move(session, "2026-08")
+
+  restored = session.get(Event, line)
+  assert restored.status == "captured"
+  assert "void_reason" not in restored.metadata_
+
+
+def test_the_bootstrap_reads_lines_an_earlier_sync_captured(session):
+  from robosystems.adapters.bank_feed.sync import _earliest_captured_line
+
+  _bank_line(session, date(2026, 7, 3), status="captured")
+  _bank_line(session, date(2026, 5, 1), status="voided")
+  _bank_line(session, date(2026, 8, 20), status="classified")
+
+  assert _earliest_captured_line(session, None) == "2026-07-03"
+
+
+def test_a_classified_bank_line_before_the_opening_still_blocks_it(session):
+  """A classified line carries a person's account choice; it is not
+  discarded as history."""
+  from robosystems.operations.roboledger.fiscal_calendar.service import (
+    CalendarOpeningBlockedError,
+  )
+
+  _bank_line(session, BEFORE_START, status="classified")
+
+  with pytest.raises(CalendarOpeningBlockedError):
+    FiscalCalendarService().open_books_at(session, GRAPH_ID, "2026-09")
+
+
 def test_moving_later_removes_empty_leading_months(session):
   _move(session, "2026-02")
   _, created, removed = _move(session, "2026-08")

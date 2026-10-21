@@ -178,19 +178,21 @@ def _draft(session: Session, posting_date: date, accounts: tuple[str, str]) -> N
   )
 
 
-def _captured_line(session: Session, on: date, *, source: str = "plaid") -> None:
-  session.add(
-    Event(
-      entity_id=PARENT_ENTITY_ID,
-      event_type="bank_transaction",
-      event_category="sales",
-      source=source,
-      status="captured",
-      occurred_at=datetime.combine(on, datetime.min.time()),
-      created_by="usr",
-    )
+def _captured_line(
+  session: Session, on: date, *, source: str = "plaid", status: str = "captured"
+) -> Event:
+  event = Event(
+    entity_id=PARENT_ENTITY_ID,
+    event_type="bank_transaction",
+    event_category="sales",
+    source=source,
+    status=status,
+    occurred_at=datetime.combine(on, datetime.min.time()),
+    created_by="usr",
   )
+  session.add(event)
   session.flush()
+  return event
 
 
 def _schedule(session: Session, start: date) -> str:
@@ -267,8 +269,23 @@ def test_setup_closed_through_a_draft_is_refused_the_same_way(ledger):
   assert not _calendar_initialized(ledger.session)
 
 
-def test_setup_is_refused_while_a_bank_line_sits_before_the_first_open_month(ledger):
-  _captured_line(ledger.session, date(2026, 7, 3))
+def test_setup_retires_an_unclassified_bank_line_before_the_first_open_month(ledger):
+  """A feed line nobody classified, dated before the books open, is history
+  the calendar never posts: retired with the reason, not a refusal."""
+  line = _captured_line(ledger.session, date(2026, 7, 3))
+  line_id = line.id
+  ledger.session.commit()
+
+  ledger.set_up(earliest_data_period="2026-09")
+
+  assert _calendar_initialized(ledger.session)
+  retired = ledger.session.get(Event, line_id)
+  assert retired.status == "voided"
+  assert retired.metadata_["void_reason"] == "feed_before_calendar"
+
+
+def test_setup_is_refused_while_a_classified_bank_line_sits_before_it(ledger):
+  _captured_line(ledger.session, date(2026, 7, 3), status="classified")
   ledger.session.commit()
 
   with pytest.raises(CalendarStartBlockedError) as refused:

@@ -27,7 +27,7 @@ from robosystems.adapters.bank_feed.chart import BankAccount, ChartIndex, name_k
 from robosystems.adapters.bank_feed.load import (
   LoadReport,
   capture_event,
-  earliest_plausible,
+  earliest_plausible_by_entity,
   ensure_agents,
   existing_events,
   in_closed_months,
@@ -208,7 +208,7 @@ def load_sync(
   report.skipped = result.skipped
   report.classification = result.classification
   report.resolved = result.resolved
-  report.earliest_occurred_at = earliest_plausible(result.events)
+  report.earliest_by_entity = earliest_plausible_by_entity(result.events)
 
   if rekey_replaced:
     singles.update(

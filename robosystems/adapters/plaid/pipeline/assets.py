@@ -347,7 +347,11 @@ def _sync_item(
   update_last_sync(context, config, summary)
   if sync.history_complete:
     bootstrap_fiscal_calendar_if_needed(
-      context, config, report.earliest_occurred_at, source_label=SOURCE_LABEL
+      context,
+      config,
+      report.earliest_by_entity,
+      source_label=SOURCE_LABEL,
+      entity_id=sync_config.get("entity_id") or None,
     )
   else:
     context.log.info(
