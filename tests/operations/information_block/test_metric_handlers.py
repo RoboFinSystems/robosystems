@@ -105,6 +105,8 @@ def _fact(
     unit="pure",
     fact_scope="in_scope",
     fact_set_id=fs_id,
+    provenance=None,
+    frozen_at=None,
   )
 
 

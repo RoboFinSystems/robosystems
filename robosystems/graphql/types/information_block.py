@@ -106,6 +106,10 @@ class InformationBlockConnection:
 class InformationBlockFact:
   """A fact bundled inside the envelope (period-scoped value)."""
 
+  # The fact's own discriminated union on `origin`, exposed as JSON with the
+  # tag embedded, like the set's.
+  provenance: strawberry.scalars.JSON | None
+
 
 @pydantic_type(model=PydanticFactSet, all_fields=True)
 class InformationBlockFactSet:

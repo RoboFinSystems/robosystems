@@ -338,6 +338,8 @@ class TestBuildEnvelope:
     fact.period_type = "instant"
     fact.unit = "USD"
     fact.fact_scope = "in_scope"
+    fact.provenance = None
+    fact.frozen_at = None
     fact.fact_set_id = "fset_balance_sheet_2026q1"
 
     # Query order (Plan B — fact_set_id read path; FactSet validated
@@ -768,6 +770,8 @@ class TestSeriesMode:
     fact.period_type = "instant"
     fact.unit = "USD"
     fact.fact_scope = "in_scope"
+    fact.provenance = None
+    fact.frozen_at = None
     fact.fact_set_id = fact_set_id
     return fact
 

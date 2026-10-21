@@ -199,6 +199,22 @@ class FactLite(BaseModel):
   unit: str = "USD"
   fact_scope: str = Field(..., description="historical | in_scope")
   fact_set_id: str | None = None
+  provenance: dict | None = Field(
+    None,
+    description=(
+      "The fact's own typed `FactProvenance` descriptor (discriminated on "
+      "`origin`): a `pivot` names the accounts that foot to it, a `rollup` the "
+      "concepts and weights it summed, a `derived` value its computations and "
+      "the amounts by part. Null means unknown, never the set's descriptor."
+    ),
+  )
+  frozen_at: datetime | None = Field(
+    None,
+    description=(
+      "When the fact's column froze: its period fully closed, so the value is "
+      "the record. Null is a live column that follows the books."
+    ),
+  )
 
 
 class FactSetLite(BaseModel):

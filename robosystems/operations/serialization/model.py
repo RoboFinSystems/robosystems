@@ -15,6 +15,7 @@ from xbrlkit.model import (
   Arc,
   Concept,
   EntityIdentity,
+  FactProvenance,
   FilingMeta,
   Label,
   Network,
@@ -243,6 +244,7 @@ def _fact(fact: BundleFact, concepts: dict[str, Concept]) -> XbrlFact:
       is_nil=text is None,
       language=TEXT_LANGUAGE if is_text else None,
       structure_id=fact.structure_id,
+      provenance=_fact_provenance(fact.provenance),
     )
   return XbrlFact(
     id=fact.id,
@@ -255,6 +257,41 @@ def _fact(fact: BundleFact, concepts: dict[str, Concept]) -> XbrlFact:
     decimals=None if fact.decimals.upper() == "INF" else fact.decimals,
     value_kind="numeric",
     structure_id=fact.structure_id,
+    provenance=_fact_provenance(fact.provenance),
+  )
+
+
+# What the fact's descriptor says asserted it, per origin: a system, a rule or
+# a person; never a mapping, a filter or an account.
+_ATTRIBUTION_KEYS = {
+  "asserted": "asserted_by",
+  "document": "asserted_by",
+  "filed": "source",
+  "observed": "source",
+  "schedule": "method",
+}
+
+
+def _fact_provenance(descriptor: dict | None) -> FactProvenance | None:
+  """The un-entitled projection of a fact's own descriptor: the kind of
+  construction, the hash a reader can check the evidence against (the lines
+  behind a frozen pivot; the document section behind a bound text block),
+  and what asserted it. A fact with no descriptor claims nothing."""
+  if not descriptor or not descriptor.get("origin"):
+    return None
+  origin = str(descriptor["origin"])
+  if origin == "pivot":
+    attributed_to = "posted ledger"
+  elif origin == "rollup":
+    attributed_to = f"rollup:{descriptor.get('rule', 'calculation')}"
+  elif origin == "derived":
+    attributed_to = descriptor.get("computation") or descriptor.get("formula")
+  else:
+    attributed_to = descriptor.get(_ATTRIBUTION_KEYS.get(origin, ""))
+  return FactProvenance(
+    kind=origin,
+    content_hash=descriptor.get("content_hash"),
+    attributed_to=str(attributed_to) if attributed_to else None,
   )
 
 

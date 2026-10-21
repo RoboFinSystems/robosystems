@@ -221,6 +221,11 @@ class BundleFact(BaseModel):
   decimals: str = "INF"
   fact_set_id: str | None = None
   structure_id: str | None = None
+  # The fact's own FactProvenance descriptor and when its column froze; the
+  # holon carries their un-entitled projection (the kind of construction and
+  # the line hash), never an account.
+  provenance: dict | None = None
+  frozen_at: datetime | None = None
 
 
 # ── Bundle root ────────────────────────────────────────────────────────────
@@ -1183,6 +1188,8 @@ def _fact_to_bundle(
     "entity_ref": entity_ref,
     "fact_set_id": str(f.fact_set_id) if f.fact_set_id else None,
     "structure_id": str(f.structure_id) if f.structure_id else None,
+    "provenance": getattr(f, "provenance", None),
+    "frozen_at": getattr(f, "frozen_at", None),
   }
   if getattr(f, "fact_type", "Numeric") == "Nonnumeric":
     return BundleFact(

@@ -56,6 +56,8 @@ def _text_fact() -> SimpleNamespace:
     unit="USD",
     fact_scope="in_scope",
     fact_set_id="fs_standing",
+    provenance=None,
+    frozen_at=None,
   )
 
 
