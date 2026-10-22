@@ -199,6 +199,7 @@ def generate_report_facts(
   close_target_qname: str = "rs-gaap:RetainedEarningsAccumulatedDeficit",
   entity_id: str | None = None,
   line_slice: LineSlice | None = None,
+  acquired_on: date | None = None,
 ) -> ReportFacts:
   """Generate structure-agnostic facts for all mapped elements across periods.
 
@@ -217,6 +218,12 @@ def generate_report_facts(
   axis's Unallocated). A slice states the income statement: the mapped
   balances, net income and the subtotals, never the cash flow or equity
   derivations, whose cash and equity lines are not tagged.
+
+  ``acquired_on`` is the eve a group read's member opened its books on when
+  it was acquired. In the column opening the day after, the cash it held
+  then is the group's cash acquired, an investing inflow, and the column
+  opens on none of it, so the group's cash flow opens where its previous
+  month closed.
   """
   arc_type = _arc_type_for_taxonomy(session, taxonomy_id)
   facts: list[ReportFact] = []
@@ -276,6 +283,8 @@ def generate_report_facts(
   # from a period's opening, not from whichever column precedes it. Kept out of
   # ``facts`` so they are never rendered.
   opening_facts = _load_opening_facts(session, mapping_id, periods, arc_type, entity_id)
+  if acquired_on is not None:
+    _acquired_cash_as_a_flow(session, facts, opening_facts, periods, acquired_on)
 
   # Operating CF from BS deltas (indirect method); needs every period's BS.
   derived = _derive_cash_flow_facts(session, facts, periods, opening_facts)
@@ -312,7 +321,15 @@ def generate_report_facts(
   _emit_opening_equity_facts(
     session, facts, periods, mapping_id, arc_type, entity_id, close_target_qname
   )
-  _emit_opening_cash_facts(session, facts, periods, mapping_id, arc_type, entity_id)
+  _emit_opening_cash_facts(
+    session,
+    facts,
+    periods,
+    mapping_id,
+    arc_type,
+    entity_id,
+    acquired_on=acquired_on,
+  )
 
   if start is not None:
     facts = [f for f in facts if _within_the_books(f, start)]
@@ -3459,6 +3476,67 @@ def _emit_opening_equity_facts(
       )
 
 
+ACQUIRED_CASH_QNAME = "rs-gaap:PaymentsToAcquireBusinessesNetOfCashAcquired"
+
+
+def _acquired_cash_as_a_flow(
+  session: Session,
+  facts: list[ReportFact],
+  opening_facts: list[ReportFact],
+  periods: list[PeriodSpec],
+  acquired_on: date,
+) -> None:
+  """An acquired member's cash at acquisition, moved from the opening of the
+  column it joins in to that column's investing section: the column measures
+  its cash flow from none of it, and the cash acquired is a flow, cash-effect
+  signed as the flow pass signs one."""
+  joining = next((p for p in periods if _opening_date(p) == acquired_on), None)
+  if joining is None:
+    return
+  # On the eve as an opening, or as an earlier column's end that a group read
+  # does not sum.
+  held = [
+    f
+    for f in opening_facts
+    if f.period_end == acquired_on and f.element_qname in _CASH_ANCHOR_QNAMES
+  ] or [
+    f
+    for f in facts
+    if f.period_type == "instant"
+    and f.period_end == acquired_on
+    and f.element_qname in _CASH_ANCHOR_QNAMES
+  ]
+  acquired = 0.0
+  for fact in held:
+    acquired += fact.value
+    fact.value = 0.0
+    if fact.source_values:
+      fact.source_values = dict.fromkeys(fact.source_values, 0.0)
+  if not acquired:
+    return
+  row = session.execute(
+    text("SELECT id, qname, name, balance_type FROM elements WHERE qname = :q"),
+    {"q": ACQUIRED_CASH_QNAME},
+  ).fetchone()
+  if row is None:
+    return
+  facts.append(
+    ReportFact(
+      element_id=row.id,
+      element_qname=row.qname,
+      element_name=row.name or row.qname,
+      classification=None,
+      balance_type=row.balance_type or "credit",
+      value=acquired,
+      period_start=joining.start,
+      period_end=joining.end,
+      period_type="duration",
+      origin="derived",
+      derivation={"computations": ["cash_acquired"]},
+    )
+  )
+
+
 def _emit_opening_cash_facts(
   session: Session,
   facts: list[ReportFact],
@@ -3466,10 +3544,12 @@ def _emit_opening_cash_facts(
   mapping_id: str,
   arc_type: str,
   entity_id: str | None,
+  *,
+  acquired_on: date | None = None,
 ) -> None:
   """Append the cash total's balance the day before each column opens, where
   no other column ends that day, so the cash flow has a beginning-of-period
-  row to open on. The same sum the column ends state through
+  row to open on. None on ``acquired_on``, whose cash is cash acquired. The same sum the column ends state through
   ``_emit_subtotal_facts``: the calc arcs from the total to the balance
   sheet's cash rows, over the mapped balances of that day."""
   total = session.execute(
@@ -3488,7 +3568,7 @@ def _emit_opening_cash_facts(
   seen: set[date] = set()
   for period in sorted(periods, key=lambda p: p.end):
     opening = _opening_date(period)
-    if opening in column_ends or opening in seen:
+    if opening in column_ends or opening in seen or opening == acquired_on:
       continue
     seen.add(opening)
     balances: dict[str, float] = {}

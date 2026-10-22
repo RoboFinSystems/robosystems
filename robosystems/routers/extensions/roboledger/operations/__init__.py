@@ -161,6 +161,9 @@ from robosystems.routers.extensions.roboledger.operations.ledger import (
   propose_consolidation_entries_op as propose_consolidation_entries_op,
 )
 from robosystems.routers.extensions.roboledger.operations.ledger import (
+  record_acquisition_op as record_acquisition_op,
+)
+from robosystems.routers.extensions.roboledger.operations.ledger import (
   record_opening_balance_op as record_opening_balance_op,
 )
 from robosystems.routers.extensions.roboledger.operations.ledger import (

@@ -461,6 +461,15 @@ def _consolidation_lines(adjustments: Sequence[Mapping[str, Any]], has) -> list[
       "basis)` for the month, never a hand entry of `nci_allocation`, which "
       "the engine would reverse back to pro rata."
     )
+  if adjustments and has("record-acquisition"):
+    lines.append(
+      "- A member bought from its owners mid-life (a residual with `cause: "
+      "pre_acquisition`) gets its balance sheet at acquisition through "
+      "`record-opening-balance` on its own books, then `record-acquisition("
+      "entity_id, consideration, basis)` with what the parent paid the sellers "
+      "and any fair-value step-ups; never a hand entry to goodwill. Ask the "
+      "person for the consideration and fair values: none is ever estimated."
+    )
   if adjustments and has("update-journal-entry"):
     lines.append(
       "- A line of the consolidation entity that carries a `flow_qname` counts "

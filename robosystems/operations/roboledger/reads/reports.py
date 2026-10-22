@@ -48,6 +48,7 @@ from robosystems.models.extensions.roboledger import Structure
 from robosystems.operations.aws.s3 import S3Client
 from robosystems.operations.roboledger.entity_scope import (
   GroupMember,
+  acquired_eve,
   books_entity_id,
   find_entity_id,
   group_members,
@@ -200,6 +201,7 @@ def generate_adhoc_private_statement(
   line_slice: LineSlice | None = None,
   sources: StatementSources | None = None,
   summed: list[bool] | None = None,
+  acquired_on: date | None = None,
 ):
   """Build a one-shot statement from one entity's current ledger, with no
   saved Report; ``line_slice`` sums one management dimension member's lines.
@@ -236,6 +238,7 @@ def generate_adhoc_private_statement(
     close_target_qname=load_close_target_concept(session, reporting_style_id),
     entity_id=entity_id,
     line_slice=line_slice,
+    acquired_on=acquired_on,
   )
 
   grid = render_structure_view(
@@ -1298,6 +1301,7 @@ def _combined_statement(
         line_slice=line_slice,
         sources=sources,
         summed=summed,
+        acquired_on=acquired_eve(session, member),
       )
     except CoaMappingNotFoundError as exc:
       first_error = first_error or exc
@@ -1510,6 +1514,7 @@ def get_consolidation_worksheet(
         periods=[w or p for w, p in zip(windows, periods, strict=True)],
         reporting_style_id=reporting_style_id,
         entity_id=entity.member.id,
+        acquired_on=acquired_eve(session, entity.member),
       )
     except CoaMappingNotFoundError as exc:
       first_error = first_error or exc

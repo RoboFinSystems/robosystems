@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import calendar
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -276,6 +276,23 @@ def group_members(
       for row in rows
     ),
   ]
+
+
+def acquired_eve(session: Session, member: GroupMember) -> date | None:
+  """The eve of the month a member joined when its books open there with a
+  recorded balance sheet: a member acquired, whose balances a group read
+  sees arrive. None for one formed in the group, which opens on nothing."""
+  if member.role == "consolidation" or member.joined_on is None:
+    return None
+  eve = member.joined_on.replace(day=1) - timedelta(days=1)
+  opened = session.execute(
+    text(
+      "SELECT 1 FROM entries WHERE entity_id = :id AND type = 'opening' "
+      "AND status <> 'superseded' AND posting_date = :eve LIMIT 1"
+    ),
+    {"id": member.id, "eve": eve},
+  ).first()
+  return eve if opened else None
 
 
 def membership_window(

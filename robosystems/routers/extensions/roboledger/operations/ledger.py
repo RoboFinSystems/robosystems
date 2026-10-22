@@ -40,9 +40,11 @@ from robosystems.models.api.extensions.agent import (
   UpdateAgentRequest,
 )
 from robosystems.models.api.extensions.consolidation import (
+  AcquisitionResponse,
   AllocationOverrideResponse,
   ProposeConsolidationEntriesRequest,
   ProposeConsolidationEntriesResponse,
+  RecordAcquisitionRequest,
   SetAllocationOverrideRequest,
 )
 from robosystems.models.api.extensions.dimensions import (
@@ -126,10 +128,14 @@ from robosystems.operations.roboledger.commands.agent import (
   update_agent as cmd_update_agent,
 )
 from robosystems.operations.roboledger.commands.consolidation import (
+  AcquisitionError,
   AllocationOverrideError,
 )
 from robosystems.operations.roboledger.commands.consolidation import (
   propose_consolidation_entries as cmd_propose_consolidation_entries,
+)
+from robosystems.operations.roboledger.commands.consolidation import (
+  record_acquisition as cmd_record_acquisition,
 )
 from robosystems.operations.roboledger.commands.consolidation import (
   set_allocation_override as cmd_set_allocation_override,
@@ -981,6 +987,43 @@ set_allocation_override_op = _registrar.register(
       ValueError: 422,
     },
     mark_stale_reason="allocation_override_set",
+  )
+)
+
+record_acquisition_op = _registrar.register(
+  OperationSpec(
+    name="record-acquisition",
+    summary="Record Acquisition",
+    description=(
+      "Record a member the parent bought from its outside owners, for a member "
+      "that joined mid-life (`joined_on` set) with its balance sheet at "
+      "acquisition recorded by record-opening-balance. Give the consideration "
+      "paid to the sellers in cents and the basis (the purchase agreement, a "
+      "valuation); optionally the fair value of the outside owners' interest "
+      "(`nci_fair_value`, for goodwill on the whole business) and fair-value "
+      "step-ups (`allocations`). It writes a draft in the consolidation "
+      "entity, dated the join, that its close posts: the excess of the "
+      "consideration over the parent's share of the member's equity at "
+      "acquisition goes to the step-ups and the rest to goodwill. "
+      "preview-consolidation-entries then reads the consideration as the "
+      "parent's investment, so the pre-acquisition residual clears. A bargain "
+      "purchase is refused until `confirm_bargain_purchase` is set after the "
+      "reassessment ASC 805 asks for. Recording again replaces the draft; a "
+      "posted acquisition is reversed first."
+    ),
+    command=cmd_record_acquisition,
+    request_model=RecordAcquisitionRequest,
+    result_type=AcquisitionResponse,
+    error_map={
+      EntityNotInGraphError: 404,
+      AcquisitionError: 422,
+      ClosedPeriodError: 422,
+      ConsolidationAdjustmentError: 422,
+      UnbalancedJournalEntryError: 422,
+      RowLockedError: 409,
+      ValueError: 422,
+    },
+    mark_stale_reason="acquisition_recorded",
   )
 )
 
