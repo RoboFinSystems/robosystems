@@ -981,6 +981,30 @@ def update_journal_entry(
 # ── Delete ───────────────────────────────────────────────────────────────
 
 
+def _ownership_change_of(entry: Entry) -> tuple[str, float] | None:
+  """The member and the share before, when ``entry`` records an ownership
+  change (``record-ownership-change``)."""
+  change = (entry.metadata_ or {}).get("ownership_change")
+  if entry.adjustment_kind != "ownership_change" or not change:
+    return None
+  return str(entry.adjusts_entity_id), float(change["from_pct"])
+
+
+def _restore_member_share(session: Session, member_id: str, from_pct: float) -> None:
+  """Put the member's share back once an ownership change no longer stands:
+  the latest change left, or the share the removed one started from."""
+  from robosystems.models.extensions import Entity
+  from robosystems.operations.roboledger.reads.consolidation import (
+    ownership_changes,
+  )
+
+  left = ownership_changes(session).get(member_id, [])
+  member = session.get(Entity, member_id)
+  if member is not None:
+    member.ownership_pct = left[-1].to_pct if left else from_pct
+    session.flush()
+
+
 def delete_journal_entry(session: Session, body: DeleteJournalEntryRequest) -> dict:
   """Hard delete a draft journal entry (line items cascade).
 
@@ -1029,8 +1053,11 @@ def delete_journal_entry(session: Session, body: DeleteJournalEntryRequest) -> d
     if settled:
       raise JournalEntrySettlesItemsError(str(entry.id), str(owner.id), settled)
 
+  removed = _ownership_change_of(entry)
   session.delete(entry)
   session.flush()
+  if removed is not None:
+    _restore_member_share(session, *removed)
   return {"deleted": True}
 
 
@@ -1158,6 +1185,9 @@ def reverse_journal_entry(
 
   original.status = "reversed"
   session.flush()
+  removed = _ownership_change_of(original)
+  if removed is not None:
+    _restore_member_share(session, *removed)
 
   if original.triggered_by_event_id is not None:
     # An alignment that settled reconciling items no longer books them.

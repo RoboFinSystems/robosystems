@@ -175,3 +175,36 @@ def test_the_list_separates_what_waits_for_a_person(tenant):
   # A person's handler has no suggested_by; it must not fall out of "others".
   assert [h.name for h in others.event_handlers] == ["person"]
   assert everything.pagination.total == 2
+
+
+def test_an_ai_metadata_patch_or_reactivation_needs_approval_again(tenant):
+  """A template can read the handler's metadata into an account or amount, so
+  an AI client's metadata patch changes what it books; and reactivating a
+  handler a person took out of matching puts it back. Both wait for a
+  person; deactivating does not."""
+  with extensions_session(GRAPH) as session:
+    patched = create_event_handler(session, _request("patched"), "usr_1")
+    update_event_handler(
+      session,
+      UpdateEventHandlerRequest(
+        event_handler_id=patched.id, metadata_patch={"expense_account": "elem_x"}
+      ),
+      "usr_1",
+      surface="mcp",
+    )
+    revived = create_event_handler(session, _request("revived"), "usr_1")
+    off = update_event_handler(
+      session,
+      UpdateEventHandlerRequest(event_handler_id=revived.id, is_active=False),
+      "usr_1",
+      surface="mcp",
+    )
+    assert off.suggested_by is None
+    update_event_handler(
+      session,
+      UpdateEventHandlerRequest(event_handler_id=revived.id, is_active=True),
+      "usr_1",
+      surface="mcp",
+    )
+  assert not _eligible(patched.id)
+  assert not _eligible(revived.id)
