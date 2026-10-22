@@ -95,6 +95,8 @@ The closeable gate returns structured codes. The calendar read lists them, and `
 
 Detail fields accompany some codes: `pending_obligation_count`, `pending_obligation_sample[]` (up to five, each with `event_id`, `schedule_id`, `schedule_name` and `period`), `earliest_pending_period`, `stranded_obligation_count`, `stranded_obligation_sample[]`, `reconciling_item_count`, `reconciling_item_sample[]` (source ids), `unposted_source_event_count`, `unposted_source_event_sample[]` (source ids, or event ids where there is none), `unreconciled_account_count`, `unreconciled_account_sample[]` (each reconciliation's name and why it isn't ready, such as `"Source ledger (QuickBooks): unreconciled"` or `"...: awaiting review"`), `unmapped_account_count`, `unmapped_account_sample[]` (code and name) and `sync_stale_days`. The calendar read carries the same fields in camelCase.
 
+The consolidation entity's close is the group close and adds four blockers of its own, `entity_open`, `adjustments_unposted`, `residual_unexplained` and `consolidated_does_not_foot`, each naming its items in a `group_*` list; see [Group Consolidation](Group-Consolidation.md#the-group-close).
+
 Every override the close accepts is written into the close's audit note. A close over stranded obligations knowingly leaves those adjusting entries out of the month. A close over reconciling items stamps statements that may disagree with QuickBooks. A close over unposted source events leaves those transactions out of the month for good, and a close over unreconciled accounts closes the books without that check. Settling the item is almost always the better choice. See [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md#reconciling-items).
 
 ### Unposted source events

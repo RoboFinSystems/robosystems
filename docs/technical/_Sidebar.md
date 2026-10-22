@@ -31,6 +31,7 @@
 - [Extensions Surface Overview](Extensions-Surface-Overview.md)
 - [GraphQL Reads](GraphQL-Reads.md)
 - [RoboLedger Operations](RoboLedger-Operations.md)
+- [Group Consolidation](Group-Consolidation.md)
 - [QuickBooks Sync & Write Policy](QuickBooks-Sync-and-Write-Policy.md)
 - [Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md)
 - [Period Close](Period-Close.md)
