@@ -2359,3 +2359,38 @@ def test_an_acquisition_is_measured_at_the_share_bought(group):
   _change(ownership_pct=80, consideration=300_000)
   again = _acquire(consideration=900_000, nci_fair_value=550_000)
   assert again.parent_share == 600_002
+
+
+def test_a_reversed_acquisition_leaves_no_premium_to_move(group):
+  """A reversed acquisition's reversal carries its kind with its lines
+  flipped; neither is the outside owners' interest any more."""
+  _acquire_sixty_percent_of_an_odd_capital(group)
+  with extensions_session(GRAPH) as session:
+    entry_id = session.execute(
+      text("SELECT id FROM entries WHERE adjustment_kind = 'acquisition'")
+    ).scalar_one()
+    session.execute(
+      text("UPDATE entries SET status = 'posted' WHERE id = :id"), {"id": entry_id}
+    )
+  with extensions_session(GRAPH) as session:
+    reverse_journal_entry(
+      session,
+      ReverseJournalEntryRequest(entry_id=str(entry_id), posting_date=JAN_1),
+      "test",
+    )
+    session.commit()
+  post(
+    group,
+    PARENT_ENTITY_ID,
+    FEB_1,
+    [("investment", 300_000), ("cash", -300_000)],
+    agent="owner",
+  )
+  assert _change(ownership_pct=80, consideration=300_000).premium_transferred == 0
+
+
+def test_an_acquisition_ignores_a_change_in_the_month_it_joined(group):
+  _acquire_sixty_percent_of_an_odd_capital(group)
+  _change(period="2026-01", ownership_pct=80, consideration=300_000)
+  again = _acquire(consideration=900_000, nci_fair_value=550_000)
+  assert again.parent_share == 600_002

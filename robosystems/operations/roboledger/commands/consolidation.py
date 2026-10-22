@@ -429,11 +429,12 @@ def record_acquisition(
         f"The step-up to {allocation.concept} is zero; leave it out."
       )
 
-  # The share the parent bought, not one a later ownership change set.
+  # The share the parent bought: held before any ownership change, even one
+  # recorded for the month it joined.
   joined_pct = pct_as_of(
     float(member.ownership_pct) if member.ownership_pct is not None else None,
     ownership_changes(session).get(str(member.id), []),
-    f"{member.joined_on:%Y-%m}",
+    f"{member.joined_on.replace(day=1) - timedelta(days=1):%Y-%m}",
   )
   share = joined_pct / 100.0 if joined_pct is not None else 1.0
   equity = _equity_at_acquisition(session, member, opening)
@@ -609,6 +610,9 @@ def _outside_premium(
       WHERE e.entity_id = :c AND e.adjusts_entity_id = :m
         AND e.adjustment_kind IN ('acquisition', 'ownership_change')
         AND e.status IN ('posted', 'draft') AND li.element_id = :account
+        -- A reversed original is out by its status; its reversal, posted
+        -- with the original's kind, goes with it.
+        AND e.reversal_of IS NULL
         AND NOT (e.id = ANY(:exclude))
       """
     ),
