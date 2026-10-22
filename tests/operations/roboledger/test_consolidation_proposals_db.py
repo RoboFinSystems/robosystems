@@ -133,6 +133,7 @@ _CHARTS = {
     "fees": "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
     "interest": "rs-gaap:InvestmentIncomeInterest",
     "distributions": "rs-gaap:OtherNonoperatingIncomeExpense",
+    "gain": DECONSOLIDATION_GAIN,
   },
   MEMBER: {
     "cash": "rs-gaap:Cash",
@@ -2118,9 +2119,15 @@ FEB_1 = date(2026, 2, 1)
 def _flow_rows() -> None:
   """The cash flow rows an ownership change tags, as flow concepts."""
   with extensions_session(GRAPH) as session:
+    traits: dict[str, Trait] = {}
     for qname, activity in (
       ("rs-gaap:PaymentsToAcquireInterestInSubsidiariesAndAffiliates", "investing"),
       ("rs-gaap:PaymentsToMinorityShareholders", "financing"),
+      (
+        "rs-gaap:ProceedsFromDivestitureOfInterestInSubsidiariesAndAffiliates",
+        "investing",
+      ),
+      ("rs-gaap:ProceedsFromMinorityShareholders", "financing"),
     ):
       flow = Element(
         qname=qname,
@@ -2131,7 +2138,10 @@ def _flow_rows() -> None:
         is_abstract=False,
         created_by="test",
       )
-      trait = Trait(category="activityType", identifier=activity)
+      trait = traits.get(activity)
+      if trait is None:
+        trait = Trait(category="activityType", identifier=activity)
+        traits[activity] = trait
       session.add_all([flow, trait])
       session.flush()
       session.add(ElementTrait(element_id=flow.id, trait_id=trait.id))
@@ -2243,6 +2253,115 @@ def test_a_price_below_the_earnings_bought_still_rides_the_payment_row(group):
   )
 
 
+def _sell_ten_percent(group: dict, price: int, released: int) -> None:
+  """On 1 February the parent sells 10 % of the member to the outside owner:
+  the proceeds against the carrying amount of the shares sold, the rest its
+  own gain or loss."""
+  post(
+    group,
+    PARENT_ENTITY_ID,
+    FEB_1,
+    [("cash", price), ("investment", -released), ("gain", released - price)],
+    agent="owner",
+  )
+
+
+def test_selling_within_the_method_reverses_the_parents_gain_and_credits_the_outside_owners(
+  group,
+):
+  """The parent carries 6,300 for its 70 % (7,000 put in, 700 of
+  distributions back); selling a seventh of it for 1,500 releases 900 of
+  carrying amount and books a 600 gain on its own books. In the group the
+  book value sold (900) moves to the outside owners through the elimination,
+  their share of January's result rises by 182.50, the gain is reversed, and
+  the 417.50 difference is the parent's paid-in capital — ASC 810, no gain.
+  The parent's cost on a formed member is its book value, so nothing is
+  released against the investment."""
+  _january_posted(group)
+  recorded = _change(ownership_pct=60, consideration=150_000)
+
+  assert (recorded.from_pct, recorded.to_pct) == (70.0, 60.0)
+  assert (recorded.book_value, recorded.earnings_transferred) == (-90_000, -18_250)
+  assert (recorded.carrying_released, recorded.gain_reversed) == (90_000, 60_000)
+  assert recorded.equity_adjustment == -41_750
+  lines = _change_lines()
+  assert {code: amount for code, (amount, _) in lines.items()} == {
+    "4400": 60_000,
+    "3200": -18_250,
+    "3050": -41_750,
+  }
+  # The proceeds leave the divestiture row and arrive as a financing inflow
+  # from the outside owners.
+  assert lines["4400"][1] == (
+    "rs-gaap:ProceedsFromDivestitureOfInterestInSubsidiariesAndAffiliates"
+  )
+  assert (
+    lines["3200"][1] == lines["3050"][1] == "rs-gaap:ProceedsFromMinorityShareholders"
+  )
+  with extensions_session(GRAPH) as session:
+    assert float(session.get(Entity, MEMBER).ownership_pct) == 60.0
+    recorded_consideration = session.execute(
+      text(
+        "SELECT (metadata->'ownership_change'->>'consideration')::bigint "
+        "FROM entries WHERE adjustment_kind = 'ownership_change'"
+      )
+    ).scalar_one()
+  assert recorded_consideration == -90_000
+
+  _sell_ten_percent(group, 150_000, 90_000)
+  response = preview("2026-02")
+  assert response.residuals == [] and not response.incomplete
+  assert _lines(response, "elimination_investment") == {
+    engine.INVESTMENT_IN_SUBSIDIARIES: 90_000,
+    engine.NONCONTROLLING_INTEREST: -90_000,
+  }
+
+
+def test_selling_after_buying_moves_only_the_premium_not_the_earnings_moved_before(
+  group,
+):
+  """February: the parent buys 10 % for 1,500, moving 182.50 of the outside
+  owners' share of January's result to itself. March: it sells that 10 %
+  back for 1,200. The outside owners get their 182.50 of results back —
+  measured from the results, not read off February's line as if it were a
+  premium — and nothing else moves on their interest, since no acquisition
+  put a fair-value premium there. The parent's cost on the shares sold,
+  975 (a tenth of 7,800 pro rata), is 75 above their 900 of book value,
+  released against the investment; the 225 gain on its books is reversed;
+  117.50 is the parent's paid-in capital."""
+  _january_posted(group)
+  _buy_ten_percent(group)
+  _change()
+  recorded = _change(period="2026-03", ownership_pct=70, consideration=120_000)
+
+  assert (recorded.earnings_transferred, recorded.premium_transferred) == (-18_250, 0)
+  assert (recorded.carrying_released, recorded.gain_reversed) == (97_500, 22_500)
+  lines = {code: amount for code, (amount, _) in _change_lines().items()}
+  # Both drafts are in the books; March's lines are the ones with the gain.
+  assert lines["4400"] == 22_500
+
+
+def test_a_sale_at_a_loss_reverses_the_loss_and_still_matches_the_parents_books(group):
+  _january_posted(group)
+  recorded = _change(ownership_pct=60, consideration=50_000)
+
+  assert (recorded.carrying_released, recorded.gain_reversed) == (90_000, -40_000)
+  assert recorded.equity_adjustment == 58_250
+  lines = {code: amount for code, (amount, _) in _change_lines().items()}
+  assert lines == {"4400": -40_000, "3200": -18_250, "3050": 58_250}
+  _sell_ten_percent(group, 50_000, 90_000)
+  response = preview("2026-02")
+  assert response.residuals == [] and not response.incomplete
+
+
+def test_a_sale_keeps_control_or_is_a_change_of_method(group):
+  _january_posted(group)
+  with pytest.raises(OwnershipChangeError, match="change of method"):
+    _change(ownership_pct=40, consideration=400_000)
+  with pytest.raises(OwnershipChangeError, match="no change to record"):
+    _change(ownership_pct=70, consideration=0)
+
+
 def test_the_month_eliminates_at_the_new_share_and_moves_the_book_value(group):
   _january_posted(group)
   _buy_ten_percent(group)
@@ -2290,8 +2409,8 @@ def test_a_change_stays_within_the_method_and_buys_more(group):
   _january_posted(group)
   with pytest.raises(OwnershipChangeError, match="no longer controls"):
     _change(ownership_pct=40)
-  with pytest.raises(OwnershipChangeError, match="is not more"):
-    _change(ownership_pct=60)
+  with pytest.raises(OwnershipChangeError, match="no change to record"):
+    _change(ownership_pct=70)
   with pytest.raises(OwnershipChangeError, match="not a member consolidated in full"):
     _change(entity_id=ASSOCIATE)
 

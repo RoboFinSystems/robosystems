@@ -435,9 +435,9 @@ class AllocationOverrideListResponse(BaseModel):
 
 
 class RecordOwnershipChangeRequest(BaseModel):
-  """The parent buys more of a member from its outside owners, staying on the
-  same consolidation method: the share it holds from a month, and what it
-  paid. ASC 810 makes it an equity transaction, never a gain or loss."""
+  """The parent buys more of a member from its outside owners, or sells some
+  of it to them while keeping control: the share it holds from a month, and
+  the price. ASC 810 makes it an equity transaction, never a gain or loss."""
 
   entity_id: str = Field(..., description="The member, consolidated in full.")
   period: str = _PERIOD
@@ -447,20 +447,23 @@ class RecordOwnershipChangeRequest(BaseModel):
     le=100,
     description=(
       "The parent's share from `period`, as a percentage: above its share "
-      "the month before, and 50 or more, so the member stays consolidated "
-      "in full."
+      "the month before for a purchase, below it for a sale, and 50 or "
+      "more either way, so the member stays consolidated in full."
     ),
   )
   consideration: int = Field(
     ...,
     ge=0,
     description=(
-      "Cents the parent paid the outside owners for the shares. Its line "
-      "names them, not the member, which is why it is given here."
+      "Cents the parent paid the outside owners for the shares, or received "
+      "from them for shares sold. Its line names them, not the member, which "
+      "is why it is given here."
     ),
   )
   basis: str = Field(
-    ..., min_length=1, description="The purchase agreement, or what sets the price."
+    ...,
+    min_length=1,
+    description="The purchase or sale agreement, or what sets the price.",
   )
 
   @field_validator("basis")
@@ -482,19 +485,26 @@ class OwnershipChangeResponse(BaseModel):
   period: str = Field(..., description="The first month the new share holds.")
   from_pct: float = Field(..., description="The parent's share the month before.")
   to_pct: float = Field(..., description="The parent's share from `period`.")
-  consideration: int = Field(..., description="Cents paid to the outside owners.")
+  consideration: int = Field(
+    ...,
+    description=(
+      "Cents paid to the outside owners, or received from them for shares sold."
+    ),
+  )
   book_value: int = Field(
     ...,
     description=(
       "Cents: the share bought of the member's capital, which the investment "
-      "elimination moves from the outside owners to the parent."
+      "elimination moves from the outside owners to the parent; negative for "
+      "a share sold, moved the other way."
     ),
   )
   earnings_transferred: int = Field(
     ...,
     description=(
       "Cents: the share bought of the member's results since it joined, moved "
-      "from the outside owners' interest to the parent."
+      "from the outside owners' interest to the parent; negative for a share "
+      "sold."
     ),
   )
   premium_transferred: int = Field(
@@ -502,14 +512,32 @@ class OwnershipChangeResponse(BaseModel):
     description=(
       "Cents: the share bought of the outside owners' interest beyond their "
       "share of book value (from the acquisition at fair value, or its "
-      "step-ups), moved to the parent."
+      "step-ups), moved to the parent; negative for a share sold."
+    ),
+  )
+  carrying_released: int = Field(
+    0,
+    description=(
+      "Cents, for a sale: the carrying amount of the shares sold on the "
+      "parent's books, its cost pro rata, which its sale entry credits "
+      "against the investment. Zero for a purchase."
+    ),
+  )
+  gain_reversed: int = Field(
+    0,
+    description=(
+      "Cents, for a sale: the gain (a loss negative) the parent's own books "
+      "take, the price less the carrying amount released, which the entry "
+      "reverses — the group has none while control is kept. Zero for a "
+      "purchase."
     ),
   )
   equity_adjustment: int = Field(
     ...,
     description=(
-      "Cents taken from the parent's equity: the price above the carrying "
-      "amount of what was bought (negative when it paid less)."
+      "Cents taken from the parent's equity (negative: added to it): for a "
+      "purchase, the price above the carrying amount of what was bought; for "
+      "a sale, the carrying amount given up above the price."
     ),
   )
   entry: JournalEntryResponse = Field(
