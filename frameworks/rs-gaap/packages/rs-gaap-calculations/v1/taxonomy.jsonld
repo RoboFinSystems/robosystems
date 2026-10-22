@@ -3232,6 +3232,36 @@
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-cash-total-arc-1",
+      "from": {
+        "@id": "rs-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"
+      },
+      "to": {
+        "@id": "rs-gaap:CashAndCashEquivalentsAtCarryingValue"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 10.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-cash-total-arc-2",
+      "from": {
+        "@id": "rs-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"
+      },
+      "to": {
+        "@id": "rs-gaap:RestrictedCashAndInvestmentsCurrent"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": 1.0,
+      "order": 20.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     }
   ]
 }

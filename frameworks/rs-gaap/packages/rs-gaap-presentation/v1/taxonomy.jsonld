@@ -22068,6 +22068,48 @@
       "order": 30273.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-cash",
+      "from": {
+        "@id": "rs-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"
+      },
+      "to": {
+        "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30050.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-cash",
+      "from": {
+        "@id": "rs-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"
+      },
+      "to": {
+        "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30050.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-cash",
+      "from": {
+        "@id": "rs-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"
+      },
+      "to": {
+        "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30050.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     }
   ]
 }
