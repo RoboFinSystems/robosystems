@@ -94,7 +94,7 @@ The registered command-write operations, grouped by workflow stage. They live in
 | **Reconciling Items** | `preview-reconciling-item`, `resolve-reconciling-item` |
 | **Reconciliations** | `preview-reconciliations`, `refresh-reconciliations`, `record-statement-balance`, `set-reconciliation-policy`, `sign-off-reconciliation` |
 | **Event Handlers** | `create-event-handler`, `update-event-handler` |
-| **Journal Entries** | `update-journal-entry`, `delete-journal-entry`, `propose-consolidation-entries`, `set-allocation-override`, `record-acquisition` |
+| **Journal Entries** | `update-journal-entry`, `delete-journal-entry`, `propose-consolidation-entries`, `set-allocation-override`, `record-acquisition`, `record-ownership-change` |
 | **Schedules** | `promote-obligations`, `rebuild-schedule`, `terminate-schedule` |
 | **Close Workflow** | `set-close-target`, `close-period`, `reopen-period` |
 | **Reports** | `create-report`, `regenerate-report`, `delete-report`, `share-report`, `revoke-report-share`, `file-report`, `transition-filing-status` |
@@ -357,6 +357,15 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"entity_id": "ent_...", "consideration": 900000, "basis": "Purchase agreement, 1 July 2026"}'
+```
+
+When the parent later buys more of a member from its outside owners, staying on full consolidation, `record-ownership-change` records it: the month the new share holds from, the share (`ownership_pct`, 50 or more and above the share before), the price paid in cents and the basis. It sets the member's share from that month and writes a draft of kind `ownership_change` in the consolidation entity, dated the month's first day, that its close posts. ASC 810 makes it an equity transaction, never a gain or loss: the investment elimination moves the share bought of the member's capital at the new share; the entry carries the price above that book value against the investment, moves the share bought of the member's results since it joined out of noncontrolling interest, and takes the difference to the parent's equity (paid-in capital under a corporate Reporting Style, the capital account under an LLC or partnership one). Its lines carry the cash flow rows that move the price from investing to financing, the group's payment to its outside owners. The engine reads each member's share as of the month from these entries, so the months before keep the share they had. Changes are recorded in the order they happened; recording a month again replaces its draft. A sale within the method, or a change that moves the member across consolidation methods, is not supported yet; changing `ownership_pct` with `update-entity` alone leaves the price unrecorded, and the month's investment elimination is withheld as a residual.
+
+```bash
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/record-ownership-change" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"entity_id": "ent_...", "period": "2026-09", "ownership_pct": 80, "consideration": 150000, "basis": "Share purchase agreement"}'
 ```
 
 Accounts are found by the rs-gaap concept they map to, never by code, and the consolidation entity posts each adjustment to its own account mapped to that concept. An intercompany line is one whose event names another of the group's entities as its counterparty, through that entity's `self` agent; `create-entity` adds that agent for each operating entity it creates, and for the group parent. Each proposal is the difference between the target and what the consolidation entity already holds for that `adjustment_kind` and member, so an entry a person posted with the same kind counts toward it. `up_to_date` is true when the consolidation entity holds what the month needs, posted or in the month's own drafts, and nothing is withheld or left out.

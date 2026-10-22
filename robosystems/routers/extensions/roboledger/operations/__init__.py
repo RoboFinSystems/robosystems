@@ -167,6 +167,9 @@ from robosystems.routers.extensions.roboledger.operations.ledger import (
   record_opening_balance_op as record_opening_balance_op,
 )
 from robosystems.routers.extensions.roboledger.operations.ledger import (
+  record_ownership_change_op as record_ownership_change_op,
+)
+from robosystems.routers.extensions.roboledger.operations.ledger import (
   record_statement_balance_op as record_statement_balance_op,
 )
 from robosystems.routers.extensions.roboledger.operations.ledger import (

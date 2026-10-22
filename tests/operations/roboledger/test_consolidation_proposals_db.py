@@ -21,6 +21,7 @@ from robosystems.models.api.extensions.consolidation import (
   AcquisitionAllocation,
   ProposeConsolidationEntriesRequest,
   RecordAcquisitionRequest,
+  RecordOwnershipChangeRequest,
   SetAllocationOverrideRequest,
 )
 from robosystems.models.api.extensions.entity import (
@@ -52,8 +53,10 @@ from robosystems.operations.roboledger.commands.consolidation import (
   BARGAIN_PURCHASE_GAIN,
   AcquisitionError,
   AllocationOverrideError,
+  OwnershipChangeError,
   propose_consolidation_entries,
   record_acquisition,
+  record_ownership_change,
   set_allocation_override,
 )
 from robosystems.operations.roboledger.commands.entity import (
@@ -108,6 +111,7 @@ _CONCEPTS = {
   engine.NCI_SHARE_OF_INCOME: ("debit", "duration", "expense"),
   engine.GOODWILL: ("debit", "instant", "asset"),
   BARGAIN_PURCHASE_GAIN: ("credit", "duration", "revenue"),
+  "rs-gaap:AdditionalPaidInCapital": ("credit", "instant", "equity"),
 }
 
 # Each entity's accounts: code → concept.
@@ -156,6 +160,7 @@ _CHARTS = {
     "4200": "rs-gaap:OtherNonoperatingIncomeExpense",
     "1800": engine.GOODWILL,
     "4300": BARGAIN_PURCHASE_GAIN,
+    "3050": "rs-gaap:AdditionalPaidInCapital",
   },
 }
 
@@ -2079,3 +2084,185 @@ def test_the_allocation_share_is_for_a_member_in_full_in_its_months(group):
     assert (
       engine.allocation_share(session, entity_id=MEMBER, period="2026-02") is not None
     )
+
+
+# ── The parent buys more of a member (group-lifecycle Phase 2) ──────────
+
+
+FEB_1 = date(2026, 2, 1)
+
+
+def _flow_rows() -> None:
+  """The cash flow rows an ownership change tags, as flow concepts."""
+  with extensions_session(GRAPH) as session:
+    for qname, activity in (
+      ("rs-gaap:PaymentsToAcquireInterestInSubsidiariesAndAffiliates", "investing"),
+      ("rs-gaap:PaymentsToMinorityShareholders", "financing"),
+    ):
+      flow = Element(
+        qname=qname,
+        name=qname.split(":")[1],
+        balance_type="credit",
+        period_type="duration",
+        element_type="concept",
+        is_abstract=False,
+        created_by="test",
+      )
+      trait = Trait(category="activityType", identifier=activity)
+      session.add_all([flow, trait])
+      session.flush()
+      session.add(ElementTrait(element_id=flow.id, trait_id=trait.id))
+
+
+def _january_posted(group: dict) -> None:
+  """The group formed in December, January's books, and January's
+  consolidating entries posted at 70 %."""
+  _flow_rows()
+  _form_the_group(group)
+  _january(group)
+  _post_proposals(group, preview("2026-01"))
+
+
+def _buy_ten_percent(group: dict, price: int = 150_000) -> None:
+  """On 1 February the parent buys 10 % of the member from the outside owner."""
+  post(
+    group,
+    PARENT_ENTITY_ID,
+    FEB_1,
+    [("investment", price), ("cash", -price)],
+    agent="owner",
+  )
+
+
+def _change(**fields):
+  values = {
+    "entity_id": MEMBER,
+    "period": "2026-02",
+    "ownership_pct": 80,
+    "consideration": 150_000,
+    "basis": "Share purchase agreement",
+  } | fields
+  with extensions_session(GRAPH) as session:
+    return record_ownership_change(
+      session, RecordOwnershipChangeRequest(**values), "test"
+    )
+
+
+def _change_lines() -> dict[str, tuple[int, str | None]]:
+  with extensions_session(GRAPH) as session:
+    rows = session.execute(
+      text(
+        """
+        SELECT el.code, li.debit_amount - li.credit_amount AS amount,
+               fe.qname AS flow
+        FROM line_items li JOIN entries e ON e.id = li.entry_id
+        JOIN elements el ON el.id = li.element_id
+        LEFT JOIN elements fe ON fe.id = li.flow_element_id
+        WHERE e.adjustment_kind = 'ownership_change' AND e.status = 'draft'
+        """
+      )
+    ).all()
+  return {r.code: (int(r.amount), r.flow) for r in rows}
+
+
+def test_buying_more_is_an_equity_transaction(group):
+  """Capital 9,000 and January's 1,825 of results: 10 % is 900 of book and
+  182.50 of earnings. The parent paid 1,500, so 600 goes against the
+  investment and 417.50 is taken from its equity; no gain or loss."""
+  _january_posted(group)
+  _buy_ten_percent(group)
+  recorded = _change()
+
+  assert (recorded.from_pct, recorded.to_pct) == (70.0, 80.0)
+  assert (recorded.book_value, recorded.earnings_transferred) == (90_000, 18_250)
+  assert recorded.equity_adjustment == 41_750
+  assert recorded.entry.posting_date == FEB_1
+  lines = _change_lines()
+  assert {code: amount for code, (amount, _) in lines.items()} == {
+    "1600": -60_000,
+    "3200": 18_250,
+    "3050": 41_750,
+  }
+  # The price is the group's payment to its outside owners: the investing
+  # outflow offset here, the rest financing.
+  assert lines["1600"][1] == (
+    "rs-gaap:PaymentsToAcquireInterestInSubsidiariesAndAffiliates"
+  )
+  assert (
+    lines["3200"][1] == lines["3050"][1] == "rs-gaap:PaymentsToMinorityShareholders"
+  )
+  with extensions_session(GRAPH) as session:
+    assert float(session.get(Entity, MEMBER).ownership_pct) == 80.0
+
+
+def test_the_month_eliminates_at_the_new_share_and_moves_the_book_value(group):
+  _january_posted(group)
+  _buy_ten_percent(group)
+  _change()
+  response = preview("2026-02")
+
+  assert response.residuals == []
+  # 10 % of the 9,000 of capital moves from the outside owners to the parent,
+  # tagged as the month's own movement.
+  assert _lines(response, "elimination_investment") == {
+    engine.INVESTMENT_IN_SUBSIDIARIES: -90_000,
+    engine.NONCONTROLLING_INTEREST: 90_000,
+  }
+  assert set(_flows(response, "elimination_investment").values()) == {
+    "rs-gaap:PaymentsToAcquireInterestInSubsidiariesAndAffiliates",
+    "rs-gaap:PaymentsToMinorityShareholders",
+  }
+  # January keeps its share.
+  assert preview("2026-01").up_to_date
+
+
+def test_the_share_holds_from_its_month(group):
+  _january_posted(group)
+  _buy_ten_percent(group)
+  _change()
+  with extensions_session(GRAPH) as session:
+    january = engine.allocation_share(session, entity_id=MEMBER, period="2026-01")
+    february = engine.allocation_share(session, entity_id=MEMBER, period="2026-02")
+  assert january is not None and february is not None
+  assert (january.outside_pct, february.outside_pct) == (30.0, 20.0)
+
+
+def test_without_the_change_recorded_the_price_is_unexplained(group):
+  _january_posted(group)
+  _buy_ten_percent(group)
+  with extensions_session(GRAPH) as session:
+    session.execute(
+      text("UPDATE entities SET ownership_pct = 80 WHERE id = :id"), {"id": MEMBER}
+    )
+  (residual,) = preview("2026-02").residuals
+  assert residual.entity_id == MEMBER
+
+
+def test_a_change_stays_within_the_method_and_buys_more(group):
+  _january_posted(group)
+  with pytest.raises(OwnershipChangeError, match="no longer controls"):
+    _change(ownership_pct=40)
+  with pytest.raises(OwnershipChangeError, match="is not more"):
+    _change(ownership_pct=60)
+  with pytest.raises(OwnershipChangeError, match="not a member consolidated in full"):
+    _change(entity_id=ASSOCIATE)
+
+
+def test_changes_are_recorded_in_order_and_a_draft_is_replaced(group):
+  _january_posted(group)
+  _buy_ten_percent(group)
+  _change(period="2026-03", ownership_pct=80)
+  with pytest.raises(OwnershipChangeError, match="in the order they happened"):
+    _change(period="2026-02", ownership_pct=75)
+  replaced = _change(period="2026-03", ownership_pct=85, consideration=200_000)
+  assert replaced.replaced
+  assert replaced.from_pct == 70.0
+
+  with extensions_session(GRAPH) as session:
+    session.execute(
+      text(
+        "UPDATE entries SET status = 'posted' WHERE adjustment_kind = 'ownership_change'"
+      )
+    )
+  with pytest.raises(OwnershipChangeError, match="Reverse that entry first"):
+    _change(period="2026-03", ownership_pct=90)
