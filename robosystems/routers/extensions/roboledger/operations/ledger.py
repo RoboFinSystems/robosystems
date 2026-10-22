@@ -42,9 +42,11 @@ from robosystems.models.api.extensions.agent import (
 from robosystems.models.api.extensions.consolidation import (
   AcquisitionResponse,
   AllocationOverrideResponse,
+  OwnershipChangeResponse,
   ProposeConsolidationEntriesRequest,
   ProposeConsolidationEntriesResponse,
   RecordAcquisitionRequest,
+  RecordOwnershipChangeRequest,
   SetAllocationOverrideRequest,
 )
 from robosystems.models.api.extensions.dimensions import (
@@ -130,12 +132,16 @@ from robosystems.operations.roboledger.commands.agent import (
 from robosystems.operations.roboledger.commands.consolidation import (
   AcquisitionError,
   AllocationOverrideError,
+  OwnershipChangeError,
 )
 from robosystems.operations.roboledger.commands.consolidation import (
   propose_consolidation_entries as cmd_propose_consolidation_entries,
 )
 from robosystems.operations.roboledger.commands.consolidation import (
   record_acquisition as cmd_record_acquisition,
+)
+from robosystems.operations.roboledger.commands.consolidation import (
+  record_ownership_change as cmd_record_ownership_change,
 )
 from robosystems.operations.roboledger.commands.consolidation import (
   set_allocation_override as cmd_set_allocation_override,
@@ -1024,6 +1030,42 @@ record_acquisition_op = _registrar.register(
       ValueError: 422,
     },
     mark_stale_reason="acquisition_recorded",
+  )
+)
+
+record_ownership_change_op = _registrar.register(
+  OperationSpec(
+    name="record-ownership-change",
+    summary="Record Ownership Change",
+    description=(
+      "Record the parent buying more of a member consolidated in full from "
+      "its outside owners: the share it holds from a month (`ownership_pct`, "
+      "staying 50 or more) and what it paid them in cents, with the basis. "
+      "It sets the member's share from that month and writes a draft in the "
+      "consolidation entity, dated the month's first day, that its close "
+      "posts: ASC 810 makes it an equity transaction, so the price above the "
+      "book value of the capital bought goes against the investment, the "
+      "share bought of the member's results since it joined comes out of the "
+      "outside owners' interest, and the difference is the parent's equity, "
+      "with no gain or loss. preview-consolidation-entries then reads the "
+      "price as part of the parent's investment and the new share from that "
+      "month. Changes are recorded in order; recording a month again "
+      "replaces its draft, and a posted one is reversed first. A sale, or a "
+      "change across consolidation methods, is not supported yet."
+    ),
+    command=cmd_record_ownership_change,
+    request_model=RecordOwnershipChangeRequest,
+    result_type=OwnershipChangeResponse,
+    error_map={
+      EntityNotInGraphError: 404,
+      OwnershipChangeError: 422,
+      ClosedPeriodError: 422,
+      ConsolidationAdjustmentError: 422,
+      UnbalancedJournalEntryError: 422,
+      RowLockedError: 409,
+      ValueError: 422,
+    },
+    mark_stale_reason="ownership_change_recorded",
   )
 )
 

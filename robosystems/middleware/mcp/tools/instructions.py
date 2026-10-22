@@ -470,6 +470,14 @@ def _consolidation_lines(adjustments: Sequence[Mapping[str, Any]], has) -> list[
       "and any fair-value step-ups; never a hand entry to goodwill. Ask the "
       "person for the consideration and fair values: none is ever estimated."
     )
+  if adjustments and has("record-ownership-change"):
+    lines.append(
+      "- The parent buying more of a member from its outside owners gets "
+      "`record-ownership-change(entity_id, period, ownership_pct, "
+      "consideration, basis)`, never `update-entity(ownership_pct=…)` alone, "
+      "which leaves the price unrecorded and the month's investment "
+      "elimination withheld."
+    )
   if adjustments and has("update-journal-entry"):
     lines.append(
       "- A line of the consolidation entity that carries a `flow_qname` counts "

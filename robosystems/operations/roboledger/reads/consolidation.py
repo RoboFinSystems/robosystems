@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import calendar
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 
 from sqlalchemy import bindparam, select, text
@@ -254,7 +254,7 @@ def _proposed(proposals: list[ConsolidationProposal]) -> dict[_DraftKey, int]:
   return {k: v for k, v in held.items() if v}
 
 
-def _flow(qname: str, kind: str, amount: int) -> str | None:
+def elimination_flow(qname: str, kind: str, amount: int) -> str | None:
   flows = _FLOWS.get((qname, kind))
   if flows is None:
     return None
@@ -283,7 +283,7 @@ def _tagged_part(
   if periodic:
     return {}, {}
   movement = {q: a - carried.get(q, 0) for q, a in lines.items()}
-  flows = {q: _flow(q, kind, a) for q, a in movement.items() if a}
+  flows = {q: elimination_flow(q, kind, a) for q, a in movement.items() if a}
   missing = {f for f in flows.values() if f and taggable and f not in taggable}
   if missing:
     untaggable |= missing
@@ -378,7 +378,11 @@ def _money(cents: int) -> str:
 # ── Loading ─────────────────────────────────────────────────────────────
 
 
-def _group(session: Session, parent_id: str) -> list[_Entity]:
+def _group(
+  session: Session, parent_id: str, period: str | None = None
+) -> list[_Entity]:
+  """The group's entities, the parent first; each member's share is the
+  parent's for ``period`` when given, from its recorded ownership changes."""
   rows = session.execute(
     text(
       "SELECT id, name, entity_role, consolidation_method, ownership_pct, "
@@ -388,25 +392,29 @@ def _group(session: Session, parent_id: str) -> list[_Entity]:
     ),
     {"parent": parent_id},
   ).all()
-  return [
-    _Entity(
-      id=str(row.id),
-      name=str(row.name),
-      role=str(row.entity_role),
-      method="full" if row.id == parent_id else str(row.consolidation_method),
-      share=(float(row.ownership_pct) / 100.0)
-      if row.ownership_pct is not None
-      else 1.0,
-      member=GroupMember(
-        str(row.id),
-        str(row.entity_role),
-        None if row.id == parent_id else row.joined_on,
-        None if row.id == parent_id else row.left_on,
-      ),
-      overrides=dict((row.metadata or {}).get(ALLOCATION_OVERRIDES) or {}),
+  changes = ownership_changes(session) if period is not None else {}
+  entities: list[_Entity] = []
+  for row in rows:
+    pct = float(row.ownership_pct) if row.ownership_pct is not None else None
+    if period is not None:
+      pct = pct_as_of(pct, changes.get(str(row.id), []), period)
+    entities.append(
+      _Entity(
+        id=str(row.id),
+        name=str(row.name),
+        role=str(row.entity_role),
+        method="full" if row.id == parent_id else str(row.consolidation_method),
+        share=pct / 100.0 if pct is not None else 1.0,
+        member=GroupMember(
+          str(row.id),
+          str(row.entity_role),
+          None if row.id == parent_id else row.joined_on,
+          None if row.id == parent_id else row.left_on,
+        ),
+        overrides=dict((row.metadata or {}).get(ALLOCATION_OVERRIDES) or {}),
+      )
     )
-    for row in rows
-  ]
+  return entities
 
 
 def primary_concepts(session: Session, mapping_ids: list[str]) -> dict[str, _Concept]:
@@ -582,6 +590,30 @@ def posting_accounts(
 # ── Targets ─────────────────────────────────────────────────────────────
 
 
+def capital_and_earnings(
+  session: Session, member_id: str, through: date
+) -> tuple[int, int]:
+  """A member's capital (its equity lines other than closing entries, as the
+  investment elimination reads it) and its results to date (the result lines
+  the closes carried to retained earnings), credit-positive, through
+  ``through``. An acquired member's earnings before it joined are capital,
+  being in the opening balance."""
+  mapping = find_entity_mapping(session, member_id, BOOK_FRAMEWORK)
+  concepts = primary_concepts(session, [str(mapping.id)]) if mapping else {}
+  rows = _rows(session, [member_id], concepts, through, through, drafts_of="")
+  capital = -sum(
+    r.amount
+    for r in rows
+    if not r.closing
+    and r.concept.classification in EQUITY_CLASSIFICATIONS
+    and r.concept.qname != NONCONTROLLING_INTEREST
+  )
+  earnings = -sum(
+    r.amount for r in rows if not r.closing and r.concept.classification in _RESULT
+  )
+  return capital, earnings
+
+
 def _net_income(rows: list[_Row], entity_id: str) -> int:
   """The month's result, credit-positive, as the close computes it."""
   return -sum(
@@ -597,27 +629,82 @@ def _net_income(rows: list[_Row], entity_id: str) -> int:
 ACQUISITION = "acquisition"
 
 
+OWNERSHIP_CHANGE = "ownership_change"
+# The kinds a person records the parent's price for a member's shares on.
+PRICED_KINDS = (ACQUISITION, OWNERSHIP_CHANGE)
+
+
 def acquisitions(
   session: Session, consolidation_id: str, through: date
 ) -> dict[str, int]:
-  """The consideration each acquired member's recorded acquisition gives,
-  through ``through``: what the parent paid its sellers, posted or waiting in
-  a draft the consolidation entity's close posts."""
+  """What the parent paid for each member's shares outside the member's own
+  books, through ``through``, posted or waiting in a draft the consolidation
+  entity's close posts: an acquisition's consideration, and the price of each
+  later change in its share, negative for shares it sold."""
   rows = session.execute(
     text(
       """
       SELECT adjusts_entity_id AS member,
-             SUM((metadata->'acquisition'->>'consideration')::bigint) AS paid
+             SUM(COALESCE(
+               (metadata->'acquisition'->>'consideration')::bigint,
+               (metadata->'ownership_change'->>'consideration')::bigint
+             )) AS paid
       FROM entries
-      WHERE entity_id = :c AND adjustment_kind = :kind
+      WHERE entity_id = :c AND adjustment_kind IN :kinds
         AND status IN ('posted', 'draft') AND posting_date <= :through
-        AND metadata ? 'acquisition'
+        AND (metadata ? 'acquisition' OR metadata ? 'ownership_change')
       GROUP BY adjusts_entity_id
       """
-    ),
-    {"c": consolidation_id, "kind": ACQUISITION, "through": through},
+    ).bindparams(bindparam("kinds", expanding=True)),
+    {"c": consolidation_id, "kinds": list(PRICED_KINDS), "through": through},
   ).all()
   return {str(r.member): int(r.paid) for r in rows if r.paid}
+
+
+@dataclass(frozen=True)
+class OwnershipChange:
+  period: str  # YYYY-MM, the first month the new share holds
+  from_pct: float
+  to_pct: float
+
+
+def ownership_changes(session: Session) -> dict[str, list[OwnershipChange]]:
+  """Each member's recorded changes in the parent's share, oldest first."""
+  rows = session.execute(
+    text(
+      """
+      SELECT adjusts_entity_id AS member, metadata->'ownership_change' AS change
+      FROM entries
+      WHERE adjustment_kind = :kind AND status IN ('posted', 'draft')
+        AND metadata ? 'ownership_change'
+      ORDER BY posting_date, created_at
+      """
+    ),
+    {"kind": OWNERSHIP_CHANGE},
+  ).all()
+  changes: dict[str, list[OwnershipChange]] = defaultdict(list)
+  for row in rows:
+    change = row.change or {}
+    changes[str(row.member)].append(
+      OwnershipChange(
+        period=str(change["period"]),
+        from_pct=float(change["from_pct"]),
+        to_pct=float(change["to_pct"]),
+      )
+    )
+  return changes
+
+
+def pct_as_of(
+  current: float | None, changes: list[OwnershipChange], period: str
+) -> float | None:
+  """The parent's share of a member for ``period``: the share the latest
+  change at or before it set, or the one the first later change started
+  from; the entity row's own with no change recorded."""
+  if not changes:
+    return current
+  held = [c for c in changes if c.period <= period]
+  return held[-1].to_pct if held else changes[0].from_pct
 
 
 def _opened(session: Session, entity_ids: list[str]) -> set[str]:
@@ -689,7 +776,7 @@ def _plan_capital(
     r.amount
     for r in rows
     if r.entity_id == consolidation_id
-    and r.kind == ACQUISITION
+    and r.kind in PRICED_KINDS
     and r.adjusts == member.id
     and r.concept.qname == INVESTMENT_IN_SUBSIDIARIES
   )
@@ -1080,10 +1167,13 @@ def allocation_share(
   concepts = primary_concepts(session, [str(mapping.id)]) if mapping else {}
   rows = _rows(session, [str(entity.id)], concepts, start, end, drafts_of="")
   income = _net_income(rows, str(entity.id))
-  # As _group and _plan_income_shares compute it.
-  share = (
-    float(entity.ownership_pct) / 100.0 if entity.ownership_pct is not None else 1.0
+  # As _group and _plan_income_shares compute it, at the month's share.
+  pct = pct_as_of(
+    float(entity.ownership_pct) if entity.ownership_pct is not None else None,
+    ownership_changes(session).get(str(entity.id), []),
+    period,
   )
+  share = pct / 100.0 if pct is not None else 1.0
   outside = max(1.0 - share, 0.0)
   pro_rata = share_of(income, outside)
   override = dict((entity.metadata_ or {}).get(ALLOCATION_OVERRIDES) or {}).get(period)
@@ -1093,9 +1183,7 @@ def allocation_share(
     entity_name=str(entity.name),
     period=period,
     consolidation_method=str(entity.consolidation_method),
-    ownership_pct=float(entity.ownership_pct)
-    if entity.ownership_pct is not None
-    else None,
+    ownership_pct=pct,
     outside_pct=round(outside * 100.0, 6),
     month_result=income,
     pro_rata_amount=pro_rata,
@@ -1143,8 +1231,14 @@ def preview_consolidation_entries(
   Raises ``NoConsolidationEntityError`` when the group has none."""
   start, end = month_bounds(period)
   parent_id = resolve_entity_id(session, None)
-  entities = _group(session, parent_id)
+  entities = _group(session, parent_id, period)
   by_id = {e.id: e for e in entities}
+  # What the month opened needing is measured at the share the month before
+  # held, so a change in it moves the eliminations within the month.
+  opening_share = {
+    e.id: e.share
+    for e in _group(session, parent_id, f"{start - timedelta(days=1):%Y-%m}")
+  }
   consolidation = next((e for e in entities if e.role == "consolidation"), None)
   if consolidation is None:
     raise NoConsolidationEntityError(
@@ -1256,7 +1350,7 @@ def preview_consolidation_entries(
           before,
           earlier,
           parent,
-          member,
+          replace(member, share=opening_share.get(member.id, member.share)),
           consolidation_id=consolidation.id,
           acquired=acquired_before,
           opened=opened,

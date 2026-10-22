@@ -43,6 +43,7 @@ ADJUSTMENT_KINDS = (
   "equity_method_pickup",
   "equity_method_distribution",
   "acquisition",
+  "ownership_change",
   "deconsolidation",
   "translation",
   "manual",
