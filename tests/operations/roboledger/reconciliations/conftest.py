@@ -167,8 +167,60 @@ def books(ext_session):
     status="draft",
   )
   entry(session, date(2026, 9, 5), accounts["cash"], accounts["revenue"], 1_000)
+  map_to_the_books(session, *accounts.values())
   session.commit()
   return accounts
+
+
+def map_to_the_books(session, *element_ids: str) -> None:
+  """A book mapping for the parent's accounts — a chart, the rs-gaap
+  framework, one concept, the mapping between them and an arc per account
+  — in the shape the close gate judges an account mapped by. A synced
+  ledger whose accounts were never mapped cannot close: its balances would
+  be in no statement."""
+  from robosystems.models.extensions import Association, Structure, Taxonomy
+
+  chart = Taxonomy(name="Chart", taxonomy_type="chart_of_accounts", created_by="test")
+  framework = Taxonomy(
+    name="rs-gaap",
+    taxonomy_type="reporting_standard",
+    standard="rs-gaap",
+    created_by="test",
+  )
+  session.add_all([chart, framework])
+  session.flush()
+  concept = Element(
+    qname="rs-gaap:Cash",
+    name="Cash",
+    taxonomy_id=framework.id,
+    element_type="concept",
+    is_abstract=False,
+    created_by="test",
+  )
+  mapping = Taxonomy(
+    name="mapping",
+    taxonomy_type="mapping",
+    source_taxonomy_id=chart.id,
+    target_taxonomy_id=framework.id,
+    created_by="test",
+  )
+  session.add_all([concept, mapping])
+  session.flush()
+  structure = Structure(
+    name="CoA mapping", block_type="coa_mapping", taxonomy_id=mapping.id
+  )
+  session.add(structure)
+  session.flush()
+  for element_id in element_ids:
+    session.add(
+      Association(
+        structure_id=structure.id,
+        from_element_id=element_id,
+        to_element_id=concept.id,
+        association_type="mapping",
+      )
+    )
+  session.flush()
 
 
 def source_report(*rows: tuple[str, str, int]) -> TrialBalanceReport:
