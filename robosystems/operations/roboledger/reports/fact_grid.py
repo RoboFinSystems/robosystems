@@ -2841,6 +2841,10 @@ def _check_cash_flow_tie_out(
     if net_change is None:
       continue
     cash_end = cash_by_date.get(current.end)
+    if cash_end is None and abs(net_change) <= 0.01:
+      # No cash moved and none is held (a consolidation entity's books):
+      # there is nothing to tie.
+      continue
     if cash_end is None:
       # "Couldn't check" must not look like "checked and tied".
       logger.warning(
