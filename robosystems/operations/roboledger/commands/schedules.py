@@ -9,16 +9,23 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from robosystems.models.api.extensions.schedules import (
+  MAX_SCHEDULE_MONTHS,
   CreateScheduleRequest,
   DeleteScheduleRequest,
+  EntryTemplateRequest,
+  PreviewScheduleRequest,
   PromoteObligationsRequest,
   PromoteObligationsResponse,
   RebuildScheduleRequest,
   ScheduleCreatedResponse,
+  ScheduleMetadataRequest,
+  ScheduleReplacementSummary,
+  ScheduleRollForwardRow,
   TerminateScheduleRequest,
   TerminateScheduleResponse,
   UpdateScheduleRequest,
 )
+from robosystems.models.api.information_block import PreviewScheduleResponse
 from robosystems.models.extensions import (
   Association,
   AssociationClassification,
@@ -54,6 +61,8 @@ from robosystems.operations.roboledger.schedules.service import (
   BEFORE_CALENDAR,
   EntryTemplate,
   ScheduleMetadata,
+  _generate_monthly_periods,
+  loan_table,
 )
 
 
@@ -349,6 +358,15 @@ def _checked_dimensions(session: Session, dimension_ids: list[str]) -> list[str]
   return checked
 
 
+def _loan_accounts(schedule_metadata: dict | None) -> set[str]:
+  terms = (schedule_metadata or {}).get("loan_terms") or {}
+  return {
+    str(a)
+    for a in (terms.get("note_element_id"), terms.get("current_portion_element_id"))
+    if a
+  }
+
+
 def _validate_element_references(session: Session, body: CreateScheduleRequest) -> None:
   """Fail fast on element ids that don't exist or template accounts missing
   from ``element_ids``; otherwise facts land on phantom elements."""
@@ -357,6 +375,10 @@ def _validate_element_references(session: Session, body: CreateScheduleRequest) 
   referenced.add(body.entry_template.credit_element_id)
   if body.schedule_metadata and body.schedule_metadata.asset_element_id:
     referenced.add(body.schedule_metadata.asset_element_id)
+  posted = {leg.element_id for leg in body.entry_template.legs} | _loan_accounts(
+    body.schedule_metadata.model_dump() if body.schedule_metadata else None
+  )
+  referenced |= posted
 
   existing = set(
     session.execute(select(Element.id).where(Element.id.in_(referenced))).scalars()
@@ -371,6 +393,7 @@ def _validate_element_references(session: Session, body: CreateScheduleRequest) 
   template_refs = {
     body.entry_template.debit_element_id,
     body.entry_template.credit_element_id,
+    *posted,
   }
   undeclared = template_refs - set(body.element_ids)
   if undeclared:
@@ -387,8 +410,9 @@ def _posting_accounts(
     (template or {}).get("debit_element_id"),
     (template or {}).get("credit_element_id"),
     (schedule_metadata or {}).get("asset_element_id"),
+    *(leg.get("element_id") for leg in (template or {}).get("legs") or []),
   )
-  return {str(a) for a in accounts if a}
+  return {str(a) for a in accounts if a} | _loan_accounts(schedule_metadata)
 
 
 def _assert_posting_accounts(
@@ -421,26 +445,8 @@ def create_schedule(
     ),
   )
   service = ScheduleService()
-  et = EntryTemplate(
-    debit_element_id=body.entry_template.debit_element_id,
-    credit_element_id=body.entry_template.credit_element_id,
-    entry_type=body.entry_template.entry_type,
-    memo_template=body.entry_template.memo_template,
-    auto_reverse=body.entry_template.auto_reverse,
-    dimension_ids=_checked_dimensions(session, body.entry_template.dimension_ids),
-  )
-
-  sm = None
-  if body.schedule_metadata:
-    sm = ScheduleMetadata(
-      method=body.schedule_metadata.method,
-      original_amount=body.schedule_metadata.original_amount,
-      residual_value=body.schedule_metadata.residual_value,
-      useful_life_months=body.schedule_metadata.useful_life_months,
-      asset_element_id=body.schedule_metadata.asset_element_id,
-      periodic_amounts=body.schedule_metadata.periodic_amounts,
-      booked_on=body.schedule_metadata.booked_on,
-    )
+  et = _entry_template(session, body.entry_template)
+  sm = _schedule_metadata(body.schedule_metadata)
 
   # Never earlier than the calendar's history end: a pending obligation in a
   # closed month, or one before the calendar, would block close-period forever.
@@ -487,6 +493,8 @@ def create_schedule(
     created_by=created_by,
   )
 
+  warnings = overlap_warnings(session, structure)
+
   # Read before commit: a post-commit refresh can run on a pooled connection
   # whose search_path was reset to `public`, resolving the wrong schema.
   metadata = structure.metadata_ or {}
@@ -505,7 +513,121 @@ def create_schedule(
     rule_summary=_rule_summary(rule_results),
     schedule_created_event_id=metadata.get("schedule_created_event_id"),
     pending_event_count=metadata.get("pending_event_count", 0),
+    warnings=warnings,
   )
+
+
+def _entry_template(session: Session, body: EntryTemplateRequest) -> EntryTemplate:
+  return EntryTemplate(
+    debit_element_id=body.debit_element_id,
+    credit_element_id=body.credit_element_id,
+    entry_type=body.entry_type,
+    memo_template=body.memo_template,
+    auto_reverse=body.auto_reverse,
+    dimension_ids=_checked_dimensions(session, body.dimension_ids),
+    legs=[leg.model_dump() for leg in body.legs],
+  )
+
+
+def _schedule_metadata(body: ScheduleMetadataRequest | None) -> ScheduleMetadata | None:
+  if body is None:
+    return None
+  return ScheduleMetadata(
+    method=body.method,
+    original_amount=body.original_amount,
+    residual_value=body.residual_value,
+    useful_life_months=body.useful_life_months,
+    asset_element_id=body.asset_element_id,
+    periodic_amounts=body.periodic_amounts,
+    booked_on=body.booked_on,
+    loan_terms=body.loan_terms.model_dump(mode="json") if body.loan_terms else None,
+  )
+
+
+def posted_periods(session: Session, structure_id: str) -> list[str]:
+  """The months (YYYY-MM) holding a posted or shadowed closing entry of the
+  schedule, its own reversals left out."""
+  rows = session.execute(
+    text(
+      "SELECT DISTINCT to_char(posting_date, 'YYYY-MM') AS month FROM entries "
+      "WHERE source_structure_id = :sid AND reversal_of IS NULL "
+      "AND status IN :terminal_entry_statuses ORDER BY month"
+    ).bindparams(terminal_entry_bindparam()),
+    {"sid": structure_id},
+  )
+  return [row.month for row in rows]
+
+
+def _months_phrase(months: list[str]) -> str:
+  if not months:
+    return ""
+  shown = ", ".join(months[:12])
+  more = f" and {len(months) - 12} more" if len(months) > 12 else ""
+  return f" (in {shown}{more})"
+
+
+def edit_warning(months: list[str]) -> str | None:
+  """What a delete, rebuild or recreate would do to a schedule's posted
+  history, and the path an edit takes instead; None while nothing posted."""
+  if not months:
+    return None
+  return (
+    f"{len(months)} month{'s' if len(months) != 1 else ''} of this schedule "
+    f"{'have' if len(months) != 1 else 'has'} posted{_months_phrase(months)}. "
+    "It can no longer be deleted or rebuilt, and a new schedule beside it "
+    "would book those months again. To change the amount or the term from "
+    f"here on, terminate it at {months[-1]}'s end and create the successor "
+    "from the month after; to correct the posted months, reopen them and "
+    "reverse their entries first."
+  )
+
+
+def overlap_warnings(session: Session, structure: Structure) -> list[str]:
+  """Other active schedules of the same entity posting the same debit and
+  credit accounts in any of the same months: usually a schedule recreated
+  beside the one it was meant to replace."""
+  metadata = structure.metadata_ or {}
+  template = metadata.get("entry_template") or {}
+  start, end = metadata.get("period_start"), metadata.get("period_end")
+  if not (template and start and end):
+    return []
+  pair = (template.get("debit_element_id"), template.get("credit_element_id"))
+  warnings: list[str] = []
+  for other in session.execute(
+    select(Structure).where(
+      Structure.block_type == "schedule",
+      Structure.is_active.is_(True),
+      Structure.entity_id == structure.entity_id,
+      Structure.id != structure.id,
+    )
+  ).scalars():
+    other_meta = other.metadata_ or {}
+    other_template = other_meta.get("entry_template") or {}
+    if (
+      other_template.get("debit_element_id"),
+      other_template.get("credit_element_id"),
+    ) != pair:
+      continue
+    other_start = other_meta.get("period_start")
+    other_end = (other_meta.get("schedule_metadata") or {}).get(
+      "end_date"
+    ) or other_meta.get("period_end")
+    if not (other_start and other_end) or other_end < start or other_start > end:
+      continue
+    months = posted_periods(session, str(other.id))
+    warnings.append(
+      f"Schedule {other.name!r} ({other.id}) already posts the same accounts "
+      f"from {other_start[:7]} to {other_end[:7]}"
+      + (
+        f", with {len(months)} month{'s' if len(months) != 1 else ''} "
+        f"posted{_months_phrase(months)}"
+        if months
+        else ""
+      )
+      + ". If this one replaces it, terminate that one where this one starts, "
+      "or both will book the overlapping months."
+    )
+  return warnings
 
 
 def promote_obligations(
@@ -594,20 +716,30 @@ def update_schedule(
   template_changed = False
 
   if body.entry_template is not None:
-    new_template = {
-      "debit_element_id": body.entry_template.debit_element_id,
-      "credit_element_id": body.entry_template.credit_element_id,
-      "entry_type": body.entry_template.entry_type,
-      "memo_template": body.entry_template.memo_template,
-      "auto_reverse": body.entry_template.auto_reverse,
-    }
-    # Stored only when there are members, so a template saved before they
-    # existed reads as unchanged when submitted again as it was.
-    dimension_ids = _checked_dimensions(session, body.entry_template.dimension_ids)
-    if dimension_ids:
-      new_template["dimension_ids"] = dimension_ids
+    new_template = _template_blob(session, body.entry_template)
     template_changed = new_template != existing_template
     metadata["entry_template"] = new_template
+
+  stored_meta = (structure.metadata_ or {}).get("schedule_metadata") or {}
+  if stored_meta.get("method") == "effective_interest":
+    if body.schedule_metadata is not None and (
+      body.schedule_metadata.model_fields_set
+      & {"method", "loan_terms", "periodic_amounts", "original_amount"}
+    ):
+      raise ValueError(
+        "A loan schedule's terms define its amortization table: change them "
+        "with rebuild-schedule, which regenerates the table."
+      )
+    if template_changed:
+      # The new legs must still balance against the stored table.
+      loan_table(
+        _stored_schedule_metadata(stored_meta),
+        _template_from_blob(metadata["entry_template"]),
+        _generate_monthly_periods(
+          date.fromisoformat(metadata["period_start"]),
+          date.fromisoformat(metadata["period_end"]),
+        ),
+      )
 
   if body.schedule_metadata is not None:
     # Only the fields the caller named change. Replacing the whole block
@@ -699,6 +831,53 @@ def update_schedule(
   )
 
 
+def _template_blob(session: Session, body: EntryTemplateRequest) -> dict:
+  """An entry template as the Structure stores it."""
+  blob: dict = {
+    "debit_element_id": body.debit_element_id,
+    "credit_element_id": body.credit_element_id,
+    "entry_type": body.entry_type,
+    "memo_template": body.memo_template,
+    "auto_reverse": body.auto_reverse,
+  }
+  # Stored only when there are members (or legs), so a template saved before
+  # they existed reads as unchanged when submitted again as it was.
+  dimension_ids = _checked_dimensions(session, body.dimension_ids)
+  if dimension_ids:
+    blob["dimension_ids"] = dimension_ids
+  if body.legs:
+    blob["legs"] = [leg.model_dump() for leg in body.legs]
+  return blob
+
+
+def _template_from_blob(raw: dict) -> EntryTemplate:
+  return EntryTemplate(
+    debit_element_id=raw["debit_element_id"],
+    credit_element_id=raw["credit_element_id"],
+    entry_type=raw.get("entry_type", "closing"),
+    memo_template=raw.get("memo_template", ""),
+    auto_reverse=raw.get("auto_reverse", False),
+    dimension_ids=list(raw.get("dimension_ids") or []),
+    legs=list(raw.get("legs") or []),
+  )
+
+
+def _stored_schedule_metadata(raw: dict) -> ScheduleMetadata:
+  return ScheduleMetadata(
+    method=raw.get("method", "straight_line"),
+    # A termination re-anchors original_amount to what it recognized; the
+    # rebuild generates from the cost and ends at the cutoff again.
+    original_amount=raw.get("original_amount_at_start")
+    or raw.get("original_amount", 0),
+    residual_value=raw.get("residual_value", 0),
+    useful_life_months=raw.get("useful_life_months", 0),
+    asset_element_id=raw.get("asset_element_id"),
+    periodic_amounts=raw.get("periodic_amounts"),
+    booked_on=(date.fromisoformat(raw["booked_on"]) if raw.get("booked_on") else None),
+    loan_terms=raw.get("loan_terms"),
+  )
+
+
 def _terminal_entry_count(session: Session, structure_id: str) -> int:
   """The schedule's entries that stand on its facts: landed, or shadowed by
   a shadow close, whose receipt refers to them as its expectations."""
@@ -775,8 +954,10 @@ def delete_schedule(session: Session, body: DeleteScheduleRequest) -> dict:
   if landed:
     raise ValueError(
       f"Cannot delete schedule {structure.id!r}: {landed} posted or shadowed "
-      "closing entries exist, and the schedule is their support. Use "
-      "terminate-schedule to stop it and keep its history."
+      "closing entries exist"
+      f"{_months_phrase(posted_periods(session, str(structure.id)))}, and the "
+      "schedule is their support. Use terminate-schedule to stop it and keep "
+      "its history."
     )
 
   # Bounded: the void locks rows the promotion sweep holds.
@@ -999,34 +1180,10 @@ def _reconstruct_schedule_definition(
     raise ValueError(
       f"Schedule {structure.id!r} has no entry_template in metadata; cannot rebuild."
     )
-  entry_template = EntryTemplate(
-    debit_element_id=raw_template["debit_element_id"],
-    credit_element_id=raw_template["credit_element_id"],
-    entry_type=raw_template.get("entry_type", "closing"),
-    memo_template=raw_template.get("memo_template", ""),
-    auto_reverse=raw_template.get("auto_reverse", False),
-    dimension_ids=list(raw_template.get("dimension_ids") or []),
-  )
+  entry_template = _template_from_blob(raw_template)
 
   raw_meta = metadata.get("schedule_metadata")
-  schedule_metadata = (
-    ScheduleMetadata(
-      method=raw_meta.get("method", "straight_line"),
-      # A termination re-anchors original_amount to what it recognized; the
-      # rebuild generates from the cost and ends at the cutoff again.
-      original_amount=raw_meta.get("original_amount_at_start")
-      or raw_meta.get("original_amount", 0),
-      residual_value=raw_meta.get("residual_value", 0),
-      useful_life_months=raw_meta.get("useful_life_months", 0),
-      asset_element_id=raw_meta.get("asset_element_id"),
-      periodic_amounts=raw_meta.get("periodic_amounts"),
-      booked_on=(
-        date.fromisoformat(raw_meta["booked_on"]) if raw_meta.get("booked_on") else None
-      ),
-    )
-    if raw_meta
-    else None
-  )
+  schedule_metadata = _stored_schedule_metadata(raw_meta) if raw_meta else None
 
   source_transaction_id = (structure.artifact_mechanics or {}).get(
     "source_transaction_id"
@@ -1132,6 +1289,86 @@ def _before_calendar_note(session: Session, structure_id: str) -> str:
   )
 
 
+def _apply_redefinition(
+  session: Session, structure: Structure, body: RebuildScheduleRequest
+) -> None:
+  """Write the definition fields a rebuild names over the stored ones, so
+  the regeneration reads them. Omitted fields keep their stored values."""
+  fields = body.model_fields_set - {"structure_id"}
+  if not fields:
+    return
+  metadata = dict(structure.metadata_ or {})
+  for key in ("period_start", "period_end"):
+    value = getattr(body, key)
+    if value is not None:
+      metadata[key] = value.isoformat()
+  if body.monthly_amount is not None:
+    metadata["monthly_amount"] = body.monthly_amount
+  start = date.fromisoformat(metadata["period_start"])
+  end = date.fromisoformat(metadata["period_end"])
+  months = (end.year - start.year) * 12 + (end.month - start.month)
+  if months < 0:
+    raise ValueError("period_end must not be before period_start")
+  if months >= MAX_SCHEDULE_MONTHS:
+    raise ValueError(f"A schedule can span at most {MAX_SCHEDULE_MONTHS} months.")
+
+  previous_accounts = _posting_accounts(
+    metadata.get("entry_template"), metadata.get("schedule_metadata")
+  )
+  if body.entry_template is not None:
+    metadata["entry_template"] = _template_blob(session, body.entry_template)
+  if body.schedule_metadata is not None:
+    named = body.schedule_metadata.model_dump(
+      mode="json", include=body.schedule_metadata.model_fields_set
+    )
+    stored = dict(metadata.get("schedule_metadata") or {})
+    if "original_amount" in named:
+      # A new cost replaces the one a termination kept beside it.
+      stored.pop("original_amount_at_start", None)
+    if named.get("method") not in (None, "custom"):
+      stored.pop("periodic_amounts", None)
+    stored.pop("periodic_columns", None)
+    metadata["schedule_metadata"] = {**stored, **named}
+
+  referenced = _posting_accounts(
+    metadata.get("entry_template"), metadata.get("schedule_metadata")
+  )
+  existing = set(
+    session.execute(select(Element.id).where(Element.id.in_(referenced))).scalars()
+  )
+  if referenced - existing:
+    raise ValueError(f"Element(s) not found: {sorted(referenced - existing)}.")
+  _assert_posting_accounts(
+    session, owner_entity_id(session, structure), referenced - previous_accounts
+  )
+  # A new account joins the block's elements, where its facts are read.
+  associations = list(
+    session.execute(
+      select(Association).where(
+        Association.structure_id == structure.id,
+        Association.association_type == "presentation",
+      )
+    ).scalars()
+  )
+  associated = {str(a.to_element_id) for a in associations}
+  anchor = associations[0].from_element_id if associations else None
+  order = max((a.order_value or 0 for a in associations), default=0)
+  for element_id in sorted(referenced - associated):
+    order += 1
+    session.add(
+      Association(
+        structure_id=structure.id,
+        from_element_id=anchor or element_id,
+        to_element_id=element_id,
+        association_type="presentation",
+        order_value=float(order),
+        created_by=structure.created_by,
+      )
+    )
+  structure.metadata_ = metadata
+  flag_modified(structure, "metadata_")
+
+
 def rebuild_schedule(
   session: Session,
   body: RebuildScheduleRequest,
@@ -1147,6 +1384,7 @@ def rebuild_schedule(
   reconstructed or landed entries exist.
   """
   structure = _load_schedule_or_404(session, body.structure_id)
+  _apply_redefinition(session, structure, body)
 
   (
     entry_template,
@@ -1165,7 +1403,9 @@ def rebuild_schedule(
   if landed:
     raise ValueError(
       f"Cannot rebuild schedule {structure.id!r}: {landed} posted or shadowed "
-      "closing entries exist. A posted entry clears once its period is "
+      "closing entries exist"
+      f"{_months_phrase(posted_periods(session, str(structure.id)))}. A posted "
+      "entry clears once its period is "
       "reopened and the entry voided; reopening alone leaves it posted. A "
       "shadowed entry is a shadow close's record and is never voided: "
       "terminate the schedule after the last shadow-closed period instead."
@@ -1336,4 +1576,187 @@ def rebuild_schedule(
     rule_summary=_rule_summary(rule_results),
     schedule_created_event_id=metadata.get("schedule_created_event_id"),
     pending_event_count=metadata.get("pending_event_count", 0),
+  )
+
+
+def _replacement_summary(
+  session: Session, structure_id: str
+) -> ScheduleReplacementSummary:
+  structure = session.get(Structure, structure_id)
+  if structure is None or structure.block_type != "schedule":
+    raise ScheduleNotFoundError(structure_id)
+  months = posted_periods(session, structure_id)
+  drafts = session.execute(
+    text(
+      "SELECT COUNT(*) FROM entries "
+      "WHERE source_structure_id = :sid AND status = 'draft'"
+    ),
+    {"sid": structure_id},
+  ).scalar()
+  return ScheduleReplacementSummary(
+    structure_id=structure_id,
+    name=structure.name,
+    posted_entry_count=_terminal_entry_count(session, structure_id),
+    posted_periods=months,
+    draft_entry_count=int(drafts or 0),
+    path="terminate_and_succeed" if months else "rebuild",
+  )
+
+
+def _roll_forward(
+  session: Session, structure: Structure
+) -> list[ScheduleRollForwardRow]:
+  """The generated schedule period by period: the balance it carries on the
+  account it credits (a loan's: the note), and what each period moves."""
+  metadata = structure.metadata_ or {}
+  template = metadata.get("entry_template") or {}
+  stored = metadata.get("schedule_metadata") or {}
+  periods = _generate_monthly_periods(
+    date.fromisoformat(metadata["period_start"]),
+    date.fromisoformat(metadata["period_end"]),
+  )
+  scope_by_end = {
+    row.period_end: row.fact_scope
+    for row in session.execute(
+      select(Fact.period_end, Fact.fact_scope).where(
+        Fact.structure_id == structure.id, Fact.period_type == "duration"
+      )
+    )
+  }
+
+  def _scope(p_end: date) -> str:
+    return scope_by_end.get(p_end, "in_scope")
+
+  columns = stored.get("periodic_columns")
+  if columns:
+    current_split = bool(
+      (stored.get("loan_terms") or {}).get("current_portion_element_id")
+    )
+    return [
+      ScheduleRollForwardRow(
+        period_start=p_start,
+        period_end=p_end,
+        opening=columns["opening"][i] / 100,
+        amount=columns["interest"][i] / 100,
+        closing=columns["balance"][i] / 100,
+        scope=_scope(p_end),
+        interest=columns["interest"][i] / 100,
+        payment=columns["payment"][i] / 100,
+        principal=columns["principal"][i] / 100,
+        current_portion=columns["current_portion"][i] / 100 if current_split else None,
+      )
+      for i, (p_start, p_end) in enumerate(periods)
+    ]
+
+  amounts = {
+    period_end: float(value)
+    for period_end, value in session.execute(
+      select(Fact.period_end, Fact.value).where(
+        Fact.structure_id == structure.id,
+        Fact.period_type == "duration",
+        Fact.element_id == template.get("debit_element_id"),
+      )
+    )
+  }
+  balances = {
+    period_end: float(value)
+    for period_end, value in session.execute(
+      select(Fact.period_end, Fact.value).where(
+        Fact.structure_id == structure.id,
+        Fact.period_type == "instant",
+        Fact.element_id == template.get("credit_element_id"),
+      )
+    )
+  }
+  rows: list[ScheduleRollForwardRow] = []
+  opening = balances.get(periods[0][0], 0.0) if periods else 0.0
+  for p_start, p_end in periods:
+    closing = balances.get(p_end, opening)
+    rows.append(
+      ScheduleRollForwardRow(
+        period_start=p_start,
+        period_end=p_end,
+        opening=opening,
+        amount=amounts.get(p_end, 0.0),
+        closing=closing,
+        scope=_scope(p_end),
+      )
+    )
+    opening = closing
+  return rows
+
+
+def preview_schedule(
+  session: Session,
+  body: PreviewScheduleRequest,
+  created_by: str,
+) -> PreviewScheduleResponse:
+  """Run create on a definition and hand back what it made, keeping none of
+  it: the same generator, guards and envelope as create, in a savepoint that
+  is rolled back. Raises what create raises, and ``ScheduleNotFoundError``
+  for an unknown ``replaces_structure_id``."""
+  from robosystems.operations.information_block.schedule import build_envelope
+
+  replaces = (
+    _replacement_summary(session, body.replaces_structure_id)
+    if body.replaces_structure_id
+    else None
+  )
+  entity_id = ensure_entity_id(session, body.entity_id)
+  savepoint = session.begin_nested()
+  try:
+    _validate_element_references(session, body)
+    _assert_posting_accounts(
+      session,
+      entity_id,
+      _posting_accounts(
+        body.entry_template.model_dump(),
+        body.schedule_metadata.model_dump() if body.schedule_metadata else None,
+      ),
+    )
+    history_end = _calendar_history_end(session, entity_id)
+    structure = ScheduleService().create_schedule(
+      session,
+      calendar_start=_calendar_open_start(session, entity_id),
+      booked_through=body.closed_through,
+      name=body.name,
+      taxonomy_id=body.taxonomy_id,
+      element_ids=body.element_ids,
+      period_start=body.period_start,
+      period_end=body.period_end,
+      monthly_amount=body.monthly_amount,
+      entry_template=_entry_template(session, body.entry_template),
+      schedule_metadata=_schedule_metadata(body.schedule_metadata),
+      created_by=created_by,
+      closed_through=max(
+        (d for d in (body.closed_through, history_end) if d is not None),
+        default=None,
+      ),
+      source_transaction_id=body.source_transaction_id,
+      entity_id=entity_id,
+    )
+    evaluate_rules_for_structure(
+      session,
+      structure.id,
+      period_start=body.period_start,
+      period_end=body.period_end,
+      created_by=created_by,
+    )
+    envelope = build_envelope(session, structure.id)
+    if envelope is None:
+      raise ValueError("The previewed schedule could not be read back.")
+    roll_forward = _roll_forward(session, structure)
+    warnings = [
+      warning
+      for warning in overlap_warnings(session, structure)
+      if not (replaces and replaces.structure_id in warning)
+    ]
+  finally:
+    savepoint.rollback()
+
+  return PreviewScheduleResponse(
+    envelope=envelope,
+    roll_forward=roll_forward,
+    warnings=warnings,
+    replaces=replaces,
   )

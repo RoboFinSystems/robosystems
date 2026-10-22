@@ -190,13 +190,30 @@ _INITIATE_SEQUENCE: list[str] = [
 ]
 
 _SCHEDULE_AUTHORING: list[str] = [
-  "ONE SCHEDULE = ONE debit element + ONE credit element pair. The "
-  "entry_template has a single debit_element_id and a single "
-  "credit_element_id — there is no multi-leg form. A real multi-line entry "
-  "(e.g. depreciation across several asset classes) is therefore MULTIPLE "
-  "schedules, one per asset/element pair, each with its own basis and its "
-  "own SumEquals proof. Do not try to cram several accounts into one "
-  "schedule.",
+  "ONE SCHEDULE = ONE debit element + ONE credit element pair, except a "
+  "loan. A straight-line or custom schedule's entry_template has a single "
+  "debit_element_id and a single credit_element_id, so a multi-line entry "
+  "(e.g. depreciation across several asset classes) is MULTIPLE schedules, "
+  "one per asset/element pair, each with its own basis and its own "
+  "SumEquals proof.",
+  "LOANS: schedule_metadata.method='effective_interest' with loan_terms "
+  "(principal, annual_rate, start_date, day_count, payments, maturity, "
+  "note_element_id) computes the amortization table, and "
+  "entry_template.legs say which column each line posts. Accrue and pay "
+  "through the bank: debit Interest Expense / credit Accrued Interest, both "
+  "`interest`. The schedule settles the payment (no feed): debit the note "
+  "`principal`, debit Interest Expense `interest`, credit cash or a due-to "
+  "`payment`. current_portion_element_id adds the current/noncurrent "
+  "reclass. Match day_count to the lender's statement: a bank line of "
+  "credit is usually actual/360.",
+  "PREVIEW BEFORE CREATE, AND EDIT BY REBUILD. preview-schedule runs the "
+  "generator on a definition and keeps nothing: show the person its "
+  "roll_forward before creating. To change a schedule, read its definition "
+  "from get-information-block (artifact.mechanics) and save the changed "
+  "fields with rebuild-schedule; once a month has posted "
+  "(mechanics.posted_periods, edit_warning) terminate it and create a "
+  "successor instead. Never recreate a schedule beside the one it replaces: "
+  "both would book the overlapping months.",
   "USE COA ELEMENT IDs, NOT QNAMES. debit_element_id / credit_element_id / "
   "element_ids take chart-of-accounts element ids (the `id` from "
   "get-unmapped-elements / get-graph-schema), NOT taxonomy qnames like "
@@ -217,7 +234,7 @@ _SCHEDULE_AUTHORING: list[str] = [
   "(original_amount, residual_value) are integer cents. $194.83 → 19483.",
   "STRAIGHT-LINE vs CUSTOM CURVE: the default method distributes "
   "monthly_amount evenly (final period absorbs rounding). For a non-linear "
-  "curve (effective-interest amortization, variable leases) set "
+  "single-pair curve (a bond discount, variable leases) set "
   "schedule_metadata.periodic_amounts to explicit per-period cents — its "
   "length must match the number of months and its sum must equal "
   "original_amount less residual_value.",

@@ -79,6 +79,10 @@ _EXEMPT: dict[str, str] = {
     "Reads the source's trial balance and the ledger's and returns the "
     "comparison. Writes nothing at all."
   ),
+  "preview-schedule": (
+    "Runs the schedule generator in a savepoint it rolls back and returns "
+    "what it made. Nothing it writes outlives the call."
+  ),
   "preview-reconciling-item": (
     "Reads a flagged event's posted entries against its accepted payload and "
     "returns the difference. Writes nothing at all — resolve-reconciling-item "

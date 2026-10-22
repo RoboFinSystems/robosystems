@@ -270,7 +270,8 @@ class ScheduleRegisterResolver:
 
   A schedule carries a balance on the account it credits (a prepaid drawing
   down from cost, or depreciation accumulating) and on the cost account it
-  names. It speaks from its first period, or from its ``booked_on`` date
+  names. A loan schedule carries its note's balance, less the current
+  portion it splits out, and that portion. It speaks from its first period, or from its ``booked_on`` date
   when the cost was booked earlier. One that was disposed of, or ended early,
   carries nothing from then on: whatever is left in the account has no
   schedule behind it.
@@ -337,6 +338,12 @@ class ScheduleRegisterResolver:
 
     for schedule in schedules:
       schedule_id = str(schedule.id)
+      loan = _loan_balances(schedule, as_of)
+      if loan is not None:
+        note = _ended_note(schedule, disposed.get(schedule_id), as_of)
+        for element_id, cents in loan:
+          _add(element_id, schedule, 0 if note else cents, note)
+        continue
       recognition = recognized.get(schedule_id, _NOTHING_RECOGNIZED)
       if not recognition.started:
         # Not started by the period end. It still carries its cost from the
@@ -397,6 +404,43 @@ def _credit_id(schedule: Structure) -> str | None:
 
 def _asset_id(schedule: Structure) -> str | None:
   return _schedule_metadata(schedule).get("asset_element_id")
+
+
+def _loan_balances(schedule: Structure, as_of: date) -> list[tuple[str, int]] | None:
+  """A loan schedule's balances at ``as_of`` by account, debit-positive cents
+  (a liability's are negative): the note's from its table, the principal as
+  drawn before the first period ends. None for any other schedule; empty
+  before the loan is drawn."""
+  metadata = schedule.metadata_ or {}
+  stored = _schedule_metadata(schedule)
+  columns = stored.get("periodic_columns")
+  terms = stored.get("loan_terms")
+  if not columns or not terms or not metadata.get("period_start"):
+    return None
+  note_id = terms["note_element_id"]
+  current_id = terms.get("current_portion_element_id")
+  start = date.fromisoformat(metadata["period_start"])
+  months = (as_of.year - start.year) * 12 + (as_of.month - start.month)
+  # The last period ending on or before as_of.
+  index = min(
+    months if _month_end(as_of) == as_of else months - 1, len(columns["balance"]) - 1
+  )
+  if index < 0:
+    if as_of.isoformat() < str(terms["start_date"]):
+      return []
+    balance, current = int(columns["opening"][0]), 0
+  else:
+    balance = int(columns["balance"][index])
+    current = int(columns["current_portion"][index]) if current_id else 0
+  balances = [(note_id, -(balance - current))]
+  if current_id:
+    balances.append((current_id, -current))
+  return balances
+
+
+def _month_end(day: date) -> date:
+  following = date(day.year + day.month // 12, day.month % 12 + 1, 1)
+  return following - timedelta(days=1)
 
 
 def _ended_note(

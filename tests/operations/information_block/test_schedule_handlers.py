@@ -12,6 +12,8 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from robosystems.models.api.extensions.schedules import (
   CreateScheduleRequest,
   DeleteScheduleRequest,
@@ -156,6 +158,13 @@ class TestDelete:
 
 
 class TestBuildEnvelope:
+  @pytest.fixture(autouse=True)
+  def _no_posted_periods(self):
+    """The posted-months read has its own real-Postgres test
+    (test_schedule_round_trip_db); these script the envelope's other reads."""
+    with patch(f"{COMMANDS}.posted_periods", return_value=[]):
+      yield
+
   def test_returns_none_when_structure_missing(self) -> None:
     session = MagicMock()
     session.get.return_value = None

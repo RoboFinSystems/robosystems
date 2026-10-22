@@ -33,6 +33,10 @@ from robosystems.operations.roboledger.fiscal_calendar import period_date_range
 from robosystems.operations.roboledger.reads.trial_balance import (
   get_net_balances_cents,
 )
+from robosystems.operations.roboledger.schedules.service import (
+  period_index,
+  planned_lines,
+)
 
 from .resolvers import IndependentSide, ReconciliationWindow, RollForward
 
@@ -162,8 +166,10 @@ def _undrafted_schedule_balances(
   # reads it, so a stray second fact for a period is not counted twice.
   rows = session.execute(
     text("""
-      SELECT s.metadata->'entry_template'->>'debit_element_id' AS debit_id,
-             s.metadata->'entry_template'->>'credit_element_id' AS credit_id,
+      SELECT s.metadata->'entry_template' AS template,
+             s.metadata->'schedule_metadata' AS schedule_metadata,
+             s.metadata->>'period_start' AS schedule_start,
+             f.period_start,
              f.value
       FROM events ev
       JOIN structures s
@@ -199,9 +205,15 @@ def _undrafted_schedule_balances(
   )
   balances: dict[str, int] = {}
   for row in rows:
-    cents = round(float(row.value) * 100)
-    balances[row.debit_id] = balances.get(row.debit_id, 0) + cents
-    balances[row.credit_id] = balances.get(row.credit_id, 0) - cents
+    index = (
+      period_index(date.fromisoformat(row.schedule_start), row.period_start)
+      if row.schedule_start
+      else 0
+    )
+    for element_id, debit, credit in planned_lines(
+      row.template, row.schedule_metadata, index, round(float(row.value) * 100)
+    ):
+      balances[element_id] = balances.get(element_id, 0) + debit - credit
   return balances
 
 
