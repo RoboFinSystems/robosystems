@@ -210,19 +210,24 @@ def _refuse_exit_while_held(session: Session, entity: Entity, left_on: date) -> 
       f"{entity.name}'s books are open for {', '.join(open_months)}; close them "
       f"through {last_month}, the month it leaves, then set left_on."
     )
-  # No open month is not closed books: a calendar that stops short, or none.
-  closed_through = session.execute(
+  # No open month is not closed books: a calendar that stops short of the
+  # month is not closed through it. An entity with no calendar has no books
+  # to close.
+  books = session.execute(
     text(
-      "SELECT max(name) FROM fiscal_periods WHERE entity_id = :id "
-      "AND period_type = 'monthly' AND status = 'closed'"
+      "SELECT count(*) AS months, "
+      "       max(name) FILTER (WHERE status = 'closed') AS closed_through "
+      "FROM fiscal_periods WHERE entity_id = :id AND period_type = 'monthly'"
     ),
     {"id": str(entity.id)},
-  ).scalar()
-  if closed_through is None or str(closed_through) < last_month:
+  ).one()
+  if books.months and (
+    books.closed_through is None or str(books.closed_through) < last_month
+  ):
     raise EntityExitError(
       f"{entity.name}'s books are closed through "
-      f"{closed_through or 'no month'}; close them through {last_month}, the "
-      "month it leaves, then set left_on."
+      f"{books.closed_through or 'no month'}; close them through {last_month}, "
+      "the month it leaves, then set left_on."
     )
   from robosystems.operations.roboledger.reads.fiscal_calendar import (
     feed_connection_ids,
