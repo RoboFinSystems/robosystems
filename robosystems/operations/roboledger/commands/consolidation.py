@@ -429,9 +429,14 @@ def record_acquisition(
         f"The step-up to {allocation.concept} is zero; leave it out."
       )
 
-  share = (
-    float(member.ownership_pct) / 100.0 if member.ownership_pct is not None else 1.0
+  # The share the parent bought: held before any ownership change, even one
+  # recorded for the month it joined.
+  joined_pct = pct_as_of(
+    float(member.ownership_pct) if member.ownership_pct is not None else None,
+    ownership_changes(session).get(str(member.id), []),
+    f"{member.joined_on.replace(day=1) - timedelta(days=1):%Y-%m}",
   )
+  share = joined_pct / 100.0 if joined_pct is not None else 1.0
   equity = _equity_at_acquisition(session, member, opening)
   parent_part = share_of(equity, share)
   outside_equity = equity - parent_part
@@ -584,6 +589,43 @@ class OwnershipChangeError(ValueError):
   """An ownership change that cannot be recorded as given."""
 
 
+def _outside_premium(
+  session: Session,
+  consolidation_id: str,
+  member_id: str,
+  nci_account: str | None,
+  *,
+  exclude: set[str],
+) -> int:
+  """The outside owners' interest in a member that its acquisition and its
+  ownership changes hold on the noncontrolling-interest account, beyond the
+  share of book value the investment elimination carries; credit-positive."""
+  if nci_account is None:
+    return 0
+  held = session.execute(
+    text(
+      """
+      SELECT COALESCE(SUM(li.credit_amount - li.debit_amount), 0)
+      FROM line_items li JOIN entries e ON e.id = li.entry_id
+      WHERE e.entity_id = :c AND e.adjusts_entity_id = :m
+        AND e.adjustment_kind IN ('acquisition', 'ownership_change')
+        AND e.status IN ('posted', 'draft') AND li.element_id = :account
+        -- A reversed original is out by its status; its reversal, posted
+        -- with the original's kind, goes with it.
+        AND e.reversal_of IS NULL
+        AND NOT (e.id = ANY(:exclude))
+      """
+    ),
+    {
+      "c": consolidation_id,
+      "m": member_id,
+      "account": nci_account,
+      "exclude": list(exclude),
+    },
+  ).scalar()
+  return int(held or 0)
+
+
 def record_ownership_change(
   session: Session, body: RecordOwnershipChangeRequest, created_by: str
 ) -> OwnershipChangeResponse:
@@ -679,22 +721,13 @@ def record_ownership_change(
       "method is not supported yet."
     )
 
-  bought = (body.ownership_pct - from_pct) / 100.0
+  before, after = from_pct / 100.0, body.ownership_pct / 100.0
   capital, earnings = capital_and_earnings(
     session, str(member.id), start - timedelta(days=1)
   )
-  book_value = share_of(capital, bought)
-  earnings_transferred = share_of(earnings, bought)
-  excess = body.consideration - book_value
-  wanted = {
-    INVESTMENT_IN_SUBSIDIARIES: -excess,
-    NONCONTROLLING_INTEREST: earnings_transferred,
-  }
-  style = load_entity_reporting_style(session, resolve_entity_id(session, None))
-  close_target = load_close_target_concept(session, style)
-  equity_concept = _PARENT_EQUITY.get(close_target, close_target)
-  wanted[equity_concept] = wanted.get(equity_concept, 0) + excess - earnings_transferred
-  wanted = {q: a for q, a in wanted.items() if a}
+  # As the investment elimination rounds each share, so the two agree.
+  book_value = share_of(capital, after) - share_of(capital, before)
+  earnings_transferred = share_of(earnings, after) - share_of(earnings, before)
 
   mapping = find_entity_mapping(session, consolidation_id, BOOK_FRAMEWORK)
   accounts = (
@@ -704,6 +737,30 @@ def record_ownership_change(
     if mapping is not None
     else {}
   )
+  # The outside owners' interest beyond their share of book value that an
+  # acquisition or an earlier change put there moves in proportion too: ASC
+  # 810 adjusts the whole carrying amount.
+  premium = _outside_premium(
+    session,
+    consolidation_id,
+    str(member.id),
+    accounts.get(NONCONTROLLING_INTEREST, (None,))[0],
+    exclude={str(e.id) for e in same},
+  )
+  premium_transferred = (
+    round(premium * (after - before) / (1.0 - before)) if before < 1.0 else 0
+  )
+  excess = body.consideration - book_value
+  moved = earnings_transferred + premium_transferred
+  wanted = {
+    INVESTMENT_IN_SUBSIDIARIES: -excess,
+    NONCONTROLLING_INTEREST: moved,
+  }
+  style = load_entity_reporting_style(session, resolve_entity_id(session, None))
+  close_target = load_close_target_concept(session, style)
+  equity_concept = _PARENT_EQUITY.get(close_target, close_target)
+  wanted[equity_concept] = wanted.get(equity_concept, 0) + excess - moved
+  wanted = {q: a for q, a in wanted.items() if a}
   missing = sorted(q for q in wanted if q not in accounts)
   if missing:
     raise OwnershipChangeError(
@@ -765,6 +822,7 @@ def record_ownership_change(
       "consideration": body.consideration,
       "book_value": book_value,
       "earnings_transferred": earnings_transferred,
+      "premium_transferred": premium_transferred,
       "basis": body.basis,
       "recorded_by": created_by,
     },
@@ -787,7 +845,8 @@ def record_ownership_change(
     consideration=body.consideration,
     book_value=book_value,
     earnings_transferred=earnings_transferred,
-    equity_adjustment=excess - earnings_transferred,
+    premium_transferred=premium_transferred,
+    equity_adjustment=excess - moved,
     entry=response,
     replaced=bool(same),
   )

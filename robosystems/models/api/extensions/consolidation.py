@@ -497,6 +497,14 @@ class OwnershipChangeResponse(BaseModel):
       "from the outside owners' interest to the parent."
     ),
   )
+  premium_transferred: int = Field(
+    0,
+    description=(
+      "Cents: the share bought of the outside owners' interest beyond their "
+      "share of book value (from the acquisition at fair value, or its "
+      "step-ups), moved to the parent."
+    ),
+  )
   equity_adjustment: int = Field(
     ...,
     description=(

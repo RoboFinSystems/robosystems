@@ -2266,3 +2266,131 @@ def test_changes_are_recorded_in_order_and_a_draft_is_replaced(group):
     )
   with pytest.raises(OwnershipChangeError, match="Reverse that entry first"):
     _change(period="2026-03", ownership_pct=90)
+
+
+# ── Pre-release review fixes ─────────────────────────────────────────────
+
+
+def _acquire_sixty_percent_of_an_odd_capital(group: dict) -> None:
+  """The member joins on 1 January with 10,000.03 of equity; the parent buys
+  60 % for 9,000, the outside owners' 40 % valued at 5,500."""
+  _flow_rows()
+  with extensions_session(GRAPH) as session:
+    session.execute(
+      text("UPDATE entities SET joined_on = :d, ownership_pct = 60 WHERE id = :id"),
+      {"d": JAN_1, "id": MEMBER},
+    )
+  post(
+    group,
+    MEMBER,
+    DEC,
+    [("cash", 1_000_003), ("equity", -1_000_003)],
+    entry_type="opening",
+  )
+  post(
+    group,
+    PARENT_ENTITY_ID,
+    JAN_1,
+    [("investment", 900_000), ("cash", -900_000)],
+    agent="owner",
+  )
+  _acquire(consideration=900_000, nci_fair_value=550_000)
+
+
+def test_buying_more_moves_the_acquisition_premium_and_rounds_as_the_elimination(group):
+  """The outside owners' 5,500 is 4,000.01 of book value and 1,499.99 above
+  it. Buying half of their 40 % moves half of that premium to the parent with
+  the shares (ASC 810), and the book value bought is the elimination's own
+  difference of rounded shares, so the month does not withhold a cent."""
+  _acquire_sixty_percent_of_an_odd_capital(group)
+  post(
+    group,
+    PARENT_ENTITY_ID,
+    FEB_1,
+    [("investment", 300_000), ("cash", -300_000)],
+    agent="owner",
+  )
+  recorded = _change(ownership_pct=80, consideration=300_000)
+
+  assert recorded.book_value == 200_000  # 800,002 less 600,002
+  assert recorded.premium_transferred == 75_000
+  lines = {code: amount for code, (amount, _) in _change_lines().items()}
+  assert lines == {"1600": -100_000, "3200": 75_000, "3050": 25_000}
+  assert preview("2026-02").residuals == []
+
+
+def test_undoing_a_change_puts_the_share_back(group):
+  _january_posted(group)
+  _buy_ten_percent(group)
+  _change()
+  with extensions_session(GRAPH) as session:
+    entry_id = session.execute(
+      text("SELECT id FROM entries WHERE adjustment_kind = 'ownership_change'")
+    ).scalar_one()
+    session.execute(
+      text("UPDATE entries SET status = 'posted' WHERE id = :id"), {"id": entry_id}
+    )
+  with extensions_session(GRAPH) as session:
+    reverse_journal_entry(
+      session,
+      ReverseJournalEntryRequest(entry_id=str(entry_id), posting_date=FEB_1),
+      "test",
+    )
+    session.commit()
+  with extensions_session(GRAPH) as session:
+    assert float(session.get(Entity, MEMBER).ownership_pct) == 70.0
+    february = engine.allocation_share(session, entity_id=MEMBER, period="2026-02")
+  assert february is not None and february.outside_pct == 30.0
+  # And it can be recorded again, from 70 %.
+  assert _change().from_pct == 70.0
+
+
+def test_an_acquisition_is_measured_at_the_share_bought(group):
+  """Recorded again after a later change, the acquisition still measures the
+  equity at the 60 % the parent bought, not the share it holds now."""
+  _acquire_sixty_percent_of_an_odd_capital(group)
+  post(
+    group,
+    PARENT_ENTITY_ID,
+    FEB_1,
+    [("investment", 300_000), ("cash", -300_000)],
+    agent="owner",
+  )
+  _change(ownership_pct=80, consideration=300_000)
+  again = _acquire(consideration=900_000, nci_fair_value=550_000)
+  assert again.parent_share == 600_002
+
+
+def test_a_reversed_acquisition_leaves_no_premium_to_move(group):
+  """A reversed acquisition's reversal carries its kind with its lines
+  flipped; neither is the outside owners' interest any more."""
+  _acquire_sixty_percent_of_an_odd_capital(group)
+  with extensions_session(GRAPH) as session:
+    entry_id = session.execute(
+      text("SELECT id FROM entries WHERE adjustment_kind = 'acquisition'")
+    ).scalar_one()
+    session.execute(
+      text("UPDATE entries SET status = 'posted' WHERE id = :id"), {"id": entry_id}
+    )
+  with extensions_session(GRAPH) as session:
+    reverse_journal_entry(
+      session,
+      ReverseJournalEntryRequest(entry_id=str(entry_id), posting_date=JAN_1),
+      "test",
+    )
+    session.commit()
+  post(
+    group,
+    PARENT_ENTITY_ID,
+    FEB_1,
+    [("investment", 300_000), ("cash", -300_000)],
+    agent="owner",
+  )
+  assert _change(ownership_pct=80, consideration=300_000).premium_transferred == 0
+
+
+def test_an_acquisition_ignores_a_change_in_the_month_it_joined(group):
+  _acquire_sixty_percent_of_an_odd_capital(group)
+  _change(period="2026-01", ownership_pct=80, consideration=300_000)
+  again = _acquire(consideration=900_000, nci_fair_value=550_000)
+  assert again.parent_share == 600_002

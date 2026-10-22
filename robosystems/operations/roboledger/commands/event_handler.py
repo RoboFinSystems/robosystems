@@ -28,7 +28,8 @@ class ApprovalNotAllowedError(Exception):
 
 
 # Fields that change what a handler matches or books. Changed over MCP, the
-# handler is the AI's proposal again and waits for a person's approval.
+# handler is the AI's proposal again and waits for a person's approval; so
+# does a metadata patch or a reactivation (update_event_handler).
 _SUBSTANTIVE_FIELDS = (
   "event_category",
   "match_source",
@@ -144,9 +145,17 @@ def update_event_handler(
   if handler is None:
     raise EventHandlerNotFoundError(body.event_handler_id)
 
-  substantive = body.transaction_template is not None or any(
-    getattr(body, field) is not None and getattr(body, field) != getattr(handler, field)
-    for field in _SUBSTANTIVE_FIELDS
+  substantive = (
+    body.transaction_template is not None
+    or any(
+      getattr(body, field) is not None
+      and getattr(body, field) != getattr(handler, field)
+      for field in _SUBSTANTIVE_FIELDS
+    )
+    # A template can read the handler's own metadata into what it books.
+    or bool(body.metadata_patch)
+    # Back into matching after a person took it out.
+    or (body.is_active is True and not handler.is_active)
   )
   for field in ("name", "description", *_SUBSTANTIVE_FIELDS, "is_active"):
     value = getattr(body, field)
