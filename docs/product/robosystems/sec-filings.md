@@ -61,7 +61,7 @@ So on the day a company reports, ask to read its filing or release rather than f
 These rules decide whether a number is right. The model is given them, and they're worth knowing when you check an answer:
 
 - **Totals or breakdowns.** A company reports a consolidated total and often breakdowns by segment, product or geography. Adding the breakdowns to the total double-counts. Ask for "consolidated" when that's what you mean.
-- **The same concept, different tags.** Companies tag revenue, for example, in several different ways. Comparisons across companies use the normalized concept, not one tag.
+- **The same concept, different tags.** Companies tag revenue, for example, in several different ways. Comparisons across companies name each company's own tag for the concept, not one tag for all of them.
 - **Flows and balances.** Revenue and cash flow cover a period; assets and liabilities are a point in time. Say "annual" or "quarterly" for flows.
 - **Fiscal years differ.** A company's fiscal 2025 may end in a month other than December. Compare by fiscal period, and name the dates when it matters.
 - **Numbers from facts, explanations from text.** Figures come from the reported facts; the why comes from the filing's narrative.

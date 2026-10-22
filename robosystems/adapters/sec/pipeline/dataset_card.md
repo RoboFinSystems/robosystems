@@ -143,7 +143,8 @@ MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact {has_dimensions: false}),
       (f)-[:FACT_HAS_ELEMENT]->(e:Element),
       (f)-[:FACT_HAS_ENTITY]->(ent:Entity {ticker: 'NVDA'}),
       (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'})
-WHERE e.canonical_concept = 'revenue' AND f.numeric_value IS NOT NULL
+WHERE e.qname IN ['us-gaap:Revenues', 'us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax']
+  AND f.numeric_value IS NOT NULL
 RETURN p.end_date, f.numeric_value AS revenue, r.form, r.filing_date, r.accession_number
 ORDER BY p.end_date DESC, r.filing_date LIMIT 20
 ```
@@ -200,7 +201,8 @@ normalises, classifies, and materialises it is [RoboSystems](https://github.com/
 Apache-2.0. Facts are as filed: restatements appear as later
 filings, not as corrections to earlier ones. Element names follow the filer's taxonomy (`us-gaap`,
 `ifrs-full`, extensions); `canonical_concept` and `Structure.canonical_type` are RoboSystems' cross-filer
-normalisation on top.
+normalisation on top. `canonical_concept` is a rough grouping for finding elements: a group can include
+elements that are not the concept, so filter numbers by `qname`.
 
 ```
 RoboSystems. SEC XBRL Knowledge Graph (LadybugDB). Hugging Face, snapshot {{snapshot_date}}.

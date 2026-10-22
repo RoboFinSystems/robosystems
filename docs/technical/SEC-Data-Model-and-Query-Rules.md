@@ -2,7 +2,7 @@
 
 This page is for integrators querying the hosted `sec` graph — the shared repository of public-company XBRL filings — with Cypher. It describes the node and relationship model, the four rules that decide whether a number read from it is right, and a set of worked queries that follow them.
 
-**Quick Start:** Before writing Cypher, try the ready-made views: `financial-statement-analysis` returns a company's statement by ticker, and `build-fact-grid` pivots facts across companies and periods. Both already apply the rules on this page. When you do write Cypher, filter `Fact {has_dimensions: false}`, match `Element.canonical_concept`, pin the `Period` shape, and `RETURN DISTINCT` from an `Entity` anchor.
+**Quick Start:** Before writing Cypher, try the ready-made views: `financial-statement-analysis` returns a company's statement by ticker, and `build-fact-grid` pivots facts across companies and periods. Both already apply the rules on this page. When you do write Cypher, filter `Fact {has_dimensions: false}`, name each filer's element qnames, pin the `Period` shape, and `RETURN DISTINCT` from an `Entity` anchor.
 
 > **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
@@ -44,11 +44,11 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/sec/operations/fi
   -H "Content-Type: application/json" \
   -d '{"statement_type": "income_statement", "ticker": "NVDA", "period_type": "annual"}'
 
-# Revenue for two companies' 10-K filings, by canonical concept
+# Revenue for two companies' 10-K filings, under either revenue tag
 curl -X POST "https://api.robosystems.ai/extensions/roboledger/sec/operations/build-fact-grid" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"canonical_concepts": ["revenue"], "entities": ["NVDA", "AMD"], "form": "10-K", "period_type": "annual"}'
+  -d '{"elements": ["us-gaap:Revenues", "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"], "entities": ["NVDA", "AMD"], "form": "10-K", "period_type": "annual"}'
 
 # Where the latest 10-K mentions export controls, cover page and exhibits included
 curl -X POST "https://api.robosystems.ai/extensions/roboledger/sec/operations/search-text" \
@@ -78,7 +78,7 @@ A link is present only when the folder holds the file: an 8-K has no holon, so n
 
 ### Concept Lookup
 
-To find which element qnames carry a concept, call the MCP tool **`resolve-element`** with a phrase such as `"operating lease liability"`, optionally scoped to a `ticker` or `report_id`. It returns the matching canonical concept, the qnames filers use for it with fact counts, and a query hint. It is served on the `sec` connector only; there is no REST equivalent.
+To find which element qnames carry a concept, call the MCP tool **`resolve-element`** with a phrase such as `"operating lease liability"`, optionally scoped to a `ticker` or `report_id`. It returns the qnames filers use for it with labels and fact counts, and a query hint. Check each label before using a qname: a match can be an element that is not the concept. It is served on the `sec` connector only; there is no REST equivalent.
 
 ### Raw Cypher
 
@@ -180,7 +180,7 @@ Every filing has its own `Structure` nodes, so tens of thousands share `canonica
 
 Two properties are added during processing, beyond what the filings carry:
 
-- **`Element.canonical_concept`** — a normalized concept id shared across filers, with `canonical_confidence` beside it. Income statement: `revenue`, `cost_of_revenue`, `gross_profit`, `research_and_development`, `selling_general_admin`, `operating_expenses`, `operating_income`, `interest_income`, `interest_expense`, `nonoperating_income`, `pretax_income`, `income_tax_expense`, `net_income`, `eps_basic`, `eps_diluted`, `weighted_average_shares_basic`, `weighted_average_shares_diluted`. Balance sheet: `cash_and_equivalents`, `accounts_receivable`, `inventory`, `current_assets`, `property_plant_equipment`, `goodwill`, `intangible_assets`, `total_assets`, `accounts_payable`, `deferred_revenue`, `current_liabilities`, `long_term_debt`, `total_debt`, `total_liabilities`, `retained_earnings`, `stockholders_equity`, `total_liabilities_and_equity`, among others. Cash flow: `operating_cash_flow`, `capital_expenditures`, `investing_cash_flow`, `financing_cash_flow`, `dividends_paid`, `share_repurchases`, `net_change_in_cash`. An element with no mapping has a null `canonical_concept`.
+- **`Element.canonical_concept`** — a normalized concept id shared across filers, with `canonical_confidence` beside it. Income statement: `revenue`, `cost_of_revenue`, `gross_profit`, `research_and_development`, `selling_general_admin`, `operating_expenses`, `operating_income`, `interest_income`, `interest_expense`, `nonoperating_income`, `pretax_income`, `income_tax_expense`, `net_income`, `eps_basic`, `eps_diluted`, `weighted_average_shares_basic`, `weighted_average_shares_diluted`. Balance sheet: `cash_and_equivalents`, `accounts_receivable`, `inventory`, `current_assets`, `property_plant_equipment`, `goodwill`, `intangible_assets`, `total_assets`, `accounts_payable`, `deferred_revenue`, `current_liabilities`, `long_term_debt`, `total_debt`, `total_liabilities`, `retained_earnings`, `stockholders_equity`, `total_liabilities_and_equity`, among others. Cash flow: `operating_cash_flow`, `capital_expenditures`, `investing_cash_flow`, `financing_cash_flow`, `dividends_paid`, `share_repurchases`, `net_change_in_cash`. An element with no mapping has a null `canonical_concept`. It is a rough grouping for discovery: a group can include elements that are not the concept, so don't compute a number from it — name the qnames ([Rule 2](#rule-2-name-each-filers-elements--elementqname)).
 - **`Structure.canonical_type`** — the statement a structure is: `income_statement`, `balance_sheet`, `cash_flow_statement`, `equity_statement` or `comprehensive_income`. Other structures carry a pattern label or null.
 
 ## The Four Rules
@@ -196,7 +196,7 @@ A filer reports each figure as a consolidated total and often again broken down 
 ```cypher
 MATCH (ent:Entity {ticker: $ticker})<-[:FACT_HAS_ENTITY]-(f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element),
       (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'})
-WHERE e.canonical_concept = 'revenue' AND p.end_date = $fy_end
+WHERE e.qname IN $revenue_qnames AND p.end_date = $fy_end
 RETURN sum(f.numeric_value) AS revenue
 ```
 
@@ -208,13 +208,13 @@ For one large filer's fiscal-year revenue, the unfiltered match returned the con
 MATCH (ent:Entity {ticker: $ticker})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})
       -[:FACT_HAS_ELEMENT]->(e:Element),
       (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'})
-WHERE e.canonical_concept = 'revenue' AND p.end_date = $fy_end
+WHERE e.qname IN $revenue_qnames AND p.end_date = $fy_end
 RETURN DISTINCT e.qname AS qname, f.numeric_value AS revenue
 ```
 
 When you want the breakdown, filter `has_dimensions: true` and return the `Dimension` beside the value — and don't add the rows back to the total.
 
-### Rule 2: Canonical Concepts Over a Single qname — `Element.canonical_concept`
+### Rule 2: Name Each Filer's Elements — `Element.qname`
 
 Filers tag the same concept with different elements. Revenue is `us-gaap:Revenues` for some and `us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax` for others. A query on one qname silently drops every filer that chose the other.
 
@@ -236,12 +236,13 @@ In a three-company peer group, two of the three tag revenue `RevenueFromContract
 MATCH (ent:Entity)<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})
       -[:FACT_HAS_ELEMENT]->(e:Element),
       (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'})
-WHERE ent.ticker IN $tickers AND e.canonical_concept = 'revenue'
+WHERE ent.ticker IN $tickers
+  AND e.qname IN ['us-gaap:Revenues', 'us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax']
 RETURN DISTINCT ent.ticker AS ticker, e.qname AS qname, p.end_date AS end_date,
        f.numeric_value AS revenue
 ```
 
-Return `e.qname` beside the concept and read it. A concept can map to more than one element in the same filing — a subtotal and one of its components, for instance — so check that each row is the line you mean. `resolve-element` shows which qnames a concept covers for a given `ticker`.
+Get each filer's qnames from `resolve-element` with its `ticker`, and read the labels. Return `e.qname` beside the value: a filing can report more than one of the listed elements — a subtotal and one of its components, for instance — so check that each row is the line you mean. `Element.canonical_concept` groups elements across filers, but a group can include elements that are not the concept, so use it to discover elements, not to filter a number. In the examples on this page, `$revenue_qnames` and `$qnames` are lists resolved this way.
 
 ### Rule 3: Pin the Period Shape — `duration_type` for Flows, `period_type: 'instant'` for Balances
 
@@ -253,7 +254,7 @@ Income-statement and cash-flow figures cover a span of time; balance-sheet figur
 MATCH (ent:Entity {ticker: $ticker})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})
       -[:FACT_HAS_ELEMENT]->(e:Element),
       (f)-[:FACT_HAS_PERIOD]->(p:Period)
-WHERE e.canonical_concept = 'revenue'
+WHERE e.qname IN $revenue_qnames
 RETURN DISTINCT p.end_date AS end_date, f.numeric_value AS revenue
 ORDER BY end_date DESC
 ```
@@ -266,7 +267,7 @@ Rows that share an `end_date` can be a quarter, six or nine months, or a year, w
 MATCH (ent:Entity {ticker: $ticker})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})
       -[:FACT_HAS_ELEMENT]->(e:Element),
       (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'quarterly'})
-WHERE e.canonical_concept = 'revenue'
+WHERE e.qname IN $revenue_qnames
 RETURN DISTINCT p.start_date AS start_date, p.end_date AS end_date, f.numeric_value AS revenue
 ORDER BY end_date DESC
 ```
@@ -297,7 +298,7 @@ MATCH (ent:Entity {ticker: $ticker})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions
       (fs:FactSet)-[:FACT_SET_CONTAINS_FACT]->(f),
       (s:Structure {canonical_type: 'income_statement'})-[:STRUCTURE_HAS_FACT_SET]->(fs)
 WHERE f.numeric_value IS NOT NULL
-RETURN DISTINCT e.canonical_concept AS concept, e.qname AS qname,
+RETURN DISTINCT e.qname AS qname,
        p.end_date AS end_date, f.numeric_value AS value
 ORDER BY end_date DESC
 LIMIT 40
@@ -331,7 +332,7 @@ MATCH (r:Report {identifier: $report_id})-[:REPORT_HAS_FACT]->(f:Fact {has_dimen
       (fs:FactSet)-[:FACT_SET_CONTAINS_FACT]->(f),
       (s:Structure {canonical_type: 'income_statement'})-[:STRUCTURE_HAS_FACT_SET]->(fs)
 WHERE f.numeric_value IS NOT NULL
-RETURN DISTINCT e.canonical_concept AS concept, e.qname AS qname,
+RETURN DISTINCT e.qname AS qname,
        p.start_date AS start_date, p.end_date AS end_date, f.numeric_value AS value
 ORDER BY end_date DESC, qname
 LIMIT 60
@@ -345,7 +346,7 @@ For a cash flow statement, use `canonical_type: 'cash_flow_statement'`. For a ba
 MATCH (ent:Entity {ticker: $ticker})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})
       -[:FACT_HAS_ELEMENT]->(e:Element),
       (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'quarterly'})
-WHERE e.canonical_concept = $concept AND f.numeric_value IS NOT NULL
+WHERE e.qname IN $qnames AND f.numeric_value IS NOT NULL
 RETURN DISTINCT e.qname AS qname, p.start_date AS start_date, p.end_date AS end_date,
        f.numeric_value AS value
 ORDER BY end_date DESC
@@ -354,23 +355,23 @@ LIMIT 8
 
 A fourth fiscal quarter is usually missing. A 10-K reports the year, not the quarter that ends it, so there is typically no three-month fact for Q4. Derive it as the annual figure minus the first three quarters of the same fiscal year, and say so when you report it. The eight rows above can therefore span more than two fiscal years.
 
-### Peer Comparison by Canonical Concept
+### Peer Comparison
 
 ```cypher
 MATCH (ent:Entity)<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})
       -[:FACT_HAS_ELEMENT]->(e:Element),
       (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'})
 WHERE ent.ticker IN $tickers
-  AND e.canonical_concept IN ['revenue', 'gross_profit']
+  AND e.qname IN $qnames
   AND p.end_date >= $since
   AND f.numeric_value IS NOT NULL
-RETURN DISTINCT ent.ticker AS ticker, e.canonical_concept AS concept, e.qname AS qname,
+RETURN DISTINCT ent.ticker AS ticker, e.qname AS qname,
        p.end_date AS end_date, f.numeric_value AS value
-ORDER BY ticker, end_date DESC, concept
+ORDER BY ticker, end_date DESC, qname
 LIMIT 50
 ```
 
-The result shows each company's own `qname` for revenue beside the shared concept. Fiscal years differ: compare each company's fiscal year by its own `end_date` rather than assuming the years line up on the calendar.
+`$qnames` holds the revenue and gross-profit elements resolved for each company; the result shows which one each company reports. Fiscal years differ: compare each company's fiscal year by its own `end_date` rather than assuming the years line up on the calendar.
 
 ### Balance Sheet at a Date
 
@@ -380,12 +381,11 @@ MATCH (ent:Entity {ticker: $ticker})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions
       (f)-[:FACT_HAS_PERIOD]->(p:Period {period_type: 'instant'}),
       (f)-[:FACT_HAS_UNIT]->(u:Unit)
 WHERE p.end_date = $as_of
-  AND e.canonical_concept IN ['cash_and_equivalents', 'current_assets', 'total_assets',
-                              'current_liabilities', 'total_liabilities', 'stockholders_equity']
+  AND e.qname IN $qnames
   AND f.numeric_value IS NOT NULL
-RETURN DISTINCT e.canonical_concept AS concept, e.qname AS qname,
+RETURN DISTINCT e.qname AS qname,
        f.numeric_value AS value, u.measure AS unit
-ORDER BY concept
+ORDER BY qname
 LIMIT 20
 ```
 
@@ -400,7 +400,7 @@ MATCH (ent:Entity {ticker: $ticker})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions
       -[:FACT_HAS_ELEMENT]->(e:Element),
       (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'}),
       (f)-[:FACT_HAS_DIMENSION]->(d:Dimension)
-WHERE e.canonical_concept = 'revenue' AND p.end_date = $fy_end
+WHERE e.qname IN $revenue_qnames AND p.end_date = $fy_end
 RETURN DISTINCT e.qname AS qname, d.axis AS axis, d.member AS member,
        f.numeric_value AS value, f.dimension_count AS dimensions
 ORDER BY axis, value DESC

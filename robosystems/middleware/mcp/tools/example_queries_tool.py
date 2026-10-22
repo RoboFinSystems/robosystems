@@ -129,12 +129,12 @@ List of example queries with explanations, tailored to the actual schema present
             },
             {
               "category": "financial",
-              "description": "⭐ CONSOLIDATED Revenue for one company (cross-filer robust)",
+              "description": "⭐ CONSOLIDATED Revenue for one company",
               "query": """MATCH (f:Fact {has_dimensions: false})-[:FACT_HAS_ELEMENT]->(e:Element), (f)-[:FACT_HAS_ENTITY]->(ent:Entity {ticker: 'NVDA'}), (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'})
-WHERE e.canonical_concept = 'revenue' AND f.numeric_value IS NOT NULL
+WHERE e.qname IN ['us-gaap:Revenues', 'us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax'] AND f.numeric_value IS NOT NULL
 RETURN ent.ticker, e.qname, p.end_date, f.numeric_value AS revenue
 ORDER BY p.end_date DESC LIMIT 10""",
-              "explanation": "⚠️ has_dimensions=false drops segment breakdowns (consolidated totals only). Filter on e.canonical_concept ('revenue', 'net_income', ...) rather than a single qname — revenue is tagged us-gaap:Revenues by some filers and us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax by others, and canonical_concept normalizes across both. Use the resolve-element tool to discover concepts.",
+              "explanation": "⚠️ has_dimensions=false drops segment breakdowns (consolidated totals only). Filers tag the same concept differently (us-gaap:Revenues vs us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax), so name the qnames: run resolve-element with the company's ticker, check the labels, and filter e.qname IN [...]. e.canonical_concept is a rough grouping, not a filter to compute a number from.",
             },
             {
               "category": "financial",

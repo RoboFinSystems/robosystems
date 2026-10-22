@@ -49,7 +49,7 @@ class BuildFactGridTool:
 
 **PARAMETERS:**
 - elements: XBRL qnames (e.g., 'us-gaap:Assets'). Use resolve-element to find qnames.
-- canonical_concepts: Normalized concept names (e.g., 'revenue', 'net_income'). Matches ALL element qnames mapped to each concept across companies. Can be combined with elements.
+- canonical_concepts: Rough cross-filer groupings (e.g., 'revenue'). A group can include elements that are not the concept, so do not compute a number from one; prefer elements.
 - periods: End dates in YYYY-MM-DD format
 - entity/entities: Filter by ticker, CIK, or name. Use 'entities' array for multi-company.
 - period_type: 'annual', 'quarterly', or 'instant'. Important for duration elements (revenue, net income).
@@ -66,7 +66,7 @@ class BuildFactGridTool:
 **NOTES:**
 On shared repositories (e.g. SEC) entity or entities is REQUIRED — those graphs host thousands of filers, so an unscoped query returns an arbitrary slice of arbitrary companies. On a tenant graph the URL already scopes to one entity, so the filter is optional there.
 On a tenant graph select by `elements` with `periods` or `period_type`: `canonical_concepts`, `form`, `fiscal_year` and `fiscal_period` exist only on shared repositories and are refused there rather than answered with nothing.
-For income statement items (revenue, net income), always specify period_type='annual' or 'quarterly' to avoid mixing duration types. Use canonical_concepts for cross-company comparisons where companies may use different XBRL tags for the same concept.
+For income statement items (revenue, net income), always specify period_type='annual' or 'quarterly' to avoid mixing duration types. Companies may tag the same concept differently: for a cross-company comparison, run resolve-element per company (with its ticker), check the labels, and pass each company's qnames as elements.
 """,
       "inputSchema": {
         "type": "object",
@@ -79,7 +79,7 @@ For income statement items (revenue, net income), always specify period_type='an
           "canonical_concepts": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "Canonical concept names (e.g., 'revenue', 'net_income', 'total_assets'). Matches ALL element qnames mapped to each concept, solving cross-company variation (e.g., 'revenue' matches both us-gaap:Revenues and us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax). Can be combined with elements.",
+            "description": "Canonical concept names (e.g., 'revenue', 'net_income', 'total_assets'). A rough grouping for discovery: a group can include elements that are not the concept, so prefer elements for any number you report. Can be combined with elements.",
           },
           "periods": {
             "type": "array",
