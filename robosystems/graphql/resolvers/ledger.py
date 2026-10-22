@@ -46,6 +46,8 @@ from robosystems.graphql.types.ledger import (
   Element,
   ElementList,
   EventBlock,
+  EventHandler,
+  EventHandlerList,
   FiscalCalendar,
   FlowCandidate,
   LedgerEntity,
@@ -127,6 +129,9 @@ from robosystems.operations.roboledger.reads import (
 )
 from robosystems.operations.roboledger.reads import (
   event_block as reads_event_block,
+)
+from robosystems.operations.roboledger.reads import (
+  event_handler as reads_event_handler,
 )
 from robosystems.operations.roboledger.reads import (
   fiscal_calendar as reads_fiscal_calendar,
@@ -1746,6 +1751,62 @@ class LedgerQuery:
     if response is None:
       return None
     return PublishListDetail.from_pydantic(response)
+
+  # ── Event handlers ──────────────────────────────────────────────────────
+
+  @strawberry.field
+  def event_handlers(
+    self,
+    info: Info[GraphQLContext, None],
+    event_type: str | None = None,
+    is_active: bool | None = None,
+    awaiting_approval: bool | None = None,
+    limit: int | None = None,
+    offset: int | None = None,
+  ) -> EventHandlerList | None:
+    """The graph's event handlers — the rules that turn a matching event into
+    GL rows — highest priority first, active or not.
+
+    A handler an AI client created, or whose match or template an AI client
+    last changed, is a suggestion (`awaitingApproval`): it takes no part in
+    matching until a person approves it with `update-event-handler`.
+
+    Args:
+      event_type: Only handlers for this event type.
+      is_active: Only active (true) or inactive (false) handlers. Omit for both.
+      awaiting_approval: Only the AI's unapproved suggestions (true), or
+        everything else (false). Omit for both.
+    """
+    limit, offset = _resolve_pagination(limit, offset, default_limit=100)
+    try:
+      with _open_session(info, "roboledger") as session:
+        response = reads_event_handler.list_event_handlers_page(
+          session,
+          event_type=event_type,
+          is_active=is_active,
+          awaiting_approval=awaiting_approval,
+          limit=limit,
+          offset=offset,
+        )
+    except ValueError, ProgrammingError:
+      _raise_ledger_not_initialized()
+    return EventHandlerList.from_pydantic(response)
+
+  @strawberry.field
+  def event_handler(
+    self, info: Info[GraphQLContext, None], id: str
+  ) -> EventHandler | None:
+    """One event handler, or null.
+
+    Args:
+      id: The handler's id (`hdl_`-prefixed).
+    """
+    try:
+      with _open_session(info, "roboledger") as session:
+        response = reads_event_handler.get_event_handler(session, id)
+    except ValueError, ProgrammingError:
+      _raise_ledger_not_initialized()
+    return EventHandler.from_pydantic(response) if response else None
 
   # ── Report shares ───────────────────────────────────────────────────────
 

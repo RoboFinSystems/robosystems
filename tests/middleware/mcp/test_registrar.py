@@ -573,6 +573,29 @@ class TestRegistrarToolExecute:
     assert seen == {"created_by": "usr_42", "graph_id": "kg_gid"}
 
   @pytest.mark.asyncio
+  async def test_requires_surface_tells_the_command_an_ai_client_called(self) -> None:
+    """`requires_surface=True` hands the command `surface="mcp"` here, as the
+    REST runner hands it `"rest"`: the event-handler approval gate keys on it."""
+    seen: dict[str, Any] = {}
+
+    def _command(session, body: _Request, created_by: str, *, surface: str):
+      seen["surface"] = surface
+      return _Response(id=body.id, echoed=body.value)
+
+    tool = _RegistrarMCPTool(
+      client=_client(graph_id="kg_gid", user_id="usr_42"),
+      spec=_spec(command=_command, requires_surface=True),
+      registrar=_registrar_stub(),
+    )
+    with patch(
+      "robosystems.middleware.mcp.tools.registrar.require_graph_extension_mcp",
+      return_value=MagicMock(),
+    ):
+      await tool.execute({"id": "x", "value": 3})
+
+    assert seen == {"surface": "mcp"}
+
+  @pytest.mark.asyncio
   async def test_gate_rejection_short_circuits_before_validation(self) -> None:
     """A gate error must return the code/message envelope and skip
     Pydantic validation (so an otherwise invalid body still produces the

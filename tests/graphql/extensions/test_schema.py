@@ -61,6 +61,8 @@ class TestSchemaComposition:
       "publishLists",
       "publishList",
       "reportShares",
+      "eventHandlers",
+      "eventHandler",
     ]:
       # Match `fieldName:` (no args) or `fieldName(` (args present).
       present = f"{field_name}:" in query_block or f"{field_name}(" in query_block

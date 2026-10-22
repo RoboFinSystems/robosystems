@@ -144,6 +144,7 @@ from robosystems.operations.roboledger.commands.dimensions import (
   update_dimension as cmd_update_dimension,
 )
 from robosystems.operations.roboledger.commands.event_handler import (
+  ApprovalNotAllowedError,
   EventHandlerNotFoundError,
   TemplateValidationError,
 )
@@ -542,13 +543,15 @@ create_event_handler_op = _registrar.register(
       "is created with apply_handlers=True. Match criteria (event_type, "
       "event_category, match_source, match_agent_type, etc.) act as AND-joined "
       "filters — null fields match anything. The highest-priority matching handler "
-      "wins. AI-suggested handlers (suggested_by='ai') require approval before "
-      "they are eligible for matching."
+      "wins. A handler created through an AI client is the AI's suggestion "
+      "(suggested_by='ai'): it takes no part in matching until a person "
+      "approves it in the app or the API."
     ),
     command=cmd_create_event_handler,
     request_model=CreateEventHandlerRequest,
     result_type=EventHandlerResponse,
     error_map={TemplateValidationError: 422, ValueError: 422},
+    requires_surface=True,
   )
 )
 
@@ -559,17 +562,22 @@ update_event_handler_op = _registrar.register(
     description=(
       "Patch an event handler's match criteria, template, priority, or active "
       "state. Pass approve=true to approve an AI-suggested handler; "
-      "approve=false to revoke approval. Only supplied fields are updated."
+      "approve=false to revoke approval. Only supplied fields are updated. "
+      "Through an AI client, approve=true is refused, and a change to what the "
+      "handler matches or books makes it a suggestion again, out of matching "
+      "until a person approves it."
     ),
     command=cmd_update_event_handler,
     request_model=UpdateEventHandlerRequest,
     result_type=EventHandlerResponse,
     error_map={
       EventHandlerNotFoundError: 404,
+      ApprovalNotAllowedError: 403,
       TemplateValidationError: 422,
       RowLockedError: 409,
       ValueError: 422,
     },
+    requires_surface=True,
   )
 )
 

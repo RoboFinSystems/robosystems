@@ -213,7 +213,9 @@ A feed captures each posted bank line as one event, with the bank account's char
 
 Registered with `create-event-handler` (and managed with `update-event-handler`, `list-event-handlers`, `get-event-handler`). A handler row has `name`, `description`, `event_type`, optional match fields (`event_category`, `match_source`, `match_agent_type`, `match_resource_type`, `match_metadata_expression`), a `transaction_template`, `priority`, and `is_active`.
 
-**Matching.** Among active handlers with the event's `event_type`, a null match field is a wildcard and a set one must equal the event's value. The highest `priority` among the matches wins; two matches tied at the top priority are an error rather than a guess. A handler suggested by an AI operator is not used until someone approves it.
+**Matching.** Among active handlers with the event's `event_type`, a null match field is a wildcard and a set one must equal the event's value. The highest `priority` among the matches wins; two matches tied at the top priority are an error rather than a guess.
+
+**An AI proposes, a person approves.** A handler created through an AI client — an AI operator, or a person working through any MCP client — is a suggestion (`suggested_by: "ai"`, `awaiting_approval: true` on the read): it takes no part in matching until a person approves it with `update-event-handler` (`approve: true`) from the app or the API. An AI client cannot approve (403), and its change to what a handler matches, its priority or its template makes the handler a suggestion again, whoever wrote it; a rename or a deactivation does not. A handler a person creates is live at once. The GraphQL read `eventHandlers` (`awaitingApproval: true` for what waits) lists them.
 
 **Template.** The `transaction_template` lists one or more balanced entries:
 
