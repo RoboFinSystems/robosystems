@@ -739,46 +739,68 @@ def unmapped_accounts_with_postings(
   session: Session, entity_id: str, *, through: date
 ) -> list[tuple[str | None, str]]:
   """The accounts in ``entity_id``'s chart that landed lines have posted to
-  through ``through`` and that its book mapping does not map: ``(code,
-  name)`` pairs, by code. Every statement and every consolidating entry
-  reads an account through its concept, so such an account's balances are
-  in none of them. With no mapping at all, every posted account is one."""
-  from robosystems.operations.roboledger.entry_status import landed_entry_bindparam
+  through ``through`` and that no active book mapping maps to a concept:
+  ``(code, name)`` pairs, by code. Every statement and every consolidating
+  entry reads an account through its concept, so such an account's balances
+  are in none of them. The chart set is the accounts read's own — for the
+  group parent that includes a chart from before charts were linked to an
+  entity, and accounts filed under none — and an arc counts only when it
+  sits in an active chart-of-accounts mapping into the book framework and
+  names a target."""
+  from robosystems.models.extensions import Association, Structure, Taxonomy
+  from robosystems.models.extensions.roboledger.entry import Entry
+  from robosystems.models.extensions.roboledger.line_item import LineItem
+  from robosystems.operations.roboledger.entry_status import LANDED_ENTRY_STATUSES
+  from robosystems.operations.roboledger.reads.accounts import (
+    account_scope,
+    entity_accounts_clause,
+  )
   from robosystems.operations.taxonomy_block.coa_mappings import (
     BOOK_FRAMEWORK,
-    find_entity_mapping,
+    COA_MAPPING_BLOCK_TYPE,
+    MAPPING_TAXONOMY_TYPE,
   )
 
-  mapping = find_entity_mapping(session, entity_id, BOOK_FRAMEWORK)
+  posted = (
+    select(LineItem.id)
+    .join(Entry, Entry.id == LineItem.entry_id)
+    .where(
+      LineItem.element_id == Element.id,
+      Entry.entity_id == entity_id,
+      Entry.status.in_(LANDED_ENTRY_STATUSES),
+      Entry.posting_date <= through,
+    )
+    .exists()
+  )
+  target = Taxonomy.__table__.alias("mapping_target")
+  mapped = (
+    select(Association.id)
+    .join(Structure, Structure.id == Association.structure_id)
+    .join(Taxonomy, Taxonomy.id == Structure.taxonomy_id)
+    .join(target, Taxonomy.target_taxonomy_id == target.c.id)
+    .where(
+      Association.from_element_id == Element.id,
+      Association.association_type == "mapping",
+      Association.to_element_id.is_not(None),
+      Structure.block_type == COA_MAPPING_BLOCK_TYPE,
+      Structure.is_active.is_(True),
+      Taxonomy.taxonomy_type == MAPPING_TAXONOMY_TYPE,
+      Taxonomy.is_active.is_(True),
+      target.c.standard == BOOK_FRAMEWORK,
+    )
+    .exists()
+  )
   rows = session.execute(
-    text(
-      """
-      SELECT el.code, el.name
-      FROM elements el
-      JOIN entity_taxonomies et ON et.taxonomy_id = el.taxonomy_id
-      WHERE et.entity_id = :entity_id AND et.basis = 'chart_of_accounts'
-        AND el.is_abstract IS NOT TRUE
-        AND EXISTS (
-          SELECT 1 FROM line_items li JOIN entries en ON en.id = li.entry_id
-          WHERE li.element_id = el.id AND en.entity_id = :entity_id
-            AND en.status IN :landed_entry_statuses
-            AND en.posting_date <= :through
-        )
-        AND NOT EXISTS (
-          SELECT 1 FROM associations a
-          WHERE a.from_element_id = el.id AND a.structure_id = :mapping_id
-            AND a.association_type = 'mapping'
-        )
-      ORDER BY el.code NULLS LAST, el.name
-      """
-    ).bindparams(landed_entry_bindparam()),
-    {
-      "entity_id": entity_id,
-      "through": through,
-      "mapping_id": str(mapping.id) if mapping is not None else "",
-    },
+    select(Element.code, Element.name)
+    .where(
+      entity_accounts_clause(account_scope(session, entity_id)),
+      Element.is_abstract.is_not(True),
+      posted,
+      ~mapped,
+    )
+    .order_by(Element.code.nulls_last(), Element.name)
   ).all()
-  return [(row.code, str(row.name)) for row in rows]
+  return [(row.code, row.name or "") for row in rows]
 
 
 def get_mapping_coverage(session: Session, mapping_id: str) -> MappingCoverageResponse:

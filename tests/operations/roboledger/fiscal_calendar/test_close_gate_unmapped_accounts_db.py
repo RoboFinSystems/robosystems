@@ -94,7 +94,7 @@ def _post(session, on: date, lines: list[tuple[str, int]], status: str = "posted
   session.commit()
 
 
-def _map(session, *element_ids: str) -> None:
+def _map(session, *element_ids: str, standard: str = "rs-gaap") -> None:
   """A book mapping for the parent's chart, with an arc for each element
   given: the shape `find_entity_mapping` resolves."""
   chart_id = session.execute(
@@ -104,9 +104,9 @@ def _map(session, *element_ids: str) -> None:
     )
   ).scalar_one()
   framework = Taxonomy(
-    name="rs-gaap",
+    name=standard,
     taxonomy_type="reporting_standard",
-    standard="rs-gaap",
+    standard=standard,
     created_by="test",
   )
   session.add(framework)
@@ -206,6 +206,29 @@ def test_an_earlier_months_posting_still_holds_this_close(session):
   in no statement of this one."""
   old = entity_account(session, PARENT_ENTITY_ID, "Old")
   _post(session, date(2026, 5, 20), [(old, 1_000), (old, -1_000)])
+
+  assert BLOCKER in _gate(session).blockers
+
+
+def test_a_parents_chart_from_before_charts_were_linked_is_read(session):
+  """A chart linked to no entity is the group parent's; its accounts are
+  read as the accounts read reads them, so the gate sees them too."""
+  old = entity_account(session, PARENT_ENTITY_ID, "Legacy")
+  session.execute(
+    text("DELETE FROM entity_taxonomies WHERE entity_id = :e"), {"e": PARENT_ENTITY_ID}
+  )
+  session.commit()
+  _post(session, date(2026, 7, 10), [(old, 1_000), (old, -1_000)])
+
+  gate = _gate(session)
+  assert BLOCKER in gate.blockers
+  assert gate.unmapped_account_sample == ["Legacy Legacy"]
+
+
+def test_an_arc_into_another_framework_does_not_count_as_mapped(session):
+  cash = entity_account(session, PARENT_ENTITY_ID, "Cash")
+  _post(session, date(2026, 7, 10), [(cash, 1_000), (cash, -1_000)])
+  _map(session, cash, standard="ifrs")
 
   assert BLOCKER in _gate(session).blockers
 
