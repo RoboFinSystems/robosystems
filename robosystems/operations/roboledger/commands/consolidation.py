@@ -6,7 +6,7 @@ acquisition, whose consideration and fair values only a person can give."""
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
@@ -16,9 +16,11 @@ from robosystems.models.api.extensions.consolidation import (
   AcquisitionResponse,
   AllocationOverrideResponse,
   ConsolidationProposal,
+  OwnershipChangeResponse,
   ProposeConsolidationEntriesRequest,
   ProposeConsolidationEntriesResponse,
   RecordAcquisitionRequest,
+  RecordOwnershipChangeRequest,
   SetAllocationOverrideRequest,
 )
 from robosystems.models.api.extensions.journal_entries import (
@@ -46,6 +48,7 @@ from robosystems.operations.roboledger.entity_scope import (
   find_consolidation_entity,
   is_group_parent,
   resolve_entity,
+  resolve_entity_id,
 )
 from robosystems.operations.roboledger.reads.consolidation import (
   ACQUISITION,
@@ -56,15 +59,25 @@ from robosystems.operations.roboledger.reads.consolidation import (
   GOODWILL,
   INVESTMENT_IN_SUBSIDIARIES,
   NONCONTROLLING_INTEREST,
+  OWNERSHIP_CHANGE,
+  capital_and_earnings,
+  elimination_flow,
   engine_drafts,
   engine_opening,
   first_month_eve,
   month_bounds,
   opening_is_recorded,
+  ownership_changes,
+  pct_as_of,
   posting_accounts,
   preview_consolidation_entries,
   primary_concepts,
   share_of,
+)
+from robosystems.operations.roboledger.reports.network_picker import (
+  load_close_target_concept,
+  load_entity_reporting_style,
+  taggable_flow_qnames,
 )
 from robosystems.operations.roboledger.supersede import (
   record_replacements,
@@ -554,3 +567,227 @@ def record_acquisition(
 
 def _cents(amount: int) -> str:
   return f"{amount / 100:,.2f}"
+
+
+# The parent's equity an ownership change adjusts, by the Style's close
+# target: a corporation's paid-in capital, else the capital account itself.
+_PARENT_EQUITY = {
+  "rs-gaap:RetainedEarningsAccumulatedDeficit": "rs-gaap:AdditionalPaidInCapital",
+}
+_NCI_FLOWS = (
+  "rs-gaap:ProceedsFromMinorityShareholders",
+  "rs-gaap:PaymentsToMinorityShareholders",
+)
+
+
+class OwnershipChangeError(ValueError):
+  """An ownership change that cannot be recorded as given."""
+
+
+def record_ownership_change(
+  session: Session, body: RecordOwnershipChangeRequest, created_by: str
+) -> OwnershipChangeResponse:
+  """Record the parent buying more of a member from its outside owners, from
+  ``period``, as a draft in the consolidation entity that its close posts,
+  and set the member's share. The investment elimination moves the share
+  bought of the member's capital at its next month; this entry carries what
+  that cannot: the price above that book value against the investment, the
+  share bought of the member's results since it joined out of the outside
+  owners' interest, and the difference in the parent's equity (ASC 810: no
+  gain or loss). Its lines carry the cash flow rows that move the price from
+  investing to financing. Replaces an earlier draft for the same month.
+
+  Raises ``OwnershipChangeError`` for anything but a member in full buying
+  more within the method, a month out of order, or an account the entry
+  needs that the consolidation entity lacks."""
+  member = resolve_entity(session, body.entity_id)
+  name = member.name
+  if (
+    is_group_parent(session, str(member.id))
+    or member.entity_role != "operating"
+    or member.consolidation_method != "full"
+  ):
+    raise OwnershipChangeError(
+      f"{name} is not a member consolidated in full; its outside owners hold no "
+      "interest the parent buys within the method."
+    )
+  if body.ownership_pct < 50:
+    raise OwnershipChangeError(
+      f"Below 50% the parent no longer controls {name}: that is a change of "
+      "method, not a change within it."
+    )
+  consolidation = find_consolidation_entity(session)
+  if consolidation is None:
+    raise OwnershipChangeError(
+      "This group has no consolidation entity; create one with entity_role "
+      "'consolidation' for the ownership change entry."
+    )
+  consolidation_id = str(consolidation.id)
+  start, _end = month_bounds(body.period)
+  if member.joined_on is not None and body.period < f"{member.joined_on:%Y-%m}":
+    raise OwnershipChangeError(
+      f"{name} joined the group in {member.joined_on:%Y-%m}; record the share "
+      "it joined with on the entity, or its acquisition."
+    )
+  assert_period_not_closed(session, start, entity_id=consolidation_id)
+
+  held = list(
+    session.execute(
+      select(Entry).where(
+        Entry.entity_id == consolidation_id,
+        Entry.adjustment_kind == OWNERSHIP_CHANGE,
+        Entry.adjusts_entity_id == str(member.id),
+        Entry.status.in_(("posted", "draft")),
+      )
+    ).scalars()
+  )
+  later = [
+    e
+    for e in held
+    if (e.metadata_ or {}).get("ownership_change", {}).get("period", "") > body.period
+  ]
+  if later:
+    raise OwnershipChangeError(
+      f"{name} has an ownership change recorded after {body.period}; record "
+      "changes in the order they happened."
+    )
+  same = [
+    e
+    for e in held
+    if (e.metadata_ or {}).get("ownership_change", {}).get("period") == body.period
+  ]
+  if any(e.status == "posted" for e in same):
+    raise OwnershipChangeError(
+      f"{name}'s ownership change for {body.period} is posted. Reverse that "
+      "entry first to record it again."
+    )
+
+  changes = [
+    c
+    for c in ownership_changes(session).get(str(member.id), [])
+    if c.period != body.period
+  ]
+  current = float(member.ownership_pct) if member.ownership_pct is not None else 100.0
+  if same:
+    from_pct = float(same[0].metadata_["ownership_change"]["from_pct"])
+  else:
+    from_pct = pct_as_of(current, changes, body.period) or 100.0
+  if body.ownership_pct <= from_pct:
+    raise OwnershipChangeError(
+      f"The parent held {from_pct:g}% of {name} before {body.period}; a share "
+      f"of {body.ownership_pct:g}% is not more. Selling shares within the "
+      "method is not supported yet."
+    )
+
+  bought = (body.ownership_pct - from_pct) / 100.0
+  capital, earnings = capital_and_earnings(
+    session, str(member.id), start - timedelta(days=1)
+  )
+  book_value = share_of(capital, bought)
+  earnings_transferred = share_of(earnings, bought)
+  excess = body.consideration - book_value
+  wanted = {
+    INVESTMENT_IN_SUBSIDIARIES: -excess,
+    NONCONTROLLING_INTEREST: earnings_transferred,
+  }
+  style = load_entity_reporting_style(session, resolve_entity_id(session, None))
+  close_target = load_close_target_concept(session, style)
+  equity_concept = _PARENT_EQUITY.get(close_target, close_target)
+  wanted[equity_concept] = wanted.get(equity_concept, 0) + excess - earnings_transferred
+  wanted = {q: a for q, a in wanted.items() if a}
+
+  mapping = find_entity_mapping(session, consolidation_id, BOOK_FRAMEWORK)
+  accounts = (
+    posting_accounts(
+      session, consolidation_id, primary_concepts(session, [str(mapping.id)])
+    )
+    if mapping is not None
+    else {}
+  )
+  missing = sorted(q for q in wanted if q not in accounts)
+  if missing:
+    raise OwnershipChangeError(
+      f"{consolidation.name} has no account mapped to "
+      + ", ".join(missing)
+      + "; add one to its chart for the ownership change entry."
+    )
+  # The price is the group's payment to its outside owners: its investing
+  # outflow on the parent's books, offset here, and a financing one.
+  flows = {
+    q: elimination_flow(q, "elimination_investment", a)
+    if q == INVESTMENT_IN_SUBSIDIARIES
+    else (_NCI_FLOWS[0] if a < 0 else _NCI_FLOWS[1])
+    for q, a in wanted.items()
+  }
+  taggable = taggable_flow_qnames(
+    session, load_entity_reporting_style(session, consolidation_id)
+  )
+  # As the engine tags: a Style with no rows read restricts nothing.
+  if taggable and not all(f in taggable for f in flows.values()):
+    flows = {}
+
+  # A draft never landed, so replacing it leaves nothing to supersede.
+  for entry in same:
+    session.delete(entry)
+  session.flush()
+
+  response = create_journal_entry(
+    session,
+    CreateJournalEntryRequest(
+      posting_date=start,
+      memo=f"{name}: parent's share to {body.ownership_pct:g}%",
+      type="adjusting",
+      status="draft",
+      adjustment_kind=OWNERSHIP_CHANGE,
+      adjusts_entity_id=str(member.id),
+      line_items=[
+        JournalEntryLineItemInput(
+          element_id=accounts[qname][0],
+          debit_amount=max(amount, 0),
+          credit_amount=max(-amount, 0),
+          description=body.basis,
+          flow_qname=flows.get(qname),
+        )
+        for qname, amount in sorted(wanted.items(), key=lambda kv: -kv[1])
+      ],
+    ),
+    created_by,
+    entity_id=consolidation_id,
+  )
+  entry = session.get(Entry, response.id)
+  assert entry is not None
+  entry.metadata_ = {
+    **(entry.metadata_ or {}),
+    "ownership_change": {
+      "period": body.period,
+      "from_pct": from_pct,
+      "to_pct": body.ownership_pct,
+      "consideration": body.consideration,
+      "book_value": book_value,
+      "earnings_transferred": earnings_transferred,
+      "basis": body.basis,
+      "recorded_by": created_by,
+    },
+  }
+  locked = lock_by_id(
+    session,
+    Entity,
+    member.id,
+    f"{name} is being updated by another process. Retry in a moment.",
+  )
+  if locked is not None:
+    locked.ownership_pct = body.ownership_pct
+  session.commit()
+  return OwnershipChangeResponse(
+    entity_id=str(member.id),
+    entity_name=name,
+    period=body.period,
+    from_pct=from_pct,
+    to_pct=body.ownership_pct,
+    consideration=body.consideration,
+    book_value=book_value,
+    earnings_transferred=earnings_transferred,
+    equity_adjustment=excess - earnings_transferred,
+    entry=response,
+    replaced=bool(same),
+  )

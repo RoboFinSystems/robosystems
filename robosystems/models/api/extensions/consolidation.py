@@ -432,3 +432,81 @@ class AllocationOverrideListResponse(BaseModel):
   overrides: list[AllocationOverrideRecord] = Field(
     default_factory=list, description="The overrides, oldest month first."
   )
+
+
+class RecordOwnershipChangeRequest(BaseModel):
+  """The parent buys more of a member from its outside owners, staying on the
+  same consolidation method: the share it holds from a month, and what it
+  paid. ASC 810 makes it an equity transaction, never a gain or loss."""
+
+  entity_id: str = Field(..., description="The member, consolidated in full.")
+  period: str = _PERIOD
+  ownership_pct: float = Field(
+    ...,
+    gt=0,
+    le=100,
+    description=(
+      "The parent's share from `period`, as a percentage: above its share "
+      "the month before, and 50 or more, so the member stays consolidated "
+      "in full."
+    ),
+  )
+  consideration: int = Field(
+    ...,
+    ge=0,
+    description=(
+      "Cents the parent paid the outside owners for the shares. Its line "
+      "names them, not the member, which is why it is given here."
+    ),
+  )
+  basis: str = Field(
+    ..., min_length=1, description="The purchase agreement, or what sets the price."
+  )
+
+  @field_validator("basis")
+  @classmethod
+  def _basis_says_something(cls, value: str) -> str:
+    if not value.strip():
+      raise ValueError(
+        "Give the basis: the purchase agreement, or what sets the price."
+      )
+    return value.strip()
+
+
+class OwnershipChangeResponse(BaseModel):
+  """A change in the parent's share of a member as recorded: the draft in
+  the consolidation entity its close posts."""
+
+  entity_id: str = Field(..., description="The member.")
+  entity_name: str = Field(..., description="The member's name.")
+  period: str = Field(..., description="The first month the new share holds.")
+  from_pct: float = Field(..., description="The parent's share the month before.")
+  to_pct: float = Field(..., description="The parent's share from `period`.")
+  consideration: int = Field(..., description="Cents paid to the outside owners.")
+  book_value: int = Field(
+    ...,
+    description=(
+      "Cents: the share bought of the member's capital, which the investment "
+      "elimination moves from the outside owners to the parent."
+    ),
+  )
+  earnings_transferred: int = Field(
+    ...,
+    description=(
+      "Cents: the share bought of the member's results since it joined, moved "
+      "from the outside owners' interest to the parent."
+    ),
+  )
+  equity_adjustment: int = Field(
+    ...,
+    description=(
+      "Cents taken from the parent's equity: the price above the carrying "
+      "amount of what was bought (negative when it paid less)."
+    ),
+  )
+  entry: JournalEntryResponse = Field(
+    ..., description="The ownership change entry, a draft the close posts."
+  )
+  replaced: bool = Field(
+    False, description="True when it replaced an earlier draft for the month."
+  )
