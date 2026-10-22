@@ -70,20 +70,25 @@ def graph_freshness(graph_id: str) -> GraphFreshness | None:
   ``None`` where the question does not apply — shared repositories and
   subgraphs are not rebuilt from a ledger — or the graph has no row.
   ``stale_since`` is the onset (``graph_stale_since``), not the latest write.
+  Advisory, so a failed lookup is ``None`` rather than a failed read.
   """
   if is_shared_repository_or_subgraph(graph_id) or is_subgraph(graph_id):
     return None
-  with SessionFactory() as session:
-    graph = Graph.get_by_id(graph_id, session)
-    if graph is None:
-      return None
-    stale = bool(graph.graph_stale)
-    metadata = graph.graph_metadata or {}
-    return GraphFreshness(
-      stale=stale,
-      stale_since=_iso(graph.graph_stale_since or graph.graph_stale_at)
-      if stale
-      else None,
-      stale_reason=graph.graph_stale_reason if stale else None,
-      last_materialized_at=metadata.get("last_materialized_at"),
-    )
+  try:
+    with SessionFactory() as session:
+      graph = Graph.get_by_id(graph_id, session)
+      if graph is None:
+        return None
+      stale = bool(graph.graph_stale)
+      stale_onset = graph.graph_stale_since or graph.graph_stale_at
+      stale_reason = graph.graph_stale_reason
+      metadata = graph.graph_metadata or {}
+  except Exception as e:
+    logger.warning(f"Could not read graph freshness for {graph_id}: {e}")
+    return None
+  return GraphFreshness(
+    stale=stale,
+    stale_since=_iso(stale_onset) if stale else None,
+    stale_reason=stale_reason if stale else None,
+    last_materialized_at=metadata.get("last_materialized_at"),
+  )

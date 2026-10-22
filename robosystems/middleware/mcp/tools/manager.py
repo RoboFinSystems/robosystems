@@ -80,16 +80,16 @@ SUBGRAPH_TOOL_PROFILE = frozenset(
 )
 
 
-# Tools the `/v1/mcp/roboledger` route withholds: it serves directory listings
-# that freeze one tool list per URL, so it drops what a chat client cannot use
-# or should not drive. An exclusion list, so new ledger tools appear by
-# default. Applied in `routers/graphs/mcp/remote.py`.
 # Reads answered from the graph, which trails a ledger's books until the next
 # rebuild; on a stale ledger graph they carry `graph_freshness`.
 GRAPH_BACKED_READ_TOOLS = frozenset(
   {"read-graph-cypher", "build-fact-grid", "financial-statement-analysis"}
 )
 
+# Tools the `/v1/mcp/roboledger` route withholds: it serves directory listings
+# that freeze one tool list per URL, so it drops what a chat client cannot use
+# or should not drive. An exclusion list, so new ledger tools appear by
+# default. Applied in `routers/graphs/mcp/remote.py`.
 ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS = frozenset(
   {
     # Subgraph-only; a chat user cannot add a subgraph connector mid-conversation.
@@ -899,11 +899,7 @@ class GraphMCPTools:
     """
     if name not in GRAPH_BACKED_READ_TOOLS or self.get_graph_sync_status_tool is None:
       return None
-    try:
-      freshness = await run_off_loop(graph_freshness, self.client.graph_id)
-    except Exception as e:
-      logger.warning(f"Could not read graph freshness for {self.client.graph_id}: {e}")
-      return None
+    freshness = await run_off_loop(graph_freshness, self.client.graph_id)
     if freshness is None or not freshness.stale:
       return None
     return freshness.model_dump()

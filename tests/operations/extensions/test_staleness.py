@@ -184,3 +184,10 @@ class TestGraphFreshness:
     ):
       mock_graph_cls.get_by_id.return_value = None
       assert graph_freshness("kg1a2b3c4d5e6f7a8b9c") is None
+
+  def test_a_failed_lookup_is_no_answer_not_a_failed_read(self):
+    with patch(
+      "robosystems.operations.extensions.staleness.SessionFactory",
+      side_effect=Exception("DB down"),
+    ):
+      assert graph_freshness("kg1a2b3c4d5e6f7a8b9c") is None
