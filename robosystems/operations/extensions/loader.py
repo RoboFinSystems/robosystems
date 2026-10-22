@@ -162,8 +162,8 @@ def _derive_adapter_qname(external_source: str | None, code: str | None) -> str 
 
 
 # Balance-sheet classifications are instants; everything else is a duration.
-# Mirrors ``_INSTANT_CLASSIFICATIONS`` in roboledger/commands/elements.py, kept
-# local so the sync path doesn't import the command layer.
+# Mirrors ``_INSTANT_CLASSIFICATIONS`` in taxonomy_block/chart_of_accounts.py;
+# the sync path keeps its own copy rather than import the chart's block layer.
 _INSTANT_EFS_IDENTIFIERS: frozenset[str] = frozenset(
   {
     "asset",

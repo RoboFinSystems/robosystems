@@ -79,9 +79,7 @@ COA_DISPLAY_NAME = "Chart of Accounts"
 COA_DISPLAY_PLURAL = "Charts of Accounts"
 COA_CATEGORY = "Chart"
 
-# Stock concepts (balance-sheet) — always point-in-time. Mirrors the set
-# in operations/roboledger/commands/elements.py so CoA period semantics
-# stay consistent across both construction paths.
+# Stock concepts (balance-sheet) — always point-in-time.
 _INSTANT_CLASSIFICATIONS = frozenset(
   {
     "asset",
