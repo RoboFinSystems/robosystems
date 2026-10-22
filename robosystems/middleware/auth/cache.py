@@ -889,7 +889,7 @@ class APIKeyCache:
       logger.info(f"Securely invalidated cache for API key: {api_key_hash[:8]}...")
 
       SecurityAuditLogger.log_security_event(
-        event_type=SecurityEventType.AUTHORIZATION_DENIED,
+        event_type=SecurityEventType.API_KEY_CACHE_INVALIDATED,
         details={
           "action": "secure_cache_invalidation",
           "cache_type": "api_key",

@@ -2297,6 +2297,14 @@ class TestCheckCashFlowTieOut:
       _check_cash_flow_tie_out(facts, self._periods())
     assert log.warning.called
 
+  def test_no_cash_moved_and_none_held_is_quiet(self):
+    # A consolidation entity holds no cash: its net change is 0.00 and it has
+    # no balance to tie to, which is consistent, not unchecked.
+    facts = [self._net_change(0.0)]
+    with patch(self._LOGGER) as log:
+      _check_cash_flow_tie_out(facts, self._periods())
+    assert not log.warning.called
+
 
 class TestReconcileOperatingToCash:
   """``_reconcile_operating_to_cash`` — foot the CF to actual ΔCash.

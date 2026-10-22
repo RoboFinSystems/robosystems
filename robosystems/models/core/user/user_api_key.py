@@ -339,7 +339,7 @@ class UserAPIKey(Model):
       cleared = bool(api_key_cache.invalidate_api_key(fingerprint))
 
       SecurityAuditLogger.log_security_event(
-        event_type=SecurityEventType.AUTHORIZATION_DENIED,
+        event_type=SecurityEventType.API_KEY_CACHE_INVALIDATED,
         details={
           "action": "api_key_cache_invalidated",
           "api_key_id": self.id,

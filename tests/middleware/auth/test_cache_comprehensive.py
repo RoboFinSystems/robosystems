@@ -311,6 +311,21 @@ class TestUserDataValidation:
     }
     assert cache._validate_user_data_integrity(invalid_data4) is False
 
+  def test_an_api_key_invalidation_is_not_logged_as_a_denial(self, cache):
+    """A revoked key's cache flush is evidence, not a denial: logged as a
+    denial it counted toward the cross-tenant probing alarm."""
+    from robosystems.security.audit_logger import _METRIC_FOR_EVENT
+
+    with (
+      patch.object(cache, "_api_key_cache_keys", return_value=[]),
+      patch("robosystems.middleware.auth.cache.SecurityAuditLogger") as mock_audit,
+    ):
+      assert cache.invalidate_api_key("hash_revoked") is True
+
+    event_type = mock_audit.log_security_event.call_args[1]["event_type"]
+    assert event_type == SecurityEventType.API_KEY_CACHE_INVALIDATED
+    assert event_type not in _METRIC_FOR_EVENT
+
   def test_inactive_user_security_check(self, cache):
     """Test security check for inactive users."""
     inactive_data = {
