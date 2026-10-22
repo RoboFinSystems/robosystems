@@ -16,6 +16,7 @@ from sqlalchemy import (
   Integer,
   Numeric,
   String,
+  text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
@@ -30,6 +31,14 @@ class Entity(ExtensionsBase):
     Index("idx_entities_source", "source"),
     Index("idx_entities_status", "status"),
     Index("idx_entities_parent", "parent_entity_id"),
+    # A ticker is unique among the graph's own entities, case apart; a
+    # linked row carries its source graph's and is not held to it.
+    Index(
+      "uq_entities_ticker_own",
+      text("lower(ticker)"),
+      unique=True,
+      postgresql_where=text("source <> 'linked'"),
+    ),
   )
 
   id = Column(

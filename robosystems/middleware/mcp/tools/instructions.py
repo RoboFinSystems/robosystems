@@ -478,6 +478,17 @@ def _consolidation_lines(adjustments: Sequence[Mapping[str, Any]], has) -> list[
       "which leaves the price unrecorded and the month's investment "
       "elimination withheld."
     )
+  if adjustments and has("record-deconsolidation"):
+    lines.append(
+      "- A member that leaves the group (sold, dissolved, control lost) gets "
+      "`update-entity(entity_id, left_on=<its last day>)` once its books are "
+      "closed through that month and its feeds disconnected, then "
+      "`record-deconsolidation(entity_id, consideration, basis)`: the "
+      "consolidation entity's draft for the month after takes off what it "
+      "still holds for the member and the gain or loss on its leaving; the "
+      "parent's own sale entry stays on its books. Never a hand entry of kind "
+      "`deconsolidation` for what the engine can compute."
+    )
   if adjustments and has("update-journal-entry"):
     lines.append(
       "- A line of the consolidation entity that carries a `flow_qname` counts "

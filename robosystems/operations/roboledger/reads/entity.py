@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -45,6 +47,9 @@ def entity_to_response(entity: Entity) -> LedgerEntityResponse:
     entity_role=entity.entity_role,
     joined_on=entity.joined_on,
     left_on=entity.left_on,
+    # Membership is by month: a member through the month it leaves.
+    is_former=entity.left_on is not None
+    and entity.left_on < date.today().replace(day=1),
     source=entity.source,
     source_id=entity.source_id,
     source_graph_id=(entity.metadata_ or {}).get("source_graph_id"),

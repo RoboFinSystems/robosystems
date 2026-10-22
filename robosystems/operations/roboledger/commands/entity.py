@@ -3,7 +3,7 @@ subsidiaries under it."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy import func, select, text
@@ -181,6 +181,89 @@ def _refuse_membership_change_in_closed_months(
       )
 
 
+class EntityExitError(ValueError):
+  """A member cannot leave the group as asked: open books, a live feed, or
+  an intercompany disagreement hold it."""
+
+
+def _refuse_exit_while_held(session: Session, entity: Entity, left_on: date) -> None:
+  """A member leaves at a month end with its books closed through it: from
+  then on its months in the group are history, so nothing may still be
+  open, feeding, or in disagreement with the group. An agreed intercompany
+  balance is not in the way — it stays as a related-party balance on the
+  parent's books once the member is a third party."""
+  last_month = f"{left_on:%Y-%m}"
+  open_months = (
+    session.execute(
+      text(
+        "SELECT name FROM fiscal_periods WHERE entity_id = :id "
+        "AND period_type = 'monthly' AND name <= :month AND status <> 'closed' "
+        "ORDER BY name"
+      ),
+      {"id": str(entity.id), "month": last_month},
+    )
+    .scalars()
+    .all()
+  )
+  if open_months:
+    raise EntityExitError(
+      f"{entity.name}'s books are open for {', '.join(open_months)}; close them "
+      f"through {last_month}, the month it leaves, then set left_on."
+    )
+  # No open month is not closed books: a calendar that stops short of the
+  # month is not closed through it. An entity with no calendar has no books
+  # to close.
+  books = session.execute(
+    text(
+      "SELECT count(*) AS months, "
+      "       max(name) FILTER (WHERE status = 'closed') AS closed_through "
+      "FROM fiscal_periods WHERE entity_id = :id AND period_type = 'monthly'"
+    ),
+    {"id": str(entity.id)},
+  ).one()
+  if books.months and (
+    books.closed_through is None or str(books.closed_through) < last_month
+  ):
+    raise EntityExitError(
+      f"{entity.name}'s books are closed through "
+      f"{books.closed_through or 'no month'}; close them through {last_month}, "
+      "the month it leaves, then set left_on."
+    )
+  from robosystems.operations.roboledger.reads.fiscal_calendar import (
+    feed_connection_ids,
+  )
+
+  feeds = feed_connection_ids(session, str(entity.id))
+  if feeds:
+    raise EntityExitError(
+      f"{entity.name}'s chart still links {len(feeds)} bank feed"
+      f"{'s' if len(feeds) != 1 else ''}; disconnect the feed first, then set "
+      "left_on."
+    )
+  if entity.consolidation_method != "full":
+    return
+  from robosystems.operations.roboledger.reads.consolidation import (
+    NoConsolidationEntityError,
+    preview_consolidation_entries,
+  )
+
+  try:
+    preview = preview_consolidation_entries(session, period=last_month)
+  except NoConsolidationEntityError:
+    return
+  disagreeing = [
+    item for item in preview.reconciling_items if str(entity.id) in item.entity_ids
+  ]
+  if disagreeing:
+    raise EntityExitError(
+      f"{entity.name}'s intercompany balances disagree with the group's in "
+      f"{last_month}: "
+      + " ".join(item.description for item in disagreeing)
+      + " Reconcile them before it leaves; an agreed balance stays as a "
+      "related-party balance."
+    )
+
+
 def _refuse_consolidation_membership() -> None:
   raise EntityMembershipError(
     "The consolidation entity belongs to the group for every month it "
@@ -300,8 +383,13 @@ def _apply_updates(session: Session, entity: Entity, updates: dict[str, Any]):
     updates.get(f, getattr(entity, f)) is not None for f in ("joined_on", "left_on")
   ):
     _refuse_consolidation_membership()
-  if not parent and role == _ROLE_OPERATING and method in _METHODS_READ:
-    _refuse_membership_change_in_closed_months(session, entity, updates)
+  if not parent and role == _ROLE_OPERATING:
+    # Read as a member now or after the change: either way a date moved
+    # inside the closed months restates them.
+    if method in _METHODS_READ or entity.consolidation_method in _METHODS_READ:
+      _refuse_membership_change_in_closed_months(session, entity, updates)
+    if updates.get("left_on") is not None and updates["left_on"] != entity.left_on:
+      _refuse_exit_while_held(session, entity, updates["left_on"])
   if "ticker" in updates:
     session.execute(_TICKER_LOCK_SQL)
     ticker = str(updates["ticker"]).strip().upper()

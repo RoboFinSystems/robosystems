@@ -200,6 +200,7 @@ def generate_report_facts(
   entity_id: str | None = None,
   line_slice: LineSlice | None = None,
   acquired_on: date | None = None,
+  left_on: date | None = None,
 ) -> ReportFacts:
   """Generate structure-agnostic facts for all mapped elements across periods.
 
@@ -224,6 +225,14 @@ def generate_report_facts(
   then is the group's cash acquired, an investing inflow, and the column
   opens on none of it, so the group's cash flow opens where its previous
   month closed.
+
+  ``left_on`` is the last day a group read's member that left is read on
+  (the end of its last month). The column opening the day after is read
+  for its cash alone: the column's own facts are not the group's and are
+  dropped, its balances at the column's end held at none, and the cash it
+  held on ``left_on`` is the group's cash divested, an investing outflow,
+  so the group's cash flow opens where its previous month closed and moves
+  to a close without the member.
   """
   arc_type = _arc_type_for_taxonomy(session, taxonomy_id)
   facts: list[ReportFact] = []
@@ -309,6 +318,19 @@ def generate_report_facts(
     opening_facts,
     holds_no_cash=_is_consolidation_entity(session, entity_id),
   )
+
+  if left_on is not None:
+    facts = _leaving_member_facts(
+      session,
+      facts,
+      opening_facts,
+      periods,
+      left_on,
+      mapping_id=mapping_id,
+      arc_type=arc_type,
+      entity_id=entity_id,
+      close_target_qname=close_target_qname,
+    )
 
   # Calc-DAG subtotals as facts, so rules scoped to a subtotal can bind.
   # Runs after every leaf and derived fact is in place.
@@ -2943,6 +2965,7 @@ _NCI_MOVEMENTS: dict[str, str] = {
   "distribution": (
     "rs-gaap:MinorityInterestDecreaseFromDistributionsToNoncontrollingInterestHolders"
   ),
+  "deconsolidation": "rs-gaap:MinorityInterestDecreaseFromDeconsolidation",
 }
 _NCI_FLOW_KIND: dict[str, str] = {
   "rs-gaap:ProceedsFromMinorityShareholders": "contribution",
@@ -3038,6 +3061,20 @@ def _equity_descendant_weights(
   return weights
 
 
+def _leaves_the_group(line, start: date) -> bool:
+  """A consolidation entity's line that belongs to a member's leaving: its
+  deconsolidation entry, or the reversal of its investment elimination in
+  the first month it is out, which the engine proposes untagged since it
+  moves no cash."""
+  if line.adjustment_kind == "deconsolidation":
+    return True
+  return (
+    line.adjustment_kind == "elimination_investment"
+    and line.adjusts_left_on is not None
+    and line.adjusts_left_on < start
+  )
+
+
 def _emit_equity_movement_facts(
   session: Session,
   facts: list[ReportFact],
@@ -3091,6 +3128,8 @@ def _emit_equity_movement_facts(
       li.debit_amount,
       li.credit_amount,
       tag.qname AS tag_qname,
+      en.adjustment_kind,
+      adj.left_on AS adjusts_left_on,
       (
         SELECT rf.qname
         FROM associations darc
@@ -3103,6 +3142,7 @@ def _emit_equity_movement_facts(
       ) AS default_flow_qname
     FROM line_items li
     JOIN entries en ON en.id = li.entry_id
+    LEFT JOIN entities adj ON adj.id = en.adjusts_entity_id
     LEFT JOIN LATERAL ({_primary_mapping("li")}) amap ON TRUE
     JOIN elements target ON target.id = amap.to_element_id
     LEFT JOIN associations fmap
@@ -3189,7 +3229,12 @@ def _emit_equity_movement_facts(
         effect = weights[line.target_id] * _natural_sign(
           net, line.target_balance_type or "credit"
         )
-      kind = _FLOW_MOVEMENT_KIND.get(line.tag_qname or "")
+      # A member's leaving is no exchange with an owner: the reversal of its
+      # elimination and the results put back are other movements, which net
+      # against the capital that leaves with its books.
+      kind = "other" if _leaves_the_group(line, period.start) else None
+      if kind is None:
+        kind = _FLOW_MOVEMENT_KIND.get(line.tag_qname or "")
       if kind is None and line.target_qname in reducer_qnames:
         kind = _FLOW_MOVEMENT_KIND.get(line.target_qname)
       if kind is None and line.entry_id in books_share_based_compensation:
@@ -3230,10 +3275,12 @@ def _emit_nci_movement_facts(
 ) -> None:
   """Append the noncontrolling interest's movement rows, per period: a line
   on an account the interest sums, tagged with the outside owners' flow, is a
-  contribution or a distribution, equity-effect signed. A line in an entry
-  that books the interest's share of income is that income, which the income
-  statement's own fact already carries; any other line has no row, so the
-  roll-forward does not reach its ending balance and the validator says so."""
+  contribution or a distribution, equity-effect signed; one in a member's
+  deconsolidation entry, or in the reversal of its elimination once it has
+  left, is the interest derecognized. A line in an entry that books the
+  interest's share of income is that income, which the income statement's
+  own fact already carries; any other line has no row, so the roll-forward
+  does not reach its ending balance and the validator says so."""
   meta = {
     row.qname: row
     for row in session.execute(
@@ -3253,6 +3300,8 @@ def _emit_nci_movement_facts(
       li.debit_amount,
       li.credit_amount,
       tag.qname AS tag_qname,
+      en.adjustment_kind,
+      adj.left_on AS adjusts_left_on,
       EXISTS (
         SELECT 1
         FROM line_items other
@@ -3262,6 +3311,7 @@ def _emit_nci_movement_facts(
       ) AS books_share_of_income
     FROM line_items li
     JOIN entries en ON en.id = li.entry_id
+    LEFT JOIN entities adj ON adj.id = en.adjusts_entity_id
     LEFT JOIN LATERAL ({_primary_mapping("li")}) amap ON TRUE
     JOIN elements target ON target.id = amap.to_element_id
     LEFT JOIN associations fmap
@@ -3290,8 +3340,13 @@ def _emit_nci_movement_facts(
         "share_of_income": _NCI_SHARE_OF_INCOME,
       },
     ):
-      kind = _NCI_FLOW_KIND.get(line.tag_qname or "")
-      if line.books_share_of_income or kind is None:
+      if line.books_share_of_income:
+        continue
+      if _leaves_the_group(line, period.start):
+        kind = "deconsolidation"
+      else:
+        kind = _NCI_FLOW_KIND.get(line.tag_qname or "")
+      if kind is None:
         continue
       net = cents_to_dollars(line.debit_amount - line.credit_amount)
       effect = weights[line.target_id] * _natural_sign(
@@ -3535,6 +3590,137 @@ def _acquired_cash_as_a_flow(
       derivation={"computations": ["cash_acquired"]},
     )
   )
+
+
+DIVESTED_CASH_QNAME = (
+  "rs-gaap:ProceedsFromDivestitureOfInterestInSubsidiariesAndAffiliates"
+)
+
+
+def _root_balance_at(
+  session: Session,
+  mapping_id: str,
+  day: date,
+  arc_type: str,
+  entity_id: str | None,
+  close_target_qname: str,
+  root_qname: str,
+) -> float | None:
+  """A roll-forward root's balance on ``day``, earnings closed to date, as
+  the opening-equity rows state it; None when the books hold nothing it
+  sums."""
+  root = session.execute(
+    text("SELECT id FROM elements WHERE qname = :q"), {"q": root_qname}
+  ).fetchone()
+  if root is None:
+    return None
+  calculations = load_rs_gaap_calculations(session)
+  summed = _equity_descendant_weights(calculations, root.id)
+  balances: dict[str, float] = {}
+  for f in _period_balance_facts(
+    session,
+    mapping_id,
+    day,
+    day,
+    arc_type=arc_type,
+    close_target_qname=close_target_qname,
+    entity_id=entity_id,
+  ):
+    if f.period_type == "instant":
+      balances[f.element_id] = balances.get(f.element_id, 0.0) + f.value
+  present = set(balances)
+  if not present & summed.keys():
+    return None
+  computed = resolve_calc_dag(
+    balances, present, calculations, topo_sort_calculations(calculations)
+  )
+  return computed.get(root.id, 0.0)
+
+
+def _leaving_member_facts(
+  session: Session,
+  facts: list[ReportFact],
+  opening_facts: list[ReportFact],
+  periods: list[PeriodSpec],
+  left_on: date,
+  *,
+  mapping_id: str,
+  arc_type: str,
+  entity_id: str | None,
+  close_target_qname: str,
+) -> list[ReportFact]:
+  """A member read for the column after it left the group, to let its cash
+  and its capital go. The column's own facts are not the group's and are
+  dropped, its balances at the column's end held at none; the cash it held
+  on ``left_on`` is the group's cash divested — the divestiture row, net of
+  cash divested, cash-effect signed as every flow is — and the capital it
+  held then leaves on the equity statement's other-movements row, where the
+  consolidation entity's reversal of its elimination and the results put
+  back net against it. Returns the facts kept; the subtotals are computed
+  over them afterwards."""
+  leaving = [p for p in periods if _opening_date(p) == left_on]
+  if not leaving:
+    return facts
+  columns = {(p.start, p.end) for p in leaving}
+  ends = {p.end for p in leaving}
+  kept: list[ReportFact] = []
+  for f in facts:
+    if f.period_type == "instant":
+      if f.period_end in ends:
+        f.value = 0.0
+        if f.close_value is not None:
+          f.close_value = 0.0
+        if f.source_values:
+          f.source_values = dict.fromkeys(f.source_values, 0.0)
+      kept.append(f)
+    elif (f.period_start, f.period_end) not in columns:
+      kept.append(f)
+  # On the eve as an opening, or as an earlier column's end.
+  held = [
+    f
+    for f in opening_facts
+    if f.period_end == left_on and f.element_qname in _CASH_ANCHOR_QNAMES
+  ] or [
+    f
+    for f in kept
+    if f.period_type == "instant"
+    and f.period_end == left_on
+    and f.element_qname in _CASH_ANCHOR_QNAMES
+  ]
+  divested = sum(f.value for f in held)
+  capital_qname, movements = _equity_rollforward_form(close_target_qname)
+  capital = _root_balance_at(
+    session, mapping_id, left_on, arc_type, entity_id, close_target_qname, capital_qname
+  )
+  for qname, value, computation in (
+    (DIVESTED_CASH_QNAME, -divested, "cash_divested"),
+    (movements["other"], -(capital or 0.0), "capital_left_with_member"),
+  ):
+    if abs(value) < 0.005:
+      continue
+    row = session.execute(
+      text("SELECT id, qname, name, balance_type FROM elements WHERE qname = :q"),
+      {"q": qname},
+    ).fetchone()
+    if row is None:
+      continue
+    for column in leaving:
+      kept.append(
+        ReportFact(
+          element_id=row.id,
+          element_qname=row.qname,
+          element_name=row.name or row.qname,
+          classification=None,
+          balance_type=row.balance_type or "debit",
+          value=value,
+          period_start=column.start,
+          period_end=column.end,
+          period_type="duration",
+          origin="derived",
+          derivation={"computations": [computation]},
+        )
+      )
+  return kept
 
 
 def _emit_opening_cash_facts(

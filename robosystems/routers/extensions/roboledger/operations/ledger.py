@@ -42,10 +42,12 @@ from robosystems.models.api.extensions.agent import (
 from robosystems.models.api.extensions.consolidation import (
   AcquisitionResponse,
   AllocationOverrideResponse,
+  DeconsolidationResponse,
   OwnershipChangeResponse,
   ProposeConsolidationEntriesRequest,
   ProposeConsolidationEntriesResponse,
   RecordAcquisitionRequest,
+  RecordDeconsolidationRequest,
   RecordOwnershipChangeRequest,
   SetAllocationOverrideRequest,
 )
@@ -132,6 +134,7 @@ from robosystems.operations.roboledger.commands.agent import (
 from robosystems.operations.roboledger.commands.consolidation import (
   AcquisitionError,
   AllocationOverrideError,
+  DeconsolidationError,
   OwnershipChangeError,
 )
 from robosystems.operations.roboledger.commands.consolidation import (
@@ -139,6 +142,9 @@ from robosystems.operations.roboledger.commands.consolidation import (
 )
 from robosystems.operations.roboledger.commands.consolidation import (
   record_acquisition as cmd_record_acquisition,
+)
+from robosystems.operations.roboledger.commands.consolidation import (
+  record_deconsolidation as cmd_record_deconsolidation,
 )
 from robosystems.operations.roboledger.commands.consolidation import (
   record_ownership_change as cmd_record_ownership_change,
@@ -1066,6 +1072,45 @@ record_ownership_change_op = _registrar.register(
       ValueError: 422,
     },
     mark_stale_reason="ownership_change_recorded",
+  )
+)
+
+record_deconsolidation_op = _registrar.register(
+  OperationSpec(
+    name="record-deconsolidation",
+    summary="Record Deconsolidation",
+    description=(
+      "Record a member's leaving the group, once `left_on` is set on it: what "
+      "the parent received for its shares in cents (0 for a dissolution) and "
+      "the basis. It writes a draft in the consolidation entity, dated the "
+      "first day of the month after the member's last, that its close posts: "
+      "what the consolidation entity still holds for the member on its "
+      "balance-sheet accounts and as the outside owners' interest is taken "
+      "off (goodwill, step-ups, the price above book of the investment, the "
+      "outside owners' accumulated share), a member in full has the results "
+      "it earned in the group put back into the group's equity as they leave "
+      "with its books, and the difference is the gain or loss on its leaving: "
+      "the group's adjustment to the gain the parent's own books took, so the "
+      "consolidated gain is the consideration less the carrying amount of "
+      "what left (ASC 810). The investment and intercompany eliminations go "
+      "back on their own in that month's proposals. The parent's own sale "
+      "entry stays on its books. Recording again replaces the draft; a posted "
+      "deconsolidation is reversed first. A retained interest is not "
+      "supported yet."
+    ),
+    command=cmd_record_deconsolidation,
+    request_model=RecordDeconsolidationRequest,
+    result_type=DeconsolidationResponse,
+    error_map={
+      EntityNotInGraphError: 404,
+      DeconsolidationError: 422,
+      ClosedPeriodError: 422,
+      ConsolidationAdjustmentError: 422,
+      UnbalancedJournalEntryError: 422,
+      RowLockedError: 409,
+      ValueError: 422,
+    },
+    mark_stale_reason="deconsolidation_recorded",
   )
 )
 

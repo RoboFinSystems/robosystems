@@ -148,6 +148,14 @@
       "documentation": "Reverses distributions a parent booked as income rather than as a return of its investment; carries a debit balance for the period."
     },
     {
+      "code": "4400",
+      "label": "Gain (Loss) on Deconsolidation",
+      "hasTrait": "trait:elementsOfFinancialStatements/revenue",
+      "subClassification": "non_operating_revenue",
+      "balance": "credit",
+      "documentation": "The group's gain or loss when a subsidiary leaves it: the consideration less the carrying amount of what left, as the deconsolidation entry adjusts the parent's own gain on the sale."
+    },
+    {
       "code": "4500",
       "label": "Share of Associates' Income",
       "hasTrait": "trait:elementsOfFinancialStatements/revenue",

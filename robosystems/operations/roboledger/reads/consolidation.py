@@ -632,6 +632,7 @@ ACQUISITION = "acquisition"
 OWNERSHIP_CHANGE = "ownership_change"
 # The kinds a person records the parent's price for a member's shares on.
 PRICED_KINDS = (ACQUISITION, OWNERSHIP_CHANGE)
+DECONSOLIDATION = "deconsolidation"
 
 
 def acquisitions(
@@ -1646,6 +1647,33 @@ def _note_what_cannot_open(
       )
 
 
+def held_for_member(
+  rows: list[_Row], consolidation_id: str, member_id: str, *, beyond_engine: bool
+) -> dict[str, int]:
+  """What the consolidation entity holds for ``member_id`` on its
+  balance-sheet accounts and as the outside owners' interest, debit-positive
+  by concept: every consolidating entry's, or with ``beyond_engine`` only
+  what the engine does not reverse on its own once the member is out — the
+  kinds it computes a cumulative target for (the investment and intercompany
+  eliminations) go back the month after; an acquisition's goodwill and
+  step-ups, the price above book of each change in the share, and the
+  outside owners' share of the member's results wait for the
+  deconsolidation."""
+  held: dict[str, int] = defaultdict(int)
+  for r in rows:
+    if r.entity_id != consolidation_id or r.adjusts != member_id or r.closing:
+      continue
+    if beyond_engine and (
+      not r.kind or (r.kind in COMPUTED_KINDS and not _is_periodic(r.kind, r.concept))
+    ):
+      continue
+    if (
+      r.concept.classification in _BALANCE or r.concept.qname == NONCONTROLLING_INTEREST
+    ):
+      held[r.concept.qname] += r.amount
+  return dict(held)
+
+
 def _hold_what_a_former_member_leaves(
   plan: _Plan,
   rows: list[_Row],
@@ -1660,17 +1688,9 @@ def _hold_what_a_former_member_leaves(
   the month is left incomplete until no asset, liability or outside owners'
   share is held for it. The group's own equity is where that entry lands."""
   for entity in outside:
-    left: dict[str, int] = defaultdict(int)
-    for r in rows:
-      if (
-        r.entity_id == consolidation.id
-        and r.adjusts == entity.id
-        and (
-          r.concept.classification in _BALANCE
-          or r.concept.qname == NONCONTROLLING_INTEREST
-        )
-      ):
-        left[r.concept.qname] += r.amount
+    left: dict[str, int] = defaultdict(
+      int, held_for_member(rows, consolidation.id, entity.id, beyond_engine=False)
+    )
     for p in proposals:
       if p.adjusts_entity_id == entity.id:
         for line in p.lines:
@@ -1686,8 +1706,8 @@ def _hold_what_a_former_member_leaves(
         f"{q.split(':')[-1]} {_money(abs(a))} {'debit' if a > 0 else 'credit'}"
         for q, a in sorted(held.items())
       )
-      + " for it beyond the eliminations proposed here; post its "
-      "deconsolidation (adjustment_kind deconsolidation) for those amounts."
+      + " for it beyond the eliminations proposed here; record-deconsolidation "
+      "derecognizes them with the gain or loss on its leaving."
     )
     plan.incomplete = True
 

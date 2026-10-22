@@ -309,6 +309,16 @@ def acquired_eve(session: Session, member: GroupMember) -> date | None:
   return eve if opened else None
 
 
+def left_eve(member: GroupMember) -> date | None:
+  """The last day a member that left is read on: the end of the month of
+  ``left_on``, after which a group read sums none of it. None for a member
+  still in, and for the consolidation entity."""
+  if member.role == "consolidation" or member.left_on is None:
+    return None
+  left = member.left_on
+  return left.replace(day=calendar.monthrange(left.year, left.month)[1])
+
+
 def membership_window(
   member: GroupMember, start: date, end: date
 ) -> tuple[date, date] | None:

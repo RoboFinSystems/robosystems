@@ -53,6 +53,7 @@ from robosystems.operations.roboledger.entity_scope import (
   find_entity_id,
   group_members,
   is_group_parent,
+  left_eve,
   membership_window,
   resolve_entity_id,
 )
@@ -202,6 +203,7 @@ def generate_adhoc_private_statement(
   sources: StatementSources | None = None,
   summed: list[bool] | None = None,
   acquired_on: date | None = None,
+  left_on: date | None = None,
 ):
   """Build a one-shot statement from one entity's current ledger, with no
   saved Report; ``line_slice`` sums one management dimension member's lines.
@@ -239,6 +241,7 @@ def generate_adhoc_private_statement(
     entity_id=entity_id,
     line_slice=line_slice,
     acquired_on=acquired_on,
+    left_on=left_on,
   )
 
   grid = render_structure_view(
@@ -1302,6 +1305,7 @@ def _combined_statement(
         sources=sources,
         summed=summed,
         acquired_on=acquired_eve(session, member),
+        left_on=left_eve(member),
       )
     except CoaMappingNotFoundError as exc:
       first_error = first_error or exc
@@ -1331,7 +1335,11 @@ _NOTHING_TO_STATE = (
 
 
 def member_windows(
-  member: GroupMember, statement_type: str, periods: list[FactPeriodSpec]
+  member: GroupMember,
+  statement_type: str,
+  periods: list[FactPeriodSpec],
+  *,
+  leaving: bool = True,
 ) -> tuple[list[FactPeriodSpec | None], set[int]]:
   """Per column, the window a member is read over, None where it is not
   summed, and the columns it belongs to only part of that the statement
@@ -1339,7 +1347,10 @@ def member_windows(
   in; an income statement sums a member's own months of the column; a cash
   flow or equity statement over part of a member's time would show balances
   arriving or leaving with no line for them (an acquisition, a
-  deconsolidation), so that column is left out."""
+  deconsolidation), so that column is left out. The column opening the day
+  after a member's last is read, for the cash and capital that leave with
+  it — ``leaving`` false for an entity the sum never held, whose cash was
+  never the group's."""
   windows: list[FactPeriodSpec | None] = []
   partial: set[int] = set()
   for i, p in enumerate(periods):
@@ -1348,8 +1359,17 @@ def member_windows(
       windows.append(p if held is not None else None)
       continue
     window = membership_window(member, p.start, p.end)
-    if window is None or window == (p.start, p.end):
-      windows.append(p if window is not None else None)
+    if window is None:
+      # The column opening the day after a member's last: read for its cash
+      # alone, so the group's cash flow lets it go where it left.
+      leaves_here = (
+        leaving
+        and statement_type != "income_statement"
+        and left_eve(member) == p.start - timedelta(days=1)
+      )
+      windows.append(p if leaves_here else None)
+    elif window == (p.start, p.end):
+      windows.append(p)
     elif statement_type == "income_statement":
       windows.append(FactPeriodSpec(start=window[0], end=window[1], label=p.label))
     else:
@@ -1495,7 +1515,9 @@ def get_consolidation_worksheet(
   partly: set[int] = set()
   summed_members: list[GroupMember] = []
   for entity in _worksheet_entities(session, parent_id):
-    windows, partial = member_windows(entity.member, statement_type, periods)
+    windows, partial = member_windows(
+      entity.member, statement_type, periods, leaving=entity.kind != "not_summed"
+    )
     summed = [w is not None for w in windows]
     # A member outside the sum matters only as its own column.
     needed = summed[0] if entity.kind == "not_summed" else any(summed)
@@ -1515,6 +1537,7 @@ def get_consolidation_worksheet(
         reporting_style_id=reporting_style_id,
         entity_id=entity.member.id,
         acquired_on=acquired_eve(session, entity.member),
+        left_on=left_eve(entity.member),
       )
     except CoaMappingNotFoundError as exc:
       first_error = first_error or exc
