@@ -11,7 +11,28 @@ from pydantic import BaseModel, Field, model_validator
 #   CHECK (type IN ('standard','adjusting','closing','reversing'))
 EntryType = Literal["standard", "adjusting", "closing", "reversing"]
 
+# The columns of a loan schedule's amortization table a leg can post.
+CurveColumn = Literal["interest", "interest_paid", "principal", "payment"]
+DayCount = Literal["30/360", "actual/365", "actual/360"]
+PaymentFrequency = Literal["monthly", "quarterly", "annual", "at_maturity"]
+
 # ── Requests ───────────────────────────────────────────────────────────────
+
+
+class ScheduleLegRequest(BaseModel):
+  """One line of the entry a loan schedule drafts each period."""
+
+  element_id: str = Field(..., description="CoA element id the line posts to.")
+  side: Literal["debit", "credit"] = Field(..., description="The line's side.")
+  amount_source: CurveColumn = Field(
+    ...,
+    description=(
+      "The amortization-table column the line takes each period: `interest` "
+      "(accrued in the period), `interest_paid` (accrued interest settled by "
+      "the period's payment), `principal` (principal repaid), `payment` "
+      "(interest_paid + principal)."
+    ),
+  )
 
 
 class EntryTemplateRequest(BaseModel):
@@ -28,8 +49,8 @@ class EntryTemplateRequest(BaseModel):
     description=(
       "CoA element id to credit (e.g. Accumulated Depreciation). A "
       "chart-of-accounts element id (see get-unmapped-elements), not a "
-      "taxonomy qname. One template = one debit/credit pair; model a "
-      "multi-account entry as several schedules."
+      "taxonomy qname. A straight-line or custom schedule posts this one "
+      "debit/credit pair; a loan schedule posts its `legs`."
     ),
   )
   entry_type: EntryType = Field(
@@ -50,6 +71,106 @@ class EntryTemplateRequest(BaseModel):
       "per axis: a department's depreciation lands in that department."
     ),
   )
+  legs: list[ScheduleLegRequest] = Field(
+    default_factory=list,
+    description=(
+      "The lines of a loan schedule's entry (`method='effective_interest'` "
+      "only), each taking one column of the amortization table; each "
+      "period's lines must balance. Accrue interest and pay through the "
+      "bank: debit Interest Expense and credit Accrued Interest, both "
+      "`interest`. The schedule settles the payment itself: debit the note "
+      "`principal`, debit Interest Expense `interest`, credit cash or a "
+      "due-to `payment`. `debit_element_id` names the interest debit leg "
+      "and `credit_element_id` one credit leg. Empty for every other "
+      "method, which posts the debit/credit pair."
+    ),
+  )
+
+
+class LoanTermsRequest(BaseModel):
+  """The terms a loan schedule's amortization table is computed from."""
+
+  principal: int = Field(..., gt=0, description="Principal drawn, in cents.")
+  annual_rate: float = Field(
+    ...,
+    ge=0,
+    lt=1,
+    description="Annual interest rate as a fraction: 0.099 for 9.9%.",
+  )
+  start_date: date = Field(
+    ...,
+    description=(
+      "The day the principal was drawn; interest accrues from it. Falls in "
+      "the schedule's first month."
+    ),
+  )
+  day_count: DayCount = Field(
+    "30/360",
+    description=(
+      "How a period's interest counts days: `30/360` (every whole month is "
+      "30 days), `actual/365` or `actual/360` (the days elapsed, over a "
+      "365- or 360-day year; actual/360 is the usual bank line of credit)."
+    ),
+  )
+  payment_frequency: PaymentFrequency = Field(
+    "monthly",
+    description=(
+      "How often a payment falls due. A payment is applied at the end of "
+      "the month it falls in."
+    ),
+  )
+  first_payment_date: date | None = Field(
+    None,
+    description=(
+      "The first payment's date. Omit for one frequency after the "
+      "schedule's first month."
+    ),
+  )
+  payment_amount: int | None = Field(
+    None,
+    gt=0,
+    description=(
+      "Each scheduled payment in cents, interest included. Omit for the "
+      "level payment that retires the principal by `maturity_date`, or for "
+      "the accrued interest when `interest_only`."
+    ),
+  )
+  interest_only: bool = Field(
+    False,
+    description="Payments settle interest only; the principal is due at maturity.",
+  )
+  maturity_date: date | None = Field(
+    None,
+    description=(
+      "When the remaining principal is due: it is repaid in that month, "
+      "which is the schedule's last. Omit for a line of credit with no "
+      "maturity, whose balance carries past the schedule."
+    ),
+  )
+  capitalize_interest: bool = Field(
+    False,
+    description=(
+      "Interest is added to the note rather than accrued apart (a PIK "
+      "note): the balance grows by each period's interest, and payments "
+      "reduce it whole."
+    ),
+  )
+  note_element_id: str = Field(
+    ...,
+    description=(
+      "The liability account the principal is carried in. The schedule "
+      "states its balance each period, which the schedule reconciliation "
+      "compares with the ledger."
+    ),
+  )
+  current_portion_element_id: str | None = Field(
+    None,
+    description=(
+      "A current-liability account for the principal due within twelve "
+      "months. When set, each period's entry also reclasses between it and "
+      "`note_element_id` so it holds the next twelve months' principal."
+    ),
+  )
 
 
 class ScheduleMetadataRequest(BaseModel):
@@ -59,10 +180,16 @@ class ScheduleMetadataRequest(BaseModel):
       "Calculation method. 'straight_line' (default) distributes "
       "`monthly_amount` evenly across periods with the final period "
       "absorbing rounding. 'custom' requires `periodic_amounts` — the "
-      "generator uses those values verbatim instead of computing. Other "
-      "strings are labels only; fact values still come from "
+      "generator uses those values verbatim instead of computing. "
+      "'effective_interest' requires `loan_terms` and the template's `legs`: "
+      "the generator computes the amortization table (opening balance, "
+      "interest, payment, principal, closing balance) and drafts the legs "
+      "from it. Other strings are labels only; fact values still come from "
       "`monthly_amount` or `periodic_amounts`."
     ),
+  )
+  loan_terms: LoanTermsRequest | None = Field(
+    None, description="The loan's terms, for `method='effective_interest'`."
   )
   original_amount: int = Field(0, description="Cost basis in cents")
   residual_value: int = Field(
@@ -132,7 +259,13 @@ class CreateScheduleRequest(BaseModel):
   )
   period_start: date = Field(..., description="First period start")
   period_end: date = Field(..., description="Last period end")
-  monthly_amount: int = Field(..., description="Monthly amount in cents")
+  monthly_amount: int = Field(
+    0,
+    description=(
+      "Monthly amount in cents. Required for a straight-line schedule; a "
+      "custom or loan schedule takes its amounts from its curve."
+    ),
+  )
   entry_template: EntryTemplateRequest
   schedule_metadata: ScheduleMetadataRequest | None = None
   closed_through: date | None = Field(
@@ -168,7 +301,78 @@ class CreateScheduleRequest(BaseModel):
       raise ValueError(
         f"A schedule can span at most {MAX_SCHEDULE_MONTHS} months (got {months + 1})."
       )
+    method = (
+      self.schedule_metadata.method if self.schedule_metadata else "straight_line"
+    )
+    if method == "straight_line" and "monthly_amount" not in self.model_fields_set:
+      raise ValueError("A straight-line schedule needs monthly_amount.")
     return self
+
+
+class PreviewScheduleRequest(CreateScheduleRequest):
+  """A schedule's definition, generated without being kept."""
+
+  replaces_structure_id: str | None = Field(
+    None,
+    description=(
+      "The schedule this definition would replace, when editing or "
+      "recreating one: the preview then says what its posted entries mean "
+      "for the change."
+    ),
+  )
+
+
+class ScheduleRollForwardRow(BaseModel):
+  """One period of a previewed schedule: the balance it carries, and what
+  moves it."""
+
+  period_start: date
+  period_end: date
+  opening: float = Field(..., description="The carried balance at the period's start.")
+  amount: float = Field(
+    ..., description="What the period recognizes: the entry's debit amount."
+  )
+  closing: float = Field(..., description="The carried balance at the period's end.")
+  scope: Literal["historical", "in_scope"] = Field(
+    ...,
+    description=(
+      "`historical` for a month already in the books' history, which the "
+      "schedule records but never drafts; `in_scope` for one a close drafts."
+    ),
+  )
+  interest: float | None = Field(None, description="Loan schedules: interest accrued.")
+  payment: float | None = Field(None, description="Loan schedules: the payment.")
+  principal: float | None = Field(None, description="Loan schedules: principal repaid.")
+  current_portion: float | None = Field(
+    None,
+    description=(
+      "Loan schedules with a current-portion account: the principal due in "
+      "the next twelve months."
+    ),
+  )
+
+
+class ScheduleReplacementSummary(BaseModel):
+  """What an existing schedule's entries mean for replacing it."""
+
+  structure_id: str
+  name: str
+  posted_entry_count: int = Field(
+    ..., description="Its posted or shadowed closing entries."
+  )
+  posted_periods: list[str] = Field(
+    default_factory=list, description="The months those entries are in (YYYY-MM)."
+  )
+  draft_entry_count: int = 0
+  path: Literal["rebuild", "terminate_and_succeed"] = Field(
+    ...,
+    description=(
+      "`rebuild` when nothing has posted: rebuild-schedule with the new "
+      "definition replaces it in place. `terminate_and_succeed` once an "
+      "entry has: terminate it after its last posted month and create the "
+      "successor from the month after."
+    ),
+  )
 
 
 class PromoteObligationsRequest(BaseModel):
@@ -356,6 +560,13 @@ class ScheduleCreatedResponse(BaseModel):
   # `pending_event_count` should equal the number of periods materialized.
   schedule_created_event_id: str | None = None
   pending_event_count: int = 0
+  warnings: list[str] = Field(
+    default_factory=list,
+    description=(
+      "What the write went ahead with that deserves a look: another active "
+      "schedule posting to the same accounts over the same months."
+    ),
+  )
 
 
 # ── Update / delete ──────────────────────────────────────────────────────
@@ -455,10 +666,26 @@ class RebuildScheduleRequest(BaseModel):
   month, are history), so a rebuild re-scopes the schedule to today's
   close state. Use this to pick up a fixed generator (e.g. the
   roll-forward direction fix) without orphaning obligations.
+
+  It is also how an edit is saved while nothing has posted: the fields below
+  replace the stored definition before it regenerates, as the schedule's
+  envelope reads them back (`artifact.mechanics`). Omitted fields keep their
+  stored values, inside `schedule_metadata` too.
   """
 
   structure_id: str = Field(
     ..., description="The schedule structure to regenerate in place."
+  )
+  period_start: date | None = Field(None, description="A new first period start.")
+  period_end: date | None = Field(None, description="A new last period end.")
+  monthly_amount: int | None = Field(
+    None, description="A new straight-line monthly amount, in cents."
+  )
+  entry_template: EntryTemplateRequest | None = Field(
+    None, description="A new entry template, replacing the stored one whole."
+  )
+  schedule_metadata: ScheduleMetadataRequest | None = Field(
+    None, description="The schedule_metadata fields to change."
   )
 
 

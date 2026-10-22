@@ -30,6 +30,8 @@ from robosystems.models.api.extensions.schedules import (
   DeleteScheduleRequest,
   EntryTemplateRequest,
   ScheduleMetadataRequest,
+  ScheduleReplacementSummary,
+  ScheduleRollForwardRow,
   UpdateScheduleRequest,
 )
 
@@ -486,6 +488,42 @@ class ScheduleMechanics(BaseModel):
       "Number of in-scope periods that have at least one closing entry "
       "posted. Runtime state derived at envelope-build time from the "
       "Entry table."
+    ),
+  )
+  period_start: date | None = Field(
+    None, description="The schedule's first period start, as defined."
+  )
+  period_end: date | None = Field(
+    None,
+    description=(
+      "The schedule's last period end, as defined. An early end is "
+      "`end_date`; rebuild-schedule regenerates to this and ends at it again."
+    ),
+  )
+  monthly_amount: int | None = Field(
+    None,
+    description=(
+      "The straight-line monthly amount in cents. With `period_start`, "
+      "`period_end`, `entry_template` and `schedule_metadata` this is the "
+      "whole definition: rebuild-schedule takes the same fields back."
+    ),
+  )
+  end_date: date | None = Field(
+    None, description="Where terminate-schedule ended it, when it did."
+  )
+  posted_periods: list[str] = Field(
+    default_factory=list,
+    description=(
+      "The months (YYYY-MM) holding a posted or shadowed closing entry of "
+      "the schedule, which no edit may rewrite."
+    ),
+  )
+  edit_warning: str | None = Field(
+    None,
+    description=(
+      "Set once an entry has posted: what deleting, rebuilding or "
+      "recreating the schedule would do to that history, and the path an "
+      "edit takes instead."
     ),
   )
 
@@ -1211,6 +1249,30 @@ class InformationBlockEnvelope(BaseModel):
 
 
 # ── Request models ─────────────────────────────────────────────────────────
+
+
+class PreviewScheduleResponse(BaseModel):
+  """A generated schedule nobody kept: its envelope as create would leave
+  it, period by period."""
+
+  envelope: InformationBlockEnvelope = Field(
+    ...,
+    description=(
+      "The schedule's Information Block envelope as create would leave it. "
+      "Its ids are provisional: nothing was written."
+    ),
+  )
+  roll_forward: list[ScheduleRollForwardRow] = Field(default_factory=list)
+  warnings: list[str] = Field(
+    default_factory=list,
+    description=(
+      "Things create would go ahead with that deserve a look: an active "
+      "schedule already posting to the same accounts over the same months."
+    ),
+  )
+  replaces: ScheduleReplacementSummary | None = Field(
+    None, description="With `replaces_structure_id`: the schedule being replaced."
+  )
 
 
 class _CreateScheduleArm(BaseModel):
@@ -2145,6 +2207,7 @@ __all__ = [
   "LineAssertionLite",
   "MetricMechanics",
   "MetricObservation",
+  "PreviewScheduleResponse",
   "RenderingLite",
   "RenderingPeriodLite",
   "RenderingRowLite",

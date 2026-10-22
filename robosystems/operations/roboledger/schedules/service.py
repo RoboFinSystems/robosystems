@@ -48,6 +48,12 @@ from robosystems.operations.roboledger.entry_status import (
 )
 from robosystems.operations.roboledger.fact_set import create_fact_set
 from robosystems.operations.roboledger.line_dimensions import write_line_dimensions
+from robosystems.operations.roboledger.schedules.curves import (
+  LEG_COLUMNS,
+  LoanTerms,
+  amortization_table,
+  reclass_cents,
+)
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 # Charlie Hoffman's Seattle Method "universal" conceptual-model has-part
@@ -70,6 +76,9 @@ class EntryTemplate:
   memo_template: str = ""
   auto_reverse: bool = False
   dimension_ids: list[str] = field(default_factory=list)
+  # A loan schedule's lines: {element_id, side, amount_source}. Empty for
+  # every other schedule, which posts the debit/credit pair.
+  legs: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -83,6 +92,7 @@ class ScheduleMetadata:
   asset_element_id: str | None = None
   periodic_amounts: list[int] | None = None  # cents; see Request model
   booked_on: date | None = None  # see Request model
+  loan_terms: dict | None = None  # see LoanTermsRequest
 
 
 @dataclass
@@ -152,6 +162,7 @@ class ScheduleService:
     source_transaction_id: str | None,
     entity_id: str,
     booked_through: date | None = None,
+    loan_columns: dict[str, list[int]] | None = None,
   ) -> tuple[Structure, dict, dict, str]:
     """Create the Structure, its element associations, and the
     cm:Debit/cm:Credit has-part posting arcs. Not called on rebuild, which
@@ -169,6 +180,7 @@ class ScheduleService:
       schedule_metadata=schedule_metadata,
       source_transaction_id=source_transaction_id,
       booked_through=booked_through,
+      loan_columns=loan_columns,
     )
 
     structure = Structure(
@@ -210,10 +222,15 @@ class ScheduleService:
         )
       ).scalars()
     }
-    for role_qname, account_element_id in (
+    posting_pairs = {
       ("cm:Debit", entry_template.debit_element_id),
       ("cm:Credit", entry_template.credit_element_id),
-    ):
+      *(
+        ("cm:Debit" if leg["side"] == "debit" else "cm:Credit", leg["element_id"])
+        for leg in entry_template.legs
+      ),
+    }
+    for role_qname, account_element_id in sorted(posting_pairs):
       role_id = cm_role_ids.get(role_qname)
       if role_id is None or account_element_id is None:
         continue
@@ -241,6 +258,7 @@ class ScheduleService:
     schedule_metadata: ScheduleMetadata | None,
     source_transaction_id: str | None,
     booked_through: date | None = None,
+    loan_columns: dict[str, list[int]] | None = None,
   ) -> tuple[dict, dict]:
     """Build the ``metadata_`` and ``artifact_mechanics`` blobs, which carry
     every generation input so ``rebuild_schedule`` needs nothing from facts.
@@ -257,6 +275,7 @@ class ScheduleService:
           if entry_template.dimension_ids
           else {}
         ),
+        **({"legs": list(entry_template.legs)} if entry_template.legs else {}),
       },
       "monthly_amount": monthly_amount,
       "period_start": period_start.isoformat(),
@@ -280,6 +299,9 @@ class ScheduleService:
           else None
         ),
       }
+      if schedule_metadata.loan_terms is not None:
+        metadata["schedule_metadata"]["loan_terms"] = schedule_metadata.loan_terms
+        metadata["schedule_metadata"]["periodic_columns"] = loan_columns
 
     # artifact_mechanics is what the envelope builder reads; metadata_ stays
     # populated for rows without it. periods_with_entries is read-time only
@@ -341,7 +363,14 @@ class ScheduleService:
     definition blobs, facts, and obligation events are rewritten, and
     ``element_ids`` is ignored. The caller (``rebuild_schedule``) must void
     the old obligation chain and delete the old facts/rules first.
+
+    ``schedule_metadata.method='effective_interest'`` computes a loan's
+    amortization table from ``loan_terms`` (stored on the Structure as
+    ``periodic_columns``) and drafts the template's ``legs`` from it.
     """
+    periods = _generate_monthly_periods(period_start, period_end)
+    loan_columns = loan_table(schedule_metadata, entry_template, periods)
+
     if existing_structure is not None:
       structure = existing_structure
       entity_id = owner_entity_id(session, structure)
@@ -355,6 +384,7 @@ class ScheduleService:
         schedule_metadata=schedule_metadata,
         source_transaction_id=source_transaction_id,
         booked_through=booked_through,
+        loan_columns=loan_columns,
       )
       structure.metadata_ = metadata
       structure.artifact_mechanics = artifact_mechanics
@@ -376,6 +406,7 @@ class ScheduleService:
           source_transaction_id=source_transaction_id,
           entity_id=entity_id,
           booked_through=booked_through,
+          loan_columns=loan_columns,
         )
       )
 
@@ -394,7 +425,9 @@ class ScheduleService:
         structure_id=structure.id,
         method=schedule_metadata.method if schedule_metadata else "straight_line",
         params=(
-          {
+          dict(schedule_metadata.loan_terms)
+          if schedule_metadata and schedule_metadata.loan_terms is not None
+          else {
             "original_amount": schedule_metadata.original_amount,
             "residual_value": schedule_metadata.residual_value,
             "useful_life_months": schedule_metadata.useful_life_months,
@@ -418,7 +451,173 @@ class ScheduleService:
     # statement type, not FK dependency.
     session.flush()
 
-    periods = _generate_monthly_periods(period_start, period_end)
+    if loan_columns is not None:
+      self._write_loan_facts(
+        session,
+        structure=structure,
+        fact_set_id=fact_set_id,
+        periods=periods,
+        columns=loan_columns,
+        entry_template=entry_template,
+        loan_terms=(schedule_metadata.loan_terms if schedule_metadata else None) or {},
+        closed_through=closed_through,
+        entity_id=entity_id,
+        created_by=created_by,
+      )
+    else:
+      self._write_amount_facts(
+        session,
+        structure=structure,
+        fact_set_id=fact_set_id,
+        periods=periods,
+        monthly_amount=monthly_amount,
+        entry_template=entry_template,
+        schedule_metadata=schedule_metadata,
+        closed_through=closed_through,
+        entity_id=entity_id,
+        created_by=created_by,
+      )
+      check_direction(session, structure.id, entry_template, schedule_metadata)
+
+    # Obligation register: the obligation sensor classifies each pending
+    # schedule_entry_due at its period boundary and dispatches the handler.
+    schedule_created_event_id, pending_event_count = (
+      self._materialize_pending_obligations(
+        session,
+        structure=structure,
+        taxonomy_id=taxonomy_id,
+        period_start=period_start,
+        period_end=period_end,
+        monthly_amount=monthly_amount,
+        periods=periods,
+        closed_through=closed_through,
+        calendar_start=calendar_start,
+        booked_through=booked_through,
+        created_by=created_by,
+        entity_id=entity_id,
+        empty_periods=_empty_loan_periods(
+          entry_template, schedule_metadata, loan_columns
+        ),
+      )
+    )
+
+    metadata["schedule_created_event_id"] = schedule_created_event_id
+    metadata["pending_event_count"] = pending_event_count
+    structure.metadata_ = metadata
+    artifact_mechanics["schedule_created_event_id"] = schedule_created_event_id
+    artifact_mechanics["pending_event_count"] = pending_event_count
+    structure.artifact_mechanics = artifact_mechanics
+
+    # The blobs were flushed already, and these keys go into the same dicts:
+    # without the flag no UPDATE is written, on a new structure too.
+    from sqlalchemy.orm.attributes import flag_modified
+
+    flag_modified(structure, "metadata_")
+    flag_modified(structure, "artifact_mechanics")
+
+    session.flush()
+    return structure
+
+  def _write_loan_facts(
+    self,
+    session: Session,
+    *,
+    structure: Structure,
+    fact_set_id: str,
+    periods: list[tuple[date, date]],
+    columns: dict[str, list[int]],
+    entry_template: EntryTemplate,
+    loan_terms: dict,
+    closed_through: date | None,
+    entity_id: str,
+    created_by: str,
+  ) -> None:
+    """A loan's facts: the interest each period on its interest debit legs,
+    the note's balance (less the current portion, when one is split out)
+    and the current portion at each period end, and the SumEquals rule over
+    the interest."""
+    note_id = loan_terms["note_element_id"]
+    current_id = loan_terms.get("current_portion_element_id")
+    interest_ids = sorted(
+      {
+        leg["element_id"]
+        for leg in entry_template.legs
+        if leg["side"] == "debit" and leg["amount_source"] == "interest"
+      }
+    )
+
+    def _fact(element_id: str, cents: int, p_start: date | None, p_end: date) -> None:
+      scope = "historical" if closed_through and p_end <= closed_through else "in_scope"
+      session.add(
+        Fact(
+          element_id=element_id,
+          value=round(cents / 100.0, 2),
+          period_start=p_start,
+          period_end=p_end,
+          period_type="duration" if p_start is not None else "instant",
+          unit="USD",
+          entity_id=entity_id,
+          structure_id=structure.id,
+          fact_set_id=fact_set_id,
+          fact_scope=scope,
+        )
+      )
+
+    opening_instant = periods[0][0]
+    _fact(note_id, columns["opening"][0], None, opening_instant)
+    if current_id:
+      _fact(current_id, 0, None, opening_instant)
+    for i, (p_start, p_end) in enumerate(periods):
+      for element_id in interest_ids:
+        _fact(element_id, columns["interest"][i], p_start, p_end)
+      current = columns["current_portion"][i] if current_id else 0
+      _fact(note_id, columns["balance"][i] - current, None, p_end)
+      if current_id:
+        _fact(current_id, current, None, p_end)
+
+    total = round(sum(columns["interest"]) / 100.0, 2)
+    debit_qname: str | None = session.execute(
+      select(Element.qname)
+      .where(Element.id == entry_template.debit_element_id)
+      .limit(1)
+    ).scalar()
+    session.add(
+      Rule(
+        taxonomy_id=structure.taxonomy_id,
+        rule_category="ReportingSystemSpecificRule",
+        rule_pattern="SumEquals",
+        rule_expression=f"sum($periodic_amount) = {total}",
+        rule_severity="error",
+        rule_origin="native",
+        target_kind="structure",
+        target_structure_id=structure.id,
+        rule_variables=[
+          {
+            "variable_name": "periodic_amount",
+            "variable_qname": debit_qname,
+            "variable_element_id": entry_template.debit_element_id,
+          }
+        ],
+        metadata_={"expected_total": total},
+        created_by=created_by,
+      )
+    )
+
+  def _write_amount_facts(
+    self,
+    session: Session,
+    *,
+    structure: Structure,
+    fact_set_id: str,
+    periods: list[tuple[date, date]],
+    monthly_amount: int,
+    entry_template: EntryTemplate,
+    schedule_metadata: ScheduleMetadata | None,
+    closed_through: date | None,
+    entity_id: str,
+    created_by: str,
+  ) -> None:
+    """A straight-line or custom curve's facts and its SumEquals rule."""
     amount_dollars = round(monthly_amount / 100.0, 2)
     original_dollars = (
       round(schedule_metadata.original_amount / 100.0, 2)
@@ -461,7 +660,8 @@ class ScheduleService:
         raise ValueError(
           f"periodic_amounts length ({len(schedule_metadata.periodic_amounts)}) "
           f"does not match period count ({len(periods)}) between "
-          f"{period_start} and {period_end}."
+          f"{periods[0][0] if periods else '-'} and "
+          f"{periods[-1][1] if periods else '-'}."
         )
       if any(x < 0 for x in schedule_metadata.periodic_amounts):
         raise ValueError("periodic_amounts entries must be non-negative.")
@@ -663,42 +863,6 @@ class ScheduleService:
         )
       )
 
-    # Obligation register: the obligation sensor classifies each pending
-    # schedule_entry_due at its period boundary and dispatches the handler.
-    schedule_created_event_id, pending_event_count = (
-      self._materialize_pending_obligations(
-        session,
-        structure=structure,
-        taxonomy_id=taxonomy_id,
-        period_start=period_start,
-        period_end=period_end,
-        monthly_amount=monthly_amount,
-        periods=periods,
-        closed_through=closed_through,
-        calendar_start=calendar_start,
-        booked_through=booked_through,
-        created_by=created_by,
-        entity_id=entity_id,
-      )
-    )
-
-    metadata["schedule_created_event_id"] = schedule_created_event_id
-    metadata["pending_event_count"] = pending_event_count
-    structure.metadata_ = metadata
-    artifact_mechanics["schedule_created_event_id"] = schedule_created_event_id
-    artifact_mechanics["pending_event_count"] = pending_event_count
-    structure.artifact_mechanics = artifact_mechanics
-
-    # The blobs were flushed already, and these keys go into the same dicts:
-    # without the flag no UPDATE is written, on a new structure too.
-    from sqlalchemy.orm.attributes import flag_modified
-
-    flag_modified(structure, "metadata_")
-    flag_modified(structure, "artifact_mechanics")
-
-    session.flush()
-    return structure
-
   def _materialize_pending_obligations(
     self,
     session: Session,
@@ -714,8 +878,13 @@ class ScheduleService:
     closed_through: date | None = None,
     calendar_start: date | None = None,
     booked_through: date | None = None,
+    empty_periods: frozenset[int] = frozenset(),
   ) -> tuple[str, int]:
     """Emit `schedule_created` + one `schedule_entry_due` per period.
+
+    A loan period with nothing to post (``empty_periods``, by index) is
+    emitted ``voided`` with ``void_reason='nothing_to_post'``: no entry would
+    ever draft for it, and an obligation without one holds the close.
 
     Periods at or before ``closed_through`` are emitted ``voided``
     (``void_reason='historical'``) so the close gate ignores them; the
@@ -728,7 +897,9 @@ class ScheduleService:
     now = datetime.now(UTC)
 
     pending_count = sum(
-      1 for _p_start, p_end in periods if not closed_through or p_end > closed_through
+      1
+      for i, (_p_start, p_end) in enumerate(periods)
+      if (not closed_through or p_end > closed_through) and i not in empty_periods
     )
 
     session.add(
@@ -756,7 +927,7 @@ class ScheduleService:
       )
     )
 
-    for p_start, p_end in periods:
+    for i, (p_start, p_end) in enumerate(periods):
       # End of day, so the sweep picks the period up exactly when it closes.
       occurred_at = datetime.combine(p_end, time(23, 59, 59), tzinfo=UTC)
       is_historical = closed_through is not None and p_end <= closed_through
@@ -777,6 +948,8 @@ class ScheduleService:
         event_metadata["void_reason"] = (
           BEFORE_CALENDAR if before_calendar else "historical"
         )
+      elif i in empty_periods:
+        event_metadata["void_reason"] = "nothing_to_post"
       session.add(
         Event(
           id=generate_prefixed_ulid("evt"),
@@ -786,7 +959,7 @@ class ScheduleService:
           event_class="economic",
           occurred_at=occurred_at,
           source="schedule",
-          status="voided" if is_historical else "pending",
+          status="voided" if is_historical or i in empty_periods else "pending",
           obligated_by_event_id=schedule_created_event_id,
           metadata_=event_metadata,
           created_at=now,
@@ -1269,45 +1442,44 @@ class ScheduleService:
         reason="No in-scope fact for this period.",
       )
 
+    amount_dollars = fact_row.value
+    amount_cents = round(amount_dollars * 100)
+    schedule_meta = (structure.metadata_ or {}).get("schedule_metadata")
+    schedule_start = (structure.metadata_ or {}).get("period_start")
+    lines = planned_lines(
+      template,
+      schedule_meta,
+      period_index(date.fromisoformat(schedule_start), period_start)
+      if schedule_start
+      else 0,
+      amount_cents,
+    )
+    if template.get("legs"):
+      if not lines:
+        if existing_entry_id:
+          self._delete_draft_entry(session, existing_entry_id)
+        return ClosingEntryResult(
+          outcome="removed" if existing_entry_id else "skipped",
+          reason="The loan schedule has nothing to post this period.",
+        )
+      amount_cents = sum(debit for _e, debit, _c in lines)
+      amount_dollars = round(amount_cents / 100.0, 2)
+
     # Before the staleness check: an unchanged draft on a retired account
     # would still post at close, and one dated before the calendar never would.
     assert_accounts_postable(
-      session, (debit_element_id, credit_element_id), entity_id=entity_id
+      session, {element_id for element_id, _d, _c in lines}, entity_id=entity_id
     )
     assert_within_calendar(session, *fence_dates, entity_id=entity_id)
-
-    amount_dollars = fact_row.value
-    amount_cents = round(amount_dollars * 100)
 
     # Built before the staleness check, which compares memos too.
     memo_template = template.get("memo_template", "")
     entry_memo = memo or memo_template.replace("{structure_name}", structure.name)
 
     if existing_entry_id:
-      current = session.execute(
-        text("""
-          SELECT
-            e.memo            AS memo,
-            li_dr.element_id  AS dr_element,
-            li_dr.debit_amount AS dr_amount,
-            li_cr.element_id  AS cr_element,
-            li_cr.credit_amount AS cr_amount
-          FROM entries e
-          LEFT JOIN line_items li_dr ON li_dr.entry_id = e.id AND li_dr.debit_amount > 0
-          LEFT JOIN line_items li_cr ON li_cr.entry_id = e.id AND li_cr.credit_amount > 0
-          WHERE e.id = :entry_id
-          LIMIT 1
-        """),
-        {"entry_id": existing_entry_id},
-      ).fetchone()
-
-      is_stale = (
-        current is None
-        or current.dr_element != debit_element_id
-        or current.cr_element != credit_element_id
-        or int(current.dr_amount or 0) != amount_cents
-        or int(current.cr_amount or 0) != amount_cents
-        or (current.memo or "") != (entry_memo or "")
+      existing_memo, existing_lines = self._draft_lines(session, existing_entry_id)
+      is_stale = existing_lines != sorted(lines) or (existing_memo or "") != (
+        entry_memo or ""
       )
 
       if not is_stale:
@@ -1330,7 +1502,7 @@ class ScheduleService:
           entry_id=existing_entry_id,
           status="draft",
           posting_date=posting_date,
-          memo=current.memo,
+          memo=existing_memo,
           debit_element_id=debit_element_id,
           credit_element_id=credit_element_id,
           amount=amount_dollars,
@@ -1357,24 +1529,16 @@ class ScheduleService:
     session.add(entry)
     session.flush()
 
-    session.add(
-      LineItem(
-        entry_id=entry.id,
-        element_id=debit_element_id,
-        debit_amount=amount_cents,
-        credit_amount=0,
-        line_order=1,
+    for order, (element_id, debit, credit) in enumerate(lines, 1):
+      session.add(
+        LineItem(
+          entry_id=entry.id,
+          element_id=element_id,
+          debit_amount=debit,
+          credit_amount=credit,
+          line_order=order,
+        )
       )
-    )
-    session.add(
-      LineItem(
-        entry_id=entry.id,
-        element_id=credit_element_id,
-        debit_amount=0,
-        credit_amount=amount_cents,
-        line_order=2,
-      )
-    )
 
     session.flush()
     self._tag_entries(session, [entry.id], template)
@@ -1403,24 +1567,19 @@ class ScheduleService:
       session.add(reversal_entry)
       session.flush()
 
-      session.add(
-        LineItem(
-          entry_id=reversal_entry.id,
-          element_id=credit_element_id,
-          debit_amount=amount_cents,
-          credit_amount=0,
-          line_order=1,
+      # The reversal swaps each line's side, credits first as before.
+      for order, (element_id, debit, credit) in enumerate(
+        sorted(lines, key=lambda line: line[1] > 0), 1
+      ):
+        session.add(
+          LineItem(
+            entry_id=reversal_entry.id,
+            element_id=element_id,
+            debit_amount=credit,
+            credit_amount=debit,
+            line_order=order,
+          )
         )
-      )
-      session.add(
-        LineItem(
-          entry_id=reversal_entry.id,
-          element_id=debit_element_id,
-          debit_amount=0,
-          credit_amount=amount_cents,
-          line_order=2,
-        )
-      )
       session.flush()
       self._tag_entries(session, [reversal_entry.id], template)
 
@@ -1446,6 +1605,22 @@ class ScheduleService:
       amount=amount_dollars,
       reversal=reversal_result,
     )
+
+  @staticmethod
+  def _draft_lines(
+    session: Session, entry_id: str
+  ) -> tuple[str | None, list[tuple[str, int, int]]]:
+    """A draft's memo and its lines as (element id, debit, credit), sorted."""
+    memo = session.execute(select(Entry.memo).where(Entry.id == entry_id)).scalar()
+    lines = sorted(
+      (str(element_id), int(debit or 0), int(credit or 0))
+      for element_id, debit, credit in session.execute(
+        select(
+          LineItem.element_id, LineItem.debit_amount, LineItem.credit_amount
+        ).where(LineItem.entry_id == entry_id)
+      )
+    )
+    return memo, lines
 
   def create_manual_closing_entry(
     self,
@@ -1880,6 +2055,212 @@ class ScheduleService:
     session.add(taxonomy)
     session.flush()
     return taxonomy.id
+
+
+def loan_table(
+  schedule_metadata: ScheduleMetadata | None,
+  entry_template: EntryTemplate,
+  periods: list[tuple[date, date]],
+) -> dict[str, list[int]] | None:
+  """A loan schedule's amortization table, its legs checked against it; None
+  for every other schedule. Raises ``ValueError`` on terms or legs the
+  generator cannot honour, naming the period where one breaks."""
+  method = schedule_metadata.method if schedule_metadata else "straight_line"
+  legs = entry_template.legs
+  if method != "effective_interest":
+    if legs:
+      raise ValueError("Template legs are for method='effective_interest' only.")
+    return None
+  if schedule_metadata is None or not schedule_metadata.loan_terms:
+    raise ValueError("method='effective_interest' needs schedule_metadata.loan_terms.")
+  if schedule_metadata.periodic_amounts is not None:
+    raise ValueError("A loan schedule computes its amounts; omit periodic_amounts.")
+  if not legs:
+    raise ValueError(
+      "A loan schedule needs entry_template.legs: the lines it drafts each "
+      "period, each taking a column of the amortization table."
+    )
+  for leg in legs:
+    if leg.get("side") not in ("debit", "credit"):
+      raise ValueError(f"A leg's side is debit or credit, not {leg.get('side')!r}.")
+    if leg.get("amount_source") not in LEG_COLUMNS:
+      raise ValueError(
+        f"A leg's amount_source is one of {sorted(LEG_COLUMNS)}, not "
+        f"{leg.get('amount_source')!r}."
+      )
+  if not any(
+    leg["side"] == "debit"
+    and leg["amount_source"] == "interest"
+    and leg["element_id"] == entry_template.debit_element_id
+    for leg in legs
+  ):
+    raise ValueError(
+      "entry_template.debit_element_id must be a debit leg taking `interest` "
+      "(the interest expense): the schedule's facts and rule are on it."
+    )
+  if not any(
+    leg["side"] == "credit" and leg["element_id"] == entry_template.credit_element_id
+    for leg in legs
+  ):
+    raise ValueError("entry_template.credit_element_id must be one of the credit legs.")
+
+  columns = amortization_table(
+    LoanTerms.from_dict(schedule_metadata.loan_terms), periods
+  )
+  for i, (_p_start, p_end) in enumerate(periods):
+    debits = sum(
+      columns[leg["amount_source"]][i] for leg in legs if leg["side"] == "debit"
+    )
+    credits = sum(
+      columns[leg["amount_source"]][i] for leg in legs if leg["side"] == "credit"
+    )
+    if debits != credits:
+      raise ValueError(
+        f"{p_end:%Y-%m}: the legs do not balance (debits {debits / 100:.2f}, "
+        f"credits {credits / 100:.2f}). Each period's entry must: an interest "
+        "debit needs an interest credit, a payment credit needs principal and "
+        "interest_paid debits."
+      )
+  return columns
+
+
+def planned_lines(
+  template: dict,
+  schedule_metadata: dict | None,
+  period_index: int,
+  amount_cents: int,
+) -> list[tuple[str, int, int]]:
+  """The lines a schedule's entry carries for one period, as (element id,
+  debit cents, credit cents), zero lines left out. A loan schedule's come
+  from its legs and stored table, with the current-portion reclass; every
+  other schedule's are its debit/credit pair at ``amount_cents``."""
+  legs = template.get("legs") or []
+  if not legs:
+    return [
+      (template["debit_element_id"], amount_cents, 0),
+      (template["credit_element_id"], 0, amount_cents),
+    ]
+  sm = schedule_metadata or {}
+  columns = sm.get("periodic_columns") or {}
+  lines: list[tuple[str, int, int]] = []
+  for leg in legs:
+    cents = int(columns[leg["amount_source"]][period_index])
+    if cents:
+      debit = leg["side"] == "debit"
+      lines.append((leg["element_id"], cents if debit else 0, 0 if debit else cents))
+  terms = sm.get("loan_terms") or {}
+  current_id = terms.get("current_portion_element_id")
+  reclass = reclass_cents(columns, period_index) if current_id else 0
+  if reclass > 0:
+    lines.append((terms["note_element_id"], reclass, 0))
+    lines.append((current_id, 0, reclass))
+  elif reclass < 0:
+    lines.append((current_id, -reclass, 0))
+    lines.append((terms["note_element_id"], 0, -reclass))
+  return lines
+
+
+def _empty_loan_periods(
+  entry_template: EntryTemplate,
+  schedule_metadata: ScheduleMetadata | None,
+  columns: dict[str, list[int]] | None,
+) -> frozenset[int]:
+  """The loan periods whose entry would carry no line."""
+  if columns is None or schedule_metadata is None:
+    return frozenset()
+  template = {"legs": entry_template.legs}
+  stored = {"periodic_columns": columns, "loan_terms": schedule_metadata.loan_terms}
+  return frozenset(
+    i
+    for i in range(len(columns["interest"]))
+    if not planned_lines(template, stored, i, 0)
+  )
+
+
+def period_index(schedule_metadata_start: date, period_start: date) -> int:
+  """A period's position in its schedule, counted in months from its start."""
+  return (period_start.year - schedule_metadata_start.year) * 12 + (
+    period_start.month - schedule_metadata_start.month
+  )
+
+
+def check_direction(
+  session: Session,
+  structure_id: str,
+  entry_template: EntryTemplate,
+  schedule_metadata: ScheduleMetadata | None,
+) -> None:
+  """Refuse a schedule whose balances would move the wrong way: a prepaid or
+  an asset being depreciated never climbs, an accumulation never falls. The
+  template is checked against what its accounts are, and the running
+  balances as written against the way the template moves them, so an
+  inverted roll-forward cannot pass because its total is right."""
+  debit_id = entry_template.debit_element_id
+  credit_id = entry_template.credit_element_id
+  asset_id = schedule_metadata.asset_element_id if schedule_metadata else None
+  traits = {
+    str(element_id): str(identifier)
+    for element_id, identifier in session.execute(
+      select(ElementTrait.element_id, Trait.identifier)
+      .join(Trait, Trait.id == ElementTrait.trait_id)
+      .where(
+        ElementTrait.element_id.in_({debit_id, credit_id}),
+        ElementTrait.is_primary.is_(True),
+        Trait.category == "elementsOfFinancialStatements",
+      )
+    )
+  }
+  if asset_id and asset_id == debit_id:
+    raise ValueError(
+      "The template debits the asset the schedule depreciates "
+      "(asset_element_id), so the asset would climb each period. Debit the "
+      "expense and credit the accumulated balance or the asset itself."
+    )
+  if traits.get(debit_id) == "contraAsset" or _element_is_contra_asset(
+    session, debit_id
+  ):
+    raise ValueError(
+      "The template debits an accumulated (contra) account, so the "
+      "accumulation would fall each period. Did you swap debit and credit?"
+    )
+  if traits.get(debit_id) == "asset" and traits.get(credit_id) == "expense":
+    raise ValueError(
+      "The template debits an asset and credits an expense, so the asset "
+      "would climb each period: a prepaid draws down by debiting the expense "
+      "and crediting the prepaid. Did you swap debit and credit?"
+    )
+
+  draws_down = credit_account_draws_down(session, credit_id)
+  series = [
+    (element_id, period_end, float(value))
+    for element_id, period_end, value in session.execute(
+      select(Fact.element_id, Fact.period_end, Fact.value)
+      .where(
+        Fact.structure_id == structure_id,
+        Fact.period_type == "instant",
+        Fact.element_id.in_({credit_id, *([asset_id] if asset_id else [])}),
+      )
+      .order_by(Fact.element_id, Fact.period_end)
+    )
+  ]
+  previous: dict[str, float] = {}
+  for element_id, period_end, value in series:
+    falls = element_id != credit_id or draws_down
+    before = previous.get(element_id)
+    if value < -0.005:
+      raise ValueError(
+        f"{period_end:%Y-%m}: the schedule's balance on {element_id} would "
+        f"fall below zero ({value:.2f})."
+      )
+    if before is not None and (
+      (falls and value > before + 0.005) or (not falls and value < before - 0.005)
+    ):
+      raise ValueError(
+        f"{period_end:%Y-%m}: the schedule's balance on {element_id} would "
+        f"{'climb' if falls else 'fall'} ({before:.2f} to {value:.2f}), "
+        f"against the way its entries move it."
+      )
+    previous[element_id] = value
 
 
 def credit_account_draws_down(session: Session, element_id: str) -> bool:

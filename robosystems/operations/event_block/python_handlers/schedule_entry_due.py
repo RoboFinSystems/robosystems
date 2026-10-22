@@ -160,8 +160,25 @@ def dispatch_preview(
       validation_errors=[],
     )
 
+  from robosystems.operations.roboledger.schedules.service import (
+    period_index,
+    planned_lines,
+  )
+
   amount_dollars = fact_row.value
   amount_cents = round(amount_dollars * 100)
+  schedule_start = (structure.metadata_ or {}).get("period_start")
+  lines = planned_lines(
+    template,
+    (structure.metadata_ or {}).get("schedule_metadata"),
+    period_index(date.fromisoformat(schedule_start), metadata.period_start)
+    if schedule_start
+    else 0,
+    amount_cents,
+  )
+  if template.get("legs"):
+    amount_cents = sum(debit for _e, debit, _c in lines)
+    amount_dollars = round(amount_cents / 100.0, 2)
   memo_template = template.get("memo_template", "") or ""
   entry_memo = metadata.memo or memo_template.replace(
     "{structure_name}", structure.name
@@ -176,15 +193,11 @@ def dispatch_preview(
         "entry_type": template.get("entry_type", "closing"),
         "line_items": [
           {
-            "element_id": debit_element_id,
-            "debit_amount": amount_cents,
-            "credit_amount": 0,
-          },
-          {
-            "element_id": credit_element_id,
-            "debit_amount": 0,
-            "credit_amount": amount_cents,
-          },
+            "element_id": element_id,
+            "debit_amount": debit,
+            "credit_amount": credit,
+          }
+          for element_id, debit, credit in lines
         ],
       }
     ],

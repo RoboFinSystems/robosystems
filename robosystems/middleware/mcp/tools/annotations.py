@@ -75,6 +75,7 @@ WRITE_TOOL_HINTS: dict[str, ToolHints] = {
   "execute-event-block": _write(destructive=True, idempotent=True, open_world=True),
   "preview-event-block": _READ,
   "preview-reconciling-item": _READ,
+  "preview-schedule": _READ,
   # Reads the trial balance from QuickBooks.
   "preview-reconciliations": _READ._replace(open_world=True),
   # Replaces the period's recorded comparison; reads QuickBooks to make it.

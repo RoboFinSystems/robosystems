@@ -41,6 +41,9 @@ from robosystems.routers.extensions.roboledger.operations.close import (
   close_period_op as close_period_op,
 )
 from robosystems.routers.extensions.roboledger.operations.close import (
+  preview_schedule_op as preview_schedule_op,
+)
+from robosystems.routers.extensions.roboledger.operations.close import (
   promote_obligations_op as promote_obligations_op,
 )
 from robosystems.routers.extensions.roboledger.operations.close import (

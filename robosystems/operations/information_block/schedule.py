@@ -84,17 +84,35 @@ def delete(
 
 
 def _load_schedule_mechanics(
-  structure: Structure, periods_with_entries: int
+  structure: Structure,
+  periods_with_entries: int,
+  posted_periods: list[str] | None = None,
 ) -> ScheduleMechanics:
   """Build the typed Schedule mechanics from ``artifact_mechanics``, falling
-  back to the ``metadata_`` shape older rows carry."""
+  back to the ``metadata_`` shape older rows carry. The definition fields
+  read from ``metadata_``, which every write path keeps whole."""
+  from robosystems.operations.roboledger.commands.schedules import edit_warning
+
+  meta = structure.metadata_ or {}
+  posted_periods = posted_periods or []
+  definition = {
+    "period_start": meta.get("period_start"),
+    "period_end": meta.get("period_end"),
+    "monthly_amount": meta.get("monthly_amount"),
+    "end_date": (meta.get("schedule_metadata") or {}).get("end_date"),
+    "posted_periods": posted_periods,
+    "edit_warning": edit_warning(posted_periods),
+  }
   mechanics_blob = structure.artifact_mechanics
   if mechanics_blob:
     return ScheduleMechanics.model_validate(
-      {**mechanics_blob, "periods_with_entries": periods_with_entries}
+      {
+        **mechanics_blob,
+        **{k: v for k, v in definition.items() if v is not None},
+        "periods_with_entries": periods_with_entries,
+      }
     )
 
-  meta = structure.metadata_ or {}
   raw_schedule_meta = meta.get("schedule_metadata")
   raw_entry_template = meta.get("entry_template")
   if not raw_entry_template:
@@ -113,6 +131,7 @@ def _load_schedule_mechanics(
       else None
     ),
     periods_with_entries=periods_with_entries,
+    **definition,
   )
 
 
@@ -164,7 +183,11 @@ def build_envelope(
     or 0
   )
 
-  mechanics = _load_schedule_mechanics(structure, periods_with_entries)
+  from robosystems.operations.roboledger.commands.schedules import posted_periods
+
+  mechanics = _load_schedule_mechanics(
+    structure, periods_with_entries, posted_periods(session, structure_id)
+  )
 
   # Only in-scope facts: historical ones are already in opening balances and
   # would invite re-drafting closed work.

@@ -90,6 +90,15 @@ class TestGenerateMonthlyPeriods:
 SVC_MODULE = "robosystems.operations.roboledger.schedules.service"
 
 
+@pytest.fixture(autouse=True)
+def _no_direction_check():
+  """The mocked session scripts each query the generator makes; the direction
+  check reads traits and facts back and has its own real-Postgres tests
+  (test_schedule_round_trip_db)."""
+  with patch(f"{SVC_MODULE}.check_direction"):
+    yield
+
+
 def _mock_session():
   """Create a mock SQLAlchemy session.
 
@@ -1662,19 +1671,17 @@ class TestCreateClosingEntry:
     #   1. existing-entry query → returns draft row
     #   2. fact lookup → value 416.67
     #   3. staleness comparison query → current draft details matching fact
-    staleness_row = MagicMock(
-      memo="Monthly depreciation - Office Furniture Depreciation",
-      dr_element="elem_depr_expense",
-      dr_amount=41667,  # cents
-      cr_element="elem_accum_depr",
-      cr_amount=41667,
-    )
     session.execute.return_value.fetchone.side_effect = [
       MagicMock(id="je_existing", status="draft"),
       MagicMock(value=416.67),
-      staleness_row,
     ]
     svc = ScheduleService()
+    svc._draft_lines = MagicMock(  # the draft as it stands, matching the fact
+      return_value=(
+        "Monthly depreciation - Office Furniture Depreciation",
+        [("elem_accum_depr", 0, 41667), ("elem_depr_expense", 41667, 0)],
+      )
+    )
 
     result = svc.create_closing_entry(
       session,
@@ -1699,21 +1706,19 @@ class TestCreateClosingEntry:
     session = _mock_session()
     session.get.return_value = self._mock_schedule_structure()
     # Schedule fact now says 500.00 but the existing draft has 416.67
-    staleness_row = MagicMock(
-      memo="old memo",
-      dr_element="elem_depr_expense",
-      dr_amount=41667,  # old cents
-      cr_element="elem_accum_depr",
-      cr_amount=41667,
-    )
     session.execute.return_value.fetchone.side_effect = [
       MagicMock(id="je_stale", status="draft"),
       MagicMock(value=500.00),  # new amount from edited schedule
-      staleness_row,
       # `_delete_draft_entry`'s locked status re-read (see above).
       MagicMock(status="draft"),
     ]
     svc = ScheduleService()
+    svc._draft_lines = MagicMock(  # the old draft: 416.67 under an old memo
+      return_value=(
+        "old memo",
+        [("elem_accum_depr", 0, 41667), ("elem_depr_expense", 41667, 0)],
+      )
+    )
 
     result = svc.create_closing_entry(
       session,

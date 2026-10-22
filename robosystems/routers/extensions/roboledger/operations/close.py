@@ -35,6 +35,7 @@ from robosystems.models.api.extensions.fiscal_calendar import (
   SetCloseTargetRequest,
 )
 from robosystems.models.api.extensions.schedules import (
+  PreviewScheduleRequest,
   PromoteObligationsRequest,
   PromoteObligationsResponse,
   RebuildScheduleRequest,
@@ -42,6 +43,7 @@ from robosystems.models.api.extensions.schedules import (
   TerminateScheduleRequest,
   TerminateScheduleResponse,
 )
+from robosystems.models.api.information_block import PreviewScheduleResponse
 from robosystems.models.core import User
 from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
@@ -59,6 +61,9 @@ from robosystems.operations.roboledger.commands.fiscal_calendar import (
   set_close_target as cmd_set_close_target,
 )
 from robosystems.operations.roboledger.commands.schedules import ScheduleNotFoundError
+from robosystems.operations.roboledger.commands.schedules import (
+  preview_schedule as cmd_preview_schedule,
+)
 from robosystems.operations.roboledger.commands.schedules import (
   promote_obligations as cmd_promote_obligations,
 )
@@ -603,6 +608,36 @@ promote_obligations_op = _registrar.register(
 )
 
 
+preview_schedule_op = _registrar.register(
+  OperationSpec(
+    name="preview-schedule",
+    summary="Preview Schedule",
+    description=(
+      "Generate a schedule from a definition without keeping it: the same "
+      "generator and guards as creating one (block_type='schedule' on "
+      "create-information-block), run and rolled back. Returns the envelope "
+      "create would leave (its ids provisional) and the period-by-period "
+      "roll-forward: the balance the schedule carries on the account it "
+      "credits (a loan's: the note), opening, the period's amount, closing, "
+      "and for a loan the interest, payment, principal and current portion. "
+      "Show it to the person before asking to create. A definition create "
+      "would refuse (a roll-forward that climbs where it should fall, legs "
+      "that do not balance) is refused here with the period that breaks. "
+      "`warnings` names any active schedule already posting the same "
+      "accounts in the same months. With `replaces_structure_id`, "
+      "`replaces` says what the schedule being edited or recreated has "
+      "posted, by month, and the path the change takes: `rebuild` "
+      "(rebuild-schedule with the new definition) while nothing has posted, "
+      "`terminate_and_succeed` after."
+    ),
+    command=cmd_preview_schedule,
+    request_model=PreviewScheduleRequest,
+    result_type=PreviewScheduleResponse,
+    error_map={ScheduleNotFoundError: 404, ValueError: 422},
+  )
+)
+
+
 rebuild_schedule_op = _registrar.register(
   OperationSpec(
     name="rebuild-schedule",
@@ -618,7 +653,15 @@ rebuild_schedule_op = _registrar.register(
       "bounds). The historical-vs-in-scope split is re-derived from the "
       "CURRENT fiscal calendar closed_through. Use this to pick up a fixed "
       "generator (e.g. the roll-forward direction fix) without orphaning "
-      "obligations."
+      "obligations. It is also how an edit is saved while nothing has "
+      "posted: pass the definition fields to change (period_start, "
+      "period_end, monthly_amount, entry_template, schedule_metadata), read "
+      "back from the schedule's envelope (artifact.mechanics), and the "
+      "schedule regenerates from them; omitted fields keep their stored "
+      "values. Refused once an entry has posted (the envelope's "
+      "posted_periods and edit_warning say so in advance): terminate the "
+      "schedule and create a successor instead. Run preview-schedule with "
+      "the new definition first to see the roll-forward."
     ),
     command=cmd_rebuild_schedule,
     request_model=RebuildScheduleRequest,
