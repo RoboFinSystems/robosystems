@@ -114086,6 +114086,99 @@
           "@language": "en"
         }
       ]
+    },
+    {
+      "@id": "rs-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
+      "balance": [
+        {
+          "@value": "debit"
+        }
+      ],
+      "periodType": [
+        {
+          "@value": "instant"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "rs-gaap"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Cash, Cash Equivalents, Restricted Cash, and Restricted Cash Equivalents",
+          "@language": "en"
+        }
+      ],
+      "rdfs:comment": [
+        {
+          "@value": "Amount of cash and cash equivalents, and cash and cash equivalents restricted to withdrawal or usage. The total the statement of cash flows opens and closes on (ASU 2016-18); derived from the balance sheet's cash rows, never mapped to.",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:StatementOfCashFlowsAbstract",
+      "periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "abstract"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "rs-gaap"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Statement of Cash Flows [Abstract]",
+          "@language": "en"
+        }
+      ]
     }
   ]
 }

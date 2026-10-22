@@ -1297,6 +1297,33 @@
       "ruleMessage": "Calculation rollup: rs-gaap:Revenues = Σ rs-gaap revenue leaves",
       "ruleSeverity": "error",
       "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-gaap-rollup-cf-cash",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollUp",
+      "ruleExpression": "$CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents = ($CashAndCashEquivalentsAtCarryingValue + $RestrictedCashAndInvestmentsCurrent)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
+          "variableQname": "rs-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"
+        },
+        {
+          "variableName": "CashAndCashEquivalentsAtCarryingValue",
+          "variableQname": "rs-gaap:CashAndCashEquivalentsAtCarryingValue"
+        },
+        {
+          "variableName": "RestrictedCashAndInvestmentsCurrent",
+          "variableQname": "rs-gaap:RestrictedCashAndInvestmentsCurrent"
+        }
+      ],
+      "ruleMessage": "Calculation rollup: rs-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents = Σ the balance sheet's cash rows (the total the cash flow opens and closes on)",
+      "ruleSeverity": "error",
+      "ruleOrigin": "native"
     }
   ]
 }

@@ -335,3 +335,68 @@ def test_the_outside_owners_interest_opens_and_closes_beside_the_capital() -> No
   assert nci.role_labels[PERIOD_END_LABEL_ROLE] == (
     "Noncontrolling interest, ending balance"
   )
+
+
+CASH_TOTAL = "rs-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"
+NET_CHANGE = "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+CASH_HEADER = "rs-gaap:StatementOfCashFlowsAbstract"
+
+
+def test_the_cash_flow_opens_and_closes_on_its_cash_total() -> None:
+  """The engine holds the cash total as the parent of net change; the export
+  presents it under the statement's header, first at the beginning of the
+  period and again at the end, with the sections untouched between them."""
+  linkbases = BundleLinkbases(
+    presentation_links=[
+      _link(
+        "presentation",
+        "cash_flow_statement",
+        [
+          _arc("presentation", CASH_TOTAL, NET_CHANGE, 30050.0),
+          _arc("presentation", NET_CHANGE, OPERATING, 30100.0),
+          _arc("presentation", OPERATING, NET_INCOME, 30110.0),
+          _arc("presentation", OPERATING, GAIN, 30126.0),
+        ],
+      )
+    ],
+    calculation_links=[
+      _link(
+        "calculation",
+        "cash_flow_statement",
+        [
+          _arc("calculation", NET_CHANGE, OPERATING, 1.0, weight=1.0),
+          _arc("calculation", OPERATING, NET_INCOME, 1.0, weight=1.0),
+          _arc("calculation", OPERATING, GAIN, 2.0, weight=-1.0),
+        ],
+      )
+    ],
+  )
+  concepts = [
+    *_concepts(),
+    _element(CASH_TOTAL, label="Cash, cash equivalents and restricted cash"),
+    _element(NET_CHANGE, period_type="duration", label="Net change in cash"),
+  ]
+  concepts.extend(_apply_preferred_labels(linkbases, concepts))
+
+  cash_flow = linkbases.presentation_links[0]
+  rows = [
+    (arc.from_qname, arc.to_qname, arc.preferred_label)
+    for arc in sorted(cash_flow.arcs, key=lambda a: a.order_value or 0.0)
+  ]
+  assert rows == [
+    (CASH_HEADER, CASH_TOTAL, PERIOD_START_LABEL_ROLE),
+    (CASH_HEADER, NET_CHANGE, None),
+    (NET_CHANGE, OPERATING, None),
+    (OPERATING, NET_INCOME, None),
+    (OPERATING, GAIN, NEGATED_LABEL_ROLE),
+    (CASH_HEADER, CASH_TOTAL, PERIOD_END_LABEL_ROLE),
+  ]
+  total = next(c for c in concepts if c.qname == CASH_TOTAL)
+  assert total.role_labels == {
+    PERIOD_START_LABEL_ROLE: "Cash, cash equivalents and restricted cash, beginning of period",
+    PERIOD_END_LABEL_ROLE: "Cash, cash equivalents and restricted cash, end of period",
+  }
+  header = next(c for c in concepts if c.qname == CASH_HEADER)
+  assert header.is_abstract
+  # Cash rolls forward alone: no outside owners' interest beside it.
+  assert not any(c.qname == "rs-gaap:MinorityInterest" for c in concepts)

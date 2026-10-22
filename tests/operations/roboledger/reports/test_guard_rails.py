@@ -1026,3 +1026,80 @@ class TestEquityStatementValidation:
     result = validate_report("equity_statement", rows)
     assert result.status == "failed"
     assert any("difference: 7656.00" in f for f in result.failures)
+
+
+def _cash_flow_rows(
+  opening: float, sections: list[float], closing: float
+) -> list[FactRow]:
+  """A cash flow as the renderer lays it out: cash at the beginning of the
+  period, the sections under net change, net change, then the cash total as
+  the end of the period."""
+  total = "rs-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"
+  rows = [
+    FactRow(
+      element_id="cash_total",
+      element_qname=total,
+      element_name="Cash, beginning of period",
+      classification=None,
+      balance_type="debit",
+      values=[opening],
+      period_role="start",
+    )
+  ]
+  rows += [
+    FactRow(
+      element_id=f"section_{i}",
+      element_qname=f"rs-gaap:NetCashProvidedByUsedInSection{i}",
+      element_name=f"Section {i}",
+      classification=None,
+      balance_type="debit",
+      values=[value],
+      depth=2,
+    )
+    for i, value in enumerate(sections)
+  ]
+  rows.append(
+    FactRow(
+      element_id="net_change",
+      element_qname="rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease",
+      element_name="Net change in cash",
+      classification=None,
+      balance_type="debit",
+      values=[sum(sections)],
+      is_subtotal=True,
+      depth=1,
+    )
+  )
+  rows.append(
+    FactRow(
+      element_id="cash_total",
+      element_qname=total,
+      element_name="Cash, end of period",
+      classification=None,
+      balance_type="debit",
+      values=[closing],
+      is_subtotal=True,
+      period_role="end",
+    )
+  )
+  return rows
+
+
+class TestCashFlowRollForward:
+  def test_beginning_cash_plus_net_change_is_ending_cash(self):
+    rows = _cash_flow_rows(1000.0, [250.0, -100.0, 50.0], 1200.0)
+    result = validate_report("cash_flow_statement", rows)
+    assert (result.status, result.passed) == ("passed", True), result.failures
+    assert "rollforward_articulates" in result.checks
+    # The ending cash is not the sum of net change; no foot warning on it.
+    assert not any("does not match sum of children" in w for w in result.warnings)
+
+  def test_a_cash_flow_that_does_not_reach_the_balance_sheet_fails(self):
+    """The ΔCash tie-out, on the page: net change that misses the balance
+    sheet's cash is a failure, not a logged warning."""
+    rows = _cash_flow_rows(1000.0, [250.0, -100.0], 1200.0)
+    result = validate_report("cash_flow_statement", rows)
+    assert result.status == "failed"
+    assert any(
+      "does not roll forward" in f and "difference: 50.00" in f for f in result.failures
+    )

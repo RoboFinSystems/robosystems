@@ -312,6 +312,7 @@ def generate_report_facts(
   _emit_opening_equity_facts(
     session, facts, periods, mapping_id, arc_type, entity_id, close_target_qname
   )
+  _emit_opening_cash_facts(session, facts, periods, mapping_id, arc_type, entity_id)
 
   if start is not None:
     facts = [f for f in facts if _within_the_books(f, start)]
@@ -585,7 +586,7 @@ def render_structure_view(
     period_balances,
     calculations,
     pre_signed=True,
-    keep=ROLLFORWARD_ROOTS if block_type == "equity_statement" else frozenset(),
+    keep=_ROLLFORWARD_ROOTS_BY_BLOCK.get(block_type, frozenset()),
   )
   if strays and block_type in _PLACED_BY_CALCULATION:
     ancestry = _calculation_ancestry(
@@ -596,6 +597,14 @@ def render_structure_view(
     rows = _with_opening_balance(rows, facts, periods, hierarchy)
   if block_type == "cash_flow_statement":
     _show_cash_signed(rows, hierarchy, calculations)
+    rows = _with_opening_balance(
+      rows,
+      facts,
+      periods,
+      hierarchy,
+      roots=CASH_ROLLFORWARD_ROOTS,
+      suffixes=(", beginning of period", ", end of period"),
+    )
 
   return FactGrid(
     structure_id=structure_id,
@@ -1572,7 +1581,6 @@ _CASH_ANCHOR_QNAMES: frozenset[str] = frozenset(
   {
     "rs-gaap:CashCashEquivalentsAndShortTermInvestments",
     "rs-gaap:CashAndCashEquivalentsAtCarryingValue",
-    "rs-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
     "rs-gaap:Cash",
     "rs-gaap:CashAndCashEquivalents",
     # Part of the cash total the statement reconciles to (ASU 2016-18), not a
@@ -1580,6 +1588,16 @@ _CASH_ANCHOR_QNAMES: frozenset[str] = frozenset(
     "rs-gaap:RestrictedCashAndInvestmentsCurrent",
   }
 )
+
+# The total the statement opens and closes on (ASU 2016-18): the root of each
+# cash flow network, summed by calc arc from the balance sheet's cash rows and
+# never mapped to. Its column-end facts come from ``_emit_subtotal_facts``; the
+# opening ones from ``_emit_opening_cash_facts``. Not an anchor: a line can't be
+# on it, and ``_cash_by_date`` would count it beside the rows it sums.
+_CASH_TOTAL_QNAME = (
+  "rs-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"
+)
+CASH_ROLLFORWARD_ROOTS: frozenset[str] = frozenset({_CASH_TOTAL_QNAME})
 
 # The reconciling leaf is in both the CF calc DAG and the Indirect
 # presentation, so the adjustment foots the subtotal and renders as a line.
@@ -2916,6 +2934,12 @@ _NCI_FLOW_KIND: dict[str, str] = {
 }
 ROLLFORWARD_ROOTS: frozenset[str] = EQUITY_ROLLFORWARD_ROOTS | {_NCI_ROOT}
 
+# The roots a statement keeps at zero and rolls forward, by block type.
+_ROLLFORWARD_ROOTS_BY_BLOCK: dict[str, frozenset[str]] = {
+  "equity_statement": ROLLFORWARD_ROOTS,
+  "cash_flow_statement": CASH_ROLLFORWARD_ROOTS,
+}
+
 # A redemption of units has no row of its own on the capital-account forms.
 _CAPITAL_ACCOUNT_MOVEMENTS: dict[str, str] = {
   "contribution": "rs-gaap:PartnersCapitalAccountContributions",
@@ -3285,26 +3309,28 @@ def _with_opening_balance(
   facts: list[ReportFact],
   periods: list[PeriodSpec],
   hierarchy: list[_HierarchyNode],
+  *,
+  roots: frozenset[str] = ROLLFORWARD_ROOTS,
+  suffixes: tuple[str, str] = (", beginning balance", ", ending balance"),
 ) -> list[FactRow]:
-  """Open each equity roll-forward on its root's balance the day before each
-  column starts, so the statement reads beginning balance + changes = ending
-  balance — the Style's capital, and on a group with outside owners the
-  noncontrolling interest beside it. The opening is another column's closing
-  where one ends that day, else the instant ``_emit_opening_equity_facts``
+  """Open each roll-forward on its root's balance the day before each column
+  starts, so the statement reads beginning balance + changes = ending balance
+  — the equity statement's capital, and on a group with outside owners the
+  noncontrolling interest beside it; the cash flow's cash total above net
+  change. The opening is another column's closing where one ends that day,
+  else the instant ``_emit_opening_equity_facts`` / ``_emit_opening_cash_facts``
   stored; none is 0."""
   # A root's subtree takes the positions just ahead of the root's own, so its
   # opening goes ahead of all of them — in every grid of the Style alike.
   subtree_size = {
     root.element_id: _subtree_size(root) - 1
     for root in hierarchy
-    if root.qname in ROLLFORWARD_ROOTS
+    if root.qname in roots
   }
   closings = [
     r
     for r in rows
-    if r.element_qname in ROLLFORWARD_ROOTS
-    and r.depth == 0
-    and r.element_id in subtree_size
+    if r.element_qname in roots and r.depth == 0 and r.element_id in subtree_size
   ]
   if not closings:
     return rows
@@ -3340,13 +3366,13 @@ def _with_opening_balance(
       continue
 
     name = closing.element_name
-    closing.element_name = f"{name}, ending balance"
+    closing.element_name = f"{name}{suffixes[1]}"
     closing.period_role = "end"
     openings.append(
       FactRow(
         element_id=closing.element_id,
         element_qname=closing.element_qname,
-        element_name=f"{name}, beginning balance",
+        element_name=f"{name}{suffixes[0]}",
         classification=closing.classification,
         balance_type=closing.balance_type,
         values=opening_values,
@@ -3431,6 +3457,66 @@ def _emit_opening_equity_facts(
           derivation={"computations": ["opening_equity"]},
         )
       )
+
+
+def _emit_opening_cash_facts(
+  session: Session,
+  facts: list[ReportFact],
+  periods: list[PeriodSpec],
+  mapping_id: str,
+  arc_type: str,
+  entity_id: str | None,
+) -> None:
+  """Append the cash total's balance the day before each column opens, where
+  no other column ends that day, so the cash flow has a beginning-of-period
+  row to open on. The same sum the column ends state through
+  ``_emit_subtotal_facts``: the calc arcs from the total to the balance
+  sheet's cash rows, over the mapped balances of that day."""
+  total = session.execute(
+    text("SELECT id, qname, name, balance_type FROM elements WHERE qname = :q"),
+    {"q": _CASH_TOTAL_QNAME},
+  ).fetchone()
+  if total is None:
+    return
+  calculations = load_rs_gaap_calculations(session)
+  summands = {src for src, _ in calculations.get(total.id, ())}
+  if not summands:
+    return
+  order = topo_sort_calculations(calculations)
+
+  column_ends = {p.end for p in periods}
+  seen: set[date] = set()
+  for period in sorted(periods, key=lambda p: p.end):
+    opening = _opening_date(period)
+    if opening in column_ends or opening in seen:
+      continue
+    seen.add(opening)
+    balances: dict[str, float] = {}
+    for balance in _read_mapped_balances(
+      session, mapping_id, opening, opening, arc_type=arc_type, entity_id=entity_id
+    ).values():
+      balances[balance.element_id] = balances.get(balance.element_id, 0.0) + (
+        _natural_sign(balance.net_balance, balance.balance_type)
+      )
+    present = set(balances)
+    if not present & summands:
+      continue
+    computed = resolve_calc_dag(balances, present, calculations, order)
+    facts.append(
+      ReportFact(
+        element_id=total.id,
+        element_qname=total.qname,
+        element_name=total.name or total.qname,
+        classification=None,
+        balance_type=total.balance_type or "debit",
+        value=computed.get(total.id, 0.0),
+        period_start=opening,
+        period_end=opening,
+        period_type="instant",
+        origin="derived",
+        derivation={"computations": ["opening_cash"]},
+      )
+    )
 
 
 def _count_unmapped(

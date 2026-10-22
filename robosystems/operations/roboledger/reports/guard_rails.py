@@ -363,15 +363,20 @@ def _validate_balance_sheet(
 def _validate_cash_flow(
   rows: list[FactRow], result: ValidationResult, column: _Column
 ) -> None:
-  """Structural footing of the rendered cash flow statement.
-
-  The ΔCash tie to the balance sheet is checked at the fact-bundle level
-  (``fact_grid._check_cash_flow_tie_out``); rendered rows carry no cash
-  balances.
-  """
+  """Structural footing of the rendered cash flow statement, and its
+  roll-forward: cash at the beginning of the period + net change = cash at
+  the end, which is the ΔCash tie to the balance sheet, since both cash rows
+  are the balance sheet's own sum."""
   # Cash-flow rows are cash-effect signed, so sections foot as plain sums.
   _check_totals_foot(rows, result, column, sign_by_balance=False)
   _check_operating_plug(rows, result, column)
+  # A cash flow with no cash rows (a consolidation entity's books, or a
+  # tenant before this library version) has nothing to roll forward; the
+  # fact-level tie-out already covers it.
+  if any(row.period_role is not None for row in rows):
+    _check_rollforward_articulates(
+      rows, result, column, what="Cash flow", suffix=", end of period"
+    )
 
 
 def _validate_equity_statement(
@@ -386,6 +391,21 @@ def _validate_equity_statement(
   not their total (the opening is), which is why the subtotal foot check does
   not apply here.
   """
+  _check_rollforward_articulates(
+    rows, result, column, what="Equity statement", suffix=", ending balance"
+  )
+
+
+def _check_rollforward_articulates(
+  rows: list[FactRow],
+  result: ValidationResult,
+  column: _Column,
+  *,
+  what: str,
+  suffix: str,
+) -> None:
+  """Beginning balance + the changes between the two balance rows = ending
+  balance, for each roll-forward the rows carry (``period_role`` start/end)."""
   _note_check(result, "rollforward_articulates")
   segments: list[tuple[FactRow, FactRow, list[FactRow]]] = []
   opening: FactRow | None = None
@@ -402,8 +422,8 @@ def _validate_equity_statement(
   if not segments:
     _fail(
       result,
-      "Equity statement validation inconclusive: no beginning or ending "
-      "balance row to roll forward between.",
+      f"{what} validation inconclusive: no beginning or ending balance row "
+      "to roll forward between.",
     )
     return
   for opening, closing, inner in segments:
@@ -416,10 +436,10 @@ def _validate_equity_statement(
     end = _value(closing, column.index)
     diff = abs(begin + changes - end)
     if diff > _TOLERANCE:
-      what = closing.element_name.removesuffix(", ending balance")
+      name = closing.element_name.removesuffix(suffix)
       _fail(
         result,
-        f"{column.prefix}{what} does not roll forward: beginning balance "
+        f"{column.prefix}{name} does not roll forward: beginning balance "
         f"({begin:.2f}) + changes ({changes:.2f}) ≠ ending balance ({end:.2f}), "
         f"difference: {diff:.2f}",
       )
@@ -460,6 +480,10 @@ def _check_totals_foot(
 
   for idx, subtotal in enumerate(rows):
     if not subtotal.is_subtotal:
+      continue
+    # A roll-forward's closing row is not the total of the rows above it;
+    # the opening is, and ``_check_rollforward_articulates`` checks that.
+    if subtotal.period_role is not None:
       continue
     if not any(v is not None for v in subtotal.values):
       continue

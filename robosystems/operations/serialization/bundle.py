@@ -969,9 +969,14 @@ PERIOD_END_LABEL_ROLE = "http://www.xbrl.org/2003/role/periodEndLabel"
 _PARENT_CHILD = "http://www.xbrl.org/2003/arcrole/parent-child"
 
 _NCI_ROOT = "rs-gaap:MinorityInterest"
+_CASH_TOTAL = "rs-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"
 
-# The roll-forward's capital concept -> the us-gaap header it sits under.
+# The roll-forward's balance concept -> the us-gaap header it sits under.
 _ROLLFORWARD_ABSTRACTS: dict[str, tuple[str, str]] = {
+  _CASH_TOTAL: (
+    "rs-gaap:StatementOfCashFlowsAbstract",
+    "Statement of Cash Flows [Abstract]",
+  ),
   "rs-gaap:StockholdersEquity": (
     "rs-gaap:StatementOfStockholdersEquityAbstract",
     "Statement of Stockholders' Equity [Abstract]",
@@ -1026,7 +1031,7 @@ def _apply_preferred_labels(
           # The standard wording: the role, not the text, is what flips the
           # displayed sign.
           _add_role_label(by_qname.get(arc.to_qname), NEGATED_LABEL_ROLE, "")
-    elif link.block_type == "equity_statement":
+    if link.block_type in ("cash_flow_statement", "equity_statement"):
       header = _as_rollforward(link, by_qname)
       if header is not None and header.qname not in by_qname:
         added[header.qname] = header
@@ -1060,13 +1065,20 @@ def _as_rollforward(
   header_qname, header_label = _ROLLFORWARD_ABSTRACTS[root]
   balances: list[BundleArc] = []
   # The outside owners' interest rolls forward beside the capital, under the
-  # same header, as the statement presents it.
-  for balance in (root, _NCI_ROOT):
+  # same header, as the statement presents it. Cash rolls forward alone, and
+  # its rows read as the statement words them.
+  companions = (root,) if root == _CASH_TOTAL else (root, _NCI_ROOT)
+  start_suffix, end_suffix = (
+    (", beginning of period", ", end of period")
+    if root == _CASH_TOTAL
+    else (", beginning balance", ", ending balance")
+  )
+  for balance in companions:
     if balance != root and (balance in targets or balance not in by_qname):
       continue
     balances += _balances_around(link, balance, header_qname)
-    _add_role_label(by_qname[balance], PERIOD_START_LABEL_ROLE, ", beginning balance")
-    _add_role_label(by_qname[balance], PERIOD_END_LABEL_ROLE, ", ending balance")
+    _add_role_label(by_qname[balance], PERIOD_START_LABEL_ROLE, start_suffix)
+    _add_role_label(by_qname[balance], PERIOD_END_LABEL_ROLE, end_suffix)
   link.arcs = [*balances, *link.arcs]
   return BundleElement(
     id=header_qname,
@@ -1096,7 +1108,23 @@ def _balances_around(
   for position, arc in enumerate(movements, start=1):
     if arc.order_value is None:
       arc.order_value = float(position)
-  orders = [arc.order_value for arc in movements if arc.order_value is not None]
+  # The closing balance follows the whole subtree, not only the movements
+  # themselves: the cash flow's one movement, net change, carries the
+  # sections beneath it.
+  subtree = {arc.to_qname for arc in movements}
+  pending = list(subtree)
+  while pending:
+    parent = pending.pop()
+    for arc in link.arcs:
+      if arc.from_qname == parent and arc.to_qname not in subtree:
+        subtree.add(arc.to_qname)
+        pending.append(arc.to_qname)
+  orders = [
+    arc.order_value
+    for arc in link.arcs
+    if arc.order_value is not None
+    and (arc.from_qname == root or arc.from_qname in subtree)
+  ]
   for arc in movements:
     arc.from_qname = header_qname
   return [
