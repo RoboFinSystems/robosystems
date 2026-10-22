@@ -481,11 +481,14 @@ def _consolidation_lines(adjustments: Sequence[Mapping[str, Any]], has) -> list[
     )
   if adjustments and has("record-ownership-change"):
     lines.append(
-      "- The parent buying more of a member from its outside owners gets "
+      "- The parent buying more of a member from its outside owners, or "
+      "selling some of it to them while keeping control, gets "
       "`record-ownership-change(entity_id, period, ownership_pct, "
-      "consideration, basis)`, never `update-entity(ownership_pct=…)` alone, "
-      "which leaves the price unrecorded and the month's investment "
-      "elimination withheld."
+      "consideration, basis)` with the price, never "
+      "`update-entity(ownership_pct=…)` alone, which leaves the price "
+      "unrecorded and the month's investment elimination withheld. A sale's "
+      "proceeds, carrying amount and gain stay on the parent's own entry; "
+      "the group reverses the gain."
     )
   if adjustments and has("record-deconsolidation"):
     lines.append(

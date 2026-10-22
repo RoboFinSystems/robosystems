@@ -13,9 +13,10 @@ as one investment and its share of the kiosk's income as one line, the
 equity method. Driftline Northside Café is the one that was bought and
 sold: a neighborhood café the roaster acquired from its founders a few
 months in, paying more than its book value, bought a further tenth of
-later, and sold whole before the year was out — the group lifecycle, with
-goodwill arriving and a gain on the sale that is smaller in the group than
-on the roaster's own books. The multi-entity beat of the showcase, and the
+later, sold that tenth back to the founders at a price, and sold whole
+before the year was out — the group lifecycle, with goodwill arriving, a
+sale within the method that is no gain in the group, and a gain on the
+final sale that is smaller in the group than on the roaster's own books. The multi-entity beat of the showcase, and the
 target the consolidation engine is built against.
 
 The fee and the distributions are kept small on purpose: the cafés send cash
@@ -100,8 +101,8 @@ GROUP = Group(
       ticker="DNORTH",
       description=(
         "A neighborhood café bought from its founders, who kept a quarter, "
-        "sold a further tenth, and were bought out alongside the roaster when "
-        "the café was sold."
+        "sold a further tenth, bought it back, and were bought out alongside "
+        "the roaster when the café was sold."
       ),
       entity_type="llc",
       template="product",
@@ -118,7 +119,8 @@ GROUP = Group(
       # Offsets into the demo's month windows: bought in the fourth month on
       # $12,000 of cash and $18,000 of equipment for $31,500 (goodwill
       # $9,000 over 75% of $30,000); a further 10% for $4,000 four months
-      # on; sold whole three months after that for $62,000.
+      # on; that tenth sold back to the founders for $7,000 two months
+      # later; sold whole the month after that for $62,000.
       acquired=Acquired(
         joins_at=3,
         opening_cash=1_200_000,
@@ -127,6 +129,9 @@ GROUP = Group(
         tops_up_at=7,
         top_up_pct=85,
         top_up_price=400_000,
+        sells_back_at=9,
+        sell_back_pct=75,
+        sell_back_price=700_000,
         sold_at=10,
         sale_price=6_200_000,
         buyer="Ridgeline Hospitality Group LLC",

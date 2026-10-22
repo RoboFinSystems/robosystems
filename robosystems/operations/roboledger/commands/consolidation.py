@@ -65,6 +65,7 @@ from robosystems.operations.roboledger.reads.consolidation import (
   NONCONTROLLING_INTEREST,
   OWNERSHIP_CHANGE,
   _rows,
+  acquisitions,
   capital_and_earnings,
   elimination_flow,
   engine_drafts,
@@ -609,18 +610,27 @@ def _outside_premium(
   *,
   exclude: set[str],
 ) -> int:
-  """The outside owners' interest in a member that its acquisition and its
-  ownership changes hold on the noncontrolling-interest account, beyond the
-  share of book value the investment elimination carries; credit-positive."""
+  """The outside owners' interest in a member beyond their share of book
+  value: what its acquisition put on the noncontrolling-interest account
+  (their interest at fair value above book) less the premium each change in
+  the parent's share since moved to the parent — never the share of the
+  member's results a change moves, which is measured afresh each time from
+  the results themselves; credit-positive."""
   if nci_account is None:
     return 0
-  held = session.execute(
+  params = {
+    "c": consolidation_id,
+    "m": member_id,
+    "account": nci_account,
+    "exclude": list(exclude),
+  }
+  acquired = session.execute(
     text(
       """
       SELECT COALESCE(SUM(li.credit_amount - li.debit_amount), 0)
       FROM line_items li JOIN entries e ON e.id = li.entry_id
       WHERE e.entity_id = :c AND e.adjusts_entity_id = :m
-        AND e.adjustment_kind IN ('acquisition', 'ownership_change')
+        AND e.adjustment_kind = 'acquisition'
         AND e.status IN ('posted', 'draft') AND li.element_id = :account
         -- A reversed original is out by its status; its reversal, posted
         -- with the original's kind, goes with it.
@@ -628,31 +638,68 @@ def _outside_premium(
         AND NOT (e.id = ANY(:exclude))
       """
     ),
-    {
-      "c": consolidation_id,
-      "m": member_id,
-      "account": nci_account,
-      "exclude": list(exclude),
-    },
+    params,
   ).scalar()
-  return int(held or 0)
+  moved = session.execute(
+    text(
+      """
+      SELECT COALESCE(SUM(
+        (metadata->'ownership_change'->>'premium_transferred')::bigint), 0)
+      FROM entries
+      WHERE entity_id = :c AND adjusts_entity_id = :m
+        AND adjustment_kind = 'ownership_change'
+        AND status IN ('posted', 'draft') AND reversal_of IS NULL
+        AND metadata ? 'ownership_change'
+        AND NOT (id = ANY(:exclude))
+      """
+    ),
+    params,
+  ).scalar()
+  return int(acquired or 0) - int(moved or 0)
+
+
+def _parent_carrying(
+  session: Session, consolidation_id: str, member_id: str, through: date
+) -> int:
+  """What the parent's books carry as its investment in a member through
+  ``through``: the price its recorded acquisition and changes in its share
+  paid the sellers, net of shares sold, and its own lines naming the member
+  — what it put in at formation, less the distributions it took back."""
+  parent_id = resolve_entity_id(session, None)
+  mapping = find_entity_mapping(session, parent_id, BOOK_FRAMEWORK)
+  concepts = primary_concepts(session, [str(mapping.id)]) if mapping else {}
+  rows = _rows(
+    session, [parent_id, member_id], concepts, through, through, drafts_of=""
+  )
+  named = sum(
+    r.amount
+    for r in rows
+    if r.entity_id == parent_id
+    and r.counterparty == member_id
+    and r.concept.qname == INVESTMENT_IN_SUBSIDIARIES
+  )
+  return named + acquisitions(session, consolidation_id, through).get(member_id, 0)
 
 
 def record_ownership_change(
   session: Session, body: RecordOwnershipChangeRequest, created_by: str
 ) -> OwnershipChangeResponse:
-  """Record the parent buying more of a member from its outside owners, from
-  ``period``, as a draft in the consolidation entity that its close posts,
-  and set the member's share. The investment elimination moves the share
-  bought of the member's capital at its next month; this entry carries what
-  that cannot: the price above that book value against the investment, the
-  share bought of the member's results since it joined out of the outside
-  owners' interest, and the difference in the parent's equity (ASC 810: no
-  gain or loss). Its lines carry the cash flow rows that move the price from
-  investing to financing. Replaces an earlier draft for the same month.
+  """Record the parent buying more of a member from its outside owners, or
+  selling some of it to them while keeping control, from ``period``, as a
+  draft in the consolidation entity that its close posts, and set the
+  member's share. The investment elimination moves the share bought or sold
+  of the member's capital at its next month; this entry carries what that
+  cannot: the price above that book value against the investment (for a
+  sale, the parent's cost above book on the shares sold, released, and the
+  gain or loss its own books took, reversed), the share bought or sold of
+  the member's results since it joined between the outside owners' interest
+  and the parent, and the difference in the parent's equity (ASC 810: an
+  equity transaction, no gain or loss while control is kept). Its lines
+  carry the cash flow rows that move the price from investing to financing.
+  Replaces an earlier draft for the same month.
 
-  Raises ``OwnershipChangeError`` for anything but a member in full buying
-  more within the method, a month out of order, or an account the entry
+  Raises ``OwnershipChangeError`` for anything but a member in full changing
+  hands within the method, a month out of order, or an account the entry
   needs that the consolidation entity lacks."""
   member = resolve_entity(session, body.entity_id)
   name = member.name
@@ -726,12 +773,12 @@ def record_ownership_change(
     from_pct = float(same[0].metadata_["ownership_change"]["from_pct"])
   else:
     from_pct = pct_as_of(current, changes, body.period) or 100.0
-  if body.ownership_pct <= from_pct:
+  if body.ownership_pct == from_pct:
     raise OwnershipChangeError(
-      f"The parent held {from_pct:g}% of {name} before {body.period}; a share "
-      f"of {body.ownership_pct:g}% is not more. Selling shares within the "
-      "method is not supported yet."
+      f"The parent held {from_pct:g}% of {name} before {body.period} already; "
+      "there is no change to record."
     )
+  selling = body.ownership_pct < from_pct
 
   before, after = from_pct / 100.0, body.ownership_pct / 100.0
   capital, earnings = capital_and_earnings(
@@ -762,16 +809,33 @@ def record_ownership_change(
   premium_transferred = (
     round(premium * (after - before) / (1.0 - before)) if before < 1.0 else 0
   )
-  excess = body.consideration - book_value
+  # What the parent's books carry for the shares: a purchase adds the price
+  # paid; a sale releases the carrying amount of the shares sold — the
+  # parent's cost, pro rata — and books its own gain or loss against the
+  # proceeds, which the group reverses (ASC 810: no gain or loss while
+  # control is kept). The engine reads the recorded amount as part of the
+  # parent's investment, so a sale is recorded as what the parent released.
+  released = 0
+  gain = 0
+  if selling:
+    carrying = _parent_carrying(
+      session, consolidation_id, str(member.id), start - timedelta(days=1)
+    )
+    released = round(carrying * (before - after) / before)
+    gain = body.consideration - released
+  recorded = -released if selling else body.consideration
   moved = earnings_transferred + premium_transferred
   wanted = {
-    INVESTMENT_IN_SUBSIDIARIES: -excess,
+    INVESTMENT_IN_SUBSIDIARIES: book_value - recorded,
     NONCONTROLLING_INTEREST: moved,
   }
+  if gain:
+    wanted[DECONSOLIDATION_GAIN] = gain
   style = load_entity_reporting_style(session, resolve_entity_id(session, None))
   close_target = load_close_target_concept(session, style)
   equity_concept = _PARENT_EQUITY.get(close_target, close_target)
-  wanted[equity_concept] = wanted.get(equity_concept, 0) + excess - moved
+  equity_adjustment = -sum(wanted.values())
+  wanted[equity_concept] = wanted.get(equity_concept, 0) + equity_adjustment
   wanted = {q: a for q, a in wanted.items() if a}
   missing = sorted(q for q in wanted if q not in accounts)
   if missing:
@@ -780,16 +844,22 @@ def record_ownership_change(
       + ", ".join(missing)
       + "; add one to its chart for the ownership change entry."
     )
-  # The price is the group's payment to its outside owners: its investing
-  # outflow on the parent's books, offset here, and a financing one. Every
-  # other line rides that one payment row, whichever way it falls — the
-  # parent's equity credited when the earnings bought exceed the premium is
-  # part of the price, not proceeds from the outside owners.
+  # The price is the group's payment to, or receipt from, its outside
+  # owners: an investing flow on the parent's books, offset here, and a
+  # financing one. Every other line rides that one financing row, whichever
+  # way it falls — the parent's equity credited when the earnings bought
+  # exceed the premium is part of the price, not proceeds from the outside
+  # owners — and a sale's gain reversal rides the investing row with the
+  # investment line, where the parent's proceeds sit.
+  investing_flow = elimination_flow(
+    INVESTMENT_IN_SUBSIDIARIES, "elimination_investment", 1 if selling else -1
+  )
+  financing_flow = _NCI_FLOWS[0] if selling else _NCI_FLOWS[1]
   flows = {
-    q: elimination_flow(q, "elimination_investment", a)
-    if q == INVESTMENT_IN_SUBSIDIARIES
-    else _NCI_FLOWS[1]
-    for q, a in wanted.items()
+    q: investing_flow
+    if q in (INVESTMENT_IN_SUBSIDIARIES, DECONSOLIDATION_GAIN)
+    else financing_flow
+    for q in wanted
   }
   taggable = taggable_flow_qnames(
     session, load_entity_reporting_style(session, consolidation_id)
@@ -834,7 +904,12 @@ def record_ownership_change(
       "period": body.period,
       "from_pct": from_pct,
       "to_pct": body.ownership_pct,
-      "consideration": body.consideration,
+      # Signed as the engine reads it into the parent's investment: the
+      # price paid, or less what a sale released.
+      "consideration": recorded,
+      "price": body.consideration,
+      "carrying_released": released,
+      "gain_reversed": gain,
       "book_value": book_value,
       "earnings_transferred": earnings_transferred,
       "premium_transferred": premium_transferred,
@@ -861,7 +936,9 @@ def record_ownership_change(
     book_value=book_value,
     earnings_transferred=earnings_transferred,
     premium_transferred=premium_transferred,
-    equity_adjustment=excess - moved,
+    carrying_released=released,
+    gain_reversed=gain,
+    equity_adjustment=equity_adjustment,
     entry=response,
     replaced=bool(same),
   )

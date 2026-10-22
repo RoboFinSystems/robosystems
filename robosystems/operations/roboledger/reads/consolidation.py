@@ -888,8 +888,9 @@ def _check_consideration(
   members: list[_Entity],
   acquired: dict[str, int],
 ) -> None:
-  """Hold the month when the recorded acquisitions paid the sellers more than
-  the parent's books hold as investment naming no member: the eliminations
+  """Hold the month when the recorded acquisitions and changes in the
+  parent's share, net of shares sold, paid the sellers more than the
+  parent's books hold as investment naming no member: the eliminations
   would credit an investment the parent never carried."""
   paid = sum(acquired.get(m.id, 0) for m in members)
   if not paid:
@@ -897,10 +898,12 @@ def _check_consideration(
   carried = _unattributed_investment(rows, parent)
   if paid > carried:
     plan.notes.append(
-      f"The recorded acquisitions paid the sellers {_money(paid)}, but "
-      f"{parent.name}'s investment account holds {_money(carried)} naming no "
-      "member; post the purchase in the parent's books, or correct the "
-      "consideration with record-acquisition."
+      f"The recorded acquisitions and changes in the parent's share paid the "
+      f"sellers {_money(paid)} net of shares sold, but {parent.name}'s "
+      f"investment account holds {_money(carried)} naming no member; post the "
+      "purchase or sale in the parent's books (a sale credits the investment "
+      "by the carrying amount of the shares sold, its gain apart), or correct "
+      "the consideration with record-acquisition or record-ownership-change."
     )
     plan.incomplete = True
 

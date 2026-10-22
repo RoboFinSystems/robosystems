@@ -219,9 +219,12 @@ class Acquired:
   founders' capital; the parent pays ``price`` for the member's
   ``ownership_pct`` and the founders (its ``outside_owner``) keep the rest.
   From window ``tops_up_at`` the parent holds ``top_up_pct``, having paid
-  the founders ``top_up_price`` for the difference. Window ``sold_at`` is
-  its last: the parent sells the whole of it to ``buyer`` for ``sale_price``
-  on the first day of the next, the founders' share going with it."""
+  the founders ``top_up_price`` for the difference; from window
+  ``sells_back_at`` it holds ``sell_back_pct``, the founders having bought
+  the difference back for ``sell_back_price`` — a sale within the method,
+  the parent keeping control. Window ``sold_at`` is its last: the parent
+  sells the whole of it to ``buyer`` for ``sale_price`` on the first day of
+  the next, the founders' share going with it."""
 
   joins_at: int
   opening_cash: int
@@ -230,6 +233,9 @@ class Acquired:
   tops_up_at: int | None = None
   top_up_pct: float | None = None
   top_up_price: int = 0
+  sells_back_at: int | None = None
+  sell_back_pct: float | None = None
+  sell_back_price: int = 0
   sold_at: int | None = None
   sale_price: int = 0
   buyer: str | None = None
@@ -310,9 +316,13 @@ class Member:
     return index >= self.joins_at and (self.sold_at is None or index <= self.sold_at)
 
   def share_at(self, index: int) -> float:
-    """The parent's share in window ``index``: the one it joined with, or the
-    one a top-up took it to from that window on."""
+    """The parent's share in window ``index``: the one it joined with, the
+    one a top-up took it to from that window on, or the one a sale back to
+    the founders left it with after that."""
     a = self.acquired
+    if a and a.sells_back_at is not None and a.sell_back_pct is not None:
+      if index >= a.sells_back_at:
+        return a.sell_back_pct / 100.0
     if a and a.tops_up_at is not None and a.top_up_pct is not None:
       if index >= a.tops_up_at:
         return a.top_up_pct / 100.0
@@ -868,6 +878,21 @@ def _check_roster(group: Group, windows: list[tuple[date, date]]) -> None:
         <= (a.sold_at if a.sold_at is not None else last_closed)
       ):
         raise RuntimeError(f"{member.name}: tops_up_at must fall within its membership")
+    if a.sells_back_at is not None:
+      held = a.top_up_pct if a.tops_up_at is not None else member.ownership_pct
+      if a.sell_back_pct is None or not 50 <= a.sell_back_pct < (held or 0):
+        raise RuntimeError(
+          f"{member.name}: a sale back lowers the parent's share, keeping half"
+        )
+      after = a.tops_up_at if a.tops_up_at is not None else a.joins_at
+      if (
+        not after
+        < a.sells_back_at
+        <= (a.sold_at if a.sold_at is not None else last_closed)
+      ):
+        raise RuntimeError(
+          f"{member.name}: sells_back_at must follow the top-up within its membership"
+        )
     if a.sold_at is not None:
       if not a.joins_at <= a.sold_at < last_closed or not a.buyer:
         raise RuntimeError(
@@ -942,6 +967,10 @@ def _load(
       lifecycle = f", acquired {_period(windows[a.joins_at][0])}"
       if a.tops_up_at is not None:
         lifecycle += f", {a.top_up_pct:g}% from {_period(windows[a.tops_up_at][0])}"
+      if a.sells_back_at is not None:
+        lifecycle += (
+          f", {a.sell_back_pct:g}% from {_period(windows[a.sells_back_at][0])}"
+        )
       if a.sold_at is not None:
         lifecycle += f", sold after {_period(windows[a.sold_at][1])}"
     print(
@@ -1094,9 +1123,11 @@ def _post_group(
 
   # What each member owes the parent at the month end, in cents.
   due: dict[str, int] = {m.ticker: 0 for m in group.members}
-  # What the parent has taken back of each member's capital in distributions:
-  # its investment's carrying amount is what it paid less these.
+  # What the parent has taken back of each member's capital in distributions,
+  # and what a sale back to the founders released: its investment's carrying
+  # amount is what it paid less these.
   received: dict[str, int] = {m.ticker: 0 for m in group.members}
+  released: dict[str, int] = {m.ticker: 0 for m in group.members}
 
   # Formation. The founders fund the parent for the group, the parent forms
   # each member, and the outside owner puts in its share directly. A member
@@ -1176,7 +1207,14 @@ def _post_group(
         count += _acquire(api, group, member, books, parent, agent_of, start)
       if lifecycle and lifecycle.sold_at is not None and index == lifecycle.sold_at + 1:
         count += _sell(
-          api, group, member, books, parent, agent_of, start, received[member.ticker]
+          api,
+          group,
+          member,
+          books,
+          parent,
+          agent_of,
+          start,
+          received[member.ticker] + released[member.ticker],
         )
 
       # Last month's charges settle on the 10th — a member sold pays its last.
@@ -1200,6 +1238,11 @@ def _post_group(
         continue
       if lifecycle and index == lifecycle.tops_up_at:
         count += _top_up(api, group, member, books, parent, agent_of, start)
+      if lifecycle and index == lifecycle.sells_back_at:
+        released[member.ticker] = _sell_back(
+          api, group, member, books, parent, agent_of, start, received[member.ticker]
+        )
+        count += 2
       expense_accounts = books.expense_accounts()
       if len(expense_accounts) < len(member.expenses):
         raise RuntimeError(
@@ -1434,6 +1477,70 @@ def _top_up(
   return 2
 
 
+def _sell_back(
+  api: _Api,
+  group: Group,
+  member: Member,
+  books: _Books,
+  parent: _Books,
+  agent_of: dict[str, str],
+  start: date,
+  received: int,
+) -> int:
+  """The founders buy some of their café back; the parent keeps control. The
+  parent's books take the proceeds against the carrying amount of the shares
+  sold — its cost, pro rata — and its own gain; the group reverses that gain
+  (ASC 810: an equity transaction) and the proceeds become a financing
+  inflow from the outside owners. Returns what the parent released."""
+  a = member.acquired
+  assert a is not None and a.sell_back_pct is not None and member.outside_owner
+  pa = group.parent
+  held = (
+    a.top_up_pct
+    if a.tops_up_at is not None and a.top_up_pct is not None
+    else member.ownership_pct
+  )
+  carrying = a.price + a.top_up_price - received
+  released = round(carrying * (held - a.sell_back_pct) / held)
+  gain = a.sell_back_price - released
+  parent.post(
+    start,
+    f"Sale of {held - a.sell_back_pct:g}% of {member.name} to {member.outside_owner}",
+    [
+      (
+        pa.cash,
+        a.sell_back_price,
+        0,
+        "rs-gaap:ProceedsFromDivestitureOfInterestInSubsidiariesAndAffiliates",
+      ),
+      (pa.investment, 0, released, None),
+      (pa.sale_gain, max(-gain, 0), max(gain, 0), None),
+    ],
+    agent_id=agent_of[member.outside_owner],
+  )
+  recorded = api.operation(
+    "record-ownership-change",
+    {
+      "entity_id": books.entity_id,
+      "period": _period(start),
+      "ownership_pct": a.sell_back_pct,
+      "consideration": a.sell_back_price,
+      "basis": (
+        f"Sale agreement with {member.outside_owner}, {start.isoformat()}: "
+        f"the roaster's share of {member.name} to {a.sell_back_pct:g}%."
+      ),
+    },
+  )
+  assert recorded is not None
+  print(
+    f"  Sold back:    {member.ticker} to {a.sell_back_pct:g}% from {_period(start)} "
+    f"for {_money(a.sell_back_price / 100)}; the parent's gain "
+    f"{_money(recorded['gain_reversed'] / 100)} reversed, its equity takes "
+    f"{_money(recorded['equity_adjustment'] / 100)}"
+  )
+  return released
+
+
 def _leave(
   api: _Api,
   member: Member,
@@ -1646,10 +1753,13 @@ def _read_back(
     for i in paid_offsets
     if m.is_member_at(i) and m.outside_share_at(i)
   )
+  # Beside the contributions, what the founders paid for shares bought back:
+  # proceeds from the outside owners, not a divestiture.
+  sold_back = sum(m.acquired.sell_back_price for m in group.members if m.acquired)
   check(
-    "outside owners' contributions on their own row",
+    "outside owners' contributions and purchases on their own row",
     _value(cf_all, "rs-gaap:ProceedsFromMinorityShareholders", end),
-    outside_in / 100,
+    (outside_in + sold_back) / 100,
   )
   # Beside the distributions, the price of every share bought from an
   # outside owner: a payment to them, not an investment.
@@ -1929,6 +2039,35 @@ def _check_lifecycle(
     _validates(
       checks,
       f"{t} top-up",
+      {"balance_sheet": bs, "income_statement": is_, "cash_flow_statement": cf},
+    )
+
+  if a.sells_back_at is not None:
+    ss, se = windows[a.sells_back_at]
+    bs = _statement(api, "balance_sheet", ss, se, consolidated=True)
+    is_ = _statement(api, "income_statement", ss, se, consolidated=True)
+    cf = _statement(api, "cash_flow_statement", ss, se, consolidated=True)
+    check(f"{t} sold back: no gain or loss in the group", _value(is_, gain_q, se), 0.0)
+    check(
+      f"{t} sold back: NCI = the founders' larger share of net assets",
+      _value(bs, nci_q, se),
+      _nci_expected(api, group, members, windows, a.sells_back_at),
+    )
+    check(
+      f"{t} sold back: the proceeds are a financing inflow from its founders",
+      _value(cf, "rs-gaap:ProceedsFromMinorityShareholders", se),
+      a.sell_back_price / 100,
+    )
+    check(
+      f"{t} sold back: nothing of it on the divestiture row",
+      _value(
+        cf, "rs-gaap:ProceedsFromDivestitureOfInterestInSubsidiariesAndAffiliates", se
+      ),
+      0.0,
+    )
+    _validates(
+      checks,
+      f"{t} sold back",
       {"balance_sheet": bs, "income_statement": is_, "cash_flow_statement": cf},
     )
 
