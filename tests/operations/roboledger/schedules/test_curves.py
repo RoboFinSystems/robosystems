@@ -81,6 +81,24 @@ def test_a_level_payment_retires_the_principal_at_maturity():
   assert table["current_portion"][-1] == 0
 
 
+def test_a_window_short_of_maturity_counts_principal_due_after_it():
+  terms = LoanTerms(
+    principal=10_000_000,
+    annual_rate=Decimal("0.06"),
+    start_date=date(2026, 1, 1),
+    first_payment_date=date(2026, 1, 31),
+    maturity_date=date(2030, 12, 31),
+  )
+  whole = amortization_table(terms, _periods(date(2026, 1, 1), date(2030, 12, 31)))
+  window = amortization_table(terms, _periods(date(2026, 1, 1), date(2027, 12, 31)))
+
+  assert len(window["principal"]) == 24
+  for name, values in window.items():
+    assert values == whole[name][:24], name
+  # The last month still owes the next twelve months' principal.
+  assert window["current_portion"][-1] == sum(whole["principal"][24:36]) > 0
+
+
 def test_the_reclass_moves_the_change_in_the_current_portion():
   columns = {"current_portion": [500, 520, 480]}
   assert [reclass_cents(columns, i) for i in range(3)] == [500, 20, -40]

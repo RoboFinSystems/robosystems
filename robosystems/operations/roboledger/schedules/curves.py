@@ -109,7 +109,8 @@ def amortization_table(
   Interest accrues on the period's opening balance from ``start_date`` (or
   the period's first day) to the period's last day inclusive; a payment
   falls at the end of its month. ``current_portion`` is the principal due in
-  the twelve periods after each one. Raises ``ValueError`` naming the period
+  the twelve months after each period, read from the table run to maturity
+  when the schedule ends before it. Raises ``ValueError`` naming the period
   when the terms cannot be honoured: a payment short of the interest it
   settles (unless interest capitalizes), or a balance driven below zero.
   """
@@ -161,10 +162,17 @@ def amortization_table(
     periodic_rate = terms.annual_rate * (step or 12) / 12
     payment_amount = _level_payment(terms.principal, periodic_rate, count)
 
+  # Past the window to maturity, so the last periods' current portion counts
+  # principal due after the schedule ends.
+  run = list(periods)
+  while maturity_index is not None and _month_index(run[-1][1]) < maturity_index:
+    following = run[-1][1] + timedelta(days=1)
+    run.append((following, _month_end(following)))
+
   columns: dict[str, list[int]] = {name: [] for name in LOAN_COLUMNS}
   balance = terms.principal
   unpaid_interest = 0
-  for p_start, p_end in periods:
+  for p_start, p_end in run:
     accrual_start = max(p_start, terms.start_date)
     days, basis = accrual_days(
       accrual_start, p_end + timedelta(days=1), terms.day_count
@@ -208,7 +216,12 @@ def amortization_table(
   columns["current_portion"] = [
     sum(principal_paid[i + 1 : i + 13]) for i in range(len(periods))
   ]
-  return columns
+  return {name: values[: len(periods)] for name, values in columns.items()}
+
+
+def _month_end(day: date) -> date:
+  following = date(day.year + day.month // 12, day.month % 12 + 1, 1)
+  return following - timedelta(days=1)
 
 
 def reclass_cents(columns: dict[str, list[int]], index: int) -> int:
