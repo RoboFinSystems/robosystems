@@ -2354,6 +2354,60 @@ def test_a_sale_at_a_loss_reverses_the_loss_and_still_matches_the_parents_books(
   assert response.residuals == [] and not response.incomplete
 
 
+def test_a_second_sale_releases_the_carrying_amount_left_pro_rata(group):
+  """After February's sale the parent carries 5,400 for its 60 %; selling a
+  sixth of that in March releases 900 again, the pool of premium stays
+  empty (both changes recorded none), and the member sits at exactly half —
+  still in full."""
+  _january_posted(group)
+  _change(ownership_pct=60, consideration=150_000)
+  _sell_ten_percent(group, 150_000, 90_000)
+  recorded = _change(period="2026-03", ownership_pct=50, consideration=100_000)
+
+  assert (recorded.carrying_released, recorded.gain_reversed) == (90_000, 10_000)
+  assert (recorded.earnings_transferred, recorded.premium_transferred) == (-18_250, 0)
+  assert recorded.equity_adjustment == 8_250
+  with extensions_session(GRAPH) as session:
+    assert float(session.get(Entity, MEMBER).ownership_pct) == 50.0
+    recorded_sum = session.execute(
+      text(
+        "SELECT SUM((metadata->'ownership_change'->>'consideration')::bigint) "
+        "FROM entries WHERE adjustment_kind = 'ownership_change'"
+      )
+    ).scalar_one()
+  assert recorded_sum == -180_000
+  post(
+    group,
+    PARENT_ENTITY_ID,
+    date(2026, 3, 1),
+    [("cash", 100_000), ("investment", -90_000), ("gain", -10_000)],
+    agent="owner",
+  )
+  response = preview("2026-03")
+  assert response.residuals == [] and not response.incomplete
+
+
+def test_a_sale_needs_an_account_for_the_gain_it_reverses(group):
+  _january_posted(group)
+  with extensions_session(GRAPH) as session:
+    session.execute(
+      text(
+        """
+        DELETE FROM associations
+        WHERE from_element_id IN (
+          SELECT el.id FROM elements el
+          JOIN entity_taxonomies et ON et.taxonomy_id = el.taxonomy_id
+          WHERE et.entity_id = :c AND el.code = '4400'
+        )
+        """
+      ),
+      {"c": ADJUSTMENTS},
+    )
+    session.commit()
+  with pytest.raises(OwnershipChangeError, match="GainLossOnDispositionOfAssets"):
+    _change(ownership_pct=60, consideration=150_000)
+
+
 def test_a_sale_keeps_control_or_is_a_change_of_method(group):
   _january_posted(group)
   with pytest.raises(OwnershipChangeError, match="change of method"):
