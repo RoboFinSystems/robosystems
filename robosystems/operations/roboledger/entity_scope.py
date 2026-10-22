@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
 from robosystems.models.extensions import Entity
+from robosystems.operations.roboledger.entry_status import SUPERSEDED_ENTRY_STATUS
 
 
 class NoEntityError(LookupError, ValueError):
@@ -281,16 +282,29 @@ def group_members(
 def acquired_eve(session: Session, member: GroupMember) -> date | None:
   """The eve of the month a member joined when its books open there with a
   recorded balance sheet: a member acquired, whose balances a group read
-  sees arrive. None for one formed in the group, which opens on nothing."""
+  sees arrive. None for one formed in the group, which opens on nothing.
+
+  An opening sits on the eve of the books' first fiscal period, so this
+  holds when the member's calendar starts in the month it joined; a
+  calendar starting later opens after the join, and its cash reads as
+  beginning cash."""
+  # Imported here: opening_balances resolves its entity through this module.
+  from robosystems.operations.roboledger.commands.opening_balances import OPENING
+
   if member.role == "consolidation" or member.joined_on is None:
     return None
   eve = member.joined_on.replace(day=1) - timedelta(days=1)
   opened = session.execute(
     text(
-      "SELECT 1 FROM entries WHERE entity_id = :id AND type = 'opening' "
-      "AND status <> 'superseded' AND posting_date = :eve LIMIT 1"
+      "SELECT 1 FROM entries WHERE entity_id = :id AND type = :opening "
+      "AND status <> :superseded AND posting_date = :eve LIMIT 1"
     ),
-    {"id": member.id, "eve": eve},
+    {
+      "id": member.id,
+      "opening": OPENING,
+      "superseded": SUPERSEDED_ENTRY_STATUS,
+      "eve": eve,
+    },
   ).first()
   return eve if opened else None
 

@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from robosystems.models.api.extensions.journal_entries import (
   AdjustmentKind,
@@ -325,6 +325,13 @@ class RecordAcquisitionRequest(BaseModel):
       "recognizing the gain; set it only after that review."
     ),
   )
+
+  @field_validator("basis")
+  @classmethod
+  def _basis_says_something(cls, value: str) -> str:
+    if not value.strip():
+      raise ValueError("Give the basis: the purchase agreement, a valuation.")
+    return value.strip()
 
 
 class AcquisitionResponse(BaseModel):

@@ -2009,3 +2009,73 @@ def test_the_allocation_share_reads_pro_rata_and_the_override(group):
   assert share.override is not None
   assert (share.override.amount, share.override.basis) == (100_000, "Preferred return")
   assert [o.period for o in listed.overrides] == ["2026-01"]
+
+
+def test_a_step_up_names_an_asset_or_liability_never_what_is_computed(group):
+  _buy_the_member(group)
+  for concept in (
+    engine.GOODWILL,
+    engine.INVESTMENT_IN_SUBSIDIARIES,
+    engine.NONCONTROLLING_INTEREST,
+    BARGAIN_PURCHASE_GAIN,
+  ):
+    with pytest.raises(AcquisitionError, match="computed from the consideration"):
+      _acquire(
+        consideration=900_000,
+        allocations=[AcquisitionAllocation(concept=concept, amount=50_000)],
+      )
+  with pytest.raises(AcquisitionError, match="is zero"):
+    _acquire(
+      consideration=900_000,
+      allocations=[
+        AcquisitionAllocation(
+          concept="rs-gaap:LongTermInvestmentsAndReceivablesNet", amount=0
+        )
+      ],
+    )
+
+
+def test_an_acquisition_needs_a_basis_that_says_something():
+  with pytest.raises(ValueError, match="Give the basis"):
+    RecordAcquisitionRequest(entity_id=MEMBER, consideration=1, basis="   ")
+
+
+def test_a_bargain_review_is_recorded_only_for_a_bargain(group):
+  _buy_the_member(group)
+  _acquire(consideration=900_000, confirm_bargain_purchase=True)
+  with extensions_session(GRAPH) as session:
+    meta = session.execute(
+      select(Entry.metadata_).where(Entry.adjustment_kind == "acquisition")
+    ).scalar_one()
+  assert meta["acquisition"]["bargain_purchase_confirmed"] is False
+
+
+def test_a_member_acquired_mid_month_joins_that_month(group):
+  """Membership is by month: joined on the 15th, the member is consolidated
+  for January and the acquisition is dated the day it joined."""
+  _buy_the_member(group)
+  with extensions_session(GRAPH) as session:
+    session.execute(
+      text("UPDATE entities SET joined_on = :d WHERE id = :id"),
+      {"d": JAN_15, "id": MEMBER},
+    )
+  recorded = _acquire(consideration=900_000)
+  assert recorded.entry.posting_date == JAN_15
+  assert preview().residuals == []
+
+
+def test_the_allocation_share_is_for_a_member_in_full_in_its_months(group):
+  _form_the_group(group)
+  with extensions_session(GRAPH) as session:
+    assert (
+      engine.allocation_share(session, entity_id=ASSOCIATE, period="2026-01") is None
+    )
+    session.execute(
+      text("UPDATE entities SET joined_on = :d WHERE id = :id"),
+      {"d": date(2026, 2, 1), "id": MEMBER},
+    )
+  with extensions_session(GRAPH) as session:
+    assert engine.allocation_share(session, entity_id=MEMBER, period="2026-01") is None
+    assert (
+      engine.allocation_share(session, entity_id=MEMBER, period="2026-02") is not None
+    )

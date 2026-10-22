@@ -48,23 +48,23 @@ from robosystems.operations.roboledger.entity_scope import (
   resolve_entity,
 )
 from robosystems.operations.roboledger.reads.consolidation import (
-  _EQUITY,
   ACQUISITION,
   ALLOCATION_OVERRIDES,
   ENGINE_PROVENANCE,
   ENGINE_SOURCE,
+  EQUITY_CLASSIFICATIONS,
   GOODWILL,
   INVESTMENT_IN_SUBSIDIARIES,
   NONCONTROLLING_INTEREST,
-  _posting_accounts,
-  _primary_concepts,
-  _share,
   engine_drafts,
   engine_opening,
   first_month_eve,
   month_bounds,
   opening_is_recorded,
+  posting_accounts,
   preview_consolidation_entries,
+  primary_concepts,
+  share_of,
 )
 from robosystems.operations.roboledger.supersede import (
   record_replacements,
@@ -339,7 +339,7 @@ def _equity_at_acquisition(session: Session, member: Entity, opening: Entry) -> 
       f"{member.name} has no chart mapping; its equity at acquisition cannot be "
       "read. Map its chart first."
     )
-  concepts = _primary_concepts(session, [str(mapping.id)])
+  concepts = primary_concepts(session, [str(mapping.id)])
   equity = 0
   for line in session.execute(
     select(LineItem).where(LineItem.entry_id == opening.id)
@@ -347,7 +347,7 @@ def _equity_at_acquisition(session: Session, member: Entity, opening: Entry) -> 
     concept = concepts.get(str(line.element_id))
     if (
       concept is not None
-      and concept.classification in _EQUITY
+      and concept.classification in EQUITY_CLASSIFICATIONS
       and concept.qname != NONCONTROLLING_INTEREST
     ):
       equity += int(line.credit_amount) - int(line.debit_amount)
@@ -399,11 +399,28 @@ def record_acquisition(
   consolidation_id = str(consolidation.id)
   assert_period_not_closed(session, member.joined_on, entity_id=consolidation_id)
 
+  computed = {
+    GOODWILL,
+    BARGAIN_PURCHASE_GAIN,
+    INVESTMENT_IN_SUBSIDIARIES,
+    NONCONTROLLING_INTEREST,
+  }
+  for allocation in body.allocations:
+    if allocation.concept in computed:
+      raise AcquisitionError(
+        f"{allocation.concept} is computed from the consideration, not "
+        "allocated; a step-up names an identifiable asset or liability."
+      )
+    if not allocation.amount:
+      raise AcquisitionError(
+        f"The step-up to {allocation.concept} is zero; leave it out."
+      )
+
   share = (
     float(member.ownership_pct) / 100.0 if member.ownership_pct is not None else 1.0
   )
   equity = _equity_at_acquisition(session, member, opening)
-  parent_part = _share(equity, share)
+  parent_part = share_of(equity, share)
   outside_equity = equity - parent_part
   stepped = sum(a.amount for a in body.allocations)
   excess = body.consideration - parent_part
@@ -415,7 +432,7 @@ def record_acquisition(
       )
     nci = body.nci_fair_value - outside_equity
   else:
-    nci = stepped - _share(stepped, share)
+    nci = stepped - share_of(stepped, share)
   goodwill = excess + nci - stepped
   if goodwill < 0 and not body.confirm_bargain_purchase:
     raise AcquisitionError(
@@ -447,10 +464,10 @@ def record_acquisition(
     )
   consolidation_mapping = find_entity_mapping(session, consolidation_id, BOOK_FRAMEWORK)
   accounts = (
-    _posting_accounts(
+    posting_accounts(
       session,
       consolidation_id,
-      _primary_concepts(session, [str(consolidation_mapping.id)]),
+      primary_concepts(session, [str(consolidation_mapping.id)]),
     )
     if consolidation_mapping is not None
     else {}
@@ -477,6 +494,8 @@ def record_acquisition(
     raise AcquisitionError(
       f"{name}'s acquisition is posted. Reverse that entry first to record it again."
     )
+  # A draft never landed, so replacing it leaves nothing to supersede, as
+  # propose-consolidation-entries replaces its own.
   for entry in held:
     session.delete(entry)
   session.flush()
@@ -495,7 +514,7 @@ def record_acquisition(
           element_id=accounts[qname][0],
           debit_amount=max(amount, 0),
           credit_amount=max(-amount, 0),
-          description=body.basis.strip(),
+          description=body.basis,
         )
         for qname, amount in sorted(wanted.items(), key=lambda kv: -kv[1])
       ],
@@ -512,8 +531,8 @@ def record_acquisition(
       "nci_fair_value": body.nci_fair_value,
       "equity_at_acquisition": equity,
       "allocations": [a.model_dump() for a in body.allocations],
-      "basis": body.basis.strip(),
-      "bargain_purchase_confirmed": body.confirm_bargain_purchase,
+      "basis": body.basis,
+      "bargain_purchase_confirmed": body.confirm_bargain_purchase and goodwill < 0,
       "recorded_by": created_by,
     },
   }

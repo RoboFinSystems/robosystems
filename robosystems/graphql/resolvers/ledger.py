@@ -1770,7 +1770,8 @@ class LedgerQuery:
 
     The pro-rata figure its ownership gives, the override set with
     `set-allocation-override` if any, and the share the consolidating entries
-    use.
+    use. Null for an entity that is not a member consolidated in full that
+    month: its outside owners have no share the engine allocates.
 
     Args:
       entity_id: The member.
@@ -1791,7 +1792,7 @@ class LedgerQuery:
       raise strawberry.exceptions.StrawberryGraphQLError(str(exc)) from exc
     except ValueError, ProgrammingError:
       _raise_ledger_not_initialized()
-    return AllocationShare.from_pydantic(response)
+    return AllocationShare.from_pydantic(response) if response else None
 
   @strawberry.field
   def allocation_overrides(

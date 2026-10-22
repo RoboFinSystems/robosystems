@@ -51,6 +51,7 @@ from robosystems.operations.roboledger.commands.opening_balances import OPENING
 from robosystems.operations.roboledger.entity_scope import (
   GroupMember,
   find_consolidation_entity,
+  is_group_parent,
   resolve_entity,
   resolve_entity_id,
 )
@@ -110,7 +111,7 @@ _NOT_INTERCOMPANY = frozenset(
   }
 )
 
-_EQUITY = frozenset(
+EQUITY_CLASSIFICATIONS = frozenset(
   {"equity", "contraEquity", "distributionToOwners", "investmentByOwners"}
 )
 _BALANCE = frozenset({"asset", "contraAsset", "liability", "contraLiability"})
@@ -366,7 +367,7 @@ def _is_periodic(kind: str, concept: _Concept) -> bool:
   return False
 
 
-def _share(cents: int, share: float) -> int:
+def share_of(cents: int, share: float) -> int:
   return round(cents * share)
 
 
@@ -408,7 +409,7 @@ def _group(session: Session, parent_id: str) -> list[_Entity]:
   ]
 
 
-def _primary_concepts(session: Session, mapping_ids: list[str]) -> dict[str, _Concept]:
+def primary_concepts(session: Session, mapping_ids: list[str]) -> dict[str, _Concept]:
   """Each mapped account's primary concept: the classified target first, then
   by qname — the rule the statements' close uses, so a posting mapped to two
   concepts is read once."""
@@ -542,7 +543,7 @@ def _rows(
   return rows
 
 
-def _posting_accounts(
+def posting_accounts(
   session: Session, consolidation_id: str, concepts: dict[str, _Concept]
 ) -> dict[str, tuple[str, str]]:
   """The consolidation entity's account for each concept it can post (D11):
@@ -666,12 +667,12 @@ def _plan_capital(
     if (
       r.entity_id == member.id
       and not r.closing
-      and r.concept.classification in _EQUITY
+      and r.concept.classification in EQUITY_CLASSIFICATIONS
       and r.concept.qname != NONCONTROLLING_INTEREST
     ):
       capital_by_concept[r.concept.qname] += r.amount
   capital = -sum(capital_by_concept.values())
-  parent_part = _share(capital, member.share)
+  parent_part = share_of(capital, member.share)
   outside_part = capital - parent_part
 
   invested_lines = [
@@ -993,13 +994,13 @@ def _plan_income_shares(
       plan.basis[key].append(
         f"The outside owners' share of {member.name}'s result for the month, "
         f"by an allocation override: {how} (pro rata would be "
-        f"{_money(_share(income, max(outside, 0.0)))}). "
+        f"{_money(share_of(income, max(outside, 0.0)))}). "
         f"{override.get('basis') or ''}".rstrip()
       )
     elif outside <= 0:
       continue
     else:
-      share = _share(_net_income(rows, member.id), outside)
+      share = share_of(_net_income(rows, member.id), outside)
       plan.basis[key].append(
         f"The outside owners' {outside:.0%} of {member.name}'s result for the "
         f"month: {_money(share)}."
@@ -1009,7 +1010,7 @@ def _plan_income_shares(
     plan.targets[(NCI_SHARE_OF_INCOME, *key)] += share
     plan.targets[(NONCONTROLLING_INTEREST, *key)] -= share
   for associate in associates:
-    pickup = _share(_net_income(rows, associate.id), associate.share)
+    pickup = share_of(_net_income(rows, associate.id), associate.share)
     if not pickup:
       continue
     key = ("equity_method_pickup", associate.id, True)
@@ -1041,7 +1042,7 @@ def _override_share(override: dict, income: int) -> int:
   """The outside owners' share an allocation override gives of ``income``."""
   if override.get("amount") is not None:
     return int(override["amount"])
-  return _share(income, float(override["percentage"]) / 100.0)
+  return share_of(income, float(override["percentage"]) / 100.0)
 
 
 def _override_record(period: str, override: dict) -> AllocationOverrideRecord:
@@ -1056,20 +1057,35 @@ def _override_record(period: str, override: dict) -> AllocationOverrideRecord:
 
 def allocation_share(
   session: Session, *, entity_id: str, period: str
-) -> AllocationShareResponse:
+) -> AllocationShareResponse | None:
   """The outside owners' share of a member's result for ``period``: the
   pro-rata figure, the override if one is set, and the share the
-  consolidating entries use. Raises ``EntityNotInGraphError`` for an
-  entity that is not this graph's."""
+  consolidating entries use, rounded as the engine rounds them. None for an
+  entity that is not a member consolidated in full that month, whose
+  outside owners have no share for the engine to allocate. Raises
+  ``EntityNotInGraphError`` for an entity that is not this graph's."""
   entity = resolve_entity(session, entity_id)
   start, end = month_bounds(period)
+  member = GroupMember(
+    str(entity.id), str(entity.entity_role), entity.joined_on, entity.left_on
+  )
+  if (
+    is_group_parent(session, str(entity.id))
+    or entity.entity_role != "operating"
+    or entity.consolidation_method != "full"
+    or not member.is_member_for(start, end)
+  ):
+    return None
   mapping = find_entity_mapping(session, str(entity.id), BOOK_FRAMEWORK)
-  concepts = _primary_concepts(session, [str(mapping.id)]) if mapping else {}
+  concepts = primary_concepts(session, [str(mapping.id)]) if mapping else {}
   rows = _rows(session, [str(entity.id)], concepts, start, end, drafts_of="")
   income = _net_income(rows, str(entity.id))
-  owned = float(entity.ownership_pct) if entity.ownership_pct is not None else 100.0
-  outside = max(100.0 - owned, 0.0)
-  pro_rata = _share(income, outside / 100.0)
+  # As _group and _plan_income_shares compute it.
+  share = (
+    float(entity.ownership_pct) / 100.0 if entity.ownership_pct is not None else 1.0
+  )
+  outside = max(1.0 - share, 0.0)
+  pro_rata = share_of(income, outside)
   override = dict((entity.metadata_ or {}).get(ALLOCATION_OVERRIDES) or {}).get(period)
   consolidation = find_consolidation_entity(session)
   return AllocationShareResponse(
@@ -1080,7 +1096,7 @@ def allocation_share(
     ownership_pct=float(entity.ownership_pct)
     if entity.ownership_pct is not None
     else None,
-    outside_pct=outside,
+    outside_pct=round(outside * 100.0, 6),
     month_result=income,
     pro_rata_amount=pro_rata,
     override=_override_record(period, override) if override else None,
@@ -1168,7 +1184,7 @@ def preview_consolidation_entries(
       unmapped.add(entity.id)
     else:
       mapping_ids.append(str(mapping.id))
-  concepts = _primary_concepts(session, mapping_ids)
+  concepts = primary_concepts(session, mapping_ids)
   rows = _rows(
     session,
     [e.id for e in [*consolidated, *associates, consolidation]],
@@ -1178,7 +1194,7 @@ def preview_consolidation_entries(
     drafts_of=consolidation.id,
   )
 
-  accounts = _posting_accounts(session, consolidation.id, concepts)
+  accounts = posting_accounts(session, consolidation.id, concepts)
   # The rows the consolidation entity's own statement presents; none is a
   # Style read by trait alone.
   taggable = taggable_flow_qnames(

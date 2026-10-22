@@ -531,3 +531,36 @@ def test_a_member_formed_in_the_group_opens_on_its_own_cash(group):
   assert "rs-gaap:PaymentsToAcquireBusinessesNetOfCashAcquired" not in {
     f.qname for f in live.facts
   }
+
+
+def test_balances_acquired_beside_cash_move_no_flow_in_the_joining_month(group):
+  """Receivables, equipment and payables in the opening are where the month's
+  changes are measured from: only the cash is a flow on joining."""
+  ids = group["ids"]
+  member = group["session"].get(Entity, ids["member"])
+  member.joined_on = date(2026, 7, 1)
+  _open_the_member_on(
+    group,
+    date(2026, 6, 30),
+    [
+      ("1000", 500_000),
+      ("1100", 200_000),
+      ("1300", 300_000),
+      ("2000", -100_000),
+      ("3000", -900_000),
+    ],
+  )
+
+  live = get_live_financial_statement(
+    group["session"],
+    graph_id=GRAPH,
+    statement_type="cash_flow_statement",
+    period_start=JULY[0],
+    period_end=JULY[1],
+    entity_id=ids["parent"],
+    scope="combined",
+  )
+  rows = {(f.qname, f.period_role): f.values[0] for f in live.facts}
+  assert rows[("rs-gaap:NetCashProvidedByUsedInOperatingActivities", None)] == 1_000.0
+  assert rows[("rs-gaap:NetCashProvidedByUsedInInvestingActivities", None)] == 15_000.0
+  assert live.validation.status == "passed", live.validation.failures

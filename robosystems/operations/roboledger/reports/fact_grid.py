@@ -3549,9 +3549,10 @@ def _emit_opening_cash_facts(
 ) -> None:
   """Append the cash total's balance the day before each column opens, where
   no other column ends that day, so the cash flow has a beginning-of-period
-  row to open on. None on ``acquired_on``, whose cash is cash acquired. The same sum the column ends state through
-  ``_emit_subtotal_facts``: the calc arcs from the total to the balance
-  sheet's cash rows, over the mapped balances of that day."""
+  row to open on. None on ``acquired_on``, whose cash is cash acquired. The
+  same sum the column ends state through ``_emit_subtotal_facts``: the calc
+  arcs from the total to the balance sheet's cash rows, over the mapped
+  balances of that day."""
   total = session.execute(
     text("SELECT id, qname, name, balance_type FROM elements WHERE qname = :q"),
     {"q": _CASH_TOTAL_QNAME},
