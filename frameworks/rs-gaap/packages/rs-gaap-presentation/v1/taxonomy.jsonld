@@ -4430,6 +4430,20 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
+      "@id": "_:rs-gaap-pres-equity-arc-nci-5",
+      "from": {
+        "@id": "rs-gaap:MinorityInterest"
+      },
+      "to": {
+        "@id": "rs-gaap:NoncontrollingInterestIncreaseFromBusinessCombination"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
+      "order": 41400.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
       "@id": "_:rs-gaap-pres-equity-arc-nci-4",
       "from": {
         "@id": "rs-gaap:MinorityInterest"
@@ -5319,6 +5333,20 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
+      "@id": "_:rs-gaap-pres-equity-part-arc-nci-5",
+      "from": {
+        "@id": "rs-gaap:MinorityInterest"
+      },
+      "to": {
+        "@id": "rs-gaap:NoncontrollingInterestIncreaseFromBusinessCombination"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-PART",
+      "order": 41400.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
       "@id": "_:rs-gaap-pres-equity-part-arc-nci-4",
       "from": {
         "@id": "rs-gaap:MinorityInterest"
@@ -5462,6 +5490,20 @@
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-LLC",
       "order": 41600.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-equity-llc-arc-nci-5",
+      "from": {
+        "@id": "rs-gaap:MinorityInterest"
+      },
+      "to": {
+        "@id": "rs-gaap:NoncontrollingInterestIncreaseFromBusinessCombination"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-LLC",
+      "order": 41400.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },

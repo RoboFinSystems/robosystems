@@ -162,6 +162,7 @@ class TestEquityFormVariants:
       assert rows == {
         "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest",
         "rs-gaap:NoncontrollingInterestIncreaseFromSubsidiaryEquityIssuance",
+        "rs-gaap:NoncontrollingInterestIncreaseFromBusinessCombination",
         "rs-gaap:MinorityInterestDecreaseFromDistributionsToNoncontrollingInterestHolders",
         "rs-gaap:MinorityInterestDecreaseFromDeconsolidation",
       }, role
