@@ -47,6 +47,33 @@ class FactRecord(BaseModel):
   )
 
 
+class GraphFreshness(BaseModel):
+  """Whether a ledger's graph is current with its books.
+
+  A ledger's graph is a projection of its database, rebuilt after writes;
+  until a rebuild finishes, graph-backed reads answer from the previous one.
+  """
+
+  stale: bool = Field(
+    ...,
+    description=(
+      "True when the books have changed since the graph was last rebuilt, so "
+      "this answer can be behind them. A rebuild is queued automatically."
+    ),
+  )
+  stale_since: str | None = Field(
+    None,
+    description="When the graph first fell behind the books (ISO 8601); null when current.",
+  )
+  stale_reason: str | None = Field(
+    None,
+    description="The latest write that left the graph behind (e.g. 'period_closed').",
+  )
+  last_materialized_at: str | None = Field(
+    None, description="When the graph was last rebuilt (ISO 8601)."
+  )
+
+
 class ElementSummary(BaseModel):
   count: int = Field(..., description="Number of facts for this element")
   total: float | None = Field(
@@ -82,6 +109,13 @@ class ViewMetadata(BaseModel):
       "True when more facts matched than `limit` allowed. The returned facts "
       "are the most recent by period; narrow the filters or raise `limit` to "
       "see the rest."
+    ),
+  )
+  graph_freshness: GraphFreshness | None = Field(
+    None,
+    description=(
+      "On a ledger's graph, whether the graph is current with the books; "
+      "null on shared repositories, which are not rebuilt from a ledger."
     ),
   )
 

@@ -406,29 +406,33 @@ class LadybugDatabaseManager:
       except Exception as e:
         logger.warning(f"Could not checkpoint WIP database {wip_id}: {e}")
 
-      self.connection_pool.close_database_connections(graph_id)
       self.connection_pool.close_database_connections(wip_id)
 
-      # A -prev left by an interrupted earlier swap would block the rename.
-      if prev_path.exists():
-        prev_wal = self.base_path / f"{prev_id}.lbug.wal"
-        prev_path.unlink()
-        if prev_wal.exists():
-          prev_wal.unlink()
-        logger.debug(f"Cleaned up prior -prev database for {graph_id}")
+      # Held from the close through both renames: a connection opened in
+      # between would pin the outgoing file and serve it after the swap.
+      with self.connection_pool.exclusive(graph_id):
+        self.connection_pool.close_database_connections(graph_id)
 
-      if active_path.exists():
-        active_path.rename(prev_path)
-        active_wal = self.base_path / f"{graph_id}.lbug.wal"
-        if active_wal.exists():
-          active_wal.rename(self.base_path / f"{prev_id}.lbug.wal")
-        logger.info(f"Moved active {graph_id} to {prev_id}")
+        # A -prev left by an interrupted earlier swap would block the rename.
+        if prev_path.exists():
+          prev_wal = self.base_path / f"{prev_id}.lbug.wal"
+          prev_path.unlink()
+          if prev_wal.exists():
+            prev_wal.unlink()
+          logger.debug(f"Cleaned up prior -prev database for {graph_id}")
 
-      wip_path.rename(active_path)
-      wip_wal = self.base_path / f"{wip_id}.lbug.wal"
-      if wip_wal.exists():
-        wip_wal.rename(self.base_path / f"{graph_id}.lbug.wal")
-      logger.info(f"Promoted WIP {wip_id} to active {graph_id}")
+        if active_path.exists():
+          active_path.rename(prev_path)
+          active_wal = self.base_path / f"{graph_id}.lbug.wal"
+          if active_wal.exists():
+            active_wal.rename(self.base_path / f"{prev_id}.lbug.wal")
+          logger.info(f"Moved active {graph_id} to {prev_id}")
+
+        wip_path.rename(active_path)
+        wip_wal = self.base_path / f"{wip_id}.lbug.wal"
+        if wip_wal.exists():
+          wip_wal.rename(self.base_path / f"{graph_id}.lbug.wal")
+        logger.info(f"Promoted WIP {wip_id} to active {graph_id}")
 
       if prev_path.exists():
         prev_wal = self.base_path / f"{prev_id}.lbug.wal"
@@ -447,12 +451,13 @@ class LadybugDatabaseManager:
       # Only recoverable while active is missing and -prev still holds it.
       logger.error(f"Swap failed for {graph_id}: {e}, attempting rollback")
       try:
-        if prev_path.exists() and not active_path.exists():
-          prev_path.rename(active_path)
-          prev_wal = self.base_path / f"{prev_id}.lbug.wal"
-          if prev_wal.exists():
-            prev_wal.rename(self.base_path / f"{graph_id}.lbug.wal")
-          logger.info(f"Rollback successful: restored {graph_id} from {prev_id}")
+        with self.connection_pool.exclusive(graph_id):
+          if prev_path.exists() and not active_path.exists():
+            prev_path.rename(active_path)
+            prev_wal = self.base_path / f"{prev_id}.lbug.wal"
+            if prev_wal.exists():
+              prev_wal.rename(self.base_path / f"{graph_id}.lbug.wal")
+            logger.info(f"Rollback successful: restored {graph_id} from {prev_id}")
       except Exception as rollback_err:
         logger.error(f"Rollback FAILED for {graph_id}: {rollback_err}")
         raise HTTPException(

@@ -102,6 +102,27 @@ class TestLadybugConnectionPool:
 
   @patch("ladybug.Database")
   @patch("ladybug.Connection")
+  def test_exclusive_holds_off_a_new_connection(self, mock_conn_class, mock_db_class):
+    """A connection cannot open on a database while it is held exclusively."""
+    mock_db_class.return_value = MagicMock()
+    mock_conn_class.return_value = MagicMock()
+    pool = LadybugConnectionPool(base_path=self.base_path)
+    opened = threading.Event()
+
+    def borrow():
+      with pool.get_connection("test_db"):
+        opened.set()
+
+    with pool.exclusive("test_db"):
+      borrower = threading.Thread(target=borrow)
+      borrower.start()
+      assert not opened.wait(timeout=0.2)
+
+    assert opened.wait(timeout=2)
+    borrower.join(timeout=2)
+
+  @patch("ladybug.Database")
+  @patch("ladybug.Connection")
   def test_get_connection_context_manager(self, mock_conn_class, mock_db_class):
     """Test connection retrieval using context manager."""
     # Mock LadybugDB classes

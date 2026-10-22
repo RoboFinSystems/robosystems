@@ -1,5 +1,7 @@
 """Tests for swap_database() and rollback_database() on LadybugDatabaseManager."""
 
+from contextlib import contextmanager
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -120,3 +122,40 @@ class TestListDatabasesFiltering:
     assert "kg123-wip" not in result
     assert "kg123-prev" not in result
     assert len(result) == 2
+
+
+class TestSwapHoldsTheDatabaseLock:
+  def test_close_and_both_renames_run_under_the_database_lock(self, manager, db_dir):
+    """No connection can open on the active file while it is being moved."""
+    (db_dir / "kg123.lbug").write_text("active")
+    (db_dir / "kg123-wip.lbug").write_text("wip")
+
+    held: set[str] = set()
+    events: list[tuple[str, str, bool]] = []
+
+    @contextmanager
+    def exclusive(name):
+      held.add(name)
+      try:
+        yield
+      finally:
+        held.discard(name)
+
+    manager.connection_pool.exclusive = exclusive
+    manager.connection_pool.close_database_connections.side_effect = lambda name: (
+      events.append(("close", name, "kg123" in held))
+    )
+    real_rename = Path.rename
+
+    def rename(self, target):
+      events.append(("rename", self.name, "kg123" in held))
+      return real_rename(self, target)
+
+    with patch.object(Path, "rename", rename):
+      result = manager.swap_database("kg123")
+
+    assert result["status"] == "success"
+    assert ("close", "kg123", True) in events
+    renames = [event for event in events if event[0] == "rename"]
+    assert [name for _, name, _ in renames] == ["kg123.lbug", "kg123-wip.lbug"]
+    assert all(under_lock for _, _, under_lock in renames)

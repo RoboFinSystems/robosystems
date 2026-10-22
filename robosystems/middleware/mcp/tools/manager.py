@@ -15,6 +15,7 @@ from robosystems.config import env
 from robosystems.logger import logger
 from robosystems.middleware.mcp.query_validator import GraphQueryValidator
 from robosystems.middleware.operations import run_off_loop
+from robosystems.operations.extensions.staleness import graph_freshness
 from robosystems.security.operation_audit import build_tool_record, write_record
 
 from ..exceptions import (
@@ -78,6 +79,12 @@ SUBGRAPH_TOOL_PROFILE = frozenset(
   }
 )
 
+
+# Reads answered from the graph, which trails a ledger's books until the next
+# rebuild; on a stale ledger graph they carry `graph_freshness`.
+GRAPH_BACKED_READ_TOOLS = frozenset(
+  {"read-graph-cypher", "build-fact-grid", "financial-statement-analysis"}
+)
 
 # Tools the `/v1/mcp/roboledger` route withholds: it serves directory listings
 # that freeze one tool list per URL, so it drops what a chat client cannot use
@@ -883,6 +890,27 @@ class GraphMCPTools:
         name, arguments, result, error, (time.monotonic() - started) * 1000
       )
 
+  async def stale_graph_notice(self, name: str) -> dict[str, Any] | None:
+    """The graph's freshness when ``name`` read a ledger's graph that is
+    behind its books; ``None`` when current or not a ledger's graph.
+
+    `read-graph-cypher` returns rows, not an object, so its callers attach
+    this beside the rows rather than inside them.
+    """
+    if name not in GRAPH_BACKED_READ_TOOLS or self.get_graph_sync_status_tool is None:
+      return None
+    freshness = await run_off_loop(graph_freshness, self.client.graph_id)
+    if freshness is None or not freshness.stale:
+      return None
+    return freshness.model_dump()
+
+  async def _with_freshness(self, name: str, result: Any) -> Any:
+    """``result`` with ``graph_freshness`` added when the graph is behind."""
+    if isinstance(result, dict) and "error" not in result:
+      if notice := await self.stale_graph_notice(name):
+        result["graph_freshness"] = notice
+    return result
+
   async def _record_mutation(
     self,
     name: str,
@@ -1021,6 +1049,7 @@ class GraphMCPTools:
             "This graph does not have the roboledger schema extension."
           )
         result = await self.financial_statement_analysis_tool.execute(arguments)
+        result = await self._with_freshness(name, result)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "disclosures":
@@ -1210,6 +1239,7 @@ class GraphMCPTools:
             "Set FACT_GRID_ENABLED=true to enable this feature."
           )
         result = await self.build_fact_grid_tool.execute(arguments)
+        result = await self._with_freshness(name, result)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "get-graph-sync-status":

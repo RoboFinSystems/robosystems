@@ -702,7 +702,7 @@ class TestCallerTimeoutClamp:
     fake = SimpleNamespace(
       _ensure_not_closed=lambda: None,
       _ensure_initialized=_noop,
-      mcp_tools=None,
+      mcp_tools=SimpleNamespace(stale_graph_notice=AsyncMock(return_value=None)),
       graph_id="kg1",
     )
     call_tool = handlers.MCPHandler.call_tool.__get__(fake)

@@ -130,6 +130,11 @@ class HttpToolAccess:
       await self.initialize()
     return await self._tools.call_tool(tool_name, arguments, return_raw=return_raw)
 
+  async def stale_graph_notice(self, tool_name: str) -> dict[str, Any] | None:
+    if self._tools is None:
+      await self.initialize()
+    return await self._tools.stale_graph_notice(tool_name)
+
   def get_tool_instance(self, tool_class: type) -> Any:
     """Return a handle that routes back through :meth:`call_tool`, so the
     ``read_only`` gating and registrar dispatch always apply. The class is
@@ -203,6 +208,10 @@ class DirectToolAccess:
       f"Tool '{tool_name}' not registered in DirectToolAccess. "
       f"Use get_tool_instance() to register tool classes first."
     )
+
+  async def stale_graph_notice(self, tool_name: str) -> dict[str, Any] | None:
+    """Neither adapter uses this access, so it reports no freshness."""
+    return None
 
   async def get_tool_schemas(self, names: list[str]) -> list[dict[str, Any]]:
     """Only registered instances, so a model-driven loop on this sees none."""

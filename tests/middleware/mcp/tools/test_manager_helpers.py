@@ -1,6 +1,7 @@
 """MCP tools manager helper and error handling tests."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+import json
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
@@ -8,6 +9,7 @@ from robosystems.middleware.mcp.tools.manager import (
   GraphMCPTools,
   resolve_schema_extensions,
 )
+from robosystems.models.api.views import GraphFreshness
 
 
 @pytest.fixture
@@ -779,3 +781,63 @@ class TestValueErrorClassification:
       )
     assert not isinstance(raised.value, GraphValidationError)
     log.error.assert_called_once()
+
+
+class TestGraphFreshnessOnGraphBackedReads:
+  """A graph-backed read on a stale ledger graph says the graph is behind."""
+
+  STALE = GraphFreshness(
+    stale=True,
+    stale_since="2026-10-01T09:00:00+00:00",
+    stale_reason="period_closed",
+    last_materialized_at="2026-09-30T12:00:00+00:00",
+  )
+
+  def _ledger_tools(self, tools, result):
+    tools.build_fact_grid_tool = Mock(execute=AsyncMock(return_value=result))
+    tools.get_graph_sync_status_tool = Mock()
+    return tools
+
+  @pytest.mark.asyncio
+  async def test_stale_graph_answer_carries_freshness(self, tools):
+    tools = self._ledger_tools(tools, {"facts": []})
+    with patch(
+      "robosystems.middleware.mcp.tools.manager.graph_freshness",
+      return_value=self.STALE,
+    ):
+      result = await tools.call_tool("build-fact-grid", {}, return_raw=True)
+
+    assert result["graph_freshness"]["stale"] is True
+    assert result["graph_freshness"]["stale_since"] == "2026-10-01T09:00:00+00:00"
+
+  @pytest.mark.asyncio
+  async def test_current_graph_answer_is_unchanged(self, tools):
+    tools = self._ledger_tools(tools, {"facts": []})
+    with patch(
+      "robosystems.middleware.mcp.tools.manager.graph_freshness",
+      return_value=GraphFreshness(stale=False),
+    ):
+      result = await tools.call_tool("build-fact-grid", {})
+
+    assert json.loads(result) == {"facts": []}
+
+  @pytest.mark.asyncio
+  async def test_graph_without_ledger_staleness_is_not_checked(self, tools):
+    tools.build_fact_grid_tool = Mock(execute=AsyncMock(return_value={"facts": []}))
+    tools.get_graph_sync_status_tool = None
+    with patch("robosystems.middleware.mcp.tools.manager.graph_freshness") as check:
+      result = await tools.call_tool("build-fact-grid", {}, return_raw=True)
+
+    check.assert_not_called()
+    assert "graph_freshness" not in result
+
+  @pytest.mark.asyncio
+  async def test_refusal_is_not_annotated(self, tools):
+    tools = self._ledger_tools(tools, {"error": "too_broad"})
+    with patch(
+      "robosystems.middleware.mcp.tools.manager.graph_freshness",
+      return_value=self.STALE,
+    ):
+      result = await tools.call_tool("build-fact-grid", {}, return_raw=True)
+
+    assert "graph_freshness" not in result

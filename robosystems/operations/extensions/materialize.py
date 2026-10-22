@@ -840,7 +840,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       AND trait_id IN (SELECT identifier FROM "Trait")
   """
 
-  # Dimension junction tables (may be empty if no dimensions loaded yet)
+  # Dimension junction tables (empty until dimensions are tagged)
   tables["TRANSACTION_HAS_DIMENSION"] = f"""
     CREATE OR REPLACE TABLE TRANSACTION_HAS_DIMENSION AS
     SELECT
@@ -1195,6 +1195,8 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       ON fs.id = f.fact_set_id
     WHERE fs.report_id IS NOT NULL
       AND fs.scenario_id IS NULL
+      -- Report nodes are published reports only; staged before this table.
+      AND fs.report_id IN (SELECT identifier FROM Report)
   """
 
   # Inner-joined to `elements` on purpose: `facts.element_id` has no FK, and
@@ -1288,6 +1290,8 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     FROM postgres_scan('{c}', '{s}', 'fact_sets')
     WHERE report_id IS NOT NULL
       AND scenario_id IS NULL
+      -- Report nodes are published reports only; staged before this table.
+      AND report_id IN (SELECT identifier FROM Report)
   """
 
   tables["FACT_SET_CONTAINS_FACT"] = f"""
@@ -1635,8 +1639,10 @@ class ExtensionsMaterializer:
   ) -> None:
     """Build in place, for first-time creation.
 
-    Unlike the blue-green path there is no fallback copy: a failure part-way
-    leaves the graph in whatever state it reached.
+    Unlike the blue-green path there is no fallback copy, so a staging error
+    stops the run before COPY: loading what did stage would publish a graph
+    missing whole tables. The graph stays stale, and the next run takes the
+    blue-green path over the empty database.
     """
     await self._ensure_database(
       client, graph_id, rebuild, lock_token=lock.token if lock else None
@@ -1652,6 +1658,12 @@ class ExtensionsMaterializer:
     await self._stage_tables(
       client, graph_id, staging_sql, result, enabled_extensions, lock=lock
     )
+    if result.status != "success":
+      logger.warning(
+        f"First build of {graph_id} stopped before COPY: "
+        f"{len(result.errors)} staging error(s)"
+      )
+      return
 
     await self._materialize_tables(client, graph_id, result, lock=lock)
 
@@ -1837,8 +1849,9 @@ class ExtensionsMaterializer:
 
     Only tables whose owning extension is enabled are staged: the rest have no
     node/rel table in LadybugDB and would fail with "Table does not exist".
-    A dimension relationship table that fails to stage is treated as
-    non-fatal — a tenant may simply have no dimension data.
+    Every staging failure is an error, dimension tables included: their source
+    tables exist in every tenant schema, so a tenant with no dimension data
+    stages an empty table, and a failure says nothing about emptiness.
     """
     all_tables = _filter_tables_for_extensions(
       NODE_TABLES + RELATIONSHIP_TABLES, enabled_extensions
@@ -1865,11 +1878,8 @@ class ExtensionsMaterializer:
         # reaches the log or the tenant-visible result.
         error_msg = redact_connection_secrets(f"Failed to stage {table_name}: {e!s}")
         logger.warning(error_msg)
-        if table_name in RELATIONSHIP_TABLES and "DIMENSION" in table_name:
-          logger.info(f"Skipping {table_name} (no dimension data)")
-        else:
-          result.status = "error"
-          result.errors.append(error_msg)
+        result.status = "error"
+        result.errors.append(error_msg)
 
     await self._prune_dangling_edges(client, graph_id, result)
 

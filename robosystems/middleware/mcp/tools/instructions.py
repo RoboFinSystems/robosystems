@@ -237,7 +237,16 @@ def build_instructions(
       "from a hit's offset"
     )
   if report_bits:
-    sections.append(_block("REPORTING & ANALYSIS", "- " + "; ".join(report_bits) + "."))
+    report_lines = ["- " + "; ".join(report_bits) + "."]
+    if has("get-graph-sync-status"):
+      report_lines.append(
+        "- `read-graph-cypher`, `build-fact-grid` and `financial-statement-analysis` "
+        "read the graph, which is rebuilt after the books change. While it is "
+        "behind, their answer carries `graph_freshness`: say so beside any number "
+        "you quote from it, or read `live-financial-statement` for the books as "
+        "they stand."
+      )
+    sections.append(_block("REPORTING & ANALYSIS", *report_lines))
 
   # Portfolios & securities.
   if has_portfolio:

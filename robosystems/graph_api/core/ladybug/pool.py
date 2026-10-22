@@ -190,6 +190,17 @@ class LadybugConnectionPool:
 
         logger.info(f"Invalidated all connections for database: {database_name}")
 
+  @contextmanager
+  def exclusive(self, database_name: str):
+    """Hold a database's lock so no connection to it opens meanwhile.
+
+    Acquisition takes the same lock, so a file move inside this block cannot
+    race a reader opening the file. It does not stop a borrower already
+    mid-query.
+    """
+    with self._get_database_lock(database_name):
+      yield
+
   def _get_database_lock(self, database_name: str) -> threading.RLock:
     """Get or create a lock for a specific database."""
     with self._global_lock:

@@ -805,7 +805,8 @@ class GetGraphSyncStatusTool:
 
       is_stale = bool(graph.graph_stale)
       stale_reason = graph.graph_stale_reason
-      stale_at = graph.graph_stale_at
+      # The onset, not the latest write: graph_stale_at moves on every write.
+      stale_at = graph.graph_stale_since or graph.graph_stale_at
 
       metadata = graph.graph_metadata or {}
       last_materialized_at = metadata.get("last_materialized_at")

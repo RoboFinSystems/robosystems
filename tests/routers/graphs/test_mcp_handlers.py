@@ -48,6 +48,7 @@ async def mcp_handler(mock_repository):
     # Create a proper async mock for mcp_tools with call_tool method
     mock_mcp_tools = Mock()
     mock_mcp_tools.call_tool = AsyncMock(return_value={"results": []})
+    mock_mcp_tools.stale_graph_notice = AsyncMock(return_value=None)
     handler.mcp_tools = mock_mcp_tools
 
     # Await the init task to ensure clean state
@@ -98,6 +99,20 @@ class TestMCPHandler:
 
     # Verify mcp_tools.call_tool was called with correct arguments
     mcp_handler.mcp_tools.call_tool.assert_called_once()
+
+  @pytest.mark.asyncio
+  async def test_cypher_on_a_stale_graph_carries_freshness(self, mcp_handler):
+    rows = [{"name": "Entity1"}]
+    notice = {"stale": True, "stale_since": "2026-10-01T09:00:00+00:00"}
+    mcp_handler.mcp_tools.call_tool.return_value = rows
+    mcp_handler.mcp_tools.stale_graph_notice = AsyncMock(return_value=notice)
+
+    result = await mcp_handler.call_tool(
+      "read-graph-cypher", {"query": "MATCH (e:Entity) RETURN e.name AS name"}
+    )
+
+    assert json.loads(result["text"]) == rows
+    assert result["graph_freshness"] == notice
 
   @pytest.mark.asyncio
   async def test_call_tool_with_parameters(self, mcp_handler, mock_repository):
