@@ -615,3 +615,26 @@ def test_a_members_cash_leaves_with_it_as_cash_divested(group):
   )
   assert engine.group_close_status(session, GRAPH, "2026-08").not_footing == []
   assert _close(group, "adjustments", "2026-08").statements_stamped
+
+  # With the entries posted, the month's consolidated cash flow still opens
+  # on July's close and moves only by the cash divested: the deconsolidation
+  # moves no cash, so nothing of it reaches operating or financing.
+  live = get_live_financial_statement(
+    session,
+    graph_id=GRAPH,
+    statement_type="cash_flow_statement",
+    period_start=AUGUST[0],
+    period_end=AUGUST[1],
+    entity_id=ids["parent"],
+    scope="consolidated",
+  )
+  rows = {(f.qname, f.period_role): f.values[0] for f in live.facts}
+  assert rows[(cash, "start")] == 4_000.0
+  assert rows[(cash, "end")] == -7_000.0
+  assert rows[(divested, None)] == -11_000.0
+  sections = {
+    kind: rows.get((f"rs-gaap:NetCashProvidedByUsedIn{kind}Activities", None), 0.0)
+    for kind in ("Operating", "Investing", "Financing")
+  }
+  assert sections == {"Operating": 0.0, "Investing": -11_000.0, "Financing": 0.0}
+  assert live.validation.status == "passed", live.validation.failures

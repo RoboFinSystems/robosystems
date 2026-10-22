@@ -1452,6 +1452,19 @@ def test_membership_dates_cannot_move_within_closed_months(group):
     with extensions_session(GRAPH) as session, pytest.raises(ConsolidatedHistoryError):
       update_entity(session, UpdateEntityRequest(entity_id=MEMBER, **change), "test")
   with extensions_session(GRAPH) as session:
+    # Leaving at June's end takes the member's books closed through June.
+    session.add(
+      FiscalPeriod(
+        graph_id=GRAPH,
+        entity_id=MEMBER,
+        name="2026-06",
+        start_date=date(2026, 6, 1),
+        end_date=date(2026, 6, 30),
+        period_type="monthly",
+        status="closed",
+      )
+    )
+  with extensions_session(GRAPH) as session:
     left = update_entity(
       session, UpdateEntityRequest(entity_id=MEMBER, left_on=date(2026, 6, 30)), "test"
     )
@@ -2591,11 +2604,28 @@ def test_a_member_leaves_only_closed_unfed_and_agreed(group):
 
   with pytest.raises(EntityExitError, match="open for 2026-01"):
     leave()
+  # Dropping the share to cost in the same call does not get past the guard.
+  with (
+    extensions_session(GRAPH) as session,
+    pytest.raises(EntityExitError, match="open for 2026-01"),
+  ):
+    update_entity(
+      session,
+      UpdateEntityRequest(entity_id=MEMBER, left_on=JAN_31, ownership_pct=10),
+      "test",
+    )
   with extensions_session(GRAPH) as session:
     session.execute(
       text("UPDATE fiscal_periods SET status = 'closed' WHERE entity_id = :id"),
       {"id": MEMBER},
     )
+  # Closed books mean closed through the month, not merely no open row.
+  with (
+    extensions_session(GRAPH) as session,
+    pytest.raises(EntityExitError, match="closed through 2026-01"),
+  ):
+    update_entity(session, UpdateEntityRequest(entity_id=MEMBER, left_on=FEB_1), "test")
+  with extensions_session(GRAPH) as session:
     cash = session.get(Element, group["accounts"][(MEMBER, "cash")])
     cash.metadata_ = {**(cash.metadata_ or {}), BANK_FEED_KEY: {"connection_id": "c"}}
   with pytest.raises(EntityExitError, match="bank feed"):

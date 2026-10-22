@@ -54,10 +54,8 @@ from robosystems.operations.roboledger.entity_scope import (
   resolve_entity_id,
 )
 from robosystems.operations.roboledger.reads.consolidation import (
-  _BALANCE,
   ACQUISITION,
   ALLOCATION_OVERRIDES,
-  COMPUTED_KINDS,
   DECONSOLIDATION,
   ENGINE_PROVENANCE,
   ENGINE_SOURCE,
@@ -66,13 +64,13 @@ from robosystems.operations.roboledger.reads.consolidation import (
   INVESTMENT_IN_SUBSIDIARIES,
   NONCONTROLLING_INTEREST,
   OWNERSHIP_CHANGE,
-  _is_periodic,
   _rows,
   capital_and_earnings,
   elimination_flow,
   engine_drafts,
   engine_opening,
   first_month_eve,
+  held_for_member,
   month_bounds,
   opening_is_recorded,
   ownership_changes,
@@ -876,29 +874,21 @@ def _month_after(day: date) -> date:
 def _held_for_member(
   session: Session, consolidation_id: str, member_id: str, through: date
 ) -> dict[str, int]:
-  """What the consolidation entity holds for a member on its balance-sheet
-  accounts and the outside owners' interest beyond what the engine reverses
-  on its own once the member is out: the kinds it computes a cumulative
-  target for (the investment and intercompany eliminations) go back the
-  month after; an acquisition's goodwill and step-ups, the price above
-  book of each change in the share, and the outside owners' share of the
-  member's results wait for the deconsolidation. Debit-positive, by
-  concept, through ``through``."""
+  """What the consolidation entity holds for a member beyond what the
+  engine reverses once the member is out, through ``through``, as
+  ``held_for_member`` reads it; the engine's own drafts of that month are
+  not counted, as the preview does not count them."""
   mapping = find_entity_mapping(session, consolidation_id, BOOK_FRAMEWORK)
   concepts = primary_concepts(session, [str(mapping.id)]) if mapping else {}
   rows = _rows(
-    session, [consolidation_id], concepts, through, through, drafts_of=consolidation_id
+    session,
+    [consolidation_id],
+    concepts,
+    through.replace(day=1),
+    through,
+    drafts_of=consolidation_id,
   )
-  held: dict[str, int] = {}
-  for r in rows:
-    if r.adjusts != member_id or not r.kind or r.closing:
-      continue
-    if r.kind in COMPUTED_KINDS and not _is_periodic(r.kind, r.concept):
-      continue
-    if (
-      r.concept.classification in _BALANCE or r.concept.qname == NONCONTROLLING_INTEREST
-    ):
-      held[r.concept.qname] = held.get(r.concept.qname, 0) + r.amount
+  held = held_for_member(rows, consolidation_id, member_id, beyond_engine=True)
   return {q: a for q, a in held.items() if a}
 
 
@@ -967,7 +957,10 @@ def record_deconsolidation(
     session.delete(entry)
   session.flush()
 
-  held = _held_for_member(session, consolidation_id, str(member.id), start)
+  # Through the month's end, as the preview measures what is still held.
+  held = _held_for_member(
+    session, consolidation_id, str(member.id), month_bounds(period)[1]
+  )
   earnings = 0
   if member.consolidation_method == "full":
     _capital, earnings = capital_and_earnings(
