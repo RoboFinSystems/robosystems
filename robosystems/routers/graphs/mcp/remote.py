@@ -195,6 +195,10 @@ def _to_tool_result(result: Any) -> dict[str, Any]:
   is_error, _ = _tool_failure(result)
   if isinstance(result, dict) and result.get("type") == "text" and "text" in result:
     content = [{"type": "text", "text": result["text"]}]
+    if freshness := result.get("graph_freshness"):
+      content.append(
+        {"type": "text", "text": json.dumps({"graph_freshness": freshness}, indent=2)}
+      )
   elif is_error and isinstance(result, dict) and isinstance(result.get("error"), str):
     content = [{"type": "text", "text": result["error"]}]
   else:

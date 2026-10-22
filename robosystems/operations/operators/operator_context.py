@@ -43,6 +43,10 @@ class ToolAccess(Protocol):
     """`names` filtered to what this graph exposes, as
     `{"name", "description", "inputSchema"}`."""
 
+  async def stale_graph_notice(self, tool_name: str) -> dict[str, Any] | None:
+    """The graph's freshness when `tool_name` read a ledger's graph that is
+    behind its books; `None` otherwise."""
+
   def get_tool_instance(self, tool_class: type) -> Any:
     """An object exposing ``await .execute(arguments)``, for operators that
     drive tools imperatively (MappingOperator)."""

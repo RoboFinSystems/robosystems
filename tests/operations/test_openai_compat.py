@@ -376,6 +376,7 @@ async def test_tool_loop_round_trips_through_chat_completions(self_hosted_balanc
   tools = MagicMock()
   tools.get_tool_schemas = AsyncMock(return_value=[CYPHER_TOOL])
   tools.call_tool = AsyncMock(side_effect=[{"error": "syntax error"}, [{"count": 42}]])
+  tools.stale_graph_notice = AsyncMock(return_value=None)
   ctx = OperatorContext(
     graph_id="kg_test",
     user_id="u",

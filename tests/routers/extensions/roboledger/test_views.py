@@ -31,7 +31,7 @@ from robosystems.models.api.extensions.reports import (
   ReadTextRequest,
   SearchTextRequest,
 )
-from robosystems.models.api.views import CreateViewRequest
+from robosystems.models.api.views import CreateViewRequest, GraphFreshness
 from robosystems.models.api.views.view_config import DEFAULT_FACT_LIMIT
 from robosystems.operations.roboledger.views.filing_text import FilingRef, QueryError
 from robosystems.operations.roboledger.views.information_blocks import (
@@ -52,6 +52,13 @@ from robosystems.routers.extensions.roboledger.views import (
 
 MODULE = "robosystems.routers.extensions.roboledger.views"
 GRAPH_ID = "kg01234567890abcdef"
+
+
+@pytest.fixture(autouse=True)
+def _graph_freshness_unread():
+  """Keep the platform database out of these unit tests."""
+  with patch(f"{MODULE}.graph_freshness", return_value=None):
+    yield
 
 
 def _make_create_view_request(
@@ -731,6 +738,65 @@ class TestFinancialStatementAnalysisOp:
           cache=_FakeCache(),
         )
     assert exc_info.value.status_code == 400
+
+
+class TestGraphFreshnessOnViews:
+  """A graph-backed view on a ledger's graph says whether it is current."""
+
+  STALE = GraphFreshness(
+    stale=True,
+    stale_since="2026-10-01T09:00:00+00:00",
+    stale_reason="period_closed",
+    last_materialized_at="2026-09-30T12:00:00+00:00",
+  )
+
+  @pytest.mark.unit
+  async def test_fact_grid_carries_the_graph_freshness(self):
+    with (
+      patch(f"{MODULE}.is_shared_repository_or_subgraph", return_value=False),
+      patch(
+        f"{MODULE}.query_fact_grid",
+        new_callable=AsyncMock,
+        return_value=(_make_facts(), False),
+      ),
+      patch(f"{MODULE}.graph_freshness", return_value=self.STALE) as freshness,
+    ):
+      envelope = await build_fact_grid_op(
+        body=_make_create_view_request(),
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    freshness.assert_called_once_with(GRAPH_ID)
+    metadata = envelope.result["metadata"]  # type: ignore[index]
+    assert metadata["graph_freshness"]["stale"] is True
+    assert metadata["graph_freshness"]["stale_since"] == "2026-10-01T09:00:00+00:00"
+
+  @pytest.mark.unit
+  async def test_statement_analysis_carries_the_graph_freshness(self):
+    body = FinancialStatementAnalysisRequest(
+      statement_type="income_statement", report_id="rpt_tenant"
+    )
+    with (
+      patch(f"{MODULE}.is_shared_repository_or_subgraph", return_value=False),
+      patch(
+        f"{MODULE}.query_financial_statement",
+        new_callable=AsyncMock,
+        return_value=[],
+      ),
+      patch(f"{MODULE}.graph_freshness", return_value=self.STALE),
+    ):
+      envelope = await financial_statement_analysis_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert envelope.result["graph_freshness"]["stale"] is True  # type: ignore[index]
 
 
 class TestFactGridFlagDecoupling:

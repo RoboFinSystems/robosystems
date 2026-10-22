@@ -28,6 +28,7 @@ from robosystems.middleware.operations import (
   OperationEnvelope,
   fingerprint_body,
   get_idempotency_cache,
+  run_off_loop,
 )
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
@@ -57,6 +58,7 @@ from robosystems.models.api.views import (
   ViewResponse,
 )
 from robosystems.models.core import User
+from robosystems.operations.extensions.staleness import graph_freshness
 from robosystems.operations.roboledger.reads.reports import ANALYSIS_STATEMENT_TYPES
 from robosystems.operations.roboledger.views import (
   BlockNotFoundError,
@@ -215,6 +217,7 @@ async def build_fact_grid_op(
       construction_time_ms=construction_time_ms,
       source="fact_grid",
       truncated=truncated,
+      graph_freshness=await run_off_loop(graph_freshness, graph_id),
     )
 
     summary = None
@@ -362,6 +365,7 @@ async def financial_statement_analysis_op(
       resolved_report=resolved_info,
       facts=facts,
       fact_count=len(facts),
+      graph_freshness=await run_off_loop(graph_freshness, graph_id),
     )
 
   return await _dispatch(ctx, _runner, cache)

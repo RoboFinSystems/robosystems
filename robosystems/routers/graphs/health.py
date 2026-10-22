@@ -151,11 +151,9 @@ async def get_database_health(
       if graph_record:
         is_stale = graph_record.graph_stale or False
         stale_reason = graph_record.graph_stale_reason
-        stale_since = (
-          graph_record.graph_stale_at.isoformat()
-          if graph_record.graph_stale_at
-          else None
-        )
+        # The onset, not the latest write: graph_stale_at moves on every write.
+        stale_onset = graph_record.graph_stale_since or graph_record.graph_stale_at
+        stale_since = stale_onset.isoformat() if stale_onset else None
         metadata = graph_record.graph_metadata or {}
         last_materialized_at = metadata.get("last_materialized_at")
         if last_materialized_at:

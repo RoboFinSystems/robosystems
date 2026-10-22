@@ -10,6 +10,7 @@ from robosystems.models.api.extensions.dimensions import (
   StatementDimension,
   StatementDimensionResponse,
 )
+from robosystems.models.api.views.view_response import GraphFreshness
 
 LiveStatementScope = Literal["entity", "combined", "consolidated"]
 
@@ -1085,6 +1086,13 @@ class FinancialStatementAnalysisResponse(BaseModel):
   resolved_report: ResolvedReportInfo | None = None
   facts: list[AnalyticalStatementFactRow]
   fact_count: int
+  graph_freshness: GraphFreshness | None = Field(
+    None,
+    description=(
+      "On a ledger's graph, whether the graph is current with the books; "
+      "null on shared repositories, which are not rebuilt from a ledger."
+    ),
+  )
 
 
 # ── Information-block views (disclosures + information-block) ────────────────

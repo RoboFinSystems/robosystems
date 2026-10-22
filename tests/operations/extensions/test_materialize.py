@@ -1420,3 +1420,80 @@ class TestInactiveNodesWithHistory:
   def test_security_keeps_retired_securities_held_by_a_position(self):
     sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["Security"]
     assert "'positions'" in sql
+
+
+class TestIncompleteBuildsNeverPublish:
+  """A build that did not stage everything must not reach the live graph."""
+
+  def _materializer(self):
+    from robosystems.operations.extensions.materialize import (
+      ExtensionsMaterializer,
+    )
+
+    return ExtensionsMaterializer()
+
+  @pytest.mark.asyncio
+  async def test_a_dimension_staging_failure_fails_the_run(self):
+    materializer = self._materializer()
+    result = MaterializeResult(graph_id=GRAPH_ID)
+    staging_sql = {
+      "Entity": "CREATE OR REPLACE TABLE Entity AS SELECT 1",
+      "TRANSACTION_HAS_DIMENSION": "CREATE OR REPLACE TABLE x AS SELECT 1",
+    }
+
+    async def execute_write(graph_id, sql, timeout):
+      if "TABLE x" in sql:
+        raise TimeoutError("staging timed out")
+      return {"success": True}
+
+    client = AsyncMock()
+    client.execute_write.side_effect = execute_write
+
+    with patch.object(materializer, "_prune_dangling_edges", new=AsyncMock()):
+      await materializer._stage_tables(
+        client, GRAPH_ID, staging_sql, result, {"roboledger"}
+      )
+
+    assert result.status == "error"
+    assert any("TRANSACTION_HAS_DIMENSION" in e for e in result.errors)
+    assert "TRANSACTION_HAS_DIMENSION" not in result.tables_staged
+
+  async def _run_direct(self, staging_status: str) -> AsyncMock:
+    materializer = self._materializer()
+    result = MaterializeResult(graph_id=GRAPH_ID)
+
+    async def fake_stage_tables(client, graph_id, sql, res, extensions, lock=None):
+      res.status = staging_status
+
+    materialize_tables = AsyncMock()
+    with (
+      patch.object(materializer, "_ensure_database", new=AsyncMock()),
+      patch.object(
+        materializer, "_get_graph_extensions", new=AsyncMock(return_value=[])
+      ),
+      patch.object(materializer, "_stage_tables", new=fake_stage_tables),
+      patch.object(materializer, "_materialize_tables", new=materialize_tables),
+      patch(
+        "robosystems.operations.extensions.materialize.build_postgres_connstr",
+        return_value=CONNSTR,
+      ),
+    ):
+      await materializer._materialize_direct(
+        AsyncMock(), GRAPH_ID, ENTITY_ID, False, result, _held_lock()
+      )
+    return materialize_tables
+
+  @pytest.mark.asyncio
+  async def test_a_first_build_stops_before_copy_on_a_staging_error(self):
+    materialize_tables = await self._run_direct("error")
+    materialize_tables.assert_not_awaited()
+
+  @pytest.mark.asyncio
+  async def test_a_first_build_copies_after_clean_staging(self):
+    materialize_tables = await self._run_direct("success")
+    materialize_tables.assert_awaited_once()
+
+  def test_report_edges_reach_only_published_reports(self):
+    tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
+    for name in ("REPORT_HAS_FACT", "REPORT_HAS_FACT_SET"):
+      assert "IN (SELECT identifier FROM Report)" in tables[name], name

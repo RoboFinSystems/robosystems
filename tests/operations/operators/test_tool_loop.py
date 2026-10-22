@@ -61,6 +61,7 @@ def _tools_mock(call_results: list) -> MagicMock:
     ]
   )
   tools.call_tool = AsyncMock(side_effect=call_results)
+  tools.stale_graph_notice = AsyncMock(return_value=None)
   return tools
 
 
@@ -125,6 +126,36 @@ async def test_happy_path_captures_rows_and_cypher():
   tools.get_tool_schemas.assert_awaited_once_with(["read-graph-cypher"])
   # Tools were handed to the model on the first turn.
   assert ai.create_message.call_args_list[0].kwargs["tools"]
+
+
+async def test_cypher_on_a_stale_graph_hands_the_model_its_freshness():
+  ai = MagicMock()
+  ai.create_message = AsyncMock(
+    side_effect=[
+      _tool_use("t1", "read-graph-cypher", query="MATCH (e:Entity) RETURN count(e)"),
+      _final("There are 42 companies, as of the last rebuild."),
+    ]
+  )
+  rows = [{"count": 42}]
+  tools = _tools_mock(call_results=[rows])
+  notice = {"stale": True, "stale_since": "2026-10-01T09:00:00+00:00"}
+  tools.stale_graph_notice = AsyncMock(return_value=notice)
+  ctx = _ctx(ai, tools)
+
+  result = await run_tool_loop(
+    ctx,
+    system="sys",
+    tool_names=["read-graph-cypher"],
+    max_iterations=5,
+    max_tokens=1000,
+  )
+
+  # The captured rows stay rows; the model sees them beside the freshness.
+  assert result.rows == rows
+  blocks = _tool_result_blocks(ai.create_message.call_args_list[1].kwargs["messages"])
+  seen = _result_text(blocks[0])
+  assert '"graph_freshness"' in seen
+  assert '"count": 42' in seen or '"count":42' in seen
 
 
 async def test_tool_error_is_fed_back_and_model_retries():
@@ -499,6 +530,7 @@ def _two_tools_mock(call_results: list) -> MagicMock:
     ]
   )
   tools.call_tool = AsyncMock(side_effect=call_results)
+  tools.stale_graph_notice = AsyncMock(return_value=None)
   return tools
 
 

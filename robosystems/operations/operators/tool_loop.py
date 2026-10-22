@@ -299,6 +299,9 @@ async def run_tool_loop(
           # Last NON-EMPTY set, so a later zero-row probe can't wipe it.
           last_rows = result
           last_cypher = args.get("query")
+        if name == "read-graph-cypher" and isinstance(result, list):
+          if notice := await ctx.tools.stale_graph_notice(name):
+            result = {"rows": result, "graph_freshness": notice}
       except Exception as e:  # cypher_tool raises ValueError on bad queries
         logger.info("run_tool_loop tool %s errored: %s", name, e)
         result = {"error": str(e)}

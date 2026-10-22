@@ -52,6 +52,15 @@ class TestEnvelopeHelpers:
       "isError": False,
     }
 
+  def test_to_tool_result_puts_freshness_beside_the_rows(self):
+    freshness = {"stale": True, "stale_since": "2026-10-01T09:00:00+00:00"}
+    result = _to_tool_result(
+      {"type": "text", "text": "[]", "graph_freshness": freshness}
+    )
+    assert result["content"][0] == {"type": "text", "text": "[]"}
+    assert json.loads(result["content"][1]["text"]) == {"graph_freshness": freshness}
+    assert result["isError"] is False
+
   def test_to_tool_result_serializes_non_text_result(self):
     result = _to_tool_result({"success": True, "rows": 3})
     assert result["isError"] is False

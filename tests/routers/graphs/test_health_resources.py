@@ -129,6 +129,7 @@ def _make_graph_record(tier="ladybug-standard"):
   record.graph_stale = False
   record.graph_stale_reason = None
   record.graph_stale_at = None
+  record.graph_stale_since = None
   record.graph_metadata = {}
   return record
 

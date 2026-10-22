@@ -345,6 +345,11 @@ class MCPHandler:
         # but the caller's, not the backend's, so the breaker ignores it.
         if isinstance(results, dict) and results.get("error"):
           return tool_error_result(text, "constraint")
+        # Cypher returns rows, so its freshness travels beside them.
+        if name == "read-graph-cypher" and (
+          notice := await self.mcp_tools.stale_graph_notice(name)
+        ):
+          return {"type": "text", "text": text, "graph_freshness": notice}
         return {"type": "text", "text": text}
 
     except TimeoutError:

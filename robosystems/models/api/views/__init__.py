@@ -12,6 +12,7 @@ from robosystems.models.api.views.view_config import (
 from robosystems.models.api.views.view_response import (
   ElementSummary,
   FactRecord,
+  GraphFreshness,
   ViewMetadata,
   ViewResponse,
 )
@@ -24,6 +25,7 @@ __all__ = [
   "FactGrid",
   "FactGridMetadata",
   "FactRecord",
+  "GraphFreshness",
   "ViewAxisConfig",
   "ViewConfig",
   "ViewMetadata",
