@@ -61,6 +61,18 @@
       "to": "rs-gaap:PartnersCapital"
     },
     {
+      "from": "3110",
+      "to": "rs-gaap:RetainedEarningsAccumulatedDeficit"
+    },
+    {
+      "from": "3120",
+      "to": "rs-gaap:PartnersCapital"
+    },
+    {
+      "from": "3130",
+      "to": "rs-gaap:MembersEquity"
+    },
+    {
       "from": "3200",
       "to": "rs-gaap:MinorityInterest"
     },

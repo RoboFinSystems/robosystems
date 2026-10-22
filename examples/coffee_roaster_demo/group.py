@@ -10,8 +10,13 @@ Consolidation Adjustments entity. Pier Market Kiosk is different: the
 roaster holds forty percent and the market's operator runs it, so the group
 never sums its books; it carries the roaster's share of the kiosk's net assets
 as one investment and its share of the kiosk's income as one line, the
-equity method. The multi-entity beat of the showcase, and
-the target the consolidation engine is built against.
+equity method. Driftline Northside Café is the one that was bought and
+sold: a neighborhood café the roaster acquired from its founders a few
+months in, paying more than its book value, bought a further tenth of
+later, and sold whole before the year was out — the group lifecycle, with
+goodwill arriving and a gain on the sale that is smaller in the group than
+on the roaster's own books. The multi-entity beat of the showcase, and the
+target the consolidation engine is built against.
 
 The fee and the distributions are kept small on purpose: the cafés send cash
 up to the roaster, and the roaster's own story is that its cash falls while
@@ -20,7 +25,7 @@ its profit rises. Fictional throughout.
 
 from __future__ import annotations
 
-from examples._scenario.group import Group, Member
+from examples._scenario.group import Acquired, Group, Member
 
 GROUP = Group(
   members=(
@@ -88,6 +93,44 @@ GROUP = Group(
       ),
       management_fee_bps=0,
       distribution=120_000,
+    ),
+    Member(
+      name="Driftline Northside Café LLC",
+      legal_name="Driftline Northside Café, LLC",
+      ticker="DNORTH",
+      description=(
+        "A neighborhood café bought from its founders, who kept a quarter, "
+        "sold a further tenth, and were bought out alongside the roaster when "
+        "the café was sold."
+      ),
+      entity_type="llc",
+      template="product",
+      ownership_pct=75,
+      outside_owner="Northside Coffee Partners LLC",
+      monthly_revenue=1_450_000,
+      revenue_memo="Northside café sales",
+      expenses=(
+        ("Northside café rent", 380_000),
+        ("Barista wages", 620_000),
+      ),
+      management_fee_bps=300,
+      distribution=150_000,
+      # Offsets into the demo's month windows: bought in the fourth month on
+      # $12,000 of cash and $18,000 of equipment for $31,500 (goodwill
+      # $9,000 over 75% of $30,000); a further 10% for $4,000 four months
+      # on; sold whole three months after that for $62,000.
+      acquired=Acquired(
+        joins_at=3,
+        opening_cash=1_200_000,
+        opening_equipment=1_800_000,
+        price=3_150_000,
+        tops_up_at=7,
+        top_up_pct=85,
+        top_up_price=400_000,
+        sold_at=10,
+        sale_price=6_200_000,
+        buyer="Ridgeline Hospitality Group LLC",
+      ),
     ),
   ),
   consolidation_name="Consolidation Adjustments",

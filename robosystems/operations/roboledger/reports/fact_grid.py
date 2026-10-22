@@ -2962,6 +2962,7 @@ _NCI_ROOT = "rs-gaap:MinorityInterest"
 _NCI_SHARE_OF_INCOME = "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest"
 _NCI_MOVEMENTS: dict[str, str] = {
   "contribution": "rs-gaap:NoncontrollingInterestIncreaseFromSubsidiaryEquityIssuance",
+  "acquisition": "rs-gaap:NoncontrollingInterestIncreaseFromBusinessCombination",
   "distribution": (
     "rs-gaap:MinorityInterestDecreaseFromDistributionsToNoncontrollingInterestHolders"
   ),
@@ -3072,6 +3073,19 @@ def _leaves_the_group(line, start: date) -> bool:
     line.adjustment_kind == "elimination_investment"
     and line.adjusts_left_on is not None
     and line.adjusts_left_on < start
+  )
+
+
+def _joins_the_group(line, start: date, end: date) -> bool:
+  """A consolidation entity's untagged line in the investment elimination
+  of a member that joined within the column: the outside owners' interest
+  in what it brought, which the engine proposes untagged since no cash
+  moved. A member formed in the group has its contribution's tag instead."""
+  return (
+    line.adjustment_kind == "elimination_investment"
+    and not line.tag_qname
+    and line.adjusts_joined_on is not None
+    and start <= line.adjusts_joined_on <= end
   )
 
 
@@ -3277,10 +3291,12 @@ def _emit_nci_movement_facts(
   on an account the interest sums, tagged with the outside owners' flow, is a
   contribution or a distribution, equity-effect signed; one in a member's
   deconsolidation entry, or in the reversal of its elimination once it has
-  left, is the interest derecognized. A line in an entry that books the
-  interest's share of income is that income, which the income statement's
-  own fact already carries; any other line has no row, so the roll-forward
-  does not reach its ending balance and the validator says so."""
+  left, is the interest derecognized, and one untagged in the elimination of
+  a member that joined within the column is the interest it brought. A line
+  in an entry that books the interest's share of income is that income,
+  which the income statement's own fact already carries; any other line has
+  no row, so the roll-forward does not reach its ending balance and the
+  validator says so."""
   meta = {
     row.qname: row
     for row in session.execute(
@@ -3302,6 +3318,7 @@ def _emit_nci_movement_facts(
       tag.qname AS tag_qname,
       en.adjustment_kind,
       adj.left_on AS adjusts_left_on,
+      adj.joined_on AS adjusts_joined_on,
       EXISTS (
         SELECT 1
         FROM line_items other
@@ -3344,6 +3361,8 @@ def _emit_nci_movement_facts(
         continue
       if _leaves_the_group(line, period.start):
         kind = "deconsolidation"
+      elif _joins_the_group(line, period.start, period.end):
+        kind = "acquisition"
       else:
         kind = _NCI_FLOW_KIND.get(line.tag_qname or "")
       if kind is None:

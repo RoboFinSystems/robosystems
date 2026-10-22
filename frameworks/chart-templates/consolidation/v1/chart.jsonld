@@ -116,6 +116,30 @@
       "documentation": "Where this entity's own income statement closes: the cumulative share of income allocated to noncontrolling interests and any eliminated intercompany profit."
     },
     {
+      "code": "3110",
+      "label": "Retained Earnings — Group (corporate parent)",
+      "hasTrait": "trait:elementsOfFinancialStatements/equity",
+      "subClassification": "equity",
+      "balance": "credit",
+      "documentation": "The group's retained earnings under a corporate parent, where a deconsolidation puts back the results a subsidiary earned in the group as they leave with its books. One of three rows, one per parent form, so the entry finds the parent's close target whatever form this entity takes."
+    },
+    {
+      "code": "3120",
+      "label": "Partners' Capital — Group (partnership parent)",
+      "hasTrait": "trait:elementsOfFinancialStatements/equity",
+      "subClassification": "equity",
+      "balance": "credit",
+      "documentation": "The group's partners' capital under a partnership parent, where a deconsolidation puts back the results a subsidiary earned in the group as they leave with its books."
+    },
+    {
+      "code": "3130",
+      "label": "Members' Equity — Group (LLC parent)",
+      "hasTrait": "trait:elementsOfFinancialStatements/equity",
+      "subClassification": "equity",
+      "balance": "credit",
+      "documentation": "The group's members' equity under an LLC parent, where a deconsolidation puts back the results a subsidiary earned in the group as they leave with its books."
+    },
+    {
       "code": "3200",
       "label": "Noncontrolling Interest",
       "hasTrait": "trait:elementsOfFinancialStatements/equity",

@@ -2218,6 +2218,31 @@ def test_buying_more_is_an_equity_transaction(group):
     assert float(session.get(Entity, MEMBER).ownership_pct) == 80.0
 
 
+def test_a_price_below_the_earnings_bought_still_rides_the_payment_row(group):
+  """Paying 1,000 for 10 % whose book value is 900 and whose share of
+  January's result is 182.50: the premium (100) is less than the earnings
+  transferred, so the parent's equity is credited the difference — and
+  that credit is part of the price paid to the outside owners, on the
+  payment row with the rest, never proceeds from them."""
+  _january_posted(group)
+  _buy_ten_percent(group, price=100_000)
+  recorded = _change(consideration=100_000)
+
+  assert recorded.equity_adjustment == -8_250
+  lines = _change_lines()
+  assert {code: amount for code, (amount, _) in lines.items()} == {
+    "1600": -10_000,
+    "3200": 18_250,
+    "3050": -8_250,
+  }
+  assert lines["1600"][1] == (
+    "rs-gaap:PaymentsToAcquireInterestInSubsidiariesAndAffiliates"
+  )
+  assert (
+    lines["3200"][1] == lines["3050"][1] == "rs-gaap:PaymentsToMinorityShareholders"
+  )
+
+
 def test_the_month_eliminates_at_the_new_share_and_moves_the_book_value(group):
   _january_posted(group)
   _buy_ten_percent(group)

@@ -15,6 +15,14 @@ it is in the books, ``propose-consolidation-entries`` drafts them in the
 consolidation entity, and its close posts them. Nothing here computes one,
 so the read-back below checks the engine against the scenario's own figures.
 
+A member can also be bought rather than formed (``Member.acquired``): its
+books open on the balance sheet it brings, the parent pays its founders for
+a share, ``record-acquisition`` carries the excess as goodwill, a later
+``record-ownership-change`` the price of buying more, and when the whole of
+it is sold ``left_on`` and ``record-deconsolidation`` take it out of the
+group with the gain or loss on its leaving — the group lifecycle, end to
+end, with the read-back checking each month against ASC 805 and 810.
+
 The entity-scoped operations are posted directly: the published client's
 facades predate ``entity_id``.
 """
@@ -130,10 +138,19 @@ _PARENT_ACCOUNTS: tuple[tuple[str, str, str, str, str, str | None], ...] = (
     "debit",
     "rs-gaap:EquityMethodInvestments",
   ),
+  (
+    "4600",
+    "Gain on Sale of Subsidiary",
+    "revenue",
+    "non_operating_revenue",
+    "credit",
+    "rs-gaap:GainLossOnDispositionOfAssets",
+  ),
 )
 
-# The consolidation template's equity-method rows, added to a consolidation
-# chart made before the template carried them.
+# The consolidation template's equity-method rows and the group-equity rows
+# a deconsolidation credits under the parent's form, added to a
+# consolidation chart made before the template carried them.
 _CONSOLIDATION_ACCOUNTS: tuple[tuple[str, str, str, str, str, str | None], ...] = (
   (
     "1700",
@@ -142,6 +159,30 @@ _CONSOLIDATION_ACCOUNTS: tuple[tuple[str, str, str, str, str, str | None], ...] 
     "other_noncurrent_assets",
     "debit",
     "rs-gaap:EquityMethodInvestments",
+  ),
+  (
+    "3110",
+    "Retained Earnings — Group (corporate parent)",
+    "equity",
+    "equity",
+    "credit",
+    "rs-gaap:RetainedEarningsAccumulatedDeficit",
+  ),
+  (
+    "3120",
+    "Partners' Capital — Group (partnership parent)",
+    "equity",
+    "equity",
+    "credit",
+    "rs-gaap:PartnersCapital",
+  ),
+  (
+    "3130",
+    "Members' Equity — Group (LLC parent)",
+    "equity",
+    "equity",
+    "credit",
+    "rs-gaap:MembersEquity",
   ),
   (
     "4500",
@@ -167,6 +208,31 @@ class ParentAccounts:
   paid_in_capital: str = "3000"
   fee_revenue: str = "4300"
   interest_income: str = "4400"
+  sale_gain: str = "4600"
+
+
+@dataclass(frozen=True)
+class Acquired:
+  """A member bought from its founders rather than formed by the group, by
+  window offset. It joins on the first day of window ``joins_at``, its books
+  opening the day before on the cash and equipment it brings against its
+  founders' capital; the parent pays ``price`` for the member's
+  ``ownership_pct`` and the founders (its ``outside_owner``) keep the rest.
+  From window ``tops_up_at`` the parent holds ``top_up_pct``, having paid
+  the founders ``top_up_price`` for the difference. Window ``sold_at`` is
+  its last: the parent sells the whole of it to ``buyer`` for ``sale_price``
+  on the first day of the next, the founders' share going with it."""
+
+  joins_at: int
+  opening_cash: int
+  opening_equipment: int
+  price: int
+  tops_up_at: int | None = None
+  top_up_pct: float | None = None
+  top_up_price: int = 0
+  sold_at: int | None = None
+  sale_price: int = 0
+  buyer: str | None = None
 
 
 @dataclass(frozen=True)
@@ -176,11 +242,13 @@ class Member:
   ``template`` is one of the shipped chart templates; the accounts the group
   needs beyond it (due to affiliates, the note, distributions, the fee and
   interest expense) are added to the chart. The months post to the
-  ``product`` template's codes (1000 cash, 3000 contributed capital, 4000
-  revenue, 6600 utilities for the rebill), so another template has to carry
-  the same ones. ``ownership_pct`` is the parent's share; ``outside_owner``
-  holds the rest and contributes it at formation. Under half, the member is on
-  the equity method: never summed, its income picked up at the parent's share.
+  ``product`` template's codes (1000 cash, 1500 equipment, 3000 contributed
+  capital, 4000 revenue, 6600 utilities for the rebill), so another template
+  has to carry the same ones. ``ownership_pct`` is the parent's share;
+  ``outside_owner`` holds the rest and contributes it at formation — or, for
+  a member ``acquired``, sold the parent its share. Under half, the member is
+  on the equity method: never summed, its income picked up at the parent's
+  share.
   """
 
   name: str
@@ -209,6 +277,8 @@ class Member:
   rebill: tuple[int, int] | None = None
   # A distribution every third month, split by ownership.
   distribution: int = 0
+  # Bought mid-life, and perhaps sold, rather than formed by the group.
+  acquired: Acquired | None = None
 
   @property
   def parent_share(self) -> float:
@@ -225,6 +295,38 @@ class Member:
     if self.ownership_pct >= 50:
       return "full"
     return "equity" if self.ownership_pct >= 20 else "cost"
+
+  @property
+  def joins_at(self) -> int:
+    """The offset of the first window the member is in the group."""
+    return self.acquired.joins_at if self.acquired else 0
+
+  @property
+  def sold_at(self) -> int | None:
+    """The offset of the member's last window in the group, if it is sold."""
+    return self.acquired.sold_at if self.acquired else None
+
+  def is_member_at(self, index: int) -> bool:
+    return index >= self.joins_at and (self.sold_at is None or index <= self.sold_at)
+
+  def share_at(self, index: int) -> float:
+    """The parent's share in window ``index``: the one it joined with, or the
+    one a top-up took it to from that window on."""
+    a = self.acquired
+    if a and a.tops_up_at is not None and a.top_up_pct is not None:
+      if index >= a.tops_up_at:
+        return a.top_up_pct / 100.0
+    return self.parent_share
+
+  def outside_share_at(self, index: int) -> float:
+    return 1.0 - self.share_at(index)
+
+  def windows(self, windows: list[tuple[date, date]]) -> list[tuple[date, date]]:
+    """The windows the member's own books cover, the last one left open: all
+    of them from the one it joined in, or through the one after its sale."""
+    if self.sold_at is None:
+      return windows[self.joins_at :]
+    return windows[self.joins_at : self.sold_at + 2]
 
 
 @dataclass(frozen=True)
@@ -728,6 +830,57 @@ def load_group(
     api.close()
 
 
+def _check_roster(group: Group, windows: list[tuple[date, date]]) -> None:
+  """What the loader models, before it writes anything."""
+  # The consolidation entity presents its own form's cash flow rows, and its
+  # eliminations tag the rows the members' lines took, so a member of another
+  # form would need a consolidation entity on that form.
+  for member in group.members:
+    if member.method == "cost" or (
+      member.method == "equity"
+      and (member.note_from_parent or member.management_fee_bps or member.rebill)
+    ):
+      raise RuntimeError(
+        f"{member.name}: an equity-method member takes no note, fee or rebill, "
+        "and a member at cost is not modelled"
+      )
+    a = member.acquired
+    if a is None:
+      continue
+    # The read-back month is the last closed one; a sale lands its
+    # deconsolidation in the month after, which has to close before it.
+    last_closed = len(windows) - 2
+    if member.method != "full" or member.note_from_parent or member.rebill:
+      raise RuntimeError(
+        f"{member.name}: an acquired member is bought in full, and takes no "
+        "note or rebill"
+      )
+    if member.ownership_pct < 100 and not member.outside_owner:
+      raise RuntimeError(f"{member.name}: name the founders who keep the rest")
+    if not 0 < a.joins_at <= last_closed:
+      raise RuntimeError(f"{member.name}: joins_at must fall inside the closed months")
+    if a.tops_up_at is not None:
+      if a.top_up_pct is None or a.top_up_pct <= member.ownership_pct:
+        raise RuntimeError(f"{member.name}: a top-up raises the parent's share")
+      if (
+        not a.joins_at
+        < a.tops_up_at
+        <= (a.sold_at if a.sold_at is not None else last_closed)
+      ):
+        raise RuntimeError(f"{member.name}: tops_up_at must fall within its membership")
+    if a.sold_at is not None:
+      if not a.joins_at <= a.sold_at < last_closed or not a.buyer:
+        raise RuntimeError(
+          f"{member.name}: sold_at leaves a closed month after it, and names the buyer"
+        )
+  other_forms = sorted({m.entity_type for m in group.members} - {"llc"})
+  if other_forms:
+    raise RuntimeError(
+      "the consolidation entity is an LLC; a member of another form "
+      f"({', '.join(other_forms)}) needs one on its own form"
+    )
+
+
 def _load(
   api: _Api,
   group: Group,
@@ -754,19 +907,22 @@ def _load(
     print(f"  Parent:       {parent.name} chart + {added} group accounts")
 
   # 1. The entities, their charts and calendars; reused on a re-run.
+  _check_roster(group, windows)
   members: dict[str, _Books] = {}
+  reused_members: set[str] = set()
   for member in group.members:
-    entity_id, reused = _ensure_entity(
-      api,
-      member.name,
-      {
-        "name": member.name,
-        "legal_name": member.legal_name,
-        "ticker": member.ticker,
-        "entity_type": member.entity_type,
-        "ownership_pct": member.ownership_pct,
-      },
-    )
+    body: dict[str, Any] = {
+      "name": member.name,
+      "legal_name": member.legal_name,
+      "ticker": member.ticker,
+      "entity_type": member.entity_type,
+      "ownership_pct": member.ownership_pct,
+    }
+    if member.acquired:
+      body["joined_on"] = windows[member.joins_at][0].isoformat()
+    entity_id, reused = _ensure_entity(api, member.name, body)
+    if reused:
+      reused_members.add(member.ticker)
     books = _Books(api, entity_id, member.name)
     members[member.ticker] = books
     taxonomy_id = _ensure_chart(api, entity_id, member.template, member.entity_type)
@@ -778,33 +934,24 @@ def _load(
       namespace=_chart_namespace(member.ticker),
       equity_concept=_FORM_EQUITY[member.entity_type],
     )
-    _ensure_calendar(api, entity_id, member.ticker, windows)
+    # An acquired member's books start the month it joins.
+    _ensure_calendar(api, entity_id, member.ticker, member.windows(windows))
+    lifecycle = ""
+    if member.acquired:
+      a = member.acquired
+      lifecycle = f", acquired {_period(windows[a.joins_at][0])}"
+      if a.tops_up_at is not None:
+        lifecycle += f", {a.top_up_pct:g}% from {_period(windows[a.tops_up_at][0])}"
+      if a.sold_at is not None:
+        lifecycle += f", sold after {_period(windows[a.sold_at][1])}"
     print(
       f"  {member.ticker:<8} {entity_id} ({member.ownership_pct:g}% owned"
       + (f", {member.outside_owner} holds the rest" if member.outside_owner else "")
+      + lifecycle
       + (", reused" if reused else "")
       + f"; {member.template} chart"
       + (f" + {added} group accounts" if added else "")
       + ")"
-    )
-
-  # The consolidation entity presents its own form's cash flow rows, and its
-  # eliminations tag the rows the members' lines took, so a member of another
-  # form would need a consolidation entity on that form.
-  for member in group.members:
-    if member.method == "cost" or (
-      member.method == "equity"
-      and (member.note_from_parent or member.management_fee_bps or member.rebill)
-    ):
-      raise RuntimeError(
-        f"{member.name}: an equity-method member takes no note, fee or rebill, "
-        "and a member at cost is not modelled"
-      )
-  other_forms = sorted({m.entity_type for m in group.members} - {"llc"})
-  if other_forms:
-    raise RuntimeError(
-      "the consolidation entity is an LLC; a member of another form "
-      f"({', '.join(other_forms)}) needs one on its own form"
     )
   consolidation_id, reused = _ensure_entity(
     api,
@@ -857,6 +1004,10 @@ def _load(
       agent_of[member.outside_owner] = _ensure_agent(
         api, agents, member.outside_owner, "owner", None
       )
+    if member.acquired and member.acquired.buyer:
+      agent_of[member.acquired.buyer] = _ensure_agent(
+        api, agents, member.acquired.buyer, "owner", None
+      )
 
   # 3. The months, on every side at once — unless the group is already in.
   # A whole group is reused; a partial one — a run that died mid-way — is not
@@ -879,6 +1030,22 @@ def _load(
       "again rather than posting on top of it"
     )
   else:
+    # A reset keeps entity rows as the last run left them — a share bought
+    # up, a member marked as left — so a reused member starts over from the
+    # roster before anything posts.
+    for member in group.members:
+      if member.ticker in reused_members:
+        api.operation(
+          "update-entity",
+          {
+            "entity_id": members[member.ticker].entity_id,
+            "ownership_pct": member.ownership_pct,
+            "joined_on": windows[member.joins_at][0].isoformat()
+            if member.acquired
+            else None,
+            "left_on": None,
+          },
+        )
     _post_group(api, group, parent, members, consolidation, agent_of, windows)
 
   # 4. Close every member's history, then the parent's, then the group's (the
@@ -887,7 +1054,10 @@ def _load(
   months_closed = 0
   if close_history:
     for member in group.members:
-      months_closed += _close_history(members[member.ticker], windows, member.ticker)
+      # A member sold closed its months as it left; its windows are closed.
+      months_closed += _close_history(
+        members[member.ticker], member.windows(windows), member.ticker
+      )
     if close_parent_history is not None:
       close_parent_history()
     months_closed += _close_history(consolidation, windows, group.consolidation_ticker)
@@ -924,12 +1094,17 @@ def _post_group(
 
   # What each member owes the parent at the month end, in cents.
   due: dict[str, int] = {m.ticker: 0 for m in group.members}
+  # What the parent has taken back of each member's capital in distributions:
+  # its investment's carrying amount is what it paid less these.
+  received: dict[str, int] = {m.ticker: 0 for m in group.members}
 
   # Formation. The founders fund the parent for the group, the parent forms
-  # each member, and the outside owner puts in its share directly.
+  # each member, and the outside owner puts in its share directly. A member
+  # bought mid-life is not formed here; it arrives in its month.
   funding = sum(
     _share(m.contributed_capital, m.parent_share) + m.note_from_parent
     for m in group.members
+    if not m.acquired
   )
   raised = _share(funding, group.founders_share)
   count = 0
@@ -941,6 +1116,8 @@ def _post_group(
     )
     count = 1
   for member in group.members:
+    if member.acquired:
+      continue
     books = members[member.ticker]
     member_agent = agent_of[books.entity_id]
     parent_part = _share(member.contributed_capital, member.parent_share)
@@ -994,13 +1171,15 @@ def _post_group(
     for member in group.members:
       books = members[member.ticker]
       member_agent = agent_of[books.entity_id]
-      expense_accounts = books.expense_accounts()
-      if len(expense_accounts) < len(member.expenses):
-        raise RuntimeError(
-          f"{member.name}'s chart has {len(expense_accounts)} expense accounts"
+      lifecycle = member.acquired
+      if lifecycle and index == lifecycle.joins_at:
+        count += _acquire(api, group, member, books, parent, agent_of, start)
+      if lifecycle and lifecycle.sold_at is not None and index == lifecycle.sold_at + 1:
+        count += _sell(
+          api, group, member, books, parent, agent_of, start, received[member.ticker]
         )
 
-      # Last month's charges settle on the 10th.
+      # Last month's charges settle on the 10th — a member sold pays its last.
       if index and due[member.ticker]:
         owed = due[member.ticker]
         books.post(
@@ -1017,6 +1196,15 @@ def _post_group(
         )
         due[member.ticker] = 0
         count += 2
+      if not member.is_member_at(index):
+        continue
+      if lifecycle and index == lifecycle.tops_up_at:
+        count += _top_up(api, group, member, books, parent, agent_of, start)
+      expense_accounts = books.expense_accounts()
+      if len(expense_accounts) < len(member.expenses):
+        raise RuntimeError(
+          f"{member.name}'s chart has {len(expense_accounts)} expense accounts"
+        )
 
       # The member's own month.
       books.post(
@@ -1093,7 +1281,8 @@ def _post_group(
         and (index + 1) % _DISTRIBUTION_EVERY == 0
         and index < last_index
       ):
-        parent_part = _share(member.distribution, member.parent_share)
+        parent_part = _share(member.distribution, member.share_at(index))
+        received[member.ticker] += parent_part
         books.post(
           end,
           "Distribution to members",
@@ -1122,8 +1311,198 @@ def _post_group(
       print(f"  ⚠️  {_period(end)} residual: {residual['explanation']}")
     for item in proposed["reconciling_items"]:
       print(f"  ⚠️  {_period(end)} reconciling item: {item['description']}")
+    for note in proposed.get("notes") or []:
+      print(f"  ℹ️  {_period(end)}: {note}")
+
+    # A member sold leaves after this month: its books close through it
+    # first, as the exit guards require, and the next month reads it out.
+    for member in group.members:
+      if member.sold_at == index:
+        _leave(api, member, members[member.ticker], windows, index)
 
   print(f"  Activity:     {count} entries over {len(windows)} months, on every side")
+
+
+def _acquire(
+  api: _Api,
+  group: Group,
+  member: Member,
+  books: _Books,
+  parent: _Books,
+  agent_of: dict[str, str],
+  joined_on: date,
+) -> int:
+  """The member arrives: its books open on the balance sheet it brings, the
+  parent pays its founders for its share (the purchase names the seller, so
+  no line names the member), and the acquisition is recorded against the
+  equity it brought — the excess is goodwill."""
+  a = member.acquired
+  assert a is not None and member.outside_owner
+  pa = group.parent
+  api.operation(
+    "record-opening-balance",
+    {
+      "entity_id": books.entity_id,
+      "balances": [
+        {"element_id": books.account("1000")["id"], "debit_amount": a.opening_cash},
+        {
+          "element_id": books.account("1500")["id"],
+          "debit_amount": a.opening_equipment,
+        },
+        {
+          "element_id": books.account("3000")["id"],
+          "credit_amount": a.opening_cash + a.opening_equipment,
+        },
+      ],
+      "memo": f"{member.name}'s balance sheet at acquisition",
+    },
+  )
+  # The parent's cash line carries the business-acquisition row, as a
+  # controller tags it: the group's read nets the cash that came with the
+  # member against it, so the consolidated statement shows one row, net of
+  # cash acquired, and nothing on the investment row.
+  parent.post(
+    joined_on,
+    f"Purchase of {member.ownership_pct:g}% of {member.name} from {member.outside_owner}",
+    [
+      (pa.investment, a.price, 0, None),
+      (pa.cash, 0, a.price, "rs-gaap:PaymentsToAcquireBusinessesNetOfCashAcquired"),
+    ],
+    agent_id=agent_of[member.outside_owner],
+  )
+  recorded = api.operation(
+    "record-acquisition",
+    {
+      "entity_id": books.entity_id,
+      "consideration": a.price,
+      "basis": (
+        f"Purchase agreement with {member.outside_owner}, closed "
+        f"{joined_on.isoformat()}: {member.ownership_pct:g}% of {member.name} "
+        "at the balance sheet it brought, the excess over book as goodwill."
+      ),
+    },
+  )
+  assert recorded is not None
+  print(
+    f"  Acquired:     {member.ticker} on {joined_on} for {_money(a.price / 100)}; "
+    f"goodwill {_money(recorded['goodwill'] / 100)}"
+  )
+  return 3
+
+
+def _top_up(
+  api: _Api,
+  group: Group,
+  member: Member,
+  books: _Books,
+  parent: _Books,
+  agent_of: dict[str, str],
+  start: date,
+) -> int:
+  """The parent buys more of the member from its founders, staying in
+  control: the price above the book value bought adjusts the parent's
+  equity, never a gain (ASC 810)."""
+  a = member.acquired
+  assert a is not None and a.top_up_pct is not None and member.outside_owner
+  pa = group.parent
+  parent.post(
+    start,
+    f"Purchase of a further {a.top_up_pct - member.ownership_pct:g}% of "
+    f"{member.name} from {member.outside_owner}",
+    [(pa.investment, a.top_up_price, 0, None), (pa.cash, 0, a.top_up_price, None)],
+    agent_id=agent_of[member.outside_owner],
+  )
+  recorded = api.operation(
+    "record-ownership-change",
+    {
+      "entity_id": books.entity_id,
+      "period": _period(start),
+      "ownership_pct": a.top_up_pct,
+      "consideration": a.top_up_price,
+      "basis": (
+        f"Purchase agreement with {member.outside_owner}, {start.isoformat()}: "
+        f"the roaster's share of {member.name} to {a.top_up_pct:g}%."
+      ),
+    },
+  )
+  assert recorded is not None
+  print(
+    f"  Bought more:  {member.ticker} to {a.top_up_pct:g}% from {_period(start)} "
+    f"for {_money(a.top_up_price / 100)}; the parent's equity takes "
+    f"{_money(recorded['equity_adjustment'] / 100)}"
+  )
+  return 2
+
+
+def _leave(
+  api: _Api,
+  member: Member,
+  books: _Books,
+  windows: list[tuple[date, date]],
+  index: int,
+) -> None:
+  """The member's last month is over: its books close through it, then the
+  entity records the day it left — the order the exit guards require."""
+  _close_history(books, windows[member.joins_at : index + 2], member.ticker)
+  left_on = windows[index][1]
+  api.operation(
+    "update-entity", {"entity_id": books.entity_id, "left_on": left_on.isoformat()}
+  )
+  print(f"  Left:         {member.ticker} after {_period(left_on)}")
+
+
+def _sell(
+  api: _Api,
+  group: Group,
+  member: Member,
+  books: _Books,
+  parent: _Books,
+  agent_of: dict[str, str],
+  start: date,
+  received: int,
+) -> int:
+  """The first day after the member's last month: the parent's books take
+  the proceeds against the investment's carrying amount, the difference its
+  own gain, and the deconsolidation adjusts that gain to the group's — the
+  price less the carrying amount of what left (ASC 810)."""
+  a = member.acquired
+  assert a is not None and a.buyer
+  pa = group.parent
+  carrying = a.price + a.top_up_price - received
+  gain = a.sale_price - carrying
+  parent.post(
+    start,
+    f"Sale of {member.name} to {a.buyer}",
+    [
+      (
+        pa.cash,
+        a.sale_price,
+        0,
+        "rs-gaap:ProceedsFromDivestitureOfInterestInSubsidiariesAndAffiliates",
+      ),
+      (pa.investment, 0, carrying, None),
+      (pa.sale_gain, max(-gain, 0), max(gain, 0), None),
+    ],
+    agent_id=agent_of[a.buyer],
+  )
+  recorded = api.operation(
+    "record-deconsolidation",
+    {
+      "entity_id": books.entity_id,
+      "consideration": a.sale_price,
+      "basis": (
+        f"Sale agreement with {a.buyer}, closed {start.isoformat()}: the whole "
+        f"of {member.name}, the roaster's share and its founders' together."
+      ),
+    },
+  )
+  assert recorded is not None
+  print(
+    f"  Sold:         {member.ticker} on {start} for {_money(a.sale_price / 100)}; "
+    f"the parent's gain {_money(gain / 100)}, the group's adjustment "
+    f"{_money(recorded['gain_loss'] / 100)}"
+  )
+  return 2
 
 
 def _read_back(
@@ -1177,17 +1556,19 @@ def _read_back(
   ):
     check(f"consolidated {label} eliminated", _value(bs, qname, end), 0.0)
 
+  last = len(windows) - 2
   nci_expected = 0.0
   nci_income_expected = 0.0
   for member in group.members:
-    if member.method != "full" or not member.outside_share:
+    outside = member.outside_share_at(last)
+    if member.method != "full" or not member.is_member_at(last) or not outside:
       continue
     mbs = member_bs[member.ticker]
     net_assets = _value(mbs, "rs-gaap:Assets", end) - _value(
       mbs, "rs-gaap:Liabilities", end
     )
-    nci_expected += member.outside_share * net_assets
-    nci_income_expected += member.outside_share * _value(
+    nci_expected += outside * net_assets
+    nci_income_expected += outside * _value(
       member_is[member.ticker], "rs-gaap:NetIncomeLoss", end
     )
   nci = _value(bs, "rs-gaap:MinorityInterest", end)
@@ -1207,44 +1588,76 @@ def _read_back(
       )
     )
 
-  # The consolidated cash flow over the whole run: what the group paid itself
-  # is gone, and the outside owners' flows stand on their own rows.
-  cf_all = _statement(api, "cash_flow_statement", windows[0][0], end, consolidated=True)
+  # The consolidated cash flow over the whole run, month by month — a column
+  # spanning a member's joining or leaving is not stated, so the months are
+  # summed: what the group paid itself is gone, and the outside owners' flows
+  # stand on their own rows.
+  cf_all = _cash_flows_summed(api, windows[:-1])
   for qname, label in (
     (
       "rs-gaap:PaymentsToAcquireInterestInSubsidiariesAndAffiliates",
       "the investment in subsidiaries",
     ),
-    (
-      "rs-gaap:ProceedsFromDivestitureOfInterestInSubsidiariesAndAffiliates",
-      "the returns of that investment",
-    ),
     ("rs-gaap:PaymentsToAcquireInvestments", "the note to a subsidiary"),
     ("rs-gaap:ProceedsFromRelatedPartyDebt", "the note from the parent"),
   ):
     check(f"consolidated cash flow nets {label}", _value(cf_all, qname, end), 0.0)
+  # The returns of the investment net out too; what remains on the
+  # divestiture row is a member sold — its price, net of the cash that left.
+  sold = sum(
+    m.acquired.sale_price / 100
+    - _value(
+      _statement(
+        api,
+        "balance_sheet",
+        *windows[m.acquired.sold_at],
+        entity_id=members[m.ticker].entity_id,
+      ),
+      cash,
+      windows[m.acquired.sold_at][1],
+    )
+    for m in group.members
+    if m.acquired and m.acquired.sold_at is not None
+  )
+  check(
+    "consolidated cash flow nets the returns of that investment, bar a member sold",
+    _value(
+      cf_all,
+      "rs-gaap:ProceedsFromDivestitureOfInterestInSubsidiariesAndAffiliates",
+      end,
+    ),
+    sold,
+  )
+  # An acquired member's founders contributed before it joined; only what
+  # they were paid out while it was in the group is the group's flow.
   outside_in = sum(
     m.contributed_capital - _share(m.contributed_capital, m.parent_share)
     for m in group.members
-    if m.method == "full" and m.outside_share
+    if m.method == "full" and m.outside_share and not m.acquired
   )
-  paid_months = sum(
-    1 for i in range(len(windows) - 1) if (i + 1) % _DISTRIBUTION_EVERY == 0
-  )
+  paid_offsets = [
+    i for i in range(len(windows) - 1) if (i + 1) % _DISTRIBUTION_EVERY == 0
+  ]
+  paid_months = len(paid_offsets)
   outside_out = sum(
-    (m.distribution - _share(m.distribution, m.parent_share)) * paid_months
+    m.distribution - _share(m.distribution, m.share_at(i))
     for m in group.members
-    if m.method == "full" and m.outside_share and m.distribution
+    if m.method == "full" and m.distribution
+    for i in paid_offsets
+    if m.is_member_at(i) and m.outside_share_at(i)
   )
   check(
     "outside owners' contributions on their own row",
     _value(cf_all, "rs-gaap:ProceedsFromMinorityShareholders", end),
     outside_in / 100,
   )
+  # Beside the distributions, the price of every share bought from an
+  # outside owner: a payment to them, not an investment.
+  bought = sum(m.acquired.top_up_price for m in group.members if m.acquired)
   check(
-    "distributions to outside owners on their own row",
+    "distributions to and purchases from outside owners on their own row",
     -_value(cf_all, "rs-gaap:PaymentsToMinorityShareholders", end),
-    outside_out / 100,
+    (outside_out + bought) / 100,
   )
 
   associates = [m for m in group.members if m.method == "equity"]
@@ -1262,6 +1675,9 @@ def _read_back(
       check,
       checks,
     )
+  for member in group.members:
+    if member.acquired:
+      _check_lifecycle(api, group, member, members, windows, check, checks)
 
   result = GroupResult(
     member_ids={m.name: members[m.ticker].entity_id for m in group.members},
@@ -1365,6 +1781,228 @@ def _check_associates(
       "the worksheet shows equity-method members beside the sum",
       not misplaced,
       ", ".join(misplaced) + " misplaced" if misplaced else "beside the sum",
+    )
+  )
+
+
+def _cash_flows_summed(api: _Api, windows: list[tuple[date, date]]) -> dict:
+  """The consolidated cash flow rows summed over ``windows``, in the shape
+  ``_row`` reads, with the last window's end as the column."""
+  totals: dict[str, float] = {}
+  for start, end in windows:
+    statement = _statement(api, "cash_flow_statement", start, end, consolidated=True)
+    for fact in statement.get("facts") or []:
+      if fact.get("period_role"):
+        continue
+      value = _row(statement, fact["qname"], end)
+      if value:
+        totals[fact["qname"]] = totals.get(fact["qname"], 0.0) + value
+  end = windows[-1][1]
+  return {
+    "periods": [{"start": windows[0][0].isoformat(), "end": end.isoformat()}],
+    "facts": [{"qname": q, "values": [v]} for q, v in totals.items()],
+  }
+
+
+def _net_assets(api: _Api, books: _Books, start: date, end: date) -> float:
+  """A member's net assets at ``end``, from its own balance sheet."""
+  mbs = _statement(api, "balance_sheet", start, end, entity_id=books.entity_id)
+  return _value(mbs, "rs-gaap:Assets", end) - _value(mbs, "rs-gaap:Liabilities", end)
+
+
+def _nci_expected(
+  api: _Api,
+  group: Group,
+  members: dict[str, _Books],
+  windows: list[tuple[date, date]],
+  index: int,
+) -> float:
+  """The outside owners' share of every full member's net assets at the end
+  of window ``index``, at the share each holds that month."""
+  start, end = windows[index]
+  return sum(
+    m.outside_share_at(index) * _net_assets(api, members[m.ticker], start, end)
+    for m in group.members
+    if m.method == "full" and m.is_member_at(index) and m.outside_share_at(index)
+  )
+
+
+def _outside_distributions(group: Group, index: int) -> int:
+  """What the outside owners of the full members are paid in window
+  ``index``, in cents."""
+  if (index + 1) % _DISTRIBUTION_EVERY:
+    return 0
+  return sum(
+    m.distribution - _share(m.distribution, m.share_at(index))
+    for m in group.members
+    if m.method == "full" and m.distribution and m.is_member_at(index)
+  )
+
+
+def _validates(
+  checks: list[GroupCheck], label: str, statements: dict[str, dict]
+) -> None:
+  for kind, statement in statements.items():
+    validation = statement.get("validation") or {}
+    checks.append(
+      GroupCheck(
+        f"{label}: consolidated {kind.replace('_', ' ')} validates",
+        bool(validation.get("passed")),
+        "; ".join(validation.get("failures") or []) or "passed",
+      )
+    )
+
+
+def _check_lifecycle(
+  api: _Api,
+  group: Group,
+  member: Member,
+  members: dict[str, _Books],
+  windows: list[tuple[date, date]],
+  check,
+  checks: list[GroupCheck],
+) -> None:
+  """An acquired member's months against ASC 805 and 810. Joining: goodwill
+  is the price over the parent's share of the equity it brought, and the
+  group's cash flow shows the price net of the cash that came with it.
+  Buying more: no gain or loss, the outside owners' share smaller, the price
+  a financing flow. Sold: the group's gain is the price less the carrying
+  amount of what left — the parent's own gain less the results the group
+  had already taken — its cash leaves on the divestiture row, nothing is
+  held for it after, and the entity shows as former."""
+  a = member.acquired
+  assert a is not None
+  books = members[member.ticker]
+  t = member.ticker
+  goodwill_q = "rs-gaap:Goodwill"
+  gain_q = "rs-gaap:GainLossOnDispositionOfAssets"
+  nci_q = "rs-gaap:MinorityInterest"
+  investment_flow = "rs-gaap:PaymentsToAcquireInterestInSubsidiariesAndAffiliates"
+  goodwill = a.price - _share(a.opening_cash + a.opening_equipment, member.parent_share)
+
+  js, je = windows[a.joins_at]
+  bs = _statement(api, "balance_sheet", js, je, consolidated=True)
+  cf = _statement(api, "cash_flow_statement", js, je, consolidated=True)
+  check(
+    f"{t} joins: goodwill = the price over the share of book",
+    _value(bs, goodwill_q, je),
+    goodwill / 100,
+  )
+  check(
+    f"{t} joins: NCI = the founders' share of net assets",
+    _value(bs, nci_q, je),
+    _nci_expected(api, group, members, windows, a.joins_at),
+  )
+  check(
+    f"{t} joins: the price net of the cash acquired on the acquisition row",
+    _value(cf, "rs-gaap:PaymentsToAcquireBusinessesNetOfCashAcquired", je),
+    -(a.price - a.opening_cash) / 100,
+  )
+  check(
+    f"{t} joins: nothing of it on the investment row",
+    _value(cf, investment_flow, je),
+    0.0,
+  )
+  _validates(checks, f"{t} joins", {"balance_sheet": bs, "cash_flow_statement": cf})
+
+  if a.tops_up_at is not None:
+    ts, te = windows[a.tops_up_at]
+    bs = _statement(api, "balance_sheet", ts, te, consolidated=True)
+    is_ = _statement(api, "income_statement", ts, te, consolidated=True)
+    cf = _statement(api, "cash_flow_statement", ts, te, consolidated=True)
+    check(f"{t} top-up: no gain or loss in the group", _value(is_, gain_q, te), 0.0)
+    check(
+      f"{t} top-up: NCI = the founders' smaller share of net assets",
+      _value(bs, nci_q, te),
+      _nci_expected(api, group, members, windows, a.tops_up_at),
+    )
+    check(
+      f"{t} top-up: the price paid to its founders is a financing flow",
+      -_value(cf, "rs-gaap:PaymentsToMinorityShareholders", te),
+      (a.top_up_price + _outside_distributions(group, a.tops_up_at)) / 100,
+    )
+    check(
+      f"{t} top-up: nothing of it on the investment row",
+      _value(cf, investment_flow, te),
+      0.0,
+    )
+    _validates(
+      checks,
+      f"{t} top-up",
+      {"balance_sheet": bs, "income_statement": is_, "cash_flow_statement": cf},
+    )
+
+  if a.sold_at is None:
+    return
+  ms, me = windows[a.sold_at]
+  xs, xe = windows[a.sold_at + 1]
+  net_assets = _net_assets(api, books, ms, me)
+  own_bs = _statement(api, "balance_sheet", ms, me, entity_id=books.entity_id)
+  cash_left = _value(own_bs, "rs-gaap:CashAndCashEquivalentsAtCarryingValue", me)
+  consolidated = {
+    kind: _statement(api, kind, xs, xe, consolidated=True)
+    for kind in (
+      "balance_sheet",
+      "income_statement",
+      "cash_flow_statement",
+      "equity_statement",
+    )
+  }
+  bs, is_, cf = (
+    consolidated["balance_sheet"],
+    consolidated["income_statement"],
+    consolidated["cash_flow_statement"],
+  )
+  check(
+    f"{t} sold: the group's gain = the price less the carrying amount of what left",
+    _value(is_, gain_q, xe),
+    a.sale_price / 100 - member.share_at(a.sold_at) * net_assets - goodwill / 100,
+  )
+  check(f"{t} sold: no goodwill held for it", _value(bs, goodwill_q, xe), 0.0)
+  check(
+    f"{t} sold: NCI = the remaining members' outside share",
+    _value(bs, nci_q, xe),
+    _nci_expected(api, group, members, windows, a.sold_at + 1),
+  )
+  check(
+    f"{t} sold: the price net of the cash that left on the divestiture row",
+    _value(
+      cf, "rs-gaap:ProceedsFromDivestitureOfInterestInSubsidiariesAndAffiliates", xe
+    ),
+    a.sale_price / 100 - cash_left,
+  )
+  _validates(checks, f"{t} sold", consolidated)
+  # The worksheet: a leaving column on the cash flow for the month its cash
+  # goes, none on the balance sheet it is no longer in.
+  for statement_type, present in (
+    ("cash_flow_statement", True),
+    ("balance_sheet", False),
+  ):
+    worksheet = api.operation(
+      "consolidation-worksheet",
+      {
+        "statement_type": statement_type,
+        "period_start": xs.isoformat(),
+        "period_end": xe.isoformat(),
+      },
+      ok=(404,),
+    )
+    if worksheet is None:
+      break
+    ids = {c.get("entity_id") for c in worksheet["columns"]}
+    checks.append(
+      GroupCheck(
+        f"{t} sold: {'a leaving column on' if present else 'no column on'} the "
+        f"{statement_type.replace('_', ' ')} worksheet",
+        (books.entity_id in ids) == present,
+        "a column" if books.entity_id in ids else "no column",
+      )
+    )
+  rows = api.graphql("{ entities { id isFormer } }")["entities"]
+  former = next((e.get("isFormer") for e in rows if e["id"] == books.entity_id), None)
+  checks.append(
+    GroupCheck(
+      f"{t} sold: shown as a former member", former is True, f"isFormer {former}"
     )
   )
 

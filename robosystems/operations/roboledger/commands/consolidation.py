@@ -589,6 +589,8 @@ def _cents(amount: int) -> str:
 _PARENT_EQUITY = {
   "rs-gaap:RetainedEarningsAccumulatedDeficit": "rs-gaap:AdditionalPaidInCapital",
 }
+# The outside owners' cash flow rows: [0] what they put in, [1] what they are
+# paid — a distribution, or the price of shares the parent buys from them.
 _NCI_FLOWS = (
   "rs-gaap:ProceedsFromMinorityShareholders",
   "rs-gaap:PaymentsToMinorityShareholders",
@@ -779,11 +781,14 @@ def record_ownership_change(
       + "; add one to its chart for the ownership change entry."
     )
   # The price is the group's payment to its outside owners: its investing
-  # outflow on the parent's books, offset here, and a financing one.
+  # outflow on the parent's books, offset here, and a financing one. Every
+  # other line rides that one payment row, whichever way it falls — the
+  # parent's equity credited when the earnings bought exceed the premium is
+  # part of the price, not proceeds from the outside owners.
   flows = {
     q: elimination_flow(q, "elimination_investment", a)
     if q == INVESTMENT_IN_SUBSIDIARIES
-    else (_NCI_FLOWS[0] if a < 0 else _NCI_FLOWS[1])
+    else _NCI_FLOWS[1]
     for q, a in wanted.items()
   }
   taggable = taggable_flow_qnames(
@@ -967,6 +972,9 @@ def record_deconsolidation(
       session, str(member.id), start - timedelta(days=1)
     )
   wanted = {q: -a for q, a in held.items()}
+  # The group's statements render under the parent's Style, which derives
+  # every summed entity's results onto its close target: the line the
+  # member's results leave when its books do.
   style = load_entity_reporting_style(session, resolve_entity_id(session, None))
   equity_concept = load_close_target_concept(session, style)
   if earnings:
