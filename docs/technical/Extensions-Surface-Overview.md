@@ -166,7 +166,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/sec/operations/bu
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-        "canonical_concepts": ["revenue"],
+        "elements": ["us-gaap:Revenues", "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"],
         "entities": ["NVDA", "AMD"],
         "form": "10-K",
         "fiscal_year": 2024,

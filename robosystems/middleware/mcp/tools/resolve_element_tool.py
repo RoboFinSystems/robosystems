@@ -31,7 +31,8 @@ class ResolveElementTool(BaseTool):
 **NOTES:**
 - concept: "revenue" → finds us-gaap:Revenues, us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax, etc.
 - concept: "total debt" → finds us-gaap:LongTermDebt, us-gaap:DebtAndCapitalLeaseObligations, etc.
-Use the returned query_hint directly in read-graph-cypher for immediate results.
+- Check each match's label before using its qname: matches can include elements that are not the concept. Pass a ticker so the matches are that company's own elements.
+- query_hint uses the top match only; for a number, filter on the qnames whose labels fit.
 """,
       "inputSchema": {
         "type": "object",

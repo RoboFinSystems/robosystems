@@ -174,7 +174,7 @@ Two things make this router distinct from the command writes:
 
 The request body is a `CreateViewRequest` (defined in [`models/api/views/view_config.py`](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/models/api/views/view_config.py)). The two filter axes you must satisfy:
 
-- **Concept filter** — `elements[]` (XBRL qnames: `rs-gaap:Assets` on a ledger's graph, `us-gaap:Assets` on SEC) or, on the SEC repository, `canonical_concepts[]` (semantic names like `revenue`, `net_income`, which match every mapped qname for that concept).
+- **Concept filter** — `elements[]` (XBRL qnames: `rs-gaap:Assets` on a ledger's graph, `us-gaap:Assets` on SEC) or, on the SEC repository, `canonical_concepts[]` (rough cross-filer groupings like `revenue`; a group can include elements that are not the concept, so name the qnames for any number you report).
 - **Period filter** — `periods[]` (`YYYY-MM-DD`), or `period_type` (`annual` / `quarterly` / `instant`), or, on the SEC repository, `fiscal_year`.
 
 You must provide at least one concept filter **and** at least one period filter, or the request returns `400`. Note that `fiscal_period` is *not* a period filter — it narrows the fiscal context of an already-scoped query.
@@ -254,7 +254,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/sec/operations/bu
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "canonical_concepts": ["revenue"],
+    "elements": ["us-gaap:Revenues", "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"],
     "entities": ["NVDA"],
     "form": "10-K",
     "period_type": "annual",
