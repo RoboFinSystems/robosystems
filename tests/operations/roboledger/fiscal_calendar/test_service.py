@@ -74,6 +74,19 @@ def _no_reconciliations(monkeypatch):
   )
 
 
+@pytest.fixture(autouse=True)
+def _all_accounts_mapped(monkeypatch):
+  """Answer the unmapped-accounts lookup at its boundary too: it joins the
+  chart, its mapping and the posted lines, which the stub cannot model. It
+  runs against a real database in
+  `tests/operations/roboledger/fiscal_calendar/test_close_gate_unmapped_accounts_db.py`.
+  """
+  monkeypatch.setattr(
+    "robosystems.operations.roboledger.reads.taxonomies.unmapped_accounts_with_postings",
+    lambda session, entity_id, *, through: [],
+  )
+
+
 # ────────────────────────────────────────────────────────────────────────────
 # In-memory session stub
 # ────────────────────────────────────────────────────────────────────────────

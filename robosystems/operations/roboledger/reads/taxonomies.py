@@ -735,6 +735,52 @@ def get_mapping_detail(
   )
 
 
+def unmapped_accounts_with_postings(
+  session: Session, entity_id: str, *, through: date
+) -> list[tuple[str | None, str]]:
+  """The accounts in ``entity_id``'s chart that landed lines have posted to
+  through ``through`` and that its book mapping does not map: ``(code,
+  name)`` pairs, by code. Every statement and every consolidating entry
+  reads an account through its concept, so such an account's balances are
+  in none of them. With no mapping at all, every posted account is one."""
+  from robosystems.operations.roboledger.entry_status import landed_entry_bindparam
+  from robosystems.operations.taxonomy_block.coa_mappings import (
+    BOOK_FRAMEWORK,
+    find_entity_mapping,
+  )
+
+  mapping = find_entity_mapping(session, entity_id, BOOK_FRAMEWORK)
+  rows = session.execute(
+    text(
+      """
+      SELECT el.code, el.name
+      FROM elements el
+      JOIN entity_taxonomies et ON et.taxonomy_id = el.taxonomy_id
+      WHERE et.entity_id = :entity_id AND et.basis = 'chart_of_accounts'
+        AND el.is_abstract IS NOT TRUE
+        AND EXISTS (
+          SELECT 1 FROM line_items li JOIN entries en ON en.id = li.entry_id
+          WHERE li.element_id = el.id AND en.entity_id = :entity_id
+            AND en.status IN :landed_entry_statuses
+            AND en.posting_date <= :through
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM associations a
+          WHERE a.from_element_id = el.id AND a.structure_id = :mapping_id
+            AND a.association_type = 'mapping'
+        )
+      ORDER BY el.code NULLS LAST, el.name
+      """
+    ).bindparams(landed_entry_bindparam()),
+    {
+      "entity_id": entity_id,
+      "through": through,
+      "mapping_id": str(mapping.id) if mapping is not None else "",
+    },
+  ).all()
+  return [(row.code, str(row.name)) for row in rows]
+
+
 def get_mapping_coverage(session: Session, mapping_id: str) -> MappingCoverageResponse:
   """Mapping coverage stats (total, mapped, unmapped, confidence).
 

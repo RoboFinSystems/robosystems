@@ -362,6 +362,9 @@ async def close_period_op(
       if e.gate.unreconciled_account_count:
         detail["unreconciled_account_count"] = e.gate.unreconciled_account_count
         detail["unreconciled_account_sample"] = list(e.gate.unreconciled_account_sample)
+      if e.gate.unmapped_account_count:
+        detail["unmapped_account_count"] = e.gate.unmapped_account_count
+        detail["unmapped_account_sample"] = list(e.gate.unmapped_account_sample)
       for name in GROUP_GATE_FIELDS:
         if getattr(e.gate, name):
           detail[name] = list(getattr(e.gate, name))
