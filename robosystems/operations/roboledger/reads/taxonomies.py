@@ -144,15 +144,17 @@ def list_elements(
   source: str | None = None,
   trait: str | None = None,
   is_abstract: bool | None = None,
+  include_inactive: bool = False,
   limit: int = 100,
   offset: int = 0,
 ) -> ElementListResponse:
-  """List active elements; ``trait`` is the FASB elementsOfFinancialStatements
-  trait."""
-  query = select(Element).where(Element.is_active.is_(True))
-  count_query = (
-    select(func.count()).select_from(Element).where(Element.is_active.is_(True))
-  )
+  """List elements, active only unless ``include_inactive``; ``trait`` is the
+  FASB elementsOfFinancialStatements trait."""
+  query = select(Element)
+  count_query = select(func.count()).select_from(Element)
+  if not include_inactive:
+    query = query.where(Element.is_active.is_(True))
+    count_query = count_query.where(Element.is_active.is_(True))
 
   if taxonomy_id:
     query = query.where(Element.taxonomy_id == taxonomy_id)

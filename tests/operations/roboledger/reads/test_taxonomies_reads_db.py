@@ -215,6 +215,13 @@ class TestListElements:
     assert "el_inactive" not in ids
     assert result.pagination.total == 8
 
+  def test_includes_a_retired_account_when_asked(self, ledger):
+    """So a retired account can be found, by its qname, and reactivated."""
+    result = list_elements(ledger, taxonomy_id="tax_coa", include_inactive=True)
+    retired = next(e for e in result.elements if e.id == "el_inactive")
+    assert retired.is_active is False
+    assert result.pagination.total == len(result.elements)
+
   def test_filters_by_taxonomy_source_and_abstract(self, ledger):
     coa = list_elements(ledger, taxonomy_id="tax_coa", is_abstract=False)
     assert {e.code for e in coa.elements} == {"1010", "1200", "6100"}

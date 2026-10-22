@@ -1140,6 +1140,7 @@ class LedgerQuery:
     source: str | None = None,
     classification: str | None = None,
     is_abstract: bool | None = None,
+    include_inactive: bool = False,
     limit: int | None = None,
     offset: int | None = None,
   ) -> ElementList | None:
@@ -1151,6 +1152,8 @@ class LedgerQuery:
       classification: Filter on the element's statement classification.
       is_abstract: True for abstract presentation nodes only, false for concrete
         elements, omit for both.
+      include_inactive: Include retired accounts (`isActive: false`), so one
+        can be found and reactivated. Omit for active elements only.
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=100)
     try:
@@ -1161,6 +1164,7 @@ class LedgerQuery:
           source=source,
           trait=classification,
           is_abstract=is_abstract,
+          include_inactive=include_inactive,
           limit=limit,
           offset=offset,
         )
