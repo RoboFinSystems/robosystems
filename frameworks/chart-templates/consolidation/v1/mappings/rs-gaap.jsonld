@@ -77,6 +77,10 @@
       "to": "rs-gaap:OtherNonoperatingIncomeExpense"
     },
     {
+      "from": "4400",
+      "to": "rs-gaap:GainLossOnDispositionOfAssets"
+    },
+    {
       "from": "4500",
       "to": "rs-gaap:IncomeLossFromEquityMethodInvestments"
     },

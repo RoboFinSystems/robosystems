@@ -632,6 +632,7 @@ ACQUISITION = "acquisition"
 OWNERSHIP_CHANGE = "ownership_change"
 # The kinds a person records the parent's price for a member's shares on.
 PRICED_KINDS = (ACQUISITION, OWNERSHIP_CHANGE)
+DECONSOLIDATION = "deconsolidation"
 
 
 def acquisitions(
@@ -1686,8 +1687,8 @@ def _hold_what_a_former_member_leaves(
         f"{q.split(':')[-1]} {_money(abs(a))} {'debit' if a > 0 else 'credit'}"
         for q, a in sorted(held.items())
       )
-      + " for it beyond the eliminations proposed here; post its "
-      "deconsolidation (adjustment_kind deconsolidation) for those amounts."
+      + " for it beyond the eliminations proposed here; record-deconsolidation "
+      "derecognizes them with the gain or loss on its leaving."
     )
     plan.incomplete = True
 

@@ -114088,6 +114088,58 @@
       ]
     },
     {
+      "@id": "rs-gaap:MinorityInterestDecreaseFromDeconsolidation",
+      "balance": [
+        {
+          "@value": "debit"
+        }
+      ],
+      "periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "concept"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "rs-gaap"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Noncontrolling Interest, Decrease from Deconsolidation",
+          "@language": "en"
+        }
+      ],
+      "rdfs:comment": [
+        {
+          "@value": "Decrease in noncontrolling interest balance from the deconsolidation of a previously consolidated subsidiary: the outside owners' interest in it is derecognized with its assets and liabilities when it leaves the group.",
+          "@language": "en"
+        }
+      ]
+    },
+    {
       "@id": "rs-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
       "balance": [
         {

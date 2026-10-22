@@ -21,6 +21,7 @@ from robosystems.models.api.extensions.chart_of_accounts import (
 )
 from robosystems.models.api.extensions.consolidation import (
   ProposeConsolidationEntriesRequest,
+  RecordDeconsolidationRequest,
 )
 from robosystems.models.api.extensions.entity import CreateEntityRequest
 from robosystems.models.api.extensions.reports import CreateReportRequest
@@ -41,6 +42,7 @@ from robosystems.operations.roboledger.commands.chart_of_accounts import (
 )
 from robosystems.operations.roboledger.commands.consolidation import (
   propose_consolidation_entries,
+  record_deconsolidation,
 )
 from robosystems.operations.roboledger.commands.entity import create_entity
 from robosystems.operations.roboledger.commands.fiscal_calendar import close_period
@@ -79,6 +81,7 @@ _COMMANDS = "robosystems.operations.roboledger.commands.fiscal_calendar"
 _BUNDLE = "robosystems.operations.roboledger.commands.reports._stamp_report_bundle"
 JUNE_20 = date(2026, 6, 20)
 JULY = (date(2026, 7, 1), date(2026, 7, 31))
+AUGUST = (date(2026, 8, 1), date(2026, 8, 31))
 NCI = "rs-gaap:MinorityInterest"
 
 
@@ -564,3 +567,51 @@ def test_balances_acquired_beside_cash_move_no_flow_in_the_joining_month(group):
   assert rows[("rs-gaap:NetCashProvidedByUsedInOperatingActivities", None)] == 1_000.0
   assert rows[("rs-gaap:NetCashProvidedByUsedInInvestingActivities", None)] == 15_000.0
   assert live.validation.status == "passed", live.validation.failures
+
+
+def test_a_members_cash_leaves_with_it_as_cash_divested(group):
+  """The member leaves at the end of July. August's group cash flow opens
+  on July's close — 4,000, the member's 11,000 in it — carries the
+  member's cash on the divestiture row as cash divested, and closes on the
+  parent's own -7,000. Its deconsolidation then takes off the outside
+  owners' 300 of July's result, puts the member's 1,000 back into the
+  group's equity, and adjusts the parent's gain by its 700 of those
+  results; August's group close stamps statements that tie."""
+  ids = group["ids"]
+  session = group["session"]
+  session.get(Entity, ids["member"]).left_on = JULY[1]
+  session.commit()
+
+  divested = "rs-gaap:ProceedsFromDivestitureOfInterestInSubsidiariesAndAffiliates"
+  cash = "rs-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"
+  for scope in ("combined", "consolidated"):
+    live = get_live_financial_statement(
+      session,
+      graph_id=GRAPH,
+      statement_type="cash_flow_statement",
+      period_start=AUGUST[0],
+      period_end=AUGUST[1],
+      entity_id=ids["parent"],
+      scope=scope,
+    )
+    rows = {(f.qname, f.period_role): f.values[0] for f in live.facts}
+    assert rows[(cash, "start")] == 4_000.0, scope
+    assert rows[(divested, None)] == -11_000.0, scope
+    assert rows[(cash, "end")] == -7_000.0, scope
+    assert live.validation.status == "passed", live.validation.failures
+
+  _close(group, "parent", "2026-08")
+  recorded = record_deconsolidation(
+    session,
+    RecordDeconsolidationRequest(
+      entity_id=ids["member"], consideration=1_200_000, basis="Sale agreement"
+    ),
+    "usr_1",
+  )
+  assert {d.concept: d.amount for d in recorded.derecognized} == {NCI: -30_000}
+  assert (recorded.earnings_restored, recorded.gain_loss) == (100_000, -70_000)
+  propose_consolidation_entries(
+    session, ProposeConsolidationEntriesRequest(period="2026-08"), "usr_1"
+  )
+  assert engine.group_close_status(session, GRAPH, "2026-08").not_footing == []
+  assert _close(group, "adjustments", "2026-08").statements_stamped

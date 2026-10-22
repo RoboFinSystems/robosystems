@@ -696,9 +696,12 @@ class TestMembershipWindows:
     self._posted(session, charts, SUB, date(2026, 6, 10), 30_000)
     self._posted(session, charts, SUB, date(2026, 7, 10), 40_000)
     session.commit()
-    update_entity(
-      session, UpdateEntityRequest(entity_id=SUB, left_on=date(2026, 6, 30)), "usr_1"
+    # Past the exit guards (closed books, no feed, agreed pairs), which the
+    # consolidation tests cover: the window reads only the row's dates.
+    session.execute(
+      text("UPDATE entities SET left_on = '2026-06-30' WHERE id = :id"), {"id": SUB}
     )
+    session.commit()
 
   def _live(self, session, statement_type: str):
     start, end = self.JUNE_JULY

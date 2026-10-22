@@ -518,3 +518,98 @@ class OwnershipChangeResponse(BaseModel):
   replaced: bool = Field(
     False, description="True when it replaced an earlier draft for the month."
   )
+
+
+class RecordDeconsolidationRequest(BaseModel):
+  """A member has left the group (`left_on` set): what the parent received
+  for its shares, and the basis. The entry derecognizes what the
+  consolidation entity still holds for the member and takes the gain or
+  loss on its leaving; the parent's own sale entry stays on its books."""
+
+  entity_id: str = Field(..., description="The member that left: its `left_on` is set.")
+  consideration: int = Field(
+    ...,
+    ge=0,
+    description=(
+      "Cents the parent received for its shares; 0 for a dissolution or an "
+      "abandonment. Recorded with the entry for the record: the parent's own "
+      "books hold the sale, cash against its investment and its own gain or "
+      "loss, which this entry adjusts to the group's."
+    ),
+  )
+  basis: str = Field(
+    ...,
+    min_length=1,
+    description="The sale agreement, the dissolution, or what sets the price.",
+  )
+
+  @field_validator("basis")
+  @classmethod
+  def _basis_says_something(cls, value: str) -> str:
+    if not value.strip():
+      raise ValueError(
+        "Give the basis: the sale agreement, the dissolution, or what sets the price."
+      )
+    return value.strip()
+
+
+class DerecognizedBalance(BaseModel):
+  """A balance the consolidation entity held for a member that left, taken
+  off by the deconsolidation."""
+
+  concept: str = Field(..., description="The rs-gaap concept.")
+  amount: int = Field(
+    ...,
+    description=(
+      "Cents as held: positive a debit (goodwill, a step-up), negative a "
+      "credit (the outside owners' interest, the price above book of the "
+      "parent's investment)."
+    ),
+  )
+
+
+class DeconsolidationResponse(BaseModel):
+  """A member's leaving as recorded: the draft in the consolidation entity
+  its close posts, dated the first day of the month after the member's
+  last."""
+
+  entity_id: str = Field(..., description="The member that left.")
+  entity_name: str = Field(..., description="The member's name.")
+  left_on: date = Field(..., description="The day it left, as the entity records.")
+  period: str = Field(
+    ...,
+    description=(
+      "The month the entry is dated in, as YYYY-MM: the first the group "
+      "reads without the member."
+    ),
+  )
+  consideration: int = Field(..., description="Cents the parent received.")
+  derecognized: list[DerecognizedBalance] = Field(
+    default_factory=list,
+    description=(
+      "What the consolidation entity held for the member beyond the "
+      "eliminations its leaving reverses on their own, each taken off."
+    ),
+  )
+  earnings_restored: int = Field(
+    0,
+    description=(
+      "Cents: the member's results since it joined, credited to the group's "
+      "equity as they leave with its books; they were the group's income. "
+      "Zero for an equity-method member, whose books were never summed."
+    ),
+  )
+  gain_loss: int = Field(
+    ...,
+    description=(
+      "Cents, a gain positive: the group's adjustment to the parent's own "
+      "gain or loss on the sale, so the consolidated gain is the consideration "
+      "less the carrying amount of what left (ASC 810)."
+    ),
+  )
+  entry: JournalEntryResponse = Field(
+    ..., description="The deconsolidation entry, a draft the close posts."
+  )
+  replaced: bool = Field(
+    False, description="True when it replaced an earlier draft of the deconsolidation."
+  )

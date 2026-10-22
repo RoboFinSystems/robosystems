@@ -18,7 +18,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import text
@@ -44,6 +44,7 @@ from robosystems.operations.roboledger.entity_scope import (
   NoEntityError,
   acquired_eve,
   group_members,
+  left_eve,
   resolve_entity_id,
 )
 from robosystems.operations.roboledger.entry_status import landed_entry_bindparam
@@ -750,12 +751,17 @@ def consolidated_report_facts(
   warnings: list[str] = []
   unmapped = 0
   for member in group_members(session, parent_id, consolidated=True):
+    leaving = left_eve(member)
     covered: list[PeriodSpec] = []
     for period in periods:
       covers = _member_covers(member, period)
       if covers is None:
         raise ConsolidatedPeriodSpansMembershipError(member.id, period)
-      if covers:
+      # The period opening the day after a member's last is read for the
+      # cash that leaves with it, as the live group read reads it.
+      if covers or (
+        leaving is not None and period.start == leaving + timedelta(days=1)
+      ):
         covered.append(period)
     if not covered:
       continue
@@ -770,6 +776,7 @@ def consolidated_report_facts(
       close_target_qname=close_target,
       entity_id=member.id,
       acquired_on=acquired_eve(session, member),
+      left_on=leaving,
     )
     unmapped += generated.unmapped_count
     warnings.extend(generated.warnings)

@@ -16,10 +16,13 @@ from robosystems.models.api.extensions.consolidation import (
   AcquisitionResponse,
   AllocationOverrideResponse,
   ConsolidationProposal,
+  DeconsolidationResponse,
+  DerecognizedBalance,
   OwnershipChangeResponse,
   ProposeConsolidationEntriesRequest,
   ProposeConsolidationEntriesResponse,
   RecordAcquisitionRequest,
+  RecordDeconsolidationRequest,
   RecordOwnershipChangeRequest,
   SetAllocationOverrideRequest,
 )
@@ -51,8 +54,11 @@ from robosystems.operations.roboledger.entity_scope import (
   resolve_entity_id,
 )
 from robosystems.operations.roboledger.reads.consolidation import (
+  _BALANCE,
   ACQUISITION,
   ALLOCATION_OVERRIDES,
+  COMPUTED_KINDS,
+  DECONSOLIDATION,
   ENGINE_PROVENANCE,
   ENGINE_SOURCE,
   EQUITY_CLASSIFICATIONS,
@@ -60,6 +66,8 @@ from robosystems.operations.roboledger.reads.consolidation import (
   INVESTMENT_IN_SUBSIDIARIES,
   NONCONTROLLING_INTEREST,
   OWNERSHIP_CHANGE,
+  _is_periodic,
+  _rows,
   capital_and_earnings,
   elimination_flow,
   engine_drafts,
@@ -89,6 +97,10 @@ from robosystems.operations.taxonomy_block.coa_mappings import (
 )
 
 BARGAIN_PURCHASE_GAIN = "rs-gaap:BusinessCombinationBargainPurchaseGainRecognizedAmount"
+# The gain or loss on a member's leaving: the disposal gain concept the
+# income statement's calculation arcs carry (rs-gaap's deconsolidation gain
+# sits in no roll-up, so a line on it would never reach net income).
+DECONSOLIDATION_GAIN = "rs-gaap:GainLossOnDispositionOfAssets"
 
 
 def propose_consolidation_entries(
@@ -849,4 +861,200 @@ def record_ownership_change(
     equity_adjustment=excess - moved,
     entry=response,
     replaced=bool(same),
+  )
+
+
+class DeconsolidationError(ValueError):
+  """A deconsolidation that cannot be recorded as given."""
+
+
+def _month_after(day: date) -> date:
+  """The first day of the month after ``day``'s."""
+  return (day.replace(day=1) + timedelta(days=32)).replace(day=1)
+
+
+def _held_for_member(
+  session: Session, consolidation_id: str, member_id: str, through: date
+) -> dict[str, int]:
+  """What the consolidation entity holds for a member on its balance-sheet
+  accounts and the outside owners' interest beyond what the engine reverses
+  on its own once the member is out: the kinds it computes a cumulative
+  target for (the investment and intercompany eliminations) go back the
+  month after; an acquisition's goodwill and step-ups, the price above
+  book of each change in the share, and the outside owners' share of the
+  member's results wait for the deconsolidation. Debit-positive, by
+  concept, through ``through``."""
+  mapping = find_entity_mapping(session, consolidation_id, BOOK_FRAMEWORK)
+  concepts = primary_concepts(session, [str(mapping.id)]) if mapping else {}
+  rows = _rows(
+    session, [consolidation_id], concepts, through, through, drafts_of=consolidation_id
+  )
+  held: dict[str, int] = {}
+  for r in rows:
+    if r.adjusts != member_id or not r.kind or r.closing:
+      continue
+    if r.kind in COMPUTED_KINDS and not _is_periodic(r.kind, r.concept):
+      continue
+    if (
+      r.concept.classification in _BALANCE or r.concept.qname == NONCONTROLLING_INTEREST
+    ):
+      held[r.concept.qname] = held.get(r.concept.qname, 0) + r.amount
+  return {q: a for q, a in held.items() if a}
+
+
+def record_deconsolidation(
+  session: Session, body: RecordDeconsolidationRequest, created_by: str
+) -> DeconsolidationResponse:
+  """Record a member's leaving as a draft in the consolidation entity, dated
+  the first day of the month after its last, which the consolidation
+  entity's close posts: what the consolidation entity still holds for the
+  member on its balance-sheet accounts and as the outside owners' interest
+  is taken off, a member in full has the results it earned in the group
+  put back into the group's equity as they leave with its books, and the
+  difference is the gain or loss on its leaving — the group's adjustment
+  to the gain the parent's own books took (ASC 810: the consideration less
+  the carrying amount of what left). Replaces an earlier draft of it.
+
+  Raises ``DeconsolidationError`` for an entity that is not a member that
+  left, a consolidation entity lacking an account the entry needs, a posted
+  deconsolidation already held, or nothing to record."""
+  member = resolve_entity(session, body.entity_id)
+  name = member.name
+  if is_group_parent(session, str(member.id)) or member.entity_role != "operating":
+    raise DeconsolidationError(
+      f"{name} is not a member of the group; only a subsidiary or an "
+      "associate leaves it."
+    )
+  if member.consolidation_method not in ("full", "equity"):
+    raise DeconsolidationError(
+      f"{name} is carried at cost: the consolidation entity holds nothing for "
+      "it, and the parent's own books carry its sale."
+    )
+  if member.left_on is None:
+    raise DeconsolidationError(
+      f"{name} is still a member; set the month it left with "
+      "update-entity(left_on=…) first."
+    )
+  consolidation = find_consolidation_entity(session)
+  if consolidation is None:
+    raise DeconsolidationError(
+      "This group has no consolidation entity; create one with entity_role "
+      "'consolidation' for the deconsolidation entry."
+    )
+  consolidation_id = str(consolidation.id)
+  start = _month_after(member.left_on)
+  period = f"{start:%Y-%m}"
+  assert_period_not_closed(session, start, entity_id=consolidation_id)
+
+  held_entries = list(
+    session.execute(
+      select(Entry).where(
+        Entry.entity_id == consolidation_id,
+        Entry.adjustment_kind == DECONSOLIDATION,
+        Entry.adjusts_entity_id == str(member.id),
+        Entry.status.in_(("posted", "draft")),
+        Entry.reversal_of.is_(None),
+      )
+    ).scalars()
+  )
+  if any(e.status == "posted" for e in held_entries):
+    raise DeconsolidationError(
+      f"{name}'s deconsolidation is posted. Reverse that entry first to record "
+      "it again."
+    )
+  # A draft never landed, so replacing it leaves nothing to supersede.
+  for entry in held_entries:
+    session.delete(entry)
+  session.flush()
+
+  held = _held_for_member(session, consolidation_id, str(member.id), start)
+  earnings = 0
+  if member.consolidation_method == "full":
+    _capital, earnings = capital_and_earnings(
+      session, str(member.id), start - timedelta(days=1)
+    )
+  wanted = {q: -a for q, a in held.items()}
+  style = load_entity_reporting_style(session, resolve_entity_id(session, None))
+  equity_concept = load_close_target_concept(session, style)
+  if earnings:
+    wanted[equity_concept] = wanted.get(equity_concept, 0) - earnings
+  wanted = {q: a for q, a in wanted.items() if a}
+  if not wanted:
+    raise DeconsolidationError(
+      f"The consolidation entity holds nothing for {name} beyond what its "
+      "leaving reverses, and it has no results to put back: there is nothing "
+      "to record."
+    )
+  # Credit-positive: the lines so far net to a debit for a gain.
+  gain_loss = sum(wanted.values())
+  if gain_loss:
+    wanted[DECONSOLIDATION_GAIN] = wanted.get(DECONSOLIDATION_GAIN, 0) - gain_loss
+
+  mapping = find_entity_mapping(session, consolidation_id, BOOK_FRAMEWORK)
+  accounts = (
+    posting_accounts(
+      session, consolidation_id, primary_concepts(session, [str(mapping.id)])
+    )
+    if mapping is not None
+    else {}
+  )
+  missing = sorted(q for q in wanted if q not in accounts)
+  if missing:
+    raise DeconsolidationError(
+      f"{consolidation.name} has no account mapped to "
+      + ", ".join(missing)
+      + "; add one to its chart for the deconsolidation entry."
+    )
+
+  response = create_journal_entry(
+    session,
+    CreateJournalEntryRequest(
+      posting_date=start,
+      memo=f"Deconsolidation of {name}",
+      type="adjusting",
+      status="draft",
+      adjustment_kind=DECONSOLIDATION,
+      adjusts_entity_id=str(member.id),
+      line_items=[
+        JournalEntryLineItemInput(
+          element_id=accounts[qname][0],
+          debit_amount=max(amount, 0),
+          credit_amount=max(-amount, 0),
+          description=body.basis,
+        )
+        for qname, amount in sorted(wanted.items(), key=lambda kv: -kv[1])
+      ],
+    ),
+    created_by,
+    entity_id=consolidation_id,
+  )
+  entry = session.get(Entry, response.id)
+  assert entry is not None
+  entry.metadata_ = {
+    **(entry.metadata_ or {}),
+    "deconsolidation": {
+      "period": period,
+      "left_on": member.left_on.isoformat(),
+      "consideration": body.consideration,
+      "derecognized": dict(held),
+      "earnings_restored": earnings,
+      "gain_loss": gain_loss,
+      "basis": body.basis,
+      "recorded_by": created_by,
+    },
+  }
+  session.commit()
+  return DeconsolidationResponse(
+    entity_id=str(member.id),
+    entity_name=name,
+    left_on=member.left_on,
+    period=period,
+    consideration=body.consideration,
+    derecognized=[
+      DerecognizedBalance(concept=q, amount=a) for q, a in sorted(held.items())
+    ],
+    earnings_restored=earnings,
+    gain_loss=gain_loss,
+    entry=response,
+    replaced=bool(held_entries),
   )

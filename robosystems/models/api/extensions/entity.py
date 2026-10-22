@@ -125,6 +125,14 @@ class LedgerEntityResponse(BaseModel):
   entity_role: str = Field("operating", description=_ROLE_DESCRIPTION)
   joined_on: date | None = Field(None, description=_JOINED_DESCRIPTION)
   left_on: date | None = Field(None, description=_LEFT_DESCRIPTION)
+  is_former: bool = Field(
+    False,
+    description=(
+      "True once the month this entity left the group is over: its months in "
+      "the group are history, readable under it, and it is no longer current. "
+      "False for a member still in, and through the month it leaves."
+    ),
+  )
 
   # Source provenance
   source: str = Field(

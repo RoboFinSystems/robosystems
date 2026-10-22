@@ -98,6 +98,8 @@ WRITE_TOOL_HINTS: dict[str, ToolHints] = {
   "record-acquisition": _REPLACES,
   # Replaces the member's draft change for that month.
   "record-ownership-change": _REPLACES,
+  # Replaces the member's draft deconsolidation.
+  "record-deconsolidation": _REPLACES,
   "create-event-handler": _ADDS,
   "update-event-handler": _REPLACES,
   # Schedules.

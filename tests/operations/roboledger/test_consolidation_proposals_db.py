@@ -15,12 +15,14 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.exc import OperationalError
 
 import robosystems.models.extensions  # noqa: F401  (register models on the Base)
+from robosystems.adapters.bank_feed.accounts import BANK_FEED_KEY
 from robosystems.config import env
 from robosystems.db.extensions import ExtensionsBase, extensions_session
 from robosystems.models.api.extensions.consolidation import (
   AcquisitionAllocation,
   ProposeConsolidationEntriesRequest,
   RecordAcquisitionRequest,
+  RecordDeconsolidationRequest,
   RecordOwnershipChangeRequest,
   SetAllocationOverrideRequest,
 )
@@ -51,16 +53,20 @@ from robosystems.operations.roboledger.commands import consolidation as commands
 from robosystems.operations.roboledger.commands._guards import ClosedPeriodError
 from robosystems.operations.roboledger.commands.consolidation import (
   BARGAIN_PURCHASE_GAIN,
+  DECONSOLIDATION_GAIN,
   AcquisitionError,
   AllocationOverrideError,
+  DeconsolidationError,
   OwnershipChangeError,
   propose_consolidation_entries,
   record_acquisition,
+  record_deconsolidation,
   record_ownership_change,
   set_allocation_override,
 )
 from robosystems.operations.roboledger.commands.entity import (
   ConsolidatedHistoryError,
+  EntityExitError,
   EntityHierarchyError,
   EntityMembershipError,
   create_entity,
@@ -112,6 +118,8 @@ _CONCEPTS = {
   engine.GOODWILL: ("debit", "instant", "asset"),
   BARGAIN_PURCHASE_GAIN: ("credit", "duration", "revenue"),
   "rs-gaap:AdditionalPaidInCapital": ("credit", "instant", "equity"),
+  "rs-gaap:RetainedEarningsAccumulatedDeficit": ("credit", "instant", "equity"),
+  DECONSOLIDATION_GAIN: ("credit", "duration", "revenue"),
 }
 
 # Each entity's accounts: code → concept.
@@ -161,6 +169,8 @@ _CHARTS = {
     "1800": engine.GOODWILL,
     "4300": BARGAIN_PURCHASE_GAIN,
     "3050": "rs-gaap:AdditionalPaidInCapital",
+    "3900": "rs-gaap:RetainedEarningsAccumulatedDeficit",
+    "4400": DECONSOLIDATION_GAIN,
   },
 }
 
@@ -2394,3 +2404,214 @@ def test_an_acquisition_ignores_a_change_in_the_month_it_joined(group):
   _change(period="2026-01", ownership_pct=80, consideration=300_000)
   again = _acquire(consideration=900_000, nci_fair_value=550_000)
   assert again.parent_share == 600_002
+
+
+# ── A member leaves the group (group-lifecycle Phase 3) ────────────────
+
+
+def _leave(entity_id: str, on: date) -> None:
+  """The entity row as update-entity leaves it, past the exit guards."""
+  with extensions_session(GRAPH) as session:
+    session.execute(
+      text("UPDATE entities SET left_on = :d WHERE id = :id"),
+      {"d": on, "id": entity_id},
+    )
+
+
+def _deconsolidate(**fields):
+  values = {
+    "entity_id": MEMBER,
+    "consideration": 800_000,
+    "basis": "Sale agreement",
+  } | fields
+  with extensions_session(GRAPH) as session:
+    return record_deconsolidation(
+      session, RecordDeconsolidationRequest(**values), "test"
+    )
+
+
+def _deconsolidation_lines(member: str = MEMBER) -> dict[str, int]:
+  with extensions_session(GRAPH) as session:
+    rows = session.execute(
+      text(
+        """
+        SELECT el.code, SUM(li.debit_amount - li.credit_amount) AS amount
+        FROM line_items li JOIN entries e ON e.id = li.entry_id
+        JOIN elements el ON el.id = li.element_id
+        WHERE e.adjustment_kind = 'deconsolidation' AND e.status = 'draft'
+          AND e.adjusts_entity_id = :m
+        GROUP BY el.code
+        """
+      ),
+      {"m": member},
+    ).all()
+  return {r.code: int(r.amount) for r in rows if r.amount}
+
+
+def test_a_member_that_leaves_has_its_results_put_back_and_the_gain_adjusted(group):
+  """January posted at 70 %; the member leaves at its end. The outside
+  owners' 547.50 of January's result, held as noncontrolling interest, is
+  taken off; the member's 1,825 of results leave with its books and are
+  put back into the group's equity; the 1,277.50 difference — the parent's
+  70 % of those results, already the group's income — is the loss on its
+  leaving against the gain the parent's own books take. The associate's
+  pickup goes the same way, with nothing to put back, and February then
+  needs nothing a person must compute."""
+  _form_the_group(group)
+  _january(group)
+  _post_proposals(group, preview())
+  _leave(MEMBER, JAN_31)
+  recorded = _deconsolidate()
+
+  assert (recorded.period, recorded.entry.posting_date) == ("2026-02", FEB_1)
+  assert [(d.concept, d.amount) for d in recorded.derecognized] == [
+    (engine.NONCONTROLLING_INTEREST, -54_750)
+  ]
+  assert (recorded.earnings_restored, recorded.gain_loss) == (182_500, -127_750)
+  assert _deconsolidation_lines() == {
+    "3200": 54_750,
+    "3900": -182_500,
+    "4400": 127_750,
+  }
+  february = preview("2026-02")
+  assert not any("no longer in the group" in n for n in february.notes)
+  assert not february.incomplete
+
+  _leave(ASSOCIATE, JAN_31)
+  assert preview("2026-02").incomplete  # the associate's pickup is held now
+  associate = _deconsolidate(entity_id=ASSOCIATE, consideration=300_000)
+  assert [(d.concept, d.amount) for d in associate.derecognized] == [
+    (engine.EQUITY_METHOD_INVESTMENT, 20_000)
+  ]
+  assert (associate.earnings_restored, associate.gain_loss) == (0, -20_000)
+  assert _deconsolidation_lines(ASSOCIATE) == {"1700": -20_000, "4400": 20_000}
+  february = preview("2026-02")
+  assert not february.incomplete
+  _post_proposals(group, february)
+  assert preview("2026-02").up_to_date
+
+
+def test_an_acquired_members_goodwill_and_premium_leave_with_it(group):
+  """Bought at a premium and sold before earning anything: the goodwill,
+  the price above book against the investment and the outside owners'
+  interest at fair value are taken off together, and they net to nothing
+  — the carrying amount is what the parent paid, so the group's gain is
+  the parent's own."""
+  _acquire_sixty_percent_of_an_odd_capital(group)
+  _post_proposals(group, preview())
+  _leave(MEMBER, JAN_31)
+  recorded = _deconsolidate(consideration=950_000)
+
+  assert {d.concept: d.amount for d in recorded.derecognized} == {
+    engine.GOODWILL: 449_997,
+    engine.INVESTMENT_IN_SUBSIDIARIES: -299_998,
+    engine.NONCONTROLLING_INTEREST: -149_999,
+  }
+  assert (recorded.earnings_restored, recorded.gain_loss) == (0, 0)
+  assert _deconsolidation_lines() == {
+    "1800": -449_997,
+    "1600": 299_998,
+    "3200": 149_999,
+  }
+  assert not preview("2026-02").incomplete
+
+
+def test_a_deconsolidation_needs_a_member_that_left_and_something_to_record(group):
+  _form_the_group(group)
+  _january(group)
+  with pytest.raises(DeconsolidationError, match="still a member"):
+    _deconsolidate()
+  with pytest.raises(DeconsolidationError, match="not a member"):
+    _deconsolidate(entity_id=PARENT_ENTITY_ID)
+  _leave(ASSOCIATE, DEC)
+  with pytest.raises(DeconsolidationError, match="nothing to record"):
+    _deconsolidate(entity_id=ASSOCIATE)
+  with pytest.raises(ValueError, match="basis"):
+    RecordDeconsolidationRequest(entity_id=MEMBER, consideration=0, basis="  ")
+
+
+def test_recording_a_deconsolidation_again_replaces_the_draft_never_a_posted_one(
+  group,
+):
+  _form_the_group(group)
+  _january(group)
+  _post_proposals(group, preview())
+  _leave(MEMBER, JAN_31)
+  assert not _deconsolidate().replaced
+  assert _deconsolidate(consideration=850_000).replaced
+  with extensions_session(GRAPH) as session:
+    session.execute(
+      text(
+        "UPDATE entries SET status = 'posted' WHERE adjustment_kind = 'deconsolidation'"
+      )
+    )
+  with pytest.raises(DeconsolidationError, match="Reverse"):
+    _deconsolidate()
+
+
+def test_a_member_leaves_only_closed_unfed_and_agreed(group):
+  """left_on is refused while the member's books are open through the
+  month, while a bank feed is linked to its chart, and while an
+  intercompany balance disagrees with the group's. An agreed balance is
+  not in the way: it stays as a related-party balance."""
+  _form_the_group(group)
+  # The parent says the member owes 175; the member's books say 150.
+  post(
+    group,
+    PARENT_ENTITY_ID,
+    JAN_31,
+    [("due_from", 17_500), ("cash", -17_500)],
+    agent=MEMBER,
+  )
+  post(
+    group,
+    MEMBER,
+    JAN_31,
+    [("cash", 15_000), ("due_to", -15_000)],
+    agent=PARENT_ENTITY_ID,
+  )
+  with extensions_session(GRAPH) as session:
+    session.add(
+      FiscalPeriod(
+        graph_id=GRAPH,
+        entity_id=MEMBER,
+        name="2026-01",
+        start_date=JAN_1,
+        end_date=JAN_31,
+        period_type="monthly",
+        status="open",
+      )
+    )
+
+  def leave():
+    with extensions_session(GRAPH) as session:
+      return update_entity(
+        session, UpdateEntityRequest(entity_id=MEMBER, left_on=JAN_31), "test"
+      )
+
+  with pytest.raises(EntityExitError, match="open for 2026-01"):
+    leave()
+  with extensions_session(GRAPH) as session:
+    session.execute(
+      text("UPDATE fiscal_periods SET status = 'closed' WHERE entity_id = :id"),
+      {"id": MEMBER},
+    )
+    cash = session.get(Element, group["accounts"][(MEMBER, "cash")])
+    cash.metadata_ = {**(cash.metadata_ or {}), BANK_FEED_KEY: {"connection_id": "c"}}
+  with pytest.raises(EntityExitError, match="bank feed"):
+    leave()
+  with extensions_session(GRAPH) as session:
+    cash = session.get(Element, group["accounts"][(MEMBER, "cash")])
+    cash.metadata_ = {
+      k: v for k, v in (cash.metadata_ or {}).items() if k != BANK_FEED_KEY
+    }
+  with pytest.raises(EntityExitError, match="disagree"):
+    leave()
+  post(
+    group,
+    MEMBER,
+    JAN_31,
+    [("cash", 2_500), ("due_to", -2_500)],
+    agent=PARENT_ENTITY_ID,
+  )
+  assert leave().left_on == JAN_31

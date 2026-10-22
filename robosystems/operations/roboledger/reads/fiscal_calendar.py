@@ -61,7 +61,7 @@ def qb_sync_state(platform_db: Session, graph_id: str) -> tuple[bool, datetime |
   return (True, connection.last_sync)
 
 
-def _feed_connection_ids(session: Session, entity_id: str) -> list[str]:
+def feed_connection_ids(session: Session, entity_id: str) -> list[str]:
   """The bank feeds with an account on one of ``entity_id``'s charts."""
   from robosystems.adapters.bank_feed.accounts import BANK_FEED_KEY
   from robosystems.models.extensions.element import Element
@@ -96,7 +96,7 @@ def entity_sync_state(
     has_qb, qb_last_sync = qb_sync_state(platform_db, graph_id)
     if has_qb:
       syncs.append(qb_last_sync)
-  feed_ids = _feed_connection_ids(session, entity_id)
+  feed_ids = feed_connection_ids(session, entity_id)
   if feed_ids:
     feeds = (
       platform_db.query(Connection)

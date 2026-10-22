@@ -167,6 +167,7 @@ The tool names below are the exact `name` strings for `tools/call`, grouped by f
 | `set-allocation-override` | Set the outside owners' share of a member's result for a month in place of the pro-rata share, with its basis |
 | `record-acquisition` | Record a member bought from its owners: the consideration, the basis and any fair values, drafted as goodwill and step-ups in the consolidation entity |
 | `record-ownership-change` | Record the parent buying more of a member from its outside owners: the share from a month and the price, drafted as an equity transaction in the consolidation entity |
+| `record-deconsolidation` | Record a member's leaving the group once `left_on` is set: the consideration and the basis, drafted in the consolidation entity as what it still held for the member taken off, the member's results put back into the group's equity, and the gain or loss |
 | `backfill-plan-history` | Compile monthly statement history behind the close boundary |
 
 **Reconciliations** — RoboLedger tenant; how they gate the close is in [Period Close](Period-Close.md#reconciliations):

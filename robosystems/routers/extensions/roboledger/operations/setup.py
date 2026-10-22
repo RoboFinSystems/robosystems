@@ -61,6 +61,7 @@ from robosystems.operations.roboledger.commands.chart_of_accounts import (
 )
 from robosystems.operations.roboledger.commands.entity import (
   CLEARABLE_FIELDS,
+  EntityExitError,
   EntityHierarchyError,
   EntityTickerTakenError,
   ParentEntityNotFoundError,
@@ -336,6 +337,7 @@ update_entity_op = _registrar.register(
       ParentEntityNotFoundError: 404,
       EntityNotInGraphError: 404,
       EntityHierarchyError: 422,
+      EntityExitError: 422,
       EntityTickerTakenError: 409,
     },
     mark_stale_reason="entity_updated",

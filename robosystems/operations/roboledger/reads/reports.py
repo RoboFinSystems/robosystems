@@ -53,6 +53,7 @@ from robosystems.operations.roboledger.entity_scope import (
   find_entity_id,
   group_members,
   is_group_parent,
+  left_eve,
   membership_window,
   resolve_entity_id,
 )
@@ -202,6 +203,7 @@ def generate_adhoc_private_statement(
   sources: StatementSources | None = None,
   summed: list[bool] | None = None,
   acquired_on: date | None = None,
+  left_on: date | None = None,
 ):
   """Build a one-shot statement from one entity's current ledger, with no
   saved Report; ``line_slice`` sums one management dimension member's lines.
@@ -239,6 +241,7 @@ def generate_adhoc_private_statement(
     entity_id=entity_id,
     line_slice=line_slice,
     acquired_on=acquired_on,
+    left_on=left_on,
   )
 
   grid = render_structure_view(
@@ -1302,6 +1305,7 @@ def _combined_statement(
         sources=sources,
         summed=summed,
         acquired_on=acquired_eve(session, member),
+        left_on=left_eve(member),
       )
     except CoaMappingNotFoundError as exc:
       first_error = first_error or exc
@@ -1339,7 +1343,8 @@ def member_windows(
   in; an income statement sums a member's own months of the column; a cash
   flow or equity statement over part of a member's time would show balances
   arriving or leaving with no line for them (an acquisition, a
-  deconsolidation), so that column is left out."""
+  deconsolidation), so that column is left out. The column opening the day
+  after a member's last is read, for the cash that leaves with it."""
   windows: list[FactPeriodSpec | None] = []
   partial: set[int] = set()
   for i, p in enumerate(periods):
@@ -1348,8 +1353,15 @@ def member_windows(
       windows.append(p if held is not None else None)
       continue
     window = membership_window(member, p.start, p.end)
-    if window is None or window == (p.start, p.end):
-      windows.append(p if window is not None else None)
+    if window is None:
+      # The column opening the day after a member's last: read for its cash
+      # alone, so the group's cash flow lets it go where it left.
+      leaving = statement_type != "income_statement" and left_eve(member) == (
+        p.start - timedelta(days=1)
+      )
+      windows.append(p if leaving else None)
+    elif window == (p.start, p.end):
+      windows.append(p)
     elif statement_type == "income_statement":
       windows.append(FactPeriodSpec(start=window[0], end=window[1], label=p.label))
     else:
@@ -1515,6 +1527,7 @@ def get_consolidation_worksheet(
         reporting_style_id=reporting_style_id,
         entity_id=entity.member.id,
         acquired_on=acquired_eve(session, entity.member),
+        left_on=left_eve(entity.member),
       )
     except CoaMappingNotFoundError as exc:
       first_error = first_error or exc

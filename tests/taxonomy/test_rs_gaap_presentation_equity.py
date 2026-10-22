@@ -163,4 +163,5 @@ class TestEquityFormVariants:
         "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest",
         "rs-gaap:NoncontrollingInterestIncreaseFromSubsidiaryEquityIssuance",
         "rs-gaap:MinorityInterestDecreaseFromDistributionsToNoncontrollingInterestHolders",
+        "rs-gaap:MinorityInterestDecreaseFromDeconsolidation",
       }, role
