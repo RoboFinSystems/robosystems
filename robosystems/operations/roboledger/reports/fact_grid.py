@@ -3293,10 +3293,10 @@ def _emit_nci_movement_facts(
   deconsolidation entry, or in the reversal of its elimination once it has
   left, is the interest derecognized, and one untagged in the elimination of
   a member that joined within the column is the interest it brought. A line
-  in an entry that books the
-  interest's share of income is that income, which the income statement's
-  own fact already carries; any other line has no row, so the roll-forward
-  does not reach its ending balance and the validator says so."""
+  in an entry that books the interest's share of income is that income,
+  which the income statement's own fact already carries; any other line has
+  no row, so the roll-forward does not reach its ending balance and the
+  validator says so."""
   meta = {
     row.qname: row
     for row in session.execute(

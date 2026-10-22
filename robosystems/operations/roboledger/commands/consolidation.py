@@ -589,6 +589,8 @@ def _cents(amount: int) -> str:
 _PARENT_EQUITY = {
   "rs-gaap:RetainedEarningsAccumulatedDeficit": "rs-gaap:AdditionalPaidInCapital",
 }
+# The outside owners' cash flow rows: [0] what they put in, [1] what they are
+# paid — a distribution, or the price of shares the parent buys from them.
 _NCI_FLOWS = (
   "rs-gaap:ProceedsFromMinorityShareholders",
   "rs-gaap:PaymentsToMinorityShareholders",
