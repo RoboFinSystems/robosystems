@@ -18,7 +18,9 @@ import robosystems.models.extensions  # noqa: F401  (register models on the Base
 from robosystems.config import env
 from robosystems.db.extensions import ExtensionsBase, extensions_session
 from robosystems.models.api.extensions.consolidation import (
+  AcquisitionAllocation,
   ProposeConsolidationEntriesRequest,
+  RecordAcquisitionRequest,
   SetAllocationOverrideRequest,
 )
 from robosystems.models.api.extensions.entity import (
@@ -44,10 +46,14 @@ from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.structure import Structure
 from robosystems.models.extensions.taxonomy import Taxonomy
 from robosystems.models.extensions.trait import Trait
+from robosystems.operations.roboledger.commands import consolidation as commands
 from robosystems.operations.roboledger.commands._guards import ClosedPeriodError
 from robosystems.operations.roboledger.commands.consolidation import (
+  BARGAIN_PURCHASE_GAIN,
+  AcquisitionError,
   AllocationOverrideError,
   propose_consolidation_entries,
+  record_acquisition,
   set_allocation_override,
 )
 from robosystems.operations.roboledger.commands.entity import (
@@ -100,6 +106,8 @@ _CONCEPTS = {
   engine.EQUITY_METHOD_INCOME: ("credit", "duration", "revenue"),
   engine.NONCONTROLLING_INTEREST: ("credit", "instant", "equity"),
   engine.NCI_SHARE_OF_INCOME: ("debit", "duration", "expense"),
+  engine.GOODWILL: ("debit", "instant", "asset"),
+  BARGAIN_PURCHASE_GAIN: ("credit", "duration", "revenue"),
 }
 
 # Each entity's accounts: code → concept.
@@ -146,6 +154,8 @@ _CHARTS = {
     "5100": "rs-gaap:InterestExpense",
     "5900": engine.NCI_SHARE_OF_INCOME,
     "4200": "rs-gaap:OtherNonoperatingIncomeExpense",
+    "1800": engine.GOODWILL,
+    "4300": BARGAIN_PURCHASE_GAIN,
   },
 }
 
@@ -181,11 +191,12 @@ def group(monkeypatch):
       )
     group = _seed()
     # One mapping serves every entity's chart here.
-    monkeypatch.setattr(
-      engine,
-      "find_entity_mapping",
-      lambda _s, _e, _f: SimpleNamespace(id=group["mapping"]),
-    )
+    for module in (engine, commands):
+      monkeypatch.setattr(
+        module,
+        "find_entity_mapping",
+        lambda _s, _e, _f: SimpleNamespace(id=group["mapping"]),
+      )
     yield group
   finally:
     with db.begin() as conn:
@@ -1781,3 +1792,290 @@ def test_a_reopened_group_month_no_longer_holds_membership(group):
       "test",
     )
   assert updated.joined_on == date(2026, 1, 14)
+
+
+# ── A member bought from its owners (group-lifecycle Phase 1) ───────────
+
+
+JAN_1 = date(2026, 1, 1)
+
+
+def _buy_the_member(group: dict, price: int = 900_000) -> None:
+  """The member, formed by others, joins on 1 January with 10,000 of equity
+  in its opening balance; the parent pays the outside owner who sold it 70 %.
+  The purchase names the seller, not the member."""
+  with extensions_session(GRAPH) as session:
+    session.execute(
+      text("UPDATE entities SET joined_on = :d WHERE id = :id"),
+      {"d": JAN_1, "id": MEMBER},
+    )
+  post(
+    group,
+    MEMBER,
+    DEC,
+    [("cash", 1_000_000), ("equity", -1_000_000)],
+    entry_type="opening",
+  )
+  post(
+    group,
+    PARENT_ENTITY_ID,
+    JAN_1,
+    [("investment", price), ("cash", -price)],
+    agent="owner",
+  )
+
+
+def _acquire(**fields):
+  with extensions_session(GRAPH) as session:
+    return record_acquisition(
+      session,
+      RecordAcquisitionRequest(entity_id=MEMBER, basis="Purchase agreement", **fields),
+      "test",
+    )
+
+
+def _acquisition_lines() -> dict[str, int]:
+  with extensions_session(GRAPH) as session:
+    rows = session.execute(
+      text(
+        """
+        SELECT el.code, SUM(li.debit_amount - li.credit_amount) AS amount
+        FROM line_items li JOIN entries e ON e.id = li.entry_id
+        JOIN elements el ON el.id = li.element_id
+        WHERE e.adjustment_kind = 'acquisition' AND e.status = 'draft'
+        GROUP BY el.code
+        """
+      )
+    ).all()
+  return {r.code: int(r.amount) for r in rows if r.amount}
+
+
+def test_an_unrecorded_acquisition_is_a_pre_acquisition_residual(group):
+  _buy_the_member(group)
+  response = preview()
+
+  (residual,) = response.residuals
+  assert residual.entity_id == MEMBER
+  assert residual.cause == "pre_acquisition"
+  # Nothing names the member, against 70 % of its 10,000.
+  assert residual.amount == -700_000
+  assert "record-acquisition" in residual.explanation
+  assert "9,000.00 naming no member" in residual.explanation
+  assert not _proposals(response, "elimination_investment")
+
+
+def test_a_recorded_acquisition_explains_the_residual_with_goodwill(group):
+  _buy_the_member(group)
+  recorded = _acquire(consideration=900_000)
+
+  assert (recorded.equity_at_acquisition, recorded.parent_share) == (1_000_000, 700_000)
+  assert (recorded.excess, recorded.goodwill, recorded.noncontrolling_interest) == (
+    200_000,
+    200_000,
+    0,
+  )
+  assert recorded.entry.status == "draft"
+  assert recorded.entry.posting_date == JAN_1
+  assert _acquisition_lines() == {"1800": 200_000, "1600": -200_000}
+
+  response = preview()
+  assert response.residuals == []
+  # The engine eliminates the parent's share of the equity at acquisition; the
+  # acquisition entry clears the rest of the 9,000 the parent paid.
+  assert _lines(response, "elimination_investment") == {
+    "rs-gaap:MembersEquity": 1_000_000,
+    engine.INVESTMENT_IN_SUBSIDIARIES: -700_000,
+    engine.NONCONTROLLING_INTEREST: -300_000,
+  }
+  # Never reversed: the acquisition is a person's entry, not a computed kind.
+  assert not _proposals(response, "acquisition")
+
+
+def test_fair_value_of_the_outside_owners_adds_their_goodwill(group):
+  _buy_the_member(group)
+  recorded = _acquire(consideration=900_000, nci_fair_value=400_000)
+
+  # 4,000 for an interest whose book share is 3,000.
+  assert (recorded.goodwill, recorded.noncontrolling_interest) == (300_000, 100_000)
+  assert _acquisition_lines() == {"1800": 300_000, "1600": -200_000, "3200": -100_000}
+  assert preview().residuals == []
+
+
+def test_a_step_up_takes_its_part_of_the_excess(group):
+  _buy_the_member(group)
+  recorded = _acquire(
+    consideration=900_000,
+    allocations=[
+      AcquisitionAllocation(
+        concept="rs-gaap:LongTermInvestmentsAndReceivablesNet", amount=50_000
+      )
+    ],
+  )
+
+  # The outside owners carry 30 % of the step-up; goodwill is the parent's alone.
+  assert (recorded.goodwill, recorded.noncontrolling_interest) == (165_000, 15_000)
+  assert _acquisition_lines() == {
+    "1800": 165_000,
+    "1650": 50_000,
+    "1600": -200_000,
+    "3200": -15_000,
+  }
+  assert preview().residuals == []
+
+
+def test_a_bargain_purchase_waits_for_its_review(group):
+  _buy_the_member(group, price=600_000)
+  with pytest.raises(AcquisitionError, match=r"bargain purchase of 1,000\.00"):
+    _acquire(consideration=600_000)
+
+  recorded = _acquire(consideration=600_000, confirm_bargain_purchase=True)
+  assert recorded.goodwill == -100_000
+  assert _acquisition_lines() == {"1600": 100_000, "4300": -100_000}
+  assert preview().residuals == []
+
+
+def test_recording_again_replaces_the_draft_but_never_a_posted_one(group):
+  _buy_the_member(group)
+  _acquire(consideration=800_000)
+  replaced = _acquire(consideration=900_000)
+  assert replaced.replaced
+  assert _acquisition_lines() == {"1800": 200_000, "1600": -200_000}
+
+  with extensions_session(GRAPH) as session:
+    session.execute(
+      text("UPDATE entries SET status = 'posted' WHERE adjustment_kind = 'acquisition'")
+    )
+  with pytest.raises(AcquisitionError, match="Reverse that entry first"):
+    _acquire(consideration=900_000)
+
+
+def test_consideration_the_parents_books_do_not_hold_leaves_the_month_open(group):
+  _buy_the_member(group)
+  _acquire(consideration=1_200_000)
+
+  response = preview()
+  assert response.incomplete
+  assert any("naming no member" in note for note in response.notes)
+  assert not response.up_to_date
+
+
+def test_an_acquisition_needs_a_member_that_joined_with_an_opening(group):
+  with pytest.raises(AcquisitionError, match="no joined_on"):
+    _acquire(consideration=900_000)
+  with extensions_session(GRAPH) as session:
+    session.execute(
+      text("UPDATE entities SET joined_on = :d WHERE id = :id"),
+      {"d": JAN_1, "id": MEMBER},
+    )
+  with pytest.raises(AcquisitionError, match="no opening balance"):
+    _acquire(consideration=900_000)
+
+
+def test_a_member_formed_by_the_parent_keeps_the_plain_residual(group):
+  """No join date and no opening: a difference is unexplained, as before."""
+  _form_the_group(group)
+  post(
+    group,
+    PARENT_ENTITY_ID,
+    JAN_31,
+    [("investment", 10_000), ("cash", -10_000)],
+    agent=MEMBER,
+  )
+  (residual,) = preview().residuals
+  assert residual.cause == "unexplained"
+
+
+def test_the_allocation_share_reads_pro_rata_and_the_override(group):
+  _form_the_group(group)
+  _january(group)
+  with extensions_session(GRAPH) as session:
+    share = engine.allocation_share(session, entity_id=MEMBER, period="2026-01")
+  # The member's 1,825 for January; the outside owners' 30 % is 547.50.
+  assert (share.month_result, share.outside_pct, share.pro_rata_amount) == (
+    182_500,
+    30.0,
+    54_750,
+  )
+  assert share.override is None
+  assert share.effective_amount == 54_750
+  assert not share.closed
+
+  _override(entity_id=MEMBER, amount=100_000, basis="Preferred return")
+  with extensions_session(GRAPH) as session:
+    share = engine.allocation_share(session, entity_id=MEMBER, period="2026-01")
+    listed = engine.allocation_overrides(session, entity_id=MEMBER)
+  assert share.pro_rata_amount == 54_750
+  assert share.effective_amount == 100_000
+  assert share.override is not None
+  assert (share.override.amount, share.override.basis) == (100_000, "Preferred return")
+  assert [o.period for o in listed.overrides] == ["2026-01"]
+
+
+def test_a_step_up_names_an_asset_or_liability_never_what_is_computed(group):
+  _buy_the_member(group)
+  for concept in (
+    engine.GOODWILL,
+    engine.INVESTMENT_IN_SUBSIDIARIES,
+    engine.NONCONTROLLING_INTEREST,
+    BARGAIN_PURCHASE_GAIN,
+  ):
+    with pytest.raises(AcquisitionError, match="computed from the consideration"):
+      _acquire(
+        consideration=900_000,
+        allocations=[AcquisitionAllocation(concept=concept, amount=50_000)],
+      )
+  with pytest.raises(AcquisitionError, match="is zero"):
+    _acquire(
+      consideration=900_000,
+      allocations=[
+        AcquisitionAllocation(
+          concept="rs-gaap:LongTermInvestmentsAndReceivablesNet", amount=0
+        )
+      ],
+    )
+
+
+def test_an_acquisition_needs_a_basis_that_says_something():
+  with pytest.raises(ValueError, match="Give the basis"):
+    RecordAcquisitionRequest(entity_id=MEMBER, consideration=1, basis="   ")
+
+
+def test_a_bargain_review_is_recorded_only_for_a_bargain(group):
+  _buy_the_member(group)
+  _acquire(consideration=900_000, confirm_bargain_purchase=True)
+  with extensions_session(GRAPH) as session:
+    meta = session.execute(
+      select(Entry.metadata_).where(Entry.adjustment_kind == "acquisition")
+    ).scalar_one()
+  assert meta["acquisition"]["bargain_purchase_confirmed"] is False
+
+
+def test_a_member_acquired_mid_month_joins_that_month(group):
+  """Membership is by month: joined on the 15th, the member is consolidated
+  for January and the acquisition is dated the day it joined."""
+  _buy_the_member(group)
+  with extensions_session(GRAPH) as session:
+    session.execute(
+      text("UPDATE entities SET joined_on = :d WHERE id = :id"),
+      {"d": JAN_15, "id": MEMBER},
+    )
+  recorded = _acquire(consideration=900_000)
+  assert recorded.entry.posting_date == JAN_15
+  assert preview().residuals == []
+
+
+def test_the_allocation_share_is_for_a_member_in_full_in_its_months(group):
+  _form_the_group(group)
+  with extensions_session(GRAPH) as session:
+    assert (
+      engine.allocation_share(session, entity_id=ASSOCIATE, period="2026-01") is None
+    )
+    session.execute(
+      text("UPDATE entities SET joined_on = :d WHERE id = :id"),
+      {"d": date(2026, 2, 1), "id": MEMBER},
+    )
+  with extensions_session(GRAPH) as session:
+    assert engine.allocation_share(session, entity_id=MEMBER, period="2026-01") is None
+    assert (
+      engine.allocation_share(session, entity_id=MEMBER, period="2026-02") is not None
+    )

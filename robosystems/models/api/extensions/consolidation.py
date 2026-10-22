@@ -4,8 +4,9 @@ needs (spec ``consolidation`` C2)."""
 from __future__ import annotations
 
 from datetime import date
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from robosystems.models.api.extensions.journal_entries import (
   AdjustmentKind,
@@ -97,6 +98,16 @@ class ConsolidationResidual(BaseModel):
     ),
   )
   explanation: str = Field(..., description="What the two figures are.")
+  cause: Literal["unexplained", "pre_acquisition"] = Field(
+    "unexplained",
+    description=(
+      "`pre_acquisition` when the member joined the group mid-life and its "
+      "acquisition is not recorded: the parent paid its sellers, not the "
+      "member, so `record-acquisition` explains the difference — the "
+      "consideration, with the excess over the parent's share of the "
+      "member's equity at acquisition as goodwill or fair-value step-ups."
+    ),
+  )
 
 
 class ConsolidationReconcilingItem(BaseModel):
@@ -241,3 +252,183 @@ class AllocationOverrideResponse(BaseModel):
   basis: str | None = Field(None, description="Why it differs from pro rata.")
   set_by: str | None = Field(None, description="Who set it.")
   cleared: bool = Field(False, description="True when the override was removed.")
+
+
+class AcquisitionAllocation(BaseModel):
+  """Part of an acquisition's excess assigned to an identifiable asset or
+  liability at fair value instead of goodwill: a step-up."""
+
+  concept: str = Field(
+    ...,
+    description=(
+      "The rs-gaap concept stepped up, e.g. `rs-gaap:PropertyPlantAndEquipmentNet`; "
+      "the consolidation entity needs an account mapped to it."
+    ),
+  )
+  amount: int = Field(
+    ...,
+    description=(
+      "Cents, debit-positive: fair value less book value at acquisition. "
+      "Positive raises an asset; negative raises a liability."
+    ),
+  )
+
+
+class RecordAcquisitionRequest(BaseModel):
+  """A member bought from its outside owners: what the parent paid them,
+  and how the excess over its share of the member's equity at acquisition is
+  allocated. The engine never invents a fair value; each comes from the
+  person, with the basis."""
+
+  entity_id: str = Field(
+    ...,
+    description=(
+      "The member acquired, consolidated in full, with `joined_on` set and "
+      "its opening balance recorded at acquisition."
+    ),
+  )
+  consideration: int = Field(
+    ...,
+    gt=0,
+    description=(
+      "Cents the parent paid the sellers for its interest. Its investment line "
+      "names the seller, not the member, which is why it is given here."
+    ),
+  )
+  nci_fair_value: int | None = Field(
+    None,
+    ge=0,
+    description=(
+      "Cents: the fair value of the outside owners' interest at acquisition, "
+      "for goodwill on the whole business (ASC 805). Omitted, the outside "
+      "owners carry their share of the identifiable net assets and goodwill "
+      "is the parent's alone."
+    ),
+  )
+  allocations: list[AcquisitionAllocation] = Field(
+    default_factory=list,
+    description="Fair-value step-ups; what is left of the excess is goodwill.",
+  )
+  basis: str = Field(
+    ...,
+    min_length=1,
+    description=(
+      "Where the consideration and fair values come from: the purchase "
+      "agreement, a valuation."
+    ),
+  )
+  confirm_bargain_purchase: bool = Field(
+    False,
+    description=(
+      "Required when the parent paid less than its share of the fair value "
+      "of what it acquired. ASC 805 has the acquirer reassess before "
+      "recognizing the gain; set it only after that review."
+    ),
+  )
+
+  @field_validator("basis")
+  @classmethod
+  def _basis_says_something(cls, value: str) -> str:
+    if not value.strip():
+      raise ValueError("Give the basis: the purchase agreement, a valuation.")
+    return value.strip()
+
+
+class AcquisitionResponse(BaseModel):
+  """A member's acquisition as recorded: the draft in the consolidation
+  entity its close posts."""
+
+  entity_id: str = Field(..., description="The member.")
+  entity_name: str = Field(..., description="The member's name.")
+  joined_on: date = Field(..., description="When it joined the group.")
+  equity_at_acquisition: int = Field(
+    ..., description="Cents: the member's equity in its opening balance."
+  )
+  parent_share: int = Field(
+    ..., description="Cents: the parent's share of that equity."
+  )
+  consideration: int = Field(..., description="Cents paid to the sellers.")
+  excess: int = Field(
+    ...,
+    description="Cents: consideration less the parent's share of the equity.",
+  )
+  goodwill: int = Field(
+    ...,
+    description="Cents of goodwill; negative for a bargain purchase gain.",
+  )
+  noncontrolling_interest: int = Field(
+    0,
+    description=(
+      "Cents added to the outside owners' interest beyond their share of the "
+      "member's book equity."
+    ),
+  )
+  entry: JournalEntryResponse = Field(
+    ..., description="The acquisition entry, a draft the close posts."
+  )
+  replaced: bool = Field(
+    False, description="True when it replaced an earlier draft of the acquisition."
+  )
+
+
+class AllocationOverrideRecord(BaseModel):
+  """A member's allocation override for one month, as set."""
+
+  period: str = Field(..., description="The month, as YYYY-MM.")
+  amount: int | None = Field(None, description="The share, in cents, when set so.")
+  percentage: float | None = Field(
+    None, description="The share as a percentage of the month's result, when set so."
+  )
+  basis: str | None = Field(None, description="Why it differs from pro rata.")
+  set_by: str | None = Field(None, description="Who set it.")
+
+
+class AllocationShareResponse(BaseModel):
+  """The outside owners' share of a member's result for one month: the
+  pro-rata figure its ownership gives, the override that replaces it if one
+  is set, and the share the consolidating entries use."""
+
+  entity_id: str = Field(..., description="The member.")
+  entity_name: str = Field(..., description="The member's name.")
+  period: str = Field(..., description="The month, as YYYY-MM.")
+  consolidation_method: str = Field(
+    ..., description="How the member is consolidated: full, equity, cost or none."
+  )
+  ownership_pct: float | None = Field(
+    None, description="The parent's ownership, as a percentage."
+  )
+  outside_pct: float = Field(
+    ..., description="The outside owners' ownership, as a percentage."
+  )
+  month_result: int = Field(
+    ...,
+    description="Cents: the member's result for the month, positive for a profit.",
+  )
+  pro_rata_amount: int = Field(
+    ..., description="Cents: the outside owners' percentage of the month's result."
+  )
+  override: AllocationOverrideRecord | None = Field(
+    None, description="The month's override, when one is set."
+  )
+  effective_amount: int = Field(
+    ...,
+    description=(
+      "Cents: the share the consolidating entries use, the override's when set."
+    ),
+  )
+  closed: bool = Field(
+    False,
+    description=(
+      "True when the consolidation entity has closed the month, so the "
+      "override can no longer change."
+    ),
+  )
+
+
+class AllocationOverrideListResponse(BaseModel):
+  """Every month a member's allocation override is set for."""
+
+  entity_id: str = Field(..., description="The member.")
+  overrides: list[AllocationOverrideRecord] = Field(
+    default_factory=list, description="The overrides, oldest month first."
+  )

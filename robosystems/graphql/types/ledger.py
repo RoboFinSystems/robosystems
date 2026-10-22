@@ -118,6 +118,15 @@ from robosystems.models.api.extensions.closing_book import (
 from robosystems.models.api.extensions.closing_book import (
   ClosingBookStructuresResponse as PydanticClosingBookStructuresResponse,
 )
+from robosystems.models.api.extensions.consolidation import (
+  AllocationOverrideListResponse as PydanticAllocationOverrideListResponse,
+)
+from robosystems.models.api.extensions.consolidation import (
+  AllocationOverrideRecord as PydanticAllocationOverrideRecord,
+)
+from robosystems.models.api.extensions.consolidation import (
+  AllocationShareResponse as PydanticAllocationShareResponse,
+)
 from robosystems.models.api.extensions.dimensions import (
   DimensionListResponse as PydanticDimensionListResponse,
 )
@@ -1080,6 +1089,24 @@ class EventHandler:
 @pydantic_type(model=PydanticEventHandlerListResponse, all_fields=True)
 class EventHandlerList:
   """A page of event handlers, highest priority first."""
+
+
+# ── Consolidation allocations ─────────────────────────────────────────────
+
+
+@pydantic_type(model=PydanticAllocationOverrideRecord, all_fields=True)
+class AllocationOverrideRecord:
+  """A member's allocation override for one month."""
+
+
+@pydantic_type(model=PydanticAllocationShareResponse, all_fields=True)
+class AllocationShare:
+  """The outside owners' share of a member's result for one month."""
+
+
+@pydantic_type(model=PydanticAllocationOverrideListResponse, all_fields=True)
+class AllocationOverrideList:
+  """Every month a member's allocation override is set for."""
 
 
 # ── Blocked source graphs ─────────────────────────────────────────────────

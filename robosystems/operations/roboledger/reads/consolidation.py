@@ -36,6 +36,9 @@ from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
 from robosystems.models.api.extensions.consolidation import (
+  AllocationOverrideListResponse,
+  AllocationOverrideRecord,
+  AllocationShareResponse,
   ConsolidationProposal,
   ConsolidationProposalLine,
   ConsolidationReconcilingItem,
@@ -47,6 +50,9 @@ from robosystems.operations.roboledger.commands._guards import closed_periods
 from robosystems.operations.roboledger.commands.opening_balances import OPENING
 from robosystems.operations.roboledger.entity_scope import (
   GroupMember,
+  find_consolidation_entity,
+  is_group_parent,
+  resolve_entity,
   resolve_entity_id,
 )
 from robosystems.operations.roboledger.entry_status import (
@@ -105,7 +111,7 @@ _NOT_INTERCOMPANY = frozenset(
   }
 )
 
-_EQUITY = frozenset(
+EQUITY_CLASSIFICATIONS = frozenset(
   {"equity", "contraEquity", "distributionToOwners", "investmentByOwners"}
 )
 _BALANCE = frozenset({"asset", "contraAsset", "liability", "contraLiability"})
@@ -361,7 +367,7 @@ def _is_periodic(kind: str, concept: _Concept) -> bool:
   return False
 
 
-def _share(cents: int, share: float) -> int:
+def share_of(cents: int, share: float) -> int:
   return round(cents * share)
 
 
@@ -403,7 +409,7 @@ def _group(session: Session, parent_id: str) -> list[_Entity]:
   ]
 
 
-def _primary_concepts(session: Session, mapping_ids: list[str]) -> dict[str, _Concept]:
+def primary_concepts(session: Session, mapping_ids: list[str]) -> dict[str, _Concept]:
   """Each mapped account's primary concept: the classified target first, then
   by qname — the rule the statements' close uses, so a posting mapped to two
   concepts is read once."""
@@ -537,7 +543,7 @@ def _rows(
   return rows
 
 
-def _posting_accounts(
+def posting_accounts(
   session: Session, consolidation_id: str, concepts: dict[str, _Concept]
 ) -> dict[str, tuple[str, str]]:
   """The consolidation entity's account for each concept it can post (D11):
@@ -588,23 +594,85 @@ def _net_income(rows: list[_Row], entity_id: str) -> int:
   )
 
 
+ACQUISITION = "acquisition"
+
+
+def acquisitions(
+  session: Session, consolidation_id: str, through: date
+) -> dict[str, int]:
+  """The consideration each acquired member's recorded acquisition gives,
+  through ``through``: what the parent paid its sellers, posted or waiting in
+  a draft the consolidation entity's close posts."""
+  rows = session.execute(
+    text(
+      """
+      SELECT adjusts_entity_id AS member,
+             SUM((metadata->'acquisition'->>'consideration')::bigint) AS paid
+      FROM entries
+      WHERE entity_id = :c AND adjustment_kind = :kind
+        AND status IN ('posted', 'draft') AND posting_date <= :through
+        AND metadata ? 'acquisition'
+      GROUP BY adjusts_entity_id
+      """
+    ),
+    {"c": consolidation_id, "kind": ACQUISITION, "through": through},
+  ).all()
+  return {str(r.member): int(r.paid) for r in rows if r.paid}
+
+
+def _opened(session: Session, entity_ids: list[str]) -> set[str]:
+  """The entities whose books start from a recorded opening balance."""
+  if not entity_ids:
+    return set()
+  rows = session.execute(
+    text(
+      "SELECT DISTINCT entity_id FROM entries "
+      "WHERE type = :opening AND status <> :superseded AND entity_id IN :ids"
+    ).bindparams(bindparam("ids", expanding=True)),
+    {"opening": OPENING, "superseded": SUPERSEDED_ENTRY_STATUS, "ids": entity_ids},
+  ).all()
+  return {str(r.entity_id) for r in rows}
+
+
+def _unattributed_investment(rows: list[_Row], parent: _Entity) -> int:
+  """The parent's investment in subsidiaries naming no member: what it paid
+  sellers for the members it bought."""
+  return sum(
+    r.amount
+    for r in rows
+    if r.entity_id == parent.id
+    and r.counterparty is None
+    and r.concept.qname == INVESTMENT_IN_SUBSIDIARIES
+  )
+
+
 def _plan_capital(
-  plan: _Plan, rows: list[_Row], parent: _Entity, member: _Entity
+  plan: _Plan,
+  rows: list[_Row],
+  parent: _Entity,
+  member: _Entity,
+  *,
+  consolidation_id: str,
+  acquired: dict[str, int],
+  opened: set[str],
 ) -> None:
   """The parent's investment against the member's capital, and the outside
-  owners' share of that capital as noncontrolling interest."""
+  owners' share of that capital as noncontrolling interest. For a member
+  bought from its owners, the investment is the recorded consideration, and
+  the acquisition entry carries the excess over the parent's share of the
+  equity it bought."""
   key = ("elimination_investment", member.id, False)
   capital_by_concept: dict[str, int] = defaultdict(int)
   for r in rows:
     if (
       r.entity_id == member.id
       and not r.closing
-      and r.concept.classification in _EQUITY
+      and r.concept.classification in EQUITY_CLASSIFICATIONS
       and r.concept.qname != NONCONTROLLING_INTEREST
     ):
       capital_by_concept[r.concept.qname] += r.amount
   capital = -sum(capital_by_concept.values())
-  parent_part = _share(capital, member.share)
+  parent_part = share_of(capital, member.share)
   outside_part = capital - parent_part
 
   invested_lines = [
@@ -614,8 +682,19 @@ def _plan_capital(
     and r.counterparty == member.id
     and r.concept.qname == INVESTMENT_IN_SUBSIDIARIES
   ]
-  invested = sum(r.amount for r in invested_lines)
-  residual = invested - parent_part
+  consideration = acquired.get(member.id, 0)
+  # The acquisition entry's investment line credits the excess paid over the
+  # parent's share of the equity at acquisition.
+  excess_held = sum(
+    r.amount
+    for r in rows
+    if r.entity_id == consolidation_id
+    and r.kind == ACQUISITION
+    and r.adjusts == member.id
+    and r.concept.qname == INVESTMENT_IN_SUBSIDIARIES
+  )
+  invested = sum(r.amount for r in invested_lines) + consideration
+  residual = invested + excess_held - parent_part
   distributed_lines = _distribution_income(rows, parent, member)
   distributed_by_concept: dict[str, int] = defaultdict(int)
   for r in distributed_lines:
@@ -637,6 +716,34 @@ def _plan_capital(
       "returned, so that income is reversed against its investment."
     )
   elif abs(residual) * 2 > len(invested_lines):
+    if (
+      not consideration and member.member.joined_on is not None and member.id in opened
+    ):
+      unattributed = _unattributed_investment(rows, parent)
+      plan.residuals.append(
+        ConsolidationResidual(
+          entity_id=member.id,
+          entity_name=member.name,
+          amount=residual,
+          cause="pre_acquisition",
+          explanation=(
+            f"{member.name} joined the group on {member.member.joined_on} "
+            f"with its books opening on {_money(capital)} of capital, of "
+            f"which {parent.name}'s {member.share:.0%} is "
+            f"{_money(parent_part)}; its acquisition is not recorded. Record "
+            "it with record-acquisition: the consideration paid to its "
+            "sellers, the excess going to goodwill or fair-value step-ups."
+            + (
+              f" {parent.name}'s investment account holds "
+              f"{_money(unattributed)} naming no member."
+              if unattributed
+              else ""
+            )
+          ),
+        )
+      )
+      plan.withheld.add(("elimination_investment", member.id))
+      return
     plan.residuals.append(
       ConsolidationResidual(
         entity_id=member.id,
@@ -646,6 +753,14 @@ def _plan_capital(
           f"{parent.name} carries {_money(invested)} as its investment in "
           f"{member.name}; its {member.share:.0%} of the member's capital "
           f"({_money(capital)}) is {_money(parent_part)}."
+          + (
+            f" Of the investment, {_money(consideration)} is the consideration "
+            f"its recorded acquisition paid the sellers, and the acquisition "
+            f"entry allocates {_money(-excess_held)} of it beyond book: record "
+            "the acquisition again if the member's opening balance changed."
+            if consideration
+            else ""
+          )
           + (
             f" {_money(distributed)} of its income names {member.name}, which "
             "explains only part of the difference."
@@ -676,6 +791,30 @@ def _plan_capital(
       else "."
     )
   )
+
+
+def _check_consideration(
+  plan: _Plan,
+  rows: list[_Row],
+  parent: _Entity,
+  members: list[_Entity],
+  acquired: dict[str, int],
+) -> None:
+  """Hold the month when the recorded acquisitions paid the sellers more than
+  the parent's books hold as investment naming no member: the eliminations
+  would credit an investment the parent never carried."""
+  paid = sum(acquired.get(m.id, 0) for m in members)
+  if not paid:
+    return
+  carried = _unattributed_investment(rows, parent)
+  if paid > carried:
+    plan.notes.append(
+      f"The recorded acquisitions paid the sellers {_money(paid)}, but "
+      f"{parent.name}'s investment account holds {_money(carried)} naming no "
+      "member; post the purchase in the parent's books, or correct the "
+      "consideration with record-acquisition."
+    )
+    plan.incomplete = True
 
 
 def _match(
@@ -846,23 +985,22 @@ def _plan_income_shares(
     key = ("nci_allocation", member.id, True)
     if override:
       income = _net_income(rows, member.id)
-      if override.get("amount") is not None:
-        share = int(override["amount"])
-        how = _money(share)
-      else:
-        pct = float(override["percentage"])
-        share = _share(income, pct / 100.0)
-        how = f"{pct:g}% of {_money(income)}, {_money(share)}"
+      share = _override_share(override, income)
+      how = (
+        _money(share)
+        if override.get("amount") is not None
+        else f"{float(override['percentage']):g}% of {_money(income)}, {_money(share)}"
+      )
       plan.basis[key].append(
         f"The outside owners' share of {member.name}'s result for the month, "
         f"by an allocation override: {how} (pro rata would be "
-        f"{_money(_share(income, max(outside, 0.0)))}). "
+        f"{_money(share_of(income, max(outside, 0.0)))}). "
         f"{override.get('basis') or ''}".rstrip()
       )
     elif outside <= 0:
       continue
     else:
-      share = _share(_net_income(rows, member.id), outside)
+      share = share_of(_net_income(rows, member.id), outside)
       plan.basis[key].append(
         f"The outside owners' {outside:.0%} of {member.name}'s result for the "
         f"month: {_money(share)}."
@@ -872,7 +1010,7 @@ def _plan_income_shares(
     plan.targets[(NCI_SHARE_OF_INCOME, *key)] += share
     plan.targets[(NONCONTROLLING_INTEREST, *key)] -= share
   for associate in associates:
-    pickup = _share(_net_income(rows, associate.id), associate.share)
+    pickup = share_of(_net_income(rows, associate.id), associate.share)
     if not pickup:
       continue
     key = ("equity_method_pickup", associate.id, True)
@@ -898,6 +1036,90 @@ def _plan_income_shares(
         "distributions as income; on the equity method they reduce the "
         "investment."
       )
+
+
+def _override_share(override: dict, income: int) -> int:
+  """The outside owners' share an allocation override gives of ``income``."""
+  if override.get("amount") is not None:
+    return int(override["amount"])
+  return share_of(income, float(override["percentage"]) / 100.0)
+
+
+def _override_record(period: str, override: dict) -> AllocationOverrideRecord:
+  return AllocationOverrideRecord(
+    period=period,
+    amount=override.get("amount"),
+    percentage=override.get("percentage"),
+    basis=override.get("basis"),
+    set_by=override.get("set_by"),
+  )
+
+
+def allocation_share(
+  session: Session, *, entity_id: str, period: str
+) -> AllocationShareResponse | None:
+  """The outside owners' share of a member's result for ``period``: the
+  pro-rata figure, the override if one is set, and the share the
+  consolidating entries use, rounded as the engine rounds them. None for an
+  entity that is not a member consolidated in full that month, whose
+  outside owners have no share for the engine to allocate. Raises
+  ``EntityNotInGraphError`` for an entity that is not this graph's."""
+  entity = resolve_entity(session, entity_id)
+  start, end = month_bounds(period)
+  member = GroupMember(
+    str(entity.id), str(entity.entity_role), entity.joined_on, entity.left_on
+  )
+  if (
+    is_group_parent(session, str(entity.id))
+    or entity.entity_role != "operating"
+    or entity.consolidation_method != "full"
+    or not member.is_member_for(start, end)
+  ):
+    return None
+  mapping = find_entity_mapping(session, str(entity.id), BOOK_FRAMEWORK)
+  concepts = primary_concepts(session, [str(mapping.id)]) if mapping else {}
+  rows = _rows(session, [str(entity.id)], concepts, start, end, drafts_of="")
+  income = _net_income(rows, str(entity.id))
+  # As _group and _plan_income_shares compute it.
+  share = (
+    float(entity.ownership_pct) / 100.0 if entity.ownership_pct is not None else 1.0
+  )
+  outside = max(1.0 - share, 0.0)
+  pro_rata = share_of(income, outside)
+  override = dict((entity.metadata_ or {}).get(ALLOCATION_OVERRIDES) or {}).get(period)
+  consolidation = find_consolidation_entity(session)
+  return AllocationShareResponse(
+    entity_id=str(entity.id),
+    entity_name=str(entity.name),
+    period=period,
+    consolidation_method=str(entity.consolidation_method),
+    ownership_pct=float(entity.ownership_pct)
+    if entity.ownership_pct is not None
+    else None,
+    outside_pct=round(outside * 100.0, 6),
+    month_result=income,
+    pro_rata_amount=pro_rata,
+    override=_override_record(period, override) if override else None,
+    effective_amount=_override_share(override, income) if override else pro_rata,
+    closed=bool(
+      consolidation is not None
+      and closed_periods(session, [end], entity_id=str(consolidation.id))
+    ),
+  )
+
+
+def allocation_overrides(
+  session: Session, *, entity_id: str
+) -> AllocationOverrideListResponse:
+  """Every month a member's allocation override is set for, oldest first."""
+  entity = resolve_entity(session, entity_id)
+  overrides = dict((entity.metadata_ or {}).get(ALLOCATION_OVERRIDES) or {})
+  return AllocationOverrideListResponse(
+    entity_id=str(entity.id),
+    overrides=[
+      _override_record(period, overrides[period]) for period in sorted(overrides)
+    ],
+  )
 
 
 # ── The preview ─────────────────────────────────────────────────────────
@@ -962,7 +1184,7 @@ def preview_consolidation_entries(
       unmapped.add(entity.id)
     else:
       mapping_ids.append(str(mapping.id))
-  concepts = _primary_concepts(session, mapping_ids)
+  concepts = primary_concepts(session, mapping_ids)
   rows = _rows(
     session,
     [e.id for e in [*consolidated, *associates, consolidation]],
@@ -972,7 +1194,7 @@ def preview_consolidation_entries(
     drafts_of=consolidation.id,
   )
 
-  accounts = _posting_accounts(session, consolidation.id, concepts)
+  accounts = posting_accounts(session, consolidation.id, concepts)
   # The rows the consolidation entity's own statement presents; none is a
   # Style read by trait alone.
   taggable = taggable_flow_qnames(
@@ -980,11 +1202,23 @@ def preview_consolidation_entries(
   )
   untaggable: set[str] = set()
 
+  acquired = acquisitions(session, consolidation.id, end)
+  acquired_before = acquisitions(session, consolidation.id, start - timedelta(days=1))
+  opened = _opened(session, [m.id for m in members])
   # Unread books would read as zero capital: a residual that misnames the cause.
   if parent.id not in unmapped:
     for member in members:
       if member.id not in unmapped:
-        _plan_capital(plan, rows, parent, member)
+        _plan_capital(
+          plan,
+          rows,
+          parent,
+          member,
+          consolidation_id=consolidation.id,
+          acquired=acquired,
+          opened=opened,
+        )
+    _check_consideration(plan, rows, parent, members, acquired)
   _plan_intercompany(plan, rows, consolidated, set(accounts))
   _plan_income_shares(plan, rows, parent, members, associates, period)
 
@@ -1018,7 +1252,15 @@ def preview_consolidation_entries(
   if parent.id not in unmapped:
     for member in members:
       if member.id not in unmapped:
-        _plan_capital(before, earlier, parent, member)
+        _plan_capital(
+          before,
+          earlier,
+          parent,
+          member,
+          consolidation_id=consolidation.id,
+          acquired=acquired_before,
+          opened=opened,
+        )
   _plan_intercompany(before, earlier, consolidated, set(accounts))
 
   opening = (

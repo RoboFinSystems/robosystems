@@ -93,6 +93,8 @@ WRITE_TOOL_HINTS: dict[str, ToolHints] = {
   "propose-consolidation-entries": _REPLACES,
   # Replaces the month's override for that member.
   "set-allocation-override": _REPLACES,
+  # Replaces the member's draft acquisition.
+  "record-acquisition": _REPLACES,
   "create-event-handler": _ADDS,
   "update-event-handler": _REPLACES,
   # Schedules.

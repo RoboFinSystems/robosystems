@@ -447,3 +447,120 @@ def test_a_member_lists_sources_only_in_the_columns_it_is_summed_into(group):
   assert cash.values == [4_000.0, -7_000.0]
   assert july == [(ids["member"], 11_000.0), (ids["parent"], -7_000.0)]
   assert june == [(ids["parent"], -7_000.0)]
+
+
+def _open_the_member_on(g, eve: date, lines: list[tuple[str, int]]) -> None:
+  """An opening balance in the member's books, as record-opening-balance
+  writes one: its balance sheet when the group acquired it."""
+  session = g["session"]
+  entry = Entry(
+    entity_id=g["ids"]["member"],
+    type="opening",
+    status="posted",
+    posting_date=eve,
+    created_by="test",
+  )
+  session.add(entry)
+  session.flush()
+  for order, (code, amount) in enumerate(lines, 1):
+    account = session.execute(
+      select(Element.id).where(
+        Element.taxonomy_id == g["charts"]["member"], Element.code == code
+      )
+    ).scalar_one()
+    session.add(
+      LineItem(
+        entry_id=entry.id,
+        element_id=account,
+        debit_amount=max(amount, 0),
+        credit_amount=max(-amount, 0),
+        line_order=order,
+      )
+    )
+  session.commit()
+
+
+def test_an_acquired_members_cash_arrives_as_cash_acquired(group):
+  """Acquired on 1 July with its books opening on 30 June, the member's cash
+  then is the group's cash acquired, an investing inflow, and July opens on
+  the group's own June close: 15,000 on the member's books, the 10,000 its
+  June entries left and the 5,000 its opening adds."""
+  ids = group["ids"]
+  member = group["session"].get(Entity, ids["member"])
+  member.joined_on = date(2026, 7, 1)
+  _open_the_member_on(group, date(2026, 6, 30), [("1000", 500_000), ("3000", -500_000)])
+
+  acquired = "rs-gaap:PaymentsToAcquireBusinessesNetOfCashAcquired"
+  cash = "rs-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"
+  for scope in ("combined", "consolidated"):
+    live = get_live_financial_statement(
+      group["session"],
+      graph_id=GRAPH,
+      statement_type="cash_flow_statement",
+      period_start=JULY[0],
+      period_end=JULY[1],
+      entity_id=ids["parent"],
+      scope=scope,
+    )
+    rows = {(f.qname, f.period_role): f.values[0] for f in live.facts}
+    assert rows[(cash, "start")] == -7_000.0, scope
+    assert rows[(acquired, None)] == 15_000.0, scope
+    assert rows[(cash, "end")] == 9_000.0, scope
+    assert live.validation.status == "passed", live.validation.failures
+  # The group's report reads it the same way.
+  assert _facts(group, _report(group, "adjustments").id)[acquired] == 15_000.0
+
+
+def test_a_member_formed_in_the_group_opens_on_its_own_cash(group):
+  """Joined on 1 July with no opening balance, the member's June entries are
+  balances it brought, not an acquisition the books record: no cash acquired."""
+  ids = group["ids"]
+  member = group["session"].get(Entity, ids["member"])
+  member.joined_on = date(2026, 7, 1)
+  group["session"].commit()
+
+  live = get_live_financial_statement(
+    group["session"],
+    graph_id=GRAPH,
+    statement_type="cash_flow_statement",
+    period_start=JULY[0],
+    period_end=JULY[1],
+    entity_id=ids["parent"],
+    scope="combined",
+  )
+  assert "rs-gaap:PaymentsToAcquireBusinessesNetOfCashAcquired" not in {
+    f.qname for f in live.facts
+  }
+
+
+def test_balances_acquired_beside_cash_move_no_flow_in_the_joining_month(group):
+  """Receivables, equipment and payables in the opening are where the month's
+  changes are measured from: only the cash is a flow on joining."""
+  ids = group["ids"]
+  member = group["session"].get(Entity, ids["member"])
+  member.joined_on = date(2026, 7, 1)
+  _open_the_member_on(
+    group,
+    date(2026, 6, 30),
+    [
+      ("1000", 500_000),
+      ("1100", 200_000),
+      ("1300", 300_000),
+      ("2000", -100_000),
+      ("3000", -900_000),
+    ],
+  )
+
+  live = get_live_financial_statement(
+    group["session"],
+    graph_id=GRAPH,
+    statement_type="cash_flow_statement",
+    period_start=JULY[0],
+    period_end=JULY[1],
+    entity_id=ids["parent"],
+    scope="combined",
+  )
+  rows = {(f.qname, f.period_role): f.values[0] for f in live.facts}
+  assert rows[("rs-gaap:NetCashProvidedByUsedInOperatingActivities", None)] == 1_000.0
+  assert rows[("rs-gaap:NetCashProvidedByUsedInInvestingActivities", None)] == 15_000.0
+  assert live.validation.status == "passed", live.validation.failures

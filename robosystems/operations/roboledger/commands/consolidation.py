@@ -1,21 +1,24 @@
 """Draft the consolidating entries a group's month needs (spec
 ``consolidation`` C2): the engine's proposals written as drafts in the
-consolidation entity, which its close posts; and the allocation overrides a
-person sets in place of a member's pro-rata share."""
+consolidation entity, which its close posts; the allocation overrides a
+person sets in place of a member's pro-rata share; and a member's
+acquisition, whose consideration and fair values only a person can give."""
 
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.consolidation import (
+  AcquisitionResponse,
   AllocationOverrideResponse,
   ConsolidationProposal,
   ProposeConsolidationEntriesRequest,
   ProposeConsolidationEntriesResponse,
+  RecordAcquisitionRequest,
   SetAllocationOverrideRequest,
 )
 from robosystems.models.api.extensions.journal_entries import (
@@ -35,26 +38,44 @@ from robosystems.operations.roboledger.commands.journal_entries import (
   _load_line_items,
   create_journal_entry,
 )
-from robosystems.operations.roboledger.commands.opening_balances import OPENING
+from robosystems.operations.roboledger.commands.opening_balances import (
+  OPENING,
+  opening_entry,
+)
 from robosystems.operations.roboledger.entity_scope import (
+  find_consolidation_entity,
   is_group_parent,
   resolve_entity,
 )
 from robosystems.operations.roboledger.reads.consolidation import (
+  ACQUISITION,
   ALLOCATION_OVERRIDES,
   ENGINE_PROVENANCE,
   ENGINE_SOURCE,
+  EQUITY_CLASSIFICATIONS,
+  GOODWILL,
+  INVESTMENT_IN_SUBSIDIARIES,
+  NONCONTROLLING_INTEREST,
   engine_drafts,
   engine_opening,
   first_month_eve,
   month_bounds,
   opening_is_recorded,
+  posting_accounts,
   preview_consolidation_entries,
+  primary_concepts,
+  share_of,
 )
 from robosystems.operations.roboledger.supersede import (
   record_replacements,
   supersede_entries,
 )
+from robosystems.operations.taxonomy_block.coa_mappings import (
+  BOOK_FRAMEWORK,
+  find_entity_mapping,
+)
+
+BARGAIN_PURCHASE_GAIN = "rs-gaap:BusinessCombinationBargainPurchaseGainRecognizedAmount"
 
 
 def propose_consolidation_entries(
@@ -303,3 +324,233 @@ def set_allocation_override(
     set_by=record.get("set_by"),
     cleared=body.clear,
   )
+
+
+class AcquisitionError(ValueError):
+  """An acquisition that cannot be recorded as given."""
+
+
+def _equity_at_acquisition(session: Session, member: Entity, opening: Entry) -> int:
+  """The member's equity in its opening balance, credit-positive, read by the
+  concept each account maps to as the engine reads its capital."""
+  mapping = find_entity_mapping(session, str(member.id), BOOK_FRAMEWORK)
+  if mapping is None:
+    raise AcquisitionError(
+      f"{member.name} has no chart mapping; its equity at acquisition cannot be "
+      "read. Map its chart first."
+    )
+  concepts = primary_concepts(session, [str(mapping.id)])
+  equity = 0
+  for line in session.execute(
+    select(LineItem).where(LineItem.entry_id == opening.id)
+  ).scalars():
+    concept = concepts.get(str(line.element_id))
+    if (
+      concept is not None
+      and concept.classification in EQUITY_CLASSIFICATIONS
+      and concept.qname != NONCONTROLLING_INTEREST
+    ):
+      equity += int(line.credit_amount) - int(line.debit_amount)
+  return equity
+
+
+def record_acquisition(
+  session: Session, body: RecordAcquisitionRequest, created_by: str
+) -> AcquisitionResponse:
+  """Record a member bought from its outside owners as a draft in the
+  consolidation entity, dated the day it joined, which the consolidation
+  entity's close posts: goodwill (or a bargain purchase gain) and the
+  fair-value step-ups against the excess of the consideration over the
+  parent's share of the member's equity at acquisition, and the outside
+  owners' share of what they add. The engine then reads the consideration as
+  the parent's investment in the member. Replaces an earlier draft of it.
+
+  Raises ``AcquisitionError`` for a member that did not join mid-life with an
+  opening balance, a consolidation entity lacking an account the entry needs,
+  a posted acquisition already held, or a bargain purchase not confirmed."""
+  member = resolve_entity(session, body.entity_id)
+  name = member.name
+  if (
+    is_group_parent(session, str(member.id))
+    or member.entity_role != "operating"
+    or member.consolidation_method != "full"
+  ):
+    raise AcquisitionError(
+      f"{name} is not a member consolidated in full; only such a member's "
+      "acquisition is eliminated against its equity."
+    )
+  if member.joined_on is None:
+    raise AcquisitionError(
+      f"{name} has no joined_on date; set the day it joined the group first."
+    )
+  opening = opening_entry(session, str(member.id))
+  if opening is None:
+    raise AcquisitionError(
+      f"{name}'s books have no opening balance. Record its balance sheet at "
+      "acquisition with record-opening-balance first: the acquisition is "
+      "measured against it."
+    )
+  consolidation = find_consolidation_entity(session)
+  if consolidation is None:
+    raise AcquisitionError(
+      "This group has no consolidation entity; create one with entity_role "
+      "'consolidation' for the acquisition entry."
+    )
+  consolidation_id = str(consolidation.id)
+  assert_period_not_closed(session, member.joined_on, entity_id=consolidation_id)
+
+  computed = {
+    GOODWILL,
+    BARGAIN_PURCHASE_GAIN,
+    INVESTMENT_IN_SUBSIDIARIES,
+    NONCONTROLLING_INTEREST,
+  }
+  for allocation in body.allocations:
+    if allocation.concept in computed:
+      raise AcquisitionError(
+        f"{allocation.concept} is computed from the consideration, not "
+        "allocated; a step-up names an identifiable asset or liability."
+      )
+    if not allocation.amount:
+      raise AcquisitionError(
+        f"The step-up to {allocation.concept} is zero; leave it out."
+      )
+
+  share = (
+    float(member.ownership_pct) / 100.0 if member.ownership_pct is not None else 1.0
+  )
+  equity = _equity_at_acquisition(session, member, opening)
+  parent_part = share_of(equity, share)
+  outside_equity = equity - parent_part
+  stepped = sum(a.amount for a in body.allocations)
+  excess = body.consideration - parent_part
+  if body.nci_fair_value is not None:
+    if share >= 1.0:
+      raise AcquisitionError(
+        f"{name} has no outside owners; nci_fair_value is for a member the "
+        "parent owns less than all of."
+      )
+    nci = body.nci_fair_value - outside_equity
+  else:
+    nci = stepped - share_of(stepped, share)
+  goodwill = excess + nci - stepped
+  if goodwill < 0 and not body.confirm_bargain_purchase:
+    raise AcquisitionError(
+      f"The parent paid {_cents(body.consideration)} for a share worth "
+      f"{_cents(body.consideration - goodwill)} at fair value: a bargain "
+      f"purchase of {_cents(-goodwill)}. ASC 805 has the acquirer reassess the "
+      "assets, liabilities and consideration before recognizing the gain; "
+      "after that review, record it again with confirm_bargain_purchase."
+    )
+
+  wanted: dict[str, int] = {}
+  for allocation in body.allocations:
+    wanted[allocation.concept] = wanted.get(allocation.concept, 0) + allocation.amount
+  if goodwill:
+    concept = GOODWILL if goodwill > 0 else BARGAIN_PURCHASE_GAIN
+    wanted[concept] = wanted.get(concept, 0) + goodwill
+  if excess:
+    wanted[INVESTMENT_IN_SUBSIDIARIES] = (
+      wanted.get(INVESTMENT_IN_SUBSIDIARIES, 0) - excess
+    )
+  if nci:
+    wanted[NONCONTROLLING_INTEREST] = wanted.get(NONCONTROLLING_INTEREST, 0) - nci
+  wanted = {q: a for q, a in wanted.items() if a}
+
+  if not wanted:
+    raise AcquisitionError(
+      f"The consideration equals the parent's share of {name}'s equity at "
+      "acquisition and nothing is stepped up: there is no excess to record."
+    )
+  consolidation_mapping = find_entity_mapping(session, consolidation_id, BOOK_FRAMEWORK)
+  accounts = (
+    posting_accounts(
+      session,
+      consolidation_id,
+      primary_concepts(session, [str(consolidation_mapping.id)]),
+    )
+    if consolidation_mapping is not None
+    else {}
+  )
+  missing = sorted(q for q in wanted if q not in accounts)
+  if missing:
+    raise AcquisitionError(
+      f"{consolidation.name} has no account mapped to "
+      + ", ".join(missing)
+      + "; add one to its chart for the acquisition entry."
+    )
+
+  held = list(
+    session.execute(
+      select(Entry).where(
+        Entry.entity_id == consolidation_id,
+        Entry.adjustment_kind == ACQUISITION,
+        Entry.adjusts_entity_id == str(member.id),
+        Entry.status.in_(("posted", "draft")),
+      )
+    ).scalars()
+  )
+  if any(e.status == "posted" for e in held):
+    raise AcquisitionError(
+      f"{name}'s acquisition is posted. Reverse that entry first to record it again."
+    )
+  # A draft never landed, so replacing it leaves nothing to supersede, as
+  # propose-consolidation-entries replaces its own.
+  for entry in held:
+    session.delete(entry)
+  session.flush()
+
+  response = create_journal_entry(
+    session,
+    CreateJournalEntryRequest(
+      posting_date=member.joined_on,
+      memo=f"Acquisition of {name}",
+      type="adjusting",
+      status="draft",
+      adjustment_kind=ACQUISITION,
+      adjusts_entity_id=str(member.id),
+      line_items=[
+        JournalEntryLineItemInput(
+          element_id=accounts[qname][0],
+          debit_amount=max(amount, 0),
+          credit_amount=max(-amount, 0),
+          description=body.basis,
+        )
+        for qname, amount in sorted(wanted.items(), key=lambda kv: -kv[1])
+      ],
+    ),
+    created_by,
+    entity_id=consolidation_id,
+  )
+  entry = session.get(Entry, response.id)
+  assert entry is not None
+  entry.metadata_ = {
+    **(entry.metadata_ or {}),
+    "acquisition": {
+      "consideration": body.consideration,
+      "nci_fair_value": body.nci_fair_value,
+      "equity_at_acquisition": equity,
+      "allocations": [a.model_dump() for a in body.allocations],
+      "basis": body.basis,
+      "bargain_purchase_confirmed": body.confirm_bargain_purchase and goodwill < 0,
+      "recorded_by": created_by,
+    },
+  }
+  session.commit()
+  return AcquisitionResponse(
+    entity_id=str(member.id),
+    entity_name=name,
+    joined_on=member.joined_on,
+    equity_at_acquisition=equity,
+    parent_share=parent_part,
+    consideration=body.consideration,
+    excess=excess,
+    goodwill=goodwill,
+    noncontrolling_interest=nci,
+    entry=response,
+    replaced=bool(held),
+  )
+
+
+def _cents(amount: int) -> str:
+  return f"{amount / 100:,.2f}"

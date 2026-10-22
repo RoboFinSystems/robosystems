@@ -165,6 +165,7 @@ The tool names below are the exact `name` strings for `tools/call`, grouped by f
 | `update-journal-entry` / `delete-journal-entry` | Edit or delete a draft entry (posted entries are reversed, never edited) |
 | `propose-consolidation-entries` | Draft a group's consolidating entries for a month in the consolidation entity, replacing the engine's earlier drafts; its close posts them |
 | `set-allocation-override` | Set the outside owners' share of a member's result for a month in place of the pro-rata share, with its basis |
+| `record-acquisition` | Record a member bought from its owners: the consideration, the basis and any fair values, drafted as goodwill and step-ups in the consolidation entity |
 | `backfill-plan-history` | Compile monthly statement history behind the close boundary |
 
 **Reconciliations** — RoboLedger tenant; how they gate the close is in [Period Close](Period-Close.md#reconciliations):

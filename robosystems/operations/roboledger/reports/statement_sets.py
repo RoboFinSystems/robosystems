@@ -42,6 +42,7 @@ from robosystems.operations.roboledger.commands._guards import (
 from robosystems.operations.roboledger.entity_scope import (
   GroupMember,
   NoEntityError,
+  acquired_eve,
   group_members,
   resolve_entity_id,
 )
@@ -768,6 +769,7 @@ def consolidated_report_facts(
       periods=covered,
       close_target_qname=close_target,
       entity_id=member.id,
+      acquired_on=acquired_eve(session, member),
     )
     unmapped += generated.unmapped_count
     warnings.extend(generated.warnings)

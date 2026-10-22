@@ -36,6 +36,8 @@ from robosystems.graphql.types.ledger import (
   AccountTreeNode,
   AgedBalances,
   Agent,
+  AllocationOverrideList,
+  AllocationShare,
   BankAccountList,
   BlockedSourceGraphList,
   ChartTemplate,
@@ -120,6 +122,9 @@ from robosystems.operations.roboledger.reads import (
 )
 from robosystems.operations.roboledger.reads import (
   closing_book as reads_closing_book,
+)
+from robosystems.operations.roboledger.reads import (
+  consolidation as reads_consolidation,
 )
 from robosystems.operations.roboledger.reads import (
   dimensions as reads_dimensions,
@@ -1751,6 +1756,65 @@ class LedgerQuery:
     if response is None:
       return None
     return PublishListDetail.from_pydantic(response)
+
+  # ── Consolidation allocations ────────────────────────────────────────────
+
+  @strawberry.field
+  def allocation_share(
+    self,
+    info: Info[GraphQLContext, None],
+    entity_id: str,
+    period: str,
+  ) -> AllocationShare | None:
+    """The outside owners' share of a member's result for one month.
+
+    The pro-rata figure its ownership gives, the override set with
+    `set-allocation-override` if any, and the share the consolidating entries
+    use. Null for an entity that is not a member consolidated in full that
+    month: its outside owners have no share the engine allocates.
+
+    Args:
+      entity_id: The member.
+      period: The month, as YYYY-MM.
+    """
+    try:
+      parse_period(period)
+    except ValueError as exc:
+      raise strawberry.exceptions.StrawberryGraphQLError(
+        message=str(exc), extensions={"code": "INVALID_PERIOD"}
+      ) from exc
+    try:
+      with _open_session(info, "roboledger") as session:
+        response = reads_consolidation.allocation_share(
+          session, entity_id=entity_id, period=period
+        )
+    except EntityNotInGraphError as exc:
+      raise strawberry.exceptions.StrawberryGraphQLError(str(exc)) from exc
+    except ValueError, ProgrammingError:
+      _raise_ledger_not_initialized()
+    return AllocationShare.from_pydantic(response) if response else None
+
+  @strawberry.field
+  def allocation_overrides(
+    self,
+    info: Info[GraphQLContext, None],
+    entity_id: str,
+  ) -> AllocationOverrideList | None:
+    """Every month a member's allocation override is set for, oldest first.
+
+    Args:
+      entity_id: The member.
+    """
+    try:
+      with _open_session(info, "roboledger") as session:
+        response = reads_consolidation.allocation_overrides(
+          session, entity_id=entity_id
+        )
+    except EntityNotInGraphError as exc:
+      raise strawberry.exceptions.StrawberryGraphQLError(str(exc)) from exc
+    except ValueError, ProgrammingError:
+      _raise_ledger_not_initialized()
+    return AllocationOverrideList.from_pydantic(response)
 
   # ── Event handlers ──────────────────────────────────────────────────────
 
