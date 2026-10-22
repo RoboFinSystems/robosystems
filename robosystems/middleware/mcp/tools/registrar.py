@@ -415,6 +415,8 @@ class _RegistrarMCPTool(BaseTool):
           kwargs["created_by"] = created_by
         if self.spec.requires_graph_id:
           kwargs["graph_id"] = graph_id
+        if self.spec.requires_surface:
+          kwargs["surface"] = "mcp"
         result = command(session, body, **kwargs)
     except tuple(self.spec.error_map.keys()) as exc:
       return translate_error(exc, self.spec.error_map)

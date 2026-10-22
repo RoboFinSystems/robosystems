@@ -22,6 +22,23 @@ class EventHandlerNotFoundError(Exception):
     self.handler_id = handler_id
 
 
+class ApprovalNotAllowedError(Exception):
+  """An AI surface tried to approve an event handler. A person approves what
+  an AI proposes, from the app or the API, never the AI itself."""
+
+
+# Fields that change what a handler matches or books. Changed over MCP, the
+# handler is the AI's proposal again and waits for a person's approval.
+_SUBSTANTIVE_FIELDS = (
+  "event_category",
+  "match_source",
+  "match_agent_type",
+  "match_resource_type",
+  "match_metadata_expression",
+  "priority",
+)
+
+
 class TemplateValidationError(Exception):
   """Raised when a transaction_template fails structural validation."""
 
@@ -59,7 +76,11 @@ def create_event_handler(
   session: Session,
   body: CreateEventHandlerRequest,
   created_by: str,
+  surface: str = "rest",
 ) -> EventHandlerResponse:
+  """Create a handler. One created over MCP — an AI operator, or a person
+  through an AI client — is the AI's suggestion: it takes no part in matching
+  until a person approves it."""
   # `hub` marks a platform-shipped handler; no tenant call ships one.
   if body.origin == "hub":
     raise ValueError("origin='hub' is set only by the platform; omit it.")
@@ -83,6 +104,7 @@ def create_event_handler(
     priority=body.priority,
     is_active=body.is_active,
     origin=body.origin,
+    suggested_by="ai" if surface == "mcp" else None,
     metadata_=body.metadata,
     created_at=datetime.now(UTC),
     updated_at=datetime.now(UTC),
@@ -98,7 +120,16 @@ def update_event_handler(
   session: Session,
   body: UpdateEventHandlerRequest,
   created_by: str,
+  surface: str = "rest",
 ) -> EventHandlerResponse:
+  """Patch a handler. Over MCP, approving is refused, and a change to what
+  the handler matches or books makes it the AI's suggestion again, out of
+  matching until a person approves it."""
+  if surface == "mcp" and body.approve is True:
+    raise ApprovalNotAllowedError(
+      "An event handler is approved by a person, in the app or the API, not "
+      "through an AI client. Ask the user to review and approve it."
+    )
   # Locked: `metadata_patch` merges into the JSON blob read here, and the
   # approve/template fields are decided from the row as read.
   from robosystems.operations.locking import lock_by_id
@@ -113,17 +144,11 @@ def update_event_handler(
   if handler is None:
     raise EventHandlerNotFoundError(body.event_handler_id)
 
-  for field in (
-    "name",
-    "description",
-    "event_category",
-    "match_source",
-    "match_agent_type",
-    "match_resource_type",
-    "match_metadata_expression",
-    "priority",
-    "is_active",
-  ):
+  substantive = body.transaction_template is not None or any(
+    getattr(body, field) is not None and getattr(body, field) != getattr(handler, field)
+    for field in _SUBSTANTIVE_FIELDS
+  )
+  for field in ("name", "description", *_SUBSTANTIVE_FIELDS, "is_active"):
     value = getattr(body, field)
     if value is not None:
       setattr(handler, field, value)
@@ -132,6 +157,11 @@ def update_event_handler(
     template_dict = body.transaction_template.model_dump()
     _validate_template(template_dict)
     handler.transaction_template = template_dict
+
+  if surface == "mcp" and substantive:
+    handler.suggested_by = "ai"
+    handler.approved_by = None
+    handler.approved_at = None
 
   if body.approve is True:
     handler.approved_by = created_by

@@ -121,6 +121,8 @@ class OperationSpec:
   command: `(session, body, /, **kwargs) -> Response`.
   requires_graph_id: pass the path graph_id to the command, for cross-DB
     lookups the tenant session can't make.
+  requires_surface: pass `surface` (`"rest"` or `"mcp"`) to the command, for
+    an operation whose rules differ when an AI operator is the caller.
   pre_validate: runs before any DB session opens; may raise HTTPException.
   on_fresh_success / mark_stale_reason: effect on a non-replayed success;
     `on_fresh_success` wins if both are set.
@@ -137,6 +139,7 @@ class OperationSpec:
   business_event_type: str | None = None
   requires_created_by: bool = True
   requires_graph_id: bool = False
+  requires_surface: bool = False
   pre_validate: Callable[[BaseModel], None] | None = None
   on_fresh_success: Callable | None = None
   mark_stale_reason: str | None = None
@@ -321,6 +324,7 @@ class OperationRegistrar:
     mark_stale_reason = spec.mark_stale_reason
     requires_created_by = spec.requires_created_by
     requires_graph_id = spec.requires_graph_id
+    requires_surface = spec.requires_surface
     op_name = spec.name
     ctx_builder = self.ctx_builder
     dispatcher = self.dispatcher
@@ -375,6 +379,8 @@ class OperationRegistrar:
                 kwargs["created_by"] = str(user.id)
               if requires_graph_id:
                 kwargs["graph_id"] = graph_id
+              if requires_surface:
+                kwargs["surface"] = "rest"
               return command(session, body, **kwargs)
             except tuple(error_map.keys()) as exc:
               _raise_mapped(exc, error_map)

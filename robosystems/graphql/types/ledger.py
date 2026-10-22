@@ -22,6 +22,12 @@ from robosystems.graphql.types.common import PaginationInfo  # noqa: F401
 from robosystems.models.api.event_block import (
   EventBlockEnvelope as PydanticEventBlockEnvelope,
 )
+from robosystems.models.api.event_handler import (
+  EventHandlerListResponse as PydanticEventHandlerListResponse,
+)
+from robosystems.models.api.event_handler import (
+  EventHandlerResponse as PydanticEventHandlerResponse,
+)
 from robosystems.models.api.extensions.account_register import (
   AccountRegisterResponse as PydanticAccountRegisterResponse,
 )
@@ -1057,6 +1063,23 @@ class ReportShare:
 @pydantic_type(model=PydanticReportShareListResponse, all_fields=True)
 class ReportShareList:
   """Paginated list of a report's shares, newest first."""
+
+
+# ── Event handlers ────────────────────────────────────────────────────────
+
+
+@pydantic_type(model=PydanticEventHandlerResponse, all_fields=True)
+class EventHandler:
+  """A rule that turns a matching event into GL rows."""
+
+  # dict-typed fields need the JSON scalar; the pydantic derivation can't map them.
+  match_metadata_expression: strawberry.scalars.JSON | None
+  transaction_template: strawberry.scalars.JSON
+
+
+@pydantic_type(model=PydanticEventHandlerListResponse, all_fields=True)
+class EventHandlerList:
+  """A page of event handlers, highest priority first."""
 
 
 # ── Blocked source graphs ─────────────────────────────────────────────────

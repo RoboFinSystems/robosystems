@@ -2512,3 +2512,62 @@ class TestReportSharesResolver:
       result = _run("query { reportShares { reportShares { id } } }")
     assert result.errors is not None
     assert result.errors[0].extensions == {"code": "LEDGER_NOT_INITIALIZED"}
+
+
+class TestEventHandlersResolver:
+  """`eventHandlers` lists the rules that book events, with what awaits a person."""
+
+  def test_lists_handlers_with_their_approval_state(self) -> None:
+    from robosystems.models.api.common import create_pagination_info
+    from robosystems.models.api.event_handler import (
+      EventHandlerListResponse,
+      EventHandlerResponse,
+    )
+
+    response = EventHandlerListResponse(
+      event_handlers=[
+        EventHandlerResponse(
+          id="hdl_1",
+          name="Stripe payouts",
+          event_type="bank_transaction",
+          match_metadata_expression={"payout": True},
+          transaction_template={"transactions": []},
+          priority=10,
+          is_active=True,
+          origin="tenant",
+          suggested_by="ai",
+          awaiting_approval=True,
+        )
+      ],
+      pagination=create_pagination_info(1, 100, 0),
+    )
+    with patch(
+      f"{_OPS}.event_handler.list_event_handlers_page", return_value=response
+    ) as read:
+      result = _run(
+        "query { eventHandlers(awaitingApproval: true) { eventHandlers { id "
+        "suggestedBy awaitingApproval matchMetadataExpression transactionTemplate "
+        "} pagination { total } } }"
+      )
+    assert result.errors is None, result.errors
+    assert read.call_args.kwargs["awaiting_approval"] is True
+    assert result.data == {
+      "eventHandlers": {
+        "eventHandlers": [
+          {
+            "id": "hdl_1",
+            "suggestedBy": "ai",
+            "awaitingApproval": True,
+            "matchMetadataExpression": {"payout": True},
+            "transactionTemplate": {"transactions": []},
+          }
+        ],
+        "pagination": {"total": 1},
+      }
+    }
+
+  def test_a_missing_handler_is_null(self) -> None:
+    with patch(f"{_OPS}.event_handler.get_event_handler", return_value=None):
+      result = _run('query { eventHandler(id: "hdl_x") { id } }')
+    assert result.errors is None
+    assert result.data == {"eventHandler": None}

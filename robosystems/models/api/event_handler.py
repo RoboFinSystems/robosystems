@@ -19,6 +19,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from robosystems.models.api.common import PaginationInfo
+
 
 class TransactionTemplateLeg(BaseModel):
   """One side of a journal entry leg (debit or credit)."""
@@ -301,33 +303,79 @@ class UpdateEventHandlerRequest(BaseModel):
 
 
 class EventHandlerResponse(BaseModel):
+  """A rule that turns a matching event into GL rows."""
+
   model_config = ConfigDict(from_attributes=True)
 
-  id: str
-  name: str
-  description: str | None = None
+  id: str = Field(..., description="Handler id (`hdl_`-prefixed).")
+  name: str = Field(..., description="Human-readable handler name.")
+  description: str | None = Field(None, description="What the handler is for.")
 
-  event_type: str
-  event_category: str | None = None
-  match_source: str | None = None
-  match_agent_type: str | None = None
-  match_resource_type: str | None = None
-  match_metadata_expression: dict | None = None
+  event_type: str = Field(..., description="The event type the handler matches.")
+  event_category: str | None = Field(
+    None, description="Match on the event's category; null matches any."
+  )
+  match_source: str | None = Field(
+    None, description="Match on the event's source system; null matches any."
+  )
+  match_agent_type: str | None = Field(
+    None, description="Match on the counterparty's role; null matches any."
+  )
+  match_resource_type: str | None = Field(
+    None, description="Match on the resource type; null matches any."
+  )
+  match_metadata_expression: dict | None = Field(
+    None, description="Equality matches against the event's metadata."
+  )
 
-  transaction_template: dict  # raw JSON for flexibility
+  transaction_template: dict = Field(
+    ..., description="The GL rows the handler books: its DSL template, as JSON."
+  )
 
-  priority: int
-  is_active: bool
-  origin: str
+  priority: int = Field(
+    ..., description="Among handlers that match, the highest priority wins."
+  )
+  is_active: bool = Field(
+    ..., description="Whether the handler takes part in matching at all."
+  )
+  origin: str = Field(
+    ..., description="`hub` for a platform-shipped handler, `tenant` otherwise."
+  )
 
-  suggested_by: str | None = None
-  confidence: float | None = None
-  approved_by: str | None = None
-  approved_at: datetime | None = None
+  suggested_by: str | None = Field(
+    None,
+    description=(
+      "`ai` when an AI client created the handler or last changed what it "
+      "matches or books; null when a person did."
+    ),
+  )
+  confidence: float | None = Field(
+    None, description="The suggesting AI's confidence, when it gave one."
+  )
+  approved_by: str | None = Field(
+    None, description="The user who approved an AI-suggested handler."
+  )
+  approved_at: datetime | None = Field(None, description="When it was approved.")
+  awaiting_approval: bool = Field(
+    False,
+    description=(
+      "True for an AI-suggested handler no one has approved: it takes no part "
+      "in matching until a person approves it."
+    ),
+  )
 
-  created_at: datetime | None = None
-  updated_at: datetime | None = None
-  created_by: str | None = None
+  created_at: datetime | None = Field(None, description="When it was created.")
+  updated_at: datetime | None = Field(None, description="When it last changed.")
+  created_by: str | None = Field(None, description="The user who created it.")
+
+
+class EventHandlerListResponse(BaseModel):
+  """A page of event handlers, highest priority first."""
+
+  event_handlers: list[EventHandlerResponse] = Field(
+    default_factory=list, description="Handlers, highest priority first."
+  )
+  pagination: PaginationInfo = Field(..., description="Pagination metadata.")
 
 
 class TransactionPreview(BaseModel):
