@@ -1,4 +1,4 @@
-"""Daily retention for operation_mutation_audit.
+"""Daily retention for operation_mutation_audit and operator_runs.
 
 Its own job, not a step of the billing jobs: those schedules are gated on
 billing, and dedicated deployments run with billing off but still keep an
@@ -48,9 +48,33 @@ def prune_operation_mutation_audit(
   return {"deleted": deleted, "cutoff": cutoff.isoformat()}
 
 
+@op
+def prune_operator_runs(
+  context: OpExecutionContext, db: DatabaseResource
+) -> dict[str, Any]:
+  """Delete operator run records older than OPERATION_AUDIT_RETENTION_DAYS —
+  the same window as the audit rows that point at them."""
+  from robosystems.models.core import OperatorRun
+
+  cutoff = datetime.now(UTC) - timedelta(days=env.OPERATION_AUDIT_RETENTION_DAYS)
+  with db.get_session() as session:
+    deleted = (
+      session.query(OperatorRun)
+      .filter(OperatorRun.started_at < cutoff)
+      .delete(synchronize_session=False)
+    )
+
+  context.log.info(
+    f"Operator run retention: deleted {deleted} rows older than "
+    f"{env.OPERATION_AUDIT_RETENTION_DAYS} days"
+  )
+  return {"deleted": deleted, "cutoff": cutoff.isoformat()}
+
+
 @job(tags={"dagster/priority": "3"})
 def daily_audit_retention_job():
   prune_operation_mutation_audit()
+  prune_operator_runs()
 
 
 daily_audit_retention_schedule = ScheduleDefinition(

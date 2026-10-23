@@ -68,7 +68,22 @@ class OperatorRequest(BaseModel):
   history: list[OperatorMessage] = Field(
     default_factory=list,
     max_length=MAX_OPERATOR_HISTORY_MESSAGES,
-    description="Conversation history",
+    description=(
+      "Conversation history. Omit it on a threaded request and the run is "
+      "seeded from the thread's own record instead"
+    ),
+  )
+  thread_id: str | None = Field(
+    None,
+    max_length=64,
+    pattern=r"^[A-Za-z0-9_-]+$",
+    description=(
+      "Groups this run with the earlier runs of one conversation. A caller "
+      "mints the id (any ULID or UUID) on the first question and sends it "
+      "with each follow-up; the run is recorded under it, and with no "
+      "`history` given, the thread's last exchanges are the history. Runs "
+      "list by thread at `GET /v1/graphs/{graph_id}/audit/runs`"
+    ),
   )
   context: dict[str, Any] | None = Field(
     None,

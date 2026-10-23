@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import time
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from robosystems.db.platform import SessionFactory
@@ -18,6 +19,11 @@ from robosystems.operations.operators.credit_consumer import FactoryCreditConsum
 from robosystems.operations.operators.credit_preflight import enforce_operator_credits
 from robosystems.operations.operators.operator_context import OperatorContext
 from robosystems.operations.operators.progress import OperationManagerProgress
+from robosystems.operations.operators.run_record import (
+  OperatorRunRecord,
+  record_operator_run,
+  result_summary,
+)
 from robosystems.operations.operators.tool_access import HttpToolAccess
 from robosystems.operations.operators.tracked_ai import TrackedAIClient
 from robosystems.security.operation_audit import AuditCaller
@@ -103,8 +109,15 @@ async def run_operator_worker(
   if landed_writes is not None:
     ctx.writes = landed_writes
 
+  # The run is recorded whatever its outcome: an answer, a failure, a
+  # cancellation, or the task budget interrupting it.
+  started_at = datetime.now(UTC)
+  started = time.monotonic()
+  status = "failed"
+  answer: str | None = None
+  error: str | None = None
+  recorded_result: dict[str, Any] = {}
   try:
-    started = time.monotonic()
     result = await operator.run(ctx)
     execution_time = time.monotonic() - started
     tokens_used = tracked_ai.total_tokens.copy()
@@ -114,6 +127,13 @@ async def run_operator_worker(
       "has_credit_tracking": True,
       "tokens_used": tokens_used,
       "call_count": tracked_ai.call_count,
+    }
+    status = "cancelled" if result.metadata.get("cancelled") else "completed"
+    answer = result.content
+    recorded_result = {
+      **result_summary(metadata),
+      "tools_called": list(result.tools_called),
+      "confidence_score": result.confidence_score,
     }
     return {
       "content": result.content,
@@ -130,8 +150,42 @@ async def run_operator_worker(
     }
 
   except Exception as e:
+    error = str(e) or type(e).__name__
     logger.error(f"Operator {operator.spec.name} failed in worker: {e}", exc_info=True)
     raise
 
+  except BaseException as e:
+    # The consumer's task budget cancels the coroutine; the record says so
+    # rather than reading as a run that never happened.
+    error = f"Interrupted before an answer ({type(e).__name__})"
+    raise
+
   finally:
+    if not recorded_result:
+      recorded_result = {
+        "credits_consumed": tracked_ai.total_credits,
+        "tokens_used": tracked_ai.total_tokens.copy(),
+        "call_count": tracked_ai.call_count,
+      }
+    finished_at = datetime.now(UTC)
+    record_operator_run(
+      OperatorRunRecord(
+        operation_id=task_id,
+        thread_id=params.get("thread_id") or None,
+        graph_id=graph_id,
+        user_id=user_id,
+        operator_type=params.get("operator_type") or operator.spec.name,
+        mode=mode.value,
+        status=status,
+        question=ctx.query,
+        history=list(ctx.history),
+        transcript=list(tracked_ai.transcript),
+        answer=answer,
+        error=error,
+        result=recorded_result,
+        started_at=started_at,
+        finished_at=finished_at,
+        duration_ms=round((time.monotonic() - started) * 1000, 2),
+      )
+    )
     await tools.close()

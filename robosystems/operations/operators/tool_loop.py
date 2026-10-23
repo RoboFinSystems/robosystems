@@ -109,17 +109,36 @@ def _serialize_tool_result(result: Any, tool_name: str | None = None) -> str:
   return text
 
 
+# Three exchanges: the console's window, and what a threaded run is seeded
+# with from its thread's record.
+_HISTORY_TURNS = 6
+
+
 def _seed_history(ctx: OperatorContext) -> list[AIMessage]:
-  messages: list[AIMessage] = []
-  for msg in ctx.history[-5:]:
+  """The prior turns as a transcript the model accepts: roles coerced to
+  user/assistant, consecutive same-role turns merged, and the result
+  trimmed to open with a user turn and close with an assistant one — the
+  question is appended after it. Converse rejects any other shape."""
+  turns: list[AIMessage] = []
+  for msg in ctx.history[-_HISTORY_TURNS:]:
     if isinstance(msg, dict):
       role = msg.get("role", "user")
       content = msg.get("content", "")
     else:
       role = getattr(msg, "role", "user")
       content = getattr(msg, "content", "")
-    messages.append(AIMessage(role=role, content=content))
-  return messages
+    if not isinstance(content, str) or not content.strip():
+      continue
+    role = "assistant" if role == "assistant" else "user"
+    if turns and turns[-1].role == role:
+      turns[-1] = AIMessage(role=role, content=f"{turns[-1].content}\n\n{content}")
+    else:
+      turns.append(AIMessage(role=role, content=content))
+  while turns and turns[0].role != "user":
+    turns.pop(0)
+  while turns and turns[-1].role != "assistant":
+    turns.pop()
+  return turns
 
 
 async def run_tool_loop(

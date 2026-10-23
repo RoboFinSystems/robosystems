@@ -34,6 +34,7 @@ from robosystems.models.api.graphs.operator import (
   OperatorResponse,
 )
 from robosystems.models.core import User
+from robosystems.operations.graph.operator_runs import thread_history
 from robosystems.operations.operators.base import (
   Operator,
   enforce_operator_graph_scope,
@@ -274,11 +275,17 @@ async def _dispatch(
   )
   _gate(operator, graph_id, current_user, db, base_mode, operator_type)
 
+  history = [{"role": m.role, "content": m.content} for m in request.history]
+  if request.thread_id and not history:
+    # The thread's own record is the history; a caller that sends one keeps it.
+    history = thread_history(db, graph_id, str(current_user.id), request.thread_id)
+
   params = {
     "operator_type": operator_type,
     "query": request.message,
     "mode": base_mode.value,
-    "history": [{"role": m.role, "content": m.content} for m in request.history],
+    "history": history,
+    "thread_id": request.thread_id,
     "context": _request_context(request) or {},
     "enable_rag": request.enable_rag,
   }
