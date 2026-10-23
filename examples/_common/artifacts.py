@@ -13,10 +13,13 @@ For a report at ``(graph_id, report_id)`` it writes, under ``out_dir``:
 * ``{stem}.holon.jsonld``      — the **native holon** (scene / boundary /
   projection named graphs), stamped at publish — the artifact the holon
   viewer consumes
+* ``{stem}.lineage.holon.jsonld`` — the same holon with its fourth named
+  graph, ``#lineage``: the ledger lines, entries and events behind every
+  frozen figure (this graph's own members only)
 * ``{stem}.zip``               — the XBRL 2.1 report package
 * ``{stem}-xbrl-validation.md``  — Arelle verdict (over the XBRL zip)
 
-All three flavors come from the product endpoint via the published SDK — the
+Every flavor comes from the product endpoint via the published SDK — the
 demos exercise the real download path, they don't reconstruct artifacts
 client-side.
 """
@@ -47,6 +50,7 @@ def render_report_artifacts(
   out_dir.mkdir(parents=True, exist_ok=True)
   tavi_path = out_dir / f"{stem}.tavi.json"
   holon_path = out_dir / f"{stem}.holon.jsonld"
+  lineage_path = out_dir / f"{stem}.lineage.holon.jsonld"
   xbrl_path = out_dir / f"{stem}.zip"
 
   tavi = client.download_report_bundle(
@@ -55,11 +59,18 @@ def render_report_artifacts(
   holon = client.download_report_bundle(
     graph_id, report_id, format="holon-jsonld", to=holon_path
   )
+  # The same holon with its fourth named graph, ``#lineage``: the ledger
+  # lines, entries and events behind every frozen figure. The facade has no
+  # short alias for it, so the GraphQL enum name goes through as given.
+  lineage = client.download_report_bundle(
+    graph_id, report_id, format="HOLON_JSONLD_LINEAGE", to=lineage_path
+  )
   xbrl = client.download_report_bundle(
     graph_id, report_id, format="xbrl-2.1", to=xbrl_path
   )
   print(f"  Tavi:     {tavi.path} ({len(tavi.content):,} bytes)")
   print(f"  Holon:    {holon.path} ({len(holon.content):,} bytes)")
+  print(f"  Lineage:  {lineage.path} ({len(lineage.content):,} bytes)")
   print(f"  XBRL 2.1: {xbrl.path} ({len(xbrl.content):,} bytes)")
 
   # Container-free validation of the XBRL zip (Arelle). Deferred import keeps

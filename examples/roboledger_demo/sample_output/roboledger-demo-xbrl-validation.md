@@ -2,13 +2,13 @@
 
 ## Result: ✅ **Valid XBRL 2.1**
 
-- **Package**: `roboledger-demo.zip` (13,476 bytes)
+- **Package**: `roboledger-demo.zip` (18,706 bytes)
 - **Files in zip**: 5 (`instance.xml, report-cal.xml, report-lab.xml, report-pre.xml, report.xsd`)
-- **Facts loaded by Arelle**: 36
+- **Facts loaded by Arelle**: 40
 - **Load errors**: 0
 - **Validation errors**: 0
 
-Validated on the host with **Arelle** (the de-facto XBRL processor, also used by SEC EDGAR) directly against the on-disk report package — no API, no container. Zero load + validation errors is the structural-correctness claim: the output is valid XBRL 2.1, consumable by any standards-compliant processor. This is **base XBRL 2.1** validation; SEC/EFM disclosure-system checks are not enabled (the instance isn't an SEC filing). Scope: tenant-authored disclosure notes are excluded from this package — the emitter's fixed framework prefixes cannot declare an extension concept, so notes ride the JSON-LD and holon flavors. A report with notes therefore has fewer facts here than in those files.
+Validated on the host with **Arelle** (the de-facto XBRL processor, also used by SEC EDGAR) directly against the on-disk report package — no API, no container. Zero load + validation errors is the structural-correctness claim: the output is valid XBRL 2.1, consumable by any standards-compliant processor. This is **base XBRL 2.1** validation; SEC/EFM disclosure-system checks are not enabled (the instance isn't an SEC filing). Scope: tenant-authored disclosure notes are excluded from this package — the emitter's fixed framework prefixes cannot declare an extension concept, so notes ride the Tavi and holon flavors. A report with notes therefore has fewer facts here than in those files.
 
 ## Errors
 

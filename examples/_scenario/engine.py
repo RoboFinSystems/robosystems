@@ -64,9 +64,10 @@ def trailing_year(start: date, months: int) -> tuple[date, date]:
   the last completed month (offset ``months - 2``; offset ``months - 1`` is the
   still-open current month).
 
-  Use this for the filed report's period so it captures the arc's climax, which
-  lands in the most recent months of the rolling window. A fixed calendar year
-  would end before the reveal and render the off-camera 'before' state.
+  It anchors the month grid and the metric windows, and so captures the arc's
+  climax, which lands in the most recent months of the rolling window. The
+  filed report ends one month earlier, on the last closed month (the runner's
+  ``filed_year``): a filed report states closed periods only.
   """
   close_offset = months - 2
   first_offset = max(close_offset - 11, 0)

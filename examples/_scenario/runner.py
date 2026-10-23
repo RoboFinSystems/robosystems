@@ -104,6 +104,19 @@ def _get_ledger_client():
   return LedgerClient(_client_config())
 
 
+def parent_mapping_id(client, graph_id: str) -> str | None:
+  """The group parent's ``coa_mapping`` structure.
+
+  With a group in the graph every member's chart has a mapping of its own, and
+  a report is for the entity whose chart its mapping maps from, so the first
+  mapping listed is not necessarily the parent's. The runner always seeds the
+  parent's chart before the group's, and the reset clears every tenant
+  structure, so the parent's is the oldest: the lowest ULID.
+  """
+  structures = client.list_structures(graph_id, block_type="coa_mapping")
+  return min((s.id for s in structures), default=None)
+
+
 def _get_document_client():
   """Construct a DocumentClient from saved credentials."""
   from robosystems_client.clients.document_client import DocumentClient
@@ -661,11 +674,10 @@ def create_mappings(
   client = _get_ledger_client()
 
   # Find the coa_mapping structure (created during create_chart_of_accounts step)
-  structures = client.list_structures(graph_id, block_type="coa_mapping")
-  if not structures:
+  mapping_id = parent_mapping_id(client, graph_id)
+  if mapping_id is None:
     print("  ERROR: No mapping structure found")
     return 0
-  mapping_id = structures[0].id
 
   # Resolve rs-gaap qnames → element IDs via the library in the entity graph.
   # rs-gaap has ~2000 elements; list_elements caps at 1000 per page, so paginate.
@@ -740,8 +752,7 @@ def create_disclosure_notes(
     print("  ERROR: rs-gaap reporting standard not found in graph")
     return 0, 0
 
-  structures = client.list_structures(graph_id, block_type="coa_mapping")
-  mapping_id = structures[0].id if structures else None
+  mapping_id = parent_mapping_id(client, graph_id)
   if mapping_id is None:
     print("  ERROR: no coa_mapping structure — member multi-mapping skipped")
 
@@ -943,7 +954,7 @@ def create_text_block_notes(
   arced abstract→concept, on a ``regulatory_disclosure`` structure with
   ``concept_arrangement='text_block'``. Then ``bind-text-block`` attaches
   each uploaded policy document to its concept as a ``Nonnumeric`` fact
-  over the scenario's report period — the Document→fact bridge. Reports
+  over the year the annual report files — the Document→fact bridge. Reports
   generated afterward snapshot the standing bindings, so the narrative
   rides the report package, the Tavi and holon bundles, and the graph.
 
@@ -954,7 +965,8 @@ def create_text_block_notes(
   if scenario.report_period is None:
     print("  (skipped — scenario has no report_period)")
     return 0
-  period_start, period_end = scenario.report_period
+  # Bound over the year the report files, or the policies miss its period.
+  period_start, period_end = filed_year(scenario)
 
   taxonomies = client.list_taxonomies(graph_id, taxonomy_type="reporting_standard")
   rs_gaap = next(
@@ -1079,10 +1091,14 @@ def verify_disclosure_notes(graph_id: str) -> None:
       # Report fact values are natural-signed dollars (not cents).
       amount = f"${latest:,.2f}" if isinstance(latest, (int, float)) else "—"
       print(f"    {marker} {row.element_name}: {amount}")
-    passed = summary.passed if summary else 0
-    total = summary.total if summary else 0
-    if total:
-      print(f"    Verification: {passed}/{total} rules passed")
+    if summary and summary.total:
+      # Structural rules (no cycles, no orphan arcs, parent before child) are
+      # checked when the block is created and come back skipped here; only a
+      # failure or an error is a finding.
+      print(
+        f"    Verification: {summary.passed} passed, {summary.failed} failed, "
+        f"{summary.errored} errored, {summary.skipped} skipped"
+      )
 
 
 def _metric_period_windows(
@@ -1755,11 +1771,10 @@ def run_ai_mapping(graph_id: str) -> None:
   )
 
   ledger = _get_ledger_client()
-  structures = ledger.list_structures(graph_id, block_type="coa_mapping")
-  if not structures:
+  mapping_id = parent_mapping_id(ledger, graph_id)
+  if mapping_id is None:
     print("  ERROR: No coa_mapping structure found — was the CoA taxonomy created?")
     return
-  mapping_id = structures[0].id
   print(f"  Mapping structure: {mapping_id}")
 
   try:
@@ -2152,6 +2167,27 @@ def close_monthly_history(graph_id: str, scenario: Scenario) -> list[tuple[date,
   return windows
 
 
+def filed_year(scenario: Scenario) -> tuple[date, date]:
+  """The twelve months the annual report files: the trailing year ending on
+  the last month the history closes, one before the close target.
+
+  A filed report states closed periods only, and the close target stays open
+  for the live close, so the scenario's ``report_period`` (which ends on the
+  close target and anchors the month grid) is one month too late to file.
+  """
+  from .engine import add_months, get_demo_start_date, last_day_of_month
+
+  assert scenario.report_period is not None
+  start, end = scenario.report_period
+  last_closed = add_months(date(end.year, end.month, 1), -1)
+  first = max(add_months(start, -1), get_demo_start_date(scenario.months))
+  return first, date(
+    last_closed.year,
+    last_closed.month,
+    last_day_of_month(last_closed.year, last_closed.month),
+  )
+
+
 def generate_annual_report(
   graph_id: str, scenario: Scenario, output_dir: Path, skip_artifacts: bool = False
 ) -> str | None:
@@ -2169,14 +2205,13 @@ def generate_annual_report(
   if scenario.report_period is None:
     print("  (skipped — scenario has no report_period)")
     return None
-  period_start, period_end = scenario.report_period
+  period_start, period_end = filed_year(scenario)
 
-  # Find the coa_mapping structure created during the taxonomy seed
-  structures = client.list_structures(graph_id, block_type="coa_mapping")
-  if not structures:
+  # The parent's mapping: a report is for the entity whose chart it maps.
+  mapping_id = parent_mapping_id(client, graph_id)
+  if mapping_id is None:
     print("  ERROR: No coa_mapping structure — was the CoA created?")
     return None
-  mapping_id = structures[0].id
 
   # Render against rs-gaap — the canonical reporting vocabulary. The
   # CoA was mapped CoA→rs-gaap above, and the Default Reporting Style's
