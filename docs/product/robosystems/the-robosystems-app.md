@@ -39,7 +39,7 @@ On a shared repository such as SEC filings, Knowledge Base, Memory, Data Lake, S
 
 **Usage** shows the graph's credit balance and recent credit transactions, its storage, and its limits, including rate limits.
 
-**Activity** lists every change made to the graph, whether it came from the Console, a connected AI assistant or the API, with who made it and when. Graph admins see it.
+**Activity** lists every change made to the graph, whether it came from the Console, a connected AI assistant or the API, with who made it and when. Graph admins see it. Picking a Console run shows what it was asked and what it answered, with its cost and the tools it used, above the changes it made.
 
 ## Your account
 

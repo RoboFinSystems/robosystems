@@ -368,7 +368,20 @@ Effort controls how hard the model thinks and how many tool calls it chooses to 
 
 The Operator `POST` path can be disabled by deployment via `OPERATOR_POST_ENABLED=false` (returns 403). The GraphQL MCP tools have a separate kill switch, `MCP_GRAPHQL_ENABLED`.
 
-An `OperatorRequest` carries `message` (required), `mode`, optional `history` (a list of `{role, content}` turns), `context`, `max_credits`, `enable_rag`, `force_extended_analysis`, `operator_type`, and `selection_criteria`. `max_credits` is a soft ceiling on the run's spend: it is checked before each model call (the first call always runs), and once reached the operator stops calling tools and answers from what it has, so a run can end slightly above it. The `OperatorResponse` — the 200 body under `?mode=sync`, and the result a finished operation carries — returns `content`, `operator_used`, `mode_used`, `metadata`, `tokens_used`, `confidence_score`, `execution_time`, and `error_details`. See [robosystems.ai/docs/api](https://robosystems.ai/docs/api) for the full field reference.
+An `OperatorRequest` carries `message` (required), `mode`, optional `history` (a list of `{role, content}` turns) or `thread_id` (a caller-minted id of up to 64 letters, digits, `_` and `-` that groups runs into a conversation; with no `history` sent, the thread's last three completed exchanges are the history, each turn clipped to 2,000 characters), `context`, `max_credits`, `enable_rag`, `force_extended_analysis`, `operator_type`, and `selection_criteria`. `max_credits` is a soft ceiling on the run's spend: it is checked before each model call (the first call always runs), and once reached the operator stops calling tools and answers from what it has, so a run can end slightly above it. The `OperatorResponse` — the 200 body under `?mode=sync`, and the result a finished operation carries — returns `content`, `operator_used`, `mode_used`, `metadata`, `tokens_used`, `confidence_score`, `execution_time`, and `error_details`. See [robosystems.ai/docs/api](https://robosystems.ai/docs/api) for the full field reference.
+
+### The run record
+
+Every operator run is recorded when it ends, whatever the outcome: the question, the history it was seeded with, one transcript entry per model call (the input added since the previous call, the model's output blocks, stop reason, token usage and credits; the first entry also carries the system prompt's SHA-256 and the tool names offered), the answer or the error, and the response metadata without its result rows. The row is keyed by the run's operation id, the same value every entry the run wrote to the graph's mutation audit carries as `operation_id`, so the audit resolves to its run after the operation itself has expired from the operation store. The record holds the payloads themselves, where the mutation audit keeps only a fingerprint of a call's arguments.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/v1/graphs/{graph_id}/audit/mutations` | Every call that changed the graph, newest first, with the `operation_id` of the operator run or REST operation that made it |
+| `GET` | `/v1/graphs/{graph_id}/audit/threads` | The graph's conversations: runs grouped by `thread_id`, titled by the first question, most recently active first |
+| `GET` | `/v1/graphs/{graph_id}/audit/runs` | The graph's operator runs, newest first; filter by `thread_id`, `user_id`, `operator_type`, `status`, `since` and `until` |
+| `GET` | `/v1/graphs/{graph_id}/audit/runs/{operation_id}` | One run with its history, transcript and result metadata |
+
+The mutation list requires graph admin. The run reads are scoped: a graph admin reads every user's runs, any other member reads their own, and another member's run answers 404. Records are pruned on the same window as the mutation audit (`OPERATION_AUDIT_RETENTION_DAYS`, 396 by default) and deleted with the graph.
 
 ---
 
