@@ -19,7 +19,7 @@ from robosystems.db.extensions import ExtensionsBase
 from robosystems.models.extensions.element import Element
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.line_item import LineItem
-from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
+from tests.ledger_entity import PARENT_ENTITY_ID, map_to_the_books, seed_parent_entity
 
 GRAPH_ID = "kg0123456789abcdef03"
 LIVE_CONNECTION = "conn_live"
@@ -167,6 +167,7 @@ def books(ext_session):
     status="draft",
   )
   entry(session, date(2026, 9, 5), accounts["cash"], accounts["revenue"], 1_000)
+  map_to_the_books(session, *accounts.values())
   session.commit()
   return accounts
 

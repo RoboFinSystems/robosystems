@@ -66,7 +66,7 @@ from robosystems.operations.roboledger.fiscal_calendar.service import (
 from robosystems.operations.roboledger.reports.statement_sets import (
   StatementStampResult,
 )
-from tests.ledger_entity import seed_parent_entity_on
+from tests.ledger_entity import map_to_the_books, seed_parent_entity_on
 
 pytestmark = pytest.mark.unit
 
@@ -272,6 +272,9 @@ def tenant(test_db, test_user, sample_graph, monkeypatch):
       s.add(element)
       s.flush()
       t.elements[ext] = str(element.id)
+    # Synced accounts post from the first sync; the close holds on an
+    # unmapped one, so the journey's chart is mapped as a real one is.
+    map_to_the_books(s, *t.elements.values())
     fcs = FiscalCalendarService()
     fcs.initialize(s, graph_id, closed_through="2026-06", actor_id=t.user_id)
     fcs.ensure_fiscal_periods(

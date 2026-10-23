@@ -135,6 +135,11 @@ class GetFiscalCalendarTool:
   - `unreconciled_accounts`: a reconciliation the close waits on is not
     reconciled for the period, or was never compared for it — run
     refresh-reconciliations (count + sample ride on the response)
+  - `unmapped_accounts`: an account with postings through the period that
+    the chart's mapping does not map to a concept, so its balances are in
+    no statement — map it with suggest-mapping and
+    create-mapping-association; nothing lifts this one (count + sample
+    ride on the response)
   - `held_bank_lines`: bank lines a sync held out of an earlier, closed
     month (dated there, arriving after it closed) that no close has decided
     on — reopen that month, which gives them back to post, or close over

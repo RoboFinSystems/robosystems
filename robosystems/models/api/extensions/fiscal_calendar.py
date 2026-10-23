@@ -488,7 +488,8 @@ class FiscalCalendarResponse(BaseModel):
       "'calendar_not_initialized', 'period_already_closed', "
       "'pending_obligations', 'stranded_obligations', "
       "'reconciling_items', 'unposted_source_events', "
-      "'unreconciled_accounts', 'held_bank_lines'; on the consolidation entity, whose close is "
+      "'unreconciled_accounts', 'unmapped_accounts', 'held_bank_lines'; on the "
+      "consolidation entity, whose close is "
       "the group's, also 'entity_open', 'adjustments_unposted', "
       "'residual_unexplained', 'consolidated_does_not_foot'"
     ),
@@ -607,6 +608,22 @@ class FiscalCalendarResponse(BaseModel):
     description=(
       "Name and status of up to 5 of those reconciliations, so the blocker "
       "names what is holding the close."
+    ),
+  )
+  unmapped_account_count: int = Field(
+    0,
+    description=(
+      "Accounts in this entity's chart with postings through the period that "
+      "its mapping does not map to a reporting concept. Their balances are in "
+      "no statement, so the month cannot be stated until each is mapped: "
+      "suggest-mapping, then create-mapping-association. No override lifts it."
+    ),
+  )
+  unmapped_account_sample: list[str] = Field(
+    default_factory=list,
+    description=(
+      "Code and name of up to 5 of those accounts, so the blocker names what "
+      "is holding the close."
     ),
   )
   group_open_entities: list[str] = Field(
@@ -750,7 +767,7 @@ class ClosePeriodResponse(BaseModel):
       "Blocker codes a shadow close recorded instead of enforcing: "
       "sync_stale, pending_obligations, stranded_obligations, "
       "reconciling_items, unposted_source_events, unreconciled_accounts, "
-      "held_bank_lines. Empty outside shadow."
+      "unmapped_accounts, held_bank_lines. Empty outside shadow."
     ),
   )
   gate_finding_counts: dict[str, int] = Field(

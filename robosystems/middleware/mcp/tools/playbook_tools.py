@@ -307,7 +307,12 @@ _KEY_RULES: list[str] = [
   "refresh-reconciliations again; one marked awaiting review already ties "
   "and needs sign-off-reconciliation, which is the user's decision to make, "
   "so ask rather than refresh again; unreconciled_account_sample names "
-  "them). "
+  "them), "
+  "and unmapped_accounts (an account with postings that the chart's mapping "
+  "does not map to a reporting concept, so its balances are in no statement "
+  "and no consolidating entry; map each with suggest-mapping then "
+  "create-mapping-association — nothing lifts this gate; "
+  "unmapped_account_sample names them). "
   "Resolve before close-period; get-fiscal-calendar reports them.",
   "JE PUBLISH SEMANTICS: journal_entry_recorded events with source='manual' "
   "publish to QuickBooks at close through the outbox; source='system' posts "

@@ -79,6 +79,8 @@ Each company in a reporting group closes on its own calendar. Name the company w
 
 ## Close a group of companies
 
+The group itself — how it is set up, what the consolidating entries are, and what happens when a company is bought or sold — is on [Consolidate a group of companies](consolidate-a-group.md). This section is the close.
+
 A group with a consolidation entity closes its month as a group, and the consolidation entity's close is that close. It waits until every company the month consolidates has closed the month, including an equity-method company, whose result the group picks up. It also needs the month's consolidating entries drafted or posted, no difference the books don't explain, and the consolidated balance sheet and statement of changes in equity passing their checks. Until then it names what's holding it: the companies still open, the entries not drafted, each unexplained difference, the checks that fail. You can close over an unexplained difference knowingly; it stays in the consolidated statements and each one is written into the close's audit note.
 
 The group close posts the consolidating entries and saves the month's consolidated statements, in the group parent's reporting style, as the consolidation entity's own: ask for the group's closed statements by naming the consolidation entity, and the parent's own statements stay as they were. Once the group has closed a month, a company's month reopens only after the group's. How the entries are drafted is in [Work across several companies](working-across-companies.md#consolidate-the-group).

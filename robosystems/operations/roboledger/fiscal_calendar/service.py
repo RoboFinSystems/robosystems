@@ -84,6 +84,11 @@ class CloseableGateResult:
   unreconciled_account_count: int = 0
   unreconciled_account_sample: list[str] = field(default_factory=list)
 
+  # Accounts with postings through the period that the chart's mapping does
+  # not reach: their balances are in no statement.
+  unmapped_account_count: int = 0
+  unmapped_account_sample: list[str] = field(default_factory=list)
+
   # Bank lines a sync held out of an earlier, closed month.
   held_bank_line_count: int = 0
   held_bank_line_sample: list[str] = field(default_factory=list)
@@ -106,6 +111,7 @@ class CloseableGateResult:
   RECONCILING_ITEMS = "reconciling_items"
   UNPOSTED_SOURCE_EVENTS = "unposted_source_events"
   UNRECONCILED_ACCOUNTS = "unreconciled_accounts"
+  UNMAPPED_ACCOUNTS = "unmapped_accounts"
   HELD_BANK_LINES = "held_bank_lines"
   ENTITY_OPEN = "entity_open"
   ADJUSTMENTS_UNPOSTED = "adjustments_unposted"
@@ -1106,8 +1112,11 @@ class FiscalCalendarService:
     source event dated in the period left uncommitted (bypass:
     `allow_unposted_source_events`); every reconciliation the close waits on
     is reconciled for the period (bypass: `allow_unreconciled_accounts`);
-    on a forward close, no bank line a sync held out of an earlier closed
-    month left undecided (bypass: `allow_held_bank_lines`).
+    every account posted to through the period mapped to a concept (no
+    bypass: an unmapped account's balances are in no statement, so the
+    month cannot be stated until it is mapped); on a forward close, no bank
+    line a sync held out of an earlier closed month left undecided (bypass:
+    `allow_held_bank_lines`).
     On the consolidation entity the close is the group's: every entity the
     month consolidates closed; its consolidating entries posted or drafted;
     no residual or intercompany disagreement left (bypass:
@@ -1295,6 +1304,24 @@ class FiscalCalendarService:
       for rec in unreconciled[:5]
     ]
 
+    # Every account the month's statements read goes through its concept,
+    # so an unmapped one with postings leaves its balances out of every
+    # statement and every consolidating entry, silently. Nothing lifts this
+    # gate: the account is mapped, through suggest-mapping and
+    # create-mapping-association.
+    from robosystems.operations.roboledger.reads.taxonomies import (
+      unmapped_accounts_with_postings,
+    )
+
+    unmapped_accounts = unmapped_accounts_with_postings(
+      session, entity_id, through=period_end
+    )
+    if unmapped_accounts:
+      blockers.append(CloseableGateResult.UNMAPPED_ACCOUNTS)
+    unmapped_sample = [
+      f"{code} {name}" if code else name for code, name in unmapped_accounts[:5]
+    ]
+
     # A reclose fills a month the held lines may belong to; the next forward
     # close is where they are decided.
     held_count, held_sample = 0, []
@@ -1344,6 +1371,8 @@ class FiscalCalendarService:
       unposted_source_event_sample=unposted_sample,
       unreconciled_account_count=unreconciled_count,
       unreconciled_account_sample=unreconciled_sample,
+      unmapped_account_count=len(unmapped_accounts),
+      unmapped_account_sample=unmapped_sample,
       held_bank_line_count=held_count,
       held_bank_line_sample=held_sample,
     )

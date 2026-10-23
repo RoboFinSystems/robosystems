@@ -735,6 +735,74 @@ def get_mapping_detail(
   )
 
 
+def unmapped_accounts_with_postings(
+  session: Session, entity_id: str, *, through: date
+) -> list[tuple[str | None, str]]:
+  """The accounts in ``entity_id``'s chart that landed lines have posted to
+  through ``through`` and that no active book mapping maps to a concept:
+  ``(code, name)`` pairs, by code. Every statement and every consolidating
+  entry reads an account through its concept, so such an account's balances
+  are in none of them. The chart set is the accounts read's own — for the
+  group parent that includes a chart from before charts were linked to an
+  entity, and accounts filed under none — and an arc counts only when it
+  sits in an active chart-of-accounts mapping into the book framework and
+  names a target."""
+  from robosystems.models.extensions import Association, Structure, Taxonomy
+  from robosystems.models.extensions.roboledger.entry import Entry
+  from robosystems.models.extensions.roboledger.line_item import LineItem
+  from robosystems.operations.roboledger.entry_status import LANDED_ENTRY_STATUSES
+  from robosystems.operations.roboledger.reads.accounts import (
+    account_scope,
+    entity_accounts_clause,
+  )
+  from robosystems.operations.taxonomy_block.coa_mappings import (
+    BOOK_FRAMEWORK,
+    COA_MAPPING_BLOCK_TYPE,
+    MAPPING_TAXONOMY_TYPE,
+  )
+
+  posted = (
+    select(LineItem.id)
+    .join(Entry, Entry.id == LineItem.entry_id)
+    .where(
+      LineItem.element_id == Element.id,
+      Entry.entity_id == entity_id,
+      Entry.status.in_(LANDED_ENTRY_STATUSES),
+      Entry.posting_date <= through,
+    )
+    .exists()
+  )
+  target = Taxonomy.__table__.alias("mapping_target")
+  mapped = (
+    select(Association.id)
+    .join(Structure, Structure.id == Association.structure_id)
+    .join(Taxonomy, Taxonomy.id == Structure.taxonomy_id)
+    .join(target, Taxonomy.target_taxonomy_id == target.c.id)
+    .where(
+      Association.from_element_id == Element.id,
+      Association.association_type == "mapping",
+      Association.to_element_id.is_not(None),
+      Structure.block_type == COA_MAPPING_BLOCK_TYPE,
+      Structure.is_active.is_(True),
+      Taxonomy.taxonomy_type == MAPPING_TAXONOMY_TYPE,
+      Taxonomy.is_active.is_(True),
+      target.c.standard == BOOK_FRAMEWORK,
+    )
+    .exists()
+  )
+  rows = session.execute(
+    select(Element.code, Element.name)
+    .where(
+      entity_accounts_clause(account_scope(session, entity_id)),
+      Element.is_abstract.is_not(True),
+      posted,
+      ~mapped,
+    )
+    .order_by(Element.code.nulls_last(), Element.name)
+  ).all()
+  return [(row.code, row.name or "") for row in rows]
+
+
 def get_mapping_coverage(session: Session, mapping_id: str) -> MappingCoverageResponse:
   """Mapping coverage stats (total, mapped, unmapped, confidence).
 

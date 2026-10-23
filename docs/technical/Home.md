@@ -56,6 +56,7 @@ The per-graph extensions: typed reads, command writes, and the workflows built o
 - **[Extensions Surface Overview](Extensions-Surface-Overview.md)** - The URL topology, three sub-surfaces, and feature flags
 - **[GraphQL Reads](GraphQL-Reads.md)** - Typed reads over the operational (OLTP) graph
 - **[RoboLedger Operations](RoboLedger-Operations.md)** - The catalog of ledger operations and analytical views
+- **[Group Consolidation](Group-Consolidation.md)** - The reporting group end to end: treatment, charts and mapping, the consolidating entries, the group close, a member's lifecycle, and the statements
 - **[QuickBooks Sync & Write Policy](QuickBooks-Sync-and-Write-Policy.md)** - Sync windows, the book of record, write-back, and reconciling items
 - **[Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md)** - The mapping model, auto-map vs suggestions, and the closed-period lock
 - **[Period Close](Period-Close.md)** - The fiscal calendar, blockers, the close and its receipt, reopening

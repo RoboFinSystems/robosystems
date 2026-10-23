@@ -65,6 +65,7 @@ SHADOW_FINDING_BLOCKERS = (
   CloseableGateResult.RECONCILING_ITEMS,
   CloseableGateResult.UNPOSTED_SOURCE_EVENTS,
   CloseableGateResult.UNRECONCILED_ACCOUNTS,
+  CloseableGateResult.UNMAPPED_ACCOUNTS,
   CloseableGateResult.HELD_BANK_LINES,
 )
 
@@ -78,6 +79,7 @@ def gate_finding_counts(gate: CloseableGateResult) -> dict[str, int]:
     CloseableGateResult.RECONCILING_ITEMS: gate.reconciling_item_count,
     CloseableGateResult.UNPOSTED_SOURCE_EVENTS: gate.unposted_source_event_count,
     CloseableGateResult.UNRECONCILED_ACCOUNTS: gate.unreconciled_account_count,
+    CloseableGateResult.UNMAPPED_ACCOUNTS: gate.unmapped_account_count,
     CloseableGateResult.HELD_BANK_LINES: gate.held_bank_line_count,
     CloseableGateResult.ENTITY_OPEN: len(gate.group_open_entities),
     CloseableGateResult.ADJUSTMENTS_UNPOSTED: len(gate.group_pending_adjustments),

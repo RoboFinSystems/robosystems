@@ -150,6 +150,9 @@ def _gate_payload(exc: CloseGateFailed, *, period: str) -> dict[str, Any]:
   if exc.gate.unreconciled_account_count:
     payload["unreconciled_account_count"] = exc.gate.unreconciled_account_count
     payload["unreconciled_account_sample"] = list(exc.gate.unreconciled_account_sample)
+  if exc.gate.unmapped_account_count:
+    payload["unmapped_account_count"] = exc.gate.unmapped_account_count
+    payload["unmapped_account_sample"] = list(exc.gate.unmapped_account_sample)
   for name in GROUP_GATE_FIELDS:
     if getattr(exc.gate, name):
       payload[name] = list(getattr(exc.gate, name))

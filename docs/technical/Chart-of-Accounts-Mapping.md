@@ -64,7 +64,7 @@ curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
 
 An unreachable arc isn't always a mistake. A gross/contra pair (equipment at cost and its accumulated depreciation) mapped at a grain the Style presents net is a correct mapping that has no line of its own. `unreachable_count` makes such cases visible so you can decide which ones they are. The [RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough.md#the-mapping-view) shows a tenant at 27 of 27 mapped with 3 unreachable.
 
-`live-financial-statement` reports an `unmapped_count` on every render. That is the quickest check for unmapped accounts that carry balances.
+`live-financial-statement` reports an `unmapped_count` on every render. That is the quickest check for unmapped accounts that carry balances. An unmapped account with postings also holds the month's close with the `unmapped_accounts` blocker, since its balances are in no statement and no consolidating entry; see [Period Close](Period-Close.md#blockers). A group's own charts have a second requirement, the concepts the consolidation engine posts to; see [Group Consolidation](Group-Consolidation.md#charts-and-mapping).
 
 ## How Mappings Get Made
 
