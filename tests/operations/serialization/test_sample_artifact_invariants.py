@@ -23,9 +23,17 @@ from xbrlkit.deserialize import from_holon_report, from_tavi_report
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ARTIFACTS = sorted(REPO_ROOT.glob("examples/*/sample_output/*.holon.jsonld"))
-# One demo's two forms, keyed by demo: (tavi, holon).
+# One demo's two forms, keyed by demo: (tavi, holon). The lineage holon is the
+# same holon with its ``#lineage`` graph added, so it pairs with the same Tavi.
 PAIRS = sorted(
-  (holon.with_name(holon.name.replace(".holon.jsonld", ".tavi.json")), holon)
+  (
+    holon.with_name(
+      holon.name.replace(".lineage.holon.jsonld", ".holon.jsonld").replace(
+        ".holon.jsonld", ".tavi.json"
+      )
+    ),
+    holon,
+  )
   for holon in ARTIFACTS
 )
 
