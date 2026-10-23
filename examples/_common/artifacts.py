@@ -60,10 +60,9 @@ def render_report_artifacts(
     graph_id, report_id, format="holon-jsonld", to=holon_path
   )
   # The same holon with its fourth named graph, ``#lineage``: the ledger
-  # lines, entries and events behind every frozen figure. The facade has no
-  # short alias for it, so the GraphQL enum name goes through as given.
+  # lines, entries and events behind every frozen figure.
   lineage = client.download_report_bundle(
-    graph_id, report_id, format="HOLON_JSONLD_LINEAGE", to=lineage_path
+    graph_id, report_id, format="holon-jsonld-lineage", to=lineage_path
   )
   xbrl = client.download_report_bundle(
     graph_id, report_id, format="xbrl-2.1", to=xbrl_path
