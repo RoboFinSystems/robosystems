@@ -37,6 +37,8 @@ See [Sign-in and graph access](oauth-and-graph-scope.md).
 
 Some features use RoboSystems' own AI rather than your client's: the **Console**, **Ask about this report** in RoboLedger, and chart-of-accounts mapping (automatic when a QuickBooks company has no mappings yet, and the **Auto-Map** button). They run on Claude models hosted in AWS Bedrock, with inference kept in the United States, and each kind of work goes to the model that fits it. A change made through the Console's `/do` runs on Claude Opus, the most capable of them, because a wrong change costs more than a wrong answer. Questions, report answers and account mapping run on Claude Sonnet. RoboSystems' AI does not use your data to train models, ours or the model provider's. What your own AI client's provider does with what it reads is governed by that client's terms. These features use credits; see [Graphs, tiers and credits](graphs-tiers-and-credits.md).
 
+Every Console run on a graph, question or change, is recorded with the graph: the question, what the model read through the graph's tools and what it answered, how the run ended, and what it cost. It is the paper trail behind the **Activity** page, where a change made by the AI points back to the run that made it. Graph admins can read every run on the graph; anyone else reads their own. The record is kept for thirteen months, the same as the graph's change log, and is deleted with the graph.
+
 ## Signing in
 
 - Sign in with a password, and add a **passkey** under **User Settings** for a sign-in that can't be phished. Owners and admins should.

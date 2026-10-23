@@ -24,6 +24,8 @@ The Console follows the graph you picked. Its examples and the tools it uses cha
 
 When it queries the graph, it shows the **Generated Cypher** so you can check the answer, and **Run** it again. Results can be downloaded as CSV or copied as JSON.
 
+A follow-up continues the conversation. The Console keeps the thread, so "and how many of those are mapped?" means what it would to a person. Switching graphs, or `/clear`, starts a new one. Conversations are kept with the graph, so you can come back to one later: `/history` lists your recent conversations on this graph, and `/resume 2` brings the second one back into the terminal and continues it.
+
 ## Asking it to make a change
 
 A plain question only reads. To have the Console change something, start the request with `/do`, for example "/do add a gross margin metric block". It makes changes that can be undone or that wait for a person: metric and forecast blocks, counterparties, memories, a draft report, the month's pending schedule entries, drafted, and bank-feed lines in the **Inbox**, sorted into accounts. When it finishes, it lists each change it made. In RoboLedger, Plan and Explorer refresh to show them. Changes use credits like questions do, and need write access to the graph. A change runs on a more capable model than a question, because a wrong change costs more than a wrong answer, so it usually uses more credits; see [Security and your data](security-and-your-data.md#ai-that-runs-inside-robosystems).
@@ -32,7 +34,7 @@ What it drafts stays a draft. Filing or sharing a report it created is done by a
 
 Some work stays out of the Console on purpose: posting and editing journal entries, closing or reopening a period, and deleting anything. Do those in the RoboLedger app or through your own AI assistant.
 
-Graph admins can see every change made to a graph, from the Console, a connected AI assistant or the API, on the **Activity** page. Shared repositories such as the SEC filings take no changes, so they have no **Activity** page.
+Graph admins can see every change made to a graph, from the Console, a connected AI assistant or the API, on the **Activity** page. Every Console run is recorded there too, question or change: what was asked, what it read and answered, how it ended and what it cost. Picking a run shows its question and answer above the changes it made. Shared repositories such as the SEC filings take no changes, so they have no **Activity** page. How long the record is kept is in [Security and your data](security-and-your-data.md#ai-that-runs-inside-robosystems).
 
 ## Commands
 
@@ -43,6 +45,8 @@ Commands start with a slash. Apart from `/do`, they don't use credits.
 - `/search` searches the graph's documents.
 - `/recall` searches the graph's memories, on graphs that have them.
 - `/examples` shows example queries for this graph.
+- `/history` lists your recent conversations on this graph; `/resume <n>` brings one back and continues it.
+- `/clear` empties the terminal and starts a new conversation.
 - `/mcp` shows this graph's connector address and the setup for common clients. `/mcp key` makes an API key scoped to this graph, for clients that take a key instead of a sign-in.
 - `/help` lists them all.
 
