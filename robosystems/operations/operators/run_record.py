@@ -47,8 +47,20 @@ def result_summary(metadata: dict[str, Any]) -> dict[str, Any]:
   return {k: v for k, v in metadata.items() if k not in _RESULT_KEYS_DROPPED}
 
 
+def _strip_nul(value: Any) -> Any:
+  """Postgres text and JSONB both reject NUL; a tool result carrying one must
+  not cost the whole record."""
+  if isinstance(value, str):
+    return value.replace("\x00", "")
+  if isinstance(value, list):
+    return [_strip_nul(item) for item in value]
+  if isinstance(value, dict):
+    return {_strip_nul(key): _strip_nul(item) for key, item in value.items()}
+  return value
+
+
 def _json_safe(value: Any) -> Any:
-  return json.loads(json.dumps(value, default=str))
+  return _strip_nul(json.loads(json.dumps(value, default=str)))
 
 
 def record_operator_run(record: OperatorRunRecord) -> None:
@@ -66,7 +78,8 @@ def record_operator_run(record: OperatorRunRecord) -> None:
 
 def write_run_record(record: OperatorRunRecord) -> None:
   """Upsert the row in its own short session; never raises. An upsert
-  because a resumed run comes back under the same operation id."""
+  because a task re-run or resumed under its operation id comes back under
+  the same id, and the attempt that finished is the record."""
   from robosystems.db.platform import SessionFactory
   from robosystems.models.core import Graph, OperatorRun
 
@@ -77,9 +90,10 @@ def write_run_record(record: OperatorRunRecord) -> None:
         session.query(Graph.org_id).filter(Graph.graph_id == record.graph_id).scalar()
       )
       values = asdict(record)
-      values["history"] = _json_safe(values["history"])
-      values["transcript"] = _json_safe(values["transcript"])
-      values["result"] = _json_safe(values["result"])
+      for key in ("history", "transcript", "result"):
+        values[key] = _json_safe(values[key])
+      for key in ("question", "answer", "error"):
+        values[key] = _strip_nul(values[key])
       if values["error"]:
         values["error"] = values["error"][:_MAX_ERROR_CHARS]
       session.merge(OperatorRun(org_id=org_id, **values))

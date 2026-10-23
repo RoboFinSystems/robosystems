@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import base64
 from datetime import datetime
+from typing import Literal
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func, or_, tuple_
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.graphs.audit import (
@@ -19,11 +20,11 @@ from robosystems.models.api.graphs.audit import (
 from robosystems.models.core import OperatorRun
 from robosystems.operations.graph.mutation_audit import InvalidCursorError
 
-# What a threaded run is seeded with: its thread's last exchanges, the
-# answers clipped so history stays cheap. The same bound the console used
-# while it held the history itself.
+# What a threaded run is seeded with: its thread's last exchanges, each turn
+# clipped so history stays cheap. The same bound the console used while it
+# held the history itself.
 THREAD_HISTORY_EXCHANGES = 3
-THREAD_HISTORY_ANSWER_CHARS = 2000
+THREAD_HISTORY_TURN_CHARS = 2000
 _TITLE_CHARS = 120
 
 
@@ -62,9 +63,11 @@ def thread_history(
   )
   history: list[dict[str, str]] = []
   for row in reversed(rows):
-    history.append({"role": "user", "content": row.question})
     history.append(
-      {"role": "assistant", "content": (row.answer or "")[:THREAD_HISTORY_ANSWER_CHARS]}
+      {"role": "user", "content": row.question[:THREAD_HISTORY_TURN_CHARS]}
+    )
+    history.append(
+      {"role": "assistant", "content": (row.answer or "")[:THREAD_HISTORY_TURN_CHARS]}
     )
   return history
 
@@ -98,7 +101,7 @@ def list_operator_runs(
   thread_id: str | None = None,
   user_id: str | None = None,
   operator_type: str | None = None,
-  status: str | None = None,
+  status: Literal["completed", "failed", "cancelled"] | None = None,
   since: datetime | None = None,
   until: datetime | None = None,
   cursor: str | None = None,
@@ -163,6 +166,10 @@ def get_operator_run(
   )
 
 
+def _thread_cursor_key(thread_id: str, user_id: str) -> str:
+  return f"{thread_id}|{user_id}"
+
+
 def list_operator_threads(
   session: Session,
   graph_id: str,
@@ -172,7 +179,10 @@ def list_operator_threads(
   limit: int = 50,
 ) -> OperatorThreadListResponse:
   """One page of the graph's threads, most recently active first, keyset-paged
-  on (last_run_at, thread_id). Runs made without a thread id are not threads."""
+  on (last_run_at, thread_id, user_id). A thread is one user's runs under one
+  thread id: the caller mints the id, so two users can share one and still
+  hold two threads, each titled and ended by its own runs. Runs made without
+  a thread id are not threads."""
   last_run_at = func.max(OperatorRun.started_at).label("last_run_at")
   grouped = (
     session.query(
@@ -189,11 +199,23 @@ def list_operator_threads(
     grouped = grouped.filter(OperatorRun.user_id == user_id)
   if cursor:
     at, key = _decode_cursor(cursor)
+    thread_key, _, user_key = key.partition("|")
     grouped = grouped.having(
-      or_(last_run_at < at, and_(last_run_at == at, OperatorRun.thread_id < key))
+      or_(
+        last_run_at < at,
+        and_(
+          last_run_at == at,
+          or_(
+            OperatorRun.thread_id < thread_key,
+            and_(OperatorRun.thread_id == thread_key, OperatorRun.user_id < user_key),
+          ),
+        ),
+      )
     )
   groups = (
-    grouped.order_by(last_run_at.desc(), OperatorRun.thread_id.desc())
+    grouped.order_by(
+      last_run_at.desc(), OperatorRun.thread_id.desc(), OperatorRun.user_id.desc()
+    )
     .limit(limit + 1)
     .all()
   )
@@ -201,12 +223,13 @@ def list_operator_threads(
   if not page:
     return OperatorThreadListResponse(graph_id=graph_id, threads=[], next_cursor=None)
 
-  thread_ids = [g.thread_id for g in page]
+  thread = [OperatorRun.thread_id, OperatorRun.user_id]
+  keys = [(g.thread_id, g.user_id) for g in page]
   # The first run names the thread; the latest says where it stands.
   first_rank = (
     func.row_number()
     .over(
-      partition_by=OperatorRun.thread_id,
+      partition_by=thread,
       order_by=(OperatorRun.started_at.asc(), OperatorRun.operation_id.asc()),
     )
     .label("first_rank")
@@ -214,14 +237,14 @@ def list_operator_threads(
   last_rank = (
     func.row_number()
     .over(
-      partition_by=OperatorRun.thread_id,
+      partition_by=thread,
       order_by=(OperatorRun.started_at.desc(), OperatorRun.operation_id.desc()),
     )
     .label("last_rank")
   )
   ranked = (
     session.query(OperatorRun, first_rank, last_rank)
-    .filter(OperatorRun.graph_id == graph_id, OperatorRun.thread_id.in_(thread_ids))
+    .filter(OperatorRun.graph_id == graph_id, tuple_(*thread).in_(keys))
     .subquery()
   )
   ends = (
@@ -229,12 +252,13 @@ def list_operator_threads(
     .filter(or_(ranked.c.first_rank == 1, ranked.c.last_rank == 1))
     .all()
   )
-  firsts = {row.thread_id: row for row in ends if row.first_rank == 1}
-  lasts = {row.thread_id: row for row in ends if row.last_rank == 1}
+  firsts = {(r.thread_id, r.user_id): r for r in ends if r.first_rank == 1}
+  lasts = {(r.thread_id, r.user_id): r for r in ends if r.last_rank == 1}
 
   threads = []
   for group in page:
-    first, last = firsts[group.thread_id], lasts[group.thread_id]
+    key = (group.thread_id, group.user_id)
+    first, last = firsts[key], lasts[key]
     threads.append(
       OperatorThreadSummary(
         thread_id=group.thread_id,
@@ -247,12 +271,16 @@ def list_operator_threads(
         last_status=last.status,
       )
     )
+  last_page = page[-1]
   return OperatorThreadListResponse(
     graph_id=graph_id,
     threads=threads,
     next_cursor=(
-      _encode_cursor(page[-1].last_run_at, page[-1].thread_id)
-      if more and page
+      _encode_cursor(
+        last_page.last_run_at,
+        _thread_cursor_key(last_page.thread_id, last_page.user_id),
+      )
+      if more
       else None
     ),
   )

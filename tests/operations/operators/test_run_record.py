@@ -124,6 +124,31 @@ def test_non_json_values_and_long_errors_are_made_storable(test_db, test_user):
   assert row.transcript[0]["input"][0]["when"].startswith("2026-01-01")
 
 
+def test_nul_bytes_are_stripped_from_every_text(test_db, test_user):
+  """Postgres rejects NUL in text and JSONB alike; one in a tool result or
+  an answer must not lose the run."""
+  graph = _graph(test_db, test_user.id)
+  op_id = f"op_{uuid4().hex}"
+  record = _record(
+    graph.graph_id,
+    test_user.id,
+    op_id,
+    question="What\x00 is this?",
+    answer="A\x00 file",
+    history=[{"role": "user", "content": "ear\x00lier"}],
+    transcript=[{"call": 1, "input": [{"toolResult": {"text": "bin\x00ary"}}]}],
+  )
+  with patch("robosystems.db.platform.SessionFactory", return_value=test_db):
+    with patch.object(test_db, "close"):
+      write_run_record(record)
+
+  row = test_db.query(OperatorRun).filter(OperatorRun.operation_id == op_id).one()
+  assert row.question == "What is this?"
+  assert row.answer == "A file"
+  assert row.history[0]["content"] == "earlier"
+  assert row.transcript[0]["input"][0]["toolResult"]["text"] == "binary"
+
+
 def test_a_failed_write_never_raises(test_db, test_user):
   graph = _graph(test_db, test_user.id)
   record = _record(graph.graph_id, test_user.id, f"op_{uuid4().hex}")

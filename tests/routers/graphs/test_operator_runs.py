@@ -61,14 +61,15 @@ def _run(
   graph_id: str,
   user_id: str,
   *,
-  minutes_ago: int,
+  minutes_ago: int = 0,
+  started_at: datetime | None = None,
   thread_id: str | None = "thr_a",
   question: str = "q",
   answer: str | None = "a",
   status: str = "completed",
   operator_type: str = "analyst",
 ) -> OperatorRun:
-  started = datetime.now(UTC) - timedelta(minutes=minutes_ago)
+  started = started_at or datetime.now(UTC) - timedelta(minutes=minutes_ago)
   row = OperatorRun(
     operation_id=f"op_{uuid4().hex}",
     thread_id=thread_id,
@@ -298,6 +299,101 @@ class TestListThreads:
     assert second["next_cursor"] is None
 
 
+class TestSharedThreadIds:
+  """The caller mints the thread id, so two users on one graph can share one.
+  Each still holds their own thread: titled, counted and ended by their own
+  runs, and a member never sees the other's."""
+
+  async def test_two_users_sharing_an_id_hold_two_threads(
+    self, async_client, test_db, test_user
+  ):
+    graph = _graph(test_db, test_user.id)
+    member = _member(test_db, graph, test_user.password_hash)
+    _run(
+      test_db, graph.graph_id, test_user.id, minutes_ago=30, question="Admin opening"
+    )
+    _run(
+      test_db,
+      graph.graph_id,
+      member.id,
+      minutes_ago=10,
+      question="Member opening",
+      status="failed",
+      answer=None,
+    )
+
+    threads = (
+      await async_client.get(f"/v1/graphs/{graph.graph_id}/audit/threads")
+    ).json()["threads"]
+
+    assert [
+      (t["user_id"], t["title"], t["run_count"], t["last_status"]) for t in threads
+    ] == [
+      (member.id, "Member opening", 1, "failed"),
+      (test_user.id, "Admin opening", 1, "completed"),
+    ]
+
+  async def test_a_member_sees_only_their_own_side_of_a_shared_id(
+    self, async_client, test_db, test_user
+  ):
+    owner = User(
+      email=f"owner+{uuid4().hex[:8]}@example.com",
+      name="Owner",
+      password_hash=test_user.password_hash,
+    )
+    test_db.add(owner)
+    test_db.commit()
+    graph = _graph(test_db, owner.id)
+    OrgUser.create(
+      org_id=graph.org_id, user_id=test_user.id, role=OrgRole.MEMBER, session=test_db
+    )
+    GraphUser.create(
+      user_id=test_user.id,
+      graph_id=graph.graph_id,
+      role=GraphRole.MEMBER,
+      session=test_db,
+    )
+    _run(test_db, graph.graph_id, owner.id, minutes_ago=30, question="Owner opening")
+    _run(
+      test_db,
+      graph.graph_id,
+      test_user.id,
+      minutes_ago=10,
+      question="My opening",
+      status="failed",
+      answer=None,
+    )
+
+    threads = (
+      await async_client.get(f"/v1/graphs/{graph.graph_id}/audit/threads")
+    ).json()["threads"]
+
+    assert [(t["user_id"], t["title"], t["last_status"]) for t in threads] == [
+      (test_user.id, "My opening", "failed")
+    ]
+
+  async def test_threads_sharing_an_id_and_a_time_page_without_skipping(
+    self, async_client, test_db, test_user
+  ):
+    graph = _graph(test_db, test_user.id)
+    member = _member(test_db, graph, test_user.password_hash)
+    at = datetime.now(UTC) - timedelta(minutes=5)
+    _run(test_db, graph.graph_id, test_user.id, started_at=at)
+    _run(test_db, graph.graph_id, member.id, started_at=at)
+    url = f"/v1/graphs/{graph.graph_id}/audit/threads"
+
+    first = (await async_client.get(url, params={"limit": 1})).json()
+    second = (
+      await async_client.get(url, params={"limit": 1, "cursor": first["next_cursor"]})
+    ).json()
+
+    seen = [
+      (t["thread_id"], t["user_id"]) for t in first["threads"] + second["threads"]
+    ]
+    assert sorted(seen) == sorted([("thr_a", test_user.id), ("thr_a", member.id)])
+    assert second["next_cursor"] is None
+
+
 class TestThreadHistory:
   def test_the_last_three_completed_exchanges_oldest_first(self, test_db, test_user):
     graph = _graph(test_db, test_user.id)
@@ -346,3 +442,11 @@ class TestThreadHistory:
     history = thread_history(test_db, graph.graph_id, test_user.id, "thr_a")
 
     assert len(history[1]["content"]) == 2000
+
+  def test_long_questions_are_clipped_like_answers(self, test_db, test_user):
+    graph = _graph(test_db, test_user.id)
+    _run(test_db, graph.graph_id, test_user.id, minutes_ago=1, question="q" * 5000)
+
+    history = thread_history(test_db, graph.graph_id, test_user.id, "thr_a")
+
+    assert len(history[0]["content"]) == 2000
