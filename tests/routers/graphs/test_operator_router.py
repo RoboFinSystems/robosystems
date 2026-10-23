@@ -644,3 +644,69 @@ class TestOperatorSharedRepositoryLimits:
     mock_check.assert_awaited_once_with(
       "sec", user, db, endpoint="agent", operation="agent"
     )
+
+
+class TestThreadedRequests:
+  """A `thread_id` rides to the worker, and with no history sent the thread's
+  own record is the history."""
+
+  def test_a_threaded_request_without_history_is_seeded_from_the_thread(
+    self, client, mock_enqueue
+  ):
+    seeded = [
+      {"role": "user", "content": "Total expenses July?"},
+      {"role": "assistant", "content": "1.2M"},
+    ]
+    with patch(f"{EXECUTE}.thread_history", return_value=seeded) as history:
+      response = client.post(
+        f"/v1/graphs/{VALID_TEST_GRAPH_ID}/operator",
+        json={"message": "And August?", "thread_id": "thr_01ABC"},
+      )
+
+    assert response.status_code == 202
+    history.assert_called_once()
+    _db, graph_id, user_id, thread_id = history.call_args[0]
+    assert (graph_id, user_id, thread_id) == (
+      VALID_TEST_GRAPH_ID,
+      "test-user-id",
+      "thr_01ABC",
+    )
+    params = mock_enqueue.call_args[0][3]
+    assert params["thread_id"] == "thr_01ABC"
+    assert params["history"] == seeded
+
+  def test_history_sent_with_a_thread_id_is_kept(self, client, mock_enqueue):
+    with patch(f"{EXECUTE}.thread_history") as history:
+      response = client.post(
+        f"/v1/graphs/{VALID_TEST_GRAPH_ID}/operator",
+        json={
+          "message": "And August?",
+          "thread_id": "thr_01ABC",
+          "history": [{"role": "user", "content": "mine"}],
+        },
+      )
+
+    assert response.status_code == 202
+    history.assert_not_called()
+    params = mock_enqueue.call_args[0][3]
+    assert params["history"] == [{"role": "user", "content": "mine"}]
+    assert params["thread_id"] == "thr_01ABC"
+
+  def test_an_unthreaded_request_carries_no_thread(self, client, mock_enqueue):
+    with patch(f"{EXECUTE}.thread_history") as history:
+      response = client.post(
+        f"/v1/graphs/{VALID_TEST_GRAPH_ID}/operator", json={"message": "hi"}
+      )
+
+    assert response.status_code == 202
+    history.assert_not_called()
+    assert mock_enqueue.call_args[0][3]["thread_id"] is None
+
+  def test_a_malformed_thread_id_is_refused(self, client, mock_enqueue):
+    response = client.post(
+      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/operator",
+      json={"message": "hi", "thread_id": "not a thread id"},
+    )
+
+    assert response.status_code == 422
+    mock_enqueue.assert_not_awaited()

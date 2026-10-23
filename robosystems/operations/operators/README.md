@@ -80,7 +80,8 @@ Import the module in `implementations/__init__.py` so the decorator runs.
 | `tool_loop.py` | Bounded, model-driven tool-use loop shared by read/analysis operators |
 | `progress.py` | `OperationManagerProgress` (worker SSE) |
 | `orchestrator.py` | Operator selection by confidence ranking |
-| `adapters/worker.py` | `run_operator_worker()` — builds the context for worker tasks and returns the response envelope |
+| `run_record.py` | `OperatorRunRecord` + `record_operator_run()` — the durable row in `operator_runs`, written at the end of every run |
+| `adapters/worker.py` | `run_operator_worker()` — builds the context for worker tasks, returns the response envelope, and records the run |
 | `adapters/worker_task.py` | `@register_task("operator")` bridge into the worker consumer |
 | `implementations/` | `analyst.py`, `mapping/` (operator, prompt, constants) |
 
@@ -91,13 +92,15 @@ Every operator runs on the background worker. The API is a producer: it gates th
 ```
 POST /v1/graphs/{g}/operator[/{type}]   (or auto-map-elements, or the QB first sync)
   → gates → enqueue_task("operator", params={"operator_type", "query", "mode",
-                                              "history", "context"})
+                                              "history", "thread_id", "context"})
   → Valkey queue → worker consumer (marks RUNNING) → OperatorWorkerTask
   → run_operator_worker() → operator.run(ctx) → response envelope
   Context: DirectToolAccess + FactoryCreditConsumer + OperationManagerProgress
 ```
 
 The envelope (`content`, `operator_used`, `mode_used`, `metadata`, `tokens_used`, `confidence_score`, `execution_time`) is what `/status` returns under `result` and what the SSE `operation_completed` event carries; the operator's own metadata keys are also merged flat for the mapping operation's consumers. The worker re-runs the three gates with its own session before the first model call — a task can sit in the queue past a role change or a spent balance.
+
+**Every run is recorded.** `TrackedAIClient` keeps the run's transcript — one entry per model call with the input added since the previous call, the model's output blocks, usage and credits — and `run_operator_worker()` writes it with the question, the history, the answer and the envelope's metadata (minus rows) to `operator_runs` in a `finally`, so a failed, cancelled or interrupted run is recorded like a completed one. The row's key is the operation id, the same value every `operation_mutation_audit` row the run made carries, so the audit log resolves to the run after the operation store has expired it. A request's `thread_id` groups runs into a conversation; with no `history` sent, the thread's last three exchanges are the history (`operations/graph/operator_runs.thread_history`). Read back at `GET /v1/graphs/{g}/audit/{threads,runs,runs/{id}}`; pruned on the audit retention window.
 
 **Pausing.** A worker task can stop at a checkpoint for a human decision (`BaseTask.pause_for_input` → status `awaiting_input` → `POST /v1/operations/{id}/resume`); see the worker README. No operator pauses yet — the primitive is there for the ones that will.
 
