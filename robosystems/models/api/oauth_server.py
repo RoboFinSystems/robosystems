@@ -5,6 +5,8 @@ form bodies and are documented inline in `routers/oauth/server.py`; the
 models here are the consent leg the login home drives.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -37,6 +39,12 @@ class PendingAuthorizationResponse(BaseModel):
     None,
     description="Product whose graphs the resource serves (e.g. 'roboledger'); "
     "only those graphs may be chosen. Null on the general routes",
+  )
+  graph_access: Literal["granted", "subscription_required", "denied"] | None = Field(
+    None,
+    description="Whether the session user can read the URL-fixed graph: "
+    "'subscription_required' for a shared repository they do not subscribe to. "
+    "Null on the graph-agnostic route",
   )
   scope: str = Field(..., description="Scope that will be granted")
 
