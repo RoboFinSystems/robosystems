@@ -349,6 +349,28 @@ def graph_serves_product(graph_id: str, product: str, session: Session) -> bool:
   return product in (graph.schema_extensions or [])
 
 
+async def fixed_graph_access(graph_id: str, user: User, session: Session) -> str:
+  """Whether ``user`` can consent to a URL-fixed graph, before they click.
+
+  The decision runs the same check; answering it on the read lets the
+  consent page offer a subscription instead of an Allow button that can
+  only fail. ``subscription_required`` for a shared repository the user
+  does not subscribe to, ``denied`` for any other graph they cannot read.
+  """
+  from fastapi import HTTPException
+
+  from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
+  from robosystems.routers.graphs.mcp.handlers import validate_mcp_access
+
+  try:
+    await validate_mcp_access(graph_id, user, session, "read")
+  except HTTPException:
+    if is_shared_repository_or_subgraph(graph_id):
+      return "subscription_required"
+    return "denied"
+  return "granted"
+
+
 class ConsentError(Exception):
   """A consent decision that cannot be honored (HTTP status + detail)."""
 

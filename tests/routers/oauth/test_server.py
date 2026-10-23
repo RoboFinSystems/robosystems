@@ -358,3 +358,65 @@ def test_pending_roboledger_request_names_its_product(client, test_user):
   assert body["resource"] == "http://testserver/v1/mcp/roboledger"
   assert body["product"] == "roboledger"
   assert body["graph_id"] is None
+
+
+def _pending_for(client, test_user, resource):
+  from main import app
+
+  client_id = client.post("/v1/oauth/register", json=VSCODE_BODY).json()["client_id"]
+  response = client.get(
+    "/v1/oauth/authorize",
+    params={
+      "response_type": "code",
+      "client_id": client_id,
+      "redirect_uri": "http://127.0.0.1:33418/",
+      "state": "st4te",
+      "code_challenge": CHALLENGE,
+      "code_challenge_method": "S256",
+      "scope": "mcp",
+      "resource": resource,
+    },
+    follow_redirects=False,
+  )
+  assert response.status_code == 302, response.text
+  request_id = _q(response.headers["location"])["request_id"]
+  app.dependency_overrides[get_optional_jwt_user] = lambda: test_user
+  try:
+    return client.get(f"/v1/oauth/authorize/{request_id}").json()
+  finally:
+    app.dependency_overrides.pop(get_optional_jwt_user, None)
+
+
+@pytest.mark.usefixtures("oauth_on")
+@pytest.mark.parametrize(
+  "graph_id, refused, expected",
+  [
+    ("sec", True, "subscription_required"),
+    ("sec", False, "granted"),
+    (KG, True, "denied"),
+    (KG, False, "granted"),
+  ],
+)
+def test_pending_fixed_graph_says_whether_it_can_be_granted(
+  client, test_user, graph_id, refused, expected
+):
+  """An Allow button that can only fail is a dead end; the read says so first."""
+  from fastapi import HTTPException
+
+  check = AsyncMock(side_effect=HTTPException(status_code=403) if refused else None)
+  with patch("robosystems.routers.graphs.mcp.handlers.validate_mcp_access", new=check):
+    body = _pending_for(
+      client, test_user, f"http://testserver/v1/graphs/{graph_id}/mcp"
+    )
+  assert body["graph_id"] == graph_id
+  assert body["graph_access"] == expected
+  check.assert_awaited_once()
+
+
+@pytest.mark.usefixtures("oauth_on")
+def test_pending_agnostic_request_has_no_graph_access(client, test_user):
+  check = AsyncMock()
+  with patch("robosystems.routers.graphs.mcp.handlers.validate_mcp_access", new=check):
+    body = _pending_for(client, test_user, "http://testserver/v1/mcp")
+  assert body["graph_access"] is None
+  check.assert_not_awaited()

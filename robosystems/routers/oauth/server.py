@@ -40,6 +40,7 @@ from robosystems.operations.oauth_server.authorization import (
   PendingAuthorizationStore,
   begin_authorization,
   error_callback,
+  fixed_graph_access,
   record_decision,
 )
 from robosystems.operations.oauth_server.clients import (
@@ -209,17 +210,23 @@ async def _require_session_user(user: User | None) -> User:
 async def pending_authorization(
   request_id: str = Path(..., min_length=16, max_length=128),
   user: User | None = Depends(get_optional_jwt_user),
+  session: Session = Depends(get_db_session),
   _rate_limit: None = Depends(oauth_consent_rate_limit_dependency),
 ) -> PendingAuthorizationResponse:
   """What the consent page renders."""
   _require_enabled()
-  await _require_session_user(user)
+  session_user = await _require_session_user(user)
   pending = PendingAuthorizationStore.peek(request_id)
   if pending is None:
     raise HTTPException(
       status_code=status.HTTP_404_NOT_FOUND,
       detail="Authorization request expired or already answered",
     )
+  graph_access = (
+    await fixed_graph_access(pending.graph_id, session_user, session)
+    if pending.graph_id is not None
+    else None
+  )
   return PendingAuthorizationResponse(
     request_id=pending.request_id,
     client_name=pending.client_name,
@@ -231,6 +238,7 @@ async def pending_authorization(
     resource=pending.resource,
     graph_id=pending.graph_id,
     product=target.product if (target := resolve_resource(pending.resource)) else None,
+    graph_access=graph_access,
     scope=pending.scope,
   )
 
