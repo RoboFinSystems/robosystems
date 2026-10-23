@@ -81,12 +81,13 @@ def upload_tables(
   graph_id: str,
   files: list[Path],
   phase_name: str,
-) -> None:
-  """Upload a list of parquet files to the given graph."""
+) -> list[str]:
+  """Upload a list of parquet files to the given graph; returns their file ids."""
   print(f"\n{'=' * 70}")
   print(f"📤 {phase_name}")
   print("=" * 70)
 
+  uploaded: list[str] = []
   for file_path in files:
     table_name = file_path.stem
     file_size = file_path.stat().st_size
@@ -101,6 +102,7 @@ def upload_tables(
         str(file_path),
       )
       if result.success:
+        uploaded.append(result.file_id)
         print(
           f"   ✅ Uploaded {file_path.name} "
           f"({result.file_size:,} bytes, {result.row_count} rows)"
@@ -111,12 +113,20 @@ def upload_tables(
     except Exception as exc:  # noqa: BLE001
       print(f"   ❌ Upload failed: {exc}")
       raise
+  return uploaded
 
 
 def wait_for_staging(
-  clients: RoboSystemsClients, graph_id: str, timeout_seconds: int = 600
+  clients: RoboSystemsClients,
+  graph_id: str,
+  file_ids: list[str],
+  timeout_seconds: int = 600,
 ) -> bool:
-  """Wait for all uploaded files to be staged in DuckDB."""
+  """Wait for this run's uploads to be staged in DuckDB.
+
+  Only the files this run uploaded: a reused graph keeps the file records of
+  earlier runs, and one left pending there would hold the wait to its
+  timeout."""
   print(f"\n{'=' * 70}")
   print("⏳ Waiting for DuckDB Staging to Complete")
   print("=" * 70)
@@ -132,10 +142,8 @@ def wait_for_staging(
       )
       return False
 
-    # Get all files for the graph
-    files = clients.files.list(graph_id)
-    if not files:
-      print("   No files found")
+    if not file_ids:
+      print("   No files uploaded")
       return True
 
     # Check status of each file
@@ -143,9 +151,9 @@ def wait_for_staging(
     staged_count = 0
     failed_count = 0
 
-    for f in files:
+    for file_id in file_ids:
       # Get detailed file info with layers
-      file_info = clients.files.get(graph_id, f.file_id)
+      file_info = clients.files.get(graph_id, file_id)
       if file_info and file_info.layers:
         # layers is a Pydantic model with duckdb attribute
         duckdb_layer = getattr(file_info.layers, "duckdb", None)
@@ -316,10 +324,12 @@ def main() -> None:
   clients = RoboSystemsClients(config)
 
   try:
-    upload_tables(clients, graph_id, node_files, "Pass 1 - Node Tables")
-    upload_tables(clients, graph_id, relationship_files, "Pass 2 - Relationship Tables")
+    file_ids = upload_tables(clients, graph_id, node_files, "Pass 1 - Node Tables")
+    file_ids += upload_tables(
+      clients, graph_id, relationship_files, "Pass 2 - Relationship Tables"
+    )
     # Wait for DuckDB staging to complete before materializing
-    staging_ok = wait_for_staging(clients, graph_id, timeout_seconds=600)
+    staging_ok = wait_for_staging(clients, graph_id, file_ids, timeout_seconds=600)
     if not staging_ok:
       print("\n⚠️  Continuing with materialization despite staging issues...")
     materialize_graph_data(clients, graph_id)

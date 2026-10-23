@@ -161,14 +161,15 @@ Schedules are anchored to month offsets from the demo start date, so they stay a
 
 ## Output Artifacts
 
-After the filed FY 2025 Report stamps, the demo downloads both
-serialization flavors of the Report bundle via the published Python SDK
+After the filed FY 2025 Report stamps, the demo downloads every
+serialization flavor of the Report bundle via the published Python SDK
 (`LedgerClient.download_report_bundle`) into `output/`:
 
 | File | Format |
 |---|---|
 | `output/roboledger-demo.tavi.json` | Tavi compiled model |
 | `output/roboledger-demo.holon.jsonld` | holon — dataset-form JSON-LD (scene / boundary / projection), the anchor stamped at publish |
+| `output/roboledger-demo.lineage.holon.jsonld` | the same holon with its fourth named graph, `#lineage`: the ledger lines, entries and events behind every frozen figure |
 | `output/roboledger-demo.zip` | XBRL 2.1 report package — `instance.xml` + `report.xsd` + presentation/calc/definition linkbases |
 
 `output/` is gitignored (each run stamps fresh graph/report IDs).
