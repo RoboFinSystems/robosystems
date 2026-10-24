@@ -184,30 +184,6 @@ DISCLOSURE_CONCEPT_MAP: dict[str, str] = {
   "ValuationAllowancesAndReservesBalance": "CreditLossesForFinancingReceivablesCurrent",
 }
 
-# Disclosure name → canonical concept, only where the calculation root maps
-# unambiguously to one concept.
-
-DISCLOSURE_TO_CANONICAL: dict[str, str] = {
-  # Balance Sheet
-  "AssetsRollUp": "total_assets",
-  "InventoryNetRollUp": "inventory",
-  "GoodwillRollForward": "goodwill",
-  "PropertyPlantAndEquipmentNetByTypeRollUp": "property_plant_equipment",
-  "FiniteLivedIntangibleAssetsNetRollUp": "intangible_assets",
-  "AccountsNotesLoansAndFinancingReceivable": "accounts_receivable",
-  "LongTermDebtMaturities": "long_term_debt",
-  "CashAndCashEquivalentsDetails": "cash_and_equivalents",
-  # Income Statement
-  "IncomeStatement": "net_income",
-  "IncomeTaxExpenseBenefitDetails": "income_tax_expense",
-  "EarningsPerShareDisclosuresHierarchy": "eps_basic",
-  "EarningsPerShareBasicAndDilutedRollUp": "eps_basic",
-  "EffectiveIncomeTaxRateContinuingOperationsTaxRateReconciliationRollUp": "income_tax_expense",
-  "InterestAndOtherIncomeRollUp": "interest_expense",
-  # Cash Flow
-  "CashFlowStatement": "operating_cash_flow",
-}
-
 
 def _generate_ddl() -> list[str]:
   """Minimal DDL with only the columns classification reads.
@@ -453,7 +429,6 @@ class AssociationClassifier:
   class ClassifyResult:
     classifications_df: pd.DataFrame
     assoc_classifications_df: pd.DataFrame
-    canonical_hints: dict[str, tuple[str, float]]
     factsets_df: pd.DataFrame
     structure_factset_rels_df: pd.DataFrame
     factset_fact_rels_df: pd.DataFrame
@@ -466,7 +441,6 @@ class AssociationClassifier:
     empty = self.ClassifyResult(
       classifications_df=pd.DataFrame(),
       assoc_classifications_df=pd.DataFrame(),
-      canonical_hints={},
       factsets_df=pd.DataFrame(),
       structure_factset_rels_df=pd.DataFrame(),
       factset_fact_rels_df=pd.DataFrame(),
@@ -533,7 +507,7 @@ class AssociationClassifier:
           )
 
       # Semantic (disclosure mechanics)
-      semantic_classes, semantic_rels, canonical_hints = self._classify_semantic(ctx)
+      semantic_classes, semantic_rels = self._classify_semantic(ctx)
       classifications.extend(semantic_classes)
       relationships.extend(semantic_rels)
 
@@ -555,11 +529,6 @@ class AssociationClassifier:
         f"({', '.join(f'{t}: {c}' for t, c in classifications_df['type'].value_counts().items())})"
       )
 
-    if canonical_hints:
-      logger.info(
-        f"Canonical hints from disclosure roots: {len(canonical_hints)} elements"
-      )
-
     if not factsets_df.empty:
       logger.info(
         f"Structure FactSets: {len(factsets_df)} sets, "
@@ -569,7 +538,6 @@ class AssociationClassifier:
     return self.ClassifyResult(
       classifications_df=classifications_df,
       assoc_classifications_df=relationships_df,
-      canonical_hints=canonical_hints,
       factsets_df=factsets_df,
       structure_factset_rels_df=struct_fs_rels_df,
       factset_fact_rels_df=fs_fact_rels_df,
@@ -578,32 +546,29 @@ class AssociationClassifier:
 
   def _classify_semantic(
     self, ctx: TempLadybugContext
-  ) -> tuple[list[dict], list[dict], dict[str, tuple[str, float]]]:
+  ) -> tuple[list[dict], list[dict]]:
     """Name each structure by its calculation root's disclosure.
 
     One Classification per matched structure, linked to all its associations.
-    Roots whose disclosure maps to a canonical concept also get a hint.
     """
     classifications: list[dict] = []
     relationships: list[dict] = []
-    canonical_hints: dict[str, tuple[str, float]] = {}
 
     try:
       roots = ctx.execute(
         """
         MATCH (s:Structure)-[:STRUCTURE_HAS_ASSOCIATION]->(a:Association)-[:ASSOCIATION_HAS_FROM_ELEMENT]->(root:Element)
         WHERE a.association_type = 'Calculation' AND a.root = 'True'
-        RETURN DISTINCT s.identifier AS structure_id, root.qname AS root_qname, root.identifier AS root_id
+        RETURN DISTINCT s.identifier AS structure_id, root.qname AS root_qname
         """
       )
     except Exception as e:
       logger.debug(f"Semantic classification query failed: {e}")
-      return classifications, relationships, canonical_hints
+      return classifications, relationships
 
     for row in roots:
       structure_id = row.get("structure_id")
       root_qname = row.get("root_qname")
-      root_id = row.get("root_id")
       if not structure_id or not root_qname:
         continue
 
@@ -611,10 +576,6 @@ class AssociationClassifier:
       disclosure_name = DISCLOSURE_CONCEPT_MAP.get(local_name)
       if not disclosure_name:
         continue
-
-      canonical_id = DISCLOSURE_TO_CANONICAL.get(disclosure_name)
-      if canonical_id and root_id and root_id not in canonical_hints:
-        canonical_hints[root_id] = (canonical_id, 0.97)
 
       try:
         assocs = ctx.execute(
@@ -649,7 +610,7 @@ class AssociationClassifier:
         f"Semantic classification: {len(classifications)} disclosure patterns identified"
       )
 
-    return classifications, relationships, canonical_hints
+    return classifications, relationships
 
   def _build_structure_factsets(
     self, ctx: TempLadybugContext, filing_meta: FilingMeta

@@ -31,6 +31,10 @@ async def query_financial_statement(
   ``period_type`` of ``None`` means instant for a balance sheet and no period
   filter otherwise. Rows come back raw; the caller runs ``deduplicate_facts``
   and truncates to ``limit``.
+
+  A filing that presents one combined statement of operations and
+  comprehensive income has no ``income_statement`` structure, so an empty
+  income statement is read from its ``comprehensive_income`` structure.
   """
   if not report_id and not ticker:
     raise ValueError("Either report_id or ticker must be provided")
@@ -105,7 +109,12 @@ async def query_financial_statement(
   # "read" is load-bearing on shared repos (SEC): the master's discovery path
   # outlasts the MCP tool timeout, so route to the replicas. Tenants ignore it.
   repository = await get_graph_repository(graph_id, operation_type="read")
-  return await repository.execute_query(query, parameters)
+  rows = await repository.execute_query(query, parameters)
+  if not rows and statement_type == "income_statement":
+    rows = await repository.execute_query(
+      query, {**parameters, "statement_type": "comprehensive_income"}
+    )
+  return rows
 
 
 def deduplicate_facts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

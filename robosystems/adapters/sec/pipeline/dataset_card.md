@@ -201,8 +201,8 @@ normalises, classifies, and materialises it is [RoboSystems](https://github.com/
 Apache-2.0. Facts are as filed: restatements appear as later
 filings, not as corrections to earlier ones. Element names follow the filer's taxonomy (`us-gaap`,
 `ifrs-full`, extensions); `canonical_concept` and `Structure.canonical_type` are RoboSystems' cross-filer
-normalisation on top. `canonical_concept` is a rough grouping for finding elements: a group can include
-elements that are not the concept, so filter numbers by `qname`.
+normalisation on top. `canonical_concept` is set from a curated table on standard `us-gaap` and `ifrs-full`
+elements only; extensions carry none.
 
 ```
 RoboSystems. SEC XBRL Knowledge Graph (LadybugDB). Hugging Face, snapshot {{snapshot_date}}.

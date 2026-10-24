@@ -49,7 +49,7 @@ class BuildFactGridTool:
 
 **PARAMETERS:**
 - elements: XBRL qnames (e.g., 'us-gaap:Assets'). Use resolve-element to find qnames.
-- canonical_concepts: Rough cross-filer groupings (e.g., 'revenue'). A group can include elements that are not the concept, so do not compute a number from one; prefer elements.
+- canonical_concepts: Cross-filer concept ids (e.g., 'revenue'), set on standard us-gaap and ifrs-full elements only. A filer that reports the line under its own extension is missing, and a filer can report two of a concept's elements (a total and a line), so return the qname with each value.
 - periods: End dates in YYYY-MM-DD format
 - entity/entities: Filter by ticker, CIK, or name. Use 'entities' array for multi-company.
 - period_type: 'annual', 'quarterly', or 'instant'. Important for duration elements (revenue, net income).
@@ -79,7 +79,7 @@ For income statement items (revenue, net income), always specify period_type='an
           "canonical_concepts": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "Canonical concept names (e.g., 'revenue', 'net_income', 'total_assets'). A rough grouping for discovery: a group can include elements that are not the concept, so prefer elements for any number you report. Can be combined with elements.",
+            "description": "Canonical concept names (e.g., 'revenue', 'net_income', 'total_assets'). Set on standard us-gaap and ifrs-full elements only, so a filer that reports the line under its own extension is missing. Can be combined with elements.",
           },
           "periods": {
             "type": "array",

@@ -1,8 +1,7 @@
-"""Embedding-based canonical concept matching for XBRL elements and structures."""
+"""Structure classification and query-time concept matching for SEC XBRL."""
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -14,33 +13,6 @@ from robosystems.logger import logger
 
 if TYPE_CHECKING:
   from robosystems.adapters.sec.taxonomy.concepts import CanonicalConcept
-
-
-def camel_case_to_words(name: str) -> str:
-  """Convert CamelCase XBRL element name to human-readable words.
-
-  >>> camel_case_to_words("RevenueFromContractWithCustomerExcludingAssessedTax")
-  'Revenue From Contract With Customer Excluding Assessed Tax'
-  """
-  result = re.sub(r"([a-z])([A-Z])", r"\1 \2", name)
-  # "HTMLParser" -> "HTML Parser"
-  result = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", result)
-  return result
-
-
-def compose_element_text(parsed_name: str, element_data: dict) -> str:
-  """Element text for embedding: parsed name plus balance, period type, classification."""
-  parts = [f"Name: {parsed_name}"]
-  balance = element_data.get("balance")
-  if balance:
-    parts.append(f"Balance: {balance}")
-  period_type = element_data.get("period_type")
-  if period_type:
-    parts.append(f"Period: {period_type}")
-  classification = element_data.get("classification")
-  if classification:
-    parts.append(f"Classification: {classification}")
-  return " | ".join(parts)
 
 
 def compose_structure_text(name: str | None, definition: str | None) -> str:
@@ -138,7 +110,7 @@ def classify_structure_heuristic(
 
 
 class SemanticEnricher:
-  """Embedding-based canonical concept matching for XBRL elements and structures.
+  """Embedding-based canonical matching for structures and free-text queries.
 
   The fastembed model loads on first use: ``adapters/__init__.py`` imports all
   adapter code eagerly.
@@ -429,158 +401,6 @@ class SemanticEnricher:
   def embed_batch(self, texts: list[str]) -> list[list[float]]:
     embeddings = list(self.model.embed(texts))
     return [emb.tolist() for emb in embeddings]
-
-  # -- Canonical matching (elements) ----------------------------------------
-
-  _CANDIDATE_THRESHOLD = 0.80
-  _MAX_CANDIDATES = 3
-
-  def match_canonical(
-    self, embedding: list[float], element_metadata: dict
-  ) -> tuple[str | None, float]:
-    """Best canonical concept for an element embedding, or (None, 0.0).
-
-    A qname listed in a concept's expected_elements returns that concept at
-    0.95 immediately. Otherwise cosine similarity, +0.10 each for matching
-    period_type and balance; the top candidates are refined (when
-    XBRL_GRAPH_REFINEMENT is on) before picking the winner.
-    """
-    taxonomy = self.element_taxonomy
-    if not taxonomy:
-      return (None, 0.0)
-
-    qname = element_metadata.get("qname", "")
-    elem_period_type = element_metadata.get("period_type", "")
-    elem_balance = element_metadata.get("balance", "")
-
-    query_vec = np.array(embedding, dtype=np.float32)
-    query_norm = np.linalg.norm(query_vec)
-    if query_norm == 0:
-      return (None, 0.0)
-
-    candidates: list[tuple[float, str, CanonicalConcept]] = []
-
-    for concept in taxonomy:
-      if concept.embedding is None:
-        continue
-
-      if qname and qname in concept.expected_elements:
-        return (concept.id, 0.95)
-
-      tax_vec = np.array(concept.embedding, dtype=np.float32)
-      tax_norm = np.linalg.norm(tax_vec)
-      if tax_norm == 0:
-        continue
-
-      cos_sim = float(np.dot(query_vec, tax_vec) / (query_norm * tax_norm))
-
-      if elem_period_type and concept.period_type == elem_period_type:
-        cos_sim += 0.10
-      if elem_balance and concept.balance == elem_balance:
-        cos_sim += 0.10
-
-      if cos_sim >= self._CANDIDATE_THRESHOLD:
-        candidates.append((cos_sim, concept.id, concept))
-
-    if not candidates:
-      return (None, 0.0)
-
-    candidates.sort(reverse=True)
-    candidates = candidates[: self._MAX_CANDIDATES]
-
-    from robosystems.adapters.sec.config import XBRL_GRAPH_REFINEMENT
-
-    if XBRL_GRAPH_REFINEMENT:
-      refined = [
-        (self._refine_element_confidence(score, qname, concept), concept_id)
-        for score, concept_id, concept in candidates
-      ]
-      refined.sort(reverse=True)
-      best_score, best_id = refined[0]
-    else:
-      best_score, best_id = candidates[0][0], candidates[0][1]
-
-    if best_score >= self._CANDIDATE_THRESHOLD:
-      return (best_id, round(min(best_score, 1.0), 4))
-    return (None, 0.0)
-
-  # element knowledge primary_statement → CanonicalConcept.category
-  _STATEMENT_TO_CATEGORY = {
-    "IncomeStatement": "income_statement",
-    "BalanceSheet": "balance_sheet",
-    "CashFlow": "cash_flow",
-  }
-
-  @staticmethod
-  def _disclosure_type_to_category(disclosure_type: str) -> str | None:
-    """Disclosure type → CanonicalConcept.category, via its statement type."""
-    from robosystems.adapters.sec.knowledge.classifiers import DISCLOSURE_TO_STATEMENT
-
-    stmt_type = DISCLOSURE_TO_STATEMENT.get(disclosure_type)
-    if stmt_type is None:
-      return None
-    return {
-      "IncomeStatement": "income_statement",
-      "BalanceSheet": "balance_sheet",
-      "CashFlow": "cash_flow",
-      "Equity": "equity",
-    }.get(stmt_type.value)
-
-  def _refine_element_confidence(
-    self, raw_conf: float, qname: str, concept: CanonicalConcept | None = None
-  ) -> float:
-    """Adjust a semantic score by graph structure (PageRank, neighborhood
-    agreement, statement alignment with ``concept``); unchanged without the
-    element knowledge artifact."""
-    ek = self.element_knowledge
-    if ek is None:
-      return raw_conf
-
-    element_info = ek.get(qname)
-    if element_info is None:
-      return raw_conf
-
-    agreement = element_info["neighborhood_agreement"]
-    pagerank = element_info["pagerank"]
-
-    pr_boost = 1.0 + 0.15 * (pagerank if pagerank is not None else 0.0)
-
-    base = raw_conf * pr_boost
-
-    if agreement is not None and agreement >= 0.8:
-      refined = base * (1.0 + 0.10 * agreement)
-    elif agreement is not None and agreement >= 0.5:
-      refined = base
-    elif agreement is not None:
-      penalty = 0.6 + 0.4 * agreement
-      refined = base * penalty
-    else:
-      refined = base
-
-    if concept is not None:
-      primary_stmt = element_info.get("primary_statement")
-      disclosure_type = element_info.get("disclosure_type")
-
-      if primary_stmt:
-        mapped_category = self._STATEMENT_TO_CATEGORY.get(primary_stmt)
-        if mapped_category == concept.category:
-          refined *= 1.08
-        elif mapped_category is not None:
-          refined *= 0.88
-      elif disclosure_type:
-        # Weaker signal than primary_statement, so smaller adjustments.
-        mapped_category = self._disclosure_type_to_category(disclosure_type)
-        if mapped_category == concept.category:
-          refined *= 1.05
-        elif mapped_category is not None:
-          refined *= 0.92
-
-    # Quadratic penalty below threshold
-    threshold = 0.90
-    if refined < threshold:
-      refined *= (refined / threshold) ** 2.0
-
-    return round(min(1.0, max(0.0, refined)), 4)
 
   # -- Canonical matching (query-time, for MCP tools) -----------------------
 

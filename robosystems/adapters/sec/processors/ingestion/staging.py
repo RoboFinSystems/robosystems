@@ -21,6 +21,7 @@ from robosystems.schemas.extensions.roboledger import RoboLedgerContext
 
 from .models import (
   LARGE_STAGING_TABLES,
+  LARGE_TABLE_STAGING_TIMEOUT,
   STAGING_MAX_RETRIES,
   STAGING_RETRY_BACKOFF_BASE,
   ProgressCallback,
@@ -131,6 +132,9 @@ class DuckDBStager:
         duckdb_memory_mb=duckdb_memory_mb,
         progress_callback=log_progress,
       )
+
+      if "Element" in successful_tables:
+        await self.stamp_canonical_concepts(client, log_progress)
 
       expected_table_count = len(tables_by_type)
       status = (
@@ -476,6 +480,9 @@ class DuckDBStager:
         else:
           failed_tables.append((table_name, error or "Unknown error"))
 
+      if "Element" in existing_table_names:
+        await self.stamp_canonical_concepts(client, log_progress)
+
       if not quarter_has_files:
         logger.warning(
           f"Incremental staging for {self.graph_id} found no files for "
@@ -509,6 +516,68 @@ class DuckDBStager:
         error=str(e),
         duration_ms=(time.time() - start_time) * 1000,
       )
+
+  async def stamp_canonical_concepts(
+    self,
+    client: GraphClient,
+    log_progress: ProgressCallback | None = None,
+  ) -> tuple[int, int]:
+    """Set Element.canonical_concept from the curated qname table, every row.
+
+    Runs after every stage, full or incremental, so a table edit reaches rows
+    staged before it. Rows whose qname is not in the table are cleared.
+    Returns (rows stamped, rows cleared).
+    """
+    from robosystems.adapters.sec.taxonomy import canonical_element_map
+
+    mapping = canonical_element_map()
+    qnames = list(mapping)
+    concepts = [mapping[q] for q in qnames]
+    # A table edit can rewrite most of the 8M+ rows, so it gets the large-table
+    # budget: a timeout here fails the stage and stops the nightly chain.
+    timeout = LARGE_TABLE_STAGING_TIMEOUT
+    started = time.time()
+
+    stamped = await client.execute_write(
+      graph_id=self.graph_id,
+      sql=(
+        'UPDATE "Element" SET canonical_concept = m.concept, '
+        "canonical_confidence = 1.0 "
+        "FROM (SELECT unnest(?::VARCHAR[]) AS qname, "
+        "unnest(?::VARCHAR[]) AS concept) AS m "
+        'WHERE "Element".qname = m.qname '
+        'AND ("Element".canonical_concept IS DISTINCT FROM m.concept '
+        'OR "Element".canonical_confidence IS DISTINCT FROM 1.0)'
+      ),
+      parameters=[qnames, concepts],
+      timeout=timeout,
+    )
+    cleared = await client.execute_write(
+      graph_id=self.graph_id,
+      sql=(
+        'UPDATE "Element" SET canonical_concept = NULL, '
+        "canonical_confidence = NULL "
+        "WHERE canonical_concept IS NOT NULL "
+        "AND qname NOT IN (SELECT unnest(?::VARCHAR[]))"
+      ),
+      parameters=[qnames],
+      timeout=timeout,
+    )
+
+    def _count(response: dict) -> int:
+      rows = response.get("rows") or []
+      return int(rows[0][0]) if rows and rows[0] else 0
+
+    counts = (_count(stamped), _count(cleared))
+    message = (
+      f"Canonical concepts: {counts[0]:,} Element rows stamped, "
+      f"{counts[1]:,} cleared ({len(qnames)} qnames) "
+      f"in {time.time() - started:.1f}s"
+    )
+    logger.info(message)
+    if log_progress:
+      log_progress(message)
+    return counts
 
   # Chunking threshold when the DuckDB memory limit is unknown.
   DEFAULT_CHUNKING_THRESHOLD_BYTES = 15 * 1024 * 1024 * 1024  # 15 GiB

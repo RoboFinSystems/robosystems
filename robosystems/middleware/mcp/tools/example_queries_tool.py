@@ -134,7 +134,7 @@ List of example queries with explanations, tailored to the actual schema present
 WHERE e.qname IN ['us-gaap:Revenues', 'us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax'] AND f.numeric_value IS NOT NULL
 RETURN ent.ticker, e.qname, p.end_date, f.numeric_value AS revenue
 ORDER BY p.end_date DESC LIMIT 10""",
-              "explanation": "⚠️ has_dimensions=false drops segment breakdowns (consolidated totals only). Filers tag the same concept differently (us-gaap:Revenues vs us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax), so name the qnames: run resolve-element with the company's ticker, check the labels, and filter e.qname IN [...]. e.canonical_concept is a rough grouping, not a filter to compute a number from.",
+              "explanation": "⚠️ has_dimensions=false drops segment breakdowns (consolidated totals only). Filers tag the same concept differently (us-gaap:Revenues vs us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax), so name the qnames: run resolve-element with the company's ticker, check the labels, and filter e.qname IN [...]. e.canonical_concept labels standard elements only, so it misses a filer whose revenue line is its own extension.",
             },
             {
               "category": "financial",

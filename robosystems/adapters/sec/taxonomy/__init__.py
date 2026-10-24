@@ -75,6 +75,29 @@ def get_element_taxonomy(
   return _element_taxonomy
 
 
+def canonical_element_map() -> dict[str, str]:
+  """qname → canonical concept id, the curated table staging stamps onto Element.
+
+  Each concept's ``expected_elements`` are the qnames that report that total;
+  a qname belongs to at most one concept. No embeddings are computed.
+  """
+  from .balance_sheet import BALANCE_SHEET_CONCEPTS
+  from .cash_flow import CASH_FLOW_CONCEPTS
+  from .income_statement import INCOME_STATEMENT_CONCEPTS
+
+  mapping: dict[str, str] = {}
+  for concept in (
+    INCOME_STATEMENT_CONCEPTS + BALANCE_SHEET_CONCEPTS + CASH_FLOW_CONCEPTS
+  ):
+    for qname in concept.expected_elements:
+      if qname in mapping:
+        raise ValueError(
+          f"{qname} is listed under both {mapping[qname]} and {concept.id}"
+        )
+      mapping[qname] = concept.id
+  return mapping
+
+
 def get_structure_taxonomy(
   model: TextEmbedding | None = None,
 ) -> list[CanonicalConcept]:
@@ -92,6 +115,7 @@ def get_structure_taxonomy(
 
 __all__ = [
   "CanonicalConcept",
+  "canonical_element_map",
   "get_element_taxonomy",
   "get_structure_taxonomy",
 ]
