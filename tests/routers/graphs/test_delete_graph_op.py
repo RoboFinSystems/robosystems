@@ -388,9 +388,56 @@ class TestDeleteGraphRunner:
         db=db,
       )
 
-    provider.cancel_subscription.assert_called_once_with("sub_stripe_xyz")
+    provider.cancel_subscription.assert_called_once_with(
+      "sub_stripe_xyz", credit_unused_time=True
+    )
     provider.stripe.Subscription.modify.assert_not_called()
     sub.cancel.assert_called_once_with(db, immediate=True)
+
+  @pytest.mark.asyncio
+  @patch("robosystems.security.SecurityAuditLogger")
+  @patch("robosystems.operations.providers.payment_provider.get_payment_provider")
+  @patch("robosystems.models.core.billing.BillingAuditLog.log_event")
+  @patch("robosystems.models.core.billing.BillingSubscription.get_by_resource")
+  async def test_immediate_on_past_due_sub_credits_nothing(
+    self,
+    mock_get_sub: MagicMock,
+    mock_log_event: MagicMock,
+    mock_get_provider: MagicMock,
+    _mock_security: MagicMock,
+  ) -> None:
+    """A past_due period was never paid, so there is no unused time to credit."""
+    db = MagicMock()
+    self._setup_admin_membership(db, role="admin")
+
+    sub = MagicMock()
+    sub.id = "sub_abc"
+    sub.status = "past_due"
+    sub.org_id = "org_1"
+    sub.stripe_subscription_id = "sub_stripe_xyz"
+    mock_get_sub.return_value = sub
+
+    provider = MagicMock()
+    mock_get_provider.return_value = provider
+
+    body = DeleteGraphOp(confirm="kg_x")
+    with self._patch_org_owner("OWNER"):
+      await delete_graph_op(
+        body=body,
+        graph_id="kg_x",
+        user=_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+        db=db,
+      )
+
+    provider.cancel_subscription.assert_called_once_with(
+      "sub_stripe_xyz", credit_unused_time=False
+    )
+    sub.cancel.assert_called_once_with(db, immediate=True)
+    assert (
+      mock_log_event.call_args.kwargs["event_data"]["credited_unused_time"] is False
+    )
 
   @pytest.mark.asyncio
   @patch("robosystems.security.SecurityAuditLogger")
