@@ -55,7 +55,7 @@ router = APIRouter()
   status_code=status.HTTP_201_CREATED,
   operation_id="createConnection",
   summary="Create Connection",
-  description="QuickBooks and Mercury: returns a pending connection — complete the OAuth flow to activate (Mercury may instead connect at once with a personal API token where the deployment allows it). External: registers a source namespace for an integration that writes through the public API. One connection allowed per provider per graph, except 'external' which allows one per source_name and 'plaid' which allows one per bank login (a connection still waiting on Link is returned instead of a second). Plaid: returns a pending connection — `POST /oauth/init` returns a `link_token` for Plaid Link. A bank feed (Mercury, Plaid) names the entity its accounts book to (`entity_id`, the group parent when omitted) and is refused (409) when that entity has no chart of accounts or is the one QuickBooks keeps; QuickBooks is refused (409) when the group parent's books are already native.",
+  description="QuickBooks and Mercury: returns a pending connection — complete the OAuth flow to activate (Mercury may instead connect at once with a personal API token where the deployment allows it). External: registers a source namespace for an integration that writes through the public API. One connection allowed per provider per graph, except 'external' which allows one per source_name and 'plaid' which allows one per bank login (a connection still waiting on Link is returned instead of a second). Plaid: returns a pending connection — `POST /oauth/init` returns a `link_token` for Plaid Link. A bank feed (Mercury, Plaid) names the entity its accounts book to (`entity_id`, the group parent when omitted) and is refused (409) when that entity has no chart of accounts or is the one QuickBooks keeps. QuickBooks keeps the group parent's books only: `entity_id` may be omitted, and naming a subsidiary is refused (409 PARENT_ONLY); it is refused (409) too when the group parent's books are already native. Every connection's `entity_id` is the entity whose books it keeps.",
   responses={
     **RESOURCE_ERROR_RESPONSES,
     409: {"description": "Connection already exists for this provider"},
@@ -128,13 +128,17 @@ async def create_connection(
     provider_registry.get_provider(request.provider)
 
     # Native and synced ledgers never mix — per entity: a feed names the
-    # entity its accounts land on, default the group parent.
+    # entity its accounts land on, default the group parent. QuickBooks names
+    # it on the request, where the graph id is the parent's older alias.
+    books_entity = getattr(config, "entity_id", None) or None
+    if request.provider == "quickbooks" and request.entity_id != graph_id:
+      books_entity = request.entity_id or None
     try:
       assert_provider_compatible(
         graph_id,
         request.provider,
         db,
-        entity_id=getattr(config, "entity_id", None) or None,
+        entity_id=books_entity,
         realm_id=getattr(config, "realm_id", None) or None,
       )
     except ProviderConflictError as conflict:
@@ -317,7 +321,9 @@ async def list_connections(
   graph_id: str = Path(
     ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
-  entity_id: str | None = Query(None, description="Filter by entity ID"),
+  entity_id: str | None = Query(
+    None, description="Only the connections that keep this entity's books"
+  ),
   provider: ProviderType | None = Query(None, description="Filter by provider type"),
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),

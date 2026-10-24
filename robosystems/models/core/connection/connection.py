@@ -424,14 +424,13 @@ class Connection(Model):
   def to_dict(self) -> dict:
     """Serialize for the connections API surface.
 
-    ``entity_id`` duplicates ``graph_id``: consumers still read the older
-    key, so both ship on every response.
+    ``entity_id`` is not here: the entity whose books a connection keeps is
+    read from the graph's ledger, so ``ConnectionService`` adds it.
     """
     return {
       "connection_id": self.id,
       "provider": self.provider,
       "status": self.status,
-      "entity_id": self.graph_id,
       "graph_id": self.graph_id,
       "user_id": self.user_id,
       "write_policy": self.write_policy,

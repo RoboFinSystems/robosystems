@@ -1797,6 +1797,57 @@ class TestCreateMercuryConnection:
 
   @pytest.mark.unit
   @pytest.mark.asyncio
+  @pytest.mark.parametrize(
+    ("named", "judged"),
+    [(None, None), (GRAPH_ID, None), ("ent_sub", "ent_sub")],
+  )
+  async def test_the_entity_quickbooks_names_reaches_the_guard(self, named, judged):
+    """QuickBooks keeps the group parent's books: omitted, or the graph id
+    (the parent's older alias), it names the parent; any other entity is
+    the guard's to refuse."""
+    from robosystems.models.api.graphs.connections import (
+      CreateConnectionRequest,
+      QuickBooksConnectionConfig,
+    )
+
+    request = CreateConnectionRequest(
+      provider="quickbooks",
+      entity_id=named,
+      quickbooks_config=QuickBooksConnectionConfig(),
+    )
+    components = _make_robustness_components()
+    with (
+      patch(
+        f"{MANAGEMENT_MODULE}.create_robustness_components", return_value=components
+      ),
+      patch(f"{MANAGEMENT_MODULE}.record_operation_start"),
+      patch(f"{MANAGEMENT_MODULE}.record_operation_success"),
+      patch(f"{MANAGEMENT_MODULE}.assert_provider_compatible") as guard,
+      patch(f"{MANAGEMENT_MODULE}.provider_registry") as registry,
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.list_connections",
+        new_callable=AsyncMock,
+        return_value=[],
+      ),
+      patch(
+        f"{MANAGEMENT_MODULE}.ConnectionService.get_connection",
+        new_callable=AsyncMock,
+        return_value=_make_connection_dict(status="pending_oauth"),
+      ),
+    ):
+      registry.get_provider = MagicMock(return_value=MagicMock())
+      registry.create_connection = AsyncMock(return_value=CONNECTION_ID)
+      await create_connection(
+        graph_id=GRAPH_ID,
+        request=request,
+        current_user=_make_mock_user(),
+        db=MagicMock(),
+        _rate_limit=None,
+      )
+    assert guard.call_args.kwargs == {"entity_id": judged, "realm_id": None}
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
   async def test_a_feed_for_an_unknown_entity_is_404(self):
     from robosystems.models.api.graphs.connections import (
       CreateConnectionRequest,

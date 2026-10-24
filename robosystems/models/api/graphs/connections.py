@@ -33,7 +33,10 @@ class ConnectionBase(BaseModel):
   entity_id: str | None = Field(
     None,
     min_length=1,
-    description="Entity identifier. Required for QuickBooks.",
+    description=(
+      "QuickBooks: the entity whose books it keeps, which can only be the "
+      "group parent; omit it. A bank feed names its entity on its own config."
+    ),
   )
 
 
@@ -165,17 +168,6 @@ class CreateConnectionRequest(ConnectionBase):
   mercury_config: MercuryConnectionConfig | None = None
   plaid_config: PlaidConnectionConfig | None = None
 
-  @field_validator("entity_id")
-  @classmethod
-  def validate_entity_id_for_provider(
-    cls, v: str | None, info: ValidationInfo
-  ) -> str | None:
-    """Require entity_id for providers that need a pre-existing entity."""
-    provider = info.data.get("provider")
-    if provider == "quickbooks" and not v:
-      raise ValueError("entity_id is required for QuickBooks connections")
-    return v
-
   @field_validator(
     "quickbooks_config", "external_config", "mercury_config", "plaid_config"
   )
@@ -231,7 +223,15 @@ class ConnectionResponse(BaseModel):
 
   connection_id: str = Field(..., description="Unique connection identifier")
   provider: str = Field(..., description="Connection provider type")
-  entity_id: str | None = Field(None, description="Entity identifier")
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "The entity whose books the connection keeps: the group parent for "
+      "QuickBooks, the entity a bank feed was connected for (each of its "
+      "accounts can move to another entity later), none for an external "
+      "source, whose events name their own."
+    ),
+  )
   status: str = Field(..., description="Connection status")
   created_at: datetime | str = Field(..., description="Creation timestamp")
   updated_at: datetime | str | None = Field(None, description="Last update timestamp")
