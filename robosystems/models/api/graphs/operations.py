@@ -145,10 +145,11 @@ class DeleteGraphOp(BaseModel):
 
   - **Immediate** (default): subscription canceled now (`ends_at = now`) and
     fast-path deprovisioning fires within ~10 minutes. Use when you want
-    the data gone and the slot freed right away. For an active card-billed
-    subscription, the unused part of the period is credited to the
-    organization's account balance (applied to its next invoice, not
-    refunded).
+    the data gone and the slot freed right away. The unused part of the
+    billed period is credited, not refunded: on a card-billed plan to the
+    organization's account balance, applied to its next invoice; on an
+    invoiced plan as a credit on that period's invoice, or a separate credit
+    invoice if it is already paid.
   - **At period end** (`at_period_end=true`): subscription canceled but
     `ends_at = current_period_end` so the graph stays usable through the
     paid period. The existing suspend → deprovision sensor pipeline tears

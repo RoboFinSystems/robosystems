@@ -499,3 +499,86 @@ class TestMarkInvoicePaid:
       session=mock_session, payment_method="cash", payment_reference=None
     )
     assert result.id == "inv_123"
+
+
+class TestCreditUnusedTime:
+  """Tests for the unused-time credit backfill endpoint."""
+
+  @pytest.fixture
+  def mock_request(self):
+    request = Mock(spec=Request)
+    request.state.admin_key_id = "admin_key_123"
+    return request
+
+  @pytest.fixture
+  def session_with_subs(self):
+    subs = []
+    for i in range(2):
+      sub = MagicMock()
+      sub.id = f"bsub_{i}"
+      sub.resource_id = f"kg_{i}"
+      subs.append(sub)
+    with patch("robosystems.routers.admin.invoice.get_db_session") as mock:
+      session = MagicMock()
+      session.query.return_value.filter.return_value.order_by.return_value.all.return_value = subs
+      mock.return_value = iter([session])
+      yield session, subs
+
+  @staticmethod
+  def _credit(sub_id: str):
+    from robosystems.operations.billing.invoice_credits import UnusedTimeCredit
+
+    return UnusedTimeCredit(
+      subscription_id=sub_id,
+      org_id="org_1",
+      billed_line_id="bli_1",
+      billed_invoice_id="binv_1",
+      billed_invoice_number="INV-2026-10-0001",
+      billed_invoice_status="open",
+      billed_cents=9900,
+      credit_cents=4950,
+      unused_from=datetime(2026, 10, 16),
+      period_end=datetime(2026, 10, 31),
+    )
+
+  @pytest.mark.asyncio
+  async def test_dry_run_plans_without_writing(self, mock_request, session_with_subs):
+    from robosystems.routers.admin.invoice import credit_unused_time
+
+    _, subs = session_with_subs
+    with (
+      patch(
+        "robosystems.operations.billing.invoice_credits.plan_unused_time_credit",
+        side_effect=[self._credit("bsub_0"), None],
+      ),
+      patch(
+        "robosystems.operations.billing.invoice_credits.apply_unused_time_credit"
+      ) as mock_apply,
+    ):
+      result = await credit_unused_time(request=mock_request, dry_run=True)
+
+    mock_apply.assert_not_called()
+    assert result.dry_run is True
+    assert [c.subscription_id for c in result.credits] == ["bsub_0"]
+    assert result.credits[0].resource_id == "kg_0"
+    assert result.total_credit_cents == 4950
+
+  @pytest.mark.asyncio
+  async def test_apply_records_and_reports_failures(
+    self, mock_request, session_with_subs
+  ):
+    from robosystems.routers.admin.invoice import credit_unused_time
+
+    session, _ = session_with_subs
+    with patch(
+      "robosystems.operations.billing.invoice_credits.apply_unused_time_credit",
+      side_effect=[RuntimeError("boom"), self._credit("bsub_1")],
+    ) as mock_apply:
+      result = await credit_unused_time(request=mock_request, dry_run=False)
+
+    assert mock_apply.call_count == 2
+    assert mock_apply.call_args.kwargs == {"actor_type": "admin"}
+    assert result.failed_subscription_ids == ["bsub_0"]
+    assert [c.subscription_id for c in result.credits] == ["bsub_1"]
+    session.rollback.assert_called_once()
+    session.close.assert_called_once()

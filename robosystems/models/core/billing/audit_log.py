@@ -38,6 +38,7 @@ class BillingEventType(str, Enum):
   INVOICE_PAID = "invoice_paid"
   INVOICE_OVERDUE = "invoice_overdue"
   INVOICE_VOIDED = "invoice_voided"
+  INVOICE_CREDITED = "invoice_credited"
 
   PAYMENT_SUCCEEDED = "payment_succeeded"
   PAYMENT_FAILED = "payment_failed"
