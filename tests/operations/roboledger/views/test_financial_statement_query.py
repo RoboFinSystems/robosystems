@@ -160,6 +160,48 @@ class TestQueryFinancialStatement:
     # 400 * 3 = 1200, clamped to 1000
     assert params["limit"] == 1000
 
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_empty_income_statement_reads_the_combined_statement(
+    self, mock_repository
+  ):
+    """A combined operations-and-comprehensive-income statement is the income
+    statement for a filing that presents no other."""
+    row = {"qname": "us-gaap:NetIncomeLoss", "value": -1.0}
+    mock_repository.execute_query.side_effect = [[], [row]]
+    with patch(
+      "robosystems.operations.roboledger.views.financial_statement_query.get_graph_repository",
+      return_value=mock_repository,
+    ):
+      rows = await query_financial_statement(
+        MOCK_GRAPH, statement_type="income_statement", report_id="rpt_x"
+      )
+
+    assert rows == [row]
+    first, second = mock_repository.execute_query.call_args_list
+    assert first.args[1]["statement_type"] == "income_statement"
+    assert second.args[1]["statement_type"] == "comprehensive_income"
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  @pytest.mark.parametrize(
+    ("statement_type", "first_result"),
+    [("income_statement", [{"qname": "us-gaap:Revenues"}]), ("balance_sheet", [])],
+  )
+  async def test_no_fallback_when_found_or_not_an_income_statement(
+    self, mock_repository, statement_type, first_result
+  ):
+    mock_repository.execute_query.return_value = first_result
+    with patch(
+      "robosystems.operations.roboledger.views.financial_statement_query.get_graph_repository",
+      return_value=mock_repository,
+    ):
+      await query_financial_statement(
+        MOCK_GRAPH, statement_type=statement_type, report_id="rpt_x"
+      )
+
+    assert mock_repository.execute_query.call_count == 1
+
 
 class TestDeduplicateFacts:
   @pytest.mark.unit

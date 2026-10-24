@@ -359,7 +359,7 @@ just tables-query sec "SELECT el.qname, f.numeric_value, p.start_date, p.end_dat
 - `Entity` - Companies with SEC CIK identifiers
 - `Report` - 10-K and 10-Q filings
 - `Fact` - Financial metrics with values
-- `Element` - us-gaap metric definitions (with `canonical_concept` from enrichment)
+- `Element` - us-gaap metric definitions (with `canonical_concept` stamped from the curated table)
 - `Period` - Date/duration contexts
 - `Unit` - Measurement units (USD, shares, etc.)
 - `Dimension` - Segments and breakdowns
@@ -601,7 +601,7 @@ just sec-health v
 
 Use the `resolve-element` MCP tool to map a concept in plain words to the qnames filers use, or query directly:
 
-`canonical_concept` is a rough cross-filer grouping for finding elements, not a filter to compute a number from: a group can include elements that are not the concept.
+`canonical_concept` is stamped during DuckDB staging from a curated table of standard `us-gaap` and `ifrs-full` qnames (`adapters/sec/taxonomy/`); filer extensions carry none. Editing the table changes every staged row on the next nightly run, with no reprocess.
 
 ```bash
 # Elements mapped to a canonical concept

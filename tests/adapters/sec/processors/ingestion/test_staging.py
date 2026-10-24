@@ -842,3 +842,121 @@ class TestStageToDuckDBExceptionHandling:
 
     assert result.status == "error"
     assert "Schema error" in result.error
+
+
+@pytest.mark.unit
+class TestStampCanonicalConcepts:
+  """The curated qname table is stamped onto Element after every stage."""
+
+  @pytest.mark.asyncio
+  async def test_stamps_mapped_rows_and_clears_the_rest(self):
+    from robosystems.adapters.sec.taxonomy import canonical_element_map
+
+    stager = _make_stager()
+    client = AsyncMock()
+    client.execute_write.side_effect = [{"rows": [[12]]}, {"rows": [[340]]}]
+
+    counts = await stager.stamp_canonical_concepts(client)
+
+    assert counts == (12, 340)
+    stamp_call, clear_call = client.execute_write.call_args_list
+    mapping = canonical_element_map()
+    qnames, concepts = stamp_call.kwargs["parameters"]
+    assert dict(zip(qnames, concepts, strict=True)) == mapping
+    assert stamp_call.kwargs["sql"].startswith('UPDATE "Element" SET canonical_concept')
+    assert clear_call.kwargs["parameters"] == [qnames]
+    assert "canonical_concept = NULL" in clear_call.kwargs["sql"]
+
+  @pytest.mark.asyncio
+  @patch(
+    "robosystems.adapters.sec.processors.ingestion.staging.get_staging_duckdb_path"
+  )
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.get_graph_client")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.RoboLedgerContext")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.S3Client")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.env")
+  async def test_full_staging_stamps_once_element_is_staged(
+    self, mock_env, mock_s3_client, mock_context, mock_get_client, mock_duckdb_path
+  ):
+    mock_env.SHARED_PROCESSED_BUCKET = "test-bucket"
+    mock_duckdb_path.return_value = "/data/staging/sec.duckdb"
+    mock_context.get_all_table_names_for_context.return_value = {"Element": "nodes"}
+    mock_context.SEC_REPOSITORY = "sec"
+    mock_client = AsyncMock()
+    mock_client.create_table.return_value = {
+      "status": "success",
+      "result": {"row_count": 10, "duration_seconds": 1.0},
+      "duration_seconds": 1.0,
+    }
+    mock_get_client.return_value = mock_client
+
+    from robosystems.adapters.sec.processors.ingestion.staging import DuckDBStager
+
+    stager = DuckDBStager()
+    with patch.object(
+      stager, "stamp_canonical_concepts", AsyncMock(return_value=(1, 0))
+    ) as stamp:
+      result = await stager.stage_to_duckdb()
+
+    assert result.status == "success"
+    stamp.assert_awaited_once()
+
+  @pytest.mark.asyncio
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.s3_get_table_patterns")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.RoboLedgerContext")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.get_graph_client")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.S3Client")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.env")
+  async def test_incremental_stamps_even_when_the_quarter_has_no_files(
+    self, mock_env, mock_s3_client, mock_get_client, mock_context, mock_patterns
+  ):
+    """A table edit reaches existing rows on the next nightly run."""
+    mock_env.SHARED_PROCESSED_BUCKET = "test-bucket"
+    mock_context.get_all_table_names_for_context.return_value = {"Element": "nodes"}
+    mock_context.SEC_REPOSITORY = "sec"
+    mock_client = AsyncMock()
+    mock_client.list_tables.return_value = [{"table_name": "Element"}]
+    mock_get_client.return_value = mock_client
+    mock_patterns.return_value = []
+
+    from robosystems.adapters.sec.processors.ingestion.staging import DuckDBStager
+
+    stager = DuckDBStager()
+    with patch.object(
+      stager, "stamp_canonical_concepts", AsyncMock(return_value=(0, 0))
+    ) as stamp:
+      result = await stager.stage_incremental_to_duckdb(year=2026, quarter=4)
+
+    assert result.status == "success"
+    stamp.assert_awaited_once()
+
+  @pytest.mark.asyncio
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.s3_get_table_patterns")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.RoboLedgerContext")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.get_graph_client")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.S3Client")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.env")
+  async def test_a_failed_stamp_fails_incremental_staging(
+    self, mock_env, mock_s3_client, mock_get_client, mock_context, mock_patterns
+  ):
+    """Materialization never proceeds on labels the stamp did not write."""
+    mock_env.SHARED_PROCESSED_BUCKET = "test-bucket"
+    mock_context.get_all_table_names_for_context.return_value = {"Element": "nodes"}
+    mock_context.SEC_REPOSITORY = "sec"
+    mock_client = AsyncMock()
+    mock_client.list_tables.return_value = [{"table_name": "Element"}]
+    mock_get_client.return_value = mock_client
+    mock_patterns.return_value = []
+
+    from robosystems.adapters.sec.processors.ingestion.staging import DuckDBStager
+
+    stager = DuckDBStager()
+    with patch.object(
+      stager,
+      "stamp_canonical_concepts",
+      AsyncMock(side_effect=RuntimeError("Write failed")),
+    ):
+      result = await stager.stage_incremental_to_duckdb(year=2026, quarter=4)
+
+    assert result.status == "error"
+    assert "Write failed" in result.error

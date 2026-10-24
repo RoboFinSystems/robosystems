@@ -83,13 +83,16 @@ graph holds.
 
 ## Enrichment (inline, per filing)
 
+- **Canonical concepts** — not assigned at processing. `Element.canonical_concept`
+  is stamped during DuckDB staging (`DuckDBStager.stamp_canonical_concepts`,
+  after every full and incremental stage) from the curated qname table in
+  `taxonomy/`: each concept's `expected_elements` are the standard `us-gaap` /
+  `ifrs-full` qnames that report it, one concept per qname. Extensions carry
+  none. Editing the table relabels every staged row on the next nightly run.
+
 `SemanticEnricher` (`enrichment.py`) runs during the Process stage and adds
 semantic metadata:
 
-- **Canonical concepts** — maps XBRL element qnames to canonical concepts (e.g.
-  `us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax` → `revenue`)
-  using fastembed cosine similarity against the curated `ConceptTaxonomy` in
-  `taxonomy/`.
 - **Structure classification** — assigns `canonical_type` to Structure nodes:
   `income_statement`, `balance_sheet`, `cash_flow_statement`,
   `equity_statement`.
@@ -97,15 +100,14 @@ semantic metadata:
   Associations to disclosure types (AssetsRollUp, RevenueBreakdown, …).
   `classify_associations()` does this offline via a temporary LadybugDB with
   Cypher pattern matching.
-- **Confidence refinement** — applies the knowledge artifacts below to suppress
-  weak semantic matches and boost well-connected elements.
+- **Confidence refinement** — applies the knowledge artifacts below to structure
+  classifications.
 
-**Embeddings are transient.** They are computed to assign canonical concepts and
-types, then discarded — the per-element `embedding` vector is not persisted, and
-there is no element-vector search tier. Indexing millions of elements produced
-long-tail noise dominated by single-filing filer extensions, so `resolve-element`
-works from canonical concepts with a text-label fallback instead. The persisted
-outputs are `canonical_concept` and `canonical_type`.
+**Embeddings are transient.** Only a Statement whose title the keyword
+heuristic cannot classify is embedded, then the vector is discarded; there is
+no element-vector search tier. Indexing millions of elements produced long-tail
+noise dominated by single-filing filer extensions, so `resolve-element` works
+from canonical concepts with a text-label fallback instead.
 
 ## Knowledge artifacts (offline, corpus-level)
 
@@ -202,7 +204,7 @@ uv run xbrlkit cache bundle --cache-dir /tmp/arelle-seed --host www.xbrl.org --h
 
 | Flag | Default | Effect |
 |------|---------|--------|
-| `XBRL_SEMANTIC_ENRICHMENT` | `True` | fastembed canonical concept mapping and structure classification |
+| `XBRL_SEMANTIC_ENRICHMENT` | `True` | Structure classification (fastembed only for a Statement the title heuristic misses) |
 | `XBRL_ASSOCIATION_CLASSIFICATION` | `True` | Association-level disclosure classification (creates Classification nodes) |
 | `XBRL_GRAPH_REFINEMENT` | `True` | Knowledge-artifact confidence refinement |
 

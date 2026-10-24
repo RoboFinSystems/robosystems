@@ -289,102 +289,43 @@ class XBRLGraphProcessor:
           f"with {len(result.factset_fact_rels_df)} fact links"
         )
 
-      # Disclosure-root hints upgrade an element's canonical concept only when
-      # more confident than the embedding match.
-      if (
-        result.canonical_hints
-        and hasattr(self, "elements_df")
-        and not self.elements_df.empty
-      ):
-        upgraded = 0
-        for elem_id, (concept_id, confidence) in result.canonical_hints.items():
-          mask = self.elements_df["identifier"] == elem_id
-          if not mask.any():
-            continue
-          current_conf = self.elements_df.loc[mask, "canonical_confidence"].iloc[0]
-          if current_conf is None or pd.isna(current_conf) or current_conf < confidence:
-            self.elements_df.loc[mask, "canonical_concept"] = concept_id
-            self.elements_df.loc[mask, "canonical_confidence"] = confidence
-            upgraded += 1
-        if upgraded:
-          self.parquet_writer.write_dataframe(self.elements_df, "nodes/Element.parquet")
-          logger.info(
-            f"Upgraded {upgraded} elements with disclosure-root canonical concepts"
-          )
     except Exception as e:
       logger.warning(f"Association classification failed (non-critical): {e}")
 
   def enrich_dataframes(self):
-    """Batch canonical enrichment of Element and Structure DataFrames.
+    """Canonical enrichment of the Structure DataFrame.
 
-    Embeddings are computed transiently to assign canonical concepts / types;
-    no embedding vector is persisted. Labels are not enriched — they carry no
-    canonical concept, so there is nothing for enrichment to assign."""
+    Element canonical concepts are not assigned here: staging stamps them from
+    the curated qname table (``DuckDBStager.stamp_canonical_concepts``), so the
+    columns are written empty. A Statement the title heuristic cannot classify
+    falls back to an embedding, computed transiently and never persisted."""
     from robosystems.adapters.sec.enrichment import (
       SemanticEnricher,
-      camel_case_to_words,
       classify_structure_heuristic,
-      compose_element_text,
       compose_structure_text,
       parse_structure_definition,
     )
 
-    if self._enricher is None:
-      self._enricher = SemanticEnricher()
-
-    enricher = self._enricher
-
-    # ----- Elements --------------------------------------------------------
+    # LadybugDB COPY FROM is positional; these columns must exist in schema order,
+    # typed so an all-empty column is not written to parquet as the null type.
     if hasattr(self, "elements_df") and not self.elements_df.empty:
-      logger.info(f"Enriching {len(self.elements_df)} elements")
-
-      # LadybugDB COPY FROM is positional; these columns must exist in schema order.
-      for col in ("canonical_concept", "canonical_confidence"):
-        if col not in self.elements_df.columns:
-          self.elements_df[col] = None
-
-      texts = []
-      for _, row in self.elements_df.iterrows():
-        parsed_name = camel_case_to_words(row.get("name", "") or "")
-        text = compose_element_text(
-          parsed_name,
-          {
-            "balance": row.get("balance"),
-            "period_type": row.get("period_type"),
-            "classification": row.get("classification"),
-          },
-        )
-        texts.append(text)
-
-      embeddings = enricher.embed_batch(texts)
-
-      canonical_concepts = []
-      canonical_confidences = []
-      for i, row in self.elements_df.iterrows():
-        concept_id, confidence = enricher.match_canonical(
-          embeddings[len(canonical_concepts)],
-          {
-            "qname": row.get("qname", ""),
-            "period_type": row.get("period_type", ""),
-            "balance": row.get("balance", ""),
-          },
-        )
-        canonical_concepts.append(concept_id)
-        canonical_confidences.append(confidence if concept_id else None)
-
-      self.elements_df["canonical_concept"] = canonical_concepts
-      self.elements_df["canonical_confidence"] = canonical_confidences
-
-      matched = sum(1 for c in canonical_concepts if c is not None)
-      logger.info(
-        f"Element enrichment complete: {matched}/{len(self.elements_df)} matched to canonical concepts"
+      index = self.elements_df.index
+      self.elements_df["canonical_concept"] = pd.Series(
+        pd.NA, index=index, dtype="string"
+      )
+      self.elements_df["canonical_confidence"] = pd.Series(
+        float("nan"), index=index, dtype="float64"
       )
 
-    # ----- Structures ------------------------------------------------------
     if hasattr(self, "structures_df") and not self.structures_df.empty:
       logger.info(f"Enriching {len(self.structures_df)} structures")
 
-      # LadybugDB COPY FROM is positional; these columns must exist in schema order.
+      # The fastembed model loads on first embed, so a filing whose statements
+      # all match the heuristic never loads it.
+      if self._enricher is None:
+        self._enricher = SemanticEnricher()
+      enricher = self._enricher
+
       for col in ("canonical_type", "canonical_confidence"):
         if col not in self.structures_df.columns:
           self.structures_df[col] = None
@@ -404,20 +345,26 @@ class XBRLGraphProcessor:
             name
           )
 
-      non_empty_mask = [bool(t.strip()) for t in texts]
-      non_empty_texts = [t for t, m in zip(texts, non_empty_mask, strict=True) if m]
+      heuristics = [
+        classify_structure_heuristic(
+          parsed_names[idx], row.get("definition", ""), block_type=row.get("type")
+        )
+        for idx, (_, row) in enumerate(self.structures_df.iterrows())
+      ]
 
-      if non_empty_texts:
-        struct_embeddings = enricher.embed_batch(non_empty_texts)
-        emb_iter = iter(struct_embeddings)
-        all_embeddings = []
-        for m in non_empty_mask:
-          if m:
-            all_embeddings.append(next(emb_iter))
-          else:
-            all_embeddings.append(None)
-      else:
-        all_embeddings = [None] * len(texts)
+      # Only a Statement the heuristic missed reads an embedding.
+      needs_embedding = [
+        idx
+        for idx, (_, row) in enumerate(self.structures_df.iterrows())
+        if heuristics[idx][0] is None
+        and row.get("type") == "Statement"
+        and texts[idx].strip()
+      ]
+      all_embeddings: list[list[float] | None] = [None] * len(texts)
+      if needs_embedding:
+        embedded = enricher.embed_batch([texts[i] for i in needs_embedding])
+        for idx, embedding in zip(needs_embedding, embedded, strict=True):
+          all_embeddings[idx] = embedding
 
       # structure id → element qnames, and definition hashes, for refinement.
       from robosystems.adapters.sec.config import XBRL_GRAPH_REFINEMENT
@@ -469,13 +416,9 @@ class XBRLGraphProcessor:
       canonical_types = []
       canonical_confidences = []
 
-      for idx, row in self.structures_df.iterrows():
-        name = parsed_names[len(canonical_types)]
-        definition = row.get("definition", "")
+      for _, row in self.structures_df.iterrows():
         block_type = row.get("type")
-        heuristic_type, heuristic_conf = classify_structure_heuristic(
-          name, definition, block_type=block_type
-        )
+        heuristic_type, heuristic_conf = heuristics[len(canonical_types)]
         if heuristic_type:
           canonical_types.append(heuristic_type)
           canonical_confidences.append(heuristic_conf)

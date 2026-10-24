@@ -73,33 +73,6 @@ class TestSemanticEnricher:
     assert len(embeddings[0]) == 384
     assert len(embeddings[1]) == 384
 
-  def test_match_canonical_known_element(self):
-    """Known elements should match with high confidence."""
-    from robosystems.adapters.sec.enrichment import SemanticEnricher
-
-    enricher = SemanticEnricher()
-    emb = enricher.embed_batch(["Revenue"])[0]
-    concept_id, confidence = enricher.match_canonical(
-      emb, {"qname": "us-gaap:Revenues", "period_type": "duration", "balance": "credit"}
-    )
-    assert concept_id == "revenue"
-    assert confidence >= 0.95  # Known-element override
-
-  def test_match_canonical_below_threshold(self):
-    """Unrelated text should not match."""
-    from robosystems.adapters.sec.enrichment import SemanticEnricher
-
-    enricher = SemanticEnricher()
-    emb = enricher.embed_batch(
-      ["this is completely unrelated text about cooking recipes"]
-    )[0]
-    concept_id, confidence = enricher.match_canonical(
-      emb, {"qname": "custom:CookingRecipe", "period_type": "", "balance": ""}
-    )
-    # Should either not match or have very low confidence
-    if concept_id is not None:
-      assert confidence < 0.85
-
   def test_match_canonical_from_query(self):
     from robosystems.adapters.sec.enrichment import SemanticEnricher
 

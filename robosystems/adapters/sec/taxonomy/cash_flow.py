@@ -17,7 +17,7 @@ CASH_FLOW_CONCEPTS = (
     aliases=("cash from operations", "cfo"),
     expected_elements=(
       "us-gaap:NetCashProvidedByUsedInOperatingActivities",
-      "us-gaap:NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",
+      "ifrs-full:CashFlowsFromUsedInOperatingActivities",
     ),
     period_type="duration",
     balance="debit",
@@ -32,6 +32,7 @@ CASH_FLOW_CONCEPTS = (
     expected_elements=(
       "us-gaap:PaymentsToAcquirePropertyPlantAndEquipment",
       "us-gaap:PaymentsToAcquireProductiveAssets",
+      "ifrs-full:PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities",
     ),
     period_type="duration",
     balance="credit",
@@ -42,7 +43,10 @@ CASH_FLOW_CONCEPTS = (
     category="cash_flow",
     description="Net cash from investing activities",
     aliases=("cash from investing",),
-    expected_elements=("us-gaap:NetCashProvidedByUsedInInvestingActivities",),
+    expected_elements=(
+      "us-gaap:NetCashProvidedByUsedInInvestingActivities",
+      "ifrs-full:CashFlowsFromUsedInInvestingActivities",
+    ),
     period_type="duration",
     balance="debit",
   ),
@@ -56,6 +60,7 @@ CASH_FLOW_CONCEPTS = (
     expected_elements=(
       "us-gaap:PaymentsOfDividends",
       "us-gaap:PaymentsOfDividendsCommonStock",
+      "ifrs-full:DividendsPaidClassifiedAsFinancingActivities",
     ),
     period_type="duration",
     balance="credit",
@@ -69,6 +74,7 @@ CASH_FLOW_CONCEPTS = (
     expected_elements=(
       "us-gaap:PaymentsForRepurchaseOfCommonStock",
       "us-gaap:PaymentsForRepurchaseOfEquity",
+      "ifrs-full:PaymentsToAcquireOrRedeemEntitysShares",
     ),
     period_type="duration",
     balance="credit",
@@ -81,9 +87,7 @@ CASH_FLOW_CONCEPTS = (
     aliases=("cash from financing",),
     expected_elements=(
       "us-gaap:NetCashProvidedByUsedInFinancingActivities",
-      "us-gaap:RepaymentsOfLongTermDebt",
-      "us-gaap:ProceedsFromIssuanceOfLongTermDebt",
-      "us-gaap:ProceedsFromRepaymentsOfShortTermDebtMaturingInMoreThanThreeMonths",
+      "ifrs-full:CashFlowsFromUsedInFinancingActivities",
     ),
     period_type="duration",
     balance="debit",
@@ -102,7 +106,7 @@ CASH_FLOW_CONCEPTS = (
     expected_elements=(
       "us-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect",
       "us-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease",
-      "us-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseExcludingExchangeRateEffect",
+      "ifrs-full:IncreaseDecreaseInCashAndCashEquivalents",
     ),
     period_type="duration",
     balance="debit",

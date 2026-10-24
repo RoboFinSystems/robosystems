@@ -744,30 +744,68 @@ class TestExternalization:
 
 @pytest.mark.unit
 class TestEnrichment:
-  def test_enrichment_runs_on_the_projected_tables(
+  def test_elements_carry_no_concept_and_a_titled_statement_skips_embedding(
     self, tmp_path, sec_filer, sec_report, model, monkeypatch
   ):
     monkeypatch.setattr("robosystems.adapters.sec.config.XBRL_GRAPH_REFINEMENT", False)
     enricher = MagicMock(name="SemanticEnricher")
-    enricher.embed_batch.side_effect = lambda texts: [[0.1, 0.2]] * len(texts)
-    enricher.match_canonical.side_effect = lambda embedding, element: (
-      ("Assets", 0.93) if element["qname"] == "us-gaap:Assets" else (None, None)
-    )
-    enricher.match_structure_canonical.return_value = ("balance_sheet", 0.8)
 
     processor = _processor(tmp_path, sec_filer, sec_report, enricher=enricher)
     processor.enable_semantic_enrichment = True
     _run(processor, model)
 
     elements = {r["qname"]: r for r in _rows(processor, "Element")}
-    assert elements["us-gaap:Assets"]["canonical_concept"] == "Assets"
-    assert elements["us-gaap:Assets"]["canonical_confidence"] == 0.93
-    assert elements["us-gaap:Revenues"]["canonical_concept"] is None
+    assert elements["us-gaap:Assets"]["canonical_concept"] is None
+    assert elements["us-gaap:Assets"]["canonical_confidence"] is None
+    schema = _read(processor, "Element").schema
+    assert str(schema.field("canonical_concept").type) == "string"
+    assert str(schema.field("canonical_confidence").type) == "double"
     structure = _rows(processor, "Structure")[0]
     assert structure["name"] == "CONSOLIDATED BALANCE SHEETS"
     assert structure["type"] == "Statement"
     assert structure["canonical_type"] == "balance_sheet"
-    assert enricher.embed_batch.call_count == 2
+    enricher.embed_batch.assert_not_called()
+
+  def test_only_an_unrecognised_statement_is_embedded(
+    self, tmp_path, sec_filer, sec_report, monkeypatch
+  ):
+    monkeypatch.setattr("robosystems.adapters.sec.config.XBRL_GRAPH_REFINEMENT", False)
+    enricher = MagicMock(name="SemanticEnricher")
+    enricher.embed_batch.side_effect = lambda texts: [[0.1, 0.2]] * len(texts)
+    enricher.match_structure_canonical.return_value = ("income_statement", 0.8)
+
+    processor = _processor(tmp_path, sec_filer, sec_report, enricher=enricher)
+    processor.structures_df = pd.DataFrame(
+      [
+        {
+          "identifier": "s-1",
+          "definition": "100010 - Statement - Consolidated Balance Sheets",
+          "type": "Statement",
+          "name": None,
+        },
+        {
+          "identifier": "s-2",
+          "definition": "100020 - Statement - Results Summary",
+          "type": "Statement",
+          "name": None,
+        },
+        {
+          "identifier": "s-3",
+          "definition": "200010 - Disclosure - Results Summary Details",
+          "type": "Disclosure",
+          "name": None,
+        },
+      ]
+    )
+    processor.enrich_dataframes()
+
+    (texts,), _ = enricher.embed_batch.call_args
+    assert enricher.embed_batch.call_count == 1
+    assert len(texts) == 1 and "Results Summary" in texts[0]
+    assert list(processor.structures_df["canonical_type"])[:2] == [
+      "balance_sheet",
+      "income_statement",
+    ]
 
 
 @pytest.mark.unit
@@ -802,7 +840,6 @@ class TestClassification:
     result.report_factset_rels_df = pd.DataFrame(
       [{"from": "report-1", "to": factset_id}]
     )
-    result.canonical_hints = {}
 
     processor = _processor(tmp_path, sec_filer, sec_report)
     with patch(
@@ -822,36 +859,6 @@ class TestClassification:
     assert _rows(processor, "FactSet")[0]["identifier"] == factset_id
     assert _rows(processor, "Classification")[0]["type"] == "RollUp"
     assert len(_rows(processor, "REPORT_HAS_FACT_SET")) == 1
-
-  def test_canonical_hints_upgrade_elements(
-    self, tmp_path, sec_filer, sec_report, model, monkeypatch
-  ):
-    monkeypatch.setattr(
-      "robosystems.adapters.sec.config.XBRL_ASSOCIATION_CLASSIFICATION", True
-    )
-    assets_id = graph_id("element", f"{US_GAAP}#Assets")
-    result = MagicMock()
-    for name in (
-      "classifications_df",
-      "assoc_classifications_df",
-      "factsets_df",
-      "structure_factset_rels_df",
-      "factset_fact_rels_df",
-      "report_factset_rels_df",
-    ):
-      setattr(result, name, pd.DataFrame())
-    result.canonical_hints = {assets_id: ("Assets", 0.99)}
-
-    processor = _processor(tmp_path, sec_filer, sec_report)
-    with patch(
-      "robosystems.adapters.sec.processors.classify.AssociationClassifier"
-    ) as classifier_cls:
-      classifier_cls.return_value.classify.return_value = result
-      _run(processor, model)
-
-    elements = {r["qname"]: r for r in _rows(processor, "Element")}
-    assert elements["us-gaap:Assets"]["canonical_concept"] == "Assets"
-    assert elements["us-gaap:Assets"]["canonical_confidence"] == 0.99
 
   def test_classifier_failure_is_non_critical(
     self, tmp_path, sec_filer, sec_report, model, monkeypatch

@@ -58,7 +58,7 @@ XBRL_STANDARDIZED_FILENAMES = False
 XBRL_TYPE_PREFIXES = False
 XBRL_COLUMN_STANDARDIZATION = False
 
-XBRL_SEMANTIC_ENRICHMENT = True  # embedding-based canonical concepts
+XBRL_SEMANTIC_ENRICHMENT = True  # structure classification
 XBRL_GRAPH_REFINEMENT = True  # adjust scores with precomputed graph artifacts
 XBRL_ASSOCIATION_CLASSIFICATION = True
 
