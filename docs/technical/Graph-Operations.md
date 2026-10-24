@@ -246,6 +246,7 @@ Deletes the graph itself. **Synchronous** in the envelope — it comes back `com
 
 - **Body:** `confirm` (required — must equal the `graph_id` in the URL) and `at_period_end` (default `false`). With `at_period_end: true`, cancellation and teardown are deferred to the end of the current billing period and the graph stays usable until then; that needs an active subscription (400 otherwise).
 - The caller must be both an org **owner** and a graph **admin**.
+- **An immediate delete credits the unused period.** On an active card-billed subscription, the unused part of the current billing period goes to the organization's account balance and is applied to its next invoice; it is not refunded. A past-due subscription gets no credit, and a deferred delete needs none — the graph runs to the end of the period it paid for.
 - **A final backup is taken before teardown.** It is recorded with `initiated_by: "final"`, and a graph admin can still download it for a grace period after the graph is torn down — the export copy of a departing graph.
 
 ### Content and Memory Operations

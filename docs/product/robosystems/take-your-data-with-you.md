@@ -33,7 +33,7 @@ Disconnecting asks how the graph keeps its books afterwards. **Disconnect** is t
 The organization owner cancels a graph on the organization's page: open **Subscriptions** and choose **Cancel Subscription** on the graph. You choose when:
 
 - **At the end of the billing period**, while the subscription is active. The graph keeps working until then. Afterwards it is suspended, and removed seven days later.
-- **Now.** The graph is deleted within about ten minutes. You type the graph ID to confirm.
+- **Now.** The graph is deleted within about ten minutes. You type the graph ID to confirm. On a card-billed plan, the unused part of the billing period is credited to your organization's account balance and applied to its next invoice. It isn't refunded.
 
 Either way, RoboSystems tries to take a **final backup** first and keeps it for 90 days; the organization's owners and admins can download it over the API, or ask support. Don't rely on it: the graph is removed even if that backup fails, and once it is, the graph no longer appears in the app. Its database, ledger records, documents, search index and report files are gone for good.
 

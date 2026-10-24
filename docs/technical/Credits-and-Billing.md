@@ -223,7 +223,7 @@ Checkout is asynchronous. After the user returns from Stripe, the status endpoin
 
 **Cancellation lives with the resource, not here.** The billing-level cancel route is reserved for future subscriptions that are not tied to a resource — it deliberately rejects the two kinds that exist today and names the canonical path instead:
 
-- **A graph** — `POST /v1/graphs/{graph_id}/operations/delete-graph`. This tears down **immediately** by default; pass `at_period_end: true` to keep the graph usable through the current billing period. The caller must be both an org owner (billing authority) and an admin on the graph (operational authority).
+- **A graph** — `POST /v1/graphs/{graph_id}/operations/delete-graph`. This tears down **immediately** by default, crediting the unused part of an active card-billed period to the organization's account balance (not a refund); pass `at_period_end: true` to keep the graph usable through the current billing period. The caller must be both an org owner (billing authority) and an admin on the graph (operational authority).
 - **A shared-repository subscription** — `POST /v1/graphs/{repo_id}/subscriptions/cancel`. This cancels **at period end** by default; pass `immediate: true` to stop access right away.
 
 Each guards itself with a `confirm` value that must equal the resource id — `delete-graph` always, the repository cancel when you ask for immediate termination — so a mistyped call cannot destroy the wrong thing. See [Shared Repositories](Shared-Repositories.md) for the repository half.
