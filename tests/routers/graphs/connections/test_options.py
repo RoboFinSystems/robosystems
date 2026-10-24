@@ -217,8 +217,8 @@ class TestGetConnectionOptions:
 
   @pytest.mark.unit
   @pytest.mark.asyncio
-  async def test_quickbooks_has_entity_id_in_required_config(self):
-    """QuickBooks provider requires entity_id configuration."""
+  async def test_quickbooks_requires_no_config(self):
+    """QuickBooks keeps the group parent's books, so it names no entity."""
     mock_user = _make_mock_user()
     mock_env = _make_mock_env(quickbooks_enabled=True, external_enabled=False)
 
@@ -230,7 +230,7 @@ class TestGetConnectionOptions:
       )
 
     qb = result.providers[0]
-    assert "entity_id" in qb.required_config
+    assert qb.required_config == []
 
   @pytest.mark.unit
   @pytest.mark.asyncio

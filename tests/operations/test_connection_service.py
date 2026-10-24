@@ -10,9 +10,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from robosystems.operations.connection_service import SYSTEM_USER_ID, ConnectionService
+from robosystems.operations.connection_service import (
+  group_parent_reader as _real_group_parent_reader,
+)
 from robosystems.operations.providers.types import SyncOutcome
 
 MODULE = "robosystems.operations.connection_service"
+
+
+@pytest.fixture(autouse=True)
+def _group_parent():
+  """The group parent is read from the graph's ledger; here it is a constant."""
+  with patch(f"{MODULE}.group_parent_reader", return_value=lambda: "ent_parent"):
+    yield
 
 
 def _make_mock_connection(**overrides):
@@ -36,7 +46,6 @@ def _make_mock_connection(**overrides):
     "connection_id": conn.id,
     "provider": conn.provider,
     "status": conn.status,
-    "entity_id": conn.graph_id,
     "graph_id": conn.graph_id,
     "user_id": conn.user_id,
     "metadata": {
@@ -750,22 +759,43 @@ class TestConnectionServiceErrorHandling:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_list_connections_entity_id_fallback(self):
-    mock_session = MagicMock()
+  async def test_list_connections_filters_by_the_entity_whose_books_they_keep(self):
+    """`entity_id` is an entity, never the graph: QuickBooks keeps the
+    parent's books, a feed the books of the entity it was connected for."""
+    qb = _make_mock_connection(id="conn_qb", provider="quickbooks")
+    feed = _make_mock_connection(id="conn_feed", provider="plaid")
+    external = _make_mock_connection(id="conn_ext", provider="external")
+    creds = {
+      "conn_qb": _make_mock_credentials(),
+      "conn_feed": _make_mock_credentials(
+        credentials={"sync_config": {"entity_id": "ent_sub"}}
+      ),
+      "conn_ext": None,
+    }
 
     with (
       patch(f"{MODULE}.Connection") as MockConn,
-      patch(f"{MODULE}.ConnectionCredentials"),
+      patch(f"{MODULE}.ConnectionCredentials") as MockCreds,
     ):
-      MockConn.list_filtered.return_value = []
+      MockConn.list_filtered.return_value = [qb, feed, external]
+      MockCreds.get_by_connection_id.side_effect = lambda cid, _s: creds[cid]
 
-      await ConnectionService.list_connections(
-        entity_id="kg_via_entity",
-        db_session=mock_session,
+      everything = await ConnectionService.list_connections(
+        graph_id="kg_test", db_session=MagicMock()
+      )
+      parents = await ConnectionService.list_connections(
+        graph_id="kg_test", entity_id="ent_parent", db_session=MagicMock()
       )
 
-    call_kwargs = MockConn.list_filtered.call_args.kwargs
-    assert call_kwargs["graph_id"] == "kg_via_entity"
+    assert MockConn.list_filtered.call_args.kwargs["graph_id"] == "kg_test"
+    assert {c["connection_id"]: c["entity_id"] for c in everything} == {
+      "conn_qb": "ent_parent",
+      "conn_feed": "ent_sub",
+      "conn_ext": None,
+    }
+    assert [c["connection_id"] for c in parents] == ["conn_qb"]
+    # Only the feed's credentials are decrypted for its entity.
+    creds["conn_qb"].get_credentials.assert_not_called()
 
   @pytest.mark.asyncio
   @pytest.mark.unit
@@ -1374,12 +1404,88 @@ class TestDispatchConnectionSync:
 # ---------------------------------------------------------------------------
 
 
+class TestBooksEntityId:
+  """The entity a connection's `entity_id` names: whose books it keeps."""
+
+  @pytest.mark.unit
+  def test_quickbooks_keeps_the_group_parents_books(self):
+    from robosystems.operations.connection_service import books_entity_id
+
+    assert books_entity_id("QuickBooks", {}, lambda: "ent_p") == "ent_p"
+
+  @pytest.mark.unit
+  def test_a_feed_keeps_the_books_it_was_connected_for(self):
+    from robosystems.operations.connection_service import books_entity_id
+
+    named = {"sync_config": {"entity_id": "ent_sub"}}
+    unnamed = {"sync_config": {"entity_id": None}}
+    assert books_entity_id("plaid", named, lambda: "ent_p") == "ent_sub"
+    assert books_entity_id("mercury", unnamed, lambda: "ent_p") == "ent_p"
+
+  @pytest.mark.unit
+  def test_an_external_source_keeps_nobodys_and_reads_nothing(self):
+    from robosystems.operations.connection_service import books_entity_id
+
+    parent = MagicMock(return_value="ent_p")
+    assert books_entity_id("external", {}, parent) is None
+    parent.assert_not_called()
+
+  @pytest.mark.unit
+  def test_the_parent_is_read_once_and_a_failed_read_hides_nothing(self):
+    with patch(f"{MODULE}._read_books", return_value="ent_p") as read:
+      parent = _real_group_parent_reader("kg_test")
+      assert (parent(), parent()) == ("ent_p", "ent_p")
+    read.assert_called_once()
+
+    with patch(f"{MODULE}._read_books", side_effect=RuntimeError("db down")):
+      assert _real_group_parent_reader("kg_test")() is None
+
+
 class TestProviderCompatibility:
   """`assert_provider_compatible` — specs/ledger/native-accounting-cutover.md §2."""
 
   @staticmethod
   def _live(*providers: str) -> list:
     return [_make_mock_connection(provider=p) for p in providers]
+
+  @pytest.mark.unit
+  def test_quickbooks_named_for_a_subsidiary_is_refused(self):
+    from robosystems.operations.connection_service import (
+      ProviderConflictError,
+      assert_provider_compatible,
+    )
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}._is_group_parent", return_value=False) as parent,
+      patch(f"{MODULE}._graph_has_native_books") as native,
+    ):
+      MockConn.get_all_for_graph.return_value = []
+      with pytest.raises(ProviderConflictError) as exc:
+        assert_provider_compatible(
+          "kg_test", "quickbooks", MagicMock(), entity_id="ent_sub"
+        )
+    assert exc.value.code == "PARENT_ONLY"
+    assert exc.value.http_status == 409
+    parent.assert_called_once_with("kg_test", "ent_sub")
+    native.assert_not_called()
+
+  @pytest.mark.unit
+  def test_quickbooks_named_for_the_parent_goes_on_to_the_books_checks(self):
+    from robosystems.operations.connection_service import assert_provider_compatible
+
+    with (
+      patch(f"{MODULE}.Connection") as MockConn,
+      patch(f"{MODULE}._is_group_parent", return_value=True),
+      patch(f"{MODULE}._parent_has_feed_account", return_value=False),
+      patch(f"{MODULE}._graph_has_native_books", return_value=False) as native,
+      patch(f"{MODULE}._parent_chart_built_elsewhere", return_value=False),
+    ):
+      MockConn.get_all_for_graph.return_value = []
+      assert_provider_compatible(
+        "kg_test", "quickbooks", MagicMock(), entity_id="ent_p"
+      )
+    native.assert_called_once()
 
   @pytest.mark.unit
   def test_bank_feed_refused_on_the_parent_while_quickbooks_is_live(self):

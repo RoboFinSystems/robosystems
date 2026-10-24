@@ -44,7 +44,7 @@ async def get_connection_options(
         description="Sync accounting data from QuickBooks Online",
         auth_type="oauth",
         auth_flow="OAuth 2.0 - You'll be redirected to QuickBooks to authorize access",
-        required_config=["entity_id"],
+        required_config=[],
         optional_config=["sync_start_date", "account_filter"],
         features=[
           "trial_balance",

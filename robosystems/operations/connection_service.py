@@ -142,6 +142,9 @@ class ConnectionService:
         result["is_expired"] = False
         result["expires_at"] = None
 
+      result["entity_id"] = books_entity_id(
+        conn.provider, result["credentials"], group_parent_reader(conn.graph_id)
+      )
       return result
 
     except Exception:
@@ -159,25 +162,27 @@ class ConnectionService:
     graph_id: str | None = None,
     db_session: Session | None = None,
   ) -> list[dict[str, Any]]:
-    """List connections, without decrypting credentials.
+    """List connections; only a bank feed's credentials are decrypted, for
+    the entity it was connected for.
 
-    `graph_id` takes precedence over `entity_id`. Only the scope-less call
-    filters by creator (`SYSTEM_USER_ID` sees all).
+    `entity_id` keeps the connections that keep that entity's books (see
+    `books_entity_id`). Only the scope-less call filters by creator
+    (`SYSTEM_USER_ID` sees all).
     """
     session = db_session or SessionFactory()
     session_created = db_session is None
 
     try:
-      target_graph_id = graph_id or entity_id
       filter_user_id = None if (graph_id or user_id == SYSTEM_USER_ID) else user_id
 
       connections = Connection.list_filtered(
         session=session,
-        graph_id=target_graph_id,
+        graph_id=graph_id,
         user_id=filter_user_id,
         provider=provider,
       )
 
+      parents: dict[str, Callable[[], str | None]] = {}
       result = []
       for conn in connections:
         conn_dict = conn.to_dict()
@@ -188,6 +193,13 @@ class ConnectionService:
           conn_dict["is_expired"] = cred.is_expired() if cred else False
         except Exception:
           conn_dict["is_expired"] = False
+
+        is_feed = (conn.provider or "").lower() in BANK_FEED_PROVIDERS
+        stored = cred.get_credentials() if cred is not None and is_feed else {}
+        parent = parents.setdefault(conn.graph_id, group_parent_reader(conn.graph_id))
+        conn_dict["entity_id"] = books_entity_id(conn.provider, stored, parent)
+        if entity_id and conn_dict["entity_id"] != entity_id:
+          continue
 
         result.append(conn_dict)
 
@@ -440,7 +452,14 @@ class ConnectionService:
         )
       conn.set_write_policy(session, write_policy)
       logger.info("Set write_policy=%s on connection %s", write_policy, connection_id)
-      return conn.to_dict()
+      result = conn.to_dict()
+      cred = ConnectionCredentials.get_by_connection_id(connection_id, session)
+      result["entity_id"] = books_entity_id(
+        conn.provider,
+        cred.get_credentials() if cred is not None else {},
+        group_parent_reader(graph_id),
+      )
+      return result
     finally:
       if session_created:
         session.close()
@@ -458,12 +477,52 @@ SYNCED_LEDGER_PROVIDERS: frozenset[str] = SEVERABLE_SOURCES
 BANK_FEED_PROVIDERS: frozenset[str] = frozenset({"mercury", "plaid"})
 
 
+def books_entity_id(
+  provider: str | None,
+  credentials: dict[str, Any],
+  group_parent: Callable[[], str | None],
+) -> str | None:
+  """The entity whose books a connection keeps: the group parent for a
+  synced ledger, the entity a bank feed was connected for (the parent when
+  it named none), and nobody's for any other source, whose events name
+  their own. A feed's accounts can each move to another entity later."""
+  wanted = (provider or "").lower()
+  if wanted in BANK_FEED_PROVIDERS:
+    named = (credentials.get("sync_config") or {}).get("entity_id")
+    return str(named) if named else group_parent()
+  if wanted in SYNCED_LEDGER_PROVIDERS:
+    return group_parent()
+  return None
+
+
+def group_parent_reader(graph_id: str) -> Callable[[], str | None]:
+  """The group parent's id, read from the graph's ledger at most once and
+  only if asked; None when the graph has no ledger or no entity yet. A
+  failed read is None too: it labels a connection, and must never hide one."""
+  from robosystems.operations.roboledger.entity_scope import find_entity_id
+
+  read: list[str | None] = []
+
+  def parent() -> str | None:
+    if not read:
+      try:
+        read.append(_read_books(graph_id, find_entity_id, missing=None))
+      except Exception:
+        logger.warning(
+          "Could not read the group parent of graph %s", graph_id, exc_info=True
+        )
+        read.append(None)
+    return read[0]
+
+  return parent
+
+
 class ProviderConflictError(Exception):
   """A provider cannot be connected given the books the graph keeps.
 
   ``code`` is stable for clients: ``QUICKBOOKS_ACTIVE``, ``CHART_REQUIRED``,
   ``NATIVE_BOOKS_PRESENT``, ``OTHER_COMPANY_BOOKS``, ``ENTITY_NOT_FOUND``,
-  ``CONSOLIDATION_ENTITY``.
+  ``CONSOLIDATION_ENTITY``, ``PARENT_ONLY``.
   """
 
   def __init__(self, code: str, message: str) -> None:
@@ -503,10 +562,13 @@ def assert_provider_compatible(
     → ``NATIVE_BOOKS_PRESENT``;
   - a synced GL naming a company other than the one that built the parent's
     synced books → ``OTHER_COMPANY_BOOKS`` (see `assert_same_company`);
-  - a feed naming an entity the graph does not have → ``ENTITY_NOT_FOUND``.
+  - a synced GL named for an entity other than the group parent →
+    ``PARENT_ONLY``;
+  - a feed or synced GL naming an entity the graph does not have →
+    ``ENTITY_NOT_FOUND``.
 
-  ``entity_id`` is where the feed's accounts land: a subsidiary's id, or
-  None for the group parent. ``resuming`` is a live synced connection
+  ``entity_id`` is the entity whose books the connection would keep: a
+  subsidiary's id, or None for the group parent. ``resuming`` is a live synced connection
   re-authorizing: it already keeps the parent's books, so accounts added
   beside it since are not books it would take over. ``realm_id`` is the
   company a synced connection names before its callback, when it names one.
@@ -545,6 +607,13 @@ def assert_provider_compatible(
     return
 
   if wanted in SYNCED_LEDGER_PROVIDERS:
+    if not _is_group_parent(graph_id, entity_id):
+      raise ProviderConflictError(
+        "PARENT_ONLY",
+        f"{wanted.capitalize()} keeps the group parent's books only. A "
+        "subsidiary's books come from its bank feeds, the API or a file "
+        "integration.",
+      )
     if resuming:
       return
     feeds = [
@@ -631,9 +700,9 @@ def synced_ledger_live(graph_id: str) -> bool:
 
 
 def _is_group_parent(graph_id: str, entity_id: str | None) -> bool:
-  """Whether a feed landing on ``entity_id`` lands on the group parent.
-  None is the parent by definition; a named entity is looked up on the
-  tenant, and one the graph does not have is refused."""
+  """Whether a connection keeping ``entity_id``'s books keeps the group
+  parent's. None is the parent by definition; a named entity is looked up on
+  the tenant, and one the graph does not have is refused."""
   from robosystems.operations.roboledger.entity_scope import (
     EntityNotInGraphError,
     NoEntityError,
