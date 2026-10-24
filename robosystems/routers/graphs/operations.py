@@ -320,9 +320,11 @@ async def delete_subgraph_op(
     "tear down immediately (~10 min); pass `true` to keep the graph usable "
     "through the current billing period and tear it down at the period "
     "boundary via the existing suspend → deprovision pipeline. An immediate "
-    "delete of an active card-billed subscription credits the unused part of "
-    "the period to the organization's account balance, applied to its next "
-    "invoice; it is not refunded. Requires "
+    "delete credits the unused part of the billed period; it is not refunded. "
+    "On a card-billed plan the credit goes to the organization's account "
+    "balance and is applied to its next invoice; on an invoiced plan it is a "
+    "credit line on that period's invoice, or a separate credit invoice if "
+    "that one is already paid. Requires "
     "`confirm` to equal the URL `graph_id`. Caller must be both org owner "
     "(billing authority) and admin on the graph (operational authority). "
     "Not allowed on shared repositories."
@@ -354,6 +356,7 @@ async def delete_graph_op(
   )
   from robosystems.models.core.graph import Graph, GraphStatus
   from robosystems.models.core.graph.graph_user import GraphUser
+  from robosystems.operations.billing.invoice_credits import apply_unused_time_credit
   from robosystems.operations.providers.payment_provider import get_payment_provider
   from robosystems.security import SecurityAuditLogger, SecurityEventType
 
@@ -513,6 +516,23 @@ async def delete_graph_op(
         "resource_id": graph_id,
       },
     )
+
+    # The invoice-billed twin of the Stripe credit above. The cancel is
+    # committed and irreversible by now, so a failure here must not fail the
+    # delete: it is logged, and the backfill picks the subscription up later.
+    if immediate and not subscription.stripe_subscription_id:
+      try:
+        apply_unused_time_credit(
+          subscription, db, actor_type="user", actor_user_id=str(user.id)
+        )
+      except Exception as exc:
+        db.rollback()
+        logger.error(
+          f"Failed to credit unused time on {subscription.id} during "
+          f"delete-graph for {graph_id}: {exc}",
+          extra={"graph_id": graph_id, "subscription_id": subscription.id},
+          exc_info=True,
+        )
 
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.GRAPH_DELETED,

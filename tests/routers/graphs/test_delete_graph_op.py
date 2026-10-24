@@ -679,3 +679,90 @@ class TestDeleteGraphImmediateSuspend:
 
     assert envelope.status == "completed"
     assert envelope.result["status"] == "deprovisioning_queued"
+
+
+class TestDeleteGraphInvoiceCredit:
+  """An immediate delete of an invoice-billed graph credits its unused time;
+  a failure to credit never fails the delete it follows."""
+
+  _setup_admin_membership = TestDeleteGraphRunner._setup_admin_membership
+  _patch_org_owner = staticmethod(TestDeleteGraphRunner._patch_org_owner)
+
+  async def _run(self, sub: MagicMock, body: DeleteGraphOp) -> MagicMock:
+    db = MagicMock()
+    self._setup_admin_membership(db, role="admin")
+    with (
+      patch(
+        "robosystems.models.core.billing.BillingSubscription.get_by_resource",
+        return_value=sub,
+      ),
+      patch("robosystems.models.core.billing.BillingAuditLog.log_event"),
+      patch("robosystems.security.SecurityAuditLogger"),
+      patch("robosystems.operations.providers.payment_provider.get_payment_provider"),
+      self._patch_org_owner("OWNER"),
+    ):
+      await delete_graph_op(
+        body=body,
+        graph_id="kg_x",
+        user=_user(user_id="usr_admin"),
+        idempotency_key=None,
+        cache=_FakeCache(),
+        db=db,
+      )
+    return db
+
+  @staticmethod
+  def _sub(stripe_subscription_id: str | None = None) -> MagicMock:
+    from datetime import UTC, datetime
+
+    sub = MagicMock()
+    sub.id = "sub_abc"
+    sub.status = "active"
+    sub.org_id = "org_1"
+    sub.stripe_subscription_id = stripe_subscription_id
+    sub.ends_at = datetime(2026, 6, 1, tzinfo=UTC)
+    return sub
+
+  @pytest.mark.asyncio
+  @patch("robosystems.operations.billing.invoice_credits.apply_unused_time_credit")
+  async def test_immediate_invoice_billed_delete_credits_unused_time(
+    self, mock_apply: MagicMock
+  ) -> None:
+    sub = self._sub()
+    db = await self._run(sub, DeleteGraphOp(confirm="kg_x"))
+
+    mock_apply.assert_called_once_with(
+      sub, db, actor_type="user", actor_user_id="usr_admin"
+    )
+
+  @pytest.mark.asyncio
+  @patch("robosystems.operations.billing.invoice_credits.apply_unused_time_credit")
+  async def test_stripe_billed_delete_leaves_the_credit_to_stripe(
+    self, mock_apply: MagicMock
+  ) -> None:
+    await self._run(self._sub("sub_stripe_xyz"), DeleteGraphOp(confirm="kg_x"))
+
+    mock_apply.assert_not_called()
+
+  @pytest.mark.asyncio
+  @patch("robosystems.operations.billing.invoice_credits.apply_unused_time_credit")
+  async def test_period_end_delete_has_nothing_to_credit(
+    self, mock_apply: MagicMock
+  ) -> None:
+    await self._run(self._sub(), DeleteGraphOp(confirm="kg_x", at_period_end=True))
+
+    mock_apply.assert_not_called()
+
+  @pytest.mark.asyncio
+  @patch(
+    "robosystems.operations.billing.invoice_credits.apply_unused_time_credit",
+    side_effect=RuntimeError("db hiccup"),
+  )
+  async def test_a_failed_credit_does_not_fail_the_delete(
+    self, _mock_apply: MagicMock
+  ) -> None:
+    sub = self._sub()
+    db = await self._run(sub, DeleteGraphOp(confirm="kg_x"))
+
+    sub.cancel.assert_called_once_with(db, immediate=True)
+    db.rollback.assert_called_once()
