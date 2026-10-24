@@ -30,6 +30,8 @@ from robosystems.middleware.extensions import GraphExtensionContext
 
 MODULE = "robosystems.graphql.context"
 GRAPH_ID = "kg01234567890abcdef"
+ACCOUNT_KEY = "rfs" + "a" * 64
+SCOPED_KEY = "rfsc" + "b" * 64
 
 
 def _entity_meta(
@@ -93,8 +95,8 @@ class TestGetContextAuthContract:
   async def test_invalid_api_key_re_raises_401(self):
     """Case 2a: X-API-Key present but bad → real 401, NOT silent anonymous.
 
-    The account-wide validator rejects it, and the graph-scoped retry (for
-    graph-scoped keys) also comes back None, so the 401 stands.
+    An account-wide key is `get_current_user`'s alone; the graph-scoped path
+    never sees it.
     """
     request = _make_request(headers={})
 
@@ -104,22 +106,45 @@ class TestGetContextAuthContract:
         new_callable=AsyncMock,
         side_effect=HTTPException(status_code=401, detail="Invalid API key"),
       ),
-      patch(f"{MODULE}.validate_api_key_with_graph", return_value=None) as mock_scoped,
+      patch(f"{MODULE}.validate_api_key_with_graph") as mock_scoped,
     ):
       with pytest.raises(HTTPException) as exc_info:
         await get_context(
           request=request,
-          api_key="rfs_bad_key",
+          api_key=ACCOUNT_KEY,
           graph_id=GRAPH_ID,
           db=MagicMock(),
         )
 
     assert exc_info.value.status_code == 401
-    # The graph-scoped retry is attempted for a pure API-key request, then fails.
-    mock_scoped.assert_called_once()
+    mock_scoped.assert_not_called()
+
+  async def test_account_key_whose_hex_starts_with_c_is_not_graph_scoped(self):
+    """`rfs` + hex beginning `c` reads as `rfsc…`; the length tells them apart."""
+    user = MagicMock()
+    key = "rfsc" + "0" * 63
+
+    with (
+      patch(
+        f"{MODULE}.get_current_user", new_callable=AsyncMock, return_value=user
+      ) as mock_account,
+      patch(f"{MODULE}.validate_api_key_with_graph") as mock_scoped,
+      patch(f"{MODULE}.check_graph_access"),
+      patch(f"{MODULE}.load_graph_metadata", return_value=_entity_meta()),
+    ):
+      ctx = await get_context(
+        request=_make_request(headers={}),
+        api_key=key,
+        graph_id=GRAPH_ID,
+        db=MagicMock(),
+      )
+
+    assert ctx["user"] is user
+    mock_account.assert_awaited_once()
+    mock_scoped.assert_not_called()
 
   async def test_graph_scoped_key_validation_runs_off_the_event_loop(self):
-    """The graph-scoped retry can reach a bcrypt verify on a cache miss; on
+    """Graph-scoped validation can reach a bcrypt verify on a cache miss; on
     the loop it stalls every other request in the process."""
     import asyncio
 
@@ -134,17 +159,13 @@ class TestGetContextAuthContract:
       return None
 
     with (
-      patch(
-        f"{MODULE}.get_current_user",
-        new_callable=AsyncMock,
-        side_effect=HTTPException(status_code=401, detail="Invalid API key"),
-      ),
       patch(f"{MODULE}.validate_api_key_with_graph", side_effect=_validate),
+      patch(f"{MODULE}.SecurityAuditLogger"),
     ):
       with pytest.raises(HTTPException):
         await get_context(
           request=_make_request(headers={}),
-          api_key="rfsc_scoped_key",
+          api_key=SCOPED_KEY,
           graph_id=GRAPH_ID,
           db=MagicMock(),
         )
@@ -152,45 +173,69 @@ class TestGetContextAuthContract:
     assert on_loop == [False]
 
   async def test_graph_scoped_key_accepted_via_graph_validation(self):
-    """Case 2a': a graph-scoped (`rfsc…`) key is refused by the
-    account-wide validator (it has no graph context there) but is valid for
-    its OWN graph. This endpoint's URL scopes us to that graph, so the
-    graph-aware retry authenticates it — matching the REST-operations and MCP
-    surfaces, which already accept these keys."""
+    """Case 2a': a graph-scoped (`rfsc…`) key is valid for its OWN graph.
+    This endpoint's URL scopes us to that graph, so it is validated against it
+    directly — matching the REST-operations and MCP surfaces — and never
+    through `get_current_user`, which refuses it and would audit it as
+    invalid on a request that then succeeds."""
     request = _make_request(headers={})
     user = MagicMock()
     user.id = "usr_owner"
     db = MagicMock()
 
     with (
-      patch(
-        f"{MODULE}.get_current_user",
-        new_callable=AsyncMock,
-        side_effect=HTTPException(status_code=401, detail="Invalid API key"),
-      ),
+      patch(f"{MODULE}.get_current_user", new_callable=AsyncMock) as mock_account,
       patch(f"{MODULE}.validate_api_key_with_graph", return_value=user) as mock_scoped,
+      patch(f"{MODULE}.SecurityAuditLogger") as mock_audit,
       patch(f"{MODULE}.check_graph_access") as mock_check,
       patch(f"{MODULE}.load_graph_metadata", return_value=_entity_meta()),
     ):
       ctx = await get_context(
         request=request,
-        api_key="rfsc_scoped_to_this_graph",
+        api_key=SCOPED_KEY,
         graph_id=GRAPH_ID,
         db=db,
       )
 
     assert ctx["user"] is user
-    # Re-validated against THIS graph (the URL scope), reusing the request db.
-    mock_scoped.assert_called_once_with("rfsc_scoped_to_this_graph", GRAPH_ID, db)
-    # The rescue path authenticated outside `get_current_user`, so it must
-    # publish the principal itself or the request stays unattributed.
+    mock_account.assert_not_called()
+    # Validated against THIS graph (the URL scope), reusing the request db.
+    mock_scoped.assert_called_once_with(SCOPED_KEY, GRAPH_ID, db)
+    # A valid key is audited as a success, never as an invalid key.
+    mock_audit.log_security_event.assert_not_called()
+    mock_audit.log_auth_success.assert_called_once()
+    # Authenticated outside `get_current_user`, so the principal is published
+    # here or the request stays unattributed.
     assert request.state.user_id == "usr_owner"
-    assert request.state.api_key_prefix == "rfsc_sco"
+    assert request.state.api_key_prefix == SCOPED_KEY[:8]
     # Graph access is still enforced on top of key validation.
     mock_check.assert_called_once_with(user, GRAPH_ID, request)
 
-  async def test_bearer_failure_does_not_trigger_graph_scoped_retry(self):
-    """The graph-scoped retry is for pure API-key requests only. A failed
+  async def test_invalid_graph_scoped_key_is_401_and_audited_once(self):
+    """A scoped key that does not validate for this graph is a real 401, with
+    one `api_key_invalid` event naming the graph."""
+    with (
+      patch(f"{MODULE}.get_current_user", new_callable=AsyncMock) as mock_account,
+      patch(f"{MODULE}.validate_api_key_with_graph", return_value=None),
+      patch(f"{MODULE}.SecurityAuditLogger") as mock_audit,
+    ):
+      with pytest.raises(HTTPException) as exc_info:
+        await get_context(
+          request=_make_request(headers={}),
+          api_key=SCOPED_KEY,
+          graph_id=GRAPH_ID,
+          db=MagicMock(),
+        )
+
+    assert exc_info.value.status_code == 401
+    mock_account.assert_not_called()
+    mock_audit.log_security_event.assert_called_once()
+    event = mock_audit.log_security_event.call_args.kwargs
+    assert event["details"] == {"api_key_prefix": SCOPED_KEY[:8], "graph_id": GRAPH_ID}
+    mock_audit.log_auth_success.assert_not_called()
+
+  async def test_bearer_failure_does_not_take_the_graph_scoped_path(self):
+    """The graph-scoped path is for pure API-key requests only. A failed
     Bearer JWT must re-raise as-is and NEVER fall through to it, so JWT auth
     (the frontends' path) is entirely unchanged."""
     request = _make_request(headers={"Authorization": "Bearer expired.jwt"})

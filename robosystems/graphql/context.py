@@ -22,12 +22,16 @@ from robosystems.middleware.auth.dependencies import (
   _stash_api_key_identity,
   get_current_user,
 )
-from robosystems.middleware.auth.utils import validate_api_key_with_graph
+from robosystems.middleware.auth.utils import (
+  is_graph_scoped_api_key,
+  validate_api_key_with_graph,
+)
 from robosystems.middleware.billing.enforcement import require_graph_access
 from robosystems.middleware.extensions import load_graph_metadata
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.graph.utils.subgraph import is_subgraph
 from robosystems.models.core import User
+from robosystems.security import SecurityAuditLogger, SecurityEventType
 
 
 class GraphQLContext(TypedDict):
@@ -46,6 +50,37 @@ class GraphQLContext(TypedDict):
   loads: NotRequired[dict[str, asyncio.Future[Any]]]
 
 
+async def _authenticate_graph_scoped_key(
+  request: Request, api_key: str, graph_id: str, db: Session
+) -> User:
+  """Authenticate a graph-scoped key against this graph, auditing either way."""
+  client_ip = request.client.host if request.client else None
+  user_agent = request.headers.get("user-agent")
+  user = await asyncio.to_thread(validate_api_key_with_graph, api_key, graph_id, db)
+  if user is None:
+    SecurityAuditLogger.log_security_event(
+      event_type=SecurityEventType.API_KEY_INVALID,
+      ip_address=client_ip,
+      user_agent=user_agent,
+      endpoint=str(request.url.path),
+      details={"api_key_prefix": api_key[:8], "graph_id": graph_id},
+      risk_level="high",
+    )
+    raise HTTPException(
+      status_code=401,
+      detail="Invalid API key",
+      headers={"WWW-Authenticate": "ApiKey"},
+    )
+  _stash_api_key_identity(request, api_key, user)
+  SecurityAuditLogger.log_auth_success(
+    user_id=str(user.id),
+    ip_address=client_ip,
+    user_agent=user_agent,
+    auth_method="api_key",
+  )
+  return user
+
+
 async def get_context(
   request: Request,
   api_key: str | None = Security(API_KEY_HEADER),
@@ -60,22 +95,22 @@ async def get_context(
   """
   has_credentials = bool(api_key) or bool(request.headers.get("Authorization"))
 
-  try:
-    user = await get_current_user(request, api_key or "")
-  except HTTPException:
-    if not has_credentials:
-      user = None
-    elif api_key and not request.headers.get("Authorization"):
-      # A graph-scoped key is refused by `get_current_user` by design; the URL
-      # scopes this endpoint to one graph, so validate it against that graph
-      # as the REST operations and MCP surfaces do.
-      user = await asyncio.to_thread(validate_api_key_with_graph, api_key, graph_id, db)
-      if user is None:
+  if (
+    api_key
+    and not request.headers.get("Authorization")
+    and is_graph_scoped_api_key(api_key)
+  ):
+    # `get_current_user` refuses a graph-scoped key by design, and would audit
+    # it as invalid; the URL scopes this endpoint to one graph, so validate it
+    # against that graph as the REST operations and MCP surfaces do.
+    user = await _authenticate_graph_scoped_key(request, api_key, graph_id, db)
+  else:
+    try:
+      user = await get_current_user(request, api_key or "")
+    except HTTPException:
+      if has_credentials:
         raise
-      # Publish the principal, which `get_current_user` would have done.
-      _stash_api_key_identity(request, api_key, user)
-    else:
-      raise
+      user = None
 
   # A subgraph has no extensions schema. Checked after auth (bad credentials
   # still 401) and before `check_graph_access`, which would resolve to the
