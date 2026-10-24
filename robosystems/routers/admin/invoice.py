@@ -5,7 +5,12 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from ...database import get_db_session
 from ...logger import get_logger
 from ...middleware.auth.admin import require_admin
-from ...models.api.admin import InvoiceLineItemResponse, InvoiceResponse
+from ...models.api.admin import (
+  InvoiceLineItemResponse,
+  InvoiceResponse,
+  UnusedTimeCreditItem,
+  UnusedTimeCreditRunResponse,
+)
 from ...models.core import User
 from ...models.core.billing import BillingInvoice, BillingInvoiceLineItem
 
@@ -286,6 +291,90 @@ async def mark_invoice_paid(
         )
         for item in line_items
       ],
+    )
+  finally:
+    session.close()
+
+
+@router.post("/credit-unused-time", response_model=UnusedTimeCreditRunResponse)
+@require_admin(permissions=["subscription:write"])
+async def credit_unused_time(
+  request: Request,
+  dry_run: bool = Query(True),
+):
+  """Credit the unused billed time of canceled invoice-billed graphs.
+
+  The backfill for graphs deleted before a delete credited its own unused
+  time; one already credited is skipped. Dry run by default.
+  """
+  from ...models.core.billing import BillingSubscription, SubscriptionStatus
+  from ...operations.billing.invoice_credits import (
+    apply_unused_time_credit,
+    plan_unused_time_credit,
+  )
+
+  session = next(get_db_session())
+  try:
+    subscriptions = (
+      session.query(BillingSubscription)
+      .filter(
+        BillingSubscription.resource_type == "graph",
+        BillingSubscription.status == SubscriptionStatus.CANCELED.value,
+        BillingSubscription.stripe_subscription_id.is_(None),
+        BillingSubscription.ends_at.isnot(None),
+      )
+      .order_by(BillingSubscription.ends_at)
+      .all()
+    )
+
+    items: list[UnusedTimeCreditItem] = []
+    failed: list[str] = []
+    for subscription in subscriptions:
+      try:
+        credit = (
+          plan_unused_time_credit(subscription, session)
+          if dry_run
+          else apply_unused_time_credit(subscription, session, actor_type="admin")
+        )
+      except Exception as exc:
+        session.rollback()
+        failed.append(subscription.id)
+        logger.error(
+          f"Unused-time credit failed for {subscription.id}: {exc}",
+          extra={"subscription_id": subscription.id},
+          exc_info=True,
+        )
+        continue
+      if credit is None:
+        continue
+      items.append(
+        UnusedTimeCreditItem(
+          subscription_id=credit.subscription_id,
+          org_id=credit.org_id,
+          resource_id=subscription.resource_id,
+          billed_invoice_number=credit.billed_invoice_number,
+          billed_invoice_status=credit.billed_invoice_status,
+          billed_cents=credit.billed_cents,
+          credit_cents=credit.credit_cents,
+          unused_from=credit.unused_from,
+          on_billed_invoice=credit.on_billed_invoice,
+        )
+      )
+
+    logger.info(
+      f"Admin unused-time credit pass: {len(items)} credits (dry_run={dry_run})",
+      extra={
+        "admin_key_id": request.state.admin_key_id,
+        "dry_run": dry_run,
+        "credits": len(items),
+        "failed": len(failed),
+      },
+    )
+    return UnusedTimeCreditRunResponse(
+      dry_run=dry_run,
+      credits=items,
+      total_credit_cents=sum(item.credit_cents for item in items),
+      failed_subscription_ids=failed,
     )
   finally:
     session.close()

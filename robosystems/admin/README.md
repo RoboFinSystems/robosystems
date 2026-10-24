@@ -79,9 +79,13 @@ just admin dev invoices get INVOICE_ID
 just admin dev invoices mark-paid INVOICE_ID \
   --payment-method "wire_transfer" \
   --payment-reference "REF-123456"
+just admin dev invoices credit-unused-time           # dry run: list what is owed
+just admin dev invoices credit-unused-time --apply   # record the credits
 ```
 
 Statuses: `open`, `paid`, `void`, `uncollectible`
+
+`credit-unused-time` credits canceled invoice-billed graphs for the part of their billed period left after access ended — a negative line on the period's invoice while it is open, a separate credit invoice once it is paid. A delete now does this itself; the command catches graphs deleted before it did. Already-credited lines are skipped, so it is safe to re-run.
 
 ### credits
 

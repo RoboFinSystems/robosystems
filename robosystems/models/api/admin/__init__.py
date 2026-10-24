@@ -26,7 +26,12 @@ from .graphs import (
   GraphStorageResponse,
   OrphanTenantSchemasResponse,
 )
-from .invoice import InvoiceLineItemResponse, InvoiceResponse
+from .invoice import (
+  InvoiceLineItemResponse,
+  InvoiceResponse,
+  UnusedTimeCreditItem,
+  UnusedTimeCreditRunResponse,
+)
 from .oauth import (
   OAuthClientCreateRequest,
   OAuthClientCreateResponse,
@@ -94,6 +99,8 @@ __all__ = [
   "SubscriptionCreateRequest",
   "SubscriptionResponse",
   "SubscriptionUpdateRequest",
+  "UnusedTimeCreditItem",
+  "UnusedTimeCreditRunResponse",
   "UserAPIKeyResponse",
   "UserActivityResponse",
   "UserDeletionBlockerResponse",

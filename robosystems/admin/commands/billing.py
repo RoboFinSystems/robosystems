@@ -369,6 +369,56 @@ def mark_invoice_paid(client, invoice_id, payment_method, payment_reference):
     click.echo(f"   Reference: {invoice['payment_reference']}")
 
 
+@invoices.command("credit-unused-time")
+@click.option(
+  "--apply", is_flag=True, help="Record the credits (default: dry run, list only)"
+)
+@click.pass_obj
+def credit_unused_time(client, apply):
+  """Credit the unused billed time of canceled invoice-billed graphs."""
+  result = client._make_request(
+    "POST",
+    "/admin/v1/invoices/credit-unused-time",
+    params={"dry_run": "false" if apply else "true"},
+  )
+
+  credits_owed = result["credits"]
+  if not credits_owed:
+    console.print("\n[yellow]No unused billed time to credit.[/yellow]")
+  else:
+    table = Table(title="Unused-time credits" + ("" if apply else " (dry run)"))
+    table.add_column("Subscription", style="cyan")
+    table.add_column("Graph")
+    table.add_column("Invoice")
+    table.add_column("Status")
+    table.add_column("Billed", justify="right")
+    table.add_column("Credit", justify="right", style="green")
+    table.add_column("Unused From")
+    table.add_column("Lands On")
+    for item in credits_owed:
+      table.add_row(
+        item["subscription_id"],
+        item.get("resource_id") or "—",
+        item["billed_invoice_number"],
+        item["billed_invoice_status"],
+        f"${item['billed_cents'] / 100:.2f}",
+        f"-${item['credit_cents'] / 100:.2f}",
+        item["unused_from"][:10],
+        "same invoice" if item["on_billed_invoice"] else "new credit invoice",
+      )
+    console.print()
+    console.print(table)
+
+  console.print(
+    f"\n[bold]Total credit:[/bold] ${result['total_credit_cents'] / 100:,.2f} "
+    f"across {len(credits_owed)} subscriptions"
+  )
+  if result["failed_subscription_ids"]:
+    console.print(f"[red]Failed:[/red] {', '.join(result['failed_subscription_ids'])}")
+  if not apply and credits_owed:
+    console.print("Run again with --apply to record them.")
+
+
 @click.group()
 def credits():
   """Manage credit pools."""

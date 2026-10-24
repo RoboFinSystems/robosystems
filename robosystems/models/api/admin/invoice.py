@@ -41,3 +41,26 @@ class InvoiceResponse(BaseModel):
   paid_at: datetime | None
   created_at: datetime
   line_items: list[InvoiceLineItemResponse]
+
+
+class UnusedTimeCreditItem(BaseModel):
+  """One subscription's unused-time credit, planned or applied."""
+
+  subscription_id: str
+  org_id: str
+  resource_id: str | None
+  billed_invoice_number: str
+  billed_invoice_status: str
+  billed_cents: int
+  credit_cents: int
+  unused_from: datetime
+  on_billed_invoice: bool
+
+
+class UnusedTimeCreditRunResponse(BaseModel):
+  """Result of an unused-time credit backfill pass."""
+
+  dry_run: bool
+  credits: list[UnusedTimeCreditItem]
+  total_credit_cents: int
+  failed_subscription_ids: list[str]
