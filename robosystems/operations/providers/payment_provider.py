@@ -90,8 +90,11 @@ class PaymentProvider(ABC):
     pass
 
   @abstractmethod
-  def cancel_subscription(self, subscription_id: str) -> None:
-    """Cancel a subscription immediately."""
+  def cancel_subscription(
+    self, subscription_id: str, *, credit_unused_time: bool = False
+  ) -> None:
+    """Cancel a subscription immediately, optionally crediting the unused
+    time of the current period to the customer's balance."""
     pass
 
   @abstractmethod
@@ -637,17 +640,29 @@ class StripePaymentProvider(PaymentProvider):
       logger.error(f"Failed to get upcoming invoice: {e}", exc_info=True)
       raise
 
-  def cancel_subscription(self, subscription_id: str) -> None:
+  def cancel_subscription(
+    self, subscription_id: str, *, credit_unused_time: bool = False
+  ) -> None:
     """Cancel a Stripe subscription immediately.
+
+    With `credit_unused_time`, Stripe prorates the unused period and bills it
+    on a final invoice now; its negative total lands on the customer's
+    balance, where it offsets their next invoice. A credit, not a refund.
 
     Already-canceled or missing counts as success, so a raise always means
     Stripe is still billing.
     """
     try:
-      self.stripe.Subscription.cancel(subscription_id)
+      if credit_unused_time:
+        self.stripe.Subscription.cancel(subscription_id, prorate=True, invoice_now=True)
+      else:
+        self.stripe.Subscription.cancel(subscription_id)
       logger.info(
         f"Canceled Stripe subscription {subscription_id}",
-        extra={"subscription_id": subscription_id},
+        extra={
+          "subscription_id": subscription_id,
+          "credit_unused_time": credit_unused_time,
+        },
       )
     except self.stripe.InvalidRequestError as e:
       if self._subscription_already_terminal(subscription_id):

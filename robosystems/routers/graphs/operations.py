@@ -319,7 +319,10 @@ async def delete_subgraph_op(
     "modes via the `at_period_end` body flag: omit it (or pass `false`) to "
     "tear down immediately (~10 min); pass `true` to keep the graph usable "
     "through the current billing period and tear it down at the period "
-    "boundary via the existing suspend → deprovision pipeline. Requires "
+    "boundary via the existing suspend → deprovision pipeline. An immediate "
+    "delete of an active card-billed subscription credits the unused part of "
+    "the period to the organization's account balance, applied to its next "
+    "invoice; it is not refunded. Requires "
     "`confirm` to equal the URL `graph_id`. Caller must be both org owner "
     "(billing authority) and admin on the graph (operational authority). "
     "Not allowed on shared repositories."
@@ -429,13 +432,23 @@ async def delete_graph_op(
       )
 
     immediate = not body.at_period_end
+    # An immediate delete credits the unused period to the customer's balance
+    # (never a refund). Only an active sub has a paid period to credit: a
+    # past_due one would be credited for time it never paid for.
+    credit_unused_time = (
+      immediate
+      and bool(subscription.stripe_subscription_id)
+      and subscription.status == SubscriptionStatus.ACTIVE.value
+    )
 
-    # Stripe's default cancel does not prorate or refund.
     if subscription.stripe_subscription_id:
       try:
         provider = get_payment_provider("stripe")
         if immediate:
-          provider.cancel_subscription(subscription.stripe_subscription_id)
+          provider.cancel_subscription(
+            subscription.stripe_subscription_id,
+            credit_unused_time=credit_unused_time,
+          )
         else:
           provider.stripe.Subscription.modify(
             subscription.stripe_subscription_id,
@@ -494,6 +507,7 @@ async def delete_graph_op(
       subscription_id=subscription.id,
       event_data={
         "immediate": immediate,
+        "credited_unused_time": credit_unused_time,
         "via": "graph_ops.delete_graph",
         "resource_type": "graph",
         "resource_id": graph_id,

@@ -752,6 +752,50 @@ class TestHandleInvoiceCreated:
     call_kwargs = MockInvoice.call_args[1]
     assert call_kwargs["tax_cents"] == 0
 
+  async def test_unused_time_credit_invoice_records_negative_totals(
+    self, mock_db_session, mock_context, mock_subscription
+  ):
+    """An immediate delete-graph's final invoice (shape captured in Stripe
+    test mode): a draft with a negative total, no number, null tax, and one
+    proration line with no unit amount."""
+    invoice_data = make_invoice_data(
+      status="draft",
+      number=None,
+      lines=[
+        {
+          "description": "Unused time on Ladybug Standard after 24 Oct 2026",
+          "quantity": 1,
+          "unit_amount_excluding_tax": None,
+          "amount": -9900,
+          "period": {"start": 1792814624, "end": 1795493021},
+        }
+      ],
+    )
+    invoice_data.update(subtotal=-9900, total=-9900, tax=None)
+    mock_subscription.status = "canceled"
+    captured_line_items: list[dict] = []
+
+    with (
+      patch(PATCH_BILLING_SUB) as MockSub,
+      patch(PATCH_BILLING_INV) as MockInvoice,
+      patch(PATCH_BILLING_LINE_ITEM) as MockLineItem,
+    ):
+      MockSub.get_by_provider_subscription_id.return_value = mock_subscription
+      mock_db_session.query.return_value.filter.return_value.first.return_value = None
+      MockInvoice.return_value = MagicMock(id="binv_credit")
+      MockLineItem.side_effect = lambda **kw: captured_line_items.append(kw)
+
+      from robosystems.dagster.jobs.billing import _handle_invoice_created
+
+      await _handle_invoice_created(invoice_data, mock_db_session, mock_context)
+
+    invoice_kwargs = MockInvoice.call_args[1]
+    assert invoice_kwargs["total_cents"] == -9900
+    assert invoice_kwargs["status"] == "draft"
+    assert invoice_kwargs["invoice_number"] == "STRIPE-ripe_abc"
+    assert captured_line_items[0]["amount_cents"] == -9900
+    assert captured_line_items[0]["unit_price_cents"] == -9900
+
 
 # ---------------------------------------------------------------------------
 # _handle_payment_succeeded
@@ -815,6 +859,35 @@ class TestHandlePaymentSucceeded:
       await _handle_payment_succeeded(invoice_data, mock_db_session, mock_context)
 
     mock_trigger.assert_awaited_once()
+
+  async def test_unused_time_credit_paid_on_canceled_sub_does_not_reprovision(
+    self, mock_db_session, mock_context, mock_subscription, mock_customer, mock_invoice
+  ):
+    """Stripe settles the delete-graph credit invoice as paid ($0 charged);
+    the subscription it belongs to is canceled and must stay torn down."""
+    invoice_data = make_invoice_data(status="paid")
+    invoice_data.update(subtotal=-9900, total=-9900, amount_paid=0)
+    mock_subscription.status = "canceled"
+
+    with (
+      patch(PATCH_BILLING_SUB) as MockSub,
+      patch(PATCH_BILLING_CUST) as MockCust,
+      patch(PATCH_BILLING_INV),
+      patch(PATCH_TRIGGER, new_callable=AsyncMock) as mock_trigger,
+    ):
+      MockSub.get_by_provider_subscription_id.return_value = mock_subscription
+      MockCust.get_by_stripe_customer_id.return_value = mock_customer
+      mock_db_session.query.return_value.filter.return_value.first.return_value = (
+        mock_invoice
+      )
+
+      from robosystems.dagster.jobs.billing import _handle_payment_succeeded
+
+      await _handle_payment_succeeded(invoice_data, mock_db_session, mock_context)
+
+    assert mock_invoice.status == "paid"
+    assert mock_subscription.status == "canceled"
+    mock_trigger.assert_not_awaited()
 
   async def test_active_subscription_does_not_trigger_provisioning(
     self, mock_db_session, mock_context, mock_subscription, mock_customer, mock_invoice

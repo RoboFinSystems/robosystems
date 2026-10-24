@@ -354,6 +354,14 @@ class TestStripeSubscriptionOperations:
     stripe_provider.cancel_subscription("sub_test123")
     stripe_provider.stripe.Subscription.cancel.assert_called_once_with("sub_test123")
 
+  def test_cancel_subscription_crediting_unused_time_invoices_the_proration(
+    self, stripe_provider
+  ):
+    stripe_provider.cancel_subscription("sub_test123", credit_unused_time=True)
+    stripe_provider.stripe.Subscription.cancel.assert_called_once_with(
+      "sub_test123", prorate=True, invoice_now=True
+    )
+
   def test_cancel_subscription_raises_on_error(self, stripe_provider):
     """Test that cancellation errors propagate."""
     stripe_provider.stripe.Subscription.cancel.side_effect = Exception("Not found")
