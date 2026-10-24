@@ -13,11 +13,20 @@ from .cache import api_key_cache
 
 # "rfs" (account-wide) or "rfsc" (graph-scoped) + 64 lowercase hex chars.
 _API_KEY_FORMAT_RE = re.compile(r"^rfsc?[0-9a-f]{64}$")
+_GRAPH_SCOPED_KEY_FORMAT_RE = re.compile(r"^rfsc[0-9a-f]{64}$")
 
 
 def _is_valid_api_key_format(api_key: str) -> bool:
   """Check if the API key matches the expected format before any cache/DB work."""
   return bool(_API_KEY_FORMAT_RE.match(api_key))
+
+
+def is_graph_scoped_api_key(api_key: str) -> bool:
+  """Whether the key has the graph-scoped shape.
+
+  By length, not prefix alone: an account-wide key's hex can begin with ``c``.
+  """
+  return bool(_GRAPH_SCOPED_KEY_FORMAT_RE.match(api_key))
 
 
 def _key_scope_allows(key_graph_id: str | None, requested_graph_id: str) -> bool:
