@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -14,33 +13,6 @@ from robosystems.logger import logger
 
 if TYPE_CHECKING:
   from robosystems.adapters.sec.taxonomy.concepts import CanonicalConcept
-
-
-def camel_case_to_words(name: str) -> str:
-  """Convert CamelCase XBRL element name to human-readable words.
-
-  >>> camel_case_to_words("RevenueFromContractWithCustomerExcludingAssessedTax")
-  'Revenue From Contract With Customer Excluding Assessed Tax'
-  """
-  result = re.sub(r"([a-z])([A-Z])", r"\1 \2", name)
-  # "HTMLParser" -> "HTML Parser"
-  result = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", result)
-  return result
-
-
-def compose_element_text(parsed_name: str, element_data: dict) -> str:
-  """Element text for embedding: parsed name plus balance, period type, classification."""
-  parts = [f"Name: {parsed_name}"]
-  balance = element_data.get("balance")
-  if balance:
-    parts.append(f"Balance: {balance}")
-  period_type = element_data.get("period_type")
-  if period_type:
-    parts.append(f"Period: {period_type}")
-  classification = element_data.get("classification")
-  if classification:
-    parts.append(f"Classification: {classification}")
-  return " | ".join(parts)
 
 
 def compose_structure_text(name: str | None, definition: str | None) -> str:

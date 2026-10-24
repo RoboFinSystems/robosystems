@@ -21,6 +21,7 @@ from robosystems.schemas.extensions.roboledger import RoboLedgerContext
 
 from .models import (
   LARGE_STAGING_TABLES,
+  LARGE_TABLE_STAGING_TIMEOUT,
   STAGING_MAX_RETRIES,
   STAGING_RETRY_BACKOFF_BASE,
   ProgressCallback,
@@ -532,7 +533,10 @@ class DuckDBStager:
     mapping = canonical_element_map()
     qnames = list(mapping)
     concepts = [mapping[q] for q in qnames]
-    timeout = get_staging_timeout("Element")
+    # A table edit can rewrite most of the 8M+ rows, so it gets the large-table
+    # budget: a timeout here fails the stage and stops the nightly chain.
+    timeout = LARGE_TABLE_STAGING_TIMEOUT
+    started = time.time()
 
     stamped = await client.execute_write(
       graph_id=self.graph_id,
@@ -567,7 +571,8 @@ class DuckDBStager:
     counts = (_count(stamped), _count(cleared))
     message = (
       f"Canonical concepts: {counts[0]:,} Element rows stamped, "
-      f"{counts[1]:,} cleared ({len(qnames)} qnames)"
+      f"{counts[1]:,} cleared ({len(qnames)} qnames) "
+      f"in {time.time() - started:.1f}s"
     )
     logger.info(message)
     if log_progress:

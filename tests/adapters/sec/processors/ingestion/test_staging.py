@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from robosystems.adapters.sec.processors.ingestion.models import (
+  LARGE_TABLE_STAGING_TIMEOUT,
   STAGING_MAX_RETRIES,
   TableInfo,
 )
@@ -866,6 +867,9 @@ class TestStampCanonicalConcepts:
     assert stamp_call.kwargs["sql"].startswith('UPDATE "Element" SET canonical_concept')
     assert clear_call.kwargs["parameters"] == [qnames]
     assert "canonical_concept = NULL" in clear_call.kwargs["sql"]
+    assert {c.kwargs["timeout"] for c in (stamp_call, clear_call)} == {
+      LARGE_TABLE_STAGING_TIMEOUT
+    }
 
   @pytest.mark.asyncio
   @patch(

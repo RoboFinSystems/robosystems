@@ -1,51 +1,6 @@
 """Tests for XBRL semantic enrichment module."""
 
-from robosystems.adapters.sec.enrichment import (
-  camel_case_to_words,
-  compose_element_text,
-  compose_structure_text,
-)
-
-
-class TestCamelCaseToWords:
-  def test_simple(self):
-    assert camel_case_to_words("Revenue") == "Revenue"
-
-  def test_multi_word(self):
-    assert camel_case_to_words("NetIncomeLoss") == "Net Income Loss"
-
-  def test_long_name(self):
-    result = camel_case_to_words("RevenueFromContractWithCustomerExcludingAssessedTax")
-    assert result == "Revenue From Contract With Customer Excluding Assessed Tax"
-
-  def test_consecutive_uppercase(self):
-    result = camel_case_to_words("EPSBasic")
-    assert result == "EPS Basic"
-
-  def test_empty_string(self):
-    assert camel_case_to_words("") == ""
-
-
-class TestComposeElementText:
-  def test_full_metadata(self):
-    result = compose_element_text(
-      "Revenue",
-      {"balance": "credit", "period_type": "duration", "classification": "us-gaap"},
-    )
-    assert "Name: Revenue" in result
-    assert "Balance: credit" in result
-    assert "Period: duration" in result
-    assert "Classification: us-gaap" in result
-
-  def test_minimal_metadata(self):
-    result = compose_element_text("Revenue", {})
-    assert result == "Name: Revenue"
-
-  def test_partial_metadata(self):
-    result = compose_element_text("Assets", {"balance": "debit"})
-    assert "Name: Assets" in result
-    assert "Balance: debit" in result
-    assert "Period:" not in result
+from robosystems.adapters.sec.enrichment import compose_structure_text
 
 
 class TestComposeStructureText:
