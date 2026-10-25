@@ -35,6 +35,16 @@ class DagsterJobMonitorTask(BaseTask):
   submitting a second one. While the run lives, the lock's TTL is kept fresh.
   """
 
+  @classmethod
+  def authorization_requirements(
+    cls, params: dict[str, Any]
+  ) -> tuple[str | None, bool]:
+    # A backup is an admin export that must run during a tier upgrade; every
+    # other monitored job writes the graph.
+    if params.get("job_name") == "backup_graph_job":
+      return "admin", False
+    return "member", True
+
   CANCEL_SETTLE_SECONDS = 120
   # Status reads can fail for a while (the webserver restarts on every
   # deploy); keep polling through that rather than give up on the run.

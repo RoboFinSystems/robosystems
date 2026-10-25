@@ -21,6 +21,9 @@ logger = get_logger(__name__)
 class GraphCreationTask(BaseTask):
   """Create a graph database (entity or generic) via the unified pipeline."""
 
+  # No graph exists yet; the org role was checked when the task was enqueued.
+  required_role = None
+
   async def execute(self) -> dict[str, Any]:
     from robosystems.operations.graph.graph_creation_service import (
       GraphCreationConfig,

@@ -45,7 +45,12 @@ from robosystems.worker.task_protection import (
   TaskProtectionManager,
 )
 from robosystems.worker.tasks import get_task_handler
-from robosystems.worker.tasks.base import BaseTask, TaskPaused, release_task_lock
+from robosystems.worker.tasks.base import (
+  BaseTask,
+  TaskPaused,
+  reauthorize_task,
+  release_task_lock,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -231,6 +236,27 @@ async def _process_task(
     # A first attempt never ran, so the lock its API call took would
     # otherwise be held for its whole TTL. A requeued one may have left work
     # running (a Dagster run, a Graph API COPY) and keeps it.
+    if task_data.get("attempt", 1) == 1:
+      await asyncio.to_thread(release_task_lock, graph_id, params)
+    await queue.lrem(inflight_key, 1, task_json)
+    return
+
+  # The payload's user was authorized at enqueue; a role removed or a graph
+  # suspended since then must stop the task here, on every dequeue path.
+  denied = await asyncio.to_thread(
+    reauthorize_task, handler_cls, graph_id, user_id, params
+  )
+  if denied:
+    logger.warning(
+      f"Task refused at dequeue: {task_type} ({task_id}): {denied}",
+      extra={"task_id": task_id, "task_type": task_type, "graph_id": graph_id},
+    )
+    await _fail_quietly(
+      manager,
+      task_id,
+      error=denied,
+      error_details={"error_type": "AuthorizationRevoked"},
+    )
     if task_data.get("attempt", 1) == 1:
       await asyncio.to_thread(release_task_lock, graph_id, params)
     await queue.lrem(inflight_key, 1, task_json)

@@ -17,6 +17,15 @@ import pytest
 from robosystems.middleware.sse.event_storage import OperationStatus
 from robosystems.middleware.sse.operation_manager import OperationManager
 
+
+@pytest.fixture(autouse=True)
+def _skip_dequeue_reauthorization():
+  # These tests exercise the consumer's lifecycle with synthetic graph ids;
+  # the role re-check at dequeue has its own tests.
+  with patch("robosystems.worker.consumer.reauthorize_task", return_value=None):
+    yield
+
+
 pytestmark = pytest.mark.integration
 
 

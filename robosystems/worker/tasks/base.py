@@ -34,6 +34,13 @@ class BaseTask(ABC):
   # Stamped by ``@register_task``; None when unregistered.
   task_type: ClassVar[str | None] = None
 
+  # The graph role re-resolved when the task is dequeued (first run, reaper
+  # requeue, DLQ retry, resume). The payload's ``user_id`` was authorized when
+  # the task was enqueued; the role may have gone since. None skips the check
+  # (no graph yet). ``require_write`` adds the write-strength lifecycle gate.
+  required_role: ClassVar[str | None] = "member"
+  require_write: ClassVar[bool] = True
+
   def __init__(
     self,
     task_id: str,
@@ -55,6 +62,20 @@ class BaseTask(ABC):
   async def execute(self) -> dict[str, Any]:
     """Execute the task. Must return a result dict."""
     raise NotImplementedError
+
+  @classmethod
+  def authorization_target(
+    cls, graph_id: str | None, params: dict[str, Any]
+  ) -> str | None:
+    """The graph whose role gates this task; the payload graph by default."""
+    return graph_id
+
+  @classmethod
+  def authorization_requirements(
+    cls, params: dict[str, Any]
+  ) -> tuple[str | None, bool]:
+    """``(required_role, require_write)`` for this payload."""
+    return cls.required_role, cls.require_write
 
   @property
   def budget_seconds(self) -> int:
@@ -188,6 +209,52 @@ class BaseTask(ABC):
   def release_lock(self) -> None:
     """Release the graph lock the enqueuing API call took for this task."""
     release_task_lock(self.graph_id, self.params)
+
+
+def reauthorize_task(
+  handler_cls: type[BaseTask],
+  graph_id: str | None,
+  user_id: str,
+  params: dict[str, Any],
+) -> str | None:
+  """Re-check the enqueuing user's role on the task's graph at dequeue time.
+
+  Returns None when the task may run, else the refusal to record. Membership
+  is read live, never from the auth cache, so a removal or downgrade that
+  landed while the task waited stops it.
+  """
+  role_name, require_write = handler_cls.authorization_requirements(params)
+  target = handler_cls.authorization_target(graph_id, params)
+  if role_name is None or not target:
+    return None
+
+  from fastapi import HTTPException
+
+  from robosystems.database import SessionFactory
+  from robosystems.middleware.billing.enforcement import require_graph_access
+  from robosystems.models.core import GraphUser
+  from robosystems.models.core.graph.graph_user import GraphRole
+
+  required = GraphRole(role_name)
+  session = SessionFactory()
+  try:
+    role, _ = GraphUser.get_effective_role(user_id, target, session)
+    if role is None or not role.at_least(required):
+      from robosystems.security import SecurityAuditLogger
+
+      SecurityAuditLogger.log_authorization_denied(
+        user_id=user_id, resource=target, action=f"worker:{handler_cls.task_type}"
+      )
+      return (
+        f"Access to graph {target} was removed or reduced while this task was queued"
+      )
+    try:
+      require_graph_access(target, session, require_write=require_write)
+    except HTTPException as exc:
+      return str(exc.detail)
+  finally:
+    session.close()
+  return None
 
 
 def release_task_lock(graph_id: str | None, params: dict[str, Any]) -> None:
