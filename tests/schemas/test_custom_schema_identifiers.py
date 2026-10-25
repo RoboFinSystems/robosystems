@@ -4,8 +4,13 @@ import pytest
 from pydantic import ValidationError
 
 from robosystems.models.api.graphs.schema import CustomSchemaDefinition
-from robosystems.schemas.identifiers import require_identifier, require_type
+from robosystems.schemas.identifiers import (
+  RESERVED_WORDS,
+  require_identifier,
+  require_type,
+)
 from robosystems.schemas.runtime.custom import CustomSchemaManager
+from robosystems.security.cypher_analyzer import CypherSecurityAnalyzer
 
 INJECTED_NAME = (
   "Leak(line STRING, PRIMARY KEY(line)); COPY Leak FROM '/tmp/x.csv' (header=false); "
@@ -53,6 +58,22 @@ class TestIdentifierRules:
     with pytest.raises(ValueError):
       require_identifier(name, "node")
 
+  @pytest.mark.parametrize(
+    "name", ["copy", "Load", "IMPORT", "export", "use", "set", "call"]
+  )
+  def test_statement_keywords_are_refused_as_names(self, name):
+    with pytest.raises(ValueError, match="reserved word"):
+      require_identifier(name, "property")
+
+  def test_reserved_words_cover_what_the_ddl_guard_refuses(self):
+    guarded = (
+      CypherSecurityAnalyzer.WRITE_KEYWORDS
+      | CypherSecurityAnalyzer.BULK_KEYWORDS
+      | CypherSecurityAnalyzer.ADMIN_KEYWORDS
+      | {"CALL"}
+    )
+    assert guarded <= RESERVED_WORDS
+
   def test_wildcard_only_where_allowed(self):
     assert require_identifier("*", "from_node", allow_wildcard=True) == "*"
     with pytest.raises(ValueError):
@@ -83,6 +104,8 @@ class TestParserRefusesInjectedNames:
   def test_property_name_and_type_are_checked(self):
     with pytest.raises(ValueError, match="property name"):
       CustomSchemaManager().create_from_dict(_schema(prop_name="id); COPY"))
+    with pytest.raises(ValueError, match="reserved word"):
+      CustomSchemaManager().create_from_dict(_schema(prop_name="copy"))
     with pytest.raises(ValueError, match="Invalid type"):
       CustomSchemaManager().create_from_dict(_schema(prop_type="STRING); COPY"))
 
@@ -105,6 +128,7 @@ class TestApiModelRefusesInjectedNames:
     [
       _schema(node_name=INJECTED_NAME),
       _schema(prop_name="id); COPY"),
+      _schema(prop_name="copy"),
       _schema(prop_type="STRING); COPY"),
       _schema(
         relationship={"name": "HAS; COPY", "from_node": "Item", "to_node": "Item"}

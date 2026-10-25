@@ -864,6 +864,8 @@ class LadybugDatabaseManager:
         # Defense in depth behind the identifier rules: whatever reached this
         # string, only a table definition runs here, and never a bulk,
         # admin or procedure statement (the same guard as the query path).
+        # Those rules admit no `;`, so each statement is one definition and
+        # its first three words are its head.
         head = " ".join(statement.split()[:3]).upper()
         if head not in ("CREATE NODE TABLE", "CREATE REL TABLE"):
           raise ValueError(

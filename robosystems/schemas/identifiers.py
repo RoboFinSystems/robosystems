@@ -10,6 +10,33 @@ import re
 IDENTIFIER_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]{0,127}$"
 TYPE_PATTERN = r"^[A-Z0-9_]+(\[[0-9]{1,5}\])?$"
 
+# Words the engine, and the DDL guard in front of it, read as statement
+# keywords. As a name they would fail at apply time; refused here with the
+# reason instead. Kept in step with the Cypher analyzer's keyword sets by test.
+RESERVED_WORDS = frozenset(
+  {
+    "CREATE",
+    "MERGE",
+    "SET",
+    "DELETE",
+    "REMOVE",
+    "DETACH",
+    "DROP",
+    "ALTER",
+    "INSERT",
+    "UPDATE",
+    "COPY",
+    "LOAD",
+    "IMPORT",
+    "EXPORT",
+    "INSTALL",
+    "UNINSTALL",
+    "ATTACH",
+    "USE",
+    "CALL",
+  }
+)
+
 _IDENTIFIER_RE = re.compile(IDENTIFIER_PATTERN)
 _TYPE_RE = re.compile(TYPE_PATTERN)
 
@@ -27,6 +54,8 @@ def require_identifier(name: object, kind: str, *, allow_wildcard: bool = False)
       f"Invalid {kind} name {name!r}: must start with a letter or underscore and "
       "contain only letters, digits and underscores (at most 128 characters)"
     )
+  if name.upper() in RESERVED_WORDS:
+    raise ValueError(f"Invalid {kind} name {name!r}: {name.upper()} is a reserved word")
   return name
 
 
