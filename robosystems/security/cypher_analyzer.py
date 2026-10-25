@@ -207,18 +207,6 @@ class CypherSecurityAnalyzer:
   _CLOSERS = frozenset(")]}")
 
   def __init__(self):
-    self.write_pattern = re.compile(
-      r"\b(" + "|".join(self.WRITE_KEYWORDS) + r")\b", re.IGNORECASE
-    )
-
-    self.bulk_pattern = re.compile(
-      r"\b(" + "|".join(self.BULK_KEYWORDS) + r")\b", re.IGNORECASE
-    )
-
-    self.admin_pattern = re.compile(
-      r"\b(" + "|".join(self.ADMIN_KEYWORDS) + r")\b", re.IGNORECASE
-    )
-
     # Dots allowed so a namespaced procedure name resolves as one identifier.
     self.call_pattern = re.compile(r"\bCALL\s+([\w.]+)\s*\(", re.IGNORECASE)
 
@@ -666,18 +654,6 @@ class CypherSecurityAnalyzer:
       found_operations.add("COMMENT_ON")
 
     return found_operations
-
-  def _validate_keyword_context(self, query: str, keyword: str, position: int) -> bool:
-    """Check that a keyword stands alone rather than being part of an identifier."""
-    if position > 0 and query[position - 1].isalnum():
-      return False
-
-    if (
-      position + len(keyword) < len(query) and query[position + len(keyword)].isalnum()
-    ):
-      return False
-
-    return True
 
   def get_write_operation_details(self, query: str) -> dict:
     """

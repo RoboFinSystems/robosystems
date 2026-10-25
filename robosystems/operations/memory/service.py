@@ -91,9 +91,9 @@ class MemoryService:
   async def update_memory(
     self, graph_id: str, memory_id: str, request: MemoryUpdateRequest
   ) -> MemoryRecord | None:
-    memory_id = require_memory_id(memory_id)
     """Read-modify-write. Always re-embeds (cheap, local) so the vector tracks
     the current text without needing the stored vector back."""
+    memory_id = require_memory_id(memory_id)
     existing = await self.client.memory_get(graph_id, memory_id)
     if existing is None:
       return None
