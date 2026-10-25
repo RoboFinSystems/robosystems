@@ -28,8 +28,8 @@ COPY pyproject.toml uv.lock ./
 
 # Export and install Lambda dependencies from pyproject.toml [dependency-groups].lambda
 # This ensures version pins are managed in pyproject.toml, not hardcoded here
-RUN uv export --only-group lambda --no-hashes --frozen > requirements.txt && \
-    pip install --no-cache-dir -r requirements.txt && \
+RUN uv export --only-group lambda --frozen > requirements.txt && \
+    pip install --no-cache-dir --require-hashes -r requirements.txt && \
     rm -f requirements.txt pyproject.toml uv.lock
 
 # Deployed Lambda never runs pip; the base image's copy carries its own

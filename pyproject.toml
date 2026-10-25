@@ -136,7 +136,7 @@ requires = ["setuptools>=82.0.1"]
 build-backend = "setuptools.build_meta"
 
 # PEP 735 dependency groups - isolated from main project dependencies
-# Use: uv export --only-group lambda --no-hashes --frozen
+# Use: uv export --only-group lambda --frozen (keeps hashes for pip --require-hashes)
 [dependency-groups]
 dev = [
     "actionlint-py>=1.7,<2",
