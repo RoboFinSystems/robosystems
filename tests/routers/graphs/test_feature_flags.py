@@ -478,7 +478,6 @@ class TestGraphOperationFeatureFlags:
         with patch("robosystems.routers.graphs.backups.utils.verify_admin_access"):
           request_data = {
             "backup_format": "full_dump",
-            "encryption": False,
             "retention_days": 30,
           }
 
@@ -607,7 +606,6 @@ class TestGraphOperationFeatureFlags:
         ):
           request_data = {
             "backup_format": "full_dump",
-            "encryption": False,
             "retention_days": 30,
           }
 

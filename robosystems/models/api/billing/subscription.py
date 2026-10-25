@@ -1,6 +1,6 @@
 """Subscription API models: repository plans, credit allocation, tier and status."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from robosystems.models.core.user.user_repository import RepositoryType
 
@@ -248,6 +248,9 @@ class CancelSubscriptionRequest(BaseModel):
   the subscription's `resource_id` (e.g. the graph_id) as a guard against
   accidental destructive calls.
   """
+
+  # A body that names none of this command's fields is not a request for it.
+  model_config = ConfigDict(extra="forbid")
 
   immediate: bool = Field(
     False,

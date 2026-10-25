@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 # Provider types
 ProviderType = Literal["quickbooks", "external", "mercury", "plaid"]
@@ -277,6 +277,9 @@ class SetWritePolicyRequest(BaseModel):
 
 class SyncConnectionRequest(BaseModel):
   """Request to sync a connection."""
+
+  # A body that names none of this command's fields is not a request for it.
+  model_config = ConfigDict(extra="forbid")
 
   full_rebuild: bool = Field(
     False,
