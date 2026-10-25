@@ -128,9 +128,12 @@ def test_an_ai_client_cannot_approve(tenant):
 def test_a_person_approves_and_the_handler_goes_live(tenant):
   with extensions_session(GRAPH) as session:
     ai = create_event_handler(session, _request(), "usr_1", surface="mcp")
+    # The approval names the version the person reviewed.
     approved = update_event_handler(
       session,
-      UpdateEventHandlerRequest(event_handler_id=ai.id, approve=True),
+      UpdateEventHandlerRequest(
+        event_handler_id=ai.id, approve=True, expected_updated_at=ai.updated_at
+      ),
       "usr_2",
     )
   assert (approved.approved_by, approved.awaiting_approval) == ("usr_2", False)
@@ -140,18 +143,17 @@ def test_a_person_approves_and_the_handler_goes_live(tenant):
 def test_an_ai_change_to_what_it_books_needs_approval_again(tenant):
   """Approved, then edited over MCP: the edit is the AI's proposal, so the
   handler leaves matching until a person approves it again — even one a
-  person wrote. A rename or a deactivation changes nothing it books."""
+  person wrote. A deactivation changes nothing it books; a rename can, since a
+  template reads `{{ handler.name }}`, so over MCP it counts too."""
   with extensions_session(GRAPH) as session:
     person = create_event_handler(session, _request(), "usr_1")
-    renamed = update_event_handler(
+    described = update_event_handler(
       session,
-      UpdateEventHandlerRequest(
-        event_handler_id=person.id, name="Stripe payouts (net)"
-      ),
+      UpdateEventHandlerRequest(event_handler_id=person.id, description="Net of fees"),
       "usr_1",
       surface="mcp",
     )
-    assert renamed.suggested_by is None
+    assert described.suggested_by is None
     retargeted = update_event_handler(
       session,
       UpdateEventHandlerRequest(event_handler_id=person.id, match_source="adyen"),
