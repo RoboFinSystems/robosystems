@@ -335,6 +335,8 @@ class GraphqlQueryTool(BaseTool):
       "schema_extensions": self._schema_extensions,
       # These tools serve user entity graphs only; shared repos never get them.
       "graph_type": "entity",
+      # Field resolvers mask counterparty tax IDs for this surface.
+      "surface": "mcp",
     }
 
   def _fetch_user(self) -> Any:

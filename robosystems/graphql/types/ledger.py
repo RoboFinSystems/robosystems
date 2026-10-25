@@ -328,7 +328,7 @@ class Agent:
   agent_type: str
   name: str
   legal_name: str | None
-  tax_id: str | None
+  tax_id_value: strawberry.Private[str | None]
   registration_number: str | None
   duns: str | None
   lei: str | None
@@ -352,7 +352,7 @@ class Agent:
       agent_type=row.agent_type,
       name=row.name,
       legal_name=row.legal_name,
-      tax_id=row.tax_id,
+      tax_id_value=row.tax_id,
       registration_number=row.registration_number,
       duns=row.duns,
       lei=row.lei,
@@ -375,6 +375,21 @@ class Agent:
       updated_at=row.updated_at,
       created_by=row.created_by,
     )
+
+  @strawberry.field(name="taxId")
+  def tax_id(self, info: strawberry.Info) -> str | None:
+    # Resolved per field, not masked by response key, so an alias or fragment
+    # cannot read the full value through the MCP surface.
+    value = self.tax_id_value
+    if not value:
+      return value
+    ctx = info.context
+    surface = (
+      ctx.get("surface") if isinstance(ctx, dict) else getattr(ctx, "surface", None)
+    )
+    if surface == "mcp":
+      return "***" + value[-4:]
+    return value
 
   @strawberry.field
   async def open_receivable(self, info: strawberry.Info) -> OpenBalanceByAgent | None:
