@@ -426,6 +426,7 @@ async def sso_token_exchange(
           "token_id": token_id,
           "target_app": request.target_app,
           "return_url": request.return_url,
+          "browser_nonce_hash": request.browser_nonce_hash,
           "session_version": current_session_version,
           "created_at": datetime.now(UTC).isoformat(),
         }
