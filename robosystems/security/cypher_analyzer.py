@@ -539,19 +539,24 @@ class CypherSecurityAnalyzer:
 
     return "".join(out)
 
+  def _keyword_tokens(self, query: str, keywords: set[str]) -> set[str]:
+    """Keywords present in the cleaned query as whole tokens.
+
+    Tokenized with ``_TOKEN_PATTERN``, which ends a numeric literal where the
+    engine's lexer does: ``1SET`` is the tokens ``1`` and ``SET``. A ``\\b``
+    regex would see one word there and miss the clause, while an identifier
+    such as ``x1set`` stays one token here and is not a keyword.
+    """
+    found: set[str] = set()
+    for token in self._TOKEN_PATTERN.findall(query):
+      upper = token.upper()
+      if upper in keywords:
+        found.add(upper)
+    return found
+
   def _find_write_operations(self, query: str) -> set[str]:
     """Find write operation keywords in the cleaned query."""
-    found_operations = set()
-
-    matches = self.write_pattern.finditer(query)
-
-    for match in matches:
-      keyword = match.group(1).upper()
-      start_pos = match.start()
-
-      # Additional context validation
-      if self._validate_keyword_context(query, keyword, start_pos):
-        found_operations.add(keyword)
+    found_operations = self._keyword_tokens(query, self.WRITE_KEYWORDS)
 
     # Folded in here because every surface gates on the two callers of this.
     found_operations |= self._find_call_operations(query)
@@ -594,33 +599,11 @@ class CypherSecurityAnalyzer:
 
   def _find_bulk_operations(self, query: str) -> set[str]:
     """Find bulk operation keywords in the cleaned query."""
-    found_operations = set()
-
-    matches = self.bulk_pattern.finditer(query)
-
-    for match in matches:
-      keyword = match.group(1).upper()
-      start_pos = match.start()
-
-      # Additional context validation
-      if self._validate_keyword_context(query, keyword, start_pos):
-        found_operations.add(keyword)
-
-    return found_operations
+    return self._keyword_tokens(query, self.BULK_KEYWORDS)
 
   def _find_admin_operations(self, query: str) -> set[str]:
     """Find administrative operation keywords in the cleaned query."""
-    found_operations = set()
-
-    matches = self.admin_pattern.finditer(query)
-
-    for match in matches:
-      keyword = match.group(1).upper()
-      start_pos = match.start()
-
-      # Additional context validation
-      if self._validate_keyword_context(query, keyword, start_pos):
-        found_operations.add(keyword)
+    found_operations = self._keyword_tokens(query, self.ADMIN_KEYWORDS)
 
     if re.search(r"\b(IMPORT|EXPORT)\s+DATABASE\b", query, re.IGNORECASE):
       found_operations.add("DATABASE_MIGRATION")
