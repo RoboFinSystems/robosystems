@@ -63,6 +63,16 @@ class EnvValidator:
           elif len(str(value)) < 32:
             errors.append(f"{var_name}: Must be at least 32 characters for security")
 
+    if env_config.ENVIRONMENT in ("prod", "staging"):
+      # A seeded placeholder is a public HMAC key; refuse it whether or not
+      # billing is on, so an unconfigured webhook secret never verifies.
+      webhook_secret = str(getattr(env_config, "STRIPE_WEBHOOK_SECRET", "") or "")
+      if webhook_secret and ("your_" in webhook_secret or len(webhook_secret) < 32):
+        errors.append(
+          "STRIPE_WEBHOOK_SECRET: placeholder or weak value; set the real Stripe "
+          "endpoint secret or remove it"
+        )
+
     if getattr(env_config, "BILLING_ENABLED", False):
       stripe_vars = {
         "STRIPE_SECRET_KEY": "Stripe payment processing",

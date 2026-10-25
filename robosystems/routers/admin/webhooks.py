@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from ...config import env
 from ...database import SessionFactory, engine, get_db_session
 from ...logger import get_logger
 from ...middleware.rate_limits import webhook_rate_limit_dependency
@@ -163,6 +164,10 @@ async def handle_stripe_webhook(
   _rate_limit: None = Depends(webhook_rate_limit_dependency),
 ):
   """Handle Stripe webhook events."""
+  # A deployment without Stripe billing receives no legitimate Stripe events;
+  # the route is absent there, whatever secret is configured.
+  if not env.BILLING_ENABLED:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
   try:
     payload = await request.body()
     signature = request.headers.get("stripe-signature")

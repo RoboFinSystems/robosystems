@@ -28,7 +28,8 @@ echo ""
 #
 # SECRETS MANAGER (robosystems/{env}):
 # - Encryption keys: JWT_SECRET_KEY, CONNECTION_CREDENTIALS_KEY
-# - External API keys: INTUIT_*, STRIPE_*, OPENFIGI_*, TURNSTILE_*
+# - External API keys: INTUIT_*, OPENFIGI_*, TURNSTILE_* (STRIPE_* are added
+#   when billing is turned on; a placeholder there would be a public HMAC key)
 # - Internal credentials: SEC_GOV_USER_AGENT
 #
 # SSM PARAMETER STORE (/robosystems/{env}/features/*):
@@ -112,10 +113,7 @@ function create_production_secret() {
         "PLAID_SECRET": "your_plaid_production_secret_here",
         "PLAID_ENVIRONMENT": "production",
         "SEC_GOV_USER_AGENT": "YourCompany/1.0 (your-email@example.com)",
-        "OPENFIGI_API_KEY": "your_openfigi_api_key_here",
-        "STRIPE_SECRET_KEY": "sk_live_your_stripe_secret_key_here",
-        "STRIPE_PUBLISHABLE_KEY": "pk_live_your_stripe_publishable_key_here",
-        "STRIPE_WEBHOOK_SECRET": "whsec_your_stripe_webhook_secret_here"
+        "OPENFIGI_API_KEY": "your_openfigi_api_key_here"
     }'
 
     echo "  Production secret created successfully!"
@@ -174,10 +172,7 @@ function create_staging_secret() {
         "PLAID_SECRET": "your_plaid_sandbox_secret_here",
         "PLAID_ENVIRONMENT": "sandbox",
         "SEC_GOV_USER_AGENT": "YourCompany-Staging/1.0 (your-email@example.com)",
-        "OPENFIGI_API_KEY": "your_openfigi_api_key_here",
-        "STRIPE_SECRET_KEY": "sk_test_your_stripe_test_secret_key_here",
-        "STRIPE_PUBLISHABLE_KEY": "pk_test_your_stripe_test_publishable_key_here",
-        "STRIPE_WEBHOOK_SECRET": "whsec_your_stripe_test_webhook_secret_here"
+        "OPENFIGI_API_KEY": "your_openfigi_api_key_here"
     }'
 
     echo "  Staging secret created successfully!"
