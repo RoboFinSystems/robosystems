@@ -27,6 +27,33 @@ class ApprovalNotAllowedError(Exception):
   an AI proposes, from the app or the API, never the AI itself."""
 
 
+class StaleApprovalError(Exception):
+  """An approval of an AI suggestion did not name the version the person
+  reviewed, or the handler changed since. The person approves exactly the
+  rule they saw."""
+
+
+def _as_millis(value: datetime) -> int:
+  # Clients round-trip the timestamp through JSON, where JavaScript keeps
+  # milliseconds; compare at that grain so an exact review still matches.
+  if value.tzinfo is None:
+    value = value.replace(tzinfo=UTC)
+  return int(value.timestamp() * 1000)
+
+
+def _require_reviewed_version(handler: EventHandler, expected: datetime | None) -> None:
+  if expected is None:
+    raise StaleApprovalError(
+      "Approving an AI-suggested handler needs expected_updated_at: the "
+      "updated_at the review showed, so the approval is bound to that version."
+    )
+  current = handler.updated_at
+  if current is None or _as_millis(current) != _as_millis(expected):
+    raise StaleApprovalError(
+      "The handler changed since it was reviewed. Load it again and review it."
+    )
+
+
 # Fields that change what a handler matches or books. Changed over MCP, the
 # handler is the AI's proposal again and waits for a person's approval; so
 # does a metadata patch or a reactivation (update_event_handler).
@@ -152,8 +179,10 @@ def update_event_handler(
       and getattr(body, field) != getattr(handler, field)
       for field in _SUBSTANTIVE_FIELDS
     )
-    # A template can read the handler's own metadata into what it books.
+    # A template can read the handler's own metadata and name into what it
+    # books (`{{ handler.metadata.x }}`, `{{ handler.name }}`).
     or bool(body.metadata_patch)
+    or (body.name is not None and body.name != handler.name)
     # Back into matching after a person took it out.
     or (body.is_active is True and not handler.is_active)
   )
@@ -173,6 +202,8 @@ def update_event_handler(
     handler.approved_at = None
 
   if body.approve is True:
+    if handler.suggested_by == "ai":
+      _require_reviewed_version(handler, body.expected_updated_at)
     handler.approved_by = created_by
     handler.approved_at = datetime.now(UTC)
   elif body.approve is False:

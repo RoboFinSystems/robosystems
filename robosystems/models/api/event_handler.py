@@ -273,7 +273,16 @@ class UpdateEventHandlerRequest(BaseModel):
     None,
     description=(
       "Approval shortcut: True stamps approved_by/approved_at to the "
-      "current user; False clears both."
+      "current user; False clears both. Approving an AI-suggested handler "
+      "also needs `expected_updated_at`."
+    ),
+  )
+  expected_updated_at: datetime | None = Field(
+    None,
+    description=(
+      "The handler's `updated_at` as shown when it was reviewed. Required "
+      "with `approve=true` on an AI-suggested handler, so the approval covers "
+      "exactly that version; a mismatch is refused with 409."
     ),
   )
 
