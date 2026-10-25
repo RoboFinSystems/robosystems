@@ -10,6 +10,7 @@ import json
 import time
 from collections.abc import AsyncGenerator
 from typing import Any, cast
+from urllib.parse import quote
 
 import httpx
 from httpx_sse import aconnect_sse
@@ -1025,7 +1026,7 @@ class GraphClient(BaseGraphClient):
     try:
       response = await self._request(
         "GET",
-        f"/databases/{graph_id}/semantic-memory/rows/{memory_id}",
+        f"/databases/{graph_id}/semantic-memory/rows/{quote(memory_id, safe='')}",
         timeout=timeout,
       )
     except GraphAPIError as e:
@@ -1044,7 +1045,7 @@ class GraphClient(BaseGraphClient):
     """Full-row upsert on id (caller supplies a re-embedded vector)."""
     response = await self._request(
       "PATCH",
-      f"/databases/{graph_id}/semantic-memory/rows/{memory_id}",
+      f"/databases/{graph_id}/semantic-memory/rows/{quote(memory_id, safe='')}",
       json_data=row,
       timeout=timeout,
     )
@@ -1059,7 +1060,7 @@ class GraphClient(BaseGraphClient):
     """Delete a memory row by id."""
     response = await self._request(
       "DELETE",
-      f"/databases/{graph_id}/semantic-memory/rows/{memory_id}",
+      f"/databases/{graph_id}/semantic-memory/rows/{quote(memory_id, safe='')}",
       timeout=timeout,
     )
     return response.json()

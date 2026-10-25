@@ -8,6 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class BackupCreateRequest(BaseModel):
   """Request model for creating a backup."""
 
+  # A body that names none of this command's fields is not a request for it.
+  model_config = ConfigDict(extra="forbid")
+
   backup_format: str = Field(
     "full_dump",
     description="Backup format - only 'full_dump' is supported (complete .lbug database file)",

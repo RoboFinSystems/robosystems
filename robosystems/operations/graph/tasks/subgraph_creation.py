@@ -20,6 +20,9 @@ logger = get_logger(__name__)
 class SubgraphCreationTask(BaseTask):
   """Create a subgraph with optional data forking from parent."""
 
+  # Forking a parent's data is the parent admin's call.
+  required_role = "admin"
+
   async def execute(self) -> dict[str, Any]:
     from robosystems.database import get_db_session
     from robosystems.models.core import Graph, User

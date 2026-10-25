@@ -108,6 +108,15 @@ class SSOExchangeRequest(BaseModel):
   return_url: str | None = Field(
     None, description="Optional return URL after authentication"
   )
+  browser_nonce_hash: str | None = Field(
+    None,
+    pattern=r"^[0-9a-f]{64}$",
+    description=(
+      "SHA-256 (hex) of a nonce the target app minted in the browser that is "
+      "signing in. Completion must present the nonce, so the handoff cannot "
+      "be redeemed by any other browser."
+    ),
+  )
 
 
 class SSOExchangeResponse(BaseModel):
@@ -122,6 +131,15 @@ class SSOCompleteRequest(BaseModel):
   """SSO completion request model."""
 
   session_id: str = Field(..., description="Temporary session ID from secure handoff")
+  browser_nonce: str | None = Field(
+    None,
+    min_length=16,
+    max_length=128,
+    description=(
+      "The nonce this browser minted when it started the bridge; its SHA-256 "
+      "was passed through the exchange as browser_nonce_hash."
+    ),
+  )
 
 
 class OIDCProviderInfo(BaseModel):

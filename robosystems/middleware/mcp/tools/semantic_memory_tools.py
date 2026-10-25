@@ -1,12 +1,16 @@
 """Semantic memory tools (remember, recall, update-memory, forget): thin
 adapters over ``MemoryService``, the per-graph LanceDB vector store."""
 
+import re
 from typing import Any
 
 from robosystems.logger import logger
 
 from ..exceptions import GraphAPIError
 from .base_tool import BaseTool
+
+# Same shape the REST operations enforce; checked before the id reaches a URL.
+_MEMORY_ID_RE = re.compile(r"^mem_[0-9a-f]{32}$")
 
 # Imported lazily: the adapter chain imports back into this package.
 _is_shared_repository_or_subgraph = None
@@ -241,6 +245,11 @@ class SemanticUpdateMemoryTool(_SemanticMemoryToolMixin, BaseTool):
     memory_id = (arguments.get("memory_id") or "").strip()
     if not memory_id:
       return {"error": "invalid_input", "message": "memory_id is required"}
+    if not _MEMORY_ID_RE.fullmatch(memory_id):
+      return {
+        "error": "invalid_input",
+        "message": "memory_id must look like mem_<32 hex characters>",
+      }
 
     from robosystems.models.api.memory import MemoryUpdateRequest
 
@@ -302,6 +311,11 @@ class SemanticForgetTool(_SemanticMemoryToolMixin, BaseTool):
     memory_id = (arguments.get("memory_id") or "").strip()
     if not memory_id:
       return {"error": "invalid_input", "message": "memory_id is required"}
+    if not _MEMORY_ID_RE.fullmatch(memory_id):
+      return {
+        "error": "invalid_input",
+        "message": "memory_id must look like mem_<32 hex characters>",
+      }
 
     async def _run(service, graph_id):
       try:

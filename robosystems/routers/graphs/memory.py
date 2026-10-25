@@ -6,7 +6,7 @@ the content operations in content_ops.py.
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from starlette import status as http_status
 
 from robosystems.database import SessionFactory
@@ -20,6 +20,7 @@ from robosystems.models.api.memory import (
 )
 from robosystems.models.api.search import SearchResponse
 from robosystems.models.core import User
+from robosystems.operations.memory.service import MEMORY_ID_PATTERN
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +117,7 @@ async def list_memories(
 )
 async def get_memory(
   graph_id: str,
-  memory_id: str,
+  memory_id: str = Path(..., pattern=MEMORY_ID_PATTERN),
   current_user: User = Depends(get_current_user_with_graph),
 ) -> MemoryRecord:
   _require_memory_enabled()

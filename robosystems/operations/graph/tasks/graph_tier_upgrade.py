@@ -90,6 +90,10 @@ def _get_autoscaling_client():
 class GraphTierUpgradeTask(BaseTask):
   """Migrate a graph's EBS volume to a new tier's instance type."""
 
+  # The graph is mid-upgrade, which the write-strength lifecycle gate refuses.
+  required_role = "admin"
+  require_write = False
+
   async def execute(self) -> dict[str, Any]:
     old_tier = self.params["old_tier"]
     new_tier = self.params["new_tier"]

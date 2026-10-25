@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # Mirrors the DB-level check constraint on `entries.type`:
 #   CHECK (type IN ('standard','adjusting','closing','reversing'))
@@ -389,6 +389,9 @@ class PromoteObligationsRequest(BaseModel):
   already `classified` (by an earlier flip-only sweep) but with no
   closing entry ever drafted — dispatching them in the same pass.
   """
+
+  # A body that names none of this command's fields is not a request for it.
+  model_config = ConfigDict(extra="forbid")
 
   dispatch_handlers: bool = Field(
     True,

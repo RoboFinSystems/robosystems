@@ -222,6 +222,9 @@ class AgentClassification(BaseModel):
 class LearnClassificationDefaultsRequest(BaseModel):
   """Seed counterparty defaults from the bank lines already committed."""
 
+  # A body that names none of this command's fields is not a request for it.
+  model_config = ConfigDict(extra="forbid")
+
   dry_run: bool = Field(
     False, description="Report what would be learned without writing it."
   )
@@ -314,6 +317,9 @@ class AgentActivityResponse(BaseModel):
 
 class AcceptSuggestionsRequest(BaseModel):
   """Take the suggestion on every open bank line the filters select."""
+
+  # A body that names none of this command's fields is not a request for it.
+  model_config = ConfigDict(extra="forbid")
 
   entity_id: str | None = Field(
     None, description="The entity whose inbox to act on. Omit for the group parent."

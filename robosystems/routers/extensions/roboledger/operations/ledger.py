@@ -164,6 +164,7 @@ from robosystems.operations.roboledger.commands.dimensions import (
 from robosystems.operations.roboledger.commands.event_handler import (
   ApprovalNotAllowedError,
   EventHandlerNotFoundError,
+  StaleApprovalError,
   TemplateValidationError,
 )
 from robosystems.operations.roboledger.commands.event_handler import (
@@ -591,6 +592,7 @@ update_event_handler_op = _registrar.register(
     error_map={
       EventHandlerNotFoundError: 404,
       ApprovalNotAllowedError: 403,
+      StaleApprovalError: 409,
       TemplateValidationError: 422,
       RowLockedError: 409,
       ValueError: 422,

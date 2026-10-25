@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -28,6 +29,21 @@ from robosystems.models.api.search import SearchHit, SearchResponse
 if TYPE_CHECKING:
   from robosystems.graph_api.client.client import GraphClient
   from robosystems.operations.search.embeddings import EmbeddingService
+
+
+MEMORY_ID_PATTERN = r"^mem_[0-9a-f]{32}$"
+_MEMORY_ID_RE = re.compile(MEMORY_ID_PATTERN)
+
+
+def require_memory_id(memory_id: str) -> str:
+  """A memory id names one row of this graph's store and nothing else.
+
+  Checked before any Graph API URL is built from it, on every surface, so a
+  malformed id cannot select another route.
+  """
+  if not isinstance(memory_id, str) or not _MEMORY_ID_RE.fullmatch(memory_id):
+    raise ValueError("memory_id must look like mem_<32 hex characters>")
+  return memory_id
 
 
 class MemoryService:
@@ -77,6 +93,7 @@ class MemoryService:
   ) -> MemoryRecord | None:
     """Read-modify-write. Always re-embeds (cheap, local) so the vector tracks
     the current text without needing the stored vector back."""
+    memory_id = require_memory_id(memory_id)
     existing = await self.client.memory_get(graph_id, memory_id)
     if existing is None:
       return None
@@ -113,6 +130,7 @@ class MemoryService:
     return _to_record({**row, "id": memory_id})
 
   async def forget(self, graph_id: str, memory_id: str) -> MemoryDeleteResponse:
+    memory_id = require_memory_id(memory_id)
     result = await self.client.memory_delete(graph_id, memory_id)
     return MemoryDeleteResponse(
       id=memory_id, deleted=bool(result.get("deleted", False))
@@ -134,6 +152,7 @@ class MemoryService:
     )
 
   async def get_memory(self, graph_id: str, memory_id: str) -> MemoryRecord | None:
+    memory_id = require_memory_id(memory_id)
     row = await self.client.memory_get(graph_id, memory_id)
     return _to_record(row) if row else None
 

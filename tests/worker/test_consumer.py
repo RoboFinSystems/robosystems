@@ -11,6 +11,14 @@ from robosystems.worker.tasks import TASK_REGISTRY, register_task
 from robosystems.worker.tasks.base import BaseTask
 
 
+@pytest.fixture(autouse=True)
+def _skip_dequeue_reauthorization():
+  # These tests exercise the consumer's lifecycle with synthetic graph ids;
+  # the role re-check at dequeue has its own tests.
+  with patch("robosystems.worker.consumer.reauthorize_task", return_value=None):
+    yield
+
+
 class SuccessTask(BaseTask):
   async def execute(self) -> dict[str, Any]:
     return {"mapped": 10, "coverage": 100}

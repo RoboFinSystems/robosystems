@@ -179,6 +179,9 @@ class DeleteGraphOp(BaseModel):
 class MaterializeOp(BaseModel):
   """Body for the materialize operation."""
 
+  # A body that names none of this command's fields is not a request for it.
+  model_config = ConfigDict(extra="forbid")
+
   force: bool = Field(
     default=False, description="Force materialization even if already up to date"
   )
@@ -266,6 +269,9 @@ class IndexDocumentOp(BaseModel):
   Create a new document when `document_id` is absent; update the named
   document (partial — only supplied fields) when present.
   """
+
+  # A body that names none of this command's fields is not a request for it.
+  model_config = ConfigDict(extra="forbid")
 
   document_id: str | None = Field(
     default=None,

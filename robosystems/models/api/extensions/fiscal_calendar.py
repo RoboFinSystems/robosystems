@@ -78,6 +78,7 @@ class InitializeLedgerRequest(BaseModel):
   )
 
   model_config = ConfigDict(
+    extra="forbid",
     json_schema_extra={
       "examples": [
         {"closed_through": None, "fiscal_year_start_month": 1},
@@ -93,7 +94,7 @@ class InitializeLedgerRequest(BaseModel):
           "note": "FY runs July–June.",
         },
       ]
-    }
+    },
   )
 
 

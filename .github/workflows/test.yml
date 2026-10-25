@@ -41,7 +41,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: ${{ github.repository }}
-          ref: ${{ github.ref }}
+          # The commit this run was dispatched and approved on, not the ref's current tip.
+          ref: ${{ github.sha }}
           token: ${{ github.token }}
 
       - name: Setup Python (GitHub-hosted runners only)
@@ -247,7 +248,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: ${{ github.repository }}
-          ref: ${{ github.ref }}
+          # The commit this run was dispatched and approved on, not the ref's current tip.
+          ref: ${{ github.sha }}
           token: ${{ github.token }}
 
       - name: Setup Python (GitHub-hosted runners only)

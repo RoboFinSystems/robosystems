@@ -1,5 +1,6 @@
 """Single Sign-On (SSO) endpoints."""
 
+import hashlib
 import json
 import secrets
 import uuid
@@ -396,6 +397,7 @@ async def sso_token_exchange(
             "token_id": token_id,  # Reference to original SSO token
             "target_app": request.target_app,
             "return_url": request.return_url,
+            "browser_nonce_hash": request.browser_nonce_hash,
             "session_version": current_session_version,
             "created_at": datetime.now(UTC).isoformat(),
           }
@@ -424,6 +426,7 @@ async def sso_token_exchange(
           "token_id": token_id,
           "target_app": request.target_app,
           "return_url": request.return_url,
+          "browser_nonce_hash": request.browser_nonce_hash,
           "session_version": current_session_version,
           "created_at": datetime.now(UTC).isoformat(),
         }
@@ -466,6 +469,40 @@ async def sso_token_exchange(
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="SSO exchange failed"
     )
+
+
+def _assert_browser_binding(body: SSOCompleteRequest, session_data: dict) -> None:
+  """A handoff completes only in the browser that started it.
+
+  The target app mints a nonce when it begins the bridge and sends its hash
+  through the login home into the exchange; the browser that completes must
+  hold the nonce. A session minted without a hash is redeemed only by a
+  client that presents no nonce (one predating the binding); a client that
+  does present one is refusing an unbound handoff it did not start.
+  """
+  expected = session_data.get("browser_nonce_hash")
+  provided = body.browser_nonce
+  if expected:
+    digest = hashlib.sha256((provided or "").encode()).hexdigest()
+    bound = bool(provided) and secrets.compare_digest(expected, digest)
+  else:
+    bound = not provided
+  if bound:
+    return
+  SecurityAuditLogger.log_security_event(
+    event_type=SecurityEventType.AUTHORIZATION_DENIED,
+    details={
+      "action": "sso_completion_browser_mismatch",
+      "target_app": session_data.get("target_app"),
+      "session_bound": bool(expected),
+      "nonce_presented": bool(provided),
+    },
+    risk_level="high",
+  )
+  raise HTTPException(
+    status_code=status.HTTP_401_UNAUTHORIZED,
+    detail="Session expired or invalid",
+  )
 
 
 def _assert_completing_app(request: Request, session_data: dict) -> None:
@@ -553,6 +590,7 @@ async def sso_complete(
             )
 
           _assert_completing_app(request, session_data)
+          _assert_browser_binding(body, session_data)
 
           # Single use: delete the session and related tokens atomically.
           await redis_client.delete(f"sso_session:{session_id}")
@@ -590,6 +628,7 @@ async def sso_complete(
           )
 
         _assert_completing_app(request, session_data)
+        _assert_browser_binding(body, session_data)
 
         await redis_client.delete(f"sso_session:{session_id}")
         await redis_client.delete(f"sso_token:{token_id}")

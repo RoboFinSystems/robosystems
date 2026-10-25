@@ -105,6 +105,8 @@ def _run_worker(mode: str, events_key: str) -> None:
   patches.setattr(ExtensionsMaterializer, "materialize", fake_materialize)
   patches.setattr(materialization_lock, "release_token", recording_release)
   patches.setattr(consumer, "QueueDepthPublisher", _NoPublisher)
+  # The journey's user holds no graph role; the dequeue re-check has its own tests.
+  patches.setattr(consumer, "reauthorize_task", lambda *args, **kwargs: None)
   # A short heartbeat so the death is observable in seconds, not 90.
   patches.setattr(consumer, "WORKER_HEARTBEAT_INTERVAL", 1)
   patches.setattr(consumer, "WORKER_HEARTBEAT_TTL", 2)

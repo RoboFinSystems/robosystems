@@ -111,7 +111,10 @@ class TestSSOTokenExchange:
     mock_get_app_urls.return_value = APP_URLS
 
     request = SSOExchangeRequest(
-      token="sso_jwt", target_app="roboledger", return_url="/reports/x"
+      token="sso_jwt",
+      target_app="roboledger",
+      return_url="/reports/x",
+      browser_nonce_hash="ab" * 32,
     )
     result = await sso_token_exchange(request=request, session=Mock(), _rate_limit=None)
 
@@ -130,6 +133,8 @@ class TestSSOTokenExchange:
     assert session_payload["session_version"] == 0
     assert session_payload["return_url"] == "/reports/x"
     assert session_payload["target_app"] == "roboledger"
+    # No lock manager here: the unlocked path stores the browser binding too.
+    assert session_payload["browser_nonce_hash"] == "ab" * 32
 
   @patch("robosystems.routers.auth.sso.Config.get_jwt_secret")
   @patch("robosystems.routers.auth.sso.jwt.decode")

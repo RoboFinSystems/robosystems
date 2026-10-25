@@ -580,7 +580,7 @@ class TestGetWriteOperationDetails:
 
 
 class TestKeywordContextValidation:
-  """Tests for _validate_keyword_context."""
+  """A keyword inside an identifier is part of the identifier."""
 
   def test_keyword_not_part_of_identifier(self, analyzer):
     # "SET" should not match inside "DATASET"

@@ -12,6 +12,11 @@ from robosystems.worker.tasks.base import BaseTask
 
 @register_task("operator")
 class OperatorWorkerTask(BaseTask):
+  # Any member may run a read-only operator; write-capable operators are
+  # re-gated for the write role inside `run_operator_worker`.
+  required_role = "viewer"
+  require_write = False
+
   async def execute(self) -> dict[str, Any]:
     from robosystems.operations.operators.operator_registry import get_operator
 
