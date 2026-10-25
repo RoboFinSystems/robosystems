@@ -29,7 +29,7 @@ def register_operator(operator_type: str):
         f"{_OPERATORS[operator_type].__name__} -> {cls.__name__}"
       )
     _OPERATORS[operator_type] = cls
-    logger.info(f"Registered operator '{operator_type}': {cls.__name__}")
+    logger.debug(f"Registered operator '{operator_type}': {cls.__name__}")
     return cls
 
   return decorator
