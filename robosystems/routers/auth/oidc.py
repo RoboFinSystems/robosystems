@@ -15,6 +15,7 @@ import json
 import secrets
 import uuid
 from datetime import UTC, datetime
+from typing import Annotated
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -81,8 +82,14 @@ async def oidc_login(
   iss: str | None = Query(default=None),
   return_to: str | None = Query(default=None),
   _rate_limit: None = Depends(oidc_rate_limit_dependency),
+  nonce_hash: Annotated[str | None, Query(pattern=r"^[0-9a-f]{64}$")] = None,
 ) -> RedirectResponse:
-  """Start an OIDC login: mint flow state and 302 to the IdP."""
+  """Start an OIDC login: mint flow state and 302 to the IdP.
+
+  The handoff back to the login home completes only with the nonce whose hash
+  arrives here, so the login home must start the flow; one started elsewhere
+  (an IdP tile, a typed link) cannot complete and lands on the login page.
+  """
   client_ip, user_agent = _client_details(request)
 
   try:
@@ -113,6 +120,7 @@ async def oidc_login(
       metadata,
       return_to=parse_return_to(return_to, AVAILABLE_APPS),
       browser_state=browser_state,
+      browser_nonce_hash=nonce_hash,
     )
   except OIDCError as exc:
     logger.error(f"OIDC login could not start: {exc}")
@@ -236,6 +244,7 @@ async def oidc_callback(
     "token_id": str(uuid.uuid4()),
     "target_app": env.LOGIN_HOME_APP,
     "return_url": "/",
+    "browser_nonce_hash": state_data.get("browser_nonce_hash"),
     "session_version": user.session_version,
     "created_at": datetime.now(UTC).isoformat(),
   }

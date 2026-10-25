@@ -476,18 +476,13 @@ def _assert_browser_binding(body: SSOCompleteRequest, session_data: dict) -> Non
 
   The target app mints a nonce when it begins the bridge and sends its hash
   through the login home into the exchange; the browser that completes must
-  hold the nonce. A session minted without a hash is redeemed only by a
-  client that presents no nonce (one predating the binding); a client that
-  does present one is refusing an unbound handoff it did not start.
+  hold the nonce. A session minted without a hash has no browser to belong to,
+  so it is never completed: current apps strip a handoff they did not start.
   """
   expected = session_data.get("browser_nonce_hash")
   provided = body.browser_nonce
-  if expected:
-    digest = hashlib.sha256((provided or "").encode()).hexdigest()
-    bound = bool(provided) and secrets.compare_digest(expected, digest)
-  else:
-    bound = not provided
-  if bound:
+  digest = hashlib.sha256((provided or "").encode()).hexdigest()
+  if expected and provided and secrets.compare_digest(expected, digest):
     return
   SecurityAuditLogger.log_security_event(
     event_type=SecurityEventType.AUTHORIZATION_DENIED,

@@ -114,7 +114,8 @@ class SSOExchangeRequest(BaseModel):
     description=(
       "SHA-256 (hex) of a nonce the target app minted in the browser that is "
       "signing in. Completion must present the nonce, so the handoff cannot "
-      "be redeemed by any other browser."
+      "be redeemed by any other browser; a session exchanged without one "
+      "cannot be completed."
     ),
   )
 
@@ -137,7 +138,8 @@ class SSOCompleteRequest(BaseModel):
     max_length=128,
     description=(
       "The nonce this browser minted when it started the bridge; its SHA-256 "
-      "was passed through the exchange as browser_nonce_hash."
+      "was passed through the exchange as browser_nonce_hash. Required to "
+      "complete a handoff."
     ),
   )
 

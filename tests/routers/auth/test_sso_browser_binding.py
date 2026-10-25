@@ -37,11 +37,8 @@ def test_any_other_browser_is_refused(nonce):
 
 
 @pytest.mark.unit
-def test_a_client_presenting_a_nonce_refuses_an_unbound_handoff():
-  with pytest.raises(HTTPException):
-    _complete(UNBOUND, NONCE)
-
-
-@pytest.mark.unit
-def test_clients_predating_the_binding_still_complete_unbound_handoffs():
-  _complete(UNBOUND, None)
+@pytest.mark.parametrize("nonce", [None, NONCE])
+def test_an_unbound_handoff_is_never_completed(nonce):
+  with pytest.raises(HTTPException) as exc:
+    _complete(UNBOUND, nonce)
+  assert exc.value.status_code == 401

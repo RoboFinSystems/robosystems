@@ -6,6 +6,7 @@ producer→consumer seam test — the payload the callback writes must be
 accepted by ``sso_complete`` verbatim, synthetic ``token_id`` and all.
 """
 
+import hashlib
 import json
 from unittest.mock import AsyncMock, Mock, patch
 from urllib.parse import parse_qs, urlparse
@@ -45,11 +46,15 @@ APP_URLS = {
   "robosystems": "https://app.example",
 }
 BROWSER_STATE = "the-browser-binding"
+# The login home's bridge nonce: it starts the flow, so it holds the nonce.
+BRIDGE_NONCE = "d" * 32
+BRIDGE_NONCE_HASH = hashlib.sha256(BRIDGE_NONCE.encode()).hexdigest()
 STATE_DATA = {
   "nonce": "expected-nonce",
   "code_verifier": "the-verifier",
   "return_to": "roboledger:/reports/x",
   "browser_state": BROWSER_STATE,
+  "browser_nonce_hash": BRIDGE_NONCE_HASH,
 }
 CLAIMS = {
   "sub": "okta|user-1",
@@ -96,7 +101,9 @@ class TestOidcLogin:
       iss=None,
       return_to="roboledger:/reports/x",
       _rate_limit=None,
+      nonce_hash=BRIDGE_NONCE_HASH,
     )
+    assert _state.call_args.kwargs["browser_nonce_hash"] == BRIDGE_NONCE_HASH
 
     assert response.status_code == 302
     location = response.headers["location"]
@@ -432,7 +439,7 @@ class TestCallbackToSsoCompleteSeam:
     request.headers = {}
     result = await sso_complete(
       request=request,
-      body=SSOCompleteRequest(session_id=session_id),
+      body=SSOCompleteRequest(session_id=session_id, browser_nonce=BRIDGE_NONCE),
       response=Mock(),
       session=Mock(),
       _rate_limit=None,
@@ -440,6 +447,39 @@ class TestCallbackToSsoCompleteSeam:
 
     assert result.token == "minted-jwt"
     assert result.user["id"] == mock_user.id
+
+  async def test_callback_carries_the_bridge_nonce_hash(self, mock_user):
+    _session_id, raw_payload = await self._payload_written_by_callback(mock_user)
+    assert json.loads(raw_payload)["browser_nonce_hash"] == BRIDGE_NONCE_HASH
+
+  @patch("robosystems.routers.auth.sso.get_async_redis_client")
+  @patch("robosystems.routers.auth.sso.get_sso_lock_manager")
+  async def test_a_flow_the_login_home_did_not_start_cannot_complete(
+    self, mock_lock_manager, mock_redis_client, mock_user
+  ):
+    """An IdP tile or a typed link starts the flow with no nonce; its handoff
+    is unbound, so no browser can complete it."""
+    _session_id, raw_payload = await self._payload_written_by_callback(mock_user)
+    payload = json.loads(raw_payload)
+    payload["browser_nonce_hash"] = None
+    mock_lock_manager.return_value = None
+    redis_instance = AsyncMock()
+    redis_instance.get.return_value = json.dumps(payload)
+    mock_redis_client.return_value = redis_instance
+    request = Mock()
+    request.headers = {}
+    with (
+      patch("robosystems.routers.auth.sso.SecurityAuditLogger.log_security_event"),
+      pytest.raises(HTTPException) as exc_info,
+    ):
+      await sso_complete(
+        request=request,
+        body=SSOCompleteRequest(session_id=_session_id),
+        response=Mock(),
+        session=Mock(),
+        _rate_limit=None,
+      )
+    assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
 
   @patch("robosystems.routers.auth.sso.User.get_by_id")
   @patch("robosystems.routers.auth.sso.get_async_redis_client")
@@ -467,7 +507,7 @@ class TestCallbackToSsoCompleteSeam:
     with pytest.raises(HTTPException) as exc_info:
       await sso_complete(
         request=request,
-        body=SSOCompleteRequest(session_id=session_id),
+        body=SSOCompleteRequest(session_id=session_id, browser_nonce=BRIDGE_NONCE),
         response=Mock(),
         session=Mock(),
         _rate_limit=None,
