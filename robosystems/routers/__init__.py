@@ -1,8 +1,9 @@
 """API v1 router assembly."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from robosystems.config import env
+from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 
 from .auth import router as auth_router
 from .billing import (
@@ -49,7 +50,14 @@ from .orgs import router as orgs_router
 from .status import router as status_router
 from .user import router as user_router
 
-router = APIRouter(prefix="/v1/graphs/{graph_id}", tags=[])
+# The burst limiter is a router dependency so it runs before any endpoint's
+# credential check: a failed API-key verification costs a bcrypt, and a
+# request that fails there must still be counted against its source.
+router = APIRouter(
+  prefix="/v1/graphs/{graph_id}",
+  tags=[],
+  dependencies=[Depends(subscription_aware_rate_limit_dependency)],
+)
 
 if env.CONNECTIONS_ENABLED:
   from .graphs.connections import router as connections_router
