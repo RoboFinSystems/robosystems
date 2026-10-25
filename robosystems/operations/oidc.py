@@ -148,12 +148,14 @@ class OIDCState:
     code_verifier: str,
     return_to: str | None,
     browser_state: str,
+    browser_nonce_hash: str | None = None,
   ) -> str:
     """Mint a state token and persist what the callback needs to resume.
 
     ``browser_state`` is mirrored into an HttpOnly cookie and re-checked at
     the callback, so only the browser that started the flow can finish it
-    (login-CSRF defense).
+    (login-CSRF defense). ``browser_nonce_hash`` is the login home's bridge
+    nonce, carried to the handoff so the last hop is bound the same way.
     """
     state = secrets.token_urlsafe(32)
     payload = {
@@ -161,6 +163,7 @@ class OIDCState:
       "code_verifier": code_verifier,
       "return_to": return_to,
       "browser_state": browser_state,
+      "browser_nonce_hash": browser_nonce_hash,
       "created_at": datetime.now(UTC).isoformat(),
     }
     try:
@@ -236,6 +239,7 @@ def build_authorize_redirect(
   *,
   return_to: str | None,
   browser_state: str,
+  browser_nonce_hash: str | None = None,
 ) -> str:
   """Mint flow state and build the IdP authorize URL (code flow + PKCE S256)."""
   nonce = secrets.token_urlsafe(16)
@@ -245,6 +249,7 @@ def build_authorize_redirect(
     code_verifier=code_verifier,
     return_to=return_to,
     browser_state=browser_state,
+    browser_nonce_hash=browser_nonce_hash,
   )
   params = {
     "response_type": "code",

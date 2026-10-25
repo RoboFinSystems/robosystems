@@ -2,6 +2,7 @@
 Tests for SSO completion endpoint.
 """
 
+import hashlib
 import json
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -13,12 +14,14 @@ from robosystems.models.core import User
 from robosystems.routers.auth.sso import sso_complete
 
 SESSION_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+BROWSER_NONCE = "c" * 32
 
 SESSION_DATA = {
   "user_id": "user_123",
   "token_id": "token_id_123",
   "target_app": "roboledger",
   "return_url": "/reports/x",
+  "browser_nonce_hash": hashlib.sha256(BROWSER_NONCE.encode()).hexdigest(),
   "session_version": 0,
   "created_at": "2026-08-11T00:00:00+00:00",
 }
@@ -49,7 +52,7 @@ def _call_args():
   mock_request.headers = {}
   return {
     "request": mock_request,
-    "body": SSOCompleteRequest(session_id=SESSION_ID),
+    "body": SSOCompleteRequest(session_id=SESSION_ID, browser_nonce=BROWSER_NONCE),
     "response": Mock(),
     "session": Mock(),
     "_rate_limit": None,
