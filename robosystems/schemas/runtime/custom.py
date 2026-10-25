@@ -12,6 +12,7 @@ from enum import Enum
 from typing import Any
 
 from robosystems.logger import logger
+from robosystems.schemas.identifiers import require_identifier, require_type
 from robosystems.utils.yaml_input import load_untrusted_yaml
 
 from ..models import Node, Property, Relationship, Schema
@@ -191,7 +192,7 @@ class CustomSchemaParser:
       raise ValueError(f"Node '{node_def['name']}' must have 'properties' field")
 
     # Check for reserved node names
-    node_name = node_def["name"]
+    node_name = require_identifier(node_def["name"], "node")
     if node_name in self.RESERVED_NODE_NAMES:
       raise ValueError(
         f"Node name '{node_name}' is reserved for system use. "
@@ -226,8 +227,9 @@ class CustomSchemaParser:
     if "type" not in prop_def:
       raise ValueError(f"Property '{prop_def['name']}' must have a 'type' field")
 
+    prop_name = require_identifier(prop_def["name"], "property")
     # Validate type — extract base type for parameterized types like FLOAT[384]
-    prop_type = prop_def["type"].upper()
+    prop_type = require_type(prop_def["type"], prop_name)
     base_type = prop_type.split("[")[0] if "[" in prop_type else prop_type
     if base_type not in self.VALID_TYPES:
       raise ValueError(
@@ -235,7 +237,7 @@ class CustomSchemaParser:
       )
 
     return Property(
-      name=prop_def["name"],
+      name=prop_name,
       type=prop_type,
       is_primary_key=prop_def.get("is_primary_key", False),
       nullable=prop_def.get("nullable", True),
@@ -255,7 +257,9 @@ class CustomSchemaParser:
       raise ValueError(f"Relationship '{rel_def['name']}' must have 'to_node' field")
 
     # Check for reserved relationship names
-    rel_name = rel_def["name"]
+    rel_name = require_identifier(rel_def["name"], "relationship")
+    require_identifier(rel_def["from_node"], "from_node", allow_wildcard=True)
+    require_identifier(rel_def["to_node"], "to_node", allow_wildcard=True)
     if rel_name in self.RESERVED_RELATIONSHIP_NAMES:
       raise ValueError(
         f"Relationship name '{rel_name}' is reserved for system use. "

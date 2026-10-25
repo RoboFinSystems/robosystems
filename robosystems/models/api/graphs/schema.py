@@ -2,7 +2,9 @@
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from robosystems.schemas.identifiers import require_identifier, require_type
 
 
 class CustomSchemaDefinition(BaseModel):
@@ -185,6 +187,28 @@ class CustomSchemaDefinition(BaseModel):
   metadata: dict[str, Any] = Field(
     default_factory=dict, description="Additional schema metadata"
   )
+
+  @model_validator(mode="after")
+  def _names_are_identifiers(self) -> CustomSchemaDefinition:
+    # Names become DDL; the parser refuses these too, this gives a 422 first.
+    for node in self.nodes:
+      if "name" in node:
+        require_identifier(node["name"], "node")
+      for prop in node.get("properties") or []:
+        if "name" in prop:
+          require_identifier(prop["name"], "property")
+        if "type" in prop and "name" in prop:
+          require_type(prop["type"], str(prop["name"]))
+    for rel in self.relationships:
+      if "name" in rel:
+        require_identifier(rel["name"], "relationship")
+      for end in ("from_node", "to_node"):
+        if end in rel:
+          require_identifier(rel[end], end, allow_wildcard=True)
+      for prop in rel.get("properties") or []:
+        if "name" in prop:
+          require_identifier(prop["name"], "property")
+    return self
 
 
 class SchemaValidationRequest(BaseModel):

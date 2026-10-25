@@ -28,6 +28,11 @@ from robosystems.graph_api.models.database import (
   NodeDatabasesHealthResponse,
 )
 from robosystems.logger import logger
+from robosystems.security.cypher_analyzer import (
+  is_admin_operation,
+  is_bulk_operation,
+  is_non_read_call,
+)
 
 from .pool import initialize_connection_pool
 
@@ -856,6 +861,23 @@ class LadybugDatabaseManager:
       logger.info(f"Applying custom schema with {len(statements)} DDL statements")
 
       for i, statement in enumerate(statements):
+        # Defense in depth behind the identifier rules: whatever reached this
+        # string, only a table definition runs here, and never a bulk,
+        # admin or procedure statement (the same guard as the query path).
+        head = " ".join(statement.split()[:3]).upper()
+        if head not in ("CREATE NODE TABLE", "CREATE REL TABLE"):
+          raise ValueError(
+            f"Custom schema DDL may only create node and relationship tables; "
+            f"refused statement {i + 1}"
+          )
+        if (
+          is_bulk_operation(statement)
+          or is_admin_operation(statement)
+          or is_non_read_call(statement)
+        ):
+          raise ValueError(
+            f"Custom schema DDL may not run engine operations; refused statement {i + 1}"
+          )
         try:
           conn.execute(statement)
           logger.debug(f"Executed custom DDL statement {i + 1}/{len(statements)}")
