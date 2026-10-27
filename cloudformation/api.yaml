@@ -831,16 +831,13 @@ Resources:
                           max_interval: 30s
                           max_elapsed_time: 300s
 
-                      debug:
-                        verbosity: normal
-
                     service:
                       extensions: [sigv4auth]
                       pipelines:
                         metrics:
                           receivers: [otlp]
                           processors: [filter/healthcheck, batch]
-                          exporters: [prometheusremotewrite, debug]
+                          exporters: [prometheusremotewrite]
                       telemetry:
                         logs:
                           level: info
