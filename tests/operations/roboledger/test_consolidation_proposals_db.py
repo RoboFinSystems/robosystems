@@ -2404,7 +2404,7 @@ def test_a_sale_needs_an_account_for_the_gain_it_reverses(group):
       {"c": ADJUSTMENTS},
     )
     session.commit()
-  with pytest.raises(OwnershipChangeError, match="GainLossOnDispositionOfAssets"):
+  with pytest.raises(OwnershipChangeError, match="GainOrLossOnSaleOfStockInSubsidiary"):
     _change(ownership_pct=60, consideration=150_000)
 
 

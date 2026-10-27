@@ -191,3 +191,24 @@ class TestEquityMethodRows:
     )
     assert investing["rs-gaap:PaymentsToAcquireEquityMethodInvestments"] == 1.0
     assert investing["rs-gaap:ProceedsFromSaleOfEquityMethodInvestments"] == 1.0
+
+
+class TestSubsidiarySaleGain:
+  """The gain on selling a member's shares (migration 0066) has its own
+  nonoperating row beside the disposal gain, which us-gaap narrowed to
+  property, plant and equipment, and the cash flow removes it as non-cash."""
+
+  def test_the_gain_is_nonoperating(self, calculations: TaxonomyPackage) -> None:
+    equation = _equation(
+      calculations, "IncomeStatement", "rs-gaap:NonoperatingIncomeExpense"
+    )
+    assert equation["rs-gaap:GainOrLossOnSaleOfStockInSubsidiary"] == 1.0
+    assert equation["rs-gaap:GainLossOnDispositionOfAssets"] == 1.0
+
+  def test_the_cash_flow_removes_the_gain(self, calculations: TaxonomyPackage) -> None:
+    operating = _equation(
+      calculations,
+      "CashFlowStatement",
+      "rs-gaap:NetCashProvidedByUsedInOperatingActivities",
+    )
+    assert operating["rs-gaap:GainOrLossOnSaleOfStockInSubsidiary"] == -1.0

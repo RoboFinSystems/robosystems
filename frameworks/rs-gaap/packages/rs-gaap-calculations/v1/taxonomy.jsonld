@@ -545,6 +545,21 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
+      "@id": "_:rs-gaap-calc-is-nonop-arc-gain-sub-sale",
+      "from": {
+        "@id": "rs-gaap:NonoperatingIncomeExpense"
+      },
+      "to": {
+        "@id": "rs-gaap:GainOrLossOnSaleOfStockInSubsidiary"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
+      "weight": 1.0,
+      "order": 350.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
       "@id": "_:rs-gaap-calc-is-nonop-arc-4",
       "from": {
         "@id": "rs-gaap:NonoperatingIncomeExpense"
@@ -3067,6 +3082,21 @@
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": -1.0,
       "order": 260.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-operating-arc-gain-sub-sale",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:GainOrLossOnSaleOfStockInSubsidiary"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "weight": -1.0,
+      "order": 265.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },

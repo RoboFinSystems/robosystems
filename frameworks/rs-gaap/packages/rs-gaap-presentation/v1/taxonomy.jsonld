@@ -2197,6 +2197,20 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-nonop-gain-sub-sale",
+      "from": {
+        "@id": "rs-gaap:NonoperatingIncomeExpense"
+      },
+      "to": {
+        "@id": "rs-gaap:GainOrLossOnSaleOfStockInSubsidiary"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "order": 10635.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
       "@id": "_:rs-gaap-pres-is-multistep-arc-15",
       "from": {
         "@id": "rs-gaap:NonoperatingIncomeExpense"
@@ -2438,6 +2452,20 @@
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
       "order": 10520.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-singlestep-arc-nonop-gain-sub-sale",
+      "from": {
+        "@id": "rs-gaap:IncomeStatementAbstract"
+      },
+      "to": {
+        "@id": "rs-gaap:GainOrLossOnSaleOfStockInSubsidiary"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
+      "order": 10525.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
@@ -21384,6 +21412,20 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-gain-sub-sale",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:GainOrLossOnSaleOfStockInSubsidiary"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "order": 30126.5,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
       "@id": "_:rs-gaap-pres-cf-indirect-arc-impairment",
       "from": {
         "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
@@ -21622,6 +21664,20 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
+      "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-gain-sub-sale",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:GainOrLossOnSaleOfStockInSubsidiary"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-LLC",
+      "order": 30126.5,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
       "@id": "_:rs-gaap-pres-cf-indirect-llc-arc-impairment",
       "from": {
         "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
@@ -21856,6 +21912,20 @@
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
       "order": 30126.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-part-arc-gain-sub-sale",
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:GainOrLossOnSaleOfStockInSubsidiary"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect-PART",
+      "order": 30126.5,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },

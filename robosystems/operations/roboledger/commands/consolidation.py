@@ -96,10 +96,10 @@ from robosystems.operations.taxonomy_block.coa_mappings import (
 )
 
 BARGAIN_PURCHASE_GAIN = "rs-gaap:BusinessCombinationBargainPurchaseGainRecognizedAmount"
-# The gain or loss on a member's leaving: the disposal gain concept the
-# income statement's calculation arcs carry (rs-gaap's deconsolidation gain
-# sits in no roll-up, so a line on it would never reach net income).
-DECONSOLIDATION_GAIN = "rs-gaap:GainLossOnDispositionOfAssets"
+# The gain or loss on selling a member's shares, whether control goes with
+# them or not. Not ``GainLossOnDispositionOfAssets``, which us-gaap narrowed
+# to property, plant and equipment.
+DECONSOLIDATION_GAIN = "rs-gaap:GainOrLossOnSaleOfStockInSubsidiary"
 
 
 def propose_consolidation_entries(

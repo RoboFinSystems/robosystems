@@ -90,7 +90,7 @@
     },
     {
       "from": "4400",
-      "to": "rs-gaap:GainLossOnDispositionOfAssets"
+      "to": "rs-gaap:GainOrLossOnSaleOfStockInSubsidiary"
     },
     {
       "from": "4500",
