@@ -2,7 +2,7 @@
 
 ## Result: ✅ **Valid XBRL 2.1**
 
-- **Package**: `coffee-roaster-demo.zip` (19,239 bytes)
+- **Package**: `coffee-roaster-demo.zip` (19,444 bytes)
 - **Files in zip**: 5 (`instance.xml, report-cal.xml, report-lab.xml, report-pre.xml, report.xsd`)
 - **Facts loaded by Arelle**: 69
 - **Load errors**: 0
