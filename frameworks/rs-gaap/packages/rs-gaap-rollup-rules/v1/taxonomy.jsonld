@@ -900,7 +900,7 @@
       "@id": "_:rs-gaap-rollup-cf-operating",
       "ruleCategory": "FundamentalAccountingConceptRelation",
       "rulePattern": "RollUp",
-      "ruleExpression": "$NetCashProvidedByUsedInOperatingActivities = ($NetIncomeLoss + $DepreciationDepletionAndAmortization + $ShareBasedCompensation - $GainLossOnDispositionOfAssets + $AssetImpairmentCharges - $GainsLossesOnExtinguishmentOfDebt - $OtherNoncashIncomeExpense + $IncreaseDecreaseInAccountsReceivable + $IncreaseDecreaseInInventories + $IncreaseDecreaseInPrepaidExpense + $IncreaseDecreaseInAccountsPayableAndAccruedLiabilities + $IncreaseDecreaseInOtherCurrentLiabilities + $IncreaseDecreaseInOtherOperatingCapitalNet + $IncreaseDecreaseInAccruedLiabilities + $IncreaseDecreaseInAccruedIncomeTaxesPayable + $DeferredIncomeTaxExpenseBenefit + $IncreaseDecreaseInOtherCurrentAssets + $IncreaseDecreaseInContractWithCustomerLiability + $IncreaseDecreaseInOperatingLeaseLiability + $NetIncomeLossAttributableToNoncontrollingInterest + $IncreaseDecreaseInDueFromAffiliatesCurrent + $IncreaseDecreaseInDueToAffiliatesCurrent - $IncomeLossFromEquityMethodInvestments)",
+      "ruleExpression": "$NetCashProvidedByUsedInOperatingActivities = ($NetIncomeLoss + $DepreciationDepletionAndAmortization + $ShareBasedCompensation - $GainLossOnDispositionOfAssets - $GainOrLossOnSaleOfStockInSubsidiary + $AssetImpairmentCharges - $GainsLossesOnExtinguishmentOfDebt - $OtherNoncashIncomeExpense + $IncreaseDecreaseInAccountsReceivable + $IncreaseDecreaseInInventories + $IncreaseDecreaseInPrepaidExpense + $IncreaseDecreaseInAccountsPayableAndAccruedLiabilities + $IncreaseDecreaseInOtherCurrentLiabilities + $IncreaseDecreaseInOtherOperatingCapitalNet + $IncreaseDecreaseInAccruedLiabilities + $IncreaseDecreaseInAccruedIncomeTaxesPayable + $DeferredIncomeTaxExpenseBenefit + $IncreaseDecreaseInOtherCurrentAssets + $IncreaseDecreaseInContractWithCustomerLiability + $IncreaseDecreaseInOperatingLeaseLiability + $NetIncomeLossAttributableToNoncontrollingInterest + $IncreaseDecreaseInDueFromAffiliatesCurrent + $IncreaseDecreaseInDueToAffiliatesCurrent - $IncomeLossFromEquityMethodInvestments)",
       "ruleTarget": {
         "targetKind": "element",
         "targetRef": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
@@ -925,6 +925,10 @@
         {
           "variableName": "GainLossOnDispositionOfAssets",
           "variableQname": "rs-gaap:GainLossOnDispositionOfAssets"
+        },
+        {
+          "variableName": "GainOrLossOnSaleOfStockInSubsidiary",
+          "variableQname": "rs-gaap:GainOrLossOnSaleOfStockInSubsidiary"
         },
         {
           "variableName": "AssetImpairmentCharges",
@@ -1123,7 +1127,7 @@
       "@id": "_:rs-gaap-rollup-is-nonop",
       "ruleCategory": "FundamentalAccountingConceptRelation",
       "rulePattern": "RollUp",
-      "ruleExpression": "$NonoperatingIncomeExpense = ($InvestmentIncomeInterest - $InterestExpense + $GainLossOnDispositionOfAssets + $OtherNonoperatingIncomeExpense + $ForeignCurrencyTransactionGainLossBeforeTax + $GainsLossesOnExtinguishmentOfDebt + $IncomeLossFromEquityMethodInvestments)",
+      "ruleExpression": "$NonoperatingIncomeExpense = ($InvestmentIncomeInterest - $InterestExpense + $GainLossOnDispositionOfAssets + $GainOrLossOnSaleOfStockInSubsidiary + $OtherNonoperatingIncomeExpense + $ForeignCurrencyTransactionGainLossBeforeTax + $GainsLossesOnExtinguishmentOfDebt + $IncomeLossFromEquityMethodInvestments)",
       "ruleTarget": {
         "targetKind": "element",
         "targetRef": "rs-gaap:NonoperatingIncomeExpense"
@@ -1144,6 +1148,10 @@
         {
           "variableName": "GainLossOnDispositionOfAssets",
           "variableQname": "rs-gaap:GainLossOnDispositionOfAssets"
+        },
+        {
+          "variableName": "GainOrLossOnSaleOfStockInSubsidiary",
+          "variableQname": "rs-gaap:GainOrLossOnSaleOfStockInSubsidiary"
         },
         {
           "variableName": "OtherNonoperatingIncomeExpense",

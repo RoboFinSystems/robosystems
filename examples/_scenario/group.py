@@ -144,7 +144,7 @@ _PARENT_ACCOUNTS: tuple[tuple[str, str, str, str, str, str | None], ...] = (
     "revenue",
     "non_operating_revenue",
     "credit",
-    "rs-gaap:GainLossOnDispositionOfAssets",
+    "rs-gaap:GainOrLossOnSaleOfStockInSubsidiary",
   ),
 )
 
@@ -1985,7 +1985,7 @@ def _check_lifecycle(
   books = members[member.ticker]
   t = member.ticker
   goodwill_q = "rs-gaap:Goodwill"
-  gain_q = "rs-gaap:GainLossOnDispositionOfAssets"
+  gain_q = "rs-gaap:GainOrLossOnSaleOfStockInSubsidiary"
   nci_q = "rs-gaap:MinorityInterest"
   investment_flow = "rs-gaap:PaymentsToAcquireInterestInSubsidiariesAndAffiliates"
   goodwill = a.price - _share(a.opening_cash + a.opening_equipment, member.parent_share)
