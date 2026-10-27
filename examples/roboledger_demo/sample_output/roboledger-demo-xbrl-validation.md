@@ -2,7 +2,7 @@
 
 ## Result: ✅ **Valid XBRL 2.1**
 
-- **Package**: `roboledger-demo.zip` (18,706 bytes)
+- **Package**: `roboledger-demo.zip` (18,868 bytes)
 - **Files in zip**: 5 (`instance.xml, report-cal.xml, report-lab.xml, report-pre.xml, report.xsd`)
 - **Facts loaded by Arelle**: 40
 - **Load errors**: 0
