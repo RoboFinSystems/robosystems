@@ -19,7 +19,6 @@ from robosystems.logger import logger
 
 from .base import BaseGraphClient
 from .config import GraphClientConfig
-from .cypher_text import add_sort_tiebreaker
 from .exceptions import (
   GraphAPIError,
   GraphTimeoutError,
@@ -332,7 +331,7 @@ class GraphClient(BaseGraphClient):
     to an empty result rather than raising.
     """
     payload: dict[str, Any] = {
-      "cypher": add_sort_tiebreaker(cypher),
+      "cypher": cypher,
       "database": graph_id,
     }
     if parameters:

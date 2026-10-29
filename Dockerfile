@@ -1,7 +1,7 @@
 # Stage 0: Extension Repository (pull LadybugDB extensions)
 # Pinned by digest: upstream re-pushes :latest and purges old version directories.
 # Move it only with LADYBUG_EXT_VERSION, to a digest that still holds that version.
-FROM ghcr.io/ladybugdb/extension-repo:latest@sha256:842f4e8540a5bc5365f6245ba6ded0a5aa336d454cadb9ad41fb425833b17e98 AS extensions
+FROM ghcr.io/ladybugdb/extension-repo:latest@sha256:a152df593815c3a9907ec2c830d3550ee5437e1bf1aa81aff464bd44a39490ff AS extensions
 
 # Stage 1: Builder
 # Using Python 3.14 slim (Debian Trixie/13) for GLIBC 2.38+ required by LadybugDB extensions
@@ -33,7 +33,7 @@ ARG TARGETARCH=arm64
 # The engine's extension version (the directory it loads from), which is not
 # necessarily the ladybug wheel's version. Used for both the repo source path
 # and the runtime install path.
-ARG LADYBUG_EXT_VERSION=0.18.1
+ARG LADYBUG_EXT_VERSION=0.22.0
 
 # Create extension directories using internal version (where LadybugDB looks).
 # No duckdb extension: materialization uses a parquet handoff, since ATTACH
@@ -116,7 +116,7 @@ FROM public.ecr.aws/docker/library/python:3.14-slim
 # Accept architecture argument in runtime stage
 ARG TARGETARCH=arm64
 # Must match builder stage — used for extension install paths
-ARG LADYBUG_EXT_VERSION=0.18.1
+ARG LADYBUG_EXT_VERSION=0.22.0
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \

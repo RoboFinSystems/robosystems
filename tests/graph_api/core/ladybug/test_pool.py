@@ -100,8 +100,8 @@ class TestLadybugConnectionPoolAcquireRelease:
     mock_conn.execute.return_value = mock_result
     mock_lbug.Connection.return_value = mock_conn
 
-    # Create .lbug file for the database
-    (Path(self.temp_dir) / "testdb.lbug").touch()
+    # Create .lbdb file for the database
+    (Path(self.temp_dir) / "testdb.lbdb").touch()
 
     pool = _make_pool(self.temp_dir)
 
@@ -124,7 +124,7 @@ class TestLadybugConnectionPoolAcquireRelease:
     mock_conn.execute.return_value = mock_result
     mock_lbug.Connection.return_value = mock_conn
 
-    (Path(self.temp_dir) / "testdb.lbug").touch()
+    (Path(self.temp_dir) / "testdb.lbdb").touch()
 
     pool = _make_pool(self.temp_dir)
 
@@ -142,7 +142,7 @@ class TestLadybugConnectionPoolAcquireRelease:
     """A new connection after one is closed must not reuse a live id."""
     mock_mem_config.return_value = 256
     mock_lbug.Connection.side_effect = lambda db: MagicMock()
-    (Path(self.temp_dir) / "testdb.lbug").touch()
+    (Path(self.temp_dir) / "testdb.lbdb").touch()
     pool = _make_pool(self.temp_dir)
 
     created = [pool._create_new_connection("testdb", read_only=False) for _ in range(3)]
@@ -168,7 +168,7 @@ class TestLadybugConnectionPoolAcquireRelease:
 
     assert e.value.status_code == 404
     mock_lbug.Database.assert_not_called()
-    assert not (Path(self.temp_dir) / "ghost.lbug").exists()
+    assert not (Path(self.temp_dir) / "ghost.lbdb").exists()
     assert "ghost" not in pool._databases
 
   @patch("robosystems.graph_api.core.ladybug.pool.lbug")
@@ -237,7 +237,7 @@ class TestLadybugConnectionPoolPlanCache:
 
   def setup_method(self):
     self.temp_dir = tempfile.mkdtemp()
-    (Path(self.temp_dir) / "testdb.lbug").touch()
+    (Path(self.temp_dir) / "testdb.lbdb").touch()
 
   def teardown_method(self):
     shutil.rmtree(self.temp_dir, ignore_errors=True)

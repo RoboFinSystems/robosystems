@@ -391,7 +391,7 @@ No `--long` flag is needed on your side: the snapshots are compressed with a 128
 
 ### Using the Decompressed `.lbug`
 
-The result is an ordinary LadybugDB database file. Open it from Python with the `ladybug` package (pinned to `0.18.1` in this repo — match the version the snapshot was written with):
+The result is an ordinary LadybugDB database file. Open it from Python with the `ladybug` package (pinned to `0.22.1` in this repo — match the release that wrote the snapshot, which its dataset card and commit title state):
 
 ```python
 import ladybug as lbug

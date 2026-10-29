@@ -127,8 +127,8 @@ class TestListDatabasesFiltering:
 class TestSwapHoldsTheDatabaseLock:
   def test_close_and_both_renames_run_under_the_database_lock(self, manager, db_dir):
     """No connection can open on the active file while it is being moved."""
-    (db_dir / "kg123.lbug").write_text("active")
-    (db_dir / "kg123-wip.lbug").write_text("wip")
+    (db_dir / "kg123.lbdb").write_text("active")
+    (db_dir / "kg123-wip.lbdb").write_text("wip")
 
     held: set[str] = set()
     events: list[tuple[str, str, bool]] = []
@@ -157,5 +157,5 @@ class TestSwapHoldsTheDatabaseLock:
     assert result["status"] == "success"
     assert ("close", "kg123", True) in events
     renames = [event for event in events if event[0] == "rename"]
-    assert [name for _, name, _ in renames] == ["kg123.lbug", "kg123-wip.lbug"]
+    assert [name for _, name, _ in renames] == ["kg123.lbdb", "kg123-wip.lbdb"]
     assert all(under_lock for _, _, under_lock in renames)

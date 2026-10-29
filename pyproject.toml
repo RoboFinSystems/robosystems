@@ -44,7 +44,7 @@ dependencies = [
     # OLAP Databases (Graph)
     "duckdb==1.4.4",
     "lancedb>=0.34.0,<0.35",  # 0.34 made pylance an optional extra (unused here); 0.30<->0.36 format compat verified 2026-08-01
-    "ladybug==0.18.1",
+    "ladybug==0.22.1",
     # OLTP Database (Postgres)
     "alembic>=1.18.5,<2.0",
     "psycopg2-binary>=2.9.0,<3.0",
