@@ -347,7 +347,7 @@ The LadybugDB implementation splits along the concurrency boundary the engine im
 
 - **Engine** (`engine.py`): a single owned connection to one database file, for isolated work
 - **Pool** (`pool.py`): the path for anything serving concurrent requests — one shared `lbug.Database` per file, since two Database objects over the same file do not see each other's committed writes
-- **Manager** (`manager.py`): lifecycle of the `.lbug` files on a node — create, delete, inspect, apply schema, and the blue-green swap that promotes a `-wip` database to active
+- **Manager** (`manager.py`): lifecycle of the `.lbdb` files on a node — create, delete, inspect, apply schema, and the blue-green swap that promotes a `-wip` database to active
 - **Service** (`service.py`): the query path the routers expose, with validation, timeouts, streaming, health, and metrics
 
 ### DuckDB Staging System
@@ -572,9 +572,9 @@ adapters/
 │       ├── catalog.py      # Per-filer catalog on the public CDN
 │       ├── documents.py    # 8-K earnings releases + pre-iXBRL primary documents
 │       ├── text_index.py   # OpenSearch text indexing (narrative sections, iXBRL disclosures)
-│       ├── s3_publish.py   # Publish the .lbug repository database to S3
+│       ├── s3_publish.py   # Publish the .lbdb repository database to S3
 │       ├── duckdb_s3_publish.py # Publish the .duckdb staging database to S3
-│       ├── r2_publish.py   # Publish the .lbug database to Cloudflare R2
+│       ├── r2_publish.py   # Publish the .lbdb database to Cloudflare R2
 │       ├── hf_publish.py   # Copy the R2 snapshot to Hugging Face (manual only)
 │       ├── dataset_card.py # Snapshot statistics + the dataset README
 │       ├── jobs.py         # Job definitions
@@ -805,11 +805,11 @@ s3://robosystems-shared-processed-{env}/
 # User/graph data
 s3://robosystems-user-{env}/
   user-staging/{user_id}/{graph_id}/{table}/*.parquet
-  graph-backups/databases/{graph_id}/full/*.lbug.gz
+  graph-backups/databases/{graph_id}/full/*.lbdb.gz
 
 # Shared repository databases (downloaded by replicas on boot)
 s3://robosystems-user-{env}/
-  shared-repositories/databases/sec.lbug
+  shared-repositories/databases/sec.lbdb
   shared-repositories/databases/sec.duckdb
 ```
 
@@ -923,7 +923,7 @@ All infrastructure is managed through CloudFormation templates in `/cloudformati
 - **`graph-infra.yaml`**: Base infrastructure (DynamoDB registries, security groups, IAM roles, SNS alerts)
 - **`graph-volumes.yaml`**: EBS volume lifecycle management (auto-expansion, snapshots, retention)
 - **`graph-ladybug.yaml`**: EC2 writer clusters for LadybugDB (all customer tiers are dedicated — one database per instance)
-- **`graph-ladybug-replicas.yaml`**: Read replica fleet for shared repositories (download the `.lbug` database from S3 on boot)
+- **`graph-ladybug-replicas.yaml`**: Read replica fleet for shared repositories (download the `.lbdb` database from S3 on boot)
 
 #### Search
 

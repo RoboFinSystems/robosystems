@@ -131,7 +131,7 @@ Dagster runs on ECS Fargate (orchestration only). Heavy compute happens on the s
 │  SHARED REPLICAS (graph-ladybug-replicas.yaml)               │
 │  ├── ASG: sized by SHARED_REPLICAS_* variables; target       │
 │  │     tracking on CPU and memory                            │
-│  ├── S3 download: Pull .lbug + .duckdb from S3 on boot       │
+│  ├── S3 download: Pull .lbdb + .duckdb from S3 on boot       │
 │  ├── Read-only; sized below the master (no DuckDB staging)   │
 │  └── ALB on port 8001, health check /health                  │
 └──────────────────────────────────────────────────────────────┘
@@ -153,21 +153,21 @@ carries the sizes, and it has been resized more than once.
 | Parquet to S3             | ✅ Handles         | -                         |
 | DuckDB staging            | -                  | ✅ Graph API handles      |
 | LadybugDB materialization | -                  | ✅ Graph API handles      |
-| S3 publish (.lbug/.duckdb)| ✅ Orchestrates    | ✅ Uploads files          |
+| S3 publish (.lbdb/.duckdb)| ✅ Orchestrates    | ✅ Uploads files          |
 | Replica refresh           | ✅ AWS API calls   | -                         |
 
 ### S3 Publish → Replica Refresh Flow
 
 ```
 1. Dagster sensor: sec_post_materialize_publish_sensor
-   ├── Publish .lbug to S3 (LadybugDB graph database)
+   ├── Publish .lbdb to S3 (LadybugDB graph database)
    └── Publish .duckdb to S3 (DuckDB with embeddings for vector search)
 
 2. Dagster sensor: triggers shared_repository_refresh_replicas_job
    └── Rolling ASG instance refresh (min_healthy=100%, max_healthy=200%)
 
 3. New replicas boot alongside old ones
-   ├── Download .lbug + .duckdb from S3 (~15 min for ~85GB)
+   ├── Download .lbdb + .duckdb from S3 (~15 min for ~85GB)
    ├── Start Graph API, pass health check
    └── Register with ALB, old instance terminated
 ```
@@ -271,7 +271,7 @@ All pipelines use DuckDB staging regardless of source. Parquet in S3 — the SEC
 | **Dagster (all jobs)**     | ECS Fargate   | None (ephemeral)      | Orchestration only. Heavy compute via Graph API.    |
 | **Shared master**          | Raw EC2 + ASG | Dynamic (Vol Manager) | Graph API handles DuckDB + LadybugDB.               |
 | **Customer graph writers** | Raw EC2 + ASG | Dynamic per-customer  | Volume Manager assigns EBS per customer allocation. |
-| **Shared replicas**        | Raw EC2 + ASG | S3 download at boot   | All replicas identical. Download .lbug/.duckdb from S3.|
+| **Shared replicas**        | Raw EC2 + ASG | S3 download at boot   | All replicas identical. Download .lbdb/.duckdb from S3.|
 
 ### Why Fargate for Dagster
 

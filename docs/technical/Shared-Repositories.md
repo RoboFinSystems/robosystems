@@ -35,7 +35,7 @@ Because it is just a graph, you query a shared repository through the **same sur
 Shared repositories run on a dedicated infrastructure tier, `ladybug-shared`, separate from the per-customer dedicated tiers:
 
 - A **shared master** instance owns the build path — the ingestion pipeline materializes the graph here.
-- A **read-only replica fleet** serves queries. Replicas download the materialized `.lbug` / `.duckdb` / vector artifacts from S3 on boot and sit behind a load balancer, so read volume scales by adding replicas rather than by resizing one instance.
+- A **read-only replica fleet** serves queries. Replicas download the materialized `.lbdb` / `.duckdb` / vector artifacts from S3 on boot and sit behind a load balancer, so read volume scales by adding replicas rather than by resizing one instance.
 - On robosystems.ai this tier serves the SEC repository; for a self-hosted deployment it is **opt-in** (`LBUG_SHARED_ENABLED`), since the replica fleet is separate infrastructure.
 
 See the [Architecture Overview](Architecture-Overview.md) for the cluster topology and the S3-publish → replica-refresh flow.
@@ -131,10 +131,10 @@ curl -s "https://api.robosystems.ai/v1/graphs/sec/backups" \
 curl -s "https://api.robosystems.ai/v1/graphs/sec/backups/BACKUP_ID/download" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 
-curl -L -o sec.lbug.zst "PASTE_THE_DOWNLOAD_URL"
+curl -L -o sec.lbdb.zst "PASTE_THE_DOWNLOAD_URL"
 ```
 
-Snapshots arrive **zstd-compressed** (`.lbug.zst`), so you need the `zstd` tool — it ships with neither macOS nor most Linux distributions by default:
+Snapshots arrive **zstd-compressed** (`.lbdb.zst`; one published before the `.lbdb` rename is `.lbug.zst` and is handled the same way), so you need the `zstd` tool — it ships with neither macOS nor most Linux distributions by default:
 
 ```bash
 brew install zstd            # macOS
@@ -145,7 +145,7 @@ sudo dnf install zstd        # Amazon Linux / Fedora / RHEL
 Then decompress it in the folder holding the download (on macOS, right-click the folder → **Services** → **New Terminal at Folder** to get there):
 
 ```bash
-zstd -d sec.lbug.zst   # -> sec.lbug ; add --rm to delete the .zst afterwards
+zstd -d sec.lbdb.zst   # -> sec.lbdb ; add --rm to delete the .zst afterwards
 ```
 
 Plain `zstd -d` is enough — no `--long` flag — and the decompressed file is roughly 2× the download, so leave disk headroom. The result is a LadybugDB database you can query directly; see [Graph Operations](Graph-Operations.md#downloading-and-unpacking-a-backup) for the full download-and-unpack walkthrough.
