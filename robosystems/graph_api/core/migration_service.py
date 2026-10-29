@@ -179,6 +179,25 @@ class MigrationService:
         databases.add(f.stem)
     return sorted(databases)
 
+  def _load_vector_extension(self, conn, db_name: str) -> None:
+    """Load the vector extension on a connection that bypasses the pool.
+
+    EXPORT DATABASE writes a vector index's definition (and the INSTALL/LOAD
+    prelude the import needs) only when the exporting connection has the
+    extension loaded; without it the export is silently index-less. Baked
+    into the image, so LOAD succeeds and INSTALL is a local no-op; a graph
+    without the extension still exports and imports, so a failure here is
+    logged, not raised.
+    """
+    try:
+      conn.execute("LOAD EXTENSION vector")
+    except Exception:
+      try:
+        conn.execute("INSTALL vector")
+        conn.execute("LOAD EXTENSION vector")
+      except Exception as e:
+        logger.warning(f"Vector extension not available for {db_name}: {e}")
+
   def _get_node_count(self, conn) -> int:
     """Count total nodes across all node tables."""
     node_count = 0
@@ -292,6 +311,7 @@ class MigrationService:
           node_count = self._get_node_count(conn)
           rel_tables = self._get_rel_table_count(conn)
 
+          self._load_vector_extension(conn, db_name)
           conn.execute(f"EXPORT DATABASE '{export_dir}'")
         except Exception as e:
           logger.error(f"Failed to export {db_name}: {e}")
@@ -455,6 +475,7 @@ class MigrationService:
         try:
           db = lbug.Database(str(db_file))
           conn = lbug.Connection(db)
+          self._load_vector_extension(conn, db_name)
           conn.execute(f"IMPORT DATABASE '{export_dir}'")
 
           actual_nodes = self._get_node_count(conn)

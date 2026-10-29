@@ -710,6 +710,65 @@ class TestCheckpointBeforeExport:
     conn.execute.assert_called_once_with("CHECKPOINT")
 
 
+class TestVectorExtensionOnRawConnections:
+  """The export and import bypass the pool, so they load the vector extension
+  themselves: without it EXPORT DATABASE writes no CREATE_VECTOR_INDEX and the
+  migrated graph comes up without its HNSW index."""
+
+  def test_loads_the_extension(self, service):
+    conn = MagicMock()
+    service._load_vector_extension(conn, "kg_a")
+    conn.execute.assert_called_once_with("LOAD EXTENSION vector")
+
+  def test_installs_when_the_first_load_fails(self, service):
+    conn = MagicMock()
+    conn.execute.side_effect = [RuntimeError("not installed"), None, None]
+    service._load_vector_extension(conn, "kg_a")
+    assert [c.args[0] for c in conn.execute.call_args_list] == [
+      "LOAD EXTENSION vector",
+      "INSTALL vector",
+      "LOAD EXTENSION vector",
+    ]
+
+  def test_an_unavailable_extension_is_not_fatal(self, service):
+    conn = MagicMock()
+    conn.execute.side_effect = RuntimeError("no extension")
+    service._load_vector_extension(conn, "kg_a")
+
+  @pytest.mark.asyncio
+  async def test_import_loads_the_extension_before_importing(
+    self, service, task_manager, tmp_path
+  ):
+    (tmp_path / "migration.json").write_text(
+      json.dumps(
+        {
+          "source_version": "0.18.1",
+          "target_version": "0.22.1",
+          "databases": [
+            {"graph_id": "kg_a", "export_path": "exports/kg_a", "node_count": 1000}
+          ],
+        }
+      )
+    )
+    (tmp_path / "exports" / "kg_a").mkdir(parents=True)
+    (tmp_path / "kg_a.lbug").write_bytes(b"original")
+    conn = MagicMock()
+
+    with (
+      patch(f"{TASK_MODULE}.lbug.Database", side_effect=_importing_database()),
+      patch(f"{TASK_MODULE}.lbug.Connection", return_value=conn),
+      patch.object(service, "_get_node_count", return_value=1000),
+    ):
+      await service.import_all_databases("task-1")
+
+    statements = [c.args[0] for c in conn.execute.call_args_list]
+    imported = next(
+      i for i, q in enumerate(statements) if q.startswith("IMPORT DATABASE")
+    )
+    assert statements.index("LOAD EXTENSION vector") < imported
+    task_manager.complete_task.assert_awaited_once()
+
+
 def test_os_import_is_module_level():
   """Guards the patch targets used above."""
   assert ms.os is os
