@@ -5,6 +5,8 @@ rows when a sort's last key followed a STRING key, at any LIMIT, and the Graph
 API client appended a constant string key to every multi-key sort to avoid it.
 The rewrite is gone; these run the plain queries against a real embedded engine
 so a regression in the pinned release fails here, not in a report.
+The one shape the engine still gets wrong, a NULL-key sort under a LIMIT, stays
+a strict xfail so the fix is noticed when it lands.
 """
 
 from __future__ import annotations
@@ -98,8 +100,25 @@ def nullable(tmp_path_factory):
 
 
 @pytest.mark.unit
-def test_sort_with_null_keys(nullable):
+@pytest.mark.xfail(
+  strict=True,
+  reason="LadybugDB 0.22.1: ORDER BY on a nullable STRING key with a LIMIT drops "
+  "NULL-key rows at 1-8 threads (right without the LIMIT, and at 14 threads); "
+  "0.18.1 was wrong with and without it. Pinned to 2 threads so every runner "
+  "sees the same result; flip when the engine sorts it correctly",
+)
+def test_sort_with_null_keys_under_a_limit(nullable):
+  nullable.set_max_threads_for_exec(2)
   rows = _rows(nullable, "MATCH (t:T) RETURN t.s, t.v")
   first = sorted((r for r in rows if r[0] is None), key=lambda r: r[1])[:10]
   query = "MATCH (t:T) RETURN t.s, t.v ORDER BY t.s DESC, t.v LIMIT 10"
   assert _rows(nullable, query) == first
+
+
+@pytest.mark.unit
+def test_sort_with_null_keys(nullable):
+  nullable.set_max_threads_for_exec(2)
+  rows = _rows(nullable, "MATCH (t:T) RETURN t.s, t.v")
+  nulls_first = sorted((r for r in rows if r[0] is None), key=lambda r: r[1])
+  query = "MATCH (t:T) RETURN t.s, t.v ORDER BY t.s DESC, t.v"
+  assert _rows(nullable, query)[: len(nulls_first)] == nulls_first
