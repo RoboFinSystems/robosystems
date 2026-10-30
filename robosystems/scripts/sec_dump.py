@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pull the public SEC .lbug dump from Hugging Face into data/lbug-dbs.
+"""Pull the public SEC .lbdb dump from Hugging Face into data/lbug-dbs.
 
 The dump is the SEC shared repository as one embedded LadybugDB file, published
 as a periodic snapshot, ``sec.lbdb.zst``, on the
@@ -16,7 +16,7 @@ download and well over 100 GiB on disk.
 
 Usage:
     just sec-dump                    # see the dataset card for current sizes
-    just sec-dump --force            # replace an existing data/lbug-dbs/sec.lbug
+    just sec-dump --force            # replace an existing data/lbug-dbs/sec.lbdb
     just sec-dump --keep-archive     # keep the .zst after decompression
     just sec-dump-no-restart         # same, without the graph-api restart afterwards
 
