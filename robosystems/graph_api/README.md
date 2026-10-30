@@ -207,7 +207,14 @@ sharing that instance. `.github/configs/graph.yml` is authoritative.
 
 Shared replicas are a separate read-only fleet: they pull `.lbdb` and `.duckdb`
 files from S3 on boot, serve queries locally, and return 503 from `/health`
-until warm. They refresh through a rolling ASG instance refresh after new
+until warm. Warm means `core/ladybug/warmup.py` has run: the engine opens a
+database lazily, so the warmup reads the working set the tools read (each node
+table's first node group, the typed tools' own shapes for a configured set of
+filers, the small edge tables whole, the element-label lookups) under a
+wall-clock budget, both set in SSM (`tuning/graph/REPLICA_WARMUP_BUDGET_SECONDS`,
+`tuning/graph/REPLICA_WARMUP_TICKERS`). The boot keeps the root volume at its
+launch throughput until the health check opens, then lowers it to the gp3
+baseline. They refresh through a rolling ASG instance refresh after new
 database files are published.
 
 ## Deployment

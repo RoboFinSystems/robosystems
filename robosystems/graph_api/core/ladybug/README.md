@@ -15,7 +15,10 @@ Four layers, each wrapping the one below:
 | `Engine` / `Repository` | `engine.py` | The driver: parameterized Cypher, DDL, transactions |
 
 Supporting modules: `config.py` (memory budget resolution and per-database
-overrides) and `materialization_lock.py` (the distributed write lock).
+overrides), `materialization_lock.py` (the distributed write lock) and
+`warmup.py` (what a shared replica reads before its health check opens: the
+typed tools' own query shapes for a configured set of filers, then the small
+edge tables, under one budget; the Fact-side edges are never scanned whole).
 
 Application code should enter at `get_ladybug_service()`. Constructing an
 `Engine` directly in a request handler bypasses pooling, health checks, and the

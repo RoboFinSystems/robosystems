@@ -93,6 +93,8 @@ tuning/
   load_shedding/     # START_PRESSURE, STOP_PRESSURE
   mcp/               # MAX_RESULT_ROWS, MAX_RESULT_SIZE_MB
   materialization/   # Rebuild cadence + per-table timeouts (MIN_STALE_AGE, COPY_TIMEOUT, ...)
+  graph/             # Engine settings read per connection or at boot (ENGINE_PLAN_CACHE_MODE,
+                     #   REPLICA_WARMUP_BUDGET_SECONDS, REPLICA_WARMUP_TICKERS)
 ```
 
 The `{NAME}` segment is UPPER_SNAKE_CASE, identical to the env var name.

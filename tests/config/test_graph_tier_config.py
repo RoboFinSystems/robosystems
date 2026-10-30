@@ -317,13 +317,18 @@ def test_prod_replica_buffer_pool_fits_under_the_admission_floor(monkeypatch):
   """A full buffer pool on a prod replica leaves admission control's floor free.
 
   The pool fills and stays full, so it has to fit beside what opening sec
-  already holds. Both constants were measured on a prod replica (2026-10-01),
-  not derived. Re-measure before changing either.
+  already holds. The container limit is run-graph-container.sh's on a 16GB
+  instance. The footprint was 5400MB on LadybugDB 0.18 (measured 2026-10-01,
+  an eager open); on 0.22.1 the whole host used 1210MB with sec open and the
+  pool still empty (CloudWatch mem_used_percent on the rolled replica,
+  2026-10-30), and the pin is twice that reading, a bound rather than an
+  estimate, until a day of traffic has been measured. Re-measure before
+  changing either.
   """
   from robosystems.config.defaults import AdmissionDefaults
 
   container_limit_mb = 13 * 1024  # run-graph-container.sh on a 16GB instance
-  open_footprint_mb = 5400  # resident outside the pool once sec is open
+  open_footprint_mb = 2560  # 2x the 1210MB the host used at open on 0.22.1
 
   monkeypatch.setattr(
     "robosystems.config.graph_tier.env.LBUG_NODE_TYPE", "shared_replica"

@@ -22,17 +22,17 @@ class SECReportResolutionError(RuntimeError):
   """
 
 
-async def resolve_sec_report(
-  graph_id: str,
+def build_sec_report_query(
   *,
   ticker: str,
   period_type: str | None = None,
   fiscal_year: int | None = None,
-) -> dict[str, Any] | None:
-  """The most recent filing for a ticker, or None when nothing matches.
+) -> tuple[str, dict[str, Any]]:
+  """The Cypher and parameters that resolve a ticker's most recent filing.
 
   ``period_type`` "quarterly" or "instant" adds 10-Q to the annual forms;
-  anything else means annual only.
+  anything else means annual only. The replica warmup runs this same text at
+  boot (``graph_api/core/ladybug/warmup.py``).
   """
   if period_type == "annual":
     forms: tuple[str, ...] = ANNUAL_FORMS
@@ -57,6 +57,20 @@ async def resolve_sec_report(
     "r.accession_number AS accession, ent.cik AS cik, "
     "r.uri AS uri, r.is_inline_xbrl AS is_inline_xbrl "
     "ORDER BY r.filing_date DESC LIMIT 1"
+  )
+  return query, parameters
+
+
+async def resolve_sec_report(
+  graph_id: str,
+  *,
+  ticker: str,
+  period_type: str | None = None,
+  fiscal_year: int | None = None,
+) -> dict[str, Any] | None:
+  """The most recent filing for a ticker, or None when nothing matches."""
+  query, parameters = build_sec_report_query(
+    ticker=ticker, period_type=period_type, fiscal_year=fiscal_year
   )
 
   try:

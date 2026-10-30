@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from robosystems.operations.roboledger.views.financial_statement_query import (
+  build_financial_statement_query,
   deduplicate_facts,
   query_financial_statement,
 )
@@ -397,3 +398,42 @@ class TestProjectsDecimals:
       )
     query, _ = mock_repository.execute_query.call_args[0]
     assert "f.decimals AS decimals" in query
+
+
+class TestBuildFinancialStatementQuery:
+  """The builder is the one text; the query path and the replica warmup both
+  run it."""
+
+  @pytest.mark.unit
+  def test_requires_report_id_or_ticker(self):
+    with pytest.raises(ValueError):
+      build_financial_statement_query(statement_type="income_statement")
+
+  @pytest.mark.unit
+  def test_balance_sheet_by_ticker_defaults_to_instant(self):
+    query, params = build_financial_statement_query(
+      statement_type="balance_sheet", ticker="NVDA"
+    )
+    assert "(ent:Entity {ticker: $ticker})" in query
+    assert "period_type: 'instant'" in query
+    assert params == {"statement_type": "balance_sheet", "ticker": "NVDA", "limit": 150}
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_query_path_executes_the_builders_text(self, mock_repository):
+    with patch(
+      "robosystems.operations.roboledger.views.financial_statement_query.get_graph_repository",
+      return_value=mock_repository,
+    ):
+      await query_financial_statement(
+        MOCK_GRAPH,
+        statement_type="cash_flow_statement",
+        ticker="AAPL",
+        period_type="annual",
+      )
+    executed_query, executed_params = mock_repository.execute_query.call_args_list[0][0]
+    built_query, built_params = build_financial_statement_query(
+      statement_type="cash_flow_statement", ticker="AAPL", period_type="annual"
+    )
+    assert executed_query == built_query
+    assert executed_params == built_params

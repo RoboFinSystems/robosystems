@@ -96,6 +96,16 @@ cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << EOF
           "mem_used_percent"
         ],
         "metrics_collection_interval": 60
+      },
+      "diskio": {
+        "measurement": [
+          "read_bytes"
+        ],
+        "metrics_collection_interval": 60,
+        "resources": [
+          "nvme0n1",
+          "nvme1n1"
+        ]
       }
     },
     "aggregation_dimensions": [["AutoScalingGroupName"]],

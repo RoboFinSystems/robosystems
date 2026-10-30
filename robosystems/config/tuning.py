@@ -18,6 +18,7 @@ from .defaults import (
   MaterializationDefaults,
   MCPDefaults,
   QueueDefaults,
+  ReplicaWarmupDefaults,
   SSEDefaults,
   TimeoutDefaults,
   WorkerDefaults,
@@ -271,6 +272,27 @@ class TuningConfig:
       logger.warning(f"Ignoring invalid graph/ENGINE_PLAN_CACHE_MODE: {value}")
       return None
     return value
+
+  @classmethod
+  def get_replica_warmup_budget_seconds(cls) -> int:
+    """Wall-clock budget for a shared replica's boot warmup; zero keeps only
+    the per-table scan. Read once, at boot."""
+    return max(
+      0,
+      cls.get_int(
+        "graph/REPLICA_WARMUP_BUDGET_SECONDS", ReplicaWarmupDefaults.BUDGET_SECONDS
+      ),
+    )
+
+  @classmethod
+  def get_replica_warmup_tickers(cls) -> list[str]:
+    """Filers whose statements the boot warmup reads, most-asked first. A
+    comma-separated override; an empty value keeps the default set."""
+    raw = cls.get("graph/REPLICA_WARMUP_TICKERS", ReplicaWarmupDefaults.TICKERS)
+    tickers = [t.strip().upper() for t in raw.split(",") if t.strip()]
+    return tickers or [
+      t.strip() for t in ReplicaWarmupDefaults.TICKERS.split(",") if t.strip()
+    ]
 
   # =========================================================================
   # SSE ACCESSORS

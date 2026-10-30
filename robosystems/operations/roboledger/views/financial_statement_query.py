@@ -13,28 +13,25 @@ from robosystems.middleware.graph import get_graph_repository
 from robosystems.operations.roboledger.views.fact_dedup import keep_most_precise
 
 
-async def query_financial_statement(
-  graph_id: str,
+def build_financial_statement_query(
   *,
   statement_type: str,
   report_id: str | None = None,
   ticker: str | None = None,
   period_type: str | None = None,
   limit: int = 50,
-) -> list[dict[str, Any]]:
-  """Run the statement traversal for ``report_id`` or ``ticker`` (one required).
+) -> tuple[str, dict[str, Any]]:
+  """The statement traversal's Cypher and parameters, for ``report_id`` or
+  ``ticker`` (one required).
 
   Both paths anchor on the indexed Report / Entity node and reach
   ``Structure {canonical_type}`` last: canonical_type is unindexed and shared
   by one structure per filing (~53k on SEC), so leading with it times out.
 
   ``period_type`` of ``None`` means instant for a balance sheet and no period
-  filter otherwise. Rows come back raw; the caller runs ``deduplicate_facts``
-  and truncates to ``limit``.
-
-  A filing that presents one combined statement of operations and
-  comprehensive income has no ``income_statement`` structure, so an empty
-  income statement is read from its ``comprehensive_income`` structure.
+  filter otherwise. The replica warmup runs this same text at boot
+  (``graph_api/core/ladybug/warmup.py``), so what it pages in is what the
+  statement tool reads.
   """
   if not report_id and not ticker:
     raise ValueError("Either report_id or ticker must be provided")
@@ -104,6 +101,34 @@ async def query_financial_statement(
     "f.decimals AS decimals, u.value AS unit "
     "ORDER BY end_date DESC "
     "LIMIT $limit"
+  )
+  return query, parameters
+
+
+async def query_financial_statement(
+  graph_id: str,
+  *,
+  statement_type: str,
+  report_id: str | None = None,
+  ticker: str | None = None,
+  period_type: str | None = None,
+  limit: int = 50,
+) -> list[dict[str, Any]]:
+  """Run the statement traversal for ``report_id`` or ``ticker`` (one required).
+
+  Rows come back raw; the caller runs ``deduplicate_facts`` and truncates to
+  ``limit``.
+
+  A filing that presents one combined statement of operations and
+  comprehensive income has no ``income_statement`` structure, so an empty
+  income statement is read from its ``comprehensive_income`` structure.
+  """
+  query, parameters = build_financial_statement_query(
+    statement_type=statement_type,
+    report_id=report_id,
+    ticker=ticker,
+    period_type=period_type,
+    limit=limit,
   )
 
   # "read" is load-bearing on shared repos (SEC): the master's discovery path

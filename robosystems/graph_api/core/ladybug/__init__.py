@@ -5,6 +5,7 @@
 - ``LadybugDatabaseManager`` — database lifecycle and the blue-green swap
 - ``LadybugService`` — the query, health and metrics surface the routers use
 - ``result_rows`` — the one way to read rows out of a ``QueryResult``
+- ``warmup`` — what a shared replica reads before its health check opens
 """
 
 from .config import get_database_memory_config
