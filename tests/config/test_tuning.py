@@ -470,3 +470,16 @@ class TestReplicaWarmupAccessors:
       "robosystems.config.tuning._get_parameter_manager", return_value=manager
     ):
       assert len(TuningConfig.get_replica_warmup_tickers()) == 50
+
+  def test_budget_is_capped_under_the_replica_health_wait(self):
+    manager = MagicMock()
+    manager.get_tuning_int.return_value = 5000
+    with patch(
+      "robosystems.config.tuning._get_parameter_manager", return_value=manager
+    ):
+      assert (
+        TuningConfig.get_replica_warmup_budget_seconds()
+        == TuningConfig.REPLICA_WARMUP_MAX_BUDGET_SECONDS
+      )
+    # run-graph-container.sh gives a replica 900 s to answer healthy.
+    assert TuningConfig.REPLICA_WARMUP_MAX_BUDGET_SECONDS < 900

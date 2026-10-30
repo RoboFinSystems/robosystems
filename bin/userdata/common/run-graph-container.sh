@@ -186,9 +186,10 @@ fi
 
 # A replica answers 503 from /health until its warmup has read the working set
 # (robosystems/graph_api/core/ladybug/warmup.py): the SSM budget there, default
-# five minutes, plus the database open and one query's overrun of the deadline.
-# Writers answer within a minute. Both waits must stay inside the ASG health
-# grace period and the stack's signal window.
+# five minutes and capped at ten in config/tuning.py, plus the database open
+# and one query's overrun of the deadline. Writers answer within a minute. Both
+# waits must stay inside the ASG health grace period and the stack's signal
+# window.
 HEALTH_CHECK_PASSED=false
 if [ "${NODE_TYPE}" = "shared_replica" ]; then
   HEALTH_CHECK_INTERVAL=10

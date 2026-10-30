@@ -605,9 +605,9 @@ Resources:
         # Cold boot: ~1 min of patching, the sec.lbdb download (~5.5 min at the
         # launch template's 1000 MiB/s, 2026-10-30), the database open, then the
         # warmup's budget (tuning/graph/REPLICA_WARMUP_BUDGET_SECONDS, 5 min by
-        # default) before /health answers. ~13 min; PT30M leaves room for a slow
-        # download or an SSM budget raised to the health wait in
-        # run-graph-container.sh (15 min).
+        # default, capped at 10) before /health answers. ~13 min; PT30M leaves
+        # room for a slow download or the budget at its cap, both inside the
+        # 15-min health wait in run-graph-container.sh.
         Timeout: PT30M
     UpdatePolicy:
       AutoScalingRollingUpdate:

@@ -176,11 +176,16 @@ def table_scans(node_tables: Sequence[str]) -> Iterator[WarmupQuery]:
 
 
 def edge_scans(node_tables: set[str], rel_tables: set[str]) -> Iterator[WarmupQuery]:
+  skipped: list[str] = []
   for src, rel, dst in EDGE_SCANS:
     if rel in rel_tables and src in node_tables and dst in node_tables:
       yield WarmupQuery(
         "edges", f"edges {rel}", f"MATCH (:{src})-[r:{rel}]->(:{dst}) RETURN count(r)"
       )
+    else:
+      skipped.append(rel)
+  if skipped:
+    logger.info(f"Warmup edge scans not in this graph's catalog: {', '.join(skipped)}")
 
 
 def filer_shapes(tickers: Sequence[str]) -> Iterator[WarmupQuery]:
@@ -307,12 +312,16 @@ def run_warmup(
       return rows
 
   def attempt(query: WarmupQuery) -> None:
+    query_started = clock()
     try:
       execute(query)
       report.count(query.phase, ok=True)
     except Exception as e:
       report.count(query.phase, ok=False)
-      logger.warning(f"Warmup [{database}] {query.name}: {str(e)[:200]}")
+      logger.warning(
+        f"Warmup [{database}] {query.name} failed after "
+        f"{clock() - query_started:.1f}s: {str(e)[:200]}"
+      )
 
   node_tables, rel_tables = discover_tables(execute)
   logger.info(
@@ -330,7 +339,8 @@ def run_warmup(
   _log_phase(report, "tables", clock() - started)
 
   if budget_seconds > 0:
-    deadline = started + budget_seconds
+    # The budget starts here: the table scans above always run.
+    deadline = clock() + budget_seconds
     phase_started = clock()
     current_phase: str | None = None
     for query in plan(node_tables, rel_tables, tickers):

@@ -226,12 +226,13 @@ class TestRunWarmup:
     clock = FakeClock()
     connection = FakeConnection(HYPERCUBE_CATALOG, clock=clock, seconds_per_query=10.0)
     tables = len([r for r in HYPERCUBE_CATALOG if r[2] == "NODE"])
-    # Discovery and the table scans always run (10 s each here); 20 s of budget
-    # then start two more queries, and the deadline is checked before each.
+    # Discovery and the table scans always run (10 s each here) and the budget
+    # starts after them: 20 s start two more queries, the deadline being checked
+    # before each.
     report = run_warmup(
       FakeManager(connection),
       "sec",
-      budget_seconds=(tables + 1) * 10 + 20,
+      budget_seconds=20,
       tickers=["NVDA"],
       clock=clock,
     )
