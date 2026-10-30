@@ -304,6 +304,34 @@ class TestStripeSubscriptionOperations:
     call_args = stripe_provider.stripe.Subscription.create.call_args
     assert call_args[1]["metadata"] == metadata
 
+  def test_create_subscription_charges_a_link_default(self, stripe_provider):
+    """A customer whose only payment method is Link (saved at Checkout) is
+    charged on it: the listing is not card-only, and the customer default
+    wins."""
+    mock_subscription = Mock()
+    mock_subscription.id = "sub_link"
+    mock_subscription.status = "active"
+    stripe_provider.stripe.Subscription.create.return_value = mock_subscription
+
+    link_pm = _stripe_object({"id": "pm_link", "type": "link"})
+    payment_methods = Mock()
+    payment_methods.data = [link_pm]
+    stripe_provider.stripe.PaymentMethod.list.return_value = payment_methods
+    stripe_provider.stripe.Customer.retrieve.return_value = _stripe_object(
+      {"invoice_settings": {"default_payment_method": "pm_link"}}
+    )
+
+    result = stripe_provider.create_subscription("cus_123", "price_456", {})
+
+    assert result == "sub_link"
+    stripe_provider.stripe.PaymentMethod.list.assert_called_once_with(
+      customer="cus_123"
+    )
+    assert (
+      stripe_provider.stripe.Subscription.create.call_args[1]["default_payment_method"]
+      == "pm_link"
+    )
+
   def _customer_with_card(self, stripe_provider):
     mock_pm = Mock()
     mock_pm.id = "pm_card"
@@ -481,6 +509,24 @@ class TestStripePaymentMethods:
     assert result[0]["is_default"] is True
     assert result[1]["id"] == "pm_2"
     assert result[1]["is_default"] is False
+
+  def test_list_payment_methods_includes_every_type(self, stripe_provider):
+    """The list is not filtered to cards: a Link method comes back with its
+    type and an empty card block, and the list call names no type."""
+    link_pm = _stripe_object({"id": "pm_link", "type": "link"})
+    mock_list = Mock()
+    mock_list.data = [link_pm]
+    stripe_provider.stripe.PaymentMethod.list.return_value = mock_list
+    stripe_provider.stripe.Customer.retrieve.return_value = _stripe_object(
+      {"invoice_settings": {"default_payment_method": "pm_link"}}
+    )
+
+    result = stripe_provider.list_payment_methods("cus_123")
+
+    stripe_provider.stripe.PaymentMethod.list.assert_called_once_with(
+      customer="cus_123"
+    )
+    assert result == [{"id": "pm_link", "type": "link", "card": {}, "is_default": True}]
 
   def test_list_payment_methods_empty(self, stripe_provider):
     """Test listing payment methods when customer has none."""

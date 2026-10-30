@@ -524,9 +524,9 @@ class StripePaymentProvider(PaymentProvider):
 
   def list_payment_methods(self, customer_id: str) -> list[dict[str, Any]]:
     try:
-      payment_methods = self.stripe.PaymentMethod.list(
-        customer=customer_id, type="card"
-      )
+      # Every attached type: a customer who saved Link or a bank account at
+      # Checkout has a chargeable default that a card-only list would hide.
+      payment_methods = self.stripe.PaymentMethod.list(customer=customer_id)
 
       customer = self.stripe.Customer.retrieve(customer_id).to_dict()
       default_payment_method = (customer.get("invoice_settings") or {}).get(
@@ -539,7 +539,7 @@ class StripePaymentProvider(PaymentProvider):
           {
             "id": pm.id,
             "type": pm.type,
-            "card": pm.card.to_dict() if pm.card else {},
+            "card": card.to_dict() if (card := getattr(pm, "card", None)) else {},
             "is_default": pm.id == default_payment_method,
           }
         )
