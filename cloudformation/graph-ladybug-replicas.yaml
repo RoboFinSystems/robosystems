@@ -505,10 +505,15 @@ Resources:
             aws s3 cp "s3://$DEPLOYMENT_BUCKET/userdata/ladybug-replica.sh" /tmp/ladybug-replica.sh --region ${AWS::Region}
             chmod +x /tmp/ladybug-replica.sh
 
-            # Execute the main script
+            # Execute the main script. Under set -e a bare failing call would end
+            # this wrapper before the signal, and CloudFormation would wait out the
+            # whole PauseTime instead of hearing the failure at once.
             echo "Executing replica userdata script..."
-            /tmp/ladybug-replica.sh
-            SCRIPT_EXIT_CODE=$?
+            if /tmp/ladybug-replica.sh; then
+              SCRIPT_EXIT_CODE=0
+            else
+              SCRIPT_EXIT_CODE=$?
+            fi
 
             # Signal CloudFormation with the result
             echo "Signaling CloudFormation (exit code: $SCRIPT_EXIT_CODE)..."
