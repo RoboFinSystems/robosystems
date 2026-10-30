@@ -111,6 +111,34 @@ class TestBuildHnswIndex:
       "index build must be checkpointed"
     )
 
+  def test_reopens_the_pooled_connections_after_building(self):
+    """A pooled connection opened before the index existed kept answering
+    from the catalog it opened with (prod, 2026-10-30); the build closes the
+    graph's connections so the next request opens a fresh one."""
+    conn = MagicMock()
+    conn.execute.return_value = FakeQueryResult([[0]])
+    service = _service_with(conn)
+
+    with patch(f"{MODULE}._get_ladybug_service", return_value=service):
+      _build_hnsw_index("kg1", "Fact")
+
+    pool = service.db_manager.connection_pool
+    pool.close_database_connections.assert_called_once_with("kg1")
+    assert pool.get_connection.return_value.__exit__.called, (
+      "the build's own connection is released before the pool is recycled"
+    )
+
+  def test_leaves_the_pool_alone_when_the_build_fails(self):
+    conn = MagicMock()
+    service = _service_with(conn)
+    service.db_manager.rebuild_vector_index.return_value = False
+
+    with patch(f"{MODULE}._get_ladybug_service", return_value=service):
+      with pytest.raises(RuntimeError):
+        _build_hnsw_index("kg1", "Fact")
+
+    service.db_manager.connection_pool.close_database_connections.assert_not_called()
+
   def test_raises_when_rebuild_reports_failure(self):
     conn = MagicMock()
     service = _service_with(conn)

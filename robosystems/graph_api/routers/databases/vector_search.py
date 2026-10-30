@@ -222,6 +222,10 @@ def _build_hnsw_index(
 
     conn.execute("CHECKPOINT")
 
+  # A connection opened before the index existed can keep binding against the
+  # catalog it opened with; every pooled connection reopens on its next use.
+  ladybug_service.db_manager.connection_pool.close_database_connections(graph_id)
+
   duration_ms = (time.time() - start) * 1000
   return {
     "graph_id": graph_id,
