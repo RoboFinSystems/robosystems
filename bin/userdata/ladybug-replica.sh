@@ -123,9 +123,12 @@ docker pull ${ECR_URI}:${ECR_IMAGE_TAG} || {
     echo "ERROR: Failed to pull ${ECR_URI}:${ECR_IMAGE_TAG}"
     exit 1
 }
+# An image without the constant makes grep exit 1; under set -e + pipefail that
+# would end the boot here, so the pipeline is allowed to fail and the fallback
+# below decides.
 DB_SUFFIX=$(docker run --rm --entrypoint grep "${ECR_URI}:${ECR_IMAGE_TAG}" \
   -oE '^GRAPH_DB_SUFFIX = "\.[a-z]+"' /app/robosystems/config/storage/graph.py 2>/dev/null \
-  | sed -E 's/.*"(.*)"/\1/')
+  | sed -E 's/.*"(.*)"/\1/' || true)
 if [ -z "${DB_SUFFIX}" ]; then
   DB_SUFFIX=".lbug"
   echo "Image declares no database suffix; using the pre-0.21 ${DB_SUFFIX}"
