@@ -189,9 +189,9 @@ class TestS3BackupAdapter:
         # Every extension the backup key has carried, with and without encryption
         timestamp_part = (
           timestamp_part.replace(".cypher.gz.enc", "")
-          .replace(".lbug.gz.enc", "")
           .replace(".lbdb.gz.enc", "")
           .replace(".lbdb.gz", "")
+          .replace(".lbug.gz.enc", "")
           .replace(".lbug.gz", "")
           .replace(".cypher.gz", "")
         )

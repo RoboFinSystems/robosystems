@@ -15,6 +15,7 @@ from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError, NoCredentialsError
 
 from robosystems.config import env
+from robosystems.config.storage.graph import GRAPH_DB_SUFFIX
 from robosystems.config.tuning import TuningConfig
 from robosystems.logger import logger
 
@@ -632,7 +633,7 @@ class S3BackupAdapter:
     if file_extension:
       extension = file_extension
     else:
-      extension = ".lbug"
+      extension = GRAPH_DB_SUFFIX
       if self.enable_compression:
         extension += ".gz"
 
@@ -644,7 +645,7 @@ class S3BackupAdapter:
     return f"graph-backups/metadata/{graph_id}/backup-{timestamp_str}.json"
 
   # Never gzip these: downloads presign the stored object directly, so a
-  # gzip-wrapped `.lbug.zip` would not open as its name promises.
+  # gzip-wrapped `.lbdb.zip` would not open as its name promises.
   _ALREADY_COMPRESSED_EXTENSIONS = (".zip", ".gz", ".zst")
 
   def _should_compress(self, file_extension: str | None) -> bool:
@@ -769,7 +770,7 @@ class S3BackupAdapter:
 
     Always pass ``timestamp``: it is the only join key between payload and
     sidecar, so one generated here desynchronises them from the caller's
-    record. ``file_extension`` overrides the default ``.lbug[.gz]``. The
+    record. ``file_extension`` overrides the default ``.lbdb[.gz]``. The
     checksum covers the pre-compression bytes.
     """
     if not isinstance(backup_data, bytes):
@@ -964,7 +965,15 @@ class S3BackupAdapter:
             key = obj["Key"]
             if any(
               ext in key
-              for ext in ["/backup-", ".zip", ".cypher", ".json", ".parquet", ".lbug"]
+              for ext in [
+                "/backup-",
+                ".zip",
+                ".cypher",
+                ".json",
+                ".parquet",
+                ".lbdb",
+                ".lbug",
+              ]
             ) and not key.endswith("/"):
               parts = key.split("/")
               if len(parts) >= 4:
@@ -989,7 +998,7 @@ class S3BackupAdapter:
   ) -> bool:
     """Delete a backup payload and its metadata sidecar together.
 
-    The default ``.lbug[.gz]`` extension is assumed, so a backup uploaded with
+    The default ``.lbdb[.gz]`` extension is assumed, so a backup uploaded with
     an explicit ``file_extension`` is not matched by this path.
     """
     backup_path = self._generate_backup_path(graph_id, backup_type, timestamp)
@@ -1097,7 +1106,7 @@ class S3BackupAdapter:
         return None
 
       timestamp_with_ext = backup_filename[7:]
-      # Strip every suffix: extensions stack (.lbug.zip, .lbug.zip.enc, ...).
+      # Strip every suffix: extensions stack (.lbdb.zip, .lbdb.zip.enc, ...).
       timestamp_str = timestamp_with_ext.split(".")[0]
 
       timestamp = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S").replace(tzinfo=UTC)

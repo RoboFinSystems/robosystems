@@ -347,19 +347,21 @@ You don't have to guess: every entry from `GET /v1/graphs/{graph_id}/backups` ca
 
 | `download_extension` | Filename | Contents |
 | --- | --- | --- |
-| `.lbug.zip` | `{graph_id}_{timestamp}.lbug.zip` | ZIP archive containing the LadybugDB database file `{graph_id}.lbug` |
-| `.lbug.zst` | `{graph_id}_{timestamp}.lbug.zst` | A single zstd-compressed LadybugDB database file — how shared repository snapshots (e.g. `sec`) ship |
+| `.lbdb.zip` | `{graph_id}_{timestamp}.lbdb.zip` | ZIP archive containing the LadybugDB database file `{graph_id}.lbdb` |
+| `.lbdb.zst` | `{graph_id}_{timestamp}.lbdb.zst` | A single zstd-compressed LadybugDB database file — how shared repository snapshots (e.g. `sec`) ship |
 
-### Unpacking a `.lbug.zip`
+Archives made before the `.lbdb` rename carry `.lbug` in these positions (`.lbug.zip`, `.lbug.zst`, a `{graph_id}.lbug` member); they unpack and restore the same way.
+
+### Unpacking a `.lbdb.zip`
 
 Nothing special — `unzip` on macOS/Linux, or double-click in Finder / Explorer:
 
 ```bash
-unzip kg1a2b3c4d5e6f7a8b_20260805_031500.lbug.zip
-# -> kg1a2b3c4d5e6f7a8b.lbug
+unzip kg1a2b3c4d5e6f7a8b_20260805_031500.lbdb.zip
+# -> kg1a2b3c4d5e6f7a8b.lbdb
 ```
 
-### Unpacking a `.lbug.zst`
+### Unpacking a `.lbdb.zst`
 
 Shared repository snapshots are compressed with [zstd](https://github.com/facebook/zstd), which is **not** installed by default on macOS or most Linux distributions. Install it first:
 
@@ -380,23 +382,23 @@ winget install Facebook.Zstandard
 Then decompress from the directory holding the download. On macOS you can jump straight there by right-clicking the enclosing folder → **Services** → **New Terminal at Folder**:
 
 ```bash
-# Writes sec_20260805_031500.lbug and keeps the .zst
-zstd -d sec_20260805_031500.lbug.zst
+# Writes sec_20260805_031500.lbdb and keeps the .zst
+zstd -d sec_20260805_031500.lbdb.zst
 
 # Same, but removes the compressed file afterwards
-zstd -d --rm sec_20260805_031500.lbug.zst
+zstd -d --rm sec_20260805_031500.lbdb.zst
 ```
 
 No `--long` flag is needed on your side: the snapshots are compressed with a 128 MB window that plain `zstd -d` handles. Budget disk for roughly **2×** the download size — these files compress at about 2.2×.
 
-### Using the Decompressed `.lbug`
+### Using the Decompressed `.lbdb`
 
-The result is an ordinary LadybugDB database file. Open it from Python with the `ladybug` package (pinned to `0.18.1` in this repo — match the version the snapshot was written with):
+The result is an ordinary LadybugDB database file. Open it from Python with the `ladybug` package (pinned to `0.22.1` in this repo — match the release that wrote the snapshot, which its dataset card and commit title state):
 
 ```python
 import ladybug as lbug
 
-db = lbug.Database("sec_20260805_031500.lbug")
+db = lbug.Database("sec_20260805_031500.lbdb")
 conn = lbug.Connection(db)
 
 result = conn.execute("MATCH (e:Entity) RETURN e.name LIMIT 10")
@@ -448,10 +450,10 @@ The backup request model rejects `compression: false` with **422**. Omit it (it 
 
 ## Self-hosted deployments
 
-**Querying a downloaded `.lbug` on your own stack.** Drop the decompressed file into the local database directory and query it directly:
+**Querying a downloaded `.lbdb` on your own stack.** Drop the decompressed file into the local database directory and query it directly:
 
 ```bash
-mv sec_20260805_031500.lbug ./data/lbug-dbs/sec.lbug
+mv sec_20260805_031500.lbdb ./data/lbug-dbs/sec.lbdb
 just lbug-query sec "MATCH (e:Entity) RETURN e.name LIMIT 10"
 ```
 

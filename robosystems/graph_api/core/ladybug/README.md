@@ -1,7 +1,7 @@
 # LadybugDB Core
 
 LadybugDB is an embedded columnar graph database — a MIT-licensed engine running
-in-process against a single `.lbug` file per graph. There is no server to
+in-process against a single `.lbdb` file per graph. There is no server to
 connect to and no network hop; the Graph API exists to put an HTTP surface in
 front of files that only this instance can reach.
 
@@ -158,7 +158,7 @@ reorder a scan into an index lookup for you.
 ## Blue-green materialization
 
 Rebuilding a graph in place would take it offline for the duration. Instead, the
-new graph is built as `{graph_id}-wip.lbug` while the live database keeps
+new graph is built as `{graph_id}-wip.lbdb` while the live database keeps
 serving, then promoted in one step.
 
 `POST /databases/{graph_id}/swap` → `manager.swap_database(graph_id)`:

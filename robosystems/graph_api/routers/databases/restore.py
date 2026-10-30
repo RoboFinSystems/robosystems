@@ -20,6 +20,7 @@ from fastapi import (
 )
 from fastapi import status as http_status
 
+from robosystems.config.storage.graph import graph_db_filename
 from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.graph_api.core.task_manager import restore_task_manager
 from robosystems.graph_api.core.utils import validate_database_name
@@ -294,7 +295,7 @@ async def download_backup(
       temp_path = Path(temp_dir)
 
       if os.path.isfile(db_path):
-        copied_db = temp_path / f"{graph_id}.lbug"
+        copied_db = temp_path / graph_db_filename(graph_id)
         shutil.copy2(db_path, copied_db)
       else:
         copied_db = temp_path / graph_id
@@ -322,7 +323,7 @@ async def download_backup(
       zip_file = temp_path / f"{graph_id}_backup.zip"
       with zipfile.ZipFile(zip_file, "w", zipfile.ZIP_DEFLATED) as zf:
         if os.path.isfile(db_path):
-          zf.write(copied_db, f"{graph_id}.lbug")
+          zf.write(copied_db, graph_db_filename(graph_id))
         else:
           for root, dirs, files in os.walk(copied_db):
             for file in files:

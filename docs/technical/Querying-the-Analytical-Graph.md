@@ -389,7 +389,7 @@ On a stack you run, the `just` recipes are development shortcuts. Two of them go
 | Recipe | What it queries | Path |
 | --- | --- | --- |
 | **`just graph-query GRAPH_ID "CYPHER"`** | Cypher via the graph engine | through the engine |
-| **`just lbug-query GRAPH_ID "CYPHER"`** | Direct LadybugDB embedded query | `./data/lbug-dbs/{graph_id}.lbug` |
+| **`just lbug-query GRAPH_ID "CYPHER"`** | Direct LadybugDB embedded query | `./data/lbug-dbs/{graph_id}.lbdb` |
 | **`just tables-query GRAPH_ID "SQL"`** | SQL over DuckDB staging via the engine | through the engine |
 | **`just duckdb-query GRAPH_ID "SQL"`** | Direct DuckDB staging query | `./data/staging/{graph_id}.duckdb` |
 | **`just graph-health`** | Graph engine health | through the engine |

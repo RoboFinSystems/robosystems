@@ -809,7 +809,7 @@ RETURN c1.name, c2.name, count(DISTINCT proj) AS shared_projects
 
 1. Visit [https://gdotv.com/](https://gdotv.com/) or download the desktop application
 2. Connect to your custom graph database:
-   - **Database Path**: `./data/lbug-dbs/<graph_id>.lbug` (get graph_id from `.local/config.json`)
+   - **Database Path**: `./data/lbug-dbs/<graph_id>.lbdb` (get graph_id from `.local/config.json`)
 3. **Enable "Fetch all edges between vertices"** in settings
 4. Run visualization queries to explore your data
 

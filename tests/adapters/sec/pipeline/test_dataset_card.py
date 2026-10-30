@@ -65,8 +65,8 @@ class TestRenderDatasetCard:
     assert "14 node types · 22 relationship types · 294.5 million nodes" in card
     assert "LadybugDB **0.18.1** (storage format v42)" in card
     assert (
-      "`sec.lbug.zst` 39.3 GiB (42,247,675,436 bytes) → "
-      "`sec.lbug` 130.3 GiB (139,865,260,032 bytes)"
+      "`sec.lbdb.zst` 39.3 GiB (42,247,675,436 bytes) → "
+      "`sec.lbdb` 130.3 GiB (139,865,260,032 bytes)"
     ) in card
     assert "You need **~170 GiB free** while decompressing (39.3 + 130.3;" in card
     assert "this is 130 GiB on disk" in card

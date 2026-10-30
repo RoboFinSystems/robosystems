@@ -189,7 +189,7 @@ class GraphDeprovisionService:
     await asyncio.to_thread(self._dispose_residual_data, graph_id, result)
     residual_failed = len(result.errors) > errors_before_disposal
 
-    # The .lbug is still on the instance: freeing the registry slot would hand
+    # The .lbdb is still on the instance: freeing the registry slot would hand
     # the next tenant a volume carrying this one's file. Stop here; the
     # teardown sensor retries graphs with deleted_at set and status not yet
     # deprovisioned, and every step above is idempotent.
@@ -198,7 +198,7 @@ class GraphDeprovisionService:
       logger.warning(
         f"Graph {graph_id} database delete failed; leaving registry, PG records "
         "and status intact for the teardown sensor to retry (avoids stranding "
-        "the .lbug on a freed instance)",
+        "the .lbdb on a freed instance)",
         extra={"graph_id": graph_id, "errors": result.errors},
       )
       return result
@@ -413,7 +413,7 @@ class GraphDeprovisionService:
     """Delete the parent graph database.
 
     Success means the file is not on the instance, not that this run removed
-    it, so retries converge. A missing .lbug still has its side stores
+    it, so retries converge. A missing .lbdb still has its side stores
     disposed (``existed=False``); a 404 from an older node also counts as
     success, leaving any residue to storage reclaim. A side store the node
     reports as ``failed`` is not success.

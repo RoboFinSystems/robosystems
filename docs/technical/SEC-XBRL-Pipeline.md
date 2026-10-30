@@ -80,13 +80,13 @@ The SEC plans are `starter` and `advanced`. The repository-prefixed spellings `s
 `just demo-sec` builds a graph for one ticker and year from EDGAR. If you want the **entire corpus** — every XBRL filing since January 2024 — a snapshot of the file that backs the hosted `sec` graph is published periodically as one LadybugDB file on Hugging Face: [robosystems/sec-xbrl-knowledge-graphs](https://huggingface.co/datasets/robosystems/sec-xbrl-knowledge-graphs). A snapshot is a point in time; the hosted graph keeps moving after it (see [How fresh is the hosted sec graph](#how-fresh-is-the-hosted-sec-graph)).
 
 ```bash
-just sec-dump                # download → data/lbug-dbs/sec.lbug; restarts graph-api if it is running
-just sec-dump --force        # replace an existing sec.lbug (for example one built by demo-sec)
+just sec-dump                # download → data/lbug-dbs/sec.lbdb; restarts graph-api if it is running
+just sec-dump --force        # replace an existing sec.lbdb (for example one built by demo-sec)
 just sec-dump --keep-archive # keep the downloaded .zst after decompression
 just sec-dump-no-restart     # same, without the graph-api restart
 ```
 
-It downloads `sec.lbug.zst` (resumable), verifies the archive's checksum and recorded size while decompressing, lands `sec.lbug` in the directory the stack mounts, removes a stale `.wal`, deletes the archive unless you pass `--keep-archive`, and warns if the engine that wrote the dump differs from the `ladybug` version this checkout pins. The download is tens of GiB and the file well over 100 GiB on disk; the dataset card carries the current sizes, and the script reads them at run time and checks free space before each step. Budget real time, too.
+It downloads `sec.lbdb.zst` (resumable; until the first snapshot published under that name, it falls back to `sec.lbug.zst`), verifies the archive's checksum and recorded size while decompressing, lands `sec.lbdb` in the directory the stack mounts, removes a stale `.wal`, deletes the archive unless you pass `--keep-archive`, and warns if the engine that wrote the dump differs from the `ladybug` version this checkout pins. The download is tens of GiB and the file well over 100 GiB on disk; the dataset card carries the current sizes, and the script reads them at run time and checks free space before each step. Budget real time, too.
 
 Then subscribe and query exactly as elsewhere in this guide — `just demo-sec-subscribe` grants access without loading anything — or read the file directly, no services needed:
 
@@ -94,7 +94,7 @@ Then subscribe and query exactly as elsewhere in this guide — `just demo-sec-s
 just lbug-query sec "MATCH (e:Entity) RETURN count(e)"
 ```
 
-The file opens with the LadybugDB release that wrote it — the `ladybug==` version this repo pinned in `pyproject.toml` when the snapshot was built (0.18.1 today). The dataset card states it (the Engine row and its *Engine version* section), each snapshot's commit title carries it, and `just sec-dump` warns when your checkout pins something else. The card also carries the snapshot date, sizes, and further example queries.
+The file opens with the LadybugDB release that wrote it — the `ladybug==` version this repo pinned in `pyproject.toml` when the snapshot was built (the published snapshot's card says which). The dataset card states it (the Engine row and its *Engine version* section), each snapshot's commit title carries it, and `just sec-dump` warns when your checkout pins something else. The card also carries the snapshot date, sizes, and further example queries.
 
 ### Advanced: Manual Loading
 
@@ -440,7 +440,7 @@ Against the pipeline you loaded locally, set `base_url="http://localhost:8000"` 
 1. Visit [https://gdotv.com/](https://gdotv.com/) or download the desktop application
 2. Open the application
 3. Connect to your local Ladybug database:
-   - **Database Path**: `./data/lbug-dbs/sec.lbug` (from RoboSystems root directory)
+   - **Database Path**: `./data/lbug-dbs/sec.lbdb` (from RoboSystems root directory)
 4. **Enable "Fetch all edges between vertices"** in settings for richer visualizations
 5. Run Cypher queries and visualize results interactively
 

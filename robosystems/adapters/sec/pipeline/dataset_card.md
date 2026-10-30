@@ -43,8 +43,8 @@ This is not a Parquet dataset: it is a database file. The dataset viewer is disa
 | **Facts** | {{facts_millions}} million XBRL facts ({{numeric_facts_millions}} million numeric), each linked to its element, entity, period, unit, dimensions, and the presentation/calculation structure it appears in |
 | **Graph** | {{node_types}} node types · {{relationship_types}} relationship types · {{nodes_millions}} million nodes |
 | **Engine** | LadybugDB **{{engine_version}}** (storage format {{storage_format}}) — the release that wrote the file and the one to open it with; see *Engine version* below |
-| **Sizes** | `sec.lbug.zst` {{compressed_gib}} GiB ({{compressed_bytes}} bytes) → `sec.lbug` {{uncompressed_gib}} GiB ({{uncompressed_bytes}} bytes) |
-| **Cadence** | monthly; the fixed path `sec.lbug.zst` is overwritten each snapshot, so `main` is always the latest and this URL never changes |
+| **Sizes** | `sec.lbdb.zst` {{compressed_gib}} GiB ({{compressed_bytes}} bytes) → `sec.lbdb` {{uncompressed_gib}} GiB ({{uncompressed_bytes}} bytes) |
+| **Cadence** | monthly; the fixed path `sec.lbdb.zst` is overwritten each snapshot, so `main` is always the latest and this URL never changes |
 
 Node types: `Entity`, `Report`, `Fact`, `FactSet`, `Element`, `Label`, `Reference`, `Period`, `Unit`,
 `Dimension`, `Structure`, `Association`, `Classification`, `Taxonomy`. The full schema — every
@@ -67,18 +67,18 @@ Budget real time: this is {{uncompressed_gib_whole}} GiB on disk, not a laptop-m
 ```bash
 git clone https://github.com/RoboFinSystems/robosystems.git
 cd robosystems
-just sec-dump          # downloads sec.lbug.zst (resumable), verifies it, decompresses to data/lbug-dbs/sec.lbug
+just sec-dump          # downloads sec.lbdb.zst (resumable), verifies it, decompresses to data/lbug-dbs/sec.lbug
 ```
 
 `just sec-dump` checks the archive's checksum and recorded size as it streams, refuses to overwrite an
-existing `sec.lbug` without `--force`, and warns if the engine that wrote the file differs from the one the
+existing `sec.lbdb` without `--force`, and warns if the engine that wrote the file differs from the one the
 checkout pins.
 
 Without `just` — the archive is plain zstd:
 
 ```bash
-hf download robosystems/sec-xbrl-knowledge-graphs sec.lbug.zst --repo-type dataset --local-dir .
-zstd -d sec.lbug.zst -o data/lbug-dbs/sec.lbug      # or: python -m zstandard, 7-Zip, any zstd
+hf download robosystems/sec-xbrl-knowledge-graphs sec.lbdb.zst --repo-type dataset --local-dir .
+zstd -d sec.lbdb.zst -o data/lbug-dbs/sec.lbdb      # or: python -m zstandard, 7-Zip, any zstd
 ```
 
 ### Engine version
@@ -92,7 +92,7 @@ checkout pins it for you (`ladybug=={{engine_version}}` in `pyproject.toml`); on
 pip install ladybug=={{engine_version}}
 ```
 
-The version that wrote each snapshot is in that snapshot's commit title (`sec.lbug.zst: snapshot YYYY-MM-DD
+The version that wrote each snapshot is in that snapshot's commit title (`sec.lbdb.zst: snapshot YYYY-MM-DD
 (ladybug X.Y.Z)`), and it moves when the pipeline upgrades its engine — check it before opening a new
 snapshot with an existing install. `just sec-dump` compares the two and warns on a mismatch.
 
@@ -181,9 +181,12 @@ you *want* segment breakdowns), and anchor on an entity, report, element, or dat
 
 ## Versioning
 
-- `sec.lbug.zst` is a fixed path. Each monthly snapshot overwrites it in a new commit whose title carries the
-  snapshot date and engine version (`sec.lbug.zst: snapshot YYYY-MM-DD (ladybug X.Y.Z)`). `main` is
+- `sec.lbdb.zst` is a fixed path. Each monthly snapshot overwrites it in a new commit whose title carries the
+  snapshot date and engine version (`sec.lbdb.zst: snapshot YYYY-MM-DD (ladybug X.Y.Z)`). `main` is
   always the latest.
+- Snapshots written before LadybugDB 0.21 were published as `sec.lbug.zst`, the platform's previous
+  suffix for the same file format. That path stays for one monthly cycle after the rename and is then
+  removed; nothing else about the file changed.
 - The engine version can move between snapshots. The commit title carries it; when it changes, install the
   matching `ladybug` before opening the new file (a RoboSystems checkout gets the new pin with the release
   that shipped it).

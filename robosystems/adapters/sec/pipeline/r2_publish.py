@@ -1,4 +1,4 @@
-"""sec_lbug_r2_published: the raw .lbug on Cloudflare R2 for zero-egress
+"""sec_lbug_r2_published: the raw .lbdb on Cloudflare R2 for zero-egress
 subscriber downloads."""
 
 import asyncio

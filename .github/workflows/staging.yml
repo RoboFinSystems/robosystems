@@ -505,7 +505,7 @@ jobs:
       ecr_image_tag: staging
       # SEC replicas track the moving staging tag. Set SHARED_REPLICA_IMAGE_TAG_STAGING
       # only during a storage-format-breaking engine upgrade (so a boot can't pull
-      # the new engine before the new-format sec.lbug is published), then clear it.
+      # the new engine before the new-format sec database file is published), then clear it.
       shared_replica_image_tag: ${{ vars.SHARED_REPLICA_IMAGE_TAG_STAGING || '' }}
       # Infrastructure inputs from graph infrastructure jobs
       secret_arn: ${{ needs.deploy-graph-infra.outputs.secret_arn }}

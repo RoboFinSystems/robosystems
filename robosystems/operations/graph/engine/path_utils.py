@@ -1,12 +1,13 @@
-"""Path construction for LadybugDB databases (single ``.lbug`` file per graph)."""
+"""Path construction for LadybugDB databases (single ``.lbdb`` file per graph)."""
 
 from pathlib import Path
 
 from ....config import env
+from ....config.storage.graph import graph_db_filename
 
 
 def get_lbug_database_path(db_name: str, base_path: str | None = None) -> Path:
-  """``{base}/{db_name}.lbug``, defaulting the base to ``LBUG_DATABASE_PATH``."""
+  """``{base}/{db_name}.lbdb``, defaulting the base to ``LBUG_DATABASE_PATH``."""
   if base_path is None:
     base_path_str = env.LBUG_DATABASE_PATH
   else:
@@ -14,7 +15,7 @@ def get_lbug_database_path(db_name: str, base_path: str | None = None) -> Path:
 
   base_path_obj = Path(base_path_str)
 
-  db_path = base_path_obj / f"{db_name}.lbug"
+  db_path = base_path_obj / graph_db_filename(db_name)
 
   return db_path
 

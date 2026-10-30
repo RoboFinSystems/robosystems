@@ -2,10 +2,10 @@
 """Pull the public SEC .lbug dump from Hugging Face into data/lbug-dbs.
 
 The dump is the SEC shared repository as one embedded LadybugDB file, published
-as a periodic snapshot, ``sec.lbug.zst``, on the
+as a periodic snapshot, ``sec.lbdb.zst``, on the
 ``robosystems/sec-xbrl-knowledge-graphs`` dataset. This downloads it, streams the
 decompression (the archive's XXH64 checksum is verified on the way through),
-lands ``sec.lbug`` in the graph directory the local stack mounts, and warns if
+lands ``sec.lbdb`` in the graph directory the local stack mounts, and warns if
 the engine that wrote the file differs from the ``ladybug`` version pinned in
 this checkout.
 
@@ -40,7 +40,10 @@ from pathlib import Path
 
 logger = logging.getLogger("sec_dump")
 
-DEFAULT_FILENAME = "sec.lbug.zst"
+DEFAULT_FILENAME = "sec.lbdb.zst"
+# The dump's name before the 0.21 engine; the default falls back to it while
+# the renamed file is not yet published.
+LEGACY_FILENAME = "sec.lbug.zst"
 DEFAULT_DEST_DIR = Path("data/lbug-dbs")
 DEFAULT_DOWNLOAD_DIR = Path("data/downloads/huggingface")
 LBUG_MAGIC = b"LBUG"
@@ -49,7 +52,7 @@ READ_CHUNK_BYTES = 16 * 1024 * 1024
 PROGRESS_EVERY_BYTES = 8 * 1024**3
 GIB = 1024**3
 # The publish job stamps the engine into the commit title:
-#   "sec.lbug.zst: snapshot 2026-07-16 (ladybug 0.18.1)"
+#   "sec.lbdb.zst: snapshot 2026-07-16 (ladybug 0.18.1)"
 ENGINE_VERSION_PATTERN = re.compile(r"\(ladybug ([0-9][^)\s]*)\)")
 
 
@@ -57,7 +60,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
   from robosystems.config import env
 
   parser = argparse.ArgumentParser(
-    description="Download the public SEC .lbug dump from Hugging Face",
+    description="Download the public SEC .lbdb dump from Hugging Face",
     formatter_class=argparse.RawDescriptionHelpFormatter,
   )
   parser.add_argument(
@@ -76,7 +79,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
   parser.add_argument(
     "--graph-id",
     default=None,
-    help="Local graph id, i.e. the .lbug basename (default: derived from --filename)",
+    help="Local graph id, i.e. the .lbdb basename (default: derived from --filename)",
   )
   parser.add_argument(
     "--dest-dir",
@@ -91,7 +94,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     help="Where the archive lands before decompression (default: %(default)s)",
   )
   parser.add_argument(
-    "--force", action="store_true", help="Replace an existing .lbug at the destination"
+    "--force", action="store_true", help="Replace an existing .lbdb at the destination"
   )
   parser.add_argument(
     "--keep-archive",
@@ -102,9 +105,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def graph_id_for(filename: str) -> str:
-  """``sec.lbug.zst`` -> ``sec``."""
+  """``sec.lbdb.zst`` -> ``sec``."""
   name = Path(filename).name
-  for suffix in (".lbug.zst", ".zst", ".lbug"):
+  for suffix in (".lbdb.zst", ".lbug.zst", ".zst", ".lbdb", ".lbug"):
     if name.endswith(suffix):
       return name[: -len(suffix)]
   return name
@@ -255,9 +258,11 @@ def main(argv: list[str] | None = None) -> int:
   # Must be set before huggingface_hub initialises hf_xet; saturates the link.
   os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")
 
+  from robosystems.config.storage.graph import graph_db_filename
+
   args = parse_args(argv)
   graph_id = args.graph_id or graph_id_for(args.filename)
-  dest = args.dest_dir / f"{graph_id}.lbug"
+  dest = args.dest_dir / graph_db_filename(graph_id)
 
   if dest.exists() and not args.force:
     logger.error(
@@ -270,6 +275,14 @@ def main(argv: list[str] | None = None) -> int:
 
   api = HfApi()
   archive_size = published_archive_size(api, args.repo, args.filename, args.revision)
+  if archive_size is None and args.filename == DEFAULT_FILENAME:
+    legacy_size = published_archive_size(api, args.repo, LEGACY_FILENAME, args.revision)
+    if legacy_size is not None:
+      logger.info(
+        f"{args.repo}/{DEFAULT_FILENAME} is not published yet; using {LEGACY_FILENAME}"
+      )
+      args.filename = LEGACY_FILENAME
+      archive_size = legacy_size
   if archive_size is not None:
     logger.info(f"{args.repo}/{args.filename}: {archive_size / GIB:.2f} GiB compressed")
     require_free_space(

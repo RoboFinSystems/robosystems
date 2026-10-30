@@ -43,8 +43,8 @@ router = APIRouter()
   description=(
     "Generate a temporary download URL for a backup. "
     "The filename carries the extension listed as `download_extension` on the "
-    "backup: `.lbug.zip` is a ZIP holding the LadybugDB database file "
-    "`{graph_id}.lbug`; `.lbug.zst` (shared repository snapshots) is a single "
+    "backup: `.lbdb.zip` is a ZIP holding the LadybugDB database file "
+    "`{graph_id}.lbdb`; `.lbdb.zst` (shared repository snapshots) is a single "
     "zstd-compressed database file; decompress it with `zstd -d`."
   ),
   status_code=status.HTTP_200_OK,
@@ -81,18 +81,19 @@ async def get_backup_download_url(
   Generate a temporary download URL for a backup.
 
   This endpoint provides a secure, time-limited URL that allows direct download
-  of compressed .lbug backup files without going through the API.
+  of compressed .lbdb backup files without going through the API.
 
   Requirements:
   - Admin role on the graph (dedicated graphs), or a repository subscription
     whose plan includes downloads (shared repositories)
-  - Backup must be in full_dump format (complete .lbug file)
+  - Backup must be in full_dump format (complete .lbdb file)
   - File will be compressed
 
   Unpacking the download:
-  - `{graph_id}_{timestamp}.lbug.zip` (backups of a graph you own) — a standard
-    ZIP archive holding the LadybugDB database file `{graph_id}.lbug`; `unzip` it.
-  - `{graph_id}_{timestamp}.lbug.zst` (shared repository snapshots) — a single
+  - `{graph_id}_{timestamp}.lbdb.zip` (backups of a graph you own) — a standard
+    ZIP archive holding the LadybugDB database file `{graph_id}.lbdb`; `unzip` it.
+    Backups written before the 0.21 engine carry `.lbug` in both places; same layout.
+  - `{graph_id}_{timestamp}.lbdb.zst` (shared repository snapshots) — a single
     zstd-compressed LadybugDB file; `zstd -d` it. Allow disk for roughly 2x the download size.
 
   Returns the download URL and its expiration. `expires_in` ranges from 5

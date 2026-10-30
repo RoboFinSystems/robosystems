@@ -1,7 +1,7 @@
 """On-instance backups: CHECKPOINT, compress and upload where the files live.
 
-Backup types: ``replica`` (raw .lbug to S3, pulled by replicas at startup),
-``duckdb_staging`` (raw .duckdb to S3), ``r2_download`` (zstd .lbug.zst to
+Backup types: ``replica`` (raw .lbdb to S3, pulled by replicas at startup),
+``duckdb_staging`` (raw .duckdb to S3), ``r2_download`` (zstd .lbdb.zst to
 Cloudflare R2 for zero-egress subscriber downloads).
 """
 
@@ -15,6 +15,7 @@ import boto3
 from boto3.s3.transfer import TransferConfig
 
 from robosystems.config import env
+from robosystems.config.storage.graph import GRAPH_DB_SUFFIX
 from robosystems.graph_api.core.task_manager import GenericTaskManager
 from robosystems.logger import logger
 
@@ -165,7 +166,7 @@ class OnInstanceBackupService:
       conn.execute("VACUUM")
 
   def _resolve_db_path(self, graph_id: str) -> Path:
-    """Get local .lbug path for a database."""
+    """Get local .lbdb path for a database."""
     from robosystems.operations.graph.engine.path_utils import get_lbug_database_path
 
     return get_lbug_database_path(graph_id)
@@ -222,7 +223,7 @@ class OnInstanceBackupService:
   ) -> dict[str, Any]:
     """Raw database upload to S3 or R2 (no compression).
 
-    Used for .lbug replica uploads, .duckdb staging uploads, and R2 downloads.
+    Used for .lbdb replica uploads, .duckdb staging uploads, and R2 downloads.
     """
     logger.info(f"[Task {task_id}] Uploading {db_path.name} to s3://{bucket}/{key}")
 
@@ -303,7 +304,7 @@ class OnInstanceBackupService:
 
     with tempfile.TemporaryDirectory(dir=ebs_temp_dir) as temp_dir:
       temp_path = Path(temp_dir)
-      compressed_file = temp_path / f"{db_path.stem}.lbug.zst"
+      compressed_file = temp_path / f"{db_path.stem}{GRAPH_DB_SUFFIX}.zst"
 
       compress_start = datetime.now(UTC)
       try:

@@ -49,11 +49,12 @@ def get_lbug_database_path(graph_id: str, base_path: str | None = None) -> Path:
   `base_path` defaults to `env.LBUG_DATABASE_PATH`.
   """
   from robosystems.config import env
+  from robosystems.config.storage.graph import graph_db_filename
 
   validated_id = validate_graph_id(graph_id)
 
   base = Path(base_path if base_path else env.LBUG_DATABASE_PATH)
-  db_path = base / f"{validated_id}.lbug"
+  db_path = base / graph_db_filename(validated_id)
 
   try:
     resolved_path = db_path.resolve()

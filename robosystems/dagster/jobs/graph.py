@@ -189,9 +189,9 @@ def create_backup(
     "csv": ".csv.zip",
     "json": ".json.zip",
     "parquet": ".parquet.zip",
-    "full_dump": ".lbug.zip",
+    "full_dump": ".lbdb.zip",
   }
-  extension = format_extensions.get(config.backup_format.lower(), ".lbug.zip")
+  extension = format_extensions.get(config.backup_format.lower(), ".lbdb.zip")
 
   # Placeholder; the upload returns the authoritative key.
   s3_key = f"graph-backups/databases/{config.graph_id}/{config.backup_type}/backup-{timestamp_str}{extension}"

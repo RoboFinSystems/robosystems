@@ -9,7 +9,7 @@ Two families of backup, and they are not interchangeable:
 
 Backups are not encrypted at the application layer. Objects are written with
 S3 server-side encryption (SSE-AES256) and served over TLS through short-lived
-signed URLs; the plaintext is a ``.lbug`` database the owner can open directly,
+signed URLs; the plaintext is a ``.lbdb`` database the owner can open directly,
 which is the point of offering a download at all. Storage lives in
 :mod:`robosystems.operations.aws.s3`.
 """
@@ -26,7 +26,12 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from robosystems.config.storage.graph import get_download_extension
+from robosystems.config.storage.graph import (
+  GRAPH_DB_SUFFIX,
+  GRAPH_DB_SUFFIXES,
+  get_download_extension,
+  graph_db_filename,
+)
 from robosystems.operations.aws.s3 import BackupMetadata, S3BackupAdapter
 
 from ....logger import logger
@@ -354,7 +359,7 @@ class BackupManager:
         )
         # Derive the served extension from the stored key rather than the
         # storage backend, so the filename describes what is inside it
-        # (".lbug.zip", not a bare ".zip" that hides the payload).
+        # (".lbdb.zip", not a bare ".zip" that hides the payload).
         extension = get_download_extension(backup.s3_key)
         filename = f"{graph_id}_{timestamp_str}{extension}"
 
@@ -463,7 +468,7 @@ class BackupManager:
       elif from_format == "full_dump" and to_format == "zip":
         converted_data = await self._convert_full_dump_to_zip(original_file)
         content_type = "application/zip"
-        filename = f"{backup_id}_database.lbug.zip"
+        filename = f"{backup_id}_database{GRAPH_DB_SUFFIX}.zip"
 
       else:
         raise ValueError(f"Conversion from {from_format} to {to_format} not supported")
@@ -478,7 +483,7 @@ class BackupManager:
       "csv": ("text/csv", f"{backup_id}.csv.zip"),
       "json": ("application/json", f"{backup_id}.json.zip"),
       "parquet": ("application/octet-stream", f"{backup_id}.parquet.zip"),
-      "full_dump": ("application/zip", f"{backup_id}_database.lbug.zip"),
+      "full_dump": ("application/zip", f"{backup_id}_database{GRAPH_DB_SUFFIX}.zip"),
     }
 
     return format_map.get(format, ("application/octet-stream", f"{backup_id}.zip"))
@@ -508,14 +513,14 @@ class BackupManager:
     return csv_data.encode("utf-8")
 
   async def _convert_full_dump_to_zip(self, dump_file: Path) -> bytes:
-    """Wrap a full dump in a ZIP holding ``database/*.lbug`` plus metadata."""
+    """Wrap a full dump in a ZIP holding ``database/*.lbdb`` plus metadata."""
     import io
     import zipfile
 
     zip_buffer = io.BytesIO()
 
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-      zip_file.write(dump_file, f"database/{dump_file.stem}.lbug")
+      zip_file.write(dump_file, f"database/{graph_db_filename(dump_file.stem)}")
 
       metadata = {
         "export_timestamp": datetime.now(UTC).isoformat(),
@@ -1140,7 +1145,7 @@ class BackupManager:
         "relationship_count": response.get("payload_relationship_count"),
         "memory": response.get("memory"),
       }
-      return backup_data, ".lbug.zip", payload
+      return backup_data, f"{GRAPH_DB_SUFFIX}.zip", payload
 
     except Exception as e:
       logger.error(f"Failed to create backup via Graph API for {graph_id}: {e}")
@@ -1347,9 +1352,9 @@ class BackupManager:
           final_backup_dir = None
 
           if os.path.isfile(target_path):
-            backup_file = backup_temp_path / f"{graph_id}.lbug.bak"
+            backup_file = backup_temp_path / f"{graph_db_filename(graph_id)}.bak"
             shutil.copy2(target_path, backup_file)
-            final_backup_file = backup_temp_path / f"{graph_id}.lbug"
+            final_backup_file = backup_temp_path / graph_db_filename(graph_id)
             shutil.move(backup_file, final_backup_file)
           else:
             backup_dir = backup_temp_path / f"{graph_id}.bak"
@@ -1364,7 +1369,7 @@ class BackupManager:
           with zipfile.ZipFile(system_backup_zip, "w", zipfile.ZIP_DEFLATED) as zf:
             if os.path.isfile(target_path):
               assert final_backup_file is not None
-              zf.write(final_backup_file, f"{graph_id}.lbug")
+              zf.write(final_backup_file, graph_db_filename(graph_id))
             else:
               assert final_backup_dir is not None
               for root, dirs, files in os.walk(final_backup_dir):
@@ -1388,7 +1393,7 @@ class BackupManager:
             backup_type="full",
             metadata=metadata,
             timestamp=timestamp,
-            file_extension=".lbug.zip",
+            file_extension=f"{GRAPH_DB_SUFFIX}.zip",
           )
 
           success = backup_metadata is not None
@@ -1428,7 +1433,7 @@ class BackupManager:
         wal_path.unlink()
         logger.info(f"Removed stale WAL before restoring graph '{graph_id}'")
 
-      # Clear the existing target whatever shape it has — a single .lbug file
+      # Clear the existing target whatever shape it has — a single .lbdb file
       # in current engine versions, a directory in older ones — since the
       # incoming dump may not be the same shape.
       if os.path.exists(target_path):
@@ -1437,8 +1442,17 @@ class BackupManager:
         else:
           shutil.rmtree(target_path)
 
-      if (temp_path / f"{graph_id}.lbug").exists():
-        shutil.copy2(temp_path / f"{graph_id}.lbug", target_path)
+      # Archives written before the suffix change hold the old member name.
+      archived = next(
+        (
+          temp_path / f"{graph_id}{suffix}"
+          for suffix in GRAPH_DB_SUFFIXES
+          if (temp_path / f"{graph_id}{suffix}").exists()
+        ),
+        None,
+      )
+      if archived is not None:
+        shutil.copy2(archived, target_path)
       else:
         shutil.copytree(temp_path / graph_id, target_path)
 

@@ -71,7 +71,9 @@ class GraphHealthChecker:
   def __init__(self, graph_id: str, api_url: str = "http://localhost:8001"):
     self.graph_id = graph_id
     self.api_url = api_url
-    self.database_path = f"./data/lbug-dbs/{graph_id}.lbug"
+    from robosystems.config.storage.graph import graph_db_filename
+
+    self.database_path = str(Path("./data/lbug-dbs") / graph_db_filename(graph_id))
 
     if graph_id in REPOSITORY_SCHEMAS:
       self.schema = REPOSITORY_SCHEMAS[graph_id]

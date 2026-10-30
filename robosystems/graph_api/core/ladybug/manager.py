@@ -1,7 +1,7 @@
 """
 LadybugDB database manager — the lifecycle of the databases on one node.
 
-Creates, deletes, inspects and health-checks the ``.lbug`` files under a base
+Creates, deletes, inspects and health-checks the ``.lbdb`` files under a base
 directory, applies schemas to new databases, and performs the blue-green swap
 that promotes a ``-wip`` database to active. Connections are handed out by the
 shared pool in ``pool.py``, never opened ad hoc, because LadybugDB permits a
@@ -19,6 +19,12 @@ import ladybug as lbug
 from fastapi import HTTPException, status
 
 from robosystems.config import env
+from robosystems.config.storage.graph import (
+  GRAPH_DB_SUFFIXES,
+  graph_db_filename,
+  graph_db_wal_filename,
+  split_graph_db_filename,
+)
 from robosystems.graph_api.core.storage_breakdown import path_size_bytes
 from robosystems.graph_api.models.database import (
   DatabaseCreateRequest,
@@ -53,7 +59,7 @@ def counts_toward_capacity(db_name: str) -> bool:
 
 
 def validate_database_path(base_path: Path, db_name: str) -> Path:
-  """Build the ``.lbug`` path for ``db_name``, rejecting directory traversal.
+  """Build the ``.lbdb`` path for ``db_name``, rejecting directory traversal.
 
   Raises ``HTTPException`` if the name is not alphanumeric/underscore/hyphen,
   or if the resolved path escapes ``base_path``.
@@ -63,7 +69,7 @@ def validate_database_path(base_path: Path, db_name: str) -> Path:
       status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid database name"
     )
 
-  db_path = base_path / f"{db_name}.lbug"
+  db_path = base_path / graph_db_filename(db_name)
 
   try:
     db_path.resolve().relative_to(base_path.resolve())
@@ -138,7 +144,12 @@ class LadybugDatabaseManager:
       logger.info(f"Creating {request.graph_id}: not counted toward max_databases")
 
     db_path = validate_database_path(self.base_path, request.graph_id)
-    if db_path.exists():
+    # A file under the previous suffix is the same database awaiting the
+    # engine upgrade's import; creating beside it would leave two.
+    if any(
+      (self.base_path / f"{request.graph_id}{suffix}").exists()
+      for suffix in GRAPH_DB_SUFFIXES
+    ):
       raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail=f"Database {request.graph_id} already exists",
@@ -146,7 +157,7 @@ class LadybugDatabaseManager:
 
     # An orphaned WAL from an incomplete deletion would be replayed into the
     # new database, so it is removed before creating.
-    wal_path = self.base_path / f"{request.graph_id}.lbug.wal"
+    wal_path = self.base_path / graph_db_wal_filename(request.graph_id)
     if wal_path.exists():
       wal_path.unlink()
       logger.info(f"Cleaned up orphaned WAL file for {request.graph_id}")
@@ -261,7 +272,7 @@ class LadybugDatabaseManager:
     ``preserve_duckdb`` keeps the staging database *and* the LanceDB indexes
     built from it, so LadybugDB can be rebuilt without re-running staging.
 
-    A missing ``.lbug`` is not a refusal: the graph file goes first, so a
+    A missing ``.lbdb`` is not a refusal: the graph file goes first, so a
     teardown that died partway must still be able to dispose of the side
     stores before the volume is reused. ``existed`` says whether the graph
     file was there this time; ``removed`` lists what this call deleted, and
@@ -271,7 +282,7 @@ class LadybugDatabaseManager:
     which are dead once the base is gone. A temporary deleted by its own name
     removes only itself.
     """
-    db_path = self.base_path / f"{graph_id}.lbug"
+    db_path = self.base_path / graph_db_filename(graph_id)
     existed = db_path.exists()
     removed: list[str] = []
     failed: list[str] = []
@@ -345,7 +356,10 @@ class LadybugDatabaseManager:
       )
 
   def _remove_graph_files(self, name: str) -> list[str]:
-    """Remove ``{name}.lbug`` and its WAL, returning the paths taken.
+    """Remove ``{name}.lbdb`` and its WAL, returning the paths taken.
+
+    A file still under the previous suffix is removed the same way: it is the
+    same database, not yet migrated.
 
     Called once for the graph itself and, on a base-name delete, once per
     blue-green temporary (``-wip``, ``-prev``) — the sweep in
@@ -353,28 +367,29 @@ class LadybugDatabaseManager:
     """
     removed: list[str] = []
 
-    # The WAL goes first: left behind, it would be replayed against a
-    # database recreated under the same name.
-    wal_path = self.base_path / f"{name}.lbug.wal"
-    if wal_path.exists():
-      wal_path.unlink()
-      removed.append(str(wal_path))
-      logger.debug(f"Deleted WAL file for {name}")
+    for suffix in GRAPH_DB_SUFFIXES:
+      # The WAL goes first: left behind, it would be replayed against a
+      # database recreated under the same name.
+      wal_path = self.base_path / f"{name}{suffix}.wal"
+      if wal_path.exists():
+        wal_path.unlink()
+        removed.append(str(wal_path))
+        logger.debug(f"Deleted WAL file for {name}")
 
-    db_path = self.base_path / f"{name}.lbug"
-    if db_path.is_file():
-      db_path.unlink()
-      removed.append(str(db_path))
-    elif db_path.is_dir():
-      # Older engine versions stored a database as a directory.
-      shutil.rmtree(db_path)
-      removed.append(str(db_path))
+      db_path = self.base_path / f"{name}{suffix}"
+      if db_path.is_file():
+        db_path.unlink()
+        removed.append(str(db_path))
+      elif db_path.is_dir():
+        # Older engine versions stored a database as a directory.
+        shutil.rmtree(db_path)
+        removed.append(str(db_path))
 
     return removed
 
   def database_exists(self, graph_id: str) -> bool:
     """Check if a LadybugDB database file exists on disk."""
-    db_path = self.base_path / f"{graph_id}.lbug"
+    db_path = self.base_path / graph_db_filename(graph_id)
     return db_path.exists()
 
   def swap_database(self, graph_id: str) -> dict[str, Any]:
@@ -384,7 +399,7 @@ class LadybugDatabaseManager:
     checkpoint the WIP so nothing is left in its WAL, close pooled connections
     to both databases (a rename under an open handle corrupts the file),
     rename active to ``-prev``, rename WIP to active, then delete ``-prev``.
-    Each ``.lbug`` is moved together with its ``.lbug.wal``.
+    Each ``.lbdb`` is moved together with its ``.lbdb.wal``.
 
     ``-prev`` exists only for the instant between the two renames: if the
     second rename fails, ``-prev`` is renamed back. It is not a rollback point
@@ -393,9 +408,9 @@ class LadybugDatabaseManager:
     wip_id = f"{graph_id}-wip"
     prev_id = f"{graph_id}-prev"
 
-    active_path = self.base_path / f"{graph_id}.lbug"
-    wip_path = self.base_path / f"{wip_id}.lbug"
-    prev_path = self.base_path / f"{prev_id}.lbug"
+    active_path = self.base_path / graph_db_filename(graph_id)
+    wip_path = self.base_path / graph_db_filename(wip_id)
+    prev_path = self.base_path / graph_db_filename(prev_id)
 
     if not wip_path.exists():
       raise HTTPException(
@@ -420,7 +435,7 @@ class LadybugDatabaseManager:
 
         # A -prev left by an interrupted earlier swap would block the rename.
         if prev_path.exists():
-          prev_wal = self.base_path / f"{prev_id}.lbug.wal"
+          prev_wal = self.base_path / graph_db_wal_filename(prev_id)
           prev_path.unlink()
           if prev_wal.exists():
             prev_wal.unlink()
@@ -428,19 +443,19 @@ class LadybugDatabaseManager:
 
         if active_path.exists():
           active_path.rename(prev_path)
-          active_wal = self.base_path / f"{graph_id}.lbug.wal"
+          active_wal = self.base_path / graph_db_wal_filename(graph_id)
           if active_wal.exists():
-            active_wal.rename(self.base_path / f"{prev_id}.lbug.wal")
+            active_wal.rename(self.base_path / graph_db_wal_filename(prev_id))
           logger.info(f"Moved active {graph_id} to {prev_id}")
 
         wip_path.rename(active_path)
-        wip_wal = self.base_path / f"{wip_id}.lbug.wal"
+        wip_wal = self.base_path / graph_db_wal_filename(wip_id)
         if wip_wal.exists():
-          wip_wal.rename(self.base_path / f"{graph_id}.lbug.wal")
+          wip_wal.rename(self.base_path / graph_db_wal_filename(graph_id))
         logger.info(f"Promoted WIP {wip_id} to active {graph_id}")
 
       if prev_path.exists():
-        prev_wal = self.base_path / f"{prev_id}.lbug.wal"
+        prev_wal = self.base_path / graph_db_wal_filename(prev_id)
         prev_path.unlink()
         if prev_wal.exists():
           prev_wal.unlink()
@@ -459,9 +474,9 @@ class LadybugDatabaseManager:
         with self.connection_pool.exclusive(graph_id):
           if prev_path.exists() and not active_path.exists():
             prev_path.rename(active_path)
-            prev_wal = self.base_path / f"{prev_id}.lbug.wal"
+            prev_wal = self.base_path / graph_db_wal_filename(prev_id)
             if prev_wal.exists():
-              prev_wal.rename(self.base_path / f"{graph_id}.lbug.wal")
+              prev_wal.rename(self.base_path / graph_db_wal_filename(graph_id))
             logger.info(f"Rollback successful: restored {graph_id} from {prev_id}")
       except Exception as rollback_err:
         logger.error(f"Rollback FAILED for {graph_id}: {rollback_err}")
@@ -480,20 +495,23 @@ class LadybugDatabaseManager:
     return self.connection_pool.get_connection(graph_id, read_only=read_only)
 
   def list_databases(self) -> list[str]:
-    """List the node's databases by scanning for ``.lbug`` files.
+    """List the node's databases by scanning for database files.
 
     The blue-green temporaries (``-wip``, ``-prev``) are excluded so they
-    never count toward the capacity limit.
+    never count toward the capacity limit. A file still under the previous
+    suffix is listed too: it holds its slot until the engine upgrade's import
+    migrates it, though the pool does not open it.
     """
-    databases = []
+    databases: set[str] = set()
 
     try:
       for item in self.base_path.iterdir():
-        if item.is_file() and item.name.endswith(".lbug"):
-          db_name = item.name[:-5]
-          if db_name.endswith(BLUE_GREEN_SUFFIXES):
-            continue
-          databases.append(db_name)
+        if not item.is_file():
+          continue
+        db_name = split_graph_db_filename(item.name)
+        if db_name is None or db_name.endswith(BLUE_GREEN_SUFFIXES):
+          continue
+        databases.add(db_name)
 
       return sorted(databases)
 
@@ -508,7 +526,7 @@ class LadybugDatabaseManager:
 
   def get_database_info(self, graph_id: str) -> DatabaseInfo:
     """Get a database's size, timestamps and metadata."""
-    db_path = self.base_path / f"{graph_id}.lbug"
+    db_path = self.base_path / graph_db_filename(graph_id)
 
     if not db_path.exists():
       raise HTTPException(
@@ -1017,7 +1035,7 @@ class LadybugDatabaseManager:
     buffers, and health checks run often enough for that to accumulate.
     """
     try:
-      db_path = self.base_path / f"{graph_id}.lbug"
+      db_path = self.base_path / graph_db_filename(graph_id)
 
       if not db_path.exists():
         return False
@@ -1068,9 +1086,7 @@ class LadybugDatabaseManager:
       )
 
       db_count = sum(
-        1
-        for f in self.base_path.glob("*.lbug")
-        if f.is_file() and counts_toward_capacity(f.stem)
+        1 for name in self.list_databases() if counts_toward_capacity(name)
       )
       capacity_pct = int((db_count / self.max_databases) * 100)
 

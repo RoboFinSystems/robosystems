@@ -13,8 +13,10 @@ from robosystems.dagster.assets.shared_repositories.huggingface import (
   publish_to_huggingface,
 )
 
-# Fixed path so the download URL on the dataset card never changes.
-SEC_HF_PATH_IN_REPO = "sec.lbug.zst"
+# Fixed path so the download URL on the dataset card never changes. Snapshots
+# before the 0.21 engine were published as sec.lbug.zst; the prune only touches
+# this path, so that file stays one cycle after the rename, then goes by hand.
+SEC_HF_PATH_IN_REPO = "sec.lbdb.zst"
 
 
 @asset(
