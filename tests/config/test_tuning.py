@@ -16,6 +16,7 @@ from robosystems.config.defaults import (
   LoadSheddingDefaults,
   MCPDefaults,
   QueueDefaults,
+  ReplicaWarmupDefaults,
 )
 from robosystems.config.tuning import TuningConfig
 
@@ -421,3 +422,64 @@ class TestGraphEnginePlanCacheMode:
 
   def test_invalid_value_is_ignored(self):
     assert self._mode("SOMETIMES") is None
+
+
+class TestReplicaWarmupAccessors:
+  """The boot warmup's budget and filer set, read from SSM with defaults."""
+
+  def test_budget_default(self):
+    with patch("robosystems.config.tuning._get_parameter_manager", return_value=None):
+      assert (
+        TuningConfig.get_replica_warmup_budget_seconds()
+        == ReplicaWarmupDefaults.BUDGET_SECONDS
+      )
+
+  def test_budget_override_and_floor(self):
+    manager = MagicMock()
+    manager.get_tuning_int.return_value = 120
+    with patch(
+      "robosystems.config.tuning._get_parameter_manager", return_value=manager
+    ):
+      assert TuningConfig.get_replica_warmup_budget_seconds() == 120
+    manager.get_tuning_int.return_value = -5
+    with patch(
+      "robosystems.config.tuning._get_parameter_manager", return_value=manager
+    ):
+      assert TuningConfig.get_replica_warmup_budget_seconds() == 0
+
+  def test_tickers_default_is_fifty_filers_in_order(self):
+    with patch("robosystems.config.tuning._get_parameter_manager", return_value=None):
+      tickers = TuningConfig.get_replica_warmup_tickers()
+    assert len(tickers) == 50
+    assert len(set(tickers)) == 50
+    assert tickers[:3] == ["AAPL", "MSFT", "NVDA"]
+    assert "BRK-B" in tickers
+
+  def test_tickers_override_is_parsed_and_upper_cased(self):
+    manager = MagicMock()
+    manager.get_tuning_parameter.return_value = " nvda, aapl ,,MSFT "
+    with patch(
+      "robosystems.config.tuning._get_parameter_manager", return_value=manager
+    ):
+      assert TuningConfig.get_replica_warmup_tickers() == ["NVDA", "AAPL", "MSFT"]
+
+  def test_empty_override_keeps_the_default_set(self):
+    manager = MagicMock()
+    manager.get_tuning_parameter.return_value = " , "
+    with patch(
+      "robosystems.config.tuning._get_parameter_manager", return_value=manager
+    ):
+      assert len(TuningConfig.get_replica_warmup_tickers()) == 50
+
+  def test_budget_is_capped_under_the_replica_health_wait(self):
+    manager = MagicMock()
+    manager.get_tuning_int.return_value = 5000
+    with patch(
+      "robosystems.config.tuning._get_parameter_manager", return_value=manager
+    ):
+      assert (
+        TuningConfig.get_replica_warmup_budget_seconds()
+        == TuningConfig.REPLICA_WARMUP_MAX_BUDGET_SECONDS
+      )
+    # run-graph-container.sh gives a replica 900 s to answer healthy.
+    assert TuningConfig.REPLICA_WARMUP_MAX_BUDGET_SECONDS < 900

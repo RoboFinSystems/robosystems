@@ -50,71 +50,33 @@ def create_app() -> FastAPI:
 
     logger.info("Graph API starting up")
 
-    # Replica warmup: page label indexes and property columns into the OS
-    # cache before serving. LadybugDB is columnar, so count(n) alone touches
-    # only the ID column. Edges are not warmed; untyped edge scans cost too much.
+    # Replica warmup: read the working set the tools read before /health
+    # answers 200 (core/ladybug/warmup.py). The engine opens lazily, so until
+    # this runs every structure is paged in from the volume by the first caller.
     if os.getenv("LBUG_ROLE") == "replica":
 
       async def warmup_local_databases():
+        from robosystems.config.tuning import TuningConfig
+        from robosystems.graph_api.core.ladybug import get_ladybug_service
+        from robosystems.graph_api.core.ladybug.warmup import run_warmup
         from robosystems.graph_api.routers.health import mark_replica_ready
 
         def _do_warmup():
-          import re
-
-          from robosystems.graph_api.core.ladybug import get_ladybug_service
-
-          _valid_label = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-
           service = get_ladybug_service()
           databases = service.db_manager.list_databases()
-          logger.info(f"Warming up {len(databases)} local databases...")
-
+          budget_seconds = TuningConfig.get_replica_warmup_budget_seconds()
+          tickers = TuningConfig.get_replica_warmup_tickers()
+          logger.info(
+            f"Warming up {len(databases)} local databases "
+            f"(budget {budget_seconds}s each, {len(tickers)} filers)..."
+          )
           for db_name in databases:
-            succeeded = 0
-            failed = 0
-
-            # Label scan: pages in node label index data and collects the
-            # labels for the per-label property scans below.
-            node_labels: list[str] = []
-            try:
-              with service.db_manager.get_connection(db_name, read_only=True) as conn:
-                result = conn.execute("MATCH (n) RETURN labels(n), count(n)")
-                while result.has_next():
-                  row = result.get_next()
-                  if row and row[0]:
-                    node_labels.append(row[0])
-                result.close()
-              succeeded += 1
-              logger.info(
-                f"Warmup [{db_name}] label scan: ok ({len(node_labels)} labels)"
-              )
-            except Exception as e:
-              failed += 1
-              logger.warning(f"Warmup [{db_name}] label scan: {e}")
-
-            # Per-label property scan: RETURN n LIMIT 500 forces LadybugDB to
-            # read every property column file for the label.
-            for label in node_labels:
-              if not _valid_label.match(label):
-                logger.warning(f"Warmup [{db_name}] skipping invalid label: {label}")
-                continue
-              try:
-                with service.db_manager.get_connection(db_name, read_only=True) as conn:
-                  r = conn.execute(f"MATCH (n:{label}) RETURN n LIMIT 500")
-                  r.close()
-                succeeded += 1
-                logger.info(f"Warmup [{db_name}] properties {label}: ok")
-              except Exception as e:
-                failed += 1
-                logger.warning(f"Warmup [{db_name}] properties {label}: {e}")
-
-            # Partial warmup is fine; only an all-failed database is broken.
-            if succeeded == 0 and failed > 0:
-              raise RuntimeError(
-                f"All warmup queries failed for {db_name} ({failed} failures)"
-              )
-
-            logger.info(f"Warmed up {db_name}: {succeeded} ok, {failed} failed")
+            run_warmup(
+              service.db_manager,
+              db_name,
+              budget_seconds=budget_seconds,
+              tickers=tickers,
+            )
 
         try:
           await asyncio.to_thread(_do_warmup)

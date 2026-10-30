@@ -415,8 +415,9 @@ Resources:
           - !Ref ValkeyClientSecurityGroupId
         # Root volume only - databases are downloaded from S3 to local disk during startup
         # Size must accommodate OS (~10GB) + downloaded database files
-        # Provisioned high for the boot download, which is disk-bound; the replica
-        # lowers its own volume to the gp3 baseline once the download finishes
+        # Provisioned high for the boot, which is disk-bound: the download, then
+        # the warmup that reads the working set before /health opens. The replica
+        # lowers its own volume to the gp3 baseline once it is in service
         # (ladybug-replica.sh), so steady state pays for no extra performance.
         BlockDeviceMappings:
           - DeviceName: /dev/xvda
@@ -601,9 +602,12 @@ Resources:
     CreationPolicy:
       ResourceSignal:
         Count: !If [HasMinInstances, !Ref MinInstances, 0]
-        # Cold boot is dominated by the sec.lbug S3 download (~11 min total at a
-        # 250 MiB/s root volume, 2026-10); left at PT30M until the boot-provisioned
-        # volume's boot is measured.
+        # Cold boot: ~1 min of patching, the sec.lbdb download (~5.5 min at the
+        # launch template's 1000 MiB/s, 2026-10-30), the database open, then the
+        # warmup's budget (tuning/graph/REPLICA_WARMUP_BUDGET_SECONDS, 5 min by
+        # default, capped at 10) before /health answers. ~13 min; PT30M leaves
+        # room for a slow download or the budget at its cap, both inside the
+        # 15-min health wait in run-graph-container.sh.
         Timeout: PT30M
     UpdatePolicy:
       AutoScalingRollingUpdate:
@@ -745,7 +749,8 @@ Resources:
 
   # Stuck-host alarm: a replica that never comes up while healthy ones still
   # serve (invisible to InsufficientHealthyHostsAlarm). The 20-min window must
-  # clear normal bootstrap (~11 min, growing with the sec graph download).
+  # clear normal bootstrap (~13 min: download plus the warmup budget; see the
+  # CreationPolicy note), growing with the sec graph.
   UnhealthyHostsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -868,6 +873,34 @@ Resources:
       EvaluationPeriods: 2 # 10 minutes sustained; the value is flat, so this only debounces gaps
       Threshold: 90
       ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref ReplicaAlertTopic
+      TreatMissingData: notBreaching
+
+  # A replica reading its root volume at the gp3 baseline's throughput for ten
+  # minutes is answering from disk, not from its buffer pool: cold after a
+  # refresh or a replacement, or a working set the pool no longer holds. After
+  # boot the volume runs at 125 MiB/s (ladybug-replica.sh), so the threshold is
+  # 80% of that over one minute; diskio_read_bytes is bytes per 60 s collection
+  # interval (the agent documents Sum as its only statistic). The boot itself
+  # runs at 1000 MiB/s for under ten minutes and cannot trip it alone. Notify-
+  # only: the remedy is the warmup (graph_api/core/ladybug/warmup.py) or a
+  # larger pool. Metrics Insights grouped by instance, so one saturated replica
+  # pages while the fleet changes under it.
+  ReplicaVolumeReadThroughputAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub robosystems-shared-replicas-${Environment}-volume-read-throughput
+      AlarmDescription: A shared replica read its root volume at 80% or more of the gp3 baseline throughput for 10 minutes - it is serving from disk rather than from its buffer pool
+      Metrics:
+        - Id: read_bytes_per_minute
+          Expression: !Sub 'SELECT SUM(diskio_read_bytes) FROM "RoboSystems/Graph/${Environment}" WHERE AutoScalingGroupName = ''robosystems-shared-replicas-${Environment}-asg'' GROUP BY InstanceId ORDER BY SUM() DESC'
+          Period: 60
+          ReturnData: true
+      EvaluationPeriods: 10
+      DatapointsToAlarm: 10
+      Threshold: 6291456000 # 0.8 x 125 MiB/s x 60 s
+      ComparisonOperator: GreaterThanOrEqualToThreshold
       AlarmActions:
         - !Ref ReplicaAlertTopic
       TreatMissingData: notBreaching

@@ -18,6 +18,7 @@ from .defaults import (
   MaterializationDefaults,
   MCPDefaults,
   QueueDefaults,
+  ReplicaWarmupDefaults,
   SSEDefaults,
   TimeoutDefaults,
   WorkerDefaults,
@@ -29,6 +30,10 @@ logger = logging.getLogger(__name__)
 
 def _get_env_override(env_key: str) -> str | None:
   return os.getenv(env_key)
+
+
+def _split_tickers(raw: str) -> list[str]:
+  return [t.strip().upper() for t in raw.split(",") if t.strip()]
 
 
 def _get_parameter_manager():
@@ -271,6 +276,28 @@ class TuningConfig:
       logger.warning(f"Ignoring invalid graph/ENGINE_PLAN_CACHE_MODE: {value}")
       return None
     return value
+
+  # run-graph-container.sh waits 15 minutes for a replica's health check; the
+  # budget, the database open and one query's overrun of the deadline must all
+  # fit inside it, whatever SSM says.
+  REPLICA_WARMUP_MAX_BUDGET_SECONDS = 600
+
+  @classmethod
+  def get_replica_warmup_budget_seconds(cls) -> int:
+    """Wall-clock budget for a shared replica's boot warmup after its table
+    scans; zero keeps only the scans. Clamped so the health wait always
+    outlasts it. Read once, at boot."""
+    budget = cls.get_int(
+      "graph/REPLICA_WARMUP_BUDGET_SECONDS", ReplicaWarmupDefaults.BUDGET_SECONDS
+    )
+    return min(max(budget, 0), cls.REPLICA_WARMUP_MAX_BUDGET_SECONDS)
+
+  @classmethod
+  def get_replica_warmup_tickers(cls) -> list[str]:
+    """Filers whose statements the boot warmup reads, most-asked first. A
+    comma-separated override; an empty value keeps the default set."""
+    raw = cls.get("graph/REPLICA_WARMUP_TICKERS", ReplicaWarmupDefaults.TICKERS)
+    return _split_tickers(raw) or _split_tickers(ReplicaWarmupDefaults.TICKERS)
 
   # =========================================================================
   # SSE ACCESSORS

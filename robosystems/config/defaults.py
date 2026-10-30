@@ -169,6 +169,28 @@ class MaterializationDefaults:
   ENGINE_COPY_TIMEOUT = 3600  # Per table: LadybugDB's own ceiling on that COPY
 
 
+class ReplicaWarmupDefaults:
+  """What a shared replica reads before its health check opens.
+
+  The warmup (graph_api/core/ladybug/warmup.py) runs the typed tools' own
+  query shapes for these filers, then the small edge tables, under one
+  wall-clock budget. The budget is the part of the boot that the health wait in
+  run-graph-container.sh, the ASG grace period and the stack's PT30M signal
+  window must all cover; zero keeps only the per-table scan.
+  """
+
+  BUDGET_SECONDS = 300
+  # Large filers that MCP sessions ask about first. Order matters: a budget cut
+  # drops the tail.
+  TICKERS = (
+    "AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,AVGO,BRK-B,JPM,"
+    "LLY,V,UNH,XOM,MA,COST,HD,PG,JNJ,ABBV,"
+    "NFLX,BAC,CRM,KO,CVX,MRK,AMD,PEP,ORCL,TMO,"
+    "WMT,CSCO,ACN,ADBE,MCD,ABT,WFC,DIS,INTU,IBM,"
+    "GE,CAT,QCOM,TXN,VZ,AMGN,INTC,NOW,PFE,BA"
+  )
+
+
 # SSM paths (under tuning/) that tuning.py reads overrides from.
 SSM_TUNING_PATHS = {
   # Cache TTLs
@@ -200,6 +222,9 @@ SSM_TUNING_PATHS = {
   "mcp/POOL_MAX_LIFETIME": MCPDefaults.POOL_MAX_LIFETIME,
   # Workers
   "workers/MAX_WORKERS": WorkerDefaults.MAX_WORKERS,
+  # Graph engine (shared replicas)
+  "graph/REPLICA_WARMUP_BUDGET_SECONDS": ReplicaWarmupDefaults.BUDGET_SECONDS,
+  "graph/REPLICA_WARMUP_TICKERS": ReplicaWarmupDefaults.TICKERS,
   # Timeouts
   "timeouts/GRAPH_HTTP": TimeoutDefaults.GRAPH_HTTP,
   "timeouts/GRAPH_QUERY": TimeoutDefaults.GRAPH_QUERY,

@@ -168,21 +168,6 @@ for REPO in "${REPOS[@]}"; do
   echo "Downloaded ${REPO}: ${FILE_SIZE_MB}MB in ${ELAPSED}s"
 done
 
-# The root volume launches with boot-download performance (the launch template);
-# drop it to the gp3 baseline now that the download is done. Non-fatal: a failure
-# only leaves the volume billed at the higher rate.
-ROOT_VOLUME_ID=$(aws ec2 describe-instances --instance-ids "${INSTANCE_ID}" --region "${AWS_REGION}" \
-  --query "Reservations[0].Instances[0].BlockDeviceMappings[?DeviceName=='/dev/xvda'].Ebs.VolumeId | [0]" \
-  --output text) || ROOT_VOLUME_ID=""
-if [ -n "${ROOT_VOLUME_ID}" ] && [ "${ROOT_VOLUME_ID}" != "None" ]; then
-  aws ec2 modify-volume --volume-id "${ROOT_VOLUME_ID}" --iops 3000 --throughput 125 \
-    --region "${AWS_REGION}" --output text --query 'VolumeModification.ModificationState' \
-    && echo "Lowered root volume ${ROOT_VOLUME_ID} to baseline performance" \
-    || echo "WARNING: could not lower root volume ${ROOT_VOLUME_ID} to baseline performance"
-else
-  echo "WARNING: root volume not found; leaving its performance as launched"
-fi
-
 chown -R 1000:1000 /mnt/ladybug-data
 chmod -R 755 /mnt/ladybug-data
 echo "All shared databases downloaded to /mnt/ladybug-data/databases/lbug-dbs/"
@@ -312,8 +297,33 @@ echo "VALKEY_URL=${VALKEY_URL:-}" >> /etc/environment
 # refresh depends on is added above.
 echo "GRAPH_ENV_SCHEMA=2" >> /etc/environment
 
-# Run shared container runner
-/usr/local/bin/run-graph-container.sh
+# Run shared container runner. It returns once /health answers 200, which on a
+# replica is after the warmup has read the working set (graph_api/core/ladybug/
+# warmup.py). Its exit code is held, not fatal yet: the volume below is lowered
+# on every path, then a failure is re-raised.
+CONTAINER_RC=0
+/usr/local/bin/run-graph-container.sh || CONTAINER_RC=$?
+
+# The root volume launches with boot-download performance (the launch template).
+# Drop it to the gp3 baseline only now, with the replica in service: the warmup
+# read the working set at full speed rather than at the rate the replica serves
+# from. Non-fatal: a failure only leaves the volume billed at the higher rate.
+ROOT_VOLUME_ID=$(aws ec2 describe-instances --instance-ids "${INSTANCE_ID}" --region "${AWS_REGION}" \
+  --query "Reservations[0].Instances[0].BlockDeviceMappings[?DeviceName=='/dev/xvda'].Ebs.VolumeId | [0]" \
+  --output text) || ROOT_VOLUME_ID=""
+if [ -n "${ROOT_VOLUME_ID}" ] && [ "${ROOT_VOLUME_ID}" != "None" ]; then
+  aws ec2 modify-volume --volume-id "${ROOT_VOLUME_ID}" --iops 3000 --throughput 125 \
+    --region "${AWS_REGION}" --output text --query 'VolumeModification.ModificationState' \
+    && echo "Lowered root volume ${ROOT_VOLUME_ID} to baseline performance" \
+    || echo "WARNING: could not lower root volume ${ROOT_VOLUME_ID} to baseline performance"
+else
+  echo "WARNING: root volume not found; leaving its performance as launched"
+fi
+
+if [ "${CONTAINER_RC}" -ne 0 ]; then
+  echo "ERROR: run-graph-container.sh exited ${CONTAINER_RC}; the replica never became healthy"
+  exit "${CONTAINER_RC}"
+fi
 
 # Update instance status to healthy
 echo "Marking instance as healthy..."

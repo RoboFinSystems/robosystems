@@ -167,8 +167,10 @@ carries the sizes, and it has been resized more than once.
    └── Rolling ASG instance refresh (min_healthy=100%, max_healthy=200%)
 
 3. New replicas boot alongside old ones
-   ├── Download .lbdb + .duckdb from S3 (~15 min for ~85GB)
-   ├── Start Graph API, pass health check
+   ├── Download .lbdb + .duckdb from S3 (~6 min for ~85GB at launch throughput)
+   ├── Start Graph API; warm the working set the tools read (a budgeted
+   │   warmup, 5 min by default) before the health check passes
+   ├── Lower the root volume to the gp3 baseline
    └── Register with ALB, old instance terminated
 ```
 
