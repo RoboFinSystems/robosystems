@@ -67,7 +67,7 @@ Budget real time: this is {{uncompressed_gib_whole}} GiB on disk, not a laptop-m
 ```bash
 git clone https://github.com/RoboFinSystems/robosystems.git
 cd robosystems
-just sec-dump          # downloads sec.lbdb.zst (resumable), verifies it, decompresses to data/lbug-dbs/sec.lbug
+just sec-dump          # downloads sec.lbdb.zst (resumable), verifies it, decompresses to data/lbug-dbs/sec.lbdb
 ```
 
 `just sec-dump` checks the archive's checksum and recorded size as it streams, refuses to overwrite an
@@ -108,7 +108,7 @@ just lbug-query sec "MATCH (e:Entity {ticker: 'NVDA'})-[:ENTITY_HAS_REPORT]->(r:
 ```python
 import ladybug as lbug
 
-db = lbug.Database("data/lbug-dbs/sec.lbug")
+db = lbug.Database("data/lbug-dbs/sec.lbdb")
 conn = lbug.Connection(db)
 result = conn.execute("MATCH (e:Entity) RETURN count(e)")
 while result.has_next():
@@ -184,9 +184,10 @@ you *want* segment breakdowns), and anchor on an entity, report, element, or dat
 - `sec.lbdb.zst` is a fixed path. Each monthly snapshot overwrites it in a new commit whose title carries the
   snapshot date and engine version (`sec.lbdb.zst: snapshot YYYY-MM-DD (ladybug X.Y.Z)`). `main` is
   always the latest.
-- Snapshots written before LadybugDB 0.21 were published as `sec.lbug.zst`, the platform's previous
-  suffix for the same file format. That path stays for one monthly cycle after the rename and is then
-  removed; nothing else about the file changed.
+- Snapshots written before the 0.22 engine (LadybugDB 0.18.1, storage v42) were published as `sec.lbug.zst`,
+  the platform's previous suffix. That path stays for one monthly cycle after the rename and is then
+  removed. The suffix is only a name; the storage format moved with the engine, so open each snapshot with
+  the release its commit title names.
 - The engine version can move between snapshots. The commit title carries it; when it changes, install the
   matching `ladybug` before opening the new file (a RoboSystems checkout gets the new pin with the release
   that shipped it).
