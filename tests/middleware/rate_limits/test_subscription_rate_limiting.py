@@ -381,3 +381,95 @@ class TestSubscriptionAwareRateLimiting:
     )
     assert limit == 30
     assert window == 60
+
+
+class TestOAuthBearerOnGraphRoutes:
+  """On `/v1/graphs/{graph_id}/...` the limiter is a router dependency and
+  runs before the auth dependency (#1945), so nothing is published on
+  `request.state` yet. A cached live OAuth token still names the caller and
+  the one graph its grant covers; that is the evidence the graph bucket is
+  charged on. Without it every OAuth MCP client behind one IP drew from the
+  anonymous 5/min bucket."""
+
+  MODULE = "robosystems.middleware.rate_limits.rate_limiting"
+
+  @pytest.fixture
+  def oauth_request(self):
+    request = MagicMock(spec=Request)
+    request.url.path = "/v1/graphs/kg1a2b3c/mcp"
+    request.method = "POST"
+    request.client = MagicMock()
+    request.client.host = "192.168.1.1"
+    request.headers = Headers(
+      {"user-agent": "claude-code", "authorization": "Bearer rfso" + "a" * 48}
+    )
+    request.state = MagicMock()
+    request.state.auth_graph_id = None
+    request.cookies = {}
+    return request
+
+  def test_cached_oauth_grant_charges_the_grant_graph_bucket(self, oauth_request):
+    with (
+      patch(f"{self.MODULE}.rate_limit_cache.check_rate_limit") as check,
+      patch(
+        f"{self.MODULE}._cached_oauth_identity",
+        return_value=("user_456", "kg1a2b3c"),
+      ),
+      patch(
+        f"{self.MODULE}._verify_jwt_for_rate_limiting",
+        return_value=None,
+      ),
+      patch(
+        "robosystems.middleware.rate_limits.graph_tier_resolver.resolve_graph_tier",
+        return_value="ladybug-standard",
+      ),
+    ):
+      check.return_value = (True, 29)
+      subscription_aware_rate_limit_dependency(oauth_request)
+
+    limit, window = get_subscription_rate_limit(
+      "ladybug-standard", EndpointCategory.GRAPH_MCP
+    )
+    check.assert_called_once_with("graph_sub:kg1a2b3c:graph_mcp", limit, window)
+    assert oauth_request.state.rate_limit_tier == "ladybug-standard"
+
+  def test_a_grant_on_another_graph_is_not_evidence_for_this_one(self, oauth_request):
+    """The caller is known, so the budget is theirs — but a grant that names
+    a different graph does not let the URL alone charge this graph's bucket."""
+    with (
+      patch(f"{self.MODULE}.rate_limit_cache.check_rate_limit") as check,
+      patch(
+        f"{self.MODULE}._cached_oauth_identity",
+        return_value=("user_456", "kg9other"),
+      ),
+      patch(
+        f"{self.MODULE}._verify_jwt_for_rate_limiting",
+        return_value=None,
+      ),
+      patch(
+        "robosystems.middleware.auth.cache.api_key_cache.get_cached_jwt_graph_access",
+        return_value=None,
+      ),
+    ):
+      check.return_value = (True, 29)
+      subscription_aware_rate_limit_dependency(oauth_request)
+
+    limit, window = get_subscription_rate_limit(
+      "ladybug-standard", EndpointCategory.GRAPH_MCP
+    )
+    check.assert_called_once_with("user_sub:user_456:graph_mcp", limit, window)
+
+  def test_an_uncached_oauth_bearer_is_one_anonymous_hit(self, oauth_request):
+    """A token's first use is validated and cached by the auth dependency
+    that runs next; until then it is counted as the IP's."""
+    with (
+      patch(f"{self.MODULE}.rate_limit_cache.check_rate_limit") as check,
+      patch(f"{self.MODULE}._cached_oauth_identity", return_value=None),
+      patch(f"{self.MODULE}._verify_jwt_for_rate_limiting", return_value=None),
+    ):
+      check.return_value = (True, 4)
+      subscription_aware_rate_limit_dependency(oauth_request)
+
+    limit, window = get_subscription_rate_limit("base", EndpointCategory.GRAPH_MCP)
+    check.assert_called_once_with("anon_sub:192.168.1.1:graph_mcp", limit, window)
+    assert oauth_request.state.rate_limit_tier == "base"
