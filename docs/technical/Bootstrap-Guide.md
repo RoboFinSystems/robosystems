@@ -541,6 +541,8 @@ just deploy staging               # Staging
 
 # Connect
 just tunnel prod all              # All tunnels (postgres, valkey, dagster, api)
+just pg-mcp prod robosystems --check   # Postgres MCP launcher: opens the tunnel on demand, reads the DB secret at start, read-only
+just bastion-stop prod            # Stop the bastion host; a script-started tunnel leaves it running (just bastion-status prod to check)
 
 # Secrets Manager
 aws secretsmanager get-secret-value --secret-id robosystems/prod --query SecretString --output text | jq .

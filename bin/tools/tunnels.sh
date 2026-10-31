@@ -28,6 +28,7 @@ DAGSTER_ENDPOINT=""
 API_ENDPOINT=""
 API_INTERNAL_ENDPOINT=""  # Service Discovery endpoint (bypasses ALB)
 API_ACCESS_MODE=""        # internal or public
+OPENED_PORTS=()           # local ports this run opened; cleanup stops only these sessions
 
 # The Dagster webserver may be configured at desired count 0; a dagster tunnel
 # scales it to 1 while open and restores the configured count on exit.
@@ -48,8 +49,11 @@ cleanup_on_exit() {
     echo ""
     echo -e "${YELLOW}Cleaning up...${NC}"
 
-    # Kill any background SSM sessions
-    pkill -f "session-manager-plugin" 2>/dev/null || true
+    # Stop the SSM sessions this run opened, and only those: another tunnel
+    # (a second terminal, an MCP launcher) must survive this script exiting.
+    for port in "${OPENED_PORTS[@]+"${OPENED_PORTS[@]}"}"; do
+        pkill -f "session-manager-plugin.*localPortNumber\": *\[\"${port}\"\]" 2>/dev/null || true
+    done
 
     # Stop the background readiness wait if it's still running (e.g. aborted mid-boot)
     if [[ -n "${WEBSERVER_WAIT_PID:-}" ]]; then
@@ -447,6 +451,7 @@ start_ssm_tunnel() {
 
     echo -e "${GREEN}Starting $service_name tunnel via SSM...${NC}"
     echo -e "${BLUE}Local: localhost:$local_port -> Remote: $remote_host:$remote_port${NC}"
+    OPENED_PORTS+=("$local_port")
 
     aws ssm start-session \
         --target "$BASTION_INSTANCE_ID" \
@@ -463,6 +468,7 @@ start_ssm_tunnel_background() {
 
     echo -e "${GREEN}Starting $service_name tunnel in background...${NC}"
     echo -e "${BLUE}Local: localhost:$local_port -> Remote: $remote_host:$remote_port${NC}"
+    OPENED_PORTS+=("$local_port")
 
     aws ssm start-session \
         --target "$BASTION_INSTANCE_ID" \

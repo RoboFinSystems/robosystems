@@ -246,6 +246,45 @@
       "problemMatcher": []
     },
     {
+      "label": "Bastion Status",
+      "type": "shell",
+      "command": "direnv",
+      "args": [
+        "exec",
+        ".",
+        "just",
+        "bastion-status",
+        "${input:bastionEnvironment}"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Bastion Stop",
+      "type": "shell",
+      "command": "direnv",
+      "args": [
+        "exec",
+        ".",
+        "just",
+        "bastion-stop",
+        "${input:bastionEnvironment}"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Bastion Start",
+      "type": "shell",
+      "command": "direnv",
+      "args": [
+        "exec",
+        ".",
+        "just",
+        "bastion-start",
+        "${input:bastionEnvironment}"
+      ],
+      "problemMatcher": []
+    },
+    {
       "label": "Migrate Up",
       "type": "shell",
       "command": "just",
@@ -358,6 +397,16 @@
         "api-internal",
         "shell",
         "migrate"
+      ]
+    },
+    {
+      "id": "bastionEnvironment",
+      "type": "pickString",
+      "description": "Which bastion host:",
+      "default": "prod",
+      "options": [
+        "prod",
+        "staging"
       ]
     },
     {
