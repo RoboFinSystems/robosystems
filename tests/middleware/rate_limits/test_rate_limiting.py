@@ -710,3 +710,64 @@ class TestOAuthBucketsFailClosed:
 
     assert factory.call_args.args[2] == bucket
     assert bool(factory.call_args.kwargs.get("fail_closed")) is closed
+
+
+class TestOAuthBearerIdentity:
+  """An opaque OAuth bearer carries nothing the limiter can reparse, and on
+  the graph routes the limiter runs before the auth dependency publishes a
+  principal (#1945), so the published-principal fallback never sees it. The
+  validation cache the auth path writes is the evidence: a token it holds
+  live is an identity, as a cached API key is. Without this, every OAuth
+  MCP client behind one egress IP shared the anonymous 5/min budget."""
+
+  class _State:
+    pass
+
+  OAUTH_HEADER = {"Authorization": "Bearer rfso" + "a" * 48}
+  IDENTITY = "robosystems.middleware.auth.oauth.cached_oauth_identity"
+
+  def test_cached_oauth_bearer_identifies_the_user(self):
+    request = _make_request(headers=dict(self.OAUTH_HEADER))
+    request.state = self._State()
+    with patch(self.IDENTITY, return_value=("user-42", "kg1a2b3c")):
+      assert get_user_from_request(request) == "user-42"
+
+  def test_cached_oauth_bearer_takes_the_api_key_burst_budget(self):
+    request = _make_request(headers=dict(self.OAUTH_HEADER))
+    request.state = self._State()
+    with patch(self.IDENTITY, return_value=("user-42", "kg1a2b3c")):
+      assert get_user_identifier(request) == "apikey:user:user-42"
+
+  def test_an_uncached_oauth_bearer_stays_anonymous(self):
+    """A token's first use is validated by the auth dependency, which caches
+    it; until then it is one anonymous hit, as a fresh API key is."""
+    request = _make_request(headers=dict(self.OAUTH_HEADER))
+    request.state = self._State()
+    with patch(self.IDENTITY, return_value=None):
+      assert get_user_from_request(request) is None
+      assert get_user_identifier(request) == "ip:127.0.0.1"
+
+  def test_the_cache_is_read_once_per_request(self):
+    request = _make_request(headers=dict(self.OAUTH_HEADER))
+    request.state = self._State()
+    with patch(self.IDENTITY, return_value=("user-42", "kg1a2b3c")) as lookup:
+      get_user_from_request(request)
+      get_user_identifier(request)
+      get_user_from_request(request)
+    assert lookup.call_count == 1
+
+  def test_a_cache_failure_is_anonymous_not_an_error(self):
+    request = _make_request(headers=dict(self.OAUTH_HEADER))
+    request.state = self._State()
+    with patch(self.IDENTITY, side_effect=RuntimeError("valkey down")):
+      assert get_user_from_request(request) is None
+
+  def test_a_jwt_bearer_never_consults_the_oauth_cache(self):
+    request = _make_request(headers={"Authorization": "Bearer eyJ.not.oauth"})
+    request.state = self._State()
+    with (
+      patch(f"{MODULE}._verify_jwt_for_rate_limiting", return_value="user-7"),
+      patch(self.IDENTITY) as lookup,
+    ):
+      assert get_user_from_request(request) == "user-7"
+    lookup.assert_not_called()

@@ -89,6 +89,32 @@ def _principal_from_payload(user_data: dict[str, Any]) -> OAuthPrincipal | None:
     return None
 
 
+def cached_oauth_identity(plain_token: str) -> tuple[str, str] | None:
+  """``(user_id, graph_id)`` for a token the validation cache holds live.
+
+  For code that runs before authentication, the rate limiter above all: the
+  cache is written only by ``validate_oauth_access_token``, so an entry makes
+  the token an identity the way a cached API key is. Reads the cache only,
+  never the database; a miss or any failure is ``None``.
+  """
+  if not is_oauth_access_token(plain_token) or len(plain_token) > 256:
+    return None
+  try:
+    cached = api_key_cache.get_cached_api_key_validation(
+      OAuthToken.fingerprint(plain_token)
+    )
+  except Exception as exc:
+    logger.debug(f"OAuth token cache read failed: {exc}")
+    return None
+  user_data = cached.get("user_data") if isinstance(cached, dict) else None
+  if not isinstance(user_data, dict) or "oauth_token_id" not in user_data:
+    return None
+  principal = _principal_from_payload(user_data)
+  if principal is None:
+    return None
+  return principal.user_id, principal.graph_id
+
+
 def validate_oauth_access_token(plain_token: str) -> OAuthPrincipal | None:
   """Resolve a presented access token, or ``None`` when it is not live.
 

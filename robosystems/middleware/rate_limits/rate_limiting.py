@@ -53,6 +53,32 @@ def _api_key_is_cached_valid(api_key_hash: str) -> bool:
     return False
 
 
+def _cached_oauth_identity(request: Request) -> tuple[str, str] | None:
+  """``(user_id, graph_id)`` when the bearer is an OAuth token the auth cache
+  holds live, else None.
+
+  On the graph routes the limiter runs before the auth dependency publishes a
+  principal, and an opaque ``rfso`` token carries nothing to reparse; the
+  validation cache the auth path writes is the evidence. Memoized on
+  ``request.state`` because the identity and the graph check both read it.
+  """
+  memo = getattr(request.state, "rate_limit_oauth_identity", False)
+  if memo is None or isinstance(memo, tuple):
+    return memo
+
+  identity = None
+  auth_header = request.headers.get("Authorization")
+  if auth_header and auth_header.startswith("Bearer "):
+    from robosystems.middleware.auth.oauth import cached_oauth_identity
+
+    try:
+      identity = cached_oauth_identity(auth_header[7:].strip())
+    except Exception:
+      identity = None
+  request.state.rate_limit_oauth_identity = identity
+  return identity
+
+
 def _caller_is_authorized_on_graph(
   request: Request, user_id: str, graph_id: str, parent_graph_id: str
 ) -> bool:
@@ -63,6 +89,11 @@ def _caller_is_authorized_on_graph(
   ``request.state``, else a cached positive decision for the graph or parent.
   """
   if getattr(request.state, "auth_graph_id", None) in (graph_id, parent_graph_id):
+    return True
+
+  # An OAuth grant names one graph; a cached live token is authorization on it.
+  oauth_identity = _cached_oauth_identity(request)
+  if oauth_identity is not None and oauth_identity[1] in (graph_id, parent_graph_id):
     return True
 
   from robosystems.middleware.auth.cache import api_key_cache
@@ -96,6 +127,9 @@ def get_user_identifier(request: Request) -> str:
     user_id = _verify_jwt_for_rate_limiting(token)
     if user_id:
       return f"jwt:{user_id}"
+    oauth_identity = _cached_oauth_identity(request)
+    if oauth_identity is not None:
+      return f"apikey:user:{oauth_identity[0]}"
 
   auth_token = request.cookies.get("auth-token")
   if auth_token:
@@ -276,6 +310,9 @@ def get_user_from_request(request: Request) -> str | None:
     user_id = _verify_jwt_for_rate_limiting(token)
     if user_id:
       return user_id
+    oauth_identity = _cached_oauth_identity(request)
+    if oauth_identity is not None:
+      return oauth_identity[0]
 
   auth_token = request.cookies.get("auth-token")
   if auth_token:
@@ -290,8 +327,9 @@ def get_user_from_request(request: Request) -> str | None:
     if _api_key_is_cached_valid(api_key_hash):
       return f"apikey_{api_key_hash}"
 
-  # Validated principal for credentials with no reparseable header (OAuth
-  # bearers); otherwise they'd share an anonymous per-IP budget.
+  # Validated principal for a credential nothing above could place (a first
+  # use of an OAuth token, a URL-carried key); otherwise it would share an
+  # anonymous per-IP budget.
   auth_user_id = getattr(request.state, "auth_user_id", None)
   if isinstance(auth_user_id, str) and auth_user_id:
     return auth_user_id
