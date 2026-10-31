@@ -321,8 +321,11 @@ async def delete_subgraph_op(
     "through the current billing period and tear it down at the period "
     "boundary via the existing suspend → deprovision pipeline. An immediate "
     "delete credits the unused part of the billed period; it is not refunded. "
-    "On a card-billed plan the credit goes to the organization's account "
-    "balance and is applied to its next invoice; on an invoiced plan it is a "
+    "A period buys time and AI credits, so the credit is the smaller unused "
+    "share of the two: credits used ahead of the time elapsed reduce it. "
+    "On a card-billed plan the credit lands on the organization's account "
+    "balance at once and is applied to its next invoice, so a graph created "
+    "right after is charged the difference; on an invoiced plan it is a "
     "credit line on that period's invoice, or a separate credit invoice if "
     "that one is already paid. Requires "
     "`confirm` to equal the URL `graph_id`. Caller must be both org owner "
@@ -356,7 +359,11 @@ async def delete_graph_op(
   )
   from robosystems.models.core.graph import Graph, GraphStatus
   from robosystems.models.core.graph.graph_user import GraphUser
-  from robosystems.operations.billing.invoice_credits import apply_unused_time_credit
+  from robosystems.operations.billing.invoice_credits import (
+    apply_unused_time_credit,
+    plan_credit_clawback,
+    snapshot_credit_consumption,
+  )
   from robosystems.operations.providers.payment_provider import get_payment_provider
   from robosystems.security import SecurityAuditLogger, SecurityEventType
 
@@ -443,6 +450,11 @@ async def delete_graph_op(
       and bool(subscription.stripe_subscription_id)
       and subscription.status == SubscriptionStatus.ACTIVE.value
     )
+    # The period bought time and AI credits; the credit refunds the smaller
+    # unused share. Read the pool now, before teardown deletes it.
+    consumption = None
+    if immediate and subscription.status == SubscriptionStatus.ACTIVE.value:
+      consumption = plan_credit_clawback(subscription, db)
 
     if subscription.stripe_subscription_id:
       try:
@@ -451,6 +463,8 @@ async def delete_graph_op(
           provider.cancel_subscription(
             subscription.stripe_subscription_id,
             credit_unused_time=credit_unused_time,
+            clawback_cents=consumption.clawback_cents if consumption else 0,
+            clawback_description=consumption.description if consumption else None,
           )
         else:
           provider.stripe.Subscription.modify(
@@ -494,6 +508,11 @@ async def delete_graph_op(
           ),
         )
 
+    # Kept on the row so a later pass (the admin backfill) reaches the same
+    # credit after the pool is gone. Written only once Stripe has canceled, so
+    # a 502 above leaves the row untouched.
+    if consumption is not None:
+      snapshot_credit_consumption(subscription, consumption)
     subscription.cancel(db, immediate=immediate)
 
     mode = "immediate" if immediate else "period_end"
@@ -511,6 +530,10 @@ async def delete_graph_op(
       event_data={
         "immediate": immediate,
         "credited_unused_time": credit_unused_time,
+        "credits_consumed_fraction": (
+          consumption.consumed_fraction if consumption else None
+        ),
+        "clawback_cents": consumption.clawback_cents if consumption else 0,
         "via": "graph_ops.delete_graph",
         "resource_type": "graph",
         "resource_id": graph_id,

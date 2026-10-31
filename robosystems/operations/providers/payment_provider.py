@@ -91,10 +91,16 @@ class PaymentProvider(ABC):
 
   @abstractmethod
   def cancel_subscription(
-    self, subscription_id: str, *, credit_unused_time: bool = False
+    self,
+    subscription_id: str,
+    *,
+    credit_unused_time: bool = False,
+    clawback_cents: int = 0,
+    clawback_description: str | None = None,
   ) -> None:
     """Cancel a subscription immediately, optionally crediting the unused
-    time of the current period to the customer's balance."""
+    time of the current period to the customer's balance, less
+    ``clawback_cents`` of AI credits consumed ahead of the time elapsed."""
     pass
 
   @abstractmethod
@@ -641,20 +647,37 @@ class StripePaymentProvider(PaymentProvider):
       raise
 
   def cancel_subscription(
-    self, subscription_id: str, *, credit_unused_time: bool = False
+    self,
+    subscription_id: str,
+    *,
+    credit_unused_time: bool = False,
+    clawback_cents: int = 0,
+    clawback_description: str | None = None,
   ) -> None:
     """Cancel a Stripe subscription immediately.
 
-    With `credit_unused_time`, Stripe prorates the unused period and bills it
-    on a final invoice now; its negative total lands on the customer's
-    balance, where it offsets their next invoice. A credit, not a refund.
+    With `credit_unused_time`, Stripe prorates the unused period onto a final
+    invoice. `clawback_cents` — AI credits consumed ahead of the time elapsed
+    — goes onto that invoice as a positive line, capped at the proration so
+    the invoice never charges, and the invoice is finalized at once so the
+    net credit lands on the customer's balance immediately and offsets their
+    next invoice: a subscription created right after pays the difference. A
+    credit, not a refund.
 
     Already-canceled or missing counts as success, so a raise always means
     Stripe is still billing.
     """
     try:
       if credit_unused_time:
-        self.stripe.Subscription.cancel(subscription_id, prorate=True, invoice_now=True)
+        subscription = self.stripe.Subscription.cancel(
+          subscription_id, prorate=True, invoice_now=True
+        )
+        self._finalize_credit_invoice(
+          subscription_id,
+          subscription,
+          clawback_cents=clawback_cents,
+          clawback_description=clawback_description,
+        )
       else:
         self.stripe.Subscription.cancel(subscription_id)
       logger.info(
@@ -683,6 +706,67 @@ class StripePaymentProvider(PaymentProvider):
         exc_info=True,
       )
       raise
+
+  def _finalize_credit_invoice(
+    self,
+    subscription_id: str,
+    subscription: Any,
+    *,
+    clawback_cents: int = 0,
+    clawback_description: str | None = None,
+  ) -> None:
+    """Finalize the proration invoice an immediate cancel leaves as a draft,
+    after offsetting it for AI credits consumed ahead of the time elapsed.
+
+    Stripe creates the invoice as a draft and only auto-finalizes it an hour
+    later; until then the credit is invisible on the customer's balance and a
+    subscription created in the meantime is charged in full. The clawback is
+    a positive line on the same draft, capped at the proration so the net is
+    never a charge. Best-effort: the cancel has already succeeded, and Stripe
+    finalizes the invoice itself if this step fails (then without the offset,
+    which the warning below records).
+    """
+    latest = getattr(subscription, "latest_invoice", None)
+    invoice_id = latest if isinstance(latest, str) else getattr(latest, "id", None)
+    if not invoice_id:
+      return
+    try:
+      invoice = self.stripe.Invoice.retrieve(invoice_id)
+      if getattr(invoice, "status", None) != "draft":
+        return
+      clawback = 0
+      if clawback_cents > 0:
+        total = int(getattr(invoice, "total", 0) or 0)
+        clawback = min(int(clawback_cents), max(0, -total))
+      if clawback > 0:
+        customer = getattr(invoice, "customer", None) or getattr(
+          subscription, "customer", None
+        )
+        self.stripe.InvoiceItem.create(
+          customer=customer if isinstance(customer, str) else customer.id,
+          invoice=invoice_id,
+          amount=clawback,
+          currency=getattr(invoice, "currency", None) or "usd",
+          description=clawback_description
+          or "AI credits used ahead of the period elapsed",
+        )
+      self.stripe.Invoice.finalize_invoice(invoice_id)
+      logger.info(
+        f"Finalized credit invoice {invoice_id} for canceled subscription "
+        f"{subscription_id}",
+        extra={
+          "subscription_id": subscription_id,
+          "invoice_id": invoice_id,
+          "total": getattr(invoice, "total", None),
+          "clawback_cents": clawback,
+        },
+      )
+    except Exception as e:
+      logger.warning(
+        f"Could not finalize credit invoice {invoice_id} for {subscription_id}: "
+        f"{e}; Stripe finalizes it within the hour",
+        extra={"subscription_id": subscription_id, "invoice_id": invoice_id},
+      )
 
   def cancel_subscription_at_period_end(self, subscription_id: str) -> None:
     """Flag a Stripe subscription to cancel when the current period ends.
