@@ -1,32 +1,9 @@
 {
-  // Credentials never live in this file: ${input:...} values are prompted on
-  // first server start and stored in VS Code's encrypted secret storage.
-  "inputs": [
-    {
-      "type": "promptString",
-      "id": "robosystems-api-key",
-      "description": "RoboSystems API key (X-API-Key; .local/config.json after `just demo-user`)",
-      "password": true
-    },
-    {
-      "type": "promptString",
-      "id": "robosystems-graph-id",
-      "description": "Graph ID (e.g. kg1a2b3c4d5e)"
-    }
-  ],
-  "servers": {
-    // VS Code speaks Streamable HTTP natively — point it straight at the
-    // local MCP endpoint. The graph id lives in the URL path; the key rides
-    // in the X-API-Key header (account-wide or graph-scoped both work).
+  "mcpServers": {
     "robosystems": {
-      "type": "http",
-      "url": "http://localhost:8000/v1/graphs/${input:robosystems-graph-id}/mcp",
-      "headers": {
-        "X-API-Key": "${input:robosystems-api-key}"
-      }
+      "url": "http://localhost:8000/v1/mcp"
     },
     "aws-documentation": {
-      "type": "stdio",
       "command": "uvx",
       "args": ["awslabs.aws-documentation-mcp-server@latest"],
       "env": {
