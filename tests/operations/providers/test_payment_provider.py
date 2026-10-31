@@ -390,6 +390,67 @@ class TestStripeSubscriptionOperations:
       "sub_test123", prorate=True, invoice_now=True
     )
 
+  def test_cancel_subscription_crediting_unused_time_finalizes_the_draft_invoice(
+    self, stripe_provider
+  ):
+    # Stripe leaves the proration invoice as a draft and auto-finalizes it an
+    # hour later; the credit must land on the balance now, not then.
+    stripe_provider.stripe.Subscription.cancel.return_value = Mock(
+      latest_invoice="in_credit"
+    )
+    stripe_provider.stripe.Invoice.retrieve.return_value = Mock(
+      status="draft", total=-8025
+    )
+
+    stripe_provider.cancel_subscription("sub_test123", credit_unused_time=True)
+
+    stripe_provider.stripe.Invoice.retrieve.assert_called_once_with("in_credit")
+    stripe_provider.stripe.Invoice.finalize_invoice.assert_called_once_with("in_credit")
+
+  def test_cancel_subscription_reads_an_expanded_latest_invoice(self, stripe_provider):
+    stripe_provider.stripe.Subscription.cancel.return_value = Mock(
+      latest_invoice=Mock(id="in_expanded")
+    )
+    stripe_provider.stripe.Invoice.retrieve.return_value = Mock(status="draft")
+
+    stripe_provider.cancel_subscription("sub_test123", credit_unused_time=True)
+
+    stripe_provider.stripe.Invoice.finalize_invoice.assert_called_once_with(
+      "in_expanded"
+    )
+
+  def test_cancel_subscription_leaves_a_finalized_credit_invoice_alone(
+    self, stripe_provider
+  ):
+    stripe_provider.stripe.Subscription.cancel.return_value = Mock(
+      latest_invoice="in_credit"
+    )
+    stripe_provider.stripe.Invoice.retrieve.return_value = Mock(status="paid")
+
+    stripe_provider.cancel_subscription("sub_test123", credit_unused_time=True)
+
+    stripe_provider.stripe.Invoice.finalize_invoice.assert_not_called()
+
+  def test_cancel_subscription_survives_a_failed_finalize(self, stripe_provider):
+    # The cancel has succeeded by then; a finalize failure must not read as
+    # "Stripe is still billing". Stripe finalizes the draft itself later.
+    stripe_provider.stripe.Subscription.cancel.return_value = Mock(
+      latest_invoice="in_credit"
+    )
+    stripe_provider.stripe.Invoice.retrieve.return_value = Mock(status="draft")
+    stripe_provider.stripe.Invoice.finalize_invoice.side_effect = Exception(
+      "rate limited"
+    )
+
+    stripe_provider.cancel_subscription("sub_test123", credit_unused_time=True)
+
+    stripe_provider.stripe.Subscription.cancel.assert_called_once()
+
+  def test_cancel_subscription_without_credit_touches_no_invoice(self, stripe_provider):
+    stripe_provider.cancel_subscription("sub_test123")
+    stripe_provider.stripe.Invoice.retrieve.assert_not_called()
+    stripe_provider.stripe.Invoice.finalize_invoice.assert_not_called()
+
   def test_cancel_subscription_raises_on_error(self, stripe_provider):
     """Test that cancellation errors propagate."""
     stripe_provider.stripe.Subscription.cancel.side_effect = Exception("Not found")
