@@ -287,6 +287,10 @@ pg-mcp environment="prod" database="robosystems" *args="":
 bastion-status environment="prod":
     @bin/tools/bastion.sh {{environment}} status
 
+# Start the bastion host and return once its SSM agent is online (so a tunnel can connect)
+bastion-start environment="prod":
+    @bin/tools/bastion.sh {{environment}} start
+
 # Stop the bastion host (a script-started tunnel leaves it running; this is the off switch)
 bastion-stop environment="prod" *args="":
     @bin/tools/bastion.sh {{environment}} stop {{args}}

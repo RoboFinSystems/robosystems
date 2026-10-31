@@ -7,13 +7,14 @@
 # running. This is the switch for it.
 #
 # Usage: bin/tools/bastion.sh <prod|staging> <status|stop|start> [--wait]
+#   start returns once the SSM agent is online; --wait applies to stop.
 
 set -euo pipefail
 
 AWS_REGION="${AWS_REGION:-us-east-1}"
 
 usage() {
-    echo "Usage: $(basename "$0") <prod|staging> <status|stop|start> [--wait]" >&2
+    echo "Usage: $(basename "$0") <prod|staging> <status|stop|start> [--wait]   (start waits for the SSM agent; --wait applies to stop)" >&2
     exit 2
 }
 
@@ -85,9 +86,20 @@ case "$ACTION" in
         fi
         aws ec2 start-instances --instance-ids "$INSTANCE_ID" --region "$AWS_REGION" >/dev/null
         echo "$ENVIRONMENT bastion $INSTANCE_ID: starting"
-        if [[ "$WAIT" == "true" ]]; then
-            aws ec2 wait instance-running --instance-ids "$INSTANCE_ID" --region "$AWS_REGION"
-            echo "$ENVIRONMENT bastion $INSTANCE_ID: running (allow ~30s for the SSM agent)"
-        fi
+        aws ec2 wait instance-running --instance-ids "$INSTANCE_ID" --region "$AWS_REGION"
+        # Running is not reachable: the SSM agent registers a little later, and
+        # a tunnel opened before that fails. Return only once it is online.
+        for _ in $(seq 1 24); do
+            ping="$(aws ssm describe-instance-information \
+                --filters "Key=InstanceIds,Values=${INSTANCE_ID}" \
+                --query 'InstanceInformationList[0].PingStatus' --output text --region "$AWS_REGION" 2>/dev/null || true)"
+            if [[ "$ping" == "Online" ]]; then
+                echo "$ENVIRONMENT bastion $INSTANCE_ID: running, SSM agent online (just tunnel $ENVIRONMENT <service> will connect)"
+                exit 0
+            fi
+            sleep 5
+        done
+        echo "$ENVIRONMENT bastion $INSTANCE_ID: running, but the SSM agent is not online after 2 minutes" >&2
+        exit 1
         ;;
 esac

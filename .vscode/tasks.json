@@ -272,6 +272,19 @@
       "problemMatcher": []
     },
     {
+      "label": "Bastion Start",
+      "type": "shell",
+      "command": "direnv",
+      "args": [
+        "exec",
+        ".",
+        "just",
+        "bastion-start",
+        "${input:bastionEnvironment}"
+      ],
+      "problemMatcher": []
+    },
+    {
       "label": "Migrate Up",
       "type": "shell",
       "command": "just",
