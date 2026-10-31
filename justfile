@@ -279,6 +279,10 @@ deploy environment="prod" ref="":
 tunnel environment service="all":
     @bin/tools/tunnels.sh {{environment}} {{service}}
 
+# Start the Postgres MCP against a hosted database (opens the tunnel, reads the secret at start, read-only)
+pg-mcp environment="prod" database="robosystems" *args="":
+    @bin/tools/pg-mcp.sh {{environment}} {{database}} {{args}}
+
 
 ## Bootstrap ##
 
