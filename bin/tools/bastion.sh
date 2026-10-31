@@ -68,6 +68,10 @@ case "$ACTION" in
         SESSIONS="$(active_sessions)"
         [[ "$SESSIONS" != "0" ]] && echo "Closing $SESSIONS active SSM session(s) (open tunnels will drop)"
         aws ec2 stop-instances --instance-ids "$INSTANCE_ID" --region "$AWS_REGION" >/dev/null
+        # A stopped instance ends its sessions without telling the local
+        # session-manager-plugin, which keeps listening on the tunnel port and
+        # would make the next launcher believe the tunnel is still up.
+        pkill -f "session-manager-plugin.*\"Target\": *\"${INSTANCE_ID}\"" 2>/dev/null || true
         echo "$ENVIRONMENT bastion $INSTANCE_ID: stopping (was running since $LAUNCHED)"
         if [[ "$WAIT" == "true" ]]; then
             aws ec2 wait instance-stopped --instance-ids "$INSTANCE_ID" --region "$AWS_REGION"
