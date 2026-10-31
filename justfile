@@ -275,26 +275,6 @@ create-release version="patch" deploy="staging":
 deploy environment="prod" ref="":
     @bin/tools/deploy.sh {{environment}} {{ref}}
 
-# SSM tunnel to private resources (via bastion host, no SSH keys required)
-tunnel environment service="all":
-    @bin/tools/tunnels.sh {{environment}} {{service}}
-
-# Start the Postgres MCP against a hosted database (opens the tunnel, reads the secret at start, read-only)
-pg-mcp environment="prod" database="robosystems" *args="":
-    @bin/tools/pg-mcp.sh {{environment}} {{database}} {{args}}
-
-# Show the bastion host's state and its active SSM sessions
-bastion-status environment="prod":
-    @bin/tools/bastion.sh {{environment}} status
-
-# Start the bastion host and return once its SSM agent is online (so a tunnel can connect)
-bastion-start environment="prod":
-    @bin/tools/bastion.sh {{environment}} start
-
-# Stop the bastion host (a script-started tunnel leaves it running; this is the off switch)
-bastion-stop environment="prod" *args="":
-    @bin/tools/bastion.sh {{environment}} stop {{args}}
-
 
 ## Bootstrap ##
 
@@ -337,6 +317,29 @@ generate-keys:
     @echo "CONNECTION_CREDENTIALS_KEY=$(openssl rand -base64 32)"
     @echo "JWT_SECRET_KEY=$(openssl rand -base64 32)"
     @echo "ADMIN_API_KEY=$(openssl rand -base64 32)"
+
+
+## SSM Tunnels & Bastion ##
+
+# SSM tunnel to private resources (via bastion host, no SSH keys required)
+tunnel environment service="all":
+    @bin/tools/tunnels.sh {{environment}} {{service}}
+
+# Start the Postgres MCP against a hosted database (opens the tunnel, reads the secret at start, read-only)
+pg-mcp environment="prod" database="robosystems" *args="":
+    @bin/tools/pg-mcp.sh {{environment}} {{database}} {{args}}
+
+# Show the bastion host's state and its active SSM sessions
+bastion-status environment="prod":
+    @bin/tools/bastion.sh {{environment}} status
+
+# Start the bastion host and return once its SSM agent is online (so a tunnel can connect)
+bastion-start environment="prod":
+    @bin/tools/bastion.sh {{environment}} start
+
+# Stop the bastion host (a script-started tunnel leaves it running; this is the off switch)
+bastion-stop environment="prod" *args="":
+    @bin/tools/bastion.sh {{environment}} stop {{args}}
 
 
 ## AWS SSM Parameter Store ##

@@ -12,6 +12,12 @@
 set -euo pipefail
 
 AWS_REGION="${AWS_REGION:-us-east-1}"
+# This stack's SSO profile when configured (BASTION_AWS_PROFILE overrides the
+# name); an inherited AWS_PROFILE may belong to another project's account.
+BASTION_AWS_PROFILE="${BASTION_AWS_PROFILE:-robosystems-sso}"
+if aws configure list-profiles 2>/dev/null | grep -qx "$BASTION_AWS_PROFILE"; then
+    export AWS_PROFILE="$BASTION_AWS_PROFILE"
+fi
 
 usage() {
     echo "Usage: $(basename "$0") <prod|staging> <status|stop|start> [--wait]   (start waits for the SSM agent; --wait applies to stop)" >&2

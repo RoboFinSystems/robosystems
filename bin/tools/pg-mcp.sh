@@ -45,7 +45,7 @@ Usage: $(basename "$0") <prod|staging> <robosystems|extensions> [--check] [--no-
   --check                 verify tunnel + secret access and print the masked target; do not start the MCP
   --no-tunnel             do not open the SSM tunnel; fail if the local port is closed
 
-Environment: AWS_PROFILE (default: robosystems-sso when that profile exists), AWS_REGION,
+Environment: PG_MCP_AWS_PROFILE (default robosystems-sso; used when that profile exists), AWS_REGION,
 LOCAL_PORT_POSTGRES (default 15432), POSTGRES_MCP_ACCESS_MODE (default restricted),
 POSTGRES_MCP_OVERRIDES (uv override file for the MCP's pinned dependencies),
 PG_MCP_TUNNEL_WAIT_SECONDS (default 150; covers a cold bastion start).
@@ -71,10 +71,14 @@ done
 
 SECRET_ID="robosystems/${ENVIRONMENT}/postgres"
 
-# AWS identity: an explicit AWS_PROFILE wins; otherwise the SSO profile the
-# admin CLI uses, when configured; otherwise whatever the default chain finds.
-if [[ -z "${AWS_PROFILE:-}" ]] && aws configure list-profiles 2>/dev/null | grep -qx "robosystems-sso"; then
-    export AWS_PROFILE="robosystems-sso"
+# AWS identity: this stack's SSO profile when it is configured (PG_MCP_AWS_PROFILE
+# overrides the name). An inherited AWS_PROFILE is deliberately not trusted: an
+# MCP client started in another project's directory hands this launcher that
+# project's profile, which points at the wrong account. Without the profile,
+# the default credential chain is used as-is.
+PG_MCP_AWS_PROFILE="${PG_MCP_AWS_PROFILE:-robosystems-sso}"
+if aws configure list-profiles 2>/dev/null | grep -qx "$PG_MCP_AWS_PROFILE"; then
+    export AWS_PROFILE="$PG_MCP_AWS_PROFILE"
 fi
 
 port_open() {
