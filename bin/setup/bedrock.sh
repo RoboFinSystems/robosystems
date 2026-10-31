@@ -304,11 +304,11 @@ show_summary() {
     echo -e "${CYAN}  NEXT STEPS${NC}"
     echo -e "${CYAN}════════════════════════════════════════════════════════════${NC}"
     echo ""
-    echo "1. Restart Docker to pick up new credentials:"
-    echo "   just restart"
+    echo "1. Recreate the containers to pick up new credentials:"
+    echo "   just start    # not 'just restart': a restart keeps the old .env"
     echo ""
     echo "2. Test Bedrock access:"
-    echo "   just test operations/agents"
+    echo "   just test operations/operators"
     echo ""
 }
 
@@ -393,8 +393,8 @@ rotate_access_key() {
     echo -e "${CYAN}New Access Key:${NC} ${NEW_ACCESS_KEY_ID}"
     echo -e "${CYAN}Old Key:${NC} ${OLD_KEY_ID} (Inactive)"
     echo ""
-    echo "Restart Docker to pick up the new credentials:"
-    echo "   just restart"
+    echo "Recreate the containers to pick up the new credentials:"
+    echo "   just start    # not 'just restart': a restart keeps the old .env"
     echo ""
 }
 
