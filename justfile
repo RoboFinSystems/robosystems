@@ -283,6 +283,14 @@ tunnel environment service="all":
 pg-mcp environment="prod" database="robosystems" *args="":
     @bin/tools/pg-mcp.sh {{environment}} {{database}} {{args}}
 
+# Show the bastion host's state and its active SSM sessions
+bastion-status environment="prod":
+    @bin/tools/bastion.sh {{environment}} status
+
+# Stop the bastion host (a script-started tunnel leaves it running; this is the off switch)
+bastion-stop environment="prod" *args="":
+    @bin/tools/bastion.sh {{environment}} stop {{args}}
+
 
 ## Bootstrap ##
 
