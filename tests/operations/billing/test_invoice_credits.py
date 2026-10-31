@@ -212,3 +212,85 @@ class TestUnusedTimeCredit:
 
     assert credit is not None
     assert credit.credit_cents == round(9900 * (30 * 24 - 2) / (30 * 24))
+
+
+class TestCreditConsumptionReducesTheCredit:
+  """The invoice lane refunds the smaller unused share of time and credits,
+  reading the snapshot the delete left once the graph's pool is gone."""
+
+  def _snapshot(self, subscription: BillingSubscription, session: Session, **fields):
+    from robosystems.operations.billing.invoice_credits import (
+      CREDIT_CONSUMPTION_SNAPSHOT,
+    )
+
+    subscription.subscription_metadata = {
+      **(subscription.subscription_metadata or {}),
+      CREDIT_CONSUMPTION_SNAPSHOT: {
+        "allocation": 8000,
+        "consumed": 8000,
+        "consumed_fraction": 1.0,
+        "elapsed_fraction": 0.5,
+        "clawback_cents": 4950,
+        **fields,
+      },
+    }
+    session.commit()
+
+  def test_a_burned_allocation_leaves_nothing_to_credit(
+    self, db_session: Session, org_id: str
+  ) -> None:
+    subscription, _ = _billed_subscription(db_session, org_id)
+    _end_access(db_session, subscription, HALFWAY)
+    self._snapshot(subscription, db_session)
+
+    assert plan_unused_time_credit(subscription, db_session) is None
+    assert apply_unused_time_credit(subscription, db_session, actor_type="user") is None
+    assert _credit_lines(db_session, subscription.id) == []
+
+  def test_credits_used_ahead_of_time_reduce_the_credit(
+    self, db_session: Session, org_id: str
+  ) -> None:
+    subscription, invoice = _billed_subscription(db_session, org_id)
+    _end_access(db_session, subscription, HALFWAY)
+    # 75 % of the credits used with half the period gone: refund 25 %, not 50 %.
+    self._snapshot(
+      subscription,
+      db_session,
+      consumed=6000,
+      consumed_fraction=0.75,
+      clawback_cents=2475,
+    )
+
+    credit = plan_unused_time_credit(subscription, db_session)
+
+    assert credit is not None
+    assert credit.time_credit_cents == 4950
+    assert credit.credit_cents == 2475
+    assert credit.credits_consumed_fraction == 0.75
+
+    applied = apply_unused_time_credit(subscription, db_session, actor_type="user")
+    assert applied is not None
+    (line,) = _credit_lines(db_session, subscription.id)
+    assert line.amount_cents == -2475
+    assert "less AI credits used ahead of time" in line.description
+    assert line.line_metadata["time_credit_cents"] == 4950
+    assert line.line_metadata["credits_consumed_fraction"] == 0.75
+
+  def test_credits_used_in_step_with_time_leave_the_credit_whole(
+    self, db_session: Session, org_id: str
+  ) -> None:
+    subscription, _ = _billed_subscription(db_session, org_id)
+    _end_access(db_session, subscription, HALFWAY)
+    self._snapshot(
+      subscription,
+      db_session,
+      consumed=4000,
+      consumed_fraction=0.5,
+      clawback_cents=0,
+    )
+
+    credit = plan_unused_time_credit(subscription, db_session)
+
+    assert credit is not None
+    assert credit.credit_cents == credit.time_credit_cents == 4950
+    assert not credit.reduced_by_consumption

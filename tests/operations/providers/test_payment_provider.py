@@ -457,6 +457,67 @@ class TestStripeSubscriptionOperations:
     with pytest.raises(Exception, match="Not found"):
       stripe_provider.cancel_subscription("sub_nonexistent")
 
+  def test_cancel_subscription_offsets_credits_used_ahead_of_time(
+    self, stripe_provider
+  ):
+    # A burned allocation claws the time credit back on the same draft invoice
+    # before it is finalized, so the net credit is what was actually unused.
+    stripe_provider.stripe.Subscription.cancel.return_value = Mock(
+      latest_invoice="in_credit", customer="cus_1"
+    )
+    stripe_provider.stripe.Invoice.retrieve.return_value = Mock(
+      status="draft", total=-8025, customer="cus_1", currency="usd"
+    )
+
+    stripe_provider.cancel_subscription(
+      "sub_test123",
+      credit_unused_time=True,
+      clawback_cents=6000,
+      clawback_description="AI credits used ahead of the period elapsed",
+    )
+
+    stripe_provider.stripe.InvoiceItem.create.assert_called_once_with(
+      customer="cus_1",
+      invoice="in_credit",
+      amount=6000,
+      currency="usd",
+      description="AI credits used ahead of the period elapsed",
+    )
+    stripe_provider.stripe.Invoice.finalize_invoice.assert_called_once_with("in_credit")
+
+  def test_cancel_subscription_caps_the_clawback_at_the_proration(
+    self, stripe_provider
+  ):
+    # Never a charge on deletion: the offset can zero the credit, not exceed it.
+    stripe_provider.stripe.Subscription.cancel.return_value = Mock(
+      latest_invoice="in_credit"
+    )
+    stripe_provider.stripe.Invoice.retrieve.return_value = Mock(
+      status="draft", total=-8025, customer="cus_1", currency="usd"
+    )
+
+    stripe_provider.cancel_subscription(
+      "sub_test123", credit_unused_time=True, clawback_cents=9603
+    )
+
+    assert stripe_provider.stripe.InvoiceItem.create.call_args.kwargs["amount"] == 8025
+    stripe_provider.stripe.Invoice.finalize_invoice.assert_called_once_with("in_credit")
+
+  def test_cancel_subscription_with_no_clawback_adds_no_line(self, stripe_provider):
+    stripe_provider.stripe.Subscription.cancel.return_value = Mock(
+      latest_invoice="in_credit"
+    )
+    stripe_provider.stripe.Invoice.retrieve.return_value = Mock(
+      status="draft", total=-8025
+    )
+
+    stripe_provider.cancel_subscription(
+      "sub_test123", credit_unused_time=True, clawback_cents=0
+    )
+
+    stripe_provider.stripe.InvoiceItem.create.assert_not_called()
+    stripe_provider.stripe.Invoice.finalize_invoice.assert_called_once_with("in_credit")
+
 
 class TestStripeWebhookVerification:
   """Tests for Stripe webhook signature verification."""

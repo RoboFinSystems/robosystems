@@ -562,7 +562,9 @@ class TestBillingSubscriptionRenewal:
     subscription.renew_period(db_session)
 
     assert subscription.current_period_start == old_period_end
-    assert subscription.current_period_end == _add_months(old_period_end, 1)
+    # Anchored on the start day, not on the (possibly clamped) period end:
+    # a subscription begun on the 31st ends Nov 30 and then Dec 31, not Dec 30.
+    assert subscription.current_period_end == _add_months(old_period_start, 2)
     assert subscription.current_period_start != old_period_start
 
   def test_renew_period_preserves_status(
@@ -637,12 +639,15 @@ class TestBillingSubscriptionRenewal:
     )
     subscription.activate(db_session)
 
+    old_period_start = subscription.current_period_start
     old_period_end = subscription.current_period_end
 
     subscription.renew_period(db_session)
 
     assert subscription.current_period_start == old_period_end
-    assert subscription.current_period_end == _add_months(old_period_end, 1)
+    # Anchored on the start day: begun on the 31st, the periods end Nov 30
+    # then Dec 31, not Dec 30 (see `_period_end_after`).
+    assert subscription.current_period_end == _add_months(old_period_start, 2)
 
 
 class TestBillingSubscriptionRepr:

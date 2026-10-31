@@ -389,7 +389,10 @@ class TestDeleteGraphRunner:
       )
 
     provider.cancel_subscription.assert_called_once_with(
-      "sub_stripe_xyz", credit_unused_time=True
+      "sub_stripe_xyz",
+      credit_unused_time=True,
+      clawback_cents=0,
+      clawback_description=None,
     )
     provider.stripe.Subscription.modify.assert_not_called()
     sub.cancel.assert_called_once_with(db, immediate=True)
@@ -432,7 +435,10 @@ class TestDeleteGraphRunner:
       )
 
     provider.cancel_subscription.assert_called_once_with(
-      "sub_stripe_xyz", credit_unused_time=False
+      "sub_stripe_xyz",
+      credit_unused_time=False,
+      clawback_cents=0,
+      clawback_description=None,
     )
     sub.cancel.assert_called_once_with(db, immediate=True)
     assert (
@@ -531,6 +537,117 @@ class TestDeleteGraphRunner:
     assert exc.value.status_code == 502
     sub.cancel.assert_not_called()
     mock_log_event.assert_not_called()
+
+  @pytest.mark.asyncio
+  @patch("robosystems.security.SecurityAuditLogger")
+  @patch("robosystems.operations.providers.payment_provider.get_payment_provider")
+  @patch("robosystems.models.core.billing.BillingAuditLog.log_event")
+  @patch("robosystems.models.core.billing.BillingSubscription.get_by_resource")
+  @patch("robosystems.operations.billing.invoice_credits.plan_credit_clawback")
+  async def test_credits_used_ahead_of_time_offset_the_stripe_credit(
+    self,
+    mock_plan: MagicMock,
+    mock_get_sub: MagicMock,
+    mock_log_event: MagicMock,
+    mock_get_provider: MagicMock,
+    _mock_security: MagicMock,
+  ) -> None:
+    # A burned allocation: the clawback rides into the Stripe cancel, and
+    # what the delete saw of the pool is kept on the subscription row.
+    from robosystems.operations.billing.invoice_credits import (
+      CREDIT_CONSUMPTION_SNAPSHOT,
+      CreditConsumption,
+    )
+
+    db = MagicMock()
+    self._setup_admin_membership(db, role="admin")
+
+    sub = MagicMock()
+    sub.id = "sub_abc"
+    sub.status = "active"
+    sub.org_id = "org_1"
+    sub.stripe_subscription_id = "sub_stripe_xyz"
+    sub.subscription_metadata = {}
+    mock_get_sub.return_value = sub
+
+    consumption = CreditConsumption(
+      allocation=8000,
+      consumed=8000,
+      consumed_fraction=1.0,
+      elapsed_fraction=0.03,
+      clawback_cents=9603,
+    )
+    mock_plan.return_value = consumption
+    provider = MagicMock()
+    mock_get_provider.return_value = provider
+
+    with self._patch_org_owner("OWNER"):
+      await delete_graph_op(
+        body=DeleteGraphOp(confirm="kg_x"),
+        graph_id="kg_x",
+        user=_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+        db=db,
+      )
+
+    mock_plan.assert_called_once_with(sub, db)
+    provider.cancel_subscription.assert_called_once_with(
+      "sub_stripe_xyz",
+      credit_unused_time=True,
+      clawback_cents=9603,
+      clawback_description=consumption.description,
+    )
+    assert sub.subscription_metadata[CREDIT_CONSUMPTION_SNAPSHOT]["consumed"] == 8000
+    event_data = mock_log_event.call_args.kwargs["event_data"]
+    assert event_data["clawback_cents"] == 9603
+    assert event_data["credits_consumed_fraction"] == 1.0
+
+  @pytest.mark.asyncio
+  @patch("robosystems.security.SecurityAuditLogger")
+  @patch("robosystems.operations.providers.payment_provider.get_payment_provider")
+  @patch("robosystems.models.core.billing.BillingAuditLog.log_event")
+  @patch("robosystems.models.core.billing.BillingSubscription.get_by_resource")
+  @patch("robosystems.operations.billing.invoice_credits.plan_credit_clawback")
+  async def test_a_failed_stripe_cancel_leaves_no_consumption_snapshot(
+    self,
+    mock_plan: MagicMock,
+    mock_get_sub: MagicMock,
+    _mock_log_event: MagicMock,
+    mock_get_provider: MagicMock,
+    _mock_security: MagicMock,
+  ) -> None:
+    from robosystems.operations.billing.invoice_credits import CreditConsumption
+
+    db = MagicMock()
+    self._setup_admin_membership(db, role="admin")
+
+    sub = MagicMock()
+    sub.id = "sub_abc"
+    sub.status = "active"
+    sub.org_id = "org_1"
+    sub.stripe_subscription_id = "sub_stripe_xyz"
+    sub.subscription_metadata = {}
+    mock_get_sub.return_value = sub
+    mock_plan.return_value = CreditConsumption(8000, 8000, 1.0, 0.03, 9603)
+
+    provider = MagicMock()
+    provider.cancel_subscription.side_effect = Exception("stripe is down")
+    mock_get_provider.return_value = provider
+
+    with self._patch_org_owner("OWNER"), pytest.raises(HTTPException) as exc:
+      await delete_graph_op(
+        body=DeleteGraphOp(confirm="kg_x"),
+        graph_id="kg_x",
+        user=_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+        db=db,
+      )
+
+    assert exc.value.status_code == 502
+    assert sub.subscription_metadata == {}
+    sub.cancel.assert_not_called()
 
 
 class TestDeleteGraphImmediateSuspend:
