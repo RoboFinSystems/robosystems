@@ -40,11 +40,11 @@ Prefer widening a model over replacing it.
 
 ### `fact_provenance.py`
 
-`FactProvenance` is a discriminated union tagged on `origin`. Each arm records how a fact came to exist: `pivot`, `schedule`, `derived`, `asserted`, `document`, `forecast`, `filed`. Adding an arm means adding a class with a new `origin` literal and extending the union — Pydantic dispatches on the tag.
+`FactProvenance` is a discriminated union tagged on `origin`. Each arm records how a fact came to exist: `pivot`, `rollup`, `schedule`, `derived`, `asserted`, `document`, `forecast`, `filed`, `observed`. Adding an arm means adding a class with a new `origin` literal and extending the union — Pydantic dispatches on the tag.
 
 ### `extensions/`
 
-Per-graph request/response models for the two product domains: entity, accounts, account rollups, AR/AP, closing book, fiscal calendar, forecasts, investor, journal entries, publish lists, reports, report packages, rollforward, schedules, summary, taxonomies, text blocks, transactions, trial balance.
+Per-graph request/response models for the two product domains: entity, accounts, account rollups, AR/AP, closing book, fiscal calendar, forecasts, investor, journal entries, publish lists, reports, report packages, schedules, summary, taxonomies, text blocks, transactions, trial balance.
 
 These are also the models the GraphQL read surface derives Strawberry types from — see the [GraphQL README](../../graphql/README.md). A field added to a Pydantic response model here appears on both the REST response and the GraphQL type with no further edit.
 

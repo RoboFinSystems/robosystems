@@ -82,9 +82,12 @@ client = QBClient(realm_id="123456", qb_credentials=credentials)
 ```
 
 QuickBooks-connected graphs support outbound write-back governed by
-`Connection.write_policy` (`native` / `qb_authoritative` / `hybrid`; QB defaults
-to `qb_authoritative`). Locally-authored events push back through the
-`execute-event-block` operation, which stamps `metadata.qb_external_id` so the
+`Connection.write_policy` (`native` / `qb_authoritative` / `shadow` / `hybrid`,
+the last reserved and not implemented; QB defaults to `qb_authoritative`). Under
+`shadow`, QuickBooks stays the book of record and RoboSystems only observes it:
+nothing publishes, the close posts nothing locally, and its drafts become
+expectations compared with what QuickBooks holds. Otherwise, locally-authored
+events push back through the `execute-event-block` operation, which stamps `metadata.qb_external_id` so the
 next CDC delta sync de-duplicates against the source. The close-review outbox
 surfaces `will_publish_to_qb` on the period-drafts read, so a user sees what
 closing a period will write to QuickBooks before committing.
@@ -93,8 +96,10 @@ closing a period will write to QuickBooks before committing.
 accounting: it captures every posted bank transaction into the ledger inbox of
 books the tenant keeps natively, with a Tier-0 account suggestion attached, and
 authors no chart, no elements and no GL rows. The provider guard
-(`operations/connection_service.py`) refuses it beside a live QuickBooks
-connection or on a graph with no chart of accounts.
+(`operations/connection_service.py`) rules per entity: it refuses a feed that
+would land on the group parent while QuickBooks is live, since QuickBooks keeps
+the parent's books (a subsidiary's feed is fine), and a feed for an entity with
+no chart of accounts.
 
 - `client/api.py` — `MercuryClient` over a `TokenSource`: the partner OAuth
   client's rotating tokens (`ConnectionTokenSource`, which writes the rotated
@@ -204,7 +209,7 @@ adapters/
 Create `adapters/custom_myservice/` with the same client/processors/pipeline
 shape, expose `get_dagster_components()` returning assets, jobs, sensors, and
 schedules, and import the pipeline in `dagster/definitions.py` (see the
-`# === FORK` comment). Then:
+`# FORK:` comment). Then:
 
 ```bash
 git remote add upstream https://github.com/RoboFinSystems/robosystems.git
