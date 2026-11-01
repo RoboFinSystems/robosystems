@@ -113,6 +113,10 @@ redaction in `middleware/otel/setup.py`.
 | -------------------------------------- | ---------------------- | ------------------------- | ---------------------------------------- |
 | `GET /v1/operations/{id}/stream` (SSE) | `get_current_user_sse` | **JWT only** (30-min TTL) | browser `EventSource` cannot set headers |
 
+A success through this door is audited with `auth_method: jwt_query_param`, so
+the security log shows who still depends on it. The TypeScript client stopped
+using it in 2.36.0.
+
 There used to be a second door: `POST /v1/graphs/{graph_id}/mcp` honored a
 graph-scoped API key in `?token=`, for MCP connector clients that could not set
 headers. It was the bridge to OAuth and was retired once OAuth covered those

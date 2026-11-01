@@ -891,10 +891,13 @@ async def get_current_user_sse(
   endpoint = str(request.url.path)
 
   jwt_token = None
+  auth_method = "jwt_token"
   if authorization and authorization.startswith("Bearer "):
     jwt_token = authorization[7:]
   elif token:
     jwt_token = token
+    # Named apart so the audit log shows who still needs this door.
+    auth_method = "jwt_query_param"
 
   if jwt_token:
     device_fingerprint = extract_device_fingerprint(request)
@@ -908,7 +911,7 @@ async def get_current_user_sse(
           user_id=str(user_id),
           ip_address=client_ip,
           user_agent=user_agent,
-          auth_method="jwt_token",
+          auth_method=auth_method,
         )
         return user
 
