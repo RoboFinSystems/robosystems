@@ -7,7 +7,7 @@ operation's history from any sequence number.
 import json
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any, cast
 
 import redis.asyncio as redis_async
@@ -18,7 +18,7 @@ from robosystems.config.defaults import CacheDefaults
 from robosystems.logger import logger
 
 
-class EventType(str, Enum):
+class EventType(StrEnum):
   OPERATION_STARTED = "operation_started"
   OPERATION_PROGRESS = "operation_progress"
   OPERATION_ERROR = "operation_error"

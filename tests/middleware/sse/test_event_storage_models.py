@@ -12,6 +12,10 @@ from robosystems.middleware.sse.event_storage import (
 
 
 class TestEventType:
+  def test_str_is_the_wire_name(self):
+    assert str(EventType.OPERATION_COMPLETED) == "operation_completed"
+    assert f"{EventType.OPERATION_PROGRESS}" == "operation_progress"
+
   def test_standard_events(self):
     assert EventType.OPERATION_STARTED.value == "operation_started"
     assert EventType.OPERATION_PROGRESS.value == "operation_progress"
