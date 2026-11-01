@@ -164,7 +164,8 @@ override-dependencies = ["pillow>=13.0.0"]
 # packages are exempt. To take a fresher release (a CVE fix), add `<pkg> = false` here with a
 # reason, then `uv lock --upgrade-package <pkg>`; drop the entry once the release ages past 7 days.
 exclude-newer = "7 days"
-exclude-newer-package = { ladybug = false, xbrlkit = false, robosystems-client = false }
+# pyasn1 0.6.5 and pypdf 6.21.4 are security fixes (Trivy, 2026-10-31); drop both after 2026-11-05.
+exclude-newer-package = { ladybug = false, xbrlkit = false, robosystems-client = false, pyasn1 = false, pypdf = false }
 
 [tool.setuptools]
 packages = ["robosystems"]
