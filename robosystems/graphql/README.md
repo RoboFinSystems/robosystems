@@ -158,8 +158,8 @@ For a whole new query rather than a new attribute:
 
 `_describe_from_docstrings` in `schema.py` copies every resolver's `__doc__` onto its
 GraphQL field description as the schema is composed. Strawberry itself only reads an
-explicit `@strawberry.field(description=...)` and ignores `__doc__`, which is how all 66
-entry points came to ship with no description at all while the types they return carried
+explicit `@strawberry.field(description=...)` and ignores `__doc__`, which is how every
+entry point came to ship with no description at all while the types they return carried
 581 of them — the index into the schema blank, the shapes it pointed at full.
 
 That text is published on five surfaces at once:
@@ -180,7 +180,7 @@ the case where the public wording should differ from the docstring.
 **Arguments are documented in the same docstring.** A Google-style `Args:` block is
 parsed out of the docstring, applied to the matching arguments by their Python names, and
 stripped from the field's own description so it is not published twice. `limit` and
-`offset` need no entry: they mean the same thing on all 31 fields that take them —
+`offset` need no entry: they mean the same thing on every field that takes them —
 `resolvers/_common.py` validates every pair against one shared guard — so
 `COMMON_ARGUMENT_DESCRIPTIONS` covers them, and an `Args:` entry still wins where a field
 needs to say something else.
@@ -219,25 +219,24 @@ markdown, so ``foo`` arrives as literal backticks around the word. Use single ba
 679 RST spans had to be swept out of the models when this was found, and it was invisible
 until someone read a rendered page.
 
-### The return shapes are at 36%, and the list is the record
+### The return shapes are not all documented, and the list is the record
 
-The 66 query fields are all documented. The types they return are not: **579 fields
-across 83 types**, and the tail is long — the ten largest are only 31% of it — so
-there is no subset worth sweeping.
+The query fields are all documented. Many of the types they return are not, and the
+tail is long, so there is no subset worth sweeping.
 
-`tests/graphql/extensions/test_schema_descriptions.py` carries those 83 types as
+`tests/graphql/extensions/test_schema_descriptions.py` carries those types as
 `UNDOCUMENTED_TYPES` and ratchets against it. A type **not** on that list must be
 fully documented, so the gap cannot grow and a new type can never ship blank. The
 list only shrinks: documenting a type means deleting its line, and a stale entry —
 one that is now documented, or that the schema no longer has — fails too.
 
 **Do not clear it in one pass.** These descriptions are public copy on five surfaces,
-and 579 of them written in bulk come out as "The id of the account". A vacuous
+and hundreds of them written in bulk come out as "The id of the account". A vacuous
 description is worse than a blank one: it reads as done, so nobody returns to it.
 Pay it down for the type you are already working in, where you can write something
 true.
 
-Which edit depends on how the type is built — 66 of the 83 are Pydantic-derived,
+Which edit depends on how the type is built — most are Pydantic-derived,
 where `Field(description=...)` documents the **REST schema at the same time**; the
 other 17 are hand-written Strawberry types needing `strawberry.field(description=...)`.
 
@@ -247,7 +246,7 @@ other 17 are hand-written Strawberry types needing `strawberry.field(description
 
 `InformationBlock` in `types/information_block.py` is hand-written for a different reason: `artifact.mechanics` is a discriminated union on `kind`. It is exposed as a `strawberry.scalars.JSON` payload with the `kind` tag inside, and `from_pydantic` constructs it explicitly. A real `strawberry.union(...)` is deferred until the arms grow field-level query needs. **A new block type therefore requires no change to this layer** — its mechanics ride the JSON scalar.
 
-The envelope's `FactSet` carries the typed `provenance` field (the discriminated `FactProvenance` union: `pivot`, `schedule`, `derived`, `asserted`, `document`, `forecast`, `filed`), also surfaced as a JSON scalar.
+The envelope's `FactSet` carries the typed `provenance` field (the discriminated `FactProvenance` union: `pivot`, `rollup`, `schedule`, `derived`, `asserted`, `document`, `forecast`, `filed`, `observed`), also surfaced as a JSON scalar.
 
 ## Errors
 
@@ -271,7 +270,7 @@ Add a new code when introducing a typed failure a frontend would want to handle 
 
 Tests live under `tests/graphql/extensions/`: `test_schema.py` (introspection and per-flag composition), `test_schema_limits.py` (the cost limiters), `test_context.py` (auth and context wiring), and one module per resolver group (`test_ledger.py`, `test_investor.py`, `test_information_block.py`, `test_taxonomy_block.py`).
 
-The pattern is to seed an isolated extensions schema with the `extensions_test_db` fixture, then call through `TestClient` with `POST /extensions/{graph_id}/graphql`. Assert on `response.json()["data"]` for success and `response.json()["errors"][0]["extensions"]["code"]` for typed failures. The `hello` probe is the smoke test — if it fails, auth or context wiring is broken before any domain resolver runs.
+The pattern is `schema.execute_sync()` with a mocked context (`context_value`) and the ops-layer calls patched, since the ops functions have their own tests. Assert on `result.data` for success and `result.errors[0].extensions["code"]` for typed failures. The `hello` probe is the smoke test — if it fails, auth or context wiring is broken before any domain resolver runs.
 
 ## Relationship to the write surface
 
@@ -294,4 +293,4 @@ Serialization-bundle downloads live here as the `reportDownloadUrl(reportId, for
 
 The catch: neither a GraphQL JSON response nor an `OperationEnvelope` can carry a raw binary zip. So **every flavor resolves to a presigned S3 URL** — the holon is stamped at publish time; the Tavi and XBRL 2.1 are materialized and cached on first request (`operations/roboledger/reads/reports.py:get_report_download_url`). The resolver only ever returns a URL string; the client follows it to S3.
 
-There is no analytical view-operation home for it either: view operations (`build-fact-grid`, `live-financial-statement`) are LadybugDB-backed analytical queries, whereas a presigned-URL lookup is a plain OLTP read.
+There is no analytical-operation home for it either: those compute an answer (`build-fact-grid` over LadybugDB, `live-financial-statement` over the OLTP ledger), whereas a presigned-URL lookup is a plain read of stored state.

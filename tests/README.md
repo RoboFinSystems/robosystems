@@ -15,7 +15,7 @@ just test-full              # everything, including tests marked slow
 
 `just test <module>` takes a path *relative to* `tests/`, so `just test adapters` and `just test middleware/billing` work; `just test tests/adapters` does not. To run an arbitrary path, file, or node id, call pytest directly.
 
-The recipes run the suite in parallel (`-n auto --dist loadfile`); see [Running in parallel](#running-in-parallel) for what that isolates and the two rules it imposes on tests.
+The recipes run the suite in parallel (`-n logical` or `-n auto`, with `--dist loadfile`); see [Running in parallel](#running-in-parallel) for what that isolates and the two rules it imposes on tests.
 
 Always go through `uv`:
 
@@ -54,7 +54,7 @@ uv run pytest -m "unit and not slow"
 uv run pytest tests/middleware/billing/test_enforcement.py
 uv run pytest tests/middleware/billing/test_enforcement.py::TestCheckCanProvisionGraph
 uv run pytest tests/middleware/billing/test_enforcement.py::TestCheckCanProvisionGraph::test_can_provision_with_valid_subscription
-uv run pytest "tests/routers/auth/test_login.py::test_login[success]"
+uv run pytest "tests/routers/auth/test_login_mfa.py::TestLoginMfaBranch::test_unenrolled_privileged_forced_to_enroll[owner]"
 
 # By name pattern
 uv run pytest -k "storage and billing"
@@ -65,7 +65,7 @@ uv run pytest --lf     # last failed
 uv run pytest --ff     # failed first, then the rest
 ```
 
-`pytest.ini` sets `addopts = -xv`, so runs are verbose and stop at the first failure by default. Pass `-p no:cacheprovider` or override with `--maxfail=N` when you want to see more than one failure at a time.
+`pytest.ini` sets `addopts = -xv`, so runs are verbose and stop at the first failure by default. Override with `--maxfail=N` when you want to see more than one failure at a time.
 
 ## Fixtures
 
@@ -73,13 +73,13 @@ uv run pytest --ff     # failed first, then the rest
 
 | Fixture                   | Scope    | What it gives you                                        |
 | ------------------------- | -------- | -------------------------------------------------------- |
-| `test_db`                 | session  | The test PostgreSQL database, already migrated            |
+| `test_db`                 | session  | The test PostgreSQL database, built by `Base.metadata.create_all` |
 | `db_session`              | function | A session whose transaction is rolled back after the test |
 | `client`                  | module   | FastAPI `TestClient` wired to `test_db`                   |
 | `client_with_mocked_auth` | function | `TestClient` with authentication stubbed out              |
 | `async_client`            | function | `httpx` async client for async endpoint tests             |
 | `mock_get_current_user`   | module   | Mocked authentication dependency                          |
-| `test_user`               | function | A user with an API key                                    |
+| `test_user`               | function | A user who owns a personal org                            |
 | `test_user_token`         | function | A JWT for `test_user`                                     |
 | `other_user`              | function | A second user, for cross-tenant isolation tests           |
 | `test_org`                | function | An organization owning `sample_graph`                     |
@@ -89,7 +89,6 @@ uv run pytest --ff     # failed first, then the rest
 | `temp_lbug_db`            | function | A throwaway on-disk LadybugDB database                    |
 | `lbug_repository`         | function | A repository bound to `temp_lbug_db`                      |
 | `lbug_repository_with_schema` | function | The same, with the base schema installed                 |
-| `mock_sec_client`         | function | Stubbed SEC EDGAR client                                  |
 
 Packages add their own `conftest.py` — check the nearest one before writing a new fixture, and reuse rather than duplicate.
 
@@ -100,17 +99,17 @@ def test_with_client(client):
 
 
 def test_with_auth(client_with_mocked_auth):
-    response = client_with_mocked_auth.get("/v1/user/profile")
+    response = client_with_mocked_auth.get("/v1/user")
     assert response.status_code == 200
 
 
 def test_with_user(test_user):
-    assert test_user.api_key is not None
+    assert test_user.email.endswith("@example.com")
 ```
 
 ## Running in parallel
 
-`just test`, `test-full`, `test-cov` and CI run `pytest -n auto --dist loadfile` (pytest-xdist): one worker per core, each file's tests kept on one worker. The full non-slow suite is ~2 minutes on a 14-core machine and ~6 on the 2-core CI runner, against 12+ serially.
+`just test` and CI run `pytest -n logical --dist loadfile` (pytest-xdist): one worker per vCPU, each file's tests kept on one worker. `test-full` and `test-cov` use `-n auto`, one worker per physical core. A serial run takes many times longer.
 
 **What is isolated per worker, and what is not** (`tests/xdist_workers.py`, invoked from `tests/__init__.py`):
 
@@ -127,7 +126,7 @@ Nothing here runs outside xdist: a plain `uv run pytest path/to/test.py` still u
 
 A third class: tests that consult a real resource whose answer depends on host load (the Graph API admission controller reads CPU and memory headroom) must mock it, or they fail only when the machine is busy — which under xdist is always.
 
-**Verifying a change to the harness.** Run the suite twice at `-n 2` — the runner's worker count, which is a different file order from `-n auto` on a big machine — and look for both failures and cleanup warnings. A test that passes alone and fails in the suite is order-dependent: reproduce it serially by naming the earlier file and the failing file in that order on the command line.
+**Verifying a change to the harness.** Run the suite twice at `-n 2` — a different file order from `-n logical` on a big machine — and look for both failures and cleanup warnings. A test that passes alone and fails in the suite is order-dependent: reproduce it serially by naming the earlier file and the failing file in that order on the command line.
 
 ## Test environment
 
@@ -289,7 +288,7 @@ mock_sessionmaker.return_value.return_value.__enter__.return_value = mock_sessio
 
 `test-ci.yml` runs the gate on every pull request and on pushes to `main`; the staging and production deploy workflows call the same reusable `test.yml` before deploying, but they are manual dispatches, not push triggers.
 
-The gate is close to `just test-all` but not identical. CI runs the test suite (`pytest -m "not slow"`), the dbt tests, `ruff check`, `basedpyright`, CloudFormation lint, workflow lint, and a Trivy dependency scan. It does **not** run a formatting step — `just test-all` calls `just format`, which rewrites files rather than checking them, so unformatted code passes CI and gets reformatted on your next local run. Run `just test-all` locally before opening a pull request; the suite runs in parallel and takes a few minutes. CI's `-n auto` on its 2-core runner brings the pytest step to ~6 minutes against a 15-minute step timeout.
+The gate is close to `just test-all` but not identical. CI runs the test suite (`pytest -m "not slow"`), the dbt tests, `ruff check`, `basedpyright`, CloudFormation lint, workflow lint, and a Trivy dependency scan. It does **not** run a formatting step — `just test-all` calls `just format`, which rewrites files rather than checking them, so unformatted code passes CI and gets reformatted on your next local run. Run `just test-all` locally before opening a pull request; the suite runs in parallel and takes a few minutes. CI's `-n logical` uses every vCPU on the runner, which keeps the pytest step inside its timeout.
 
 ## Reference
 

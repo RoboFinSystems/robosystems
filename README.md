@@ -126,7 +126,7 @@ just demo-roboledger        # End-to-end RoboLedger demo: bulk OLTP, schedules, 
 just demo-custom-graph      # Builds custom graph schema with relationship networks
 just demo-coffee-roaster    # Synthetic manufacturing scenario
 just demo-saas-startup      # Synthetic SaaS scenario
-just demo-roboinvestor      # Cross-graph traversal from a private holding to its issuer's filed report (run demo-saas-startup first)
+just demo-roboinvestor      # Cross-graph traversal from a private holding to its issuer's filed report (builds the issuer's ledger itself on first run)
 ```
 
 Each demo has a corresponding [documentation page](https://robosystems.ai/docs/technical) with detailed guides.
@@ -256,7 +256,7 @@ Details: [Enterprise SSO & SCIM](https://robosystems.ai/docs/technical/enterpris
 ### AI Operator System
 
 - Unified architecture: stateless Operators (Claude/MCP executors) with protocol-based service injection
-- Dual execution: API (sync/SSE) and background worker (Valkey queue + SSE progress)
+- One execution path: the API gates and enqueues, every Operator runs on the background worker (Valkey queue + SSE progress), and `?mode=sync` waits on the result
 - Automatic credit tracking per AI call — Operators cannot forget billing
 - Extensible: add new Operators for new AI workflows; they inherit execution, credit tracking, and progress streaming automatically
 
@@ -273,7 +273,7 @@ A curated knowledge graph of US public company financial data from SEC EDGAR XBR
 The full corpus is also published monthly as one LadybugDB file on Hugging Face — [robosystems/sec-xbrl-knowledge-graphs](https://huggingface.co/datasets/robosystems/sec-xbrl-knowledge-graphs) (tens of GiB to download, well over 100 GiB on disk; the dataset card carries each snapshot's exact sizes). `just sec-dump` pulls it into `data/lbug-dbs` for local Cypher, API, and MCP with no pipeline run; see the [SEC XBRL Pipeline](https://robosystems.ai/docs/technical/sec-xbrl-pipeline) guide.
 
 - **Pipeline**: EDGAR → Download → Process (Parquet) → Stage (DuckDB) → Enrich (Icebug+fastembed) → Materialize (LadybugDB) → Index + Embed (OpenSearch)
-- **Graph**: the base schema plus the `roboledger` extension — 20 node types and 41 relationship types modeling the full XBRL reporting hierarchy
+- **Graph**: the base schema plus the `roboledger` extension, modeling the full XBRL reporting hierarchy
 - **Extraction**: every filing is parsed by [xbrlkit](https://xbrlkit.com) — the same open library behind the `disclosures` and `information-block` tools, the holon viewer, and its own MCP server
 - **Search**: Hybrid BM25 + KNN vector search across narrative sections and iXBRL disclosures
 - **Enrichment**: Semantic element mapping, statement classification, and disclosure tagging across the shared repository's disclosures
@@ -325,7 +325,7 @@ Full-featured SDK for web and Node.js applications with TypeScript support.
 npm install @robosystems/client
 ```
 
-- **Features**: Type-safe API calls, automatic retry logic, connection pooling, streaming support
+- **Features**: Type-safe API calls, automatic retry logic, streaming support
 - **Use Cases**: Web applications, Node.js backends, React/Vue/Angular frontends
 - **Documentation**: [npm](https://www.npmjs.com/package/@robosystems/client) | [GitHub](https://github.com/RoboFinSystems/robosystems-typescript-client)
 
@@ -347,7 +347,7 @@ pip install robosystems-client
 
 **Getting Started & Platform:**
 
-- [Home / Overview](https://robosystems.ai/docs/technical) · [Quick Start](https://robosystems.ai/docs/technical/local-development) · [Core Concepts](https://robosystems.ai/docs/technical/core-concepts) · [Architecture Overview](https://robosystems.ai/docs/technical/architecture-overview) · [Bootstrap Guide](https://robosystems.ai/docs/technical/bootstrap-guide) · [Windows Setup (WSL2)](https://robosystems.ai/docs/technical/windows-setup-with-wsl2) · [Security & Compliance](https://robosystems.ai/docs/technical/security-and-compliance)
+- [Home / Overview](https://robosystems.ai/docs/technical) · [Local Development](https://robosystems.ai/docs/technical/local-development) · [Core Concepts](https://robosystems.ai/docs/technical/core-concepts) · [Architecture Overview](https://robosystems.ai/docs/technical/architecture-overview) · [Bootstrap Guide](https://robosystems.ai/docs/technical/bootstrap-guide) · [Windows Setup (WSL2)](https://robosystems.ai/docs/technical/windows-setup-with-wsl2) · [Security & Compliance](https://robosystems.ai/docs/technical/security-and-compliance)
 
 **Operations Layer:**
 

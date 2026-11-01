@@ -66,8 +66,8 @@ def build_fiscal_calendar_response(session: Session, ...) -> FiscalCalendarRespo
     ...  # query, return Pydantic model
 
 # commands/fiscal_calendar.py
-def close_period(session: Session, body: ClosePeriodRequest) -> ClosePeriodResponse:
-    ...  # validate, mutate, return Pydantic model
+def close_period(session: Session, ...) -> ClosePeriodResponse:
+    ...  # validate, mutate, commit, return Pydantic model
 ```
 
 ## Information Block registry
@@ -79,7 +79,6 @@ def close_period(session: Session, body: ClosePeriodRequest) -> ClosePeriodRespo
 | `block_type` | Construction mode | Handler | Surfaces in library |
 | ------------ | ----------------- | ------- | ------------------- |
 | `schedule` | declarative | `schedule.py` | No |
-| `rollforward` | declarative | `rollforward.py` | No |
 | `forecast` | declarative | `forecast.py` | No |
 | `balance_sheet` | compositional | `statement.py` | Yes |
 | `income_statement` | compositional | `statement.py` | Yes |
@@ -88,8 +87,9 @@ def close_period(session: Session, body: ClosePeriodRequest) -> ClosePeriodRespo
 | `comprehensive_income` | compositional | `statement.py` | Yes |
 | `regulatory_disclosure` | compositional | `disclosure.py` | No |
 | `metric` | derivative | `metric.py` | No |
+| `reconciliation` | derivative | `reconciliation.py` | No |
 
-Not every block type is authored through `create-information-block`. Statements are produced by `create-report`; disclosure structures are authored as vocabulary via `create-taxonomy-block`; metrics are written by `compute-metrics` / `assert-metrics`. Those types install not-implemented create/update/delete handlers (HTTP 501) while their `build_envelope` paths are fully wired and serve read envelopes normally.
+Not every block type is authored through `create-information-block`. Statements are produced by `create-report`; disclosure structures are authored as vocabulary via `create-taxonomy-block`; metrics are written by `compute-metrics` / `assert-metrics`; reconciliations by `refresh-reconciliations`. Those types install not-implemented create/update/delete handlers (HTTP 501) while their `build_envelope` paths are fully wired and serve read envelopes normally.
 
 Supporting modules: `envelope.py` (shared ORM→Lite projectors), `metrics.py` (the metric write paths), `chart.py` (chart View projection), `text_block.py` (narrative disclosure envelopes), and `forecast_compute.py` / `forecast_articulation.py` / `forecast_history.py` (the forecast derivation engine). See the [Information Block README](information_block/README.md) for the subsystem in detail.
 
@@ -103,4 +103,4 @@ Supporting modules: `envelope.py` (shared ORM→Lite projectors), `metrics.py` (
 
 ## Platform services
 
-`graph/`, `providers/`, `aws/`, and the top-level service modules are platform infrastructure. They predate the domain kernels and use async service classes rather than the session-in / Pydantic-out function contract. They cover graph lifecycle (creation, subscriptions, credits, tiers), LadybugDB backup and ingestion (under `graph/engine/`), and external provider management.
+`graph/`, `providers/`, `aws/`, and the top-level service modules are platform infrastructure. They predate the domain kernels and use service modules rather than the session-in / Pydantic-out function contract, sync in some (`credit_service`, `subscription_service`, `document_service`) and async in others (`connection_service`, `graph_creation_service`). They cover graph lifecycle (creation, subscriptions, credits, tiers), LadybugDB backup and ingestion (under `graph/engine/`), and external provider management.

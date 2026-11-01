@@ -21,7 +21,7 @@ Every graph gets its own PostgreSQL schema inside the `extensions` database, key
 
 ```
 extensions database:
-├── public/           → migration history (alembic_version), shared functions
+├── public/           → migration history (alembic_version), shared functions, shared framework tables, its own copy of each tenant table
 ├── kg123abc.../      → Entity, Transaction, Entry, LineItem, Element, Structure, Fact, Portfolio, ...
 ├── kg456def.../      → same tables, fully isolated from kg123
 └── ...
@@ -29,7 +29,7 @@ extensions database:
 
 Isolation is enforced by PostgreSQL via `SET search_path`. Two tenants can hold rows with the same ULID and never collide, because they live in different schemas.
 
-**Every table in this directory is tenant-scoped.** None of the models set an explicit `__table_args__.schema` — that absence is the signal to `provision_tenant_schema` that the table belongs in each `kg*` schema, not in `public`.
+**Almost every table in this directory is tenant-scoped.** A model with no explicit `__table_args__` schema belongs in each `kg*` schema — that absence is the signal to `provision_tenant_schema`. The exceptions are the shared tables in `framework.py`, `framework_package.py`, `framework_bridge.py`, and `bridge.py`, which declare `{"schema": "public"}`: one copy, read by every tenant.
 
 ### Opening a session
 
@@ -45,9 +45,9 @@ The context manager validates the graph id against `_sanitize_schema` (hard stop
 
 **Never hand-roll a session against the extensions engine.** The `SET search_path` step is load-bearing for tenant isolation; skipping it leaks one tenant's writes into another's schema.
 
-### Lazy schema provisioning
+### Schema provisioning
 
-A new graph has no tenant schema until something needs one. `provision_tenant_schema(graph_id)` creates it on first extension access — typically during connection setup or manual entity creation:
+A graph gets its tenant schema when it is created: `GraphCreationService` calls `provision_tenant_schema(graph_id)` for any graph whose extensions need one:
 
 ```python
 from robosystems.db.extensions import provision_tenant_schema
@@ -57,7 +57,7 @@ provision_tenant_schema("kg123abc456")
 # ExtensionsBase.metadata that doesn't declare its own schema.
 ```
 
-Once provisioned, the schema persists for the life of the graph, and later model changes arrive via migrations rather than re-provisioning.
+Sync paths go through `ensure_tenant_schema`, which provisions only if the schema is missing. Once provisioned, the schema persists for the life of the graph, and later model changes arrive via migrations rather than re-provisioning.
 
 ## Base vs extension shelving
 
@@ -74,7 +74,7 @@ Top-level files mirror `schemas/base.py` — **base ontology concepts** applicab
 
 | Module | Concept |
 | ------ | ------- |
-| `entity.py` | `Entity` — the parent entity for a graph |
+| `entity.py` | `Entity` — a company in the graph's reporting group: the group parent, its subsidiaries, or a `linked` company received with a shared report |
 | `taxonomy.py` | `Taxonomy` — grouping container (CoA, reporting, mapping, schedule) plus the extension chain |
 | `element.py` | `Element` — CoA elements and US GAAP reporting elements, unified. `Account` is an alias of `Element` |
 | `element_label.py`, `element_reference.py`, `element_trait.py` | Supplementary labels, ASC citations, trait bindings (attached by qname) |
@@ -151,28 +151,69 @@ The pipeline lives in `operations/extensions/` (`materialize.py`, `loader.py`, `
 
 ## Migrations
 
-Always autogenerate. The workflow matches the platform's, with `extensions` as the second argument to every recipe:
+Always start from autogenerate. The workflow matches the platform's, with `extensions` as the second argument to every recipe and one extra step, the fan-out:
 
 ```bash
 # 1. Edit a SQLAlchemy model in this directory
 just migrate-create "add bank_feeds table" extensions
 
-# 2. Review the generated file in migrations/extensions/versions/
-#    Verify every op.create_table / op.add_column call is schema-less
-#    (tenant-scoped). Autogenerate against a multi-tenant database can
-#    otherwise target the wrong schema.
+# 2. Review the generated file in migrations/extensions/versions/ and
+#    rewrite its body to reach every tenant schema (below). Autogenerate
+#    sees only `public`, and can render unrelated drift there too.
 
 just migrate-up extensions
 ```
 
 `just migrate-current extensions`, `just migrate-history extensions`, `just migrate-down extensions` (local only), and `just migrate-reset extensions` (destructive, local only) round out the set. Config is in `migrations/extensions.ini`; revisions live under `migrations/extensions/versions/`.
 
-### Multi-tenant caveat
+### Fanning out to tenant schemas
 
-Alembic applies migrations to `public` by default, not to tenant schemas. Because the generated `op.create_table` / `op.add_column` calls carry no `schema=` kwarg:
+Alembic applies migrations to `public`, not to tenant schemas. A generated `op.create_table` / `op.add_column` stops there:
 
 - **New tenant schemas** provisioned after the migration pick up the new shape automatically, because `provision_tenant_schema` reads `ExtensionsBase.metadata` at provision time.
-- **Existing tenant schemas** need the same DDL applied per schema. `robosystems/db/extensions.py` has the tooling for iterating tenants during an alter; the pattern is to migrate `public` first, then loop over existing schemas.
+- **Existing tenant schemas** get the change only if the migration applies it to each one. Without that it is silent in dev, where tenants are provisioned fresh at head, and a runtime failure in production, where the column is missing from every customer schema.
+
+So the migration body applies the same DDL to `public` and to every tenant, using the helpers in `migrations/extensions/helpers.py`:
+
+```python
+from alembic import op
+from sqlalchemy.engine import Connection
+
+from migrations.extensions.helpers import TenantOps, for_each_tenant_schema
+
+
+def _expand(conn: Connection, schema: str) -> None:
+  t = TenantOps(conn, schema)
+  t.create_table(
+    "bank_feeds",
+    "id VARCHAR PRIMARY KEY, transaction_date DATE NOT NULL, "
+    "amount BIGINT NOT NULL, created_at TIMESTAMP WITH TIME ZONE NOT NULL, "
+    "CONSTRAINT check_bank_feed_amount CHECK (amount >= 0)",
+  )
+  t.create_index("idx_bank_feeds_date", "bank_feeds", ["transaction_date"])
+
+
+def _contract(conn: Connection, schema: str) -> None:
+  t = TenantOps(conn, schema)
+  t.drop_index("idx_bank_feeds_date")
+  t.drop_table("bank_feeds")
+
+
+def upgrade() -> None:
+  conn = op.get_bind()
+  _expand(conn, "public")
+  for_each_tenant_schema(conn, _expand)
+
+
+def downgrade() -> None:
+  conn = op.get_bind()
+  for_each_tenant_schema(conn, _contract)
+  _contract(conn, "public")
+```
+
+`TenantOps` also carries the column, constraint, and raw-SQL operations. For a single new column, `add_tenant_column(table, column, type_sql)` is the one-call form: it adds the column to `public` and to every tenant.
+
+`tests/migrations/test_extensions_tenant_fanout.py` fails CI when a migration issues `op.*` DDL on a tenant table with no fan-out in the file. It checks the file, not each operation, so one fan-out satisfies it: make sure every change in the migration reaches the tenants. A table that declares `{"schema": "public"}` is not a tenant table and needs no fan-out. A genuinely public-only change to a tenant table opts out with the marker comment `# tenant-fanout: not-required`.
 
 That is the operational cost of schema-per-graph tenancy, paid for explicit PostgreSQL-level isolation of financial data.
 
@@ -204,7 +245,7 @@ Adding `BankFeed` to the roboledger domain:
 
 2. **Export it** from `roboledger/__init__.py` and from `extensions/__init__.py`.
 3. **Generate the migration**: `just migrate-create "add bank_feeds table" extensions`.
-4. **Review and apply**, then confirm the table exists in a tenant schema (`\dt kg….*` in psql).
+4. **Rewrite its body to fan out** (see [Fanning out to tenant schemas](#fanning-out-to-tenant-schemas)), apply it, then confirm the table exists in a tenant schema (`\dt kg….*` in psql).
 5. **If it must reach the graph**, add the corresponding node type to `robosystems/schemas/extensions/roboledger.py` and a materialization step in `operations/extensions/`.
 6. **If an API reads or writes it**, add Pydantic models under `robosystems/models/api/extensions/` and wire them through `operations/roboledger/{reads,commands}/`. The model file is a schema definition, not a domain object — no business logic there.
 
