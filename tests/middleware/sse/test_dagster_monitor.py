@@ -617,6 +617,35 @@ class TestRunAndMonitorDagsterJob:
     assert "connection refused" in error_call[0][1]
 
 
+class TestUntrackedRun:
+  """Callers that pass `operation_id=None` (account emails) store no events."""
+
+  @pytest.mark.unit
+  async def test_emits_nothing_without_operation_id(self, monitor, mock_event_storage):
+    await monitor.emit_started(None, "send_email_job", "run-abc")
+    await monitor.emit_progress(None, "Job status: STARTED", progress_percent=50)
+    await monitor.emit_completion(None, {"run_id": "run-abc"})
+    await monitor.emit_error(None, "Dagster job failed")
+
+    mock_event_storage.store_event_sync.assert_not_called()
+    mock_event_storage.get_operation_result_sync.assert_not_called()
+
+  @pytest.mark.unit
+  async def test_watches_the_run_to_completion(self, monitor, mock_event_storage):
+    monitor.get_run_status = MagicMock(
+      side_effect=[
+        {"status": "running", "dagster_status": "STARTED", "progress_percent": 50},
+        {"status": "completed", "dagster_status": "SUCCESS", "progress_percent": 100},
+      ]
+    )
+
+    result = await monitor.monitor_run("run-abc", None)
+
+    assert result["status"] == "completed"
+    assert monitor.get_run_status.call_count == 2
+    mock_event_storage.store_event_sync.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # submit_dagster_job_sync
 # ---------------------------------------------------------------------------

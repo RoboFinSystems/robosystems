@@ -101,10 +101,12 @@ class DagsterRunMonitor:
 
   async def emit_started(
     self,
-    operation_id: str,
+    operation_id: str | None,
     job_name: str,
     run_id: str,
   ):
+    if operation_id is None:
+      return
     try:
       await asyncio.to_thread(
         self.event_storage.store_event_sync,
@@ -122,11 +124,13 @@ class DagsterRunMonitor:
 
   async def emit_progress(
     self,
-    operation_id: str,
+    operation_id: str | None,
     message: str,
     progress_percent: float | None = None,
     details: dict[str, Any] | None = None,
   ):
+    if operation_id is None:
+      return
     event_data = {
       "message": message,
       "progress_percent": progress_percent,
@@ -146,11 +150,13 @@ class DagsterRunMonitor:
 
   async def emit_completion(
     self,
-    operation_id: str,
+    operation_id: str | None,
     result: dict[str, Any],
   ):
     """Emit completion, merging the result the job recorded on the operation
     metadata with the monitoring result."""
+    if operation_id is None:
+      return
     try:
       stored_result = (
         await asyncio.to_thread(
@@ -175,10 +181,12 @@ class DagsterRunMonitor:
 
   async def emit_error(
     self,
-    operation_id: str,
+    operation_id: str | None,
     error: str,
     error_details: dict[str, Any] | None = None,
   ):
+    if operation_id is None:
+      return
     try:
       await asyncio.to_thread(
         self.event_storage.store_event_sync,
@@ -196,7 +204,7 @@ class DagsterRunMonitor:
   async def monitor_run(
     self,
     run_id: str,
-    operation_id: str,
+    operation_id: str | None,
   ) -> dict[str, Any]:
     """Poll a run to completion, emitting an event on each status change.
 
@@ -278,13 +286,14 @@ class DagsterRunMonitor:
 
 async def run_and_monitor_dagster_job(
   job_name: str,
-  operation_id: str,
+  operation_id: str | None,
   run_config: dict[str, Any] | None = None,
   tags: dict[str, str] | None = None,
 ) -> dict[str, Any]:
   """Submit a Dagster job and monitor it to completion via SSE.
 
   Returns the final run status; on failure emits an error event and re-raises.
+  With no `operation_id` the run is still watched, but no events are stored.
   """
   monitor = DagsterRunMonitor()
 
