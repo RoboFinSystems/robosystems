@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Signal handling for graceful shutdown
-trap 'echo "Received shutdown signal"; kill -TERM $PID 2>/dev/null || true; wait $PID; exit 0' SIGTERM SIGINT
+trap 'echo "Received shutdown signal"; exit 0' SIGTERM SIGINT
 
 # ============================================================================
 # Dagster Run Task Detection
