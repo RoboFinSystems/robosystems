@@ -305,7 +305,7 @@ As you make changes, choose the right restart command:
 
 | Command | Use when |
 | --- | --- |
-| **`just restart`** | You changed Python code. Source is volume-mounted, so a container restart picks it up. |
+| **`just restart`** | You changed Python code or added a migration. Source is volume-mounted, so a container restart picks it up, and the Dagster daemon applies any new migrations as it boots. |
 | **`just rebuild`** | You changed dependencies, environment variables, or a Dockerfile. A plain restart will **not** pick these up. |
 | **`just upgrade`** | You pulled new commits and want the latest published images, recreating only what changed. |
 | **`just reset-local`** | You edited the taxonomy framework source (`frameworks/**/taxonomy.jsonld`). It tears the stack down, wipes local data, rebuilds, and reseeds the library; validate the edit first with `just framework-validate`. |
