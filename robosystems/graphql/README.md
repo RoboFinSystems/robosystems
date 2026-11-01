@@ -219,25 +219,24 @@ markdown, so ``foo`` arrives as literal backticks around the word. Use single ba
 679 RST spans had to be swept out of the models when this was found, and it was invisible
 until someone read a rendered page.
 
-### The return shapes are at 36%, and the list is the record
+### The return shapes are not all documented, and the list is the record
 
-The query fields are all documented. The types they return are not: **579 fields
-across 83 types**, and the tail is long — the ten largest are only 31% of it — so
-there is no subset worth sweeping.
+The query fields are all documented. Many of the types they return are not, and the
+tail is long, so there is no subset worth sweeping.
 
-`tests/graphql/extensions/test_schema_descriptions.py` carries those 83 types as
+`tests/graphql/extensions/test_schema_descriptions.py` carries those types as
 `UNDOCUMENTED_TYPES` and ratchets against it. A type **not** on that list must be
 fully documented, so the gap cannot grow and a new type can never ship blank. The
 list only shrinks: documenting a type means deleting its line, and a stale entry —
 one that is now documented, or that the schema no longer has — fails too.
 
 **Do not clear it in one pass.** These descriptions are public copy on five surfaces,
-and 579 of them written in bulk come out as "The id of the account". A vacuous
+and hundreds of them written in bulk come out as "The id of the account". A vacuous
 description is worse than a blank one: it reads as done, so nobody returns to it.
 Pay it down for the type you are already working in, where you can write something
 true.
 
-Which edit depends on how the type is built — 66 of the 83 are Pydantic-derived,
+Which edit depends on how the type is built — most are Pydantic-derived,
 where `Field(description=...)` documents the **REST schema at the same time**; the
 other 17 are hand-written Strawberry types needing `strawberry.field(description=...)`.
 

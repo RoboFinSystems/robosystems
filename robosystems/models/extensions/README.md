@@ -183,32 +183,32 @@ from migrations.extensions.helpers import TenantOps, for_each_tenant_schema
 
 
 def _expand(conn: Connection, schema: str) -> None:
-    t = TenantOps(conn, schema)
-    t.create_table(
-        "bank_feeds",
-        "id VARCHAR PRIMARY KEY, transaction_date DATE NOT NULL, "
-        "amount BIGINT NOT NULL, created_at TIMESTAMP WITH TIME ZONE NOT NULL, "
-        "CONSTRAINT check_bank_feed_amount CHECK (amount >= 0)",
-    )
-    t.create_index("idx_bank_feeds_date", "bank_feeds", ["transaction_date"])
+  t = TenantOps(conn, schema)
+  t.create_table(
+    "bank_feeds",
+    "id VARCHAR PRIMARY KEY, transaction_date DATE NOT NULL, "
+    "amount BIGINT NOT NULL, created_at TIMESTAMP WITH TIME ZONE NOT NULL, "
+    "CONSTRAINT check_bank_feed_amount CHECK (amount >= 0)",
+  )
+  t.create_index("idx_bank_feeds_date", "bank_feeds", ["transaction_date"])
 
 
 def _contract(conn: Connection, schema: str) -> None:
-    t = TenantOps(conn, schema)
-    t.drop_index("idx_bank_feeds_date")
-    t.drop_table("bank_feeds")
+  t = TenantOps(conn, schema)
+  t.drop_index("idx_bank_feeds_date")
+  t.drop_table("bank_feeds")
 
 
 def upgrade() -> None:
-    conn = op.get_bind()
-    _expand(conn, "public")
-    for_each_tenant_schema(conn, _expand)
+  conn = op.get_bind()
+  _expand(conn, "public")
+  for_each_tenant_schema(conn, _expand)
 
 
 def downgrade() -> None:
-    conn = op.get_bind()
-    for_each_tenant_schema(conn, _contract)
-    _contract(conn, "public")
+  conn = op.get_bind()
+  for_each_tenant_schema(conn, _contract)
+  _contract(conn, "public")
 ```
 
 `TenantOps` also carries the column, constraint, and raw-SQL operations. For a single new column, `add_tenant_column(table, column, type_sql)` is the one-call form: it adds the column to `public` and to every tenant.
