@@ -139,6 +139,8 @@ services:
       - .env
     volumes:
       - ./robosystems:${ROBOSYSTEMS_IMAGE:+/mnt/checkout}/app/robosystems
+      # Boot migrations must match the checkout, not the image
+      - ./migrations:${ROBOSYSTEMS_IMAGE:+/mnt/checkout}/app/migrations
       - ./dagster_home/storage:/app/dagster_home/storage
       - ./data/staging:/app/data/staging
       - ./data/artifacts:/app/data/artifacts
