@@ -116,7 +116,7 @@ curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/materialize" 
 ```bash
 just start                 # Start full Docker stack
 just upgrade               # Fetch latest images (or rebuild) and recreate what changed
-just restart               # Quick restart (Python code changes only)
+just restart               # Quick restart (Python code and new migrations)
 just rebuild               # Full rebuild (dependency/Dockerfile changes)
 just test                  # Run tests (excludes slow/integration)
 just logs api              # View API logs
@@ -172,7 +172,7 @@ just demo-roboledger --skeleton           # Skeleton: user + empty roboledger gr
 ## Code Standards
 
 - **Python 3.14** with uv package management
-- **Ruff** formatting (88-char lines, double quotes)
+- **Ruff** formatting (88-char lines, 2-space indent, double quotes)
 - **basedpyright** for type checking
 - **Self-documenting code**: Prefer clear names over comments; add comments only for non-obvious logic
 - **Emojis**: Only in interactive scripts (`/examples/`), never in production code or logs
@@ -196,13 +196,16 @@ async def endpoint(
 ### Service Layer Pattern
 
 ```python
-from robosystems.operations.graph import CreditService, EntityGraphService
+from robosystems.operations.graph import CreditService
 
 # Business logic in operations, not routers
-credit_service = CreditService(user_id, graph_id)
-if await credit_service.has_sufficient_credits("operation"):
-    result = await entity_service.execute(...)
-    await credit_service.consume_credits("operation")
+credit_service = CreditService(session)
+balance = credit_service.check_credit_balance(graph_id, required_credits)
+if balance["has_sufficient_credits"]:
+    response = call_model(...)
+    credit_service.consume_ai_tokens(
+        graph_id, input_tokens, output_tokens, model, "operation description"
+    )
 ```
 
 ### Database Migrations
@@ -233,7 +236,7 @@ Workflow for any change:
 1. Update the SQLAlchemy model in `/robosystems/models/core/` or `/robosystems/models/extensions/`
 2. Generate the migration against the correct database — `just migrate-create "msg"` for platform, `just migrate-create "msg" extensions` for extensions
 3. Review the generated file (autogenerate misses enum changes, CHECK constraints, some index changes — fix those by hand)
-4. Apply with `just migrate-up` or `just migrate-up extensions`
+4. Apply with `just migrate-up` or `just migrate-up extensions`. On a local build the Dagster daemon mounts `migrations/` and `frameworks/` from the checkout and also applies new migrations when it boots
 
 ## Architecture Overview
 
@@ -241,7 +244,7 @@ Workflow for any change:
 robosystems/
 ├── routers/                      # API endpoints (thin layer, calls operations)
 │   ├── extensions/               # Extensions command + analytical view surface
-│   │   ├── roboledger/           # operations.py + views.py (build-fact-grid, disclosures, information-block)
+│   │   ├── roboledger/           # operations/ + reads.py + views.py (build-fact-grid, disclosures, information-block)
 │   │   │                         # /extensions/roboledger/{g}/operations/*
 │   │   └── roboinvestor/         # /extensions/roboinvestor/{g}/operations/*
 │   └── …                         # Core platform routers (graphs, billing, auth, …)
@@ -262,10 +265,11 @@ robosystems/
 │   ├── roboinvestor/
 │   │   ├── reads/                # portfolios, securities, positions, holdings
 │   │   └── commands/             # portfolios, securities, positions
-│   ├── graph/                    # Graph services (credit, entity, subscription)
+│   ├── graph/                    # Graph services (credit, creation, subscription, deprovision)
 │   ├── extensions/               # OLTP→OLAP materialization (materialize.py, loader.py, staleness.py)
 │   ├── operators/                # AI Operator operations (Claude/MCP executors — distinct from REA Agent counterparty model)
-│   └── providers/                # Provider registry and implementations
+│   ├── providers/                # Provider registry and implementations
+│   └── …                         # event_block, information_block, taxonomy_block, serialization, search, billing, memory, …
 ├── middleware/                   # Cross-cutting concerns
 │   ├── auth/                     # Authentication (JWT, API keys, cross-app SSO, passkeys/MFA, enterprise OIDC + SCIM)
 │   ├── billing/                  # Credit consumption tracking
@@ -285,6 +289,7 @@ robosystems/
 │   └── extensions/               # Extensions OLTP SQLAlchemy models (roboledger, roboinvestor); schema-per-graph tenancy
 ├── config/                       # Centralized configuration (see config/README.md)
 ├── schemas/                      # Graph schema definitions
+├── taxonomy/                     # Framework package loading and the library writer
 └── graph_api/                    # Graph API microservice
 ```
 
@@ -311,7 +316,7 @@ just test-all              # Full suite with all checks
 
 ### Bash Timeouts
 
-Always use `timeout: 600000` (10 minutes) on Bash tool calls for `just test-all`, `just test`, and other test commands. The default 2-minute Bash timeout is too short for the full suite. CI has a 10-minute limit for the test step.
+Always use `timeout: 600000` (10 minutes) on Bash tool calls for `just test-all`, `just test`, and other test commands. The default 2-minute Bash timeout is too short for the full suite. CI gives the pytest job 25 minutes.
 
 ### Test Markers
 
@@ -393,6 +398,8 @@ All configuration is centralized in `/robosystems/config/`. See `config/README.m
 | `operators.py`          | Claude model configuration (Bedrock) — AI Operator config |
 | `validation.py`         | Startup configuration checks                   |
 | `valkey_registry.py`    | Valkey database allocation (never hardcode DB numbers) |
+| `tuning.py`, `defaults.py` | SSM-tunable values and their defaults        |
+| `parameter_store.py`    | SSM Parameter Store client                     |
 | `storage/`              | S3 path helpers (shared data, graph storage)   |
 
 ## Graph API
@@ -472,13 +479,13 @@ just admin dev invoices list             # List invoices
 just admin dev cache info                # View cache databases
 ```
 
-Command groups: `subscriptions`, `invoices`, `credits`, `graphs`, `users`, `orgs`, `cache`, `instances`, `migrations`. Use `--help` on any group for options.
+Command groups: `subscriptions`, `invoices`, `credits`, `graphs`, `users`, `orgs`, `cache`, `instances`, `migrations`, `scim`, `oauth`, `search`, `worker`. Use `--help` on any group for options.
 
 ## CI/CD
 
 - **GitHub-hosted runners** (default): Used for tests, builds, and deployments
 - **Self-hosted runners** (optional): Set `RUNNER_LABELS` repo variable to use self-hosted runners
-- **Deployments**: Manual workflow dispatch via `staging.yml` and `prod.yml`
+- **Deployments**: Manual workflow dispatch via `staging.yml` and `prod.yml`, run from the version tag (from `main` only for one-offs)
 - **Release notes**: `tag-release.yml` auto-generates the changelog from changes since the last tag (via the Claude API). For milestone releases, commit curated notes to `.github/release-notes/v<version>.md` _before_ dispatching `create-release.yml` — when that file exists at the tagged ref it replaces the generated changelog (and the stats section is skipped)
 - **Infrastructure Config**: `.github/configs/graph.yml`
 
@@ -488,7 +495,7 @@ Command groups: `subscriptions`, `invoices`, `credits`, `graphs`, `users`, `orgs
 | ----------- | ----------------- | ------------------------------ |
 | API/Workers | ECS Fargate ARM64 | Auto-scaling, Spot-preferred   |
 | PostgreSQL  | RDS               | Burstable T4g instance         |
-| LadybugDB   | EC2 ARM64         | R7g instances (tier-dependent) |
+| LadybugDB   | EC2 ARM64         | M7g/R7g (tier-dependent)       |
 | Cache       | ElastiCache       | Valkey-compatible              |
 | Search      | OpenSearch         | Full-text + semantic (KNN)     |
 
@@ -516,7 +523,7 @@ just ssm-set prod features/MCP_SUBGRAPH_OPS_ENABLED true  # Set parameter
 just ssm-delete prod features/OLD_FLAG               # Delete parameter
 ```
 
-Parameters are stored at `/robosystems/{env}/{category}/{NAME}` in SSM Parameter Store. The `{NAME}` segment is **UPPER_SNAKE_CASE**, identical to the env var name (e.g., `RATE_LIMIT_ENABLED`, not `rate-limit-enabled`). Unlike GitHub variables (which require redeployment), SSM parameters take effect immediately at runtime.
+Parameters are stored at `/robosystems/{env}/{category}/{NAME}` in SSM Parameter Store. The `{NAME}` segment is **UPPER_SNAKE_CASE**, identical to the env var name (e.g., `RATE_LIMIT_ENABLED`, not `rate-limit-enabled`). Unlike GitHub variables, SSM parameters need no redeployment, but when a change lands depends on the reader: `env.*` feature flags are computed at import, so their services need a restart, while `tuning/` values are read at call time through a cache of about five minutes.
 
 ## Secret Management
 
@@ -530,7 +537,7 @@ Parameters are stored at `/robosystems/{env}/{category}/{NAME}` in SSM Parameter
 Two lanes, both published to the content CDN by `.github/workflows/publish-docs.yml` and rendered on the sites:
 
 - **Product docs live in `docs/product/{site}/`** — `roboledger/` serves `roboledger.ai/docs`, `robosystems/` serves `robosystems.ai/docs/guides`. Every page is a public claim: describe what the product does today, name an MCP tool only where the reader has to recognise one (`tests/scripts/test_product_docs.py` checks each backticked name against the server's tools), and keep the front matter's `title` and `order`. See `docs/product/README.md`.
-- **Technical docs live in `docs/technical/`** (the GitHub wiki until 2026-10), published at `robosystems.ai/docs/technical`. Change them in the PR that makes them true. Their examples are written for the hosted API; local development lives on one page there. Link a sibling page as `Page-Name.md`; a broken link or anchor fails `tests/scripts/test_technical_docs.py`. See `docs/technical/README.md`. Preview either lane with `just docs-build`.
+- **Technical docs live in `docs/technical/`**, published at `robosystems.ai/docs/technical`. Change them in the PR that makes them true. Their examples are written for the hosted API; local development lives on one page there. Link a sibling page as `Page-Name.md`; a broken link or anchor fails `tests/scripts/test_technical_docs.py`. See `docs/technical/README.md`. Preview either lane with `just docs-build`.
 
 A third surface does not go through that workflow: **the REST API reference at `robosystems.ai/docs/api`**, which robosystems-app renders from the live `/openapi.json`, one page per operation. Nothing here publishes it — an operation's `summary`, `description` and response models *are* its page, so the prose in a router is public copy. It is read-only by design; to run a call, use the Swagger page at the API root (`localhost:8000/` in development, `api.robosystems.ai/` in production).
 
