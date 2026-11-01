@@ -507,6 +507,45 @@ class TestCreateSSEStreamStarlette:
         assert data["operation_id"] == "op1"
 
   @pytest.mark.asyncio
+  async def test_an_in_process_event_is_sent_under_its_wire_name(self):
+    """Clients listen by name, so `EventType.OPERATION_COMPLETED` never reaches one."""
+    with (
+      patch(
+        "robosystems.middleware.sse.streaming.get_event_storage"
+      ) as mock_storage_fn,
+      patch(
+        "robosystems.middleware.sse.streaming.TuningConfig.get_sse_max_connections_per_user",
+        return_value=10,
+      ),
+      patch(
+        "robosystems.middleware.sse.streaming.TuningConfig.get_sse_queue_size",
+        return_value=100,
+      ),
+      patch("robosystems.middleware.sse.redis_subscriber.get_redis_subscriber"),
+    ):
+      mock_storage = AsyncMock()
+      mock_storage.get_operation_metadata.return_value = self._make_metadata()
+      mock_storage.get_events.return_value = []
+      mock_storage_fn.return_value = mock_storage
+
+      stream = create_sse_stream_starlette("op1", "user1")
+      events = [await anext(stream)]
+      next_event = asyncio.create_task(anext(stream))
+      while not await get_connection_manager().get_active_connections("op1"):
+        await asyncio.sleep(0)
+
+      await emit_event_to_operation("op1", EventType.OPERATION_COMPLETED, {"ok": True})
+      events.append(await next_event)
+      events.append(await anext(stream))
+      await stream.aclose()
+
+    assert [event["event"] for event in events] == [
+      "connected",
+      "operation_completed",
+      "stream_end",
+    ]
+
+  @pytest.mark.asyncio
   async def test_stream_replays_historical_events(self):
     """Test that stream replays events from a given sequence number."""
     metadata = self._make_metadata(status=OperationStatus.COMPLETED)
