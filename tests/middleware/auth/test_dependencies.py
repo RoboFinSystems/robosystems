@@ -811,6 +811,44 @@ class TestGetCurrentUser:
     assert mock_verify_jwt.call_count == 1
     assert mock_verify_jwt.call_args.args[0] == token_value
     mock_audit_logger.log_auth_success.assert_called_once()
+    assert (
+      mock_audit_logger.log_auth_success.call_args.kwargs["auth_method"]
+      == "jwt_query_param"
+    )
+
+  @pytest.mark.asyncio
+  @patch("robosystems.database.SessionFactory")
+  @patch("robosystems.middleware.auth.dependencies.verify_jwt_claims")
+  @patch("robosystems.middleware.auth.dependencies.api_key_cache")
+  @patch("robosystems.middleware.auth.dependencies.User")
+  @patch("robosystems.middleware.auth.dependencies.SecurityAuditLogger")
+  async def test_get_current_user_sse_bearer_is_audited_apart_from_query_param(
+    self, mock_audit_logger, mock_user_class, mock_cache, mock_verify_jwt, mock_sf
+  ):
+    """A header wins over `token`, and the audit event says which door was used."""
+    user_id = "user123"
+    mock_sf.return_value = Mock()
+    mock_verify_jwt.return_value = (user_id, 0)
+    mock_cache.get_cached_jwt_user_data.return_value = None
+
+    mock_user = Mock(spec=User)
+    mock_user.id = user_id
+    mock_user.name = "Test"
+    mock_user.email = "test@test.com"
+    mock_user.is_active = True
+    mock_user_class.get_by_id.return_value = mock_user
+
+    await get_current_user_sse(
+      self.mock_request,
+      api_key=None,
+      authorization="Bearer header.jwt.token",
+      token="query.jwt.token",
+    )
+
+    assert mock_verify_jwt.call_args.args[0] == "header.jwt.token"
+    assert (
+      mock_audit_logger.log_auth_success.call_args.kwargs["auth_method"] == "jwt_token"
+    )
 
 
 class TestGetCurrentUserWithGraph:
