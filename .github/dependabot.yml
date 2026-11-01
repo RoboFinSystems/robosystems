@@ -7,10 +7,6 @@ updates:
       interval: "monthly"
     labels:
       - "dependencies"
-    ignore:
-      # hold: v9's prune-cache flip bloats the cache; v10's guard covers events we don't use
-      - dependency-name: "astral-sh/setup-uv"
-        update-types: ["version-update:semver-major"]
     groups:
       # One PR per run for minor/patch pins; majors stay individual for review
       actions-minor-patch:
