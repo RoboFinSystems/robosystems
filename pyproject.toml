@@ -125,7 +125,7 @@ dev = [
     # AWS development tools
     "awscli-local>=0.22.0,<1.0",
     "cfn-lint>=1.50.1,<2.0",
-    "moto[s3]>=5.2.2,<6.0",
+    "moto[s3]>=5.2.2,<5.2.4",  # hold: 5.2.4/5.2.5 let put_object escape mock_aws to AWS_ENDPOINT_URL (pytest.ini sets LocalStack); 5.2.3 intercepts. Recheck each release
     # Development utilities
     "rich>=15.0.0,<16.0",
     "pytest-xdist>=3.6,<4.0",
@@ -158,6 +158,13 @@ lambda = [
 # its TextEmbedding, which never touches PIL. Drop this once a fastembed release lifts the cap
 # (qdrant/fastembed#830).
 override-dependencies = ["pillow>=13.0.0"]
+
+# Release cooldown: resolve only versions on PyPI for 7+ days, so a hijacked or broken release
+# has time to be caught and yanked before it reaches the lock. Deliberate pins and our own
+# packages are exempt. To take a fresher release (a CVE fix), add `<pkg> = false` here with a
+# reason, then `uv lock --upgrade-package <pkg>`; drop the entry once the release ages past 7 days.
+exclude-newer = "7 days"
+exclude-newer-package = { ladybug = false, xbrlkit = false, robosystems-client = false }
 
 [tool.setuptools]
 packages = ["robosystems"]

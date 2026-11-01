@@ -23,6 +23,10 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
+    # Matches `exclude-newer = "7 days"` in pyproject: a version-update PR for a release
+    # under 7 days old could not resolve against it anyway
+    cooldown:
+      default-days: 7
     labels:
       - "dependencies"
     ignore:
