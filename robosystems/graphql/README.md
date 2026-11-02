@@ -1,6 +1,6 @@
 # Extensions GraphQL
 
-Strawberry GraphQL schema served at `POST /extensions/{graph_id}/graphql`. This is the **read** surface for the extensions subsystem; writes go through the named command operations at `POST /extensions/{roboledger,roboinvestor}/{graph_id}/operations/*`.
+Strawberry GraphQL schema served at `POST /extensions/{graph_id}/graphql`. This is the **read** surface for the extensions subsystem; writes go through the named command operations at `POST /extensions/{roboledger,roboinvestor}/{graph_id}/operations/*`. It is served over HTTP only: the schema has no subscriptions, and `main.py` removes the WebSocket route the Strawberry router adds.
 
 ## `graph_id` comes from the URL
 
