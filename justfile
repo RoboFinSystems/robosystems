@@ -112,6 +112,7 @@ install:
 # Update dependencies and regenerate lock file
 update:
     uv lock --upgrade
+    uv run --frozen --no-sync python bin/tools/check_lock.py
     uv sync --all-extras --dev
 
 # Install local Python SDK (editable, overrides PyPI version; `just install` to restore)
