@@ -200,10 +200,11 @@ services:
     # stack's idle pool plus a parallel test run exhausts the server.
     # Command-line settings override postgresql.conf, so an existing data
     # directory picks these up when the container is recreated.
+    # A parallel test run holds about 11 per worker, so 100 runs out on 14 cores.
     command:
       - postgres
       - -c
-      - max_connections=100
+      - max_connections=200
       - -c
       - shared_buffers=128MB
       - -c
