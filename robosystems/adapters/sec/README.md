@@ -132,7 +132,7 @@ over the full DuckDB corpus to produce three parquet artifacts:
 Graph construction uses [icebug](https://github.com/Ladybug-Memory/icebug), a
 networkit fork optimized for columnar memory. `Graph.fromCSR()` takes zero-copy
 Arrow arrays, so the path is DuckDB SQL (node indexing, edge dedup) →
-`fetch_arrow_table()` → numpy COO→CSR → `fromCSR()`, with no Python
+`to_arrow_table()` → numpy COO→CSR → `fromCSR()`, with no Python
 per-element loop. That avoids triple-buffering the data across DuckDB, Python
 lists, and the graph.
 

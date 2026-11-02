@@ -534,11 +534,11 @@ async def _materialize_table_impl(
         # Aliased `t` so the incremental anti-join can qualify outer columns.
         select_sql = f"SELECT {select_expr} FROM {table_name} AS t{where}"
         if query_params:
-          arrow_reader = duck_conn.execute(select_sql, query_params).fetch_record_batch(
+          arrow_reader = duck_conn.execute(select_sql, query_params).to_arrow_reader(
             ARROW_STREAM_BATCH_ROWS
           )
         else:
-          arrow_reader = duck_conn.execute(select_sql).fetch_record_batch(
+          arrow_reader = duck_conn.execute(select_sql).to_arrow_reader(
             ARROW_STREAM_BATCH_ROWS
           )
 
@@ -768,7 +768,7 @@ async def _fork_from_parent_duckdb_impl(
           array_casts = _fixed_array_casts(typed_source, exclude_cols)
           arrow_reader = duck_conn.execute(
             f"SELECT {select_expr} FROM {table_name}"
-          ).fetch_record_batch(ARROW_STREAM_BATCH_ROWS)
+          ).to_arrow_reader(ARROW_STREAM_BATCH_ROWS)
 
           table_rows = 0
           logger.info(f"Copying {table_name} from parent to subgraph")

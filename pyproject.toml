@@ -42,7 +42,7 @@ dependencies = [
     "boto3>=1.42.0,<2.0",
     "huggingface-hub>=1.19,<2",
     # OLAP Databases (Graph)
-    "duckdb==1.4.4",
+    "duckdb==1.5.6",  # hold: any move needs a Graviton materialization (Arrow-export segfault reproduced only there)
     "lancedb>=0.34.0,<0.35",  # 0.34 made pylance an optional extra (unused here); 0.30<->0.36 format compat verified 2026-08-01
     "ladybug==0.22.1",
     # OLTP Database (Postgres)
@@ -163,6 +163,7 @@ override-dependencies = ["pillow>=13.0.0"]
 # has time to be caught and yanked before it reaches the lock. Deliberate pins and our own
 # packages are exempt. To take a fresher release (a CVE fix), add `<pkg> = false` here with a
 # reason, then `uv lock --upgrade-package <pkg>`; drop the entry once the release ages past 7 days.
+# bin/tools/check_lock.py fails a re-lock that rolls a package back and reports spent entries.
 exclude-newer = "7 days"
 # pyasn1 0.6.5 and pypdf 6.21.4 are security fixes (Trivy, 2026-10-31); drop both after 2026-11-05.
 exclude-newer-package = { ladybug = false, xbrlkit = false, robosystems-client = false, pyasn1 = false, pypdf = false }

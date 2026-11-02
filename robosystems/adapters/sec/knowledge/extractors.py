@@ -108,7 +108,7 @@ class ArcExtractor:
 
       nodes_arrow = conn.execute(
         "SELECT qname FROM _node_index ORDER BY node_id"
-      ).fetch_arrow_table()
+      ).to_arrow_table()
       nodes = nodes_arrow.column("qname")
 
       edges_arrow = conn.execute("""
@@ -142,7 +142,7 @@ class ArcExtractor:
                weight
         FROM combined
         ORDER BY src, dst
-      """).fetch_arrow_table()
+      """).to_arrow_table()
 
       return nodes, edges_arrow
     finally:

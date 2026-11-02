@@ -138,9 +138,7 @@ def engines(tmp_path):
 
 def _stream(duck, conn, select_expr, casts):
   """The production transport: DuckDB → Arrow batches → restore → COPY."""
-  reader = duck.execute(f"SELECT {select_expr} FROM Product AS t").fetch_record_batch(
-    1000
-  )
+  reader = duck.execute(f"SELECT {select_expr} FROM Product AS t").to_arrow_reader(1000)
   for arrow_batch in reader:
     exported = arrow_batch.schema.field("embedding").type
     assert not pa.types.is_fixed_size_list(exported), (
@@ -205,7 +203,7 @@ def test_array_typed_staging_column_exports_as_list(engines):
     ).fetchall()
   ]
   select = _build_type_safe_select(source)
-  reader = duck.execute(f"SELECT {select} FROM Arr").fetch_record_batch(1000)
+  reader = duck.execute(f"SELECT {select} FROM Arr").to_arrow_reader(1000)
 
   batch = next(iter(reader))
 
