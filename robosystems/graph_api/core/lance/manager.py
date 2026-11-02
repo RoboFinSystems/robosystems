@@ -139,14 +139,14 @@ class LanceManager:
       pool = get_duckdb_pool()
       with pool.get_connection(graph_id) as con:
         logger.info("Executing vector extraction query against DuckDB (via pool)...")
-        arrow_table = con.execute(query).fetch_arrow_table()
+        arrow_table = con.execute(query).to_arrow_table()
     except Exception:
       # No pool (tests, or the pool has not opened this database yet).
       logger.info("Pool unavailable, opening standalone DuckDB connection...")
       con = duckdb.connect(str(duckdb_path), read_only=True)
       try:
         con.execute(f"SET memory_limit = '{memory_limit}'")
-        arrow_table = con.execute(query).fetch_arrow_table()
+        arrow_table = con.execute(query).to_arrow_table()
       finally:
         con.close()
 

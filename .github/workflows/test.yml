@@ -69,6 +69,14 @@ jobs:
         run: |
           uv lock --locked
 
+      - name: Check lockfile against the base branch
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --quiet --depth=1 origin "$BASE_REF"
+          uv run --frozen --no-sync python bin/tools/check_lock.py --base FETCH_HEAD --annotate
+
       - name: Run dbt tests
         timeout-minutes: 1
         run: |

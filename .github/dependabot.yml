@@ -26,17 +26,19 @@ updates:
     labels:
       - "dependencies"
     ignore:
-      # hold: pyproject caps dbt-core <1.12 (beta parser dep + unused metricflow subtree)
+      # hold: dbt-core majors are deliberate; the QuickBooks transform shells out to it
       - dependency-name: "dbt-core"
-        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+        update-types: ["version-update:semver-major"]
       # hold: stripe-python 12+ removes stripe.error; upgrade deliberately, not via Dependabot
       - dependency-name: "stripe"
         update-types: ["version-update:semver-major"]
       # Graph-engine pins move only with a deliberate engine upgrade: ladybug pairs
       # with LADYBUG_EXT_VERSION in the Dockerfile, duckdb with the Arrow-export
-      # seam, lancedb with an on-disk format check. 0.x minors are not "safe"
+      # seam, lancedb with an on-disk format check. 0.x minors are not "safe".
+      # DuckDB patches still surface, so its pin can't age out of support unseen
       - dependency-name: "ladybug"
       - dependency-name: "duckdb"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "lancedb"
       # hold: majors on these carry a pyproject `# hold:` comment with the reason
       - dependency-name: "pandas"
