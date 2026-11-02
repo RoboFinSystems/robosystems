@@ -532,6 +532,7 @@ def create_app() -> FastAPI:
     env.ROBOLEDGER_ENABLED or env.ROBOINVESTOR_ENABLED
   ):
     from fastapi import Depends as _Depends
+    from fastapi.routing import APIWebSocketRoute
     from strawberry.fastapi import GraphQLRouter
 
     from robosystems.graphql import schema as extensions_graphql_schema
@@ -546,6 +547,12 @@ def create_app() -> FastAPI:
       # GraphiQL playground (dev only).
       graphql_ide="graphiql" if env.is_development() else None,
     )
+    # The schema has no subscriptions, but the router always adds a WebSocket route.
+    graphql_router.routes = [
+      route
+      for route in graphql_router.routes
+      if not isinstance(route, APIWebSocketRoute)
+    ]
     app.include_router(
       graphql_router,
       prefix="/extensions/{graph_id}/graphql",
