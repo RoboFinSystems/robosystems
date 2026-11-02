@@ -42,7 +42,7 @@ dependencies = [
     "boto3>=1.42.0,<2.0",
     "huggingface-hub>=1.19,<2",
     # OLAP Databases (Graph)
-    "duckdb==1.4.4",
+    "duckdb==1.5.6",  # hold: 1.5 supported to 2027-03; 2.0 is a fresh major and rejects the old lambda syntax. Any move needs a Graviton materialization: the Arrow-export segfault never reproduced elsewhere
     "lancedb>=0.34.0,<0.35",  # 0.34 made pylance an optional extra (unused here); 0.30<->0.36 format compat verified 2026-08-01
     "ladybug==0.22.1",
     # OLTP Database (Postgres)
