@@ -24,11 +24,14 @@ on:
         default: false
   # Monthly schedule for AMI updates - controlled by GRAPH_AMI_AUTO_UPDATE variable
   # Staging runs first (1st of month), Prod follows next day (2nd of month)
+  # Off the hour because GitHub delays or drops scheduled runs under load. Prod
+  # repeats on the 3rd in case the 2nd is dropped; an AMI already pinned is a no-op.
+  # schedule-gate matches these strings: change them together.
   schedule:
-    - cron: "0 7 1 * *" # AMI: Staging 1st of month at 7am UTC
-    - cron: "0 7 2 * *" # AMI: Prod 2nd of month at 7am UTC
-    # Weekly Docker cleanup - every Sunday at 6am UTC (before typical work hours)
-    - cron: "0 6 * * 0" # Docker: Both envs every Sunday
+    - cron: "17 7 1 * *" # AMI: Staging 1st of month, about 7am UTC
+    - cron: "17 7 2-3 * *" # AMI: Prod 2nd and 3rd of month, about 7am UTC
+    # Weekly Docker cleanup - every Sunday about 6am UTC (before typical work hours)
+    - cron: "23 6 * * 0" # Docker: Both envs every Sunday
 
 permissions:
   id-token: write
@@ -58,8 +61,8 @@ jobs:
         run: |
           CRON="${{ github.event.schedule }}"
 
-          # Docker cleanup: Sunday at 6am UTC - always enabled, runs for both envs
-          if [[ "$CRON" == "0 6 * * 0" ]]; then
+          # Docker cleanup: Sunday about 6am UTC - always enabled, runs for both envs
+          if [[ "$CRON" == "23 6 * * 0" ]]; then
             echo "task=docker-cleanup" >> $GITHUB_OUTPUT
             echo "should_run=true" >> $GITHUB_OUTPUT
             echo "environment=both" >> $GITHUB_OUTPUT
@@ -67,12 +70,12 @@ jobs:
             exit 0
           fi
 
-          # AMI update: 1st/2nd of month - requires GRAPH_AMI_AUTO_UPDATE=true
+          # AMI update: 1st-3rd of month - requires GRAPH_AMI_AUTO_UPDATE=true
           echo "task=update-ami" >> $GITHUB_OUTPUT
           SETTING="${{ vars.GRAPH_AMI_AUTO_UPDATE }}"
           if [ "$SETTING" == "true" ]; then
-            # 1st of month = staging, 2nd of month = prod
-            if [[ "$CRON" == "0 7 1 "* ]]; then
+            # 1st of month = staging, 2nd and 3rd of month = prod
+            if [[ "$CRON" == "17 7 1 "* ]]; then
               ENV="staging"
             else
               ENV="prod"
@@ -349,7 +352,8 @@ jobs:
     needs: [ami-get-latest, ami-update-ssm, ami-dispatch-deploy]
     if: |
       always() &&
-      needs.ami-get-latest.result != 'skipped'
+      needs.ami-get-latest.result != 'skipped' &&
+      (needs.ami-get-latest.outputs.ami_changed == 'true' || contains(needs.*.result, 'failure'))
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -370,6 +374,7 @@ jobs:
 
           # Gather results
           AMI_CHANGED="${{ needs.ami-get-latest.outputs.ami_changed }}"
+          GET_LATEST="${{ needs.ami-get-latest.result }}"
           SSM_UPDATE="${{ needs.ami-update-ssm.result }}"
           DEPLOY_DISPATCH="${{ needs.ami-dispatch-deploy.result }}"
           DEPLOY_REF="${{ needs.ami-dispatch-deploy.outputs.deploy_ref }}"
@@ -377,16 +382,14 @@ jobs:
 
           # Determine overall status
           HAS_FAILURE=false
-          if [ "$SSM_UPDATE" == "failure" ] || [ "$DEPLOY_DISPATCH" == "failure" ]; then
+          if [ "$GET_LATEST" == "failure" ] || [ "$SSM_UPDATE" == "failure" ] || [ "$DEPLOY_DISPATCH" == "failure" ]; then
             HAS_FAILURE=true
           fi
 
           if [ "$HAS_FAILURE" == "true" ]; then
             SUBJECT="[ALERT] Graph AMI Update Failed - ${ENV}"
-          elif [ "$AMI_CHANGED" == "true" ]; then
-            SUBJECT="Graph AMI Updated - ${ENV}"
           else
-            SUBJECT="Graph AMI Check - No Update Needed - ${ENV}"
+            SUBJECT="Graph AMI Updated - ${ENV}"
           fi
 
           MESSAGE="RoboSystems Graph AMI Maintenance Report
