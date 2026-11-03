@@ -58,6 +58,15 @@ def test_only_the_investment_elimination_carries_the_arrival():
   assert not fact_grid._joins_the_group(intercompany, *JULY)
 
 
+def test_the_elimination_of_a_joining_members_capital_is_no_distribution():
+  """A debit to equity beside a balance sheet line reads as a distribution by
+  its default flow. The capital an acquired member brought is not one."""
+  elimination = _line("elimination_investment", joined=date(2026, 7, 1))
+  assert fact_grid._joins_the_group(elimination, *JULY)
+  later = _line("elimination_investment", joined=date(2026, 3, 1))
+  assert not fact_grid._joins_the_group(later, *JULY)
+
+
 def test_a_former_members_reversal_is_its_leaving_whatever_its_dates():
   left = date(2026, 7, 31)
   reversal = _line("elimination_investment", left=left, posted=date(2026, 8, 31))

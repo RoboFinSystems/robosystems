@@ -182,9 +182,13 @@ def _validate_income_statement(
   implied_ni = 0.0
   credit_leaves = 0
   debit_leaves = 0
-  for row in rows:
+  for index, row in enumerate(rows):
     # The NI row is excluded by identity, even if is_subtotal is unset.
     if row.is_subtotal or row.is_abstract or row is net_income_row:
+      continue
+    # Rows are post-order, so one that follows a deeper row sums it: a concept
+    # with a chart's own accounts under it would otherwise count twice.
+    if index > 0 and rows[index - 1].depth > row.depth:
       continue
     value = _value(row, column.index)
     if row.balance_type == "credit":

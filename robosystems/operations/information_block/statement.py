@@ -11,7 +11,7 @@ not-implemented stubs.
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import date
+from datetime import date, timedelta
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -41,6 +41,7 @@ from robosystems.operations.information_block.envelope import (
   window_series_sets,
 )
 from robosystems.operations.roboledger.reports.fact_grid import (
+  CASH_ROLLFORWARD_ROOTS,
   ROLLFORWARD_ROOTS,
   FactRow,
   PeriodSpec,
@@ -50,6 +51,7 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   _collect_hierarchy_element_ids,  # type: ignore[reportPrivateUsage]
   _HierarchyNode,  # type: ignore[reportPrivateUsage]
   _load_calculations,  # type: ignore[reportPrivateUsage]
+  _show_cash_signed,  # type: ignore[reportPrivateUsage]
   _with_opening_balance,  # type: ignore[reportPrivateUsage]
   columns_before_the_books,
 )
@@ -145,6 +147,14 @@ def _build_statement_envelope(
         if window is None:
           continue
         set_start, set_end = window
+        # What the column's roll-forward opens on, stored the day before it.
+        if (
+          set_start is not None
+          and f.period_end == set_start - timedelta(days=1)
+          and f.period_start == f.period_end
+        ):
+          facts.append(f)
+          continue
         if f.period_end != set_end:
           continue
         if (
@@ -310,6 +320,11 @@ def _build_statement_rendering(
     period_keys.add((ps, pe))
   if not period_keys:
     return RenderingLite(rows=[], periods=[], validation=None, unmapped_count=0)
+  # A roll-forward's opening is stored on the day before a window starts. It
+  # opens that window's column and is not a column of its own.
+  windows = {key for key in period_keys if key[0] != key[1]}
+  if windows:
+    period_keys = windows
 
   ordered_periods = sorted(period_keys, key=lambda pk: (pk[1], pk[0]))
   periods: list[PeriodSpec] = [
@@ -371,6 +386,18 @@ def _build_statement_rendering(
   # The statement view's layout: each roll-forward opens on its balance.
   if block_type == "equity_statement":
     rows = _with_opening_balance(rows, report_facts, periods, hierarchy)
+  # The same statement the live read renders: a gain its section subtracts at
+  # its cash effect, and cash opening above the net change.
+  if block_type == "cash_flow_statement":
+    _show_cash_signed(rows, hierarchy, calculations)
+    rows = _with_opening_balance(
+      rows,
+      report_facts,
+      periods,
+      hierarchy,
+      roots=CASH_ROLLFORWARD_ROOTS,
+      suffixes=(", beginning of period", ", end of period"),
+    )
 
   # Columns have no display label here, so findings name them by period end.
   validation_result = validate_report(
@@ -557,11 +584,11 @@ def _load_element_classifications(
   params = {f"e{i}": eid for i, eid in enumerate(element_ids)}
   rows = session.execute(
     text(f"""
-      SELECT et.element_id, cls.identifier
+      SELECT et.element_id, tr.identifier
       FROM element_traits et
-      JOIN classifications cls
-        ON cls.id = et.trait_id
-        AND cls.category = 'elementsOfFinancialStatements'
+      JOIN traits tr
+        ON tr.id = et.trait_id
+        AND tr.category = 'elementsOfFinancialStatements'
       WHERE et.is_primary = TRUE
         AND et.element_id IN ({placeholders})
     """),

@@ -90,6 +90,27 @@ class TestIncomeStatementValidation:
     assert result.passed is False
     assert any("Net Income mismatch" in f for f in result.failures)
 
+  def test_a_concept_with_accounts_under_it_counts_once(self):
+    """A chart's own accounts render under the concept they map to. The concept
+    is not flagged a subtotal, and it must not count beside them."""
+    rows = [
+      _row("Subscription", 128000.0, classification="revenue", depth=3),
+      _row("Services", 10000.0, classification="revenue", depth=3),
+      _row("Revenue from Contracts", 138000.0, classification="revenue", depth=2),
+      _row("Revenues", 138000.0, classification="revenue", is_subtotal=True, depth=1),
+      _row("G&A", 246389.0, classification="expense", depth=2),
+      _row(
+        "Net Income",
+        -108389.0,
+        classification="",
+        qname="rs-gaap:NetIncomeLoss",
+        is_subtotal=True,
+        depth=0,
+      ),
+    ]
+    result = validate_report("income_statement", rows)
+    assert result.passed is True, result.failures
+
   def test_a_window_with_no_activity_is_not_checked_and_not_failed(self):
     rows = [
       _row("Assets", 0.0, classification="asset", is_subtotal=True, depth=0),

@@ -806,8 +806,8 @@ def _close_history(books: _Books, windows, label: str) -> int:
         "note": "historical close (provisioning)",
       },
     )
-    rules = (receipt or {}).get("statement_rule_summary") or {}
-    if rules.get("fail") or rules.get("error"):
+    rules = (receipt or {}).get("statement_rule_summary")
+    if rules is None or rules.get("fail") or rules.get("error"):
       books.api.rule_failures.append(f"{label} {period}: {rules}")
     closed += 1
   print(
@@ -1704,6 +1704,30 @@ def _read_back(
       "every close's stamped statements pass their rules",
       not api.rule_failures,
       "; ".join(api.rule_failures[:3]) or "none failed",
+    )
+  )
+  # An equity statement that foots can still open on the wrong balance: each
+  # month begins where the last one ended, an acquisition's included.
+  breaks: list[str] = []
+  closing: dict[str, float] = {}
+  for month_start, month_end in windows[:-1]:
+    statement = _statement(
+      api, "equity_statement", month_start, month_end, consolidated=True
+    )
+    for fact in statement.get("facts") or []:
+      root = fact["qname"]
+      if fact.get("period_role") == "start" and root in closing:
+        if abs(fact["values"][0] - closing[root]) > _TOLERANCE:
+          breaks.append(
+            f"{root} {month_end}: {fact['values'][0]:,.2f} vs {closing[root]:,.2f}"
+          )
+      elif fact.get("period_role") == "end":
+        closing[root] = fact["values"][0]
+  checks.append(
+    GroupCheck(
+      "consolidated equity begins each month where the last ended",
+      not breaks,
+      "; ".join(breaks[:3]) or "ties",
     )
   )
 

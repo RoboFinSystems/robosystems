@@ -700,6 +700,162 @@ class TestRenderingComposesCalcsCrossStructure:
     assert flags["rs-gaap:GrossProfit"] is False
 
 
+class TestStampedStatementsReadLikeTheLiveOnes:
+  """A filed report goes through the stamped path; what the live read gets
+  right there must hold here too."""
+
+  @staticmethod
+  def _elem(element_id: str, qname: str, balance_type: str) -> Any:
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+      id=element_id,
+      qname=qname,
+      name=element_id,
+      balance_type=balance_type,
+      is_abstract=False,
+    )
+
+  @staticmethod
+  def _arc(from_id: str, to_id: str, order: float, kind: str = "presentation") -> Any:
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+      association_type=kind,
+      from_element_id=from_id,
+      to_element_id=to_id,
+      order_value=order,
+      weight=1.0,
+    )
+
+  @staticmethod
+  def _fact(element_id: str, value: float, start: date, end: date) -> Any:
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+      element_id=element_id,
+      value=value,
+      period_start=start,
+      period_end=end,
+      period_type="instant",
+    )
+
+  def _balance_sheet(self) -> Any:
+    from types import SimpleNamespace
+
+    structure_id = "struct_bs"
+    elements = [
+      self._elem("e_assets", "rs-gaap:Assets", "debit"),
+      self._elem("e_equity", "rs-gaap:StockholdersEquity", "credit"),
+      self._elem("e_nci", "rs-gaap:MinorityInterest", "credit"),
+      self._elem("e_total", "rs-gaap:LiabilitiesAndStockholdersEquity", "credit"),
+    ]
+    start, end = date(2026, 7, 1), date(2026, 9, 30)
+    opening = date(2026, 6, 30)
+    facts = [
+      self._fact("e_assets", 1000.0, start, end),
+      self._fact("e_equity", 900.0, start, end),
+      self._fact("e_nci", 100.0, start, end),
+      self._fact("e_total", 1000.0, start, end),
+      # What the equity roll-forward opens on, stored on the same set.
+      self._fact("e_equity", 800.0, opening, opening),
+      self._fact("e_nci", 90.0, opening, opening),
+    ]
+    associations = [
+      self._arc(structure_id, "e_assets", 0.0),
+      self._arc(structure_id, "e_total", 1.0),
+      self._arc("e_total", "e_equity", 0.0),
+      self._arc("e_total", "e_nci", 1.0),
+    ]
+    session = MagicMock()
+    session.execute.side_effect = [
+      _exec_result(
+        all_rows=[
+          SimpleNamespace(element_id="e_assets", identifier="asset"),
+          SimpleNamespace(element_id="e_equity", identifier="equity"),
+          SimpleNamespace(element_id="e_nci", identifier="equity"),
+        ]
+      ),
+      [],
+    ]
+    rendering = statement_handlers._build_statement_rendering(
+      session,
+      elements=elements,  # type: ignore[arg-type]
+      associations=associations,  # type: ignore[arg-type]
+      facts=facts,  # type: ignore[arg-type]
+      structure_id=structure_id,
+      block_type="balance_sheet",
+      concept_arrangement="arithmetic",
+    )
+    return rendering, session
+
+  def test_a_filed_cash_flow_shows_a_subtracted_gain_at_its_cash_effect(self) -> None:
+    from types import SimpleNamespace
+
+    structure_id = "struct_cf"
+    elements = [
+      self._elem("e_ni", "rs-gaap:NetIncomeLoss", "credit"),
+      self._elem("e_gain", "rs-gaap:GainOrLossOnSaleOfStockInSubsidiary", "credit"),
+      self._elem(
+        "e_ops", "rs-gaap:NetCashProvidedByUsedInOperatingActivities", "debit"
+      ),
+    ]
+    start, end = date(2026, 7, 1), date(2026, 9, 30)
+    facts = [
+      self._fact("e_ni", 100.0, start, end),
+      self._fact("e_gain", 30.0, start, end),
+      self._fact("e_ops", 70.0, start, end),
+    ]
+    associations = [
+      self._arc(structure_id, "e_ops", 0.0),
+      self._arc("e_ops", "e_ni", 0.0),
+      self._arc("e_ops", "e_gain", 1.0),
+    ]
+    calc = [
+      SimpleNamespace(
+        structure_id="s",
+        from_element_id="e_ops",
+        to_element_id=child,
+        weight=weight,
+        is_extension=False,
+      )
+      for child, weight in (("e_ni", 1.0), ("e_gain", -1.0))
+    ]
+    session = MagicMock()
+    session.execute.side_effect = [_exec_result(all_rows=[]), calc]
+
+    rendering = statement_handlers._build_statement_rendering(
+      session,
+      elements=elements,  # type: ignore[arg-type]
+      associations=associations,  # type: ignore[arg-type]
+      facts=facts,  # type: ignore[arg-type]
+      structure_id=structure_id,
+      block_type="cash_flow_statement",
+      concept_arrangement="arithmetic",
+    )
+
+    values = {r.element_id: r.values[0] for r in rendering.rows}
+    assert values["e_gain"] == -30.0
+    assert values["e_ni"] + values["e_gain"] == values["e_ops"]
+
+  def test_an_opening_balance_is_not_a_column_of_its_own(self) -> None:
+    rendering, _ = self._balance_sheet()
+    assert [(p.start, p.end) for p in rendering.periods] == [
+      (date(2026, 7, 1), date(2026, 9, 30))
+    ]
+
+  def test_noncontrolling_interest_counts_as_equity(self) -> None:
+    rendering, _ = self._balance_sheet()
+    assert rendering.validation.failures == []
+    assert rendering.validation.status == "passed"
+
+  def test_classifications_are_read_from_the_traits_table(self) -> None:
+    _, session = self._balance_sheet()
+    sql = str(session.execute.call_args_list[0].args[0])
+    assert "JOIN traits" in sql
+    assert "classifications" not in sql
+
+
 class TestSeriesMode:
   """F-4 statement-series projection — one column per report set,
   actuals-preferred at the seam, facts windowed to their own set."""
