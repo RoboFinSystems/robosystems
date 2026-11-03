@@ -111,6 +111,61 @@ class TestIncomeStatementValidation:
     result = validate_report("income_statement", rows)
     assert result.passed is True, result.failures
 
+  def test_the_line_after_accounts_that_netted_to_zero_still_counts(self):
+    """Their concept nets to zero and leaves no row, so interest follows rows
+    deeper than itself without summing them."""
+    rows = [
+      _row("Revenue", 1000.0, classification="revenue", depth=0),
+      _row("Software", 300.0, classification="expense", depth=1),
+      _row("Software Credits", -300.0, classification="expense", depth=1),
+      _row("Interest", 50.0, classification="expense", depth=0),
+      _row(
+        "Net Income",
+        950.0,
+        classification="",
+        qname="rs-gaap:NetIncomeLoss",
+        is_subtotal=True,
+        depth=0,
+      ),
+    ]
+    result = validate_report("income_statement", rows)
+    assert result.passed is True, result.failures
+
+  def test_a_concept_counts_what_its_accounts_do_not_cover(self):
+    """One account maps to the concept itself and another sits under it."""
+    rows = [
+      _row("Subscription", 600.0, classification="revenue", depth=1),
+      _row("Revenue", 1000.0, classification="revenue", depth=0),
+      _row(
+        "Net Income",
+        1000.0,
+        classification="",
+        qname="rs-gaap:NetIncomeLoss",
+        is_subtotal=True,
+        depth=0,
+      ),
+    ]
+    result = validate_report("income_statement", rows)
+    assert result.passed is True, result.failures
+
+  def test_a_real_mismatch_after_a_concept_with_accounts_still_fails(self):
+    rows = [
+      _row("Subscription", 1000.0, classification="revenue", depth=1),
+      _row("Revenue", 1000.0, classification="revenue", depth=0),
+      _row("G&A", 400.0, classification="expense", depth=0),
+      _row(
+        "Net Income",
+        700.0,
+        classification="",
+        qname="rs-gaap:NetIncomeLoss",
+        is_subtotal=True,
+        depth=0,
+      ),
+    ]
+    result = validate_report("income_statement", rows)
+    assert result.passed is False
+    assert "Net Income mismatch" in result.failures[0]
+
   def test_a_window_with_no_activity_is_not_checked_and_not_failed(self):
     rows = [
       _row("Assets", 0.0, classification="asset", is_subtotal=True, depth=0),
