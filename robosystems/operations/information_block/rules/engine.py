@@ -266,8 +266,9 @@ def _evaluate_rollup_arc_derived(
   of its direct children's reported balances, not a global DAG resolution, so
   an element on another statement's calc path can't contaminate the sum.
   Using live arcs rather than the rule's frozen enumeration lets a subtotal
-  foot over a sibling concept. Periods where no direct child is reported here
-  are skipped.
+  foot over a sibling concept. Periods where no additive child is reported here
+  are skipped: a subtracted child alone (the outside owners' share beside net
+  income on a cash flow) says the subtotal belongs to another statement.
 
   Returns ``None`` when the parent has no calc children, so the caller falls
   back to the frozen-expression evaluator.
@@ -291,7 +292,7 @@ def _evaluate_rollup_arc_derived(
   per_period: list[dict[str, Any]] = []
   for key in sorted(periods, key=lambda k: (k[1] is None, k[1] or date.min)):
     balances, present = by_period[key]
-    if not any(cid in present for cid, _ in children):
+    if not any(cid in present for cid, weight in children if weight > 0):
       continue
     children_sum = sum(balances.get(cid, 0.0) * w for cid, w in children)
     reported = balances.get(parent_id, 0.0)

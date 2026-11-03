@@ -534,6 +534,7 @@ def create_business_events(
           "event_type": "invoice_issued",
           "event_category": "sales",
           "agent_id": agent_id,
+          "terms_days": 30,
           "metadata": base_metadata,
         }
         resp = client.create_event_block(graph_id, body)
@@ -1497,9 +1498,7 @@ def run_forecast_scenario(
     json={
       "block_type": "forecast",
       "payload": {
-        "name": f"FY{(scenario.report_period[1].year + 1) % 100} Operating Budget"
-        if scenario.report_period
-        else "Operating Budget",
+        "name": "Operating Budget",
         "scenario_kind": "budget",
         "horizon_months": horizon,
         "levers": levers,
@@ -2223,7 +2222,7 @@ def generate_annual_report(
 
   report = client.create_report(
     graph_id,
-    name=f"FY {period_end.year} Annual Report",
+    name=f"Twelve Months Ended {period_end:%B %Y}",
     mapping_id=mapping_id,
     taxonomy_id=taxonomy_id,
     period_start=period_start,
@@ -2352,8 +2351,8 @@ def run_demo(
 
   from .engine import emit, validate
 
-  # Validate data
-  txns = emit(scenario)
+  # The current month's plan runs to its end; books hold only what has happened.
+  txns = [txn for txn in emit(scenario) if txn[0] <= date.today()]
   print(f"\n{scenario.company_name} — RoboLedger Showcase Demo Setup")
   print("=" * 60)
   print(f"  Accounts:     {len(scenario.accounts)}")

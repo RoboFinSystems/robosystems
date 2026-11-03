@@ -61,17 +61,45 @@ class TestIncomeStatementValidation:
     assert result.passed is True
     assert len(result.failures) == 0
 
-  def test_missing_revenue_is_inconclusive_failure(self):
-    """Was a warning under the old qname-substring semantic check; the
-    new structural validator fails inconclusively because Net Income
-    can't be computed without a revenue rollup."""
+  def test_a_company_with_no_revenue_yet_reconciles_on_its_expenses(self):
+    """A pre-revenue month is a fact about the company. Its net income is its
+    expenses, and a wrong one still fails."""
     rows = [
       _row("Expenses", 500.0, classification="expense", is_subtotal=True, depth=0),
       _row("SG&A", 500.0, classification="expense", depth=1),
+      _row(
+        "Net Income",
+        -500.0,
+        classification="",
+        qname="rs-gaap:NetIncomeLoss",
+        is_subtotal=True,
+        depth=0,
+      ),
     ]
+    assert validate_report("income_statement", rows).passed is True
+
+    rows[-1] = _row(
+      "Net Income",
+      -400.0,
+      classification="",
+      qname="rs-gaap:NetIncomeLoss",
+      is_subtotal=True,
+      depth=0,
+    )
     result = validate_report("income_statement", rows)
     assert result.passed is False
-    assert any("inconclusive" in f and "revenue" in f for f in result.failures)
+    assert any("Net Income mismatch" in f for f in result.failures)
+
+  def test_a_window_with_no_activity_is_not_checked_and_not_failed(self):
+    rows = [
+      _row("Assets", 0.0, classification="asset", is_subtotal=True, depth=0),
+      _row("Equity", 0.0, classification="equity", is_subtotal=True, depth=0),
+    ]
+    for block in ("balance_sheet", "income_statement"):
+      result = validate_report(block, rows)
+      assert result.status == "inconclusive"
+      assert result.failures == []
+      assert validate_report(block, []).status == "inconclusive"
 
   def test_missing_net_income_emits_implied_warning(self):
     """No NetIncome row but revenue + expense both present — the
@@ -249,16 +277,38 @@ class TestBalanceSheetValidation:
     assert len(result.failures) == 1
     assert "does not balance" in result.failures[0]
 
-  def test_empty_balance_sheet_passes(self):
-    """All zeros, with explicit rollup rows for all three classifications,
-    should pass the equation (0 = 0 + 0)."""
+  def test_an_all_zero_balance_sheet_is_not_checked_and_not_failed(self):
     rows = [
       _row("Assets", 0.0, classification="asset", is_subtotal=True, depth=0),
       _row("Liabilities", 0.0, classification="liability", is_subtotal=True, depth=0),
       _row("Equity", 0.0, classification="equity", is_subtotal=True, depth=0),
     ]
     result = validate_report("balance_sheet", rows)
+    assert result.status == "inconclusive"
+    assert result.failures == []
+
+  def test_a_company_with_no_debts_balances(self):
+    """No liability rows is a fact about the company, not a wiring gap."""
+    rows = [
+      _row("Assets", 43000.0, classification="asset", is_subtotal=True, depth=0),
+      _row("Cash", 43000.0, classification="asset", depth=1),
+      _row("Equity", 43000.0, classification="equity", is_subtotal=True, depth=0),
+      _row("Members Equity", 43000.0, classification="equity", depth=1),
+    ]
+    result = validate_report("balance_sheet", rows)
     assert result.passed is True
+    assert result.failures == []
+
+  def test_no_debts_does_not_excuse_assets_that_differ_from_equity(self):
+    rows = [
+      _row("Assets", 43000.0, classification="asset", is_subtotal=True, depth=0),
+      _row("Cash", 43000.0, classification="asset", depth=1),
+      _row("Equity", 40000.0, classification="equity", is_subtotal=True, depth=0),
+      _row("Members Equity", 40000.0, classification="equity", depth=1),
+    ]
+    result = validate_report("balance_sheet", rows)
+    assert result.passed is False
+    assert any("does not balance" in f for f in result.failures)
 
   def test_no_rollup_rows_is_inconclusive_not_silent_pass(self):
     """Regression test: prior behaviour silently returned passed=True when
@@ -582,6 +632,7 @@ class TestSemanticChecks:
   def test_zero_subtotal_warning(self):
     rows = [
       _row("Empty Section", 0.0, is_subtotal=True, depth=0),
+      _row("Revenue", 500.0, depth=0, qname="us-gaap:Revenues"),
     ]
     result = validate_report("income_statement", rows)
     assert any("zero balance" in w.lower() for w in result.warnings)

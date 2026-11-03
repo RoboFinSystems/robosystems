@@ -3062,17 +3062,18 @@ def _equity_descendant_weights(
   return weights
 
 
-def _leaves_the_group(line, start: date) -> bool:
+def _leaves_the_group(line) -> bool:
   """A consolidation entity's line that belongs to a member's leaving: its
   deconsolidation entry, or the reversal of its investment elimination in
   the first month it is out, which the engine proposes untagged since it
-  moves no cash."""
+  moves no cash. Read off the line's own date, so a column that spans the
+  leaving reads it as one that starts after it does."""
   if line.adjustment_kind == "deconsolidation":
     return True
   return (
     line.adjustment_kind == "elimination_investment"
     and line.adjusts_left_on is not None
-    and line.adjusts_left_on < start
+    and line.posting_date > line.adjusts_left_on
   )
 
 
@@ -3143,6 +3144,7 @@ def _emit_equity_movement_facts(
       li.credit_amount,
       tag.qname AS tag_qname,
       en.adjustment_kind,
+      en.posting_date,
       adj.left_on AS adjusts_left_on,
       (
         SELECT rf.qname
@@ -3246,7 +3248,7 @@ def _emit_equity_movement_facts(
       # A member's leaving is no exchange with an owner: the reversal of its
       # elimination and the results put back are other movements, which net
       # against the capital that leaves with its books.
-      kind = "other" if _leaves_the_group(line, period.start) else None
+      kind = "other" if _leaves_the_group(line) else None
       if kind is None:
         kind = _FLOW_MOVEMENT_KIND.get(line.tag_qname or "")
       if kind is None and line.target_qname in reducer_qnames:
@@ -3317,6 +3319,7 @@ def _emit_nci_movement_facts(
       li.credit_amount,
       tag.qname AS tag_qname,
       en.adjustment_kind,
+      en.posting_date,
       adj.left_on AS adjusts_left_on,
       adj.joined_on AS adjusts_joined_on,
       EXISTS (
@@ -3359,7 +3362,7 @@ def _emit_nci_movement_facts(
     ):
       if line.books_share_of_income:
         continue
-      if _leaves_the_group(line, period.start):
+      if _leaves_the_group(line):
         kind = "deconsolidation"
       elif _joins_the_group(line, period.start, period.end):
         kind = "acquisition"
