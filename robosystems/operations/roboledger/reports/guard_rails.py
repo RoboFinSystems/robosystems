@@ -94,8 +94,21 @@ def validate_report(
       )
   columns = [c for c in columns if c.index not in partial]
   empty_columns = _empty_column_indexes(rows, columns)
+  # A window with no activity (a company before it joined, or after it left)
+  # has nothing to disagree with: not checked, and not a failure.
+  if columns and len(empty_columns) == len(columns):
+    return ValidationResult(
+      passed=False,
+      status=STATUS_INCONCLUSIVE,
+      checks=["no_activity"],
+      warnings=[
+        "No activity in this period, so nothing was checked.",
+        *result.warnings,
+      ],
+    )
   for column in columns:
-    validator(rows, result, column)
+    if column.index not in empty_columns:
+      validator(rows, result, column)
     # A comparative column that is empty end to end is reported once by
     # ``_check_comparative_data``; per-section zero warnings on it are noise.
     if column.index == 0 or column.index not in empty_columns:
@@ -169,9 +182,13 @@ def _validate_income_statement(
   implied_ni = 0.0
   credit_leaves = 0
   debit_leaves = 0
-  for row in rows:
+  for index, row in enumerate(rows):
     # The NI row is excluded by identity, even if is_subtotal is unset.
     if row.is_subtotal or row.is_abstract or row is net_income_row:
+      continue
+    # Rows are post-order, so one that follows a deeper row sums it: a concept
+    # with a chart's own accounts under it would otherwise count twice.
+    if index > 0 and rows[index - 1].depth > row.depth:
       continue
     value = _value(row, column.index)
     if row.balance_type == "credit":
@@ -195,21 +212,12 @@ def _validate_income_statement(
         missing.append("expense")
       _fail(
         result,
-        "Income statement validation inconclusive: missing classification "
-        f"rollups for {missing}. Wire FASB elementsOfFinancialStatements "
-        "traits onto the structure's elements, or ensure at least one "
-        "subtotal row per classification is present.",
+        "Income statement validation inconclusive: no total for "
+        f"{', '.join(missing)}. Map the accounts behind it to reporting concepts.",
       )
       inconclusive = True
     else:
       implied_ni = _value(revenue_row, column.index) - _value(expense_row, column.index)
-  elif credit_leaves == 0:
-    _fail(
-      result,
-      "Income statement validation inconclusive: no revenue/income line "
-      "found to reconcile Net Income against.",
-    )
-    inconclusive = True
 
   if inconclusive:
     return
@@ -332,21 +340,23 @@ def _validate_balance_sheet(
     if pick is not None:
       candidates[cls] = pick
 
-  required = {"asset", "liability", "equity"}
+  # A company with no debts has no liability rows, and that is a statement of
+  # fact: its assets must then equal its equity, which the equation below holds.
+  required = {"asset", "equity"}
   missing = required - candidates.keys()
   if missing:
     # No silent pass when a classification total is missing.
     _fail(
       result,
-      "Balance sheet validation inconclusive: missing classification "
-      f"rollups for {sorted(missing)}. Wire FASB elementsOfFinancialStatements "
-      "traits onto the structure's elements, or ensure at least one "
-      "subtotal row per classification is present.",
+      "Balance sheet validation inconclusive: no total for "
+      f"{', '.join(sorted(missing))}. Map the accounts behind it to reporting "
+      "concepts.",
     )
     return
 
   total_assets = _value(candidates["asset"], column.index)
-  total_liabilities = _value(candidates["liability"], column.index)
+  liabilities = candidates.get("liability")
+  total_liabilities = _value(liabilities, column.index) if liabilities else 0.0
   total_equity = _value(candidates["equity"], column.index) + _sibling_equity_leaves(
     rows, candidates["equity"], column.index
   )

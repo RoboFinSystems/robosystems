@@ -64,13 +64,14 @@ class TestPackageMetadata:
 
 
 class TestRuleContent:
-  def test_has_three_cross_tree_identities(self, rules: list[RuleSpec]) -> None:
-    """Only the genuine cross-tree identities are kept (BS0, BS01, IS04);
+  def test_has_two_cross_tree_identities(self, rules: list[RuleSpec]) -> None:
+    """Only the genuine cross-tree identities are kept (BS01, IS04);
     rollup-shaped Consistency rules move to rs-gaap-rollup-rules (L2) and
-    FAC/SFAC6-aggregate rules have no rs-gaap subtotal target."""
-    assert len(rules) == 3
+    FAC/SFAC6-aggregate rules have no rs-gaap subtotal target. BS0 (Assets =
+    Liabilities + StockholdersEquity) failed a group with outside owners by
+    its noncontrolling interest, on books that balance."""
+    assert len(rules) == 2
     assert {r.id for r in rules} == {
-      "rs-gaap-rule-bs-identity",
       "rs-gaap-rule-bs-balances",
       "rs-gaap-rule-ci-identity",
     }

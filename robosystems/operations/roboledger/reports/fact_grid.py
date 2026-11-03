@@ -341,7 +341,14 @@ def generate_report_facts(
 
   # Last, so no step above reads a balance dated outside every column.
   _emit_opening_equity_facts(
-    session, facts, periods, mapping_id, arc_type, entity_id, close_target_qname
+    session,
+    facts,
+    periods,
+    mapping_id,
+    arc_type,
+    entity_id,
+    close_target_qname,
+    acquired_on=acquired_on,
   )
   _emit_opening_cash_facts(
     session,
@@ -3062,17 +3069,18 @@ def _equity_descendant_weights(
   return weights
 
 
-def _leaves_the_group(line, start: date) -> bool:
+def _leaves_the_group(line) -> bool:
   """A consolidation entity's line that belongs to a member's leaving: its
   deconsolidation entry, or the reversal of its investment elimination in
   the first month it is out, which the engine proposes untagged since it
-  moves no cash."""
+  moves no cash. Read off the line's own date, so a column that spans the
+  leaving reads it as one that starts after it does."""
   if line.adjustment_kind == "deconsolidation":
     return True
   return (
     line.adjustment_kind == "elimination_investment"
     and line.adjusts_left_on is not None
-    and line.adjusts_left_on < start
+    and line.posting_date > line.adjusts_left_on
   )
 
 
@@ -3143,7 +3151,9 @@ def _emit_equity_movement_facts(
       li.credit_amount,
       tag.qname AS tag_qname,
       en.adjustment_kind,
+      en.posting_date,
       adj.left_on AS adjusts_left_on,
+      adj.joined_on AS adjusts_joined_on,
       (
         SELECT rf.qname
         FROM associations darc
@@ -3246,7 +3256,13 @@ def _emit_equity_movement_facts(
       # A member's leaving is no exchange with an owner: the reversal of its
       # elimination and the results put back are other movements, which net
       # against the capital that leaves with its books.
-      kind = "other" if _leaves_the_group(line, period.start) else None
+      # Nor is its joining: the elimination takes out the capital it brought,
+      # which is no distribution to anyone.
+      kind = (
+        "other"
+        if _leaves_the_group(line) or _joins_the_group(line, period.start, period.end)
+        else None
+      )
       if kind is None:
         kind = _FLOW_MOVEMENT_KIND.get(line.tag_qname or "")
       if kind is None and line.target_qname in reducer_qnames:
@@ -3317,6 +3333,7 @@ def _emit_nci_movement_facts(
       li.credit_amount,
       tag.qname AS tag_qname,
       en.adjustment_kind,
+      en.posting_date,
       adj.left_on AS adjusts_left_on,
       adj.joined_on AS adjusts_joined_on,
       EXISTS (
@@ -3359,7 +3376,7 @@ def _emit_nci_movement_facts(
     ):
       if line.books_share_of_income:
         continue
-      if _leaves_the_group(line, period.start):
+      if _leaves_the_group(line):
         kind = "deconsolidation"
       elif _joins_the_group(line, period.start, period.end):
         kind = "acquisition"
@@ -3488,14 +3505,25 @@ def _emit_opening_equity_facts(
   arc_type: str,
   entity_id: str | None,
   close_target_qname: str,
+  *,
+  acquired_on: date | None = None,
 ) -> None:
   """Append each roll-forward root's balance the day before each column
   opens, where no other column ends that day — the earliest column's opening,
   or every column's on a YTD or rolling layout. It is the same balance the
   balance sheet would report that day, earnings closed to date, at an instant
   no column renders. The roots are the Style's capital and the
-  noncontrolling interest."""
-  capital_qname, _ = _equity_rollforward_form(close_target_qname)
+  noncontrolling interest.
+
+  A group read's acquired member brought its capital with it: that was never
+  the group's, so in the column it joins the capital is a movement, which its
+  elimination (see ``_joins_the_group``) takes straight back out, and the
+  group's opening stays the prior month's close."""
+  capital_qname, movements = _equity_rollforward_form(close_target_qname)
+  other = session.execute(
+    text("SELECT id, qname, name, balance_type FROM elements WHERE qname = :q"),
+    {"q": movements["other"]},
+  ).fetchone()
   roots = session.execute(
     text("SELECT id, qname, name, balance_type FROM elements WHERE qname = ANY(:q)"),
     {"q": [capital_qname, _NCI_ROOT]},
@@ -3512,7 +3540,9 @@ def _emit_opening_equity_facts(
   seen: set[date] = set()
   for period in sorted(periods, key=lambda p: p.end):
     opening = _opening_date(period)
-    if opening in column_ends or opening in seen:
+    # On the eve as an opening, or as an earlier column's end that a group read
+    # does not sum: the acquired capital is read either way.
+    if opening in seen or (opening in column_ends and opening != acquired_on):
       continue
     seen.add(opening)
     day = _period_balance_facts(
@@ -3532,6 +3562,30 @@ def _emit_opening_equity_facts(
     computed = resolve_calc_dag(balances, present, calculations, order)
     for root in roots:
       if not present & summed[root.id].keys():
+        continue
+      if opening == acquired_on and root.qname == capital_qname and other is not None:
+        for held in facts:
+          if (
+            held.element_id == root.id
+            and held.period_type == "instant"
+            and held.period_end == opening
+          ):
+            held.value = 0.0
+        facts.append(
+          ReportFact(
+            element_id=other.id,
+            element_qname=other.qname,
+            element_name=other.name or other.qname,
+            classification=None,
+            balance_type=other.balance_type or "credit",
+            value=computed.get(root.id, 0.0),
+            period_start=period.start,
+            period_end=period.end,
+            period_type="duration",
+            origin="derived",
+            derivation={"computations": ["equity_movement"]},
+          )
+        )
         continue
       facts.append(
         ReportFact(

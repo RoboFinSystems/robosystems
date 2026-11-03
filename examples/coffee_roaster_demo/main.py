@@ -71,7 +71,7 @@ REVEAL_PROMPTS = [
 # levers are decimals per month, days levers are day counts.
 FORECAST_LEVERS = {
   "rs-driver:RevenueGrowthRate": 0.03,
-  "rs-driver:CostOfRevenueRate": 0.62,
+  "rs-driver:CostOfRevenueRate": 0.45,
   "rs-driver:DaysSalesOutstanding": 45,
   "rs-driver:DaysPayableOutstanding": 30,
 }

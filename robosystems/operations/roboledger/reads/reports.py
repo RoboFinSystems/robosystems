@@ -1325,7 +1325,7 @@ def _combined_statement(
 
 
 _BEFORE_THE_BOOKS = (
-  "Every column reaches back before the books begin; record the window "
+  "Every column reaches back before the books begin; choose a window "
   "from the first month the books cover."
 )
 _NOTHING_TO_STATE = (

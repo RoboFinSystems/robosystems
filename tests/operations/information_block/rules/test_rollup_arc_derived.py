@@ -116,6 +116,43 @@ class TestEvaluateRollupArcDerived:
     assert outcome.status == "skipped"
     assert "children are present" in (outcome.message or "")
 
+  def test_a_lone_subtracted_child_does_not_make_a_rollup_checkable(self) -> None:
+    # A consolidated cash flow carries net income and the outside owners' share
+    # as add-backs, without the income statement's continuing operations. The
+    # subtracted share alone must not fail net income by the whole of its income.
+    calcs = {
+      "NetIncomeLoss": [
+        ("ContinuingOps", 1.0),
+        ("DiscontinuedOps", 1.0),
+        ("NoncontrollingShare", -1.0),
+      ]
+    }
+    balances = {"NetIncomeLoss": 25438.29, "NoncontrollingShare": 1503.60}
+    outcome = _eval(
+      _rule("NetIncomeLoss", "rs-gaap:NetIncomeLoss"),
+      {_P1: (balances, set(balances))},
+      calcs,
+    )
+    assert outcome is not None
+    assert outcome.status == "skipped"
+
+  def test_a_wrong_net_income_still_fails_with_its_additive_child_present(self) -> None:
+    calcs = {
+      "NetIncomeLoss": [("ContinuingOps", 1.0), ("NoncontrollingShare", -1.0)],
+    }
+    balances = {
+      "NetIncomeLoss": 25000.00,
+      "ContinuingOps": 26941.89,
+      "NoncontrollingShare": 1503.60,
+    }
+    outcome = _eval(
+      _rule("NetIncomeLoss", "rs-gaap:NetIncomeLoss"),
+      {_P1: (balances, set(balances))},
+      calcs,
+    )
+    assert outcome is not None
+    assert outcome.status == "fail"
+
   def test_real_discrepancy_fails_not_tautology(self) -> None:
     # Parent reported independently at 100000 but children sum to 92471.13 —
     # a genuine mismatch must still fail (the check is not vacuous).

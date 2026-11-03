@@ -18,9 +18,13 @@ pytestmark = pytest.mark.unit
 JULY = (date(2026, 7, 1), date(2026, 7, 31))
 
 
-def _line(kind: str, *, tag: str | None = None, joined=None, left=None):
+def _line(kind: str, *, tag: str | None = None, joined=None, left=None, posted=None):
   return SimpleNamespace(
-    adjustment_kind=kind, tag_qname=tag, adjusts_joined_on=joined, adjusts_left_on=left
+    adjustment_kind=kind,
+    tag_qname=tag,
+    adjusts_joined_on=joined,
+    adjusts_left_on=left,
+    posting_date=posted,
   )
 
 
@@ -54,10 +58,19 @@ def test_only_the_investment_elimination_carries_the_arrival():
   assert not fact_grid._joins_the_group(intercompany, *JULY)
 
 
+def test_the_elimination_of_a_joining_members_capital_is_no_distribution():
+  """A debit to equity beside a balance sheet line reads as a distribution by
+  its default flow. The capital an acquired member brought is not one."""
+  elimination = _line("elimination_investment", joined=date(2026, 7, 1))
+  assert fact_grid._joins_the_group(elimination, *JULY)
+  later = _line("elimination_investment", joined=date(2026, 3, 1))
+  assert not fact_grid._joins_the_group(later, *JULY)
+
+
 def test_a_former_members_reversal_is_its_leaving_whatever_its_dates():
-  reversal = _line(
-    "elimination_investment", joined=date(2026, 7, 1), left=date(2026, 7, 31)
-  )
-  assert fact_grid._leaves_the_group(reversal, date(2026, 8, 1))
-  assert not fact_grid._leaves_the_group(reversal, JULY[0])
-  assert fact_grid._leaves_the_group(_line("deconsolidation"), JULY[0])
+  left = date(2026, 7, 31)
+  reversal = _line("elimination_investment", left=left, posted=date(2026, 8, 31))
+  in_its_last_month = _line("elimination_investment", left=left, posted=left)
+  assert fact_grid._leaves_the_group(reversal)
+  assert not fact_grid._leaves_the_group(in_its_last_month)
+  assert fact_grid._leaves_the_group(_line("deconsolidation"))
