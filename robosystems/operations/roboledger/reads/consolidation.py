@@ -303,6 +303,7 @@ class NoConsolidationEntityError(ValueError):
 @dataclass(frozen=True)
 class _Concept:
   qname: str
+  label: str
   period_type: str | None
   classification: str | None
 
@@ -375,6 +376,10 @@ def _money(cents: int) -> str:
   return f"{cents / 100:,.2f}"
 
 
+def _possessive(name: str) -> str:
+  return f"{name}'" if name.endswith("s") else f"{name}'s"
+
+
 # ── Loading ─────────────────────────────────────────────────────────────
 
 
@@ -426,8 +431,8 @@ def primary_concepts(session: Session, mapping_ids: list[str]) -> dict[str, _Con
   rows = session.execute(
     text(
       """
-      SELECT a.from_element_id, t.qname, t.period_type, t.balance_type,
-             tcls.identifier AS classification
+      SELECT a.from_element_id, t.qname, t.name AS label, t.period_type,
+             t.balance_type, tcls.identifier AS classification
       FROM associations a
       JOIN elements t ON t.id = a.to_element_id
       LEFT JOIN (
@@ -450,6 +455,7 @@ def primary_concepts(session: Session, mapping_ids: list[str]) -> dict[str, _Con
     ranked[str(row.from_element_id)].append(
       _Concept(
         qname=str(row.qname),
+        label=row.label or str(row.qname).split(":")[-1],
         period_type=row.period_type,
         classification=row.classification
         or _infer_classification(row.qname, row.balance_type),
@@ -799,7 +805,7 @@ def _plan_capital(
       if amount:
         plan.targets[(qname, *key)] += amount
     plan.basis[key].append(
-      f"{parent.name} took {_money(distributed)} of {member.name}'s "
+      f"{parent.name} took {_money(distributed)} of {_possessive(member.name)} "
       "distributions as income; in the group they are the member's capital "
       "returned, so that income is reversed against its investment."
     )
@@ -817,12 +823,12 @@ def _plan_capital(
           explanation=(
             f"{member.name} joined the group on {member.member.joined_on} "
             f"with its books opening on {_money(capital)} of capital, of "
-            f"which {parent.name}'s {member.share:.0%} is "
+            f"which {_possessive(parent.name)} {member.share:.0%} is "
             f"{_money(parent_part)}; its acquisition is not recorded. Record "
             "it with record-acquisition: the consideration paid to its "
             "sellers, the excess going to goodwill or fair-value step-ups."
             + (
-              f" {parent.name}'s investment account holds "
+              f" {_possessive(parent.name)} investment account holds "
               f"{_money(unattributed)} naming no member."
               if unattributed
               else ""
@@ -870,8 +876,8 @@ def _plan_capital(
   if outside_part:
     plan.targets[(NONCONTROLLING_INTEREST, *key)] -= outside_part
   plan.basis[key].append(
-    f"{member.name}'s capital net of distributions {_money(capital)}: "
-    f"{parent.name}'s {member.share:.0%} {_money(parent_part)} eliminated "
+    f"{_possessive(member.name)} capital net of distributions {_money(capital)}: "
+    f"{_possessive(parent.name)} {member.share:.0%} {_money(parent_part)} eliminated "
     f"against its investment"
     + (
       f", the outside owners' {_money(outside_part)} as noncontrolling interest."
@@ -899,7 +905,7 @@ def _check_consideration(
   if paid > carried:
     plan.notes.append(
       f"The recorded acquisitions and changes in the parent's share paid the "
-      f"sellers {_money(paid)} net of shares sold, but {parent.name}'s "
+      f"sellers {_money(paid)} net of shares sold, but {_possessive(parent.name)} "
       f"investment account holds {_money(carried)} naming no member; post the "
       "purchase or sale in the parent's books (a sale credits the investment "
       "by the carrying amount of the shares sold, its gain apart), or correct "
@@ -952,6 +958,7 @@ def _plan_intercompany(
   ids = [e.id for e in consolidated]
   parent_id = ids[0]
   names = {e.id: e.name for e in consolidated}
+  labels = {r.concept.qname: r.concept.label for r in rows}
   for i, a in enumerate(ids):
     for b in ids[i + 1 :]:
       member = b if a == parent_id else a
@@ -991,9 +998,8 @@ def _plan_intercompany(
           what = "charges for the month" if periodic else "balances"
           plan.basis[key].append(
             f"Intercompany {what} between {names[a]} and {names[b]}: "
-            + ", ".join(
-              f"{names[e]} {q.split(':')[-1]} {_money(abs(amt))}"
-              for e, q, amt in eliminated
+            + "; ".join(
+              f"{names[e]}, {labels[q]}, {_money(abs(amt))}" for e, q, amt in eliminated
             )
             + "."
           )
@@ -1004,8 +1010,8 @@ def _plan_intercompany(
             # and the other recharged at cost: it stays in the group's
             # result, and nothing disagrees.
             plan.notes.append(
-              f"{names[entity_id]}'s {qname.split(':')[-1]} with {names[other]} "
-              f"includes {_money(amount)} with no income on {names[other]}'s "
+              f"{labels[qname]}: {names[entity_id]} records {_money(amount)} with "
+              f"{names[other]} with no income on {_possessive(names[other])} "
               "books; it stays in the consolidated statements as a cost "
               "recharged at cost."
             )
@@ -1017,10 +1023,10 @@ def _plan_intercompany(
               entity_id=entity_id,
               amount=amount,
               description=(
-                f"{names[entity_id]}'s {qname.split(':')[-1]} with "
-                f"{names[other]} ({_money(abs(original))}) has "
-                f"{_money(abs(amount))} with no counterpart on "
-                f"{names[other]}'s books."
+                f"{labels[qname]}: {names[entity_id]} records "
+                f"{_money(abs(original))} with {names[other]}, "
+                f"{_money(abs(amount))} of it with no counterpart on "
+                f"{_possessive(names[other])} books."
               ),
             )
           )
@@ -1035,8 +1041,8 @@ def _plan_intercompany(
           continue
         other = b if entity_id == a else a
         plan.notes.append(
-          f"{names[entity_id]}'s {qname.split(':')[-1]} with {names[other]} "
-          f"({_money(abs(amount))}) is owed within the group, and the "
+          f"{labels[qname]}: {names[entity_id]} records {_money(abs(amount))} with "
+          f"{names[other]}, owed within the group, and the "
           f"consolidation entity has no account mapped to {qname} to "
           "eliminate it; the balance is left out."
         )
@@ -1083,7 +1089,7 @@ def _plan_income_shares(
         else f"{float(override['percentage']):g}% of {_money(income)}, {_money(share)}"
       )
       plan.basis[key].append(
-        f"The outside owners' share of {member.name}'s result for the month, "
+        f"The outside owners' share of {_possessive(member.name)} result for the month, "
         f"by an allocation override: {how} (pro rata would be "
         f"{_money(share_of(income, max(outside, 0.0)))}). "
         f"{override.get('basis') or ''}".rstrip()
@@ -1093,7 +1099,7 @@ def _plan_income_shares(
     else:
       share = share_of(_net_income(rows, member.id), outside)
       plan.basis[key].append(
-        f"The outside owners' {outside:.0%} of {member.name}'s result for the "
+        f"The outside owners' {outside:.0%} of {_possessive(member.name)} result for the "
         f"month: {_money(share)}."
       )
     if not share:
@@ -1108,7 +1114,7 @@ def _plan_income_shares(
     plan.targets[(EQUITY_METHOD_INVESTMENT, *key)] += pickup
     plan.targets[(EQUITY_METHOD_INCOME, *key)] -= pickup
     plan.basis[key].append(
-      f"The parent's {associate.share:.0%} of {associate.name}'s result for the "
+      f"The parent's {associate.share:.0%} of {_possessive(associate.name)} result for the "
       f"month: {_money(pickup)}."
     )
   for associate in associates:
@@ -1123,7 +1129,7 @@ def _plan_income_shares(
     if received:
       plan.targets[(EQUITY_METHOD_INVESTMENT, *key)] -= received
       plan.basis[key].append(
-        f"{parent.name} took {_money(received)} of {associate.name}'s "
+        f"{parent.name} took {_money(received)} of {_possessive(associate.name)} "
         "distributions as income; on the equity method they reduce the "
         "investment."
       )
@@ -1388,7 +1394,7 @@ def preview_consolidation_entries(
       posting_date=eve,
       memo=f"Opening balance — {_MEMOS[kind].format(name=by_id[member_id].name)}",
       basis=(
-        f"What {by_id[member_id].name}'s history before {period} already "
+        f"What {_possessive(by_id[member_id].name)} history before {period} already "
         "needed when the group's first month opened; the consolidated "
         "statements open on it."
       ),
@@ -1490,7 +1496,7 @@ def preview_consolidation_entries(
   )
   if untaggable:
     plan.notes.append(
-      f"{consolidation.name}'s cash flow statement has no "
+      f"{_possessive(consolidation.name)} cash flow statement has no "
       + ", ".join(sorted(untaggable))
       + " row; the entries that would offset it are left untagged."
     )
@@ -1644,7 +1650,7 @@ def _note_what_cannot_open(
   for kind, member_id in sorted(needed - set(opening)):
     if member_id in by_id:
       plan.notes.append(
-        f"{by_id[member_id].name}'s {kind} from before {period} cannot be "
+        f"{_possessive(by_id[member_id].name)} {kind} from before {period} cannot be "
         "the consolidation entity's opening, so it is caught up within the "
         "month; the consolidated equity statement may not roll forward over it."
       )
@@ -1690,6 +1696,7 @@ def _hold_what_a_former_member_leaves(
   stays on the balance sheet until a person posts the deconsolidation, so
   the month is left incomplete until no asset, liability or outside owners'
   share is held for it. The group's own equity is where that entry lands."""
+  labels = {r.concept.qname: r.concept.label for r in rows}
   for entity in outside:
     left: dict[str, int] = defaultdict(
       int, held_for_member(rows, consolidation.id, entity.id, beyond_engine=False)
@@ -1705,8 +1712,8 @@ def _hold_what_a_former_member_leaves(
     plan.notes.append(
       f"{entity.name} is no longer in the group, and {consolidation.name} "
       "still holds "
-      + ", ".join(
-        f"{q.split(':')[-1]} {_money(abs(a))} {'debit' if a > 0 else 'credit'}"
+      + "; ".join(
+        f"{labels[q]}, {_money(abs(a))} {'debit' if a > 0 else 'credit'}"
         for q, a in sorted(held.items())
       )
       + " for it beyond the eliminations proposed here; record-deconsolidation "
