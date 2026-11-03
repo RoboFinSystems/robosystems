@@ -789,6 +789,44 @@ def test_balances_the_two_sides_disagree_on_are_reconciling_items(group):
   ]
 
 
+def test_a_disagreement_reads_in_the_concept_label_a_person_sees(group):
+  """The close panel shows this text as it is, so it carries the label the
+  statements use rather than the concept's local name."""
+  _form_the_group(group)
+  with extensions_session(GRAPH) as session:
+    session.execute(
+      text(
+        "UPDATE elements SET name = 'Due from Affiliate, Current' "
+        "WHERE qname = 'rs-gaap:DueFromAffiliateCurrent'"
+      )
+    )
+    session.execute(
+      text("UPDATE entities SET name = 'Harbor Partners' WHERE id = :id"),
+      {"id": MEMBER},
+    )
+  post(
+    group,
+    PARENT_ENTITY_ID,
+    JAN_31,
+    [("due_from", 17_500), ("cash", -17_500)],
+    agent=MEMBER,
+  )
+  post(
+    group,
+    MEMBER,
+    JAN_31,
+    [("cash", 15_000), ("due_to", -15_000)],
+    agent=PARENT_ENTITY_ID,
+  )
+
+  [item] = preview().reconciling_items
+
+  assert item.description == (
+    "Due from Affiliate, Current: Parent Co records 175.00 with Harbor Partners, "
+    "25.00 of it with no counterpart on Harbor Partners' books."
+  )
+
+
 def test_a_member_outside_its_interval_is_not_consolidated(group):
   _form_the_group(group)
   _january(group)
@@ -823,9 +861,9 @@ def test_a_member_that_left_holds_the_month_until_its_deconsolidation(group):
   )
   assert february.incomplete and not february.up_to_date
   held = [n for n in february.notes if "no longer in the group" in n]
-  assert any("Member LLC" in n and "MinorityInterest 547.50 credit" in n for n in held)
+  assert any("Member LLC" in n and "MinorityInterest, 547.50 credit" in n for n in held)
   assert any(
-    "Associate LLC" in n and "EquityMethodInvestments 200.00 debit" in n for n in held
+    "Associate LLC" in n and "EquityMethodInvestments, 200.00 debit" in n for n in held
   )
 
   _post_proposals(group, february)
