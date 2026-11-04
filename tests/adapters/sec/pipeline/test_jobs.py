@@ -1,11 +1,14 @@
 """Tests for SEC pipeline Dagster job definitions."""
 
+import json
+
 import pytest
 
 from robosystems.adapters.sec.pipeline.jobs import (
   sec_artifact_generation_job,
   sec_download_job,
   sec_duckdb_s3_publish_job,
+  sec_filing_catalog_job,
   sec_historical_duckdb_s3_publish_job,
   sec_historical_lbug_s3_publish_job,
   sec_historical_materialize_job,
@@ -285,3 +288,12 @@ def test_the_chain_entry_jobs_retry_infrastructure_failures_only(job):
   or by nothing. A step failure is not retried: it would fail again."""
   assert job.tags.get("dagster/max_retries") == "3"
   assert job.tags.get("dagster/retry_on_asset_or_op_failure") == "false"
+
+
+@pytest.mark.unit
+def test_the_catalog_runs_on_demand_only():
+  """At the catalog's task size Spot refused launches and killed runs often
+  enough to use up all its retries."""
+  kwargs = sec_filing_catalog_job.tags["ecs/run_task_kwargs"]
+  strategy = json.loads(kwargs)["capacityProviderStrategy"]
+  assert [s["capacityProvider"] for s in strategy] == ["FARGATE"]
