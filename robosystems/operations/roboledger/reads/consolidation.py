@@ -373,7 +373,7 @@ def share_of(cents: int, share: float) -> int:
 
 
 def _money(cents: int) -> str:
-  return f"{cents / 100:,.2f}"
+  return f"{'-' if cents < 0 else ''}${abs(cents) / 100:,.2f}"
 
 
 def _possessive(name: str) -> str:

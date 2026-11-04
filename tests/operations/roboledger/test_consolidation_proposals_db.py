@@ -822,8 +822,8 @@ def test_a_disagreement_reads_in_the_concept_label_a_person_sees(group):
   [item] = preview().reconciling_items
 
   assert item.description == (
-    "Due from Affiliate, Current: Parent Co records 175.00 with Harbor Partners, "
-    "25.00 of it with no counterpart on Harbor Partners' books."
+    "Due from Affiliate, Current: Parent Co records $175.00 with Harbor Partners, "
+    "$25.00 of it with no counterpart on Harbor Partners' books."
   )
 
 
@@ -2883,3 +2883,8 @@ def test_a_member_leaves_only_closed_unfed_and_agreed(group):
     agent=PARENT_ENTITY_ID,
   )
   assert leave().left_on == JAN_31
+
+
+def test_money_reads_in_dollars() -> None:
+  assert engine._money(71700) == "$717.00"
+  assert engine._money(-123456) == "-$1,234.56"
