@@ -3177,6 +3177,11 @@ class TestCashFlowRowWording:
       ),
       ("Other Noncash Income (Expense)", "Other Noncash (Income) Expense"),
       ("Gain", "Gain"),
+      ("Receivables (Net)", "Receivables (Net)"),
+      (
+        "(Increase) Decrease in Accounts Receivable",
+        "(Increase) Decrease in Accounts Receivable",
+      ),
     ],
   )
   def test_the_wording_swaps_the_paired_words(self, label: str, worded: str) -> None:
