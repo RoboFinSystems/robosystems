@@ -17,9 +17,15 @@ from typing import Any
 import pandas as pd
 from dagster import AssetExecutionContext, BackfillPolicy, MaterializeResult, asset
 
+from robosystems.adapters.sec.tickers import (
+  apply_ticker_map,
+  current_ticker_map,
+  updated_aliases,
+)
 from robosystems.config import env
 from robosystems.config.storage.shared import (
   FILING_ARTIFACT_MANIFEST,
+  FILING_CATALOG_ALIASES_KEY,
   FILING_CATALOG_INDEX_KEY,
   FILING_ROBOTS_KEY,
   PUBLIC_DATA_STORAGE_CLASS,
@@ -108,8 +114,9 @@ def filers(entities: pd.DataFrame) -> dict[str, dict[str, Any]]:
   """One row per CIK — its latest partition's Entity row, so a ticker or name
   change on a later filing wins.
 
-  A filing processed with no filer name writes a placeholder row, the CIK for a
-  name and nothing else, which never replaces a row that knows the filer.
+  A combined filing whose fact names another registrant writes a placeholder
+  row for it, the CIK for a name and nothing else, which never replaces a row
+  that knows the filer.
   """
   out: dict[str, dict[str, Any]] = {}
   if entities.empty:
@@ -457,28 +464,39 @@ def read_manifests(
     return dict(pool.map(one, filings))
 
 
-def read_prior_renderable(s3: Any, bucket: str) -> dict[str, dict[str, Any]]:
-  """The renderability the previous index recorded, keyed by ticker.
+def read_prior_index(s3: Any, bucket: str) -> dict[str, dict[str, Any]]:
+  """What the previous index published for each filer, keyed by CIK: its ticker
+  and renderability.
 
   A run reads manifests only for the filers it touches but writes every filer's
-  index row; untouched filers carry theirs forward from here (one GET instead
-  of a manifest per filing). A missing index is not an error: untouched filers
-  settle on the next run.
+  index row, so untouched filers carry theirs forward from here (one GET instead
+  of a manifest per filing). No index yet means every filer is new. An index that
+  cannot be read fails the run: carrying nothing forward would publish every
+  untouched filer as not renderable.
   """
   try:
     body = s3.get_object(Bucket=bucket, Key=FILING_CATALOG_INDEX_KEY)["Body"].read()
-    companies = json.loads(body).get("companies") or []
-  except Exception as e:
-    logger.info(f"No prior catalog index to carry renderability from: {e}")
+  except s3.exceptions.NoSuchKey:
     return {}
+  companies = json.loads(body).get("companies") or []
   return {
-    row["ticker"]: {
+    row["cik"]: {
+      "ticker": row.get("ticker"),
       "renderable": row.get("renderable", False),
       "latest_renderable": row.get("latest_renderable"),
     }
     for row in companies
-    if row.get("ticker")
+    if row.get("cik")
   }
+
+
+def read_aliases(s3: Any, bucket: str) -> dict[str, dict[str, Any]]:
+  """Old ticker → the filer that left it. None yet means none."""
+  try:
+    body = s3.get_object(Bucket=bucket, Key=FILING_CATALOG_ALIASES_KEY)["Body"].read()
+  except s3.exceptions.NoSuchKey:
+    return {}
+  return json.loads(body).get("aliases") or {}
 
 
 # ── the asset ────────────────────────────────────────────────────────────────
@@ -516,7 +534,8 @@ def sec_filing_catalog(
 
   Partitioned by quarter. Rewrites the catalog file of every filer with a
   filing in the run's partitions (every filer on ``full_rebuild``), and the
-  corpus index always.
+  corpus index always. A filer new to the index or under a new ticker is rewritten
+  whichever partition it files in, with a copy at each ticker it left.
   """
   public_bucket = env.PUBLIC_DATA_BUCKET
   if not public_bucket:
@@ -539,7 +558,24 @@ def sec_filing_catalog(
     f"{len(relationships)} entity-report rows"
   )
   by_cik = filings_by_cik(reports, relationships, entities, config.form_types)
-  filer_rows = filers(entities)
+  try:
+    prior = read_prior_index(s3, public_bucket)
+    prior_aliases = read_aliases(s3, public_bucket)
+  except Exception as e:
+    # A full rebuild reads every manifest, so it needs neither file, and it is
+    # how a bad one gets replaced.
+    if not config.full_rebuild:
+      raise
+    context.log.warning(f"Rebuilding without the prior catalog state: {e}")
+    prior, prior_aliases = {}, {}
+  prior_tickers = {c: r["ticker"] for c, r in prior.items() if r.get("ticker")}
+  # Applied even with no map: the published tickers still outrank the rows' own.
+  filer_rows = apply_ticker_map(
+    filers(entities),
+    current_ticker_map(s3, env.SHARED_RAW_BUCKET) or {},
+    filed=set(by_cik),
+    prior=prior_tickers,
+  )
 
   listed: dict[str, tuple[dict[str, Any], list[dict[str, Any]]]] = {}
   for cik, filer in filer_rows.items():
@@ -559,6 +595,12 @@ def sec_filing_catalog(
     # A contested ticker's file is rewritten on every run: the other filer may
     # have written it last, and its holder may not file in this partition.
     touched |= contested
+    # A filer new to the index, or under a new ticker, has no file there yet.
+    touched |= {
+      cik
+      for cik, (filer, _) in listed.items()
+      if ((prior.get(cik) or {}).get("ticker") or "").upper() != filer["ticker"].upper()
+    }
   context.log.info(
     f"{len(listed)} filers listed; rewriting {len(touched)}"
     + (
@@ -568,8 +610,27 @@ def sec_filing_catalog(
     )
   )
 
-  # Renderability for the filers this run does not rewrite (see the helper).
-  prior = {} if config.full_rebuild else read_prior_renderable(s3, public_bucket)
+  listed_tickers = {
+    cik: filer["ticker"] for cik, (filer, _) in listed.items() if filer["ticker"]
+  }
+  aliases = updated_aliases(
+    prior_aliases,
+    listed_tickers,
+    prior_tickers,
+    datetime.now(UTC).date().isoformat(),
+  )
+  old_tickers: dict[str, list[str]] = {}
+  for old, entry in sorted(aliases.items()):
+    old_tickers.setdefault(entry["cik"], []).append(old)
+
+  # Nothing should leave the index except through a rename, which is an alias.
+  dropped = sorted(
+    str(row["ticker"]) for cik, row in prior.items() if cik not in listed
+  )
+  if dropped:
+    context.log.error(
+      f"{len(dropped)} filers left the catalog index: {', '.join(dropped[:50])}"
+    )
 
   written = 0
   failed = 0
@@ -578,28 +639,54 @@ def sec_filing_catalog(
     filer, filings = listed[cik]
     manifests = read_manifests(s3, public_bucket, filings, config.manifest_workers)
     document = build_company(filer, filings, manifests, viewer_url=config.viewer_url)
+    former = old_tickers.get(cik)
+    if former:
+      document["former_tickers"] = former
     summaries[cik] = {
       "renderable": document["renderable"],
       "latest_renderable": document["latest_renderable"],
     }
-    ok = writer.upload_string(
-      _dump(document),
-      public_bucket,
-      get_filing_catalog_key(filer["ticker"]),
-      content_type=CATALOG_MEDIA_TYPE,
-      cache_control=CATALOG_CACHE_CONTROL,
-      storage_class=PUBLIC_DATA_STORAGE_CLASS,
-    )
-    written += int(ok)
-    failed += int(not ok)
+    # An old ticker keeps a whole document, so a reader that has not learned
+    # about moves still works; one that has can redirect on `moved_to`.
+    for key, body in (
+      (filer["ticker"], document),
+      *((old, {**document, "moved_to": filer["ticker"]}) for old in former or []),
+    ):
+      ok = writer.upload_string(
+        _dump(body),
+        public_bucket,
+        get_filing_catalog_key(key),
+        content_type=CATALOG_MEDIA_TYPE,
+        cache_control=CATALOG_CACHE_CONTROL,
+        storage_class=PUBLIC_DATA_STORAGE_CLASS,
+      )
+      written += int(ok)
+      failed += int(not ok)
+
+  aliases_ok = writer.upload_string(
+    _dump(
+      {
+        "version": CATALOG_VERSION,
+        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "aliases": aliases,
+      }
+    ),
+    public_bucket,
+    FILING_CATALOG_ALIASES_KEY,
+    content_type=CATALOG_MEDIA_TYPE,
+    cache_control=CATALOG_CACHE_CONTROL,
+    storage_class=PUBLIC_DATA_STORAGE_CLASS,
+  )
 
   index = build_index(
     [
-      index_row(filer, fs, summaries.get(cik) or prior.get(filer["ticker"]))
+      index_row(filer, fs, summaries.get(cik) or prior.get(cik))
       for cik, (filer, fs) in listed.items()
     ]
   )
-  index_ok = writer.upload_string(
+  # The index is what the next run compares against, so it goes last, and not
+  # at all without the aliases: that run then finds the same renames again.
+  index_ok = aliases_ok and writer.upload_string(
     _dump(index),
     public_bucket,
     FILING_CATALOG_INDEX_KEY,
@@ -633,6 +720,8 @@ def sec_filing_catalog(
       "filers_renderable": renderable_filers,
       "filers_written": written,
       "filers_failed": failed,
+      "filers_dropped": len(dropped),
+      "ticker_aliases": len(aliases),
       "index_written": index_ok,
       "partitions": len(partitions),
     }

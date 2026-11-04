@@ -7,7 +7,11 @@ from typing import Any
 import ladybug as lbug
 import pytest
 
-from robosystems.adapters.sec.mcp.element_resolver import _resolve_text_fallback
+from robosystems.adapters.sec.mcp.element_resolver import (
+  _build_query_hint,
+  _fetch_canonical_elements,
+  _resolve_text_fallback,
+)
 
 LABEL_ROLE = "http://www.xbrl.org/2003/role/label"
 
@@ -73,3 +77,56 @@ async def test_untickered_text_fallback_returns_matches_by_confidence(client):
     "us-gaap:Revenues",
     "acme:OtherRevenue",
   ]
+
+
+class _RecordingClient:
+  graph_id = "sec"
+
+  def __init__(self):
+    self.calls: list[tuple[str, dict[str, Any]]] = []
+
+  async def execute_query(self, query, parameters=None):
+    self.calls.append((query, parameters or {}))
+    return []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_renamed_filer_is_matched_by_cik():
+  recording = _RecordingClient()
+
+  await _fetch_canonical_elements(recording, "revenue", "BK", None, "0001390777")
+  await _resolve_text_fallback(
+    recording, {"matches": []}, "Revenue", "BK", None, "0001390777"
+  )
+
+  for query, parameters in recording.calls:
+    assert "ent.cik = $cik" in query
+    assert "ent.ticker" not in query
+    assert parameters["cik"] == "0001390777"
+    assert "ticker" not in parameters
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_any_other_filer_is_matched_by_ticker():
+  recording = _RecordingClient()
+
+  await _fetch_canonical_elements(recording, "revenue", "NVDA", None)
+
+  query, parameters = recording.calls[0]
+  assert "ent.ticker = $ticker" in query
+  assert parameters["ticker"] == "NVDA"
+
+
+@pytest.mark.unit
+def test_the_query_hint_follows_the_same_match():
+  result: dict[str, Any] = {
+    "matches": [{"qname": "us-gaap:Revenues"}],
+    "query_hint": None,
+  }
+
+  _build_query_hint(result, "BK", None, "0001390777")
+
+  assert "ent.cik = $cik" in result["query_hint"]
+  assert result["query_hint_params"]["cik"] == "0001390777"

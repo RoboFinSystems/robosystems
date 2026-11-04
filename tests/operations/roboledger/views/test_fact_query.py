@@ -24,6 +24,7 @@ from robosystems.operations.roboledger.views.fact_query import (
   _deduplicate_fact_rows,
   _is_ticker,
   _safe_str,
+  _with_renamed_filers,
   period_scope_hint,
   query_fact_grid,
   shared_only_selectors,
@@ -736,3 +737,30 @@ class TestSharedOnlySelectors:
     refusal = shared_only_selectors(MOCK_GRAPH_ID, form="10-K", fiscal_year=2025)
     assert refusal is not None
     assert refusal.startswith("form, fiscal_year are only available")
+
+
+@pytest.mark.unit
+class TestRenamedFilers:
+  @pytest.mark.asyncio
+  async def test_a_renamed_filers_ticker_becomes_its_cik(self):
+    with patch(
+      "robosystems.adapters.sec.mcp.report_resolver.renamed_filer_cik_sync",
+      side_effect=lambda t: "0001390777" if t == "BK" else None,
+    ):
+      resolved = await _with_renamed_filers(
+        "sec", ["BK", "NVDA", "0000320193", "Acme Corp"]
+      )
+
+    assert resolved == ["0001390777", "NVDA", "0000320193", "Acme Corp"]
+
+  @pytest.mark.asyncio
+  async def test_a_tenant_graph_never_looks_up(self):
+    with patch(
+      "robosystems.adapters.sec.mcp.report_resolver.renamed_filer_cik_sync"
+    ) as lookup:
+      assert await _with_renamed_filers(MOCK_GRAPH_ID, ["BK"]) == ["BK"]
+    lookup.assert_not_called()
+
+  @pytest.mark.asyncio
+  async def test_no_filter_stays_no_filter(self):
+    assert await _with_renamed_filers("sec", None) is None

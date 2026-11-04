@@ -10,6 +10,8 @@ Verifies:
 
 from __future__ import annotations
 
+import json
+import time
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -18,10 +20,25 @@ from robosystems.adapters.sec.mcp.report_resolver import (
   ANNUAL_FORMS,
   QUARTERLY_FORMS,
   SECReportResolutionError,
+  _renamed_cache,
+  build_sec_report_query,
+  renamed_filer_cik,
+  renamed_filer_cik_sync,
   resolve_sec_report,
 )
 
 MOCK_GRAPH = "sec"
+S3 = "robosystems.adapters.sec.mcp.report_resolver.S3Client"
+
+
+@pytest.fixture(autouse=True)
+def catalog():
+  """No catalog document unless a test seeds one; never a real bucket."""
+  _renamed_cache.clear()
+  with patch(S3) as client:
+    client.return_value.read_string.return_value = None
+    yield client.return_value
+  _renamed_cache.clear()
 
 
 @pytest.fixture
@@ -156,3 +173,84 @@ class TestResolveSecReport:
     ):
       with pytest.raises(SECReportResolutionError):
         await resolve_sec_report(MOCK_GRAPH, ticker="NVDA")
+
+
+@pytest.mark.unit
+class TestRenamedFilers:
+  def _seed(self, catalog, **document):
+    catalog.read_string.return_value = json.dumps(document)
+
+  def test_an_old_ticker_resolves_to_the_filers_cik(self, catalog):
+    self._seed(catalog, cik="0001390777", moved_to="BNY")
+    assert renamed_filer_cik_sync("bk") == "0001390777"
+
+  def test_a_new_ticker_resolves_to_the_filers_cik(self, catalog):
+    self._seed(catalog, cik="0001390777", former_tickers=["BK"])
+    assert renamed_filer_cik_sync("BNY") == "0001390777"
+
+  def test_an_unrenamed_filer_keeps_the_ticker_path(self, catalog):
+    self._seed(catalog, cik="0000034088", filings=[])
+    assert renamed_filer_cik_sync("XOM") is None
+
+  def test_a_ticker_with_no_document_keeps_the_ticker_path(self):
+    assert renamed_filer_cik_sync("NONE") is None
+
+  def test_a_catalog_that_cannot_be_read_keeps_the_ticker_path(self, catalog):
+    catalog.read_string.side_effect = RuntimeError("503")
+    assert renamed_filer_cik_sync("BK") is None
+
+  def test_a_failed_read_is_remembered_only_briefly(self, catalog):
+    catalog.read_string.side_effect = RuntimeError("503")
+    assert renamed_filer_cik_sync("BK") is None
+    assert renamed_filer_cik_sync("BK") is None
+    assert catalog.read_string.call_count == 1
+
+    catalog.read_string.side_effect = None
+    self._seed(catalog, cik="0001390777", moved_to="BNY")
+    expires, cached = _renamed_cache["BK"]
+    assert cached is None
+    assert expires - time.monotonic() <= 30
+    _renamed_cache["BK"] = (time.monotonic() - 1, None)
+    assert renamed_filer_cik_sync("BK") == "0001390777"
+
+  def test_a_lookup_is_cached(self, catalog):
+    self._seed(catalog, cik="0001390777", moved_to="BNY")
+    renamed_filer_cik_sync("BK")
+    renamed_filer_cik_sync("BK")
+    assert catalog.read_string.call_count == 1
+
+  @pytest.mark.parametrize("symbol", ["../secret", "A B", "0001390777", ""])
+  def test_what_is_not_a_ticker_reads_nothing(self, catalog, symbol):
+    assert renamed_filer_cik_sync(symbol) is None
+    catalog.read_string.assert_not_called()
+
+  @pytest.mark.asyncio
+  async def test_only_the_sec_repository_looks_up(self, catalog):
+    self._seed(catalog, cik="0001390777", moved_to="BNY")
+    assert await renamed_filer_cik("kg123", "BK") is None
+    catalog.read_string.assert_not_called()
+
+  def test_the_query_matches_a_renamed_filer_by_cik(self):
+    query, parameters = build_sec_report_query(ticker="BK", cik="0001390777")
+    assert "ent.cik = $cik" in query
+    assert "ent.ticker" not in query.split("RETURN")[0]
+    assert parameters["cik"] == "0001390777"
+    assert "ticker" not in parameters
+
+  def test_the_query_otherwise_matches_by_ticker(self):
+    query, parameters = build_sec_report_query(ticker="NVDA")
+    assert "ent.ticker = $ticker" in query
+    assert parameters["ticker"] == "NVDA"
+
+  @pytest.mark.asyncio
+  async def test_resolving_a_renamed_filer_goes_by_cik(self, catalog, mock_repository):
+    self._seed(catalog, cik="0001390777", moved_to="BNY")
+    mock_repository.execute_query.return_value = [{"identifier": "r"}]
+    with patch(
+      "robosystems.adapters.sec.mcp.report_resolver.get_graph_repository",
+      AsyncMock(return_value=mock_repository),
+    ):
+      await resolve_sec_report(MOCK_GRAPH, ticker="BK")
+    query, parameters = mock_repository.execute_query.call_args.args
+    assert "ent.cik = $cik" in query
+    assert parameters["cik"] == "0001390777"

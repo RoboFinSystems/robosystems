@@ -3,14 +3,75 @@ on the shared SEC repository."""
 
 from __future__ import annotations
 
+import asyncio
+import json
+import re
+import time
 from typing import Any
 
+from robosystems.config import env
+from robosystems.config.storage.shared import get_filing_catalog_key
 from robosystems.logger import logger
 from robosystems.middleware.graph import get_graph_repository
+from robosystems.operations.aws.s3 import S3Client
 
 ANNUAL_FORMS: tuple[str, ...] = ("10-K", "20-F", "40-F")
 # Includes annual forms: foreign filers may file only annually.
 QUARTERLY_FORMS: tuple[str, ...] = ("10-K", "20-F", "40-F", "10-Q")
+
+
+SEC_GRAPH_ID = "sec"
+_TICKER = re.compile(r"^[A-Z0-9][A-Z0-9.\-/]{0,15}$")
+_RENAMED_TTL_SECONDS = 300
+# A storage outage must not add a failing read to every SEC query.
+_RENAMED_FAILURE_TTL_SECONDS = 30
+_RENAMED_CACHE_LIMIT = 4096
+_renamed_cache: dict[str, tuple[float, str | None]] = {}
+
+
+def _remember_renamed(symbol: str, cik: str | None, expires: float) -> None:
+  if len(_renamed_cache) >= _RENAMED_CACHE_LIMIT:
+    _renamed_cache.clear()
+  _renamed_cache[symbol] = (expires, cik)
+
+
+def renamed_filer_cik_sync(ticker: str) -> str | None:
+  """The CIK of a filer the catalog says changed ticker, asked for by either one.
+
+  None for every other ticker, including when the catalog cannot be read, so
+  those keep matching ``Entity.ticker``. Renamed filers go by CIK because the
+  catalog moves first and the graph follows on the next nightly build.
+  """
+  symbol = ticker.strip().upper()
+  if not _TICKER.match(symbol) or symbol.isdigit() or not env.PUBLIC_DATA_BUCKET:
+    return None
+  now = time.monotonic()
+  cached = _renamed_cache.get(symbol)
+  if cached and cached[0] > now:
+    return cached[1]
+  try:
+    text = S3Client().read_string(
+      env.PUBLIC_DATA_BUCKET, get_filing_catalog_key(symbol)
+    )
+    document = json.loads(text) if text else None
+  except Exception as e:
+    logger.warning(f"SEC catalog read failed for {symbol}: {e}")
+    _remember_renamed(symbol, None, now + _RENAMED_FAILURE_TTL_SECONDS)
+    return None
+  cik = None
+  if isinstance(document, dict) and (
+    document.get("moved_to") or document.get("former_tickers")
+  ):
+    cik = document.get("cik")
+  _remember_renamed(symbol, cik, now + _RENAMED_TTL_SECONDS)
+  return cik
+
+
+async def renamed_filer_cik(graph_id: str, ticker: str | None) -> str | None:
+  """:func:`renamed_filer_cik_sync`, on the SEC repository only."""
+  if graph_id != SEC_GRAPH_ID or not ticker:
+    return None
+  return await asyncio.to_thread(renamed_filer_cik_sync, ticker)
 
 
 class SECReportResolutionError(RuntimeError):
@@ -25,14 +86,16 @@ class SECReportResolutionError(RuntimeError):
 def build_sec_report_query(
   *,
   ticker: str,
+  cik: str | None = None,
   period_type: str | None = None,
   fiscal_year: int | None = None,
 ) -> tuple[str, dict[str, Any]]:
   """The Cypher and parameters that resolve a ticker's most recent filing.
 
-  ``period_type`` "quarterly" or "instant" adds 10-Q to the annual forms;
-  anything else means annual only. The replica warmup runs this same text at
-  boot (``graph_api/core/ladybug/warmup.py``).
+  ``cik`` matches the filer by CIK instead, for a renamed filer. ``period_type``
+  "quarterly" or "instant" adds 10-Q to the annual forms; anything else means
+  annual only. The replica warmup runs this same text at boot
+  (``graph_api/core/ladybug/warmup.py``).
   """
   if period_type == "annual":
     forms: tuple[str, ...] = ANNUAL_FORMS
@@ -41,8 +104,15 @@ def build_sec_report_query(
   else:
     forms = ANNUAL_FORMS
 
-  where_parts = ["ent.ticker = $ticker", "r.form IN $forms"]
-  parameters: dict[str, Any] = {"ticker": ticker, "forms": list(forms)}
+  where_parts = [
+    "ent.cik = $cik" if cik else "ent.ticker = $ticker",
+    "r.form IN $forms",
+  ]
+  parameters: dict[str, Any] = {"forms": list(forms)}
+  if cik:
+    parameters["cik"] = cik
+  else:
+    parameters["ticker"] = ticker
 
   if fiscal_year is not None:
     where_parts.append("r.fiscal_year_focus = $fiscal_year")
@@ -70,7 +140,10 @@ async def resolve_sec_report(
 ) -> dict[str, Any] | None:
   """The most recent filing for a ticker, or None when nothing matches."""
   query, parameters = build_sec_report_query(
-    ticker=ticker, period_type=period_type, fiscal_year=fiscal_year
+    ticker=ticker,
+    cik=await renamed_filer_cik(graph_id, ticker),
+    period_type=period_type,
+    fiscal_year=fiscal_year,
   )
 
   try:
