@@ -861,9 +861,11 @@ def test_a_member_that_left_holds_the_month_until_its_deconsolidation(group):
   )
   assert february.incomplete and not february.up_to_date
   held = [n for n in february.notes if "no longer in the group" in n]
-  assert any("Member LLC" in n and "MinorityInterest, 547.50 credit" in n for n in held)
   assert any(
-    "Associate LLC" in n and "EquityMethodInvestments, 200.00 debit" in n for n in held
+    "Member LLC" in n and "MinorityInterest, $547.50 credit" in n for n in held
+  )
+  assert any(
+    "Associate LLC" in n and "EquityMethodInvestments, $200.00 debit" in n for n in held
   )
 
   _post_proposals(group, february)
