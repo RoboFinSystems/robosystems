@@ -108,8 +108,8 @@ def filers(entities: pd.DataFrame) -> dict[str, dict[str, Any]]:
   """One row per CIK — its latest partition's Entity row, so a ticker or name
   change on a later filing wins.
 
-  A filing processed without its EDGAR header writes a placeholder row, the CIK
-  for a name and nothing else, which never replaces a row that knows the filer.
+  A filing processed with no filer name writes a placeholder row, the CIK for a
+  name and nothing else, which never replaces a row that knows the filer.
   """
   out: dict[str, dict[str, Any]] = {}
   if entities.empty:
