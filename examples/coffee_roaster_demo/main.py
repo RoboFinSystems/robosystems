@@ -65,15 +65,16 @@ REVEAL_PROMPTS = [
   "How much cash is tied up in inventory vs. receivables?",
 ]
 
-# Operating-budget scenario — Driftline's working-capital arc as lever
-# assertions: modest growth, roaster margins, the slow-paying wholesale account
-# baked into DSO. Values follow the rs-driver catalog conventions: percent
-# levers are decimals per month, days levers are day counts.
+# Operating-budget scenario — Driftline's books carried forward as lever
+# assertions: modest growth, its recent roaster margins, receivables on the
+# 30-day terms it invoices on, bills paid in the month they arrive. Values follow
+# the rs-driver catalog conventions: percent levers are decimals per month, days
+# levers are day counts.
 FORECAST_LEVERS = {
   "rs-driver:RevenueGrowthRate": 0.03,
-  "rs-driver:CostOfRevenueRate": 0.45,
-  "rs-driver:DaysSalesOutstanding": 45,
-  "rs-driver:DaysPayableOutstanding": 30,
+  "rs-driver:CostOfRevenueRate": 0.42,
+  "rs-driver:DaysSalesOutstanding": 30,
+  "rs-driver:DaysPayableOutstanding": 0,
 }
 
 

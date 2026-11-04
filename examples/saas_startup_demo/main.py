@@ -59,18 +59,18 @@ REVEAL_PROMPTS = [
 ]
 
 # Operating-budget scenario — Cadence's growth/burn arc as lever assertions:
-# SaaS growth continuing the historical ramp (~5%/month), the ~22% hosting +
-# support cost-of-revenue rate, a month of hosting bills in payables. DSO is
-# deliberately NOT asserted — an annual-prepay book has no receivables story,
+# SaaS growth continuing the slowing historical ramp (~4.5%/month), the ~22%
+# hosting + support cost-of-revenue rate, bills paid in the month they arrive. DSO
+# is deliberately NOT asserted — an annual-prepay book has no receivables story,
 # so the DSO rule stays inactive and the working-capital projection is the
 # payables side only. That partial-lever path is the point: each episode
 # asserts only the levers its business model actually turns. Values follow the
 # rs-driver catalog conventions (percent levers as decimals per month, days
 # levers as day counts).
 FORECAST_LEVERS = {
-  "rs-driver:RevenueGrowthRate": 0.05,
+  "rs-driver:RevenueGrowthRate": 0.045,
   "rs-driver:CostOfRevenueRate": 0.22,
-  "rs-driver:DaysPayableOutstanding": 30,
+  "rs-driver:DaysPayableOutstanding": 0,
 }
 
 
