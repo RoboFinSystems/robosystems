@@ -396,16 +396,16 @@ SEC_INDEX_ECS_TAGS = {
 }
 
 # The filer catalog: a fold over three small processed tables plus one
-# manifest read per filing of a touched filer. Light, and idempotent on retry
-# (every write is a whole file), so Spot is fine.
+# manifest read per filing of a touched filer. On-demand: at this size Spot
+# refuses and interrupts runs often enough to exhaust the retries, and the run
+# is too cheap for Spot to save anything.
 SEC_CATALOG_ECS_TAGS = {
   "dagster/max_retries": 3,
   "ecs/cpu": "1024",
   "ecs/memory": "4096",
   "ecs/run_task_kwargs": {
     "capacityProviderStrategy": [
-      {"capacityProvider": "FARGATE_SPOT", "weight": 9, "base": 0},
-      {"capacityProvider": "FARGATE", "weight": 1, "base": 0},
+      {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
     ],
   },
 }
