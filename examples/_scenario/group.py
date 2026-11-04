@@ -1730,6 +1730,24 @@ def _read_back(
       "; ".join(breaks[:3]) or "ties",
     )
   )
+  # This group's acquisition is paid in cash, so no month has a non-cash one. A
+  # consolidating entry reading as one is a false line beside the right totals.
+  noncash = "rs-gaap:NoncashOrPartNoncashAcquisitionValueOfAssetsAcquired1"
+  acquired = [
+    f"{month_end}: {_value(flows, noncash, month_end):,.2f}"
+    for month_start, month_end in windows[:-1]
+    for flows in [
+      _statement(api, "cash_flow_statement", month_start, month_end, consolidated=True)
+    ]
+    if _value(flows, noncash, month_end)
+  ]
+  checks.append(
+    GroupCheck(
+      "consolidated cash flow states no non-cash acquisition",
+      not acquired,
+      "; ".join(acquired[:3]) or "none",
+    )
+  )
 
   # The consolidated cash flow over the whole run, month by month — a column
   # spanning a member's joining or leaving is not stated, so the months are

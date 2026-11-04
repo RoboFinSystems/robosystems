@@ -1412,6 +1412,124 @@ def compute_custom_metrics(
 # ---------------------------------------------------------------------------
 
 
+def _plan_series_breaks(
+  graph_id: str,
+  headers: dict,
+  scenario_id: str,
+  is_block_id: str | None,
+  bs_block_id: str | None,
+  cf_block_id: str | None,
+) -> list[str]:
+  """Read the forecast as the Plan page does, one series across the seam, and
+  list every forecast month whose statements disagree."""
+  import httpx
+
+  breaks: list[str] = []
+
+  def series(block_id: str | None) -> tuple[dict[str, dict], dict[str, dict]]:
+    """(period end -> period, row name or qname -> {period end: value})."""
+    if not block_id:
+      return {}, {}
+    query = (
+      f'{{ informationBlock(id: "{block_id}", scenarioId: "{scenario_id}", '
+      "series: true) { view { rendering { periods { end forecast } "
+      "validation { status } "
+      "rows { elementQname elementName values } } } } }"
+    )
+    resp = httpx.post(
+      f"{BASE_URL}/extensions/{graph_id}/graphql",
+      json={"query": query},
+      headers=headers,
+      timeout=120.0,
+    )
+    block = ((resp.json() or {}).get("data") or {}).get("informationBlock") or {}
+    rendering = (block.get("view") or {}).get("rendering") or {}
+    if (rendering.get("validation") or {}).get("status") == "failed":
+      breaks.append(f"the series of block {block_id} fails its validation")
+    periods = {p["end"]: p for p in rendering.get("periods") or []}
+    rows: dict[str, dict] = {}
+    for row in rendering.get("rows") or []:
+      by_end = dict(zip(periods, row.get("values") or []))
+      name = row.get("elementName") or ""
+      key = (
+        "cash_begin"
+        if name.endswith("beginning of period")
+        else "cash_end"
+        if name.endswith("end of period")
+        else row.get("elementQname")
+      )
+      rows[key] = by_end
+    return periods, rows
+
+  _, income = series(is_block_id)
+  bs_periods, balance = series(bs_block_id)
+  cf_periods, flows = series(cf_block_id)
+  forecast_ends = [e for e, p in cf_periods.items() if p.get("forecast")]
+  if not forecast_ends:
+    return ["the cash flow has no forecast columns"]
+
+  def amount(rows: dict[str, dict], key: str, end: str) -> float:
+    return (rows.get(key) or {}).get(end) or 0.0
+
+  def tie(label: str, end: str, left: float, right: float) -> None:
+    if abs(left - right) >= 0.01:
+      breaks.append(f"{end} {label}: {left:,.2f} != {right:,.2f}")
+
+  ends = list(cf_periods)
+  for end in forecast_ends:
+    if not bs_periods.get(end, {}).get("forecast"):
+      breaks.append(f"{end} the balance sheet has no forecast column")
+      continue
+    prior = ends[ends.index(end) - 1]
+    tie(
+      "assets = liabilities and equity",
+      end,
+      amount(balance, "rs-gaap:Assets", end),
+      amount(balance, "rs-gaap:LiabilitiesAndStockholdersEquity", end),
+    )
+    tie(
+      "cash flow ends on the balance sheet's cash",
+      end,
+      amount(flows, "cash_end", end),
+      amount(balance, "rs-gaap:CashAndCashEquivalentsAtCarryingValue", end),
+    )
+    tie(
+      "cash opens on last month's close",
+      end,
+      amount(flows, "cash_begin", end),
+      amount(flows, "cash_end", prior),
+    )
+    tie(
+      "opening cash + net change = closing cash",
+      end,
+      amount(flows, "cash_begin", end)
+      + amount(flows, "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease", end),
+      amount(flows, "cash_end", end),
+    )
+    tie(
+      "net income agrees across statements",
+      end,
+      amount(income, "rs-gaap:NetIncomeLoss", end),
+      amount(flows, "rs-gaap:NetIncomeLoss", end),
+    )
+    # These scenarios assert no distributions or capital, so earnings are all
+    # that moves equity, and the walk has nothing left for a plug to close.
+    tie(
+      "equity moves by net income",
+      end,
+      amount(balance, "rs-gaap:StockholdersEquity", end)
+      - amount(balance, "rs-gaap:StockholdersEquity", prior),
+      amount(income, "rs-gaap:NetIncomeLoss", end),
+    )
+    tie(
+      "the cash flow needs no reconciling plug",
+      end,
+      amount(flows, "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet", end),
+      0.0,
+    )
+  return breaks
+
+
 def _graphql_rendering(
   graph_id: str, block_id: str, headers: dict, scenario_id: str | None = None
 ) -> dict:
@@ -1629,6 +1747,15 @@ def run_forecast_scenario(
           f"  WARNING: ΔCash {cash_last - cash_prev:,.2f} != "
           f"CF net change {net_change:,.2f}"
         )
+  plan_breaks = _plan_series_breaks(
+    graph_id, headers, scenario_id, is_block_id, bs_block_id, cf_block_id
+  )
+  if plan_breaks:
+    print(f"  ❌ Plan series: {len(plan_breaks)} breaks")
+    for line in plan_breaks[:6]:
+      print(f"    {line}")
+    raise SystemExit(1)
+  print(f"  Plan series:  statements tie across {len(months_computed)} forecast months")
   verified = [m for m in months_computed if m.get("verification_passed")]
   failed = [m for m in months_computed if m.get("verification_passed") is False]
   if failed:

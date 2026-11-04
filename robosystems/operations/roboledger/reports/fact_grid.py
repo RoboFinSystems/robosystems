@@ -2514,7 +2514,8 @@ def _emit_noncash_and_settlement_facts(
         and ln.net > 0
         and _default_flow(ln.concept_id, -ln.net, "investingActivity")
       )
-      if capex and acquisition_id is not None:
+      # A consolidating entry moves balances between statements and buys nothing.
+      if capex and acquisition_id is not None and not holds_no_cash:
         consideration = any(
           ln.net < 0 and ln.kind in ("working", "nonoperating") for ln in lines
         )

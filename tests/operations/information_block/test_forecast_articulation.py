@@ -9,6 +9,7 @@ exactness, per-set schedule-movement freeze semantics, CF footing to
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 
 import pytest
@@ -350,6 +351,28 @@ class TestDerivedCashFlow:
       calc_order=CALC_ORDER,
     )
     assert cf["dda"] == pytest.approx(2.0)
+
+  def test_the_statement_closes_on_the_balance_sheets_cash(self):
+    """Each anchor counts, so a carried restricted balance stays in the total;
+    the month's net change alone is not where cash ends."""
+    ctx = replace(
+      _ctx(),
+      cash_total_element_id="cash_total",
+      cash_anchor_element_ids=("cash", "restricted"),
+    )
+    bs = {**BS_PRIOR, "ar": 150.0, "ap": 62.0, "prepaid": 11.0, "re": 132.0}
+    bs["cash"] = 75.0
+    bs["restricted"] = 5.0
+    cf, _ = derive_cash_flow(
+      ctx,
+      bs=bs,
+      prior_bs={**BS_PRIOR, "restricted": 5.0},
+      resolved_is={"ni": 10.0, "dda": 2.0},
+      calculations=CALC,
+      calc_order=CALC_ORDER,
+    )
+    assert cf["cf_net"] == pytest.approx(25.0)
+    assert cf["cash_total"] == pytest.approx(80.0)
 
 
 class TestScheduleInstantRouting:

@@ -35,6 +35,7 @@ from robosystems.operations.roboledger.reports.calc_dag import (
 )
 from robosystems.operations.roboledger.reports.fact_grid import (
   _CASH_ANCHOR_QNAMES,
+  _CASH_TOTAL_QNAME,
   _CF_NET_CHANGE_QNAME,
   _CF_OPERATING_SUBTOTAL_QNAME,
   _CF_RECONCILING_LEAF_QNAME,
@@ -121,6 +122,8 @@ class ArticulationContext:
   derivations: dict[str, list[tuple[str, float]]]
   schedules: ScheduleProjection
   diagnostics: list[str] = field(default_factory=list)
+  cash_total_element_id: str | None = None
+  cash_anchor_element_ids: tuple[str, ...] = ()
 
 
 def _resolve_qnames(session: Session, qnames: list[str]) -> dict[str, str]:
@@ -301,6 +304,7 @@ def load_articulation_context(
       _NI_QNAME,
       _ASSETS_QNAME,
       _LE_QNAME,
+      _CASH_TOTAL_QNAME,
       _CF_NET_CHANGE_QNAME,
       _CF_RECONCILING_LEAF_QNAME,
       _CF_OPERATING_SUBTOTAL_QNAME,
@@ -375,6 +379,10 @@ def load_articulation_context(
     financing_element_id=specials.get(_CF_FINANCING_QNAME),
     derivations=derivations,
     schedules=schedules,
+    cash_total_element_id=specials.get(_CASH_TOTAL_QNAME),
+    cash_anchor_element_ids=tuple(
+      specials[q] for q in sorted(_CASH_ANCHOR_QNAMES) if q in specials
+    ),
     diagnostics=diagnostics,
   )
 
@@ -515,6 +523,11 @@ def derive_cash_flow(
   for subtotal_id in (ctx.investing_element_id, ctx.financing_element_id):
     if subtotal_id is not None and final.get(subtotal_id, 0.0) != 0.0:
       cf[subtotal_id] = final[subtotal_id]
+  # What the statement closes on: the balance sheet's cash, never its flows.
+  if ctx.cash_total_element_id is not None:
+    cf[ctx.cash_total_element_id] = sum(
+      bs.get(anchor, 0.0) for anchor in ctx.cash_anchor_element_ids
+    )
 
   return cf, plug
 

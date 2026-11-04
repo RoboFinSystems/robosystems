@@ -295,6 +295,8 @@ def _run(
   closed_months: set[str] | None = None,
   bs_closed_months: set[str] | None = None,
   published_months: set[str] | None = None,
+  base_bs_facts: list[Any] | None = None,
+  articulation_calls: list[dict] | None = None,
 ):
   """``verify`` controls ``_verify_month_sets``.
 
@@ -328,7 +330,7 @@ def _run(
   authored_facts = _lever_facts(levers) + _lever_facts(assertions or [])
   facts_by_set = {
     "fs_base_is": base_is_facts if base_is_facts is not None else BASE_IS_FACTS,
-    "fs_base_bs": [],
+    "fs_base_bs": base_bs_facts or [],
     "fs_lever": authored_facts,
   }
 
@@ -365,6 +367,11 @@ def _run(
       return SimpleNamespace(id="fs_base_bs")
     return None
 
+  def _articulation(*args: Any, **kwargs: Any) -> ArticulationContext:
+    if articulation_calls is not None:
+      articulation_calls.append(kwargs)
+    return _bare_ctx(schedule_projection or ScheduleProjection())
+
   with (
     patch.object(fc, "newest_actual_structure_id", side_effect=_structures),
     patch.object(fc, "_actual_set_at", side_effect=_base_set),
@@ -375,9 +382,7 @@ def _run(
     patch.object(
       fc,
       "load_articulation_context",
-      side_effect=lambda *a, **k: _bare_ctx(
-        schedule_projection or ScheduleProjection()
-      ),
+      side_effect=_articulation,
     ),
     patch.object(
       fc, "numeric_facts", side_effect=lambda session, fs_id: facts_by_set[fs_id]
@@ -1383,6 +1388,33 @@ class TestSeamAnchoredRoll:
       "2026-12",
     ]
     assert rec.month("struct_is", date(2026, 7, 31)) is None
+
+  def test_the_walk_opens_on_the_base_month_not_on_its_opening_balance(self) -> None:
+    """A closed set stores its equity roll-forward's opening the day before the
+    month starts. On an LLC or partnership that root is the balance the walk
+    rolls, so reading it as the month's close drops the month's earnings."""
+    calls: list[dict] = []
+
+    def equity(period_end: date, value: float) -> SimpleNamespace:
+      return SimpleNamespace(
+        element_id="el_members", value=value, period_end=period_end
+      )
+
+    _run(
+      _seam_mechanics(horizon=2),
+      SEAM_RULES,
+      _levers_for(2),
+      months=2,
+      schedule_projection=ScheduleProjection(),
+      base_bs_facts=[
+        equity(date(2026, 6, 30), 288_833.30),
+        equity(date(2026, 5, 31), 275_971.41),
+      ],
+      articulation_calls=calls,
+    )
+
+    assert calls[0]["bs_prior"]["el_members"] == 288_833.30
+    assert calls[0]["base_bs_element_ids"].count("el_members") == 1
 
   def test_the_horizon_end_holds_still(self) -> None:
     """A re-anchored walk computes FEWER months, never later ones.

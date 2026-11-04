@@ -997,6 +997,55 @@ class TestSeriesMode:
     cash_row = next(r for r in rendering.rows if r.element_qname == "rs-gaap:Cash")
     assert cash_row.values == [100_000.0, 110_000.0]
 
+  def test_forecast_instants_keep_their_columns_beside_actual_windows(self) -> None:
+    """An actual balance carries its month's start; a forecast balance has
+    none. Neither is the opening of a later column."""
+    may, june, july = date(2026, 5, 31), date(2026, 6, 30), date(2026, 7, 31)
+    sets = [
+      self._fact_set("fs_may", date(2026, 5, 1), may),
+      self._fact_set("fs_june", date(2026, 6, 1), june, scenario_id="struct_budget"),
+      self._fact_set("fs_july", date(2026, 7, 1), july, scenario_id="struct_budget"),
+    ]
+    facts = [
+      self._fact("f_may", "fs_may", may, 100.0, period_start=date(2026, 5, 1)),
+      self._fact("f_june", "fs_june", june, 110.0),
+      self._fact("f_july", "fs_july", july, 120.0),
+    ]
+    envelope = self._run_series(sets, facts, "struct_budget")
+
+    assert envelope is not None
+    rendering = envelope.view.rendering
+    assert rendering is not None
+    assert [p.end for p in rendering.periods] == [may, june, july]
+    assert [p.forecast for p in rendering.periods] == [None, True, True]
+    cash_row = next(r for r in rendering.rows if r.element_qname == "rs-gaap:Cash")
+    assert cash_row.values == [100.0, 110.0, 120.0]
+
+  def test_a_closing_balance_fills_the_column_of_its_month(self) -> None:
+    """A forecast cash flow's closing cash has no start of its own. It belongs
+    to the month ending that day, not to a column beside it."""
+    may, june = date(2026, 5, 31), date(2026, 6, 30)
+    sets = [
+      self._fact_set("fs_may", date(2026, 5, 1), may),
+      self._fact_set("fs_june", date(2026, 6, 1), june, scenario_id="struct_budget"),
+    ]
+    facts = [
+      self._fact("f_may", "fs_may", may, 100.0, period_start=date(2026, 5, 1)),
+      self._fact("f_flow", "fs_june", june, 5.0, period_start=date(2026, 6, 1)),
+      self._fact("f_closing", "fs_june", june, 110.0),
+    ]
+    envelope = self._run_series(sets, facts, "struct_budget")
+
+    assert envelope is not None
+    rendering = envelope.view.rendering
+    assert rendering is not None
+    assert [(p.start, p.end) for p in rendering.periods] == [
+      (date(2026, 5, 1), may),
+      (date(2026, 6, 1), june),
+    ]
+    cash_row = next(r for r in rendering.rows if r.element_qname == "rs-gaap:Cash")
+    assert cash_row.values == [100.0, 115.0]
+
   def test_facts_window_to_their_own_set(self) -> None:
     """An annual set carries comparative-period facts; they must not
     leak into other columns (nor mint phantom columns)."""

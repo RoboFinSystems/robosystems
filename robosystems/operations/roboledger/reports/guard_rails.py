@@ -186,11 +186,12 @@ def _validate_income_statement(
     # The NI row is excluded by identity, even if is_subtotal is unset.
     if row.is_subtotal or row.is_abstract or row is net_income_row:
       continue
-    # Rows are post-order, so one that follows a deeper row sums it: a concept
-    # with a chart's own accounts under it would otherwise count twice.
-    if index > 0 and rows[index - 1].depth > row.depth:
-      continue
-    value = _value(row, column.index)
+    # A concept with a chart's own accounts under it is unflagged, and they
+    # count on their own rows. A parent that netted to zero left no row, so the
+    # line after its accounts covers nothing of theirs, and that sum is zero.
+    value = _value(row, column.index) - _direct_children_sum(
+      rows, index, column, sign_by_balance=True
+    )
     if row.balance_type == "credit":
       implied_ni += value
       credit_leaves += 1
@@ -497,16 +498,7 @@ def _check_totals_foot(
       continue
     if not any(v is not None for v in subtotal.values):
       continue
-    child_sum = 0.0
-
-    for j in range(idx - 1, -1, -1):
-      child = rows[j]
-      if child.depth <= subtotal.depth:
-        break
-      if child.depth == subtotal.depth + 1:
-        child_sum += _child_weight(child, subtotal, sign_by_balance) * _value(
-          child, column.index
-        )
+    child_sum = _direct_children_sum(rows, idx, column, sign_by_balance=sign_by_balance)
 
     subtotal_val = _value(subtotal, column.index)
     diff = abs(subtotal_val - child_sum)
@@ -516,6 +508,23 @@ def _check_totals_foot(
         f"does not match sum of children ({child_sum:.2f}), "
         f"difference: {diff:.2f}"
       )
+
+
+def _direct_children_sum(
+  rows: list[FactRow], index: int, column: _Column, *, sign_by_balance: bool
+) -> float:
+  """Sum the rows directly under ``rows[index]``: post-order, so the preceding
+  rows one level deeper, back to the first at its own depth or shallower."""
+  parent = rows[index]
+  total = 0.0
+  for child in reversed(rows[:index]):
+    if child.depth <= parent.depth:
+      break
+    if child.depth == parent.depth + 1:
+      total += _child_weight(child, parent, sign_by_balance) * _value(
+        child, column.index
+      )
+  return total
 
 
 def _child_weight(child: FactRow, subtotal: FactRow, sign_by_balance: bool) -> float:

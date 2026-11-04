@@ -411,6 +411,9 @@ def cmd_compute_forecast(
       for fact in numeric_facts(session, base_bs_set.id):
         if fact.value is None:
           continue
+        # The set also holds its equity roll-forward's opening, a month earlier.
+        if fact.period_end != base_end:
+          continue
         if fact.element_id not in bs_prior:
           base_bs_element_ids.append(fact.element_id)
         bs_prior[fact.element_id] = float(fact.value)
