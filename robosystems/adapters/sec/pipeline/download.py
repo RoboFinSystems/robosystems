@@ -1,6 +1,6 @@
 """sec_raw_filings: EFTS discovery and download of SEC XBRL ZIPs to S3."""
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from dagster import (
   AssetExecutionContext,
@@ -218,7 +218,6 @@ def sec_raw_filings(
 
       if ciks_to_fetch:
         import json
-        from datetime import UTC, datetime
 
         submissions_limiter = AsyncRateLimiter(rate=config.submissions_rate)
         submissions_semaphore = asyncio.Semaphore(config.submissions_concurrency)
@@ -231,41 +230,6 @@ def sec_raw_filings(
           )
 
           return complete_submissions_strict(cik)
-
-        def incremental_update_submissions(
-          existing: dict, cik: str, new_recent: dict
-        ) -> dict:
-          """Prepend the recent page's unseen filings to the stored master."""
-          new_accessions = set(
-            new_recent.get("filings", {}).get("recent", {}).get("accessionNumber", [])
-          )
-          existing_accessions = set(
-            existing.get("filings", {}).get("accessionNumber", [])
-          )
-
-          new_only = new_accessions - existing_accessions
-          if not new_only:
-            return existing
-
-          recent_data = new_recent.get("filings", {}).get("recent", {})
-          recent_accessions = recent_data.get("accessionNumber", [])
-
-          for field in existing["filings"]:
-            if field in recent_data:
-              new_values = [
-                recent_data[field][i]
-                for i, acc in enumerate(recent_accessions)
-                if acc in new_only
-              ]
-              existing["filings"][field] = new_values + existing["filings"][field]
-
-          existing["_metadata"] = existing.get("_metadata", {})
-          existing["_metadata"]["totalFilings"] = len(
-            existing["filings"].get("accessionNumber", [])
-          )
-          existing["_metadata"]["lastUpdated"] = datetime.now(UTC).isoformat()
-
-          return existing
 
         async def fetch_submission(cik: str) -> bool:
           nonlocal submissions_fetched, submissions_failed
@@ -303,8 +267,8 @@ def sec_raw_filings(
                       build_complete_submissions_sync, cik
                     )
                   else:
-                    submissions_data = incremental_update_submissions(
-                      existing_data, cik, new_recent
+                    submissions_data = merge_recent_submissions(
+                      existing_data, new_recent
                     )
 
                 s3.client.put_object(
@@ -544,6 +508,43 @@ def sec_raw_filings(
       "source_files_existed": source_files_existed,
     }
   )
+
+
+def merge_recent_submissions(existing: dict, new_recent: dict) -> dict:
+  """The stored master with EDGAR's recent page applied: its unseen filings
+  prepended, and the filer's header (tickers, name, exchange, SIC) replaced."""
+  for field, value in new_recent.items():
+    if field != "filings":
+      existing[field] = value
+
+  new_accessions = set(
+    new_recent.get("filings", {}).get("recent", {}).get("accessionNumber", [])
+  )
+  existing_accessions = set(existing.get("filings", {}).get("accessionNumber", []))
+
+  new_only = new_accessions - existing_accessions
+  if not new_only:
+    return existing
+
+  recent_data = new_recent.get("filings", {}).get("recent", {})
+  recent_accessions = recent_data.get("accessionNumber", [])
+
+  for field in existing["filings"]:
+    if field in recent_data:
+      new_values = [
+        recent_data[field][i]
+        for i, acc in enumerate(recent_accessions)
+        if acc in new_only
+      ]
+      existing["filings"][field] = new_values + existing["filings"][field]
+
+  existing["_metadata"] = existing.get("_metadata", {})
+  existing["_metadata"]["totalFilings"] = len(
+    existing["filings"].get("accessionNumber", [])
+  )
+  existing["_metadata"]["lastUpdated"] = datetime.now(UTC).isoformat()
+
+  return existing
 
 
 def _stored_master_is_short(master: dict, header: dict) -> bool:

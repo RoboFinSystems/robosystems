@@ -90,6 +90,19 @@ class SearchService:
       logger.info("Loaded EmbeddingService for search")
     return self._embedding_service
 
+  @staticmethod
+  def _entity_filter(graph_id: str, entity: str) -> str:
+    """A renamed SEC filer by CIK: indexed sections keep the ticker they were
+    written with, and every section carries the CIK."""
+    from robosystems.adapters.sec.mcp.report_resolver import (
+      SEC_GRAPH_ID,
+      renamed_filer_cik_sync,
+    )
+
+    if graph_id != SEC_GRAPH_ID:
+      return entity
+    return renamed_filer_cik_sync(entity) or entity
+
   def search_documents(self, graph_id: str, request: SearchRequest) -> SearchResponse:
     """Search documents with graph_id isolation.
 
@@ -110,7 +123,7 @@ class SearchService:
 
     filters: dict[str, Any] = {}
     if request.entity:
-      filters["entity"] = request.entity
+      filters["entity"] = self._entity_filter(graph_id, request.entity)
     if request.form_type:
       filters["form_type"] = request.form_type
     if request.section:

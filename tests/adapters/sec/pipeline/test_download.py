@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from robosystems.adapters.sec.pipeline.download import _get_with_429_retry
+from robosystems.adapters.sec.pipeline.download import (
+  _get_with_429_retry,
+  merge_recent_submissions,
+)
 
 
 def _response(status, content=b""):
@@ -62,3 +65,48 @@ class TestGetWith429Retry:
       await _get_with_429_retry(session, "u", MagicMock())
 
     sleep.assert_awaited_once_with(300)
+
+
+@pytest.mark.unit
+class TestMergeRecentSubmissions:
+  def _master(self):
+    return {
+      "tickers": ["BK"],
+      "name": "OLD NAME",
+      "filings": {"accessionNumber": ["a1"], "form": ["10-K"]},
+      "_metadata": {"paginationFilesMerged": 3},
+    }
+
+  def _recent(self, *accessions):
+    return {
+      "tickers": ["BNY", "BNY-PK"],
+      "name": "NEW NAME",
+      "exchanges": ["NYSE"],
+      "filings": {
+        "recent": {
+          "accessionNumber": list(accessions),
+          "form": ["10-Q"] * len(accessions),
+        }
+      },
+    }
+
+  def test_the_header_refreshes_with_a_new_filing(self):
+    merged = merge_recent_submissions(self._master(), self._recent("a2", "a1"))
+
+    assert merged["tickers"] == ["BNY", "BNY-PK"]
+    assert merged["name"] == "NEW NAME"
+    assert merged["exchanges"] == ["NYSE"]
+    assert merged["filings"]["accessionNumber"] == ["a2", "a1"]
+    assert merged["_metadata"]["totalFilings"] == 2
+    assert merged["_metadata"]["paginationFilesMerged"] == 3
+
+  def test_the_header_refreshes_with_no_new_filing(self):
+    merged = merge_recent_submissions(self._master(), self._recent("a1"))
+
+    assert merged["tickers"] == ["BNY", "BNY-PK"]
+    assert merged["filings"]["accessionNumber"] == ["a1"]
+
+  def test_the_recent_page_never_replaces_the_stored_history(self):
+    merged = merge_recent_submissions(self._master(), self._recent())
+
+    assert "recent" not in merged["filings"]

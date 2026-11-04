@@ -45,6 +45,9 @@ async def resolve_sec_element(
   The result carries the matches, the canonical concept when one matched, and
   a parameterized Cypher ``query_hint`` built from the top match.
   """
+  from .report_resolver import SEC_GRAPH_ID, renamed_filer_cik
+
+  cik = await renamed_filer_cik(SEC_GRAPH_ID, ticker)
   enricher = _get_enricher()
   result: dict[str, Any] = {
     "concept": concept,
@@ -78,14 +81,16 @@ async def resolve_sec_element(
   # No canonical match → fall back to text search on element labels.
   if not canonical_id:
     return await _resolve_text_fallback(
-      graph_client, result, concept, ticker, report_id
+      graph_client, result, concept, ticker, report_id, cik
     )
 
-  rows = await _fetch_canonical_elements(graph_client, canonical_id, ticker, report_id)
+  rows = await _fetch_canonical_elements(
+    graph_client, canonical_id, ticker, report_id, cik
+  )
 
   if not rows:
     return await _resolve_text_fallback(
-      graph_client, result, concept, ticker, report_id
+      graph_client, result, concept, ticker, report_id, cik
     )
 
   qnames = [r["qname"] for r in rows if r.get("qname")]
@@ -106,11 +111,19 @@ async def resolve_sec_element(
     )
 
   result["matches"] = result["matches"][:10]
-  _build_query_hint(result, ticker, report_id)
+  _build_query_hint(result, ticker, report_id, cik)
   return result
 
 
 # ── Canonical concept path ────────────────────────────────────────────────
+
+
+def _filer_clause(cik: str | None) -> str:
+  return "ent.cik = $cik" if cik else "ent.ticker = $ticker"
+
+
+def _filer_params(ticker: str, cik: str | None) -> dict[str, str]:
+  return {"cik": cik} if cik else {"ticker": ticker}
 
 
 async def _fetch_canonical_elements(
@@ -118,6 +131,7 @@ async def _fetch_canonical_elements(
   canonical_id: str,
   ticker: str | None,
   report_id: str | None,
+  cik: str | None = None,
 ) -> list[dict[str, Any]]:
   """Fetch elements matching a canonical concept id, optionally scoped."""
   try:
@@ -138,13 +152,13 @@ async def _fetch_canonical_elements(
         "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
         "(f)-[:FACT_HAS_ENTITY]->(ent:Entity) "
         "WHERE e.canonical_concept = $canonical_id "
-        "AND ent.ticker = $ticker "
+        f"AND {_filer_clause(cik)} "
         "AND f.has_dimensions = false "
         "RETURN DISTINCT e.qname AS qname, e.canonical_confidence AS confidence, "
         "count(f) AS fact_count "
         "ORDER BY fact_count DESC LIMIT 20"
       )
-      params["ticker"] = ticker
+      params.update(_filer_params(ticker, cik))
     else:
       query = (
         "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element) "
@@ -170,6 +184,7 @@ async def _resolve_text_fallback(
   concept: str,
   ticker: str | None,
   report_id: str | None,
+  cik: str | None = None,
 ) -> dict[str, Any]:
   """Final fallback: search element labels by text when embedding paths miss."""
   search_term = concept.lower()
@@ -180,14 +195,14 @@ async def _resolve_text_fallback(
         "(f)-[:FACT_HAS_ENTITY]->(ent:Entity) "
         "WHERE l.value CONTAINS $search_term "
         'AND l.type = "http://www.xbrl.org/2003/role/label" '
-        "AND ent.ticker = $ticker "
+        f"AND {_filer_clause(cik)} "
         "AND f.has_dimensions = false "
         "RETURN DISTINCT e.qname AS qname, l.value AS label, "
         "e.canonical_concept AS concept, e.canonical_confidence AS confidence, "
         "count(f) AS fact_count "
         "ORDER BY fact_count DESC LIMIT 10"
       )
-      params = {"search_term": search_term, "ticker": ticker}
+      params = {"search_term": search_term, **_filer_params(ticker, cik)}
     else:
       query = (
         "MATCH (e:Element)-[:ELEMENT_HAS_LABEL]->(l:Label) "
@@ -212,7 +227,7 @@ async def _resolve_text_fallback(
   except Exception as e:
     logger.warning(f"Text fallback search failed: {e}")
 
-  _build_query_hint(result, ticker, report_id)
+  _build_query_hint(result, ticker, report_id, cik)
   return result
 
 
@@ -242,7 +257,10 @@ async def _fetch_labels_by_qname(
 
 
 def _build_query_hint(
-  result: dict[str, Any], ticker: str | None, report_id: str | None
+  result: dict[str, Any],
+  ticker: str | None,
+  report_id: str | None,
+  cik: str | None = None,
 ) -> None:
   """Set a parameterized Cypher hint for the top match, ready for ``read-graph-cypher``."""
   if not result["matches"]:
@@ -263,12 +281,12 @@ def _build_query_hint(
       "ORDER BY p.end_date DESC LIMIT 20"
     )
   elif ticker:
-    hint_params["ticker"] = ticker
+    hint_params.update(_filer_params(ticker, cik))
     result["query_hint"] = (
       "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
       "(f)-[:FACT_HAS_PERIOD]->(p:Period), "
       "(f)-[:FACT_HAS_ENTITY]->(ent:Entity) "
-      "WHERE e.qname = $qname AND ent.ticker = $ticker "
+      f"WHERE e.qname = $qname AND {_filer_clause(cik)} "
       "AND f.has_dimensions = false "
       "RETURN ent.ticker AS ticker, e.qname AS element, "
       "f.numeric_value AS value, p.end_date AS date, "

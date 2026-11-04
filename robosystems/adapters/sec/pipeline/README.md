@@ -263,6 +263,11 @@ every 30 min, 06:00–20:30 ET — sec_current_reports_intraday_schedule
   `search-text`, `read-text`, `disclosures`, `information-block`, the viewer
   and the filer pages have it. An 8-K is readable within the half hour, plus
   whatever lag EFTS adds.
+- **Tickers:** the catalog applies EDGAR's current map (`adapters/sec/tickers.py`)
+  on every run; staging then stamps what the catalog published onto Entity, so
+  the two cannot disagree. A renamed filer's old file stays whole, with
+  `moved_to`, and `aliases.json` names it. Tools go by CIK for a renamed filer,
+  so they work in the hours before the graph catches up.
 - **Next morning:** the graph (`financial-statement-analysis`,
   `build-fact-grid`, Cypher) and document search (indexing stays on the
   nightly chain). For those hours a filing is known to the tools that read it

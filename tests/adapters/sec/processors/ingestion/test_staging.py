@@ -4,6 +4,7 @@ Tests DuckDBStager initialization, stage_to_duckdb, stage_incremental_to_duckdb,
 retry logic, and error handling.
 """
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -904,6 +905,155 @@ class TestStampCanonicalConcepts:
 
     assert result.status == "success"
     stamp.assert_awaited_once()
+
+  @pytest.mark.asyncio
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.S3Client")
+  async def test_entity_identity_stamps_the_catalogs_tickers(self, mock_s3):
+    index = {
+      "companies": [
+        {"cik": "0001390777", "ticker": "BNY", "name": "Bank of New York"},
+        {"cik": "0000000002", "ticker": None, "name": "No ticker"},
+        {"ticker": "NOCIK", "name": "No CIK"},
+      ]
+    }
+    mock_s3.return_value.read_string.return_value = json.dumps(index)
+    client = AsyncMock()
+    client.execute_write.return_value = {"rows": [[7]]}
+
+    from robosystems.adapters.sec.processors.ingestion.staging import DuckDBStager
+
+    stamped = await DuckDBStager().stamp_entity_identity(client)
+
+    assert stamped == 7
+    call = client.execute_write.call_args.kwargs
+    assert call["sql"].startswith('UPDATE "Entity" SET ticker = m.ticker')
+    assert call["parameters"] == [
+      ["0001390777"],
+      ["BNY"],
+      ["Bank of New York"],
+      "http://www.sec.gov/CIK",
+    ]
+
+  @pytest.mark.asyncio
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.S3Client")
+  async def test_entity_identity_runs_on_real_duckdb(self, mock_s3):
+    import duckdb
+
+    from robosystems.adapters.sec.processors.ingestion.staging import DuckDBStager
+
+    cik_scheme = "http://www.sec.gov/CIK"
+    index = {
+      "companies": [
+        {"cik": "0000000001", "ticker": "BNY", "name": "New Name"},
+        {"cik": "0000000002", "ticker": "UNT", "name": None},
+        {"cik": "0000000003", "ticker": "PLC", "name": "Placeholder Filer"},
+        {"cik": "0000000004", "ticker": "SAME", "name": "Same"},
+        {"cik": "0000000005", "ticker": "OTH", "name": "Other Scheme"},
+      ]
+    }
+    mock_s3.return_value.read_string.return_value = json.dumps(index)
+    conn = duckdb.connect()
+    conn.execute(
+      'CREATE TABLE "Entity" (identifier VARCHAR, cik VARCHAR, ticker VARCHAR, '
+      "name VARCHAR, scheme VARCHAR, exchange VARCHAR)"
+    )
+    conn.executemany(
+      'INSERT INTO "Entity" VALUES (?, ?, ?, ?, ?, ?)',
+      [
+        ("a", "0000000001", "BK", "Old Name", cik_scheme, "NYSE"),
+        ("b", "0000000002", "OLD", "Kept Name", cik_scheme, "NYSE"),
+        ("c", "0000000003", "", "0000000003", cik_scheme, ""),
+        ("d", "0000000004", "SAME", "Same", cik_scheme, "NYSE"),
+        ("e", "0000000005", None, "Elsewhere", "http://other", ""),
+        ("f", "0000000006", "XOM", "Not in the index", cik_scheme, "NYSE"),
+      ],
+    )
+
+    async def execute_write(graph_id, sql, parameters, timeout):
+      return {"rows": conn.execute(sql, parameters).fetchall()}
+
+    client = AsyncMock()
+    client.execute_write.side_effect = execute_write
+
+    stamped = await DuckDBStager().stamp_entity_identity(client)
+
+    assert stamped == 3
+    rows = dict(
+      conn.execute(
+        "SELECT identifier, ticker || '|' || name FROM \"Entity\" WHERE ticker IS NOT NULL"
+      ).fetchall()
+    )
+    assert rows == {
+      "a": "BNY|New Name",
+      "b": "UNT|Kept Name",
+      "c": "PLC|Placeholder Filer",
+      "d": "SAME|Same",
+      "f": "XOM|Not in the index",
+    }
+    assert conn.execute(
+      "SELECT ticker, exchange FROM \"Entity\" WHERE identifier = 'a'"
+    ).fetchone() == ("BNY", "NYSE")
+
+  @pytest.mark.asyncio
+  @pytest.mark.parametrize(
+    "read",
+    [
+      {"return_value": None},
+      {"return_value": "not json"},
+      {"side_effect": RuntimeError("AccessDenied")},
+      {"return_value": '{"companies": []}'},
+    ],
+    ids=["missing", "corrupt", "unreadable", "empty"],
+  )
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.S3Client")
+  async def test_entity_identity_without_a_catalog_changes_nothing(self, mock_s3, read):
+    mock_s3.return_value.read_string.configure_mock(**read)
+    client = AsyncMock()
+
+    from robosystems.adapters.sec.processors.ingestion.staging import DuckDBStager
+
+    assert await DuckDBStager().stamp_entity_identity(client) == 0
+    client.execute_write.assert_not_called()
+
+  @pytest.mark.asyncio
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.s3_get_table_patterns")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.RoboLedgerContext")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.get_graph_client")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.S3Client")
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.env")
+  async def test_incremental_stamps_entity_after_the_upsert(
+    self, mock_env, mock_s3_client, mock_get_client, mock_context, mock_patterns
+  ):
+    """The upsert writes back the rows' frozen tickers, so the stamp follows it."""
+    mock_env.SHARED_PROCESSED_BUCKET = "test-bucket"
+    mock_context.get_all_table_names_for_context.return_value = {"Entity": "nodes"}
+    mock_context.SEC_REPOSITORY = "sec"
+    mock_patterns.return_value = ["s3://test-bucket/Entity/*.parquet"]
+    order: list[str] = []
+
+    async def write(**kwargs):
+      order.append(kwargs["sql"].split()[0])
+      return {"rows": []}
+
+    mock_client = AsyncMock()
+    mock_client.list_tables.return_value = [{"table_name": "Entity"}]
+    mock_client.create_table.return_value = {"status": "created"}
+    mock_client.query_table.return_value = {"rows": [[1]]}
+    mock_client.execute_write.side_effect = write
+    mock_get_client.return_value = mock_client
+
+    from robosystems.adapters.sec.processors.ingestion.staging import DuckDBStager
+
+    stager = DuckDBStager()
+
+    async def stamp(*_):
+      order.append("stamp")
+      return 0
+
+    with patch.object(stager, "stamp_entity_identity", stamp):
+      await stager.stage_incremental_to_duckdb(year=2026, quarter=4)
+
+    assert order[-3:] == ["DELETE", "INSERT", "stamp"]
 
   @pytest.mark.asyncio
   @patch("robosystems.adapters.sec.processors.ingestion.staging.s3_get_table_patterns")

@@ -287,6 +287,7 @@ FILING_ARTIFACT_TAVI_GAPS = "tavi.gaps.json"
 FILING_ARTIFACT_MANIFEST = "manifest.json"
 FILING_CATALOG_PREFIX = "companies/"
 FILING_CATALOG_INDEX_KEY = "companies/index.json"
+FILING_CATALOG_ALIASES_KEY = "companies/aliases.json"
 FILING_ROBOTS_KEY = "robots.txt"
 # One releases list per filer: the 8-Ks captured for it, newest first. An
 # 8-K is in neither the graph nor the catalog, so this is how one is found.

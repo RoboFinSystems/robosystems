@@ -176,6 +176,20 @@ def _build_entity_match(
   )
 
 
+async def _with_renamed_filers(
+  graph_id: str, entity_list: list[str] | None
+) -> list[str] | None:
+  """Replace a renamed SEC filer's ticker with its CIK, which either ticker finds."""
+  from robosystems.adapters.sec.mcp.report_resolver import renamed_filer_cik
+
+  if not entity_list:
+    return entity_list
+  return [
+    (await renamed_filer_cik(graph_id, value) if _is_ticker(value) else None) or value
+    for value in entity_list
+  ]
+
+
 # A tenant period's value comes from the report of record: a filed report,
 # then the books' own close stamps (no report), then drafts, then archived.
 _REPORT_STANDING = {"filed": 3, None: 2, "draft": 1, "under_review": 1, "archived": 0}
@@ -309,7 +323,9 @@ async def query_fact_grid(
   """
   parameters: dict[str, Any] = {}
 
-  entity_list = entities if entities else ([entity] if entity else None)
+  entity_list = await _with_renamed_filers(
+    graph_id, entities if entities else ([entity] if entity else None)
+  )
   entity_filter, entity_where = _build_entity_match(entity_list, parameters)
   element_pattern, element_where = _build_element_match(
     elements, canonical_concepts, parameters, inline=entity_filter is None

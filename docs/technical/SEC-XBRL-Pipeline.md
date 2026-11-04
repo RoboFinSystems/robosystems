@@ -567,6 +567,12 @@ The hosted `sec` repository moves on three schedules, all on business days, East
 
 So the tools that read one filing from its published folder — `describe-filing`, `search-text`, `read-text`, `disclosures`, `information-block` — find a filing the day it is filed, because they look the ticker up in the catalog first. Everything that reads the graph or the search index — Cypher, `financial-statement-analysis`, `build-fact-grid`, `search-documents` — sees it after that night's rebuild.
 
+### When a ticker changes
+
+A filer is identified by its CIK, and its ticker is whatever EDGAR lists for it today. Each catalog run applies EDGAR's current ticker map, so a renamed or newly listed filer is corrected without waiting for its next filing, and the night's staging carries the same ticker into the graph.
+
+The old ticker keeps working. `companies/{old}.json` stays a whole company document with a `moved_to` field, `companies/aliases.json` lists every old ticker with its filer's CIK, and the tools and `search-documents` accept either ticker. Raw Cypher sees only the current one, so match `Entity.cik` when a query has to survive a rename.
+
 On a stack of your own, every SEC schedule and sensor ships stopped; turn on the ones you want in the Dagster UI.
 
 ## Common Tasks

@@ -148,6 +148,7 @@ s3://robosystems-public-data-{env}/
   companies/
     index.json                     # every filer with its latest filing
     {ticker}.json                  # one filer: filings + representations
+    aliases.json                   # old ticker -> the filer that left it
   robots.txt                       # filed documents disallowed
 ```
 

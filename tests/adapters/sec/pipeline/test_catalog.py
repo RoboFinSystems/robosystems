@@ -1,5 +1,6 @@
 """The filer catalog fold: processed Report/Entity rows plus manifests → JSON."""
 
+import json
 from unittest.mock import MagicMock
 
 import pandas as pd
@@ -16,7 +17,7 @@ from robosystems.adapters.sec.pipeline.catalog import (
   one_filer_per_ticker,
   read_corpus,
   read_manifests,
-  read_prior_renderable,
+  read_prior_index,
   renderable,
   renderable_summary,
   viewer_link,
@@ -518,49 +519,59 @@ class TestRenderability:
     assert row["latest"]["accession"] == "0000066740-25-000020"
 
 
-class TestPriorRenderable:
-  """Carrying renderability forward for the filers a run does not rewrite."""
+class _NoSuchKey(Exception):
+  pass
 
-  def test_reads_the_previous_index_keyed_by_ticker(self):
+
+class TestPriorIndex:
+  """What the last index published, for the filers a run does not rewrite."""
+
+  def _s3(self, index=None, error=None):
     s3 = MagicMock()
+    s3.exceptions.NoSuchKey = _NoSuchKey
+    if error is not None:
+      s3.get_object.side_effect = error
+    else:
+      s3.get_object.return_value = {
+        "Body": MagicMock(read=lambda: json.dumps(index).encode())
+      }
+    return s3
+
+  def test_reads_the_previous_index_keyed_by_cik(self):
     index = {
       "companies": [
         {
+          "cik": MMM,
           "ticker": "MMM",
           "renderable": True,
           "latest_renderable": {"accession": "x", "form": "10-K"},
         },
-        {"ticker": "NVDA", "renderable": False, "latest_renderable": None},
-        {"ticker": None, "renderable": True},
+        {"cik": NVDA, "ticker": "NVDA", "renderable": False, "latest_renderable": None},
+        {"ticker": "NOCIK", "renderable": True},
       ]
     }
-    s3.get_object.return_value = {
-      "Body": MagicMock(read=lambda: __import__("json").dumps(index).encode())
-    }
 
-    prior = read_prior_renderable(s3, "public")
+    prior = read_prior_index(self._s3(index), "public")
 
-    assert prior["MMM"] == {
+    assert prior[MMM] == {
+      "ticker": "MMM",
       "renderable": True,
       "latest_renderable": {"accession": "x", "form": "10-K"},
     }
-    assert prior["NVDA"] == {"renderable": False, "latest_renderable": None}
-    # A row with no ticker cannot be keyed and is dropped rather than crashing.
-    assert None not in prior
+    assert prior[NVDA]["renderable"] is False
+    # A row with no CIK cannot be keyed and is dropped rather than crashing.
+    assert set(prior) == {MMM, NVDA}
 
   def test_a_missing_index_carries_nothing_forward(self):
-    s3 = MagicMock()
-    s3.get_object.side_effect = Exception("NoSuchKey")
+    assert read_prior_index(self._s3(error=_NoSuchKey()), "public") == {}
 
-    assert read_prior_renderable(s3, "public") == {}
+  def test_an_index_that_cannot_be_read_raises(self):
+    with pytest.raises(RuntimeError):
+      read_prior_index(self._s3(error=RuntimeError("AccessDenied")), "public")
 
   def test_an_index_written_before_the_flag_reads_as_not_renderable(self):
-    s3 = MagicMock()
-    index = {"companies": [{"ticker": "MMM", "latest": {"accession": "x"}}]}
-    s3.get_object.return_value = {
-      "Body": MagicMock(read=lambda: __import__("json").dumps(index).encode())
-    }
+    index = {"companies": [{"cik": MMM, "ticker": "MMM", "latest": {"accession": "x"}}]}
 
-    assert read_prior_renderable(s3, "public") == {
-      "MMM": {"renderable": False, "latest_renderable": None}
+    assert read_prior_index(self._s3(index), "public") == {
+      MMM: {"ticker": "MMM", "renderable": False, "latest_renderable": None}
     }

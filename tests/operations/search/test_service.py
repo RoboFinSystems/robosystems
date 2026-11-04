@@ -1,11 +1,21 @@
 """Tests for SearchService."""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from robosystems.models.api.search import SearchRequest
 from robosystems.operations.search.service import SearchService
+
+
+@pytest.fixture(autouse=True)
+def renamed_filer():
+  """No filer is renamed unless a test says so; never a real bucket."""
+  with patch(
+    "robosystems.adapters.sec.mcp.report_resolver.renamed_filer_cik_sync",
+    return_value=None,
+  ) as lookup:
+    yield lookup
 
 
 @pytest.fixture
@@ -444,3 +454,24 @@ class TestGroupSuccessiveFilings:
     kwargs = mock_client.search.call_args.kwargs
     assert (kwargs["size"], kwargs["offset"]) == (10, 20)
     assert [h.also_in_filings for h in hits] == [None, None]
+
+
+class TestRenamedFilerFilter:
+  """Indexed sections keep the ticker they were written with, so a renamed SEC
+  filer is filtered by the CIK every section carries."""
+
+  def _search(self, service, mock_client, graph_id):
+    mock_client.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
+    service.search_documents(graph_id, SearchRequest(query="q", entity="BK"))
+    return mock_client.search.call_args.kwargs["filters"]["entity"]
+
+  def test_a_renamed_filer_filters_by_cik(self, service, mock_client, renamed_filer):
+    renamed_filer.return_value = "0001390777"
+    assert self._search(service, mock_client, "sec") == "0001390777"
+
+  def test_any_other_filer_filters_as_asked(self, service, mock_client):
+    assert self._search(service, mock_client, "sec") == "BK"
+
+  def test_a_tenant_graph_never_looks_up(self, service, mock_client, renamed_filer):
+    assert self._search(service, mock_client, "kg123") == "BK"
+    renamed_filer.assert_not_called()

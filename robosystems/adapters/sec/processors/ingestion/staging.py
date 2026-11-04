@@ -5,6 +5,7 @@ LadybugDB is a separate stage.
 """
 
 import asyncio
+import json
 import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -13,7 +14,10 @@ if TYPE_CHECKING:
   from robosystems.graph_api.client.client import GraphClient
 
 from robosystems.config import env
-from robosystems.config.storage.shared import get_staging_duckdb_path
+from robosystems.config.storage.shared import (
+  FILING_CATALOG_INDEX_KEY,
+  get_staging_duckdb_path,
+)
 from robosystems.graph_api.client.factory import get_graph_client
 from robosystems.logger import logger
 from robosystems.operations.aws.s3 import S3Client
@@ -31,6 +35,9 @@ from .models import (
   make_progress_logger,
   s3_get_table_patterns,
 )
+
+# The scheme of a filer's own rows; other schemes can carry a numeric identifier.
+CIK_SCHEME = "http://www.sec.gov/CIK"
 
 
 class DuckDBStager:
@@ -135,6 +142,8 @@ class DuckDBStager:
 
       if "Element" in successful_tables:
         await self.stamp_canonical_concepts(client, log_progress)
+      if "Entity" in successful_tables:
+        await self.stamp_entity_identity(client, log_progress)
 
       expected_table_count = len(tables_by_type)
       status = (
@@ -482,6 +491,9 @@ class DuckDBStager:
 
       if "Element" in existing_table_names:
         await self.stamp_canonical_concepts(client, log_progress)
+      # After the Entity upsert above, which writes back the rows' frozen values.
+      if "Entity" in existing_table_names:
+        await self.stamp_entity_identity(client, log_progress)
 
       if not quarter_has_files:
         logger.warning(
@@ -578,6 +590,60 @@ class DuckDBStager:
     if log_progress:
       log_progress(message)
     return counts
+
+  async def stamp_entity_identity(
+    self,
+    client: GraphClient,
+    log_progress: ProgressCallback | None = None,
+  ) -> int:
+    """Set each listed filer's ticker and name on Entity from the catalog index.
+
+    The catalog decides a filer's current ticker; staging follows it, so the two
+    cannot disagree. Runs after every stage. A catalog that cannot be read skips
+    the stamp: the rows stay as they were, and a missing stamp must not stop the
+    nightly chain. Returns rows stamped.
+    """
+    try:
+      text = await asyncio.to_thread(
+        S3Client().read_string, env.PUBLIC_DATA_BUCKET, FILING_CATALOG_INDEX_KEY
+      )
+      companies = json.loads(text).get("companies") if text else None
+    except Exception as e:
+      logger.warning(f"Catalog index unavailable, Entity stamp skipped: {e}")
+      return 0
+    rows = [r for r in companies or [] if r.get("cik") and r.get("ticker")]
+    if not rows:
+      return 0
+
+    started = time.time()
+    response = await client.execute_write(
+      graph_id=self.graph_id,
+      sql=(
+        'UPDATE "Entity" SET ticker = m.ticker, name = COALESCE(m.name, "Entity".name) '
+        "FROM (SELECT unnest(?::VARCHAR[]) AS cik, unnest(?::VARCHAR[]) AS ticker, "
+        "unnest(?::VARCHAR[]) AS name) AS m "
+        'WHERE "Entity".cik = m.cik AND "Entity".scheme = ? '
+        'AND ("Entity".ticker IS DISTINCT FROM m.ticker '
+        'OR "Entity".name IS DISTINCT FROM COALESCE(m.name, "Entity".name))'
+      ),
+      parameters=[
+        [r["cik"] for r in rows],
+        [r["ticker"] for r in rows],
+        [r.get("name") for r in rows],
+        CIK_SCHEME,
+      ],
+      timeout=get_staging_timeout("Entity"),
+    )
+    result_rows = response.get("rows") or []
+    stamped = int(result_rows[0][0]) if result_rows and result_rows[0] else 0
+    message = (
+      f"Entity identity: {stamped:,} rows stamped from {len(rows):,} catalog filers "
+      f"in {time.time() - started:.1f}s"
+    )
+    logger.info(message)
+    if log_progress:
+      log_progress(message)
+    return stamped
 
   # Chunking threshold when the DuckDB memory limit is unknown.
   DEFAULT_CHUNKING_THRESHOLD_BYTES = 15 * 1024 * 1024 * 1024  # 15 GiB
