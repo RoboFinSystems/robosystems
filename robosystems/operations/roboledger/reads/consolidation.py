@@ -1780,9 +1780,7 @@ def group_close_status(
   drafts = engine_drafts(session, preview.consolidation_entity_id, start, end)
   if _drafted(session, drafts) != _proposed(preview.proposals):
     status.pending_adjustments = [
-      f"{p.adjustment_kind} for {p.adjusts_entity_name}"
-      for p in preview.proposals
-      if not p.opening
+      p.memo for p in preview.proposals if not p.opening
     ] or ["drafts that no longer match the books"]
   if first_month_eve(
     session, preview.consolidation_entity_id, start

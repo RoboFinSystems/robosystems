@@ -1330,6 +1330,8 @@ def test_the_group_month_waits_on_its_entities_and_entries(group, monkeypatch):
     names[ASSOCIATE],
   }
   assert waiting.pending_adjustments
+  # Read on the close panel, so in the entry's own words, not its kind's slug.
+  assert not any("_" in pending for pending in waiting.pending_adjustments)
   assert waiting.unexplained == []
 
   for entity_id in (PARENT_ENTITY_ID, MEMBER, ASSOCIATE):
