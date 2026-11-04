@@ -32,6 +32,7 @@ from robosystems.config.storage.shared import (
 
 MMM = "0000066740"
 NVDA = "0001045810"
+ACME = "0001234567"
 CDN = "https://data.example.com"
 
 
@@ -46,7 +47,6 @@ def _entities(*rows):
       "exchange",
       "sic",
       "sic_description",
-      "updated_at",
       "partition",
     ],
   )
@@ -63,7 +63,6 @@ def _reports(*rows):
       "report_date",
       "fiscal_year_focus",
       "fiscal_period_focus",
-      "updated_at",
       "partition",
     ],
   )
@@ -76,7 +75,7 @@ def _links(*rows):
 @pytest.fixture
 def corpus():
   entities = _entities(
-    ("e-mmm", MMM, "MMM", "3M CO", "NYSE", "3841", "Surgical", "2025-02-05", "2025-Q1"),
+    ("e-mmm", MMM, "MMM", "3M CO", "NYSE", "3841", "Surgical", "2025-Q1"),
     (
       "e-mmm",
       MMM,
@@ -85,7 +84,6 @@ def corpus():
       "NYSE",
       "3841",
       "Surgical",
-      "2025-04-30",
       "2025-Q2",
     ),
     (
@@ -96,7 +94,6 @@ def corpus():
       "Nasdaq",
       "3674",
       "Semis",
-      "2025-02-26",
       "2025-Q1",
     ),
     (
@@ -107,7 +104,6 @@ def corpus():
       None,
       None,
       None,
-      "2025-02-01",
       "2025-Q1",
     ),
   )
@@ -120,7 +116,6 @@ def corpus():
       "2024-12-31",
       2024,
       "FY",
-      "2025-02-05",
       "2025-Q1",
     ),
     # The same 10-K reprocessed into a later batch: the later row wins.
@@ -132,7 +127,6 @@ def corpus():
       "2024-12-31",
       2024,
       "FY",
-      "2025-03-01",
       "2025-Q1",
     ),
     (
@@ -143,7 +137,6 @@ def corpus():
       "2025-03-31",
       2025,
       "Q1",
-      "2025-04-30",
       "2025-Q2",
     ),
     (
@@ -154,7 +147,6 @@ def corpus():
       None,
       None,
       None,
-      "2025-05-01",
       "2025-Q2",
     ),
     (
@@ -165,7 +157,6 @@ def corpus():
       "2025-01-26",
       2025,
       "FY",
-      "2025-02-26",
       "2025-Q1",
     ),
     (
@@ -176,7 +167,6 @@ def corpus():
       "2024-12-31",
       2024,
       "FY",
-      "2025-02-01",
       "2025-Q1",
     ),
   )
@@ -199,6 +189,35 @@ class TestFold:
     assert rows[MMM]["name"] == "3M COMPANY"
     assert rows[MMM]["ticker"] == "MMM"
     assert rows["0009999999"]["ticker"] is None
+
+  def test_the_latest_partition_wins_whatever_order_the_rows_arrive_in(self):
+    rows = filers(
+      _entities(
+        ("e-a", ACME, "ACME", "ACME CORP", "NYSE", "1", "S", "2026-Q2"),
+        ("e-a", ACME, "ACME", "ACME INC", "NYSE", "1", "S", "2015-Q1"),
+      )
+    )
+    assert rows[ACME]["name"] == "ACME CORP"
+
+  @pytest.mark.parametrize(
+    "placeholder_partition", ["2016-Q1", "2026-Q4"], ids=["between", "latest"]
+  )
+  def test_a_placeholder_row_never_replaces_a_row_that_knows_the_filer(
+    self, placeholder_partition
+  ):
+    rows = filers(
+      _entities(
+        ("e-a", ACME, "ACME", "ACME CORP", "NYSE", "1", "S", "2015-Q4"),
+        ("e-a", ACME, "", ACME, "", "", "", placeholder_partition),
+        ("e-a", ACME, "ACME", "ACME CORP", "NYSE", "1", "S", "2026-Q3"),
+      )
+    )
+    assert rows[ACME]["ticker"] == "ACME"
+    assert rows[ACME]["name"] == "ACME CORP"
+
+  def test_a_filer_only_a_placeholder_knows_stays_without_a_ticker(self):
+    rows = filers(_entities(("e-a", ACME, "", ACME, "", "", "", "2016-Q1")))
+    assert rows[ACME]["ticker"] is None
 
   def test_filings_by_cik_dedups_filters_forms_and_sorts_newest_first(self, corpus):
     entities, reports, links = corpus

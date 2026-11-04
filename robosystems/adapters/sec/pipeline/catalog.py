@@ -60,7 +60,6 @@ REPORT_COLUMNS = [
   "report_date",
   "fiscal_year_focus",
   "fiscal_period_focus",
-  "updated_at",
 ]
 ENTITY_COLUMNS = [
   "identifier",
@@ -70,7 +69,6 @@ ENTITY_COLUMNS = [
   "exchange",
   "sic",
   "sic_description",
-  "updated_at",
 ]
 RELATIONSHIP_COLUMNS = ["from", "to"]
 
@@ -107,15 +105,19 @@ def _int(value: Any) -> int | None:
 
 
 def filers(entities: pd.DataFrame) -> dict[str, dict[str, Any]]:
-  """One row per CIK — the most recently written Entity row, so a ticker or
-  name change on a later filing wins."""
+  """One row per CIK — its latest partition's Entity row, so a ticker or name
+  change on a later filing wins.
+
+  A filing processed with no filer name writes a placeholder row, the CIK for a
+  name and nothing else, which never replaces a row that knows the filer.
+  """
   out: dict[str, dict[str, Any]] = {}
   if entities.empty:
     return out
-  ordered = entities.sort_values("updated_at", na_position="first")
+  ordered = entities.sort_values("partition", kind="stable")
   for row in ordered.to_dict("records"):
     cik = _text(row.get("cik"))
-    if not cik:
+    if not cik or (cik in out and _text(row.get("name")) == cik):
       continue
     out[cik] = {
       "cik": cik,
@@ -166,8 +168,8 @@ def filings_by_cik(
   """Each filer's listed filings, newest first, one per accession.
 
   A filing reprocessed into a later batch appears twice in the parquet; the
-  row written last wins. Forms outside ``form_types`` carry no statements
-  and are dropped.
+  last row read wins. Forms outside ``form_types`` carry no statements and are
+  dropped.
   """
   out: dict[str, list[dict[str, Any]]] = {}
   if reports.empty or relationships.empty or entities.empty:
@@ -182,7 +184,7 @@ def filings_by_cik(
   }
   wanted = {f.upper() for f in form_types}
   latest: dict[str, dict[str, Any]] = {}
-  for row in reports.sort_values("updated_at", na_position="first").to_dict("records"):
+  for row in reports.sort_values("partition", kind="stable").to_dict("records"):
     accession = _text(row.get("accession_number"))
     form = (_text(row.get("form")) or "").upper()
     if not accession or form not in wanted:
