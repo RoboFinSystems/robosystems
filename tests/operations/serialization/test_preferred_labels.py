@@ -21,6 +21,7 @@ from robosystems.operations.serialization.bundle import (
   NEGATED_LABEL_ROLE,
   PERIOD_END_LABEL_ROLE,
   PERIOD_START_LABEL_ROLE,
+  TERSE_LABEL_ROLE,
   BundleArc,
   BundleElement,
   BundleLinkbaseLink,
@@ -126,6 +127,64 @@ def test_a_subtracted_cash_flow_row_is_negated() -> None:
   assert labels == {NET_INCOME: None, GAIN: NEGATED_LABEL_ROLE}
   gain = next(c for c in concepts if c.qname == GAIN)
   assert gain.role_labels == {NEGATED_LABEL_ROLE: "Gain"}
+
+
+def _cash_flow_row(
+  qname: str, label: str, weight: float
+) -> tuple[BundleLinkbases, BundleElement]:
+  concept = _element(qname, period_type="duration", balance_type="credit", label=label)
+  linkbases = BundleLinkbases(
+    presentation_links=[
+      _link(
+        "presentation",
+        "cash_flow_statement",
+        [_arc("presentation", OPERATING, qname, 1.0)],
+      )
+    ],
+    calculation_links=[
+      _link(
+        "calculation",
+        "cash_flow_statement",
+        [_arc("calculation", OPERATING, qname, 1.0, weight=weight)],
+      )
+    ],
+  )
+  _apply_preferred_labels(linkbases, [concept])
+  return linkbases, concept
+
+
+def test_a_subtracted_row_is_worded_for_its_cash_effect() -> None:
+  linkbases, concept = _cash_flow_row(
+    "rs-gaap:GainOrLossOnSaleOfStockInSubsidiary",
+    "Gain (Loss) on Disposition of Stock in Subsidiary",
+    -1.0,
+  )
+  assert linkbases.presentation_links[0].arcs[0].preferred_label == NEGATED_LABEL_ROLE
+  assert concept.role_labels == {
+    NEGATED_LABEL_ROLE: "(Gain) Loss on Disposition of Stock in Subsidiary"
+  }
+
+
+def test_a_row_holding_its_cash_effect_is_reworded_without_negating() -> None:
+  linkbases, concept = _cash_flow_row(
+    "rs-gaap:IncreaseDecreaseInAccountsReceivable",
+    "Increase (Decrease) in Accounts Receivable",
+    1.0,
+  )
+  assert linkbases.presentation_links[0].arcs[0].preferred_label == TERSE_LABEL_ROLE
+  assert concept.role_labels == {
+    TERSE_LABEL_ROLE: "(Increase) Decrease in Accounts Receivable"
+  }
+
+
+def test_a_liability_change_keeps_its_wording() -> None:
+  linkbases, concept = _cash_flow_row(
+    "rs-gaap:IncreaseDecreaseInContractWithCustomerLiability",
+    "Increase (Decrease) in Contract with Customer, Liability",
+    1.0,
+  )
+  assert linkbases.presentation_links[0].arcs[0].preferred_label is None
+  assert concept.role_labels == {}
 
 
 def test_the_roll_forward_opens_and_closes_on_its_capital_concept() -> None:
@@ -236,6 +295,27 @@ def test_the_labelled_package_validates_under_arelle(tmp_path) -> None:
     if line.startswith("[") and not line.startswith("[info]")
   ]
   assert problems == []
+
+
+def test_the_holon_carries_the_reworded_row_to_the_report_page() -> None:
+  linkbases, concept = _cash_flow_row(
+    "rs-gaap:IncreaseDecreaseInAccountsReceivable",
+    "Increase (Decrease) in Accounts Receivable",
+    1.0,
+  )
+  bundle = _bundle(
+    schema_concepts=[concept, _element(OPERATING, period_type="duration")],
+    linkbases=linkbases,
+    facts=[],
+    structure_display_order={},
+  )
+  model = from_holon_json(serialize_to_holon_jsonld(bundle))
+  row = model.concepts[concept.qname]
+  assert any(
+    label.role == TERSE_LABEL_ROLE
+    and label.value == "(Increase) Decrease in Accounts Receivable"
+    for label in row.labels
+  )
 
 
 def test_the_holon_round_trips_the_preferred_labels() -> None:

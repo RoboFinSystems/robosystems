@@ -964,6 +964,7 @@ def _associations_to_linkbases(
 
 
 NEGATED_LABEL_ROLE = "http://www.xbrl.org/2009/role/negatedLabel"
+TERSE_LABEL_ROLE = "http://www.xbrl.org/2003/role/terseLabel"
 PERIOD_START_LABEL_ROLE = "http://www.xbrl.org/2003/role/periodStartLabel"
 PERIOD_END_LABEL_ROLE = "http://www.xbrl.org/2003/role/periodEndLabel"
 _PARENT_CHILD = "http://www.xbrl.org/2003/arcrole/parent-child"
@@ -1004,6 +1005,8 @@ def _apply_preferred_labels(
   - a cash flow row its parent subtracts (a gain presented from its income
     statement fact) takes ``negatedLabel``, shown at its cash effect, whether
     or not the summation ships (``subtracted``);
+  - a cash flow row whose fact already holds its cash effect takes
+    ``terseLabel``, which words it for that sign and flips nothing;
   - an equity roll-forward, whose capital concept the engine holds as the
     parent of its movements, takes the XBRL shape: a header with the capital
     concept first under ``periodStartLabel``, the movements, and the capital
@@ -1012,6 +1015,11 @@ def _apply_preferred_labels(
   Adds the role labels to the concepts and returns the header concepts the
   bundle must also declare.
   """
+  from robosystems.operations.roboledger.reports.fact_grid import (
+    CASH_EFFECT_ROWS,
+    cash_effect_wording,
+  )
+
   by_qname = {c.qname: c for c in concepts}
   weights = {
     (arc.from_qname, arc.to_qname): arc.weight
@@ -1026,11 +1034,17 @@ def _apply_preferred_labels(
     if link.block_type == "cash_flow_statement":
       for arc in link.arcs:
         weight = weights.get((arc.from_qname, arc.to_qname))
+        concept = by_qname.get(arc.to_qname)
         if weight is not None and weight < 0:
           arc.preferred_label = NEGATED_LABEL_ROLE
-          # The standard wording: the role, not the text, is what flips the
-          # displayed sign.
-          _add_role_label(by_qname.get(arc.to_qname), NEGATED_LABEL_ROLE, "")
+        elif arc.to_qname in CASH_EFFECT_ROWS:
+          arc.preferred_label = TERSE_LABEL_ROLE
+        else:
+          continue
+        # The role, not the text, is what flips a negated row's sign.
+        if concept is not None:
+          base = concept_label(concept) or concept.qname.split(":", 1)[-1]
+          concept.role_labels.setdefault(arc.preferred_label, cash_effect_wording(base))
     if link.block_type in ("cash_flow_statement", "equity_statement"):
       header = _as_rollforward(link, by_qname)
       if header is not None and header.qname not in by_qname:
