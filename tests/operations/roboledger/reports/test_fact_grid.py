@@ -11,6 +11,7 @@ import pytest
 
 from robosystems.operations.roboledger.reports.fact_grid import (
   _EQUITY_FLOW_REDUCER_QNAMES,
+  FactRow,
   PeriodSpec,
   ReportFact,
   _append_empty_equity_facts,
@@ -34,7 +35,9 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   _reconcile_operating_to_cash,
   _roll_up_facts_to_structure,
   _root_sort_key,
+  _show_cash_signed,
   _synthesize_ppe_net_facts,
+  cash_effect_wording,
 )
 
 
@@ -3080,3 +3083,101 @@ class TestGroupColumnsBeforeTheBooks:
 
     members = [GroupMember("parent", "operating", None, None)]
     assert self._omitted(members, {"parent": date(2026, 7, 1)}) == {0, 1}
+
+
+class TestCashFlowRowWording:
+  def _row(self, element_id: str, qname: str, name: str, value: float) -> FactRow:
+    return FactRow(
+      element_id=element_id,
+      element_qname=qname,
+      element_name=name,
+      classification="",
+      balance_type="credit",
+      values=[value],
+    )
+
+  def _shown(self, *rows: FactRow, subtract: str | None = None) -> list[FactRow]:
+    children = [
+      _HierarchyNode(
+        element_id=row.element_id,
+        qname=row.element_qname,
+        name=row.element_name,
+        classification="",
+        balance_type="credit",
+        is_abstract=False,
+        depth=1,
+      )
+      for row in rows
+    ]
+    hierarchy = [
+      _HierarchyNode(
+        element_id="operating",
+        qname="rs-gaap:NetCashProvidedByUsedInOperatingActivities",
+        name="Operating",
+        classification="",
+        balance_type="debit",
+        is_abstract=False,
+        depth=0,
+        children=children,
+      )
+    ]
+    weights = [(r.element_id, -1.0 if r.element_id == subtract else 1.0) for r in rows]
+    _show_cash_signed(list(rows), hierarchy, {"operating": weights})
+    return list(rows)
+
+  def test_an_asset_change_keeps_its_value_under_the_cash_wording(self) -> None:
+    [row] = self._shown(
+      self._row(
+        "ar",
+        "rs-gaap:IncreaseDecreaseInAccountsReceivable",
+        "Increase (Decrease) in Accounts Receivable",
+        -667.0,
+      )
+    )
+    assert row.element_name == "(Increase) Decrease in Accounts Receivable"
+    assert row.values == [-667.0]
+
+  def test_a_subtracted_gain_flips_under_the_cash_wording(self) -> None:
+    [row] = self._shown(
+      self._row(
+        "gain",
+        "rs-gaap:GainOrLossOnSaleOfStockInSubsidiary",
+        "Gain (Loss) on Disposition of Stock in Subsidiary",
+        8360.0,
+      ),
+      subtract="gain",
+    )
+    assert row.element_name == "(Gain) Loss on Disposition of Stock in Subsidiary"
+    assert row.values == [-8360.0]
+
+  def test_a_liability_change_reads_as_named(self) -> None:
+    [row] = self._shown(
+      self._row(
+        "deferred",
+        "rs-gaap:IncreaseDecreaseInContractWithCustomerLiability",
+        "Increase (Decrease) in Contract with Customer, Liability",
+        1133.0,
+      )
+    )
+    assert row.element_name == (
+      "Increase (Decrease) in Contract with Customer, Liability"
+    )
+    assert row.values == [1133.0]
+
+  @pytest.mark.parametrize(
+    ("label", "worded"),
+    [
+      (
+        "Income (Loss) from Equity Method Investments",
+        "(Income) Loss from Equity Method Investments",
+      ),
+      (
+        "Gains (Losses) on Extinguishment of Debt",
+        "(Gains) Losses on Extinguishment of Debt",
+      ),
+      ("Other Noncash Income (Expense)", "Other Noncash (Income) Expense"),
+      ("Gain", "Gain"),
+    ],
+  )
+  def test_the_wording_swaps_the_paired_words(self, label: str, worded: str) -> None:
+    assert cash_effect_wording(label) == worded

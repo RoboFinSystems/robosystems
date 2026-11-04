@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
@@ -661,6 +662,29 @@ def render_structure_view(
   )
 
 
+# Cash flow rows on an asset or on operating capital, whose facts hold the cash
+# effect: a rise in the balance is negative, which "Increase (Decrease)" would
+# read as a fall.
+CASH_EFFECT_ROWS: frozenset[str] = frozenset(
+  {
+    "rs-gaap:IncreaseDecreaseInAccountsReceivable",
+    "rs-gaap:IncreaseDecreaseInDueFromAffiliatesCurrent",
+    "rs-gaap:IncreaseDecreaseInInventories",
+    "rs-gaap:IncreaseDecreaseInOtherCurrentAssets",
+    "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet",
+    "rs-gaap:IncreaseDecreaseInPrepaidExpense",
+  }
+)
+
+_PAIRED_WORDING = re.compile(r"(\w+) \((\w+)\)")
+
+
+def cash_effect_wording(label: str) -> str:
+  """A label worded for its cash effect: "Gain (Loss) on Sale" reads
+  "(Gain) Loss on Sale", so a gain in parentheses is a gain."""
+  return _PAIRED_WORDING.sub(r"(\1) \2", label, count=1)
+
+
 def _show_cash_signed(
   rows: list[FactRow],
   hierarchy: list[_HierarchyNode],
@@ -668,7 +692,8 @@ def _show_cash_signed(
 ) -> None:
   """Show a cash flow row its section subtracts (a gain, presented from its
   income statement fact) at its cash effect, as a negated label would, so
-  every section reads as a plain sum. The fact keeps its own sign."""
+  every section reads as a plain sum, and word it and the rows already holding
+  their cash effect to match. The fact keeps its own sign."""
   parent_of: dict[str, str] = {}
 
   def _walk(node: _HierarchyNode) -> None:
@@ -687,6 +712,8 @@ def _show_cash_signed(
   for row in rows:
     if row.element_id in subtracted:
       row.values = [None if v is None else 0.0 - v for v in row.values]
+    if row.element_id in subtracted or row.element_qname in CASH_EFFECT_ROWS:
+      row.element_name = cash_effect_wording(row.element_name)
 
 
 # ── Ancestor rollup ────────────────────────────────────────────────────────
