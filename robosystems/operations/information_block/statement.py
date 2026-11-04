@@ -320,11 +320,22 @@ def _build_statement_rendering(
     period_keys.add((ps, pe))
   if not period_keys:
     return RenderingLite(rows=[], periods=[], validation=None, unmapped_count=0)
-  # A roll-forward's opening is stored on the day before a window starts. It
-  # opens that window's column and is not a column of its own.
+  # A roll-forward's opening is stored on the day before a window starts, and a
+  # forecast's closing balance has no start: each belongs to its window's column.
+  # A forecast balance sheet's instants have no window, and are its columns.
   windows = {key for key in period_keys if key[0] != key[1]}
-  if windows:
-    period_keys = windows
+  window_starts = {start for start, _ in windows}
+  start_of_window: dict[date, date] = {}
+  for start, end in sorted(windows):
+    start_of_window.setdefault(end, start)
+  period_keys = {
+    key
+    for key in period_keys
+    if key[0] != key[1]
+    or (
+      key[1] not in start_of_window and key[1] + timedelta(days=1) not in window_starts
+    )
+  }
 
   ordered_periods = sorted(period_keys, key=lambda pk: (pk[1], pk[0]))
   periods: list[PeriodSpec] = [
@@ -341,7 +352,7 @@ def _build_statement_rendering(
       # Nonnumeric (text-block) facts have no place in the numeric grid.
       continue
     pe = f.period_end
-    ps = f.period_start if f.period_start is not None else pe
+    ps = f.period_start if f.period_start is not None else start_of_window.get(pe, pe)
     report_facts.append(
       ReportFact(
         element_id=f.element_id,
