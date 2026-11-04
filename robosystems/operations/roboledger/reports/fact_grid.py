@@ -676,7 +676,9 @@ CASH_EFFECT_ROWS: frozenset[str] = frozenset(
   }
 )
 
-_PAIRED_WORDING = re.compile(r"(\w+) \((\w+)\)")
+_PAIRED_WORDING = re.compile(
+  r"\b(Increase|Gains?|Income) \((Decrease|Loss(?:es)?|Expense)\)"
+)
 
 
 def cash_effect_wording(label: str) -> str:

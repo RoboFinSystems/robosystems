@@ -13,7 +13,10 @@ from __future__ import annotations
 
 import pytest
 
-from robosystems.operations.roboledger.reports.fact_grid import CASH_EFFECT_ROWS
+from robosystems.operations.roboledger.reports.fact_grid import (
+  CASH_EFFECT_ROWS,
+  cash_effect_wording,
+)
 from robosystems.taxonomy import load_taxonomy_package
 from robosystems.taxonomy.discovery import framework_root
 from robosystems.taxonomy.model import TaxonomyPackage
@@ -246,3 +249,22 @@ class TestCashEffectRows:
     }
     assert liabilities
     assert not liabilities & CASH_EFFECT_ROWS
+
+  def test_every_row_worded_for_cash_has_a_pair_to_swap(
+    self, calculations: TaxonomyPackage
+  ) -> None:
+    """A library label the wording does not recognise would read backwards."""
+    library = load_taxonomy_package(_PACKAGES / "rs-gaap" / "v1" / "taxonomy.jsonld")
+    labels = {e.qname: e.name for e in library.elements}
+    subtracted = {
+      a.to_qname
+      for a in calculations.associations
+      if a.role == _ROLE_BASE + "CashFlowStatement"
+      and a.association_type == "calculation"
+      and a.from_qname == "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      and a.weight == -1.0
+    }
+    rows = subtracted | CASH_EFFECT_ROWS
+    assert len(rows) == 11
+    unchanged = {q for q in rows if cash_effect_wording(labels[q]) == labels[q]}
+    assert unchanged == set()
