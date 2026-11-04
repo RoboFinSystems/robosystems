@@ -795,6 +795,17 @@ def test_an_asset_taken_in_exchange_is_a_noncash_acquisition(tenant):
   assert _cash_flow(tenant)[ACQUIRED] == 600.0
 
 
+def test_a_consolidating_entry_acquires_nothing(tenant):
+  """A member's deconsolidation debits the elimination of the investment, with
+  no cash in the entry. Nothing was bought."""
+  _post(
+    tenant,
+    [("equipment", 600, 0), ("metals", 0, 400), ("disposal_gain", 0, 200)],
+    entity_id=ADJUSTMENTS,
+  )
+  assert ACQUIRED not in _cash_flow(tenant, entity_id=ADJUSTMENTS)
+
+
 def test_a_remeasurement_acquires_nothing(tenant):
   _post(tenant, [("metals", 1000, 0), ("other_income", 0, 1000)])
   assert ACQUIRED not in _cash_flow(tenant)
