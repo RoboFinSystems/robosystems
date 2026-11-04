@@ -256,6 +256,24 @@ class TestCurrentTickerMap:
     with self._edgar(error=RuntimeError("503")):
       assert current_ticker_map(_s3(), "raw") is None
 
+  @pytest.mark.parametrize("body", [b"not json", b"[]", b'{"0": "row"}', b"\xff\xfe"])
+  def test_a_corrupt_stored_copy_is_replaced_by_a_good_fetch(self, body):
+    s3 = _s3()
+    s3.get_object.side_effect = None
+    s3.get_object.return_value = {"Body": MagicMock(read=lambda: body)}
+    with self._edgar(_raw((1, "ACME", "Acme"))):
+      result = current_ticker_map(s3, "raw")
+
+    assert result == {ACME: Listing(("ACME",), "Acme")}
+    s3.put_object.assert_called_once()
+
+  def test_a_corrupt_stored_copy_and_no_fetch_is_no_map(self):
+    s3 = _s3()
+    s3.get_object.side_effect = None
+    s3.get_object.return_value = {"Body": MagicMock(read=lambda: b"not json")}
+    with self._edgar(error=RuntimeError("503")):
+      assert current_ticker_map(s3, "raw") is None
+
   def test_a_stored_copy_that_cannot_be_read_fails_the_run(self):
     s3 = _s3()
     s3.get_object.side_effect = RuntimeError("AccessDenied")

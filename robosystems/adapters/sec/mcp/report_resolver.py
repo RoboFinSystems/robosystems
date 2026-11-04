@@ -23,8 +23,16 @@ QUARTERLY_FORMS: tuple[str, ...] = ("10-K", "20-F", "40-F", "10-Q")
 SEC_GRAPH_ID = "sec"
 _TICKER = re.compile(r"^[A-Z0-9][A-Z0-9.\-/]{0,15}$")
 _RENAMED_TTL_SECONDS = 300
+# A storage outage must not add a failing read to every SEC query.
+_RENAMED_FAILURE_TTL_SECONDS = 30
 _RENAMED_CACHE_LIMIT = 4096
 _renamed_cache: dict[str, tuple[float, str | None]] = {}
+
+
+def _remember_renamed(symbol: str, cik: str | None, expires: float) -> None:
+  if len(_renamed_cache) >= _RENAMED_CACHE_LIMIT:
+    _renamed_cache.clear()
+  _renamed_cache[symbol] = (expires, cik)
 
 
 def renamed_filer_cik_sync(ticker: str) -> str | None:
@@ -48,15 +56,14 @@ def renamed_filer_cik_sync(ticker: str) -> str | None:
     document = json.loads(text) if text else None
   except Exception as e:
     logger.warning(f"SEC catalog read failed for {symbol}: {e}")
+    _remember_renamed(symbol, None, now + _RENAMED_FAILURE_TTL_SECONDS)
     return None
   cik = None
   if isinstance(document, dict) and (
     document.get("moved_to") or document.get("former_tickers")
   ):
     cik = document.get("cik")
-  if len(_renamed_cache) >= _RENAMED_CACHE_LIMIT:
-    _renamed_cache.clear()
-  _renamed_cache[symbol] = (now + _RENAMED_TTL_SECONDS, cik)
+  _remember_renamed(symbol, cik, now + _RENAMED_TTL_SECONDS)
   return cik
 
 

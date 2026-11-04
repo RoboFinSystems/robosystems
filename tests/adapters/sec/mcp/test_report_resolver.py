@@ -11,6 +11,7 @@ Verifies:
 from __future__ import annotations
 
 import json
+import time
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -198,11 +199,18 @@ class TestRenamedFilers:
     catalog.read_string.side_effect = RuntimeError("503")
     assert renamed_filer_cik_sync("BK") is None
 
-  def test_a_failed_read_is_not_remembered(self, catalog):
+  def test_a_failed_read_is_remembered_only_briefly(self, catalog):
     catalog.read_string.side_effect = RuntimeError("503")
-    renamed_filer_cik_sync("BK")
+    assert renamed_filer_cik_sync("BK") is None
+    assert renamed_filer_cik_sync("BK") is None
+    assert catalog.read_string.call_count == 1
+
     catalog.read_string.side_effect = None
     self._seed(catalog, cik="0001390777", moved_to="BNY")
+    expires, cached = _renamed_cache["BK"]
+    assert cached is None
+    assert expires - time.monotonic() <= 30
+    _renamed_cache["BK"] = (time.monotonic() - 1, None)
     assert renamed_filer_cik_sync("BK") == "0001390777"
 
   def test_a_lookup_is_cached(self, catalog):

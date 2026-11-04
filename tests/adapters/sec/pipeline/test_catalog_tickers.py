@@ -121,7 +121,7 @@ TICKER_MAP = {
 }
 
 
-def _run(bucket, *, ticker_map=TICKER_MAP, corpus=None):
+def _run(bucket, *, ticker_map=TICKER_MAP, corpus=None, full_rebuild=False):
   context = build_asset_context(partition_key="2026-Q4")
   with (
     patch.object(catalog_module, "_get_s3_client", return_value=bucket),
@@ -130,7 +130,9 @@ def _run(bucket, *, ticker_map=TICKER_MAP, corpus=None):
     patch.object(catalog_module, "current_ticker_map", return_value=ticker_map),
     patch.object(catalog_module.env, "PUBLIC_DATA_BUCKET", PUBLIC),
   ):
-    return sec_filing_catalog(context, SECFilingCatalogConfig(graph_id="sec"))
+    return sec_filing_catalog(
+      context, SECFilingCatalogConfig(graph_id="sec", full_rebuild=full_rebuild)
+    )
 
 
 @pytest.fixture
@@ -214,13 +216,45 @@ class TestCatalogWhenTickersMove:
     assert index[NEW_HOLDER]["ticker"] == "XOM"
     assert "XOM" not in bucket.json(FILING_CATALOG_ALIASES_KEY)["aliases"]
 
-  def test_no_map_leaves_tickers_as_they_were_published(self, bucket):
-    bucket.seed_index(_prior(UNTOUCHED, "UNT"))
+  def test_no_map_keeps_the_published_tickers_rather_than_the_rows(self, bucket):
+    """The rows still say BK. Going back to them would undo the rename and
+    publish an alias pointing the wrong way."""
+    _run(self._seeded(bucket))
+    bucket.writes.clear()
 
     _run(bucket, ticker_map=None)
 
     index = {r["cik"]: r for r in bucket.json(FILING_CATALOG_INDEX_KEY)["companies"]}
-    assert index[UNTOUCHED]["ticker"] == "UNT"
+    assert index[RENAMED]["ticker"] == "BNY"
+    aliases = bucket.json(FILING_CATALOG_ALIASES_KEY)["aliases"]
+    assert aliases["BK"]["ticker"] == "BNY"
+    assert "BNY" not in aliases
+    assert "moved_to" not in bucket.json("companies/bny.json")
+
+  def test_a_full_rebuild_replaces_a_corrupt_index(self, bucket):
+    bucket.objects[FILING_CATALOG_INDEX_KEY] = "not json"
+
+    result = _run(bucket, full_rebuild=True)
+
+    assert result.metadata["index_written"] is True
+    index = {r["cik"]: r for r in bucket.json(FILING_CATALOG_INDEX_KEY)["companies"]}
+    assert index[RENAMED]["ticker"] == "BNY"
+
+  def test_a_full_rebuild_replaces_corrupt_aliases(self, bucket):
+    self._seeded(bucket)
+    bucket.objects[FILING_CATALOG_ALIASES_KEY] = "not json"
+
+    result = _run(bucket, full_rebuild=True)
+
+    assert result.metadata["index_written"] is True
+    assert isinstance(bucket.json(FILING_CATALOG_ALIASES_KEY)["aliases"], dict)
+
+  def test_an_ordinary_run_on_a_corrupt_index_fails_and_writes_nothing(self, bucket):
+    bucket.objects[FILING_CATALOG_INDEX_KEY] = "not json"
+
+    with pytest.raises(ValueError):
+      _run(bucket)
+    assert bucket.writes == []
 
   def test_a_filer_leaving_the_index_is_reported(self, bucket):
     bucket.seed_index(_prior("0000000099", "GONE"), _prior(UNTOUCHED, "UNT"))

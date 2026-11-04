@@ -558,16 +558,24 @@ def sec_filing_catalog(
     f"{len(relationships)} entity-report rows"
   )
   by_cik = filings_by_cik(reports, relationships, entities, config.form_types)
-  prior = read_prior_index(s3, public_bucket)
-  filer_rows = filers(entities)
-  ticker_map = current_ticker_map(s3, env.SHARED_RAW_BUCKET)
-  if ticker_map:
-    filer_rows = apply_ticker_map(
-      filer_rows,
-      ticker_map,
-      filed=set(by_cik),
-      prior={c: r["ticker"] for c, r in prior.items() if r.get("ticker")},
-    )
+  try:
+    prior = read_prior_index(s3, public_bucket)
+    prior_aliases = read_aliases(s3, public_bucket)
+  except Exception as e:
+    # A full rebuild reads every manifest, so it needs neither file, and it is
+    # how a bad one gets replaced.
+    if not config.full_rebuild:
+      raise
+    context.log.warning(f"Rebuilding without the prior catalog state: {e}")
+    prior, prior_aliases = {}, {}
+  prior_tickers = {c: r["ticker"] for c, r in prior.items() if r.get("ticker")}
+  # Applied even with no map: the published tickers still outrank the rows' own.
+  filer_rows = apply_ticker_map(
+    filers(entities),
+    current_ticker_map(s3, env.SHARED_RAW_BUCKET) or {},
+    filed=set(by_cik),
+    prior=prior_tickers,
+  )
 
   listed: dict[str, tuple[dict[str, Any], list[dict[str, Any]]]] = {}
   for cik, filer in filer_rows.items():
@@ -605,9 +613,8 @@ def sec_filing_catalog(
   listed_tickers = {
     cik: filer["ticker"] for cik, (filer, _) in listed.items() if filer["ticker"]
   }
-  prior_tickers = {c: r["ticker"] for c, r in prior.items() if r.get("ticker")}
   aliases = updated_aliases(
-    read_aliases(s3, public_bucket),
+    prior_aliases,
     listed_tickers,
     prior_tickers,
     datetime.now(UTC).date().isoformat(),

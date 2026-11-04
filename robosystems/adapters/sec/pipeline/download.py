@@ -512,7 +512,7 @@ def sec_raw_filings(
 
 def merge_recent_submissions(existing: dict, new_recent: dict) -> dict:
   """The stored master with EDGAR's recent page applied: its unseen filings
-  prepended, and the filer's header (tickers, name, exchange, SIC) replaced."""
+  prepended, and every other field on the page, the filer's header, replaced."""
   for field, value in new_recent.items():
     if field != "filings":
       existing[field] = value

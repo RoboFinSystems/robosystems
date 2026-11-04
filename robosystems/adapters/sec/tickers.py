@@ -51,19 +51,26 @@ def parse_ticker_map(raw: dict[str, Any]) -> dict[str, Listing]:
   }
 
 
+def _stored_ticker_map(s3: Any, bucket: str) -> dict[str, Listing] | None:
+  """The last good copy. None when there is none or it is corrupt: the fetch can
+  replace it, and absence from a map never clears a ticker."""
+  try:
+    body = s3.get_object(Bucket=bucket, Key=TICKER_MAP_KEY)["Body"].read()
+  except s3.exceptions.NoSuchKey:
+    return None
+  try:
+    return parse_ticker_map(json.loads(body))
+  except (ValueError, AttributeError, TypeError) as e:
+    logger.warning(f"Stored EDGAR ticker map is corrupt, ignoring it: {e}")
+    return None
+
+
 def current_ticker_map(s3: Any, bucket: str) -> dict[str, Listing] | None:
   """Today's map, kept as the last good copy; that copy if the fetch fails or
-  looks wrong; None when there has never been a good one."""
+  looks wrong; None when there is no good one."""
   from robosystems.adapters.sec.client.edgar import edgar_client
 
-  stored_raw: dict[str, Any] | None = None
-  try:
-    stored_raw = json.loads(
-      s3.get_object(Bucket=bucket, Key=TICKER_MAP_KEY)["Body"].read()
-    )
-  except s3.exceptions.NoSuchKey:
-    pass
-  stored = parse_ticker_map(stored_raw) if stored_raw else None
+  stored = _stored_ticker_map(s3, bucket)
 
   try:
     raw = edgar_client().company_tickers()
