@@ -35,12 +35,10 @@ def _platform_session_returning(candidate):
 
 
 def _platform_session_with_policy(policy):
-  """Mock platform session whose write_policy scalar query resolves to
-  ``policy``."""
-  session = MagicMock()
-  chain = session.query.return_value.filter.return_value.order_by.return_value
-  chain.limit.return_value.scalar.return_value = policy
-  return session
+  """Mock platform session whose live-connection query resolves to a row
+  holding ``policy``, or to no row when ``policy`` is None."""
+  row = None if policy is None else SimpleNamespace(id="conn-live", write_policy=policy)
+  return _platform_session_returning(row)
 
 
 class TestShadowLedger:
@@ -56,6 +54,13 @@ class TestShadowLedger:
 
   def test_shadow_is_never_a_writeback_policy(self):
     assert SHADOW_WRITE_POLICY not in WRITEBACK_WRITE_POLICIES
+
+  def test_the_live_row_decides_both_predicates(self):
+    """One row answers "does it shadow" and "where does it publish", so a
+    shadow ledger never resolves a publish target."""
+    session = _platform_session_with_policy("shadow")
+    assert shadow_ledger(session, GRAPH_ID) is True
+    assert resolve_writeback_connection(session, GRAPH_ID) is None
 
   def test_only_the_group_parents_close_shadows(self):
     platform = _platform_session_with_policy("shadow")
@@ -80,6 +85,15 @@ class TestResolveWritebackConnection:
 
   def test_returns_none_when_no_writeback_connection(self):
     session = _platform_session_returning(None)
+
+    assert resolve_writeback_connection(session, GRAPH_ID) is None
+
+  def test_a_live_row_that_does_not_write_back_is_no_target(self):
+    """The policy is read from the live row, never searched for among older
+    rows: a `native` live row resolves to no target."""
+    session = _platform_session_returning(
+      SimpleNamespace(id="conn-live", write_policy="native")
+    )
 
     assert resolve_writeback_connection(session, GRAPH_ID) is None
 

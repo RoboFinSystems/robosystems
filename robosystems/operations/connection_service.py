@@ -220,10 +220,11 @@ class ConnectionService:
     """Soft-delete a connection and deactivate its credentials.
 
     The row is kept so tenant-side rows keyed by its ``connection_id`` stay
-    attached; re-OAuthing the same QB realm revives it (unless severed).
-    ``write_policy`` drops to ``native`` since no external GL is active;
-    `Connection.restore` re-applies the provider default. Pass `graph_id` so a
-    guessed `connection_id` can't delete another graph's connection.
+    attached; re-OAuthing the same QB realm revives it (unless severed) with
+    the ``write_policy`` it held, so a disconnect never turns ``shadow`` back
+    into write-back. Readers exclude deleted rows, so the kept value is inert
+    meanwhile. Pass `graph_id` so a guessed `connection_id` can't delete
+    another graph's connection.
     """
     session = db_session or SessionFactory()
     session_created = db_session is None
@@ -241,9 +242,6 @@ class ConnectionService:
       cred = ConnectionCredentials.get_by_connection_id(connection_id, session)
       if cred:
         cred.deactivate(session)
-
-      if conn.write_policy != WritePolicy.NATIVE.value:
-        conn.write_policy = WritePolicy.NATIVE.value
 
       conn.soft_delete(session)
       logger.info(f"Soft-deleted connection {connection_id}")
@@ -428,8 +426,8 @@ class ConnectionService:
     The connection must belong to `graph_id` (the authorized URL scope), so a
     guessed id can't flip another graph into write-back; any write-role member
     may set it (the router enforces role). Returns None when missing or out of
-    scope. Raises ValueError for 'native', which only disconnect and sever
-    set, or a value the model refuses.
+    scope. Raises ValueError for 'native', which only sever sets, or a value
+    the model refuses.
     """
     session = db_session or SessionFactory()
     session_created = db_session is None
@@ -447,7 +445,7 @@ class ConnectionService:
 
       if write_policy == WritePolicy.NATIVE.value:
         raise ValueError(
-          "'native' is what disconnecting or severing leaves; a live "
+          "'native' is what severing leaves; a live "
           "connection chooses 'qb_authoritative' or 'shadow'."
         )
       conn.set_write_policy(session, write_policy)

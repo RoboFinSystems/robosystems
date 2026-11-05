@@ -430,7 +430,7 @@ async def get_connection(
     "book of record and writes nothing to it: the close posts nothing locally "
     "either, its drafts become shadowed expectations compared with what "
     "QuickBooks holds, and its gates are recorded as findings. 'native' is "
-    "not a choice here: it is what disconnecting or severing leaves, books "
+    "not a choice here: it is what severing leaves, books "
     "kept in RoboSystems with no connection to write to. This is the explicit "
     "operator opt-in for writing to your books of record."
   ),

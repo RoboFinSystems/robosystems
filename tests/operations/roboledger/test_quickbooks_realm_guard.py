@@ -36,7 +36,7 @@ _SINGLE_REALM_SITES: dict[str, tuple[re.Pattern[str], Counter[str]]] = {
     re.compile(r"Connection\.provider\s*==\s*\"quickbooks\""),
     Counter(
       {
-        "robosystems/operations/roboledger/fiscal_calendar/qb_writeback.py": 2,
+        "robosystems/operations/roboledger/fiscal_calendar/qb_writeback.py": 1,
         "robosystems/operations/roboledger/reads/fiscal_calendar.py": 1,
       }
     ),
