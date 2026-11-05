@@ -1001,8 +1001,9 @@ class TestClosePrePublishWriteback:
       (entry2, event2),
     ]
 
-    # Mock the platform-DB connection lookup.
-    mock_conn = MagicMock(id="conn_qb_1")
+    # Mock the platform-DB connection lookup. The resolver reads the live
+    # row's policy itself, so the mock has to carry one.
+    mock_conn = MagicMock(id="conn_qb_1", write_policy="qb_authoritative")
     mock_platform_session = MagicMock()
     mock_platform_session.__enter__ = MagicMock(return_value=mock_platform_session)
     mock_platform_session.__exit__ = MagicMock(return_value=False)

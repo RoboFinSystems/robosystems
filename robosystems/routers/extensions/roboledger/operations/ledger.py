@@ -525,7 +525,8 @@ execute_event_block_op = _registrar.register(
       "and promotes the published entries to 'posted'; the event goes "
       "'fulfilled' once no draft remains, or 'pending' on rejection (what "
       "landed is kept). Native-policy events fast-path through with no QB "
-      "write — RoboSystems is the system of record."
+      "write — RoboSystems is the system of record. Only the group parent's "
+      "books are QuickBooks': an event on a subsidiary's books is refused."
     ),
     command=cmd_execute_event_block,
     request_model=ExecuteEventBlockRequest,

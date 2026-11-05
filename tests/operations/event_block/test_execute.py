@@ -26,6 +26,16 @@ def _period_gate_open():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _event_on_the_group_parent():
+  """Mock sessions cannot resolve the group parent either; every event here
+  is the parent's unless a test says otherwise."""
+  with patch(
+    "robosystems.operations.event_block.commands.is_group_parent", return_value=True
+  ):
+    yield
+
+
 COMMANDS_MODULE = "robosystems.operations.event_block.commands"
 GRAPH_ID = "kg00000000000000aa"
 
@@ -81,6 +91,38 @@ def _make_session(
       ("je_left",) if drafts_left_after else None,
     ]
   return session
+
+
+@pytest.mark.unit
+class TestExecuteEventBlockRefusesASubsidiary:
+  def test_a_subsidiarys_event_is_refused_before_any_platform_lookup(self):
+    """QuickBooks keeps the group parent's books only. The close skips a
+    subsidiary before publishing; the direct operation refuses it, whatever
+    connection the event names, and never opens the platform session."""
+    from robosystems.models.api.event_block import ExecuteEventBlockRequest
+    from robosystems.operations.event_block.commands import (
+      EventNotOnSourceBooksError,
+      execute_event_block,
+    )
+
+    evt = _make_event(source="schedule")
+    evt.entity_id = "ent_subsidiary"
+    session = _make_session(evt)
+
+    with (
+      patch(f"{COMMANDS_MODULE}.is_group_parent", return_value=False) as parent,
+      patch("robosystems.database.SessionFactory") as platform,
+    ):
+      with pytest.raises(EventNotOnSourceBooksError, match="ent_subsidiary"):
+        execute_event_block(
+          session,
+          ExecuteEventBlockRequest(event_id=evt.id, connection_id="conn_qb_1"),
+          "usr_1",
+          graph_id=GRAPH_ID,
+        )
+
+    parent.assert_called_once_with(session, "ent_subsidiary")
+    platform.assert_not_called()
 
 
 @pytest.mark.unit

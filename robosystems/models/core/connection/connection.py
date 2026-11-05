@@ -35,7 +35,8 @@ class WritePolicy(str, Enum):
   """Whether RoboSystems-originated entries write back to an external GL.
 
   - ``NATIVE``: books kept in RoboSystems with no external GL to write to,
-    what disconnect and sever leave. Not a choice for a live connection.
+    what severing leaves. Not a choice for a live connection. A disconnected
+    row keeps the policy it held, so a revival keeps the customer's choice.
   - ``QB_AUTHORITATIVE``: entries publish to QuickBooks via
     ``execute-event-block`` and stay DRAFT locally until QB accepts.
     Round-tripped entries are matched by ``metadata.qb_external_id``.
@@ -409,11 +410,12 @@ class Connection(Model):
       raise
 
   def restore(self, session: Session) -> None:
-    """Revive a soft-deleted connection, re-applying the provider's default
-    write policy (disconnect resets it to ``native``)."""
+    """Revive a soft-deleted connection with the write policy it held: a
+    customer who chose ``shadow`` is not turned back into write-back by a
+    reconnect. Every reader excludes deleted rows, so the kept value is
+    inert until revival."""
     self.deleted_at = None
     self.updated_at = datetime.now(UTC)
-    self.write_policy = default_write_policy_for_provider(self.provider)
     try:
       session.commit()
       session.refresh(self)

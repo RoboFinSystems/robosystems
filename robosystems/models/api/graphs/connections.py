@@ -239,10 +239,11 @@ class ConnectionResponse(BaseModel):
   write_policy: str | None = Field(
     None,
     description=(
-      "Source-of-truth write policy: 'native' (RoboSystems is authoritative; "
-      "no outbound write-back) or 'qb_authoritative' (QuickBooks is "
-      "authoritative; RoboSystems-originated entries publish to QB). "
-      "Set via the write-policy endpoint."
+      "Outbound write policy: 'qb_authoritative' (QuickBooks is the book of "
+      "record and RoboSystems-originated entries publish to it at close), "
+      "'shadow' (QuickBooks is the book of record, nothing is written to it "
+      "and the close posts nothing locally), or 'native' (no external ledger; "
+      "what severing leaves). Set via the write-policy endpoint."
     ),
   )
   source_name: str | None = Field(
@@ -270,7 +271,7 @@ class SetWritePolicyRequest(BaseModel):
       "nothing is written to QuickBooks, the close posts nothing locally, "
       "its drafts become shadowed expectations and its gates are findings. "
       "'native', books kept in RoboSystems with no write-back, is what "
-      "disconnecting or severing leaves, not a choice for a live connection."
+      "severing leaves, not a choice for a live connection."
     ),
   )
 

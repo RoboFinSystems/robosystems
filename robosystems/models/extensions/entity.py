@@ -101,7 +101,9 @@ class Entity(ExtensionsBase):
   left_on = Column(Date, nullable=True)
 
   source = Column(String, nullable=False, default="native")  # native, quickbooks, xero
-  source_id = Column(String)  # realm_id for QB, org_id for Xero
+  # Provenance of the row, descriptive only. For QuickBooks the loader writes
+  # CompanyInfo's own Id (always "1"), not the realm, which the connection holds.
+  source_id = Column(String)
   connection_id = Column(String)
 
   address_line1 = Column(String)

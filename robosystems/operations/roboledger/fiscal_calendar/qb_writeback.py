@@ -20,12 +20,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from typing import TYPE_CHECKING
 
 from sqlalchemy import ColumnElement, Row, and_, not_, or_
 from sqlalchemy.orm import Session
 
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
+
+if TYPE_CHECKING:
+  from robosystems.models.core.connection.connection import Connection
 
 # Synced-in QB transactions already live in QB, so they are not here.
 WRITEBACK_EVENT_SOURCES = ("schedule", "manual")
@@ -65,24 +69,50 @@ class WritebackConnection:
   write_policy: str
 
 
-def resolve_writeback_connection(
+def live_quickbooks_connection(
   platform_session: Session, graph_id: str
-) -> WritebackConnection | None:
-  """The QB connection close publishes to, or None. Newest wins if several."""
-  from robosystems.models.core.connection.connection import Connection
+) -> Connection | None:
+  """The graph's live QuickBooks connection, or None: not deleted, past OAuth,
+  neither disconnected nor severed. Newest wins if several.
 
-  candidate = (
+  A row still in ``pending_oauth`` is a connect attempt, not a connection: it
+  has no credentials and carries the provider's default policy, so it must
+  never stand in for the live row beside it. Both predicates below read this
+  one row, so the policy the close publishes under and the policy that
+  shadows it can never come from different connections.
+  """
+  from robosystems.models.core.connection.connection import (
+    Connection,
+    ConnectionStatus,
+  )
+
+  return (
     platform_session.query(Connection)
     .filter(
       Connection.graph_id == graph_id,
       Connection.provider == "quickbooks",
-      Connection.write_policy.in_(WRITEBACK_WRITE_POLICIES),
       Connection.deleted_at.is_(None),
+      Connection.status.notin_(
+        [
+          ConnectionStatus.PENDING_OAUTH.value,
+          ConnectionStatus.DISCONNECTED.value,
+          ConnectionStatus.SEVERED.value,
+        ]
+      ),
     )
     .order_by(Connection.created_at.desc())
     .first()
   )
-  if candidate is None:
+
+
+def resolve_writeback_connection(
+  platform_session: Session, graph_id: str
+) -> WritebackConnection | None:
+  """The QB connection close publishes to, or None: the live connection, when
+  its policy writes back. A shadow ledger publishes nothing even with an
+  older write-back row beside it."""
+  candidate = live_quickbooks_connection(platform_session, graph_id)
+  if candidate is None or candidate.write_policy not in WRITEBACK_WRITE_POLICIES:
     return None
   return WritebackConnection(
     connection_id=str(candidate.id),
@@ -91,28 +121,9 @@ def resolve_writeback_connection(
 
 
 def shadow_ledger(platform_session: Session, graph_id: str) -> bool:
-  """Whether the graph's live QuickBooks connection runs in shadow. Newest
-  live connection wins, as the write-back resolver's does."""
-  from robosystems.models.core.connection.connection import (
-    Connection,
-    ConnectionStatus,
-  )
-
-  policy = (
-    platform_session.query(Connection.write_policy)
-    .filter(
-      Connection.graph_id == graph_id,
-      Connection.provider == "quickbooks",
-      Connection.deleted_at.is_(None),
-      Connection.status.notin_(
-        [ConnectionStatus.DISCONNECTED.value, ConnectionStatus.SEVERED.value]
-      ),
-    )
-    .order_by(Connection.created_at.desc())
-    .limit(1)
-    .scalar()
-  )
-  return policy == SHADOW_WRITE_POLICY
+  """Whether the graph's live QuickBooks connection runs in shadow."""
+  candidate = live_quickbooks_connection(platform_session, graph_id)
+  return candidate is not None and candidate.write_policy == SHADOW_WRITE_POLICY
 
 
 def shadow_close_for_entity(

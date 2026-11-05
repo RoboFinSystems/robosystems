@@ -467,13 +467,13 @@ class TestDeleteConnection:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_delete_resets_write_policy_to_native(self):
-    """After a disconnect there is no active authoritative external GL, so
-    the row goes out as `native`; `Connection.restore` re-applies the
-    provider default on revival."""
+  async def test_delete_keeps_the_write_policy_for_revival(self):
+    """Every reader excludes deleted rows, so the policy a disconnected row
+    holds is inert until `Connection.restore` revives it with the customer's
+    choice intact."""
     mock_session = MagicMock()
     mock_conn = _make_mock_connection()
-    mock_conn.write_policy = "qb_authoritative"
+    mock_conn.write_policy = "shadow"
 
     with (
       patch(f"{MODULE}.Connection") as MockConn,
@@ -486,7 +486,7 @@ class TestDeleteConnection:
         connection_id="conn_1", user_id="usr_123", db_session=mock_session
       )
 
-    assert mock_conn.write_policy == "native"
+    assert mock_conn.write_policy == "shadow"
     mock_conn.soft_delete.assert_called_once()
 
   @pytest.mark.asyncio

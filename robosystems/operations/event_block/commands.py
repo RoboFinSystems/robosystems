@@ -47,6 +47,7 @@ from robosystems.operations.roboledger.commands._guards import (
 from robosystems.operations.roboledger.entity_scope import (
   ensure_entity_id,
   find_entity_id,
+  is_group_parent,
 )
 from robosystems.operations.roboledger.entry_status import (
   LANDED_ENTRY_STATUSES,
@@ -309,6 +310,15 @@ def _flush_new_event(
     if body.external_id and violates(exc, "idx_events_source_external"):
       raise DuplicateEventError(body.source, body.external_id) from exc
     raise
+
+
+class EventNotOnSourceBooksError(ValueError):
+  """The event's entity is not the one the source connection books for.
+
+  QuickBooks keeps the group parent's books only; a subsidiary's entries
+  post here at close and are never published, whichever connection the
+  event names.
+  """
 
 
 class ConnectionNotOnGraphError(ValueError):
@@ -1382,6 +1392,15 @@ def execute_event_block(
       status=str(event.status),
       qb_external_id=None,
       qb_error=None,
+    )
+
+  # The close skips subsidiaries before it gets here; the direct operation
+  # has to refuse them itself.
+  if not is_group_parent(session, str(event.entity_id)):
+    raise EventNotOnSourceBooksError(
+      f"Event {event.id} belongs to entity {event.entity_id}, whose books "
+      "QuickBooks does not keep; its entries post here at close and are "
+      "never published."
     )
 
   # Caller can override the connection (used by the close-period batch

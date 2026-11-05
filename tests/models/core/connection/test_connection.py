@@ -661,22 +661,22 @@ class TestConnectionToDictWithSoftDelete:
 
 @pytest.mark.unit
 class TestConnectionRestore:
-  def test_restore_clears_deleted_at_and_reapplies_provider_write_policy(self):
-    """Disconnect drops write_policy to native; revival re-applies the
-    provider default so a reconnected QuickBooks is authoritative again."""
+  def test_restore_clears_deleted_at_and_keeps_the_write_policy(self):
+    """A disconnected row keeps the policy it held, so a customer who chose
+    shadow is not turned back into write-back by reconnecting."""
     session = MagicMock()
     conn = Connection(
       graph_id="kg_test",
       user_id="usr_1",
       provider="quickbooks",
-      write_policy="native",
+      write_policy="shadow",
     )
     conn.deleted_at = datetime.now(UTC)
 
     conn.restore(session)
 
     assert conn.deleted_at is None
-    assert conn.write_policy == "qb_authoritative"
+    assert conn.write_policy == "shadow"
     session.commit.assert_called_once()
 
   def test_restore_keeps_native_for_providers_without_an_external_gl(self):
