@@ -29,28 +29,15 @@ def get_shared_master_asg_name() -> str:
 
 
 def _autoscaling_client():
-  region = env.AWS_REGION
-  if env.is_development() and env.AWS_ENDPOINT_URL:
-    return boto3.client(
-      "autoscaling", endpoint_url=env.AWS_ENDPOINT_URL, region_name=region
-    )
-  return boto3.client("autoscaling", region_name=region)
+  return boto3.client("autoscaling", region_name=env.AWS_REGION)
 
 
 def _ec2_client():
-  region = env.AWS_REGION
-  if env.is_development() and env.AWS_ENDPOINT_URL:
-    return boto3.client("ec2", endpoint_url=env.AWS_ENDPOINT_URL, region_name=region)
-  return boto3.client("ec2", region_name=region)
+  return boto3.client("ec2", region_name=env.AWS_REGION)
 
 
 def _dynamodb_resource():
-  region = env.AWS_REGION
-  if env.is_development() and env.AWS_ENDPOINT_URL:
-    return boto3.resource(
-      "dynamodb", endpoint_url=env.AWS_ENDPOINT_URL, region_name=region
-    )
-  return boto3.resource("dynamodb", region_name=region)
+  return boto3.resource("dynamodb", **env.get_dynamodb_config())
 
 
 def set_desired_capacity(asg_name: str, desired: int) -> None:

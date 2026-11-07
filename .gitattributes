@@ -3,7 +3,7 @@
 # Git for Windows defaults to core.autocrlf=true, which rewrites text files to
 # CRLF on checkout. Several files in this repo are executed on Linux regardless
 # of the developer's platform — the container ENTRYPOINT (bin/entrypoint.sh),
-# the init scripts bind-mounted into postgres and localstack, and the git hooks
+# the init scripts bind-mounted into postgres and storage-init, and the git hooks
 # — and a stray \r breaks all of them ("bad interpreter", "$'\r': command not
 # found", "exec ...: no such file or directory"). Pin LF in the working tree so
 # a Windows checkout produces the same bytes as a macOS or Linux one.

@@ -859,9 +859,15 @@ class EnvConfig:
   # Credentials come from IAM roles in ECS/EC2.
   AWS_DEFAULT_REGION = get_str_env("AWS_DEFAULT_REGION", "us-east-1")
   AWS_REGION = get_str_env("AWS_REGION", AWS_DEFAULT_REGION)
-  AWS_ENDPOINT_URL = get_str_env("AWS_ENDPOINT_URL", "")  # For LocalStack
-  # Browser-reachable S3 endpoint for presigned URLs in dev (AWS_ENDPOINT_URL
-  # is a docker hostname). Unset in staging/prod.
+  # botocore's own endpoint variables: one for every service, or one per
+  # service. The dev stack sets the per-service pair, because it serves S3
+  # (SeaweedFS) and DynamoDB (DynamoDB Local) from two containers; all three
+  # are empty against AWS. Every other service is reached at its real endpoint.
+  AWS_ENDPOINT_URL = get_str_env("AWS_ENDPOINT_URL", "")
+  AWS_ENDPOINT_URL_S3 = get_str_env("AWS_ENDPOINT_URL_S3", AWS_ENDPOINT_URL)
+  AWS_ENDPOINT_URL_DYNAMODB = get_str_env("AWS_ENDPOINT_URL_DYNAMODB", AWS_ENDPOINT_URL)
+  # Browser-reachable S3 endpoint for presigned URLs in dev (the S3 endpoint
+  # above is a docker hostname). Unset in staging/prod.
   AWS_S3_PRESIGN_ENDPOINT_URL = get_str_env("AWS_S3_PRESIGN_ENDPOINT_URL", "")
 
   # Bedrock keys are dev-only .env overrides; prod/staging use IAM roles.
@@ -1207,18 +1213,6 @@ class EnvConfig:
     return f"{base_url}/{database_name}"
 
   @classmethod
-  def get_aws_config(cls) -> dict:
-    """boto3 kwargs; deliberately no credentials (IAM roles)."""
-    config = {
-      "region_name": cls.AWS_DEFAULT_REGION,
-    }
-
-    if cls.AWS_ENDPOINT_URL:
-      config["endpoint_url"] = cls.AWS_ENDPOINT_URL
-
-    return config
-
-  @classmethod
   def get_s3_config(cls) -> dict:
     """boto3 kwargs for S3; S3-specific credentials when set, else IAM roles."""
     config = {
@@ -1231,8 +1225,20 @@ class EnvConfig:
     if cls.AWS_S3_SECRET_ACCESS_KEY:
       config["aws_secret_access_key"] = cls.AWS_S3_SECRET_ACCESS_KEY
 
-    if cls.AWS_ENDPOINT_URL:
-      config["endpoint_url"] = cls.AWS_ENDPOINT_URL
+    if cls.AWS_ENDPOINT_URL_S3:
+      config["endpoint_url"] = cls.AWS_ENDPOINT_URL_S3
+
+    return config
+
+  @classmethod
+  def get_dynamodb_config(cls) -> dict:
+    """boto3 kwargs for DynamoDB; deliberately no credentials (IAM roles)."""
+    config = {
+      "region_name": cls.AWS_REGION,
+    }
+
+    if cls.AWS_ENDPOINT_URL_DYNAMODB:
+      config["endpoint_url"] = cls.AWS_ENDPOINT_URL_DYNAMODB
 
     return config
 

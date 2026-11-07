@@ -131,8 +131,8 @@ def _parquet_row_count(
     tail_len = min(file_size, _PARQUET_TAIL_READ_BYTES)
     tail = _read_range(s3, bucket, key, file_size - tail_len, file_size - 1)
   except FlexibleChecksumError:
-    # LocalStack returns the whole object's checksum on a ranged GET, which
-    # botocore rejects. Fall back to one bounded full read.
+    # An S3 stand-in may return the whole object's checksum on a ranged GET,
+    # which botocore rejects. Fall back to one bounded full read.
     tail = io.BufferedReader(
       _BoundedS3Body(s3.get_object(Bucket=bucket, Key=key)["Body"], byte_limit),
       _STREAM_BUFFER_BYTES,

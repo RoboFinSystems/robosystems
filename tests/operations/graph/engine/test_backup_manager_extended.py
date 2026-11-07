@@ -291,11 +291,11 @@ class TestGetBackupDownloadUrl:
     mock_backup.s3_key = "backups/graph1/file.zip"
     mock_backup.created_at = datetime(2025, 6, 15, 12, 0, 0, tzinfo=UTC)
 
-    mock_s3_client = MagicMock()
-    mock_s3_client.generate_presigned_url.return_value = (
+    presign_client = MagicMock()
+    presign_client.generate_presigned_url.return_value = (
       "https://s3.example.com/presigned"
     )
-    manager.s3_adapter.s3_client = mock_s3_client
+    manager.s3_adapter.presign_client = presign_client
 
     with (
       patch("robosystems.database.session") as mock_sl,
@@ -342,18 +342,21 @@ class TestGetBackupDownloadUrl:
       assert url is None
 
   @pytest.mark.asyncio
-  async def test_localstack_hostname_replacement(self, manager):
+  async def test_signs_with_the_browser_reachable_client(self, manager):
+    """The adapter's presign client signs the URL, not its primary client,
+    so in dev the URL carries the host-reachable endpoint."""
     mock_backup = MagicMock()
     mock_backup.is_completed = True
     mock_backup.s3_bucket = "test-bucket"
     mock_backup.s3_key = "test-key"
     mock_backup.created_at = datetime(2025, 1, 1, tzinfo=UTC)
 
-    mock_s3_client = MagicMock()
-    mock_s3_client.generate_presigned_url.return_value = (
-      "http://localstack:4566/test-bucket/test-key"
+    manager.s3_adapter.s3_client = MagicMock()
+    presign_client = MagicMock()
+    presign_client.generate_presigned_url.return_value = (
+      "http://localhost:8333/test-bucket/test-key?X-Amz-Signature=abc"
     )
-    manager.s3_adapter.s3_client = mock_s3_client
+    manager.s3_adapter.presign_client = presign_client
 
     with (
       patch("robosystems.database.session") as mock_sl,
@@ -365,8 +368,8 @@ class TestGetBackupDownloadUrl:
 
       url = await manager.get_backup_download_url("graph1", "bk_ls")
 
-      assert "localhost:4566" in url
-      assert "localstack:" not in url
+      assert url == "http://localhost:8333/test-bucket/test-key?X-Amz-Signature=abc"
+      manager.s3_adapter.s3_client.generate_presigned_url.assert_not_called()
 
 
 # ===========================================================================

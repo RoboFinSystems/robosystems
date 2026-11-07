@@ -227,14 +227,14 @@ def no_memory_limit(tmp_path, monkeypatch):
 
 @pytest.fixture()
 def bucket(monkeypatch):
-  # boto3 reads these itself, which would send every call past moto to a
-  # running LocalStack.
+  # boto3 reads these itself, which would send every call past moto to the
+  # dev stack's S3 server.
   monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
   monkeypatch.delenv("AWS_ENDPOINT_URL_S3", raising=False)
   with (
     mock_aws(),
     patch.object(env, "USER_DATA_BUCKET", BUCKET),
-    patch.object(env, "AWS_ENDPOINT_URL", ""),
+    patch.object(env, "AWS_ENDPOINT_URL_S3", ""),
     patch.object(env, "AWS_S3_PRESIGN_ENDPOINT_URL", ""),
   ):
     s3 = boto3.client("s3", region_name="us-east-1")
@@ -432,8 +432,8 @@ def test_an_upload_overwritten_after_completion_never_reaches_the_stored_file(fi
 
 def test_an_upload_that_changes_while_it_is_checked_is_not_stored(files):
   """The copy is conditional on the upload's ETag as read. Moto does not
-  enforce the condition, so S3's refusal is raised here as S3 sends it
-  (LocalStack enforces it, and the end-to-end check runs there)."""
+  enforce the condition, so S3's refusal is raised here as S3 sends it (the
+  dev stack's S3 server enforces it, and the end-to-end check runs there)."""
   from botocore.exceptions import ClientError
 
   service, graph_id, user_id, s3 = files

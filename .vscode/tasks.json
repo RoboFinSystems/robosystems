@@ -356,7 +356,8 @@
         "valkey",
         "lbug",
         "graph-api",
-        "localstack",
+        "seaweedfs",
+        "dynamodb",
         "api",
         "observability",
         "roboledger-app",
@@ -378,7 +379,8 @@
         "grafana",
         "prometheus",
         "otel-collector",
-        "localstack",
+        "seaweedfs",
+        "dynamodb",
         "dagster-webserver",
         "dagster-daemon"
       ]

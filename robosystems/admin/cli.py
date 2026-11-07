@@ -114,7 +114,9 @@ class AdminAPIClient:
         "us-east-1",
       ]
 
-      env = {k: v for k, v in os.environ.items() if k != "AWS_ENDPOINT_URL"}
+      env = {
+        k: v for k, v in os.environ.items() if not k.startswith("AWS_ENDPOINT_URL")
+      }
       result = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
       api_access_mode = result.stdout.strip() if result.returncode == 0 else ""
 
@@ -159,7 +161,9 @@ class AdminAPIClient:
         "text",
       ]
 
-      env = {k: v for k, v in os.environ.items() if k != "AWS_ENDPOINT_URL"}
+      env = {
+        k: v for k, v in os.environ.items() if not k.startswith("AWS_ENDPOINT_URL")
+      }
       result = subprocess.run(cmd, capture_output=True, text=True, check=True, env=env)
 
       secret_value = result.stdout.strip()

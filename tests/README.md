@@ -115,7 +115,7 @@ def test_with_user(test_user):
 
 - **The platform test database — per worker.** `test_db` drops and recreates `public`, and the autouse cleanup truncates every table after each test; two workers on one database would race on that. Each worker gets `robosystems_test_<gwN>`, created on demand, and both `TEST_DATABASE_URL` (the fixtures) and `DATABASE_URL` (the app engine) move to it. The rewrite runs from the test package's `__init__` because `robosystems.config.env` reads the URL at import and `robosystems.db.platform` binds its engine from it at import — a later hook would leave the app on the shared database while the fixtures truncate a private one. The uuid-named throwaway extensions schemas some tests build live in this database, so they follow it.
 - **The extensions database — shared.** Its tests use those throwaway schemas or a module-scoped tenant schema with a per-file name; `--dist loadfile` keeps a file on one worker, so a file never runs concurrently against itself. The taxonomy library it holds is read-only to tests.
-- **Valkey and LocalStack — shared.** Tests that touch them live must key by their own ids.
+- **Valkey and S3 — shared.** Tests that touch them live must key by their own ids.
 
 Nothing here runs outside xdist: a plain `uv run pytest path/to/test.py` still uses `robosystems_test` directly.
 
@@ -138,7 +138,7 @@ Configuration comes from the `env` block in `pytest.ini`, so tests get a determi
 | Valkey     | `localhost:6379`                                               |
 | Graph API  | `localhost:8001`                                               |
 | LadybugDB  | `./data/lbug-dbs`                                              |
-| LocalStack | `http://localhost:4566` for S3 and other AWS services          |
+| S3         | `http://localhost:8333`, SeaweedFS from the compose stack (`AWS_ENDPOINT_URL_S3`); other AWS services are mocked with moto |
 
 Rate limiting, OpenTelemetry, and CAPTCHA are disabled for tests; billing, security auditing, subgraph creation, and backup creation are enabled so their code paths are exercised. External APIs — SEC EDGAR, QuickBooks, Anthropic, OpenFIGI — are mocked; tests never make live calls.
 

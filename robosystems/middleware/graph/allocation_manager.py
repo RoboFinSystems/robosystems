@@ -67,14 +67,8 @@ VALID_INSTANCE_ID_PATTERN = re.compile(r"^i-[0-9a-f]{8,17}$")  # AWS instance ID
 
 
 def get_dynamodb_resource():
-  """DynamoDB resource, pointed at LocalStack in development."""
-  region = env.AWS_REGION
-
-  if env.is_development() and env.AWS_ENDPOINT_URL:
-    return boto3.resource(
-      "dynamodb", endpoint_url=env.AWS_ENDPOINT_URL, region_name=region
-    )
-  return boto3.resource("dynamodb", region_name=region)
+  """DynamoDB resource; the dev stack's endpoint when one is configured."""
+  return boto3.resource("dynamodb", **env.get_dynamodb_config())
 
 
 class DatabaseStatus(Enum):
@@ -201,18 +195,8 @@ class LadybugAllocationManager:
     self.volume_table = dynamodb.Table(env.VOLUME_REGISTRY_TABLE)
 
     region = env.AWS_REGION
-
-    if env.is_development() and env.AWS_ENDPOINT_URL:
-      endpoint_url = env.AWS_ENDPOINT_URL
-      self.autoscaling = boto3.client(
-        "autoscaling", endpoint_url=endpoint_url, region_name=region
-      )
-      self.cloudwatch = boto3.client(
-        "cloudwatch", endpoint_url=endpoint_url, region_name=region
-      )
-    else:
-      self.autoscaling = boto3.client("autoscaling", region_name=region)
-      self.cloudwatch = boto3.client("cloudwatch", region_name=region)
+    self.autoscaling = boto3.client("autoscaling", region_name=region)
+    self.cloudwatch = boto3.client("cloudwatch", region_name=region)
 
     logger.info(f"Initialized LadybugAllocationManager for environment: {environment}")
 

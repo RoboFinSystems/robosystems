@@ -401,14 +401,17 @@ class DuckDBConnectionPool:
             f"Could not load AWS credentials from provider chain: {cred_err}"
           )
 
-      if env.AWS_ENDPOINT_URL:
-        # DuckDB expects endpoint without protocol (e.g., "localstack:4566" not "http://localstack:4566")
-        endpoint = env.AWS_ENDPOINT_URL.replace("http://", "").replace("https://", "")
+      if env.AWS_ENDPOINT_URL_S3:
+        # DuckDB takes the endpoint without a scheme ("seaweedfs:8333"); the
+        # dev stack's S3 server is plain HTTP and addressed path-style.
+        endpoint = env.AWS_ENDPOINT_URL_S3.replace("http://", "").replace(
+          "https://", ""
+        )
         conn.execute("SET s3_endpoint=?", [endpoint])
         conn.execute("SET s3_url_style='path'")
-        conn.execute("SET s3_use_ssl=false")  # LocalStack doesn't use SSL
+        conn.execute("SET s3_use_ssl=false")
         logger.debug(
-          f"Configured DuckDB to use S3 endpoint: {endpoint} (from {env.AWS_ENDPOINT_URL})"
+          f"Configured DuckDB to use S3 endpoint: {endpoint} (from {env.AWS_ENDPOINT_URL_S3})"
         )
 
       max_threads = self._get_duckdb_max_threads()

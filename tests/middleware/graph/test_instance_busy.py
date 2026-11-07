@@ -26,6 +26,7 @@ INSTANCE = "i-abc123"
 def table(monkeypatch):
   monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
   monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
+  monkeypatch.delenv("AWS_ENDPOINT_URL_S3", raising=False)
   with mock_aws():
     resource = boto3.resource("dynamodb", region_name="us-east-1")
     tbl = resource.create_table(

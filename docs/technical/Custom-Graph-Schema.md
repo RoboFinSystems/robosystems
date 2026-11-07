@@ -75,7 +75,7 @@ just demo-custom-graph
 **Command syntax**: `just demo-custom-graph [--flags]`
 - All flags pass through to the underlying script
 - Base URL is read from `ROBOSYSTEMS_API_URL` in `.env.local` (defaults to `http://localhost:8000`)
-- LocalStack vs real S3 is auto-detected from the base URL (any localhost / 127.0.0.1 → LocalStack)
+- The local stack's S3 server vs real S3 is auto-detected from the base URL (any localhost / 127.0.0.1 → the local stack, on port 8333)
 
 ### Quick Start Options
 
@@ -243,7 +243,7 @@ uv run examples/custom_graph_demo/generate_data.py --regenerate  # Force regener
 
 **What happens automatically:**
 
-1. **Upload**: Files uploaded to S3 (LocalStack in development)
+1. **Upload**: Files uploaded to S3 (SeaweedFS in development)
 2. **Stage**: Data loaded into DuckDB staging tables
 3. **Validate**: Automatic data quality checks
 4. **Ingest**: DuckDB → Ladybug graph database via extension

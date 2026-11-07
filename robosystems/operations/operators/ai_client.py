@@ -152,7 +152,7 @@ class AIClient:
 
     from robosystems.operations.aws.long_call import long_call_client
 
-    # Explicit endpoint so LocalStack's AWS_ENDPOINT_URL is bypassed.
+    # Explicit endpoint so no AWS_ENDPOINT_URL override reaches Bedrock.
     bedrock_endpoint = f"https://bedrock-runtime.{env.AWS_BEDROCK_REGION}.amazonaws.com"
 
     kwargs = {
@@ -172,7 +172,7 @@ class AIClient:
     try:
       client = long_call_client("bedrock-runtime", _BEDROCK_READ_TIMEOUT, **kwargs)
       # Fail at construction rather than on the first (billable) call. Skipped
-      # in dev, where LocalStack has no STS to call.
+      # in dev, which has no AWS identity to check.
       if env.ENVIRONMENT != "dev":
         sts_kwargs = {"service_name": "sts", "region_name": env.AWS_BEDROCK_REGION}
         if env.AWS_BEDROCK_ACCESS_KEY_ID:

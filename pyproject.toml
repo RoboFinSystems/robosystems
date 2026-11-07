@@ -123,9 +123,8 @@ dev = [
     "ruff>=0.12.0,<1.0",
     "basedpyright>=1.22.0,<2.0",
     # AWS development tools
-    "awscli-local>=0.22.0,<1.0",
     "cfn-lint>=1.50.1,<2.0",
-    "moto[s3]>=5.2.2,<5.2.4",  # hold: 5.2.4/5.2.5 let put_object escape mock_aws to AWS_ENDPOINT_URL (pytest.ini sets LocalStack); 5.2.3 intercepts. Recheck each release
+    "moto[s3]>=5.2.2,<5.2.4",  # hold: 5.2.4/5.2.5 let put_object escape mock_aws to the endpoint pytest.ini sets (AWS_ENDPOINT_URL_S3, the dev S3 server); 5.2.3 intercepts. Recheck each release
     # Development utilities
     "rich>=15.0.0,<16.0",
     "pytest-xdist>=3.6,<4.0",

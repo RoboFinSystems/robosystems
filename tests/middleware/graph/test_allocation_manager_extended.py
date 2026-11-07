@@ -39,7 +39,6 @@ def _create_manager(environment="test", max_dbs=10, asg_name="test-asg"):
   ):
     mock_env.AWS_REGION = "us-east-1"
     mock_env.is_development.return_value = environment == "dev"
-    mock_env.AWS_ENDPOINT_URL = None
     mock_env.GRAPH_REGISTRY_TABLE = "graph-registry"
     mock_env.INSTANCE_REGISTRY_TABLE = "instance-registry"
     mock_env.VOLUME_REGISTRY_TABLE = "volume-registry"
@@ -241,7 +240,6 @@ class TestLadybugAllocationManagerInit:
       ):
         mock_env.AWS_REGION = "us-east-1"
         mock_env.is_development.return_value = False
-        mock_env.AWS_ENDPOINT_URL = None
         mock_env.GRAPH_REGISTRY_TABLE = "graph-registry"
         mock_env.INSTANCE_REGISTRY_TABLE = "instance-registry"
         mock_env.VOLUME_REGISTRY_TABLE = "volume-registry"
@@ -1043,6 +1041,7 @@ class TestVolumeRegistryRemoveRace:
     from moto import mock_aws
 
     monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
+    monkeypatch.delenv("AWS_ENDPOINT_URL_S3", raising=False)
     with mock_aws():
       table = boto3.resource("dynamodb", region_name="us-east-1").create_table(
         TableName="volume-registry",
@@ -1099,6 +1098,7 @@ class TestVolumeResolvedFromTheInstancesOwnRow:
     from moto import mock_aws
 
     monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
+    monkeypatch.delenv("AWS_ENDPOINT_URL_S3", raising=False)
     with mock_aws():
       dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
 

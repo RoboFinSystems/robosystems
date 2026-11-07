@@ -75,7 +75,7 @@ def ingest_from_s3(
     endpoint_url = s3_config.get("endpoint_url")
 
     if endpoint_url:
-      # LocalStack (dev/test) takes fixed dummy credentials.
+      # The dev stack's S3 server takes its fixed identity's keys.
       s3_client = boto3.client(
         "s3",
         endpoint_url=endpoint_url,

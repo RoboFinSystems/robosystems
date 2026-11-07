@@ -1,4 +1,4 @@
-"""A filing's text read from LocalStack S3 when one object's body breaks
+"""A filing's text read from the dev stack's S3 when one object's body breaks
 mid-read: the read is an error to retry, and nothing degraded is cached."""
 
 from __future__ import annotations
@@ -167,9 +167,9 @@ class _Cache:
 def bucket(monkeypatch: pytest.MonkeyPatch):
   s3 = S3Client()
   if not str(s3.s3_client.meta.endpoint_url).startswith("http://localhost"):
-    pytest.skip("needs LocalStack")
+    pytest.skip("needs the dev stack's S3 server")
   name = env.PUBLIC_DATA_BUCKET
-  # CI's LocalStack starts with no buckets; the local stack's already has it.
+  # CI's S3 server starts with one bucket; the local stack's already has this one.
   try:
     s3.s3_client.create_bucket(Bucket=name)
   except s3.s3_client.exceptions.BucketAlreadyOwnedByYou:

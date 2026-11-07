@@ -42,11 +42,11 @@ class S3Client:
   """
 
   def __init__(self, region_name: str | None = None, endpoint_url: str | None = None):
-    """Defaults to ``env.AWS_DEFAULT_REGION`` / ``env.AWS_ENDPOINT_URL``."""
+    """Defaults to ``env.AWS_DEFAULT_REGION`` / ``env.AWS_ENDPOINT_URL_S3``."""
     self.region_name = region_name or env.AWS_DEFAULT_REGION
-    self.endpoint_url = endpoint_url or env.AWS_ENDPOINT_URL
-    # Dev only: the container reaches LocalStack by docker DNS, which the host
-    # browser can't resolve, so presigned URLs are signed against this
+    self.endpoint_url = endpoint_url or env.AWS_ENDPOINT_URL_S3
+    # Dev only: the container reaches the S3 server by docker DNS, which the
+    # host browser can't resolve, so presigned URLs are signed against this
     # endpoint instead. Unset in staging/prod.
     self.presign_endpoint_url = env.AWS_S3_PRESIGN_ENDPOINT_URL or None
 
@@ -589,6 +589,9 @@ class S3BackupAdapter:
       from botocore.config import Config
 
       config = Config(
+        # SigV4 throughout: SigV2 presigned URLs are refused by S3 buckets
+        # created since 2019 and by the dev stack's S3 server.
+        signature_version="s3v4",
         max_pool_connections=50,  # Sized for parallel part uploads
         retries={
           "mode": "adaptive",
@@ -600,12 +603,23 @@ class S3BackupAdapter:
         },
       )
 
-      # Endpoint override exists for LocalStack in dev; unset against real AWS.
+      # Endpoint override exists for the dev stack's S3 server; unset against AWS.
       if endpoint_url:
         self.s3_client = session.client("s3", config=config, endpoint_url=endpoint_url)
         logger.info(f"Using custom S3 endpoint: {endpoint_url}")
       else:
         self.s3_client = session.client("s3", config=config)
+
+      # Dev only: download URLs are signed against the browser-reachable
+      # endpoint, since the docker hostname above is not one the browser
+      # resolves. Unset in staging/prod, where the one client signs.
+      self.presign_client = (
+        session.client(
+          "s3", config=config, endpoint_url=env.AWS_S3_PRESIGN_ENDPOINT_URL
+        )
+        if env.AWS_S3_PRESIGN_ENDPOINT_URL
+        else self.s3_client
+      )
 
       self.multipart_threshold = 100 * 1024 * 1024  # Switch to multipart above 100 MB
       self.multipart_chunksize = 50 * 1024 * 1024  # 50 MB per part
@@ -1156,7 +1170,7 @@ class S3BackupAdapter:
 
       url = await asyncio.get_event_loop().run_in_executor(
         None,
-        lambda: self.s3_client.generate_presigned_url(
+        lambda: self.presign_client.generate_presigned_url(
           "get_object",
           Params={"Bucket": self.bucket_name, "Key": backup_path},
           ExpiresIn=expires_in,

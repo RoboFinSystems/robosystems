@@ -27,7 +27,7 @@ What is isolated, and what deliberately is not:
   TEMPLATE extensions``) needs the template free of connections, which the
   local dev stack's API never leaves it.
 
-- **Valkey and LocalStack — shared.** Tests that touch them live key by their
+- **Valkey and S3 — shared.** Tests that touch them live key by their
   own ids. The double ``-n auto`` run in the spec's verification is what
   proves that holds as the suite grows; a collision found there is fixed in
   the test, not by widening this module.

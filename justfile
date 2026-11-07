@@ -17,7 +17,7 @@
 
 _env := ".env"
 _local_env := ".env.local"
-_store_volumes := "robosystems-pg-data robosystems-valkey-data robosystems-opensearch-data robosystems-localstack-data"
+_store_volumes := "robosystems-pg-data robosystems-valkey-data robosystems-opensearch-data robosystems-seaweedfs-data robosystems-dynamodb-data"
 # Makes `up` rebuild the images built here. A published image keeps the pull
 # policy set beside it in .env, so it is never built over.
 _build_local := "ROBOSYSTEMS_LOCAL_PULL_POLICY=build"
@@ -625,7 +625,7 @@ clean-data:
     docker volume rm -f {{_store_volumes}}
     rm -rf ./.local/config.json
 
-# Wipe Postgres, Valkey, OpenSearch and LocalStack (stops the stack first; `just start` brings it back empty)
+# Wipe Postgres, Valkey, OpenSearch, SeaweedFS and DynamoDB Local (stops the stack first; `just start` brings it back empty)
 clean-volumes:
     @just teardown
     docker volume rm -f {{_store_volumes}}

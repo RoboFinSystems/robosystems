@@ -22,6 +22,9 @@ services:
       - "8000:8000"
     volumes:
       - ./robosystems:${ROBOSYSTEMS_IMAGE:+/mnt/checkout}/app/robosystems
+    depends_on:
+      storage-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python3", "/app/bin/healthcheck.py", "http://robosystems-api:8000/v1/status"]
       interval: 30s
@@ -110,6 +113,8 @@ services:
     depends_on:
       pg:
         condition: service_healthy
+      storage-init:
+        condition: service_completed_successfully
     # Runs dagster job execute locally (SEC processing, materialization, etc.)
     # Needs headroom for fastembed model + DuckDB + XBRL processing
     restart: always
@@ -149,6 +154,8 @@ services:
     depends_on:
       pg:
         condition: service_healthy
+      storage-init:
+        condition: service_completed_successfully
     restart: always
     deploy:
       resources:
@@ -180,6 +187,8 @@ services:
         condition: service_healthy
       pg:
         condition: service_healthy
+      storage-init:
+        condition: service_completed_successfully
     restart: always
     deploy:
       resources:
@@ -268,43 +277,83 @@ services:
           cpus: "0.25"
     profiles: ["valkey", "robosystems", "all"]
 
-  # LocalStack - AWS services for RoboSystems
-  localstack:
-    container_name: robosystems-localstack
-    image: localstack/localstack:3.0
+  # SeaweedFS - S3-compatible object storage, one all-in-one process on a volume
+  seaweedfs:
+    container_name: robosystems-seaweedfs
+    image: chrislusf/seaweedfs:4.51
+    # -ip is the address the volume server is reached on inside the container;
+    # the service name resolves on the compose network. The identity file gives
+    # the stack's "test" keys full access and anonymous reads on the public
+    # bucket, which the browser fetches without credentials.
+    command: >-
+      mini -dir=/data -ip=seaweedfs
+      -s3.config=/etc/seaweedfs/s3.json
+      -master.volumeSizeLimitMB=1024 -master.telemetry=false
+      -admin.ui=false -webdav=false -s3.port.iceberg=0 -s3.port.lance=0
     ports:
-      - "4566:4566"
-    environment:
-      # LocalStack configuration
-      - SERVICES=s3,secretsmanager,iam,dynamodb
-      - DEBUG=1
-      - DATA_DIR=/var/lib/localstack
-      - PERSISTENCE=1
-      # S3 configuration
-      - S3_SKIP_SIGNATURE_VALIDATION=1
-      - S3_SKIP_KMS_KEY_VALIDATION=1
-      # AWS credentials (dummy values for LocalStack)
-      - AWS_ACCESS_KEY_ID=test
-      - AWS_SECRET_ACCESS_KEY=test
-      - AWS_DEFAULT_REGION=us-east-1
+      - "8333:8333"
     volumes:
-      - localstack_data:/var/lib/localstack
-      - "./bin/setup/localstack-init.sh:/etc/localstack/init/ready.d/init.sh"
+      - seaweedfs_data:/data
+      - ./bin/setup/seaweedfs-s3.json:/etc/seaweedfs/s3.json:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8333/status"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
     restart: always
     deploy:
       resources:
         limits:
-          memory: ${LOCALSTACK_MEMORY_LIMIT:-2g}
+          memory: ${SEAWEEDFS_MEMORY_LIMIT:-512m}
           cpus: "1"
         reservations:
-          memory: 1g
+          memory: 128m
+          cpus: "0.25"
+    profiles: ["seaweedfs", "robosystems", "all"]
+
+  # DynamoDB Local - the graph and instance registries, on a volume
+  dynamodb:
+    container_name: robosystems-dynamodb
+    image: amazon/dynamodb-local:3.3.2
+    # The image runs as its own user, which cannot write a named volume Docker
+    # creates as root; root is fine for a development store.
+    user: root
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-dbPath", "/home/dynamodblocal/data"]
+    volumes:
+      - dynamodb_data:/home/dynamodblocal/data
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: ${DYNAMODB_MEMORY_LIMIT:-512m}
           cpus: "0.5"
-    profiles: ["localstack", "robosystems", "all"]
+        reservations:
+          memory: 128m
+          cpus: "0.1"
+    profiles: ["dynamodb", "robosystems", "all"]
+
+  # Creates the buckets and registry tables once both stores answer, then exits
+  storage-init:
+    container_name: robosystems-storage-init
+    image: amazon/aws-cli:2.39.6
+    entrypoint: ["bash", "/storage-init.sh"]
+    environment:
+      - S3_ENDPOINT_URL=http://seaweedfs:8333
+      - DYNAMODB_ENDPOINT_URL=http://dynamodb:8000
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_PAGER=
+      - LBUG_DATABASES_PER_INSTANCE=${LBUG_DATABASES_PER_INSTANCE:-50}
+    volumes:
+      - ./bin/setup/storage-init.sh:/storage-init.sh:ro
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+      dynamodb:
+        condition: service_started
+    restart: "no"
+    profiles: ["storage-init", "robosystems", "all"]
 
   # OpenSearch - Full-text search for filing narratives
   opensearch:
@@ -396,7 +445,7 @@ services:
       - NEXT_PUBLIC_ROBOSYSTEMS_APP_URL=http://localhost:3000
       - NEXT_PUBLIC_ROBOLEDGER_APP_URL=http://localhost:3001
       - NEXT_PUBLIC_ROBOINVESTOR_APP_URL=http://localhost:3002
-      - NEXT_PUBLIC_S3_ENDPOINT_URL=http://localhost:4566
+      - NEXT_PUBLIC_S3_ENDPOINT_URL=http://localhost:8333
       - NEXT_PUBLIC_MAINTENANCE_MODE=true
     ports:
       - 3000:3000
@@ -426,7 +475,7 @@ services:
       - NEXT_PUBLIC_ROBOSYSTEMS_APP_URL=http://localhost:3000
       - NEXT_PUBLIC_ROBOLEDGER_APP_URL=http://localhost:3001
       - NEXT_PUBLIC_ROBOINVESTOR_APP_URL=http://localhost:3002
-      - NEXT_PUBLIC_S3_ENDPOINT_URL=http://localhost:4566
+      - NEXT_PUBLIC_S3_ENDPOINT_URL=http://localhost:8333
       - NEXT_PUBLIC_MAINTENANCE_MODE=true
     ports:
       - 3001:3000
@@ -456,7 +505,7 @@ services:
       - NEXT_PUBLIC_ROBOSYSTEMS_APP_URL=http://localhost:3000
       - NEXT_PUBLIC_ROBOLEDGER_APP_URL=http://localhost:3001
       - NEXT_PUBLIC_ROBOINVESTOR_APP_URL=http://localhost:3002
-      - NEXT_PUBLIC_S3_ENDPOINT_URL=http://localhost:4566
+      - NEXT_PUBLIC_S3_ENDPOINT_URL=http://localhost:8333
       - NEXT_PUBLIC_MAINTENANCE_MODE=true
     ports:
       - 3002:3000
@@ -484,5 +533,7 @@ volumes:
     name: robosystems-valkey-data
   opensearch_data:
     name: robosystems-opensearch-data
-  localstack_data:
-    name: robosystems-localstack-data
+  seaweedfs_data:
+    name: robosystems-seaweedfs-data
+  dynamodb_data:
+    name: robosystems-dynamodb-data

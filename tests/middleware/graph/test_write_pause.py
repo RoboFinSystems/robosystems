@@ -34,6 +34,7 @@ def ssm(monkeypatch):
   monkeypatch.setenv("ENVIRONMENT", "prod")
   monkeypatch.setenv("AWS_REGION", "us-east-1")
   monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
+  monkeypatch.delenv("AWS_ENDPOINT_URL_S3", raising=False)
   monkeypatch.setattr(parameter_store, "_fast_ssm_client", None)
   monkeypatch.setattr(parameter_store, "_parameter_manager", None)
   with mock_aws():
