@@ -28,7 +28,7 @@ Every API guide in these docs is written against the hosted platform at `https:/
 
 Before starting, ensure you have:
 
-- **Docker** running locally (Docker Desktop or equivalent), with at least 8 GB of memory allocated.
+- **Docker** running locally (Docker Desktop or equivalent), with at least 8 GB of memory allocated. The per-container memory caps in `compose.yaml` suit a 24 GB machine; on a smaller one, lower them in `.env` (the "Container Memory Caps" block of `.env.example`).
 - **[uv](https://docs.astral.sh/uv/)** for Python package management (the demo scripts run under `uv`).
 - **[just](https://github.com/casey/just)** for the task recipes used throughout this guide.
 - **[jq](https://jqlang.github.io/jq/)** to read your API key out of `.local/config.json`. On macOS: `brew install jq`.

@@ -32,7 +32,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1g
+          memory: ${API_MEMORY_LIMIT:-1g}
           cpus: "1"
         reservations:
           memory: 512m
@@ -78,7 +78,7 @@ services:
         limits:
           # Unlike prod, this one container holds every local graph (1GB each
           # plus admission-control headroom); 6g covers what the demos create.
-          memory: 6g
+          memory: ${GRAPH_API_MEMORY_LIMIT:-6g}
           cpus: "1.5"
         reservations:
           memory: 1g
@@ -116,7 +116,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 8g
+          memory: ${DAGSTER_WEBSERVER_MEMORY_LIMIT:-8g}
           cpus: "4"
         reservations:
           memory: 1g
@@ -153,7 +153,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4g
+          memory: ${DAGSTER_DAEMON_MEMORY_LIMIT:-4g}
           cpus: "2"
         reservations:
           memory: 512m
@@ -184,7 +184,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1g
+          memory: ${WORKER_MEMORY_LIMIT:-1g}
           cpus: "1"
         reservations:
           memory: 512m
@@ -230,7 +230,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1g
+          memory: ${PG_MEMORY_LIMIT:-1g}
           cpus: "1"
         reservations:
           memory: 512m
@@ -261,7 +261,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 768m
+          memory: ${VALKEY_MEMORY_LIMIT:-768m}
           cpus: "0.5"
         reservations:
           memory: 512m
@@ -299,7 +299,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2g
+          memory: ${LOCALSTACK_MEMORY_LIMIT:-2g}
           cpus: "1"
         reservations:
           memory: 1g
@@ -313,7 +313,7 @@ services:
     environment:
       - discovery.type=single-node
       - DISABLE_SECURITY_PLUGIN=true
-      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      - OPENSEARCH_JAVA_OPTS=${OPENSEARCH_JAVA_OPTS:--Xms512m -Xmx512m}
     ports:
       - "9200:9200"
     volumes:
@@ -332,7 +332,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1g
+          memory: ${OPENSEARCH_MEMORY_LIMIT:-1g}
           cpus: "1"
         reservations:
           memory: 512m
@@ -404,7 +404,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512m
+          memory: ${ROBOSYSTEMS_APP_MEMORY_LIMIT:-512m}
           cpus: "0.5"
         reservations:
           memory: 256m
@@ -434,7 +434,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512m
+          memory: ${ROBOLEDGER_APP_MEMORY_LIMIT:-512m}
           cpus: "0.5"
         reservations:
           memory: 256m
@@ -464,7 +464,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512m
+          memory: ${ROBOINVESTOR_APP_MEMORY_LIMIT:-512m}
           cpus: "0.5"
         reservations:
           memory: 256m
