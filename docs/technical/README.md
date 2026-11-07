@@ -16,7 +16,7 @@ The first paragraph is the page's description in search results and link preview
 - Add the page to `_Sidebar.md` under its section, or it lands under "Other" and the build warns.
 - Link to a sibling page by file name (`[Period Close](Period-Close.md#blockers)`). A link to a page or heading that does not exist fails the build, and so does a link into the old wiki.
 - Images go in `images/` and are shown with `![what it shows](images/name.png)`.
-- Examples call the hosted API at `https://api.robosystems.ai`. Running a stack yourself is one page, [Local Development](Local-Development.md).
+- Examples call the hosted API at `https://api.robosystems.ai`. Running a stack yourself is two pages: [Local Development](Local-Development.md) on your own laptop, and [Self-Hosting on a Server](Self-Hosting-on-a-Server.md) on a machine other people reach.
 - Point at served sources (`GET /v1/offering`, `/openapi.json`, `.github/configs/graph.yml`) rather than restating volatile configuration.
 
 ## Publishing
