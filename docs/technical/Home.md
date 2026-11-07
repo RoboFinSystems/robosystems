@@ -80,6 +80,7 @@ The financial-content model underneath the products. Each concept page has a ref
 Running, deploying, and operating your own stack.
 
 - **[Local Development](Local-Development.md)** - From `just start` to your first authenticated query, and how local differs from hosted
+- **[Self-Hosting on a Server](Self-Hosting-on-a-Server.md)** - The stack on one machine on your network: a name, a certificate, one port, users and keys, MCP from laptops
 - **[Windows Setup (WSL2)](Windows-Setup-with-WSL2.md)** - Set up WSL2 and run the stack on Windows
 - **[Self-Hosted AI Models](Self-Hosted-AI-Models.md)** - Run the operators on open-weight models through any OpenAI-compatible endpoint
 - **[Connecting QuickBooks Locally](Connecting-QuickBooks-Locally.md)** - Run real QuickBooks OAuth against a local stack

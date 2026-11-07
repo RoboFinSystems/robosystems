@@ -324,7 +324,7 @@ just test-all   # Unit tests plus linting, formatting, and type checks
 
 ## Deploying Your Own
 
-Running locally is the first half of self-hosting. The repository also ships the GitHub Actions workflows and CloudFormation templates that deploy the full platform into your own AWS account — see the [Bootstrap Guide](Bootstrap-Guide.md).
+Running locally is the first half of self-hosting. The same stack on a server that other machines reach, with a hostname, a certificate and one open port, is [Self-Hosting on a Server](Self-Hosting-on-a-Server.md). The repository also ships the GitHub Actions workflows and CloudFormation templates that deploy the full platform into your own AWS account — see the [Bootstrap Guide](Bootstrap-Guide.md).
 
 ## Troubleshooting
 
