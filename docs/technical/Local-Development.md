@@ -21,6 +21,7 @@ Every API guide in these docs is written against the hosted platform at `https:/
 | **Graph API** (Cypher without platform auth) | Not exposed | `http://localhost:8001`, used by `just graph-query` |
 | **Dagster UI** | Not exposed | `http://localhost:8002` |
 | **Object storage** | Amazon S3 | SeaweedFS at `http://localhost:8333`, S3-compatible |
+| **Email** | Amazon SES | Mailpit: every message the stack sends lands in the inbox at `http://localhost:8025` |
 | **OpenSearch** | Not exposed | `http://localhost:9200` |
 | **Admin CLI** | Platform operators only | `just admin dev ...` |
 
@@ -73,7 +74,7 @@ Once the containers are healthy, three local URLs are available:
 | **Graph API** | `http://localhost:8001` | Lower-level Cypher (no platform auth) |
 | **Dagster UI** | `http://localhost:8002` | Orchestration dashboard |
 
-The same profile also runs PostgreSQL (`5432`), Valkey (`6379`), SeaweedFS (`8333`, the S3-compatible object store), DynamoDB Local (the graph registries, not published), and OpenSearch (`9200`). A one-shot `storage-init` container creates the buckets and registry tables on each start and leaves existing ones alone.
+The same profile also runs PostgreSQL (`5432`), Valkey (`6379`), SeaweedFS (`8333`, the S3-compatible object store), DynamoDB Local (the graph registries, not published), Mailpit (`1025` for SMTP, the inbox at `8025`), and OpenSearch (`9200`). A one-shot `storage-init` container creates the buckets and registry tables on each start and leaves existing ones alone.
 
 Verify the API is up with the health check. This endpoint is **unauthenticated**, so no key is needed:
 

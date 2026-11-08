@@ -1,7 +1,11 @@
 """AWS SES adapter for sending transactional emails."""
 
 import html
+import smtplib
+import ssl
 from datetime import UTC, datetime
+from email.message import EmailMessage
+from email.utils import formataddr, formatdate, make_msgid
 from typing import Any
 from urllib.parse import quote
 
@@ -101,11 +105,84 @@ def _paragraph(text: str) -> str:
   return f'<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:{_BRAND_DARK};">{text}</p>'
 
 
+class SMTPTransport:
+  """Delivery over SMTP, chosen by `SMTP_HOST`: the dev stack's Mailpit, or a
+  relay on a self-hosted deployment's own network. Port 465 is implicit TLS;
+  any other port negotiates STARTTLS unless `SMTP_STARTTLS` is false."""
+
+  IMPLICIT_TLS_PORT = 465
+
+  def __init__(
+    self,
+    host: str,
+    port: int,
+    username: str = "",
+    password: str = "",
+    starttls: bool = True,
+    timeout: float = 10.0,
+  ):
+    self.host = host
+    self.port = port
+    self.username = username
+    self.password = password
+    self.starttls = starttls
+    self.timeout = timeout
+
+  def send(
+    self,
+    *,
+    from_name: str,
+    from_address: str,
+    to_email: str,
+    subject: str,
+    text: str,
+    html: str,
+  ) -> str:
+    """Send one message and return its Message-ID. Raises on any failure."""
+    message = EmailMessage()
+    message["From"] = formataddr((from_name, from_address))
+    message["To"] = to_email
+    message["Subject"] = subject
+    message["Date"] = formatdate(usegmt=True)
+    message["Message-ID"] = make_msgid(domain=from_address.rpartition("@")[2] or None)
+    message.set_content(text)
+    message.add_alternative(html, subtype="html")
+
+    context = ssl.create_default_context()
+    if self.port == self.IMPLICIT_TLS_PORT:
+      connection = smtplib.SMTP_SSL(
+        self.host, self.port, timeout=self.timeout, context=context
+      )
+    else:
+      connection = smtplib.SMTP(self.host, self.port, timeout=self.timeout)
+    with connection as session:
+      if self.port != self.IMPLICIT_TLS_PORT and self.starttls:
+        session.starttls(context=context)
+      if self.username:
+        session.login(self.username, self.password)
+      session.send_message(message)
+    return message["Message-ID"]
+
+
 class SESEmailService:
-  """Service for sending transactional emails via Amazon SES."""
+  """Service for sending transactional emails: Amazon SES, or SMTP when
+  `SMTP_HOST` is set."""
 
   def __init__(self):
-    self.ses_client = boto3.client("ses", region_name=env.AWS_REGION)
+    self.smtp = (
+      SMTPTransport(
+        env.SMTP_HOST,
+        env.SMTP_PORT,
+        env.SMTP_USERNAME,
+        env.SMTP_PASSWORD,
+        env.SMTP_STARTTLS,
+      )
+      if env.SMTP_HOST
+      else None
+    )
+    self.ses_client = (
+      None if self.smtp else boto3.client("ses", region_name=env.AWS_REGION)
+    )
     self.from_address = env.EMAIL_FROM_ADDRESS
     self.from_name = env.EMAIL_FROM_NAME
 
@@ -494,11 +571,12 @@ View usage details: {url}
   async def send_email(
     self, email_type: str, to_email: str, template_data: dict[str, Any]
   ) -> bool:
-    """Render `email_type` and send it via SES.
+    """Render `email_type` and send it over SES, or over SMTP when
+    `SMTP_HOST` is set.
 
-    Never raises: a send failure (unconfigured sender, SES rejection, network
-    error) is logged and reported as False, so email delivery can't fail a
-    request that only needed to notify someone.
+    Never raises: a send failure (unconfigured sender, SES rejection, SMTP or
+    network error) is logged and reported as False, so email delivery can't
+    fail a request that only needed to notify someone.
     """
     if not self.from_address:
       logger.warning(
@@ -509,6 +587,22 @@ View usage details: {url}
     try:
       template = self._get_email_template(email_type, template_data)
 
+      if self.smtp:
+        message_id = self.smtp.send(
+          from_name=self.from_name,
+          from_address=self.from_address,
+          to_email=to_email,
+          subject=template["subject"],
+          text=template["text"],
+          html=template["html"],
+        )
+        logger.info(
+          f"Sent {email_type} email to {to_email} over SMTP ({self.smtp.host}). "
+          f"Message-ID: {message_id}"
+        )
+        return True
+
+      assert self.ses_client is not None
       message = {
         "Subject": {"Data": template["subject"], "Charset": "UTF-8"},
         "Body": {

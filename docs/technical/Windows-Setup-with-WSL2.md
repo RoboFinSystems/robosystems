@@ -137,7 +137,7 @@ See [Local Development](Local-Development.md) for the full walkthrough.
 
 **`bind: An attempt was made to access a socket in a way forbidden by its access permissions`**
 
-Windows' NAT driver reserves port ranges dynamically, and it sometimes claims ports the stack needs (8000, 8001, 8002, 5432, 6379, 8333, 9200). Check the reservations from an admin PowerShell:
+Windows' NAT driver reserves port ranges dynamically, and it sometimes claims ports the stack needs (8000, 8001, 8002, 5432, 6379, 8333, 8025, 9200). Check the reservations from an admin PowerShell:
 
 ```powershell
 netsh interface ipv4 show excludedportrange protocol=tcp

@@ -99,7 +99,8 @@ def _discard_email_token(ref: str) -> None:
   tags={"kind": "email", "category": "notification"},
 )
 def send_email_op(context: OpExecutionContext, config: SendEmailConfig) -> dict:
-  """Send an email via SES.
+  """Send an email through the configured transport: SES, or SMTP when
+  SMTP_HOST is set.
 
   Token requirements by email_type:
   - email_verification, password_reset, org_invitation: token_ref required,
@@ -252,7 +253,8 @@ def _emit_email_result_to_sse(
   },
 )
 def send_email_job():
-  """Send an email via SES, with 3 retries at exponential backoff.
+  """Send an email through the configured transport (SES, or SMTP when
+  SMTP_HOST is set), with 3 retries at exponential backoff.
 
   Build run config with ``build_email_job_config``, which parks the raw token.
   """
