@@ -2,9 +2,13 @@
 # Move a deployment that runs the published images to a release.
 #
 #   bin/tools/upgrade-to.sh v1.22.0 [--dry-run]
+#   bin/tools/upgrade-to.sh latest  [--dry-run]   # the newest release tag
 #
 # For a stack that pins ROBOSYSTEMS_IMAGE to a registry image (a self-hosted
-# server; not a laptop that builds from source). In order:
+# server; not a laptop that builds from source). "latest" is resolved to a
+# release tag before anything moves; the pin written to .env is always that
+# tag, never "latest", so the deployment stays on a version it can name. In
+# order:
 #   1. preflight: clean tree, the tag exists, the image for it is published
 #   2. settings drift: what the release's .env.example has that .env lacks
 #   3. the checkout moves to the tag, so compose, scripts and image are one ref
@@ -18,9 +22,9 @@ TAG=${1:-}
 DRY_RUN=0
 [ "${2:-}" = "--dry-run" ] && DRY_RUN=1
 case "$TAG" in
-v[0-9]*.[0-9]*.[0-9]*) ;;
+v[0-9]*.[0-9]*.[0-9]* | latest) ;;
 *)
-  echo "usage: $0 v<major>.<minor>.<patch> [--dry-run]" >&2
+  echo "usage: $0 v<major>.<minor>.<patch>|latest [--dry-run]" >&2
   exit 2
   ;;
 esac
@@ -47,9 +51,14 @@ case "$IMAGE_REPO" in
 esac
 [ "$IMAGE_REF" != "$IMAGE_REPO" ] || die "ROBOSYSTEMS_IMAGE=${IMAGE_REF} carries no tag to move"
 
-echo "🔍 Preflight for ${TAG} (currently ${CURRENT_TAG}, checkout $(git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD))"
 [ -z "$(git status --porcelain --untracked-files=no)" ] || die "the working tree has uncommitted changes to tracked files; commit, stash or discard first"
 git fetch --tags --quiet origin
+if [ "$TAG" = "latest" ]; then
+  TAG=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
+  [ -n "$TAG" ] || die "no release tag in the repository"
+  echo "🔍 latest → ${TAG}"
+fi
+echo "🔍 Preflight for ${TAG} (currently ${CURRENT_TAG}, checkout $(git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD))"
 git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null || die "tag ${TAG} is not in the repository"
 "$HERE/check-release-image.sh" "${IMAGE_REPO}:${TAG}"
 

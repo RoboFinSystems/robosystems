@@ -178,3 +178,39 @@ class TestUpgradeToRefusals:
     # fetch, because this repository has no remote.
     assert "uncommitted changes" not in result.stderr
     assert result.returncode != 0
+
+  def test_latest_resolves_to_the_newest_release_tag_and_never_pins_latest(
+    self, tmp_path: Path
+  ):
+    """The tags sort as versions, not strings, so v1.10.0 beats v1.9.0; the
+    registry check then runs against that tag, and this stub registry has no
+    daemon route, so the run stops there."""
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+    clone = tmp_path / "clone"
+    subprocess.run([*git, "clone", "-q", str(origin), str(clone)], check=True)
+    (clone / "compose.yaml").write_text("services: {}\n")
+    (clone / ".env.example").write_text(
+      "ROBOSYSTEMS_IMAGE=registry.example.internal/robosystems:latest\n"
+    )
+    subprocess.run([*git, "add", "."], cwd=clone, check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "init"], cwd=clone, check=True)
+    for tag in ("v1.9.0", "v1.10.0", "v1.2.3"):
+      subprocess.run([*git, "tag", tag], cwd=clone, check=True)
+    subprocess.run(
+      [*git, "push", "-q", "origin", "HEAD", "--tags"], cwd=clone, check=True
+    )
+    (clone / ".env").write_text(
+      "ROBOSYSTEMS_IMAGE=registry.example.internal/robosystems:v1.9.0\n"
+    )
+
+    result = run("upgrade-to.sh", "latest", "--dry-run", cwd=clone)
+
+    assert "latest → v1.10.0" in result.stdout
+    assert "Preflight for v1.10.0" in result.stdout
+    assert (
+      "ROBOSYSTEMS_IMAGE=registry.example.internal/robosystems:v1.9.0"
+      in (clone / ".env").read_text()
+    )
+    assert result.returncode != 0  # stopped at the registry check, before any change

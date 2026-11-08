@@ -49,7 +49,7 @@ teardown profile="robosystems":
 upgrade profile="robosystems" scope="":
     @bin/tools/upgrade.sh {{profile}} {{scope}}
 
-# Move a deployment on published images to a release: checkout at the tag, pin the image, upgrade, wait for the version (flags: --dry-run)
+# Move a deployment on published images to a release tag (or `latest`, resolved to the newest one): checkout at the tag, pin the image, upgrade, wait for the version (flags: --dry-run)
 upgrade-to tag flags="":
     @bin/tools/upgrade-to.sh {{tag}} {{flags}}
 
