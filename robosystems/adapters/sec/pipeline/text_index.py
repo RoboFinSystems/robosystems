@@ -114,12 +114,10 @@ def _cell(value: Any) -> str:
 
 
 def _get_s3_client():
-  """S3 client; LocalStack endpoint in dev."""
+  """S3 client; the dev stack's endpoint when one is configured."""
   kwargs: dict[str, Any] = {"region_name": env.AWS_REGION}
-  if env.ENVIRONMENT == "dev":
-    endpoint = env.AWS_ENDPOINT_URL
-    if endpoint:
-      kwargs["endpoint_url"] = endpoint
+  if env.AWS_ENDPOINT_URL_S3:
+    kwargs["endpoint_url"] = env.AWS_ENDPOINT_URL_S3
   return boto3.client("s3", **kwargs)
 
 

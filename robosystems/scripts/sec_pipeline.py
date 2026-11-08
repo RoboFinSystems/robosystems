@@ -57,7 +57,7 @@ from robosystems.logger import logger
 SEC_PRIMARY_START_YEAR = 2024
 
 # Default set for --count. US filers only; JPM and BRK-B excluded (their filings
-# exceed local memory); capped at 15 because LocalStack lists ~1000 S3 files.
+# exceed local memory); capped at 15 to keep a local run bounded.
 TOP_COMPANIES_BY_MARKET_CAP = [
   "AAPL",  # Apple - Tech
   "MSFT",  # Microsoft - Tech
@@ -603,8 +603,8 @@ class SECPipeline:
           f"s3://{bucket}/{prefix}/",
           "--recursive",
         ]
-        if app_env.AWS_ENDPOINT_URL:
-          cmd.extend(["--endpoint-url", app_env.AWS_ENDPOINT_URL])
+        if app_env.AWS_ENDPOINT_URL_S3:
+          cmd.extend(["--endpoint-url", app_env.AWS_ENDPOINT_URL_S3])
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode == 0:
           logger.info(f"    Cleared: {bucket}/{prefix}/")

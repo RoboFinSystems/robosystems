@@ -25,7 +25,9 @@ The `robosystems` profile brings up:
 | `worker` | — | Background task processing |
 | `pg` | 5432 | PostgreSQL (platform + extensions databases) |
 | `valkey` | 6379 | Cache and queues |
-| `localstack` | 4566 | Local AWS emulation |
+| `seaweedfs` | 8333 | S3-compatible object storage |
+| `dynamodb` | — | DynamoDB Local, the graph registries |
+| `storage-init` | — | Creates the buckets and tables, then exits |
 | `opensearch` | 9200 | Full-text + semantic search |
 
 The frontend apps (`robosystems-app`, `roboledger-app`, `roboinvestor-app`) are on the `apps` profile and are **not** started by `robosystems`. Observability (`otel-collector`, `prometheus`, `grafana`) is on the `observability` profile.

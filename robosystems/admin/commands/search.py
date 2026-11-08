@@ -347,8 +347,10 @@ def _get_opensearch_endpoint(environment: str, aws_profile: str) -> str:
     "--region",
     "us-east-1",
   ]
-  # Strip AWS_ENDPOINT_URL to avoid hitting LocalStack when run locally
-  sub_env = {k: v for k, v in os.environ.items() if k != "AWS_ENDPOINT_URL"}
+  # Strip the dev stack's endpoint overrides so the CLI reaches AWS
+  sub_env = {
+    k: v for k, v in os.environ.items() if not k.startswith("AWS_ENDPOINT_URL")
+  }
   result = subprocess.run(cmd, capture_output=True, text=True, check=True, env=sub_env)
   endpoint = result.stdout.strip()
   if not endpoint or endpoint == "None":

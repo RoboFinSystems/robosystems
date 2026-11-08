@@ -242,7 +242,9 @@ class InstancesHelper:
 
     import boto3
 
-    os.environ.pop("AWS_ENDPOINT_URL", None)
+    # The dev stack's endpoint overrides must not reach a deployed registry.
+    for name in ("AWS_ENDPOINT_URL", "AWS_ENDPOINT_URL_DYNAMODB"):
+      os.environ.pop(name, None)
 
     session = boto3.Session(profile_name=aws_profile, region_name=self.region)
     dynamodb = session.resource("dynamodb")

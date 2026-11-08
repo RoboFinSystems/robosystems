@@ -160,8 +160,9 @@ class FakeXBRLProcessor:
 def world(test_db, monkeypatch):
   FakeXBRLProcessor.calls = []
   edgar = Edgar()
-  # pytest.ini points boto3 at LocalStack; moto intercepts only without it.
+  # pytest.ini points S3 at the dev stack's server; moto intercepts only without it.
   monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
+  monkeypatch.delenv("AWS_ENDPOINT_URL_S3", raising=False)
   with (
     mock_aws(),
     responses.RequestsMock(assert_all_requests_are_fired=False) as http,

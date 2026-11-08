@@ -89,7 +89,7 @@ cd robosystems
 | LadybugDB or DuckDB errors on file locks, or corrupt staging databases | Both engines keep their files in `./data` bind mounts and rely on POSIX file locking, which is unreliable across the 9p/drvfs boundary |
 | Docker builds and test runs are several times slower | Every file read crosses the Windows/Linux filesystem boundary |
 
-PostgreSQL, Valkey, OpenSearch, and LocalStack keep their data in named Docker volumes rather than under the repository, so the checkout's location does not affect them.
+PostgreSQL, Valkey, OpenSearch, SeaweedFS and DynamoDB Local keep their data in named Docker volumes rather than under the repository, so the checkout's location does not affect them.
 
 To browse the repo from Windows Explorer afterwards, run `explorer.exe .` from the repo directory, or enter `\\wsl$` in the Explorer address bar.
 
@@ -137,7 +137,7 @@ See [Local Development](Local-Development.md) for the full walkthrough.
 
 **`bind: An attempt was made to access a socket in a way forbidden by its access permissions`**
 
-Windows' NAT driver reserves port ranges dynamically, and it sometimes claims ports the stack needs (8000, 8001, 8002, 5432, 6379, 4566, 9200). Check the reservations from an admin PowerShell:
+Windows' NAT driver reserves port ranges dynamically, and it sometimes claims ports the stack needs (8000, 8001, 8002, 5432, 6379, 8333, 9200). Check the reservations from an admin PowerShell:
 
 ```powershell
 netsh interface ipv4 show excludedportrange protocol=tcp

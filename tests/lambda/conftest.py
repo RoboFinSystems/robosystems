@@ -25,11 +25,11 @@ LAMBDA_DIR = Path(__file__).resolve().parent.parent.parent / "bin" / "lambda"
 @pytest.fixture
 def aws_env(monkeypatch):
   """Env vars required by Lambda modules at import time."""
-  # pytest.ini sets AWS_ENDPOINT_URL=http://localhost:4566 for LocalStack-based
-  # tests. Clear it here so boto3 hits the default endpoint where moto's
-  # mock_aws can intercept; otherwise moto is bypassed and calls fall through
-  # to LocalStack (which doesn't have all services enabled).
+  # pytest.ini points S3 at the dev stack's server (AWS_ENDPOINT_URL_S3). Clear
+  # the endpoint variables so boto3 hits the default endpoints, where moto's
+  # mock_aws intercepts; otherwise S3 calls fall through to the live server.
   monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
+  monkeypatch.delenv("AWS_ENDPOINT_URL_S3", raising=False)
   monkeypatch.delenv("AWS_PROFILE", raising=False)
 
   monkeypatch.setenv("ENVIRONMENT", "test")

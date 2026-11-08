@@ -36,10 +36,11 @@ class S3Resource(ConfigurableResource):
     kwargs: dict[str, Any] = {
       "region_name": self.region_name or env.AWS_REGION,
     }
-    # Support LocalStack for local development
-    if env.AWS_ENDPOINT_URL:
-      kwargs["endpoint_url"] = env.AWS_ENDPOINT_URL
-      # Disable checksum validation — LocalStack's checksums are unreliable
+    # The dev stack's S3 server
+    if env.AWS_ENDPOINT_URL_S3:
+      kwargs["endpoint_url"] = env.AWS_ENDPOINT_URL_S3
+      # An S3 stand-in's response checksums are not AWS's; validate only when
+      # the operation requires it.
       kwargs["config"] = Config(response_checksum_validation="when_required")
     return boto3.client("s3", **kwargs)
 

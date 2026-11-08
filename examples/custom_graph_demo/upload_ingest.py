@@ -301,18 +301,18 @@ def main() -> None:
   node_files = _list_parquet_files(NODES_DIR, EXPECTED_NODE_TABLES)
   relationship_files = _list_parquet_files(RELATIONSHIPS_DIR, EXPECTED_REL_TABLES)
 
-  # Auto-detect LocalStack vs real AWS S3 from base_url: any localhost /
-  # 127.0.0.1 base_url implies the local dev stack (LocalStack on :4566);
-  # anything else (staging, prod, a fork's API) implies real AWS S3.
+  # Auto-detect the local stack's S3 server vs real AWS S3 from base_url: any
+  # localhost / 127.0.0.1 base_url implies the local dev stack (SeaweedFS on
+  # :8333); anything else (staging, prod, a fork's API) implies real AWS S3.
   is_local = "localhost" in args.base_url or "127.0.0.1" in args.base_url
-  s3_endpoint = "http://localhost:4566" if is_local else None
+  s3_endpoint = "http://localhost:8333" if is_local else None
 
   print("\n" + "=" * 70)
   print("📊 Custom Graph Demo - Upload & Ingest")
   print("=" * 70)
   print(f"Graph ID: {graph_id}")
   print(f"Base URL: {args.base_url}")
-  print(f"S3: {f'LocalStack ({s3_endpoint})' if is_local else 'AWS S3'}")
+  print(f"S3: {f'local stack ({s3_endpoint})' if is_local else 'AWS S3'}")
   print(f"Credentials: {credentials_path}")
   print("=" * 70)
 

@@ -210,7 +210,7 @@ a small number of long operations rather than many short ones.
 | Staging directory | `DUCKDB_STAGING_PATH` (default `./data/staging`) |
 | Memory limit | Per-graph override → tier `duckdb_memory_limit` from `.github/configs/graph.yml` via `CLUSTER_TIER` |
 | Threads | Tier `duckdb_max_threads`, aligned to instance vCPUs |
-| S3 credentials / endpoint | Standard AWS env vars; `AWS_ENDPOINT_URL` switches to path-style URLs for LocalStack |
+| S3 credentials / endpoint | Standard AWS env vars; `AWS_ENDPOINT_URL_S3` switches to path-style URLs for the dev stack's S3 server |
 
 Memory can be boosted for the duration of a staging run and then restored —
 `set_duckdb_memory_override` / `reconfigure_memory_limit` — for the same reason

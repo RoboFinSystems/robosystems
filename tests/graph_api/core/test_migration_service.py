@@ -658,7 +658,7 @@ class TestS3ClientConstruction:
   def test_passes_endpoint_and_credentials_when_configured(self, service):
     config = {
       "region_name": "us-east-1",
-      "endpoint_url": "http://localstack:4566",
+      "endpoint_url": "http://seaweedfs:8333",
       "aws_access_key_id": "key",
       "aws_secret_access_key": "secret",
     }
@@ -669,7 +669,7 @@ class TestS3ClientConstruction:
       service._get_s3_client()
 
     kwargs = mock_client.call_args.kwargs
-    assert kwargs["endpoint_url"] == "http://localstack:4566"
+    assert kwargs["endpoint_url"] == "http://seaweedfs:8333"
     assert kwargs["aws_access_key_id"] == "key"
     assert kwargs["aws_secret_access_key"] == "secret"
 

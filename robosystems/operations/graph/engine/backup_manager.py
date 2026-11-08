@@ -375,7 +375,9 @@ class BackupManager:
             raise RuntimeError("R2 not configured for R2-backed backup download")
           presign_client = boto3.client("s3", **r2_config)
         else:
-          presign_client = self.s3_adapter.s3_client
+          # Signed against the browser-reachable endpoint in dev, where the
+          # S3 server's docker hostname is not one the browser can resolve.
+          presign_client = self.s3_adapter.presign_client
 
         url = await asyncio.get_event_loop().run_in_executor(
           None,
@@ -389,13 +391,6 @@ class BackupManager:
             ExpiresIn=expires_in,
           ),
         )
-
-        # Dev only: the LocalStack container hostname isn't browser-reachable.
-        if "localstack:" in url:
-          url = url.replace("localstack:4566", "localhost:4566")
-          logger.info(
-            "Replaced LocalStack container hostname with localhost in presigned URL"
-          )
 
         logger.info(
           f"Generated download URL for backup {backup_id} (expires in {expires_in}s)"

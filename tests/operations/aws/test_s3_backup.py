@@ -2,7 +2,7 @@
 Tests for S3 backup adapter functionality.
 
 This test suite validates S3 integration, compression,
-and backup lifecycle management using LocalStack.
+and backup lifecycle management against the dev stack's S3 server.
 """
 
 import asyncio
@@ -17,8 +17,8 @@ class TestS3BackupAdapter:
   """Test suite for S3 backup adapter."""
 
   @pytest.fixture(autouse=True)
-  def setup_localstack_env(self):
-    """Set up LocalStack environment variables for testing."""
+  def setup_s3_env(self):
+    """Point the adapter at the dev stack's S3 server."""
     # Store original values
     original_env = {}
     env_vars = {
@@ -26,7 +26,7 @@ class TestS3BackupAdapter:
       "AWS_S3_ACCESS_KEY_ID": "test",
       "AWS_S3_SECRET_ACCESS_KEY": "test",
       "AWS_REGION": "us-east-1",
-      "AWS_ENDPOINT_URL": "http://localhost:4566",
+      "AWS_ENDPOINT_URL_S3": "http://localhost:8333",
     }
 
     for key, value in env_vars.items():
@@ -48,10 +48,10 @@ class TestS3BackupAdapter:
     import boto3
     from botocore.exceptions import ClientError
 
-    # Create the bucket in LocalStack first
+    # Create the bucket first
     s3_client = boto3.client(
       "s3",
-      endpoint_url="http://localhost:4566",
+      endpoint_url="http://localhost:8333",
       aws_access_key_id="test",
       aws_secret_access_key="test",
       region_name="us-east-1",
@@ -79,11 +79,10 @@ class TestS3BackupAdapter:
 
   @pytest.mark.asyncio
   async def test_s3_adapter_health_check(self, s3_adapter):
-    """Test S3 adapter health check with LocalStack."""
+    """Test S3 adapter health check against the live S3 server."""
     health = s3_adapter.health_check()
 
-    # Note: In real test, LocalStack should be running
-    # For now, we'll test the structure
+    # The server is expected to be running; the shape is what is asserted
     assert "status" in health
     assert "bucket" in health
     assert health["bucket"] == "robosystems-local"

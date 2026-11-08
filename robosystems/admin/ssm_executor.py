@@ -41,8 +41,8 @@ class SSMCommandStillRunning(RuntimeError):
 
 
 def _clean_env() -> dict[str, str]:
-  """Strip AWS_ENDPOINT_URL to avoid hitting LocalStack when run locally."""
-  return {k: v for k, v in os.environ.items() if k != "AWS_ENDPOINT_URL"}
+  """Strip the dev stack's endpoint overrides so the CLI reaches AWS."""
+  return {k: v for k, v in os.environ.items() if not k.startswith("AWS_ENDPOINT_URL")}
 
 
 class SSMExecutor:

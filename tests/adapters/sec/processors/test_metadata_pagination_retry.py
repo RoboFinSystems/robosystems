@@ -58,7 +58,11 @@ def _edgar(page_status: int = 200) -> None:
 
 
 @pytest.fixture()
-def s3():
+def s3(monkeypatch):
+  # The test environment names the dev stack's S3 server; moto only intercepts
+  # requests bound for AWS, so the endpoint has to go before the client is made.
+  monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
+  monkeypatch.delenv("AWS_ENDPOINT_URL_S3", raising=False)
   with mock_aws():
     client = boto3.client("s3", region_name="us-east-1")
     client.create_bucket(Bucket=BUCKET)

@@ -273,18 +273,6 @@ wheels = [
 ]
 
 [[package]]
-name = "awscli-local"
-version = "0.23.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "localstack-client" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/b1/56/fb8eed90e00285f34ba97239c94c63daa963ce1746d2a99b2f66b893ba92/awscli_local-0.23.0.tar.gz", hash = "sha256:59aa31190d578967a4d376440320810e00ffd7dabba5dcb9eab6ae7a4c633441", size = 12318, upload-time = "2026-10-21T14:01:26.159Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/65/5a/3545f4877ad0898c4998a67ba3b1a5f6f6748d437259597af2c5bd89e9f7/awscli_local-0.23.0-py3-none-any.whl", hash = "sha256:43f53d549286d649277eb26bcf0c8891a337834f5adde99478f5bb3775214a00", size = 13008, upload-time = "2026-10-21T14:01:24.932Z" },
-]
-
-[[package]]
 name = "babel"
 version = "2.18.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1883,15 +1871,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/9e/09/849cf129d7eae1e42
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1a/d4/c4dcb02ed11f8884e169b3350fc40aa4c08edf8bed77a8f0f267542e6452/leather-0.4.1-py3-none-any.whl", hash = "sha256:ec61cba1ca3ccb96ed90e38b116fc58757d97d352171006b3288c47ce3fbd183", size = 30340, upload-time = "2025-12-15T19:01:40.823Z" },
 ]
-
-[[package]]
-name = "localstack-client"
-version = "2.12"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "boto3" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/88/99/f0cb24bd7687765f37ce6a577736a4a13501054be66eb748ddd4a13e6592/localstack_client-2.12.tar.gz", hash = "sha256:dbb98712fd2c8869d5dfed7a2ca006b95c7750fe9a43af123ef054efc7e7ebb4", size = 11105, upload-time = "2026-07-21T09:54:08.664Z" }
 
 [[package]]
 name = "loguru"
@@ -3897,7 +3876,6 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
-    { name = "awscli-local" },
     { name = "basedpyright" },
     { name = "cfn-lint" },
     { name = "moto", extra = ["s3"] },
@@ -3928,7 +3906,6 @@ requires-dist = [
     { name = "aiohttp", specifier = ">=3.14.3" },
     { name = "alembic", specifier = ">=1.18.5,<2.0" },
     { name = "authlib", specifier = ">=1.6.5,<2.0" },
-    { name = "awscli-local", marker = "extra == 'dev'", specifier = ">=0.22.0,<1.0" },
     { name = "basedpyright", marker = "extra == 'dev'", specifier = ">=1.22.0,<2.0" },
     { name = "bcrypt", specifier = ">=5.0.0,<6.0" },
     { name = "beautifulsoup4", specifier = ">=4.13.0,<5.0" },

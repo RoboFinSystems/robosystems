@@ -1073,17 +1073,13 @@ class LadybugDatabaseManager:
   def _update_instance_registry(self):
     """Write this node's database count and free capacity to the registry.
 
-    Development path only — it points at the LocalStack endpoint. Failures are
-    swallowed so a registry problem cannot fail database creation.
+    Development path only — it writes the dev stack's registry row. Failures
+    are swallowed so a registry problem cannot fail database creation.
     """
     try:
       import boto3
 
-      dynamodb = boto3.client(
-        "dynamodb",
-        endpoint_url=env.AWS_ENDPOINT_URL or "http://localstack:4566",
-        region_name="us-east-1",
-      )
+      dynamodb = boto3.client("dynamodb", **env.get_dynamodb_config())
 
       db_count = sum(
         1 for name in self.list_databases() if counts_toward_capacity(name)

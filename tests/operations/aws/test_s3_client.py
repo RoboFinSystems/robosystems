@@ -41,7 +41,7 @@ class TestS3ClientInit:
   def test_init_defaults_from_env(self, mock_env, mock_boto_client):
     """Init uses env defaults for region and endpoint."""
     mock_env.AWS_DEFAULT_REGION = "us-west-2"
-    mock_env.AWS_ENDPOINT_URL = ""
+    mock_env.AWS_ENDPOINT_URL_S3 = ""
     mock_env.AWS_S3_PRESIGN_ENDPOINT_URL = ""
     mock_env.ENVIRONMENT = "dev"
     mock_env.AWS_S3_ACCESS_KEY_ID = ""
@@ -63,25 +63,25 @@ class TestS3ClientInit:
   def test_init_explicit_region_and_endpoint(self, mock_env, mock_boto_client):
     """Init respects explicit region_name and endpoint_url args."""
     mock_env.AWS_DEFAULT_REGION = "us-east-1"
-    mock_env.AWS_ENDPOINT_URL = ""
+    mock_env.AWS_ENDPOINT_URL_S3 = ""
     mock_env.AWS_S3_PRESIGN_ENDPOINT_URL = ""
     mock_env.ENVIRONMENT = "dev"
     mock_env.AWS_S3_ACCESS_KEY_ID = ""
     mock_env.AWS_S3_SECRET_ACCESS_KEY = ""
 
-    client = S3Client(region_name="eu-west-1", endpoint_url="http://localhost:4566")
+    client = S3Client(region_name="eu-west-1", endpoint_url="http://localhost:8333")
 
     assert client.region_name == "eu-west-1"
-    assert client.endpoint_url == "http://localhost:4566"
+    assert client.endpoint_url == "http://localhost:8333"
     call_kwargs = mock_boto_client.call_args[1]
-    assert call_kwargs["endpoint_url"] == "http://localhost:4566"
+    assert call_kwargs["endpoint_url"] == "http://localhost:8333"
 
   @patch("robosystems.operations.aws.s3.boto3.client")
   @patch("robosystems.operations.aws.s3.env")
   def test_init_prod_uses_iam_role(self, mock_env, mock_boto_client):
     """In prod/staging, no access keys are passed (IAM role used)."""
     mock_env.AWS_DEFAULT_REGION = "us-east-1"
-    mock_env.AWS_ENDPOINT_URL = ""
+    mock_env.AWS_ENDPOINT_URL_S3 = ""
     mock_env.AWS_S3_PRESIGN_ENDPOINT_URL = ""
     mock_env.ENVIRONMENT = "prod"
     mock_env.AWS_S3_ACCESS_KEY_ID = "some-key"
@@ -98,7 +98,7 @@ class TestS3ClientInit:
   def test_init_staging_uses_iam_role(self, mock_env, mock_boto_client):
     """Staging environment also uses IAM role, not access keys."""
     mock_env.AWS_DEFAULT_REGION = "us-east-1"
-    mock_env.AWS_ENDPOINT_URL = ""
+    mock_env.AWS_ENDPOINT_URL_S3 = ""
     mock_env.AWS_S3_PRESIGN_ENDPOINT_URL = ""
     mock_env.ENVIRONMENT = "staging"
     mock_env.AWS_S3_ACCESS_KEY_ID = "key"
@@ -114,7 +114,7 @@ class TestS3ClientInit:
   def test_init_dev_uses_access_keys(self, mock_env, mock_boto_client):
     """Dev environment uses access keys when provided."""
     mock_env.AWS_DEFAULT_REGION = "us-east-1"
-    mock_env.AWS_ENDPOINT_URL = ""
+    mock_env.AWS_ENDPOINT_URL_S3 = ""
     mock_env.AWS_S3_PRESIGN_ENDPOINT_URL = ""
     mock_env.ENVIRONMENT = "dev"
     mock_env.AWS_S3_ACCESS_KEY_ID = "AKIA-TEST"
@@ -131,7 +131,7 @@ class TestS3ClientInit:
   def test_init_dev_no_keys_uses_default_chain(self, mock_env, mock_boto_client):
     """Dev environment without access keys falls back to default cred chain."""
     mock_env.AWS_DEFAULT_REGION = "us-east-1"
-    mock_env.AWS_ENDPOINT_URL = ""
+    mock_env.AWS_ENDPOINT_URL_S3 = ""
     mock_env.AWS_S3_PRESIGN_ENDPOINT_URL = ""
     mock_env.ENVIRONMENT = "dev"
     mock_env.AWS_S3_ACCESS_KEY_ID = ""
@@ -147,13 +147,13 @@ class TestS3ClientInit:
   def test_init_with_presign_endpoint_builds_second_client(
     self, mock_env, mock_boto_client
   ):
-    """When ``AWS_S3_PRESIGN_ENDPOINT_URL`` is set (dev/localstack), the
+    """When ``AWS_S3_PRESIGN_ENDPOINT_URL`` is set (the dev stack), the
     client builds a second boto3 client just for presigned URL signing
     so signed URLs are reachable from the host browser while internal
     upload/download traffic stays on the docker DNS endpoint."""
     mock_env.AWS_DEFAULT_REGION = "us-east-1"
-    mock_env.AWS_ENDPOINT_URL = "http://localstack:4566"
-    mock_env.AWS_S3_PRESIGN_ENDPOINT_URL = "http://localhost:4566"
+    mock_env.AWS_ENDPOINT_URL_S3 = "http://seaweedfs:8333"
+    mock_env.AWS_S3_PRESIGN_ENDPOINT_URL = "http://localhost:8333"
     mock_env.ENVIRONMENT = "dev"
     mock_env.AWS_S3_ACCESS_KEY_ID = ""
     mock_env.AWS_S3_SECRET_ACCESS_KEY = ""
@@ -163,8 +163,8 @@ class TestS3ClientInit:
     assert mock_boto_client.call_count == 2
     primary_kwargs = mock_boto_client.call_args_list[0][1]
     presign_kwargs = mock_boto_client.call_args_list[1][1]
-    assert primary_kwargs["endpoint_url"] == "http://localstack:4566"
-    assert presign_kwargs["endpoint_url"] == "http://localhost:4566"
+    assert primary_kwargs["endpoint_url"] == "http://seaweedfs:8333"
+    assert presign_kwargs["endpoint_url"] == "http://localhost:8333"
 
 
 @pytest.mark.unit
@@ -178,7 +178,7 @@ class TestS3ClientUploadString:
       patch("robosystems.operations.aws.s3.env") as mock_env,
     ):
       mock_env.AWS_DEFAULT_REGION = "us-east-1"
-      mock_env.AWS_ENDPOINT_URL = ""
+      mock_env.AWS_ENDPOINT_URL_S3 = ""
       mock_env.ENVIRONMENT = "dev"
       mock_env.AWS_S3_ACCESS_KEY_ID = ""
       mock_env.AWS_S3_SECRET_ACCESS_KEY = ""
@@ -259,7 +259,7 @@ class TestS3ClientEncodingAndStorageClass:
       patch("robosystems.operations.aws.s3.env") as mock_env,
     ):
       mock_env.AWS_DEFAULT_REGION = "us-east-1"
-      mock_env.AWS_ENDPOINT_URL = ""
+      mock_env.AWS_ENDPOINT_URL_S3 = ""
       mock_env.ENVIRONMENT = "dev"
       mock_env.AWS_S3_ACCESS_KEY_ID = ""
       mock_env.AWS_S3_SECRET_ACCESS_KEY = ""
@@ -346,7 +346,7 @@ class TestS3ClientUploadFile:
       patch("robosystems.operations.aws.s3.env") as mock_env,
     ):
       mock_env.AWS_DEFAULT_REGION = "us-east-1"
-      mock_env.AWS_ENDPOINT_URL = ""
+      mock_env.AWS_ENDPOINT_URL_S3 = ""
       mock_env.ENVIRONMENT = "dev"
       mock_env.AWS_S3_ACCESS_KEY_ID = ""
       mock_env.AWS_S3_SECRET_ACCESS_KEY = ""
@@ -410,7 +410,7 @@ class TestS3ClientDownloadFile:
       patch("robosystems.operations.aws.s3.env") as mock_env,
     ):
       mock_env.AWS_DEFAULT_REGION = "us-east-1"
-      mock_env.AWS_ENDPOINT_URL = ""
+      mock_env.AWS_ENDPOINT_URL_S3 = ""
       mock_env.ENVIRONMENT = "dev"
       mock_env.AWS_S3_ACCESS_KEY_ID = ""
       mock_env.AWS_S3_SECRET_ACCESS_KEY = ""
@@ -472,7 +472,7 @@ class TestS3ClientReadString:
       patch("robosystems.operations.aws.s3.env") as mock_env,
     ):
       mock_env.AWS_DEFAULT_REGION = "us-east-1"
-      mock_env.AWS_ENDPOINT_URL = ""
+      mock_env.AWS_ENDPOINT_URL_S3 = ""
       mock_env.ENVIRONMENT = "dev"
       mock_env.AWS_S3_ACCESS_KEY_ID = ""
       mock_env.AWS_S3_SECRET_ACCESS_KEY = ""
@@ -511,7 +511,7 @@ class TestS3ClientDownloadString:
       patch("robosystems.operations.aws.s3.env") as mock_env,
     ):
       mock_env.AWS_DEFAULT_REGION = "us-east-1"
-      mock_env.AWS_ENDPOINT_URL = ""
+      mock_env.AWS_ENDPOINT_URL_S3 = ""
       mock_env.ENVIRONMENT = "dev"
       mock_env.AWS_S3_ACCESS_KEY_ID = ""
       mock_env.AWS_S3_SECRET_ACCESS_KEY = ""
@@ -608,7 +608,7 @@ class TestS3ClientDeleteObject:
       patch("robosystems.operations.aws.s3.env") as mock_env,
     ):
       mock_env.AWS_DEFAULT_REGION = "us-east-1"
-      mock_env.AWS_ENDPOINT_URL = ""
+      mock_env.AWS_ENDPOINT_URL_S3 = ""
       mock_env.ENVIRONMENT = "dev"
       mock_env.AWS_S3_ACCESS_KEY_ID = ""
       mock_env.AWS_S3_SECRET_ACCESS_KEY = ""
@@ -666,7 +666,7 @@ class TestS3ClientObjectExists:
       patch("robosystems.operations.aws.s3.env") as mock_env,
     ):
       mock_env.AWS_DEFAULT_REGION = "us-east-1"
-      mock_env.AWS_ENDPOINT_URL = ""
+      mock_env.AWS_ENDPOINT_URL_S3 = ""
       mock_env.ENVIRONMENT = "dev"
       mock_env.AWS_S3_ACCESS_KEY_ID = ""
       mock_env.AWS_S3_SECRET_ACCESS_KEY = ""
@@ -719,7 +719,7 @@ class TestS3ClientListObjects:
       patch("robosystems.operations.aws.s3.env") as mock_env,
     ):
       mock_env.AWS_DEFAULT_REGION = "us-east-1"
-      mock_env.AWS_ENDPOINT_URL = ""
+      mock_env.AWS_ENDPOINT_URL_S3 = ""
       mock_env.ENVIRONMENT = "dev"
       mock_env.AWS_S3_ACCESS_KEY_ID = ""
       mock_env.AWS_S3_SECRET_ACCESS_KEY = ""
@@ -808,7 +808,7 @@ class TestS3ClientIterObjectKeys:
       patch("robosystems.operations.aws.s3.env") as mock_env,
     ):
       mock_env.AWS_DEFAULT_REGION = "us-east-1"
-      mock_env.AWS_ENDPOINT_URL = ""
+      mock_env.AWS_ENDPOINT_URL_S3 = ""
       mock_env.ENVIRONMENT = "dev"
       mock_env.AWS_S3_ACCESS_KEY_ID = ""
       mock_env.AWS_S3_SECRET_ACCESS_KEY = ""
@@ -861,7 +861,7 @@ class TestS3ClientBatchUploadStrings:
       patch("robosystems.operations.aws.s3.env") as mock_env,
     ):
       mock_env.AWS_DEFAULT_REGION = "us-east-1"
-      mock_env.AWS_ENDPOINT_URL = ""
+      mock_env.AWS_ENDPOINT_URL_S3 = ""
       mock_env.ENVIRONMENT = "dev"
       mock_env.AWS_S3_ACCESS_KEY_ID = ""
       mock_env.AWS_S3_SECRET_ACCESS_KEY = ""
@@ -1060,7 +1060,7 @@ class TestS3BackupAdapterPathGeneration:
         "aws_access_key_id": "test",
         "aws_secret_access_key": "test",
         "region_name": "us-east-1",
-        "endpoint_url": "http://localhost:4566",
+        "endpoint_url": "http://localhost:8333",
       }
 
       # Mock head_bucket to succeed

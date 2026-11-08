@@ -89,7 +89,7 @@ This initializes the `.env` file and starts the complete RoboSystems stack with:
 - PostgreSQL for IAM, graph metadata, extensions and Dagster
 - Valkey for caching, SSE messaging, and rate limiting
 - OpenSearch for full-text and semantic document search
-- Localstack for S3 and DynamoDB emulation
+- SeaweedFS for S3-compatible object storage and DynamoDB Local for the graph registries
 
 **Service URLs:**
 

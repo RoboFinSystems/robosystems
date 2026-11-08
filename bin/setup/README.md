@@ -10,7 +10,7 @@ Scripts for bootstrapping and configuring RoboSystems deployments. These handle 
 | `aws.sh`             | Secrets + SSM parameters       | AWS credentials     | 1-2 min   |
 | `gha.sh`             | Configure GitHub variables     | GitHub CLI          | 2-3 min   |
 | `bedrock.sh`         | Local AI development setup     | AWS credentials     | 1 min     |
-| `localstack-init.sh` | Local AWS emulation            | Docker (automatic)  | N/A       |
+| `storage-init.sh`    | Dev buckets and registry tables | Docker (automatic) | N/A       |
 | `postgres-init.sh`   | PostgreSQL databases           | Docker (automatic)  | N/A       |
 
 ## Bootstrap Flow
@@ -432,11 +432,11 @@ AWS_BEDROCK_SECRET_ACCESS_KEY=...
 
 ---
 
-### `localstack-init.sh`
+### `storage-init.sh`
 
-**Purpose**: Initialize LocalStack for local AWS service emulation.
+**Purpose**: Create the development stack's S3 buckets on SeaweedFS and its DynamoDB registry tables on DynamoDB Local, with `seaweedfs-s3.json` as the S3 server's identity file (the stack's `test`/`test` keys, plus anonymous reads on the public-data bucket).
 
-**Execution**: Automatic - runs when LocalStack container starts via Docker Compose.
+**Execution**: Automatic - runs in the `storage-init` container on every `docker compose up`, once both stores answer. It creates what is missing and leaves what exists alone, so the stores keep their contents across restarts; a table schema change needs `just clean-volumes`.
 
 **S3 Buckets Created**:
 

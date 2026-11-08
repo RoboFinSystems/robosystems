@@ -220,15 +220,15 @@ def get_public_data_url(bucket: str, key: str, cdn_url: str | None = None) -> st
 
     1. CDN (prod/staging): ``{cdn_url}/{key}`` when a CloudFront distribution
        is configured.
-    2. LocalStack (dev): path-style against the *browser-reachable* endpoint
-       (``AWS_S3_PRESIGN_ENDPOINT_URL`` — e.g. ``http://localhost:4566`` —
-       falling back to ``AWS_ENDPOINT_URL``). The pipeline uploads through a
-       docker-DNS hostname (``http://localstack:4566``) that isn't reachable
+    2. The dev stack's S3 server: path-style against the *browser-reachable*
+       endpoint (``AWS_S3_PRESIGN_ENDPOINT_URL`` — e.g. ``http://localhost:8333``
+       — falling back to ``AWS_ENDPOINT_URL_S3``). The pipeline uploads through
+       a docker-DNS hostname (``http://seaweedfs:8333``) that isn't reachable
        from the host browser, so the stored URL must use the localhost one.
     3. Real AWS without a CDN: the virtual-hosted-style public S3 URL.
 
-  A truthy ``cdn_url`` takes precedence over both the LocalStack and raw-S3
-  forms. A leading slash on ``key`` is optional.
+  A truthy ``cdn_url`` takes precedence over both the custom-endpoint and
+  raw-S3 forms. A leading slash on ``key`` is optional.
 
   Example:
       >>> get_public_data_url("robosystems-public-data", "2025/320193/f.html")
@@ -241,9 +241,9 @@ def get_public_data_url(bucket: str, key: str, cdn_url: str | None = None) -> st
   if cdn_url:
     return f"{cdn_url.rstrip('/')}/{key}"
 
-  endpoint = env.AWS_S3_PRESIGN_ENDPOINT_URL or env.AWS_ENDPOINT_URL
+  endpoint = env.AWS_S3_PRESIGN_ENDPOINT_URL or env.AWS_ENDPOINT_URL_S3
   if endpoint:
-    # LocalStack (and other custom S3 endpoints) use path-style addressing.
+    # A custom S3 endpoint is addressed path-style.
     return f"{endpoint.rstrip('/')}/{bucket}/{key}"
 
   return f"https://{bucket}.s3.amazonaws.com/{key}"

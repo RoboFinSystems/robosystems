@@ -155,12 +155,6 @@ run_db_init() {
     echo "Database initialization complete"
 }
 
-# For local development - wait for LocalStack to be ready
-if [[ "${ENVIRONMENT:-}" == "dev" ]]; then
-    echo "Development environment detected - waiting for LocalStack to initialize..."
-    sleep 5
-fi
-
 # Configure Dagster based on environment
 configure_dagster() {
     DAGSTER_HOME=${DAGSTER_HOME:-/app/dagster_home}

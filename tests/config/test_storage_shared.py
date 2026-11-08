@@ -129,7 +129,7 @@ class TestGetPublicDataUrl:
   """Tests for get_public_data_url environment-aware resolution."""
 
   def test_cdn_takes_precedence(self):
-    with patch.object(EnvConfig, "AWS_ENDPOINT_URL", "http://localstack:4566"):
+    with patch.object(EnvConfig, "AWS_ENDPOINT_URL_S3", "http://seaweedfs:8333"):
       result = get_public_data_url(
         "robosystems-public-data",
         "2025/320193/fact_abc.html",
@@ -137,38 +137,38 @@ class TestGetPublicDataUrl:
       )
     assert result == "https://cdn.example.com/2025/320193/fact_abc.html"
 
-  def test_localstack_prefers_presign_endpoint(self):
+  def test_dev_stack_prefers_presign_endpoint(self):
     with (
-      patch.object(EnvConfig, "AWS_S3_PRESIGN_ENDPOINT_URL", "http://localhost:4566"),
-      patch.object(EnvConfig, "AWS_ENDPOINT_URL", "http://localstack:4566"),
+      patch.object(EnvConfig, "AWS_S3_PRESIGN_ENDPOINT_URL", "http://localhost:8333"),
+      patch.object(EnvConfig, "AWS_ENDPOINT_URL_S3", "http://seaweedfs:8333"),
     ):
       result = get_public_data_url(
         "robosystems-public-data", "2025/320193/fact_abc.html"
       )
     # Path-style against the browser-reachable localhost endpoint, not the
-    # docker-DNS localstack hostname the pipeline uploads through.
+    # docker-DNS hostname the pipeline uploads through.
     assert (
       result
-      == "http://localhost:4566/robosystems-public-data/2025/320193/fact_abc.html"
+      == "http://localhost:8333/robosystems-public-data/2025/320193/fact_abc.html"
     )
 
-  def test_localstack_falls_back_to_endpoint_url(self):
+  def test_dev_stack_falls_back_to_s3_endpoint_url(self):
     with (
       patch.object(EnvConfig, "AWS_S3_PRESIGN_ENDPOINT_URL", ""),
-      patch.object(EnvConfig, "AWS_ENDPOINT_URL", "http://localstack:4566"),
+      patch.object(EnvConfig, "AWS_ENDPOINT_URL_S3", "http://seaweedfs:8333"),
     ):
       result = get_public_data_url(
         "robosystems-public-data", "2025/320193/fact_abc.html"
       )
     assert (
       result
-      == "http://localstack:4566/robosystems-public-data/2025/320193/fact_abc.html"
+      == "http://seaweedfs:8333/robosystems-public-data/2025/320193/fact_abc.html"
     )
 
   def test_real_aws_without_cdn(self):
     with (
       patch.object(EnvConfig, "AWS_S3_PRESIGN_ENDPOINT_URL", ""),
-      patch.object(EnvConfig, "AWS_ENDPOINT_URL", ""),
+      patch.object(EnvConfig, "AWS_ENDPOINT_URL_S3", ""),
     ):
       result = get_public_data_url(
         "robosystems-public-data", "2025/320193/fact_abc.html"
@@ -181,7 +181,7 @@ class TestGetPublicDataUrl:
   def test_leading_slash_stripped(self):
     with (
       patch.object(EnvConfig, "AWS_S3_PRESIGN_ENDPOINT_URL", ""),
-      patch.object(EnvConfig, "AWS_ENDPOINT_URL", ""),
+      patch.object(EnvConfig, "AWS_ENDPOINT_URL_S3", ""),
     ):
       result = get_public_data_url("bucket", "/path/to/obj.html")
     assert result == "https://bucket.s3.amazonaws.com/path/to/obj.html"

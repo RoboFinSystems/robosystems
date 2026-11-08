@@ -51,13 +51,8 @@ class DrainRefusedError(RuntimeError):
 
 
 def _get_dynamodb_resource():
-  """DynamoDB resource, pointed at LocalStack in development."""
-  region = env.AWS_REGION
-  if env.is_development() and env.AWS_ENDPOINT_URL:
-    return boto3.resource(
-      "dynamodb", endpoint_url=env.AWS_ENDPOINT_URL, region_name=region
-    )
-  return boto3.resource("dynamodb", region_name=region)
+  """DynamoDB resource; the dev stack's endpoint when one is configured."""
+  return boto3.resource("dynamodb", **env.get_dynamodb_config())
 
 
 # Past the volume manager's own 900s timeout (graph-volumes.yaml), so its own
@@ -67,23 +62,16 @@ VOLUME_MANAGER_TIMEOUT_SECONDS = 930
 
 
 def _get_lambda_client():
-  """Lambda client for the volume manager, pointed at LocalStack in development."""
+  """Lambda client for the volume manager."""
   from robosystems.operations.aws.long_call import long_call_client
 
-  kwargs: dict = {"region_name": env.AWS_REGION}
-  if env.is_development() and env.AWS_ENDPOINT_URL:
-    kwargs["endpoint_url"] = env.AWS_ENDPOINT_URL
-  return long_call_client("lambda", VOLUME_MANAGER_TIMEOUT_SECONDS, **kwargs)
+  return long_call_client(
+    "lambda", VOLUME_MANAGER_TIMEOUT_SECONDS, region_name=env.AWS_REGION
+  )
 
 
 def _get_autoscaling_client():
-  """Auto Scaling client, pointed at LocalStack in development."""
-  region = env.AWS_REGION
-  if env.is_development() and env.AWS_ENDPOINT_URL:
-    return boto3.client(
-      "autoscaling", endpoint_url=env.AWS_ENDPOINT_URL, region_name=region
-    )
-  return boto3.client("autoscaling", region_name=region)
+  return boto3.client("autoscaling", region_name=env.AWS_REGION)
 
 
 @register_task("graph_tier_upgrade")

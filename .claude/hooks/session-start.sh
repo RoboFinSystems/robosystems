@@ -44,13 +44,10 @@ EXTENSIONS_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/extensions
   uv run alembic -c migrations/extensions.ini upgrade head >> "$LOG" 2>&1 \
   || echo "extensions migration failed; see $LOG" >&2
 
-# LocalStack: only a handful of S3-backed tests need it and it is slow to become
-# healthy, so it comes up in the background and never blocks session start.
-(
-  docker compose -f compose.yaml --env-file .env up -d --wait localstack
-  AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1 \
-    uv run awslocal s3api create-bucket --bucket robosystems-local
-) > /var/tmp/localstack-setup.log 2>&1 &
+# S3: only a handful of S3-backed tests need it, so SeaweedFS and the bucket
+# init come up in the background and never block session start.
+docker compose -f compose.yaml --env-file .env --profile robosystems up -d storage-init \
+  > /var/tmp/storage-setup.log 2>&1 &
 disown
 
 exit 0
