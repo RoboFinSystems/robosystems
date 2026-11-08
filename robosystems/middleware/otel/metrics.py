@@ -16,7 +16,11 @@ from typing import Any
 
 from opentelemetry import metrics
 from opentelemetry.metrics import CallbackOptions, Observation
-from opentelemetry.sdk.metrics.view import ExplicitBucketHistogramAggregation, View
+from opentelemetry.sdk.metrics.view import (
+  DropAggregation,
+  ExplicitBucketHistogramAggregation,
+  View,
+)
 
 # Collapses a raw graph_id in an `endpoint` label back to {graph_id}, so a
 # caller that passes a real path instead of the templated route can't mint a
@@ -85,23 +89,14 @@ GRAPH_API_DURATION_BUCKETS = (
 )
 
 
-# FastAPIInstrumentor records the client-supplied Host header as an attribute,
-# so junk Host values would mint unbounded series. Keep only server-controlled
-# attributes on the http.server.* instruments.
-_HTTP_SERVER_ATTRIBUTE_ALLOWLIST = frozenset(
-  {
-    "http.method",
-    "http.status_code",
-    "http.target",  # FastAPIInstrumentor sets this to the templated route, e.g. /v1/graphs/{graph_id}/...
-    "http.scheme",
-    "http.flavor",
-  }
-)
+# The FastAPI and requests instrumentors' own HTTP metrics duplicate the
+# robosystems_api_* instruments, and no dashboard reads them. Their spans are kept.
+_DROPPED_INSTRUMENTS = ("http.server.*", "http.client.*")
 
 
 def get_metric_views() -> list[View]:
-  """Return View configurations for custom histogram buckets."""
-  views = [
+  """Return View configurations: custom histogram buckets and dropped instruments."""
+  return [
     View(
       instrument_name="robosystems_api_request_duration_seconds",
       aggregation=ExplicitBucketHistogramAggregation(boundaries=API_DURATION_BUCKETS),
@@ -120,20 +115,11 @@ def get_metric_views() -> list[View]:
         boundaries=GRAPH_API_DURATION_BUCKETS
       ),
     ),
+    *(
+      View(instrument_name=pattern, aggregation=DropAggregation())
+      for pattern in _DROPPED_INSTRUMENTS
+    ),
   ]
-  for instrument in (
-    "http.server.duration",
-    "http.server.request.size",
-    "http.server.response.size",
-    "http.server.active_requests",
-  ):
-    views.append(
-      View(
-        instrument_name=instrument,
-        attribute_keys=_HTTP_SERVER_ATTRIBUTE_ALLOWLIST,
-      )
-    )
-  return views
 
 
 class MetricType(Enum):

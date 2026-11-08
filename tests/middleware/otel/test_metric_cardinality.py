@@ -8,7 +8,7 @@ from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
 from robosystems.middleware.otel import metrics as metrics_module
-from robosystems.middleware.otel.metrics import EndpointMetrics
+from robosystems.middleware.otel.metrics import EndpointMetrics, get_metric_views
 
 
 @pytest.fixture
@@ -72,3 +72,22 @@ class TestMetricCardinality:
 
     points = _points(reader)["robosystems_api_errors_total"]
     assert {p.attributes.get("error_code") for p in points} == {"404"}
+
+
+@pytest.mark.unit
+def test_views_drop_instrumentor_http_metrics_and_keep_ours():
+  reader = InMemoryMetricReader()
+  provider = MeterProvider(metric_readers=[reader], views=get_metric_views())
+  meter = provider.get_meter("test")
+
+  meter.create_histogram("http.server.duration").record(12, {"http.target": "/v1/x"})
+  meter.create_histogram("http.server.response.size").record(512)
+  meter.create_up_down_counter("http.server.active_requests").add(1)
+  meter.create_histogram("http.client.duration").record(30)
+  meter.create_counter("robosystems_api_requests_total").add(1, {"endpoint": "/v1/x"})
+  meter.create_histogram("robosystems_api_request_duration_seconds").record(0.2)
+
+  assert set(_points(reader)) == {
+    "robosystems_api_requests_total",
+    "robosystems_api_request_duration_seconds",
+  }

@@ -144,16 +144,22 @@ Histogram buckets are set through `get_metric_views()`: `API_DURATION_BUCKETS`
 (5ms–300s, covering fast reads through ingestion and backup) for Graph API
 proxy calls.
 
+`get_metric_views()` also drops the instrumentors' own `http.server.*` and
+`http.client.*` metrics. They duplicate the `api_*` family above, no dashboard
+reads them, and at three 16-bucket histograms per route × status × method ×
+task they were ~80% of ingested samples. The FastAPI and requests spans are
+unaffected. If you need one back, add a `robosystems_*` instrument with bounded
+labels rather than re-enabling them: FastAPIInstrumentor records the
+client-supplied `Host` header as a metric attribute.
+
 ## Gotchas
 
 **Cardinality is a cost line, not a style preference.** Amazon Managed
-Prometheus bills by sample. Two guards already exist in code and should not be
-removed casually:
+Prometheus bills by sample, and series persist for a task's whole uptime
+(cumulative temporality), so a quiet deploy cadence raises the plateau. Two
+guards exist in code and should not be removed casually:
 
-- `get_metric_views()` restricts the auto-generated `http.server.*` instruments
-  to a server-controlled attribute allowlist. FastAPIInstrumentor otherwise
-  records the client-supplied `Host` header, and internet scanners hitting the
-  public ALB with junk hostnames mint ~48 new series apiece.
+- `get_metric_views()` drops the auto-generated `http.*` instruments (above).
 - `_sanitize_endpoint()` normalizes endpoint labels. Never put a UUID,
   timestamp, or raw user input in a label.
 
