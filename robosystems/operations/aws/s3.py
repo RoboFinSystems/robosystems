@@ -589,8 +589,9 @@ class S3BackupAdapter:
       from botocore.config import Config
 
       config = Config(
-        # SigV4 throughout: SigV2 presigned URLs are refused by S3 buckets
-        # created since 2019 and by the dev stack's S3 server.
+        # SigV4 throughout. botocore presigns SigV2 by default in us-east-1,
+        # which AWS deprecated, and the dev stack's S3 server refuses a SigV2
+        # presign that carries a response-* override (the backup download does).
         signature_version="s3v4",
         max_pool_connections=50,  # Sized for parallel part uploads
         retries={

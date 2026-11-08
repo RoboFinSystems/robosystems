@@ -26,6 +26,7 @@ The `robosystems` profile brings up:
 | `pg` | 5432 | PostgreSQL (platform + extensions databases) |
 | `valkey` | 6379 | Cache and queues |
 | `seaweedfs` | 8333 | S3-compatible object storage |
+| `mailpit` | 8025 | The dev inbox (SMTP on 1025) |
 | `dynamodb` | — | DynamoDB Local, the graph registries |
 | `storage-init` | — | Creates the buckets and tables, then exits |
 | `opensearch` | 9200 | Full-text + semantic search |

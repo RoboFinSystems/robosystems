@@ -355,6 +355,28 @@ services:
     restart: "no"
     profiles: ["storage-init", "robosystems", "all"]
 
+  # Mailpit - the dev inbox: SMTP on 1025, web UI on 8025, messages in memory
+  mailpit:
+    container_name: robosystems-mailpit
+    image: axllent/mailpit:v1.33.1
+    ports:
+      - 1025:1025
+      - 8025:8025
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: ${MAILPIT_MEMORY_LIMIT:-128m}
+          cpus: "0.25"
+        reservations:
+          memory: 32m
+    profiles: ["mailpit", "robosystems", "all"]
+
   # OpenSearch - Full-text search for filing narratives
   opensearch:
     container_name: robosystems-opensearch

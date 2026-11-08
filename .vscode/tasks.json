@@ -358,6 +358,7 @@
         "graph-api",
         "seaweedfs",
         "dynamodb",
+        "mailpit",
         "api",
         "observability",
         "roboledger-app",
@@ -381,6 +382,7 @@
         "otel-collector",
         "seaweedfs",
         "dynamodb",
+        "mailpit",
         "dagster-webserver",
         "dagster-daemon"
       ]

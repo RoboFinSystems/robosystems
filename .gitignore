@@ -151,3 +151,8 @@ robosystems/adapters/sec/arelle/cache/
 **/dbt/.user.yml
 # HF cache — ArelleClient points XDG_CACHE_HOME at this directory's parent
 robosystems/adapters/sec/huggingface/
+
+# OpenCode project config (holds a per-machine MCP API key; keep local)
+opencode.json
+opencode.jsonc
+.opencode/

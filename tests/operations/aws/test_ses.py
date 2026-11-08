@@ -1,12 +1,13 @@
 """Tests for SES email service adapter."""
 
-from unittest.mock import Mock, patch
+import smtplib
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from botocore.exceptions import ClientError
 
 from robosystems.config import env
-from robosystems.operations.aws.ses import SESEmailService
+from robosystems.operations.aws.ses import SESEmailService, SMTPTransport
 
 
 @pytest.fixture
@@ -29,6 +30,7 @@ def ses_service(mock_ses_client):
       mock_env.ROBOLEDGER_URL = "https://roboledger.ai"
       mock_env.ROBOINVESTOR_URL = "https://roboinvestor.ai"
       mock_env.ROBOSYSTEMS_URL = "https://robosystems.ai"
+      mock_env.SMTP_HOST = ""
       mock_env.EMAIL_TOKEN_EXPIRY_HOURS = 48
       mock_env.PASSWORD_RESET_TOKEN_EXPIRY_HOURS = 2
 
@@ -222,6 +224,7 @@ class TestSESEmailService:
       mock_env.ROBOLEDGER_URL = "https://roboledger.ai"
       mock_env.ROBOINVESTOR_URL = "https://roboinvestor.ai"
       mock_env.ROBOSYSTEMS_URL = "https://robosystems.ai"
+      mock_env.SMTP_HOST = ""
 
       # Mock boto3 client
       with patch("robosystems.operations.aws.ses.boto3") as mock_boto3:
@@ -304,6 +307,7 @@ class TestSESEmailService:
       mock_env.ROBOLEDGER_URL = "https://roboledger.ai"
       mock_env.ROBOINVESTOR_URL = "https://roboinvestor.ai"
       mock_env.ROBOSYSTEMS_URL = "https://robosystems.ai"
+      mock_env.SMTP_HOST = ""
 
       mock_ses_client.send_email.return_value = {"MessageId": "msg-env"}
 
@@ -601,3 +605,118 @@ class TestPasskeyEnrolledEmail:
     assert '<a href="https://evil.example">' not in html_body
     assert '<img src=x onerror="x">' not in html_body
     assert "&lt;/p&gt;&lt;a href=" in html_body
+
+
+def _smtp_service(**smtp: object) -> SESEmailService:
+  """A service built with SMTP settings in the environment; boto3 is patched
+  so a stray SES client would be visible, not silently created."""
+  with patch("robosystems.operations.aws.ses.boto3") as mock_boto3:
+    with patch("robosystems.operations.aws.ses.env") as mock_env:
+      mock_env.AWS_REGION = "us-east-1"
+      mock_env.EMAIL_FROM_ADDRESS = "noreply@example.com"
+      mock_env.EMAIL_FROM_NAME = "Test"
+      mock_env.ENVIRONMENT = "dev"
+      mock_env.ROBOLEDGER_URL = "https://roboledger.ai"
+      mock_env.ROBOINVESTOR_URL = "https://roboinvestor.ai"
+      mock_env.ROBOSYSTEMS_URL = "https://robosystems.ai"
+      mock_env.LOGIN_HOME_APP = "robosystems"
+      mock_env.EMAIL_TOKEN_EXPIRY_HOURS = 48
+      mock_env.PASSWORD_RESET_TOKEN_EXPIRY_HOURS = 2
+      mock_env.SMTP_HOST = smtp.get("host", "mailpit")
+      mock_env.SMTP_PORT = smtp.get("port", 1025)
+      mock_env.SMTP_USERNAME = smtp.get("username", "")
+      mock_env.SMTP_PASSWORD = smtp.get("password", "")
+      mock_env.SMTP_STARTTLS = smtp.get("starttls", False)
+      service = SESEmailService()
+    assert not mock_boto3.client.called
+  return service
+
+
+@pytest.mark.unit
+class TestSMTPDelivery:
+  """`SMTP_HOST` selects SMTP; the SES client is never built or called."""
+
+  @pytest.mark.asyncio
+  async def test_sends_the_rendered_message_over_smtp(self):
+    service = _smtp_service()
+    assert service.ses_client is None
+
+    with patch("robosystems.operations.aws.ses.smtplib") as mock_smtplib:
+      connection = MagicMock()
+      mock_smtplib.SMTP.return_value.__enter__.return_value = connection
+      result = await service.send_verification_email(
+        user_email="user@example.com",
+        user_name="Test User",
+        token="token123",
+      )
+
+    assert result is True
+    mock_smtplib.SMTP.assert_called_once_with("mailpit", 1025, timeout=10.0)
+    assert not mock_smtplib.SMTP_SSL.called
+    assert not connection.starttls.called
+    assert not connection.login.called
+    message = connection.send_message.call_args[0][0]
+    assert message["To"] == "user@example.com"
+    assert message["From"] == "Test <noreply@example.com>"
+    assert "verify" in message["Subject"].lower()
+    assert message["Message-ID"].endswith("@example.com>")
+    parts = {part.get_content_type() for part in message.iter_parts()}
+    assert parts == {"text/plain", "text/html"}
+    assert "token123" in message.get_body(("html",)).get_content()
+
+  @pytest.mark.asyncio
+  async def test_smtp_failure_is_reported_not_raised(self):
+    service = _smtp_service()
+    with patch("robosystems.operations.aws.ses.smtplib") as mock_smtplib:
+      mock_smtplib.SMTP.return_value.__enter__.return_value.send_message.side_effect = (
+        smtplib.SMTPRecipientsRefused({"user@example.com": (550, b"no such user")})
+      )
+      result = await service.send_welcome_email(
+        user_email="user@example.com", user_name="Test User"
+      )
+    assert result is False
+
+
+@pytest.mark.unit
+class TestSMTPTransport:
+  """The connection shape follows the port and the settings."""
+
+  def _send(self, transport: SMTPTransport, mock_smtplib: MagicMock) -> MagicMock:
+    connection = MagicMock()
+    mock_smtplib.SMTP.return_value.__enter__.return_value = connection
+    mock_smtplib.SMTP_SSL.return_value.__enter__.return_value = connection
+    transport.send(
+      from_name="Test",
+      from_address="noreply@example.com",
+      to_email="user@example.com",
+      subject="Hello",
+      text="hello",
+      html="<p>hello</p>",
+    )
+    return connection
+
+  def test_starttls_and_login_on_a_submission_port(self):
+    transport = SMTPTransport("relay.example.com", 587, "robot", "secret", True)
+    with patch("robosystems.operations.aws.ses.smtplib") as mock_smtplib:
+      connection = self._send(transport, mock_smtplib)
+    mock_smtplib.SMTP.assert_called_once_with("relay.example.com", 587, timeout=10.0)
+    connection.starttls.assert_called_once()
+    connection.login.assert_called_once_with("robot", "secret")
+    connection.send_message.assert_called_once()
+
+  def test_port_465_is_implicit_tls_with_no_starttls(self):
+    transport = SMTPTransport("relay.example.com", 465, "robot", "secret", True)
+    with patch("robosystems.operations.aws.ses.smtplib") as mock_smtplib:
+      connection = self._send(transport, mock_smtplib)
+    assert mock_smtplib.SMTP_SSL.call_args[0] == ("relay.example.com", 465)
+    assert not mock_smtplib.SMTP.called
+    assert not connection.starttls.called
+    connection.login.assert_called_once_with("robot", "secret")
+
+  def test_starttls_off_sends_in_the_clear(self):
+    transport = SMTPTransport("mailpit", 1025, "", "", False)
+    with patch("robosystems.operations.aws.ses.smtplib") as mock_smtplib:
+      connection = self._send(transport, mock_smtplib)
+    assert not connection.starttls.called
+    assert not connection.login.called
+    connection.send_message.assert_called_once()

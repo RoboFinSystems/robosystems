@@ -553,8 +553,12 @@ class InstanceMonitor:
     missing or address wrong) so an alarm can watch it.
 
     Published on every sweep, zero included, so the alarm sees a real
-    datapoint rather than reading OK on missing data.
+    datapoint rather than reading OK on missing data. A dev stack has no
+    CloudWatch, so it only logs the count.
     """
+    if self.environment == "dev":
+      logger.info(f"Orphaned graph registrations: {count} (CloudWatch skipped in dev)")
+      return
     try:
       self.cloudwatch.put_metric_data(
         Namespace=f"RoboSystems/Graph/{self.environment}",
@@ -841,6 +845,12 @@ class InstanceMonitor:
       # The environment is in the namespace, not a dimension, so staging and
       # prod never share a metric stream.
       cloudwatch_namespace = f"RoboSystems/Graph/{self.environment}"
+
+      if self.environment == "dev":
+        logger.info(
+          f"Collected {len(metrics)} Graph metrics (CloudWatch publish skipped in dev)"
+        )
+        return result
 
       for i in range(0, len(metrics), 20):
         batch = metrics[i : i + 20]

@@ -372,6 +372,14 @@ class EnvConfig:
     "EMAIL_FROM_NAME",
     get_secret_value("EMAIL_FROM_NAME", "RoboSystems"),
   )
+  # Mail transport: SES unless SMTP_HOST names a server (the dev stack's
+  # Mailpit, or a relay on the deployment's own network). Port 465 is implicit
+  # TLS; any other port negotiates STARTTLS unless SMTP_STARTTLS is false.
+  SMTP_HOST = get_str_env("SMTP_HOST", get_secret_value("SMTP_HOST", ""))
+  SMTP_PORT = get_int_env("SMTP_PORT", 587)
+  SMTP_USERNAME = get_str_env("SMTP_USERNAME", get_secret_value("SMTP_USERNAME", ""))
+  SMTP_PASSWORD = get_str_env("SMTP_PASSWORD", get_secret_value("SMTP_PASSWORD", ""))
+  SMTP_STARTTLS = get_bool_env("SMTP_STARTTLS", True)
 
   # Cloudflare Turnstile (CAPTCHA)
   TURNSTILE_SECRET_KEY = get_secret_value("TURNSTILE_SECRET_KEY", "")

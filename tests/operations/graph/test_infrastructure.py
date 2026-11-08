@@ -1172,3 +1172,37 @@ class TestTenantSlotsFree:
       for metric in call[1]["MetricData"]
     ]
     assert "TenantSlotsFree" not in names
+
+
+@pytest.fixture
+def dev_monitor():
+  """A monitor for a dev stack, which has no CloudWatch to publish to."""
+  with patch(f"{MODULE}.env") as mock_env:
+    mock_env.ENVIRONMENT = "dev"
+    m = InstanceMonitor(
+      instance_registry_table="dev-instance",
+      graph_registry_table="dev-graph",
+      volume_registry_table="dev-volume",
+      environment="dev",
+    )
+  m._ec2 = MagicMock()
+  m._dynamodb = MagicMock()
+  m._cloudwatch = MagicMock()
+  return m
+
+
+@pytest.mark.unit
+class TestDevStackPublishesNothing:
+  """A dev stack (the laptop, a self-hosted box) computes the metrics and
+  skips CloudWatch; the publishers must not reach for AWS."""
+
+  def test_orphaned_graph_count_is_logged_not_published(self, dev_monitor):
+    dev_monitor._publish_orphaned_graph_metric(3)
+    assert not dev_monitor._cloudwatch.put_metric_data.called
+
+  def test_collect_metrics_skips_the_publish(self, dev_monitor):
+    dev_monitor._dynamodb.Table.return_value = _make_dynamo_table(items=[])
+    result = dev_monitor.collect_metrics()
+    assert result.error_message is None
+    assert result.metrics_published == 0
+    assert not dev_monitor._cloudwatch.put_metric_data.called
