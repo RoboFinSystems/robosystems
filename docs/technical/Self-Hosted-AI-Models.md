@@ -46,7 +46,7 @@ Anything that speaks Chat Completions with tool calling works. Three shapes, in 
 
 - **A hosted catalog of open weights** — NVIDIA's API catalog (`https://integrate.api.nvidia.com/v1`) and OpenRouter (`https://openrouter.ai/api/v1`) both serve current open-weight models behind one key, which makes them the fastest way to try the lane. Your prompts leave your machine, so treat this as evaluation unless the terms say otherwise.
 - **An inference server you run** — vLLM, or an NVIDIA NIM container on your own GPU. Nothing leaves your infrastructure; this is the configuration a sovereignty or data-residency requirement wants.
-- **A model server on your workstation** — Ollama, LM Studio. From inside Docker your host is `host.docker.internal`, not `localhost`, so Ollama is `http://host.docker.internal:11434/v1`. Workstation-size models are the weakest option for this workload — see [Which Models Work](#which-models-work).
+- **A model server on your workstation, or on another machine on your network** — Ollama, LM Studio. From inside Docker your host is `host.docker.internal`, not `localhost`, so Ollama is `http://host.docker.internal:11434/v1`; a second machine is its address on your network, and the same endpoint can serve the operators and an MCP client on a laptop at once. Workstation-size models are the weakest option for this workload — see [Which Models Work](#which-models-work).
 
 ### Validation at Startup
 
