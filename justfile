@@ -49,6 +49,14 @@ teardown profile="robosystems":
 upgrade profile="robosystems" scope="":
     @bin/tools/upgrade.sh {{profile}} {{scope}}
 
+# Move a deployment on published images to a release: checkout at the tag, pin the image, upgrade, wait for the version (flags: --dry-run)
+upgrade-to tag flags="":
+    @bin/tools/upgrade-to.sh {{tag}} {{flags}}
+
+# Settings the .env.example catalog has that this .env lacks (--strict exits 2 when a set key is missing)
+settings-drift env=".env" example=".env.example" flags="":
+    @bin/tools/settings-drift.sh {{env}} {{example}} {{flags}}
+
 # Rebuild the images built here and force recreate (package/env changes); a published image is recreated as pulled
 rebuild profile="robosystems":
     @test -f {{_env}} || cp .env.example {{_env}}
