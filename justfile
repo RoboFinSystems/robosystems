@@ -45,9 +45,17 @@ stop profile="robosystems":
 teardown profile="robosystems":
     docker compose -f compose.yaml --profile {{profile}} down
 
-# Fetch latest images (or rebuild) and recreate what changed
+# Refresh the images this checkout names (pull a published tag again, or rebuild a local build) and recreate what changed; a pinned deployment moves releases with `just upgrade-to`
 upgrade profile="robosystems" scope="":
     @bin/tools/upgrade.sh {{profile}} {{scope}}
+
+# Move a deployment on published images to a release tag (or `latest`, resolved to the newest one): checkout at the tag, pin the image, upgrade, wait for the version (flags: --dry-run)
+upgrade-to tag flags="":
+    @bin/tools/upgrade-to.sh {{tag}} {{flags}}
+
+# Settings the .env.example catalog has that this .env lacks (--strict exits 2 when a set key is missing)
+settings-drift env=".env" example=".env.example" flags="":
+    @bin/tools/settings-drift.sh {{env}} {{example}} {{flags}}
 
 # Rebuild the images built here and force recreate (package/env changes); a published image is recreated as pulled
 rebuild profile="robosystems":
