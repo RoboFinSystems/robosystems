@@ -463,7 +463,7 @@ class TestBackupManager:
     # Mock S3 client
     mock_s3_client = MagicMock()
     mock_s3_client.generate_presigned_url.return_value = "https://presigned-url.com"
-    backup_manager.s3_adapter.s3_client = mock_s3_client
+    backup_manager.s3_adapter.presign_client = mock_s3_client
 
     with (
       patch("robosystems.database.session") as mock_session_local,
