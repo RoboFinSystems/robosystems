@@ -26,12 +26,23 @@ def _task() -> GraphMaterializationTask:
   return task
 
 
-async def _execute(task, copy_seconds: float, extend_results):
+async def _execute(task, copy_seconds: float, extend_results, copy_until=None):
+  """Run the task around a stand-in copy. The copy sleeps `copy_seconds`, or,
+  given `copy_until`, returns as soon as that event is set (with the seconds
+  as a ceiling), so a test can tie the copy's length to the refresher's
+  progress instead of to the clock."""
+
   def db_gen():
     yield MagicMock()
 
   async def slow_copy(**_kwargs):
-    await asyncio.sleep(copy_seconds)
+    if copy_until is None:
+      await asyncio.sleep(copy_seconds)
+    else:
+      try:
+        await asyncio.wait_for(copy_until.wait(), timeout=copy_seconds)
+      except TimeoutError:
+        pass
     return {"status": "success"}
 
   with (
@@ -52,14 +63,32 @@ async def _execute(task, copy_seconds: float, extend_results):
 
 async def test_a_valkey_blip_is_retried_and_the_copy_finishes():
   """An error building the client or reaching Valkey must not end the
-  refresher: the copy would then run past the TTL unrefreshed."""
+  refresher: the copy would then run past the TTL unrefreshed. The copy runs
+  until the refresher has been called a third time, two blips and one
+  success, so the test measures the retry and not the runner's speed."""
   task = _task()
-  results = [ConnectionError("blip"), ConnectionError("blip")] + [True] * 100
+  loop = asyncio.get_running_loop()
+  extended_thrice = asyncio.Event()
+  answers = iter([ConnectionError("blip"), ConnectionError("blip")] + [True] * 100)
+  calls = 0
 
-  outcome, extend, release = await _execute(task, 0.1, results)
+  def extend(_token):
+    # Runs on a worker thread (asyncio.to_thread); signal the loop safely.
+    nonlocal calls
+    calls += 1
+    answer = next(answers)
+    if calls >= 3:
+      loop.call_soon_threadsafe(extended_thrice.set)
+    if isinstance(answer, Exception):
+      raise answer
+    return answer
+
+  outcome, extend_mock, release = await _execute(
+    task, 5, extend, copy_until=extended_thrice
+  )
 
   assert outcome == {"status": "success"}
-  assert extend.call_count > 2
+  assert extend_mock.call_count >= 3
   release.assert_called_once()
 
 
