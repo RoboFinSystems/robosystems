@@ -45,7 +45,7 @@ stop profile="robosystems":
 teardown profile="robosystems":
     docker compose -f compose.yaml --profile {{profile}} down
 
-# Fetch latest images (or rebuild) and recreate what changed
+# Refresh the images this checkout names (pull a published tag again, or rebuild a local build) and recreate what changed; a pinned deployment moves releases with `just upgrade-to`
 upgrade profile="robosystems" scope="":
     @bin/tools/upgrade.sh {{profile}} {{scope}}
 

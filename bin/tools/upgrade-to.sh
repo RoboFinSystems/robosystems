@@ -5,26 +5,43 @@
 #   bin/tools/upgrade-to.sh latest  [--dry-run]   # the newest release tag
 #
 # For a stack that pins ROBOSYSTEMS_IMAGE to a registry image (a self-hosted
-# server; not a laptop that builds from source). "latest" is resolved to a
-# release tag before anything moves; the pin written to .env is always that
-# tag, never "latest", so the deployment stays on a version it can name. In
-# order:
-#   1. preflight: clean tree, the tag exists, the image for it is published
+# server; not a laptop that builds from source). The platform services (API,
+# worker, Graph API, Dagster) share that one image; the apps have their own
+# image settings and their own releases. "latest" is resolved to a release tag
+# before anything moves; the pin written to .env is always that tag, never
+# "latest", so the deployment stays on a version it can name. In order:
+#   1. preflight: no uncommitted tracked changes, the tag exists, its image is published
 #   2. settings drift: what the release's .env.example has that .env lacks
 #   3. the checkout moves to the tag, so compose, scripts and image are one ref
 #   4. ROBOSYSTEMS_IMAGE is pinned to the tag (the old .env is kept under .local/env-backups)
 #   5. upgrade.sh pulls and recreates what changed
 #   6. the API must report the new version before this exits 0
 # The last line is the rollback command. Migrations run forward only.
+#
+# The scripts this needs after the switch are copied to .local/release-tools
+# first, because the target checkout may predate them; a rollback to such a
+# release runs the copy.
 set -euo pipefail
 
+USAGE="usage: $0 v<major>.<minor>.<patch>|latest [--dry-run]"
 TAG=${1:-}
 DRY_RUN=0
-[ "${2:-}" = "--dry-run" ] && DRY_RUN=1
+case "${2:-}" in
+"") ;;
+--dry-run) DRY_RUN=1 ;;
+*)
+  echo "$USAGE" >&2
+  exit 2
+  ;;
+esac
+if [ $# -gt 2 ]; then
+  echo "$USAGE" >&2
+  exit 2
+fi
 case "$TAG" in
 v[0-9]*.[0-9]*.[0-9]* | latest) ;;
 *)
-  echo "usage: $0 v<major>.<minor>.<patch>|latest [--dry-run]" >&2
+  echo "$USAGE" >&2
   exit 2
   ;;
 esac
@@ -32,6 +49,7 @@ esac
 HERE=$(cd "$(dirname "$0")" && pwd)
 PROFILE=${PROFILE:-robosystems}
 STATUS_URL=${STATUS_URL:-http://localhost:8000/v1/status}
+TOOLS=.local/release-tools
 
 die() {
   echo "❌ $*" >&2
@@ -68,18 +86,38 @@ trap 'rm -f "$EXAMPLE_TMP"' EXIT
 git show "${TAG}:.env.example" >"$EXAMPLE_TMP"
 "$HERE/settings-drift.sh" .env "$EXAMPLE_TMP" | sed "s#${EXAMPLE_TMP}#.env.example@${TAG}#g"
 
+# How to come back. A release older than this tool has no `just upgrade-to`,
+# so the hint names the copy kept outside the tree.
+rollback_hint() {
+  case "$CURRENT_TAG" in
+  v[0-9]*.[0-9]*.[0-9]*)
+    if git cat-file -e "${CURRENT_TAG}:bin/tools/upgrade-to.sh" 2>/dev/null; then
+      echo "just upgrade-to ${CURRENT_TAG}"
+    else
+      echo "bash ${TOOLS}/upgrade-to.sh ${CURRENT_TAG}   (that release predates the command)"
+    fi
+    ;;
+  *) echo "the previous pin was ${IMAGE_REPO}:${CURRENT_TAG}, which names no version to return to; the previous .env is kept under .local/env-backups" ;;
+  esac
+}
+
 if [ "$DRY_RUN" = 1 ]; then
   echo ""
   echo "Dry run. Would: git switch --detach ${TAG}; pin ROBOSYSTEMS_IMAGE=${IMAGE_REPO}:${TAG}; run upgrade.sh ${PROFILE}; wait for ${STATUS_URL} to report ${TAG#v}."
-  echo "Rollback afterwards would be: just upgrade-to ${CURRENT_TAG}"
+  echo "Rollback afterwards: $(rollback_hint)"
   exit 0
 fi
 
-echo "📌 Checkout → ${TAG}"
-git switch --detach "${TAG}" --quiet
-mkdir -p .local/env-backups
+mkdir -p "$TOOLS" .local/env-backups
+cp "$HERE/upgrade-to.sh" "$HERE/check-release-image.sh" "$HERE/settings-drift.sh" "$HERE/wait-for-version.sh" "$HERE/upgrade.sh" "$TOOLS/"
 BACKUP=".local/env-backups/env-$(date +%Y%m%d-%H%M%S)"
 cp .env "$BACKUP"
+ROLLBACK=$(rollback_hint)
+# From here on a failure leaves the checkout and .env on the new tag; say how to come back.
+trap 'echo ""; echo "❌ Stopped before the API reported ${TAG#v}. The checkout and .env are on ${TAG}; the previous .env is ${BACKUP}. Rollback: ${ROLLBACK}" >&2' ERR
+
+echo "📌 Checkout → ${TAG}"
+git switch --detach "${TAG}" --quiet
 NEW_ENV=$(mktemp)
 awk -v repo="$IMAGE_REPO" -v tag="$TAG" '
   /^ROBOSYSTEMS_IMAGE=/ && !done { print "ROBOSYSTEMS_IMAGE=" repo ":" tag; done = 1; next }
@@ -89,11 +127,16 @@ mv "$NEW_ENV" .env
 echo "📌 ROBOSYSTEMS_IMAGE=${IMAGE_REPO}:${TAG} (previous .env kept as ${BACKUP})"
 
 echo "🚀 Upgrading"
-"$HERE/upgrade.sh" "$PROFILE"
+if [ -x bin/tools/upgrade.sh ]; then
+  bin/tools/upgrade.sh "$PROFILE" # the target release's own copy
+else
+  "$TOOLS/upgrade.sh" "$PROFILE"
+fi
 
 echo "🩺 Waiting for the API"
-"$HERE/wait-for-version.sh" "$STATUS_URL" "${TAG#v}" 300
+"$TOOLS/wait-for-version.sh" "$STATUS_URL" "${TAG#v}" 300
 docker compose -f compose.yaml --env-file .env --profile "$PROFILE" ps --format 'table {{.Name}}\t{{.Status}}\t{{.Image}}'
 
+trap - ERR
 echo ""
-echo "✅ On ${TAG}. Rollback: just upgrade-to ${CURRENT_TAG}  (migrations run forward only; a release that migrated the database does not roll back)"
+echo "✅ On ${TAG}. Rollback: ${ROLLBACK}  (migrations run forward only; a release that migrated the database does not roll back)"

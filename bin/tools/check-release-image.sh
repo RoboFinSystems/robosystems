@@ -19,19 +19,19 @@ case "$REF" in
 esac
 
 if command -v docker >/dev/null 2>&1; then
-  if docker manifest inspect "$REF" >/dev/null 2>/tmp/check-release-image.$$; then
-    rm -f /tmp/check-release-image.$$
+  ERR=$(mktemp)
+  trap 'rm -f "$ERR"' EXIT
+  if docker manifest inspect "$REF" >/dev/null 2>"$ERR"; then
     echo "✅ ${REF} is published"
     exit 0
   fi
-  if grep -qi "manifest unknown\|not found\|no such manifest" /tmp/check-release-image.$$; then
-    rm -f /tmp/check-release-image.$$
+  # Only the registry's own answer means "no such image". Anything else (no
+  # daemon, a credential helper that is missing or wants a desktop session)
+  # falls through to the registry's HTTP API.
+  if grep -qiE "manifest unknown|no such manifest|MANIFEST_UNKNOWN" "$ERR"; then
     echo "❌ ${REF} is not published" >&2
     exit 1
   fi
-  # Any other failure (no daemon, a credential helper that wants a desktop
-  # session) falls through to the registry's own API.
-  rm -f /tmp/check-release-image.$$
 fi
 
 NAME=${REF%:*}

@@ -42,10 +42,12 @@ for F in "$ENV_FILE" "$EXAMPLE_FILE"; do
   fi
 done
 
-# Keys the deployment mentions, set or commented.
-PRESENT=$(sed -nE 's/^#? ?([A-Z][A-Z0-9_]*)=.*/\1/p' "$ENV_FILE" | sort -u)
-SET_KEYS=$(sed -nE 's/^([A-Z][A-Z0-9_]*)=.*/\1/p' "$EXAMPLE_FILE" | sort -u)
-OPTIONAL_KEYS=$(sed -nE 's/^# ([A-Z][A-Z0-9_]*)=.*/\1/p' "$EXAMPLE_FILE" | sort -u)
+# Keys the deployment mentions, set or commented. `export KEY=` counts, and a
+# file saved with CRLF line endings reads the same as one without.
+keys() { tr -d '\r' <"$2" | sed -nE "$1" | sort -u; }
+PRESENT=$(keys 's/^#? ?(export[[:space:]]+)?([A-Z][A-Z0-9_]*)=.*/\2/p' "$ENV_FILE")
+SET_KEYS=$(keys 's/^(export[[:space:]]+)?([A-Z][A-Z0-9_]*)=.*/\2/p' "$EXAMPLE_FILE")
+OPTIONAL_KEYS=$(keys 's/^# (export[[:space:]]+)?([A-Z][A-Z0-9_]*)=.*/\2/p' "$EXAMPLE_FILE")
 
 missing() {
   # keys in $1 that are not in PRESENT
