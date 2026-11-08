@@ -276,7 +276,7 @@ def _build_query_hint(
       "(f)-[:FACT_HAS_PERIOD]->(p:Period) "
       "WHERE e.qname = $qname AND r.identifier = $report_id "
       "AND f.has_dimensions = false "
-      "RETURN e.qname AS element, f.numeric_value AS value, "
+      "RETURN e.qname AS element, f.value AS value, "
       "p.end_date AS date, p.duration_type AS period_type "
       "ORDER BY p.end_date DESC LIMIT 20"
     )
@@ -289,7 +289,7 @@ def _build_query_hint(
       f"WHERE e.qname = $qname AND {_filer_clause(cik)} "
       "AND f.has_dimensions = false "
       "RETURN ent.ticker AS ticker, e.qname AS element, "
-      "f.numeric_value AS value, p.end_date AS date, "
+      "f.value AS value, p.end_date AS date, "
       "p.duration_type AS period_type "
       "ORDER BY p.end_date DESC LIMIT 20"
     )
@@ -299,7 +299,7 @@ def _build_query_hint(
       "(f)-[:FACT_HAS_PERIOD]->(p:Period) "
       "WHERE e.qname = $qname "
       "AND f.has_dimensions = false "
-      "RETURN e.qname AS element, f.numeric_value AS value, "
+      "RETURN e.qname AS element, f.value AS value, "
       "p.end_date AS date, p.duration_type AS period_type "
       "ORDER BY p.end_date DESC LIMIT 20"
     )

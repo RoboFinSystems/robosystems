@@ -28,6 +28,7 @@ from robosystems.operations.roboledger.views.fact_dedup import (
   keep_most_precise,
   precision_rank,
 )
+from robosystems.operations.roboledger.views.fact_value import fact_number
 
 _INVALID_SCHEMA_NAME = "3F000"
 
@@ -387,6 +388,7 @@ async def query_fact_grid(
     "        p.end_date as period_end,\n"
     "        p.duration_type as duration_type,\n"
     "        f.numeric_value as value,\n"
+    "        f.value as raw_value,\n"
     "        f.decimals as decimals,\n"
     "        u.value as unit,\n"
     "        ent.ticker as entity_ticker,\n"
@@ -416,6 +418,8 @@ async def query_fact_grid(
     return [], False
   if len(results) >= ENGINE_ROW_CAP:
     raise FactGridTooBroadError
+  for row in results:
+    row["value"] = fact_number(row.pop("raw_value", None), row.get("value"))
 
   standing = None
   fact_ids = [row["fact_id"] for row in results if row.get("fact_id")]

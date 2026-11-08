@@ -437,3 +437,29 @@ class TestBuildFinancialStatementQuery:
     )
     assert executed_query == built_query
     assert executed_params == built_params
+
+
+class TestStatementValuesFromText:
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_the_value_is_read_from_the_fact_text(self, mock_repository):
+    """LadybugDB 0.22 can project numeric_value as 0.0 under a filtered scan;
+    the statement reads the number from the fact's text instead."""
+    mock_repository.execute_query = AsyncMock(
+      return_value=[
+        {"qname": "us-gaap:Assets", "value": 0.0, "raw_value": "72795612000"},
+        {"qname": "us-gaap:Goodwill", "value": 4932199000.0, "raw_value": None},
+      ]
+    )
+    with patch(
+      "robosystems.operations.roboledger.views.financial_statement_query.get_graph_repository",
+      return_value=mock_repository,
+    ):
+      rows = await query_financial_statement(
+        MOCK_GRAPH, statement_type="balance_sheet", report_id="rpt_abc"
+      )
+
+    query, _ = mock_repository.execute_query.call_args[0]
+    assert "f.value AS raw_value" in query
+    assert [row["value"] for row in rows] == [72795612000.0, 4932199000.0]
+    assert all("raw_value" not in row for row in rows)
