@@ -49,25 +49,28 @@ PRESENT=$(keys 's/^#? ?(export[[:space:]]+)?([A-Z][A-Z0-9_]*)=.*/\2/p' "$ENV_FIL
 SET_KEYS=$(keys 's/^(export[[:space:]]+)?([A-Z][A-Z0-9_]*)=.*/\2/p' "$EXAMPLE_FILE")
 OPTIONAL_KEYS=$(keys 's/^# (export[[:space:]]+)?([A-Z][A-Z0-9_]*)=.*/\2/p' "$EXAMPLE_FILE")
 
-missing() {
-  # keys in $1 that are not in PRESENT
-  printf '%s\n' "$1" | while IFS= read -r KEY; do
+# The lookups read from files, not pipes: `grep -q` closes its input on the
+# first match, and under pipefail a printf feeding it can then fail on the
+# broken pipe, which would read as "missing" (seen on Linux, not on macOS).
+PRESENT_FILE=$(mktemp)
+CATALOG_FILE=$(mktemp)
+trap 'rm -f "$PRESENT_FILE" "$CATALOG_FILE"' EXIT
+printf '%s\n' "$PRESENT" >"$PRESENT_FILE"
+printf '%s\n%s\n' "$SET_KEYS" "$OPTIONAL_KEYS" | sort -u >"$CATALOG_FILE"
+
+absent_from() {
+  # keys in $2 (newline-separated) that are not a line of file $1
+  printf '%s\n' "$2" | while IFS= read -r KEY; do
     [ -z "$KEY" ] && continue
-    if ! printf '%s\n' "$PRESENT" | grep -qx "$KEY"; then
-      echo "$KEY"
-    fi
+    grep -qxF -- "$KEY" "$1" || echo "$KEY"
   done
 }
 
-MISSING_SET=$(missing "$SET_KEYS")
-MISSING_OPTIONAL=$(missing "$OPTIONAL_KEYS")
+MISSING_SET=$(absent_from "$PRESENT_FILE" "$SET_KEYS")
+MISSING_OPTIONAL=$(absent_from "$PRESENT_FILE" "$OPTIONAL_KEYS")
 # Keys the deployment carries that the catalog no longer names: retired
 # settings, or local additions the release does not know about.
-CATALOG=$(printf '%s\n%s\n' "$SET_KEYS" "$OPTIONAL_KEYS" | sort -u)
-UNKNOWN=$(printf '%s\n' "$PRESENT" | while IFS= read -r KEY; do
-  [ -z "$KEY" ] && continue
-  printf '%s\n' "$CATALOG" | grep -qx "$KEY" || echo "$KEY"
-done)
+UNKNOWN=$(absent_from "$CATALOG_FILE" "$PRESENT")
 
 if [ -z "$MISSING_SET" ] && [ -z "$MISSING_OPTIONAL" ]; then
   echo "✅ ${ENV_FILE} names every setting in ${EXAMPLE_FILE}"
