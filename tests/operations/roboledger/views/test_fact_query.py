@@ -764,3 +764,36 @@ class TestRenamedFilers:
   @pytest.mark.asyncio
   async def test_no_filter_stays_no_filter(self):
     assert await _with_renamed_filers("sec", None) is None
+
+
+@pytest.mark.unit
+class TestFactGridValuesFromText:
+  @pytest.mark.asyncio
+  async def test_the_value_is_read_from_the_fact_text(self, mock_repository):
+    """LadybugDB 0.22 can project numeric_value as 0.0 under a filtered scan;
+    the grid reads the number from the fact's text instead."""
+    mock_repository.execute_query = AsyncMock(
+      return_value=[
+        {
+          "element_id": "us-gaap:Goodwill",
+          "element_name": "Goodwill",
+          "period_start": None,
+          "period_end": "2025-06-30",
+          "duration_type": None,
+          "value": 0.0,
+          "raw_value": "119509000000",
+          "decimals": "-6",
+          "unit": "USD",
+          "entity_ticker": "MSFT",
+          "entity_name": "Microsoft",
+          "fact_id": "f1",
+        }
+      ]
+    )
+    with patch(PATCH_REPO, return_value=mock_repository):
+      facts, _ = await query_fact_grid("sec", elements=["us-gaap:Goodwill"])
+
+    query = mock_repository.execute_query.call_args[0][0]
+    assert "f.value as raw_value" in query
+    assert [fact["value"] for fact in facts] == [119509000000.0]
+    assert all("raw_value" not in fact for fact in facts)

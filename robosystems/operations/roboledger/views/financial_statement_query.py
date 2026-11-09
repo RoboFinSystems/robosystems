@@ -11,6 +11,7 @@ from typing import Any
 
 from robosystems.middleware.graph import get_graph_repository
 from robosystems.operations.roboledger.views.fact_dedup import keep_most_precise
+from robosystems.operations.roboledger.views.fact_value import fact_number
 
 
 def build_financial_statement_query(
@@ -95,7 +96,7 @@ def build_financial_statement_query(
     f"MATCH {', '.join(match_parts)} "
     f"WHERE {' AND '.join(where_clauses)} "
     "RETURN DISTINCT e.canonical_concept AS canonical_concept, e.qname AS qname, "
-    "e.name AS name, f.numeric_value AS value, "
+    "e.name AS name, f.numeric_value AS value, f.value AS raw_value, "
     "p.start_date AS start_date, p.end_date AS end_date, "
     "p.period_type AS period_type, p.duration_type AS duration_type, "
     "f.decimals AS decimals, u.value AS unit "
@@ -139,6 +140,8 @@ async def query_financial_statement(
     rows = await repository.execute_query(
       query, {**parameters, "statement_type": "comprehensive_income"}
     )
+  for row in rows:
+    row["value"] = fact_number(row.pop("raw_value", None), row.get("value"))
   return rows
 
 

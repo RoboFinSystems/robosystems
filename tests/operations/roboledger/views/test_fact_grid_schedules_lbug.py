@@ -20,7 +20,8 @@ GRAPH = "kgdddddddddddddddd25"
 SCHEMA = [
   "CREATE NODE TABLE Element(identifier STRING, qname STRING, name STRING, "
   "canonical_concept STRING, PRIMARY KEY(identifier))",
-  "CREATE NODE TABLE Fact(identifier STRING, numeric_value DOUBLE, decimals STRING, "
+  "CREATE NODE TABLE Fact(identifier STRING, value STRING, numeric_value DOUBLE, "
+  "decimals STRING, "
   "has_dimensions BOOLEAN, PRIMARY KEY(identifier))",
   "CREATE NODE TABLE Period(identifier STRING, start_date STRING, end_date STRING, "
   "duration_type STRING, period_type STRING, PRIMARY KEY(identifier))",
@@ -68,9 +69,9 @@ def graph(tmp_path):
       {"id": set_id, "t": set_type},
     )
     conn.execute(
-      "CREATE (:Fact {identifier: $id, numeric_value: $v, decimals: '2', "
-      "has_dimensions: false})",
-      {"id": fact_id, "v": amount},
+      "CREATE (:Fact {identifier: $id, value: $raw, numeric_value: $v, "
+      "decimals: '2', has_dimensions: false})",
+      {"id": fact_id, "raw": str(float(amount)), "v": amount},
     )
     for rel, label, key in (
       ("FACT_HAS_ELEMENT", "Element", "el_7000"),

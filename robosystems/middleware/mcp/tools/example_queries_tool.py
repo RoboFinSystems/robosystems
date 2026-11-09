@@ -132,7 +132,7 @@ List of example queries with explanations, tailored to the actual schema present
               "description": "⭐ CONSOLIDATED Revenue for one company",
               "query": """MATCH (f:Fact {has_dimensions: false})-[:FACT_HAS_ELEMENT]->(e:Element), (f)-[:FACT_HAS_ENTITY]->(ent:Entity {ticker: 'NVDA'}), (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'})
 WHERE e.qname IN ['us-gaap:Revenues', 'us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax'] AND f.numeric_value IS NOT NULL
-RETURN ent.ticker, e.qname, p.end_date, f.numeric_value AS revenue
+RETURN ent.ticker, e.qname, p.end_date, f.value AS revenue
 ORDER BY p.end_date DESC LIMIT 10""",
               "explanation": "⚠️ has_dimensions=false drops segment breakdowns (consolidated totals only). Filers tag the same concept differently (us-gaap:Revenues vs us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax), so name the qnames: run resolve-element with the company's ticker, check the labels, and filter e.qname IN [...]. e.canonical_concept labels standard elements only, so it misses a filer whose revenue line is its own extension.",
             },
@@ -144,7 +144,7 @@ ORDER BY p.end_date DESC LIMIT 10""",
       (fs:FactSet)-[:FACT_SET_CONTAINS_FACT]->(f),
       (s:Structure {canonical_type: 'income_statement'})-[:STRUCTURE_HAS_FACT_SET]->(fs)
 WHERE f.numeric_value IS NOT NULL
-RETURN DISTINCT e.qname, f.numeric_value AS value, p.end_date
+RETURN DISTINCT e.qname, f.value AS value, p.end_date
 ORDER BY p.end_date DESC LIMIT 40""",
               "explanation": "Pull a whole statement via Structure.canonical_type (income_statement | balance_sheet | cash_flow_statement | equity_statement). ⚠️ ANCHOR ON THE ENTITY (or a Report) FIRST and reach Structure LAST — ~53k filings share canonical_type='income_statement', so leading the MATCH with the Structure node scans them all and times out. For balance sheets, filter Period {period_type: 'instant'} instead of duration_type.",
             },
@@ -154,7 +154,7 @@ ORDER BY p.end_date DESC LIMIT 40""",
               "query": """MATCH (f:Fact {has_dimensions: true})-[:FACT_HAS_ELEMENT]->(e:Element), (f)-[:FACT_HAS_DIMENSION]->(d:Dimension)
 WHERE e.qname = 'us-gaap:Revenues'
   AND f.numeric_value IS NOT NULL
-RETURN d.axis_uri, d.member_uri, f.numeric_value
+RETURN d.axis_uri, d.member_uri, f.value
 LIMIT 10""",
               "explanation": "Use has_dimensions=true when you WANT segment/geography breakdowns",
             },
@@ -164,7 +164,7 @@ LIMIT 10""",
               "query": """MATCH (f:Fact {has_dimensions: false})-[:FACT_HAS_PERIOD]->(p:Period)
 WHERE p.end_date >= '2024-01-01'
   AND p.duration_type = 'annual'
-RETURN f.identifier, f.numeric_value, p.end_date, p.duration_type
+RETURN f.identifier, f.value, p.end_date, p.duration_type
 LIMIT 10""",
               "explanation": "Period.period_type: instant/duration/forever. Period.duration_type: quarterly/semi_annual/nine_months/annual/other",
             },
