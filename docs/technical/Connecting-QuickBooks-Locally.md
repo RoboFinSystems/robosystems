@@ -534,6 +534,8 @@ just lbug-query $GRAPH_ID "
 
 If you have an MCP client connected to the RoboSystems server (Claude, ChatGPT, or any MCP client):
 
+If you want this without running the stack, RoboLedger's [QuickBooks MCP server](https://roboledger.ai/quickbooks-mcp) is the hosted version: connect the QuickBooks company there and use the same tools from Claude, ChatGPT, or any MCP client.
+
 ```bash
 # Inspect mapping state
 get-mapping-summary --mapping_id <mapping_struct_id>
