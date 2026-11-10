@@ -16,29 +16,34 @@ Perform the month-end close for the current target period. Follow the company's 
 
 2. **Read the close procedures**: Use `search-documents` to find "month-end close procedures". Review the checklist. If you need detail on a specific topic (depreciation policy, prepaid policy, etc.), use `get-document-section`.
 
-3. **Check what's pending**: Use `get-period-close-status` for the close target period. This shows every schedule's pending/drafted/posted status.
+3. **Work the bank inbox**: Use `list-event-blocks` with `status='captured'` and `event_type='bank_transaction'` to see the lines waiting, and work the ones dated in the period. A period cannot close over them. For each line:
+   - If it carries a learned suggestion (`metadata.suggestion_source = 'agent_default'`), take it with `accept-suggestions` or `update-event-block(metadata_patch={accept_suggestion: true})`, then commit.
+   - A payment may settle an open invoice or bill. Check `dischargeCandidates(eventId)` over `query-graphql` **before** classifying a payment to an expense or asset account: if a bill for it is already on the books, classify the line to Accounts Payable and link the bill, or the cost is counted twice.
+   - With no suggestion, decide from history and the policy documents. If a person is needed, leave the line open and say why.
 
-4. **Draft closing entries from schedules**: Call `promote-obligations` (with `dispatch_handlers=true`) to draft every matured schedule's entry for the period in one sweep, or `create-event-block(event_type='schedule_entry_due')` to draft a single schedule. There is no `create-closing-entry` tool. Both paths are idempotent — safe to call repeatedly. Interpret the `outcome` field:
+4. **Check what's pending**: Use `get-period-close-status` for the close target period. This shows every schedule's pending/drafted/posted status.
+
+5. **Draft closing entries from schedules**: Call `promote-obligations` (with `dispatch_handlers=true`) to draft every matured schedule's entry for the period in one sweep, or `create-event-block(event_type='schedule_entry_due')` to draft a single schedule. There is no `create-closing-entry` tool. Both paths are idempotent — safe to call repeatedly. Interpret the `outcome` field:
    - `created` — new draft was just made
    - `unchanged` — draft already exists and matches the schedule; no change
    - `regenerated` — draft was stale (schedule edited since it was drafted); replaced with fresh
    - `removed` — stale draft existed but the schedule no longer produces a fact for this period; cleaned up
    - `skipped` — no draft existed and no in-scope fact; nothing to do (e.g., a matured prepaid)
 
-5. **Handle one-off business events**: If the user mentions anything that isn't a recurring schedule — an asset sold, a correcting entry, an impairment, a customer refund — fire `create-event-block` with the right `event_type`:
+6. **Handle one-off business events**: If the user mentions anything that isn't a recurring schedule — an asset sold, a correcting entry, an impairment, a customer refund — fire `create-event-block` with the right `event_type`:
    - **Asset sold or retired** → `event_type='asset_disposed'`. The handler atomically truncates the linked schedule (no future drafts), drops the schedule's SumEquals rule, and posts the balanced disposal entry.
    - **Free-form correction / impairment / one-off adjustment** → `event_type='journal_entry_recorded'` with `metadata.type='closing'` (or `'adjusting'`) and explicit `line_items`. Total debits must equal total credits. Write a clear `memo` citing the business event.
    - **Reverse a posted entry** → `event_type='journal_entry_reversed'` with `metadata.entry_id`. Handler creates the offsetting reversing entry and marks the original as `status='reversed'`.
 
-6. **Review all drafts**: Call `list-period-drafts` for the target period. This returns every draft entry (schedule-derived AND manual) with full line-item detail. Summarize for the user: total debits, total credits, balanced? If anything doesn't look right, flag it.
+7. **Review all drafts**: Call `list-period-drafts` for the target period. This returns every draft entry (schedule-derived AND manual) with full line-item detail. Summarize for the user: total debits, total credits, balanced? If anything doesn't look right, flag it.
 
-7. **Generate financial statements** (optional, before closing): Use `live-financial-statement` to produce:
+8. **Generate financial statements** (optional, before closing): Use `live-financial-statement` to produce:
    - Balance sheet (`statement_type: "balance_sheet"`)
    - Income statement (`statement_type: "income_statement"`)
 
-8. **Commit the close**: After the user approves the drafts, call `close-period` for the target period. This atomically posts every draft in the period and marks the period closed. `closed_through` advances and `close_target` auto-advances to the next month.
+9. **Commit the close**: After the user approves the drafts, call `close-period` for the target period. This atomically posts every draft in the period and marks the period closed. `closed_through` advances and `close_target` auto-advances to the next month.
 
-9. **Summarize**: Report what was done — entries created, amounts, any items flagged for review, new calendar state.
+10. **Summarize**: Report what was done — entries created, amounts, any items flagged for review, new calendar state.
 
 ## Rules
 
