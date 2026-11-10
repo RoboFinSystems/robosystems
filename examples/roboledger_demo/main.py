@@ -1132,10 +1132,26 @@ def create_schedules(graph_id: str, element_lookup: dict[str, str]) -> int:
 
 
 def upload_policies(graph_id: str) -> int:
-  """Upload accounting policy documents via ``DocumentClient.upload()``."""
+  """Upload accounting policy documents via ``DocumentClient.upload()``.
+
+  The demo reset does not reach documents, so a re-run first removes the
+  copies an earlier run left in the policies folder. Without that each run
+  adds four more, the old text stays searchable beside the new, and the graph
+  runs into its document limit.
+  """
   from .policies import DOCUMENTS
 
   client = _get_document_client()
+  folders = {doc["folder"] for doc in DOCUMENTS}
+  stale = [
+    d
+    for d in client.list(graph_id).to_dict().get("documents", [])
+    if d.get("folder") in folders
+  ]
+  for document in stale:
+    client.delete(graph_id, document["id"])
+  if stale:
+    print(f"  Removed:      {len(stale)} documents from an earlier run")
   uploaded = 0
   for doc in DOCUMENTS:
     try:
