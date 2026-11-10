@@ -37,14 +37,15 @@ The `just demo-roboledger` recipe loads `.env.local` (via `UV_ENV_FILE`), so the
 |---|---|---|
 | **Accounts** | 27 | Clean chart of accounts (assets, liabilities, equity, revenue, expenses) |
 | **Agents** | 17 | 6 customers + 8 vendors + 2 employees + 1 government (IRS). Same shape a real QB sync produces. |
-| **Business Events** | ~305 | Typed event stream emulating data arriving from outside: `invoice_issued` + `payment_received` pairs (with `discharges_event_id` chain), `bill_received` + `bill_paid` pairs, `journal_entry_recorded` for opening balances / payroll / settlements |
-| **Discharge chains** | ~132 | `payment_received → invoice_issued` and `bill_paid → bill_received` REA duality links |
+| **Business Events** | ~250 | Typed event stream emulating data arriving from outside. The older history is posted directly: `invoice_issued` + `payment_received` pairs, `bill_received` + `bill_paid` pairs, `journal_entry_recorded` for opening balances, payroll, card purchases and settlements. From the last three closed months on, money in and out arrives as `bank_transaction` lines instead |
+| **Bank lines** | ~38 | The last three closed months' lines were classified, committed and posted by each month's close, which is what teaches every counterparty its account. The close target's lines (about ten) wait unclassified in the inbox, most carrying a learned suggestion |
+| **Discharge chains** | ~110 | A payment settles its invoice and a bill payment its bill, whether it arrived as a `payment_received` / `bill_paid` event or as a bank line |
 | **Mappings** | 27 | CoA → US GAAP reporting concept associations |
-| **Fiscal Calendar** | 1 | `closed_through = month_before_last`, `close_target = last_completed_month` |
+| **Fiscal Calendar** | 1 | History through four months before the close target comes over already closed; the next three months are closed one at a time during the load; `close_target = last_completed_month` |
 | **Fiscal Periods** | 16 | One per month in the data window, first 14 marked `closed`, last 2 `open` |
 | **Schedules** | 6 | 2 depreciation + 4 prepaid amortization schedules (staggered renewals) |
 | **Schedule Facts** | mixed | Historical (pre-target) vs in_scope (target onward) — close workflow only acts on in_scope |
-| **Documents** | 4 | Close procedures, depreciation policy, prepaid policy, revenue policy |
+| **Documents** | 4 | Close procedures, depreciation policy (with the capitalization threshold), prepaid policy, revenue policy |
 | **FY 2025 Report** | 1 | Annual report — generated, packaged, and **filed** (Report Block lifecycle end-to-end). The current period stays queued for the AI close workflow. |
 
 ### Event-type vocabulary
@@ -58,6 +59,7 @@ The demo emits the same typed vocabulary a QuickBooks sync produces, exercising 
 | `bill_received` | purchase | Vendor bill arrives (DR expense/asset, CR AP) | — |
 | `bill_paid` | purchase | Bill settled (DR AP, CR cash) | `bill_received` event_id |
 | `journal_entry_recorded` | adjustment | Opening balances, payroll, settlements not from external counterparties | — |
+| `bank_transaction` | treasury | A line from the bank: a customer's payment, a bill's payment or a card purchase. Lands `captured`; classifying and committing it drafts the entry the close posts | the invoice or bill it settles, if any |
 
 ## The Company
 

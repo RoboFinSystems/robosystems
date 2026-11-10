@@ -506,11 +506,71 @@ def _can_split_bill_payment(lines: list[tuple[str, int, int]]) -> bool:
   return has_cash_credit and not has_liability_debit
 
 
+def _land_bank_line(
+  client,
+  graph_id: str,
+  *,
+  txn_date: date,
+  amount: int,
+  memo: str,
+  agent_name: str | None,
+  agent_id: str | None,
+  cash_id: str,
+  sequence: int,
+) -> str:
+  """Land one bank line unclassified, as a feed does; returns its event id.
+
+  `amount` is signed from the company's side: money in is positive. The cash
+  account is bound here because a line cannot post without it.
+  """
+  body: dict = {
+    "event_type": "bank_transaction",
+    "event_category": "treasury",
+    "event_class": "economic",
+    "source": "manual",
+    "external_id": f"cascade-bank-{txn_date.isoformat()}-{sequence:04d}",
+    "occurred_at": f"{txn_date.isoformat()}T00:00:00+00:00",
+    "amount": amount,
+    "currency": "USD",
+    "description": f"{(agent_name or 'Card').upper()} {memo}",
+    "resource_type": "money",
+    "resource_element_id": cash_id,
+    "metadata": {"merchant_name": agent_name} if agent_name else {},
+  }
+  if agent_id:
+    body["agent_id"] = agent_id
+  return client.create_event_block(graph_id, body).id
+
+
+def _commit_bank_line(
+  client,
+  graph_id: str,
+  event_id: str,
+  account_id: str,
+  settles_event_id: str | None,
+) -> None:
+  """Classify a bank line and commit it: a draft the month's close posts."""
+  classify: dict = {
+    "event_id": event_id,
+    "transition_to": "classified",
+    "metadata_patch": {"classified_element_id": account_id, "classified_by": "user"},
+  }
+  if settles_event_id:
+    classify["discharges_event_id"] = settles_event_id
+  client.update_event_block(graph_id, classify)
+  client.update_event_block(
+    graph_id, {"event_id": event_id, "transition_to": "committed"}
+  )
+
+
 def create_business_events(
   graph_id: str,
   txns: list,
   element_lookup: dict[str, str],
   agent_lookup: dict[str, str],
+  *,
+  bank_from: date | None = None,
+  commit_through: date | None = None,
 ) -> dict[str, int]:
   """Create typed business events from synthetic transactions.
 
@@ -532,10 +592,18 @@ def create_business_events(
     (e.g. payroll tax deposits) → `journal_entry_recorded` with
     `event_category=adjustment` and optional `agent_id`.
 
-  All event handlers dispatch through the journal_entry_recorded Python
+  All of those dispatch through the journal_entry_recorded Python
   handler (`robosystems/operations/event_block/python_handlers/registry.py`) —
   the event_type drives inbox classification and the duality chain, not the GL
   posting shape.
+
+  From `bank_from` on, money in and out arrives the way a bank feed delivers
+  it instead: a customer's payment, a bill's payment and a card purchase each
+  land as a `bank_transaction`. Lines dated through `commit_through` are
+  classified and committed here (drafts their month's close posts, and what
+  teaches each counterparty its account). Later lines are left unclassified
+  in the inbox for the close to work, and a line dated after today has not
+  happened yet, so it is not landed at all.
   """
   client = _get_ledger_client()
 
@@ -551,12 +619,29 @@ def create_business_events(
     "bill_received": 0,
     "bill_paid": 0,
     "journal_entry_recorded": 0,
+    "bank_transaction": 0,
   }
+  bank_lines_open = 0
+  today = date.today()
   line_item_count = 0
   unmapped = 0
 
   cash_id = element_lookup.get(_CASH_CODE)
   ap_id = element_lookup.get(_AP_CODE)
+
+  def bank_line(txn_date: date, amount: int, memo: str, agent_name, agent_id) -> str:
+    counts["bank_transaction"] += 1
+    return _land_bank_line(
+      client,
+      graph_id,
+      txn_date=txn_date,
+      amount=amount,
+      memo=memo,
+      agent_name=agent_name,
+      agent_id=agent_id,
+      cash_id=cash_id or "",
+      sequence=counts["bank_transaction"],
+    )
 
   for txn_date, txn_type, description, agent_name, lines in txns:
     li_list = _build_line_items(lines, element_lookup)
@@ -586,8 +671,37 @@ def create_business_events(
       "description": memo,
     }
 
+    as_bank = bank_from is not None and txn_date >= bank_from and cash_id is not None
+    # A line the bank has not shown yet; its invoice or bill is still entered.
+    not_yet = as_bank and txn_date > today
+    work_it = as_bank and commit_through is not None and txn_date <= commit_through
+
     try:
-      if txn_type == "invoice":
+      if as_bank and txn_type in ("payment", "card_purchase") and not not_yet:
+        money_in = txn_type == "payment"
+        contra = next(li["element_id"] for li in li_list if li["element_id"] != cash_id)
+        settles = (
+          invoice_index.pop((agent_name or "", total_amount), None)
+          if money_in
+          else None
+        )
+        event_id = bank_line(
+          txn_date,
+          total_amount if money_in else -total_amount,
+          memo,
+          agent_name,
+          agent_id,
+        )
+        if work_it:
+          _commit_bank_line(client, graph_id, event_id, contra, settles)
+        else:
+          bank_lines_open += 1
+        line_item_count += len(li_list)
+
+      elif as_bank and txn_type in ("payment", "card_purchase"):
+        pass
+
+      elif txn_type == "invoice":
         body = {
           **base_body,
           "event_type": "invoice_issued",
@@ -644,6 +758,16 @@ def create_business_events(
         counts["bill_received"] += 1
         line_item_count += len(br_lines)
 
+        if as_bank:
+          # The payment is a bank line that settles the bill.
+          if not not_yet:
+            event_id = bank_line(txn_date, -total_amount, memo, agent_name, agent_id)
+            if work_it:
+              _commit_bank_line(client, graph_id, event_id, ap_id, br_resp.id)
+            else:
+              bank_lines_open += 1
+          continue
+
         # bill_paid: DR AP, CR cash — straight discharge
         bp_lines = [
           {"element_id": ap_id, "debit_amount": total_amount, "credit_amount": 0},
@@ -699,6 +823,7 @@ def create_business_events(
     "entries": sum(counts.values()),
     "line_items": line_item_count,
     "events_by_type": counts,
+    "bank_lines_open": bank_lines_open,
   }
 
 
@@ -839,30 +964,29 @@ def run_ai_mapping(graph_id: str) -> None:
 
 
 def initialize_fiscal_calendar(graph_id: str) -> str:
-  """Seed the fiscal calendar so exactly one period is ready to close.
+  """Seed the fiscal calendar with the history that came over already closed.
 
-  `closed_through` is set to the month *before* last, which leaves the last
-  completed month as the single open, fully-elapsed period — the demo's
-  `close_target`. The current month stays open but is still in progress, so a
-  user landing in an MCP client has one unambiguous period to close and no
-  backlog to wade through first.
+  `closed_through` is the month before the first live month (`BANK_FROM`):
+  everything through it was posted directly and is treated as closed
+  elsewhere. `close_live_months` then closes the live months one at a time,
+  which leaves the last completed month as the single open, fully-elapsed
+  period — the demo's `close_target`.
 
   `LedgerClient.initialize_ledger()` creates the calendar, seeds FiscalPeriod
   rows from `earliest_data_period` through the current month, and marks each
-  closed or open against that boundary. Returns the `close_target` period.
+  closed or open against that boundary. Returns the first live period.
   """
   from robosystems.operations.roboledger.fiscal_calendar import (
     current_month_period,
     previous_period,
   )
 
-  from .data import get_demo_start_date
+  from .data import BANK_FROM, add_months, get_demo_start_date
 
-  # closed_through = month before last completed month
-  # → close_target = last completed month (one period ready to close)
   last_completed = previous_period(current_month_period())
-  closed_through = previous_period(last_completed)
   demo_start = get_demo_start_date()
+  first_live = add_months(demo_start, BANK_FROM)
+  closed_through = previous_period(f"{first_live.year:04d}-{first_live.month:02d}")
   demo_start_period = f"{demo_start.year:04d}-{demo_start.month:02d}"
 
   client = _get_ledger_client()
@@ -877,9 +1001,34 @@ def initialize_fiscal_calendar(graph_id: str) -> str:
   close_target = fc.close_target or last_completed
 
   print(f"  closed_through: {closed_through}")
-  print(f"  close_target:   {close_target}")
+  print(f"  first to close: {close_target}")
   print(f"  periods seeded: {result.periods_created}")
   return close_target
+
+
+def close_live_months(graph_id: str) -> str:
+  """Close each live month in turn, posting the bank lines committed in it.
+
+  Runs before `create_schedules`: a pending schedule obligation would block
+  these closes, and schedules created afterwards take their scope from the
+  advanced `closed_through`, so they queue only the close target's entries.
+  Returns the close target, the one completed month left open.
+  """
+  from robosystems.operations.roboledger.fiscal_calendar import (
+    current_month_period,
+    previous_period,
+  )
+
+  from .data import BANK_FROM, LIVE_MONTHS, add_months, get_demo_start_date
+
+  client = _get_ledger_client()
+  demo_start = get_demo_start_date()
+  for offset in range(BANK_FROM, BANK_FROM + LIVE_MONTHS):
+    month = add_months(demo_start, offset)
+    period = f"{month.year:04d}-{month.month:02d}"
+    result = client.close_period(graph_id, period, note="roboledger_demo live month")
+    print(f"  closed {period}: {result.entries_posted} entries posted")
+  return previous_period(current_month_period())
 
 
 # ---------------------------------------------------------------------------
@@ -904,8 +1053,8 @@ def create_schedules(graph_id: str, element_lookup: dict[str, str]) -> int:
   Prior-run schedules are cleaned up via `LedgerClient.delete_schedule()` so
   re-runs stay idempotent.
   """
+  from .data import SCHEDULES, get_demo_start_date
   from .data import add_months as demo_add_months
-  from .data import get_demo_start_date
 
   demo_start = get_demo_start_date()
 
@@ -915,15 +1064,7 @@ def create_schedules(graph_id: str, element_lookup: dict[str, str]) -> int:
     end_month = demo_add_months(start, life_months)
     return start, end_month - timedelta(days=1)
 
-  schedules = [
-    # (name, dr_code, cr_code, monthly_cents, original_cents, useful_months, start_offset)
-    ("Computer Equipment Depreciation", "7000", "1350", 13_333, 480_000, 36, 0),
-    ("Office Furniture Depreciation", "7000", "1350", 2_500, 150_000, 60, 2),
-    ("Business Insurance", "6400", "1200", 10_000, 120_000, 12, 2),
-    ("Business Insurance (Year 2 Renewal)", "6400", "1200", 10_000, 120_000, 12, 14),
-    ("Software Subscription", "6100", "1210", 2_500, 30_000, 12, 5),
-    ("Cloud Hosting (AWS Savings Plan)", "6200", "1220", 5_000, 60_000, 12, 8),
-  ]
+  schedules = SCHEDULES
 
   client = _get_ledger_client()
 
@@ -1223,10 +1364,17 @@ def main() -> None:
   # Create business events (via HTTP API — exercises typed event vocabulary:
   # invoice_issued, payment_received, bill_received, bill_paid,
   # journal_entry_recorded — with REA duality chains)
-  print(f"\nCreating {len(txns)} business events...")
-  entry_counts = create_business_events(graph_id, txns, element_lookup, agent_lookup)
+  from .data import BANK_FROM, LIVE_MONTHS, add_months, get_demo_start_date
+
+  demo_start = get_demo_start_date()
+  bank_from = add_months(demo_start, BANK_FROM)
+  commit_through = add_months(demo_start, BANK_FROM + LIVE_MONTHS) - timedelta(days=1)
+  history = [t for t in txns if t[0] < bank_from]
+  recent = [t for t in txns if t[0] >= bank_from]
+
+  print(f"\nCreating {len(history)} historical business events...")
+  entry_counts = create_business_events(graph_id, history, element_lookup, agent_lookup)
   print(f"  Events:       {entry_counts['entries']}")
-  print(f"  Line Items:   {entry_counts['line_items']}")
   for event_type, count in entry_counts["events_by_type"].items():
     if count > 0:
       print(f"    {event_type}: {count}")
@@ -1242,7 +1390,26 @@ def main() -> None:
 
   # Initialize fiscal calendar (via HTTP API — exercises initialize op)
   print("\nInitializing fiscal calendar...")
-  close_target = initialize_fiscal_calendar(graph_id)
+  initialize_fiscal_calendar(graph_id)
+
+  # The live months: money arrives as bank lines, is worked, and each month
+  # is closed. The close target's lines stay in the inbox for the AI close.
+  print(f"\nCreating {len(recent)} recent business events (bank lines)...")
+  recent_counts = create_business_events(
+    graph_id,
+    recent,
+    element_lookup,
+    agent_lookup,
+    bank_from=bank_from,
+    commit_through=commit_through,
+  )
+  for event_type, count in recent_counts["events_by_type"].items():
+    if count > 0:
+      print(f"    {event_type}: {count}")
+  print(f"    left in the inbox: {recent_counts['bank_lines_open']}")
+
+  print("\nClosing the live months...")
+  close_target = close_live_months(graph_id)
 
   # Create schedules (HTTP API — exercises create-information-block op)
   print("\nCreating schedules...")

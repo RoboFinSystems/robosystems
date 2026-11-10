@@ -69,9 +69,12 @@ just demo-roboledger --ai             # map the CoA with the MappingOperator (ne
 just demo-roboledger --dry-run        # validate the generated data, write nothing
 ```
 
-You get a graph with 27 accounts, 17 REA agents, ~305 typed business events, 6
+You get a graph with 27 accounts, 17 REA agents, ~250 typed business events, 6
 depreciation/amortization schedules, 4 policy documents, and a filed FY report
-— plus exactly one period queued and ready for the AI close.
+— plus exactly one period queued and ready for the AI close, with about ten
+bank lines waiting in its inbox. The three months before it were worked through
+the inbox and closed in turn, so most of those lines arrive with a suggestion
+learned from the company's own history.
 
 ### Showcase scenarios — Driftline Coffee and Cadence Labs
 

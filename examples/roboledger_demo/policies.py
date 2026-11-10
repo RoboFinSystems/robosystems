@@ -65,6 +65,9 @@ DEPRECIATION_POLICY = """# Depreciation Policy — Cascade Advisory Group LLC
 ## Method
 Straight-line depreciation for all fixed assets. No salvage value unless specified.
 
+## Capitalization Threshold
+A purchase of equipment or furniture is capitalized when a single item costs $1,000 or more and will be used for more than one year. Anything below $1,000 is expensed to Office Supplies (6500) in the month it is bought, whatever it is.
+
 ## Asset Classes
 
 | Asset Class | Useful Life | Monthly Amount |
@@ -84,7 +87,7 @@ Straight-line depreciation for all fixed assets. No salvage value unless specifi
 - Credit: Accumulated Depreciation (1350)
 
 ## Notes
-- Assets are placed in service on the acquisition date
+- Assets are placed in service on the acquisition date; depreciation begins the following month, so the month of purchase carries none
 - Fully depreciated assets remain on the books at $0 net book value until disposed
 - Combined monthly depreciation: $158.33
 """

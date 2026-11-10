@@ -39,6 +39,29 @@ DEMO_MONTHS = 16  # rolling window of synthetic data
 # Mirrors `schedule_owned_from` in examples/_scenario/engine.py.
 SCHEDULE_OWNED_FROM = DEMO_MONTHS - 2
 
+# The closed months, counted back from the close target, whose cash activity
+# arrived as bank lines and was worked through the inbox. Each was closed in
+# turn, so a counterparty's account is learned from lines a close posted.
+LIVE_MONTHS = 3
+
+# First offset whose money in and out lands as bank lines. Before it the
+# history is posted directly, as books brought over from another system are.
+BANK_FROM = DEMO_MONTHS - 2 - LIVE_MONTHS
+
+
+# The recurring closing schedules:
+# (name, debit code, credit code, monthly cents, original cents, life in
+# months, first month's offset). `create_schedules` loads them, and the
+# ledger benchmark reads the same list for the entries a close should draft.
+SCHEDULES = (
+  ("Computer Equipment Depreciation", "7000", "1350", 13_333, 480_000, 36, 0),
+  ("Office Furniture Depreciation", "7000", "1350", 2_500, 150_000, 60, 2),
+  ("Business Insurance", "6400", "1200", 10_000, 120_000, 12, 2),
+  ("Business Insurance (Year 2 Renewal)", "6400", "1200", 10_000, 120_000, 12, 14),
+  ("Software Subscription", "6100", "1210", 2_500, 30_000, 12, 5),
+  ("Cloud Hosting (AWS Savings Plan)", "6200", "1220", 5_000, 60_000, 12, 8),
+)
+
 
 def add_months(d: date, months: int) -> date:
   """Return the first day of the month that is `months` after d."""
@@ -395,7 +418,7 @@ def _monthly_transactions(start: date, offset: int) -> list[tuple]:
   txns.append(
     (
       date(year, m, 1),
-      "bill_payment",
+      "card_purchase",
       "Monthly SaaS tools (Slack, Zoom, etc.)",
       "Slack Technologies",
       [("6100", 450_00, 0), ("1000", 0, 450_00)],
@@ -406,7 +429,7 @@ def _monthly_transactions(start: date, offset: int) -> list[tuple]:
   txns.append(
     (
       date(year, m, 1),
-      "bill_payment",
+      "card_purchase",
       "AWS monthly usage",
       "Amazon Web Services",
       [("6200", 180_00, 0), ("1000", 0, 180_00)],
@@ -417,7 +440,7 @@ def _monthly_transactions(start: date, offset: int) -> list[tuple]:
   txns.append(
     (
       date(year, m, 15),
-      "bill_payment",
+      "card_purchase",
       "Office supplies",
       "Amazon",
       [("6500", supplies, 0), ("1000", 0, supplies)],
@@ -429,7 +452,7 @@ def _monthly_transactions(start: date, offset: int) -> list[tuple]:
     txns.append(
       (
         date(year, m, min(20, end_day)),
-        "bill_payment",
+        "card_purchase",
         "Travel & meals",
         "United Airlines",
         [("6600", travel, 0), ("1000", 0, travel)],
@@ -441,7 +464,7 @@ def _monthly_transactions(start: date, offset: int) -> list[tuple]:
     txns.append(
       (
         date(year, m, min(22, end_day)),
-        "bill_payment",
+        "card_purchase",
         "Professional development",
         "Various",
         [("6300", prof_dev, 0), ("1000", 0, prof_dev)],
