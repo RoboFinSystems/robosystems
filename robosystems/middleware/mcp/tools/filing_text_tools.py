@@ -105,7 +105,7 @@ class DescribeFilingTool(BaseTool):
   def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "describe-filing",
-      "description": """How one filing is laid out: entity, periods, statements and disclosures by role, axes, and the text — its Items (10-K / 10-Q) and largest text blocks with the character `offset` each starts at, which `read-text` pages from. Call it before `read-text` when you want a whole section rather than a match.
+      "description": """How one filing is laid out: entity, periods, statements by role and notes by name, axes, and the text — its Items (10-K / 10-Q) and largest text blocks with the character `offset` each starts at, which `read-text` pages from. Call it before `read-text` when you want a whole section rather than a match.
 
 **WHEN TO USE:**
 - Before reading a whole Item (MD&A, Risk Factors) with `read-text`: its offset is here
@@ -118,7 +118,7 @@ class DescribeFilingTool(BaseTool):
 
 **RETURNS:**
 - `profile.text` — "primary document" when the filing's own document is read, "tagged text blocks" when its folder holds none
-- `filing` (form, dates, `items` on an 8-K), `entity`, `counts`, `periods`, `statements`, `disclosures`, `axes`
+- `filing` (form, dates, `items` on an 8-K), `entity`, `counts`, `periods`, `statements`, `disclosures` (the notes by name; `disclosures` with one as `topic` lists its blocks), `axes`
 - `sections.items` — each Item's `id`, `label`, `offset`, `chars`; `sections.text_blocks` — the largest blocks
 - `resolved_report.links` on SEC — `viewer` opens the filing in the xbrlkit viewer (give the user that URL to show it), `holon`, `tavi`, `as_filed`, an 8-K's `exhibits`, `edgar`
 

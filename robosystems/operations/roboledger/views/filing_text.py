@@ -766,8 +766,9 @@ def _hosted_guidance(out: dict[str, Any]) -> dict[str, Any]:
       "`periods` (start..end for a flow, one date for a balance)."
     )
     out["networks_note"] = (
-      "`information-block` reads one of these whole: its `id` is the `block`; "
-      "`disclosures` groups them into families"
+      "`information-block` reads a statement whole: its `id` is the `block`; "
+      "`disclosures` with one of the note names as `topic` lists that note's "
+      "blocks, each with the `id` to read"
     )
     out["next"] = [
       "`disclosures` for the map of this report's statements and notes, then "

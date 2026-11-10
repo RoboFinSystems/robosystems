@@ -113,7 +113,7 @@ The tool names below are the exact `name` strings for `tools/call`, grouped by f
 
 | Tool | Purpose | Served on |
 | --- | --- | --- |
-| `describe-filing` | One filing's layout: periods, statements and disclosures by role, and its Items with the offsets `read-text` pages from | Shared repositories (`sec`) |
+| `describe-filing` | One filing's layout: periods, statements by role and notes by name, and its Items with the offsets `read-text` pages from | Shared repositories (`sec`) |
 | `search-text` | Words found inside one filing's whole text, in document order — the filing's own document from any processed year, or an 8-K earnings release with its exhibits | Shared repositories (`sec`) |
 | `read-text` | One filing's whole text, a window at a time, from an offset | Shared repositories (`sec`) |
 | `resolve-element` | A concept in plain words → the canonical concept and the element qnames filers use for it | A shared repository whose manifest declares `has_semantic_enrichment` — today `sec` only |

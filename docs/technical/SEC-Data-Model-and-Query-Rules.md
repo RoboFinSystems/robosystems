@@ -33,7 +33,7 @@ Seven operations answer the common questions without Cypher. Each is an MCP tool
 | **`build-fact-grid`** | Chosen concepts across companies, periods and dimensions, deduplicated | The graph |
 | **`disclosures`** | The map of a filing's sections: one row per note or statement | The filing held whole |
 | **`information-block`** | One section read whole: its rows, breakdowns by its own axes, calculation footing, and text | The filing held whole |
-| **`describe-filing`** | How one filing is laid out: periods, statements and disclosures by role, and its Items with their character offsets | The filing's text |
+| **`describe-filing`** | How one filing is laid out: periods, statements by role and notes by name, and its Items with their character offsets | The filing's text |
 | **`search-text`** | Every place one filing's whole text says something, in document order, with the section each match falls in | The filing's text |
 | **`read-text`** | One window of a filing's whole text from an offset, with `next_offset` while more follows | The filing's text |
 
