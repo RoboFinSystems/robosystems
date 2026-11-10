@@ -8,9 +8,11 @@ a live DB or real Strawberry schema.
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from graphql import build_schema
 
 import robosystems.middleware.mcp.tools.graphql_tool as gt
 
@@ -69,23 +71,62 @@ class TestGraphqlSchemaTool:
     s.__str__.return_value = sdl
     return s
 
+  def _real_schema(self):
+    """A stand-in with the graphql-core schema where Strawberry keeps it."""
+    core = build_schema(
+      """
+      type Query {
+        "Posted balances."
+        trialBalance(startDate: String, endDate: String): TrialBalance
+        hello: String!
+      }
+      "Totals plus one row per account."
+      type TrialBalance { rows: [Row!]!, totalDebits: Float! }
+      type Row { accountCode: String! }
+      """
+    )
+    return SimpleNamespace(_schema=core)
+
   def test_tool_definition(self, mock_client):
     tool = self._make_tool(mock_client)
     defn = tool.get_tool_definition()
     assert defn["name"] == "get-graphql-schema"
-    assert "format" in defn["inputSchema"]["properties"]
-    assert "sdl" in defn["inputSchema"]["properties"]["format"]["enum"]
-    assert "introspection" in defn["inputSchema"]["properties"]["format"]["enum"]
+    properties = defn["inputSchema"]["properties"]
+    assert properties["format"]["enum"] == ["index", "sdl", "introspection"]
+    assert properties["types"]["items"] == {"type": "string"}
 
   @pytest.mark.asyncio
-  async def test_returns_sdl_by_default(self, mock_client):
+  async def test_returns_the_index_by_default(self, mock_client):
     tool = self._make_tool(mock_client)
-    fake = self._fake_schema()
 
-    with patch(f"{MODULE}._ensure_gql_schema", return_value=fake):
+    with patch(f"{MODULE}._ensure_gql_schema", return_value=self._real_schema()):
       result = await tool.execute({})
 
-    assert result["schema"] == "type Query { hello: String }"
+    lines = result["schema"].splitlines()
+    assert lines[0].startswith("# Query root fields")
+    assert lines[1:] == [
+      "trialBalance(startDate: String, endDate: String): TrialBalance",
+      "hello: String!",
+    ]
+    assert "Posted balances" not in result["schema"]
+
+  @pytest.mark.asyncio
+  async def test_named_types_come_back_in_full(self, mock_client):
+    tool = self._make_tool(mock_client)
+
+    with patch(f"{MODULE}._ensure_gql_schema", return_value=self._real_schema()):
+      result = await tool.execute({"types": ["TrialBalance", "Missing", "__Schema"]})
+
+    assert "Totals plus one row per account." in result["schema"]
+    assert "totalDebits: Float!" in result["schema"]
+    assert "type Row" not in result["schema"]
+    assert result["unknown_types"] == ["Missing", "__Schema"]
+
+  @pytest.mark.asyncio
+  @pytest.mark.parametrize("types", [[], "TrialBalance", [1], ["T"] * 26])
+  async def test_bad_types_argument_is_refused(self, mock_client, types):
+    result = await self._make_tool(mock_client).execute({"types": types})
+    assert result["error"] == "invalid_argument"
 
   @pytest.mark.asyncio
   async def test_returns_sdl_when_format_explicit(self, mock_client):
@@ -154,8 +195,8 @@ class TestGraphqlSchemaTool:
     fake = self._fake_schema()
 
     with patch(f"{MODULE}._ensure_gql_schema", return_value=fake) as mock_get:
-      await tool.execute({})
-      await tool.execute({})
+      await tool.execute({"format": "sdl"})
+      await tool.execute({"format": "sdl"})
 
     # _ensure_gql_schema (and thus str(schema)) called only once
     assert mock_get.call_count == 1

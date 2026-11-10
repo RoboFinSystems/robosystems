@@ -9,7 +9,7 @@ reconciliation worklist is enumerable.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from unittest.mock import MagicMock
 
 from robosystems.models.extensions.roboledger.event import Event
@@ -94,3 +94,32 @@ class TestListClassFilter:
     session = self._session()
     list_event_blocks(session)
     assert "events.event_class =" not in _captured_list_stmt(session)
+
+
+class TestListDateRange:
+  def _session(self) -> MagicMock:
+    session = MagicMock()
+    session.execute.return_value.scalars.return_value.all.return_value = []
+    return session
+
+  def _bounds(self, session: MagicMock) -> list[datetime]:
+    (stmt,) = session.execute.call_args.args
+    params = stmt.compile().params
+    return sorted(v for k, v in params.items() if k.startswith("occurred_at"))
+
+  def test_both_days_are_inclusive(self) -> None:
+    session = self._session()
+    list_event_blocks(
+      session, occurred_from=date(2026, 10, 1), occurred_to=date(2026, 10, 31)
+    )
+    stmt = _captured_list_stmt(session)
+    assert "events.occurred_at >=" in stmt
+    assert "events.occurred_at <" in stmt
+    # The upper bound is the start of the next day, so the 31st is whole.
+    assert self._bounds(session) == [datetime(2026, 10, 1), datetime(2026, 11, 1)]
+
+  def test_omitted_range_leaves_it_out(self) -> None:
+    session = self._session()
+    list_event_blocks(session)
+    assert "events.occurred_at >=" not in _captured_list_stmt(session)
+    assert "events.occurred_at <" not in _captured_list_stmt(session)
