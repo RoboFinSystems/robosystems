@@ -108,9 +108,9 @@ def test_balance_diff_folds_a_created_account_into_its_trait():
   before = Counter({"1000": 100, "6500": 0})
   after = Counter({"1000": 2500100, "2500": -2500000})
   expected = expected_delta(TASKS["loan"])
-  assert balance_diff(before, after, expected, TRAITS) == {}
+  assert balance_diff(before, after, expected, TRAITS, BASELINE | {"1000"}) == {}
   to_revenue = Counter({"1000": 2500100, "6500": -2500000})
-  assert balance_diff(before, to_revenue, expected, TRAITS) == {
+  assert balance_diff(before, to_revenue, expected, TRAITS, BASELINE | {"1000"}) == {
     "6500": -2500000,
     "NEW:liability": 2500000,
   }
@@ -157,3 +157,10 @@ def test_long_prompts_take_the_long_rate():
   assert short == pytest.approx(0.005)
   assert long == pytest.approx(0.0075)
   assert turn_cost("some-unpriced-model", _usage(input_tokens=1)) is None
+
+
+def test_an_existing_account_with_no_opening_balance_is_not_new():
+  before = Counter({"1000": 100})
+  after = Counter({"1000": 100, "6100": 2500, "2000": -2500})
+  expected = Counter({"6100": 2500, "2000": -2500})
+  assert balance_diff(before, after, expected, TRAITS, BASELINE | {"1000"}) == {}

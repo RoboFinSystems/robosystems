@@ -81,6 +81,7 @@ def balance_diff(
   after: Counter[str],
   expected: Counter[str],
   trait_by_code: dict[str, str],
+  baseline_codes: set[str],
 ) -> dict[str, int]:
   """Actual movement minus expected, per account; empty when the books match."""
   actual: Counter[str] = Counter()
@@ -88,7 +89,9 @@ def balance_diff(
     moved = after[code] - before[code]
     if not moved:
       continue
-    key = code if code in before else NEW + trait_by_code.get(code, "unknown")
+    # An account with no balance is absent from `before`, so the chart decides.
+    is_new = code not in baseline_codes
+    key = NEW + trait_by_code.get(code, "unknown") if is_new else code
     actual[key] += moved
   diff = {k: actual[k] - expected[k] for k in set(actual) | set(expected)}
   return {k: v for k, v in sorted(diff.items()) if v}

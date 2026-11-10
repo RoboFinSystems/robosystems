@@ -71,7 +71,9 @@ def _score(
   ]
   closed_through = company.mcp.read("get-fiscal-calendar", {})["closed_through"]
   period_closed = closed_through >= company.period
-  diff = balance_diff(before, after, expected_delta(task), company.trait_by_code)
+  diff = balance_diff(
+    before, after, expected_delta(task), company.trait_by_code, baseline_codes
+  )
   return Score(
     outcome(verdicts, task, period_closed, diff, model_finished),
     verdicts,
