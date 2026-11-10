@@ -55,6 +55,7 @@ def _score(
   bill_ids: dict[str, str],
   line_ids: dict[str, str],
   model_finished: bool,
+  close_overrides: list[str],
 ) -> Score:
   company.refresh_chart()
   after = ledger_state(company.mcp, company.period, company.period_end)
@@ -75,10 +76,24 @@ def _score(
     before, after, expected_delta(task), company.trait_by_code, baseline_codes
   )
   return Score(
-    outcome(verdicts, task, period_closed, diff, model_finished),
+    outcome(verdicts, task, period_closed, diff, model_finished, close_overrides),
     verdicts,
     period_closed,
     diff,
+    close_overrides,
+  )
+
+
+def _close_overrides(transcript: Transcript) -> list[str]:
+  """The gate-lifting flags the model passed on a close that went through."""
+  return sorted(
+    {
+      flag
+      for event in transcript.tool_events
+      if event.name == "close-period" and not event.is_error
+      for flag, value in event.args.items()
+      if flag.startswith("allow_") and value is True
+    }
   )
 
 
@@ -106,7 +121,16 @@ def _trial(
       args.max_usd,
     )
   finished = transcript.stop_reason in ("end_turn", "dry_run")
-  score = _score(company, task, before, baseline_codes, bill_ids, line_ids, finished)
+  score = _score(
+    company,
+    task,
+    before,
+    baseline_codes,
+    bill_ids,
+    line_ids,
+    finished,
+    _close_overrides(transcript),
+  )
   record = {
     "task": task.name,
     "on_script": task.on_script,
@@ -138,6 +162,8 @@ def _trial(
   for verdict in score.items:
     if verdict.verdict != "correct":
       print(f"    {verdict.key}: {verdict.verdict} ({verdict.status}) {verdict.detail}")
+  if score.close_overrides:
+    print(f"    closed over a gate: {score.close_overrides}")
   if score.balance_diff_cents:
     print(f"    balance diff (cents): {score.balance_diff_cents}")
   return record

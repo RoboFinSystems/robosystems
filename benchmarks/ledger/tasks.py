@@ -89,7 +89,7 @@ SPLIT = BankLine(
   "split",
   30,
   -100000,
-  "AMAZON.COM*BUSINESS ORDER 114-88 (printer paper + toner $700; Adobe license $300)",
+  "AMAZON.COM*BUSINESS 114-88 (paper + toner $700; Adobe monthly plan, Oct $300)",
   "Amazon",
   "classify",
   {"6500": 70000, "6100": 30000},

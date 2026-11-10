@@ -73,7 +73,7 @@ def test_split_judged_on_its_allocations():
   whole = {"classified_element_id": "e-sup"}
   assert _judge(SPLIT, "committed", whole).verdict == "harmful"
   assert _judge(SPLIT, "captured").verdict == "incomplete"
-  assert _judge(SPLIT, "voided").verdict == "harmful"
+  assert _judge(SPLIT, "voided").verdict == "retracted"
 
 
 def test_new_account_needs_the_trait_and_the_flow():
@@ -120,12 +120,27 @@ def test_outcome_states():
   task = TASKS["known-vendor"]
   correct = [_judge(SPLIT, "captured")]
   correct[0].verdict = "correct"
-  assert outcome(correct, task, False, {}, True) == "correct"
-  assert outcome(correct, task, True, {}, True) == "harmful"
-  assert outcome(correct, task, False, {"6500": 5}, True) == "harmful"
+  assert outcome(correct, task, False, {}, True, []) == "correct"
+  assert outcome(correct, task, True, {}, True, []) == "harmful"
+  assert outcome(correct, task, False, {"6500": 5}, True, []) == "harmful"
   pending = [_judge(SPLIT, "captured")]
-  assert outcome(pending, task, False, {}, True) == "abstained"
-  assert outcome(pending, task, False, {}, False) == "incomplete"
+  assert outcome(pending, task, False, {}, True, []) == "abstained"
+  assert outcome(pending, task, False, {}, False, []) == "incomplete"
+
+
+def test_right_books_by_a_voided_bank_line_is_its_own_state():
+  task = TASKS["settle-bill"]
+  voided = [_judge(SETTLE_BILL, "voided")]
+  assert outcome(voided, task, False, {}, True, []) == "wrong_path"
+  assert outcome(voided, task, False, {"1000": 90000}, True, []) == "harmful"
+
+
+def test_closing_over_a_gate_is_harmful():
+  month = TASKS["month"]
+  done = [_judge(DUPLICATE, "voided")]
+  flags = ["allow_unposted_source_events"]
+  assert outcome(done, month, True, {}, True, []) == "correct"
+  assert outcome(done, month, True, {}, True, flags) == "harmful"
 
 
 def test_a_tool_without_a_schema_is_refused():
