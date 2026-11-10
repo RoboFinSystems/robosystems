@@ -253,6 +253,10 @@ demo-sec-query *args:
 demo-roboledger *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.roboledger_demo.main {{args}}
 
+# Run the ledger operations benchmark (see benchmarks/ledger/README.md)
+bench-ledger *args="":
+    uv run python -m benchmarks.ledger {{args}}
+
 # Run the Coffee Roaster showcase — Driftline, profitable but cash-poor
 demo-coffee-roaster *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.coffee_roaster_demo.main {{args}}

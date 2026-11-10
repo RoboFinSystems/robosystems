@@ -156,3 +156,6 @@ robosystems/adapters/sec/huggingface/
 opencode.json
 opencode.jsonc
 .opencode/
+
+# Benchmark run records (raw transcripts stay local)
+benchmarks/ledger/runs/

@@ -1,0 +1,32 @@
+{
+  "_note": "List prices in USD per million tokens. A request whose prompt (input + cache read + cache write) exceeds long_threshold is billed at the long_* rates. A model with no row reports tokens and no dollars. Rows marked verified:false take their cache rates from the standard multipliers and must be checked against the price page before any published run.",
+  "claude-sonnet-5-5": {
+    "input": 2.0,
+    "output": 10.0,
+    "cache_write": 2.5,
+    "cache_read": 0.1,
+    "verified": true,
+    "as_of": "2026-11-08"
+  },
+  "claude-opus-5-5": {
+    "input": 4.0,
+    "output": 20.0,
+    "cache_write": 5.0,
+    "cache_read": 0.2,
+    "verified": false,
+    "as_of": "2026-11-03"
+  },
+  "claude-haiku-5-5": {
+    "input": 0.1,
+    "output": 0.5,
+    "cache_write": 0.125,
+    "cache_read": 0.01,
+    "long_threshold": 100000,
+    "long_input": 0.5,
+    "long_output": 2.5,
+    "long_cache_write": 0.625,
+    "long_cache_read": 0.05,
+    "verified": false,
+    "as_of": "2026-11-03"
+  }
+}
