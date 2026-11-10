@@ -679,6 +679,9 @@ class TestDescribeNamesThisServersTools:
     assert "`disclosures`" in out["next"][0]
     assert "`information-block`" in out["next"][0]
     assert "`information-block`" in out["networks_note"]
+    # The notes come back by name, so the note has to say how a name becomes a block.
+    assert "`topic`" in out["networks_note"]
+    assert all(isinstance(name, str) for name in out["disclosures"])
     assert out["periods_note"].startswith(
       f"{len(out['periods'])} of {out['counts']['periods']} periods"
     )

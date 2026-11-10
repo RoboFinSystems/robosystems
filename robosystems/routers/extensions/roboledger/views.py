@@ -552,8 +552,8 @@ async def _resolve_filing(graph_id: str, body: FilingSelector) -> FilingRef:
   operation_id="describeFiling",
   summary="Describe Filing",
   description=(
-    "How one filing is laid out: entity, periods, statements and disclosures "
-    "by role, axes, and its text — the Items of a 10-K or 10-Q and its largest "
+    "How one filing is laid out: entity, periods, statements by role and "
+    "notes by name, axes, and its text — the Items of a 10-K or 10-Q and its largest "
     "text blocks, each with the character offset `read-text` pages from. On "
     "the SEC shared repository the filing is read from its public folder — "
     "its own document, from any processed year — and a `ticker` picks it: "
