@@ -8,11 +8,13 @@ from datetime import UTC, datetime
 import pytest
 
 from robosystems.adapters.bank_feed.load import refresh_hints
+from robosystems.models.api.event_block import CreateEventBlockRequest
 from robosystems.models.api.extensions.agent import (
   LearnClassificationDefaultsRequest,
   UpdateAgentRequest,
 )
 from robosystems.models.extensions.roboledger import Agent, Event
+from robosystems.operations.event_block.commands import create_event_block_in_session
 from robosystems.operations.roboledger.classification import (
   apply_ladder,
   learn_from_commit,
@@ -390,3 +392,40 @@ def test_history_seeds_each_counterparty_with_its_most_used_account(feed):
     feed.session, LearnClassificationDefaultsRequest(), "usr_1"
   )
   assert (again.agents_learned, again.agents_kept) == (0, 1)
+
+
+def _captured_through_the_api(t, **overrides) -> Event:
+  body = CreateEventBlockRequest(
+    **{
+      "event_type": "bank_transaction",
+      "event_category": "treasury",
+      "source": "manual",
+      "occurred_at": datetime(2026, 10, 9, tzinfo=UTC),
+      "amount": -4_500,
+      "agent_id": t.agent.id,
+      "resource_type": "money",
+      "resource_element_id": t.cash,
+      **overrides,
+    }
+  )
+  event, _ = create_event_block_in_session(t.session, body, "usr_1", graph_id="kg_test")
+  return event
+
+
+def test_a_line_captured_through_the_api_gets_the_learned_suggestion(feed):
+  _commit(feed, _line(feed, status="classified"), classified_element_id=feed.payroll)
+
+  event = _captured_through_the_api(feed)
+
+  assert event.status == "captured"
+  assert event.metadata_["suggested_element_id"] == feed.payroll
+  assert event.metadata_["suggestion_source"] == "agent_default"
+
+
+def test_a_line_with_no_counterparty_or_no_default_is_left_as_sent(feed):
+  unknown = _captured_through_the_api(feed, agent_id=None, metadata={"note": "x"})
+  assert unknown.metadata_ == {"note": "x"}
+
+  no_default = _captured_through_the_api(feed)
+  assert "suggested_element_id" not in no_default.metadata_
+  assert "suggestion_source" not in no_default.metadata_

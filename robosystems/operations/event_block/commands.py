@@ -619,6 +619,7 @@ def create_event_block_in_session(
     envelope = _to_envelope(event, body.dimension_ids)
     return event, envelope
 
+  body = _with_learned_suggestion(session, body, entity_id)
   event = _build_event_row(body, created_by, "captured", entity_id)
   session.add(event)
   _flush_new_event(session, event, body)
@@ -627,6 +628,22 @@ def create_event_block_in_session(
 
   envelope = _to_envelope(event, body.dimension_ids)
   return event, envelope
+
+
+def _with_learned_suggestion(
+  session: Session, body: CreateEventBlockRequest, entity_id: str
+) -> CreateEventBlockRequest:
+  """A captured bank line that names its counterparty gets the suggestion the
+  counterparty has learned, as a line from a bank feed does at capture."""
+  from robosystems.operations.roboledger.classification import (
+    LEARNED_EVENT_TYPES,
+    apply_ladder,
+  )
+
+  if body.event_type not in LEARNED_EVENT_TYPES or not body.agent_id:
+    return body
+  metadata = apply_ladder(session, dict(body.metadata or {}), body.agent_id, entity_id)
+  return body.model_copy(update={"metadata": metadata})
 
 
 def _tag_event(session: Session, event: Event, dimension_ids: list[str]) -> None:
