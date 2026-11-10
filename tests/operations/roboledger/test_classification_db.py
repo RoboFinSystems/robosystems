@@ -13,8 +13,14 @@ from robosystems.models.api.extensions.agent import (
   LearnClassificationDefaultsRequest,
   UpdateAgentRequest,
 )
+from robosystems.models.extensions.element import Element
 from robosystems.models.extensions.roboledger import Agent, Event
-from robosystems.operations.event_block.commands import create_event_block_in_session
+from robosystems.operations.event_block.commands import (
+  _resuggest_after_obligation,
+  _resuggest_after_settlement,
+  _settle_the_suggested_item,
+  create_event_block_in_session,
+)
 from robosystems.operations.roboledger.classification import (
   apply_ladder,
   learn_from_commit,
@@ -429,3 +435,131 @@ def test_a_line_with_no_counterparty_or_no_default_is_left_as_sent(feed):
   no_default = _captured_through_the_api(feed)
   assert "suggested_element_id" not in no_default.metadata_
   assert "suggestion_source" not in no_default.metadata_
+
+
+@pytest.fixture()
+def payable(feed):
+  """The feed's books with a payables control account."""
+  feed.payables = entity_account(feed.session, feed.parent.id, "Accounts Payable")
+  feed.session.get(Element, feed.payables).metadata_ = {
+    "account_type": "Accounts Payable"
+  }
+  feed.session.commit()
+  return feed
+
+
+def _open_bill(t, *, amount=4_500, day=5) -> Event:
+  bill = Event(
+    entity_id=t.parent.id,
+    event_type="bill_received",
+    event_category="purchase",
+    event_class="economic",
+    agent_id=t.agent.id,
+    occurred_at=datetime(2026, 10, day, tzinfo=UTC),
+    effective_at=datetime(2026, 10, day, tzinfo=UTC),
+    status="fulfilled",
+    source="manual",
+    amount=amount,
+    description="October subscription",
+    created_by="test",
+  )
+  t.session.add(bill)
+  t.session.flush()
+  return bill
+
+
+def test_a_line_that_pays_an_open_bill_exactly_is_suggested_as_its_settlement(payable):
+  _commit(
+    payable, _line(payable, status="classified"), classified_element_id=payable.payroll
+  )
+  bill = _open_bill(payable)
+
+  event = _captured_through_the_api(payable)
+
+  assert event.metadata_["suggestion_source"] == "open_item"
+  assert event.metadata_["suggested_element_id"] == payable.payables
+  assert event.metadata_["suggested_discharges_event_id"] == bill.id
+  assert "open bill of $45.00 dated 2026-10-05" in event.metadata_["suggestion_basis"]
+
+
+def test_another_amount_falls_back_to_the_learned_default(payable):
+  _commit(
+    payable, _line(payable, status="classified"), classified_element_id=payable.payroll
+  )
+  _open_bill(payable, amount=9_900)
+
+  event = _captured_through_the_api(payable)
+
+  assert event.metadata_["suggestion_source"] == "agent_default"
+  assert event.metadata_["suggested_element_id"] == payable.payroll
+  assert "suggested_discharges_event_id" not in event.metadata_
+
+
+def test_a_bill_dated_after_the_line_is_not_what_it_pays(payable):
+  _open_bill(payable, day=20)
+
+  event = _captured_through_the_api(payable)
+
+  assert "suggestion_source" not in event.metadata_
+
+
+def test_taking_the_suggestion_settles_the_bill(payable):
+  bill = _open_bill(payable)
+  event = _captured_through_the_api(payable)
+
+  _settle_the_suggested_item(payable.session, event)
+
+  assert event.discharges_event_id == bill.id
+
+
+def test_a_bill_entered_later_resuggests_the_waiting_line(payable):
+  waiting = _captured_through_the_api(payable)
+  assert "suggestion_source" not in waiting.metadata_
+
+  bill = _open_bill(payable)
+  _resuggest_after_obligation(payable.session, bill)
+
+  payable.session.refresh(waiting)
+  assert waiting.metadata_["suggestion_source"] == "open_item"
+  assert waiting.metadata_["suggested_discharges_event_id"] == bill.id
+
+
+def test_a_settling_line_teaches_nothing(payable):
+  bill = _open_bill(payable)
+  line = _line(payable, status="classified")
+  line.discharges_event_id = bill.id
+
+  _commit(payable, line, classified_element_id=payable.payables)
+
+  assert _default(payable) is None
+
+
+def test_always_ask_keeps_the_open_item_out(payable):
+  _commit(
+    payable, _line(payable, status="classified"), classified_element_id=payable.payroll
+  )
+  update_agent(
+    payable.session,
+    UpdateAgentRequest(agent_id=payable.agent.id, classification_mode="always_ask"),
+    "usr_1",
+  )
+  _open_bill(payable)
+
+  event = _captured_through_the_api(payable)
+
+  assert event.metadata_.get("suggestion_source") != "open_item"
+
+
+def test_a_bill_one_line_has_settled_is_no_longer_offered_to_the_next(payable):
+  bill = _open_bill(payable)
+  first = _captured_through_the_api(payable)
+  second = _captured_through_the_api(payable)
+  assert second.metadata_["suggested_discharges_event_id"] == bill.id
+
+  _settle_the_suggested_item(payable.session, first)
+  first.status = "committed"
+  _resuggest_after_settlement(payable.session, first)
+
+  payable.session.refresh(second)
+  assert second.metadata_.get("suggestion_source") != "open_item"
+  assert "suggested_discharges_event_id" not in second.metadata_

@@ -592,6 +592,7 @@ def create_event_block_in_session(
       _acknowledge_settled_items(
         session, event, typed_metadata, created_by, graph_id=graph_id
       )
+      _resuggest_after_obligation(session, event)
 
       envelope = _to_envelope(event, body.dimension_ids)
       return event, envelope
@@ -615,6 +616,7 @@ def create_event_block_in_session(
 
     apply_handler(session, event, handler, created_by=created_by)
     inherit_event_dimensions(session, str(event.id))
+    _resuggest_after_obligation(session, event)
 
     envelope = _to_envelope(event, body.dimension_ids)
     return event, envelope
@@ -630,11 +632,58 @@ def create_event_block_in_session(
   return event, envelope
 
 
+def _settle_the_suggested_item(session: Session, event: Event) -> None:
+  """Taking a suggestion that names an open item settles that item, unless
+  the line already settles something."""
+  from robosystems.operations.roboledger.classification import (
+    SOURCE_OPEN_ITEM,
+    SUGGESTED_SETTLES,
+    SUGGESTION_SOURCE,
+  )
+
+  metadata = event.metadata_ or {}
+  obligation_id = metadata.get(SUGGESTED_SETTLES)
+  if (
+    obligation_id
+    and metadata.get(SUGGESTION_SOURCE) == SOURCE_OPEN_ITEM
+    and not event.discharges_event_id
+  ):
+    discharges.set_settlement_link(session, event, str(obligation_id))
+
+
+def _resuggest_after_settlement(session: Session, event: Event) -> None:
+  """A committed line that settled an item has used it up, so the
+  counterparty's other waiting lines must not go on being offered it."""
+  from robosystems.operations.roboledger.classification import (
+    LEARNED_EVENT_TYPES,
+    resuggest_open_lines,
+  )
+
+  if (
+    event.event_type in LEARNED_EVENT_TYPES
+    and event.agent_id
+    and event.discharges_event_id
+  ):
+    session.flush()
+    resuggest_open_lines(session, str(event.agent_id), str(event.entity_id))
+
+
+def _resuggest_after_obligation(session: Session, event: Event) -> None:
+  """A new bill or invoice may be what a waiting bank line pays, so the
+  counterparty's open lines get their suggestion worked out again."""
+  from robosystems.operations.roboledger.classification import resuggest_open_lines
+
+  if event.event_type in discharges.OBLIGATION_EVENT_TYPES and event.agent_id:
+    session.flush()
+    resuggest_open_lines(session, str(event.agent_id), str(event.entity_id))
+
+
 def _with_learned_suggestion(
   session: Session, body: CreateEventBlockRequest, entity_id: str
 ) -> CreateEventBlockRequest:
-  """A captured bank line that names its counterparty gets the suggestion the
-  counterparty has learned, as a line from a bank feed does at capture."""
+  """A captured bank line that names its counterparty gets the suggestion a
+  line from a bank feed gets at capture: an open item it pays exactly, else
+  the account the counterparty has learned."""
   from robosystems.operations.roboledger.classification import (
     LEARNED_EVENT_TYPES,
     apply_ladder,
@@ -642,7 +691,14 @@ def _with_learned_suggestion(
 
   if body.event_type not in LEARNED_EVENT_TYPES or not body.agent_id:
     return body
-  metadata = apply_ladder(session, dict(body.metadata or {}), body.agent_id, entity_id)
+  metadata = apply_ladder(
+    session,
+    dict(body.metadata or {}),
+    body.agent_id,
+    entity_id,
+    amount=body.amount,
+    occurred_at=body.occurred_at,
+  )
   return body.model_copy(update={"metadata": metadata})
 
 
@@ -791,6 +847,7 @@ def _refuse_system_metadata(patch: dict | None) -> None:
     "suggestion_outcome",
     "feed_suggested_element_id",
     "feed_suggested_account_name",
+    "suggested_discharges_event_id",
   }
   reserved = sorted(
     key for key in (patch or {}) if key in system_keys or key.startswith("dispatch_")
@@ -1048,6 +1105,13 @@ def update_event_block(
   if body.discharge_allocations is not None:
     discharges.allocate(session, event, body.discharge_allocations, created_by)
 
+  if (
+    body.discharges_event_id is None
+    and body.discharge_allocations is None
+    and (body.metadata_patch or {}).get("accept_suggestion") is True
+  ):
+    _settle_the_suggested_item(session, event)
+
   if body.document_id is not None:
     # Checked before the lock; an empty string detaches the document.
     event.document_id = body.document_id or None
@@ -1104,6 +1168,7 @@ def update_event_block(
     from robosystems.operations.roboledger.classification import learn_from_commit
 
     learn_from_commit(session, event, created_by)
+    _resuggest_after_settlement(session, event)
 
   # Before commit, which expires `event`.
   envelope = _to_envelope(event, _load_dimension_ids(session, event.id))

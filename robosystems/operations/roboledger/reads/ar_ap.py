@@ -15,6 +15,7 @@ from __future__ import annotations
 import calendar
 from collections import defaultdict
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Literal
 
@@ -661,6 +662,50 @@ def get_aged_balances(
 
 
 # ---- Discharge candidates ---------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SettlementMatch:
+  """An open item a bank line pays exactly, and the account that clears it."""
+
+  item: OpenItem
+  account_id: str
+  account_name: str
+  kind: OpenItemKind
+
+
+def find_settlement_match(
+  session: Session,
+  *,
+  entity_id: str,
+  agent_id: str,
+  amount: int,
+  as_of: date,
+  excluding_payment: str | None = None,
+) -> SettlementMatch | None:
+  """The counterparty's open item whose open amount is exactly the line's:
+  a bill for money out, an invoice for money in. The oldest when several
+  match. None without exactly one control account to clear it through."""
+  kind: OpenItemKind = "payables" if amount < 0 else "receivables"
+  exact = [
+    item
+    for item in _open_items(
+      session,
+      kind,
+      as_of=as_of,
+      entity_ids=[entity_id],
+      agent_id=agent_id,
+      excluding_payment=excluding_payment,
+    )
+    if item.open_cents == abs(amount)
+  ]
+  if not exact:
+    return None
+  accounts = _control_accounts(session, kind, entity_id)
+  if len(accounts) != 1:
+    return None
+  item = min(exact, key=lambda i: (i.due_date, i.occurred_on))
+  return SettlementMatch(item, str(accounts[0].id), str(accounts[0].name), kind)
 
 
 def list_discharge_candidates(

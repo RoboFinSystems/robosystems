@@ -9,15 +9,18 @@ its own chart, so one entity's lines never teach another's default. A default
 from before the entity key (``metadata.classification``) belongs to the entity
 whose chart holds its account. The suggestion ladder puts
 a learned default above the feed's own category hint, which is kept beside it
-(``feed_suggested_*``) so it returns when the default goes. Only a committed
-line teaches, and a default never posts by itself: the inbox is the gate.
+(``feed_suggested_*``) so it returns when the default goes. Above both sits an
+open item the line pays exactly: the counterparty's bill or invoice for the
+same amount, suggested through its control account with the item to settle.
+Only a committed line teaches, and a default never posts by itself: the inbox
+is the gate.
 """
 
 from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any, Literal
 
 from sqlalchemy import select, text
@@ -41,6 +44,7 @@ ClassificationMode = Literal["suggest", "always_ask"]
 SUGGEST: ClassificationMode = "suggest"
 ALWAYS_ASK: ClassificationMode = "always_ask"
 
+SOURCE_OPEN_ITEM = "open_item"
 SOURCE_AGENT_DEFAULT = "agent_default"
 SOURCE_TIER0 = "tier0"
 
@@ -51,6 +55,8 @@ FEED_SUGGESTED_ELEMENT_ID = "feed_suggested_element_id"
 FEED_SUGGESTED_ACCOUNT_NAME = "feed_suggested_account_name"
 SUGGESTION_SOURCE = "suggestion_source"
 SUGGESTION_BASIS = "suggestion_basis"
+# The open item the suggestion would settle; taking the suggestion links it.
+SUGGESTED_SETTLES = "suggested_discharges_event_id"
 LADDER_KEYS = (
   SUGGESTED_ELEMENT_ID,
   SUGGESTED_ACCOUNT_NAME,
@@ -58,6 +64,7 @@ LADDER_KEYS = (
   FEED_SUGGESTED_ACCOUNT_NAME,
   SUGGESTION_SOURCE,
   SUGGESTION_BASIS,
+  SUGGESTED_SETTLES,
 )
 # Set on a commit: whether the suggestion was taken.
 SUGGESTION_OUTCOME = "suggestion_outcome"
@@ -193,22 +200,53 @@ def _basis(agent: Agent, element: Element, default: AgentDefault) -> str:
   )
 
 
+def _as_day(value: datetime | date | str | None) -> date | None:
+  """A feed can hand over a placeholder for a date it does not have; a line
+  with no usable date is simply not matched to an open item."""
+  if value is None:
+    return None
+  if isinstance(value, str):
+    try:
+      value = datetime.fromisoformat(value)
+    except ValueError:
+      return None
+  return value.date() if isinstance(value, datetime) else value
+
+
+def _settlement_basis(agent: Agent, match: Any) -> str:
+  what = "bill" if match.kind == "payables" else "invoice"
+  item = match.item
+  about = f" ({item.description})" if item.description else ""
+  return (
+    f"Matches {agent.name}'s open {what} of ${item.open_cents / 100:,.2f} dated "
+    f"{item.occurred_on.isoformat()}{about}. Taking the suggestion settles it."
+  )
+
+
 def apply_ladder(
   session: Session,
   metadata: dict[str, Any],
   agent_id: str | None,
   entity_id: str | None = None,
+  *,
+  amount: int | None = None,
+  occurred_at: datetime | date | str | None = None,
+  event_id: str | None = None,
 ) -> dict[str, Any]:
-  """A captured line's metadata with the highest suggestion available: the
-  agent's learned default for the line's entity, else the feed's category
-  hint, else none.
+  """A captured line's metadata with the highest suggestion available: an
+  open item of the agent's the line pays exactly, else the agent's learned
+  default for the line's entity, else the feed's category hint, else none.
+
+  The open item needs the line's ``amount`` and ``occurred_at``; without
+  them that rung is skipped. ``event_id`` keeps the line's own settlement,
+  if it has one, from counting against the item.
 
   The feed's hint is first read from the line's own suggestion and kept in
   ``feed_suggested_*``, so applying the ladder again is idempotent.
   """
   out = dict(metadata)
   if FEED_SUGGESTED_ELEMENT_ID not in out and FEED_SUGGESTED_ACCOUNT_NAME not in out:
-    if out.get(SUGGESTION_SOURCE) != SOURCE_AGENT_DEFAULT:
+    if out.get(SUGGESTION_SOURCE) not in (SOURCE_AGENT_DEFAULT, SOURCE_OPEN_ITEM):
       out[FEED_SUGGESTED_ELEMENT_ID] = out.get(SUGGESTED_ELEMENT_ID)
       out[FEED_SUGGESTED_ACCOUNT_NAME] = out.get(SUGGESTED_ACCOUNT_NAME)
 
@@ -216,6 +254,29 @@ def apply_ladder(
   default = (
     read_default(session, agent.metadata_, entity_id) if agent is not None else None
   )
+  always_ask = default is not None and default.mode == ALWAYS_ASK
+
+  out.pop(SUGGESTED_SETTLES, None)
+  day = _as_day(occurred_at)
+  if agent is not None and amount and day is not None and not always_ask:
+    from robosystems.operations.roboledger.reads.ar_ap import find_settlement_match
+
+    match = find_settlement_match(
+      session,
+      entity_id=resolve_entity_id(session, entity_id),
+      agent_id=str(agent.id),
+      amount=amount,
+      as_of=day,
+      excluding_payment=event_id,
+    )
+    if match is not None:
+      out[SUGGESTED_ELEMENT_ID] = match.account_id
+      out[SUGGESTED_ACCOUNT_NAME] = match.account_name
+      out[SUGGESTION_SOURCE] = SOURCE_OPEN_ITEM
+      out[SUGGESTION_BASIS] = _settlement_basis(agent, match)
+      out[SUGGESTED_SETTLES] = match.item.event_id
+      return out
+
   element = (
     _postable(session, default.element_id)
     if default is not None and default.mode == SUGGEST
@@ -242,7 +303,7 @@ def apply_ladder(
     out[SUGGESTION_SOURCE] = SOURCE_TIER0
   else:
     out.pop(SUGGESTION_SOURCE, None)
-  if agent is not None and default is not None and default.mode == ALWAYS_ASK:
+  if agent is not None and always_ask:
     out[SUGGESTION_BASIS] = f"{agent.name} is set to always ask."
   else:
     out.pop(SUGGESTION_BASIS, None)
@@ -273,7 +334,15 @@ def resuggest_open_lines(session: Session, agent_id: str, entity_id: str) -> int
   changed = 0
   for event in events:
     before = dict(event.metadata_ or {})
-    after = apply_ladder(session, before, agent_id, entity_id)
+    after = apply_ladder(
+      session,
+      before,
+      agent_id,
+      entity_id,
+      amount=event.amount,
+      occurred_at=event.occurred_at,
+      event_id=str(event.id),
+    )
     if after != before:
       event.metadata_ = after
       changed += 1
@@ -299,7 +368,8 @@ def learn_from_commit(session: Session, event: Event, created_by: str) -> None:
   No default yet: the account becomes it, unless the committer said not to
   remember it. The same account: one more confirmation. Another account: one
   more override, and the default moves only when the committer asked
-  (``remember_classification``). A split counts toward nothing.
+  (``remember_classification``). A split counts toward nothing, and neither
+  does a line that settles an open item.
   """
   if event.event_type not in LEARNED_EVENT_TYPES:
     return
@@ -316,6 +386,10 @@ def learn_from_commit(session: Session, event: Event, created_by: str) -> None:
   event.metadata_ = metadata
 
   if chosen is None or not event.agent_id:
+    return
+  # A line that pays a bill or invoice says where that item was booked, not
+  # where the counterparty's own spending goes, so it teaches nothing.
+  if event.discharges_event_id:
     return
   agent = lock_by_id(
     session,

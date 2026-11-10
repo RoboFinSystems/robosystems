@@ -219,7 +219,13 @@ def refresh_hints(event: Event, metadata: dict[str, Any], keys: Iterable[str]) -
     current[FEED_SUGGESTED_ELEMENT_ID] = metadata.get(SUGGESTED_ELEMENT_ID)
     current[FEED_SUGGESTED_ACCOUNT_NAME] = metadata.get(SUGGESTED_ACCOUNT_NAME)
     current = apply_ladder(
-      session, current, event.agent_id, owner_entity_id(session, event)
+      session,
+      current,
+      event.agent_id,
+      owner_entity_id(session, event),
+      amount=event.amount,
+      occurred_at=event.occurred_at,
+      event_id=str(event.id),
     )
   if current == before:
     return False
@@ -254,6 +260,8 @@ def capture_event(
         dict(payload.get("metadata") or {}),
         payload.get("agent_id"),
         payload.get("entity_id"),
+        amount=payload.get("amount"),
+        occurred_at=payload.get("occurred_at"),
       ),
     }
   try:
