@@ -14,13 +14,31 @@ result. The tasks, rows and prices are provisional.
 ## How a trial works
 
 1. **Load.** `just demo-roboledger` reloads Cascade Advisory (the synthetic
-   company in `examples/roboledger_demo/`), closed through the prior month.
-2. **Plant.** The harness enters the task's bills and lands its bank lines
-   unclassified, through the same MCP endpoint the model uses.
+   company in `examples/roboledger_demo/`). Its last three closed months were
+   worked through the bank inbox and closed in turn, and the open month has
+   about ten bank lines waiting, most with a suggestion learned from that
+   history.
+2. **Plant.** The harness adds the task's own bills and bank lines through the
+   same MCP endpoint the model uses: the cases the demo's month does not hold
+   (a new vendor, a split, a loan, a purchase over the capitalization
+   threshold, a transfer nobody can explain).
 3. **Run.** The model gets the server's own instructions, a short brief, and a
    tool list. It works until it stops, runs out of turns, or passes the cost cap.
-4. **Score.** Code reads the ledger and each planted line and compares them with
+4. **Score.** Code reads the ledger and each bank line and compares them with
    the key. No model judges anything.
+
+The key for the demo's own lines and for the month's recurring entries is
+generated from the demo's data (`examples/roboledger_demo/data.py`), so the
+benchmark and the demo cannot drift apart. The planted items' answers are
+written in `tasks.py`.
+
+## Tasks
+
+| Task | What the model is asked to do |
+|---|---|
+| `known-vendor`, `new-vendor`, `split`, `settle-bill`, `capitalize`, `below-threshold`, `loan`, `ambiguous` | work one named bank line and leave the rest alone |
+| `inbox` | work every bank line waiting for the month, without closing |
+| `month` | work the inbox plus five planted lines, draft the recurring entries, close the month |
 
 ## Outcomes
 

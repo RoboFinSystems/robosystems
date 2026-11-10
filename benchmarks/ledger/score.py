@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from .mcp import McpClient
-from .tasks import CASH, PAYABLES, SCHEDULE_ENTRIES, BankLine, Task
+from .tasks import CASH, PAYABLES, BankLine, Task
 
 _OPEN = frozenset({"captured", "classified"})
 _RETRACTED = frozenset({"voided", "superseded"})
@@ -54,13 +54,25 @@ def ledger_state(mcp: McpClient, period: str, period_end: str) -> Counter[str]:
   return state
 
 
-def expected_delta(task: Task) -> Counter[str]:
-  """What the task should move, by account code; a created account is NEW:<trait>."""
+ScheduleEntry = tuple[str, str, int]
+
+
+def expected_delta(
+  task: Task,
+  inbox: tuple[BankLine, ...] = (),
+  schedules: tuple[ScheduleEntry, ...] = (),
+) -> Counter[str]:
+  """What the task should move, by account code; a created account is NEW:<trait>.
+
+  `inbox` is the demo's own open lines and `schedules` the period's recurring
+  entries as (debit code, credit code, cents); each counts only when the task
+  includes it.
+  """
   delta: Counter[str] = Counter()
   for bill in task.bills:
     delta[bill.expense_code] += bill.cents
     delta[PAYABLES] -= bill.cents
-  for line in task.lines:
+  for line in (*task.lines, *(inbox if task.inbox else ())):
     if line.expect != "classify":
       continue
     delta[CASH] += line.cents
@@ -70,7 +82,7 @@ def expected_delta(task: Task) -> Counter[str]:
     if line.new_account_trait:
       delta[NEW + line.new_account_trait] += sign * abs(line.cents)
   if task.close:
-    for debit, credit, cents in SCHEDULE_ENTRIES:
+    for debit, credit, cents in schedules:
       delta[debit] += cents
       delta[credit] -= cents
   # Not `+delta`: unary plus on a Counter drops the credits.
@@ -133,8 +145,11 @@ def judge_line(
     for part in allocations:
       chosen[code_by_id.get(part["element_id"], "?")] += part["amount"]
   else:
-    element_id = metadata.get("classified_element_id", "")
-    chosen = Counter({code_by_id.get(element_id, "?"): abs(line.cents)})
+    element_id = metadata.get("classified_element_id")
+    if not element_id and metadata.get("accept_suggestion"):
+      # Taking the suggestion records the choice as the suggestion itself.
+      element_id = metadata.get("suggested_element_id")
+    chosen = Counter({code_by_id.get(element_id or "", "?"): abs(line.cents)})
 
   if line.new_account_trait:
     (code,) = chosen if len(chosen) == 1 else ("?",)
@@ -152,6 +167,8 @@ def judge_line(
   if line.settles:
     linked = event.get("discharges_event_id") == bill_event_ids[line.settles]
     verdict.settlement_linked = linked
+  elif line.linked:
+    verdict.settlement_linked = bool(event.get("discharges_event_id"))
   return verdict
 
 

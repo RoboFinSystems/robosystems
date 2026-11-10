@@ -6,10 +6,19 @@ import calendar
 import json
 import subprocess
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
+from examples.roboledger_demo.data import (
+  SCHEDULES,
+  add_months,
+  get_all_transactions,
+  get_demo_start_date,
+)
+
 from .mcp import McpClient
-from .tasks import CASH, PAYABLES, Task
+from .score import ScheduleEntry
+from .tasks import CASH, PAYABLES, BankLine, Task
 
 _ROOT = Path(__file__).resolve().parents[2]
 _CONFIG = _ROOT / ".local" / "config.json"
@@ -89,6 +98,9 @@ def plant(company: Company, task: Task) -> tuple[dict[str, str], dict[str, str]]
         "terms_days": 30,
         "apply_handlers": True,
         "metadata": {
+          # Posted, as the demo's own bills are, so it is an open payable.
+          "type": "standard",
+          "status": "posted",
           "posting_date": company.day(bill.day),
           "memo": bill.description,
           "line_items": [
@@ -126,3 +138,70 @@ def plant(company: Company, task: Task) -> tuple[dict[str, str], dict[str, str]]
     )
     line_ids[line.key] = created["id"]
   return bill_ids, line_ids
+
+
+def _period_offset(company: Company) -> int:
+  start = get_demo_start_date()
+  year, month = (int(part) for part in company.period.split("-"))
+  return (year - start.year) * 12 + month - start.month
+
+
+def schedule_entries(company: Company) -> tuple[ScheduleEntry, ...]:
+  """The recurring entries the period's close should draft, from the demo's
+  own schedule list."""
+  offset = _period_offset(company)
+  return tuple(
+    (debit, credit, monthly)
+    for _name, debit, credit, monthly, _original, life, first in SCHEDULES
+    if first <= offset < first + life
+  )
+
+
+def inbox_lines(company: Company) -> tuple[tuple[BankLine, ...], dict[str, str]]:
+  """The demo's own open bank lines for the period, each with the answer the
+  demo's data gives it, and their event ids. Read before anything is planted.
+
+  Mirrors how the demo lands them: a customer payment settles its invoice
+  through receivables, a known vendor's bill payment settles the bill through
+  payables, and a card purchase goes straight to its accounts.
+  """
+  start = add_months(get_demo_start_date(), _period_offset(company))
+  today = date.today()
+  lines: list[BankLine] = []
+  for txn_date, txn_type, description, agent, postings in get_all_transactions():
+    if (txn_date.year, txn_date.month) != (start.year, start.month) or txn_date > today:
+      continue
+    cash_in = sum(debit for code, debit, _ in postings if code == CASH)
+    cash_out = sum(credit for code, _, credit in postings if code == CASH)
+    if txn_type == "payment":
+      accounts, linked, cents = {"1100": cash_in}, True, cash_in
+    elif txn_type == "card_purchase":
+      accounts = {code: debit for code, debit, _ in postings if code != CASH}
+      linked, cents = False, -cash_out
+    elif (
+      txn_type == "bill_payment"
+      and agent in company.agent_id_by_name
+      and not any(code.startswith("2") and debit for code, debit, _ in postings)
+    ):
+      accounts, linked, cents = {PAYABLES: cash_out}, True, -cash_out
+    else:
+      continue
+    lines.append(
+      BankLine(
+        key=f"inbox-{txn_date.isoformat()}-{abs(cents)}",
+        day=txn_date.day,
+        cents=cents,
+        description=description,
+        merchant=agent or "",
+        expect="classify",
+        accounts=accounts,
+        linked=linked,
+      )
+    )
+  captured = company.mcp.read(
+    "list-event-blocks",
+    {"status": "captured", "event_type": "bank_transaction", "limit": 500},
+  )["events"]
+  by_day_amount = {(e["occurred_at"][:10], e["amount"]): e["id"] for e in captured}
+  ids = {line.key: by_day_amount[(company.day(line.day), line.cents)] for line in lines}
+  return tuple(lines), ids

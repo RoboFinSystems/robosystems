@@ -10,11 +10,12 @@ from benchmarks.ledger.rows import CHECK_TOOLS, CLOSE_LIST, tools_for
 from benchmarks.ledger.score import balance_diff, expected_delta, judge_line, outcome
 from benchmarks.ledger.tasks import (
   AMBIGUOUS,
-  DUPLICATE,
   LOAN,
   SETTLE_BILL,
   SPLIT,
   TASKS,
+  BankLine,
+  prompt,
 )
 
 pytestmark = pytest.mark.unit
@@ -48,18 +49,43 @@ def _usage(input_tokens=0, output=0, read=0, write=0):
   }
 
 
+INBOX = (
+  BankLine("in-rent", 1, -250000, "rent", "Landlord", "classify", {"2000": 250000}),
+  BankLine("in-pay", 18, 1100000, "payment", "Client", "classify", {"1100": 1100000}),
+)
+SCHEDULES = (("7000", "1350", 13333), ("6400", "1200", 10000))
+DUPLICATE = BankLine("dup", 20, -40000, "repeat", "Airline", "void")
+
+
 def test_every_key_balances():
   for task in TASKS.values():
-    assert sum(expected_delta(task).values()) == 0, task.name
+    delta = expected_delta(task, INBOX, SCHEDULES)
+    assert sum(delta.values()) == 0, task.name
 
 
-def test_month_key_moves_cash_by_every_committed_line():
-  delta = expected_delta(TASKS["month"])
-  assert delta["1000"] == -18437 - 61240 - 100000 - 90000 + 2500000
-  assert delta["2000"] == 0
-  assert delta["6500"] == 18437 + 70000 + 90000
+def test_month_key_adds_the_inbox_the_planted_lines_and_the_schedules():
+  delta = expected_delta(TASKS["month"], INBOX, SCHEDULES)
+  planted_cash = -61240 - 100000 - 90000 + 2500000 - 154900
+  assert delta["1000"] == planted_cash - 250000 + 1100000
+  # Paying a bill the demo already posted debits payables.
+  assert delta["2000"] == 250000
+  assert delta["1100"] == -1100000
   assert delta["NEW:liability"] == -2500000
-  assert delta["7000"] == 15833
+  assert delta["7000"] == 13333
+  assert delta["6400"] == 10000
+
+
+def test_a_task_without_the_inbox_or_a_close_ignores_them():
+  assert expected_delta(TASKS["known-vendor"], INBOX, SCHEDULES) == Counter(
+    {"1000": -18437, "6500": 18437}
+  )
+
+
+def test_an_atomic_prompt_names_its_line_and_fences_the_rest():
+  text = prompt(TASKS["known-vendor"], "2026-10", lambda day: f"2026-10-{day:02d}")
+  assert "AMZN Mktp US*2K4RT81X0" in text
+  assert "2026-10-27" in text and "-$184.37" in text
+  assert "Work only that line" in text
 
 
 def test_split_judged_on_its_allocations():
@@ -74,6 +100,14 @@ def test_split_judged_on_its_allocations():
   assert _judge(SPLIT, "committed", whole).verdict == "harmful"
   assert _judge(SPLIT, "captured").verdict == "incomplete"
   assert _judge(SPLIT, "voided").verdict == "retracted"
+
+
+def test_an_accepted_suggestion_is_read_as_the_account_suggested():
+  line = BankLine("in", 1, -45000, "saas", "Vendor", "classify", {"6100": 45000})
+  taken = {"accept_suggestion": True, "suggested_element_id": "e-soft"}
+  assert _judge(line, "committed", taken).verdict == "correct"
+  elsewhere = {"accept_suggestion": True, "suggested_element_id": "e-sup"}
+  assert _judge(line, "committed", elsewhere).verdict == "harmful"
 
 
 def test_new_account_needs_the_trait_and_the_flow():

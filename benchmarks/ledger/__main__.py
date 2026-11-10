@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 
-from .fixture import Company, load_company, plant
+from .fixture import Company, inbox_lines, load_company, plant, schedule_entries
 from .loop import Transcript, run_trial
 from .mcp import ToolDef
 from .providers import make_provider
@@ -24,7 +24,7 @@ from .score import (
   ledger_state,
   outcome,
 )
-from .tasks import SYSTEM_PREAMBLE, TASKS, Task, prompt
+from .tasks import SYSTEM_PREAMBLE, TASKS, BankLine, Task, prompt
 
 _RUNS = Path(__file__).with_name("runs")
 _ROOT = Path(__file__).resolve().parents[2]
@@ -50,6 +50,8 @@ def _git_sha() -> str:
 def _score(
   company: Company,
   task: Task,
+  lines: tuple[BankLine, ...],
+  expected: Any,
   before: Any,
   baseline_codes: set[str],
   bill_ids: dict[str, str],
@@ -68,13 +70,11 @@ def _score(
       company.trait_by_code,
       bill_ids,
     )
-    for line in task.lines
+    for line in lines
   ]
   closed_through = company.mcp.read("get-fiscal-calendar", {})["closed_through"]
   period_closed = closed_through >= company.period
-  diff = balance_diff(
-    before, after, expected_delta(task), company.trait_by_code, baseline_codes
-  )
+  diff = balance_diff(before, after, expected, company.trait_by_code, baseline_codes)
   return Score(
     outcome(verdicts, task, period_closed, diff, model_finished, close_overrides),
     verdicts,
@@ -103,10 +103,14 @@ def _trial(
   company = load_company(reset=not args.no_reset)
   tools = tools_for(row, company.mcp.list_tools())
   system = f"{SYSTEM_PREAMBLE}\n\n{company.mcp.instructions()}"
-  user_text = prompt(task, company.period)
+  user_text = prompt(task, company.period, company.day)
   baseline_codes = set(company.id_by_code)
   before = ledger_state(company.mcp, company.period, company.period_end)
-  bill_ids, line_ids = plant(company, task)
+  inbox, inbox_ids = inbox_lines(company) if task.inbox else ((), {})
+  expected = expected_delta(task, inbox, schedule_entries(company))
+  bill_ids, planted_ids = plant(company, task)
+  lines = (*inbox, *task.lines)
+  line_ids = {**inbox_ids, **planted_ids}
 
   if args.dry_run:
     transcript = Transcript(args.model, stop_reason="dry_run")
@@ -124,6 +128,8 @@ def _trial(
   score = _score(
     company,
     task,
+    lines,
+    expected,
     before,
     baseline_codes,
     bill_ids,
@@ -145,7 +151,7 @@ def _trial(
     "surface": _surface_report(row, tools),
     "system": system,
     "prompt": user_text,
-    "expected_delta_cents": dict(expected_delta(task)),
+    "expected_delta_cents": dict(expected),
     "score": score.as_dict(),
     "transcript": transcript.as_dict(),
   }

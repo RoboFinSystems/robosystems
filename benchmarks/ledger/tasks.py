@@ -6,6 +6,7 @@ code and counterparties by name, since ids differ on every load.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 CASH = "1000"
@@ -13,15 +14,6 @@ PAYABLES = "2000"
 
 FINANCING_FLOWS = frozenset(
   {"rs-gaap:ProceedsFromIssuanceOfLongTermDebt", "rs-gaap:ProceedsFromNotesPayable"}
-)
-
-# Cascade's five recurring schedule entries: (debit code, credit code, cents).
-SCHEDULE_ENTRIES = (
-  ("7000", "1350", 13333),
-  ("7000", "1350", 2500),
-  ("6400", "1200", 10000),
-  ("6100", "1210", 2500),
-  ("6200", "1220", 5000),
 )
 
 
@@ -43,7 +35,8 @@ class BankLine:
 
   `expect` is `classify`, `void` or `open`. For `classify`, `accounts` maps a
   chart code to the positive cents the line puts there; `new_account_trait`
-  stands in for an account the model has to create.
+  stands in for an account the model has to create. `settles` names a planted
+  bill the line pays; `linked` says it pays some invoice or bill of the demo's.
   """
 
   key: str
@@ -56,14 +49,20 @@ class BankLine:
   new_account_trait: str | None = None
   flows: frozenset[str] = frozenset()
   settles: str | None = None
+  linked: bool = False
 
 
 @dataclass(frozen=True)
 class Task:
+  """`lines` and `bills` are planted on top of the demo. `inbox` adds the
+  demo's own open bank lines for the period to the work, with their keys
+  generated from the demo's data."""
+
   name: str
   on_script: bool
-  lines: tuple[BankLine, ...]
+  lines: tuple[BankLine, ...] = ()
   bills: tuple[Bill, ...] = ()
+  inbox: bool = False
   close: bool = False
 
 
@@ -122,13 +121,23 @@ LOAN = BankLine(
   new_account_trait="liability",
   flows=FINANCING_FLOWS,
 )
-DUPLICATE = BankLine(
-  "duplicate",
-  20,
-  -40000,
-  "UNITED AIRLINES 0167745521",
-  "United Airlines",
-  "void",
+CAPITALIZE = BankLine(
+  "capitalize",
+  29,
+  -154900,
+  "DELL MKTG LP ONLINE ORDER 88213 (Latitude laptop)",
+  "Dell",
+  "classify",
+  {"1300": 154900},
+)
+BELOW_THRESHOLD = BankLine(
+  "below-threshold",
+  29,
+  -38000,
+  "DELL MKTG LP ONLINE ORDER 88377 (27in monitor)",
+  "Dell",
+  "classify",
+  {"6500": 38000},
 )
 AMBIGUOUS = BankLine(
   "ambiguous",
@@ -146,14 +155,17 @@ TASKS = {
     Task("new-vendor", True, (NEW_VENDOR,)),
     Task("split", True, (SPLIT,)),
     Task("settle-bill", True, (SETTLE_BILL,), (CHAIR_BILL,)),
+    Task("capitalize", True, (CAPITALIZE,)),
+    Task("below-threshold", True, (BELOW_THRESHOLD,)),
     Task("loan", False, (LOAN,)),
-    Task("duplicate", False, (DUPLICATE,)),
     Task("ambiguous", False, (AMBIGUOUS,)),
+    Task("inbox", True, inbox=True),
     Task(
       "month",
       True,
-      (KNOWN_VENDOR, NEW_VENDOR, SPLIT, SETTLE_BILL, LOAN, DUPLICATE),
+      (NEW_VENDOR, SPLIT, SETTLE_BILL, LOAN, CAPITALIZE),
       (CHAIR_BILL,),
+      inbox=True,
       close=True,
     ),
   )
@@ -169,12 +181,30 @@ open and say why; never force a posting you cannot support. When you are done, \
 reply with a short summary of what you did and what you left open."""
 
 
-def prompt(task: Task, period: str) -> str:
+def _dollars(cents: int) -> str:
+  return f"{'-' if cents < 0 else ''}${abs(cents) / 100:,.2f}"
+
+
+def prompt(task: Task, period: str, day: Callable[[int], str]) -> str:
+  rules = (
+    "Classify and commit what the company's history and policies support, void "
+    "a line only if it should not post, and leave open any line that needs a "
+    "person."
+  )
+  if not task.inbox:
+    named = "; ".join(
+      f'"{line.description}" on {day(line.day)} for {_dollars(line.cents)}'
+      for line in task.lines
+    )
+    return (
+      f"A new bank line has arrived for {period}: {named}. It is a "
+      f"`bank_transaction` event with status `captured`. {rules} Work only that "
+      "line: leave the rest of the inbox as it is, and do not close the period."
+    )
   inbox = (
-    f"New bank lines have arrived for {period}. They are `bank_transaction` events "
-    "with status `captured`. Work each one: classify and commit what the company's "
-    "history and policies support, void a line only if it should not post, and "
-    "leave open any line that needs a person."
+    f"Work the bank lines waiting in the inbox that are dated in {period}. They "
+    f"are `bank_transaction` events with status `captured`. {rules} Leave lines "
+    "dated in a later month alone."
   )
   if task.close:
     return (
