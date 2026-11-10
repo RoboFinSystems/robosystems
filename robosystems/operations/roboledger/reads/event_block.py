@@ -5,6 +5,8 @@ see the same envelope creators wrote.
 
 from __future__ import annotations
 
+from datetime import date, datetime, time, timedelta
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -83,8 +85,13 @@ def list_event_blocks(
   limit: int = 50,
   offset: int = 0,
   entity_id: str | None = None,
+  occurred_from: date | None = None,
+  occurred_to: date | None = None,
 ) -> list[EventBlockEnvelope]:
-  """One entity's events, default the group parent's, newest first."""
+  """One entity's events, default the group parent's, newest first.
+
+  ``occurred_from`` and ``occurred_to`` are whole days, both inclusive.
+  """
   stmt = select(Event)
   entity_id = find_entity_id(session, entity_id)
   if entity_id is not None:
@@ -105,6 +112,12 @@ def list_event_blocks(
     # True rides idx_events_payload_drift (partial index on the storage
     # column, which keeps its mechanical name).
     stmt = stmt.where(Event.payload_drift.is_(is_reconciling_item))
+  if occurred_from is not None:
+    stmt = stmt.where(Event.occurred_at >= datetime.combine(occurred_from, time.min))
+  if occurred_to is not None:
+    stmt = stmt.where(
+      Event.occurred_at < datetime.combine(occurred_to + timedelta(days=1), time.min)
+    )
 
   stmt = stmt.order_by(Event.occurred_at.desc()).limit(limit).offset(offset)
   events = session.execute(stmt).scalars().all()

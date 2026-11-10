@@ -263,14 +263,15 @@ An AI agent reaches the same surface through two MCP tools on the RoboSystems MC
 
 | Tool | Purpose |
 | --- | --- |
-| `get-graphql-schema` | Returns the GraphQL schema. Default `format: "sdl"` returns the SDL text; `format: "introspection"` returns the full JSON introspection result. |
+| `get-graphql-schema` | Returns the GraphQL schema in the size asked for. Default `format: "index"` lists every Query root field with its arguments and return type, one per line; `types: [...]` returns the named types in full, as SDL; `format: "sdl"` returns the whole schema; `format: "introspection"` returns the full JSON introspection result. |
 | `query-graphql` | Executes a read-only GraphQL query. Arguments: `query` (required), `variables` (optional object), `operationName` (optional). |
 
-The intended flow is two steps: discover the schema, then query it.
+The intended flow is to find the field, read the types it returns, then query.
 
 ```text
-1. get-graphql-schema           # returns SDL; discover types and fields
-2. query-graphql  query="{ fiscalCalendar { closedThrough closeTarget } }"
+1. get-graphql-schema                              # the index of root fields
+2. get-graphql-schema  types=["FiscalCalendar"]    # that type's fields
+3. query-graphql  query="{ fiscalCalendar { closedThrough closeTarget } }"
 ```
 
 `query-graphql` is strictly read-only. It rejects mutations and subscriptions before execution, and enforces a complexity gate: maximum query depth 10, maximum 200 fields, and maximum 20 aliases. Queries that exceed these limits are rejected rather than executed.

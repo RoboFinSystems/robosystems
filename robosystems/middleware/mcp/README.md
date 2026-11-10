@@ -98,18 +98,18 @@ Claude.
 |------|-------------|
 | `read-graph-cypher` | Read-only Cypher with validation |
 | `get-graph-schema` | Full database schema (cached 60 s) |
-| `get-graphql-schema` | Extensions GraphQL SDL or JSON introspection (process-lifetime cache) |
+| `get-graphql-schema` | Extensions GraphQL schema: a root-field index (default), named types in full, the whole SDL, or JSON introspection (process-lifetime cache) |
 | `query-graphql` | Read-only GraphQL against the extensions surface; mutations and subscriptions rejected before execution; depth 10, 200 fields, 20 aliases |
 
 The GraphQL pair requires `EXTENSIONS_GRAPHQL_ENABLED=true` **and**
 `MCP_GRAPHQL_ENABLED=true`. The latter is an SSM kill switch that disables both
 tools without a redeploy.
 
-The intended pattern is one schema call per conversation, then typed queries
-against it:
+The intended pattern is the index once, the types a question needs, then typed
+queries against them:
 
 ```
-get-graphql-schema   → SDL (once, cached for the process lifetime)
+get-graphql-schema   → root-field index, then `types=[...]` for the types it names
 query-graphql(query) → data (one call, nested typed response)
 ```
 

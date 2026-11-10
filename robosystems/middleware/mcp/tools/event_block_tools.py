@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -125,6 +126,9 @@ class ListEventBlocksTool:
 - source (optional): 'manual' | 'schedule' | 'system', a connected provider name, or a registered external source_name
 - is_reconciling_item (optional): true → only reconciling items (the
   reconciliation worklist); false → exclude them; omit for all
+- occurred_from / occurred_to (optional): YYYY-MM-DD, both inclusive. Give
+  them whenever the question is about one period: one month's events, not
+  the whole history
 - limit (optional, default 50, max 1000)
 - offset (optional, default 0)
 - entity_id (optional): the entity whose inbox to list; omit for the group
@@ -158,6 +162,16 @@ class ListEventBlocksTool:
           "agent_id": {"type": "string"},
           "source": {"type": "string"},
           "is_reconciling_item": {"type": "boolean"},
+          "occurred_from": {
+            "type": "string",
+            "format": "date",
+            "description": "First day to include (YYYY-MM-DD).",
+          },
+          "occurred_to": {
+            "type": "string",
+            "format": "date",
+            "description": "Last day to include (YYYY-MM-DD).",
+          },
           "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 50},
           "offset": {"type": "integer", "minimum": 0, "default": 0},
           "entity_id": ENTITY_ID_ARGUMENT,
@@ -193,6 +207,20 @@ class ListEventBlocksTool:
       return {"error": "invalid_arguments", "message": "offset must be >= 0"}
 
     try:
+      occurred_from = _parse_day(arguments.get("occurred_from"))
+      occurred_to = _parse_day(arguments.get("occurred_to"))
+    except ValueError:
+      return {
+        "error": "invalid_arguments",
+        "message": "occurred_from and occurred_to must be YYYY-MM-DD dates",
+      }
+    if occurred_from and occurred_to and occurred_from > occurred_to:
+      return {
+        "error": "invalid_arguments",
+        "message": "occurred_from must not be after occurred_to",
+      }
+
+    try:
       with extensions_session(graph_id) as session:
         envelopes = ops_list_event_blocks(
           session,
@@ -206,6 +234,8 @@ class ListEventBlocksTool:
           limit=limit,
           offset=offset,
           entity_id=arguments.get("entity_id"),
+          occurred_from=occurred_from,
+          occurred_to=occurred_to,
         )
         if include_metadata:
           events = [e.model_dump(mode="json") for e in envelopes]
@@ -223,6 +253,14 @@ class ListEventBlocksTool:
     except Exception as exc:
       logger.warning(f"list-event-blocks failed: {exc}")
       return {"error": "command_failed", "message": str(exc)}
+
+
+def _parse_day(value: Any) -> date | None:
+  if value is None:
+    return None
+  if not isinstance(value, str):
+    raise ValueError("not a date string")
+  return date.fromisoformat(value)
 
 
 def _summarize_event_block(envelope) -> dict[str, Any]:

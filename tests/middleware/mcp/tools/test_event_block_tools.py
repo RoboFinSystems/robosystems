@@ -10,7 +10,7 @@ surface the flag.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -135,6 +135,51 @@ class TestListEventBlocksReconcilingItemFilter:
     (event,) = result["events"]
     assert event["is_reconciling_item"] is True
     assert event["metadata"]["drift_payload"] == {"amount": 99}
+
+
+class TestListEventBlocksDateRange:
+  @pytest.mark.asyncio
+  async def test_days_forward_to_ops_as_dates(self) -> None:
+    with (
+      _patched_session(),
+      patch(f"{MODULE}.ops_list_event_blocks", return_value=[]) as ops_mock,
+    ):
+      tool = ListEventBlocksTool(_client())
+      await tool.execute({"occurred_from": "2026-10-01", "occurred_to": "2026-10-31"})
+
+    kwargs = ops_mock.call_args.kwargs
+    assert kwargs["occurred_from"] == date(2026, 10, 1)
+    assert kwargs["occurred_to"] == date(2026, 10, 31)
+
+  @pytest.mark.asyncio
+  async def test_omitted_days_forward_none(self) -> None:
+    with (
+      _patched_session(),
+      patch(f"{MODULE}.ops_list_event_blocks", return_value=[]) as ops_mock,
+    ):
+      await ListEventBlocksTool(_client()).execute({})
+
+    assert ops_mock.call_args.kwargs["occurred_from"] is None
+    assert ops_mock.call_args.kwargs["occurred_to"] is None
+
+  @pytest.mark.asyncio
+  @pytest.mark.parametrize(
+    "arguments",
+    [
+      {"occurred_from": "October"},
+      {"occurred_to": 20261031},
+      {"occurred_from": "2026-11-01", "occurred_to": "2026-10-01"},
+    ],
+  )
+  async def test_bad_ranges_are_refused_before_the_read(self, arguments) -> None:
+    with (
+      _patched_session(),
+      patch(f"{MODULE}.ops_list_event_blocks", return_value=[]) as ops_mock,
+    ):
+      result = await ListEventBlocksTool(_client()).execute(arguments)
+
+    assert result["error"] == "invalid_arguments"
+    ops_mock.assert_not_called()
 
 
 class TestDatabaseFaultsAreNotEchoedToTheModel:

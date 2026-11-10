@@ -14,8 +14,10 @@ from typing import Any
 
 from graphql import (
   DocumentNode,
+  GraphQLSchema,
   OperationType,
   get_introspection_query,
+  print_type,
 )
 from graphql import (
   parse as gql_parse,
@@ -42,6 +44,13 @@ def _ensure_gql_schema() -> Any:
 # The schema is fixed for the process lifetime, so no TTL.
 _SCHEMA_CACHE: dict[str, str] = {}
 
+_FORMATS = ("index", "sdl", "introspection")
+_MAX_TYPES = 25
+_INDEX_HEADER = (
+  "# Query root fields: name(arguments): return type. For a type's own fields "
+  "call get-graphql-schema with types=[...]; format='sdl' is the whole schema."
+)
+
 _MAX_DEPTH = 10
 _MAX_FIELDS = 200
 _MAX_ALIASES = 20
@@ -55,6 +64,32 @@ def _anon_ctx(graph_id: str = "") -> dict[str, Any]:
     "schema_extensions": (),
     "graph_type": "",
   }
+
+
+def _core_schema(schema: Any) -> GraphQLSchema:
+  return schema._schema
+
+
+def _root_index(core: GraphQLSchema) -> str:
+  """Every Query field on one line, without descriptions."""
+  lines = [_INDEX_HEADER]
+  query = core.query_type
+  for name, field in (query.fields if query else {}).items():
+    args = ", ".join(f"{arg}: {spec.type}" for arg, spec in field.args.items())
+    lines.append(f"{name}({args}): {field.type}" if args else f"{name}: {field.type}")
+  return "\n".join(lines)
+
+
+def _types_sdl(core: GraphQLSchema, names: list[str]) -> tuple[str, list[str]]:
+  found: list[str] = []
+  unknown: list[str] = []
+  for name in names:
+    named = core.type_map.get(name)
+    if named is None or name.startswith("__"):
+      unknown.append(name)
+    else:
+      found.append(print_type(named))
+  return "\n\n".join(found), unknown
 
 
 def _reject_non_query(doc: DocumentNode) -> str | None:
@@ -147,32 +182,45 @@ def _check_complexity(doc: DocumentNode) -> str | None:
 
 
 class GraphqlSchemaTool(BaseTool):
-  """Return the extensions GraphQL schema as SDL or introspection JSON."""
+  """Return the extensions GraphQL schema: an index, named types, or all of it."""
 
   def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "get-graphql-schema",
       "description": (
-        "Return the GraphQL schema for the extensions endpoint.\n\n"
+        "Return the GraphQL schema for the extensions endpoint, in the size "
+        "you need.\n\n"
         "**WHEN TO USE:**\n"
-        "- Before query-graphql, to discover types, fields and input arguments\n"
+        "- Before query-graphql, to discover fields, arguments and types\n"
         "- When a query fails on an unknown field — the schema is "
         "per-deployment and depends on which extensions (roboledger, "
         "roboinvestor) are enabled\n\n"
         "**PARAMETERS:**\n"
-        "- ``format``: ``sdl`` (default) is human-readable Schema Definition "
-        "Language, best for scanning types and writing queries; "
+        "- ``format``: ``index`` (default) lists every Query root field with "
+        "its arguments and return type, one per line — start here. ``sdl`` is "
+        "the whole schema as Schema Definition Language, and is large: ask "
+        "for it only when the index and ``types`` are not enough. "
         "``introspection`` is the full JSON introspection result, for tooling "
-        "that consumes the standard format.\n\n"
-        "**RETURNS:** The schema in the requested format."
+        "that consumes the standard format.\n"
+        "- ``types``: names of types to read in full, with their fields and "
+        "descriptions, e.g. ``['TrialBalance', 'TrialBalanceRow']``. Takes "
+        "the return types the index names. ``format`` is ignored with it.\n\n"
+        "**RETURNS:** ``schema``, the text asked for. With ``types``, "
+        "``unknown_types`` names any that the schema does not have."
       ),
       "inputSchema": {
         "type": "object",
         "properties": {
           "format": {
             "type": "string",
-            "enum": ["sdl", "introspection"],
-            "description": "Schema format to return. Defaults to 'sdl'.",
+            "enum": list(_FORMATS),
+            "description": "What to return. Defaults to 'index'.",
+          },
+          "types": {
+            "type": "array",
+            "items": {"type": "string"},
+            "maxItems": _MAX_TYPES,
+            "description": "Type names to return in full, as SDL.",
           },
         },
         "additionalProperties": False,
@@ -182,19 +230,39 @@ class GraphqlSchemaTool(BaseTool):
   async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
     self._log_tool_execution("get-graphql-schema", arguments)
 
-    format_ = arguments.get("format", "sdl")
-    if format_ not in ("sdl", "introspection"):
+    format_ = arguments.get("format", "index")
+    if format_ not in _FORMATS:
       return {
         "error": "invalid_argument",
-        "message": "format must be 'sdl' or 'introspection'",
+        "message": "format must be 'index', 'sdl' or 'introspection'",
       }
+
+    types = arguments.get("types")
+    if types is not None:
+      if (
+        not isinstance(types, list)
+        or not types
+        or len(types) > _MAX_TYPES
+        or not all(isinstance(name, str) for name in types)
+      ):
+        return {
+          "error": "invalid_argument",
+          "message": f"types must be a list of 1 to {_MAX_TYPES} type names",
+        }
+      sdl, unknown = _types_sdl(_core_schema(_ensure_gql_schema()), types)
+      response: dict[str, Any] = {"schema": sdl}
+      if unknown:
+        response["unknown_types"] = unknown
+      return response
 
     if format_ in _SCHEMA_CACHE:
       return {"schema": _SCHEMA_CACHE[format_]}
 
     schema = _ensure_gql_schema()
 
-    if format_ == "sdl":
+    if format_ == "index":
+      result = _root_index(_core_schema(schema))
+    elif format_ == "sdl":
       result = str(schema)
     else:
       r = schema.execute_sync(
@@ -230,8 +298,8 @@ class GraphqlQueryTool(BaseTool):
         "endpoint.\n\n"
         "**WHEN TO USE:**\n"
         "- For typed reads of extensions data (roboledger, roboinvestor)\n"
-        "- After get-graphql-schema, which gives the types and fields to "
-        "query against\n\n"
+        "- After get-graphql-schema, which lists the fields to query and "
+        "returns any type in full\n\n"
         "**PARAMETERS:**\n"
         "- ``query``: the GraphQL query string. Mutations and subscriptions "
         "are rejected.\n"
