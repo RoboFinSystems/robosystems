@@ -25,17 +25,78 @@ from robosystems.config.shared_repositories import (
 )
 
 
+def start_plan_url() -> str:
+  """Where a trial subscriber starts the plan without waiting out the trial."""
+  from robosystems.config import env
+
+  return f"{env.ROBOSYSTEMS_URL}/organization?tab=subscriptions"
+
+
 def trial_refusal(repository: str, operation: str = "query") -> str:
   """What a trial subscriber is told when they reach past the trial: raw
   queries, or the AI analyst (``operation="agent"``), which runs on credits."""
-  from robosystems.config import env
-
   what = "The AI analyst is" if operation == "agent" else "Raw queries are"
   opens = "It opens" if operation == "agent" else "They open"
   return (
     f"{what} not part of the {repository.upper()} trial, which covers the "
-    f"analysis tools. {opens} with your first payment: start your plan now at "
-    f"{env.ROBOSYSTEMS_URL}/organization?tab=subscriptions"
+    f"analysis tools. {opens} with your first payment, and you do not have to "
+    f"wait for the trial to end: start your plan now at {start_plan_url()}"
+  )
+
+
+_LIMIT_NOUNS = {
+  "mcp": "tool calls",
+  "query": "queries",
+  "search": "searches",
+  "agent": "AI analyst calls",
+}
+_LIMIT_KEYS = {
+  "mcp": "mcp_queries",
+  "query": "queries",
+  "search": "searches",
+  "agent": "agent_calls",
+}
+_RESETS = {"minute": "within a minute", "hour": "within the hour", "day": "tomorrow"}
+
+
+def limit_message(
+  repository: str,
+  operation: str,
+  detail: dict,
+  plan: str | None,
+  *,
+  trial: bool = False,
+) -> str:
+  """What a subscriber is told at a volume limit. On a trial it says the limit
+  is the trial's, what the plan's own is, and how to start the plan now."""
+  from robosystems.config import env
+
+  window = detail.get("window", "period")
+  noun = _LIMIT_NOUNS.get(operation, "requests")
+  reached = f"limit of {detail.get('limit', 0)} {noun} per {window}"
+  resets = f"It resets {_RESETS.get(window, 'shortly')}."
+  plan_key = (plan or "").split("-")[-1]
+  plan_name = plan_key.capitalize() or "your"
+
+  if not trial:
+    return (
+      f"You have reached the {plan_name} plan's {reached}. {resets} "
+      f"Plans and their limits: {env.ROBOSYSTEMS_URL}/repositories/browse"
+    )
+
+  plan_limit = (_get_rate_limits(repository, plan_key) or {}).get(
+    f"{_LIMIT_KEYS.get(operation, 'queries')}_per_{window}"
+  )
+  if plan_limit == -1:
+    plans_own = f" The {plan_name} plan has no {window} limit."
+  elif plan_limit:
+    plans_own = f" The {plan_name} plan allows {plan_limit} per {window}."
+  else:
+    plans_own = ""
+  return (
+    f"You have reached the {repository.upper()} trial's {reached}. {resets} "
+    f"A trial runs at lower limits than the plan.{plans_own} You do not have "
+    f"to wait for the trial to end: start your plan now at {start_plan_url()}"
   )
 
 

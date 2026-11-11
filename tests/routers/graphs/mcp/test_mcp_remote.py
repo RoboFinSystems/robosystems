@@ -1099,10 +1099,16 @@ class TestTrialToolList:
 
   async def test_initialize_names_the_trial(self):
     body = await self._dispatch("initialize", remote.CYPHER_READ_TOOLS)
-    assert "on a trial" in body["result"]["instructions"]
+    note = body["result"]["instructions"]
+    assert "on a 14-day trial" in note
+    # A chat subscriber never sees the app: the note carries the limits, what
+    # is closed, and the way to start the plan early.
+    assert "5 per minute, 50 per hour, 300 per day" in note
+    assert "`read-graph-cypher`" in note
+    assert "/organization?tab=subscriptions" in note
 
   async def test_a_paid_subscriber_sees_every_tool_and_no_note(self):
     listed = await self._dispatch("tools/list", frozenset())
     assert len(listed["result"]["tools"]) == 2
     handshake = await self._dispatch("initialize", frozenset())
-    assert "on a trial" not in handshake["result"]["instructions"]
+    assert "TRIAL" not in handshake["result"]["instructions"]
