@@ -300,8 +300,9 @@ def test_get_main_cors_origins_dev_allows_app_names(monkeypatch):
     EnvConfig, "ROBOINVESTOR_URL", "http://localhost:3002", raising=False
   )
   origins = EnvConfig.get_main_cors_origins()
-  assert "https://app.example.internal" in origins
-  assert "https://ledger.example.internal" in origins
+  assert {"https://app.example.internal", "https://ledger.example.internal"} <= set(
+    origins
+  )
   assert origins.count("http://localhost:3002") == 1
   assert "http://localhost:3000" in origins
 
