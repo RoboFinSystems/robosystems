@@ -136,7 +136,8 @@ class ListEventBlocksTool:
 - include_metadata (optional, default false): When false, returns a lean
   per-event summary (id, event_type, event_category, status, occurred_at,
   source, agent_id, amount, currency, description, has_discharge_link,
-  is_reconciling_item).
+  is_reconciling_item), plus a waiting bank line's suggestion when it has
+  one (suggested_account_name, suggestion_source, suggestion_basis).
   When true, includes the full event_block metadata blob — `entries`,
   `qb_*` fields, connection_id, etc. — same shape as get-event-block.
   Default is summary-only because bulk metadata across hundreds of
@@ -267,6 +268,12 @@ def _summarize_event_block(envelope) -> dict[str, Any]:
   """Drop the metadata blob (the full source-system payload) for a few
   surface fields and a `has_discharge_link` flag."""
   occurred_at = envelope.occurred_at
+  metadata = envelope.metadata or {}
+  suggestion = {
+    key: metadata[key]
+    for key in ("suggested_account_name", "suggestion_source", "suggestion_basis")
+    if metadata.get(key)
+  }
   return {
     "id": envelope.id,
     "event_type": envelope.event_type,
@@ -283,6 +290,7 @@ def _summarize_event_block(envelope) -> dict[str, Any]:
     "has_discharge_link": envelope.discharges_event_id is not None,
     "has_obligation_link": envelope.obligated_by_event_id is not None,
     "is_reconciling_item": envelope.is_reconciling_item,
+    **suggestion,
   }
 
 

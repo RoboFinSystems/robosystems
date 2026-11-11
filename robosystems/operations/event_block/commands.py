@@ -651,6 +651,47 @@ def _settle_the_suggested_item(session: Session, event: Event) -> None:
     discharges.set_settlement_link(session, event, str(obligation_id))
 
 
+# Says a line suggested as an open item's settlement is a separate purchase.
+NOT_A_SETTLEMENT = "not_a_settlement"
+
+
+def _refuse_overlooking_the_open_item(event: Event, patch: dict) -> None:
+  """A line suggested as the settlement of an open bill or invoice is not
+  classified to another account unless the caller says it settles nothing:
+  that would leave the item open and count it a second time."""
+  from robosystems.operations.roboledger.classification import (
+    SOURCE_OPEN_ITEM,
+    SUGGESTED_ELEMENT_ID,
+    SUGGESTED_SETTLES,
+    SUGGESTION_BASIS,
+    SUGGESTION_SOURCE,
+  )
+
+  chosen = {patch.get("classified_element_id")} | {
+    allocation.get("element_id")
+    for allocation in patch.get("classified_allocations") or []
+    if isinstance(allocation, dict)
+  }
+  chosen.discard(None)
+  metadata = event.metadata_ or {}
+  if (
+    not chosen
+    or metadata.get(SUGGESTION_SOURCE) != SOURCE_OPEN_ITEM
+    or not metadata.get(SUGGESTED_SETTLES)
+    or metadata.get(SUGGESTED_ELEMENT_ID) in chosen
+    or metadata.get(NOT_A_SETTLEMENT) is True
+    or event.discharges_event_id
+  ):
+    return
+  basis = metadata.get(SUGGESTION_BASIS) or "This line matches an open item."
+  raise HandlerMetadataValidationError(
+    f"Event {event.id}: {basis} Classifying it to another account would leave "
+    "that item open and count it twice. Take the suggestion with "
+    "metadata_patch={accept_suggestion: true}, or, if this is a separate "
+    f"transaction, add {NOT_A_SETTLEMENT}: true to the metadata_patch."
+  )
+
+
 def _resuggest_after_settlement(session: Session, event: Event) -> None:
   """A committed line that settled an item has used it up, so the
   counterparty's other waiting lines must not go on being offered it."""
@@ -1111,6 +1152,9 @@ def update_event_block(
     and (body.metadata_patch or {}).get("accept_suggestion") is True
   ):
     _settle_the_suggested_item(session, event)
+
+  if body.metadata_patch and body.discharge_allocations is None:
+    _refuse_overlooking_the_open_item(event, body.metadata_patch)
 
   if body.document_id is not None:
     # Checked before the lock; an empty string detaches the document.

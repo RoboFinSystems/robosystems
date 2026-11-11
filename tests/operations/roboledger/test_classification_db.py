@@ -16,10 +16,14 @@ from robosystems.models.api.extensions.agent import (
 from robosystems.models.extensions.element import Element
 from robosystems.models.extensions.roboledger import Agent, Event
 from robosystems.operations.event_block.commands import (
+  _refuse_overlooking_the_open_item,
   _resuggest_after_obligation,
   _resuggest_after_settlement,
   _settle_the_suggested_item,
   create_event_block_in_session,
+)
+from robosystems.operations.event_block.python_handlers.types import (
+  HandlerMetadataValidationError,
 )
 from robosystems.operations.roboledger.classification import (
   apply_ladder,
@@ -563,3 +567,43 @@ def test_a_bill_one_line_has_settled_is_no_longer_offered_to_the_next(payable):
   payable.session.refresh(second)
   assert second.metadata_.get("suggestion_source") != "open_item"
   assert "suggested_discharges_event_id" not in second.metadata_
+
+
+def test_a_suggested_settlement_is_not_classified_to_another_account(payable):
+  _open_bill(payable)
+  event = _captured_through_the_api(payable)
+
+  with pytest.raises(HandlerMetadataValidationError, match="not_a_settlement"):
+    _refuse_overlooking_the_open_item(
+      event, {"classified_element_id": payable.software}
+    )
+  with pytest.raises(HandlerMetadataValidationError, match="open bill of"):
+    _refuse_overlooking_the_open_item(
+      event,
+      {"classified_allocations": [{"element_id": payable.software, "amount": 4_500}]},
+    )
+
+
+def test_the_suggested_account_a_stated_exception_or_a_link_is_let_through(payable):
+  bill = _open_bill(payable)
+  event = _captured_through_the_api(payable)
+
+  _refuse_overlooking_the_open_item(event, {"accept_suggestion": True})
+  _refuse_overlooking_the_open_item(event, {"basis": "a memo"})
+  _refuse_overlooking_the_open_item(event, {"classified_element_id": payable.payables})
+
+  event.metadata_ = {**event.metadata_, "not_a_settlement": True}
+  _refuse_overlooking_the_open_item(event, {"classified_element_id": payable.software})
+
+  event.metadata_ = {**event.metadata_, "not_a_settlement": False}
+  event.discharges_event_id = bill.id
+  _refuse_overlooking_the_open_item(event, {"classified_element_id": payable.software})
+
+
+def test_a_line_with_a_learned_suggestion_takes_any_account(payable):
+  _commit(
+    payable, _line(payable, status="classified"), classified_element_id=payable.payroll
+  )
+  event = _captured_through_the_api(payable)
+
+  _refuse_overlooking_the_open_item(event, {"classified_element_id": payable.software})

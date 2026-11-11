@@ -204,6 +204,7 @@ A feed captures each posted bank line as one event, with the bank account's char
 | `classified_element_id` | The one account the whole line books to |
 | `classified_allocations` | A split: `[{element_id, amount}]`, positive cents that sum to the line's absolute amount. Wins over `classified_element_id`. |
 | `accept_suggestion` | `true` takes `suggested_element_id`. Refused when the line carries no suggested element, as with a name-only suggestion. |
+| `not_a_settlement` | `true` says a line suggested as the settlement of an open bill or invoice (`suggestion_source: open_item`) is a separate transaction. Without it, classifying that line to an account other than the suggested one is refused. |
 | `from_element_id`, `to_element_id` | `internal_transfer` only: the two bank legs. `to_element_id` defaults to `resource_element_id`. The feed sets both when it knows both accounts. |
 | `classified_by`, `basis` | Who chose, and why. Recorded, not interpreted. |
 
