@@ -38,6 +38,8 @@ from robosystems.operations.roboledger.classification import (
   LEARNED_EVENT_TYPES,
   SUGGESTED_ACCOUNT_NAME,
   SUGGESTED_ELEMENT_ID,
+  SUGGESTION_BASIS,
+  SUGGESTION_CAUTION,
   SUGGESTION_SOURCE,
 )
 from robosystems.operations.roboledger.commands._guards import ClosedPeriodError
@@ -100,6 +102,12 @@ def _skip_before_writing(
     return "no_suggestion", "the line carries no suggestion; choose an account"
   if drifted:
     return "source_changed", "the feed changed this line after it was captured"
+  if metadata.get(SUGGESTION_CAUTION):
+    return (
+      "needs_review",
+      str(metadata.get(SUGGESTION_BASIS) or "the suggestion needs a look first")
+      + " Classify this line on its own.",
+    )
   return None
 
 

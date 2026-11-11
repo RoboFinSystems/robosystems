@@ -23,7 +23,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from typing import Any, Literal
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from robosystems.models.extensions.element import Element
@@ -57,6 +57,9 @@ SUGGESTION_SOURCE = "suggestion_source"
 SUGGESTION_BASIS = "suggestion_basis"
 # The open item the suggestion would settle; taking the suggestion links it.
 SUGGESTED_SETTLES = "suggested_discharges_event_id"
+# Why a suggestion should not be taken without a look; a batch skips the line.
+SUGGESTION_CAUTION = "suggestion_caution"
+CAUTION_UNUSUAL_AMOUNT = "unusual_amount"
 LADDER_KEYS = (
   SUGGESTED_ELEMENT_ID,
   SUGGESTED_ACCOUNT_NAME,
@@ -65,6 +68,7 @@ LADDER_KEYS = (
   SUGGESTION_SOURCE,
   SUGGESTION_BASIS,
   SUGGESTED_SETTLES,
+  SUGGESTION_CAUTION,
 )
 # Set on a commit: whether the suggestion was taken.
 SUGGESTION_OUTCOME = "suggestion_outcome"
@@ -223,6 +227,42 @@ def _settlement_basis(agent: Agent, match: Any) -> str:
   )
 
 
+# A line this many times the counterparty's largest posted one is said to be.
+UNUSUAL_AMOUNT_MULTIPLE = 3
+_POSTED_STATUSES = ("committed", "pending", "fulfilled")
+
+
+def _unusual_amount_note(
+  session: Session,
+  agent: Agent,
+  entity_id: str | None,
+  amount: int | None,
+  event_id: str | None,
+) -> str:
+  """A sentence for the suggestion's basis when the line is far larger than
+  any the counterparty has posted, which is when its usual account is most
+  likely not the whole answer. Empty with fewer than two posted lines."""
+  if not amount:
+    return ""
+  magnitude = func.abs(Event.amount)
+  query = select(func.count(Event.id), func.max(magnitude)).where(
+    Event.agent_id == agent.id,
+    Event.entity_id == resolve_entity_id(session, entity_id),
+    Event.event_type.in_(sorted(LEARNED_EVENT_TYPES)),
+    Event.status.in_(_POSTED_STATUSES),
+    Event.amount.is_not(None),
+  )
+  if event_id:
+    query = query.where(Event.id != event_id)
+  posted, largest = session.execute(query).one()
+  if posted < 2 or not largest or abs(amount) <= UNUSUAL_AMOUNT_MULTIPLE * largest:
+    return ""
+  return (
+    f" This line is ${abs(amount) / 100:,.2f}; the largest of {agent.name}'s "
+    f"{posted} posted lines was ${largest / 100:,.2f}, so check what it is for."
+  )
+
+
 def apply_ladder(
   session: Session,
   metadata: dict[str, Any],
@@ -257,6 +297,7 @@ def apply_ladder(
   always_ask = default is not None and default.mode == ALWAYS_ASK
 
   out.pop(SUGGESTED_SETTLES, None)
+  out.pop(SUGGESTION_CAUTION, None)
   day = _as_day(occurred_at)
   if agent is not None and amount and day is not None and not always_ask:
     from robosystems.operations.roboledger.reads.ar_ap import find_settlement_match
@@ -286,7 +327,10 @@ def apply_ladder(
     out[SUGGESTED_ELEMENT_ID] = str(element.id)
     out[SUGGESTED_ACCOUNT_NAME] = element.name
     out[SUGGESTION_SOURCE] = SOURCE_AGENT_DEFAULT
-    out[SUGGESTION_BASIS] = _basis(agent, element, default)
+    note = _unusual_amount_note(session, agent, entity_id, amount, event_id)
+    out[SUGGESTION_BASIS] = _basis(agent, element, default) + note
+    if note:
+      out[SUGGESTION_CAUTION] = CAUTION_UNUSUAL_AMOUNT
     return out
 
   feed_id = out.get(FEED_SUGGESTED_ELEMENT_ID)

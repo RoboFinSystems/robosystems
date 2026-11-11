@@ -889,6 +889,7 @@ def _refuse_system_metadata(patch: dict | None) -> None:
     "feed_suggested_element_id",
     "feed_suggested_account_name",
     "suggested_discharges_event_id",
+    "suggestion_caution",
   }
   reserved = sorted(
     key for key in (patch or {}) if key in system_keys or key.startswith("dispatch_")

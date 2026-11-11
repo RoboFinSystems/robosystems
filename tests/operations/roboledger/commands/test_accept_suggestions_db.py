@@ -288,3 +288,21 @@ def test_the_limit_bounds_a_call(feed):
 
   assert (out.selected, out.classified, out.truncated) == (3, 2, True)
   assert [r.event_id for r in out.lines] == [first.id, second.id]
+
+
+def test_a_suggestion_with_a_caution_is_left_for_a_look(feed):
+  cautioned = _line(
+    feed,
+    suggestion_caution="unusual_amount",
+    suggestion_basis="Gusto, classified to Software on 3 of 3 committed lines.",
+  )
+  plain = _line(feed, day=3)
+
+  result = _run(feed, commit=True)
+
+  by_id = {line.event_id: line for line in result.lines}
+  assert by_id[cautioned.id].outcome == "skipped"
+  assert by_id[cautioned.id].reason == "needs_review"
+  assert "Classify this line on its own" in by_id[cautioned.id].detail
+  assert _status(feed, cautioned) == "captured"
+  assert _status(feed, plain) == "committed"

@@ -131,7 +131,10 @@ def build_instructions(
         "`not_a_settlement: true`. "
         "`agent_default` is the counterparty's own default, learned from the "
         "lines committed before it (`suggestion_basis` says how often it held), "
-        "so trust it; `tier0` is only the bank's category. Every commit "
+        "so trust it, unless the basis says the line is far larger than that "
+        "counterparty's usual: then read the description, since it may need "
+        "another account or a split, and a batch leaves it for you. `tier0` is "
+        "only the bank's category. Every commit "
         "teaches the default; to move it to the account you chose instead, add "
         "`remember_classification: true` to the commit's `metadata_patch`."
       ),
