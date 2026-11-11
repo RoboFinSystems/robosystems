@@ -140,6 +140,42 @@ class TestTrialLifecycle:
     assert grant.is_trial is True
     assert grant.user_credits is None
 
+  async def test_the_opening_invoice_can_beat_the_checkout_event(
+    self, test_db, test_user, test_org
+  ):
+    """Stripe sends the zero invoice before checkout.session.completed; the
+    subscription must carry its Stripe id by the time it is provisioned."""
+    member = _member(test_db, test_user.password_hash)
+    subscription = BillingSubscription.create_subscription(
+      org_id=test_org.id,
+      resource_type="repository",
+      resource_id=None,
+      plan_name="starter",
+      base_price_cents=2900,
+      session=test_db,
+      user_id=member.id,
+    )
+    subscription.status = "pending_payment"
+    subscription.provider_subscription_id = f"cs_test_{uuid4().hex[:10]}"
+    subscription.subscription_metadata = {"trial_days": 14, "repository_name": "sec"}
+    test_db.commit()
+
+    stripe_sub_id = f"sub_test_{uuid4().hex[:10]}"
+    invoice = _invoice(subscription, reason="subscription_create", amount=0)
+    invoice["subscription"] = stripe_sub_id
+    invoice["metadata"] = {"subscription_id": subscription.id}
+    seen: dict = {}
+
+    async def _provision(sub, _session, _context):
+      seen["stripe_subscription_id"] = sub.stripe_subscription_id
+
+    with patch(
+      "robosystems.dagster.jobs.billing._trigger_resource_provisioning", _provision
+    ):
+      await _handle_payment_succeeded(invoice, test_db, MagicMock())
+
+    assert seen["stripe_subscription_id"] == stripe_sub_id
+
   async def test_stripe_restates_the_trial_end(self, test_db, test_user, test_org):
     _member_, subscription, _grant = _on_trial(test_db, test_user, test_org)
     trial_end = datetime.now(UTC) + timedelta(days=13, hours=23)

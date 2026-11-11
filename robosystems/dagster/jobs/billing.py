@@ -513,6 +513,13 @@ async def _handle_payment_succeeded(
     db_session.commit()
 
   if subscription.status in ["pending_payment", "provisioning"]:
+    # This invoice can beat checkout.session.completed, and provisioning reads
+    # the Stripe id to tell a provider subscription (and its trial) from an
+    # invoiced one.
+    stripe_sub_id = _extract_stripe_subscription_id(invoice_data)
+    if stripe_sub_id and not subscription.stripe_subscription_id:
+      subscription.stripe_subscription_id = stripe_sub_id
+      db_session.commit()
     await _trigger_resource_provisioning(subscription, db_session, context)
 
   # A trial opens on a zero invoice of its own; any later paid invoice is the
