@@ -687,3 +687,62 @@ class TestCachedStrategies:
       graph_id="sec_historical",
     )
     assert schema_strategy == MCPExecutionStrategy.SCHEMA_CACHED
+
+
+@pytest.mark.unit
+class TestAuthorizeMcpToolCallTrial:
+  """A trial grant has the tools and not the raw-query tool."""
+
+  @staticmethod
+  async def _authorize(tool_name: str, arguments: dict, *, is_trial: bool):
+    from robosystems.config import env as config_env
+    from robosystems.routers.graphs.mcp import execute
+
+    grant = Mock(is_trial=is_trial, limits_plan="trial" if is_trial else "starter")
+    with (
+      patch.object(
+        execute.statement_kernel, "authorize", return_value=Mock(is_write=False)
+      ),
+      patch.object(execute, "validate_mcp_access", AsyncMock()),
+      patch("robosystems.database.SessionFactory", Mock()),
+      patch(
+        "robosystems.models.core.user.user_repository.UserRepository"
+        ".get_by_user_and_repository",
+        return_value=grant,
+      ),
+      patch.object(config_env, "RATE_LIMIT_ENABLED", False),
+    ):
+      return await execute.authorize_mcp_tool_call(
+        "sec", MCPToolCall(name=tool_name, arguments=arguments), _make_mock_user()
+      )
+
+  @pytest.mark.asyncio
+  async def test_raw_cypher_is_refused_on_a_trial(self):
+    with pytest.raises(HTTPException) as exc_info:
+      await self._authorize(
+        "read-graph-cypher",
+        {"query": "MATCH (e:Entity) RETURN e LIMIT 1"},
+        is_trial=True,
+      )
+    assert exc_info.value.status_code == 403
+    assert "not part of the SEC trial" in exc_info.value.detail
+
+  @pytest.mark.asyncio
+  async def test_a_tool_is_open_on_a_trial(self):
+    assert (
+      await self._authorize(
+        "financial-statement-analysis", {"ticker": "NVDA"}, is_trial=True
+      )
+      == "read"
+    )
+
+  @pytest.mark.asyncio
+  async def test_raw_cypher_is_open_once_paid(self):
+    assert (
+      await self._authorize(
+        "read-graph-cypher",
+        {"query": "MATCH (e:Entity) RETURN e LIMIT 1"},
+        is_trial=False,
+      )
+      == "read"
+    )

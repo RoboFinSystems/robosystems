@@ -77,6 +77,13 @@ class RepositoryInfo(BaseModel):
   description: str = Field(..., description="Repository description")
   enabled: bool = Field(..., description="Whether repository is enabled")
   coming_soon: bool = Field(..., description="Whether repository is coming soon")
+  trial_days: int = Field(
+    0,
+    description=(
+      "Length in days of the free trial a first subscription opens with; "
+      "0 when the repository offers none"
+    ),
+  )
   plans: list[OfferingRepositoryPlan] = Field(..., description="Available plans")
 
 

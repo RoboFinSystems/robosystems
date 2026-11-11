@@ -172,67 +172,89 @@ class TestRunGraphProvisioning:
 class TestRunUserRepositoryProvisioning:
   """Tests for run_user_repository_provisioning function."""
 
+  @staticmethod
+  async def _provision(metadata: dict):
+    """Run provisioning for a Stripe-linked subscription carrying ``metadata``."""
+    from datetime import UTC, datetime
+
+    mock_db = MagicMock()
+    mock_subscription = MagicMock()
+    mock_subscription.id = "sub123"
+    mock_subscription.status = "provisioning"
+    mock_subscription.plan_name = "sec-starter"
+    mock_subscription.stripe_subscription_id = "sub_stripe_1"
+    mock_subscription.subscription_metadata = metadata
+    mock_subscription.trial_ends_at = None
+    mock_subscription.current_period_start = datetime(2026, 1, 1, tzinfo=UTC)
+    mock_subscription.current_period_end = datetime(2026, 2, 1, tzinfo=UTC)
+    mock_db.query.return_value.filter.return_value.first.return_value = (
+      mock_subscription
+    )
+    mock_repo_service = MagicMock()
+    mock_repo_service.grant_access.return_value = True
+    mock_repo_service.allocate_credits.return_value = 10000
+
+    with (
+      patch(
+        "robosystems.operations.graph.provisioning_service.get_operation_manager",
+        return_value=AsyncMock(),
+      ),
+      patch("robosystems.database.get_db_session", side_effect=lambda: iter([mock_db])),
+      patch("robosystems.models.core.billing.BillingCustomer") as mock_customer,
+      patch(
+        "robosystems.operations.graph.repository_subscription_service"
+        ".RepositorySubscriptionService",
+        return_value=mock_repo_service,
+      ),
+      patch("robosystems.models.core.billing.BillingAuditLog"),
+      patch(
+        "robosystems.operations.graph.subscription_service"
+        ".generate_subscription_invoice"
+      ),
+      patch(
+        "robosystems.operations.graph.provisioning_service.report_asset_materialization"
+      ),
+      patch(
+        "robosystems.operations.billing.repository_subscriptions"
+        ".reconcile_repository_grant"
+      ),
+    ):
+      mock_customer.get_by_user_id.return_value = MagicMock(org_id="org123")
+      result = await run_user_repository_provisioning(
+        operation_id="op123",
+        subscription_id="sub123",
+        user_id="user456",
+        repository_name="sec",
+      )
+    return result, mock_subscription, mock_repo_service
+
   @pytest.mark.asyncio
   async def test_successful_user_repository_provisioning(self):
     """Test successful user repository provisioning."""
-    with patch(
-      "robosystems.operations.graph.provisioning_service.get_operation_manager"
-    ) as mock_get_manager:
-      mock_manager = AsyncMock()
-      mock_get_manager.return_value = mock_manager
+    result, subscription, repo_service = await self._provision({})
 
-      with patch("robosystems.database.get_db_session") as mock_get_db:
-        mock_db = MagicMock()
-        mock_get_db.side_effect = lambda: iter([mock_db])
+    assert result["status"] == "activated"
+    assert result["repository_name"] == "sec"
+    assert result["access_granted"] is True
+    assert result["credits_allocated"] == 10000
+    subscription.activate.assert_called_once()
+    assert repo_service.grant_access.call_args.kwargs["trial"] is False
+    assert subscription.trial_ends_at is None
 
-        mock_subscription = MagicMock()
-        mock_subscription.id = "sub123"
-        mock_subscription.status = "provisioning"
-        mock_subscription.plan_name = "sec-starter"
-        mock_subscription.current_period_start = MagicMock()
-        mock_subscription.current_period_start.isoformat.return_value = "2026-01-01"
-        mock_subscription.current_period_end = MagicMock()
-        mock_subscription.current_period_end.isoformat.return_value = "2026-02-01"
+  @pytest.mark.asyncio
+  async def test_a_trial_is_provisioned_without_credits(self):
+    """A trial grants access under the trial flag, allocates nothing, and ends
+    its first period on the trial's last day."""
+    from datetime import UTC, datetime
 
-        mock_customer = MagicMock()
-        mock_customer.org_id = "org123"
+    result, subscription, repo_service = await self._provision({"trial_days": 14})
 
-        mock_db.query.return_value.filter.return_value.first.return_value = (
-          mock_subscription
-        )
-
-        with patch(
-          "robosystems.models.core.billing.BillingCustomer"
-        ) as mock_billing_customer:
-          mock_billing_customer.get_by_user_id.return_value = mock_customer
-
-          with patch(
-            "robosystems.operations.graph.repository_subscription_service.RepositorySubscriptionService"
-          ) as mock_repo_service_class:
-            mock_repo_service = MagicMock()
-            mock_repo_service.grant_access.return_value = True
-            mock_repo_service.allocate_credits.return_value = 10000
-            mock_repo_service_class.return_value = mock_repo_service
-
-            with patch("robosystems.models.core.billing.BillingAuditLog"):
-              with patch(
-                "robosystems.operations.graph.subscription_service.generate_subscription_invoice"
-              ):
-                with patch(
-                  "robosystems.operations.graph.provisioning_service.report_asset_materialization"
-                ):
-                  result = await run_user_repository_provisioning(
-                    operation_id="op123",
-                    subscription_id="sub123",
-                    user_id="user456",
-                    repository_name="sec",
-                  )
-
-                  assert result["status"] == "activated"
-                  assert result["repository_name"] == "sec"
-                  assert result["access_granted"] is True
-                  assert result["credits_allocated"] == 10000
-                  mock_subscription.activate.assert_called_once()
+    assert result["status"] == "activated"
+    assert result["credits_allocated"] == 0
+    assert repo_service.grant_access.call_args.kwargs["trial"] is True
+    repo_service.allocate_credits.assert_not_called()
+    assert subscription.trial_ends_at == datetime(2026, 1, 15, tzinfo=UTC)
+    assert subscription.current_period_end == subscription.trial_ends_at
 
   @pytest.mark.asyncio
   async def test_user_repository_provisioning_invalid_type(self):

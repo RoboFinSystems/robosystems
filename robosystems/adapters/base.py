@@ -51,8 +51,12 @@ class SharedRepositoryManifest:
   graph_tier: str = "ladybug-shared"
   graph_instance_id: str = "ladybug-shared-prod"
 
-  # Keyed by plan name; None = default limits.
+  # Keyed by plan name; None = default limits. A ``trial`` row applies to a
+  # trial grant whichever plan it converts to.
   rate_limits: dict[str, dict[str, int]] | None = None
+
+  # Free-trial length for a first subscription; 0 = no trial.
+  trial_days: int = 0
 
   # Keyed by plan name. Each: name, price_cents, price_monthly, price_display,
   # monthly_credits, access_level, description, features.

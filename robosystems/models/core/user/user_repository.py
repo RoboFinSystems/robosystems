@@ -93,6 +93,9 @@ class UserRepository(Model):
   repository_plan = Column(String, nullable=False, default="starter")
 
   is_active = Column(Boolean, nullable=False, default=True)
+  # A trial grant: trial limits and no raw queries until the first paid
+  # invoice clears it.
+  is_trial = Column(Boolean, nullable=False, default=False, server_default="false")
   activated_at = Column(
     DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
   )
@@ -167,6 +170,7 @@ class UserRepository(Model):
     monthly_credits: int = 0,
     expires_at: datetime | None = None,
     metadata: dict[str, Any] | None = None,
+    is_trial: bool = False,
   ) -> UserRepository:
     """Create or update repository access for a user.
 
@@ -187,6 +191,7 @@ class UserRepository(Model):
       existing.granted_by = granted_by
       existing.granted_at = now
       existing.is_active = True
+      existing.is_trial = is_trial
       existing.monthly_price_cents = monthly_price_cents
       existing.monthly_credit_allocation = monthly_credits
       existing.expires_at = expires_at
@@ -207,6 +212,7 @@ class UserRepository(Model):
         granted_at=now,
         activated_at=now,
         is_active=True,
+        is_trial=is_trial,
         monthly_price_cents=monthly_price_cents,
         monthly_credit_allocation=monthly_credits,
         extra_metadata=json.dumps(metadata) if metadata else None,
@@ -464,6 +470,13 @@ class UserRepository(Model):
       "repository_type": self.repository_type,
     }
 
+  @property
+  def limits_plan(self) -> str:
+    """The plan whose rate limits apply: the trial row until the first payment."""
+    from robosystems.config.shared_repositories import TRIAL_PLAN
+
+    return TRIAL_PLAN if safe_bool(self.is_trial) else str(self.repository_plan)
+
   def get_repository_plan_config(self) -> dict[str, Any]:
     """Plan configuration from ``config/shared_repositories.py``.
 
@@ -502,6 +515,7 @@ class UserRepository(Model):
       "access_level": self.access_level.value,
       "repository_plan": self.repository_plan,
       "is_active": safe_bool(self.is_active),
+      "is_trial": safe_bool(self.is_trial),
       "activated_at": self.activated_at.isoformat(),
       "expires_at": self.expires_at.isoformat() if self.expires_at else None,
       "monthly_price_cents": self.monthly_price_cents,

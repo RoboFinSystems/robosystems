@@ -25,6 +25,20 @@ from robosystems.config.shared_repositories import (
 )
 
 
+def trial_refusal(repository: str, operation: str = "query") -> str:
+  """What a trial subscriber is told when they reach past the trial: raw
+  queries, or the AI analyst (``operation="agent"``), which runs on credits."""
+  from robosystems.config import env
+
+  what = "The AI analyst is" if operation == "agent" else "Raw queries are"
+  opens = "It opens" if operation == "agent" else "They open"
+  return (
+    f"{what} not part of the {repository.upper()} trial, which covers the "
+    f"analysis tools. {opens} with your first payment: start your plan now at "
+    f"{env.ROBOSYSTEMS_URL}/organization?tab=billing"
+  )
+
+
 class AllowedSharedEndpoints(str, Enum):
   QUERY = "query"
   MCP = "mcp"

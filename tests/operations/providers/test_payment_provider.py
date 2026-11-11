@@ -951,3 +951,62 @@ class TestStripeCancelIdempotency:
 
     with pytest.raises(InvalidRequestError):
       stripe_provider.cancel_subscription_at_period_end("sub_live")
+
+
+class TestStripeTrial:
+  """A trial rides on the subscription Stripe opens, with the card still taken."""
+
+  @pytest.fixture
+  def stripe_provider(self):
+    with patch("robosystems.operations.providers.payment_provider.env") as mock_env:
+      mock_env.ROBOSYSTEMS_URL = "https://robosystems.example.com"
+      with patch.object(StripePaymentProvider, "__init__", lambda self: None):
+        provider = StripePaymentProvider()
+        provider.stripe = Mock()
+        return provider
+
+  def test_checkout_carries_the_trial_and_still_collects_the_card(
+    self, stripe_provider
+  ):
+    stripe_provider.create_checkout_session(
+      "cus_123", "price_456", {"subscription_id": "bsub_1"}, trial_days=14
+    )
+    kwargs = stripe_provider.stripe.checkout.Session.create.call_args.kwargs
+    assert kwargs["subscription_data"] == {
+      "metadata": {"subscription_id": "bsub_1"},
+      "trial_period_days": 14,
+    }
+    assert kwargs["payment_method_collection"] == "always"
+
+  def test_checkout_without_a_trial_sends_no_trial_period(self, stripe_provider):
+    stripe_provider.create_checkout_session("cus_123", "price_456", {})
+    kwargs = stripe_provider.stripe.checkout.Session.create.call_args.kwargs
+    assert "trial_period_days" not in kwargs["subscription_data"]
+
+  def test_a_card_on_file_subscription_carries_the_trial(self, stripe_provider):
+    stripe_provider.stripe.Subscription.create.return_value = Mock(
+      id="sub_1", status="trialing"
+    )
+    stripe_provider.create_subscription(
+      "cus_123", "price_456", {}, payment_method_id="pm_1", trial_days=14
+    )
+    kwargs = stripe_provider.stripe.Subscription.create.call_args.kwargs
+    assert kwargs["trial_period_days"] == 14
+
+  def test_a_card_on_file_subscription_without_a_trial(self, stripe_provider):
+    stripe_provider.stripe.Subscription.create.return_value = Mock(
+      id="sub_1", status="active"
+    )
+    stripe_provider.create_subscription(
+      "cus_123", "price_456", {}, payment_method_id="pm_1"
+    )
+    assert (
+      "trial_period_days"
+      not in stripe_provider.stripe.Subscription.create.call_args.kwargs
+    )
+
+  def test_ending_a_trial_bills_now(self, stripe_provider):
+    stripe_provider.end_trial("sub_1")
+    stripe_provider.stripe.Subscription.modify.assert_called_once_with(
+      "sub_1", trial_end="now"
+    )

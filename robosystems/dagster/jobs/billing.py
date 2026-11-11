@@ -515,6 +515,19 @@ async def _handle_payment_succeeded(
   if subscription.status in ["pending_payment", "provisioning"]:
     await _trigger_resource_provisioning(subscription, db_session, context)
 
+  # A trial opens on a zero invoice of its own; any later paid invoice is the
+  # trial's first charge.
+  if (
+    invoice_data.get("billing_reason") != "subscription_create"
+    or (invoice_data.get("amount_paid") or 0) > 0
+  ):
+    from robosystems.operations.billing.repository_subscriptions import (
+      convert_repository_trial,
+    )
+
+    if convert_repository_trial(subscription, db_session):
+      context.log.info(f"Trial converted for subscription {subscription.id}")
+
   context.log.info(f"Payment succeeded for subscription {subscription.id}")
 
 
@@ -757,6 +770,10 @@ async def _apply_subscription_updated(
     subscription.current_period_start = datetime.fromtimestamp(period_start, tz=UTC)
   if period_end:
     subscription.current_period_end = datetime.fromtimestamp(period_end, tz=UTC)
+
+  trial_end = subscription_data.get("trial_end")
+  if trial_end:
+    subscription.trial_ends_at = datetime.fromtimestamp(trial_end, tz=UTC)
 
   # A tier upgrade changes the price and Stripe reports active; the worker
   # owns the upgrading -> active transition.

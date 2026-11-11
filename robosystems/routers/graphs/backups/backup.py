@@ -175,7 +175,7 @@ async def list_backups(
         str(current_user.id), repository_id, db
       )
       if user_repo:
-        plan = user_repo.repository_plan
+        plan = user_repo.limits_plan
         quota_info = await DownloadRateLimiter.get_download_quota(
           user_id=str(current_user.id),
           repository=repository_id,

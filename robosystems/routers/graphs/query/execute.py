@@ -169,7 +169,11 @@ async def execute_cypher_query(
       require_graph_access(graph_id, session, require_write=True)
 
     await _check_shared_repository_limits(
-      graph_id=graph_id, user=current_user, session=session, endpoint="query"
+      graph_id=graph_id,
+      user=current_user,
+      session=session,
+      endpoint="query",
+      raw_query=True,
     )
 
     tier = GraphTier.LADYBUG_STANDARD
@@ -846,7 +850,13 @@ async def _check_shared_repository_limits(
   session: Session,
   endpoint: str = "query",
   operation: str = "query",
+  raw_query: bool = False,
 ) -> None:
+  """Subscription and per-plan limits for a shared-repository read.
+
+  ``raw_query`` marks a caller-written statement, as against a view, which
+  counts as a query too: a trial has the views and not the statements.
+  """
   from robosystems.config import env
   from robosystems.config.shared_repositories import (
     is_shared_repository_or_subgraph,
@@ -873,6 +883,16 @@ async def _check_shared_repository_limits(
       f"Subscribe at {env.ROBOSYSTEMS_URL}/repositories/browse",
     )
 
+  if repo_access.is_trial and (raw_query or operation == "agent"):
+    from robosystems.middleware.rate_limits.repository_rate_limits import (
+      trial_refusal,
+    )
+
+    raise HTTPException(
+      status_code=http_status.HTTP_403_FORBIDDEN,
+      detail=trial_refusal(parent_repo_id, operation),
+    )
+
   if not env.RATE_LIMIT_ENABLED:
     return
 
@@ -887,7 +907,7 @@ async def _check_shared_repository_limits(
   try:
     limiter = DualLayerRateLimiter(redis_client)
 
-    repo_plan = repo_access.repository_plan if repo_access else None
+    repo_plan = repo_access.limits_plan if repo_access else None
 
     # Per-plan volume limits; burst protection is enforced upstream.
     limit_check = await limiter.check_limits(

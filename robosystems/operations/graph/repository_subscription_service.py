@@ -270,11 +270,13 @@ class RepositorySubscriptionService:
     repository_type: RepositoryType,
     user_id: str,
     repository_plan: str | None = None,
+    trial: bool = False,
   ) -> bool:
     """Grant a user access to a repository after payment is confirmed.
 
     Idempotent: an existing record is reactivated rather than duplicated. Also
     ensures the repository `Graph` row exists, defaulting to the "starter" plan.
+    A ``trial`` grant is created without credits and under the trial limits.
     """
     self.ensure_repository_graph_exists(repository_type)
 
@@ -317,11 +319,12 @@ class RepositorySubscriptionService:
       repository_plan=repository_plan,
       session=self.session,
       monthly_price_cents=plan_config["price_cents"],
-      monthly_credits=plan_config["monthly_credits"],
+      monthly_credits=0 if trial else plan_config["monthly_credits"],
       metadata={
         "granted_at": datetime.now(UTC).isoformat(),
         "granted_via": "provisioning",
       },
+      is_trial=trial,
     )
 
     logger.info(

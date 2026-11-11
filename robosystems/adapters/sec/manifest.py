@@ -102,7 +102,25 @@ SEC_MANIFEST = SharedRepositoryManifest(
     "For text inside filings use `search-documents`; to read one disclosure "
     "whole use `disclosures`, then `information-block`."
   ),
+  trial_days=14,
   rate_limits={
+    "trial": {
+      # Raw queries are refused on a trial before these are read; the row
+      # covers the other operations the category counts.
+      "queries_per_minute": 5,
+      "queries_per_hour": 50,
+      "queries_per_day": 300,
+      "mcp_queries_per_minute": 5,
+      "mcp_queries_per_hour": 50,
+      "mcp_queries_per_day": 300,
+      "searches_per_minute": 5,
+      "searches_per_hour": 25,
+      "searches_per_day": 150,
+      "agent_calls_per_minute": 0,
+      "agent_calls_per_hour": 0,
+      "agent_calls_per_day": 0,
+      "downloads_per_month": 1,
+    },
     "starter": {
       "queries_per_minute": 10,
       "queries_per_hour": 200,

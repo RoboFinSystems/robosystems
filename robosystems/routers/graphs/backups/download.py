@@ -124,7 +124,7 @@ async def get_backup_download_url(
           detail="Repository subscription required for backup downloads",
         )
 
-      plan = user_repo.repository_plan
+      plan = user_repo.limits_plan
       monthly_limit = DownloadRateLimiter.get_shared_repo_monthly_limit(
         parent_repo_id, plan
       )

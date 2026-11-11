@@ -333,19 +333,31 @@ async def run_user_repository_provisioning(
 
       repo_service = RepositorySubscriptionService(db)
 
+      # Only a provider subscription carries a trial; its first paid invoice
+      # ends it and grants the credits.
+      trial_days = int(
+        (subscription.subscription_metadata or {}).get("trial_days") or 0
+      )
+      is_trial = trial_days > 0 and bool(subscription.stripe_subscription_id)
+
       access_granted = repo_service.grant_access(
         repository_type=repository_type,
         user_id=user_id,
         repository_plan=repository_plan,
+        trial=is_trial,
       )
 
       if operation_id:
         await manager.emit_progress(operation_id, "Allocating credits...", 50)
 
-      credits_allocated = repo_service.allocate_credits(
-        repository_type=repository_type,
-        repository_plan=repository_plan,
-        user_id=user_id,
+      credits_allocated = (
+        0
+        if is_trial
+        else repo_service.allocate_credits(
+          repository_type=repository_type,
+          repository_plan=repository_plan,
+          user_id=user_id,
+        )
       )
 
       logger.info(
@@ -358,6 +370,14 @@ async def run_user_repository_provisioning(
 
       subscription.resource_id = repository_name
       subscription.activate(db)
+      if is_trial:
+        from datetime import timedelta
+
+        # The provider's webhook restates both from its own clock.
+        trial_end = subscription.current_period_start + timedelta(days=trial_days)
+        subscription.trial_ends_at = trial_end
+        subscription.current_period_end = trial_end
+        db.commit()
       # A re-subscribe inherits the grant an earlier subscription ended.
       from robosystems.operations.billing.repository_subscriptions import (
         reconcile_repository_grant,
@@ -376,6 +396,7 @@ async def run_user_repository_provisioning(
           "current_period_start": subscription.current_period_start.isoformat(),
           "current_period_end": subscription.current_period_end.isoformat(),
           "credits_allocated": credits_allocated,
+          **({"trial_days": trial_days} if is_trial else {}),
         },
       )
 
