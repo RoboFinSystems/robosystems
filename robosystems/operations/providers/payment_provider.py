@@ -36,9 +36,17 @@ class PaymentProvider(ABC):
 
   @abstractmethod
   def create_checkout_session(
-    self, customer_id: str, price_id: str, metadata: dict[str, Any]
+    self,
+    customer_id: str,
+    price_id: str,
+    metadata: dict[str, Any],
+    trial_days: int = 0,
   ) -> dict[str, Any]:
-    """Start a hosted checkout. Returns ``{checkout_url, session_id}``."""
+    """Start a hosted checkout. Returns ``{checkout_url, session_id}``.
+
+    ``trial_days`` opens the subscription with a free trial; the card is
+    still collected.
+    """
     pass
 
   @abstractmethod
@@ -57,11 +65,17 @@ class PaymentProvider(ABC):
     price_id: str,
     metadata: dict[str, Any],
     payment_method_id: str | None = None,
+    trial_days: int = 0,
   ) -> str:
     """Subscribe a customer who already has a payment method on file.
 
     Without ``payment_method_id`` the customer's default method is used.
     """
+    pass
+
+  @abstractmethod
+  def end_trial(self, subscription_id: str) -> None:
+    """End a subscription's trial now, which bills the first period."""
     pass
 
   @abstractmethod
@@ -160,8 +174,15 @@ class StripePaymentProvider(PaymentProvider):
     return customer.id
 
   def create_checkout_session(
-    self, customer_id: str, price_id: str, metadata: dict[str, Any]
+    self,
+    customer_id: str,
+    price_id: str,
+    metadata: dict[str, Any],
+    trial_days: int = 0,
   ) -> dict[str, Any]:
+    subscription_data: dict[str, Any] = {"metadata": metadata}
+    if trial_days > 0:
+      subscription_data["trial_period_days"] = trial_days
     session = self.stripe.checkout.Session.create(
       customer=customer_id,
       mode="subscription",
@@ -171,7 +192,9 @@ class StripePaymentProvider(PaymentProvider):
       metadata=metadata,
       # Stripe does not copy session metadata onto the subscription; webhook
       # resolution needs it there.
-      subscription_data={"metadata": metadata},
+      subscription_data=subscription_data,
+      # A trial still takes the card: it is what the trial converts on.
+      payment_method_collection="always",
       payment_method_types=["card"],
       billing_address_collection="auto",
       allow_promotion_codes=True,
@@ -215,6 +238,7 @@ class StripePaymentProvider(PaymentProvider):
     price_id: str,
     metadata: dict[str, Any],
     payment_method_id: str | None = None,
+    trial_days: int = 0,
   ) -> str:
     if not payment_method_id:
       payment_methods = self.list_payment_methods(customer_id)
@@ -231,12 +255,14 @@ class StripePaymentProvider(PaymentProvider):
 
     # Off-session: nobody is present to complete authentication, so fail
     # rather than create an `incomplete` subscription.
+    trial: dict[str, Any] = {"trial_period_days": trial_days} if trial_days > 0 else {}
     subscription = self.stripe.Subscription.create(
       customer=customer_id,
       items=[{"price": price_id}],
       default_payment_method=payment_method_id,
       metadata=metadata,
       payment_behavior="error_if_incomplete",
+      **trial,
     )
 
     if subscription.status not in ("active", "trialing"):
@@ -767,6 +793,13 @@ class StripePaymentProvider(PaymentProvider):
         f"{e}; Stripe finalizes it within the hour",
         extra={"subscription_id": subscription_id, "invoice_id": invoice_id},
       )
+
+  def end_trial(self, subscription_id: str) -> None:
+    self.stripe.Subscription.modify(subscription_id, trial_end="now")
+    logger.info(
+      f"Ended trial on Stripe subscription {subscription_id}",
+      extra={"subscription_id": subscription_id},
+    )
 
   def cancel_subscription_at_period_end(self, subscription_id: str) -> None:
     """Flag a Stripe subscription to cancel when the current period ends.

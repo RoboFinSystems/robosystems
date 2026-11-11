@@ -194,6 +194,13 @@ class GraphSubscriptionResponse(BaseModel):
   current_period_end: str | None = Field(None, description="Current billing period end")
   started_at: str | None = Field(None, description="Subscription start date")
   canceled_at: str | None = Field(None, description="Cancellation date")
+  trial_ends_at: str | None = Field(
+    None,
+    description=(
+      "When the free trial ends and the first charge is made. Null for a "
+      "subscription that opened without a trial; kept after the trial is over."
+    ),
+  )
   ends_at: str | None = Field(
     None,
     description="Subscription end date (when access will be revoked, especially relevant for cancelled subscriptions)",

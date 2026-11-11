@@ -426,6 +426,68 @@ class TestCreateCheckoutSession:
   @pytest.mark.asyncio
   @patch("robosystems.models.core.OrgUser.get_user_orgs")
   @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
+  @patch("robosystems.routers.billing.checkout.BillingConfig.get_repository_plan")
+  @patch("robosystems.routers.billing.checkout.BillingSubscription.create_subscription")
+  @patch("robosystems.routers.billing.checkout.get_payment_provider")
+  @pytest.mark.parametrize("trial_days", [14, 0])
+  async def test_a_repository_checkout_carries_the_trial_it_is_owed(
+    self,
+    mock_get_provider,
+    mock_create_sub,
+    mock_get_plan,
+    mock_get_customer,
+    mock_get_user_orgs,
+    trial_days,
+    mock_user,
+    mock_db,
+  ):
+    """The trial length reaches both the provider and the row provisioning reads."""
+    from robosystems.models.core import OrgRole
+
+    mock_get_user_orgs.return_value = [Mock(org_id="org_123", role=OrgRole.OWNER)]
+    mock_customer = Mock(spec=BillingCustomer)
+    mock_customer.invoice_billing_enabled = False
+    mock_customer.has_payment_method = False
+    mock_customer.stripe_customer_id = "cus_123"
+    mock_get_customer.return_value = mock_customer
+    mock_get_plan.return_value = {"price_cents": 2900}
+    mock_subscription = Mock(spec=BillingSubscription)
+    mock_subscription.id = "sub_456"
+    mock_create_sub.return_value = mock_subscription
+    mock_provider = Mock()
+    mock_provider.get_or_create_price.return_value = "price_789"
+    mock_provider.create_checkout_session.return_value = {
+      "checkout_url": "https://checkout.stripe.com/test",
+      "session_id": "cs_test",
+    }
+    mock_get_provider.return_value = mock_provider
+
+    with patch(
+      "robosystems.operations.billing.repository_subscriptions.repository_trial_days",
+      return_value=trial_days,
+    ) as eligibility:
+      await create_checkout_session(
+        CreateCheckoutRequest(
+          resource_type="repository",
+          plan_name="starter",
+          resource_config={"repository_name": "sec"},
+        ),
+        mock_user,
+        mock_db,
+        None,
+      )
+
+    eligibility.assert_called_once_with("sec", mock_user.id, "org_123", mock_db)
+    assert (
+      mock_provider.create_checkout_session.call_args.kwargs["trial_days"] == trial_days
+    )
+    assert mock_subscription.subscription_metadata.get("trial_days") == (
+      trial_days or None
+    )
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.core.OrgUser.get_user_orgs")
+  @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
   async def test_create_checkout_session_refuses_over_graph_limit(
     self, mock_get_customer, mock_get_user_orgs, mock_user, mock_db, checkout_request
   ):

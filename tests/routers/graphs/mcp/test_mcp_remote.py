@@ -1060,3 +1060,49 @@ class TestRouteToolProfile:
     assert body["result"]["isError"] is True
     assert "not available on this connection" in body["result"]["content"][0]["text"]
     authorize.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+class TestTrialToolList:
+  """A trial subscriber's tool list leaves out raw Cypher, and the handshake
+  says so."""
+
+  @staticmethod
+  def _handler():
+    handler = _make_handler(
+      tools=[
+        {"name": "read-graph-cypher", "description": "read"},
+        {"name": "financial-statement-analysis", "description": "statements"},
+      ]
+    )
+    handler.get_instructions = Mock(return_value="START HERE")
+    return handler
+
+  async def _dispatch(self, method: str, exclusions):
+    handler = self._handler()
+    with (
+      patch.object(remote, "_validate_read_access", AsyncMock()),
+      patch.object(remote, "_trial_exclusions", Mock(return_value=exclusions)),
+      patch.object(remote, "get_graph_repository", AsyncMock(return_value=Mock())),
+      patch.object(remote, "MCPHandler", Mock(return_value=handler)),
+    ):
+      request = _make_request(
+        {"jsonrpc": "2.0", "id": 1, "method": method, "params": {}}
+      )
+      return _body(await dispatch_jsonrpc(request, "sec", _make_user()))
+
+  async def test_tools_list_leaves_out_raw_cypher(self):
+    body = await self._dispatch("tools/list", remote.CYPHER_READ_TOOLS)
+    assert [t["name"] for t in body["result"]["tools"]] == [
+      "financial-statement-analysis"
+    ]
+
+  async def test_initialize_names_the_trial(self):
+    body = await self._dispatch("initialize", remote.CYPHER_READ_TOOLS)
+    assert "on a trial" in body["result"]["instructions"]
+
+  async def test_a_paid_subscriber_sees_every_tool_and_no_note(self):
+    listed = await self._dispatch("tools/list", frozenset())
+    assert len(listed["result"]["tools"]) == 2
+    handshake = await self._dispatch("initialize", frozenset())
+    assert "on a trial" not in handshake["result"]["instructions"]

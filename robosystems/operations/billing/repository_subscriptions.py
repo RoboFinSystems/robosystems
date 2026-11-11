@@ -15,6 +15,101 @@ from robosystems.models.core.billing.audit_log import BillingEventType
 logger = get_logger(__name__)
 
 
+def repository_trial_days(
+  repository_id: str, user_id: str, org_id: str, session: Session
+) -> int:
+  """Trial days a new subscription to this repository opens with.
+
+  One trial per subscriber and per org: any earlier subscription that got as
+  far as the repository, other than a failed one, spends it.
+  """
+  from sqlalchemy import or_
+
+  from robosystems.config.shared_repositories import get_trial_days
+  from robosystems.models.core.billing.subscription import SubscriptionStatus
+
+  days = get_trial_days(repository_id)
+  if days <= 0:
+    return 0
+  prior = (
+    session.query(BillingSubscription.id)
+    .filter(
+      BillingSubscription.resource_type == "repository",
+      BillingSubscription.resource_id == repository_id,
+      or_(
+        BillingSubscription.user_id == user_id,
+        BillingSubscription.org_id == org_id,
+      ),
+      BillingSubscription.status != SubscriptionStatus.FAILED.value,
+    )
+    .first()
+  )
+  return 0 if prior else days
+
+
+def convert_repository_trial(
+  subscription: BillingSubscription, session: Session
+) -> bool:
+  """The trial's first payment landed: lift the trial and grant the plan's
+  credits. False when the subscription's grant is not on a trial."""
+  from robosystems.models.core import RepositoryType
+  from robosystems.operations.graph.repository_subscription_service import (
+    RepositorySubscriptionService,
+  )
+
+  if (
+    subscription.resource_type != "repository"
+    or not subscription.resource_id
+    or not subscription.user_id
+  ):
+    return False
+  grant = UserRepository.get_by_user_and_repository(
+    subscription.user_id, subscription.resource_id, session
+  )
+  if not grant or not grant.is_trial:
+    return False
+
+  grant.is_trial = False
+  session.commit()
+  # The bare plan key, as provisioning writes it.
+  credits_allocated = RepositorySubscriptionService(session).allocate_credits(
+    repository_type=RepositoryType(subscription.resource_id),
+    repository_plan=str(grant.repository_plan).split("-")[-1],
+    user_id=subscription.user_id,
+  )
+  grant.monthly_credit_allocation = credits_allocated
+  session.commit()
+  grant.invalidate_access_cache()
+
+  BillingAuditLog.log_event(
+    session=session,
+    event_type=BillingEventType.TRIAL_CONVERTED,
+    description=(
+      f"Trial converted to the paid plan for {subscription.resource_id} repository"
+    ),
+    actor_type="system",
+    org_id=subscription.org_id,
+    subscription_id=subscription.id,
+    event_data={
+      "resource_type": "repository",
+      "resource_id": subscription.resource_id,
+      "subscriber_user_id": subscription.user_id,
+      "credits_allocated": credits_allocated,
+    },
+  )
+
+  logger.info(
+    f"Repository trial converted for subscription {subscription.id}",
+    extra={
+      "subscription_id": subscription.id,
+      "subscriber_user_id": subscription.user_id,
+      "repository": subscription.resource_id,
+      "credits_allocated": credits_allocated,
+    },
+  )
+  return True
+
+
 class RepositorySubscriptionError(Exception):
   """Base class for repository subscription operation failures."""
 

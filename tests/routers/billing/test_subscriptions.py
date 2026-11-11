@@ -73,6 +73,7 @@ class TestListSubscriptions:
     mock_sub1.started_at = datetime(2025, 1, 1)
     mock_sub1.canceled_at = None
     mock_sub1.ends_at = None
+    mock_sub1.trial_ends_at = None
     mock_sub1.created_at = datetime(2025, 1, 1)
 
     mock_sub2 = Mock(spec=BillingSubscription)
@@ -89,6 +90,7 @@ class TestListSubscriptions:
     mock_sub2.started_at = datetime(2024, 12, 1)
     mock_sub2.canceled_at = datetime(2025, 1, 15)
     mock_sub2.ends_at = datetime(2025, 2, 1)
+    mock_sub2.trial_ends_at = datetime(2024, 12, 15)
     mock_sub2.created_at = datetime(2024, 12, 1)
 
     mock_query = mock_db.query.return_value
@@ -111,6 +113,8 @@ class TestListSubscriptions:
     assert result[1].resource_type == "repository"
     assert result[1].status == "canceled"
     assert result[1].canceled_at is not None
+    assert result[0].trial_ends_at is None
+    assert result[1].trial_ends_at == "2024-12-15T00:00:00"
 
   @pytest.mark.asyncio
   @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
@@ -178,6 +182,7 @@ class TestGetSubscription:
     mock_subscription.started_at = datetime(2025, 1, 1)
     mock_subscription.canceled_at = None
     mock_subscription.ends_at = None
+    mock_subscription.trial_ends_at = None
     mock_subscription.created_at = datetime(2025, 1, 1)
 
     mock_query = mock_db.query.return_value
@@ -238,6 +243,7 @@ class TestGetSubscription:
     mock_subscription.started_at = None
     mock_subscription.canceled_at = None
     mock_subscription.ends_at = None
+    mock_subscription.trial_ends_at = None
     mock_subscription.created_at = datetime(2025, 1, 1)
 
     mock_query = mock_db.query.return_value
@@ -307,6 +313,7 @@ class TestCancelSubscription:
     sub.started_at = datetime(2025, 1, 1)
     sub.canceled_at = None
     sub.ends_at = None
+    sub.trial_ends_at = None
     sub.stripe_subscription_id = None
     sub.created_at = datetime(2025, 1, 1)
     return sub

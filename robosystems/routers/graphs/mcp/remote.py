@@ -217,6 +217,34 @@ async def _validate_read_access(graph_id: str, current_user: User) -> None:
     sess.close()
 
 
+_TRIAL_INSTRUCTIONS_NOTE = (
+  "\n\nTRIAL\n- This connection is on a trial: the analysis tools above are "
+  "available, and raw Cypher (`read-graph-cypher`) opens with the first payment."
+)
+
+
+def _trial_exclusions(graph_id: str, current_user: User) -> frozenset[str]:
+  """Raw-query tools a trial subscriber's tool list leaves out. The call
+  itself is refused in `authorize_mcp_tool_call`, with the reason."""
+  from robosystems.config.shared_repositories import (
+    is_shared_repository_or_subgraph,
+    resolve_shared_repository_parent,
+  )
+  from robosystems.database import SessionFactory
+  from robosystems.models.core.user.user_repository import UserRepository
+
+  if not is_shared_repository_or_subgraph(graph_id):
+    return _NO_EXCLUSIONS
+  sess = SessionFactory()
+  try:
+    grant = UserRepository.get_by_user_and_repository(
+      current_user.id, resolve_shared_repository_parent(graph_id), sess
+    )
+    return CYPHER_READ_TOOLS if grant and grant.is_trial else _NO_EXCLUSIONS
+  finally:
+    sess.close()
+
+
 async def _handle_initialize(
   graph_id: str,
   current_user: User,
@@ -231,6 +259,8 @@ async def _handle_initialize(
   )
 
   await _validate_read_access(graph_id, current_user)
+  trial_exclusions = await run_off_loop(_trial_exclusions, graph_id, current_user)
+  excluded_tools = excluded_tools | trial_exclusions
 
   # Rebuilt per initialize so a reconnecting client sees the live tool set.
   instructions: str | None = None
@@ -258,6 +288,8 @@ async def _handle_initialize(
     },
   }
   if instructions:
+    if trial_exclusions:
+      instructions += _TRIAL_INSTRUCTIONS_NOTE
     result["instructions"] = instructions
   return result
 
@@ -277,6 +309,9 @@ async def _handle_tools_list(
   excluded_tools: frozenset[str] = _NO_EXCLUSIONS,
 ) -> dict[str, Any]:
   await _validate_read_access(graph_id, current_user)
+  excluded_tools = excluded_tools | await run_off_loop(
+    _trial_exclusions, graph_id, current_user
+  )
 
   repository = await get_graph_repository(graph_id, _get_mcp_operation_type(graph_id))
   handler = MCPHandler(repository, graph_id, current_user)

@@ -91,7 +91,7 @@ async def _check_search_rate_limit(
       graph_id=graph_id,
       operation="search",
       endpoint=endpoint,
-      repository_plan=repo_access.repository_plan,
+      repository_plan=repo_access.limits_plan,
     )
 
     if not limit_check["allowed"]:

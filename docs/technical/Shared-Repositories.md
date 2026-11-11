@@ -110,6 +110,26 @@ SEC EDGAR is the one shared repository available today — public-company filing
 
 Prices, monthly AI credit allocations and download allowances are served live and unauthenticated at **`GET /v1/offering`**, and shown on the [pricing page](https://robosystems.ai/pricing). Rate limits apply per category — queries, MCP calls, searches, and AI agent calls each have their own per-minute / per-hour / per-day budgets.
 
+### The free trial
+
+A first subscription to `sec` opens with a 14-day free trial, on either plan. A card is taken at the start and charged when the trial ends, at which point the subscription carries on as the plan you chose. The repository's `trial_days` in `GET /v1/offering` is the length, and a subscription's `trial_ends_at` is the day the charge is made.
+
+During the trial:
+
+- **The analysis tools are open** — `financial-statement-analysis`, `build-fact-grid`, `disclosures`, `information-block`, `resolve-element`, `search-documents`, `search-text`, `read-text` and `describe-filing`, over MCP or their REST operations — along with the snapshot download.
+- **Raw Cypher is not.** `POST /v1/graphs/sec/query/cypher` and the `read-graph-cypher` tool answer `403` with the way to open them, and the tool is left out of a trial connection's MCP tool list.
+- **The AI analyst is not**, and no AI credits are granted. The plan's monthly allocation arrives with the first charge.
+- **The trial has its own rate limits**, the same whichever plan it converts to.
+
+Cancelling during the trial keeps access until the trial's last day and nothing is charged. To skip the rest of the trial and start the plan at once:
+
+```bash
+curl -X POST "https://api.robosystems.ai/v1/graphs/sec/subscriptions/end-trial" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
+```
+
+The first period is charged to the card on file, and raw Cypher, the AI analyst and the credits open when the payment clears. There is one trial per subscriber and per organization: a later subscription to the same repository starts paid.
+
 The repository id is `sec`. For the data model and the rules a query must follow to return the right number, see [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules.md); for loading filings into a local stack, the [SEC XBRL Pipeline](SEC-XBRL-Pipeline.md) demo.
 
 ### Freshness

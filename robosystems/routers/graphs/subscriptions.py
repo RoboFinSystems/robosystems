@@ -118,6 +118,9 @@ def subscription_to_response(
     canceled_at=(
       subscription.canceled_at.isoformat() if subscription.canceled_at else None
     ),
+    trial_ends_at=(
+      subscription.trial_ends_at.isoformat() if subscription.trial_ends_at else None
+    ),
     ends_at=subscription.ends_at.isoformat() if subscription.ends_at else None,
     created_at=subscription.created_at.isoformat(),
     operation_id=operation_id,
@@ -281,6 +284,21 @@ async def create_repository_subscription(
     # The canonical plan key, not the request's raw string: rate limits,
     # credits and price lookups all key on it.
     plan_name = plan_config["name"]
+
+    # Read before this subscription's own row exists. Only a provider
+    # subscription can carry a trial: nothing else would convert it.
+    trial_days = 0
+    if (
+      env.BILLING_ENABLED
+      and customer.has_payment_method
+      and customer.stripe_customer_id
+    ):
+      from ...operations.billing.repository_subscriptions import (
+        repository_trial_days,
+      )
+
+      trial_days = repository_trial_days(parent_repo_id, target_user_id, org_id, db)
+
     try:
       subscription = BillingSubscription.create_subscription(
         org_id=org_id,
@@ -349,8 +367,14 @@ async def create_repository_subscription(
             "resource_type": "repository",
             "resource_id": parent_repo_id,
           },
+          trial_days=trial_days,
         )
 
+        if trial_days:
+          subscription.subscription_metadata = {
+            **(subscription.subscription_metadata or {}),
+            "trial_days": trial_days,
+          }
         subscription.stripe_subscription_id = stripe_subscription_id
         subscription.provider_subscription_id = stripe_subscription_id
         subscription.provider_customer_id = customer.stripe_customer_id
@@ -632,6 +656,86 @@ async def _change_repository_plan(
       "old_plan": old_plan,
       "new_plan": new_plan_tier,
     },
+  )
+
+  return subscription_to_response(subscription)
+
+
+@router.post(
+  "/end-trial",
+  response_model=GraphSubscriptionResponse,
+  summary="End Repository Trial",
+  description=(
+    "End your free trial of a shared repository now and start the paid plan. "
+    "The first period is charged to the payment method on file; raw queries, "
+    "the AI analyst and the plan's credits open once the payment clears, "
+    "usually within a minute. Returns 400 when the subscription is not on a "
+    "trial."
+  ),
+  operation_id="endRepositorySubscriptionTrial",
+  responses={**RESOURCE_ERROR_RESPONSES},
+)
+async def end_repository_trial(
+  graph_id: str = Path(
+    ...,
+    description="Repository name (e.g., 'sec')",
+    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
+  ),
+  current_user: User = Depends(get_current_user),
+  db: Session = Depends(get_db_session),
+  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
+) -> GraphSubscriptionResponse:
+  if not is_shared_repository(graph_id):
+    raise HTTPException(status_code=400, detail="User graphs have no trial")
+
+  parent_repo_id = resolve_shared_repository_parent(graph_id)
+  subscription = BillingSubscription.get_by_resource_and_user(
+    resource_type="repository",
+    resource_id=parent_repo_id,
+    user_id=current_user.id,
+    session=db,
+    exclude_statuses=TERMINAL_SUBSCRIPTION_STATUSES,
+  )
+  grant = UserRepository.get_by_user_and_repository(current_user.id, parent_repo_id, db)
+  if (
+    not subscription
+    or not subscription.stripe_subscription_id
+    or not grant
+    or not grant.is_trial
+  ):
+    raise HTTPException(status_code=400, detail=f"No trial is running for {graph_id}")
+
+  from ...operations.providers.payment_provider import get_payment_provider
+
+  try:
+    get_payment_provider("stripe").end_trial(subscription.stripe_subscription_id)
+  except Exception as e:
+    logger.error(
+      f"Failed to end trial for {graph_id}: {e}",
+      extra={"subscription_id": subscription.id},
+      exc_info=True,
+    )
+    raise HTTPException(
+      status_code=502,
+      detail=(
+        "The payment provider could not end the trial. "
+        "No changes were made — please try again."
+      ),
+    )
+
+  # The grant stays on the trial until the payment webhook lands.
+  subscription.trial_ends_at = datetime.now(UTC)
+  db.commit()
+
+  BillingAuditLog.log_event(
+    session=db,
+    event_type=BillingEventType.TRIAL_ENDED_EARLY,
+    org_id=subscription.org_id,
+    subscription_id=subscription.id,
+    description=f"Trial ended early for {parent_repo_id} repository",
+    actor_type="user",
+    actor_user_id=current_user.id,
+    event_data={"resource_type": "repository", "resource_id": parent_repo_id},
   )
 
   return subscription_to_response(subscription)

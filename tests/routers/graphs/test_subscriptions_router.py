@@ -94,6 +94,7 @@ class TestSubscriptionToResponse:
     subscription.started_at = now
     subscription.canceled_at = None
     subscription.ends_at = None
+    subscription.trial_ends_at = None
     subscription.created_at = now
 
     with patch(
@@ -135,6 +136,7 @@ class TestSubscriptionToResponse:
     subscription.started_at = None
     subscription.canceled_at = None
     subscription.ends_at = None
+    subscription.trial_ends_at = None
     subscription.created_at = created
 
     with patch(
@@ -174,6 +176,7 @@ class TestCancelRepositorySubscription:
     sub.started_at = datetime(2026, 1, 1, tzinfo=UTC)
     sub.canceled_at = None
     sub.ends_at = None
+    sub.trial_ends_at = None
     sub.stripe_subscription_id = None
     sub.created_at = datetime(2026, 1, 1, tzinfo=UTC)
     return sub
@@ -479,6 +482,7 @@ class TestChangeRepositoryPlan:
     sub.started_at = datetime(2026, 1, 1, tzinfo=UTC)
     sub.canceled_at = None
     sub.ends_at = None
+    sub.trial_ends_at = None
     sub.stripe_subscription_id = None
     sub.created_at = datetime(2026, 1, 1, tzinfo=UTC)
     return sub
@@ -648,6 +652,7 @@ class TestCancelStripeFailureHandling:
     sub.started_at = datetime(2026, 1, 1, tzinfo=UTC)
     sub.canceled_at = None
     sub.ends_at = None
+    sub.trial_ends_at = None
     sub.stripe_subscription_id = "sub_stripe_xyz"
     sub.created_at = datetime(2026, 1, 1, tzinfo=UTC)
     return sub
@@ -903,3 +908,71 @@ class TestResolveSubscriptionTarget:
         _resolve_subscription_target(self._user(), "user_outsider", db)
 
     assert exc.value.status_code == 404
+
+
+class TestEndRepositoryTrial:
+  """Ending a trial early is a provider call; the grant converts on the payment."""
+
+  @staticmethod
+  async def _end_trial(*, subscription, grant, provider):
+    from robosystems.routers.graphs.subscriptions import end_repository_trial
+
+    user = MagicMock(id="user_1")
+    db = MagicMock()
+    with (
+      patch(
+        f"{MODULE}.BillingSubscription.get_by_resource_and_user",
+        return_value=subscription,
+      ),
+      patch(f"{MODULE}.UserRepository.get_by_user_and_repository", return_value=grant),
+      patch(
+        "robosystems.operations.providers.payment_provider.get_payment_provider",
+        return_value=provider,
+      ),
+      patch(f"{MODULE}.BillingAuditLog.log_event"),
+      patch(f"{MODULE}.subscription_to_response", return_value="response"),
+    ):
+      return await end_repository_trial("sec", user, db, None)
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_a_running_trial_is_ended_at_the_provider(self):
+    subscription = MagicMock(stripe_subscription_id="sub_1")
+    provider = MagicMock()
+
+    result = await self._end_trial(
+      subscription=subscription, grant=MagicMock(is_trial=True), provider=provider
+    )
+
+    assert result == "response"
+    provider.end_trial.assert_called_once_with("sub_1")
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_a_paid_subscription_has_no_trial_to_end(self):
+    provider = MagicMock()
+
+    with pytest.raises(HTTPException) as exc:
+      await self._end_trial(
+        subscription=MagicMock(stripe_subscription_id="sub_1"),
+        grant=MagicMock(is_trial=False),
+        provider=provider,
+      )
+
+    assert exc.value.status_code == 400
+    provider.end_trial.assert_not_called()
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_a_provider_failure_changes_nothing(self):
+    subscription = MagicMock(stripe_subscription_id="sub_1", trial_ends_at="unchanged")
+    provider = MagicMock()
+    provider.end_trial.side_effect = RuntimeError("stripe down")
+
+    with pytest.raises(HTTPException) as exc:
+      await self._end_trial(
+        subscription=subscription, grant=MagicMock(is_trial=True), provider=provider
+      )
+
+    assert exc.value.status_code == 502
+    assert subscription.trial_ends_at == "unchanged"

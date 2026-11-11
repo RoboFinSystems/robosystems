@@ -15,6 +15,9 @@ if TYPE_CHECKING:
 _manifests: dict[str, Any] = {}
 _loaded = False
 
+# The rate-limit row a trial grant reads, in place of its plan's own.
+TRIAL_PLAN = "trial"
+
 
 # ---------------------------------------------------------------------------
 # Registry internals
@@ -152,6 +155,12 @@ def get_rate_limits(repo_id: str, plan: str) -> dict[str, int] | None:
   if not manifest or not manifest.rate_limits:
     return None
   return manifest.rate_limits.get(plan)
+
+
+def get_trial_days(repo_id: str) -> int:
+  """Free-trial length for a first subscription to this repository; 0 = none."""
+  manifest = get_manifest(repo_id)
+  return int(manifest.trial_days) if manifest else 0
 
 
 def get_credit_costs(repo_id: str) -> dict | None:

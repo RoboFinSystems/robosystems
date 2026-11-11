@@ -162,6 +162,7 @@ async def get_service_offerings(
         "description": manifest.description,
         "enabled": manifest.status == "available",
         "coming_soon": manifest.status == "coming_soon",
+        "trial_days": manifest.trial_days,
         "plans": plans,
       }
       repositories.append(repo_info)

@@ -124,6 +124,9 @@ class BillingSubscription(Base):
   current_period_end = Column(DateTime, nullable=True)
   canceled_at = Column(DateTime, nullable=True)
   ends_at = Column(DateTime, nullable=True)
+  # Set when the subscription opened with a free trial, and kept afterwards:
+  # it is also the record that this subscriber has had one.
+  trial_ends_at = Column(DateTime, nullable=True)
 
   created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(

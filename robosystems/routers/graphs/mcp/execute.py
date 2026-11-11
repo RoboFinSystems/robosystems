@@ -198,6 +198,19 @@ async def authorize_mcp_tool_call(
   finally:
     sess.close()
 
+  if repo_access and repo_access.is_trial and is_cypher_read_tool:
+    from robosystems.config.shared_repositories import (
+      resolve_shared_repository_parent,
+    )
+    from robosystems.middleware.rate_limits.repository_rate_limits import (
+      trial_refusal,
+    )
+
+    raise HTTPException(
+      status_code=http_status.HTTP_403_FORBIDDEN,
+      detail=trial_refusal(resolve_shared_repository_parent(graph_id)),
+    )
+
   if (
     MultiTenantUtils.is_shared_repository_or_subgraph(graph_id)
     and env.RATE_LIMIT_ENABLED
@@ -225,7 +238,7 @@ async def authorize_mcp_tool_call(
         graph_id=graph_id,
         operation="mcp",
         endpoint=f"mcp/call-tool/{tool_call.name}",
-        repository_plan=repo_access.repository_plan,
+        repository_plan=repo_access.limits_plan,
       )
 
       if not limit_check["allowed"]:
@@ -251,7 +264,7 @@ async def authorize_mcp_tool_call(
             headers={
               "Retry-After": str(detail.get("retry_after", 60)),
               "X-RateLimit-Repository": graph_id,
-              "X-RateLimit-Plan": str(repo_access.repository_plan),
+              "X-RateLimit-Plan": repo_access.limits_plan,
             },
           )
         else:

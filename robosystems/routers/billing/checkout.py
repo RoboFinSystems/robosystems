@@ -216,9 +216,18 @@ async def create_checkout_session(
 
     # For the post-payment provisioning step. user_id stays in metadata for
     # older webhook payloads; the column is the authoritative copy.
+    trial_days = 0
+    if request.resource_type == "repository" and repo_name:
+      from ...operations.billing.repository_subscriptions import (
+        repository_trial_days,
+      )
+
+      trial_days = repository_trial_days(repo_name, current_user.id, org_id, db)
+
     subscription.subscription_metadata = {
       "resource_config": request.resource_config,
       "user_id": current_user.id,
+      **({"trial_days": trial_days} if trial_days else {}),
     }
     subscription.status = "pending_payment"
     subscription.payment_provider = "stripe"
@@ -251,6 +260,7 @@ async def create_checkout_session(
         "user_id": str(current_user.id),
         "resource_type": request.resource_type,
       },
+      trial_days=trial_days,
     )
 
     subscription.provider_subscription_id = checkout["session_id"]
