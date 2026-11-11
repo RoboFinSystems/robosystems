@@ -8,6 +8,7 @@ import subprocess
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 from examples.roboledger_demo.data import (
   SCHEDULES,
@@ -122,20 +123,22 @@ def plant(company: Company, task: Task) -> tuple[dict[str, str], dict[str, str]]
   line_ids: dict[str, str] = {}
   for line in task.lines:
     # A bank line posts only if its cash account is bound when it is created.
-    created = mcp.read(
-      "create-event-block",
-      {
-        "event_type": "bank_transaction",
-        "event_category": "treasury",
-        "occurred_at": f"{company.day(line.day)}T00:00:00Z",
-        "source": "manual",
-        "amount": line.cents,
-        "description": line.description,
-        "resource_type": "money",
-        "resource_element_id": company.id_by_code[CASH],
-        "metadata": {"merchant_name": line.merchant},
-      },
-    )
+    body: dict[str, Any] = {
+      "event_type": "bank_transaction",
+      "event_category": "treasury",
+      "occurred_at": f"{company.day(line.day)}T00:00:00Z",
+      "source": "manual",
+      "amount": line.cents,
+      "description": line.description,
+      "resource_type": "money",
+      "resource_element_id": company.id_by_code[CASH],
+      "metadata": {"merchant_name": line.merchant},
+    }
+    # A feed names the counterparty it already knows, which is what earns the
+    # line its suggestion.
+    if line.merchant in company.agent_id_by_name:
+      body["agent_id"] = company.agent_id_by_name[line.merchant]
+    created = mcp.read("create-event-block", body)
     line_ids[line.key] = created["id"]
   return bill_ids, line_ids
 
