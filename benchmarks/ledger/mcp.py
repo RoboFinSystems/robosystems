@@ -65,6 +65,10 @@ class McpClient:
     )
     self._next_id = 0
 
+  def api(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+    """A call to the stack's own API, outside MCP, as the same user."""
+    return self._http.request(method, f"{self.base_url}{path}", **kwargs)
+
   def _rpc(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
     self._next_id += 1
     body = {"jsonrpc": "2.0", "id": self._next_id, "method": method, "params": params}

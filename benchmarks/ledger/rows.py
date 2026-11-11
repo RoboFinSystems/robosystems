@@ -56,7 +56,11 @@ ROWS = {
   "C": "full tool surface as shipped",
   "D": "full surface without the preview and review tools",
   "F": "the fixed close list",
+  "O": "the stack's own author operator, its prompt, tools and model",
 }
+
+# The row that hands the task to the operator instead of driving the tools.
+OPERATOR_ROW = "O"
 
 
 def tools_for(row: str, surface: list[ToolDef]) -> list[ToolDef]:
