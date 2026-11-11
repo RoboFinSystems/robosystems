@@ -116,7 +116,12 @@ def _trial(
     transcript = Transcript(args.model, stop_reason="dry_run")
   else:
     transcript = run_trial(
-      make_provider(args.model, args.effort),
+      make_provider(
+        args.model,
+        args.effort,
+        base_url=args.base_url,
+        provider_order=args.provider_order.split(",") if args.provider_order else None,
+      ),
       system,
       user_text,
       tools,
@@ -143,6 +148,8 @@ def _trial(
     "row": row,
     "model": args.model,
     "effort": args.effort or "model default",
+    "provider_order": args.provider_order,
+    "base_url": args.base_url,
     "trial": index,
     "graph_id": company.mcp.graph_id,
     "period": company.period,
@@ -155,14 +162,16 @@ def _trial(
     "score": score.as_dict(),
     "transcript": transcript.as_dict(),
   }
-  name = f"{task.name}-{row}-{args.model}-{index}.json"
+  # An open-weight model id carries its publisher: "openai/gpt-oss-120b".
+  name = f"{task.name}-{row}-{args.model.replace('/', '_')}-{index}.json"
   (out / name).write_text(json.dumps(record, indent=1, default=str))
   cost = "n/a" if transcript.cost_usd is None else f"${transcript.cost_usd:.3f}"
   print(
-    f"{task.name:13} {row} {args.model:18} {score.outcome:10} "
+    f"{task.name:15} {row} {args.model:34} {score.outcome:10} "
     f"turns={transcript.turns:<3} calls={len(transcript.tool_events):<3} "
     f"errors={transcript.tool_errors:<2} {cost:>8} {transcript.wall_s:>6.0f}s "
-    f"stop={transcript.stop_reason}",
+    f"stop={transcript.stop_reason}"
+    + (f" via={','.join(transcript.served_by)}" if transcript.served_by else ""),
     flush=True,
   )
   for verdict in score.items:
@@ -212,6 +221,14 @@ def main() -> None:
   run = commands.add_parser("run", help="run trials and score them")
   run.add_argument("--model", default="claude-sonnet-5-5")
   run.add_argument("--effort", default=None, help="low|medium|high|xhigh|max")
+  run.add_argument(
+    "--provider-order",
+    default=None,
+    help="OpenRouter hosts to pin, comma separated, no fallback to others",
+  )
+  run.add_argument(
+    "--base-url", default=None, help="an OpenAI-compatible model server to use"
+  )
   run.add_argument("--row", default="C", help=f"comma list of {list(ROWS)}")
   run.add_argument("--task", default="all", help="comma list of task names, or all")
   run.add_argument("--k", type=int, default=1)

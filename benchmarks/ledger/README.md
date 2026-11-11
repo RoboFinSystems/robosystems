@@ -74,6 +74,17 @@ just bench-ledger run --task known-vendor --row F
 just bench-ledger run --model claude-haiku-5-5 --task all --row C,F --k 3
 ```
 
+An open-weight model runs through any OpenAI-compatible endpoint. A model id
+that is not a Claude one goes to OpenRouter (`OPENROUTER_API_KEY`), pinned to
+one host and quantisation with no fallback; `--base-url` points at a local
+server instead (`LOCAL_LLM_API_KEY` if it wants one). The host that served each
+turn is in the record.
+
+```bash
+just bench-ledger run --model openai/gpt-oss-120b --provider-order near-ai/fp4 --task settle-bill
+just bench-ledger run --model my-local-model --base-url http://localhost:8080/v1 --task all
+```
+
 Every trial reloads the company, about a minute each, and replaces whatever is
 in the local Cascade demo graph. After a stack reset, wait for the extensions
 database migrations to finish before the first run; the health check goes green

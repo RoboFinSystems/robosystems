@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 import traceback
 from collections.abc import Callable
@@ -30,7 +31,8 @@ class Transcript:
   model: str
   turns: int = 0
   tool_errors: int = 0
-  turn_usage: list[dict[str, int]] = field(default_factory=list)
+  turn_usage: list[dict[str, Any]] = field(default_factory=list)
+  served_by: list[str] = field(default_factory=list)
   tool_events: list[ToolEvent] = field(default_factory=list)
   wall_s: float = 0.0
   cost_usd: float | None = None
@@ -41,6 +43,14 @@ class Transcript:
 
   def as_dict(self) -> dict[str, Any]:
     return asdict(self)
+
+
+def _cost(model: str, turn_usage: list[dict[str, Any]]) -> float | None:
+  """What the provider charged, where every turn says; else the price table."""
+  charged = [usage.get("cost_usd") for usage in turn_usage]
+  if all(cost is not None for cost in charged):
+    return round(sum(cost for cost in charged if cost is not None), 6)
+  return trial_cost(model, turn_usage)
 
 
 def run_trial(
@@ -62,14 +72,18 @@ def run_trial(
       t.turns = turn_index
       turn = provider.step(conversation)
       t.turn_usage.append(turn.usage.as_dict())
-      t.cost_usd = trial_cost(provider.model, t.turn_usage)
+      t.cost_usd = _cost(provider.model, t.turn_usage)
+      if turn.served_by and turn.served_by not in t.served_by:
+        t.served_by.append(turn.served_by)
       if not turn.tool_calls:
         t.final_text, t.stop_reason = turn.text, turn.stop_reason
         break
       results = []
       for call in turn.tool_calls:
         call_started = time.monotonic()
-        if call.name in allowed:
+        if call.error:
+          text, is_error = json.dumps({"error": call.error}), True
+        elif call.name in allowed:
           text, is_error = tool_runner(call.name, call.args)
         else:
           text, is_error = f'{{"error": "no tool named {call.name}"}}', True
