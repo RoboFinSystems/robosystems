@@ -210,6 +210,8 @@ A feed captures each posted bank line as one event, with the bank account's char
 
 `captured` → `classified` checks the choice and refuses one that could not post, with the reason: no account chosen, a split that does not sum to the line, or the line classified to the bank account it moved through. On commit the handler writes a draft journal entry: money in is debit bank and credit the chosen account, money out the reverse. An unclassified line falls back to the graph's DSL handlers and is refused when none matches. A bank line is always pinned to the local lane (`publish_to_source: false`), so it never writes back to QuickBooks. When the bank later changes a posted line, the event becomes a reconciling item and a restate posts the bank's new amount and date; a line the bank removed is refused and reverses through `catch_up`. The handlers land `classified`.
 
+A learned suggestion on a line more than three times the largest the counterparty has posted says so in `suggestion_basis` and carries `suggestion_caution: unusual_amount`. `accept-suggestions` skips such a line with the reason `needs_review`, so it is classified on its own.
+
 ### DSL handlers
 
 Registered with `create-event-handler` (and managed with `update-event-handler`, `list-event-handlers`, `get-event-handler`). A handler row has `name`, `description`, `event_type`, optional match fields (`event_category`, `match_source`, `match_agent_type`, `match_resource_type`, `match_metadata_expression`), a `transaction_template`, `priority`, and `is_active`.

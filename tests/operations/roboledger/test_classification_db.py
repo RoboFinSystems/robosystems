@@ -607,3 +607,28 @@ def test_a_line_with_a_learned_suggestion_takes_any_account(payable):
   event = _captured_through_the_api(payable)
 
   _refuse_overlooking_the_open_item(event, {"classified_element_id": payable.software})
+
+
+def test_a_line_far_larger_than_the_counterpartys_posted_ones_says_so(feed):
+  for _ in range(2):
+    _commit(feed, _line(feed, status="classified"), classified_element_id=feed.payroll)
+
+  usual = _captured_through_the_api(feed, amount=-300_000)
+  unusual = _captured_through_the_api(feed, amount=-900_000)
+
+  assert "largest" not in usual.metadata_["suggestion_basis"]
+  assert unusual.metadata_["suggested_element_id"] == feed.payroll
+  assert (
+    "This line is $9,000.00; the largest of" in unusual.metadata_["suggestion_basis"]
+  )
+  assert "2 posted lines was $1,200.00" in unusual.metadata_["suggestion_basis"]
+  assert unusual.metadata_["suggestion_caution"] == "unusual_amount"
+  assert "suggestion_caution" not in usual.metadata_
+
+
+def test_one_posted_line_is_too_little_to_call_another_unusual(feed):
+  _commit(feed, _line(feed, status="classified"), classified_element_id=feed.payroll)
+
+  event = _captured_through_the_api(feed, amount=-900_000)
+
+  assert "largest" not in event.metadata_["suggestion_basis"]
