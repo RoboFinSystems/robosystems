@@ -52,10 +52,20 @@ $S3 s3api put-bucket-cors \
   --cors-configuration '{"CORSRules":[{"AllowedOrigins":["*"],"AllowedMethods":["GET","HEAD"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag","Content-Length","Content-Type"],"MaxAgeSeconds":3600}]}'
 
 # The apps upload files straight to presigned URLs on the user bucket, so the
-# browser's preflight needs their dev origins allowed (production: s3.yaml).
+# browser's preflight needs their origins allowed (production: s3.yaml): the
+# localhost ones, plus the app URLs a server on its own names sets in .env.
+APP_ORIGINS=""
+for url in http://localhost:3000 http://localhost:3001 http://localhost:3002 \
+  "${ROBOSYSTEMS_URL:-}" "${ROBOLEDGER_URL:-}" "${ROBOINVESTOR_URL:-}"; do
+  origin=$(printf '%s' "$url" | sed -nE 's#^(https?://[^/]+).*#\1#p')
+  [ -n "$origin" ] || continue
+  case ",$APP_ORIGINS," in *",\"$origin\","*) continue ;; esac
+  APP_ORIGINS="${APP_ORIGINS:+$APP_ORIGINS,}\"$origin\""
+done
 $S3 s3api put-bucket-cors \
   --bucket robosystems-user \
-  --cors-configuration '{"CORSRules":[{"AllowedOrigins":["http://localhost:3000","http://localhost:3001","http://localhost:3002"],"AllowedMethods":["PUT","HEAD"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag"],"MaxAgeSeconds":3600}]}'
+  --cors-configuration "{\"CORSRules\":[{\"AllowedOrigins\":[${APP_ORIGINS}],\"AllowedMethods\":[\"PUT\",\"HEAD\"],\"AllowedHeaders\":[\"*\"],\"ExposeHeaders\":[\"ETag\"],\"MaxAgeSeconds\":3600}]}"
+echo "User bucket CORS origins: ${APP_ORIGINS}"
 
 echo "Buckets:"
 $S3 s3api list-buckets --query 'Buckets[].Name' --output text
