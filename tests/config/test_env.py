@@ -286,6 +286,27 @@ def test_get_main_cors_origins_respects_environment(monkeypatch):
   assert "https://roboledger.ai" in origins
 
 
+def test_get_main_cors_origins_dev_allows_app_names(monkeypatch):
+  """A dev-environment server on its own names allows the apps it serves
+  there, read from the same app URLs, without EXTRA_CORS_ORIGINS."""
+  monkeypatch.setattr(EnvConfig, "ENVIRONMENT", "dev", raising=False)
+  monkeypatch.setattr(
+    EnvConfig, "ROBOSYSTEMS_URL", "https://app.example.internal", raising=False
+  )
+  monkeypatch.setattr(
+    EnvConfig, "ROBOLEDGER_URL", "https://ledger.example.internal/", raising=False
+  )
+  monkeypatch.setattr(
+    EnvConfig, "ROBOINVESTOR_URL", "http://localhost:3002", raising=False
+  )
+  origins = EnvConfig.get_main_cors_origins()
+  assert {"https://app.example.internal", "https://ledger.example.internal"} <= set(
+    origins
+  )
+  assert origins.count("http://localhost:3002") == 1
+  assert "http://localhost:3000" in origins
+
+
 def test_get_main_cors_origins_derives_fork_domain(monkeypatch):
   """A dedicated-tenant fork serving its own domain allows its own frontend
   without code changes: origins derive from the deployment's app URLs, with

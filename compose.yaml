@@ -452,7 +452,10 @@ services:
     restart: always
     profiles: ["observability"]
 
-  # RoboSystems App Frontend
+  # RoboSystems App Frontend. The three apps take their URLs from the same .env
+  # settings the API reads (ROBOSYSTEMS_API_URL, ROBOSYSTEMS_URL, ROBOLEDGER_URL,
+  # ROBOINVESTOR_URL, AWS_S3_PRESIGN_ENDPOINT_URL), so a server on its own names
+  # moves both sides with one edit. The published images inject them at start.
   robosystems-app:
     container_name: robosystems-app
     image: ${ROBOSYSTEMS_APP_IMAGE:-robosystems-app-local}
@@ -463,11 +466,11 @@ services:
     environment:
       - NODE_ENV=development
       - ENVIRONMENT=dev
-      - NEXT_PUBLIC_ROBOSYSTEMS_API_URL=http://localhost:8000
-      - NEXT_PUBLIC_ROBOSYSTEMS_APP_URL=http://localhost:3000
-      - NEXT_PUBLIC_ROBOLEDGER_APP_URL=http://localhost:3001
-      - NEXT_PUBLIC_ROBOINVESTOR_APP_URL=http://localhost:3002
-      - NEXT_PUBLIC_S3_ENDPOINT_URL=http://localhost:8333
+      - NEXT_PUBLIC_ROBOSYSTEMS_API_URL=${ROBOSYSTEMS_API_URL:-http://localhost:8000}
+      - NEXT_PUBLIC_ROBOSYSTEMS_APP_URL=${ROBOSYSTEMS_URL:-http://localhost:3000}
+      - NEXT_PUBLIC_ROBOLEDGER_APP_URL=${ROBOLEDGER_URL:-http://localhost:3001}
+      - NEXT_PUBLIC_ROBOINVESTOR_APP_URL=${ROBOINVESTOR_URL:-http://localhost:3002}
+      - NEXT_PUBLIC_S3_ENDPOINT_URL=${AWS_S3_PRESIGN_ENDPOINT_URL:-http://localhost:8333}
       - NEXT_PUBLIC_MAINTENANCE_MODE=true
     ports:
       - 3000:3000
@@ -493,11 +496,11 @@ services:
     environment:
       - NODE_ENV=development
       - ENVIRONMENT=dev
-      - NEXT_PUBLIC_ROBOSYSTEMS_API_URL=http://localhost:8000
-      - NEXT_PUBLIC_ROBOSYSTEMS_APP_URL=http://localhost:3000
-      - NEXT_PUBLIC_ROBOLEDGER_APP_URL=http://localhost:3001
-      - NEXT_PUBLIC_ROBOINVESTOR_APP_URL=http://localhost:3002
-      - NEXT_PUBLIC_S3_ENDPOINT_URL=http://localhost:8333
+      - NEXT_PUBLIC_ROBOSYSTEMS_API_URL=${ROBOSYSTEMS_API_URL:-http://localhost:8000}
+      - NEXT_PUBLIC_ROBOSYSTEMS_APP_URL=${ROBOSYSTEMS_URL:-http://localhost:3000}
+      - NEXT_PUBLIC_ROBOLEDGER_APP_URL=${ROBOLEDGER_URL:-http://localhost:3001}
+      - NEXT_PUBLIC_ROBOINVESTOR_APP_URL=${ROBOINVESTOR_URL:-http://localhost:3002}
+      - NEXT_PUBLIC_S3_ENDPOINT_URL=${AWS_S3_PRESIGN_ENDPOINT_URL:-http://localhost:8333}
       - NEXT_PUBLIC_MAINTENANCE_MODE=true
     ports:
       - 3001:3000
@@ -523,12 +526,12 @@ services:
     environment:
       - NODE_ENV=development
       - ENVIRONMENT=dev
-      - NEXT_PUBLIC_ROBOSYSTEMS_API_URL=http://localhost:8000
-      - NEXT_PUBLIC_ROBOSYSTEMS_APP_URL=http://localhost:3000
-      - NEXT_PUBLIC_ROBOLEDGER_APP_URL=http://localhost:3001
-      - NEXT_PUBLIC_ROBOINVESTOR_APP_URL=http://localhost:3002
-      - NEXT_PUBLIC_S3_ENDPOINT_URL=http://localhost:8333
-      - NEXT_PUBLIC_FILINGS_CDN_URL=http://localhost:8333/robosystems-public-data
+      - NEXT_PUBLIC_ROBOSYSTEMS_API_URL=${ROBOSYSTEMS_API_URL:-http://localhost:8000}
+      - NEXT_PUBLIC_ROBOSYSTEMS_APP_URL=${ROBOSYSTEMS_URL:-http://localhost:3000}
+      - NEXT_PUBLIC_ROBOLEDGER_APP_URL=${ROBOLEDGER_URL:-http://localhost:3001}
+      - NEXT_PUBLIC_ROBOINVESTOR_APP_URL=${ROBOINVESTOR_URL:-http://localhost:3002}
+      - NEXT_PUBLIC_S3_ENDPOINT_URL=${AWS_S3_PRESIGN_ENDPOINT_URL:-http://localhost:8333}
+      - NEXT_PUBLIC_FILINGS_CDN_URL=${AWS_S3_PRESIGN_ENDPOINT_URL:-http://localhost:8333}/robosystems-public-data
       - NEXT_PUBLIC_MAINTENANCE_MODE=true
     ports:
       - 3002:3000
