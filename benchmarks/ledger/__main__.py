@@ -11,11 +11,12 @@ from typing import Any
 
 import httpx
 
+from . import operator
 from .fixture import Company, inbox_lines, load_company, plant, schedule_entries
 from .loop import Transcript, run_trial
 from .mcp import ToolDef
 from .providers import make_provider
-from .rows import ROWS, tools_for
+from .rows import OPERATOR_ROW, ROWS, tools_for
 from .score import (
   Score,
   balance_diff,
@@ -101,9 +102,16 @@ def _trial(
   args: argparse.Namespace, task: Task, row: str, index: int, out: Path
 ) -> dict:
   company = load_company(reset=not args.no_reset)
-  tools = tools_for(row, company.mcp.list_tools())
-  system = f"{SYSTEM_PREAMBLE}\n\n{company.mcp.instructions()}"
-  user_text = prompt(task, company.period, company.day)
+  by_operator = row == OPERATOR_ROW
+  if by_operator:
+    task = operator.as_the_operator_sees_it(task)
+    tools: list[ToolDef] = []
+    system = "(the operator's own)"
+    user_text = operator.prompt(task, company.period, company.day)
+  else:
+    tools = tools_for(row, company.mcp.list_tools())
+    system = f"{SYSTEM_PREAMBLE}\n\n{company.mcp.instructions()}"
+    user_text = prompt(task, company.period, company.day)
   baseline_codes = set(company.id_by_code)
   before = ledger_state(company.mcp, company.period, company.period_end)
   inbox, inbox_ids = inbox_lines(company) if task.inbox else ((), {})
@@ -112,8 +120,18 @@ def _trial(
   lines = (*inbox, *task.lines)
   line_ids = {**inbox_ids, **planted_ids}
 
+  approved: list[str] = []
   if args.dry_run:
     transcript = Transcript(args.model, stop_reason="dry_run")
+  elif by_operator:
+    transcript = operator.run(
+      company.mcp,
+      user_text,
+      args.max_credits,
+      args.operator_timeout,
+      args.operator_model,
+    )
+    approved = operator.approve(company.mcp, line_ids)
   else:
     transcript = run_trial(
       make_provider(
@@ -146,8 +164,9 @@ def _trial(
     "task": task.name,
     "on_script": task.on_script,
     "row": row,
-    "model": args.model,
+    "model": transcript.model if by_operator else args.model,
     "effort": args.effort or "model default",
+    "approved_by_harness": approved,
     "provider_order": args.provider_order,
     "base_url": args.base_url,
     "trial": index,
@@ -155,7 +174,7 @@ def _trial(
     "period": company.period,
     "stack_version": _stack_version(company),
     "harness_sha": _git_sha(),
-    "surface": _surface_report(row, tools),
+    "surface": ROWS[row] if by_operator else _surface_report(row, tools),
     "system": system,
     "prompt": user_text,
     "expected_delta_cents": dict(expected),
@@ -163,11 +182,12 @@ def _trial(
     "transcript": transcript.as_dict(),
   }
   # An open-weight model id carries its publisher: "openai/gpt-oss-120b".
-  name = f"{task.name}-{row}-{args.model.replace('/', '_')}-{index}.json"
+  label = record["model"].replace("/", "_").replace(":", "_")
+  name = f"{task.name}-{row}-{label}-{index}.json"
   (out / name).write_text(json.dumps(record, indent=1, default=str))
   cost = "n/a" if transcript.cost_usd is None else f"${transcript.cost_usd:.3f}"
   print(
-    f"{task.name:15} {row} {args.model:34} {score.outcome:10} "
+    f"{task.name:15} {row} {record['model']:34} {score.outcome:10} "
     f"turns={transcript.turns:<3} calls={len(transcript.tool_events):<3} "
     f"errors={transcript.tool_errors:<2} {cost:>8} {transcript.wall_s:>6.0f}s "
     f"stop={transcript.stop_reason}"
@@ -189,12 +209,20 @@ def _run(args: argparse.Namespace) -> None:
   unknown = [n for n in names if n not in TASKS]
   if unknown:
     raise SystemExit(f"unknown task(s) {unknown}; have {list(TASKS)}")
+  rows = args.row.split(",")
+  if OPERATOR_ROW in rows:
+    skipped = [n for n in names if not operator.supports(TASKS[n])]
+    if skipped and args.task != "all":
+      raise SystemExit(
+        f"row {OPERATOR_ROW} cannot run {skipped}: a close is a person's"
+      )
   out = _RUNS / time.strftime("%Y%m%d-%H%M%S")
   out.mkdir(parents=True)
   records = [
     _trial(args, TASKS[name], row, index, out)
-    for row in args.row.split(",")
+    for row in rows
     for name in names
+    if row != OPERATOR_ROW or operator.supports(TASKS[name])
     for index in range(1, args.k + 1)
   ]
   costs = [r["transcript"]["cost_usd"] or 0 for r in records]
@@ -206,6 +234,8 @@ def _tools(args: argparse.Namespace) -> None:
   surface = company.mcp.list_tools()
   _RUNS.mkdir(exist_ok=True)
   for row in ROWS:
+    if row == OPERATOR_ROW:
+      continue
     tools = tools_for(row, surface)
     print(_surface_report(row, tools))
     (_RUNS / f"tools-{row}.json").write_text(
@@ -234,6 +264,17 @@ def main() -> None:
   run.add_argument("--k", type=int, default=1)
   run.add_argument("--max-turns", type=int, default=60)
   run.add_argument("--max-usd", type=float, default=3.0, help="stop a trial past this")
+  run.add_argument(
+    "--max-credits", type=float, default=None, help="row O: the operator's ceiling"
+  )
+  run.add_argument(
+    "--operator-model",
+    default="claude-opus-5-5",
+    help="row O: the model the stack's author tier runs on, for pricing",
+  )
+  run.add_argument(
+    "--operator-timeout", type=int, default=900, help="row O: seconds to wait"
+  )
   run.add_argument("--no-reset", action="store_true", help="reuse the loaded company")
   run.add_argument("--dry-run", action="store_true", help="plant and score, no model")
   args = parser.parse_args()

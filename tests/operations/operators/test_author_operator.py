@@ -518,6 +518,19 @@ class TestClassifyGuard:
     )
     assert out["metadata_patch"]["classified_allocations"] == allocations
 
+  async def test_the_choices_that_go_with_a_classification_pass(self):
+    patch = {
+      "classified_element_id": "el_1",
+      "classified_flow_qname": "rs-gaap:ProceedsFromIssuanceOfLongTermDebt",
+      "remember_classification": True,
+      "not_a_settlement": True,
+    }
+    out = await self.guard(
+      {"event_id": "evt_1", "transition_to": "classified", "metadata_patch": patch},
+      _event_tools(BANK_LINE),
+    )
+    assert out["metadata_patch"] == {**patch, "classified_by": "ai"}
+
   @pytest.mark.parametrize(
     "event",
     [

@@ -296,3 +296,116 @@ def test_a_finished_open_weight_turn_reads_as_end_turn():
   turn = provider.step(provider.start("s", "u", []))
   assert (turn.text, turn.stop_reason, turn.tool_calls) == ("Done.", "end_turn", [])
   assert turn.usage.cost_usd is None
+
+
+class _FakeResponse:
+  def __init__(self, status_code: int, body: dict) -> None:
+    self.status_code = status_code
+    self._body = body
+    self.text = str(body)
+
+  def json(self) -> dict:
+    return self._body
+
+
+class _FakeStack:
+  """Stands in for the stack: one operator run, and the inbox lines' states."""
+
+  graph_id = "kg_test"
+
+  def __init__(self, statuses: dict[str, str], result: dict) -> None:
+    self.statuses = statuses
+    self.result = result
+    self.calls: list[tuple[str, dict]] = []
+    self.requests: list[tuple[str, str, dict]] = []
+
+  def api(self, method: str, path: str, **kwargs):
+    self.requests.append((method, path, kwargs))
+    if method == "POST":
+      return _FakeResponse(202, {"operation_id": "op_1"})
+    return _FakeResponse(200, {"status": "completed", "result": self.result})
+
+  def read(self, name: str, args: dict):
+    return {"status": self.statuses[args["id"]]}
+
+  def call(self, name: str, args: dict):
+    self.calls.append((name, args))
+    return "{}", False
+
+
+def test_the_operator_row_leaves_a_close_and_a_new_account_to_a_person():
+  from benchmarks.ledger import operator
+
+  assert not operator.supports(TASKS["month"])
+  assert operator.supports(TASKS["inbox"])
+  (loan,) = operator.as_the_operator_sees_it(TASKS["loan"]).lines
+  assert (loan.expect, loan.new_account_trait) == ("open", None)
+  assert operator.as_the_operator_sees_it(TASKS["split"]) == TASKS["split"]
+  assert not expected_delta(operator.as_the_operator_sees_it(TASKS["loan"]))
+
+
+def test_the_operator_row_asks_for_a_classification_and_never_a_commit():
+  from benchmarks.ledger import operator
+
+  text = operator.prompt(TASKS["settle-bill"], "2026-10", lambda day: f"2026-10-{day}")
+
+  assert "HERMANMILLER.COM ACH PMT HM-88213" in text
+  assert "commit" not in text.lower() and "void" not in text.lower()
+
+
+def test_an_operator_run_is_read_from_the_settled_operation():
+  from benchmarks.ledger import operator
+
+  stack = _FakeStack(
+    {},
+    {
+      "content": "Classified the line.",
+      "tokens_used": {"input": 900, "output": 40, "cache_read": 5000},
+      "tools_called": ["list-event-blocks"],
+      "metadata": {
+        "loop_iterations": 4,
+        "credits_consumed": 12.5,
+        "writes": [{"operation": "update-event-block", "id": "evt_1"}],
+      },
+    },
+  )
+
+  transcript = operator.run(
+    stack,  # type: ignore[arg-type]
+    "classify it",
+    500,
+    timeout_s=5,
+    priced_as="claude-opus-5-5",
+  )
+
+  method, path, kwargs = stack.requests[0]
+  assert (method, path) == ("POST", "/v1/graphs/kg_test/operator/author")
+  assert kwargs["json"] == {
+    "message": "classify it",
+    "mode": "extended",
+    "max_credits": 500,
+  }
+  assert transcript.stop_reason == "end_turn"
+  assert transcript.turns == 4
+  assert transcript.final_text == "Classified the line."
+  assert [e.name for e in transcript.tool_events] == [
+    "list-event-blocks",
+    "update-event-block",
+  ]
+  assert transcript.turn_usage[0]["credits"] == 12.5
+  assert transcript.cost_usd == pytest.approx(
+    (900 * 4 + 40 * 20 + 5000 * 0.20) / 1_000_000
+  )
+
+
+def test_the_harness_approves_only_what_the_operator_classified():
+  from benchmarks.ledger import operator
+
+  stack = _FakeStack({"evt_a": "classified", "evt_b": "captured"}, {})
+
+  approved = operator.approve(stack, {"a": "evt_a", "b": "evt_b"})  # type: ignore[arg-type]
+
+  assert approved == ["a"]
+  assert stack.calls == [
+    ("update-event-block", {"event_id": "evt_a", "transition_to": "committed"})
+  ]
