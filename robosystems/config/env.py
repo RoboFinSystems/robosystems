@@ -1299,6 +1299,12 @@ class EnvConfig:
         "https://roboinvestor.ai",
         "https://robosystems.ai",
       ]
+      # A server on its own names (Self-Hosting-on-a-Server.md) sets the app
+      # URLs in .env; the apps it serves there are allowed without a second list.
+      for url in (cls.ROBOSYSTEMS_URL, cls.ROBOLEDGER_URL, cls.ROBOINVESTOR_URL):
+        origin = _url_origin(url)
+        if origin and origin not in origins:
+          origins.append(origin)
       # Dev-only extras (e.g. ngrok tunnels for OAuth callbacks).
       extra = get_secret_list_value("EXTRA_CORS_ORIGINS", "")
       origins.extend(o for o in extra if o not in origins)

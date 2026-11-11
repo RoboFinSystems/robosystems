@@ -43,6 +43,50 @@ The API uses this for the OAuth callbacks of connectors, SCIM resource locations
 curl https://api.example.internal/v1/status
 ```
 
+## The Web Apps
+
+The three web apps are the `apps` profile; the `all` profile is the platform and the apps together, so `just start all` and `just upgrade all` run both. The published app images take their addresses when the container starts, from the same `.env` settings the API reads, so serving them on your names is the same pattern as the API: a name, a certificate and a proxy site for each, then the addresses in `.env`.
+
+Give each app a name, and the object store one as well. Browsers upload and download files straight from the object store through signed links, and a page served over HTTPS cannot fetch a plain `http://` address, so the store needs a name behind the same proxy. One certificate can carry all five names, or each can have its own. With Caddy, beside the API's site:
+
+```
+app.example.internal {
+	tls /etc/caddy/certs/app.pem /etc/caddy/certs/app-key.pem
+	reverse_proxy localhost:3000
+}
+
+ledger.example.internal {
+	tls /etc/caddy/certs/ledger.pem /etc/caddy/certs/ledger-key.pem
+	reverse_proxy localhost:3001
+}
+
+investor.example.internal {
+	tls /etc/caddy/certs/investor.pem /etc/caddy/certs/investor-key.pem
+	reverse_proxy localhost:3002
+}
+
+s3.example.internal {
+	tls /etc/caddy/certs/s3.pem /etc/caddy/certs/s3-key.pem
+	reverse_proxy localhost:8333
+}
+```
+
+Caddy passes the request's `Host` header through unchanged, which the object store needs: the signed links are signed for the name the browser uses. Then set the addresses in `.env`:
+
+```bash
+ROBOSYSTEMS_API_URL=https://api.example.internal
+ROBOSYSTEMS_URL=https://app.example.internal
+ROBOLEDGER_URL=https://ledger.example.internal
+ROBOINVESTOR_URL=https://investor.example.internal
+AWS_S3_PRESIGN_ENDPOINT_URL=https://s3.example.internal
+```
+
+and run `just start all`. The apps read these for the links between them and to the API, and the API reads them for the links in the mail it sends, for redirects after sign-in, and for the origins it accepts requests from: in the development environment that is localhost plus these three app URLs, so nothing goes in `EXTRA_CORS_ORIGINS` for them. Sign-in happens on the RoboSystems app and carries over to the other two.
+
+Two settings name an app address on their own. Passkeys, when `PASSKEYS_ENABLED=true`, are bound to the sign-in app's name: set `PASSKEY_RP_ID=app.example.internal` and `PASSKEY_ORIGIN=https://app.example.internal`, since the development default is `localhost`. A QuickBooks connection returns to `INTUIT_REDIRECT_URI`, which has to be `https://ledger.example.internal/connections/qb-callback` and registered with Intuit as such.
+
+The addresses reach the apps at container start because the published images carry placeholders that their entrypoint fills in. An app image built from its source on this machine (an `*_APP_IMAGE` setting without a registry) bakes the addresses from its own repository's `.env` at build time instead, so a server should run the published images. The apps release on their own schedule: pin each `*_APP_IMAGE` line to the release you tested, as with the platform image. `just upgrade-to` moves the platform image only, and `just upgrade all` pulls the app images at the tags they are pinned to.
+
 ## Users and API Keys
 
 Everything a user needs can be done over the API from a laptop with nothing but the name. Registration is `POST /v1/auth/register` with an email, a name and a password. `POST /v1/auth/login` returns a session token. `POST /v1/user/api-keys` with that token as a bearer creates an API key, which every later call sends as `X-API-Key`. The demo script runs exactly this sequence:
@@ -83,7 +127,6 @@ The operators, the server-side AI, call Claude through AWS Bedrock by default an
 
 What this shape does not do yet, and what to do about it:
 
-- **The web apps do not follow the name.** The three app services in `compose.yaml` carry their URLs as fixed `http://localhost` values in their `environment` blocks. To serve the apps on your name, edit those lines, or run the apps from their own repositories with their own `.env`, and add the apps' origins to `EXTRA_CORS_ORIGINS` in `.env`, since the API's allowed origins in the development environment are localhost plus that variable. Without the apps, users work through the API and MCP, which this page covers.
 - **Every service port is published on all of the server's interfaces**: 8000, 8001, 8002, 5432, 6379, 8333, 1025, 8025 and 9200 in the `robosystems` profile, 3000 to 3002 with the apps, 9090 and 4000 with observability. Put a host firewall in front that allows 443 from your users and ssh from your administrator and nothing else, or bind the published ports to loopback in a compose override (`127.0.0.1:8000:8000`).
 - **The object store's credentials are fixed.** The S3 identity the stack uses (`test`/`test`, in `bin/setup/seaweedfs-s3.json` and `.env`) is the same on every installation, and the public-data bucket allows anonymous reads, which the browser needs. Change the keys in both files before exposing the box beyond a trusted network, and keep port 8333 behind the host firewall like the others.
 - **Outbound access the box needs**: Docker Hub for image pulls, the model endpoint if it is not on the box, and the APIs of any connector you turn on.
