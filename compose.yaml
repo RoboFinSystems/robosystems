@@ -345,6 +345,10 @@ services:
       - AWS_DEFAULT_REGION=us-east-1
       - AWS_PAGER=
       - LBUG_DATABASES_PER_INSTANCE=${LBUG_DATABASES_PER_INSTANCE:-50}
+      # The app origins the user bucket accepts browser uploads from.
+      - ROBOSYSTEMS_URL=${ROBOSYSTEMS_URL:-http://localhost:3000}
+      - ROBOLEDGER_URL=${ROBOLEDGER_URL:-http://localhost:3001}
+      - ROBOINVESTOR_URL=${ROBOINVESTOR_URL:-http://localhost:3002}
     volumes:
       - ./bin/setup/storage-init.sh:/storage-init.sh:ro
     depends_on:

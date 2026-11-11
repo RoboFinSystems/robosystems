@@ -81,7 +81,7 @@ ROBOINVESTOR_URL=https://investor.example.internal
 AWS_S3_PRESIGN_ENDPOINT_URL=https://s3.example.internal
 ```
 
-and run `just start all`. The apps read these for the links between them and to the API, and the API reads them for the links in the mail it sends, for redirects after sign-in, and for the origins it accepts requests from: in the development environment that is localhost plus these three app URLs, so nothing goes in `EXTRA_CORS_ORIGINS` for them. Sign-in happens on the RoboSystems app and carries over to the other two.
+and run `just start all`. The apps read these for the links between them and to the API, and the API reads them for the links in the mail it sends, for redirects after sign-in, and for the origins it accepts requests from: in the development environment that is localhost plus these three app URLs, so nothing goes in `EXTRA_CORS_ORIGINS` for them. The object store's upload bucket takes the same three origins for the browser's uploads, set by `storage-init` on each start. Sign-in happens on the RoboSystems app and carries over to the other two.
 
 Two settings name an app address on their own. Passkeys, when `PASSKEYS_ENABLED=true`, are bound to the sign-in app's name: set `PASSKEY_RP_ID=app.example.internal` and `PASSKEY_ORIGIN=https://app.example.internal`, since the development default is `localhost`. A QuickBooks connection returns to `INTUIT_REDIRECT_URI`, which has to be `https://ledger.example.internal/connections/qb-callback` and registered with Intuit as such.
 
