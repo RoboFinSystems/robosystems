@@ -66,9 +66,11 @@ def limit_message(
   plan: str | None,
   *,
   trial: bool = False,
+  user_id: str | None = None,
 ) -> str:
   """What a subscriber is told at a volume limit. On a trial it says the limit
-  is the trial's, what the plan's own is, and how to start the plan now."""
+  is the trial's, what the plan's own is, and how to start the plan now.
+  ``user_id`` lets a cancelled trial be told it runs out instead."""
   from robosystems.config import env
 
   window = detail.get("window", "period")
@@ -93,11 +95,36 @@ def limit_message(
     plans_own = f" The {plan_name} plan allows {plan_limit} per {window}."
   else:
     plans_own = ""
-  return (
+  lead = (
     f"You have reached the {repository.upper()} trial's {reached}. {resets} "
-    f"A trial runs at lower limits than the plan.{plans_own} You do not have "
-    f"to wait for the trial to end: start your plan now at {start_plan_url()}"
+    f"A trial runs at lower limits than the plan.{plans_own}"
   )
+  if user_id and _trial_is_canceled(repository, user_id):
+    return f"{lead} Your trial is cancelled and keeps these limits to its last day."
+  return (
+    f"{lead} You do not have to wait for the trial to end: start your plan "
+    f"now at {start_plan_url()}"
+  )
+
+
+def _trial_is_canceled(repository: str, user_id: str) -> bool:
+  """Read on the refusal path only, so the cost is one query per 429."""
+  from robosystems.database import SessionFactory
+  from robosystems.models.core.billing import BillingSubscription
+
+  session = SessionFactory()
+  try:
+    subscription = BillingSubscription.get_by_resource_and_user(
+      resource_type="repository",
+      resource_id=repository,
+      user_id=user_id,
+      session=session,
+    )
+    return bool(subscription and subscription.status == "canceled")
+  except Exception:
+    return False
+  finally:
+    session.close()
 
 
 class AllowedSharedEndpoints(str, Enum):

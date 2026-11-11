@@ -224,6 +224,72 @@ class TestTrialLifecycle:
     test_db.refresh(grant)
     assert grant.is_trial is False
 
+  async def test_a_zero_invoice_inside_the_trial_does_not_lift_it(
+    self, test_db, test_user, test_org
+  ):
+    """A plan change mid-trial raises a zero `subscription_update` invoice.
+    Nothing was paid and the trial has not ended, so the trial stands."""
+    _member_, subscription, grant = _on_trial(test_db, test_user, test_org)
+
+    await _handle_payment_succeeded(
+      _invoice(subscription, reason="subscription_update", amount=0),
+      test_db,
+      MagicMock(),
+    )
+
+    test_db.refresh(grant)
+    assert grant.is_trial is True
+    assert grant.user_credits is None
+
+  async def test_a_fully_discounted_first_invoice_lifts_an_ended_trial(
+    self, test_db, test_user, test_org
+  ):
+    _member_, subscription, grant = _on_trial(test_db, test_user, test_org)
+    subscription.trial_ends_at = datetime.now(UTC) - timedelta(seconds=30)
+    test_db.commit()
+
+    await _handle_payment_succeeded(
+      _invoice(subscription, reason="subscription_cycle", amount=0),
+      test_db,
+      MagicMock(),
+    )
+
+    test_db.refresh(grant)
+    assert grant.is_trial is False
+
+  async def test_a_plan_change_mid_trial_keeps_the_trial(
+    self, test_db, test_user, test_org
+  ):
+    """The seat moves to the new plan; the trial, its limits and its empty
+    credit pool stay until that plan's first charge."""
+    from robosystems.models.api.billing.subscription import (
+      UpgradeSubscriptionRequest,
+    )
+    from robosystems.routers.graphs.subscriptions import _change_repository_plan
+
+    member, subscription, grant = _on_trial(test_db, test_user, test_org)
+
+    with patch(
+      "robosystems.operations.providers.payment_provider.get_payment_provider",
+      return_value=MagicMock(),
+    ):
+      await _change_repository_plan(
+        "sec", UpgradeSubscriptionRequest(new_plan_name="advanced"), member, test_db
+      )
+    # What Stripe sends for the price swap inside a trial.
+    await _handle_payment_succeeded(
+      _invoice(subscription, reason="subscription_update", amount=0),
+      test_db,
+      MagicMock(),
+    )
+
+    test_db.refresh(grant)
+    assert grant.repository_plan == "advanced"
+    assert grant.is_trial is True
+    assert grant.limits_plan == TRIAL_PLAN
+    assert not grant.monthly_credit_allocation
+    assert grant.user_credits is None
+
   async def test_a_cancel_keeps_the_rest_of_the_trial_and_never_converts(
     self, test_db, test_user, test_org
   ):

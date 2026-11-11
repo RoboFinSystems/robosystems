@@ -619,7 +619,8 @@ async def _change_repository_plan(
     new_plan=new_plan_tier,
     session=db,
     new_price_cents=new_price_cents,
-    new_credits=new_credits,
+    # A trial holds no credits; the new plan's arrive with its first charge.
+    new_credits=None if user_repo.is_trial else new_credits,
   )
 
   BillingAuditLog.log_event(

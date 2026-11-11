@@ -199,3 +199,22 @@ class TestLimitMessage:
 
     assert "do not have to wait for the trial to end" in message
     assert message.endswith("/organization?tab=subscriptions")
+
+  def test_a_cancelled_trial_is_not_told_to_start_its_plan(self):
+    from unittest.mock import patch
+
+    from robosystems.middleware.rate_limits import repository_rate_limits
+
+    with patch.object(repository_rate_limits, "_trial_is_canceled", return_value=True):
+      message = repository_rate_limits.limit_message(
+        "sec",
+        "mcp",
+        {"window": "minute", "limit": 5},
+        "starter",
+        trial=True,
+        user_id="user_1",
+      )
+
+    assert "the SEC trial's limit of 5 tool calls per minute" in message
+    assert "cancelled and keeps these limits to its last day" in message
+    assert "start your plan" not in message
