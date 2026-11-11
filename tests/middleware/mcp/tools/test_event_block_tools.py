@@ -123,6 +123,34 @@ class TestListEventBlocksReconcilingItemFilter:
     assert "drift_payload" not in by_id["evt_drift"]
 
   @pytest.mark.asyncio
+  async def test_summary_mode_shows_a_waiting_lines_suggestion(self) -> None:
+    suggested = _envelope(id="evt_suggested").model_copy(
+      update={
+        "metadata": {
+          "suggested_element_id": "elem_ap",
+          "suggested_account_name": "Accounts Payable",
+          "suggestion_source": "open_item",
+          "suggestion_basis": "Matches an open bill.",
+        }
+      }
+    )
+    with (
+      _patched_session(),
+      patch(
+        f"{MODULE}.ops_list_event_blocks",
+        return_value=[suggested, _envelope(id="evt_plain")],
+      ),
+    ):
+      result = await ListEventBlocksTool(_client()).execute({})
+
+    by_id = {e["id"]: e for e in result["events"]}
+    assert by_id["evt_suggested"]["suggested_account_name"] == "Accounts Payable"
+    assert by_id["evt_suggested"]["suggestion_source"] == "open_item"
+    assert by_id["evt_suggested"]["suggestion_basis"] == "Matches an open bill."
+    assert "suggested_element_id" not in by_id["evt_suggested"]
+    assert "suggestion_source" not in by_id["evt_plain"]
+
+  @pytest.mark.asyncio
   async def test_full_mode_carries_flag_and_stashed_payload(self) -> None:
     envelopes = [_envelope(id="evt_drift", is_reconciling_item=True)]
     with (

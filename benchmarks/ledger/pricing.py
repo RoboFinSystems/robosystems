@@ -15,7 +15,7 @@ def _table() -> dict[str, dict[str, Any]]:
   return {k: v for k, v in json.loads(_PRICES.read_text()).items() if k[0] != "_"}
 
 
-def turn_cost(model: str, usage: dict[str, int]) -> float | None:
+def turn_cost(model: str, usage: dict[str, Any]) -> float | None:
   row = _table().get(model)
   if row is None:
     return None
@@ -33,7 +33,7 @@ def turn_cost(model: str, usage: dict[str, int]) -> float | None:
   return per_million / 1_000_000
 
 
-def trial_cost(model: str, turn_usage: list[dict[str, int]]) -> float | None:
+def trial_cost(model: str, turn_usage: list[dict[str, Any]]) -> float | None:
   costs = [turn_cost(model, u) for u in turn_usage]
   if any(c is None for c in costs):
     return None

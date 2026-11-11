@@ -213,3 +213,86 @@ def test_an_existing_account_with_no_opening_balance_is_not_new():
   after = Counter({"1000": 100, "6100": 2500, "2000": -2500})
   expected = Counter({"6100": 2500, "2000": -2500})
   assert balance_diff(before, after, expected, TRAITS, BASELINE | {"1000"}) == {}
+
+
+def _chat_provider(reply: dict, seen: list[dict]):
+  import json as _json
+
+  import httpx
+
+  from benchmarks.ledger.providers import OPENROUTER_URL, OpenAICompatProvider
+
+  def handler(request: httpx.Request) -> httpx.Response:
+    seen.append(_json.loads(request.content))
+    return httpx.Response(200, json=reply)
+
+  return OpenAICompatProvider(
+    "openai/gpt-oss-120b",
+    OPENROUTER_URL,
+    "key",
+    name="openrouter",
+    provider_order=["nebius"],
+    transport=httpx.MockTransport(handler),
+  )
+
+
+def test_the_open_weight_route_reads_tool_calls_cost_and_the_host():
+  reply = {
+    "provider": "Nebius",
+    "choices": [
+      {
+        "finish_reason": "tool_calls",
+        "message": {
+          "role": "assistant",
+          "content": None,
+          "reasoning": "look at the calendar first",
+          "tool_calls": [
+            {
+              "id": "c1",
+              "function": {"name": "get-fiscal-calendar", "arguments": "{}"},
+            },
+            {"id": "c2", "function": {"name": "close-period", "arguments": "{oops"}},
+          ],
+        },
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 1000,
+      "completion_tokens": 50,
+      "prompt_tokens_details": {"cached_tokens": 400},
+      "cost": 0.00123,
+    },
+  }
+  seen: list[dict] = []
+  provider = _chat_provider(reply, seen)
+  tool = ToolDef("get-fiscal-calendar", "calendar", {"properties": {}})
+  conversation = provider.start("system", "do the month", [tool])
+
+  turn = provider.step(conversation)
+
+  assert seen[0]["provider"] == {"order": ["nebius"], "allow_fallbacks": False}
+  assert seen[0]["usage"] == {"include": True}
+  assert seen[0]["tools"][0]["function"]["parameters"] == {"properties": {}}
+  assert (turn.stop_reason, turn.served_by) == ("tool_use", "Nebius")
+  assert (turn.usage.input_tokens, turn.usage.cache_read_tokens) == (600, 400)
+  assert turn.usage.cost_usd == 0.00123
+  good, bad = turn.tool_calls
+  assert (good.name, good.args, good.error) == ("get-fiscal-calendar", {}, None)
+  assert bad.error is not None and "not valid JSON" in bad.error
+
+  provider.add_tool_results(conversation, [(good, "{}", False), (bad, "err", True)])
+  assistant, first, second = conversation.messages[-3:]
+  assert assistant["reasoning"] == "look at the calendar first"
+  assert first == {"role": "tool", "tool_call_id": "c1", "content": "{}"}
+  assert second["tool_call_id"] == "c2"
+
+
+def test_a_finished_open_weight_turn_reads_as_end_turn():
+  reply = {
+    "choices": [{"finish_reason": "stop", "message": {"content": "Done."}}],
+    "usage": {"prompt_tokens": 10, "completion_tokens": 2},
+  }
+  provider = _chat_provider(reply, [])
+  turn = provider.step(provider.start("s", "u", []))
+  assert (turn.text, turn.stop_reason, turn.tool_calls) == ("Done.", "end_turn", [])
+  assert turn.usage.cost_usd is None
