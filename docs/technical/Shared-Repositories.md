@@ -119,7 +119,7 @@ During the trial:
 - **The analysis tools are open** — `financial-statement-analysis`, `build-fact-grid`, `disclosures`, `information-block`, `resolve-element`, `search-documents`, `search-text`, `read-text` and `describe-filing`, over MCP or their REST operations — along with the snapshot download.
 - **Raw Cypher is not.** `POST /v1/graphs/sec/query/cypher` and the `read-graph-cypher` tool answer `403` with the way to open them, and the tool is left out of a trial connection's MCP tool list.
 - **The AI analyst is not**, and no AI credits are granted. The plan's monthly allocation arrives with the first charge.
-- **The trial has its own rate limits**, the same whichever plan it converts to.
+- **The trial has its own rate limits**, lower than either plan's and the same whichever plan it converts to: 5 tool calls a minute, 50 an hour and 300 a day over MCP, and 5, 25 and 150 for search. A `429` at one of them says it is the trial's limit, names your plan's own, and gives the link that starts the plan. `X-RateLimit-Plan` reads `trial`.
 
 Cancelling during the trial keeps access until the trial's last day and nothing is charged. To skip the rest of the trial and start the plan at once:
 
@@ -128,7 +128,7 @@ curl -X POST "https://api.robosystems.ai/v1/graphs/sec/subscriptions/end-trial" 
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
-The first period is charged to the card on file, and raw Cypher, the AI analyst and the credits open when the payment clears. There is one trial per subscriber and per organization: a later subscription to the same repository starts paid.
+The same thing is the **Start Plan Now** button on the Subscriptions tab of your organization page. The first period is charged to the card on file, and the plan's rate limits, raw Cypher, the AI analyst and the credits open when the payment clears. Nothing else changes: the same connection and the same API key carry on. There is one trial per subscriber and per organization: a later subscription to the same repository starts paid.
 
 The repository id is `sec`. For the data model and the rules a query must follow to return the right number, see [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules.md); for loading filings into a local stack, the [SEC XBRL Pipeline](SEC-XBRL-Pipeline.md) demo.
 

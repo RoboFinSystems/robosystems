@@ -931,10 +931,20 @@ async def _check_shared_repository_limits(
         raise HTTPException(status_code=http_status.HTTP_403_FORBIDDEN, detail=message)
       elif reason == "repository_limit":
         detail = limit_check.get("detail", {})
+        from robosystems.middleware.rate_limits.repository_rate_limits import (
+          limit_message,
+        )
+
         raise HTTPException(
           status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
-          detail=f"{message}. Limit: {detail.get('limit', 0)} per {detail.get('window', 'period')}. "
-          f"Upgrade for higher limits at {env.ROBOSYSTEMS_URL}/repositories/browse",
+          detail=limit_message(
+            parent_repo_id,
+            operation,
+            detail,
+            repo_access.repository_plan if repo_access else None,
+            trial=bool(repo_access and repo_access.is_trial),
+          ),
+          headers={"Retry-After": str(detail.get("reset_in", 60))},
         )
       else:
         raise HTTPException(

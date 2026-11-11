@@ -217,10 +217,43 @@ async def _validate_read_access(graph_id: str, current_user: User) -> None:
     sess.close()
 
 
-_TRIAL_INSTRUCTIONS_NOTE = (
-  "\n\nTRIAL\n- This connection is on a trial: the analysis tools above are "
-  "available, and raw Cypher (`read-graph-cypher`) opens with the first payment."
-)
+def _trial_instructions_note(graph_id: str) -> str:
+  """What an MCP client is told about a trial connection. A subscriber working
+  from a chat never sees the app, so the model has to be able to explain the
+  trial and how to leave it."""
+  from robosystems.config.shared_repositories import (
+    get_rate_limits,
+    get_trial_days,
+    resolve_shared_repository_parent,
+  )
+  from robosystems.middleware.rate_limits.repository_rate_limits import (
+    start_plan_url,
+  )
+
+  repository = resolve_shared_repository_parent(graph_id)
+  limits = get_rate_limits(repository, "trial") or {}
+  calls = ", ".join(
+    f"{limits[key]} per {window}"
+    for window in ("minute", "hour", "day")
+    if (key := f"mcp_queries_per_{window}") in limits
+  )
+  days = get_trial_days(repository)
+  return (
+    "\n\nTRIAL\n"
+    f"- This connection is on a {days}-day trial of the subscriber's plan. The "
+    "analysis tools above are all available.\n"
+    + (
+      f"- Trial rate limits are lower than the plan's: {calls}, counted in tool calls.\n"
+      if calls
+      else ""
+    )
+    + "- Raw Cypher (`read-graph-cypher`) and the AI analyst are not part of the "
+    "trial. They open with the first payment.\n"
+    "- The plan starts by itself when the trial ends. The subscriber can start it "
+    f"sooner, which lifts the trial limits at once, at {start_plan_url()}\n"
+    "- When a call is refused for a trial limit, say that it is the trial's "
+    "limit and give the subscriber that link. Do not retry in a loop."
+  )
 
 
 def _trial_exclusions(graph_id: str, current_user: User) -> frozenset[str]:
@@ -289,7 +322,7 @@ async def _handle_initialize(
   }
   if instructions:
     if trial_exclusions:
-      instructions += _TRIAL_INSTRUCTIONS_NOTE
+      instructions += _trial_instructions_note(graph_id)
     result["instructions"] = instructions
   return result
 

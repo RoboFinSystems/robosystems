@@ -81,6 +81,10 @@ async def _check_search_rate_limit(
       f"Visit {env.ROBOSYSTEMS_URL}/repositories/browse",
     )
 
+  from robosystems.middleware.rate_limits.repository_rate_limits import (
+    limit_message,
+  )
+
   redis_client = create_async_redis_client(ValkeyDatabase.RATE_LIMITS)
 
   try:
@@ -104,11 +108,19 @@ async def _check_search_rate_limit(
           detail=message,
         )
       else:
-        retry_after = str(limit_check.get("detail", {}).get("reset_in", 60))
+        detail = limit_check.get("detail", {})
+        if reason == "repository_limit":
+          message = limit_message(
+            resolve_shared_repository_parent(graph_id),
+            "search",
+            detail,
+            repo_access.repository_plan,
+            trial=repo_access.is_trial,
+          )
         raise HTTPException(
           status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
           detail=message,
-          headers={"Retry-After": retry_after},
+          headers={"Retry-After": str(detail.get("reset_in", 60))},
         )
   finally:
     await redis_client.aclose()

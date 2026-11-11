@@ -215,11 +215,17 @@ async def authorize_mcp_tool_call(
     MultiTenantUtils.is_shared_repository_or_subgraph(graph_id)
     and env.RATE_LIMIT_ENABLED
   ):
+    from robosystems.config.shared_repositories import (
+      resolve_shared_repository_parent,
+    )
     from robosystems.config.valkey_registry import (
       ValkeyDatabase,
       create_async_redis_client,
     )
     from robosystems.middleware.rate_limits import DualLayerRateLimiter
+    from robosystems.middleware.rate_limits.repository_rate_limits import (
+      limit_message,
+    )
 
     if not repo_access:
       raise HTTPException(
@@ -259,10 +265,15 @@ async def authorize_mcp_tool_call(
           detail = limit_check.get("detail", {})
           raise HTTPException(
             status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"{message}. Limit: {detail.get('limit', 0)} per {detail.get('window', 'period')}. "
-            f"Upgrade for higher limits at {env.ROBOSYSTEMS_URL}/repositories/browse",
+            detail=limit_message(
+              resolve_shared_repository_parent(graph_id),
+              "mcp",
+              detail,
+              repo_access.repository_plan,
+              trial=repo_access.is_trial,
+            ),
             headers={
-              "Retry-After": str(detail.get("retry_after", 60)),
+              "Retry-After": str(detail.get("reset_in", 60)),
               "X-RateLimit-Repository": graph_id,
               "X-RateLimit-Plan": repo_access.limits_plan,
             },

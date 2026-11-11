@@ -157,3 +157,45 @@ class TestPlanKeying:
       SharedRepositoryRateLimits.is_endpoint_allowed("sec", "query")
 
     mock_check.assert_called_once_with("query", repo_id="sec")
+
+
+class TestLimitMessage:
+  """What a subscriber reads at a volume limit."""
+
+  def test_a_trial_limit_names_the_trial_the_plan_and_the_way_out(self):
+    from robosystems.middleware.rate_limits.repository_rate_limits import (
+      limit_message,
+    )
+
+    message = limit_message(
+      "sec", "mcp", {"window": "hour", "limit": 50}, "sec-starter", trial=True
+    )
+
+    assert "the SEC trial's limit of 50 tool calls per hour" in message
+    assert "resets within the hour" in message
+    assert "The Starter plan allows 100 per hour" in message
+    assert "do not have to wait for the trial to end" in message
+    assert message.endswith("/organization?tab=subscriptions")
+
+  def test_a_plan_limit_names_the_plan_and_no_trial(self):
+    from robosystems.middleware.rate_limits.repository_rate_limits import (
+      limit_message,
+    )
+
+    message = limit_message(
+      "sec", "search", {"window": "minute", "limit": 10}, "advanced"
+    )
+
+    assert "the Advanced plan's limit of 10 searches per minute" in message
+    assert "trial" not in message
+    assert message.endswith("/repositories/browse")
+
+  def test_a_trial_refusal_says_the_wait_is_optional(self):
+    from robosystems.middleware.rate_limits.repository_rate_limits import (
+      trial_refusal,
+    )
+
+    message = trial_refusal("sec")
+
+    assert "do not have to wait for the trial to end" in message
+    assert message.endswith("/organization?tab=subscriptions")
