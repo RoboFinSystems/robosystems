@@ -6,7 +6,7 @@ surfaces name a *profile* rather than a model id, so catalog churn never
 reaches the published SDKs.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
 
@@ -37,6 +37,8 @@ class ModelProvider(Enum):
   BEDROCK = "bedrock"
   # A self-hosted OpenAI-compatible endpoint (vLLM, Ollama, LM Studio, NIM).
   OPENAI_COMPAT = "openai_compat"
+  # The Anthropic API called directly; local development only.
+  ANTHROPIC = "anthropic"
 
 
 class OperatorModel(Enum):
@@ -182,15 +184,46 @@ def self_hosted_model_spec(model_id: str, max_output_tokens: int) -> ModelSpec:
   )
 
 
+# Where the Anthropic API may serve the Claude rows: a developer's own stack.
+_ANTHROPIC_API_ENVIRONMENTS = frozenset({"dev", "test"})
+
+
+def anthropic_api_models(
+  enabled: bool, api_key: str, environment: str
+) -> dict[OperatorModel, ModelSpec]:
+  """The Claude rows served by the Anthropic API instead of Bedrock, for a
+  developer running on their own API key. A row's short name is already its
+  Anthropic model id, and its request fields and rate-card key carry over, so
+  only the wire id and the provider change. Refused outside local
+  development: hosted deployments keep inference inside AWS."""
+  if not enabled:
+    return dict(_BEDROCK_MODELS)
+  if environment not in _ANTHROPIC_API_ENVIRONMENTS:
+    raise ValueError(
+      "ANTHROPIC_API_ENABLED is for local development only; "
+      f"ENVIRONMENT={environment!r} runs the Claude models on Bedrock"
+    )
+  if not api_key:
+    raise ValueError("ANTHROPIC_API_ENABLED is on but ANTHROPIC_API_KEY is empty")
+  return {
+    model: replace(spec, model_id=model.value, provider=ModelProvider.ANTHROPIC)
+    for model, spec in _BEDROCK_MODELS.items()
+  }
+
+
 def build_model_registry(
   openai_compat_enabled: bool,
   openai_compat_base_url: str,
   openai_compat_model: str,
   openai_compat_max_output_tokens: int,
+  *,
+  anthropic_api_enabled: bool = False,
+  anthropic_api_key: str = "",
+  environment: str = "dev",
 ) -> dict[OperatorModel, ModelSpec]:
   """The registry for this deployment. Raises on a half-configured
   self-hosted model rather than booting with a row that cannot be called."""
-  registry = dict(_BEDROCK_MODELS)
+  registry = anthropic_api_models(anthropic_api_enabled, anthropic_api_key, environment)
   if not openai_compat_enabled:
     return registry
   if not openai_compat_base_url or not openai_compat_model:
@@ -293,6 +326,9 @@ class OperatorConfig:
     openai_compat_base_url=env.OPENAI_COMPAT_BASE_URL,
     openai_compat_model=env.OPENAI_COMPAT_MODEL,
     openai_compat_max_output_tokens=env.OPENAI_COMPAT_MAX_OUTPUT_TOKENS,
+    anthropic_api_enabled=env.ANTHROPIC_API_ENABLED,
+    anthropic_api_key=env.ANTHROPIC_API_KEY,
+    environment=env.ENVIRONMENT,
   )
 
   # The platform mapping, re-pointed per deployment by OPERATOR_PROFILE_*.

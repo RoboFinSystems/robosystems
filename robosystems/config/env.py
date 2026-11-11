@@ -883,6 +883,13 @@ class EnvConfig:
   AWS_BEDROCK_ACCESS_KEY_ID = get_str_env("AWS_BEDROCK_ACCESS_KEY_ID", "")
   AWS_BEDROCK_SECRET_ACCESS_KEY = get_str_env("AWS_BEDROCK_SECRET_ACCESS_KEY", "")
 
+  # The Claude models through the Anthropic API on a developer's own key, in
+  # place of Bedrock. Local development only; the registry refuses it elsewhere.
+  ANTHROPIC_API_ENABLED = get_bool_env("ANTHROPIC_API_ENABLED", False)
+  ANTHROPIC_API_KEY = (
+    get_str_env("ANTHROPIC_API_KEY", "") if ANTHROPIC_API_ENABLED else ""
+  )
+
   # Self-hosted OpenAI-compatible inference (vLLM, Ollama, NIM). Off means the
   # model row does not exist and nothing below is read.
   OPENAI_COMPAT_ENABLED = get_bool_env(
