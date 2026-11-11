@@ -610,7 +610,7 @@ docs-build out=".local/docs":
 
 # Forward Stripe webhook events to local API
 stripe-webhook url="http://localhost:8000":
-    stripe listen --forward-to {{url}}/admin/v1/webhooks/stripe
+    stripe listen --all-snapshot --forward-to {{url}}/admin/v1/webhooks/stripe
 
 # Clone frontend app repositories
 clone-apps:

@@ -943,6 +943,7 @@ async def _check_shared_repository_limits(
             detail,
             repo_access.repository_plan if repo_access else None,
             trial=bool(repo_access and repo_access.is_trial),
+            user_id=user.id,
           ),
           headers={"Retry-After": str(detail.get("reset_in", 60))},
         )

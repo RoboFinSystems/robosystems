@@ -134,3 +134,23 @@ class TestOfferingEndpoint:
 
     repos = response.json()["repository_subscriptions"]
     assert repos["pricing_model"] == "per_user"
+
+  async def test_a_trial_is_offered_only_where_billing_can_run_one(
+    self, async_client: AsyncClient
+  ):
+    """A trial is a provider subscription's; with billing off a subscriber
+    gets the plan outright, so the offering advertises none."""
+    from unittest.mock import patch
+
+    from robosystems.config import env
+
+    def trial_days() -> int:
+      repos = async_client_response.json()["repository_subscriptions"]["repositories"]
+      return next(r for r in repos if r["type"] == "sec")["trial_days"]
+
+    with patch.object(env, "BILLING_ENABLED", False):
+      async_client_response = await async_client.get("/v1/offering")
+      assert trial_days() == 0
+    with patch.object(env, "BILLING_ENABLED", True):
+      async_client_response = await async_client.get("/v1/offering")
+      assert trial_days() == 14

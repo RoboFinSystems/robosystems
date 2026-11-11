@@ -116,6 +116,7 @@ async def _check_search_rate_limit(
             detail,
             repo_access.repository_plan,
             trial=repo_access.is_trial,
+            user_id=str(current_user.id),
           )
         raise HTTPException(
           status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,

@@ -162,7 +162,8 @@ async def get_service_offerings(
         "description": manifest.description,
         "enabled": manifest.status == "available",
         "coming_soon": manifest.status == "coming_soon",
-        "trial_days": manifest.trial_days,
+        # Only a provider subscription carries a trial.
+        "trial_days": manifest.trial_days if env.BILLING_ENABLED else 0,
         "plans": plans,
       }
       repositories.append(repo_info)

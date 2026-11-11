@@ -271,6 +271,7 @@ async def authorize_mcp_tool_call(
               detail,
               repo_access.repository_plan,
               trial=repo_access.is_trial,
+              user_id=current_user.id,
             ),
             headers={
               "Retry-After": str(detail.get("reset_in", 60)),
