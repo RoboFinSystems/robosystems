@@ -35,7 +35,7 @@ def trial_refusal(repository: str, operation: str = "query") -> str:
   return (
     f"{what} not part of the {repository.upper()} trial, which covers the "
     f"analysis tools. {opens} with your first payment: start your plan now at "
-    f"{env.ROBOSYSTEMS_URL}/organization?tab=billing"
+    f"{env.ROBOSYSTEMS_URL}/organization?tab=subscriptions"
   )
 
 

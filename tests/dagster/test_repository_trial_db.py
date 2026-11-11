@@ -331,7 +331,7 @@ class TestTrialGate:
 
     assert exc.value.status_code == 403
     assert "Raw queries are not part of the SEC trial" in exc.value.detail
-    assert "organization?tab=billing" in exc.value.detail
+    assert "organization?tab=subscriptions" in exc.value.detail
 
   async def test_the_ai_analyst_is_refused(self, test_db, test_user, test_org):
     member, _subscription, _grant = _on_trial(test_db, test_user, test_org)
