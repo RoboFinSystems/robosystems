@@ -300,6 +300,15 @@ OPERATOR_PROFILE_BALANCED=openai-compat                      # a tier you leave 
 
 Then run `just rebuild`, because a plain restart does not pick up environment changes. For the rest of the settings, which endpoints work, which models we tested, and what to check before pointing it at real books, see **[Self-Hosted AI Models](Self-Hosted-AI-Models.md)**.
 
+If you have an Anthropic API key and no Bedrock access, the operators can call Claude through the Anthropic API instead:
+
+```bash
+ANTHROPIC_API_ENABLED=true
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Every Claude tier then runs on that key, and nothing else about the operators changes. This route is for local development only: a stack whose `ENVIRONMENT` is `staging` or `prod` refuses to start with it on. Run `just rebuild` after setting it.
+
 ## Restarting and Iterating
 
 As you make changes, choose the right restart command:

@@ -1,5 +1,6 @@
 """Model access via AWS Bedrock Converse, plus an optional self-hosted
-OpenAI-compatible model (`openai_compat.py`) that speaks the same blocks.
+OpenAI-compatible model (`openai_compat.py`) and, in local development, the
+Anthropic API (`anthropic_api.py`); both speak the same blocks.
 
 Which model runs is a registry row in `config/operators.py`, not a code path.
 Messages carry Converse content blocks; a reasoning block the model returned
@@ -33,6 +34,7 @@ from robosystems.config import (
 from robosystems.logger import logger
 
 if TYPE_CHECKING:
+  from robosystems.operations.operators.anthropic_api import AnthropicAPIClient
   from robosystems.operations.operators.openai_compat import OpenAICompatClient
 
 
@@ -146,6 +148,7 @@ class AIClient:
     self.client = self._initialize_bedrock_client()
     logger.info("Initialized AI client with AWS Bedrock")
     self._self_hosted = self._initialize_self_hosted_client()
+    self._anthropic = self._initialize_anthropic_client()
 
   def _initialize_bedrock_client(self):
     import boto3
@@ -186,6 +189,15 @@ class AIClient:
         "Ensure AWS credentials are configured (aws configure) or set:\n"
         "  AWS_BEDROCK_ACCESS_KEY_ID and AWS_BEDROCK_SECRET_ACCESS_KEY"
       )
+
+  @staticmethod
+  def _initialize_anthropic_client() -> AnthropicAPIClient | None:
+    if not env.ANTHROPIC_API_ENABLED:
+      return None
+    from robosystems.operations.operators.anthropic_api import AnthropicAPIClient
+
+    logger.info("Claude models are served by the Anthropic API (local development)")
+    return AnthropicAPIClient(api_key=env.ANTHROPIC_API_KEY)
 
   @staticmethod
   def _initialize_self_hosted_client() -> OpenAICompatClient | None:
@@ -240,6 +252,24 @@ class AIClient:
       logger.debug(f"Using self-hosted model: {spec.model_id}")
       return await self._self_hosted.create_message(
         spec, messages, system, max_tokens, temperature, tools
+      )
+
+    if spec.provider is ModelProvider.ANTHROPIC:
+      if self._anthropic is None:
+        raise AIProviderError(
+          f"{spec.model_id} is served by the Anthropic API but "
+          "ANTHROPIC_API_ENABLED is off"
+        )
+      logger.debug(f"Using Anthropic API model: {spec.model_id}")
+      return await self._anthropic.create_message(
+        spec,
+        messages,
+        system,
+        max_tokens,
+        temperature,
+        tools,
+        cache_conversation,
+        effort,
       )
 
     logger.debug(f"Using Bedrock model: {spec.model_id}")

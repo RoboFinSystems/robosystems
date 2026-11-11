@@ -41,6 +41,8 @@ dependencies = [
     # Cloud Service (AWS)
     "boto3>=1.42.0,<2.0",
     "huggingface-hub>=1.19,<2",
+    # AI Operators
+    "anthropic>=1.3,<2",
     # OLAP Databases (Graph)
     "duckdb==1.5.6",  # hold: any move needs a Graviton materialization (Arrow-export segfault reproduced only there)
     "lancedb>=0.34.0,<0.35",  # 0.34 made pylance an optional extra (unused here); 0.30<->0.36 format compat verified 2026-08-01
@@ -125,8 +127,6 @@ dev = [
     # AWS development tools
     "cfn-lint>=1.50.1,<2.0",
     "moto[s3]>=5.2.2,<5.2.4",  # hold: 5.2.4/5.2.5 let put_object escape mock_aws to the endpoint pytest.ini sets (AWS_ENDPOINT_URL_S3, the dev S3 server); 5.2.3 intercepts. Recheck each release
-    # Benchmark harness (benchmarks/; never in the image)
-    "anthropic>=1.3,<2",
     # Development utilities
     "rich>=15.0.0,<16.0",
     "pytest-xdist>=3.6,<4.0",

@@ -11,6 +11,7 @@ from robosystems.config.operators import (
   OperatorConfig,
   OperatorExecutionMode,
   OperatorModel,
+  anthropic_api_models,
   build_model_registry,
   build_profile_models,
 )
@@ -163,6 +164,50 @@ class TestSelfHostedModel:
     id would run and bill as another model."""
     with pytest.raises(ValueError, match="collides"):
       build_model_registry(True, self.URL, model, 0)
+
+
+class TestAnthropicAPI:
+  """A developer can run the Claude rows on their own Anthropic API key.
+  Hosted deployments cannot: inference there stays on Bedrock."""
+
+  def test_off_by_default(self):
+    providers = {spec.provider for spec in OperatorConfig.MODEL_REGISTRY.values()}
+    assert ModelProvider.ANTHROPIC not in providers
+
+  def test_on_serves_every_claude_row_by_its_own_api_id(self):
+    registry = build_model_registry(
+      False, "", "", 0, anthropic_api_enabled=True, anthropic_api_key="sk-test"
+    )
+
+    assert set(registry) == set(OperatorConfig.MODEL_REGISTRY)
+    for model, spec in registry.items():
+      platform = OperatorConfig.MODEL_REGISTRY[model]
+      assert spec.provider is ModelProvider.ANTHROPIC
+      assert spec.model_id == model.value
+      assert spec.pricing_key == platform.pricing_key
+      assert spec.additional_request_fields == platform.additional_request_fields
+
+  def test_the_self_hosted_model_can_sit_beside_it(self):
+    registry = build_model_registry(
+      True,
+      "http://localhost:11434/v1",
+      "qwen3:32b",
+      0,
+      anthropic_api_enabled=True,
+      anthropic_api_key="sk-test",
+    )
+
+    assert registry[OperatorModel.OPENAI_COMPAT].provider is ModelProvider.OPENAI_COMPAT
+    assert registry[OperatorModel.SONNET_5_5].provider is ModelProvider.ANTHROPIC
+
+  @pytest.mark.parametrize("environment", ["staging", "prod"])
+  def test_a_hosted_environment_refuses_it(self, environment):
+    with pytest.raises(ValueError, match="local development only"):
+      anthropic_api_models(True, "sk-test", environment)
+
+  def test_on_without_a_key_fails_the_boot(self):
+    with pytest.raises(ValueError, match="ANTHROPIC_API_KEY is empty"):
+      anthropic_api_models(True, "", "dev")
 
 
 class TestProfileOverrides:
