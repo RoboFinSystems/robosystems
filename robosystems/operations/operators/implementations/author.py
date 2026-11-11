@@ -51,6 +51,10 @@ _CLASSIFY_METADATA = frozenset(
     "accept_suggestion",
     "basis",
     "classified_by",
+    # Choices about the classification itself; none of them posts.
+    "classified_flow_qname",
+    "remember_classification",
+    "not_a_settlement",
   }
 )
 
@@ -74,8 +78,9 @@ async def _classify_only(
       "From the console, update-event-block only classifies a bank-feed "
       "line: transition_to 'classified' with a metadata_patch of "
       "classified_element_id, classified_allocations or accept_suggestion, "
-      "and a basis. Committing, voiding or editing an event is the user's "
-      "step in the Inbox."
+      "and a basis, optionally with classified_flow_qname, "
+      "remember_classification or not_a_settlement. Committing, voiding or "
+      "editing an event is the user's step in the Inbox."
     )
   # Any captured event accepts the transition, and a synced one moved to
   # classified is never retried by its sync, so the event itself is read.
@@ -203,8 +208,13 @@ class AuthorOperator(AnalystOperator):
         "captured bank-feed line (`transition_to: 'classified'` with a "
         "`metadata_patch` of `classified_element_id`, or "
         "`classified_allocations` for a split, or `accept_suggestion: true`, "
-        "plus a short `basis`). It never commits, voids or edits a line, and "
-        "never touches an event from another source."
+        "plus a short `basis`). The patch may also carry "
+        "`classified_flow_qname` for a financing or investing flow, "
+        "`remember_classification: true` to make the account the "
+        "counterparty's default, and `not_a_settlement: true` when a line "
+        "suggested as an open item's payment is a separate transaction. It "
+        "never commits, voids or edits a line, and never touches an event "
+        "from another source."
       )
     if "create-report" in write_tools:
       ledger_rules += (

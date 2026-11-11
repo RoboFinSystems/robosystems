@@ -60,6 +60,16 @@ posting costs more than an open one.
 | `C` | the full surface as shipped |
 | `D` | the full surface without the preview and review tools |
 | `F` | a fixed list of the tools a close uses |
+| `O` | none: the task goes to the stack's own author operator |
+
+Row `O` measures the product's operator as shipped: its own prompt, tool list,
+step and credit limits, on whatever model the stack's author tier runs. The
+operator classifies a bank line and never commits one, so the harness commits
+what it classified, standing in for the person who approves the inbox, and then
+scores the books. A close is a person's step, so `month` is not run; the
+operator cannot add an account, so the loan line is expected to be left open.
+`--model` does not apply to this row. Cost is worked out from the run's tokens
+at `--operator-model`'s prices, and the record keeps the credits it metered.
 
 ## Running it
 
@@ -72,6 +82,7 @@ just bench-ledger tools                      # size each row's tool list, dump w
 just bench-ledger run --dry-run              # load, plant and score with no model (free)
 just bench-ledger run --task known-vendor --row F
 just bench-ledger run --model claude-haiku-5-5 --task all --row C,F --k 3
+just bench-ledger run --row O --task all       # through the author operator
 ```
 
 An open-weight model runs through any OpenAI-compatible endpoint. A model id
@@ -102,6 +113,7 @@ usage per turn, the score) under `runs/`, which is git-ignored.
 | `rows.py` | the tool lists |
 | `fixture.py` | loading the company and planting a task |
 | `loop.py`, `providers.py` | the model loop and the provider route |
+| `operator.py` | the operator row: the run, and the approval that follows it |
 | `mcp.py` | the MCP client |
 | `prices.json` | list prices, with the date each was read from the price page |
 
