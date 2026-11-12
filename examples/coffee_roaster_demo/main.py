@@ -34,6 +34,7 @@ Usage:
                                           #   (requires AWS Bedrock)
     just demo-coffee-roaster --no-group   # the roaster alone, no café group
                                           #   (--no-subsidiary still works)
+    just demo-coffee-roaster --no-acceptance  # skip the closing statement check
 
 Expect several minutes of progress output ending in a summary with the graph
 id, the period queued for close, the filed report id, and the reveal prompts

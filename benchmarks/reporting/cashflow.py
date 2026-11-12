@@ -138,22 +138,33 @@ def line_flows(
 
   for entry in entries:
     lines = list(entry)
-    cash = [line for line in lines if concept_of(line) in CASH_CONCEPTS]
-    others = [line for line in lines if line not in cash]
+    cash: list[JournalLine] = []
+    others: list[JournalLine] = []
+    for line in lines:
+      (cash if concept_of(line) in CASH_CONCEPTS else others).append(line)
     if cash:
-      for line in cash:
+      moved = sum(abs(line.debit - line.credit) for line in cash)
+      tagged = [line for line in cash if line.flow]
+      for line in tagged:
         if gross(line.flow):
           add(out.paid, line.flow, line.debit - line.credit)
-      if not all(line.flow for line in cash):
+      # A line carrying a cash line's tag is that cash line's other side and
+      # is already counted. The rest answer for the untagged cash.
+      claimed = {line.flow for line in tagged}
+      if len(tagged) < len(cash):
         for line in others:
-          add(out.paid, flow_of(line), line.cash_effect)
-      elif gross(cash[0].flow):
-        # A tagged payment of a bill: the payable it clears was the row's,
-        # not operations', and the bill is no longer owed.
+          if line.flow not in claimed:
+            add(out.paid, flow_of(line), line.cash_effect)
+      # A tagged payment of a bill: the payable it clears was the row's, not
+      # operations', and the bill is no longer owed.
+      for payment in tagged:
+        if not gross(payment.flow) or not moved:
+          continue
+        share = abs(payment.debit - payment.credit) / moved
         for line in others:
           if concept_of(line) in PAYABLES:
-            add(out.backed_out, concept_of(line), -line.cash_effect)
-            add(out.billed, cash[0].flow, -line.cash_effect)
+            add(out.backed_out, concept_of(line), -line.cash_effect * share)
+            add(out.billed, payment.flow, -line.cash_effect * share)
       continue
     if lines and lines[0].owner in eliminating:
       for line in lines:

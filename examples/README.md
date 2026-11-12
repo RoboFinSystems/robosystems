@@ -105,7 +105,9 @@ just demo-saas-startup                # Cadence: burn masked by deferred revenue
 ```
 
 Both accept the same flags as the RoboLedger demo (`[graph_id]`, `--ai`,
-`--dry-run`). Each also has an offline preview that renders the arc without the
+`--dry-run`). Each load ends by checking every entity's statements against
+its ledger for every month loaded (`benchmarks/reporting/`) and reports the
+count in the summary; `--no-acceptance` skips it. Each also has an offline preview that renders the arc without the
 platform running:
 
 ```bash

@@ -459,8 +459,65 @@ class TestLineFlows:
     assert read.paid == {CAPEX: 2500}
     assert _read(_entry(("1300", 0, 2500, CAPEX), owner="cons")).paid == {}
 
+  def test_tagged_and_untagged_cash_lines_share_the_entry_without_double_counting(self):
+    loan = "rs-gaap:ProceedsFromIssuanceOfLongTermDebt"
+    read = _read(
+      _entry(
+        ("1000", 0, 600, CAPEX),
+        ("1000", 0, 400, None),
+        ("1300", 600, 0, CAPEX),
+        ("6000", 400, 0, None),
+      )
+    )
+    assert read.paid == {CAPEX: -600}
+    split = _read(
+      _entry(
+        ("1000", 500, 0, loan),
+        ("1000", 0, 500, CAPEX),
+        ("2500", 0, 500, loan),
+        ("1300", 500, 0, CAPEX),
+      )
+    )
+    assert split.paid == {loan: 500, CAPEX: -500}
+
+  def test_a_known_month_by_hand(self):
+    """A month worked on paper. The company draws a 10,000 loan, pays 4,000
+    cash for a machine, takes a 1,500 bill for a second one and pays 600 of an
+    older 900 bill for a third, puts a 700 laptop on the card, and pays 300 of
+    rent. ASC 230: financing 10,000; investing 4,000 + 600 = 4,600 out; the
+    1,500 and the 700 are non-cash this month."""
+    loan = "rs-gaap:ProceedsFromIssuanceOfLongTermDebt"
+    read = _read(
+      _entry(("1000", 10000, 0, None), ("2500", 0, 10000, None)),
+      _entry(("1300", 4000, 0, None), ("1000", 0, 4000, None)),
+      _entry(("1300", 1500, 0, None), ("2000", 0, 1500, None)),
+      _entry(("2000", 600, 0, None), ("1000", 0, 600, None)),
+      _entry(("1300", 700, 0, None), ("2100", 0, 700, None)),
+      _entry(("6000", 300, 0, None), ("1000", 0, 300, None)),
+    )
+    assert read.paid == {CAPEX: -4000}
+    owed = {CAPEX: -900.0}
+    for flow, amount in read.billed.items():
+      owed[flow] += amount
+    stated = {loan: 10000.0, CAPEX: -4600.0}
+    # The loan has no tag and long-term debt no default row here, so the
+    # statement's 10,000 is the one row these lines cannot explain.
+    unexplained, settled = settle(stated, read.paid, owed, 0.015)
+    assert unexplained == [(loan, 10000.0, 0.0)]
+    assert settled == -600.0 and owed == {CAPEX: -1800.0}
+    assert read.backed_out == {
+      "rs-gaap:AccountsPayableCurrent": -1500,
+      "rs-gaap:AccruedLiabilitiesCurrent": -700,
+    }
+
 
 class TestSettle:
+  def test_a_payment_larger_than_the_open_bills_is_unexplained(self):
+    owed = {CAPEX: -500.0}
+    unexplained, settled = settle({CAPEX: -1500.0}, {}, owed, 0.015)
+    assert unexplained == [(CAPEX, -1500.0, 0.0)]
+    assert settled == 0.0 and owed == {CAPEX: -500.0}
+
   def test_a_row_ahead_of_the_cash_entries_draws_on_open_bills(self):
     owed = {CAPEX: -1500.0}
     unexplained, settled = settle({CAPEX: -1500.0}, {}, owed, 0.015)
