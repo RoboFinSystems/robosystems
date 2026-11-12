@@ -342,8 +342,9 @@ Resources:
             echo "Tagged root volume: $ROOT_VOLUME"
           fi
 
-          # Signal CloudFormation
-          /opt/aws/bin/cfn-signal --exit-code $? --stack $AWS_STACK_NAME --resource BastionHostEC2Instance --region $AWS_REGION
+          # The downloaded script has already signalled CloudFormation. A second
+          # signal here races the stack update finishing, and its failure would
+          # end this script before the auto-stop below.
 
           echo "UserData script execution completed at $(date)"
 
