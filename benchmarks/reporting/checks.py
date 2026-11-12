@@ -64,11 +64,13 @@ def expected_rows(statement: dict, ledger: Ledger) -> list[tuple[dict, float]]:
   """Each row's net debits in the ledger: its own concept's accounts plus the
   rows beneath it. A statement lists children before their parent, so the
   deeper rows still waiting when a row arrives are its children."""
+  rows = _rows(statement)
+  placed = ledger.placed({fact["qname"] for fact in rows})
   waiting: list[tuple[int, float]] = []
   out: list[tuple[dict, float]] = []
-  for fact in _rows(statement):
+  for fact in rows:
     depth = int(fact.get("depth") or 0)
-    net = ledger.by_concept.get(fact["qname"], 0.0)
+    net = placed.get(fact["qname"], (0.0, ""))[0]
     while waiting and waiting[-1][0] > depth:
       net += waiting.pop()[1]
     waiting.append((depth, net))
@@ -128,11 +130,9 @@ class Checker:
       if not _close(_first(fact), expected):
         wrong.append(f"{fact['qname']} {_money(_first(fact))} vs {_money(expected)}")
     missing = [
-      f"{qname} {_money(ledger.concept(qname, ledger.concept_trait[qname]))} absent"
-      for qname in sorted(ledger.by_concept)
-      if qname not in seen
-      and ledger.concept_trait.get(qname) in present
-      and abs(ledger.by_concept[qname]) > TOLERANCE
+      f"{qname} {_money(net if trait in DEBIT_TRAITS else -net)} absent"
+      for qname, (net, trait) in sorted(ledger.placed(seen).items())
+      if qname not in seen and trait in present and abs(net) > TOLERANCE
     ]
     problems = wrong + missing
     self._add(

@@ -98,7 +98,7 @@ class Entity:
   joined_on: date | None
   left_on: date | None
   closed_through: str | None
-  concept_by_code: dict[str, str]
+  concepts_by_code: dict[str, list[str]]
 
   def summed_at(self, end: date) -> bool:
     """Whether the consolidated balance sheet at ``end`` sums this entity. A
@@ -144,7 +144,7 @@ def load_entities(api: Api) -> list[Entity]:
   }
   entities = []
   for row in data["entities"]:
-    concept_by_code: dict[str, str] = {}
+    concepts_by_code: dict[str, list[str]] = {}
     mapping_id = mapping_ids.get(row["id"])
     if mapping_id is None and row["isParent"]:
       mapping_id = mapping_ids.get(None)
@@ -157,7 +157,7 @@ def load_entities(api: Api) -> list[Entity]:
       for association in (detail or {}).get("associations") or []:
         code = (association.get("fromElementQname") or "").split(":", 1)[-1]
         if code and association.get("toElementQname"):
-          concept_by_code[code] = association["toElementQname"]
+          concepts_by_code.setdefault(code, []).append(association["toElementQname"])
     calendar_state = api.graphql(
       "query($e: String!) { fiscalCalendar(entityId: $e) { closedThrough } }",
       {"e": row["id"]},
@@ -172,7 +172,7 @@ def load_entities(api: Api) -> list[Entity]:
         joined_on=_day(row.get("joinedOn")),
         left_on=_day(row.get("leftOn")),
         closed_through=(calendar_state or {}).get("closedThrough"),
-        concept_by_code=concept_by_code,
+        concepts_by_code=concepts_by_code,
       )
     )
   return sorted(
@@ -186,7 +186,7 @@ def cumulative(api: Api, entity: Entity, end: date) -> Ledger:
     "{ rows { accountCode trait totalDebits totalCredits } } }",
     {"e": entity.id, "d": end.isoformat()},
   )["trialBalance"]["rows"]
-  return fold(rows, entity.concept_by_code)
+  return fold(rows, entity.concepts_by_code, entity.id)
 
 
 def months_to_check(entities: list[Entity], limit: int) -> list[str]:
@@ -218,7 +218,7 @@ def run(api: Api, limit: int, only: str | None) -> list[Check]:
     scopes: list[tuple[str, str | None, Ledger, Ledger]] = []
     for entity in entities:
       at_end, before = ledgers[entity.id][month], ledgers[entity.id][prior]
-      active = any(abs(v) > 0.005 for v in at_end.by_trait.values())
+      active = any(abs(line.net) > 0.005 for line in at_end.lines.values())
       closed = entity.closed_through and month <= entity.closed_through
       if active and closed:
         scopes.append((entity.name, entity.id, before, at_end))
