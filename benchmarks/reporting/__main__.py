@@ -20,6 +20,7 @@ from typing import Any
 
 import httpx
 
+from .cashflow import ACQUISITION, DIVESTITURE, Flows, JournalLine, line_flows
 from .checks import Check, Checker
 from .expected import Ledger, combine, fold, less
 
@@ -99,6 +100,13 @@ class Entity:
   left_on: date | None
   closed_through: str | None
   concepts_by_code: dict[str, list[str]]
+
+  def library_concept(self, code: str) -> str | None:
+    """The library concept the account reports under, a tenant member aside."""
+    mapped = self.concepts_by_code.get(code) or []
+    return next((q for q in mapped if q.startswith("rs-gaap:")), None) or (
+      mapped[0] if mapped else None
+    )
 
   def summed_at(self, end: date) -> bool:
     """Whether the consolidated balance sheet at ``end`` sums this entity. A
@@ -189,6 +197,57 @@ def cumulative(api: Api, entity: Entity, end: date) -> Ledger:
   return fold(rows, entity.concepts_by_code, entity.id)
 
 
+def load_flows(api: Api) -> Flows:
+  """The cash flow statement's arcs from the library's calculation taxonomy."""
+  taxonomy = next(
+    t["id"]
+    for t in api.graphql("{ libraryTaxonomies { id standard } }")["libraryTaxonomies"]
+    if t["standard"] == "rs-gaap-calculations"
+  )
+  arcs: list[dict] = []
+  while True:
+    page = api.graphql(
+      "query($t: ID!, $o: Int!) { libraryTaxonomyArcs(taxonomyId: $t, limit: 1000, "
+      "offset: $o) { fromElementQname toElementQname associationType weight } }",
+      {"t": taxonomy, "o": len(arcs)},
+    )["libraryTaxonomyArcs"]
+    arcs.extend(page)
+    if len(page) < 1000:
+      return Flows.from_arcs(arcs)
+
+
+def journal(
+  api: Api, entity: Entity, start: date, end: date
+) -> list[list[JournalLine]]:
+  """The entity's posted entries for the month, each as its lines."""
+  entries: list[list[JournalLine]] = []
+  offset = 0
+  while True:
+    page = api.graphql(
+      "query($e: String!, $s: Date!, $d: Date!, $o: Int!) { journalEntries("
+      'entityId: $e, startDate: $s, endDate: $d, status: "posted", limit: 500, '
+      "offset: $o) { pagination { hasMore } entries { lineItems "
+      "{ accountCode debitAmount creditAmount flowQname } } } }",
+      {"e": entity.id, "s": start.isoformat(), "d": end.isoformat(), "o": offset},
+    )["journalEntries"]
+    for entry in page["entries"]:
+      entries.append(
+        [
+          JournalLine(
+            entity.id,
+            line["accountCode"],
+            float(line.get("debitAmount") or 0),
+            float(line.get("creditAmount") or 0),
+            line.get("flowQname"),
+          )
+          for line in entry["lineItems"]
+        ]
+      )
+    offset += len(page["entries"])
+    if not page["pagination"]["hasMore"] or not page["entries"]:
+      return entries
+
+
 def months_to_check(entities: list[Entity], limit: int) -> list[str]:
   parent = next((e for e in entities if e.is_parent), entities[0])
   if not parent.closed_through:
@@ -209,6 +268,14 @@ def run(api: Api, limit: int, only: str | None) -> list[Check]:
     e.id: {m: cumulative(api, e, _month_end(m)) for m in boundaries} for e in entities
   }
   grouped = len(entities) > 1
+  flows = load_flows(api)
+  by_id = {e.id: e for e in entities}
+  owed: dict[str, dict[str, float]] = {}
+  eliminating = {e.id for e in entities if e.role == "consolidation"}
+
+  def concept_of(line: JournalLine) -> str | None:
+    return by_id[line.owner].library_concept(line.code)
+
   checks: list[Check] = []
 
   for index, month in enumerate(months):
@@ -247,7 +314,34 @@ def run(api: Api, limit: int, only: str | None) -> list[Check]:
           statements[kind] = api.statement(kind, start, end, entity_id=entity_id)
         except (RuntimeError, httpx.HTTPError) as error:
           statements[kind] = str(error)
-      checker.statements(statements, before, at_end, period)
+      owners = (
+        [by_id[entity_id]]
+        if entity_id
+        else [e for e in entities if e.summed_during(start, end)]
+      )
+      entries = [entry for e in owners for entry in journal(api, e, start, end)]
+      from_lines = line_flows(entries, concept_of, flows, eliminating)
+      same_entities = True
+      if entity_id is None:
+        prior_end = _month_end(prior)
+        for e in entities:
+          was, now = e.summed_at(prior_end), e.summed_at(end)
+          if was == now:
+            continue
+          same_entities = False
+          held = ledgers[e.id][prior].cash
+          row, sign = (ACQUISITION, 1.0) if now else (DIVESTITURE, -1.0)
+          from_lines.paid[row] = from_lines.paid.get(row, 0.0) + sign * held
+      checker.statements(
+        statements,
+        before,
+        at_end,
+        period,
+        from_lines,
+        flows,
+        owed.setdefault(name, {}),
+        same_entities,
+      )
       checks.extend(checker.checks)
       failed = sum(not c.passed for c in checker.checks)
       print(

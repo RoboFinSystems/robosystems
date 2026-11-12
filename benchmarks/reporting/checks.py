@@ -5,6 +5,15 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 
+from .cashflow import (
+  FINANCING,
+  INVESTING,
+  PAYABLES,
+  Flows,
+  LineFlows,
+  operating_rows,
+  settle,
+)
 from .expected import (
   BALANCE_TRAITS,
   DEBIT_TRAITS,
@@ -148,6 +157,10 @@ class Checker:
     before: Ledger,
     at_end: Ledger,
     period: Ledger,
+    from_lines: LineFlows | None = None,
+    flows: Flows | None = None,
+    owed: dict[str, float] | None = None,
+    same_entities: bool = True,
   ) -> None:
     """Every check for the scope and month. A statement that would not
     render arrives as its error and fails on its own; the rest still run."""
@@ -166,6 +179,17 @@ class Checker:
       self.income_statement(income, period)
     if "cash_flow_statement" in rendered:
       self.cash_flow(rendered["cash_flow_statement"], before, at_end, net_income)
+      if flows is not None and from_lines is not None:
+        self.cash_flow_rows(
+          rendered["cash_flow_statement"],
+          income,
+          before,
+          at_end,
+          from_lines,
+          flows,
+          owed if owed is not None else {},
+          same_entities,
+        )
     if "equity_statement" in rendered:
       self.equity_statement(rendered["equity_statement"], before, at_end, net_income)
 
@@ -259,6 +283,60 @@ class Checker:
         _close(stated, net_income),
         f"{_money(stated)} vs {_money(net_income)}",
       )
+
+  def cash_flow_rows(
+    self,
+    statement: dict,
+    income: dict | None,
+    before: Ledger,
+    at_end: Ledger,
+    from_lines: LineFlows,
+    flows: Flows,
+    owed: dict[str, float],
+    balances: bool = True,
+  ) -> None:
+    """The rows themselves: investing and financing against the journal
+    lines, operating against the income statement and the balance changes."""
+    kind = "cash_flow_statement"
+    if not _stated(statement):
+      return
+    rows = _rows(statement)
+    stated = {
+      f["qname"]: _first(f)
+      for f in rows
+      if flows.section.get(f["qname"]) in (INVESTING, FINANCING)
+      and not f.get("is_subtotal")
+    }
+    for flow, amount in from_lines.billed.items():
+      owed[flow] = owed.get(flow, 0.0) + amount
+    unexplained, settled = settle(stated, from_lines.paid, owed, TOLERANCE)
+    wrong = [
+      f"{q} {_money(actual)} vs {_money(expected)}"
+      for q, actual, expected in unexplained
+    ]
+    self._add(
+      kind,
+      "investing and financing rows equal their ledger lines",
+      not wrong,
+      "; ".join(wrong[:4]) or f"{len(stated)} rows",
+    )
+    # A bill paid this month left payables for its own row, not for operations.
+    backed_out = dict(from_lines.backed_out)
+    for payable in PAYABLES:
+      backed_out[payable] = backed_out.get(payable, 0.0) - settled
+    figures = {f["qname"]: _first(f) for f in _rows(income)} if income else {}
+    worked = operating_rows(rows, figures, before, at_end, flows, backed_out, balances)
+    wrong = [
+      f"{q} {_money(actual)} vs {_money(expected)}"
+      for q, actual, expected in worked
+      if not _close(actual, expected)
+    ]
+    self._add(
+      kind,
+      "operating rows equal the income statement and the balance changes",
+      not wrong,
+      "; ".join(wrong[:4]) or f"{len(worked)} rows",
+    )
 
   def equity_statement(
     self, statement: dict, before: Ledger, at_end: Ledger, net_income: float | None
