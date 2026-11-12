@@ -25,7 +25,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
 
 # uv pinned in six places that move together: here (twice), Dockerfile.lambda, and
 # setup-uv's `version` in test.yml, create-release.yml and publish-docs.yml
-COPY --from=ghcr.io/astral-sh/uv:0.12.24 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /usr/local/bin/uv
 
 # Copy LadybugDB extensions from official extension repository
 # Extensions pulled from the pinned extension-repo stage above
@@ -144,7 +144,7 @@ RUN /usr/local/bin/python -m pip uninstall -y --root-user-action=ignore pip
 
 # uv pinned in six places that move together: here (twice), Dockerfile.lambda, and
 # setup-uv's `version` in test.yml, create-release.yml and publish-docs.yml
-COPY --from=ghcr.io/astral-sh/uv:0.12.24 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /usr/local/bin/uv
 
 # Copy virtual environment from builder stage
 COPY --from=builder /build/.venv /build/.venv
