@@ -96,6 +96,10 @@ class TestLedger:
     ledger = fold(_tb(("9999", "expense", 12, 0)), CONCEPTS)
     assert ledger.unmapped == {"9999": 12}
 
+  def test_only_the_taxonomy_cash_rows_count_as_cash(self):
+    concepts = {"1000": "rs-gaap:CashSurrenderValueOfLifeInsurance"}
+    assert fold(_tb(("1000", "asset", 500, 0)), concepts).cash == 0
+
   def test_less_is_the_activity_between_two_dates(self):
     period = less(fold(CLOSING, CONCEPTS), fold(OPENING, CONCEPTS))
     assert period.cash == 400
@@ -117,6 +121,31 @@ class TestRows:
     assert rows["rs-gaap:AssetsNoncurrent"] == 450
     assert rows["rs-gaap:Assets"] == 1850
     assert rows["rs-gaap:Liabilities"] == -250
+
+  def test_a_statement_listed_parent_first_fails_rather_than_passes(self):
+    statement = _balance_sheet()
+    statement["facts"].reverse()
+    checker = Checker("Co", "2026-01")
+    checker.balance_sheet(statement, fold(CLOSING, CONCEPTS))
+    assert "every row equals its accounts" in _failed(checker)
+
+
+class TestScope:
+  def test_a_statement_that_will_not_render_fails_and_the_rest_still_run(self):
+    before, at_end = fold(OPENING, CONCEPTS), fold(CLOSING, CONCEPTS)
+    checker = Checker("Co", "2026-01")
+    checker.statements(
+      {"balance_sheet": _balance_sheet(), "income_statement": "failed (500): boom"},
+      before,
+      at_end,
+      less(at_end, before),
+    )
+    assert _failed(checker) == ["the statement renders"]
+    assert {c.statement for c in checker.checks} == {
+      "ledger",
+      "balance_sheet",
+      "income_statement",
+    }
 
 
 class TestBalanceSheet:

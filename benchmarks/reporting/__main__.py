@@ -20,7 +20,7 @@ from typing import Any
 
 import httpx
 
-from .checks import NET_INCOME, Check, Checker
+from .checks import Check, Checker
 from .expected import Ledger, combine, fold, less
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -241,25 +241,13 @@ def run(api: Api, limit: int, only: str | None) -> list[Check]:
         continue
       checker = Checker(name, month)
       period = activity if entity_id is None and activity else less(at_end, before)
-      statements = {
-        kind: api.statement(kind, start, end, entity_id=entity_id)
-        for kind in _STATEMENTS
-      }
-      net_income = next(
-        (
-          float(f["values"][0])
-          for f in statements["income_statement"].get("facts") or []
-          if f.get("qname") == NET_INCOME
-        ),
-        None,
-      )
-      checker.unmapped(at_end)
-      checker.balance_sheet(statements["balance_sheet"], at_end)
-      checker.income_statement(statements["income_statement"], period)
-      checker.cash_flow(statements["cash_flow_statement"], before, at_end, net_income)
-      checker.equity_statement(
-        statements["equity_statement"], before, at_end, net_income
-      )
+      statements: dict[str, dict | str] = {}
+      for kind in _STATEMENTS:
+        try:
+          statements[kind] = api.statement(kind, start, end, entity_id=entity_id)
+        except (RuntimeError, httpx.HTTPError) as error:
+          statements[kind] = str(error)
+      checker.statements(statements, before, at_end, period)
       checks.extend(checker.checks)
       failed = sum(not c.passed for c in checker.checks)
       print(
@@ -327,6 +315,8 @@ def main() -> None:
   api = _target(args)
   print(f"Reporting acceptance: {api.graph_id} at {api.base_url}")
   checks = run(api, args.months, args.scope)
+  if not checks:
+    raise SystemExit("no checks ran: no scope has books for these months")
   print_grid(checks)
   if args.json:
     args.json.write_text(json.dumps([c.as_dict() for c in checks], indent=2))

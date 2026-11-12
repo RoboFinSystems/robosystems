@@ -26,9 +26,14 @@ PRESENTED_AS = {
 }
 
 
-def is_cash(qname: str) -> bool:
-  local = qname.split(":", 1)[-1]
-  return local.startswith("Cash") or "RestrictedCash" in local
+# The two rows the cash flow statement's cash total sums, by the taxonomy's
+# own calculation arcs.
+CASH_CONCEPTS = frozenset(
+  {
+    "rs-gaap:CashAndCashEquivalentsAtCarryingValue",
+    "rs-gaap:RestrictedCashAndInvestmentsCurrent",
+  }
+)
 
 
 @dataclass
@@ -75,7 +80,7 @@ def fold(rows: Iterable[Mapping], concept_by_code: Mapping[str, str]) -> Ledger:
     qname = PRESENTED_AS.get(qname, qname)
     ledger.by_concept[qname] = ledger.by_concept.get(qname, 0.0) + net
     ledger.concept_trait.setdefault(qname, trait)
-    if trait == "asset" and is_cash(qname):
+    if qname in CASH_CONCEPTS:
       ledger.cash += net
   return ledger
 

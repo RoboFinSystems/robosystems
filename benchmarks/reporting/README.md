@@ -46,7 +46,19 @@ entity records (`consolidationMethod`, `joinedOn`, `leftOn`). An equity-method
 member is not summed.
 
 A window the engine declines (`inconclusive`: a month before the books begin)
-is left unchecked and shows as `-` in the grid.
+is left unchecked and shows as `-` in the grid. A statement that fails to
+render is a failed check, and the run goes on. A run that checks nothing exits
+non-zero.
+
+## What it assumes
+
+A month's activity is the difference between two cumulative trial balances, so
+the ledger must not post year-end closing entries or reset its income accounts.
+The demo ledgers do neither. On a ledger that does, the income statement of the
+month holding the closing entry would compare wrongly.
+
+A statement lists the rows beneath a row before the row itself. If the order
+changed, the parent rows would fail the row check rather than pass it.
 
 ## What is not checked yet
 

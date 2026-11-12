@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 
 from .expected import (
@@ -141,6 +141,33 @@ class Checker:
       not problems,
       "; ".join(problems[:4]) or f"{compared} rows",
     )
+
+  def statements(
+    self,
+    statements: Mapping[str, dict | str],
+    before: Ledger,
+    at_end: Ledger,
+    period: Ledger,
+  ) -> None:
+    """Every check for the scope and month. A statement that would not
+    render arrives as its error and fails on its own; the rest still run."""
+    rendered: dict[str, dict] = {}
+    for kind, statement in statements.items():
+      if isinstance(statement, str):
+        self._add(kind, "the statement renders", False, statement)
+      else:
+        rendered[kind] = statement
+    income = rendered.get("income_statement")
+    net_income = _value(income, NET_INCOME) if income else None
+    self.unmapped(at_end)
+    if "balance_sheet" in rendered:
+      self.balance_sheet(rendered["balance_sheet"], at_end)
+    if income:
+      self.income_statement(income, period)
+    if "cash_flow_statement" in rendered:
+      self.cash_flow(rendered["cash_flow_statement"], before, at_end, net_income)
+    if "equity_statement" in rendered:
+      self.equity_statement(rendered["equity_statement"], before, at_end, net_income)
 
   def unmapped(self, ledger: Ledger) -> None:
     self._add(
