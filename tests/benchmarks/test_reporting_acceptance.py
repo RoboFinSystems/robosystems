@@ -5,6 +5,13 @@ from datetime import date
 import pytest
 
 from benchmarks.reporting.__main__ import Entity
+from benchmarks.reporting.cashflow import (
+  Flows,
+  JournalLine,
+  line_flows,
+  operating_rows,
+  settle,
+)
 from benchmarks.reporting.checks import Checker, expected_rows
 from benchmarks.reporting.expected import combine, fold, less
 
@@ -314,3 +321,196 @@ class TestMembership:
     assert self._member(role="consolidation", method="none").summed_at(
       date(2026, 1, 31)
     )
+
+
+ARCS = [
+  (
+    "calculation",
+    "rs-gaap:NetCashProvidedByUsedInOperatingActivities",
+    "rs-gaap:NetIncomeLoss",
+    1,
+  ),
+  (
+    "calculation",
+    "rs-gaap:NetCashProvidedByUsedInOperatingActivities",
+    "rs-gaap:IncomeLossFromEquityMethodInvestments",
+    -1,
+  ),
+  (
+    "calculation",
+    "rs-gaap:NetCashProvidedByUsedInOperatingActivities",
+    "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities",
+    1,
+  ),
+  (
+    "calculation",
+    "rs-gaap:NetCashProvidedByUsedInOperatingActivities",
+    "rs-gaap:IncreaseDecreaseInAccruedLiabilities",
+    1,
+  ),
+  (
+    "calculation",
+    "rs-gaap:NetCashProvidedByUsedInInvestingActivities",
+    "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment",
+    1,
+  ),
+  (
+    "calculation",
+    "rs-gaap:NetCashProvidedByUsedInInvestingActivities",
+    "rs-gaap:ProceedsFromSaleOfPropertyPlantAndEquipment",
+    1,
+  ),
+  (
+    "calculation",
+    "rs-gaap:NetCashProvidedByUsedInFinancingActivities",
+    "rs-gaap:ProceedsFromIssuanceOfLongTermDebt",
+    1,
+  ),
+  (
+    "derivation",
+    "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment",
+    "rs-gaap:PropertyPlantAndEquipmentGross",
+    -1,
+  ),
+  (
+    "derivation",
+    "rs-gaap:ProceedsFromSaleOfPropertyPlantAndEquipment",
+    "rs-gaap:PropertyPlantAndEquipmentGross",
+    1,
+  ),
+  (
+    "derivation",
+    "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities",
+    "rs-gaap:AccountsPayableCurrent",
+    1,
+  ),
+  (
+    "derivation",
+    "rs-gaap:IncreaseDecreaseInAccruedLiabilities",
+    "rs-gaap:AccruedLiabilitiesCurrent",
+    1,
+  ),
+]
+FLOWS = Flows.from_arcs(
+  {
+    "associationType": kind,
+    "fromElementQname": parent,
+    "toElementQname": child,
+    "weight": w,
+  }
+  for kind, parent, child, w in ARCS
+)
+CAPEX = "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment"
+LEDGER_CONCEPTS = {
+  **CONCEPTS,
+  "2100": "rs-gaap:AccruedLiabilitiesCurrent",
+  "2500": "rs-gaap:LongTermDebtAndCapitalLeaseObligations",
+}
+
+
+def _entry(*lines, owner="e"):
+  return [JournalLine(owner, code, dr, cr, flow) for code, dr, cr, flow in lines]
+
+
+def _read(*entries, eliminating=()):
+  return line_flows(
+    entries, lambda line: LEDGER_CONCEPTS.get(line.code), FLOWS, eliminating
+  )
+
+
+class TestLineFlows:
+  def test_a_tagged_cash_line_is_its_own_flow(self):
+    loan = "rs-gaap:ProceedsFromIssuanceOfLongTermDebt"
+    read = _read(_entry(("1000", 5000, 0, loan), ("2500", 0, 5000, loan)))
+    assert read.paid == {loan: 5000}
+
+  def test_an_untagged_purchase_takes_its_concepts_default_by_direction(self):
+    bought = _read(_entry(("1300", 800, 0, None), ("1000", 0, 800, None)))
+    sold = _read(_entry(("1000", 300, 0, None), ("1300", 0, 300, None)))
+    assert bought.paid == {CAPEX: -800}
+    assert sold.paid == {"rs-gaap:ProceedsFromSaleOfPropertyPlantAndEquipment": 300}
+
+  def test_an_operating_payment_is_no_row(self):
+    read = _read(_entry(("6000", 300, 0, None), ("1000", 0, 300, None)))
+    assert read.paid == {} and read.billed == {} and read.backed_out == {}
+
+  def test_a_bill_for_equipment_is_billed_and_comes_out_of_payables(self):
+    read = _read(_entry(("1300", 1500, 0, None), ("2000", 0, 1500, None)))
+    assert read.paid == {}
+    assert read.billed == {CAPEX: -1500}
+    assert read.backed_out == {"rs-gaap:AccountsPayableCurrent": -1500}
+
+  def test_equipment_on_the_card_comes_out_of_the_card_and_is_never_billed(self):
+    read = _read(_entry(("1300", 900, 0, None), ("2100", 0, 900, None)))
+    assert read.billed == {}
+    assert read.backed_out == {"rs-gaap:AccruedLiabilitiesCurrent": -900}
+
+  def test_a_tagged_payment_of_a_bill_clears_what_the_bill_set_up(self):
+    read = _read(
+      _entry(("1300", 1500, 0, None), ("2000", 0, 1500, None)),
+      _entry(("2000", 1500, 0, CAPEX), ("1000", 0, 1500, CAPEX)),
+    )
+    assert read.paid == {CAPEX: -1500}
+    assert read.billed == {CAPEX: 0}
+    assert read.backed_out == {"rs-gaap:AccountsPayableCurrent": 0}
+
+  def test_a_consolidation_entitys_tagged_lines_adjust_the_rows(self):
+    read = _read(_entry(("1300", 0, 2500, CAPEX), owner="cons"), eliminating={"cons"})
+    assert read.paid == {CAPEX: 2500}
+    assert _read(_entry(("1300", 0, 2500, CAPEX), owner="cons")).paid == {}
+
+
+class TestSettle:
+  def test_a_row_ahead_of_the_cash_entries_draws_on_open_bills(self):
+    owed = {CAPEX: -1500.0}
+    unexplained, settled = settle({CAPEX: -1500.0}, {}, owed, 0.015)
+    assert unexplained == [] and settled == -1500.0 and owed == {CAPEX: 0.0}
+
+  def test_a_row_with_no_lines_and_no_bill_is_unexplained(self):
+    unexplained, settled = settle({CAPEX: -1500.0}, {}, {}, 0.015)
+    assert unexplained == [(CAPEX, -1500.0, 0.0)] and settled == 0.0
+
+  def test_a_flow_in_the_lines_with_no_row_is_unexplained(self):
+    assert settle({}, {CAPEX: -800.0}, {}, 0.015)[0] == [(CAPEX, 0.0, -800.0)]
+
+
+class TestOperatingRows:
+  PAYABLES_ROW = "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities"
+
+  def _ledgers(self):
+    before = fold(_tb(("2000", "liability", 0, 100)), LEDGER_CONCEPTS)
+    at_end = fold(_tb(("2000", "liability", 0, 1850)), LEDGER_CONCEPTS)
+    return before, at_end
+
+  def _rows(self, payables):
+    return [
+      _fact("rs-gaap:NetIncomeLoss", 600.0, 3, "metric"),
+      _fact("rs-gaap:IncomeLossFromEquityMethodInvestments", -40.0, 3, "gain"),
+      _fact(self.PAYABLES_ROW, payables, 3, None),
+    ]
+
+  def test_income_rows_at_their_weight_and_balances_at_their_cash_effect(self):
+    before, at_end = self._ledgers()
+    income = {
+      "rs-gaap:NetIncomeLoss": 600.0,
+      "rs-gaap:IncomeLossFromEquityMethodInvestments": 40.0,
+    }
+    worked = operating_rows(self._rows(1750.0), income, before, at_end, FLOWS)
+    assert [(q, expected) for q, _stated, expected in worked] == [
+      ("rs-gaap:NetIncomeLoss", 600.0),
+      ("rs-gaap:IncomeLossFromEquityMethodInvestments", -40.0),
+      (self.PAYABLES_ROW, 1750.0),
+    ]
+
+  def test_a_bill_for_equipment_is_not_an_operating_increase_in_payables(self):
+    before, at_end = self._ledgers()
+    backed_out = {"rs-gaap:AccountsPayableCurrent": -1500.0}
+    worked = operating_rows(self._rows(250.0), {}, before, at_end, FLOWS, backed_out)
+    assert worked == [(self.PAYABLES_ROW, 250.0, 250.0)]
+
+  def test_balances_are_left_out_when_the_entities_changed(self):
+    before, at_end = self._ledgers()
+    worked = operating_rows(
+      self._rows(1750.0), {}, before, at_end, FLOWS, balances=False
+    )
+    assert worked == []
