@@ -43,6 +43,11 @@ on:
         required: false
         type: string
         default: ""
+      max_availability_zones:
+        description: "Limit the load balancer and its tasks to the first N zones of the VPC (2 or more). Empty uses every zone."
+        required: false
+        type: string
+        default: ""
       # Container & Application Configuration
       ecr_repository_url:
         description: "Full ECR repository URL (e.g., 123456789.dkr.ecr.us-east-1.amazonaws.com/robosystems)"
@@ -351,12 +356,28 @@ jobs:
           # Convert Spot percentage to on-demand weight (capacity providers use relative weights)
           FARGATE_OD_WEIGHT=$((100 - ${{ inputs.fargate_spot_weight }}))
 
+          # A public load balancer holds one billed IPv4 address per zone and
+          # routes only to tasks in its own zones, so both lists are cut
+          # together. The VPC stack emits them in the same zone order.
+          SUBNET_IDS="${{ inputs.subnet_ids }}"
+          PUBLIC_SUBNET_IDS="${{ inputs.public_subnet_ids }}"
+          MAX_AZS="${{ inputs.max_availability_zones }}"
+          if [ -n "$MAX_AZS" ]; then
+            if ! [[ "$MAX_AZS" =~ ^[0-9]+$ ]] || [ "$MAX_AZS" -lt 2 ]; then
+              echo "ERROR: max_availability_zones must be 2 or more, got '$MAX_AZS'"
+              exit 1
+            fi
+            SUBNET_IDS=$(echo "$SUBNET_IDS" | cut -d, -f1-"$MAX_AZS")
+            PUBLIC_SUBNET_IDS=$(echo "$PUBLIC_SUBNET_IDS" | cut -d, -f1-"$MAX_AZS")
+            echo "Limiting the API to $MAX_AZS availability zones"
+          fi
+
           # Build parameters
           API_STACK_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
                 ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
                 ParameterKey=VpcCidr,ParameterValue=${{ inputs.vpc_cidr }} \
-                ParameterKey=SubnetIds,ParameterValue=\"${{ inputs.subnet_ids }}\" \
-                ParameterKey=PublicSubnetIds,ParameterValue=\"${{ inputs.public_subnet_ids }}\" \
+                ParameterKey=SubnetIds,ParameterValue=\"$SUBNET_IDS\" \
+                ParameterKey=PublicSubnetIds,ParameterValue=\"$PUBLIC_SUBNET_IDS\" \
                 ParameterKey=ECRRepositoryUrl,ParameterValue=${{ inputs.ecr_repository_url }} \
                 ParameterKey=ECRImageTag,ParameterValue=${{ inputs.ecr_image_tag }} \
                 ParameterKey=Cpu,ParameterValue=${{ inputs.cpu }} \
