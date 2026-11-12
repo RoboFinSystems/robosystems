@@ -78,6 +78,10 @@ written a second time from the ledger's side:
 - A member bought or sold is stated net of the cash it held at the month-end
   before. That is exact when it joins on a first day and leaves on a last one;
   a mid-month change with cash moving in between would show as a mismatch.
+- A member that leaves takes its own balances with it: they are not a flow.
+  What the others held against it is no longer inside the group, so the
+  elimination of both sides falls away without a flow, and the other side
+  stands as owed by or to an outside party. Collecting it is a flow.
 - An operating row the income statement also carries is that figure at the
   row's weight. A working-capital row is the cash effect of its balances'
   change, less what was backed out.
@@ -91,9 +95,6 @@ first month of the books to avoid that.
 - Cash-flow-only rows: the supplemental disclosures (non-cash acquisitions,
   capital expenditures not yet paid, interest and taxes paid) and
   `OtherNoncashIncomeExpense`.
-- Working-capital rows of the consolidated statement in a month a member
-  joins or leaves. The two dates hold different entities, so the change in a
-  balance is not a flow.
 - Which equity row carries the period's earnings. Total equity is checked;
   the split between rows is not.
 - Reports of record (a filed report's stamped statements). Only the live

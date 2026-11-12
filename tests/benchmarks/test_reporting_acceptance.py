@@ -13,7 +13,7 @@ from benchmarks.reporting.cashflow import (
   settle,
 )
 from benchmarks.reporting.checks import Checker, expected_rows
-from benchmarks.reporting.expected import combine, fold, less
+from benchmarks.reporting.expected import combine, continuing_opening, fold, less
 
 pytestmark = pytest.mark.unit
 
@@ -553,7 +553,7 @@ class TestOperatingRows:
       "rs-gaap:IncomeLossFromEquityMethodInvestments": 40.0,
     }
     worked = operating_rows(self._rows(1750.0), income, before, at_end, FLOWS)
-    assert [(q, expected) for q, _stated, expected in worked] == [
+    assert [(q, expected) for q, _stated, expected in worked if expected] == [
       ("rs-gaap:NetIncomeLoss", 600.0),
       ("rs-gaap:IncomeLossFromEquityMethodInvestments", -40.0),
       (self.PAYABLES_ROW, 1750.0),
@@ -563,11 +563,38 @@ class TestOperatingRows:
     before, at_end = self._ledgers()
     backed_out = {"rs-gaap:AccountsPayableCurrent": -1500.0}
     worked = operating_rows(self._rows(250.0), {}, before, at_end, FLOWS, backed_out)
-    assert worked == [(self.PAYABLES_ROW, 250.0, 250.0)]
+    assert (self.PAYABLES_ROW, 250.0, 250.0) in worked
 
-  def test_balances_are_left_out_when_the_entities_changed(self):
+  def test_a_working_capital_change_with_no_row_is_stated_as_nothing(self):
     before, at_end = self._ledgers()
-    worked = operating_rows(
-      self._rows(1750.0), {}, before, at_end, FLOWS, balances=False
+    worked = operating_rows([], {}, before, at_end, FLOWS)
+    assert (self.PAYABLES_ROW, 0.0, 1750.0) in worked
+
+
+class TestMemberLeaves:
+  """The parent is owed 435 by a member; the consolidation entity eliminates
+  both sides. The member leaves, and the parent then collects."""
+
+  CONCEPTS = {
+    "1150": "rs-gaap:DueFromAffiliateCurrent",
+    "2150": "rs-gaap:DueToAffiliateCurrent",
+  }
+
+  def _fold(self, owner, *rows):
+    return fold(_tb(*rows), self.CONCEPTS, owner)
+
+  def test_what_the_others_held_against_it_stands_as_an_outside_balance(self):
+    parent = self._fold("parent", ("1150", "asset", 1690, 0))
+    cafe = self._fold("cafe", ("2150", "liability", 0, 1255))
+    eliminations = self._fold(
+      "cons", ("1150", "asset", 0, 1690), ("2150", "liability", 1690, 0)
     )
-    assert worked == []
+    leaver = self._fold("left", ("2150", "liability", 0, 435))
+    opening = continuing_opening([parent, cafe, eliminations], [leaver]).placed()
+    assert opening["rs-gaap:DueFromAffiliateCurrent"][0] == 435
+    assert opening["rs-gaap:DueToAffiliateCurrent"][0] == 0
+
+  def test_a_member_with_nothing_owed_changes_nothing(self):
+    parent = self._fold("parent", ("1150", "asset", 100, 0))
+    leaver = self._fold("left", ("1150", "asset", 0, 0))
+    assert continuing_opening([parent], [leaver]).placed() == parent.placed()

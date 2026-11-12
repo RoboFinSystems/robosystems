@@ -225,31 +225,33 @@ def operating_rows(
   at_end: Ledger,
   flows: Flows,
   backed_out: Mapping[str, float] | None = None,
-  balances: bool = True,
 ) -> list[tuple[str, float, float]]:
   """(row, stated, expected) for each operating row that can be worked out:
   a row the income statement also carries is that figure at the row's
   weight, and a working-capital row is the cash effect of its balances'
-  change, less what ``backed_out`` says was never an operating flow. The
-  reconciling item and other cash-flow-only rows are left out, and so are the
-  working-capital rows when ``balances`` is false: the two dates do not hold
-  the same entities, so their difference is not a flow."""
+  change, less what ``backed_out`` says was never an operating flow. A
+  working-capital row the statement leaves out is stated as nothing. The
+  reconciling item and other cash-flow-only rows are left out."""
   opening, closing = before.placed(), at_end.placed()
   backed_out = backed_out or {}
+  stated = {
+    fact["qname"]: float((fact.get("values") or [0.0])[0] or 0.0)
+    for fact in rows
+    if flows.section.get(fact["qname"]) == OPERATING and not fact.get("is_subtotal")
+  }
   out: list[tuple[str, float, float]] = []
-  for fact in rows:
-    qname = fact["qname"]
-    if flows.section.get(qname) != OPERATING or fact.get("is_subtotal"):
+  for qname in [*stated, *(q for q in flows.derived_from if q not in stated)]:
+    if flows.section.get(qname) != OPERATING:
       continue
-    stated = float((fact.get("values") or [0.0])[0] or 0.0)
     if qname in income:
-      out.append((qname, stated, flows.weight.get(qname, 1.0) * income[qname]))
-    elif balances and qname in flows.derived_from:
+      expected = flows.weight.get(qname, 1.0) * income[qname]
+    elif qname in flows.derived_from and qname in flows.weight:
       concepts = flows.derived_from[qname]
       change = sum(
         closing.get(c, (0.0, ""))[0] - opening.get(c, (0.0, ""))[0] for c in concepts
       )
-      out.append(
-        (qname, stated, sum(backed_out.get(c, 0.0) for c in concepts) - change)
-      )
+      expected = sum(backed_out.get(c, 0.0) for c in concepts) - change
+    else:
+      continue
+    out.append((qname, stated.get(qname, 0.0), expected))
   return out

@@ -84,6 +84,8 @@ ACCOUNTS = {
   ),
   "cogs": ("rs-gaap:CostOfGoodsAndServicesSold", "debit", "duration"),
   "receivable": ("rs-gaap:ReceivablesNetCurrent", "debit", "instant"),
+  "due_from": ("rs-gaap:DueFromAffiliateCurrent", "debit", "instant"),
+  "due_to": ("rs-gaap:DueToAffiliateCurrent", "credit", "instant"),
   "extinguishment_gain": (
     "rs-gaap:GainsLossesOnExtinguishmentOfDebt",
     "credit",
@@ -725,6 +727,85 @@ def test_the_consolidation_entitys_cash_flow_nets_to_nothing(tenant):
   assert cf[REPAYMENTS] == 100.0, cf
   assert cf.get(NET_CHANGE, 0.0) == 0.0, cf
   assert cf[RECONCILING] == -100.0, cf
+
+
+DUE_FROM_ROW = "rs-gaap:IncreaseDecreaseInDueFromAffiliatesCurrent"
+DUE_TO_ROW = "rs-gaap:IncreaseDecreaseInDueToAffiliatesCurrent"
+
+
+def _eliminate_balances(ids, member_id: str, lines, posted: date) -> None:
+  """An ``elimination_intercompany`` entry on the consolidation entity."""
+  with extensions_session(GRAPH) as session:
+    entry = Entry(
+      entity_id=ADJUSTMENTS,
+      type="standard",
+      status="posted",
+      posting_date=posted,
+      memo="test",
+      created_by="test",
+      adjustment_kind="elimination_intercompany",
+      adjusts_entity_id=member_id,
+    )
+    session.add(entry)
+    session.flush()
+    for order, (key, debit, credit) in enumerate(lines, start=1):
+      session.add(
+        LineItem(
+          entry_id=entry.id,
+          element_id=ids[key],
+          debit_amount=round(debit * 100),
+          credit_amount=round(credit * 100),
+          line_order=order,
+        )
+      )
+
+
+@pytest.fixture
+def member_that_left(tenant):
+  """A subsidiary that left the group on the last day of January."""
+  member_id = "ent_noncash_left"
+  with extensions_session(GRAPH) as session:
+    session.add(
+      Entity(
+        id=member_id,
+        name="Left Co",
+        entity_type="llc",
+        is_parent=False,
+        parent_entity_id=PARENT,
+        consolidation_method="full",
+        ownership_pct=75,
+        left_on=date(2026, 1, 31),
+        created_by="usr_1",
+      )
+    )
+  yield member_id
+  with extensions_session(GRAPH) as session:
+    session.execute(text("SET LOCAL robosystems.ledger_purge = 'on'"))
+    session.execute(text("DELETE FROM line_items"))
+    session.execute(text("DELETE FROM entries"))
+    session.execute(text("DELETE FROM entities WHERE id = :id"), {"id": member_id})
+
+
+def test_an_elimination_that_falls_away_when_a_member_leaves_is_no_flow(
+  tenant, member_that_left
+):
+  """While the member is in the group, what it owes the parent is eliminated
+  on both sides. Once it has left, the elimination is taken back: nothing
+  moved, so neither affiliate row does, and the parent's own receivable is
+  left to show its collection."""
+  eliminated = [("due_to", 435, 0), ("due_from", 0, 435)]
+  taken_back = [("due_from", 435, 0), ("due_to", 0, 435)]
+  _eliminate_balances(tenant, member_that_left, eliminated, date(2026, 1, 31))
+  _eliminate_balances(tenant, member_that_left, taken_back, date(2026, 2, 28))
+
+  while_in = _cash_flow(tenant, period=JAN, periods=[JAN, FEB], entity_id=ADJUSTMENTS)
+  assert while_in[DUE_TO_ROW] == -435.0, while_in
+  assert while_in[DUE_FROM_ROW] == 435.0, while_in
+
+  after = _cash_flow(tenant, period=FEB, periods=[JAN, FEB], entity_id=ADJUSTMENTS)
+  assert after.get(DUE_TO_ROW, 0.0) == 0.0, after
+  assert after.get(DUE_FROM_ROW, 0.0) == 0.0, after
+  _assert_no_reconciling_adjustment(after)
 
 
 def test_an_owner_paying_the_card_is_not_operating_cash(tenant):

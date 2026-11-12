@@ -22,7 +22,7 @@ import httpx
 
 from .cashflow import ACQUISITION, DIVESTITURE, Flows, JournalLine, line_flows
 from .checks import Check, Checker
-from .expected import LIBRARY, Ledger, combine, fold, less
+from .expected import LIBRARY, Ledger, combine, continuing_opening, fold, less
 
 _ROOT = Path(__file__).resolve().parents[2]
 _CONFIG = _ROOT / ".local" / "config.json"
@@ -292,6 +292,10 @@ def run(
     prior = boundaries[index]
     end = _month_end(month)
     start = end.replace(day=1)
+    prior_end = _month_end(prior)
+    staying = [e for e in entities if e.summed_at(end)]
+    left = [e for e in entities if e.summed_at(prior_end) and e not in staying]
+    joined = [e for e in staying if not e.summed_at(prior_end)]
     scopes: list[tuple[str, str | None, Ledger, Ledger]] = []
     for entity in entities:
       at_end, before = ledgers[entity.id][month], ledgers[entity.id][prior]
@@ -335,17 +339,25 @@ def run(
           journals[(e.id, month)] = journal(api, e, start, end)
         entries.extend(journals[(e.id, month)])
       from_lines = line_flows(entries, concept_of, flows, eliminating)
-      same_entities = True
+      flow_opening = None
       if entity_id is None:
-        prior_end = _month_end(prior)
-        for e in entities:
-          was, now = e.summed_at(prior_end), e.summed_at(end)
-          if was == now:
-            continue
-          same_entities = False
+        for e, row, sign in [
+          *((e, ACQUISITION, 1.0) for e in joined),
+          *((e, DIVESTITURE, -1.0) for e in left),
+        ]:
           held = ledgers[e.id][prior].cash
-          row, sign = (ACQUISITION, 1.0) if now else (DIVESTITURE, -1.0)
           from_lines.paid[row] = from_lines.paid.get(row, 0.0) + sign * held
+        if left or joined:
+          flow_opening = continuing_opening(
+            (ledgers[e.id][prior] for e in staying),
+            (ledgers[e.id][prior] for e in left),
+          )
+      elif left and entity_id in eliminating:
+        # The consolidation entity's own statement: what it eliminated against
+        # a member that left falls away, and that is not a flow either.
+        flow_opening = continuing_opening(
+          [ledgers[entity_id][prior]], (ledgers[e.id][prior] for e in left)
+        )
       checker.statements(
         statements,
         before,
@@ -354,7 +366,7 @@ def run(
         from_lines,
         flows,
         owed.setdefault(name, {}),
-        same_entities,
+        flow_opening,
       )
       checks.extend(checker.checks)
       if progress:
