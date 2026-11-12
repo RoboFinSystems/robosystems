@@ -257,6 +257,10 @@ demo-roboledger *args="":
 bench-ledger *args="":
     uv run python -m benchmarks.ledger {{args}}
 
+# Check a graph's statements against its ledger (see benchmarks/reporting/README.md)
+bench-reporting *args="":
+    uv run python -m benchmarks.reporting {{args}}
+
 # Run the Coffee Roaster showcase — Driftline, profitable but cash-poor
 demo-coffee-roaster *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.coffee_roaster_demo.main {{args}}
