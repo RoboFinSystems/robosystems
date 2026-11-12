@@ -22,7 +22,7 @@ import httpx
 
 from .cashflow import ACQUISITION, DIVESTITURE, Flows, JournalLine, line_flows
 from .checks import Check, Checker
-from .expected import Ledger, combine, fold, less
+from .expected import LIBRARY, Ledger, combine, fold, less
 
 _ROOT = Path(__file__).resolve().parents[2]
 _CONFIG = _ROOT / ".local" / "config.json"
@@ -104,7 +104,7 @@ class Entity:
   def library_concept(self, code: str) -> str | None:
     """The library concept the account reports under, a tenant member aside."""
     mapped = self.concepts_by_code.get(code) or []
-    return next((q for q in mapped if q.startswith("rs-gaap:")), None) or (
+    return next((q for q in mapped if q.startswith(LIBRARY)), None) or (
       mapped[0] if mapped else None
     )
 
@@ -200,10 +200,17 @@ def cumulative(api: Api, entity: Entity, end: date) -> Ledger:
 def load_flows(api: Api) -> Flows:
   """The cash flow statement's arcs from the library's calculation taxonomy."""
   taxonomy = next(
-    t["id"]
-    for t in api.graphql("{ libraryTaxonomies { id standard } }")["libraryTaxonomies"]
-    if t["standard"] == "rs-gaap-calculations"
+    (
+      t["id"]
+      for t in api.graphql("{ libraryTaxonomies { id standard } }")["libraryTaxonomies"]
+      if t["standard"] == "rs-gaap-calculations"
+    ),
+    None,
   )
+  if taxonomy is None:
+    raise RuntimeError(
+      "the rs-gaap-calculations taxonomy is not in this graph's library"
+    )
   arcs: list[dict] = []
   while True:
     page = api.graphql(
@@ -258,7 +265,9 @@ def months_to_check(entities: list[Entity], limit: int) -> list[str]:
   return list(reversed(months))
 
 
-def run(api: Api, limit: int, only: str | None) -> list[Check]:
+def run(
+  api: Api, limit: int, only: str | None, *, progress: bool = True
+) -> list[Check]:
   entities = load_entities(api)
   months = months_to_check(entities, limit)
   if not months:
@@ -271,6 +280,7 @@ def run(api: Api, limit: int, only: str | None) -> list[Check]:
   flows = load_flows(api)
   by_id = {e.id: e for e in entities}
   owed: dict[str, dict[str, float]] = {}
+  journals: dict[tuple[str, str], list[list[JournalLine]]] = {}
   eliminating = {e.id for e in entities if e.role == "consolidation"}
 
   def concept_of(line: JournalLine) -> str | None:
@@ -319,7 +329,11 @@ def run(api: Api, limit: int, only: str | None) -> list[Check]:
         if entity_id
         else [e for e in entities if e.summed_during(start, end)]
       )
-      entries = [entry for e in owners for entry in journal(api, e, start, end)]
+      entries = []
+      for e in owners:
+        if (e.id, month) not in journals:
+          journals[(e.id, month)] = journal(api, e, start, end)
+        entries.extend(journals[(e.id, month)])
       from_lines = line_flows(entries, concept_of, flows, eliminating)
       same_entities = True
       if entity_id is None:
@@ -343,12 +357,13 @@ def run(api: Api, limit: int, only: str | None) -> list[Check]:
         same_entities,
       )
       checks.extend(checker.checks)
-      failed = sum(not c.passed for c in checker.checks)
-      print(
-        f"  {month}  {name:<34} {len(checker.checks) - failed:>3} ok"
-        + (f"  {failed} FAILED" if failed else ""),
-        flush=True,
-      )
+      if progress:
+        failed = sum(not c.passed for c in checker.checks)
+        print(
+          f"  {month}  {name:<34} {len(checker.checks) - failed:>3} ok"
+          + (f"  {failed} FAILED" if failed else ""),
+          flush=True,
+        )
   return checks
 
 
@@ -378,13 +393,19 @@ def print_grid(checks: list[Check]) -> None:
       print(f"{scope[:30]:<31}{statement[:19]:<20} " + " ".join(cells))
   failures = [c for c in checks if not c.passed]
   print(f"\n{len(checks) - len(failures)} of {len(checks)} checks passed")
-  kinds: dict[tuple[str, str], list[Check]] = {}
-  for c in failures:
-    kinds.setdefault((c.statement, c.name), []).append(c)
-  for (statement, name), group in sorted(kinds.items()):
+  for (statement, name), group in failure_kinds(checks):
     first = group[0]
     print(f"\nFAILED {statement}: {name} ({len(group)} scope-months)")
     print(f"  first: {first.scope} {first.month}: {first.detail}")
+
+
+def failure_kinds(checks: list[Check]) -> list[tuple[tuple[str, str], list[Check]]]:
+  """The failed checks grouped by statement and check, in a stable order."""
+  kinds: dict[tuple[str, str], list[Check]] = {}
+  for c in checks:
+    if not c.passed:
+      kinds.setdefault((c.statement, c.name), []).append(c)
+  return sorted(kinds.items())
 
 
 def _target(args: argparse.Namespace) -> Api:

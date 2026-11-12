@@ -172,6 +172,10 @@ class Checker:
         rendered[kind] = statement
     income = rendered.get("income_statement")
     net_income = _value(income, NET_INCOME) if income else None
+    # The month's bills are owed whether or not its cash flow could be read.
+    if from_lines is not None and owed is not None:
+      for flow, amount in from_lines.billed.items():
+        owed[flow] = owed.get(flow, 0.0) + amount
     self.unmapped(at_end)
     if "balance_sheet" in rendered:
       self.balance_sheet(rendered["balance_sheet"], at_end)
@@ -307,8 +311,6 @@ class Checker:
       if flows.section.get(f["qname"]) in (INVESTING, FINANCING)
       and not f.get("is_subtotal")
     }
-    for flow, amount in from_lines.billed.items():
-      owed[flow] = owed.get(flow, 0.0) + amount
     unexplained, settled = settle(stated, from_lines.paid, owed, TOLERANCE)
     wrong = [
       f"{q} {_money(actual)} vs {_money(expected)}"

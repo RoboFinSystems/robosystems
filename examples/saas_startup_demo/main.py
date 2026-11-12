@@ -28,6 +28,7 @@ Usage:
     just demo-saas-startup --dry-run    # validate the synthetic data only
     just demo-saas-startup --ai         # map the CoA with the MappingOperator
                                         #   (requires AWS Bedrock)
+    just demo-saas-startup --no-acceptance  # skip the closing statement check
 
 Expect several minutes of progress output ending in a summary with the graph
 id, the period queued for close, the filed report id, and the reveal prompts

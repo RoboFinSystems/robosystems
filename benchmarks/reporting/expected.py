@@ -34,7 +34,7 @@ CASH_CONCEPTS = frozenset(
   }
 )
 
-_LIBRARY = "rs-gaap:"
+LIBRARY = "rs-gaap:"
 
 
 def base_trait(trait: str | None) -> str:
@@ -118,7 +118,7 @@ def _targets(mapped: str | Sequence[str] | None) -> tuple[str, ...]:
     return ()
   names = [mapped] if isinstance(mapped, str) else list(mapped)
   names = list(dict.fromkeys(PRESENTED_AS.get(n, n) for n in names))
-  return tuple(sorted(names, key=lambda n: n.startswith(_LIBRARY)))
+  return tuple(sorted(names, key=lambda n: n.startswith(LIBRARY)))
 
 
 def fold(

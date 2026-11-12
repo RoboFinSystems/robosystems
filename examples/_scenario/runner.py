@@ -2217,6 +2217,23 @@ def materialize_graph(graph_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def verify_statements(graph_id: str, months: int) -> tuple[int, int, list[str]]:
+  """Run the reporting acceptance checks (``benchmarks/reporting``) over the
+  loaded months: each entity's statements, and the group's, against the
+  ledger. Returns (passed, total, one line per kind of failure). Read-only."""
+  from benchmarks.reporting.__main__ import Api, failure_kinds, run
+
+  config = _client_config()
+  api = Api(config["base_url"], graph_id, config["token"])
+  checks = run(api, months, None, progress=False)
+  kinds = [
+    f"{statement}: {name} ({len(group)} scope-months; first {group[0].scope} "
+    f"{group[0].month}: {group[0].detail[:120]})"
+    for (statement, name), group in failure_kinds(checks)
+  ]
+  return sum(c.passed for c in checks), len(checks), kinds
+
+
 def scenario_windows(scenario: Scenario) -> list[tuple[date, date]]:
   """The scenario's month windows, the open close target last; empty for a
   scenario with no ``report_period``. The grid every step shares."""
@@ -2689,6 +2706,11 @@ def run_demo(
   if CREDENTIALS_FILE.exists():
     print(f"  API Key:  (saved to {CREDENTIALS_FILE})")
 
+  statement_checks = None
+  if "--no-acceptance" not in argv:
+    print("\nChecking every statement against the ledger...")
+    statement_checks = verify_statements(graph_id, len(period_windows))
+
   from robosystems.operations.roboledger.fiscal_calendar import parse_period
 
   year, month = parse_period(close_target)
@@ -2710,6 +2732,14 @@ def run_demo(
       f"{group_result.months_closed} entity-months closed on their own calendars; "
       f"checks {'passed' if group_result.passed else 'FAILED'}"
     )
+  if statement_checks is not None:
+    passed, total, failed_kinds = statement_checks
+    print(
+      f"  Statements:    {passed} of {total} checks against the ledger passed"
+      + ("" if passed == total else " — FAILED:")
+    )
+    for line in failed_kinds:
+      print(f"                 {line}")
   print("\n  Run the close (Claude Desktop / MCP):")
   print(f"    1. Switch to workspace: {graph_id}")
   print("    2. Ask: 'Search for month-end close procedures'")
