@@ -941,8 +941,9 @@ def _roll_up_facts_to_structure(
 ) -> list[ReportFact]:
   """Repoint out-of-structure facts at their nearest in-structure ancestor.
 
-  Facts with no ancestor are dropped, and collected into ``dropped`` when
-  given, for the caller to present another way. No aggregation here —
+  Facts with no ancestor are dropped, and so is one whose ancestor has a
+  fact of its own; both are collected into ``dropped`` when given, for the
+  caller to present another way. No aggregation here —
   ``_facts_to_balance_dict`` sums facts sharing an element_id.
   """
   if not facts:
@@ -974,6 +975,10 @@ def _roll_up_facts_to_structure(
         dropped.append(fact)
       continue
     if (ancestor, fact.period_start, fact.period_end) in direct_keys:
+      # The ancestor's own fact already holds this one, so it is not added
+      # again; it still has no row, which is the caller's to give it.
+      if dropped is not None:
+        dropped.append(fact)
       continue
     rolled.append(
       ReportFact(
