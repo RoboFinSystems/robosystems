@@ -197,6 +197,81 @@ class TestParameterStoreManagerErrorHandling:
       assert result == "fallback"
 
 
+class TestTuningParameterMisses:
+  """An unset tuning parameter is looked up once per TTL, not on every read."""
+
+  def _manager(self, mock_get_client, ttl=300):
+    mock_client = MagicMock()
+    mock_get_client.return_value = mock_client
+    mock_client.exceptions.ParameterNotFound = type(
+      "ParameterNotFound", (Exception,), {}
+    )
+    return ParameterStoreManager(environment="prod", cache_ttl_seconds=ttl), mock_client
+
+  def test_missing_parameter_is_looked_up_once(self):
+    with patch("robosystems.config.parameter_store._get_ssm_client") as mock_get_client:
+      manager, client = self._manager(mock_get_client)
+      client.get_parameter.side_effect = client.exceptions.ParameterNotFound()
+
+      assert manager.get_tuning_parameter("database/UNSET", "30000") == "30000"
+      # The miss is cached, not the default: each caller keeps its own.
+      assert manager.get_tuning_int("database/UNSET", 5) == 5
+      assert client.get_parameter.call_count == 1
+
+  def test_miss_expires_with_the_ttl(self):
+    with patch("robosystems.config.parameter_store._get_ssm_client") as mock_get_client:
+      manager, client = self._manager(mock_get_client, ttl=60)
+      client.get_parameter.side_effect = client.exceptions.ParameterNotFound()
+
+      with patch("robosystems.config.parameter_store.time.time") as mock_time:
+        mock_time.return_value = 1000.0
+        manager.get_tuning_parameter("database/UNSET", "a")
+        mock_time.return_value = 1061.0
+        client.get_parameter.side_effect = None
+        client.get_parameter.return_value = {"Parameter": {"Value": "set"}}
+
+        assert manager.get_tuning_parameter("database/UNSET", "a") == "set"
+        assert client.get_parameter.call_count == 2
+
+  def test_failed_lookup_is_not_cached_as_a_miss(self):
+    with patch("robosystems.config.parameter_store._get_ssm_client") as mock_get_client:
+      manager, client = self._manager(mock_get_client)
+      client.get_parameter.side_effect = Exception("throttled")
+
+      manager.get_tuning_parameter("database/X", "a")
+      manager.get_tuning_parameter("database/X", "a")
+
+      assert client.get_parameter.call_count == 2
+
+  def test_refresh_clears_misses(self):
+    with patch("robosystems.config.parameter_store._get_ssm_client") as mock_get_client:
+      manager, client = self._manager(mock_get_client)
+      client.get_parameter.side_effect = client.exceptions.ParameterNotFound()
+
+      manager.get_tuning_parameter("database/UNSET", "a")
+      manager.refresh()
+      manager.get_tuning_parameter("database/UNSET", "a")
+
+      assert client.get_parameter.call_count == 2
+
+  def test_batch_load_overrides_a_cached_miss(self):
+    with patch("robosystems.config.parameter_store._get_ssm_client") as mock_get_client:
+      manager, client = self._manager(mock_get_client)
+      client.get_parameter.side_effect = client.exceptions.ParameterNotFound()
+      manager.get_tuning_parameter("database/LATE", "a")
+
+      client.get_paginator.return_value.paginate.return_value = [
+        {
+          "Parameters": [
+            {"Name": "/robosystems/prod/tuning/database/LATE", "Value": "now-set"}
+          ]
+        }
+      ]
+      manager.get_all_tuning_parameters()
+
+      assert manager.get_tuning_parameter("database/LATE", "a") == "now-set"
+
+
 class TestBatchFetch:
   """Test batch fetching of feature flags."""
 

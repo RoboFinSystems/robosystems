@@ -583,6 +583,7 @@ jobs:
       vpc_id: ${{ needs.deploy-vpc.outputs.vpc_id }}
       subnet_ids: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
       public_subnet_ids: ${{ needs.deploy-vpc.outputs.public_subnet_ids }}
+      max_availability_zones: ${{ vars.API_MAX_AVAILABILITY_ZONES_STAGING || '' }}
       # Container & Application Configuration
       ecr_repository_url: ${{ needs.build.outputs.ecr_repository_url }}
       ecr_image_tag: ${{ needs.build.outputs.image_ref }}

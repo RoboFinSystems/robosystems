@@ -81,6 +81,10 @@ class ParameterStoreManager:
 
     self._batch_cache: tuple[dict[str, str], float] | None = None
 
+    # {path: looked_up_at} for tuning parameters SSM does not have. Most are
+    # unset and run on their code default, so a miss is cached like a value.
+    self._tuning_misses: dict[str, float] = {}
+
   def _get_client(self):
     return _get_ssm_client()
 
@@ -176,9 +180,11 @@ class ParameterStoreManager:
     """Drop cached parameters — one by name, or all when ``name`` is None."""
     if name:
       self._cache.pop(name, None)
+      self._tuning_misses.pop(name.removeprefix("tuning:"), None)
     else:
       self._cache.clear()
       self._batch_cache = None
+      self._tuning_misses.clear()
 
   # =========================================================================
   # TUNING PARAMETER METHODS
@@ -202,6 +208,12 @@ class ParameterStoreManager:
       else:
         del self._cache[cache_key]
 
+    missed_at = self._tuning_misses.get(path)
+    if missed_at is not None:
+      if time.time() - missed_at < self.cache_ttl_seconds:
+        return default
+      del self._tuning_misses[path]
+
     parameter_path = f"/robosystems/{self.environment}/tuning/{path}"
 
     try:
@@ -214,6 +226,7 @@ class ParameterStoreManager:
       return value
 
     except client.exceptions.ParameterNotFound:
+      self._tuning_misses[path] = time.time()
       logger.debug(f"Tuning parameter not found: {parameter_path}, using default")
       return default
     except Exception as e:
