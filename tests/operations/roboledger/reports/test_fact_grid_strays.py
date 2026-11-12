@@ -178,9 +178,10 @@ def test_values_follow_the_period_columns():
 
 
 def test_the_rollup_collects_only_the_facts_it_drops():
-  """``dropped`` gets the facts with no renderable ancestor: not the ones
-  rolled up, not the audit-only ones, not the ones an authoritative
-  ancestor already covers."""
+  """``dropped`` gets the facts left without a row: one with no renderable
+  ancestor, and one whose ancestor has a fact of its own. That ancestor's
+  figure already holds it, so it is not added again, but it has no line. Not
+  the ones rolled up, and not the audit-only ones."""
   parents = {"orphan": ["dead_end"], "detail": ["in_struct"]}
 
   def execute(_stmt, params):
@@ -205,7 +206,7 @@ def test_the_rollup_collects_only_the_facts_it_drops():
   rolled = _roll_up_facts_to_structure(session, facts, {"in_struct"}, dropped=dropped)
 
   assert [f.element_id for f in rolled] == ["in_struct"]
-  assert [f.element_id for f in dropped] == ["orphan"]
+  assert [f.element_id for f in dropped] == ["detail", "orphan"]
 
 
 def test_the_rollup_signature_without_a_collector_is_unchanged():
