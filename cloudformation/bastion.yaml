@@ -295,6 +295,19 @@ Resources:
           exec > >(tee /var/log/user-data.log)
           exec 2>&1
 
+          # Auto-stop: the bastion runs only when an admin starts it. As an exit
+          # handler, the stop also runs when a step below fails under set -e.
+          stop_after_init() {
+            set +e
+            echo "Auto-stopping bastion instance in 60 seconds..."
+            sleep 60
+            STOP_TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+            STOP_INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $STOP_TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
+            aws ec2 stop-instances --instance-ids "$STOP_INSTANCE_ID" --region ${AWS::Region}
+            echo "Bastion instance will stop shortly"
+          }
+          trap stop_after_init EXIT
+
           echo "Starting Bastion Host initialization at $(date)"
 
           # Download the UserData script from S3
@@ -342,21 +355,10 @@ Resources:
             echo "Tagged root volume: $ROOT_VOLUME"
           fi
 
-          # The downloaded script has already signalled CloudFormation. A second
-          # signal here races the stack update finishing, and its failure would
-          # end this script before the auto-stop below.
+          # The downloaded script has already signalled CloudFormation; a second
+          # signal here would race the stack update finishing and fail.
 
           echo "UserData script execution completed at $(date)"
-
-          # Auto-stop: Bastion is stopped by default after initialization
-          # This ensures the bastion only runs when manually started by an admin
-          echo "Auto-stopping bastion instance in 60 seconds..."
-          sleep 60
-
-          # Stop this instance (INSTANCE_ID already set above via IMDSv2)
-          aws ec2 stop-instances --instance-ids "$INSTANCE_ID" --region $AWS_REGION
-
-          echo "Bastion instance will stop shortly"
 
     CreationPolicy:
       ResourceSignal:
