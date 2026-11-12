@@ -2281,7 +2281,7 @@ def _emit_noncash_and_settlement_facts(
 
   line_sql = text(f"""
     SELECT en.id AS entry_id, en.posting_date, en.triggered_by_event_id,
-      ev.discharges_event_id,
+      ev.discharges_event_id, en.adjustment_kind, adj.left_on AS adjusts_left_on,
       li.debit_amount, li.credit_amount, li.flow_element_id,
       COALESCE(amap.to_element_id, li.element_id) AS concept_id,
       c.qname AS concept_qname, c.period_type AS concept_period_type
@@ -2290,6 +2290,7 @@ def _emit_noncash_and_settlement_facts(
     LEFT JOIN LATERAL ({_primary_mapping("li")}) amap ON TRUE
     LEFT JOIN elements c ON c.id = COALESCE(amap.to_element_id, li.element_id)
     LEFT JOIN events ev ON ev.id = en.triggered_by_event_id
+    LEFT JOIN entities adj ON adj.id = en.adjusts_entity_id
     WHERE en.status IN :landed_entry_statuses
       AND en.type <> 'opening'
       AND (:entity_id IS NULL OR en.entity_id = :entity_id)
@@ -2345,9 +2346,16 @@ def _emit_noncash_and_settlement_facts(
   dated: dict[str, date] = {}
   event_of: dict[str, str] = {}
   discharges: dict[str, str] = {}
+  fallen_away: set[str] = set()
   for row in rows:
     key = str(row.entry_id)
     dated[key] = row.posting_date
+    if (
+      row.adjustment_kind == "elimination_intercompany"
+      and row.adjusts_left_on is not None
+      and row.posting_date > row.adjusts_left_on
+    ):
+      fallen_away.add(key)
     if row.triggered_by_event_id:
       event_of[key] = str(row.triggered_by_event_id)
     if row.discharges_event_id:
@@ -2496,6 +2504,16 @@ def _emit_noncash_and_settlement_facts(
       continue
     kinds = {line.kind for line in lines}
     untagged = not any(line.tagged for line in lines)
+
+    if entry_key in fallen_away:
+      # The elimination of what a member owed, or was owed, falls away once
+      # it has left. No cash moved; the balance left standing is the other
+      # entity's own, and collecting it is that entity's flow.
+      for line in lines:
+        if line.kind == "working":
+          for column in columns:
+            _add(working_leaf[line.concept_id], column, line.net)
+      continue
 
     if "cash" not in kinds:
       # On the consolidation entity a tagged line is its own flow already;

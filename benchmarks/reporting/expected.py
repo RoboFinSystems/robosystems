@@ -36,6 +36,13 @@ CASH_CONCEPTS = frozenset(
 
 LIBRARY = "rs-gaap:"
 
+# The two sides of a balance one entity of a group holds against another,
+# and the trait of each.
+INTERCOMPANY = {
+  "rs-gaap:DueFromAffiliateCurrent": ("rs-gaap:DueToAffiliateCurrent", "liability"),
+  "rs-gaap:DueToAffiliateCurrent": ("rs-gaap:DueFromAffiliateCurrent", "asset"),
+}
+
 
 def base_trait(trait: str | None) -> str:
   """A contra account belongs to the trait it offsets: ``contraAsset`` is an asset."""
@@ -157,3 +164,25 @@ def less(later: Ledger, earlier: Ledger) -> Ledger:
       (after.net if after else 0.0) - (before.net if before else 0.0),
     )
   return period
+
+
+def continuing_opening(staying: Iterable[Ledger], leaving: Iterable[Ledger]) -> Ledger:
+  """The opening balances a month's flows are measured from, for the
+  entities in the group at its end.
+
+  A member that left takes its own balances with it: they are not a flow.
+  What the others held against it is no longer a balance inside the group,
+  so the elimination of both sides is taken back and the other side stands
+  as what it now is, owed by or to an outside party."""
+  opening = combine(staying)
+  for ledger in leaving:
+    for (owner, code), line in ledger.lines.items():
+      own = next((t for t in line.targets if t in INTERCOMPANY), None)
+      if own is None or not line.net:
+        continue
+      other, other_trait = INTERCOMPANY[own]
+      opening.lines[(f"left:{owner}", code)] = Line((own,), line.trait, line.net)
+      opening.lines[(f"left:{owner}", f"{code}:other")] = Line(
+        (other,), other_trait, -line.net
+      )
+  return opening

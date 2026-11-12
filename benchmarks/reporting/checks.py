@@ -160,10 +160,12 @@ class Checker:
     from_lines: LineFlows | None = None,
     flows: Flows | None = None,
     owed: dict[str, float] | None = None,
-    same_entities: bool = True,
+    flow_opening: Ledger | None = None,
   ) -> None:
     """Every check for the scope and month. A statement that would not
-    render arrives as its error and fails on its own; the rest still run."""
+    render arrives as its error and fails on its own; the rest still run.
+    ``flow_opening`` is what the working-capital flows are measured from when
+    that is not ``before``: a month the group's members changed."""
     rendered: dict[str, dict] = {}
     for kind, statement in statements.items():
       if isinstance(statement, str):
@@ -187,12 +189,11 @@ class Checker:
         self.cash_flow_rows(
           rendered["cash_flow_statement"],
           income,
-          before,
+          flow_opening or before,
           at_end,
           from_lines,
           flows,
           owed if owed is not None else {},
-          same_entities,
         )
     if "equity_statement" in rendered:
       self.equity_statement(rendered["equity_statement"], before, at_end, net_income)
@@ -297,7 +298,6 @@ class Checker:
     from_lines: LineFlows,
     flows: Flows,
     owed: dict[str, float],
-    balances: bool = True,
   ) -> None:
     """The rows themselves: investing and financing against the journal
     lines, operating against the income statement and the balance changes."""
@@ -327,7 +327,7 @@ class Checker:
     for payable in PAYABLES:
       backed_out[payable] = backed_out.get(payable, 0.0) - settled
     figures = {f["qname"]: _first(f) for f in _rows(income)} if income else {}
-    worked = operating_rows(rows, figures, before, at_end, flows, backed_out, balances)
+    worked = operating_rows(rows, figures, before, at_end, flows, backed_out)
     wrong = [
       f"{q} {_money(actual)} vs {_money(expected)}"
       for q, actual, expected in worked
