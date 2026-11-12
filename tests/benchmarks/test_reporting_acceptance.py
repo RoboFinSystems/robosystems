@@ -89,8 +89,9 @@ class TestLedger:
 
   def test_property_is_stated_net_of_its_depreciation(self):
     ledger = fold(CLOSING, CONCEPTS)
-    assert ledger.by_concept["rs-gaap:PropertyPlantAndEquipmentNet"] == 450
-    assert "rs-gaap:PropertyPlantAndEquipmentGross" not in ledger.by_concept
+    placed = ledger.placed()
+    assert placed["rs-gaap:PropertyPlantAndEquipmentNet"] == (450, "asset")
+    assert "rs-gaap:PropertyPlantAndEquipmentGross" not in placed
 
   def test_an_account_with_a_balance_and_no_mapping_is_reported(self):
     ledger = fold(_tb(("9999", "expense", 12, 0)), CONCEPTS)
@@ -100,6 +101,21 @@ class TestLedger:
     concepts = {"1000": "rs-gaap:CashSurrenderValueOfLifeInsurance"}
     assert fold(_tb(("1000", "asset", 500, 0)), concepts).cash == 0
 
+  def test_a_contra_account_belongs_to_the_trait_it_offsets(self):
+    rows = _tb(("1300", "asset", 500, 0), ("1350", "contraAsset", 0, 50))
+    assert fold(rows, CONCEPTS).natural("asset") == 450
+
+  def test_an_account_mapped_twice_counts_once_on_the_row_shown(self):
+    concepts = {"4000": ["rs-gaap:Revenues", "acme:SubscriptionRevenue"]}
+    ledger = fold(_tb(("4000", "revenue", 0, 900)), concepts)
+    assert ledger.placed({"acme:SubscriptionRevenue", "rs-gaap:Revenues"}) == {
+      "acme:SubscriptionRevenue": (-900, "revenue")
+    }
+    assert ledger.placed({"rs-gaap:Revenues"}) == {
+      "rs-gaap:Revenues": (-900, "revenue")
+    }
+    assert ledger.placed() == {"rs-gaap:Revenues": (-900, "revenue")}
+
   def test_less_is_the_activity_between_two_dates(self):
     period = less(fold(CLOSING, CONCEPTS), fold(OPENING, CONCEPTS))
     assert period.cash == 400
@@ -107,9 +123,9 @@ class TestLedger:
     assert period.natural("equity") == 0
 
   def test_combine_adds_entities_at_the_concept(self):
-    both = combine([fold(CLOSING, CONCEPTS), fold(CLOSING, CONCEPTS)])
-    assert both.natural("asset") == 3700
-    assert both.by_concept["rs-gaap:Revenues"] == -1800
+    both = combine([fold(CLOSING, CONCEPTS, "a"), fold(OPENING, CONCEPTS, "b")])
+    assert both.natural("asset") == 2850
+    assert both.placed()["rs-gaap:Revenues"][0] == -900
 
 
 class TestRows:
@@ -277,7 +293,7 @@ class TestMembership:
       "joined_on": date(2025, 11, 1),
       "left_on": date(2026, 6, 30),
       "closed_through": "2026-06",
-      "concept_by_code": {},
+      "concepts_by_code": {},
     }
     return Entity(**{**values, **overrides})
 
