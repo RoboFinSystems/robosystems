@@ -2985,3 +2985,40 @@ def test_a_deconsolidation_recorded_for_an_exit_that_was_called_off_is_held(grou
   assert february.incomplete is True
   assert february.up_to_date is False
   assert any("deconsolidation again" in note for note in february.notes)
+
+
+def test_a_posted_ownership_change_in_a_reopened_month_is_held_too(group):
+  """A reopen leaves what the close posted where it was, so a posted entry
+  can go stale the same way; the remedy is to reverse it first."""
+  from robosystems.models.extensions.roboledger import Entry, LineItem
+
+  _january_posted(group)
+  _buy_ten_percent(group)
+  _change()
+  _post_the("ownership_change")
+  assert preview("2026-02").incomplete is False
+
+  with extensions_session(GRAPH) as session:
+    late = Entry(
+      entity_id=MEMBER,
+      type="standard",
+      status="posted",
+      posting_date=JAN_31,
+      created_by="test",
+    )
+    session.add(late)
+    session.flush()
+    for order, (code, amount) in enumerate([("cash", 40_000), ("sales", -40_000)], 1):
+      session.add(
+        LineItem(
+          entry_id=late.id,
+          element_id=group["accounts"][(MEMBER, code)],
+          debit_amount=max(amount, 0),
+          credit_amount=max(-amount, 0),
+          line_order=order,
+        )
+      )
+
+  february = preview("2026-02")
+  assert february.incomplete is True
+  assert any("reverse the posted entry" in note for note in february.notes)

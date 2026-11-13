@@ -31,8 +31,8 @@ from collections import defaultdict
 from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 
-from sqlalchemy import bindparam, select, text
-from sqlalchemy.orm import Session
+from sqlalchemy import bindparam, exists, select, text
+from sqlalchemy.orm import Session, aliased
 
 from robosystems.logger import logger
 from robosystems.models.api.extensions.consolidation import (
@@ -1380,11 +1380,14 @@ def preview_consolidation_entries(
       [m for m in members if m.member.is_member_for(eve, eve)],
       [a for a in associates if a.member.is_member_for(eve, eve)],
       opening_share,
+      # The group's statements render under the parent's Style, so its close
+      # target is the equity the group's own results sit in.
       load_close_target_concept(
-        session, load_entity_reporting_style(session, consolidation.id)
+        session, load_entity_reporting_style(session, parent_id)
       ),
       set(accounts),
       period,
+      parent,
     )
   for (kind, member_id), lines in opening.items():
     for qname, amount in lines.items():
@@ -1657,44 +1660,60 @@ def _open_on_earlier_results(
   close_target: str,
   postable: set[str],
   period: str,
+  parent: _Entity,
 ) -> None:
-  """The outside owners' share of what each member earned before the first
-  month. The month's own allocation is measured within the month, so results
-  from before it reach noncontrolling interest only here: without it that
-  interest opens on the outside owners' capital alone, and stays short for
-  good. Those results already sit in the group's own equity, so the opening
-  moves the share out of it.
+  """What each member's results before the first month already called for.
+  The month's own allocation and pickup are measured within the month, so
+  earlier results reach the balance sheet only here: without it the outside
+  owners' interest opens on their capital alone, and an equity-method
+  investment on what the parent paid, and both stay short for good.
 
-  An equity-method member's earlier results are named, not opened on: what
-  the parent has already taken of them is a person's to say."""
+  Those results sit in the group's own equity (a full member's) or outside
+  the group altogether (an associate's), so each opening moves a share
+  between that equity and the balance it belongs in. An associate's is net
+  of the distributions the parent has already taken as income."""
+  wanted: list[tuple[tuple[str, str], _Entity, str, int, str]] = []
   for member in members:
     outside = 1.0 - opening_share.get(member.id, member.share)
     share = share_of(_results(earlier, member.id), outside) if outside > 0 else 0
-    if not share:
+    wanted.append(
+      (
+        ("nci_allocation", member.id),
+        member,
+        NONCONTROLLING_INTEREST,
+        -share,
+        f"The outside owners' {outside:.0%} of {_possessive(member.name)} results",
+      )
+    )
+  for associate in associates:
+    pickup = share_of(_results(earlier, associate.id), associate.share)
+    received = -sum(r.amount for r in _distribution_income(earlier, parent, associate))
+    wanted.append(
+      (
+        ("equity_method_pickup", associate.id),
+        associate,
+        EQUITY_METHOD_INVESTMENT,
+        pickup - received,
+        f"The parent's {associate.share:.0%} of {_possessive(associate.name)} results",
+      )
+    )
+  for key, _entity, balance, amount, what in wanted:
+    if not amount:
       continue
-    key = ("nci_allocation", member.id)
-    missing = sorted({NONCONTROLLING_INTEREST, close_target} - postable)
+    missing = sorted({balance, close_target} - postable)
     if missing:
       plan.notes.append(
-        f"The outside owners' {outside:.0%} of {_possessive(member.name)} results "
-        f"before {period}, {_money(share)}, cannot be the consolidation entity's "
-        "opening: it has no account mapped to " + ", ".join(missing) + "."
+        f"{what} before {period}, {_money(abs(amount))}, cannot be the "
+        "consolidation entity's opening: it has no account mapped to "
+        + ", ".join(missing)
+        + "."
       )
       plan.incomplete = True
       continue
-    opening[key] = {NONCONTROLLING_INTEREST: -share, close_target: share}
-    # A balance from here on, held as opened: no month's allocation reads it.
-    for qname, amount in opening[key].items():
-      plan.targets[(qname, *key, False)] += amount
-  for associate in associates:
-    pickup = share_of(_results(earlier, associate.id), associate.share)
-    if pickup:
-      plan.notes.append(
-        f"The parent's {associate.share:.0%} of {_possessive(associate.name)} "
-        f"results before {period}, {_money(pickup)}, is not in the equity-method "
-        "investment the group opens on; a consolidating entry on the eve of the "
-        "month carries it, less any of it the parent has already received."
-      )
+    opening[key] = {balance: amount, close_target: -amount}
+    # A balance from here on, held as opened: no month's entry reads it.
+    for qname, line in opening[key].items():
+      plan.targets[(qname, *key, False)] += line
 
 
 def _results(rows: list[_Row], entity_id: str) -> int:
@@ -1816,21 +1835,29 @@ def _hold_a_recorded_draft_its_inputs_have_left(
   recorded again."""
   from robosystems.models.extensions import Entity
 
-  drafts = session.execute(
+  reversal = aliased(Entry)
+  # A posted one counts too: the month is open, so it was reopened, and a
+  # reopen leaves what the close posted where it was.
+  recorded_entries = session.execute(
     select(Entry).where(
       Entry.entity_id == consolidation.id,
-      Entry.status == "draft",
+      Entry.status.in_(("draft", "posted")),
       Entry.adjustment_kind.in_((ACQUISITION, OWNERSHIP_CHANGE, DECONSOLIDATION)),
       Entry.posting_date >= start,
       Entry.posting_date <= end,
+      Entry.reversal_of.is_(None),
+      ~exists().where(reversal.reversal_of == Entry.id),
     )
   ).scalars()
-  for entry in drafts:
+  for entry in recorded_entries:
     member = session.get(Entity, entry.adjusts_entity_id)
     if member is None:
       continue
     name = by_id[member.id].name if member.id in by_id else member.name
     recorded = (entry.metadata_ or {}).get(entry.adjustment_kind) or {}
+    if not recorded:
+      # A hand entry of the kind recorded nothing to compare.
+      continue
     eve = start - timedelta(days=1)
     moved: str | None = None
     if entry.adjustment_kind == ACQUISITION:
@@ -1855,9 +1882,14 @@ def _hold_a_recorded_draft_its_inputs_have_left(
     if moved is None:
       continue
     kind = entry.adjustment_kind.replace("_", " ")
+    remedy = (
+      f"record the {kind} again, or delete the draft"
+      if entry.status == "draft"
+      else f"reverse the posted entry and record the {kind} again"
+    )
     plan.notes.append(
-      f"{moved} since its {kind} was recorded, so the draft entry no longer "
-      f"measures it; record the {kind} again, or delete the draft."
+      f"{moved} since its {kind} was recorded, so the {entry.status} entry no "
+      f"longer measures it; {remedy}."
     )
     plan.incomplete = True
 
