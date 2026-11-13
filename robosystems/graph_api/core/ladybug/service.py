@@ -228,6 +228,20 @@ def validate_cypher_query(cypher: str) -> None:
     )
 
 
+def validate_vector_queries(cypher: str, parameters: dict | None) -> None:
+  """Refuse a vector search whose query vector is not a list of numbers."""
+  from robosystems.security.cypher_analyzer import has_unsafe_vector_query
+
+  if has_unsafe_vector_query(cypher, parameters):
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail=(
+        "QUERY_VECTOR_INDEX takes its query vector as a list of numbers, "
+        "written out or bound as a parameter."
+      ),
+    )
+
+
 class LadybugService:
   """LadybugDB service with multi-database support."""
 
@@ -316,6 +330,7 @@ class LadybugService:
         validated_graph_id = validate_database_name(request.database)
         validate_cypher_query(request.cypher)
         validate_query_parameters(request.parameters)
+        validate_vector_queries(request.cypher, request.parameters)
 
         if validated_graph_id not in self.db_manager.list_databases():
           _raise_database_not_found(validated_graph_id)
@@ -391,6 +406,20 @@ class LadybugService:
               yield {
                 "error": error_msg,
                 "error_type": "ParserException",
+                "chunk_index": 0,
+                "is_last_chunk": True,
+                "row_count": 0,
+                "total_rows_sent": 0,
+                "execution_time_ms": (time.time() - start_time) * 1000,
+              }
+              return
+            elif "read-only transaction" in error_msg:
+              logger.warning(
+                f"Write refused in a read for {validated_graph_id}: {error_msg}"
+              )
+              yield {
+                "error": "This statement writes and was submitted as a read.",
+                "error_type": "ReadOnlyTransaction",
                 "chunk_index": 0,
                 "is_last_chunk": True,
                 "row_count": 0,
@@ -553,6 +582,7 @@ class LadybugService:
         validated_graph_id = validate_database_name(request.database)
         validate_cypher_query(request.cypher)
         validate_query_parameters(request.parameters)
+        validate_vector_queries(request.cypher, request.parameters)
 
         if validated_graph_id not in self.db_manager.list_databases():
           _raise_database_not_found(validated_graph_id)
@@ -578,8 +608,7 @@ class LadybugService:
           def execute_query_with_params():
             if request.parameters:
               return conn.execute(translated_cypher, request.parameters)
-            else:
-              return conn.execute(translated_cypher)
+            return conn.execute(translated_cypher)
 
           try:
             with ThreadPoolExecutor(max_workers=1) as executor:
@@ -637,6 +666,16 @@ class LadybugService:
               raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Catalog error: {error_msg}",
+              )
+            elif "read-only transaction" in error_msg:
+              logger.warning(
+                f"Write refused in a read for {validated_graph_id}: {error_msg}"
+              )
+              span.set_attribute("error", True)
+              span.set_attribute("error.type", "ReadOnlyTransaction")
+              raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This statement writes and was submitted as a read.",
               )
             else:
               logger.error(
