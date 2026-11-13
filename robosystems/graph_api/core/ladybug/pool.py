@@ -131,6 +131,7 @@ class LadybugConnectionPool:
     self._maybe_run_maintenance()
 
     with self._get_database_lock(database_name):
+      self._close_connections_on_a_dropped_database(database_name)
       connection_info = self._get_existing_connection(database_name, read_only)
 
       if connection_info and self._is_connection_valid(connection_info):
@@ -143,6 +144,14 @@ class LadybugConnectionPool:
         return connection_info
 
       return self._create_new_connection(database_name, read_only)
+
+  def _close_connections_on_a_dropped_database(self, database_name: str) -> None:
+    """Close pooled connections whose database object is no longer the one
+    registered: every statement on one fails until the health check finds it."""
+    registered = self._databases.get(database_name)
+    for conn_id, conn_info in list(self._pools.get(database_name, {}).items()):
+      if conn_info.database is not registered:
+        self._close_connection(database_name, conn_id)
 
   def _release_connection(self, database_name: str, connection_info: ConnectionInfo):
     """Mark a connection as done with. Connections stay in the pool for reuse.
@@ -556,7 +565,9 @@ class LadybugConnectionPool:
     large ingestion. The next access recreates it. ``aggressive`` additionally
     forces full GC and ``malloc_trim`` to hand the pages back to the OS.
     """
-    with self._global_lock:
+    # The per-database lock, which opening a connection holds: a cleanup that
+    # lands inside an open would leave that connection on a closed database.
+    with self._get_database_lock(database_name):
       logger.debug(
         f"Forcing cleanup for database: {database_name} (aggressive={aggressive})"
       )
