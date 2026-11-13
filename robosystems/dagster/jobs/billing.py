@@ -528,16 +528,13 @@ async def _handle_payment_succeeded(
       db_session.commit()
     await _trigger_resource_provisioning(subscription, db_session, context)
 
-  # A trial is lifted by its first charge: money paid, or the renewal invoice
-  # that closes the trial (a full discount pays nothing). Any other zero
-  # invoice lifts nothing: a plan change raises one whenever it is made.
-  trial_end = subscription.trial_ends_at
-  trial_over = isinstance(trial_end, datetime) and _as_utc(trial_end) <= datetime.now(
-    UTC
-  ) + timedelta(minutes=5)
+  # A trial is lifted by its first charge: a paid invoice that billed for
+  # something. Money paid is one; so is a charge a discount or the account's
+  # balance covered in full. An invoice whose lines are all zero is neither,
+  # whenever it arrives: a plan change inside a trial raises one.
   if (invoice_data.get("amount_paid") or 0) > 0 or (
-    invoice_data.get("billing_reason") == "subscription_cycle" and trial_over
-  ):
+    invoice_data.get("subtotal") or 0
+  ) > 0:
     from robosystems.operations.billing.repository_subscriptions import (
       convert_repository_trial,
     )

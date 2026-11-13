@@ -74,7 +74,12 @@ def _on_trial(session, test_user, test_org, plan: str = "starter"):
   return member, subscription, grant
 
 
-def _invoice(subscription, *, reason: str, amount: int) -> dict:
+def _invoice(
+  subscription, *, reason: str, amount: int, billed: int | None = None
+) -> dict:
+  """An invoice as Stripe sends it paid. ``billed`` is what its lines come to
+  before a discount or the account's balance, when that is not ``amount``."""
+  billed = amount if billed is None else billed
   now = datetime.now(UTC)
   end = now + timedelta(days=30)
   return {
@@ -85,14 +90,14 @@ def _invoice(subscription, *, reason: str, amount: int) -> dict:
     "billing_reason": reason,
     "amount_due": amount,
     "amount_paid": amount,
-    "subtotal": amount,
-    "total": amount,
+    "subtotal": billed,
+    "total": billed,
     "period_start": int(now.timestamp()),
     "period_end": int(end.timestamp()),
     "lines": {
       "data": [
         {
-          "amount": amount,
+          "amount": billed,
           "quantity": 1,
           "period": {"start": int(now.timestamp()), "end": int(end.timestamp())},
         }
@@ -241,21 +246,47 @@ class TestTrialLifecycle:
     assert grant.is_trial is True
     assert grant.user_credits is None
 
-  async def test_a_fully_discounted_first_invoice_lifts_an_ended_trial(
-    self, test_db, test_user, test_org
+  @pytest.mark.parametrize(
+    "reason", ["subscription_cycle", "subscription_update"], ids=["at-its-end", "early"]
+  )
+  async def test_a_charge_covered_in_full_lifts_the_trial(
+    self, test_db, test_user, test_org, reason
   ):
+    """A full discount, or the account's balance, pays an invoice that billed
+    the plan's price: the subscriber owes nothing more for it."""
     _member_, subscription, grant = _on_trial(test_db, test_user, test_org)
-    subscription.trial_ends_at = datetime.now(UTC) - timedelta(seconds=30)
-    test_db.commit()
 
     await _handle_payment_succeeded(
-      _invoice(subscription, reason="subscription_cycle", amount=0),
+      _invoice(subscription, reason=reason, amount=0, billed=2900),
       test_db,
       MagicMock(),
     )
 
     test_db.refresh(grant)
     assert grant.is_trial is False
+
+  @pytest.mark.parametrize(
+    "reason", ["subscription_cycle", "subscription_update", "subscription_create"]
+  )
+  async def test_an_invoice_that_bills_nothing_never_lifts_an_ended_trial(
+    self, test_db, test_user, test_org, reason
+  ):
+    """A renewal a proration credit nets to nothing was not a charge either."""
+    _member_, subscription, grant = _on_trial(test_db, test_user, test_org)
+    subscription.trial_ends_at = datetime.now(UTC) - timedelta(days=31)
+    test_db.commit()
+
+    await _handle_payment_succeeded(
+      _invoice(subscription, reason=reason, amount=0, billed=0), test_db, MagicMock()
+    )
+    await _handle_payment_succeeded(
+      _invoice(subscription, reason=reason, amount=0, billed=-7000),
+      test_db,
+      MagicMock(),
+    )
+
+    test_db.refresh(grant)
+    assert grant.is_trial is True
 
   @pytest.mark.parametrize(
     "trial_ends_in",
