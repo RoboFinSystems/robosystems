@@ -648,17 +648,53 @@ def _settle_the_suggested_item(session: Session, event: Event) -> None:
     and metadata.get(SUGGESTION_SOURCE) == SOURCE_OPEN_ITEM
     and not event.discharges_event_id
   ):
+    _refuse_an_item_no_longer_open(session, event, str(obligation_id))
     discharges.set_settlement_link(session, event, str(obligation_id))
+    # The item is this line's now: the counterparty's other waiting lines
+    # must not go on being offered it.
+    _resuggest_after_settlement(session, event)
+
+
+def _refuse_an_item_no_longer_open(
+  session: Session, event: Event, obligation_id: str
+) -> None:
+  """A suggestion is as old as the last time it was worked out. The item it
+  names may since have been paid, or taken by another waiting line; settling
+  it again would pay one bill twice and book the second cost nowhere."""
+  from robosystems.operations.roboledger.reads.ar_ap import find_settlement_match
+
+  match = (
+    find_settlement_match(
+      session,
+      entity_id=str(event.entity_id),
+      agent_id=str(event.agent_id),
+      amount=event.amount,
+      as_of=event.occurred_at.date(),
+      excluding_payment=str(event.id),
+    )
+    if event.agent_id and event.amount and event.occurred_at
+    else None
+  )
+  if match is None or match.item.event_id != obligation_id:
+    raise HandlerMetadataValidationError(
+      f"Event {event.id}: the open item this line was suggested to settle is no "
+      "longer open at this amount: another line has paid or taken it. Classify "
+      "the line to its own account, or settle another item with "
+      "discharges_event_id."
+    )
 
 
 # Says a line suggested as an open item's settlement is a separate purchase.
 NOT_A_SETTLEMENT = "not_a_settlement"
 
 
-def _refuse_overlooking_the_open_item(event: Event, patch: dict) -> None:
+def _refuse_overlooking_the_open_item(
+  session: Session, event: Event, patch: dict
+) -> None:
   """A line suggested as the settlement of an open bill or invoice is not
   classified to another account unless the caller says it settles nothing:
-  that would leave the item open and count it a second time."""
+  that would leave the item open and count it a second time. Saying so on a
+  line that had taken the suggestion gives the item back."""
   from robosystems.operations.roboledger.classification import (
     SOURCE_OPEN_ITEM,
     SUGGESTED_ELEMENT_ID,
@@ -674,14 +710,22 @@ def _refuse_overlooking_the_open_item(event: Event, patch: dict) -> None:
   }
   chosen.discard(None)
   metadata = event.metadata_ or {}
+  suggested_item = metadata.get(SUGGESTED_SETTLES)
   if (
     not chosen
     or metadata.get(SUGGESTION_SOURCE) != SOURCE_OPEN_ITEM
-    or not metadata.get(SUGGESTED_SETTLES)
+    or not suggested_item
     or metadata.get(SUGGESTED_ELEMENT_ID) in chosen
-    or metadata.get(NOT_A_SETTLEMENT) is True
-    or event.discharges_event_id
   ):
+    return
+  # A link to some other item is the caller's own settlement, made by hand.
+  took_the_suggestion = event.discharges_event_id == suggested_item
+  if event.discharges_event_id and not took_the_suggestion:
+    return
+  if metadata.get(NOT_A_SETTLEMENT) is True:
+    if took_the_suggestion:
+      discharges.set_settlement_link(session, event, "")
+      _resuggest_counterparty_lines(session, event)
     return
   basis = metadata.get(SUGGESTION_BASIS) or "This line matches an open item."
   raise HandlerMetadataValidationError(
@@ -695,16 +739,19 @@ def _refuse_overlooking_the_open_item(event: Event, patch: dict) -> None:
 def _resuggest_after_settlement(session: Session, event: Event) -> None:
   """A committed line that settled an item has used it up, so the
   counterparty's other waiting lines must not go on being offered it."""
+  if event.discharges_event_id:
+    _resuggest_counterparty_lines(session, event)
+
+
+def _resuggest_counterparty_lines(session: Session, event: Event) -> None:
+  """What ``event`` settles has changed, so what is on offer to its
+  counterparty's other waiting lines has too."""
   from robosystems.operations.roboledger.classification import (
     LEARNED_EVENT_TYPES,
     resuggest_open_lines,
   )
 
-  if (
-    event.event_type in LEARNED_EVENT_TYPES
-    and event.agent_id
-    and event.discharges_event_id
-  ):
+  if event.event_type in LEARNED_EVENT_TYPES and event.agent_id:
     session.flush()
     resuggest_open_lines(session, str(event.agent_id), str(event.entity_id))
 
@@ -1155,7 +1202,7 @@ def update_event_block(
     _settle_the_suggested_item(session, event)
 
   if body.metadata_patch and body.discharge_allocations is None:
-    _refuse_overlooking_the_open_item(event, body.metadata_patch)
+    _refuse_overlooking_the_open_item(session, event, body.metadata_patch)
 
   if body.document_id is not None:
     # Checked before the lock; an empty string detaches the document.
