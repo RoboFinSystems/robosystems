@@ -336,17 +336,23 @@ def _open_items(
   entity_ids: list[str],
   agent_id: str | None = None,
   excluding_payment: str | None = None,
-  counting_claims: bool = False,
+  unsettled_now: bool = False,
 ) -> list[OpenItem]:
   """Every obligation of ``kind`` in ``entity_ids`` issued on or before
   ``as_of`` with something left open at ``as_of``: a settlement dated after it
-  has not happened yet. Oldest first."""
+  has not happened yet. Oldest first.
+
+  ``unsettled_now`` asks the other question, the one a payment looking for
+  its item asks: what nothing has settled or claimed yet, whatever the dates.
+  A bill a later-dated line has already paid is not open to an earlier one."""
   if not entity_ids:
     return []
   originating = Event.__table__
   bound = _end_of(as_of)
   by_obligation = _settled(
-    bound, excluding=excluding_payment, counting_claims=counting_claims
+    None if unsettled_now else bound,
+    excluding=excluding_payment,
+    counting_claims=unsettled_now,
   )
   original = func.abs(originating.c.amount)
   settled = func.coalesce(by_obligation.c.settled, 0)
@@ -715,7 +721,7 @@ def find_settlement_match(
       entity_ids=[entity_id],
       agent_id=agent_id,
       excluding_payment=excluding_payment,
-      counting_claims=True,
+      unsettled_now=True,
     )
     if item.open_cents == abs(amount)
   ]
@@ -726,6 +732,31 @@ def find_settlement_match(
     return None
   item = min(exact, key=lambda i: (i.due_date, i.occurred_on))
   return SettlementMatch(item, str(accounts[0].id), str(accounts[0].name), kind)
+
+
+def item_is_unsettled_at(
+  session: Session,
+  *,
+  obligation_id: str,
+  entity_id: str,
+  amount: int,
+  issued_on: date,
+  excluding_payment: str,
+) -> bool:
+  """Whether ``obligation_id`` still has exactly ``amount`` that no posted
+  payment has settled and no other waiting line has claimed."""
+  kind: OpenItemKind = "payables" if amount < 0 else "receivables"
+  return any(
+    item.event_id == obligation_id and item.open_cents == abs(amount)
+    for item in _open_items(
+      session,
+      kind,
+      as_of=issued_on,
+      entity_ids=[entity_id],
+      excluding_payment=excluding_payment,
+      unsettled_now=True,
+    )
+  )
 
 
 def list_discharge_candidates(

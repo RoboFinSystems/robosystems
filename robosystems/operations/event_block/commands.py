@@ -33,6 +33,7 @@ from robosystems.models.extensions.roboledger.transaction import Transaction
 from robosystems.operations.locking import (
   RowLockedError,
   bounded_lock_wait,
+  lock_by_id,
   ordered_lock_column,
 )
 from robosystems.operations.roboledger.commands._guards import (
@@ -660,37 +661,54 @@ def _refuse_an_item_no_longer_open(
 ) -> None:
   """A suggestion is as old as the last time it was worked out. The item it
   names may since have been paid, or taken by another waiting line; settling
-  it again would pay one bill twice and book the second cost nowhere."""
-  from robosystems.operations.roboledger.reads.ar_ap import find_settlement_match
+  it again would pay one bill twice and book the second cost nowhere. The
+  item's row is locked first, so of two lines taking it at once the second
+  waits and then sees the first's claim."""
+  from robosystems.operations.roboledger.reads.ar_ap import item_is_unsettled_at
 
-  match = (
-    find_settlement_match(
+  item = lock_by_id(
+    session, Event, obligation_id, "the open item this line settles", key_share=True
+  )
+  issued_at = item.occurred_at if item is not None else None
+  if (
+    issued_at is None
+    or not event.amount
+    or not item_is_unsettled_at(
       session,
+      obligation_id=obligation_id,
       entity_id=str(event.entity_id),
-      agent_id=str(event.agent_id),
       amount=event.amount,
-      as_of=event.occurred_at.date(),
+      issued_on=issued_at.date(),
       excluding_payment=str(event.id),
     )
-    if event.agent_id and event.amount and event.occurred_at
-    else None
-  )
-  if match is None or match.item.event_id != obligation_id:
+  ):
     raise HandlerMetadataValidationError(
       f"Event {event.id}: the open item this line was suggested to settle is no "
-      "longer open at this amount: another line has paid or taken it. Classify "
-      "the line to its own account, or settle another item with "
-      "discharges_event_id."
+      "longer open at this amount. Classify the line to its own account, or "
+      "settle another item with discharges_event_id."
     )
+
+
+def _took_the_suggested_item(event: Event) -> bool:
+  from robosystems.operations.roboledger.classification import (
+    SOURCE_OPEN_ITEM,
+    SUGGESTED_SETTLES,
+    SUGGESTION_SOURCE,
+  )
+
+  metadata = event.metadata_ or {}
+  return (
+    bool(event.discharges_event_id)
+    and metadata.get(SUGGESTION_SOURCE) == SOURCE_OPEN_ITEM
+    and event.discharges_event_id == metadata.get(SUGGESTED_SETTLES)
+  )
 
 
 # Says a line suggested as an open item's settlement is a separate purchase.
 NOT_A_SETTLEMENT = "not_a_settlement"
 
 
-def _refuse_overlooking_the_open_item(
-  session: Session, event: Event, patch: dict
-) -> None:
+def _refuse_overlooking_the_open_item(session: Session, event: Event) -> None:
   """A line suggested as the settlement of an open bill or invoice is not
   classified to another account unless the caller says it settles nothing:
   that would leave the item open and count it a second time. Saying so on a
@@ -703,13 +721,15 @@ def _refuse_overlooking_the_open_item(
     SUGGESTION_SOURCE,
   )
 
-  chosen = {patch.get("classified_element_id")} | {
+  # The line's account after the patch, not the patch's: taking the
+  # suggestion on a line already classified elsewhere changes no account.
+  metadata = event.metadata_ or {}
+  chosen = {metadata.get("classified_element_id")} | {
     allocation.get("element_id")
-    for allocation in patch.get("classified_allocations") or []
+    for allocation in metadata.get("classified_allocations") or []
     if isinstance(allocation, dict)
   }
   chosen.discard(None)
-  metadata = event.metadata_ or {}
   suggested_item = metadata.get(SUGGESTED_SETTLES)
   if (
     not chosen
@@ -723,7 +743,8 @@ def _refuse_overlooking_the_open_item(
   if event.discharges_event_id and not took_the_suggestion:
     return
   if metadata.get(NOT_A_SETTLEMENT) is True:
-    if took_the_suggestion:
+    # A posted line's entry has already cleared the item: its link stands.
+    if took_the_suggestion and not _has_linked_entries(session, str(event.id)):
       discharges.set_settlement_link(session, event, "")
       _resuggest_counterparty_lines(session, event)
     return
@@ -1177,6 +1198,15 @@ def update_event_block(
     _validate_routed_connection(body.metadata_patch, graph_id)
     merged = dict(event.metadata_ or {})
     merged.update(body.metadata_patch)
+    # Taking the suggestion and calling the line a separate purchase are two
+    # answers to one question: the later one replaces the earlier.
+    if body.metadata_patch.get("accept_suggestion") is True and not (
+      {"classified_element_id", "classified_allocations"} & body.metadata_patch.keys()
+    ):
+      for key in ("classified_element_id", "classified_allocations", NOT_A_SETTLEMENT):
+        merged.pop(key, None)
+    elif body.metadata_patch.get(NOT_A_SETTLEMENT) is True:
+      merged.pop("accept_suggestion", None)
     event.metadata_ = merged
     if "publish_to_source" in body.metadata_patch:
       from robosystems.operations.roboledger.commands.reconciling_items import (
@@ -1194,6 +1224,15 @@ def update_event_block(
   if body.discharge_allocations is not None:
     discharges.allocate(session, event, body.discharge_allocations, created_by)
 
+  # What this line settles changed, or it was withdrawn while naming an
+  # item: what is on offer to its counterparty's other waiting lines did too.
+  if (
+    body.discharges_event_id is not None
+    or body.discharge_allocations is not None
+    or (body.transition_to in _RETRACTED_STATUSES and event.discharges_event_id)
+  ):
+    _resuggest_counterparty_lines(session, event)
+
   if (
     body.discharges_event_id is None
     and body.discharge_allocations is None
@@ -1202,7 +1241,7 @@ def update_event_block(
     _settle_the_suggested_item(session, event)
 
   if body.metadata_patch and body.discharge_allocations is None:
-    _refuse_overlooking_the_open_item(session, event, body.metadata_patch)
+    _refuse_overlooking_the_open_item(session, event)
 
   if body.document_id is not None:
     # Checked before the lock; an empty string detaches the document.
@@ -1247,6 +1286,11 @@ def update_event_block(
       restamp_retagged_months(
         session, retag_dates, entity_id=str(event.entity_id), actor_id=created_by
       )
+
+  if fire_handler and _took_the_suggested_item(event):
+    # Linked on a suggestion, perhaps long ago: posting is the last moment to
+    # find the item paid or claimed by another line since.
+    _refuse_an_item_no_longer_open(session, event, str(event.discharges_event_id))
 
   if fire_handler:
     # After the metadata patch so the handler sees the final shape.
