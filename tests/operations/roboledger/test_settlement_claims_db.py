@@ -472,3 +472,80 @@ def test_a_line_just_past_midnight_elsewhere_takes_its_own_suggestion(books):
   _update(t, line, transition_to="classified", metadata_patch=ACCEPT)
 
   assert _event(t, line).discharges_event_id == bill_id
+
+
+def test_a_posted_line_no_longer_takes_a_suggestion(books):
+  """Its entry already says where it went; a link made now would mark a bill
+  paid that the entry never touched."""
+  t = books
+  _bill(t)
+  line = _line(t, 9)
+  _update(
+    t,
+    line,
+    transition_to="committed",
+    metadata_patch={"classified_element_id": t.software, "not_a_settlement": True},
+  )
+
+  with pytest.raises(HandlerMetadataValidationError, match="is posted"):
+    _update(t, line, metadata_patch=ACCEPT)
+  t.session.rollback()
+
+  assert _event(t, line).discharges_event_id is None
+  assert _event(t, line).metadata_["classified_element_id"] == t.software
+  assert _open_payables(t) == [4_500]
+
+
+def test_allocating_what_is_left_of_the_suggested_bill_posts(books):
+  """Allocation rows say what the line settles; part of the suggested bill
+  having been paid another way does not stop the rest being applied to it."""
+  from robosystems.models.api.event_block import DischargeAllocation
+
+  t = books
+  bill = _bill(t, day=5)
+  at = datetime(2026, 10, 6, tzinfo=UTC)
+  other = Event(
+    entity_id=t.parent.id,
+    event_type="bill_received",
+    event_category="purchase",
+    event_class="economic",
+    agent_id=t.agent.id,
+    occurred_at=at,
+    effective_at=at,
+    status="fulfilled",
+    source="manual",
+    amount=1_000,
+    created_by="test",
+  )
+  paid_elsewhere = Event(
+    entity_id=t.parent.id,
+    event_type="bill_paid",
+    event_category="purchase",
+    event_class="economic",
+    agent_id=t.agent.id,
+    occurred_at=at,
+    effective_at=at,
+    status="committed",
+    source="quickbooks",
+    amount=1_000,
+    discharges_event_id=bill,
+    created_by="test",
+  )
+  t.session.add_all([other, paid_elsewhere])
+  t.session.commit()
+  other_id = str(other.id)
+  line = _line(t, 9)
+
+  _update(
+    t,
+    line,
+    transition_to="committed",
+    metadata_patch={"classified_element_id": t.payables, "classified_by": "user"},
+    discharge_allocations=[
+      DischargeAllocation(obligation_event_id=bill, amount=3_500),
+      DischargeAllocation(obligation_event_id=other_id, amount=1_000),
+    ],
+  )
+
+  assert _event(t, line).status == "committed"
+  assert _open_payables(t) == []

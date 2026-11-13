@@ -29,6 +29,7 @@ from robosystems.models.extensions.roboledger.dimension_junctions import (
 )
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
+from robosystems.models.extensions.roboledger.event_discharge import EventDischarge
 from robosystems.models.extensions.roboledger.transaction import Transaction
 from robosystems.operations.locking import (
   RowLockedError,
@@ -1196,6 +1197,13 @@ def update_event_block(
   before_patch = dict(event.metadata_ or {})
   if body.metadata_patch:
     _validate_routed_connection(body.metadata_patch, graph_id)
+    if body.metadata_patch.get("accept_suggestion") is True and _has_linked_entries(
+      session, str(event.id)
+    ):
+      raise HandlerMetadataValidationError(
+        f"Event {event.id} is posted: its entry already says where it went, so "
+        "a suggestion can no longer be taken on it."
+      )
     merged = dict(event.metadata_ or {})
     merged.update(body.metadata_patch)
     # Taking the suggestion and calling the line a separate purchase are two
@@ -1287,7 +1295,17 @@ def update_event_block(
         session, retag_dates, entity_id=str(event.entity_id), actor_id=created_by
       )
 
-  if fire_handler and _took_the_suggested_item(event):
+  # Allocation rows are the caller's own statement of what the line settles,
+  # and may apply part of it to an item partly paid already.
+  if (
+    fire_handler
+    and _took_the_suggested_item(event)
+    and not session.execute(
+      select(EventDischarge.payment_event_id)
+      .where(EventDischarge.payment_event_id == event.id)
+      .limit(1)
+    ).first()
+  ):
     # Linked on a suggestion, perhaps long ago: posting is the last moment to
     # find the item paid or claimed by another line since.
     _refuse_an_item_no_longer_open(session, event, str(event.discharges_event_id))
