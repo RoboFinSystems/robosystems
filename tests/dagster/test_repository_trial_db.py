@@ -74,7 +74,12 @@ def _on_trial(session, test_user, test_org, plan: str = "starter"):
   return member, subscription, grant
 
 
-def _invoice(subscription, *, reason: str, amount: int) -> dict:
+def _invoice(
+  subscription, *, reason: str, amount: int, billed: int | None = None
+) -> dict:
+  """An invoice as Stripe sends it paid. ``billed`` is what its lines come to
+  before a discount or the account's balance, when that is not ``amount``."""
+  billed = amount if billed is None else billed
   now = datetime.now(UTC)
   end = now + timedelta(days=30)
   return {
@@ -85,14 +90,14 @@ def _invoice(subscription, *, reason: str, amount: int) -> dict:
     "billing_reason": reason,
     "amount_due": amount,
     "amount_paid": amount,
-    "subtotal": amount,
-    "total": amount,
+    "subtotal": billed,
+    "total": billed,
     "period_start": int(now.timestamp()),
     "period_end": int(end.timestamp()),
     "lines": {
       "data": [
         {
-          "amount": amount,
+          "amount": billed,
           "quantity": 1,
           "period": {"start": int(now.timestamp()), "end": int(end.timestamp())},
         }
@@ -241,21 +246,107 @@ class TestTrialLifecycle:
     assert grant.is_trial is True
     assert grant.user_credits is None
 
-  async def test_a_fully_discounted_first_invoice_lifts_an_ended_trial(
-    self, test_db, test_user, test_org
+  @pytest.mark.parametrize(
+    "reason", ["subscription_cycle", "subscription_update"], ids=["at-its-end", "early"]
+  )
+  async def test_a_charge_covered_in_full_lifts_the_trial(
+    self, test_db, test_user, test_org, reason
   ):
+    """A full discount, or the account's balance, pays an invoice that billed
+    the plan's price: the subscriber owes nothing more for it."""
     _member_, subscription, grant = _on_trial(test_db, test_user, test_org)
-    subscription.trial_ends_at = datetime.now(UTC) - timedelta(seconds=30)
-    test_db.commit()
 
     await _handle_payment_succeeded(
-      _invoice(subscription, reason="subscription_cycle", amount=0),
+      _invoice(subscription, reason=reason, amount=0, billed=2900),
       test_db,
       MagicMock(),
     )
 
     test_db.refresh(grant)
     assert grant.is_trial is False
+
+  @pytest.mark.parametrize(
+    "reason", ["subscription_cycle", "subscription_update", "subscription_create"]
+  )
+  async def test_an_invoice_that_bills_nothing_never_lifts_an_ended_trial(
+    self, test_db, test_user, test_org, reason
+  ):
+    """A renewal a proration credit nets to nothing was not a charge either."""
+    _member_, subscription, grant = _on_trial(test_db, test_user, test_org)
+    subscription.trial_ends_at = datetime.now(UTC) - timedelta(days=31)
+    test_db.commit()
+
+    await _handle_payment_succeeded(
+      _invoice(subscription, reason=reason, amount=0, billed=0), test_db, MagicMock()
+    )
+    await _handle_payment_succeeded(
+      _invoice(subscription, reason=reason, amount=0, billed=-7000),
+      test_db,
+      MagicMock(),
+    )
+
+    test_db.refresh(grant)
+    assert grant.is_trial is True
+
+  @pytest.mark.parametrize(
+    "trial_ends_in",
+    [timedelta(minutes=4), timedelta(seconds=-1), timedelta(hours=-1)],
+    ids=["in-its-last-minutes", "just-ended-early", "ended"],
+  )
+  async def test_a_zero_plan_change_invoice_never_lifts_the_trial(
+    self, test_db, test_user, test_org, trial_ends_in
+  ):
+    """Stripe raises the same paid zero invoice for a plan change at any point,
+    so it says nothing about the first charge: that one can still decline."""
+    _member_, subscription, grant = _on_trial(test_db, test_user, test_org)
+    subscription.trial_ends_at = datetime.now(UTC) + trial_ends_in
+    test_db.commit()
+
+    await _handle_payment_succeeded(
+      _invoice(subscription, reason="subscription_update", amount=0),
+      test_db,
+      MagicMock(),
+    )
+
+    test_db.refresh(grant)
+    assert grant.is_trial is True
+    assert grant.limits_plan == TRIAL_PLAN
+    assert grant.user_credits is None
+
+  async def test_a_cancelled_trial_can_be_resumed(self, test_db, test_user, test_org):
+    """Stripe reports a resumed trial as `trialing`, not `active`."""
+    member, subscription, grant = _on_trial(test_db, test_user, test_org)
+    period_end = datetime.now(UTC) + timedelta(days=10)
+    await _handle_subscription_updated(
+      _event(
+        subscription, "trialing", cancel_at_period_end=True, period_end=period_end
+      ),
+      test_db,
+      MagicMock(),
+    )
+    test_db.refresh(subscription)
+    assert subscription.status == "canceled"
+
+    provider = MagicMock()
+    provider.get_subscription_state.return_value = {
+      "status": "trialing",
+      "cancel_at_period_end": False,
+    }
+    with patch(
+      "robosystems.operations.providers.payment_provider.get_payment_provider",
+      return_value=provider,
+    ):
+      await _handle_subscription_updated(
+        _event(subscription, "trialing", period_end=period_end), test_db, MagicMock()
+      )
+
+    test_db.refresh(subscription)
+    test_db.refresh(grant)
+    assert subscription.status == "active"
+    assert subscription.ends_at is None
+    assert grant.expires_at is None
+    assert grant.is_trial is True
+    assert _has_access(test_db, member)
 
   async def test_a_plan_change_mid_trial_keeps_the_trial(
     self, test_db, test_user, test_org
