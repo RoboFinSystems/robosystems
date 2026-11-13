@@ -225,6 +225,8 @@ def test_a_statement_behind_any_separator_is_not_a_read(engine, separators, lead
     "MATCH (t:T) RETURN {call: t.id} AS m",
     "MATCH (call:T) RETURN call.id, call.x",
     "MATCH (t:T) WITH t.id AS call WHERE call = 1 RETURN call",
+    "MATCH (t:T) WITH t.id AS call MATCH (u:T) RETURN call, u.id",
+    "MATCH (t:T) WITH t.id AS call ORDER BY call LIMIT (1) RETURN call",
   ],
 )
 def test_an_honest_read_stays_a_read(engine, statement):
@@ -273,15 +275,6 @@ def test_every_engine_table_function_is_named(engine):
   assert functions - CypherSecurityAnalyzer.ENGINE_TABLE_FUNCTIONS == set()
 
 
-def test_a_read_only_transaction_refuses_what_the_analyzer_would_miss(engine):
-  """The backstop: the engine itself refuses a write in a read-only transaction."""
-  before = engine.rows("MATCH (t:T) RETURN t.id, t.x ORDER BY t.id")
-  for clause in ("SET t.x = 9", "CREATE (:L)", "MERGE (:T {id: 7})"):
-    engine.rows("BEGIN TRANSACTION READ ONLY")
-    assert not engine.accepts(f"MATCH (t:T) {clause}")
-  assert engine.rows("MATCH (t:T) RETURN t.id, t.x ORDER BY t.id") == before
-
-
 SEARCH = "CALL query_vector_index('T', 'idx', {vector}, 3) RETURN node.id"
 
 
@@ -313,6 +306,7 @@ def test_a_vector_search_over_numbers_is_let_through(vector, parameters):
     ("[0.1, NULL]", None),
     ("[]", None),
     ("t.embedding", None),
+    ("efs := 100, NULL", None),
   ],
 )
 def test_a_vector_search_over_anything_else_is_refused(vector, parameters):

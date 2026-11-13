@@ -617,7 +617,9 @@ class CypherSecurityAnalyzer:
     """
     targets: list[tuple[str, str]] = []
     for i, token in enumerate(tokens):
-      if token.upper() != "CALL" or (i > 0 and tokens[i - 1] in (".", "$", ":")):
+      if token.upper() != "CALL" or (
+        i > 0 and (tokens[i - 1] in (".", "$", ":") or tokens[i - 1].upper() == "AS")
+      ):
         continue
       j = i + 1
       parts: list[str] = []
@@ -629,6 +631,9 @@ class CypherSecurityAnalyzer:
         else:
           break
       following = tokens[j] if j < len(tokens) else ""
+      # `... AS call LIMIT (1)`: a clause keyword is no procedure's name.
+      if parts and parts[0].upper() in self.OPERAND_BOUNDARIES:
+        continue
       if parts and following == "(":
         targets.append(("procedure", ".".join(parts)))
       elif parts and following == "=":
@@ -647,7 +652,12 @@ class CypherSecurityAnalyzer:
       for i in range(len(tokens) - 1):
         if tokens[i].lower() != "query_vector_index" or tokens[i + 1] != "(":
           continue
-        arguments = self._call_arguments(tokens, i + 1)
+        # A named argument (`efs := 100`) takes no position.
+        arguments = [
+          argument
+          for argument in self._call_arguments(tokens, i + 1)
+          if argument[1:3] != [":", "="]
+        ]
         if len(arguments) < 3 or not self._is_number_list(arguments[2], parameters):
           return True
       return False

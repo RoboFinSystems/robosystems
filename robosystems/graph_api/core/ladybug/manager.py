@@ -494,10 +494,6 @@ class LadybugDatabaseManager:
     """Check out a pooled connection for a database."""
     return self.connection_pool.get_connection(graph_id, read_only=read_only)
 
-  def read_only_transaction(self, graph_id: str):
-    """A private connection inside a read-only transaction, for one read."""
-    return self.connection_pool.read_only_transaction(graph_id)
-
   def list_databases(self) -> list[str]:
     """List the node's databases by scanning for database files.
 

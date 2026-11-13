@@ -276,20 +276,6 @@ class LadybugService:
     )
     logger.info(f"Node type: {node_type}, Repository type: {repository_type}")
 
-  def _statement_connection(self, graph_id: str, cypher: str):
-    """The connection an ad-hoc statement runs on.
-
-    A writer's database opens read-write whatever the caller holds, so the
-    analyzer alone would decide whether a statement may write. A statement it
-    calls a read therefore runs inside a transaction the engine itself holds
-    read-only: a write the analyzer missed is refused there.
-    """
-    from robosystems.security.cypher_analyzer import is_write_operation
-
-    if self.read_only or is_write_operation(cypher):
-      return self.db_manager.get_connection(graph_id, read_only=self.read_only)
-    return self.db_manager.read_only_transaction(graph_id)
-
   def _validate_node_configuration(self):
     """Validate node configuration based on type."""
     if self.node_type == NodeType.WRITER:
@@ -355,7 +341,9 @@ class LadybugService:
           f"Streaming query on {validated_graph_id}: {translated_cypher[:100]}..."
         )
 
-        with self._statement_connection(validated_graph_id, translated_cypher) as conn:
+        with self.db_manager.get_connection(
+          validated_graph_id, read_only=self.read_only
+        ) as conn:
           try:
             query_timeout = TuningConfig.get_graph_query_timeout()
 
@@ -610,7 +598,9 @@ class LadybugService:
           f"Executing query on {validated_graph_id}: {translated_cypher[:100]}..."
         )
 
-        with self._statement_connection(validated_graph_id, translated_cypher) as conn:
+        with self.db_manager.get_connection(
+          validated_graph_id, read_only=self.read_only
+        ) as conn:
           query_timeout = TuningConfig.get_graph_query_timeout()
 
           # A worker thread, not a signal-based alarm: signals only fire on the
