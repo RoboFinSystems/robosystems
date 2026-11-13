@@ -6,6 +6,7 @@ read-only allowlist, is treated as a write.
 
 import logging
 import re
+import unicodedata
 from collections.abc import Iterable
 from enum import Enum
 from typing import NamedTuple
@@ -84,6 +85,23 @@ class CypherSecurityAnalyzer:
     "RENAME COLUMN",
   }
 
+  # What follows CREATE or DROP in a catalog statement; a data CREATE is
+  # followed by a pattern.
+  DDL_OBJECTS = {
+    "NODE",
+    "REL",
+    "TABLE",
+    "INDEX",
+    "SEQUENCE",
+    "MACRO",
+    "TYPE",
+    "GRAPH",
+  }
+
+  # Manual transactions and checkpoints, where a statement can start.
+  TRANSACTION_CONTROL = {"BEGIN", "COMMIT", "ROLLBACK", "CHECKPOINT"}
+  STATEMENT_PREFIXES = {";", "EXPLAIN", "PROFILE"}
+
   SYSTEM_PROCEDURES = {
     "show_warnings",
     "clear_warnings",
@@ -108,6 +126,47 @@ class CypherSecurityAnalyzer:
     "show_functions",
     "query_vector_index",
     "query_fts_index",
+  }
+
+  # The engine's table functions (LadybugDB 0.22). Outside
+  # READ_ONLY_PROCEDURES these are refused by name wherever they are applied,
+  # so the refusal does not rest on recognising the CALL in front of them.
+  ENGINE_TABLE_FUNCTIONS = {
+    "bm_info",
+    "catalog_version",
+    "clear_warnings",
+    "current_setting",
+    "db_version",
+    "disk_info",
+    "disk_size_info",
+    "drop_projected_graph",
+    "file_info",
+    "fsm_info",
+    "project_graph",
+    "project_graph_cypher",
+    "projected_graph_info",
+    "read_csv_parallel",
+    "read_csv_serial",
+    "read_npy",
+    "read_pandas",
+    "read_parquet",
+    "show_attached_databases",
+    "show_connection",
+    "show_functions",
+    "show_graphs",
+    "show_indexes",
+    "show_loaded_extensions",
+    "show_macros",
+    "show_official_extensions",
+    "show_projected_graphs",
+    "show_sequences",
+    "show_tables",
+    "show_warnings",
+    "stats_info",
+    "storage_info",
+    "storage_version",
+    "table_info",
+    "_cache_array_column_locally",
   }
 
   # Procedures that run a statement passed as a string, which static analysis
@@ -202,25 +261,14 @@ class CypherSecurityAnalyzer:
     "REMOVE",
   }
 
-  _TOKEN_PATTERN = re.compile(r"=~|[^\W\d]\w*|\d+(?:\.\d+)?|\S")
+  # A number is read as the engine's lexer reads one: an optional fraction, a
+  # leading-dot form, and an exponent with an optional minus sign.
+  _TOKEN_PATTERN = re.compile(
+    r"=~|(?P<name>[^\W\d]\w*)|(?P<number>(?:\d+(?:\.\d+)?|\.\d+)(?:[eE]-?\d+)?)|\S"
+  )
+  _NAME_PATTERN = re.compile(r"[^\W\d]\w*")
   _OPENERS = frozenset("([{")
   _CLOSERS = frozenset(")]}")
-
-  def __init__(self):
-    # Dots allowed so a namespaced procedure name resolves as one identifier.
-    self.call_pattern = re.compile(r"\bCALL\s+([\w.]+)\s*\(", re.IGNORECASE)
-
-    # `CALL <setting> = <value>`: session configuration, no parentheses.
-    self.call_assignment_pattern = re.compile(r"\bCALL\s+([\w.]+)\s*=", re.IGNORECASE)
-
-    # `:schema_table` in a node or rel pattern, or as a label predicate.
-    self.catalog_label_pattern = re.compile(
-      r":\s*(" + "|".join(self.CATALOG_LABELS) + r")\b", re.IGNORECASE
-    )
-
-    self.transaction_control_pattern = re.compile(
-      r"(?:^|;)\s*(BEGIN|COMMIT|ROLLBACK|CHECKPOINT)\b", re.IGNORECASE
-    )
 
   def analyze_query(self, query: str) -> CypherOperationType:
     """
@@ -263,8 +311,8 @@ class CypherSecurityAnalyzer:
       schema_ops = self._find_schema_ddl(cleaned_query)
       return len(schema_ops) > 0
     except Exception as e:
-      logger.warning(f"Schema DDL analysis failed: {e}")
-      return False
+      logger.warning(f"Schema DDL analysis failed, defaulting to DDL: {e}")
+      return True
 
   def is_bulk_operation(self, query: str) -> bool:
     """Check whether a query contains bulk operations (COPY, LOAD, IMPORT)."""
@@ -273,8 +321,8 @@ class CypherSecurityAnalyzer:
       bulk_ops = self._find_bulk_operations(cleaned_query)
       return len(bulk_ops) > 0
     except Exception as e:
-      logger.warning(f"Bulk operation analysis failed: {e}")
-      return False
+      logger.warning(f"Bulk operation analysis failed, defaulting to bulk: {e}")
+      return True
 
   def is_admin_operation(self, query: str) -> bool:
     """Check whether a query contains administrative operations."""
@@ -317,10 +365,9 @@ class CypherSecurityAnalyzer:
     nothing legitimate quotes one. Fails closed.
     """
     try:
-      cleaned_query = self._clean_query(query)
-      for match in self.call_pattern.finditer(cleaned_query):
-        name = match.group(1)
-        if name == _IDENTIFIER_PLACEHOLDER:
+      tokens = self._code_tokens(self._clean_query(query))
+      for _, name in self._call_targets(tokens):
+        if _IDENTIFIER_PLACEHOLDER in name.split("."):
           return True
         if name.lower() in self.OPAQUE_STATEMENT_PROCEDURES:
           return True
@@ -332,12 +379,17 @@ class CypherSecurityAnalyzer:
   def references_catalog_label(self, query: str) -> bool:
     """Whether a pattern or label predicate names one of CATALOG_LABELS.
 
-    Quoted identifiers stay visible here: a backtick-quoted label is still
-    that label to the engine. Fails closed.
+    A label sits after ``:`` or, in an alternation, after ``|``. Quoted
+    identifiers stay visible here: a backtick-quoted label is still that
+    label to the engine. Fails closed.
     """
     try:
       cleaned = self._clean_query(query, keep_quoted_identifiers=True)
-      return self.catalog_label_pattern.search(cleaned) is not None
+      tokens = [match.group() for match in self._TOKEN_PATTERN.finditer(cleaned)]
+      return any(
+        tokens[i].lower() in self.CATALOG_LABELS and tokens[i - 1] in (":", "|")
+        for i in range(1, len(tokens))
+      )
     except Exception as e:
       logger.warning(f"Catalog-label analysis failed: {e}")
       return True
@@ -367,7 +419,10 @@ class CypherSecurityAnalyzer:
       if not guarded:
         return None
 
-      tokens = self._TOKEN_PATTERN.findall(self._clean_query(query))
+      tokens = [
+        match.group()
+        for match in self._TOKEN_PATTERN.finditer(self._clean_query(query))
+      ]
       guarded_labels = {label for labels in guarded.values() for label in labels}
       labels_by_variable = self._labels_by_variable(tokens, guarded_labels)
       self._carry_rebound_labels(tokens, labels_by_variable)
@@ -522,25 +577,78 @@ class CypherSecurityAnalyzer:
         )
         continue
 
+      # The engine skips separators that ``\s`` does not match (U+180E, a
+      # leading U+FEFF), so every separator and control character becomes a
+      # plain space before anything is matched.
+      if (ch < " " or ch > "~") and unicodedata.category(ch)[0] in "ZC":
+        ch = " "
+
       out.append(ch)
       i += 1
 
     return "".join(out)
 
+  def _code_tokens(self, cleaned_query: str) -> list[str]:
+    """Tokens of a cleaned query, split where the engine's lexer splits.
+
+    A name written straight after a number (``1SET``, ``1e9DELETE``) is two
+    tokens to the engine and is never written that way in an honest query, so
+    it is refused here: every caller fails closed on the error.
+    """
+    tokens: list[str] = []
+    for match in self._TOKEN_PATTERN.finditer(cleaned_query):
+      if match.lastgroup == "number":
+        following = cleaned_query[match.end() : match.end() + 1]
+        if following and self._NAME_PATTERN.match(following):
+          raise ValueError("A numeric literal runs into a name")
+      tokens.append(match.group())
+    return tokens
+
+  def _call_targets(self, tokens: list[str]) -> list[tuple[str, str]]:
+    """Each ``CALL`` in the tokens as ``(form, name)``.
+
+    ``form`` is ``procedure`` for ``CALL name(``, ``setting`` for
+    ``CALL name =``, and ``unknown`` for anything else, which callers treat
+    as a write. ``n.call`` is a property and is skipped.
+    """
+    targets: list[tuple[str, str]] = []
+    for i, token in enumerate(tokens):
+      if token.upper() != "CALL" or (i > 0 and tokens[i - 1] == "."):
+        continue
+      j = i + 1
+      parts: list[str] = []
+      while j < len(tokens) and self._NAME_PATTERN.fullmatch(tokens[j]):
+        parts.append(tokens[j])
+        j += 1
+        if j + 1 < len(tokens) and tokens[j] == ".":
+          j += 1
+        else:
+          break
+      name = ".".join(parts)
+      following = tokens[j] if j < len(tokens) else ""
+      if parts and following == "(":
+        targets.append(("procedure", name))
+      elif parts and following == "=":
+        targets.append(("setting", name))
+      else:
+        targets.append(("unknown", name or "?"))
+    return targets
+
+  @staticmethod
+  def _follows(tokens: list[str], first: set[str], second: set[str]) -> bool:
+    """Whether a token in ``first`` is directly followed by one in ``second``."""
+    return any(
+      tokens[i] in first and tokens[i + 1] in second for i in range(len(tokens) - 1)
+    )
+
   def _keyword_tokens(self, query: str, keywords: set[str]) -> set[str]:
     """Keywords present in the cleaned query as whole tokens.
 
-    Tokenized with ``_TOKEN_PATTERN``, which ends a numeric literal where the
-    engine's lexer does: ``1SET`` is the tokens ``1`` and ``SET``. A ``\\b``
-    regex would see one word there and miss the clause, while an identifier
-    such as ``x1set`` stays one token here and is not a keyword.
+    An identifier such as ``x1set`` stays one token and is not a keyword.
     """
-    found: set[str] = set()
-    for token in self._TOKEN_PATTERN.findall(query):
-      upper = token.upper()
-      if upper in keywords:
-        found.add(upper)
-    return found
+    return {
+      token.upper() for token in self._code_tokens(query) if token.upper() in keywords
+    }
 
   def _find_write_operations(self, query: str) -> set[str]:
     """Find write operation keywords in the cleaned query."""
@@ -554,36 +662,35 @@ class CypherSecurityAnalyzer:
   def _find_call_operations(self, query: str) -> set[str]:
     """Find `CALL` forms that must not be treated as reads.
 
-    A procedure outside ``READ_ONLY_PROCEDURES`` (fail closed), or any
-    ``CALL <name> = <value>`` (session state on a pooled connection). Returns
-    ``CALL:<name>`` / ``CALL_SET:<name>`` markers.
+    A procedure outside ``READ_ONLY_PROCEDURES`` (fail closed), any
+    ``CALL <name> = <value>`` (session state on a pooled connection), a
+    ``CALL`` in a form not recognised, and an engine table function applied
+    anywhere. Returns ``CALL:<name>`` / ``CALL_SET:<name>`` markers.
     """
     found: set[str] = set()
+    tokens = self._code_tokens(query)
 
-    for match in self.call_assignment_pattern.finditer(query):
-      found.add(f"CALL_SET:{match.group(1).lower()}")
+    for form, name in self._call_targets(tokens):
+      lowered = name.lower()
+      if form == "setting":
+        found.add(f"CALL_SET:{lowered}")
+      elif form == "unknown" or lowered not in self.READ_ONLY_PROCEDURES:
+        found.add(f"CALL:{lowered}")
 
-    for match in self.call_pattern.finditer(query):
-      name = match.group(1).lower()
-      if name not in self.READ_ONLY_PROCEDURES:
-        found.add(f"CALL:{name}")
+    for i in range(len(tokens) - 1):
+      lowered = tokens[i].lower()
+      if (
+        tokens[i + 1] == "("
+        and lowered in self.ENGINE_TABLE_FUNCTIONS
+        and lowered not in self.READ_ONLY_PROCEDURES
+      ):
+        found.add(f"CALL:{lowered}")
 
     return found
 
   def _find_read_operations(self, query: str) -> set[str]:
     """Find read operation keywords in the cleaned query."""
-    found_operations = set()
-
-    read_pattern = re.compile(
-      r"\b(" + "|".join(self.READ_KEYWORDS) + r")\b", re.IGNORECASE
-    )
-
-    matches = read_pattern.finditer(query)
-    for match in matches:
-      keyword = match.group(1).upper()
-      found_operations.add(keyword)
-
-    return found_operations
+    return self._keyword_tokens(query, self.READ_KEYWORDS)
 
   def _find_bulk_operations(self, query: str) -> set[str]:
     """Find bulk operation keywords in the cleaned query."""
@@ -591,66 +698,55 @@ class CypherSecurityAnalyzer:
 
   def _find_admin_operations(self, query: str) -> set[str]:
     """Find administrative operation keywords in the cleaned query."""
-    found_operations = self._keyword_tokens(query, self.ADMIN_KEYWORDS)
+    tokens = [token.upper() for token in self._code_tokens(query)]
+    found_operations = {token for token in tokens if token in self.ADMIN_KEYWORDS}
 
-    if re.search(r"\b(IMPORT|EXPORT)\s+DATABASE\b", query, re.IGNORECASE):
+    if self._follows(tokens, {"IMPORT", "EXPORT"}, {"DATABASE"}):
       found_operations.add("DATABASE_MIGRATION")
 
     # DETACH DATABASE, not DETACH DELETE
-    if re.search(r"\bDETACH\s+DATABASE\b", query, re.IGNORECASE):
+    if self._follows(tokens, {"DETACH"}, {"DATABASE"}):
       found_operations.add("DETACH_DATABASE")
 
     # Manual transactions would outlive the request on a pooled connection.
-    # Anchored at statement start so a property named `begin` still reads.
-    if self.transaction_control_pattern.search(query):
-      found_operations.add("TRANSACTION_CONTROL")
+    # Only where a statement can start, so a property named `begin` still reads.
+    for i, token in enumerate(tokens):
+      if token in self.TRANSACTION_CONTROL and (
+        i == 0 or tokens[i - 1] in self.STATEMENT_PREFIXES
+      ):
+        found_operations.add("TRANSACTION_CONTROL")
 
     return found_operations
 
   def _find_system_calls(self, query: str) -> set[str]:
     """Find system procedure calls in the cleaned query."""
-    found_calls = set()
-
-    matches = self.call_pattern.finditer(query)
-
-    for match in matches:
-      procedure_name = match.group(1).lower()
-      if procedure_name in self.SYSTEM_PROCEDURES:
-        found_calls.add(procedure_name)
-
-    return found_calls
+    return {
+      name.lower()
+      for form, name in self._call_targets(self._code_tokens(query))
+      if form == "procedure" and name.lower() in self.SYSTEM_PROCEDURES
+    }
 
   def _find_schema_ddl(self, query: str) -> set[str]:
-    """Find schema DDL keywords in the cleaned query."""
+    """Find schema DDL in the cleaned query."""
+    tokens = [token.upper() for token in self._code_tokens(query)]
     found_operations = set()
 
-    if re.search(r"\bCREATE\s+(NODE|REL)\s+TABLE\b", query, re.IGNORECASE):
-      found_operations.add("CREATE_TABLE")
+    # Covers the qualified forms and the unqualified `DROP TABLE <name>`.
+    if self._follows(tokens, {"CREATE", "DROP"}, self.DDL_OBJECTS):
+      found_operations.add("CATALOG_DDL")
 
-    if re.search(r"\bDROP\s+(NODE|REL)\s+TABLE\b", query, re.IGNORECASE):
-      found_operations.add("DROP_TABLE")
-
-    # The engine also accepts unqualified `DROP TABLE <name>`.
-    if re.search(r"\b(CREATE|DROP)\s+TABLE\b", query, re.IGNORECASE):
-      found_operations.add("TABLE_DDL")
-
-    if re.search(r"\b(CREATE|DROP)\s+INDEX\b", query, re.IGNORECASE):
-      found_operations.add("INDEX_DDL")
-    if re.search(r"\b(CREATE|DROP)\s+SEQUENCE\b", query, re.IGNORECASE):
-      found_operations.add("SEQUENCE_DDL")
-
-    if re.search(r"\bALTER\s+TABLE\b", query, re.IGNORECASE):
+    if self._follows(tokens, {"ALTER"}, {"TABLE"}):
       found_operations.add("ALTER_TABLE")
 
-    if re.search(r"\b(ADD|DROP|RENAME)\s+COLUMN\b", query, re.IGNORECASE):
+    if self._follows(tokens, {"ADD", "DROP", "RENAME"}, {"COLUMN"}):
       found_operations.add("MODIFY_COLUMN")
 
-    if re.search(r"\bRENAME\s+TABLE\b", query, re.IGNORECASE):
+    if self._follows(tokens, {"RENAME"}, {"TABLE"}):
       found_operations.add("RENAME_TABLE")
 
     # A catalog write the keyword set can't see (`comment` is a common
     # property name, so only the two-word form is matched).
-    if re.search(r"\bCOMMENT\s+ON\b", query, re.IGNORECASE):
+    if self._follows(tokens, {"COMMENT"}, {"ON"}):
       found_operations.add("COMMENT_ON")
 
     return found_operations

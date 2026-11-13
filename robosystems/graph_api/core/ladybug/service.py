@@ -228,6 +228,38 @@ def validate_cypher_query(cypher: str) -> None:
     )
 
 
+def execute_statement(
+  conn, cypher: str, parameters: dict | None, read_only_database: bool
+):
+  """Run one ad-hoc statement, a read inside a read-only transaction.
+
+  A writer's database opens read-write whatever the caller holds, so the
+  analyzer alone would decide whether a statement may write. A statement it
+  calls a read therefore runs in a transaction the engine itself holds
+  read-only: a write the analyzer missed is refused there. The result stays
+  readable after the transaction ends.
+  """
+  from robosystems.security.cypher_analyzer import is_write_operation
+
+  def run():
+    if parameters:
+      return conn.execute(cypher, parameters)
+    return conn.execute(cypher)
+
+  if read_only_database or is_write_operation(cypher):
+    return run()
+
+  conn.execute("BEGIN TRANSACTION READ ONLY")
+  try:
+    return run()
+  finally:
+    # An error inside the transaction has already ended it.
+    try:
+      conn.execute("COMMIT")
+    except Exception:
+      pass
+
+
 class LadybugService:
   """LadybugDB service with multi-database support."""
 
@@ -333,9 +365,9 @@ class LadybugService:
             query_timeout = TuningConfig.get_graph_query_timeout()
 
             def _execute_streaming():
-              if request.parameters:
-                return conn.execute(translated_cypher, request.parameters)
-              return conn.execute(translated_cypher)
+              return execute_statement(
+                conn, translated_cypher, request.parameters, self.read_only
+              )
 
             with ThreadPoolExecutor(max_workers=1) as executor:
               future = executor.submit(_execute_streaming)
@@ -576,10 +608,9 @@ class LadybugService:
           # A worker thread, not a signal-based alarm: signals only fire on the
           # main thread.
           def execute_query_with_params():
-            if request.parameters:
-              return conn.execute(translated_cypher, request.parameters)
-            else:
-              return conn.execute(translated_cypher)
+            return execute_statement(
+              conn, translated_cypher, request.parameters, self.read_only
+            )
 
           try:
             with ThreadPoolExecutor(max_workers=1) as executor:
@@ -637,6 +668,16 @@ class LadybugService:
               raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Catalog error: {error_msg}",
+              )
+            elif "read-only transaction" in error_msg:
+              logger.warning(
+                f"Write refused in a read for {validated_graph_id}: {error_msg}"
+              )
+              span.set_attribute("error", True)
+              span.set_attribute("error.type", "ReadOnlyTransaction")
+              raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This statement writes and was submitted as a read.",
               )
             else:
               logger.error(
