@@ -319,4 +319,67 @@ def test_a_vector_search_over_anything_else_is_refused(vector, parameters):
 
 
 def test_a_statement_with_no_vector_search_is_not_looked_at():
-  assert not has_unsafe_vector_query("MATCH (t:T) RETURN t.query_vector_index", None)
+  assert not has_unsafe_vector_query("MATCH (t:T) RETURN t.vector, t.idx", None)
+
+
+@pytest.mark.parametrize(
+  "statement",
+  [
+    "MATCH (t:T) RETURN t.query_vector_index",
+    "RETURN 'query_vector_index'",
+    SEARCH.format(vector="[0.1]") + " // query_vector_index",
+    SEARCH.format(vector="[0.1]").replace("query_vector_index", "`QUERY_VECTOR_INDEX`"),
+    SEARCH.format(vector="[0.1]") + " UNION " + SEARCH.format(vector="NULL"),
+    "CALL query_vector_index /* */ ('T', 'idx', NULL, 3) RETURN node.id",
+  ],
+)
+def test_the_name_anywhere_but_in_a_checked_call_is_refused(statement):
+  """The count of names in the text is the count of calls that were checked."""
+  assert has_unsafe_vector_query(statement, None)
+
+
+def test_a_bound_vector_that_is_not_finite_is_refused():
+  for value in (float("nan"), float("inf")):
+    assert has_unsafe_vector_query(
+      SEARCH.format(vector="$embedding"), {"embedding": [0.1, value]}
+    )
+
+
+LOOKALIKES = [
+  "QUERY_VECTOR_\u0131NDEX",
+  "QUERY_VECTOR_\u0130NDEX",
+  "query_vector_\\u0069ndex",
+  "`query_vector_\\u0069ndex`",
+  "QUERY\u00adVECTOR_INDEX",
+  "\uff31UERY_VECTOR_INDEX",
+  "QUERY_VECTOR\u2010INDEX",
+  "vector.QUERY_VECTOR_INDEX",
+]
+
+
+def test_the_engine_knows_the_search_by_its_plain_name_only(tmp_path):
+  """The refusal above counts the name in the text, so no other spelling may
+  reach the function. An engine upgrade that adds one fails here."""
+  database = lb.Database(str(tmp_path / "v.lbdb"))
+  connection = lb.Connection(database)
+  try:
+    connection.execute("LOAD EXTENSION vector")
+  except Exception:
+    pytest.skip("the vector extension is not installed here")
+  connection.execute("CREATE NODE TABLE Doc(id INT64, emb FLOAT[3], PRIMARY KEY(id))")
+  connection.execute("CREATE (:Doc {id: 1, emb: [0.1, 0.2, 0.3]})")
+  connection.execute("CALL CREATE_VECTOR_INDEX('Doc', 'doc_idx', 'emb')")
+  search = "CALL {name}('Doc', 'doc_idx', [0.1, 0.2, 0.3], 1) RETURN node.id"
+
+  result = connection.execute(search.format(name="QUERY_VECTOR_INDEX"))
+  assert result.get_next() == [1]
+  functions = connection.execute("CALL show_functions() RETURN *")
+  searches = set()
+  while functions.has_next():
+    row = functions.get_next()
+    if "TABLE FUNCTION" in str(row[1]) and "QUERY" in str(row[0]).upper():
+      searches.add(str(row[0]).upper())
+  assert searches == {"QUERY_VECTOR_INDEX"}
+  for name in LOOKALIKES:
+    with pytest.raises(RuntimeError):
+      connection.execute(search.format(name=name))
