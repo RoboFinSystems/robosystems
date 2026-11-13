@@ -39,7 +39,23 @@ class EnvValidator:
         f"Only 'ladybug' is supported."
       )
 
-    if env_config.ENVIRONMENT in ("prod", "staging"):
+    from robosystems.config.secrets_manager import BASE_SECRET_SCOPE, secrets_scope
+
+    scope = secrets_scope()
+    holds_base_secret = scope is None or BASE_SECRET_SCOPE in scope
+
+    if env_config.ENVIRONMENT in ("prod", "staging") and not holds_base_secret:
+      # The Graph API: no database, no sessions, no stored credentials.
+      for var_name, description in {
+        "GRAPH_API_KEY": "Graph API key",
+        "VALKEY_URL": "Valkey/Redis base URL",
+        "AWS_REGION": "AWS region",
+      }.items():
+        if not getattr(env_config, var_name, None):
+          errors.append(
+            f"{var_name}: {description} is required in {env_config.ENVIRONMENT}"
+          )
+    elif env_config.ENVIRONMENT in ("prod", "staging"):
       required_prod_vars = {
         "DATABASE_URL": "PostgreSQL connection string",
         "JWT_SECRET_KEY": "JWT signing key (must not be default)",

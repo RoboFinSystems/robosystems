@@ -175,13 +175,7 @@ manager.create_table(TableCreateRequest(
 ))
 
 manager.delete_file_data("kg123", "Entity", "3f2a…")   # retract one file's rows
-manager.refresh_table("kg123", "Entity")               # rebuild from the registry
 ```
-
-`refresh_table` rebuilds the table from the *current* set of completed files in
-the platform PostgreSQL registry (`GraphTable` / `GraphFile`) — the authority on
-which files belong to a table, not the S3 listing. It 404s if the table is not
-registered and 400s if the registry has no completed files for it.
 
 On the materialize side, `TableMaterializationRequest(incremental=True)` COPYs
 only rows not already present, by anti-joining against a keyset snapshot of

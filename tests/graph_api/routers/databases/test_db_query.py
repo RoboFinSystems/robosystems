@@ -464,8 +464,8 @@ class TestDatabaseQueryRouter:
 def test_execute_query_handler_is_sync_for_threadpool_offload():
   """The handler must be a plain `def`, not `async def`.
 
-  Its body is entirely synchronous (the engine call, plus a Postgres read in
-  `_is_graph_rebuilding`). As `async def` it ran on the single event loop, so a
+  Its body is entirely synchronous (the engine call). As `async def` it ran on
+  the single event loop, so a
   long query against the shared `sec` repo held every caller on the instance.
   A plain `def` is run on Starlette's threadpool instead.
   """

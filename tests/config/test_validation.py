@@ -195,6 +195,38 @@ class TestEnvValidator:
       with pytest.raises(ConfigValidationError):
         EnvValidator.validate_required_vars(env_config)
 
+  def test_scoped_process_is_held_to_what_it_uses(self, monkeypatch):
+    """The Graph API runs without the application's secrets and still boots."""
+    monkeypatch.setenv("SECRETS_SCOPE", "graph-api,valkey")
+    monkeypatch.delenv("GRAPH_API_URL", raising=False)
+    env_config = MockEnvConfig()
+    env_config.ENVIRONMENT = "prod"
+    env_config.GRAPH_API_KEY = "test-api-key"
+    env_config.DATABASE_URL = ""
+    env_config.JWT_SECRET_KEY = ""
+    env_config.CONNECTION_CREDENTIALS_KEY = ""
+
+    EnvValidator.validate_required_vars(env_config)
+
+  def test_scoped_process_still_needs_its_own_key(self, monkeypatch):
+    monkeypatch.setenv("SECRETS_SCOPE", "graph-api,valkey")
+    env_config = MockEnvConfig()
+    env_config.ENVIRONMENT = "prod"
+    env_config.GRAPH_API_KEY = None
+
+    with pytest.raises(ConfigValidationError):
+      EnvValidator.validate_required_vars(env_config)
+
+  def test_unscoped_process_still_needs_the_signing_key(self, monkeypatch):
+    monkeypatch.delenv("SECRETS_SCOPE", raising=False)
+    env_config = MockEnvConfig()
+    env_config.ENVIRONMENT = "prod"
+    env_config.GRAPH_API_KEY = "test-api-key"
+    env_config.JWT_SECRET_KEY = ""
+
+    with pytest.raises(ConfigValidationError):
+      EnvValidator.validate_required_vars(env_config)
+
   def test_oidc_enabled_without_connection_fails(self):
     """An enabled OIDC surface with a missing connection must fail at boot."""
     env_config = MockEnvConfig()

@@ -34,6 +34,14 @@ X-Graph-API-Key: <key>
 Secrets Manager, are rotated on a schedule, and are compared in constant time.
 The service listens only inside the VPC — there is no public route to port 8001.
 
+The process holds no application credentials. The entrypoint starts it with
+`SECRETS_SCOPE=graph-api,valkey`, so its own key and the Valkey token are the
+only secrets it reads; every other secret resolves empty without a call to
+Secrets Manager. It opens no connection to the platform database. What it
+needs beyond that arrives with the request that needs it: the `postgres_scan`
+connection string inside a staging statement, and the R2 endpoint and
+credentials on an `r2_download` backup.
+
 ## Endpoints
 
 ### Cluster
@@ -177,6 +185,7 @@ LBUG_DATABASE_PATH=/data/lbug-dbs     # LadybugDB files
 DUCKDB_STAGING_PATH=./data/staging    # DuckDB staging files
 LBUG_ACCESS_PATTERN=api_auto          # api_auto | api_writer | direct_file
 GRAPH_API_KEY=                        # cluster API key
+SECRETS_SCOPE=graph-api,valkey        # the secrets this process may read (set by the entrypoint)
 GRAPH_QUERY_TIMEOUT=30
 ```
 
@@ -279,8 +288,11 @@ Check `GET /metrics` and `GET /databases/{graph_id}/storage`. Slow the caller;
 raising thresholds trades a rejected request for an OOM kill that takes every
 database on the instance with it.
 
-**503 with `"status": "rebuilding"`.** A blue-green materialization is in flight
-for that graph. Queries resume when the swap completes.
+**503 with `"status": "rebuilding"`.** A rebuild is in flight for that graph.
+The refusal comes from the caller's `GraphClient`, which reads the flag from the
+platform database before sending a query (`middleware/graph/rebuild_status.py`);
+the Graph API itself holds no database connection. Queries resume when the
+rebuild clears the flag. A raw HTTP call to the instance is not checked.
 
 **501 on a `/tables` route.** You reached a replica. Staging is writer-only.
 

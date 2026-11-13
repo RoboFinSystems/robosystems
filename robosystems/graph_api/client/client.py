@@ -316,6 +316,33 @@ class GraphClient(BaseGraphClient):
     response = await self._request("GET", "/health")
     return response.json()
 
+  async def _refuse_while_rebuilding(self, graph_id: str) -> None:
+    """Raise the retryable 503 a rebuilding graph answers queries with.
+
+    A shared replica serves its own copy, untouched by a rebuild of the
+    master under the same graph id, so reads routed there go through.
+    """
+    if getattr(self, "_route_target", None) == "shared_replica":
+      return
+
+    from robosystems.middleware.graph.rebuild_status import is_graph_rebuilding
+
+    if not await is_graph_rebuilding(graph_id):
+      return
+    logger.warning(f"Query refused for {graph_id}: graph is rebuilding")
+    raise GraphTransientError(
+      "Graph database is being rebuilt",
+      503,
+      {
+        "detail": {
+          "error": "Graph temporarily unavailable",
+          "reason": "Graph database is being rebuilt",
+          "status": "rebuilding",
+          "retry_after": 30,
+        }
+      },
+    )
+
   async def query(
     self,
     cypher: str,
@@ -330,6 +357,8 @@ class GraphClient(BaseGraphClient):
     server's NDJSON chunks. A malformed or empty non-streaming body degrades
     to an empty result rather than raising.
     """
+    await self._refuse_while_rebuilding(graph_id)
+
     payload: dict[str, Any] = {
       "cypher": cypher,
       "database": graph_id,
@@ -1217,13 +1246,16 @@ class GraphClient(BaseGraphClient):
     s3_destination: dict[str, str] | None = None,
     checkpoint: bool = True,
     vacuum: bool = False,
+    r2_credentials: dict[str, str] | None = None,
   ) -> dict[str, Any]:
     """Start a backup task and return its ``task_id`` and ``monitor_url``.
 
     ``backup_format`` only supports ``full_dump``. ``backup_type`` is
     ``standard``, ``replica``, ``duckdb_staging`` or ``r2_download``; every
-    non-standard type requires ``s3_destination``. ``vacuum`` compacts before
-    the dump and applies to DuckDB only.
+    non-standard type requires ``s3_destination``. ``r2_download`` also needs
+    ``r2_credentials`` (``endpoint_url``, ``access_key_id``,
+    ``secret_access_key``): the instance holds none. ``vacuum`` compacts
+    before the dump and applies to DuckDB only.
     """
     payload = {
       "backup_format": backup_format,
@@ -1234,6 +1266,8 @@ class GraphClient(BaseGraphClient):
     }
     if s3_destination:
       payload["s3_destination"] = s3_destination
+    if r2_credentials:
+      payload["r2_credentials"] = r2_credentials
 
     response = await self._post(
       f"/databases/{graph_id}/backup",
@@ -1253,6 +1287,7 @@ class GraphClient(BaseGraphClient):
     s3_destination: dict[str, str] | None = None,
     checkpoint: bool = True,
     vacuum: bool = False,
+    r2_credentials: dict[str, str] | None = None,
   ) -> dict[str, Any]:
     """Create a backup and block until it finishes, monitoring via SSE.
 
@@ -1271,6 +1306,7 @@ class GraphClient(BaseGraphClient):
         s3_destination=s3_destination,
         checkpoint=checkpoint,
         vacuum=vacuum,
+        r2_credentials=r2_credentials,
       )
 
       task_id = start_response["task_id"]

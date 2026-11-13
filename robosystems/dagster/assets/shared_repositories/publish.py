@@ -364,6 +364,15 @@ def _run_r2_backup(graph_id: str, bucket: str, r2_key: str) -> dict[str, Any]:
   """Run the R2 backup via Graph Client Factory."""
   from robosystems.graph_api.client.factory import get_graph_client_for_sec_ingestion
 
+  r2_config = env.get_r2_config()
+  if not r2_config:
+    raise RuntimeError("R2 not configured — set R2_ENDPOINT_URL and R2 credentials")
+  r2_credentials = {
+    "endpoint_url": r2_config["endpoint_url"],
+    "access_key_id": r2_config["aws_access_key_id"],
+    "secret_access_key": r2_config["aws_secret_access_key"],
+  }
+
   async def _execute():
     client = await get_graph_client_for_sec_ingestion()
     try:
@@ -371,6 +380,7 @@ def _run_r2_backup(graph_id: str, bucket: str, r2_key: str) -> dict[str, Any]:
         graph_id=graph_id,
         backup_type="r2_download",
         s3_destination={"bucket": bucket, "key": r2_key},
+        r2_credentials=r2_credentials,
         compression=True,
         checkpoint=True,
         timeout=TASK_TIME_LIMIT,
