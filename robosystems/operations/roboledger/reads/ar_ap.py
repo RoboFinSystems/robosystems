@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Literal
 
-from sqlalchemy import case, exists, func, or_, select, union_all
+from sqlalchemy import and_, case, exists, func, or_, select, union_all
 from sqlalchemy.orm import Session, aliased
 
 from robosystems.models.api.extensions.ar_ap import (
@@ -65,16 +65,31 @@ _AP_ORIGINATING_TYPES: tuple[str, ...] = ("bill_received",)
 
 _OPEN_BALANCE_STATUSES: tuple[str, ...] = ("committed", "fulfilled")
 
+# A line waiting to be posted that already names what it settles.
+_CLAIMING_STATUSES: tuple[str, ...] = ("captured", "classified")
 
-def _settled(bound: datetime | None = None, *, excluding: str | None = None):
+
+def _settled(
+  bound: datetime | None = None,
+  *,
+  excluding: str | None = None,
+  counting_claims: bool = False,
+):
   """``(obligation_id, settled)``: what committed payments, dated before
   ``bound`` when one is given, have applied to each obligation. A payment with
   allocation rows settles through them; one without settles the obligation its
   ``discharges_event_id`` names, at its full magnitude. ``excluding`` leaves
-  one payment out, so its own settlement does not hide what it may settle."""
+  one payment out, so its own settlement does not hide what it may settle.
+  ``counting_claims`` adds the waiting lines that already name the obligation,
+  whatever their date: what they will settle is not on offer to another."""
   payments = Event.__table__.alias("payments_e")
   allocations = EventDischarge.__table__
-  dated = (payments.c.occurred_at < bound,) if bound is not None else ()
+  counted = payments.c.status.in_(_OPEN_BALANCE_STATUSES)
+  if bound is not None:
+    counted = and_(counted, payments.c.occurred_at < bound)
+  if counting_claims:
+    counted = or_(counted, payments.c.status.in_(_CLAIMING_STATUSES))
+  dated = (counted,)
   if excluding is not None:
     dated = (*dated, payments.c.id != excluding)
   allocated = (
@@ -85,14 +100,13 @@ def _settled(bound: datetime | None = None, *, excluding: str | None = None):
     .select_from(
       allocations.join(payments, payments.c.id == allocations.c.payment_event_id)
     )
-    .where(payments.c.status.in_(_OPEN_BALANCE_STATUSES), *dated)
+    .where(*dated)
   )
   linked = select(
     payments.c.discharges_event_id.label("obligation_id"),
     func.abs(payments.c.amount).label("amount"),
   ).where(
     payments.c.discharges_event_id.is_not(None),
-    payments.c.status.in_(_OPEN_BALANCE_STATUSES),
     ~exists().where(allocations.c.payment_event_id == payments.c.id),
     *dated,
   )
@@ -322,15 +336,24 @@ def _open_items(
   entity_ids: list[str],
   agent_id: str | None = None,
   excluding_payment: str | None = None,
+  unsettled_now: bool = False,
 ) -> list[OpenItem]:
   """Every obligation of ``kind`` in ``entity_ids`` issued on or before
   ``as_of`` with something left open at ``as_of``: a settlement dated after it
-  has not happened yet. Oldest first."""
+  has not happened yet. Oldest first.
+
+  ``unsettled_now`` asks the other question, the one a payment looking for
+  its item asks: what nothing has settled or claimed yet, whatever the dates.
+  A bill a later-dated line has already paid is not open to an earlier one."""
   if not entity_ids:
     return []
   originating = Event.__table__
   bound = _end_of(as_of)
-  by_obligation = _settled(bound, excluding=excluding_payment)
+  by_obligation = _settled(
+    None if unsettled_now else bound,
+    excluding=excluding_payment,
+    counting_claims=unsettled_now,
+  )
   original = func.abs(originating.c.amount)
   settled = func.coalesce(by_obligation.c.settled, 0)
   stmt = (
@@ -685,7 +708,9 @@ def find_settlement_match(
 ) -> SettlementMatch | None:
   """The counterparty's open item whose open amount is exactly the line's:
   a bill for money out, an invoice for money in. The oldest when several
-  match. None without exactly one control account to clear it through."""
+  match. An item another waiting line already names is that line's, so two
+  lines are never offered one item. None without exactly one control account
+  to clear it through."""
   kind: OpenItemKind = "payables" if amount < 0 else "receivables"
   exact = [
     item
@@ -696,6 +721,7 @@ def find_settlement_match(
       entity_ids=[entity_id],
       agent_id=agent_id,
       excluding_payment=excluding_payment,
+      unsettled_now=True,
     )
     if item.open_cents == abs(amount)
   ]
@@ -706,6 +732,31 @@ def find_settlement_match(
     return None
   item = min(exact, key=lambda i: (i.due_date, i.occurred_on))
   return SettlementMatch(item, str(accounts[0].id), str(accounts[0].name), kind)
+
+
+def item_is_unsettled_at(
+  session: Session,
+  *,
+  obligation_id: str,
+  entity_id: str,
+  amount: int,
+  issued_on: date,
+  excluding_payment: str,
+) -> bool:
+  """Whether ``obligation_id`` still has exactly ``amount`` that no posted
+  payment has settled and no other waiting line has claimed."""
+  kind: OpenItemKind = "payables" if amount < 0 else "receivables"
+  return any(
+    item.event_id == obligation_id and item.open_cents == abs(amount)
+    for item in _open_items(
+      session,
+      kind,
+      as_of=issued_on,
+      entity_ids=[entity_id],
+      excluding_payment=excluding_payment,
+      unsettled_now=True,
+    )
+  )
 
 
 def list_discharge_candidates(

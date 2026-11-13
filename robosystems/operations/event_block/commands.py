@@ -29,10 +29,12 @@ from robosystems.models.extensions.roboledger.dimension_junctions import (
 )
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
+from robosystems.models.extensions.roboledger.event_discharge import EventDischarge
 from robosystems.models.extensions.roboledger.transaction import Transaction
 from robosystems.operations.locking import (
   RowLockedError,
   bounded_lock_wait,
+  lock_by_id,
   ordered_lock_column,
 )
 from robosystems.operations.roboledger.commands._guards import (
@@ -648,17 +650,70 @@ def _settle_the_suggested_item(session: Session, event: Event) -> None:
     and metadata.get(SUGGESTION_SOURCE) == SOURCE_OPEN_ITEM
     and not event.discharges_event_id
   ):
+    _refuse_an_item_no_longer_open(session, event, str(obligation_id))
     discharges.set_settlement_link(session, event, str(obligation_id))
+    # The item is this line's now: the counterparty's other waiting lines
+    # must not go on being offered it.
+    _resuggest_after_settlement(session, event)
+
+
+def _refuse_an_item_no_longer_open(
+  session: Session, event: Event, obligation_id: str
+) -> None:
+  """A suggestion is as old as the last time it was worked out. The item it
+  names may since have been paid, or taken by another waiting line; settling
+  it again would pay one bill twice and book the second cost nowhere. The
+  item's row is locked first, so of two lines taking it at once the second
+  waits and then sees the first's claim."""
+  from robosystems.operations.roboledger.reads.ar_ap import item_is_unsettled_at
+
+  item = lock_by_id(
+    session, Event, obligation_id, "the open item this line settles", key_share=True
+  )
+  issued_at = item.occurred_at if item is not None else None
+  if (
+    issued_at is None
+    or not event.amount
+    or not item_is_unsettled_at(
+      session,
+      obligation_id=obligation_id,
+      entity_id=str(event.entity_id),
+      amount=event.amount,
+      issued_on=issued_at.date(),
+      excluding_payment=str(event.id),
+    )
+  ):
+    raise HandlerMetadataValidationError(
+      f"Event {event.id}: the open item this line was suggested to settle is no "
+      "longer open at this amount. Classify the line to its own account, or "
+      "settle another item with discharges_event_id."
+    )
+
+
+def _took_the_suggested_item(event: Event) -> bool:
+  from robosystems.operations.roboledger.classification import (
+    SOURCE_OPEN_ITEM,
+    SUGGESTED_SETTLES,
+    SUGGESTION_SOURCE,
+  )
+
+  metadata = event.metadata_ or {}
+  return (
+    bool(event.discharges_event_id)
+    and metadata.get(SUGGESTION_SOURCE) == SOURCE_OPEN_ITEM
+    and event.discharges_event_id == metadata.get(SUGGESTED_SETTLES)
+  )
 
 
 # Says a line suggested as an open item's settlement is a separate purchase.
 NOT_A_SETTLEMENT = "not_a_settlement"
 
 
-def _refuse_overlooking_the_open_item(event: Event, patch: dict) -> None:
+def _refuse_overlooking_the_open_item(session: Session, event: Event) -> None:
   """A line suggested as the settlement of an open bill or invoice is not
   classified to another account unless the caller says it settles nothing:
-  that would leave the item open and count it a second time."""
+  that would leave the item open and count it a second time. Saying so on a
+  line that had taken the suggestion gives the item back."""
   from robosystems.operations.roboledger.classification import (
     SOURCE_OPEN_ITEM,
     SUGGESTED_ELEMENT_ID,
@@ -667,21 +722,32 @@ def _refuse_overlooking_the_open_item(event: Event, patch: dict) -> None:
     SUGGESTION_SOURCE,
   )
 
-  chosen = {patch.get("classified_element_id")} | {
+  # The line's account after the patch, not the patch's: taking the
+  # suggestion on a line already classified elsewhere changes no account.
+  metadata = event.metadata_ or {}
+  chosen = {metadata.get("classified_element_id")} | {
     allocation.get("element_id")
-    for allocation in patch.get("classified_allocations") or []
+    for allocation in metadata.get("classified_allocations") or []
     if isinstance(allocation, dict)
   }
   chosen.discard(None)
-  metadata = event.metadata_ or {}
+  suggested_item = metadata.get(SUGGESTED_SETTLES)
   if (
     not chosen
     or metadata.get(SUGGESTION_SOURCE) != SOURCE_OPEN_ITEM
-    or not metadata.get(SUGGESTED_SETTLES)
+    or not suggested_item
     or metadata.get(SUGGESTED_ELEMENT_ID) in chosen
-    or metadata.get(NOT_A_SETTLEMENT) is True
-    or event.discharges_event_id
   ):
+    return
+  # A link to some other item is the caller's own settlement, made by hand.
+  took_the_suggestion = event.discharges_event_id == suggested_item
+  if event.discharges_event_id and not took_the_suggestion:
+    return
+  if metadata.get(NOT_A_SETTLEMENT) is True:
+    # A posted line's entry has already cleared the item: its link stands.
+    if took_the_suggestion and not _has_linked_entries(session, str(event.id)):
+      discharges.set_settlement_link(session, event, "")
+      _resuggest_counterparty_lines(session, event)
     return
   basis = metadata.get(SUGGESTION_BASIS) or "This line matches an open item."
   raise HandlerMetadataValidationError(
@@ -695,16 +761,19 @@ def _refuse_overlooking_the_open_item(event: Event, patch: dict) -> None:
 def _resuggest_after_settlement(session: Session, event: Event) -> None:
   """A committed line that settled an item has used it up, so the
   counterparty's other waiting lines must not go on being offered it."""
+  if event.discharges_event_id:
+    _resuggest_counterparty_lines(session, event)
+
+
+def _resuggest_counterparty_lines(session: Session, event: Event) -> None:
+  """What ``event`` settles has changed, so what is on offer to its
+  counterparty's other waiting lines has too."""
   from robosystems.operations.roboledger.classification import (
     LEARNED_EVENT_TYPES,
     resuggest_open_lines,
   )
 
-  if (
-    event.event_type in LEARNED_EVENT_TYPES
-    and event.agent_id
-    and event.discharges_event_id
-  ):
+  if event.event_type in LEARNED_EVENT_TYPES and event.agent_id:
     session.flush()
     resuggest_open_lines(session, str(event.agent_id), str(event.entity_id))
 
@@ -1128,8 +1197,24 @@ def update_event_block(
   before_patch = dict(event.metadata_ or {})
   if body.metadata_patch:
     _validate_routed_connection(body.metadata_patch, graph_id)
+    if body.metadata_patch.get("accept_suggestion") is True and _has_linked_entries(
+      session, str(event.id)
+    ):
+      raise HandlerMetadataValidationError(
+        f"Event {event.id} is posted: its entry already says where it went, so "
+        "a suggestion can no longer be taken on it."
+      )
     merged = dict(event.metadata_ or {})
     merged.update(body.metadata_patch)
+    # Taking the suggestion and calling the line a separate purchase are two
+    # answers to one question: the later one replaces the earlier.
+    if body.metadata_patch.get("accept_suggestion") is True and not (
+      {"classified_element_id", "classified_allocations"} & body.metadata_patch.keys()
+    ):
+      for key in ("classified_element_id", "classified_allocations", NOT_A_SETTLEMENT):
+        merged.pop(key, None)
+    elif body.metadata_patch.get(NOT_A_SETTLEMENT) is True:
+      merged.pop("accept_suggestion", None)
     event.metadata_ = merged
     if "publish_to_source" in body.metadata_patch:
       from robosystems.operations.roboledger.commands.reconciling_items import (
@@ -1147,6 +1232,15 @@ def update_event_block(
   if body.discharge_allocations is not None:
     discharges.allocate(session, event, body.discharge_allocations, created_by)
 
+  # What this line settles changed, or it was withdrawn while naming an
+  # item: what is on offer to its counterparty's other waiting lines did too.
+  if (
+    body.discharges_event_id is not None
+    or body.discharge_allocations is not None
+    or (body.transition_to in _RETRACTED_STATUSES and event.discharges_event_id)
+  ):
+    _resuggest_counterparty_lines(session, event)
+
   if (
     body.discharges_event_id is None
     and body.discharge_allocations is None
@@ -1155,7 +1249,7 @@ def update_event_block(
     _settle_the_suggested_item(session, event)
 
   if body.metadata_patch and body.discharge_allocations is None:
-    _refuse_overlooking_the_open_item(event, body.metadata_patch)
+    _refuse_overlooking_the_open_item(session, event)
 
   if body.document_id is not None:
     # Checked before the lock; an empty string detaches the document.
@@ -1200,6 +1294,21 @@ def update_event_block(
       restamp_retagged_months(
         session, retag_dates, entity_id=str(event.entity_id), actor_id=created_by
       )
+
+  # Allocation rows are the caller's own statement of what the line settles,
+  # and may apply part of it to an item partly paid already.
+  if (
+    fire_handler
+    and _took_the_suggested_item(event)
+    and not session.execute(
+      select(EventDischarge.payment_event_id)
+      .where(EventDischarge.payment_event_id == event.id)
+      .limit(1)
+    ).first()
+  ):
+    # Linked on a suggestion, perhaps long ago: posting is the last moment to
+    # find the item paid or claimed by another line since.
+    _refuse_an_item_no_longer_open(session, event, str(event.discharges_event_id))
 
   if fire_handler:
     # After the metadata patch so the handler sees the final shape.

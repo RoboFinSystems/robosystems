@@ -569,35 +569,52 @@ def test_a_bill_one_line_has_settled_is_no_longer_offered_to_the_next(payable):
   assert "suggested_discharges_event_id" not in second.metadata_
 
 
+def _judge(payable, event, suggested: dict, **patched) -> None:
+  """The guard reads the line as the patch leaves it."""
+  event.metadata_ = {**suggested, **patched}
+  _refuse_overlooking_the_open_item(payable.session, event)
+
+
 def test_a_suggested_settlement_is_not_classified_to_another_account(payable):
   _open_bill(payable)
   event = _captured_through_the_api(payable)
+  suggested = dict(event.metadata_)
 
   with pytest.raises(HandlerMetadataValidationError, match="not_a_settlement"):
-    _refuse_overlooking_the_open_item(
-      event, {"classified_element_id": payable.software}
-    )
+    _judge(payable, event, suggested, classified_element_id=payable.software)
   with pytest.raises(HandlerMetadataValidationError, match="open bill of"):
-    _refuse_overlooking_the_open_item(
+    _judge(
+      payable,
       event,
-      {"classified_allocations": [{"element_id": payable.software, "amount": 4_500}]},
+      suggested,
+      classified_allocations=[{"element_id": payable.software, "amount": 4_500}],
     )
 
 
 def test_the_suggested_account_a_stated_exception_or_a_link_is_let_through(payable):
   bill = _open_bill(payable)
   event = _captured_through_the_api(payable)
+  suggested = dict(event.metadata_)
 
-  _refuse_overlooking_the_open_item(event, {"accept_suggestion": True})
-  _refuse_overlooking_the_open_item(event, {"basis": "a memo"})
-  _refuse_overlooking_the_open_item(event, {"classified_element_id": payable.payables})
+  _judge(payable, event, suggested, accept_suggestion=True)
+  _judge(payable, event, suggested, basis="a memo")
+  _judge(payable, event, suggested, classified_element_id=payable.payables)
+  _judge(
+    payable,
+    event,
+    suggested,
+    classified_element_id=payable.software,
+    not_a_settlement=True,
+  )
 
-  event.metadata_ = {**event.metadata_, "not_a_settlement": True}
-  _refuse_overlooking_the_open_item(event, {"classified_element_id": payable.software})
+  # A link the caller made to some other item is their own settlement.
+  event.discharges_event_id = "evt_another_item"
+  _judge(payable, event, suggested, classified_element_id=payable.software)
 
-  event.metadata_ = {**event.metadata_, "not_a_settlement": False}
+  # The suggested item's own link is not: the account still has to be its.
   event.discharges_event_id = bill.id
-  _refuse_overlooking_the_open_item(event, {"classified_element_id": payable.software})
+  with pytest.raises(HandlerMetadataValidationError, match="not_a_settlement"):
+    _judge(payable, event, suggested, classified_element_id=payable.software)
 
 
 def test_a_line_with_a_learned_suggestion_takes_any_account(payable):
@@ -606,7 +623,7 @@ def test_a_line_with_a_learned_suggestion_takes_any_account(payable):
   )
   event = _captured_through_the_api(payable)
 
-  _refuse_overlooking_the_open_item(event, {"classified_element_id": payable.software})
+  _judge(payable, event, dict(event.metadata_), classified_element_id=payable.software)
 
 
 def test_a_line_far_larger_than_the_counterpartys_posted_ones_says_so(feed):
