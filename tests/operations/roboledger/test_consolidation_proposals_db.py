@@ -2890,3 +2890,98 @@ def test_a_member_leaves_only_closed_unfed_and_agreed(group):
 def test_money_reads_in_dollars() -> None:
   assert engine._money(71700) == "$717.00"
   assert engine._money(-123456) == "-$1,234.56"
+
+
+def _post_the(kind: str) -> str:
+  with extensions_session(GRAPH) as session:
+    entry_id = session.execute(
+      text("SELECT id FROM entries WHERE adjustment_kind = :kind"), {"kind": kind}
+    ).scalar_one()
+    session.execute(
+      text("UPDATE entries SET status = 'posted' WHERE id = :id"), {"id": entry_id}
+    )
+  return str(entry_id)
+
+
+def test_a_reversed_acquisition_can_be_recorded_again(group):
+  """The refusal says to reverse the posted entry first; having done so, the
+  reversal and the entry it undid no longer stand in the way."""
+  _buy_the_member(group)
+  _acquire(consideration=900_000)
+  entry_id = _post_the("acquisition")
+  with extensions_session(GRAPH) as session:
+    reverse_journal_entry(
+      session, ReverseJournalEntryRequest(entry_id=entry_id, posting_date=JAN_1), "test"
+    )
+    session.commit()
+
+  assert _acquire(consideration=950_000).consideration == 950_000
+
+
+def test_an_ownership_change_measured_before_the_prior_month_landed_is_held(group):
+  """Recorded while January still had a draft, the change priced the member's
+  results without it. Once January lands, February is not ready to close."""
+  from robosystems.models.extensions.roboledger import Entry, LineItem
+
+  _january_posted(group)
+  _buy_ten_percent(group)
+  with extensions_session(GRAPH) as session:
+    late = Entry(
+      entity_id=MEMBER,
+      type="standard",
+      status="draft",
+      posting_date=JAN_31,
+      created_by="test",
+    )
+    session.add(late)
+    session.flush()
+    for order, (code, amount) in enumerate([("cash", 40_000), ("sales", -40_000)], 1):
+      session.add(
+        LineItem(
+          entry_id=late.id,
+          element_id=group["accounts"][(MEMBER, code)],
+          debit_amount=max(amount, 0),
+          credit_amount=max(-amount, 0),
+          line_order=order,
+        )
+      )
+    late_id = str(late.id)
+  early = _change()
+  assert preview("2026-02").incomplete is False
+
+  with extensions_session(GRAPH) as session:
+    session.execute(
+      text("UPDATE entries SET status = 'posted' WHERE id = :id"), {"id": late_id}
+    )
+  _post_proposals(group, preview("2026-01"))
+
+  february = preview("2026-02")
+  assert february.incomplete is True
+  assert february.up_to_date is False
+  assert any("ownership change again" in note for note in february.notes)
+
+  again = _change()
+  assert again.earnings_transferred != early.earnings_transferred
+  assert preview("2026-02").incomplete is False
+
+
+def test_a_deconsolidation_recorded_for_an_exit_that_was_called_off_is_held(group):
+  """The draft is dated the month after the old exit; with the exit cleared
+  that month still consolidates the member, and must not post its leaving."""
+  from robosystems.models.api.extensions.entity import UpdateEntityRequest
+  from robosystems.operations.roboledger.commands.entity import update_entity
+
+  _form_the_group(group)
+  _january(group)
+  _post_proposals(group, preview())
+  _leave(MEMBER, JAN_31)
+  _deconsolidate()
+  assert not any("deconsolidation again" in note for note in preview("2026-02").notes)
+
+  with extensions_session(GRAPH) as session:
+    update_entity(session, UpdateEntityRequest(entity_id=MEMBER, left_on=None), "test")
+
+  february = preview("2026-02")
+  assert february.incomplete is True
+  assert february.up_to_date is False
+  assert any("deconsolidation again" in note for note in february.notes)
