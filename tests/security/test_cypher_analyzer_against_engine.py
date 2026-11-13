@@ -7,6 +7,7 @@ engine itself, so an engine upgrade that widens its grammar fails here first.
 """
 
 import itertools
+import os
 import re
 
 import ladybug as lb
@@ -339,7 +340,7 @@ def test_the_name_anywhere_but_in_a_checked_call_is_refused(statement):
 
 
 def test_a_bound_vector_that_is_not_finite_is_refused():
-  for value in (float("nan"), float("inf")):
+  for value in (float("nan"), float("inf"), float("-inf"), 10**400):
     assert has_unsafe_vector_query(
       SEARCH.format(vector="$embedding"), {"embedding": [0.1, value]}
     )
@@ -364,7 +365,10 @@ def test_the_engine_knows_the_search_by_its_plain_name_only(tmp_path):
   connection = lb.Connection(database)
   try:
     connection.execute("LOAD EXTENSION vector")
-  except Exception:
+  except Exception as missing:
+    # CI installs the extension, so that a skip there is not a quiet pass.
+    if os.environ.get("CI"):
+      pytest.fail(f"the vector extension did not load in CI: {missing}")
     pytest.skip("the vector extension is not installed here")
   connection.execute("CREATE NODE TABLE Doc(id INT64, emb FLOAT[3], PRIMARY KEY(id))")
   connection.execute("CREATE (:Doc {id: 1, emb: [0.1, 0.2, 0.3]})")

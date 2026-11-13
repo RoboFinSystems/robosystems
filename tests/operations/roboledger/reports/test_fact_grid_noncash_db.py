@@ -1201,6 +1201,16 @@ def test_a_payment_applied_to_part_of_a_capex_bill_leaves_the_rest_unpaid(tenant
   _assert_no_reconciling_adjustment(cf)
 
 
+def test_allocations_past_the_payment_are_scaled_to_it(tenant):
+  _one_payment(tenant, [("equipment", 1000, 1000), ("cogs", 400, 400)], 700)
+  cf = _cash_flow(tenant)
+  assert cf[CAPEX] == -500.0
+  assert cf[CAPEX_UNPAID] == 500.0
+  assert cf[OPERATING] == -200.0
+  assert cf[NET_CHANGE] == -700.0
+  _assert_no_reconciling_adjustment(cf)
+
+
 def test_capex_paid_later_by_a_shared_payment_is_unpaid_until_then(tenant):
   _one_payment(
     tenant,

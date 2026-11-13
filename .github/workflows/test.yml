@@ -341,6 +341,22 @@ jobs:
           AWS_SECRET_ACCESS_KEY: test
           AWS_DEFAULT_REGION: us-east-1
 
+      - name: Install the LadybugDB vector extension
+        run: |
+          # The pinned extension repository and version the image bakes in,
+          # read from the Dockerfile so the two cannot drift.
+          image=$(sed -n 's|^FROM \(ghcr.io/ladybugdb/extension-repo[^ ]*\) AS extensions$|\1|p' Dockerfile)
+          version=$(sed -n 's|^ARG LADYBUG_EXT_VERSION=||p' Dockerfile | head -1)
+          arch=$(dpkg --print-architecture)
+          target="$HOME/.lbdb/extension/${version}/linux_${arch}/vector"
+          test -n "$image" && test -n "$version"
+          mkdir -p "$target"
+          container=$(docker create "$image")
+          docker cp "$container:/usr/share/nginx/html/v${version}/linux_${arch}/vector/libvector.lbug_extension" "$target/"
+          docker rm "$container" > /dev/null
+          test -s "$target/libvector.lbug_extension"
+          echo "✅ vector extension ${version} (${arch}) installed"
+
       - name: Run tests
         timeout-minutes: 15
         run: |
