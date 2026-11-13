@@ -5,6 +5,7 @@ read-only allowlist, is treated as a write.
 """
 
 import logging
+import math
 import re
 import unicodedata
 from collections.abc import Iterable
@@ -648,10 +649,18 @@ class CypherSecurityAnalyzer:
     literal or a bound value can be checked before it runs. Fails closed.
     """
     try:
+      # The engine resolves the function only from its plain name, so the
+      # text says how many calls there can be. Each must be one this reading
+      # found and checked; a name seen any other way is refused.
+      named = query.lower().count("query_vector_index")
+      if not named:
+        return False
       tokens = self._code_tokens(self._clean_query(query))
+      checked = 0
       for i in range(len(tokens) - 1):
-        if tokens[i].lower() != "query_vector_index" or tokens[i + 1] != "(":
+        if tokens[i].lower().strip("`") != "query_vector_index" or tokens[i + 1] != "(":
           continue
+        checked += 1
         # A named argument (`efs := 100`) takes no position.
         arguments = [
           argument
@@ -660,7 +669,7 @@ class CypherSecurityAnalyzer:
         ]
         if len(arguments) < 3 or not self._is_number_list(arguments[2], parameters):
           return True
-      return False
+      return checked != named
     except Exception as e:
       logger.warning(f"Vector query analysis failed, defaulting to unsafe: {e}")
       return True
@@ -691,7 +700,9 @@ class CypherSecurityAnalyzer:
         isinstance(value, list)
         and len(value) > 0
         and all(
-          isinstance(item, (int, float)) and not isinstance(item, bool)
+          isinstance(item, (int, float))
+          and not isinstance(item, bool)
+          and math.isfinite(item)
           for item in value
         )
       )
