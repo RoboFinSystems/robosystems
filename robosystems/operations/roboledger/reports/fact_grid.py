@@ -2367,11 +2367,59 @@ def _emit_noncash_and_settlement_facts(
       discharges[key] = str(row.discharges_event_id)
   entries = _entries(rows)
 
+  # What a payment settles: its allocation rows where it has them, else the
+  # one obligation it links, whole.
+  allocated: dict[str, list[tuple[str, int]]] = {}
+
+  def _load_allocations(payment_events: set[str]) -> None:
+    wanted = sorted(payment_events - allocated.keys())
+    if not wanted:
+      return
+    for event_id in wanted:
+      allocated[event_id] = []
+    for row in session.execute(
+      text(
+        "SELECT payment_event_id, obligation_event_id, amount "
+        "FROM event_discharges WHERE payment_event_id = ANY(:events) "
+        "ORDER BY payment_event_id, obligation_event_id"
+      ),
+      {"events": wanted},
+    ):
+      allocated[str(row.payment_event_id)].append(
+        (str(row.obligation_event_id), int(row.amount))
+      )
+
+  def _shares(
+    event_id: str | None, link: str | None, event_paid: float
+  ) -> list[tuple[str, float]]:
+    """``(obligation, share of the payment)``. Allocations short of the
+    payment leave the rest settling nothing; ones past it are scaled to it."""
+    rows = allocated.get(event_id or "")
+    if not rows:
+      return [(link, 1.0)] if link else []
+    base = max(sum(amount for _, amount in rows), abs(event_paid))
+    return [(obligation, amount / base) for obligation, amount in rows]
+
+  _load_allocations(set(event_of.values()))
+  paid_by_event: dict[str, int] = {}
+  for key, lines in entries.items():
+    if lines and key in event_of:
+      paid_by_event[event_of[key]] = paid_by_event.get(event_of[key], 0) + sum(
+        ln.net for ln in lines if ln.kind == "working"
+      )
+
+  def _settles(entry_key: str) -> list[tuple[str, float]]:
+    event_id = event_of.get(entry_key)
+    return _shares(
+      event_id, discharges.get(entry_key), paid_by_event.get(event_id or "", 0)
+    )
+
   settled: dict[str, list[_CfLine]] = {}
-  if discharges:
+  obligations = {obligation for key in event_of for obligation, _ in _settles(key)}
+  if obligations:
     bill_rows = _lines(
       "en.triggered_by_event_id = ANY(:events)",
-      events=sorted(set(discharges.values())),
+      events=sorted(obligations),
     )
     bill_event = {str(r.entry_id): str(r.triggered_by_event_id) for r in bill_rows}
     for entry_key, lines in _entries(bill_rows).items():
@@ -2590,54 +2638,60 @@ def _emit_noncash_and_settlement_facts(
             _add(working_leaf[line.concept_id], column, line.net)
       continue
 
-    bill = settled.get(discharges.get(entry_key, ""))
-    if bill and "nonoperating" not in kinds:
+    targets = [
+      (settled[obligation], share)
+      for obligation, share in _settles(entry_key)
+      if settled.get(obligation)
+    ]
+    if targets and "nonoperating" not in kinds:
       paid_lines = [ln for ln in lines if ln.kind == "working"]
       paid = sum(ln.net for ln in paid_lines)
-      # Only the balance this payment settles: a disposal's written-off
-      # depreciation is a working line of the bill, not part of what is owed.
-      settles = {ln.concept_id for ln in paid_lines}
-      owed = [ln for ln in bill if ln.kind == "working"]
-      # Paid through clearing, the payment's line is on none of the bill's.
-      if any(ln.concept_id in settles for ln in owed):
-        owed = [ln for ln in owed if ln.concept_id in settles]
-      payable = abs(sum(ln.net for ln in owed))
-      if payable and paid:
-        fraction = min(abs(paid), payable) / payable
-        # A bill that took cash when it posted routed that part on its own
-        # entry; the payments settle only what it left owing.
-        if _on_account(bill)[0]:
-          paid_on_posting = abs(sum(ln.net for ln in bill if ln.kind == "cash"))
-          fraction *= payable / (payable + paid_on_posting)
-        _add_paid(bill, columns, fraction)
-        routed = 0.0
-        bill_flows: set[str] = set()
-        for line in bill:
-          if line.kind != "nonoperating":
-            continue
-          flow_id = _default_flow(line.concept_id, -line.net)
-          if flow_id is None:
-            continue
-          bill_flows.add(flow_id)
-          routed += line.net * fraction
-          emitted_flows.add(flow_id)
-          for column in columns:
-            _add(flow_id, column, -line.net * fraction)
-        if routed and len(bill_flows) == 1:
-          # The cash a disposal brought in, or a retirement paid, is the
-          # asset or debt net of the gain and the depreciation written off.
-          flow_id = bill_flows.pop()
-          extra = sum(ln.net for ln in bill if _disposes(ln)) * fraction
-          routed += extra
-          for column in columns:
-            _add(flow_id, column, -extra)
-        if routed:
-          for line in paid_lines:
+      for bill, share in targets:
+        portion = paid * share
+        # Only the balance this payment settles: a disposal's written-off
+        # depreciation is a working line of the bill, not part of what is owed.
+        settles = {ln.concept_id for ln in paid_lines}
+        owed = [ln for ln in bill if ln.kind == "working"]
+        # Paid through clearing, the payment's line is on none of the bill's.
+        if any(ln.concept_id in settles for ln in owed):
+          owed = [ln for ln in owed if ln.concept_id in settles]
+        payable = abs(sum(ln.net for ln in owed))
+        if payable and portion:
+          fraction = min(abs(portion), payable) / payable
+          # A bill that took cash when it posted routed that part on its own
+          # entry; the payments settle only what it left owing.
+          if _on_account(bill)[0]:
+            paid_on_posting = abs(sum(ln.net for ln in bill if ln.kind == "cash"))
+            fraction *= payable / (payable + paid_on_posting)
+          _add_paid(bill, columns, fraction)
+          routed = 0.0
+          bill_flows: set[str] = set()
+          for line in bill:
+            if line.kind != "nonoperating":
+              continue
+            flow_id = _default_flow(line.concept_id, -line.net)
+            if flow_id is None:
+              continue
+            bill_flows.add(flow_id)
+            routed += line.net * fraction
+            emitted_flows.add(flow_id)
             for column in columns:
-              _add(working_leaf[line.concept_id], column, routed * line.net / paid)
+              _add(flow_id, column, -line.net * fraction)
+          if routed and len(bill_flows) == 1:
+            # The cash a disposal brought in, or a retirement paid, is the
+            # asset or debt net of the gain and the depreciation written off.
+            flow_id = bill_flows.pop()
+            extra = sum(ln.net for ln in bill if _disposes(ln)) * fraction
+            routed += extra
+            for column in columns:
+              _add(flow_id, column, -extra)
+          if routed:
+            for line in paid_lines:
+              for column in columns:
+                _add(working_leaf[line.concept_id], column, routed * line.net / paid)
       continue
 
-    if entry_key not in discharges and kinds <= {"cash", "working", "pnl"}:
+    if not _settles(entry_key) and kinds <= {"cash", "working", "pnl"}:
       to_payables = sum(
         ln.net
         for ln in lines
@@ -2703,26 +2757,45 @@ def _emit_noncash_and_settlement_facts(
   # What each bill's linked payments settled, and when: only their payable
   # lines count (a payment through a clearing account carries another
   # working line), and one with no cash line settled the bill in kind.
-  payments: dict[str, list[tuple[date, int, bool]]] = {}
+  payments: dict[str, list[tuple[date, float, bool]]] = {}
   if bills:
-    settling: dict[str, tuple[str, date, int, bool]] = {}
-    for row in _lines("ev.discharges_event_id = ANY(:events)", events=sorted(bills)):
+    settling: dict[str, tuple[str, str | None, date, int, bool]] = {}
+    for row in _lines(
+      "(ev.discharges_event_id = ANY(:events) OR ev.id IN ("
+      "SELECT payment_event_id FROM event_discharges "
+      "WHERE obligation_event_id = ANY(:events)))",
+      events=sorted(bills),
+    ):
       line = _classify(row)
       if line is None:
         continue
-      event_id, posted, paid, cash = settling.get(
-        str(row.entry_id), (str(row.discharges_event_id), row.posting_date, 0, False)
+      payment, link, posted, paid, cash = settling.get(
+        str(row.entry_id),
+        (
+          str(row.triggered_by_event_id),
+          str(row.discharges_event_id) if row.discharges_event_id else None,
+          row.posting_date,
+          0,
+          False,
+        ),
       )
       if line.kind == "working" and line.concept_id in payable_concepts:
         paid += line.net
       settling[str(row.entry_id)] = (
-        event_id,
+        payment,
+        link,
         posted,
         paid,
         cash or line.kind == "cash",
       )
-    for event_id, posted, paid, cash in settling.values():
-      payments.setdefault(event_id, []).append((posted, paid, cash))
+    _load_allocations({payment for payment, *_ in settling.values()})
+    payment_paid: dict[str, int] = {}
+    for payment, _, _, paid, _ in settling.values():
+      payment_paid[payment] = payment_paid.get(payment, 0) + paid
+    for payment, link, posted, paid, cash in settling.values():
+      for obligation, share in _shares(payment, link, payment_paid[payment]):
+        if obligation in bills:
+          payments.setdefault(obligation, []).append((posted, paid * share, cash))
 
   def _unpaid(event_id: str, bill: _Bill, on: date) -> float:
     paid = sum(net for posted, net, _ in payments.get(event_id, ()) if posted <= on)
