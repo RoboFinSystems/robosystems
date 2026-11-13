@@ -12,7 +12,10 @@ from sqlalchemy.orm import Session
 from robosystems.database import get_db_session
 from robosystems.logger import get_logger
 from robosystems.middleware.auth.cache import api_key_cache
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import (
+  get_current_user,
+  require_jwt_user,
+)
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.rate_limits import general_api_rate_limit_dependency
 from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
@@ -143,7 +146,7 @@ async def list_graph_members(
   response_model=GraphMemberResponse,
   status_code=status.HTTP_201_CREATED,
   summary="Add Graph Member",
-  description="Grant a member of the graph's organization access at a chosen role. Requires graph admin.",
+  description="Grant a member of the graph's organization access at a chosen role. Requires graph admin. Requires a signed-in session; API keys are not accepted.",
   operation_id="addGraphMember",
   responses={**RESOURCE_ERROR_RESPONSES},
 )
@@ -152,7 +155,7 @@ async def add_graph_member(
   graph_id: str = Path(
     ..., description="Graph identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(require_jwt_user),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> GraphMemberResponse:
@@ -206,7 +209,7 @@ async def add_graph_member(
   "/{user_id}",
   response_model=GraphMemberResponse,
   summary="Update Graph Member Role",
-  description="Change an explicit member's graph role. Requires graph admin. Implicit org owner/admin access is managed through org roles.",
+  description="Change an explicit member's graph role. Requires graph admin. Implicit org owner/admin access is managed through org roles. Requires a signed-in session; API keys are not accepted.",
   operation_id="updateGraphMemberRole",
   responses={**RESOURCE_ERROR_RESPONSES},
 )
@@ -216,7 +219,7 @@ async def update_graph_member_role(
   graph_id: str = Path(
     ..., description="Graph identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(require_jwt_user),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> GraphMemberResponse:

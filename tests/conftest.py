@@ -244,6 +244,7 @@ def client_with_mocked_auth(test_db, test_user):
     get_current_user,
     get_current_user_with_deprovisioned_graph,
     get_current_user_with_graph,
+    require_jwt_user,
   )
   from robosystems.middleware.rate_limits import (
     analytics_rate_limit_dependency,
@@ -270,6 +271,7 @@ def client_with_mocked_auth(test_db, test_user):
 
   # Override the dependencies
   app.dependency_overrides[get_current_user] = lambda: mock_user
+  app.dependency_overrides[require_jwt_user] = lambda: mock_user
   app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
   # The backup list/download routes use the deprovisioned-tolerant variant.
   app.dependency_overrides[get_current_user_with_deprovisioned_graph] = lambda: (
@@ -313,6 +315,7 @@ async def async_client(test_db, test_user):
     get_current_user,
     get_current_user_with_deprovisioned_graph,
     get_current_user_with_graph,
+    require_jwt_user,
   )
   from robosystems.middleware.rate_limits import (
     analytics_rate_limit_dependency,
@@ -343,6 +346,7 @@ async def async_client(test_db, test_user):
 
   # Override the dependencies
   app.dependency_overrides[get_current_user] = lambda: mock_user
+  app.dependency_overrides[require_jwt_user] = lambda: mock_user
   app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
   # The backup list/download routes use the deprovisioned-tolerant variant.
   app.dependency_overrides[get_current_user_with_deprovisioned_graph] = lambda: (

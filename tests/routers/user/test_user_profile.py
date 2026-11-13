@@ -694,6 +694,7 @@ class TestUserAPIKeys:
     from main import app
     from robosystems.middleware.auth.dependencies import (
       get_current_user,
+      require_jwt_user,
     )
     from robosystems.middleware.rate_limits import (
       analytics_rate_limit_dependency,
@@ -711,6 +712,7 @@ class TestUserAPIKeys:
 
     # Mock the authentication dependency
     app.dependency_overrides[get_current_user] = lambda: mock_user_with_api_keys
+    app.dependency_overrides[require_jwt_user] = lambda: mock_user_with_api_keys
 
     # Disable rate limiting during tests
     app.dependency_overrides[auth_rate_limit_dependency] = lambda: None
@@ -1229,6 +1231,7 @@ class TestUserEndpointsMetrics:
     from main import app
     from robosystems.middleware.auth.dependencies import (
       get_current_user,
+      require_jwt_user,
     )
     from robosystems.middleware.rate_limits import (
       analytics_rate_limit_dependency,
@@ -1246,6 +1249,7 @@ class TestUserEndpointsMetrics:
 
     # Mock the authentication dependency
     app.dependency_overrides[get_current_user] = lambda: mock_user_for_metrics
+    app.dependency_overrides[require_jwt_user] = lambda: mock_user_for_metrics
 
     # Disable rate limiting during tests
     app.dependency_overrides[auth_rate_limit_dependency] = lambda: None

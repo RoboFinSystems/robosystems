@@ -494,10 +494,10 @@ class TestOrgMembershipAuditEvents:
     )
     # A plain member may not change roles.
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import require_jwt_user
 
-    previous = app.dependency_overrides.get(get_current_user)
-    app.dependency_overrides[get_current_user] = lambda: outsider
+    previous = app.dependency_overrides.get(require_jwt_user)
+    app.dependency_overrides[require_jwt_user] = lambda: outsider
     try:
       with patch("robosystems.routers.orgs.members.SecurityAuditLogger") as audit:
         response = await async_client.put(
@@ -506,9 +506,9 @@ class TestOrgMembershipAuditEvents:
         )
     finally:
       if previous is not None:
-        app.dependency_overrides[get_current_user] = previous
+        app.dependency_overrides[require_jwt_user] = previous
       else:
-        app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(require_jwt_user, None)
 
     assert response.status_code == 403
     audit.log_security_event.assert_not_called()

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ...database import get_db_session
 from ...logger import logger
-from ...middleware.auth.dependencies import get_current_user
+from ...middleware.auth.dependencies import get_current_user, require_jwt_user
 from ...middleware.otel.metrics import (
   endpoint_metrics_decorator,
   get_endpoint_metrics,
@@ -105,7 +105,7 @@ async def list_api_keys(
   "/user/api-keys",
   response_model=CreateAPIKeyResponse,
   summary="Create API Key",
-  description="The raw key value is only returned once at creation time and cannot be retrieved again.",
+  description="The raw key value is only returned once at creation time and cannot be retrieved again. Requires a signed-in session; API keys are not accepted.",
   status_code=status.HTTP_201_CREATED,
   operation_id="createUserAPIKey",
   responses={**AUTHENTICATED_ERROR_RESPONSES},
@@ -115,7 +115,7 @@ async def list_api_keys(
 )
 async def create_api_key(
   request: CreateAPIKeyRequest,
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(require_jwt_user),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
 ) -> CreateAPIKeyResponse:

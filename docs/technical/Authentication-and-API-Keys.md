@@ -10,7 +10,7 @@ RoboSystems has three doors into the same building. All resolve to the same `Use
 
 | Method | Who uses it | Header | Where it comes from | Lifecycle |
 | --- | --- | --- | --- | --- |
-| **API key** | Scripts, `curl`, MCP clients, SDKs, CI | `X-API-Key` | **Settings → API keys** at robosystems.ai; or `POST /v1/user/api-keys` | Long-lived; you revoke or expire it explicitly |
+| **API key** | Scripts, `curl`, MCP clients, SDKs, CI | `X-API-Key` | **Settings → API keys** at robosystems.ai | Long-lived; you revoke or expire it explicitly |
 | **JWT / Bearer** | The browser frontends (robosystems-app, roboledger-app, roboinvestor-app) | `Authorization: Bearer …` | `POST /v1/auth/login` issues a token | Short-lived, auto-refreshed by the frontend session layer |
 | **OAuth 2.1 bearer** | MCP clients that run a consent flow — claude.ai, Claude Code, ChatGPT, Cursor, VS Code, the Docker MCP Toolkit | `Authorization: Bearer rfso…` (opaque; accepted by the MCP routes only) | The client discovers the authorization server from `https://api.robosystems.ai/v1/mcp`, you sign in, and the consent screen picks the graph — see [AI Operators & MCP](AI-Operators-and-MCP.md#connecting-from-mcp-clients) | 1-hour access token, 90-day refresh token rotated on use; scoped to the one graph chosen at consent; revoke with `POST /v1/oauth/revoke` or from [Connected Apps](#connected-apps) |
 
@@ -162,24 +162,16 @@ A graph-scoped key is accepted only on routes that carry its graph's id in the U
 
 ### Create a Key
 
-```bash
-curl -X POST "https://api.robosystems.ai/v1/user/api-keys" \
-  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "CI pipeline key", "description": "for nightly smoke tests"}'
-```
+Create keys in the app: **Settings → API keys** at robosystems.ai. The route behind that page, `POST /v1/user/api-keys`, takes a signed-in session (`Authorization: Bearer …`) and refuses an API key with `401`: a key reads, renames and revokes keys, but it does not create one. The same holds for the other routes that hand out access — see [what a key cannot do](#what-a-key-cannot-do).
 
 The request fields are `name` (required), `description` (optional), `expires_at` (optional, ISO-8601, must be in the future), and `graph_id` (optional). Supplying a `graph_id` mints a **graph-scoped** key: it works only for that graph and its subgraphs. Omit it for an account-wide key, which reaches every graph your account can. A graph's MCP address accepts either kind; scoping a connector's key to its graph is the safer default.
 
-```bash
-curl -X POST "https://api.robosystems.ai/v1/user/api-keys" \
-  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "CI pipeline key",
-    "description": "for nightly smoke tests",
-    "expires_at": "2026-12-31T23:59:59Z"
-  }'
+```json
+{
+  "name": "CI pipeline key",
+  "description": "for nightly smoke tests",
+  "expires_at": "2026-12-31T23:59:59Z"
+}
 ```
 
 The response contains the key metadata (`api_key`) plus the raw `key`:
@@ -346,7 +338,21 @@ The flow, at a glance:
 
 `login` returns a short-lived Bearer JWT that the frontend session layer carries on subsequent requests and refreshes automatically before it expires. The token is signed with HS256.
 
-**For backend testing you never need this path.** There is no reason to call `login` from `curl` when you have an API key — the API key authenticates the same `User` against the same endpoints. If you find yourself wrangling Bearer tokens in a shell script, you are on the wrong door; switch to `X-API-Key`. The Bearer path exists for browser sessions across the three frontend domains, where token-based session handling and refresh are the right model.
+**For backend testing you never need this path.** There is no reason to call `login` from `curl` when you have an API key — the API key authenticates the same `User` against the same endpoints, apart from the few that [take a session only](#what-a-key-cannot-do). If you find yourself wrangling Bearer tokens in a shell script, you are on the wrong door; switch to `X-API-Key`. The Bearer path exists for browser sessions across the three frontend domains, where token-based session handling and refresh are the right model.
+
+### What a key cannot do
+
+An API key works your graphs; it does not hand out access to them. These take a signed-in session and answer an API key with `401`:
+
+| Action | Route |
+| --- | --- |
+| Create an API key | `POST /v1/user/api-keys` |
+| Invite someone to the organization, or resend an invitation | `POST /v1/orgs/{org_id}/invitations`, `POST /v1/orgs/{org_id}/invitations/{invitation_id}/resend` |
+| Change an organization member's role | `PUT /v1/orgs/{org_id}/members/{user_id}` |
+| Grant a graph role, or change one | `POST /v1/graphs/{graph_id}/members`, `PUT /v1/graphs/{graph_id}/members/{user_id}` |
+| Change the account's email or password, manage passkeys, approve a connected app | the account routes below |
+
+Listing, and taking access away, stay open to a key: revoke a key, revoke an invitation, remove a member.
 
 The four endpoints above are the session flow. The rest of the account lifecycle — how a user comes into existence, and how they change their credentials — is below.
 

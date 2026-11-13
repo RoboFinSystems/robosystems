@@ -89,7 +89,7 @@ def test_member_cannot_administer(tenants, client: Client) -> None:
   member = _role(tenants, "member")
   a = client.post(
     f"/v1/graphs/{tenants.graph_a}/members",
-    principal=member,
+    jwt=member.jwt,
     json={"user_id": member.user_id, "role": "admin"},
   )
   assert a.status_code in (401, 403), (
