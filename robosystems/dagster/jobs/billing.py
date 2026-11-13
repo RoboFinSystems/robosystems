@@ -160,13 +160,17 @@ class SubscriptionNotFoundError(Exception):
   """No BillingSubscription matches the webhook event; the handler lets Stripe retry."""
 
 
+# A subscription inside its trial is as live as a paying one.
+LIVE_STRIPE_STATUSES = ("active", "trialing")
+
+
 def _as_utc(value: datetime) -> datetime:
   """Timestamp columns load naive; compare them as the UTC they were stored."""
   return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
 def _stripe_confirms_reactivation(stripe_subscription_id: str | None, context) -> bool:
-  """Whether Stripe's live subscription is active with no pending cancel.
+  """Whether Stripe's live subscription is running with no pending cancel.
 
   A payload emitted before a local cancel and redelivered after it looks
   exactly like a portal reactivation; only the live object tells them apart.
@@ -176,7 +180,9 @@ def _stripe_confirms_reactivation(stripe_subscription_id: str | None, context) -
   from robosystems.operations.providers.payment_provider import get_payment_provider
 
   live = get_payment_provider("stripe").get_subscription_state(stripe_subscription_id)
-  confirmed = live.get("status") == "active" and not live.get("cancel_at_period_end")
+  confirmed = live.get("status") in LIVE_STRIPE_STATUSES and not live.get(
+    "cancel_at_period_end"
+  )
   if not confirmed:
     context.log.warning(
       f"Ignoring stale reactivation for {stripe_subscription_id}: live state {live}"
@@ -522,15 +528,15 @@ async def _handle_payment_succeeded(
       db_session.commit()
     await _trigger_resource_provisioning(subscription, db_session, context)
 
-  # A trial is lifted by its first charge: money paid, or the first invoice
-  # after the trial has ended (a full discount pays nothing). A zero invoice
-  # inside the trial is not one, whatever raised it.
+  # A trial is lifted by its first charge: money paid, or the renewal invoice
+  # that closes the trial (a full discount pays nothing). Any other zero
+  # invoice lifts nothing: a plan change raises one whenever it is made.
   trial_end = subscription.trial_ends_at
   trial_over = isinstance(trial_end, datetime) and _as_utc(trial_end) <= datetime.now(
     UTC
   ) + timedelta(minutes=5)
   if (invoice_data.get("amount_paid") or 0) > 0 or (
-    invoice_data.get("billing_reason") != "subscription_create" and trial_over
+    invoice_data.get("billing_reason") == "subscription_cycle" and trial_over
   ):
     from robosystems.operations.billing.repository_subscriptions import (
       convert_repository_trial,
@@ -822,7 +828,7 @@ async def _apply_subscription_updated(
     and subscription.status == "canceled"
     and subscription.ends_at
     and _as_utc(subscription.ends_at) > datetime.now(UTC)
-    and status == "active"
+    and status in LIVE_STRIPE_STATUSES
     and _stripe_confirms_reactivation(subscription_data.get("id"), context)
   ):
     subscription.status = "active"
