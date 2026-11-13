@@ -70,6 +70,7 @@ router = APIRouter()
 _NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache"}
 _METADATA_CACHE = {"Cache-Control": "public, max-age=3600"}
 _MAX_FORM_FIELD = 4096
+_MAX_AUDIT_USER_AGENT = 256
 
 
 def _require_enabled() -> None:
@@ -89,6 +90,26 @@ def _oauth_error(
 
 def _client_ip(request: Request) -> str | None:
   return request.client.host if request.client else None
+
+
+def _audit_rejection(
+  request: Request,
+  event_type: SecurityEventType,
+  action: str,
+  error: str,
+  reason: str,
+) -> None:
+  """Record a refused request with the rule it broke and who sent it, so a
+  client that cannot connect is told apart from a probe."""
+  user_agent = request.headers.get("user-agent")
+  SecurityAuditLogger.log_security_event(
+    event_type=event_type,
+    ip_address=_client_ip(request),
+    user_agent=user_agent[:_MAX_AUDIT_USER_AGENT] if user_agent else None,
+    endpoint=request.url.path,
+    details={"action": action, "error": error, "reason": reason},
+    risk_level="low",
+  )
 
 
 # --- discovery -----------------------------------------------------------
@@ -177,12 +198,12 @@ async def authorize(
     # Client resolution may fetch a metadata document; keep it off the loop.
     location = await run_in_threadpool(begin_authorization, params, session)
   except AuthorizeError as exc:
-    SecurityAuditLogger.log_security_event(
-      event_type=SecurityEventType.AUTHORIZATION_DENIED,
-      ip_address=_client_ip(request),
-      endpoint="/v1/oauth/authorize",
-      details={"action": "oauth_authorize_rejected", "error": exc.error},
-      risk_level="low",
+    _audit_rejection(
+      request,
+      SecurityEventType.AUTHORIZATION_DENIED,
+      "oauth_authorize_rejected",
+      exc.error,
+      exc.description,
     )
     if exc.redirect_uri:
       return RedirectResponse(error_callback(exc), status_code=302, headers=_NO_STORE)
@@ -395,29 +416,31 @@ async def register(
 ):
   """RFC 7591 dynamic client registration (public or confidential)."""
   _require_enabled()
+
+  def refused(error: str, reason: str) -> JSONResponse:
+    _audit_rejection(
+      request,
+      SecurityEventType.INPUT_VALIDATION_FAILURE,
+      "oauth_registration_rejected",
+      error,
+      reason,
+    )
+    return _oauth_error(error, reason)
+
   content_type = request.headers.get("content-type", "").split(";", 1)[0].strip()
   if content_type.casefold() != "application/json":
-    return _oauth_error(
-      "invalid_client_metadata", "Content-Type must be application/json"
-    )
+    return refused("invalid_client_metadata", "Content-Type must be application/json")
   try:
     payload = await request.json()
   except Exception:
-    return _oauth_error("invalid_client_metadata", "Request body is not valid JSON")
+    return refused("invalid_client_metadata", "Request body is not valid JSON")
 
   try:
     client, secret = register_dynamic_client(
       payload, registration_ip=_client_ip(request), session=session
     )
   except ClientError as exc:
-    SecurityAuditLogger.log_security_event(
-      event_type=SecurityEventType.INPUT_VALIDATION_FAILURE,
-      ip_address=_client_ip(request),
-      endpoint="/v1/oauth/register",
-      details={"action": "oauth_registration_rejected", "error": exc.error},
-      risk_level="low",
-    )
-    return _oauth_error(exc.error, exc.description)
+    return refused(exc.error, exc.description)
 
   logger.info(
     "OAuth client registered dynamically",
