@@ -463,3 +463,70 @@ def test_without_its_opening_the_group_close_refuses(group, monkeypatch):
     "Noncontrolling Interest does not roll forward" in f
     for f in refused.value.gate.group_not_footing
   )
+
+
+def _earned_before_the_group(g) -> None:
+  """June: the parent puts 7,000 into the member, an outside owner 3,000, and
+  the member earns 1,000. July, the group's first month: nothing happens."""
+  _post(g, "parent", JUNE_20, [("1600", 700_000), ("1000", -700_000)], "member")
+  _post(g, "member", JUNE_20, [("1000", 700_000), ("3000", -700_000)], "parent")
+  _post(g, "member", JUNE_20, [("1000", 300_000), ("3000", -300_000)], None)
+  _post(g, "member", JUNE_20, [("1000", 100_000), ("4000", -100_000)], None)
+  for period in ("2026-06", "2026-07"):
+    _close(g, "member", period)
+    _close(g, "parent", period)
+
+
+def _nci_held(g) -> int:
+  return int(
+    g["session"]
+    .execute(
+      text(
+        "SELECT COALESCE(SUM(li.credit_amount - li.debit_amount), 0) "
+        "FROM line_items li JOIN entries e ON e.id = li.entry_id "
+        "JOIN associations a ON a.from_element_id = li.element_id "
+        "AND a.association_type = 'mapping' "
+        "JOIN elements c ON c.id = a.to_element_id "
+        "WHERE e.entity_id = :entity AND e.status = 'posted' AND c.qname = :nci"
+      ),
+      {"entity": g["ids"]["adjustments"], "nci": NCI},
+    )
+    .scalar()
+  )
+
+
+def test_the_opening_carries_the_outside_share_of_earlier_results(group):
+  """The outside owners hold 30 % of the member's net assets, 11,000 with
+  what it earned before the group's first month, not of its capital alone."""
+  _earned_before_the_group(group)
+  response = _propose(group)
+  assert response.notes == []
+
+  with group["session"].begin_nested():
+    preview = engine.preview_consolidation_entries(group["session"], period="2026-07")
+  assert preview.up_to_date, preview.notes
+  assert [p for p in preview.proposals if not p.opening] == []
+
+  closed = _close(group, "adjustments", "2026-07")
+  assert closed.statements_stamped, closed.statement_stamp_note
+  assert _nci_held(group) == 330_000
+  equity = _equity(group)
+  assert equity.validation.status != "failed", equity.validation.failures
+  assert _july(equity, "ending") == 3300.0
+
+
+def test_the_month_after_does_not_take_the_earlier_share_back(group):
+  _earned_before_the_group(group)
+  _propose(group)
+  _close(group, "adjustments", "2026-07")
+  _post(group, "member", date(2026, 8, 12), [("1000", 50_000), ("4000", -50_000)], None)
+  for key in ("member", "parent"):
+    _close(group, key, "2026-08")
+
+  _propose(group, "2026-08")
+  with group["session"].begin_nested():
+    august = engine.preview_consolidation_entries(group["session"], period="2026-08")
+  assert august.up_to_date, august.notes
+  assert _close(group, "adjustments", "2026-08").statements_stamped
+  # July's 330,000 and 30 % of August's 500.00.
+  assert _nci_held(group) == 345_000

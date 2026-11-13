@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import select, text
+from sqlalchemy import exists, select, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from robosystems.models.api.extensions.consolidation import (
   AcquisitionResponse,
@@ -350,6 +350,16 @@ def set_allocation_override(
   )
 
 
+_REVERSAL = aliased(Entry)
+
+# An entry that was reversed holds nothing any more, and neither does its
+# reversal: only what still stands keeps a member from being recorded again.
+_STILL_STANDING = (
+  Entry.reversal_of.is_(None),
+  ~exists().where(_REVERSAL.reversal_of == Entry.id),
+)
+
+
 class AcquisitionError(ValueError):
   """An acquisition that cannot be recorded as given."""
 
@@ -516,6 +526,7 @@ def record_acquisition(
         Entry.adjustment_kind == ACQUISITION,
         Entry.adjusts_entity_id == str(member.id),
         Entry.status.in_(("posted", "draft")),
+        *_STILL_STANDING,
       )
     ).scalars()
   )
@@ -1025,7 +1036,7 @@ def record_deconsolidation(
         Entry.adjustment_kind == DECONSOLIDATION,
         Entry.adjusts_entity_id == str(member.id),
         Entry.status.in_(("posted", "draft")),
-        Entry.reversal_of.is_(None),
+        *_STILL_STANDING,
       )
     ).scalars()
   )

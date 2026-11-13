@@ -31,8 +31,8 @@ from collections import defaultdict
 from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 
-from sqlalchemy import bindparam, select, text
-from sqlalchemy.orm import Session
+from sqlalchemy import bindparam, exists, select, text
+from sqlalchemy.orm import Session, aliased
 
 from robosystems.logger import logger
 from robosystems.models.api.extensions.consolidation import (
@@ -65,6 +65,7 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   _infer_classification,
 )
 from robosystems.operations.roboledger.reports.network_picker import (
+  load_close_target_concept,
   load_entity_reporting_style,
   taggable_flow_qnames,
 )
@@ -1372,6 +1373,22 @@ def preview_consolidation_entries(
   )
   if eve is not None:
     _note_what_cannot_open(plan, before, held_before, opening, by_id, period)
+    _open_on_earlier_results(
+      plan,
+      opening,
+      earlier,
+      [m for m in members if m.member.is_member_for(eve, eve)],
+      [a for a in associates if a.member.is_member_for(eve, eve)],
+      opening_share,
+      # The group's statements render under the parent's Style, so its close
+      # target is the equity the group's own results sit in.
+      load_close_target_concept(
+        session, load_entity_reporting_style(session, parent_id)
+      ),
+      set(accounts),
+      period,
+      parent,
+    )
   for (kind, member_id), lines in opening.items():
     for qname, amount in lines.items():
       held[(qname, kind, member_id, False)] += amount
@@ -1493,6 +1510,9 @@ def preview_consolidation_entries(
 
   _hold_what_a_former_member_leaves(
     plan, rows, proposals, [e for e in operating if e not in in_month], consolidation
+  )
+  _hold_a_recorded_draft_its_inputs_have_left(
+    session, plan, consolidation, by_id, start, end
   )
   if untaggable:
     plan.notes.append(
@@ -1630,6 +1650,84 @@ def _opening(
   }
 
 
+def _open_on_earlier_results(
+  plan: _Plan,
+  opening: dict[tuple[str, str], dict[str, int]],
+  earlier: list[_Row],
+  members: list[_Entity],
+  associates: list[_Entity],
+  opening_share: dict[str, float],
+  close_target: str,
+  postable: set[str],
+  period: str,
+  parent: _Entity,
+) -> None:
+  """What each member's results before the first month already called for.
+  The month's own allocation and pickup are measured within the month, so
+  earlier results reach the balance sheet only here: without it the outside
+  owners' interest opens on their capital alone, and an equity-method
+  investment on what the parent paid, and both stay short for good.
+
+  Those results sit in the group's own equity (a full member's) or outside
+  the group altogether (an associate's), so each opening moves a share
+  between that equity and the balance it belongs in. An associate's is net
+  of the distributions the parent has already taken as income."""
+  wanted: list[tuple[tuple[str, str], _Entity, str, int, str]] = []
+  for member in members:
+    outside = 1.0 - opening_share.get(member.id, member.share)
+    share = share_of(_results(earlier, member.id), outside) if outside > 0 else 0
+    wanted.append(
+      (
+        ("nci_allocation", member.id),
+        member,
+        NONCONTROLLING_INTEREST,
+        -share,
+        f"The outside owners' {outside:.0%} of {_possessive(member.name)} results",
+      )
+    )
+  for associate in associates:
+    pickup = share_of(_results(earlier, associate.id), associate.share)
+    received = -sum(r.amount for r in _distribution_income(earlier, parent, associate))
+    wanted.append(
+      (
+        ("equity_method_pickup", associate.id),
+        associate,
+        EQUITY_METHOD_INVESTMENT,
+        pickup - received,
+        f"The parent's {associate.share:.0%} of {_possessive(associate.name)} results",
+      )
+    )
+  for key, _entity, balance, amount, what in wanted:
+    if not amount:
+      continue
+    missing = sorted({balance, close_target} - postable)
+    if missing:
+      plan.notes.append(
+        f"{what} before {period}, {_money(abs(amount))}, cannot be the "
+        "consolidation entity's opening: it has no account mapped to "
+        + ", ".join(missing)
+        + "."
+      )
+      plan.incomplete = True
+      continue
+    opening[key] = {balance: amount, close_target: -amount}
+    # A balance from here on, held as opened: no month's entry reads it.
+    for qname, line in opening[key].items():
+      plan.targets[(qname, *key, False)] += line
+
+
+def _results(rows: list[_Row], entity_id: str) -> int:
+  """An entity's results over ``rows``, credit-positive, as
+  ``capital_and_earnings`` reads them."""
+  return -sum(
+    r.amount
+    for r in rows
+    if r.entity_id == entity_id
+    and not r.closing
+    and r.concept.classification in _RESULT
+  )
+
+
 def _note_what_cannot_open(
   plan: _Plan,
   before: _Plan,
@@ -1718,6 +1816,80 @@ def _hold_what_a_former_member_leaves(
       )
       + " for it beyond the eliminations proposed here; record-deconsolidation "
       "derecognizes them with the gain or loss on its leaving."
+    )
+    plan.incomplete = True
+
+
+def _hold_a_recorded_draft_its_inputs_have_left(
+  session: Session,
+  plan: _Plan,
+  consolidation: _Entity,
+  by_id: dict[str, _Entity],
+  start: date,
+  end: date,
+) -> None:
+  """An acquisition, ownership change or deconsolidation is priced when it is
+  recorded and waits as a draft for the group close. If the member's dates or
+  its results have moved since, the draft says something the books no longer
+  do, and the close would post it: the month is left incomplete until it is
+  recorded again."""
+  from robosystems.models.extensions import Entity
+
+  reversal = aliased(Entry)
+  # A posted one counts too: the month is open, so it was reopened, and a
+  # reopen leaves what the close posted where it was.
+  recorded_entries = session.execute(
+    select(Entry).where(
+      Entry.entity_id == consolidation.id,
+      Entry.status.in_(("draft", "posted")),
+      Entry.adjustment_kind.in_((ACQUISITION, OWNERSHIP_CHANGE, DECONSOLIDATION)),
+      Entry.posting_date >= start,
+      Entry.posting_date <= end,
+      Entry.reversal_of.is_(None),
+      ~exists().where(reversal.reversal_of == Entry.id),
+    )
+  ).scalars()
+  for entry in recorded_entries:
+    member = session.get(Entity, entry.adjusts_entity_id)
+    if member is None:
+      continue
+    name = by_id[member.id].name if member.id in by_id else member.name
+    recorded = (entry.metadata_ or {}).get(entry.adjustment_kind) or {}
+    if not recorded:
+      # A hand entry of the kind recorded nothing to compare.
+      continue
+    eve = start - timedelta(days=1)
+    moved: str | None = None
+    if entry.adjustment_kind == ACQUISITION:
+      if member.joined_on != entry.posting_date:
+        moved = f"{name} no longer joins the group on {entry.posting_date}"
+    elif entry.adjustment_kind == DECONSOLIDATION:
+      left_on = member.left_on.isoformat() if member.left_on else None
+      if recorded.get("left_on") != left_on:
+        moved = f"{name} no longer leaves the group on {recorded.get('left_on')}"
+      elif member.consolidation_method == "full" and "earnings_restored" in recorded:
+        _capital, earnings = capital_and_earnings(session, str(member.id), eve)
+        if earnings != recorded["earnings_restored"]:
+          moved = f"{_possessive(name)} results before {start} have changed"
+    elif {"from_pct", "to_pct", "earnings_transferred"} <= recorded.keys():
+      _capital, earnings = capital_and_earnings(session, str(member.id), eve)
+      before, after = recorded["from_pct"] / 100.0, recorded["to_pct"] / 100.0
+      if (
+        share_of(earnings, after) - share_of(earnings, before)
+        != (recorded["earnings_transferred"])
+      ):
+        moved = f"{_possessive(name)} results before {start} have changed"
+    if moved is None:
+      continue
+    kind = entry.adjustment_kind.replace("_", " ")
+    remedy = (
+      f"record the {kind} again, or delete the draft"
+      if entry.status == "draft"
+      else f"reverse the posted entry and record the {kind} again"
+    )
+    plan.notes.append(
+      f"{moved} since its {kind} was recorded, so the {entry.status} entry no "
+      f"longer measures it; {remedy}."
     )
     plan.incomplete = True
 
