@@ -148,6 +148,45 @@ class TestRegistration:
     assert response.status_code == 400
     assert response.json()["error"] == "invalid_redirect_uri"
 
+  @pytest.mark.parametrize(
+    ("request_kwargs", "reason"),
+    [
+      (
+        {"json": {"redirect_uris": ["http://evil.example/cb"]}},
+        "http redirect_uris are only permitted for loopback hosts",
+      ),
+      (
+        {"content": "x", "headers": {"content-type": "text/plain"}},
+        "Content-Type must be application/json",
+      ),
+      (
+        {"content": "{", "headers": {"content-type": "application/json"}},
+        "Request body is not valid JSON",
+      ),
+    ],
+  )
+  def test_a_rejection_is_audited_with_its_reason_and_sender(
+    self, client, request_kwargs, reason
+  ):
+    headers = {
+      **request_kwargs.pop("headers", {}),
+      "user-agent": "agent/1 " + "x" * 400,
+    }
+    with patch(
+      "robosystems.routers.oauth.server.SecurityAuditLogger.log_security_event"
+    ) as audit:
+      response = client.post("/v1/oauth/register", headers=headers, **request_kwargs)
+    assert response.status_code == 400
+    logged = audit.call_args.kwargs
+    assert logged["endpoint"] == "/v1/oauth/register"
+    assert logged["details"] == {
+      "action": "oauth_registration_rejected",
+      "error": response.json()["error"],
+      "reason": reason,
+    }
+    assert logged["user_agent"].startswith("agent/1 ")
+    assert len(logged["user_agent"]) == 256
+
 
 @pytest.mark.usefixtures("oauth_on")
 class TestTokenEndpointErrors:
@@ -184,6 +223,25 @@ class TestAuthorizeEndpoint:
     )
     assert response.status_code == 400
     assert response.json()["error"] == "invalid_client"
+
+  def test_a_rejection_is_audited_with_its_reason_and_sender(self, client):
+    with patch(
+      "robosystems.routers.oauth.server.SecurityAuditLogger.log_security_event"
+    ) as audit:
+      response = client.get(
+        "/v1/oauth/authorize",
+        params={"response_type": "code", "client_id": "rfsoc_nope"},
+        headers={"user-agent": "agent/1"},
+        follow_redirects=False,
+      )
+    logged = audit.call_args.kwargs
+    assert logged["endpoint"] == "/v1/oauth/authorize"
+    assert logged["user_agent"] == "agent/1"
+    assert logged["details"] == {
+      "action": "oauth_authorize_rejected",
+      "error": "invalid_client",
+      "reason": response.json()["error_description"],
+    }
 
   def test_bad_request_redirects_back_to_the_client(self, client):
     registered = client.post("/v1/oauth/register", json=VSCODE_BODY).json()
