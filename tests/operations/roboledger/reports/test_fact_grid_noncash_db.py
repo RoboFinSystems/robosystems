@@ -25,6 +25,7 @@ from robosystems.models.extensions.association import Association
 from robosystems.models.extensions.element_trait import ElementTrait
 from robosystems.models.extensions.roboledger import Entry, LineItem
 from robosystems.models.extensions.roboledger.event import Event
+from robosystems.models.extensions.roboledger.event_discharge import EventDischarge
 from robosystems.models.extensions.structure import Structure
 from robosystems.models.extensions.taxonomy import Taxonomy
 from robosystems.models.extensions.trait import Trait
@@ -1146,3 +1147,109 @@ def test_the_exported_cash_flow_negates_what_its_summation_subtracts(tenant):
 
   assert (OPERATING, DISPOSAL_GAIN) in subtracted
   assert not any(str(a.from_element_id) == operating for a in sourced)
+
+
+def _one_payment(ids, bills, paid: int, posted=date(2026, 1, 20), link=0) -> None:
+  """``bills`` are ``(account, bill dollars, dollars this payment applies)``:
+  one payment of ``paid`` dollars allocated across them, its single link on
+  the bill at index ``link``."""
+  events = []
+  for account, amount, _ in bills:
+    event = _event("bill_received")
+    _post(ids, [(account, amount, 0), ("payable", 0, amount)], event_id=event)
+    events.append(event)
+  payment = _event("bill_paid", discharges=events[link])
+  with extensions_session(GRAPH) as session:
+    session.add_all(
+      EventDischarge(
+        payment_event_id=payment,
+        obligation_event_id=event,
+        amount=applied * 100,
+        created_by="test",
+      )
+      for event, (_, _, applied) in zip(events, bills, strict=True)
+    )
+  _post(ids, [("payable", paid, 0), ("cash", 0, paid)], posted=posted, event_id=payment)
+
+
+@pytest.mark.parametrize("link", [0, 1])
+def test_one_payment_of_two_bills_routes_each(tenant, link):
+  _one_payment(tenant, [("equipment", 1000, 1000), ("cogs", 400, 400)], 1400, link=link)
+  cf = _cash_flow(tenant)
+  assert cf[CAPEX] == -1000.0
+  assert cf[OPERATING] == -400.0
+  assert cf[NET_CHANGE] == -1400.0
+  assert CAPEX_UNPAID not in cf
+  _assert_no_reconciling_adjustment(cf)
+
+
+def test_one_payment_of_two_capex_bills_routes_both(tenant):
+  _one_payment(tenant, [("equipment", 1000, 1000), ("equipment", 600, 600)], 1600)
+  cf = _cash_flow(tenant)
+  assert cf[CAPEX] == -1600.0
+  assert cf.get(OPERATING, 0.0) == 0.0
+  assert CAPEX_UNPAID not in cf
+  _assert_no_reconciling_adjustment(cf)
+
+
+def test_a_payment_applied_to_part_of_a_capex_bill_leaves_the_rest_unpaid(tenant):
+  _one_payment(tenant, [("equipment", 1000, 400), ("cogs", 300, 300)], 700, link=1)
+  cf = _cash_flow(tenant)
+  assert cf[CAPEX] == -400.0
+  assert cf[CAPEX_UNPAID] == 600.0
+  assert cf[NET_CHANGE] == -700.0
+  _assert_no_reconciling_adjustment(cf)
+
+
+def test_capex_paid_later_by_a_shared_payment_is_unpaid_until_then(tenant):
+  _one_payment(
+    tenant,
+    [("equipment", 1000, 1000), ("cogs", 400, 400)],
+    1400,
+    posted=date(2026, 2, 10),
+    link=1,
+  )
+  jan = _cash_flow(tenant, JAN, [JAN, FEB])
+  feb = _cash_flow(tenant, FEB, [JAN, FEB])
+  assert jan[CAPEX_UNPAID] == 1000.0
+  assert CAPEX not in jan
+  assert feb[CAPEX] == -1000.0
+  assert CAPEX_UNPAID not in feb
+  _assert_no_reconciling_adjustment(feb)
+
+
+def test_two_shared_payments_settle_a_capex_bill_between_them(tenant):
+  bill = _event("bill_received")
+  _post(tenant, [("equipment", 1000, 0), ("payable", 0, 1000)], event_id=bill)
+  other = _event("bill_received")
+  _post(tenant, [("cogs", 200, 0), ("payable", 0, 200)], event_id=other)
+  for day, to_bill, to_other in ((10, 600, 100), (20, 400, 100)):
+    payment = _event("bill_paid", discharges=other)
+    with extensions_session(GRAPH) as session:
+      session.add_all(
+        [
+          EventDischarge(
+            payment_event_id=payment,
+            obligation_event_id=bill,
+            amount=to_bill * 100,
+            created_by="test",
+          ),
+          EventDischarge(
+            payment_event_id=payment,
+            obligation_event_id=other,
+            amount=to_other * 100,
+            created_by="test",
+          ),
+        ]
+      )
+    _post(
+      tenant,
+      [("payable", to_bill + to_other, 0), ("cash", 0, to_bill + to_other)],
+      posted=date(2026, 1, day),
+      event_id=payment,
+    )
+  cf = _cash_flow(tenant)
+  assert cf[CAPEX] == -1000.0
+  assert cf[OPERATING] == -200.0
+  assert CAPEX_UNPAID not in cf
+  _assert_no_reconciling_adjustment(cf)
