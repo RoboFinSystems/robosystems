@@ -58,6 +58,9 @@ class CypherSecurityAnalyzer:
     "UPDATE",
   }
 
+  # Functions that change the database from inside an expression.
+  WRITE_FUNCTIONS = {"nextval"}
+
   # Belong on the dedicated staging endpoints
   BULK_KEYWORDS = {
     "COPY",
@@ -607,13 +610,14 @@ class CypherSecurityAnalyzer:
   def _call_targets(self, tokens: list[str]) -> list[tuple[str, str]]:
     """Each ``CALL`` in the tokens as ``(form, name)``.
 
-    ``form`` is ``procedure`` for ``CALL name(``, ``setting`` for
-    ``CALL name =``, and ``unknown`` for anything else, which callers treat
-    as a write. ``n.call`` is a property and is skipped.
+    ``form`` is ``procedure`` for ``CALL name(`` and ``setting`` for
+    ``CALL name =``, the two forms the engine has. Anywhere else the word is
+    a name of the caller's (an alias, a variable, ``n.call``, ``$call``, a
+    map key or a label) and is not a call.
     """
     targets: list[tuple[str, str]] = []
     for i, token in enumerate(tokens):
-      if token.upper() != "CALL" or (i > 0 and tokens[i - 1] == "."):
+      if token.upper() != "CALL" or (i > 0 and tokens[i - 1] in (".", "$", ":")):
         continue
       j = i + 1
       parts: list[str] = []
@@ -624,15 +628,69 @@ class CypherSecurityAnalyzer:
           j += 1
         else:
           break
-      name = ".".join(parts)
       following = tokens[j] if j < len(tokens) else ""
       if parts and following == "(":
-        targets.append(("procedure", name))
+        targets.append(("procedure", ".".join(parts)))
       elif parts and following == "=":
-        targets.append(("setting", name))
-      else:
-        targets.append(("unknown", name or "?"))
+        targets.append(("setting", ".".join(parts)))
     return targets
+
+  def has_unsafe_vector_query(self, query: str, parameters: dict | None) -> bool:
+    """Whether a ``query_vector_index`` call's query vector is anything but a
+    list of numbers, written out or bound as a parameter.
+
+    The engine does not survive a vector that evaluates to null, and only a
+    literal or a bound value can be checked before it runs. Fails closed.
+    """
+    try:
+      tokens = self._code_tokens(self._clean_query(query))
+      for i in range(len(tokens) - 1):
+        if tokens[i].lower() != "query_vector_index" or tokens[i + 1] != "(":
+          continue
+        arguments = self._call_arguments(tokens, i + 1)
+        if len(arguments) < 3 or not self._is_number_list(arguments[2], parameters):
+          return True
+      return False
+    except Exception as e:
+      logger.warning(f"Vector query analysis failed, defaulting to unsafe: {e}")
+      return True
+
+  def _call_arguments(self, tokens: list[str], opener: int) -> list[list[str]]:
+    """The argument token lists of the call whose ``(`` is at ``opener``."""
+    arguments: list[list[str]] = [[]]
+    depth = 0
+    for token in tokens[opener:]:
+      if token in self._OPENERS:
+        depth += 1
+        if depth == 1:
+          continue
+      elif token in self._CLOSERS:
+        depth -= 1
+        if depth == 0:
+          return arguments if arguments != [[]] else []
+      elif token == "," and depth == 1:
+        arguments.append([])
+        continue
+      arguments[-1].append(token)
+    raise ValueError("Unclosed call")
+
+  def _is_number_list(self, argument: list[str], parameters: dict | None) -> bool:
+    if len(argument) == 2 and argument[0] == "$":
+      value = (parameters or {}).get(argument[1])
+      return (
+        isinstance(value, list)
+        and len(value) > 0
+        and all(
+          isinstance(item, (int, float)) and not isinstance(item, bool)
+          for item in value
+        )
+      )
+    if len(argument) < 3 or argument[0] != "[" or argument[-1] != "]":
+      return False
+    return all(
+      item in (",", "-") or self._TOKEN_PATTERN.fullmatch(item).lastgroup == "number"  # type: ignore[union-attr]
+      for item in argument[1:-1]
+    )
 
   @staticmethod
   def _follows(tokens: list[str], first: set[str], second: set[str]) -> bool:
@@ -654,6 +712,11 @@ class CypherSecurityAnalyzer:
     """Find write operation keywords in the cleaned query."""
     found_operations = self._keyword_tokens(query, self.WRITE_KEYWORDS)
 
+    tokens = self._code_tokens(query)
+    for i in range(len(tokens) - 1):
+      if tokens[i + 1] == "(" and tokens[i].lower() in self.WRITE_FUNCTIONS:
+        found_operations.add(f"FUNCTION:{tokens[i].lower()}")
+
     # Folded in here because every surface gates on the two callers of this.
     found_operations |= self._find_call_operations(query)
 
@@ -663,9 +726,9 @@ class CypherSecurityAnalyzer:
     """Find `CALL` forms that must not be treated as reads.
 
     A procedure outside ``READ_ONLY_PROCEDURES`` (fail closed), any
-    ``CALL <name> = <value>`` (session state on a pooled connection), a
-    ``CALL`` in a form not recognised, and an engine table function applied
-    anywhere. Returns ``CALL:<name>`` / ``CALL_SET:<name>`` markers.
+    ``CALL <name> = <value>`` (session state on a pooled connection), and an
+    engine table function applied anywhere. Returns ``CALL:<name>`` /
+    ``CALL_SET:<name>`` markers.
     """
     found: set[str] = set()
     tokens = self._code_tokens(query)
@@ -674,7 +737,7 @@ class CypherSecurityAnalyzer:
       lowered = name.lower()
       if form == "setting":
         found.add(f"CALL_SET:{lowered}")
-      elif form == "unknown" or lowered not in self.READ_ONLY_PROCEDURES:
+      elif lowered not in self.READ_ONLY_PROCEDURES:
         found.add(f"CALL:{lowered}")
 
     for i in range(len(tokens) - 1):
@@ -1183,6 +1246,11 @@ def has_opaque_statement_call(query: str) -> bool:
   """Whether the query calls a procedure that runs a string-supplied
   statement; callers refuse these outright rather than classifying them."""
   return cypher_analyzer.has_opaque_statement_call(query)
+
+
+def has_unsafe_vector_query(query: str, parameters: dict | None) -> bool:
+  """Whether a vector search's query vector is not a list of numbers."""
+  return cypher_analyzer.has_unsafe_vector_query(query, parameters)
 
 
 def references_catalog_label(query: str) -> bool:

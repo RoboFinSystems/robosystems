@@ -268,6 +268,7 @@ class TestLadybugService:
 
     # Mock the get_connection method on the instance as a context manager
     mock_db_instance.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_db_instance.read_only_transaction = mock_db_instance.get_connection
     mock_db_instance.get_connection.return_value.__exit__.return_value = None
 
     # Execute query
@@ -331,6 +332,7 @@ class TestLadybugService:
     # Mock database manager
     mock_db_instance = MagicMock()
     mock_db_instance.list_databases.return_value = ["test_db"]
+    mock_db_instance.read_only_transaction = mock_db_instance.get_connection
     mock_db_manager.return_value = mock_db_instance
 
     # Create service
@@ -395,6 +397,7 @@ class TestLadybugService:
 
     # Mock the get_connection method on the instance as a context manager
     mock_db_instance.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_db_instance.read_only_transaction = mock_db_instance.get_connection
     mock_db_instance.get_connection.return_value.__exit__.return_value = None
 
     request = QueryRequest(

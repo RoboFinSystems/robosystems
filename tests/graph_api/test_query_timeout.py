@@ -72,6 +72,7 @@ class TestQueryTimeout:
 
     mock_conn.execute = slow_execute
     mock_db_instance.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_db_instance.read_only_transaction = mock_db_instance.get_connection
 
     # Create service
     service = LadybugService(

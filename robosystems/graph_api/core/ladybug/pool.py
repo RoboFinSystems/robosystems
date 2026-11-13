@@ -126,6 +126,34 @@ class LadybugConnectionPool:
       if connection_info:
         self._release_connection(database_name, connection_info)
 
+  @contextmanager
+  def read_only_transaction(self, database_name: str):
+    """A connection of the caller's own, inside a read-only transaction.
+
+    A transaction belongs to its connection and pooled connections are shared
+    by overlapping requests, so one opened there would be ended, joined or
+    inherited by whoever else holds the connection. This one is opened for
+    the block and closed with it. The engine refuses any write inside it.
+
+    Only the query ceiling is set on it. The other settings a pooled
+    connection gets are the database's, already applied, and applying them
+    again beside a running write can wedge the engine.
+    """
+    database = self._acquire_connection(database_name, read_only=False).database
+    conn = lbug.Connection(database)
+    try:
+      timeout_ms = TuningConfig.get_graph_engine_query_timeout() * 1000
+      conn.execute(f"CALL timeout={timeout_ms};")
+      conn.execute("BEGIN TRANSACTION READ ONLY")
+      yield conn
+    finally:
+      # An error inside the transaction has already ended it.
+      try:
+        conn.execute("ROLLBACK")
+      except Exception:
+        pass
+      conn.close()
+
   def _acquire_connection(self, database_name: str, read_only: bool) -> ConnectionInfo:
     """Reuse a valid pooled connection, or create one."""
     self._maybe_run_maintenance()

@@ -468,6 +468,8 @@ class TestLadybugServiceExecuteQuery:
       patch(f"{SERVICE_MODULE}.LadybugMetricsCollector") as mock_metrics,
     ):
       mock_db_instance = MagicMock()
+      # These tests follow one statement on whichever connection it is given.
+      mock_db_instance.read_only_transaction = mock_db_instance.get_connection
       mock_db_mgr.return_value = mock_db_instance
       mock_metrics.return_value = MagicMock()
 
@@ -771,6 +773,8 @@ class TestLadybugServiceStreamingQuery:
       patch(f"{SERVICE_MODULE}.LadybugMetricsCollector") as mock_metrics,
     ):
       mock_db_instance = MagicMock()
+      # These tests follow one statement on whichever connection it is given.
+      mock_db_instance.read_only_transaction = mock_db_instance.get_connection
       mock_db_mgr.return_value = mock_db_instance
       mock_metrics.return_value = MagicMock()
 
@@ -1048,6 +1052,7 @@ class TestQueryTimeoutInterruptsEngine:
         repository_type=RepositoryType.ENTITY,
       )
       svc.db_manager.list_databases.return_value = ["test_db"]
+      svc.db_manager.read_only_transaction = svc.db_manager.get_connection
       yield svc
 
   def _wire(self, service):

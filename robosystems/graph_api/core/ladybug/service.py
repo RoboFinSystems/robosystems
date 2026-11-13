@@ -228,36 +228,18 @@ def validate_cypher_query(cypher: str) -> None:
     )
 
 
-def execute_statement(
-  conn, cypher: str, parameters: dict | None, read_only_database: bool
-):
-  """Run one ad-hoc statement, a read inside a read-only transaction.
+def validate_vector_queries(cypher: str, parameters: dict | None) -> None:
+  """Refuse a vector search whose query vector is not a list of numbers."""
+  from robosystems.security.cypher_analyzer import has_unsafe_vector_query
 
-  A writer's database opens read-write whatever the caller holds, so the
-  analyzer alone would decide whether a statement may write. A statement it
-  calls a read therefore runs in a transaction the engine itself holds
-  read-only: a write the analyzer missed is refused there. The result stays
-  readable after the transaction ends.
-  """
-  from robosystems.security.cypher_analyzer import is_write_operation
-
-  def run():
-    if parameters:
-      return conn.execute(cypher, parameters)
-    return conn.execute(cypher)
-
-  if read_only_database or is_write_operation(cypher):
-    return run()
-
-  conn.execute("BEGIN TRANSACTION READ ONLY")
-  try:
-    return run()
-  finally:
-    # An error inside the transaction has already ended it.
-    try:
-      conn.execute("COMMIT")
-    except Exception:
-      pass
+  if has_unsafe_vector_query(cypher, parameters):
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail=(
+        "QUERY_VECTOR_INDEX takes its query vector as a list of numbers, "
+        "written out or bound as a parameter."
+      ),
+    )
 
 
 class LadybugService:
@@ -293,6 +275,20 @@ class LadybugService:
       f"Graph API Service initialized: {base_path} (max: {max_databases}, read_only: {read_only})"
     )
     logger.info(f"Node type: {node_type}, Repository type: {repository_type}")
+
+  def _statement_connection(self, graph_id: str, cypher: str):
+    """The connection an ad-hoc statement runs on.
+
+    A writer's database opens read-write whatever the caller holds, so the
+    analyzer alone would decide whether a statement may write. A statement it
+    calls a read therefore runs inside a transaction the engine itself holds
+    read-only: a write the analyzer missed is refused there.
+    """
+    from robosystems.security.cypher_analyzer import is_write_operation
+
+    if self.read_only or is_write_operation(cypher):
+      return self.db_manager.get_connection(graph_id, read_only=self.read_only)
+    return self.db_manager.read_only_transaction(graph_id)
 
   def _validate_node_configuration(self):
     """Validate node configuration based on type."""
@@ -348,6 +344,7 @@ class LadybugService:
         validated_graph_id = validate_database_name(request.database)
         validate_cypher_query(request.cypher)
         validate_query_parameters(request.parameters)
+        validate_vector_queries(request.cypher, request.parameters)
 
         if validated_graph_id not in self.db_manager.list_databases():
           _raise_database_not_found(validated_graph_id)
@@ -358,16 +355,14 @@ class LadybugService:
           f"Streaming query on {validated_graph_id}: {translated_cypher[:100]}..."
         )
 
-        with self.db_manager.get_connection(
-          validated_graph_id, read_only=self.read_only
-        ) as conn:
+        with self._statement_connection(validated_graph_id, translated_cypher) as conn:
           try:
             query_timeout = TuningConfig.get_graph_query_timeout()
 
             def _execute_streaming():
-              return execute_statement(
-                conn, translated_cypher, request.parameters, self.read_only
-              )
+              if request.parameters:
+                return conn.execute(translated_cypher, request.parameters)
+              return conn.execute(translated_cypher)
 
             with ThreadPoolExecutor(max_workers=1) as executor:
               future = executor.submit(_execute_streaming)
@@ -423,6 +418,20 @@ class LadybugService:
               yield {
                 "error": error_msg,
                 "error_type": "ParserException",
+                "chunk_index": 0,
+                "is_last_chunk": True,
+                "row_count": 0,
+                "total_rows_sent": 0,
+                "execution_time_ms": (time.time() - start_time) * 1000,
+              }
+              return
+            elif "read-only transaction" in error_msg:
+              logger.warning(
+                f"Write refused in a read for {validated_graph_id}: {error_msg}"
+              )
+              yield {
+                "error": "This statement writes and was submitted as a read.",
+                "error_type": "ReadOnlyTransaction",
                 "chunk_index": 0,
                 "is_last_chunk": True,
                 "row_count": 0,
@@ -585,6 +594,7 @@ class LadybugService:
         validated_graph_id = validate_database_name(request.database)
         validate_cypher_query(request.cypher)
         validate_query_parameters(request.parameters)
+        validate_vector_queries(request.cypher, request.parameters)
 
         if validated_graph_id not in self.db_manager.list_databases():
           _raise_database_not_found(validated_graph_id)
@@ -600,17 +610,15 @@ class LadybugService:
           f"Executing query on {validated_graph_id}: {translated_cypher[:100]}..."
         )
 
-        with self.db_manager.get_connection(
-          validated_graph_id, read_only=self.read_only
-        ) as conn:
+        with self._statement_connection(validated_graph_id, translated_cypher) as conn:
           query_timeout = TuningConfig.get_graph_query_timeout()
 
           # A worker thread, not a signal-based alarm: signals only fire on the
           # main thread.
           def execute_query_with_params():
-            return execute_statement(
-              conn, translated_cypher, request.parameters, self.read_only
-            )
+            if request.parameters:
+              return conn.execute(translated_cypher, request.parameters)
+            return conn.execute(translated_cypher)
 
           try:
             with ThreadPoolExecutor(max_workers=1) as executor:

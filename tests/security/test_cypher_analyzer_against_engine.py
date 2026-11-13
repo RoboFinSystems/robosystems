@@ -15,6 +15,7 @@ import pytest
 from robosystems.security.cypher_analyzer import (
   CypherSecurityAnalyzer,
   has_opaque_statement_call,
+  has_unsafe_vector_query,
   is_admin_operation,
   is_bulk_operation,
   is_non_read_call,
@@ -49,6 +50,7 @@ def engine(tmp_path_factory):
     "CREATE NODE TABLE T(id INT64, v DOUBLE, x INT64, s STRING, PRIMARY KEY(id))"
   )
   connection.execute("CREATE NODE TABLE L(id SERIAL, PRIMARY KEY(id))")
+  connection.execute("CREATE SEQUENCE sq")
   connection.execute("CREATE (:T {id: 1, v: 1.0, x: 0, s: 'a'})")
   data_file = directory / "rows.csv"
   data_file.write_text("k,v\na,1\n")
@@ -139,7 +141,9 @@ def _statements() -> list[str]:
     "CREATE REL TABLE IF NOT EXISTS R(FROM T TO T)",
     "DROP TABLE IF EXISTS Absent",
     "ALTER TABLE T ADD IF NOT EXISTS z INT64",
-    "CREATE SEQUENCE IF NOT EXISTS sq",
+    "CREATE SEQUENCE IF NOT EXISTS sq2",
+    "RETURN nextval('sq')",
+    "MATCH (t:T) RETURN t.id, nextval('sq')",
     "CREATE (:L)",
     "MATCH (t:T) SET t.x = 5",
     "MATCH (t:T|schema_table) RETURN count(t)",
@@ -216,6 +220,11 @@ def test_a_statement_behind_any_separator_is_not_a_read(engine, separators, lead
     "CALL table_info('T') RETURN *",
     "MATCH (t:T) RETURN {schema_table: t.id} AS m",
     "MATCH (t:T) RETURN count(t) AS n",
+    "MATCH (t:T) RETURN t.id AS call",
+    "WITH 1 AS call RETURN call",
+    "MATCH (t:T) RETURN {call: t.id} AS m",
+    "MATCH (call:T) RETURN call.id, call.x",
+    "MATCH (t:T) WITH t.id AS call WHERE call = 1 RETURN call",
   ],
 )
 def test_an_honest_read_stays_a_read(engine, statement):
@@ -234,13 +243,23 @@ def test_an_honest_read_stays_a_read(engine, statement):
     "RETURN read_npy('x')",
     "CALL `read_csv_serial`('x') RETURN *",
     "CALL gql('MATCH (n) DELETE n')",
-    "CALL",
-    "CALL {RETURN 1} RETURN 1",
   ],
 )
 def test_a_file_function_is_refused_however_it_is_called(statement):
   """Never sent to the engine: these are refused by name, not by what they do."""
   assert is_non_read(statement)
+
+
+@pytest.mark.parametrize(
+  "statement",
+  [
+    "MATCH (t:T) WHERE t.id = $call RETURN t.id",
+    "MATCH (t:Call) RETURN t.call, t.type, t.graph, t.index, t.begin, t.comment",
+    "MATCH (t:T) RETURN t.id AS begin, t.x AS comment ORDER BY begin",
+  ],
+)
+def test_a_name_that_reads_like_a_keyword_is_still_a_read(statement):
+  assert not is_non_read(statement)
 
 
 def test_every_engine_table_function_is_named(engine):
@@ -261,3 +280,49 @@ def test_a_read_only_transaction_refuses_what_the_analyzer_would_miss(engine):
     engine.rows("BEGIN TRANSACTION READ ONLY")
     assert not engine.accepts(f"MATCH (t:T) {clause}")
   assert engine.rows("MATCH (t:T) RETURN t.id, t.x ORDER BY t.id") == before
+
+
+SEARCH = "CALL query_vector_index('T', 'idx', {vector}, 3) RETURN node.id"
+
+
+@pytest.mark.parametrize(
+  ("vector", "parameters"),
+  [
+    ("[0.1, -0.2, 3e-1]", None),
+    ("$embedding", {"embedding": [0.1, 0.2, 0.3]}),
+    ("$embedding", {"embedding": [1, 2, 3]}),
+  ],
+)
+def test_a_vector_search_over_numbers_is_let_through(vector, parameters):
+  assert not has_unsafe_vector_query(SEARCH.format(vector=vector), parameters)
+
+
+@pytest.mark.parametrize(
+  ("vector", "parameters"),
+  [
+    ("NULL", None),
+    ("null", None),
+    ("$embedding", {"embedding": None}),
+    ("$embedding", {}),
+    ("$embedding", None),
+    ("$embedding", {"embedding": []}),
+    ("$embedding", {"embedding": [0.1, None]}),
+    ("$embedding", {"embedding": "0.1"}),
+    ("CAST(NULL AS FLOAT[3])", None),
+    ("CASE WHEN false THEN [0.1] END", None),
+    ("[0.1, NULL]", None),
+    ("[]", None),
+    ("t.embedding", None),
+  ],
+)
+def test_a_vector_search_over_anything_else_is_refused(vector, parameters):
+  """Never sent to the engine: it does not survive a null query vector."""
+  assert has_unsafe_vector_query(SEARCH.format(vector=vector), parameters)
+  spaced = SEARCH.format(vector=vector).replace(
+    "query_vector_index(", "QUERY_VECTOR_INDEX\u180e ("
+  )
+  assert has_unsafe_vector_query(spaced, parameters)
+
+
+def test_a_statement_with_no_vector_search_is_not_looked_at():
+  assert not has_unsafe_vector_query("MATCH (t:T) RETURN t.query_vector_index", None)
