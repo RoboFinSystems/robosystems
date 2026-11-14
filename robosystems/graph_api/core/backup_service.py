@@ -47,6 +47,7 @@ class OnInstanceBackupService:
     compression: bool = True,
     checkpoint: bool = True,
     vacuum: bool = False,
+    r2_credentials: dict[str, str] | None = None,
   ) -> dict[str, Any]:
     """Back up a database on-instance and upload it, reporting progress.
 
@@ -125,7 +126,7 @@ class OnInstanceBackupService:
           key,
           task_id,
           db_size,
-          s3_client=self._get_r2_client(),
+          s3_client=self._get_r2_client(r2_credentials),
         )
       else:
         raise ValueError(f"Unsupported on-instance backup type: {backup_type}")
@@ -188,12 +189,11 @@ class OnInstanceBackupService:
       kwargs["aws_secret_access_key"] = s3_config.get("aws_secret_access_key")
     return boto3.client("s3", **kwargs)
 
-  def _get_r2_client(self):
-    """Create Cloudflare R2 client (S3-compatible) for zero-egress downloads."""
-    r2_config = env.get_r2_config()
-    if not r2_config:
-      raise RuntimeError("R2 not configured — set R2_ENDPOINT_URL and R2 credentials")
-    return boto3.client("s3", **r2_config)
+  def _get_r2_client(self, r2_credentials: dict[str, str] | None):
+    """Cloudflare R2 client (S3-compatible), from the request's credentials."""
+    if not r2_credentials:
+      raise RuntimeError("R2 credentials were not sent with the backup request")
+    return boto3.client("s3", **r2_credentials)
 
   @staticmethod
   def _cleanup_stale_temp_dirs(parent_dir: Path, max_age_hours: int = 24) -> None:
@@ -283,7 +283,7 @@ class OnInstanceBackupService:
     key: str,
     task_id: str,
     db_size: int,
-    s3_client=None,
+    s3_client,
   ) -> dict[str, Any]:
     """Compress the database with the bundled zstd binary and upload to R2.
 
@@ -292,9 +292,6 @@ class OnInstanceBackupService:
     stays at 128MB so subscribers can decompress with a plain ``zstd -d``.
     """
     logger.info(f"[Task {task_id}] Compressing {db_path.name} with zstd before upload")
-
-    if s3_client is None:
-      s3_client = self._get_r2_client()
 
     # On the data volume, not the container's /tmp (the root disk), which is too
     # small to hold a compressed multi-GB database.

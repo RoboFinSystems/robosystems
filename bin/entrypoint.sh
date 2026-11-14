@@ -211,6 +211,8 @@ case $DOCKER_PROFILE in
     ;;
   "ladybug-writer")
     echo "Starting LadybugDB Writer API..."
+    # The Graph API reads its own key and the Valkey token, nothing else.
+    export SECRETS_SCOPE="graph-api,valkey"
     # max-databases will be loaded from tier configuration based on CLUSTER_TIER
     exec uv run python -m robosystems.graph_api \
       --node-type writer \
@@ -229,6 +231,7 @@ case $DOCKER_PROFILE in
       LBUG_NODE_TYPE="shared_master"
       READONLY_FLAG=""
     fi
+    export SECRETS_SCOPE="graph-api,valkey"
     # max-databases will be loaded from tier configuration based on CLUSTER_TIER
     exec uv run python -m robosystems.graph_api \
       --node-type ${LBUG_NODE_TYPE} \

@@ -4,7 +4,7 @@ Database-related Pydantic models for the Graph API.
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 
 class QueryRequest(BaseModel):
@@ -60,6 +60,18 @@ class S3Destination(BaseModel):
   key: str = Field(..., description="S3 object key")
 
 
+class R2Credentials(BaseModel):
+  """Where an ``r2_download`` backup uploads, and as whom.
+
+  Sent by the caller with each request: the instance holds no R2 credentials
+  of its own.
+  """
+
+  endpoint_url: str = Field(..., description="R2 S3-compatible endpoint")
+  access_key_id: SecretStr = Field(..., description="R2 access key id")
+  secret_access_key: SecretStr = Field(..., description="R2 secret access key")
+
+
 class BackupRequest(BaseModel):
   """Request model for database backup."""
 
@@ -82,6 +94,10 @@ class BackupRequest(BaseModel):
   s3_destination: S3Destination | None = Field(
     default=None,
     description="Target S3 location for on-instance upload (required for every non-standard type)",
+  )
+  r2_credentials: R2Credentials | None = Field(
+    default=None,
+    description="R2 endpoint and credentials (required for 'r2_download')",
   )
   checkpoint: bool = Field(
     default=True,

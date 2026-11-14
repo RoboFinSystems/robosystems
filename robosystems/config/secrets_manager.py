@@ -22,6 +22,24 @@ from botocore.exceptions import ClientError
 # Not robosystems.logger: that would be a circular import.
 logger = logging.getLogger(__name__)
 
+# The base secret's name in ``SECRETS_SCOPE``.
+BASE_SECRET_SCOPE = "base"
+
+
+def secrets_scope() -> frozenset[str] | None:
+  """The secrets this process may read, or None when it is unscoped.
+
+  ``SECRETS_SCOPE`` is a comma-separated list of extension secret names
+  (``graph-api``, ``valkey``, …) and ``base``. A scoped process reads the
+  others as empty without asking Secrets Manager, so it runs the same whether
+  or not its role could have read them. The entrypoint sets it for the Graph
+  API, which needs none of the application's own secrets.
+  """
+  raw = (os.getenv("SECRETS_SCOPE") or "").strip()
+  if not raw:
+    return None
+  return frozenset(name.strip() for name in raw.split(",") if name.strip())
+
 
 class SecretsManager:
   """Manages retrieval of secrets from AWS Secrets Manager."""
@@ -49,6 +67,10 @@ class SecretsManager:
     failures raise in prod/staging (fail closed).
     """
     if self.environment not in ["prod", "staging"]:
+      return {}
+
+    scope = secrets_scope()
+    if scope is not None and (secret_type or BASE_SECRET_SCOPE) not in scope:
       return {}
 
     cache_key = f"{self.environment}/{secret_type}" if secret_type else self.environment

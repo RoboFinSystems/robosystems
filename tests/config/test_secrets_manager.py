@@ -324,3 +324,64 @@ class TestSecretsManagerHelpers:
         f"Secret type for {key} should be None or string"
       )
       assert isinstance(secret_key, str), f"Secret key for {key} should be string"
+
+
+class TestSecretsScope:
+  """A scoped process reads only the secrets it names."""
+
+  def _manager(self):
+    with patch("boto3.client") as mock_boto:
+      client = MagicMock()
+      mock_boto.return_value = client
+      manager = SecretsManager(environment="prod")
+    client.get_secret_value.return_value = {
+      "SecretString": json.dumps({"GRAPH_API_KEY": "graph-key", "JWT_SECRET_KEY": "x"})
+    }
+    return manager, client
+
+  def test_unscoped_process_reads_everything(self, monkeypatch):
+    monkeypatch.delenv("SECRETS_SCOPE", raising=False)
+    manager, client = self._manager()
+
+    assert manager.get_secret()["JWT_SECRET_KEY"] == "x"
+    assert manager.get_secret("postgres")
+    assert client.get_secret_value.call_count == 2
+
+  def test_scoped_process_reads_named_secrets(self, monkeypatch):
+    monkeypatch.setenv("SECRETS_SCOPE", "graph-api, valkey")
+    manager, client = self._manager()
+
+    assert manager.get_secret("graph-api")["GRAPH_API_KEY"] == "graph-key"
+    client.get_secret_value.assert_called_once_with(
+      SecretId="robosystems/prod/graph-api"
+    )
+
+  @pytest.mark.parametrize("secret_type", [None, "postgres", "admin"])
+  def test_out_of_scope_secret_is_empty_without_a_call(self, monkeypatch, secret_type):
+    monkeypatch.setenv("SECRETS_SCOPE", "graph-api,valkey")
+    manager, client = self._manager()
+    # A denial would raise in prod; the scope must not depend on one.
+    client.get_secret_value.side_effect = AssertionError("asked Secrets Manager")
+
+    assert manager.get_secret(secret_type) == {}
+    assert manager.get_admin_key() == ""
+
+  def test_base_can_be_named(self, monkeypatch):
+    monkeypatch.setenv("SECRETS_SCOPE", "base")
+    manager, client = self._manager()
+
+    assert manager.get_secret()["JWT_SECRET_KEY"] == "x"
+    assert manager.get_secret("postgres") == {}
+    assert client.get_secret_value.call_count == 1
+
+  def test_scoped_value_lookup_falls_back_to_the_default(self, monkeypatch):
+    monkeypatch.setenv("SECRETS_SCOPE", "graph-api,valkey")
+    monkeypatch.setenv("ENVIRONMENT", "prod")
+    monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+    manager, client = self._manager()
+    client.get_secret_value.side_effect = AssertionError("asked Secrets Manager")
+
+    with patch(
+      "robosystems.config.secrets_manager.get_secrets_manager", return_value=manager
+    ):
+      assert get_secret_value("JWT_SECRET_KEY", "") == ""

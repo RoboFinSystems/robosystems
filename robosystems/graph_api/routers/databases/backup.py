@@ -33,6 +33,7 @@ async def perform_backup(
   compression: bool,
   backup_type: str = "standard",
   s3_destination: dict | None = None,
+  r2_credentials: dict | None = None,
   checkpoint: bool = True,
   vacuum: bool = False,
   db_manager=None,
@@ -58,6 +59,7 @@ async def perform_backup(
         graph_id=graph_id,
         backup_type=backup_type,
         s3_destination=s3_destination,
+        r2_credentials=r2_credentials,
         compression=compression,
         checkpoint=checkpoint,
         vacuum=vacuum,
@@ -170,6 +172,12 @@ async def create_backup(
       detail=f"s3_destination is required for backup_type '{request.backup_type}'",
     )
 
+  if request.backup_type == "r2_download" and not request.r2_credentials:
+    raise HTTPException(
+      status_code=http_status.HTTP_400_BAD_REQUEST,
+      detail="r2_credentials is required for backup_type 'r2_download'",
+    )
+
   task_id = await backup_task_manager.create_task(
     task_type="backup",
     metadata={
@@ -187,6 +195,18 @@ async def create_backup(
       "key": request.s3_destination.key,
     }
 
+  # Handed to the background task only: never task metadata, never a log line.
+  r2_credentials = None
+  if request.r2_credentials:
+    r2_credentials = {
+      "endpoint_url": request.r2_credentials.endpoint_url,
+      "aws_access_key_id": request.r2_credentials.access_key_id.get_secret_value(),
+      "aws_secret_access_key": (
+        request.r2_credentials.secret_access_key.get_secret_value()
+      ),
+      "region_name": "auto",
+    }
+
   duckdb_pool = None
   if request.backup_type == "duckdb_staging":
     from robosystems.graph_api.core.duckdb import get_duckdb_pool
@@ -201,6 +221,7 @@ async def create_backup(
     compression=request.compression,
     backup_type=request.backup_type,
     s3_destination=s3_dest_dict,
+    r2_credentials=r2_credentials,
     checkpoint=request.checkpoint,
     vacuum=request.vacuum,
     db_manager=ladybug_service.db_manager,

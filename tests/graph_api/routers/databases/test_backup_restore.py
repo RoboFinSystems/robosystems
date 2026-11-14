@@ -452,3 +452,47 @@ async def test_download_backup_directory_database(monkeypatch, tmp_path):
     assert zf.read("graph1/nodes") == b"node-data"
     assert zf.read("graph1/logs/metrics.log") == b"metrics"
     assert json.loads(zf.read("backup-manifest.json"))["database_form"] == "directory"
+
+
+R2_REQUEST = {
+  "backup_type": "r2_download",
+  "s3_destination": {"bucket": "downloads", "key": "sec.lbdb.zst"},
+}
+R2_CREDENTIALS = {
+  "endpoint_url": "https://r2.example",
+  "access_key_id": "r2-access-key-id",
+  "secret_access_key": "r2-secret-access-key",
+}
+
+
+def test_r2_backup_without_credentials_is_refused(backup_client):
+  client = backup_client(FakeClusterService(read_only=False, databases=["sec"]))
+
+  response = client.post("/databases/sec/backup", json=R2_REQUEST)
+
+  assert response.status_code == 400
+  assert "r2_credentials" in response.json()["detail"]
+  client.task_manager.create_task.assert_not_awaited()
+
+
+def test_r2_backup_hands_the_request_credentials_to_the_task_only(backup_client):
+  client = backup_client(FakeClusterService(read_only=False, databases=["sec"]))
+
+  response = client.post(
+    "/databases/sec/backup", json={**R2_REQUEST, "r2_credentials": R2_CREDENTIALS}
+  )
+
+  assert response.status_code == 200
+  assert "r2-secret-access-key" not in response.text
+
+  # Task metadata is stored and streamed to monitors: no credential in it.
+  _, task_kwargs = client.task_manager.create_task.await_args
+  assert "r2" not in str(task_kwargs["metadata"]).replace("r2_download", "")
+
+  _, backup_kwargs = client.perform_backup_mock.call_args
+  assert backup_kwargs["r2_credentials"] == {
+    "endpoint_url": "https://r2.example",
+    "aws_access_key_id": "r2-access-key-id",
+    "aws_secret_access_key": "r2-secret-access-key",
+    "region_name": "auto",
+  }

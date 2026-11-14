@@ -1,7 +1,5 @@
 """Cypher query execution against a LadybugDB database, under admission control."""
 
-import os
-import time
 from contextlib import contextmanager
 
 import pydantic_core
@@ -15,53 +13,8 @@ from robosystems.graph_api.core.admission_control import (
 from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.graph_api.models.database import QueryRequest
 from robosystems.logger import logger
-from robosystems.models.core import Graph
 
 router = APIRouter(prefix="/databases", tags=["Graph Query"])
-
-# Rebuild status per graph, cached to keep RDS off the query path. An RDS
-# failure fails open (assume not rebuilding).
-_rebuild_status_cache: dict[str, tuple[bool, float]] = {}
-_REBUILD_CACHE_TTL = 30  # seconds
-
-
-def _is_graph_rebuilding(graph_id: str) -> bool:
-  """Check if a graph is currently rebuilding, using a cached RDS lookup.
-
-  Skipped for shared replicas — they serve an independent local copy and should
-  not be affected by the master setting rebuilding status on the same graph_id.
-  """
-  if os.getenv("LBUG_ROLE") == "replica":
-    return False
-
-  now = time.monotonic()
-
-  cached = _rebuild_status_cache.get(graph_id)
-  if cached is not None:
-    is_rebuilding, cached_at = cached
-    if now - cached_at < _REBUILD_CACHE_TTL:
-      return is_rebuilding
-
-  try:
-    from robosystems.database import session as scoped_session
-
-    db = scoped_session()
-    try:
-      graph = Graph.get_by_id(graph_id, db)
-      is_rebuilding = bool(
-        graph
-        and graph.graph_metadata
-        and graph.graph_metadata.get("status") == "rebuilding"
-      )
-      _rebuild_status_cache[graph_id] = (is_rebuilding, now)
-      return is_rebuilding
-    finally:
-      scoped_session.remove()
-  except Exception:
-    logger.warning(
-      f"Failed to check rebuild status for {graph_id}, assuming not rebuilding"
-    )
-    return False
 
 
 @contextmanager
@@ -99,25 +52,15 @@ def execute_query(
 
   Raises:
       HTTPException: 503 if server is overloaded (admission control)
-      HTTPException: 503 if graph is rebuilding
+
+  A rebuilding graph is refused by the caller's client before the request is
+  sent (``middleware/graph/rebuild_status``); this process holds no database
+  connection to ask.
 
   Deliberately a plain ``def``: the body is entirely synchronous (the engine
-  call, and a Postgres read in ``_is_graph_rebuilding``), so Starlette runs it
-  on the threadpool. As ``async def`` it ran on the single event loop, where a
+  call), so Starlette runs it on the threadpool. As ``async def`` it ran on the single event loop, where a
   long query against the shared repository held every caller on the instance.
   """
-  if _is_graph_rebuilding(graph_id):
-    logger.warning(f"Query rejected for {graph_id}: graph is rebuilding")
-    raise HTTPException(
-      status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-      detail={
-        "error": "Graph temporarily unavailable",
-        "reason": "Graph database is being rebuilt",
-        "status": "rebuilding",
-        "retry_after": 30,
-      },
-    )
-
   admission_controller = get_admission_controller()
   decision, reason = admission_controller.check_admission(graph_id, "query")
 

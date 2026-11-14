@@ -411,3 +411,32 @@ class TestCompressAndUploadReplica:
 
     metadata = s3_client.upload_file.call_args.kwargs["ExtraArgs"]["Metadata"]
     assert f"-{metadata['compression_level']}" in mock_run.call_args.args[0]
+
+
+class TestR2Client:
+  """The R2 client is built from the request, never from instance config."""
+
+  def _service(self):
+    from robosystems.graph_api.core.backup_service import OnInstanceBackupService
+
+    return OnInstanceBackupService(
+      db_manager=MagicMock(), task_manager=MagicMock(), duckdb_pool=None
+    )
+
+  def test_uses_the_credentials_sent_with_the_request(self):
+    credentials = {
+      "endpoint_url": "https://r2.example",
+      "aws_access_key_id": "id",
+      "aws_secret_access_key": "secret",
+      "region_name": "auto",
+    }
+    with patch("robosystems.graph_api.core.backup_service.boto3.client") as client:
+      self._service()._get_r2_client(credentials)
+
+    client.assert_called_once_with("s3", **credentials)
+
+  def test_refuses_without_them(self):
+    with patch("robosystems.graph_api.core.backup_service.env") as env:
+      env.get_r2_config.return_value = {"endpoint_url": "https://instance.example"}
+      with pytest.raises(RuntimeError, match="not sent"):
+        self._service()._get_r2_client(None)
