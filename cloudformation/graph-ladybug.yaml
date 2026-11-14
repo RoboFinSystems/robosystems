@@ -243,10 +243,11 @@ Resources:
                   - secretsmanager:GetSecretValue
                   - secretsmanager:DescribeSecret
                 Resource:
-                  # Base secret: robosystems/prod or robosystems/staging
-                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}-*"
-                  # Extension secrets: robosystems/prod/s3, robosystems/prod/postgres, robosystems/prod/ladybug, etc.
-                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/*"
+                  # The Graph API's own key and the Valkey token, and nothing
+                  # else: the container runs with SECRETS_SCOPE=graph-api,valkey
+                  # (bin/entrypoint.sh). Keep the two lists in step.
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/graph-api-*"
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/valkey-*"
               # SSM Parameter Store permissions for feature flags and tuning parameters
               - Effect: Allow
                 Action:
