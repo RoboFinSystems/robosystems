@@ -454,12 +454,24 @@ class TestLadybugConnectionPool:
     swapper = threading.Thread(target=swap, daemon=True)
     swapper.start()
     assert held.wait(timeout=5)
-    maintainer = threading.Thread(target=run, daemon=True)
-    maintainer.start()
-    time.sleep(0.3)
-    go_on.set()
-    swapper.join(timeout=5)
-    maintainer.join(timeout=5)
+
+    # Signal once maintenance asks for the database lock it will wait on, so
+    # the swap's global-lock attempt starts only after that point.
+    maintainer_waiting = threading.Event()
+    real_get_lock = pool._get_database_lock
+
+    def get_lock(name: str):
+      lock = real_get_lock(name)
+      maintainer_waiting.set()
+      return lock
+
+    with patch.object(pool, "_get_database_lock", side_effect=get_lock):
+      maintainer = threading.Thread(target=run, daemon=True)
+      maintainer.start()
+      assert maintainer_waiting.wait(timeout=5)
+      go_on.set()
+      swapper.join(timeout=5)
+      maintainer.join(timeout=5)
 
     assert got_global == [True], "maintenance held the global lock while waiting"
     assert not swapper.is_alive() and not maintainer.is_alive()
