@@ -271,6 +271,9 @@ class LadybugDatabaseManager:
 
     ``preserve_duckdb`` keeps the staging database *and* the LanceDB indexes
     built from it, so LadybugDB can be rebuilt without re-running staging.
+    Without it the delete is a teardown, and an engine upgrade's leftovers
+    for the graph (its ``.pre-migration`` file, its ``exports/`` directory)
+    go too.
 
     A missing ``.lbdb`` is not a refusal: the graph file goes first, so a
     teardown that died partway must still be able to dispose of the side
@@ -299,6 +302,10 @@ class LadybugDatabaseManager:
       for name in names:
         self.connection_pool.close_database_connections(name)
         removed.extend(self._remove_graph_files(name))
+        # A rebuild keeps the graph, and with it the engine upgrade's rollback
+        # copy; a teardown leaves nothing named for the graph on the volume.
+        if not preserve_duckdb:
+          removed.extend(self._remove_migration_files(name))
 
       # LanceDB indexes are derived from DuckDB staging, so they follow the
       # same preserve decision.
@@ -384,6 +391,27 @@ class LadybugDatabaseManager:
         # Older engine versions stored a database as a directory.
         shutil.rmtree(db_path)
         removed.append(str(db_path))
+
+    return removed
+
+  def _remove_migration_files(self, name: str) -> list[str]:
+    """Remove what an engine upgrade left for ``name``: the ``.pre-migration``
+    copy of its old file and its ``exports/`` directory."""
+    removed: list[str] = []
+
+    for suffix in GRAPH_DB_SUFFIXES:
+      pre_migration = self.base_path / f"{name}{suffix}.pre-migration"
+      if pre_migration.is_file():
+        pre_migration.unlink()
+        removed.append(str(pre_migration))
+      elif pre_migration.is_dir():
+        shutil.rmtree(pre_migration)
+        removed.append(str(pre_migration))
+
+    export_dir = self.base_path / "exports" / name
+    if export_dir.is_dir():
+      shutil.rmtree(export_dir)
+      removed.append(str(export_dir))
 
     return removed
 
