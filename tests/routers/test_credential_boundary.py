@@ -36,6 +36,8 @@ def test_api_key_is_refused(client, api_key, method, path, body):
   response = client.request(method, path, json=body, headers={"X-API-Key": api_key})
 
   assert response.status_code == 401, response.text
+  assert "API keys are not accepted" in response.json()["detail"]
+  assert response.headers["WWW-Authenticate"] == "Bearer"
 
 
 @pytest.mark.parametrize(
@@ -47,4 +49,27 @@ def test_session_passes_authentication(client, test_user, method, path, body):
   response = client.request(method, path, json=body, headers=headers)
 
   # Whatever the route decides next (403, 404, 501), it is not an auth refusal.
+  assert response.status_code != 401, response.text
+
+
+# Reading, and taking access away, stay open to a key.
+KEY_ROUTES = [
+  ("get", "/v1/user/api-keys"),
+  ("delete", "/v1/user/api-keys/uak_missing"),
+  ("get", f"/v1/orgs/{ORG}/members"),
+  ("delete", f"/v1/orgs/{ORG}/members/user_1"),
+  ("get", f"/v1/orgs/{ORG}/invitations"),
+  ("delete", f"/v1/orgs/{ORG}/invitations/inv_1"),
+  ("get", f"/v1/graphs/{GRAPH}/members"),
+  ("delete", f"/v1/graphs/{GRAPH}/members/user_1"),
+]
+
+
+@pytest.mark.parametrize(
+  ("method", "path"), KEY_ROUTES, ids=[f"{m} {p}" for m, p in KEY_ROUTES]
+)
+def test_api_key_still_reads_and_removes(client, api_key, method, path):
+  response = client.request(method, path, headers={"X-API-Key": api_key})
+
+  # Whatever the route decides next (403, 404, 501), the key authenticated.
   assert response.status_code != 401, response.text

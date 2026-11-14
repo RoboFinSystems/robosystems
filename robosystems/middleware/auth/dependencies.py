@@ -288,7 +288,10 @@ async def require_jwt_user(
   if user is None:
     raise HTTPException(
       status_code=status.HTTP_401_UNAUTHORIZED,
-      detail="An interactive session is required for this action",
+      detail=(
+        "A signed-in session is required for this action; API keys are not accepted"
+      ),
+      headers={"WWW-Authenticate": "Bearer"},
     )
   return user
 
