@@ -106,7 +106,10 @@ def test_rest_writes_are_isolated(tenants, client: Client, report: Report) -> No
       body = dict(spec["body"])
       if body.get("user_id") == "{attacker_user_id}":
         body["user_id"] = attacker.user_id
-      a = client.post(path, principal=attacker, json=body)
+      if spec.get("session"):
+        a = client.post(path, jwt=attacker.jwt, json=body)
+      else:
+        a = client.post(path, principal=attacker, json=body)
       verdict, note = classify_write(a)
       f = Finding(
         "horizontal",

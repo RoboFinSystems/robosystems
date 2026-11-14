@@ -274,17 +274,24 @@ async def get_optional_jwt_user(request: Request) -> User | None:
   if not verify_result:
     return None
   user_id, token_session_version = verify_result
-  return _get_user_for_verified_jwt(user_id, token_session_version)
+  user = _get_user_for_verified_jwt(user_id, token_session_version)
+  if user:
+    _publish_jwt_identity(request, user_id)
+  return user
 
 
 async def require_jwt_user(
   user: User | None = Depends(get_optional_jwt_user),
 ) -> User:
-  """The JWT-session user, or 401. For routes that change sign-in credentials."""
+  """The JWT-session user, or 401. For routes that change sign-in credentials
+  or grant access: creating a key, inviting a member, raising a role."""
   if user is None:
     raise HTTPException(
       status_code=status.HTTP_401_UNAUTHORIZED,
-      detail="An interactive session is required for this action",
+      detail=(
+        "A signed-in session is required for this action; API keys are not accepted"
+      ),
+      headers={"WWW-Authenticate": "Bearer"},
     )
   return user
 

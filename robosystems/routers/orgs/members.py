@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from ...database import get_db_session
 from ...logger import get_logger
 from ...middleware.auth.cache import api_key_cache
-from ...middleware.auth.dependencies import get_current_user
+from ...middleware.auth.dependencies import get_current_user, require_jwt_user
 from ...middleware.rate_limits import general_api_rate_limit_dependency
 from ...models.api.common import (
   RESOURCE_ERROR_RESPONSES,
@@ -85,7 +85,7 @@ async def list_org_members(
   "/orgs/{org_id}/members/{user_id}",
   response_model=OrgMemberResponse,
   summary="Update Member Role",
-  description="Requires admin or owner role. Owner promotion/demotion requires a dedicated ownership transfer workflow.",
+  description="Requires admin or owner role. Owner promotion/demotion requires a dedicated ownership transfer workflow. Requires a signed-in session; API keys are not accepted.",
   operation_id="updateOrgMemberRole",
   responses={**RESOURCE_ERROR_RESPONSES},
 )
@@ -93,7 +93,7 @@ async def update_member_role(
   org_id: str,
   user_id: str,
   request: UpdateMemberRoleRequest,
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(require_jwt_user),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> OrgMemberResponse:

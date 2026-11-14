@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from ...config import env
 from ...database import get_db_session
 from ...logger import get_logger
-from ...middleware.auth.dependencies import get_current_user
+from ...middleware.auth.dependencies import get_current_user, require_jwt_user
 from ...middleware.rate_limits import general_api_rate_limit_dependency
 from ...middleware.sse import build_email_job_config, run_and_monitor_dagster_job
 from ...models.api.common import RESOURCE_ERROR_RESPONSES, ErrorResponse
@@ -122,7 +122,7 @@ def _queue_invitation_email(
   response_model=OrgInvitationResponse,
   status_code=status.HTTP_201_CREATED,
   summary="Invite Member",
-  description="Invite a new user to the organization by email. Disabled by default (ORG_MEMBER_INVITATIONS_ENABLED=false); returns 501 when disabled. Requires admin or owner role. Only emails without an existing account can be invited.",
+  description="Invite a new user to the organization by email. Disabled by default (ORG_MEMBER_INVITATIONS_ENABLED=false); returns 501 when disabled. Requires admin or owner role. Only emails without an existing account can be invited. Requires a signed-in session; API keys are not accepted.",
   operation_id="createOrgInvitation",
   responses={
     **RESOURCE_ERROR_RESPONSES,
@@ -135,7 +135,7 @@ async def create_invitation(
   request: CreateInvitationRequest,
   fastapi_request: Request,
   background_tasks: BackgroundTasks,
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(require_jwt_user),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> OrgInvitationResponse:
@@ -290,7 +290,7 @@ async def revoke_invitation(
   "/orgs/{org_id}/invitations/{invitation_id}/resend",
   response_model=OrgInvitationResponse,
   summary="Resend Invitation",
-  description="Requires admin or owner role. Rotates the invitation token, extends its expiry, and re-sends the email.",
+  description="Requires admin or owner role. Rotates the invitation token, extends its expiry, and re-sends the email. Requires a signed-in session; API keys are not accepted.",
   operation_id="resendOrgInvitation",
   responses={
     **RESOURCE_ERROR_RESPONSES,
@@ -302,7 +302,7 @@ async def resend_invitation(
   invitation_id: str,
   fastapi_request: Request,
   background_tasks: BackgroundTasks,
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(require_jwt_user),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> OrgInvitationResponse:

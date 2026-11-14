@@ -98,14 +98,18 @@ class TestUserRegistrationWorkflow:
     assert updated_data["name"] == "Updated Integration User"
     assert updated_data["email"] == "updated-integration@example.com"
 
-    # Step 5: Create additional API key
+    # Step 5: Create additional API key. Session-only, like the profile update:
+    # a key does not mint another key.
     create_key_data = {
       "name": "Secondary API Key",
       "description": "Additional key for testing",
     }
 
+    refused = client.post("/v1/user/api-keys", json=create_key_data, headers=headers)
+    assert refused.status_code == 401
+
     create_key_response = client.post(
-      "/v1/user/api-keys", json=create_key_data, headers=headers
+      "/v1/user/api-keys", json=create_key_data, headers=session_headers
     )
     assert create_key_response.status_code == 201
 

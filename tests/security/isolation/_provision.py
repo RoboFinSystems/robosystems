@@ -220,7 +220,7 @@ def _invite_and_join(
   email = f"{_unique('iso_' + label)}@example.com"
   r = client.post(
     f"/v1/orgs/{owner.org_id}/invitations",
-    principal=owner,
+    jwt=owner.jwt,  # granting access takes a session, not a key
     json={"email": email, "role": org_role},
   )
   if r.status_code != 201:
@@ -260,7 +260,7 @@ def grant_graph_role(
 ) -> bool:
   r = client.post(
     f"/v1/graphs/{graph_id}/members",
-    principal=admin,
+    jwt=admin.jwt,
     json={"user_id": user_id, "role": role},
   )
   return r.status_code in (200, 201)

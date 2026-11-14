@@ -36,6 +36,8 @@ REST_WRITES: list[dict] = [
     "path": "/v1/graphs/{graph_id}/members",
     # user_id is filled with the attacker's own id at run time
     "body": {"user_id": "{attacker_user_id}", "role": "admin"},
+    # Session-only route: a key is refused before authorization is reached.
+    "session": True,
   },
 ]
 
