@@ -225,8 +225,11 @@ class User(Model):
     except SQLAlchemyError:
       session.rollback()
       raise
-    for token in revoked:
-      token.invalidate_cache()
+    try:
+      for token in revoked:
+        token.invalidate_cache()
+    except Exception as e:
+      logger.error(f"OAuth tokens revoked; clearing their cache failed: {e}")
     if revoked:
       logger.info(f"Revoked {len(revoked)} OAuth tokens (sessions_invalidated)")
 

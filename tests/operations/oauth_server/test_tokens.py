@@ -305,6 +305,22 @@ class TestRefresh:
     assert refresh.used_at is None
     assert access.revoked_at is None
 
+  def test_a_failed_post_commit_step_still_returns_the_new_pair(
+    self, test_db, issued, client_row
+  ):
+    with patch.object(OAuthToken, "log_issued", side_effect=SQLAlchemyError("gone")):
+      rotated = refresh_access_token(
+        refresh_token=issued.refresh_token,
+        client=client_row,
+        scope=None,
+        resource=None,
+        session=test_db,
+      )
+    new_refresh = OAuthToken.get_by_plaintext(
+      rotated.refresh_token, TOKEN_TYPE_REFRESH, test_db
+    )
+    assert new_refresh is not None and new_refresh.is_live
+
   @pytest.mark.timeout(60)
   def test_concurrent_replay_waits_for_the_rotation_and_revokes_its_successor(
     self, test_db, issued, client_row

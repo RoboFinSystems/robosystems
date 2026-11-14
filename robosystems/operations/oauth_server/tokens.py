@@ -236,19 +236,25 @@ def refresh_access_token(
       commit=False,
     )
     grant.last_used_at = datetime.now(UTC)
+    granted_scope = str(grant.scope)
     session.commit()
   except SQLAlchemyError:
     session.rollback()
     raise
 
-  for token in previous_access:
-    token.invalidate_cache()
-  OAuthToken.log_issued(access, refresh, rotation=True)
+  # The rotation is committed. What follows is best-effort, so a failure here
+  # never costs the client the pair it was just issued.
+  try:
+    for token in previous_access:
+      token.invalidate_cache()
+    OAuthToken.log_issued(access, refresh, rotation=True)
+  except Exception as e:
+    logger.error(f"OAuth rotation committed; a post-commit step failed: {e}")
   return TokenResponse(
     access_token=access_plain,
     refresh_token=refresh_plain,
     expires_in=ttl,
-    scope=str(grant.scope),
+    scope=granted_scope,
   )
 
 
