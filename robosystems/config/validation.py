@@ -44,18 +44,25 @@ class EnvValidator:
     scope = secrets_scope()
     holds_base_secret = scope is None or BASE_SECRET_SCOPE in scope
 
-    if env_config.ENVIRONMENT in ("prod", "staging") and not holds_base_secret:
-      # The Graph API: no database, no sessions, no stored credentials.
-      for var_name, description in {
-        "GRAPH_API_KEY": "Graph API key",
-        "VALKEY_URL": "Valkey/Redis base URL",
-        "AWS_REGION": "AWS region",
-      }.items():
-        if not getattr(env_config, var_name, None):
-          errors.append(
-            f"{var_name}: {description} is required in {env_config.ENVIRONMENT}"
-          )
-    elif env_config.ENVIRONMENT in ("prod", "staging"):
+    if not holds_base_secret:
+      # The Graph API: no database, no sessions, no stored credentials. It is
+      # held to what it uses and to nothing below: every later check is about
+      # an application feature whose settings this process cannot read, so
+      # running them would refuse the boot over a secret it must not hold.
+      if env_config.ENVIRONMENT in ("prod", "staging"):
+        for var_name, description in {
+          "GRAPH_API_KEY": "Graph API key",
+          "VALKEY_URL": "Valkey/Redis base URL",
+          "AWS_REGION": "AWS region",
+        }.items():
+          if not getattr(env_config, var_name, None):
+            errors.append(
+              f"{var_name}: {description} is required in {env_config.ENVIRONMENT}"
+            )
+      EnvValidator._report(errors, warnings)
+      return
+
+    if env_config.ENVIRONMENT in ("prod", "staging"):
       required_prod_vars = {
         "DATABASE_URL": "PostgreSQL connection string",
         "JWT_SECRET_KEY": "JWT signing key (must not be default)",
@@ -253,7 +260,10 @@ class EnvValidator:
 
     EnvValidator._validate_urls(env_config, errors)
     EnvValidator._validate_paths(env_config, warnings)
+    EnvValidator._report(errors, warnings)
 
+  @staticmethod
+  def _report(errors: list[str], warnings: list[str]) -> None:
     if warnings:
       for warning in warnings:
         logger.warning(f"Config validation warning: {warning}")
