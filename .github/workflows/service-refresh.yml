@@ -34,11 +34,11 @@ on:
         description: "Graph node types to refresh"
         required: false
         type: choice
+        # Writers only. Shared replicas are replaced by the instance refresh the
+        # shared-repository publish starts from Dagster, never restarted here.
         options:
           - writer
-          - all
           - shared
-          - shared-replicas
         default: "writer"
       max_wait_minutes:
         description: "Minutes the refresh keeps coming back to instances busy with destructive ops"
@@ -83,7 +83,7 @@ on:
         type: string
         default: "true"
       graph_node_types:
-        description: "Graph node types to refresh (writer, all, shared, shared-replicas)"
+        description: "Graph node types to refresh (writer, shared)"
         required: false
         type: string
         default: "writer"

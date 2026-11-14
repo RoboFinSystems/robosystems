@@ -137,19 +137,23 @@ class TestTargeting:
 
     assert gcr._resolve_queue(["shared"], "test") == [shared]
 
-  def test_replicas_target_node_type_not_ladybug_role(self, gcr):
-    """Replicas only got LadybugRole=replica later, and a tag reaches an instance
-    at boot. Matching NodeType works during that rollout rather than silently
-    selecting nothing."""
-    replica = _launch(NodeType="shared_replica")
+  @pytest.mark.parametrize("group", ["writer", "shared"])
+  def test_no_group_reaches_a_replica(self, gcr, group):
+    """A replica restarted in place fails its health check and is replaced; it
+    changes by instance refresh from Dagster, never through this walk."""
+    _launch(NodeType="shared_replica")
+    _launch(NodeType="shared_replica", LadybugRole="replica")
 
-    assert gcr._resolve_queue(["shared-replicas"], "test") == [replica]
+    assert gcr._resolve_queue([group], "test") == []
 
-  def test_all_walks_writers_before_replicas(self, gcr):
-    replica = _launch(NodeType="shared_replica")
-    writer = _launch(LadybugRole="writer", WriterTier="ladybug-standard")
+  @pytest.mark.parametrize("group", ["shared-replicas", "all"])
+  def test_replica_groups_are_refused(self, gcr, group):
+    with pytest.raises(ValueError, match="refreshed from Dagster"):
+      gcr._resolve_queue([group], "test")
 
-    assert gcr._resolve_queue(gcr.ALL_GROUPS, "test") == [writer, replica]
+  def test_start_refuses_a_replica_group(self, gcr):
+    with pytest.raises(ValueError, match="Unknown node_type"):
+      gcr.start({"node_types": "shared-replicas", "environment": "test"})
 
   def test_other_environments_and_stopped_instances_are_excluded(self, gcr):
     _launch(env="prod", LadybugRole="writer", WriterTier="ladybug-standard")

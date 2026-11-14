@@ -22,6 +22,13 @@ caller that stops stepping stops the walk after the in-flight instance.
 `start` takes an optional `instance_ids` list that narrows the queue to those
 instances (still within the group's filters), so a deferred remainder can be
 re-walked on its own.
+
+Writers only. A shared replica is never restarted in place: it warms up after a
+restart, fails its load balancer health check while it does, and is replaced
+by its auto scaling group regardless. Replicas change by instance refresh,
+which the shared-repository publish starts from Dagster
+(`robosystems/dagster/assets/shared_repositories/replicas.py`); that brings the
+new instance into service before the old one is retired.
 """
 
 import logging
@@ -70,19 +77,15 @@ LEASE_ATTRIBUTE = "active_leases"
 STALE_WINDOW_SECONDS = 21600
 
 # EC2 filters per node-type group. `writer` covers every writer tier (the tier is
-# in `WriterTier`, e.g. `ladybug-shared`). Replicas match on `NodeType`, which
-# every replica carries; `LadybugRole=replica` only reaches an instance at boot.
+# in `WriterTier`, e.g. `ladybug-shared`). There is no replica group, on purpose
+# (see the module docstring).
 NODE_TYPE_FILTERS: dict[str, list[dict[str, Any]]] = {
   "writer": [{"Name": "tag:LadybugRole", "Values": ["writer"]}],
   "shared": [
     {"Name": "tag:LadybugRole", "Values": ["writer"]},
     {"Name": "tag:WriterTier", "Values": ["ladybug-shared"]},
   ],
-  "shared-replicas": [{"Name": "tag:NodeType", "Values": ["shared_replica"]}],
 }
-
-# What `all` expands to, in walk order.
-ALL_GROUPS = ["writer", "shared-replicas"]
 
 # Walked last within its group: the tier most likely to be mid-materialization,
 # and the one whose data every shared repository reads.
@@ -112,8 +115,8 @@ def _filters_for(
   """EC2 filters selecting a node-type group's running instances."""
   if group not in NODE_TYPE_FILTERS:
     raise ValueError(
-      f"Unknown node_type '{group}'; expected one of "
-      f"{sorted([*NODE_TYPE_FILTERS, 'all'])}"
+      f"Unknown node_type '{group}'; expected one of {sorted(NODE_TYPE_FILTERS)}. "
+      "Shared replicas are refreshed from Dagster, not here."
     )
   filters = [
     {"Name": "tag:Environment", "Values": [environment]},
@@ -358,7 +361,7 @@ def start(event: dict[str, Any]) -> dict[str, Any]:
   environment = event.get("environment", ENVIRONMENT)
   node_type = event.get("node_types", "writer")
   max_wait_minutes = int(event.get("max_wait_minutes", DEFAULT_MAX_WAIT_MINUTES))
-  groups = ALL_GROUPS if node_type == "all" else [node_type]
+  groups = [node_type]
   instance_ids = _parse_instance_ids(event.get("instance_ids"))
 
   state: dict[str, Any] = {
