@@ -483,40 +483,45 @@ class LadybugConnectionPool:
       self._check_connection_health()
       self._last_health_check = now
 
+  def _snapshot_connections(self) -> list[tuple[str, str, ConnectionInfo]]:
+    """The pool's connections, copied under the global lock and returned
+    without it: maintenance then takes each database lock on its own, in the
+    same order as a swap (database lock, then global), never the reverse."""
+    with self._global_lock:
+      return [
+        (db_name, conn_id, conn_info)
+        for db_name, pool in list(self._pools.items())
+        for conn_id, conn_info in list(pool.items())
+      ]
+
   def _cleanup_expired_connections(self):
     """Clean up expired connections."""
-    with self._global_lock:
-      expired_connections = []
+    expired = [
+      (db_name, conn_id)
+      for db_name, conn_id, conn_info in self._snapshot_connections()
+      if not self._is_connection_valid(conn_info)
+    ]
+    for db_name, conn_id in expired:
+      with self._get_database_lock(db_name):
+        self._close_connection(db_name, conn_id)
 
-      for db_name, pool in self._pools.items():
-        for conn_id, conn_info in pool.items():
-          if not self._is_connection_valid(conn_info):
-            expired_connections.append((db_name, conn_id))
-
-      for db_name, conn_id in expired_connections:
-        with self._get_database_lock(db_name):
-          self._close_connection(db_name, conn_id)
-
-      if expired_connections:
-        logger.info(f"Cleaned up {len(expired_connections)} expired connections")
+    if expired:
+      logger.info(f"Cleaned up {len(expired)} expired connections")
 
   def _check_connection_health(self):
     """Check health of all connections."""
-    with self._global_lock:
-      unhealthy_connections = []
-
-      for db_name, pool in self._pools.items():
-        for conn_id, conn_info in pool.items():
-          if not self._test_connection_health(conn_info):
-            conn_info.is_healthy = False
-            unhealthy_connections.append((db_name, conn_id))
-
-      for db_name, conn_id in unhealthy_connections:
-        with self._get_database_lock(db_name):
+    removed = 0
+    for db_name, conn_id, conn_info in self._snapshot_connections():
+      with self._get_database_lock(db_name):
+        if conn_id not in self._pools.get(db_name, {}):
+          continue
+        if not self._test_connection_health(conn_info):
+          conn_info.is_healthy = False
           self._close_connection(db_name, conn_id)
+          removed += 1
 
-      if unhealthy_connections:
-        logger.warning(f"Removed {len(unhealthy_connections)} unhealthy connections")
+    if removed:
+      logger.warning(f"Removed {removed} unhealthy connections")
 
   def _test_connection_health(self, connection_info: ConnectionInfo) -> bool:
     """Test if a connection is healthy."""
