@@ -53,3 +53,23 @@ def test_both_graph_profiles_start_scoped():
     branch = script[script.index(profile) :].split(";;", 1)[0]
     assert 'export SECRETS_SCOPE="graph-api,valkey"' in branch, profile
     assert branch.index("SECRETS_SCOPE") < branch.index("robosystems.graph_api")
+
+
+TEMPLATES = Path(__file__).parents[2] / "cloudformation"
+SECRET_ARN = re.compile(r"secret:robosystems/\$\{Environment\}([^\s\"]*)")
+
+
+@pytest.mark.parametrize(
+  "template", ["graph-ladybug.yaml", "graph-ladybug-replicas.yaml"]
+)
+def test_instance_role_reads_only_the_scoped_secrets(template):
+  """The role and the process scope name the same secrets, so neither is the
+  only thing standing between the instance and the rest."""
+  script = ENTRYPOINT.read_text()
+  scope = re.search(r'export SECRETS_SCOPE="([^"]+)"', script)
+  assert scope is not None
+  expected = {f"/{name}-*" for name in scope.group(1).split(",")}
+
+  granted = set(SECRET_ARN.findall((TEMPLATES / template).read_text()))
+
+  assert granted == expected, f"{template} grants {sorted(granted)}"
