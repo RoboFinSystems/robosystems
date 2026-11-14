@@ -36,7 +36,7 @@ def test_a_shadow_comparison_stays_current_beside_a_draft(ext_session):
   session.commit()
 
   with patch(
-    "robosystems.operations.roboledger.fiscal_calendar.qb_writeback.shadow_ledger",
+    "robosystems.operations.roboledger.fiscal_calendar.qb_writeback.shadow_close_for_entity",
     return_value=True,
   ):
     recorded = record_statement_balance(

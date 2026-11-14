@@ -263,10 +263,21 @@ class TestListPeriodDraftsTool:
     with (
       _patch_session(),
       patch(f"{MODULE}.list_period_drafts", return_value=response) as read,
+      patch(
+        "robosystems.operations.roboledger.entity_scope.find_entity_id",
+        side_effect=lambda _session, entity_id=None: entity_id,
+      ),
+      patch(
+        "robosystems.operations.roboledger.fiscal_calendar.qb_writeback."
+        "publish_posture",
+        return_value=(None, False),
+      ) as posture,
     ):
       result = await tool.execute({"period": "2026-03", "entity_id": "ent_sub"})
 
     assert read.call_args.kwargs["entity_id"] == "ent_sub"
+    # The named entity's keeper decides the outbox, not the graph's.
+    assert posture.call_args.args[2] == "ent_sub"
     assert result["draft_count"] == 1
     assert result["all_balanced"] is True
     assert result["drafts"][0]["entry_id"] == "je_01"

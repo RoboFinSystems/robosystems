@@ -44,9 +44,8 @@ _CLOSE = "robosystems.operations.roboledger.fiscal_calendar.close_service"
 def _one_entity():
   """The mocked session has no entities table: every close here is the group
   parent's, so the resolver's query never eats an ordered execute result."""
-  with (
-    patch(f"{_CLOSE}.resolve_entity_id", side_effect=lambda s, e=None: e or ENTITY_ID),
-    patch(f"{_CLOSE}.is_group_parent", return_value=True),
+  with patch(
+    f"{_CLOSE}.resolve_entity_id", side_effect=lambda s, e=None: e or ENTITY_ID
   ):
     yield
 
@@ -1001,13 +1000,17 @@ class TestClosePrePublishWriteback:
       (entry2, event2),
     ]
 
-    # Mock the platform-DB connection lookup. The resolver reads the live
-    # row's policy itself, so the mock has to carry one.
-    mock_conn = MagicMock(id="conn_qb_1", write_policy="qb_authoritative")
+    # Mock the platform-DB keeper lookup. The resolver reads the keeper's
+    # policy and provider itself, so the mock has to carry both.
+    mock_conn = MagicMock(
+      id="conn_qb_1", write_policy="qb_authoritative", provider="quickbooks"
+    )
     mock_platform_session = MagicMock()
     mock_platform_session.__enter__ = MagicMock(return_value=mock_platform_session)
     mock_platform_session.__exit__ = MagicMock(return_value=False)
-    mock_platform_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = mock_conn
+    mock_platform_session.query.return_value.filter.return_value.first.return_value = (
+      mock_conn
+    )
 
     def fake_execute(_sess, body, created_by, **_kwargs):
       # First event accepts, second rejects.

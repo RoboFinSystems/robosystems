@@ -29,7 +29,10 @@ from robosystems.models.extensions.roboledger import Event
 from robosystems.operations.information_block.reconciliation import (
   RECONCILIATION_BLOCK_TYPE,
 )
-from robosystems.operations.roboledger.reads.fiscal_calendar import live_qb_connection
+from robosystems.operations.roboledger.entity_scope import find_entity_id
+from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+  books_keeper,
+)
 
 from .cleared import AccountLines, account_lines
 from .observations import BANK_CURRENT, first_feed_reading, statement_observations
@@ -160,7 +163,9 @@ class SourceLedgerResolver:
     self.graph_id = graph_id
 
   def resolve(self, session: Session, window: ReconciliationWindow) -> IndependentSide:
-    report, connection_id, last_sync_at = self._fetch(window)
+    report, connection_id, last_sync_at = self._fetch(
+      window, window.entity_id or find_entity_id(session)
+    )
 
     by_source_id: dict[str, str] = {}
     linked = session.execute(
@@ -207,7 +212,7 @@ class SourceLedgerResolver:
     )
 
   def _fetch(
-    self, window: ReconciliationWindow
+    self, window: ReconciliationWindow, entity_id: str | None
   ) -> tuple[TrialBalanceReport, str, datetime | None]:
     """The source's trial balance, with the connection it was read through.
 
@@ -221,10 +226,14 @@ class SourceLedgerResolver:
     )
 
     with SessionFactory() as platform_session:
-      connection = live_qb_connection(platform_session, self.graph_id)
-      if connection is None or not connection.realm_id:
+      connection = books_keeper(platform_session, self.graph_id, entity_id)
+      if (
+        connection is None
+        or (connection.provider or "").lower() != _QUICKBOOKS
+        or not connection.realm_id
+      ):
         raise NoSourceLedgerError(
-          "This graph has no connected QuickBooks ledger. The source_ledger "
+          "This entity has no connected QuickBooks ledger. The source_ledger "
           "check compares a synced ledger with the books it was synced from."
         )
       credentials_row = ConnectionCredentials.get_by_connection_id(

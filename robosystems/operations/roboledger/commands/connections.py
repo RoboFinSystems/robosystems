@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-from robosystems.models.extensions import Element
+from robosystems.models.extensions import Element, Entity
 
 SEVERABLE_SOURCES: frozenset[str] = frozenset({"quickbooks"})
 
@@ -39,6 +39,12 @@ def sever_synced_chart(
       connection_id=None,
       external_id=None,
     )
+  )
+  # The entity rows it described are no longer that connection's.
+  session.execute(
+    update(Entity)
+    .where(Entity.connection_id == connection_id)
+    .values(connection_id=None)
   )
   return int(result.rowcount or 0)
 

@@ -42,8 +42,12 @@ class TestSeverSyncedChart:
     stamped = sever_synced_chart(session, "conn_1")
 
     assert stamped == 29
-    statement = session.execute.call_args.args[0]
-    sql = _compiled(statement)
+    elements, entities = (c.args[0] for c in session.execute.call_args_list)
+    # The entity rows the connection described are let go with its chart.
+    released = _compiled(entities)
+    assert released.startswith("UPDATE entities SET connection_id=NULL")
+    assert released.endswith("WHERE entities.connection_id = 'conn_1'")
+    sql = _compiled(elements)
     assert sql.startswith("UPDATE elements SET")
     assert "source='native'" in sql
     assert "external_source=NULL" in sql

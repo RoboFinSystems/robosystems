@@ -164,7 +164,7 @@ def _window(
   shadow = closed_under_shadow(session, period, entity_id)
   if shadow is None:
     with SessionFactory() as platform_session:
-      shadow = shadow_close_for_entity(session, platform_session, graph_id, entity_id)
+      shadow = shadow_close_for_entity(platform_session, graph_id, entity_id)
   return reconciliation_window(
     period, get_fiscal_year_start_month(session), entity_id, shadow=shadow
   )

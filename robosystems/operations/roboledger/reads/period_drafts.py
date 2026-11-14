@@ -12,10 +12,7 @@ from robosystems.models.api.extensions.fiscal_calendar import (
   DraftLineItem,
   PeriodDraftsResponse,
 )
-from robosystems.operations.roboledger.entity_scope import (
-  find_entity_id,
-  is_group_parent,
-)
+from robosystems.operations.roboledger.entity_scope import find_entity_id
 from robosystems.operations.roboledger.fiscal_calendar import period_date_range
 from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
   SHADOW_WRITE_POLICY,
@@ -42,14 +39,14 @@ def list_period_drafts(
   With a ``writeback`` connection, each draft carries ``will_publish_to_qb``
   from the same predicate close uses (``qb_writeback.py``); without one, every
   draft is local-only. Under ``shadow`` none publishes or posts: the close
-  takes each as an expectation. The connection is the group parent's: a
-  subsidiary's drafts never publish to it, and never shadow.
+  takes each as an expectation. Both are the caller's read of the entity's
+  own books keeper (`publish_posture`), so another entity's connection never
+  decides them.
   """
   period_start, period_end = period_date_range(period)
 
-  defaulted = entity_id is None
   entity_id = find_entity_id(session, entity_id)
-  if entity_id is None or not (defaulted or is_group_parent(session, entity_id)):
+  if entity_id is None:
     writeback = None
     shadow = False
   has_writeback = writeback is not None

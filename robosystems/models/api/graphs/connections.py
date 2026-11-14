@@ -232,6 +232,15 @@ class ConnectionResponse(BaseModel):
       "source, whose events name their own."
     ),
   )
+  keeps_books: bool = Field(
+    False,
+    description=(
+      "Whether this connection is the ledger of record for `entity_id`: its "
+      "books are kept in the connected system, and `write_policy` says "
+      "whether entries are written back to it or only mirrored. False for a "
+      "bank feed or an external event source."
+    ),
+  )
   status: str = Field(..., description="Connection status")
   created_at: datetime | str = Field(..., description="Creation timestamp")
   updated_at: datetime | str | None = Field(None, description="Last update timestamp")
@@ -243,7 +252,8 @@ class ConnectionResponse(BaseModel):
       "record and RoboSystems-originated entries publish to it at close), "
       "'shadow' (QuickBooks is the book of record, nothing is written to it "
       "and the close posts nothing locally), or 'native' (no external ledger; "
-      "what severing leaves). Set via the write-policy endpoint."
+      "what severing leaves). It governs the books of `entity_id`, and only "
+      "on the connection that keeps them. Set via the write-policy endpoint."
     ),
   )
   source_name: str | None = Field(

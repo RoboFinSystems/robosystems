@@ -31,15 +31,12 @@ _SINGLE_REALM_SITES: dict[str, tuple[re.Pattern[str], Counter[str]]] = {
       }
     ),
   ),
-  # The graph's QuickBooks connection, as though it had one.
+  # The graph's QuickBooks connection, as though it had one. Struck to zero
+  # 2026-11-14: every policy question reads the entity's books keeper
+  # (`qb_writeback.books_keeper`). A new pick by provider fails here.
   "a graph-wide QuickBooks connection pick": (
     re.compile(r"Connection\.provider\s*==\s*\"quickbooks\""),
-    Counter(
-      {
-        "robosystems/operations/roboledger/fiscal_calendar/qb_writeback.py": 1,
-        "robosystems/operations/roboledger/reads/fiscal_calendar.py": 1,
-      }
-    ),
+    Counter(),
   ),
   # One pipeline working directory per graph: two companies syncing at once
   # would write over each other's extract.

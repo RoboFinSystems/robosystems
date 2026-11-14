@@ -21,7 +21,6 @@ from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
 from robosystems.models.extensions.roboledger.transaction import Transaction
 from robosystems.operations.locking import bounded_lock_wait
 from robosystems.operations.roboledger.entity_scope import (
-  is_group_parent,
   resolve_entity_id,
 )
 from robosystems.operations.roboledger.entry_status import SHADOWED_ENTRY_STATUS
@@ -652,16 +651,13 @@ class PeriodCloseService:
       select_writeback_eligible_entries,
     )
 
-    if not is_group_parent(session, entity_id):
-      return 0
-
     # Shared with the outbox read (`list_period_drafts`) so its preview
     # matches this write.
     with _PlatformSessionFactory() as platform_session:
-      writeback = resolve_writeback_connection(platform_session, graph_id)
+      writeback = resolve_writeback_connection(platform_session, graph_id, entity_id)
     if writeback is None:
       logger.debug(
-        f"No qb_authoritative QB connection on graph {graph_id}; "
+        f"No write-back keeper for entity {entity_id} on graph {graph_id}; "
         f"skipping close-period pre-publish step"
       )
       return 0

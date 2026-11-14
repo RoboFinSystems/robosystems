@@ -57,7 +57,7 @@ SERVICE = "robosystems.operations.connection_service"
 def _no_synced_ledger():
   """No QuickBooks on the graph unless a test says so; the platform
   database is not part of these tests."""
-  with patch(f"{SERVICE}.synced_ledger_live", return_value=False):
+  with patch(f"{SERVICE}.books_kept_elsewhere", return_value=False):
     yield
 
 
@@ -578,7 +578,7 @@ def test_an_entity_quickbooks_keeps_is_refused(session):
     "user_test",
     graph_id=GRAPH_ID,
   )
-  with patch(f"{SERVICE}.synced_ledger_live", return_value=True) as live:
+  with patch(f"{SERVICE}.books_kept_elsewhere", return_value=True) as live:
     with pytest.raises(QuickBooksKeptEntityError):
       link_bank_account(
         session,
@@ -588,7 +588,7 @@ def test_an_entity_quickbooks_keeps_is_refused(session):
         "user_test",
         graph_id=GRAPH_ID,
       )
-    live.assert_called_once_with(GRAPH_ID)
+    live.assert_called_once_with(GRAPH_ID, PARENT_ENTITY_ID)
   # Still on the subsidiary.
   link = session.get(Element, moved.element_id).metadata_[BANK_FEED_KEY]
   assert link["account_id"] == ACCOUNT

@@ -91,6 +91,15 @@ class Connection(Model):
       unique=True,
       postgresql_where="source_name IS NOT NULL AND deleted_at IS NULL",
     ),
+    # One ledger of record per entity. Status is not in the predicate, so a
+    # status change can never violate it; `become_keeper` moves the flag.
+    Index(
+      "uq_connections_books_keeper",
+      "graph_id",
+      "entity_id",
+      unique=True,
+      postgresql_where="keeps_books AND deleted_at IS NULL",
+    ),
   )
 
   id = Column(
@@ -110,6 +119,14 @@ class Connection(Model):
   # External provider's registered Event.source slug; the registration is the
   # event-source allow-list entry. No credentials are held for these.
   source_name = Column(String, nullable=True)
+
+  # The entity (extensions DB) this connection is for: the one whose books a
+  # synced ledger keeps, or a bank feed lands on. NULL on a row from before
+  # the column and on a source whose events name their own entity.
+  entity_id = Column(String, nullable=True)
+  # This connection is that entity's ledger of record. Set when it finishes
+  # authorizing, never on a connect attempt; see `books_keeper`.
+  keeps_books = Column(Boolean, default=False, server_default="false", nullable=False)
 
   # Sync tracking
   auto_sync_enabled = Column(Boolean, default=True, nullable=False)
@@ -160,6 +177,7 @@ class Connection(Model):
     source_name: str | None = None,
     auto_sync_enabled: bool = True,
     write_policy: str | None = None,
+    entity_id: str | None = None,
   ) -> Connection:
     """Create a new connection.
 
@@ -178,6 +196,7 @@ class Connection(Model):
       institution_name=institution_name,
       source_name=source_name,
       auto_sync_enabled=auto_sync_enabled,
+      entity_id=entity_id,
       write_policy=(
         write_policy
         if write_policy is not None
@@ -388,6 +407,39 @@ class Connection(Model):
       session.rollback()
       raise
 
+  def become_keeper(self, session: Session) -> None:
+    """Make this connection its entity's ledger of record, taking the flag
+    from any other row on that entity in the same commit: the newest
+    authorization wins, as the newest row once did."""
+    if not self.entity_id:
+      raise ValueError(f"Connection {self.id} names no entity to keep books for.")
+    session.query(Connection).filter(
+      Connection.graph_id == self.graph_id,
+      Connection.entity_id == self.entity_id,
+      Connection.id != self.id,
+      Connection.keeps_books.is_(True),
+    ).update({Connection.keeps_books: False}, synchronize_session=False)
+    session.flush()
+    self.keeps_books = True
+    self.updated_at = datetime.now(UTC)
+    try:
+      session.commit()
+      session.refresh(self)
+    except SQLAlchemyError:
+      session.rollback()
+      raise
+
+  def stop_keeping_books(self, session: Session) -> None:
+    """Give up the flag: a severed ledger keeps nobody's books."""
+    self.keeps_books = False
+    self.updated_at = datetime.now(UTC)
+    try:
+      session.commit()
+      session.refresh(self)
+    except SQLAlchemyError:
+      session.rollback()
+      raise
+
   def delete(self, session: Session) -> None:
     """Hard-delete (admin purge only). Prefer ``soft_delete``, which keeps
     tenant data keyed on connection_id attached."""
@@ -426,8 +478,8 @@ class Connection(Model):
   def to_dict(self) -> dict:
     """Serialize for the connections API surface.
 
-    ``entity_id`` is not here: the entity whose books a connection keeps is
-    read from the graph's ledger, so ``ConnectionService`` adds it.
+    ``entity_id`` is the stored one, None on a row from before the column;
+    ``ConnectionService`` fills that from the graph's ledger.
     """
     return {
       "connection_id": self.id,
@@ -436,6 +488,8 @@ class Connection(Model):
       "graph_id": self.graph_id,
       "user_id": self.user_id,
       "write_policy": self.write_policy,
+      "entity_id": self.entity_id,
+      "keeps_books": bool(self.keeps_books),
       "source_name": self.source_name,
       "metadata": {
         "realm_id": self.realm_id,

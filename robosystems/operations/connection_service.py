@@ -23,6 +23,11 @@ from robosystems.models.core.connection.connection_credentials import (
   ConnectionCredentials,
 )
 from robosystems.operations.roboledger.commands.connections import SEVERABLE_SOURCES
+from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+  WRITEBACK_PROVIDERS,
+  WRITEBACK_WRITE_POLICIES,
+  books_keeper,
+)
 
 # Internal callers (Dagster, background tasks); bypasses the creator check.
 SYSTEM_USER_ID = "system"
@@ -55,6 +60,12 @@ class ConnectionService:
     session_created = db_session is None
 
     try:
+      for_entity = books_entity_id(
+        provider, credentials or {}, group_parent_reader(target_graph_id)
+      )
+      if for_entity is None and provider.lower() in SYNCED_LEDGER_PROVIDERS:
+        # Before the ledger exists: the parent's id is fixed by construction.
+        for_entity = f"entity_{target_graph_id}"
       conn = Connection.create(
         graph_id=target_graph_id,
         user_id=user_id,
@@ -68,7 +79,22 @@ class ConnectionService:
         institution_name=metadata.get("institution_name"),
         source_name=metadata.get("source_name"),
         auto_sync_enabled=metadata.get("auto_sync_enabled", True),
+        entity_id=for_entity,
       )
+
+      # A synced ledger created already authorized keeps the books at once;
+      # one still in OAuth takes them at its callback.
+      if (
+        provider.lower() in SYNCED_LEDGER_PROVIDERS
+        and for_entity
+        and conn.status
+        not in (
+          ConnectionStatus.PENDING_OAUTH.value,
+          ConnectionStatus.DISCONNECTED.value,
+          ConnectionStatus.SEVERED.value,
+        )
+      ):
+        conn.become_keeper(session)
 
       if credentials:
         ConnectionCredentials.create(
@@ -142,7 +168,7 @@ class ConnectionService:
         result["is_expired"] = False
         result["expires_at"] = None
 
-      result["entity_id"] = books_entity_id(
+      result["entity_id"] = conn.entity_id or books_entity_id(
         conn.provider, result["credentials"], group_parent_reader(conn.graph_id)
       )
       return result
@@ -162,8 +188,8 @@ class ConnectionService:
     graph_id: str | None = None,
     db_session: Session | None = None,
   ) -> list[dict[str, Any]]:
-    """List connections; only a bank feed's credentials are decrypted, for
-    the entity it was connected for.
+    """List connections. Credentials are decrypted only for a bank feed
+    from before connections stored their entity.
 
     `entity_id` keeps the connections that keep that entity's books (see
     `books_entity_id`). Only the scope-less call filters by creator
@@ -194,10 +220,12 @@ class ConnectionService:
         except Exception:
           conn_dict["is_expired"] = False
 
-        is_feed = (conn.provider or "").lower() in BANK_FEED_PROVIDERS
-        stored = cred.get_credentials() if cred is not None and is_feed else {}
-        parent = parents.setdefault(conn.graph_id, group_parent_reader(conn.graph_id))
-        conn_dict["entity_id"] = books_entity_id(conn.provider, stored, parent)
+        if not conn.entity_id:
+          # A row from before the column: derived as it always was.
+          is_feed = (conn.provider or "").lower() in BANK_FEED_PROVIDERS
+          stored = cred.get_credentials() if cred is not None and is_feed else {}
+          parent = parents.setdefault(conn.graph_id, group_parent_reader(conn.graph_id))
+          conn_dict["entity_id"] = books_entity_id(conn.provider, stored, parent)
         if entity_id and conn_dict["entity_id"] != entity_id:
           continue
 
@@ -294,6 +322,7 @@ class ConnectionService:
         stamped = sever_synced_chart(ext, connection_id, source=provider)
 
       conn.set_write_policy(session, WritePolicy.NATIVE.value)
+      conn.stop_keeping_books(session)
       conn.update_status(ConnectionStatus.SEVERED.value, session)
       # The stamp renames the severed accounts in the graph's projection.
       mark_graph_stale(target_graph_id, "connection_severed")
@@ -448,15 +477,29 @@ class ConnectionService:
           "'native' is what severing leaves; a live "
           "connection chooses 'qb_authoritative' or 'shadow'."
         )
+      provider = (conn.provider or "").lower()
+      if not conn.keeps_books and provider not in SYNCED_LEDGER_PROVIDERS:
+        raise ValueError(
+          "A write policy belongs to the connection that keeps an entity's "
+          f"books; a {provider} connection keeps none, so it has none to set."
+        )
+      if (
+        write_policy in WRITEBACK_WRITE_POLICIES and provider not in WRITEBACK_PROVIDERS
+      ):
+        raise ValueError(
+          f"Nothing can be written back to a {provider} ledger; its books "
+          "can only be mirrored ('shadow')."
+        )
       conn.set_write_policy(session, write_policy)
       logger.info("Set write_policy=%s on connection %s", write_policy, connection_id)
       result = conn.to_dict()
-      cred = ConnectionCredentials.get_by_connection_id(connection_id, session)
-      result["entity_id"] = books_entity_id(
-        conn.provider,
-        cred.get_credentials() if cred is not None else {},
-        group_parent_reader(graph_id),
-      )
+      if not result.get("entity_id"):
+        cred = ConnectionCredentials.get_by_connection_id(connection_id, session)
+        result["entity_id"] = books_entity_id(
+          conn.provider,
+          cred.get_credentials() if cred is not None else {},
+          group_parent_reader(graph_id),
+        )
       return result
     finally:
       if session_created:
@@ -574,7 +617,6 @@ def assert_provider_compatible(
   """
   wanted = (provider or "").lower()
   connections = list(Connection.get_all_for_graph(graph_id, session))
-  live = {(c.provider or "").lower() for c in connections}
 
   if wanted in BANK_FEED_PROVIDERS:
     # A named entity is resolved first, whatever else is live: one the graph
@@ -587,13 +629,21 @@ def assert_provider_compatible(
         "entries, so a bank feed cannot book there. Connect the bank for the "
         "company whose account it is.",
       )
-    blocking = sorted(live & SYNCED_LEDGER_PROVIDERS)
-    if blocking and lands_on_parent:
+    # A parent that cannot be read still has its id, fixed by construction:
+    # the guard must not pass because a read failed.
+    target = (
+      group_parent_reader(graph_id)() or f"entity_{graph_id}"
+      if lands_on_parent
+      else entity_id
+    )
+    keeper = books_keeper(session, graph_id, target)
+    if keeper is not None:
       raise ProviderConflictError(
         "QUICKBOOKS_ACTIVE",
-        f"{blocking[0].capitalize()} keeps the group parent's books, so a bank "
-        "feed cannot book there. Connect the bank for a subsidiary (name it "
-        "when connecting), or sever the synced connection first.",
+        f"{(keeper.provider or 'a ledger').capitalize()} keeps this entity's "
+        "books, so a bank feed cannot book there. Connect the bank for "
+        "another entity of the group (name it when connecting), or sever the "
+        "synced connection first.",
       )
     if not _graph_has_chart(graph_id, entity_id):
       raise ProviderConflictError(
@@ -687,14 +737,11 @@ def withdraw_pending_connection(connection_id: str, session: Session) -> None:
   conn.delete(session)
 
 
-def synced_ledger_live(graph_id: str) -> bool:
-  """Whether a synced ledger (QuickBooks) is connected to the graph, and so
-  keeps the group parent's books. Read on the platform database."""
+def books_kept_elsewhere(graph_id: str, entity_id: str) -> bool:
+  """Whether a connected ledger keeps ``entity_id``'s books. Read on the
+  platform database."""
   with SessionFactory() as session:
-    return any(
-      (c.provider or "").lower() in SYNCED_LEDGER_PROVIDERS
-      for c in Connection.get_all_for_graph(graph_id, session)
-    )
+    return books_keeper(session, graph_id, entity_id) is not None
 
 
 def _is_group_parent(graph_id: str, entity_id: str | None) -> bool:

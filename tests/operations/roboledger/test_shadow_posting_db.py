@@ -45,7 +45,10 @@ def shadow(two_entities):
     for entity in (t.parent, t.sub)
   }
   t.session.commit()
-  with patch(f"{_WRITEBACK}.shadow_ledger", return_value=True):
+  with patch(
+    f"{_WRITEBACK}.shadow_close_for_entity",
+    side_effect=lambda _platform, _graph, entity_id: entity_id == t.parent.id,
+  ):
     yield t
 
 

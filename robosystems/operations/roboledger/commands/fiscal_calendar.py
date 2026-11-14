@@ -358,7 +358,7 @@ def close_period(
     has_sync, last_sync_at = entity_sync_state(
       session, platform_db, graph_id, entity_id
     )
-    shadow = shadow_close_for_entity(session, platform_db, graph_id, entity_id)
+    shadow = shadow_close_for_entity(platform_db, graph_id, entity_id)
     result = close_service.close(
       session,
       graph_id,
@@ -792,7 +792,7 @@ def _restamp_closed_period(
   Any failure rolls the reopen back with it.
   """
   has_sync, last_sync_at = entity_sync_state(session, platform_db, graph_id, entity_id)
-  shadow = shadow_close_for_entity(session, platform_db, graph_id, entity_id)
+  shadow = shadow_close_for_entity(platform_db, graph_id, entity_id)
   with exclusive_period_fence(graph_id, period, detail=_fence_detail(period)):
     _reopen_under_fence(
       session,

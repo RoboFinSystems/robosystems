@@ -519,7 +519,8 @@ class TestConnectionToDict:
     assert result["connection_id"] == "conn_abc123"
     assert result["provider"] == "quickbooks"
     assert result["status"] == "connected"
-    assert "entity_id" not in result  # the graph id is not an entity
+    assert result["entity_id"] is None  # the graph id is not an entity
+    assert result["keeps_books"] is False
     assert result["graph_id"] == "kg_test"
     assert result["user_id"] == "usr_1"
     assert result["metadata"]["realm_id"] == "realm123"

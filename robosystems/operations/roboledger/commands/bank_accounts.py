@@ -33,7 +33,6 @@ from robosystems.models.extensions.roboledger import Event
 from robosystems.operations.roboledger.entity_scope import (
   ensure_entity_id,
   is_consolidation_entity,
-  is_group_parent,
   resolve_entity_id,
 )
 from robosystems.operations.roboledger.reads.accounts import coa_element_clause
@@ -245,16 +244,15 @@ def _linked_element(session: Session, connection_id: str, account_id: str):
 
 
 def _assert_not_synced(session: Session, graph_id: str, entity_id: str) -> None:
-  """A feed account never books where a synced ledger keeps the books (the
-  group parent, while QuickBooks is connected) or in the consolidation
-  entity."""
+  """A feed account never books where a connected ledger keeps the books,
+  or in the consolidation entity."""
   # Imported here: the connection service reaches back into the ledger's
   # commands, so a module-level import would be a cycle waiting to happen.
-  from robosystems.operations.connection_service import synced_ledger_live
+  from robosystems.operations.connection_service import books_kept_elsewhere
 
   if is_consolidation_entity(session, entity_id):
     raise ConsolidationEntityFeedError(entity_id)
-  if is_group_parent(session, entity_id) and synced_ledger_live(graph_id):
+  if books_kept_elsewhere(graph_id, entity_id):
     raise QuickBooksKeptEntityError(entity_id)
 
 

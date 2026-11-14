@@ -66,7 +66,11 @@ from robosystems.operations.roboledger.fiscal_calendar.service import (
 from robosystems.operations.roboledger.reports.statement_sets import (
   StatementStampResult,
 )
-from tests.ledger_entity import map_to_the_books, seed_parent_entity_on
+from tests.ledger_entity import (
+  PARENT_ENTITY_ID,
+  map_to_the_books,
+  seed_parent_entity_on,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -215,6 +219,8 @@ def tenant(test_db, test_user, sample_graph, monkeypatch):
       status="connected",
       realm_id="9130",
       write_policy="qb_authoritative",
+      entity_id=PARENT_ENTITY_ID,
+      keeps_books=True,
     )
     p.add(connection)
     p.commit()

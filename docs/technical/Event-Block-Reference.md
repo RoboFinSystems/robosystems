@@ -135,6 +135,7 @@ Publishes an event to its connection's system of record. Request: `event_id`, an
 | Connection | Result |
 | --- | --- |
 | No connection on the event | Returned unchanged; nothing is written externally |
+| A connection that does not keep the books of the event's entity | Refused; an entity's entries are never published to another entity's ledger |
 | `write_policy: native` | Returned unchanged; RoboLedger is the system of record |
 | `write_policy: qb_authoritative` | Each unpublished draft entry is written to QuickBooks as its own journal entry, with the entry id as the request id, and recorded in `metadata.qb_entry_ids` (entry id → QuickBooks id). Each entry that lands posts. Once no draft is left, the event moves to `fulfilled` and its transactions post. On rejection, the entries sent before it stay posted, the rejection is stored on `metadata.last_outbound_error`, the event keeps its status, and the rest stay draft for a retry, which sends only the entries not yet in `qb_entry_ids`. |
 
