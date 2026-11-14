@@ -208,6 +208,59 @@ class TestEnvValidator:
 
     EnvValidator.validate_required_vars(env_config)
 
+  def test_scoped_process_boots_with_every_application_feature_on(self, monkeypatch):
+    """Production shape: the features are on and their secrets are not here.
+
+    A graph instance reads the same feature flags as the API. None of them may
+    refuse its boot over a secret the scope keeps from it.
+    """
+    monkeypatch.setenv("SECRETS_SCOPE", "graph-api,valkey")
+    monkeypatch.delenv("GRAPH_API_URL", raising=False)
+    env_config = MockEnvConfig()
+    env_config.ENVIRONMENT = "prod"
+    env_config.GRAPH_API_KEY = "test-api-key"
+    for secret in (
+      "DATABASE_URL",
+      "JWT_SECRET_KEY",
+      "CONNECTION_CREDENTIALS_KEY",
+      "STRIPE_SECRET_KEY",
+      "STRIPE_WEBHOOK_SECRET",
+      "SSO_OIDC_ISSUER",
+      "SSO_OIDC_CLIENT_ID",
+      "SSO_OIDC_CLIENT_SECRET",
+    ):
+      setattr(env_config, secret, "")
+    for flag in (
+      "BILLING_ENABLED",
+      "SSO_OIDC_ENABLED",
+      "SCIM_ENABLED",
+      "PASSKEYS_ENABLED",
+      "MFA_ENFORCEMENT_ENABLED",
+      "CONNECTION_PLAID_ENABLED",
+      "CONNECTION_MERCURY_ENABLED",
+    ):
+      setattr(env_config, flag, True)
+    # Even a failed flag preload is the API's concern, not a reason to take a
+    # customer's database offline.
+    env_config.PARAMETER_STORE_AVAILABLE = False
+    env_config.FEATURE_FLAGS_PRELOADED = False
+    env_config.RATE_LIMIT_ENABLED = False
+
+    EnvValidator.validate_required_vars(env_config)
+
+  def test_unscoped_process_with_billing_on_still_needs_stripe(self, monkeypatch):
+    monkeypatch.delenv("SECRETS_SCOPE", raising=False)
+    env_config = MockEnvConfig()
+    env_config.ENVIRONMENT = "prod"
+    env_config.GRAPH_API_KEY = "test-api-key"
+    env_config.BILLING_ENABLED = True
+    env_config.STRIPE_SECRET_KEY = ""
+    env_config.STRIPE_WEBHOOK_SECRET = ""
+
+    with patch("os.getenv", return_value=None):
+      with pytest.raises(ConfigValidationError):
+        EnvValidator.validate_required_vars(env_config)
+
   def test_scoped_process_still_needs_its_own_key(self, monkeypatch):
     monkeypatch.setenv("SECRETS_SCOPE", "graph-api,valkey")
     env_config = MockEnvConfig()
