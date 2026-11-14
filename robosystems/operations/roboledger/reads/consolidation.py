@@ -65,9 +65,9 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   _infer_classification,
 )
 from robosystems.operations.roboledger.reports.network_picker import (
+  entity_taggable_flows,
   load_close_target_concept,
   load_entity_reporting_style,
-  taggable_flow_qnames,
 )
 from robosystems.operations.taxonomy_block.coa_mappings import (
   BOOK_FRAMEWORK,
@@ -277,8 +277,8 @@ def _tagged_part(
   Only the month's movement is tagged: what an entry catches up from earlier
   months (``carried``) moved no cash in this one. The tagged lines must net
   to nothing, as the cash flows they offset do; when one cannot be tagged
-  (the consolidation entity's statement has no row for it) or they would
-  not net, the entry offsets nothing, since half an offset is a flow. A
+  (no entity of the group presents a row for it) or they would not net, the
+  entry offsets nothing, since half an offset is a flow. A
   distribution the parent took as income is reversed beside them untagged:
   it is the operating side of the flow they offset."""
   if periodic:
@@ -1300,11 +1300,9 @@ def preview_consolidation_entries(
   )
 
   accounts = posting_accounts(session, consolidation.id, concepts)
-  # The rows the consolidation entity's own statement presents; none is a
-  # Style read by trait alone.
-  taggable = taggable_flow_qnames(
-    session, load_entity_reporting_style(session, consolidation.id)
-  )
+  # The rows some entity of the group presents; none is a Style read by
+  # trait alone.
+  taggable = entity_taggable_flows(session, consolidation.id)
   untaggable: set[str] = set()
 
   acquired = acquisitions(session, consolidation.id, end)
@@ -1516,7 +1514,7 @@ def preview_consolidation_entries(
   )
   if untaggable:
     plan.notes.append(
-      f"{_possessive(consolidation.name)} cash flow statement has no "
+      "No cash flow statement in the group has a "
       + ", ".join(sorted(untaggable))
       + " row; the entries that would offset it are left untagged."
     )

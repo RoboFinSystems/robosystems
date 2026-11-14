@@ -847,9 +847,7 @@ def load_group(
 
 def _check_roster(group: Group, windows: list[tuple[date, date]]) -> None:
   """What the loader models, before it writes anything."""
-  # The consolidation entity presents its own form's cash flow rows, and its
-  # eliminations tag the rows the members' lines took, so a member of another
-  # form would need a consolidation entity on that form.
+  # The members this loader builds are LLCs; another form is not modelled.
   for member in group.members:
     if member.method == "cost" or (
       member.method == "equity"
@@ -906,8 +904,8 @@ def _check_roster(group: Group, windows: list[tuple[date, date]]) -> None:
   other_forms = sorted({m.entity_type for m in group.members} - {"llc"})
   if other_forms:
     raise RuntimeError(
-      "the consolidation entity is an LLC; a member of another form "
-      f"({', '.join(other_forms)}) needs one on its own form"
+      "the loader builds LLC members only; a member of another form "
+      f"({', '.join(other_forms)}) is not modelled"
     )
 
 

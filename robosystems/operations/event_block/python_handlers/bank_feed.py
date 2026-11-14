@@ -527,9 +527,10 @@ def resolve_flows(
   """``{qname: element_id}`` for flow concepts. Raises when one names no
   element, or one that is not a flow (no ``activityType`` trait): an
   unresolved tag would silently leave the line on its default flow. Given
-  the entity, a flow must also be a row of its cash flow statement: a tag
-  the statement cannot present computes a fact no row shows, and the
-  operating reconciling adjustment absorbs it."""
+  the entity, a flow must also be a row of its cash flow statement (for the
+  consolidation entity, of some group entity's): a tag the statement cannot
+  present computes a fact no row shows, and the operating reconciling
+  adjustment absorbs it."""
   if not qnames:
     return {}
   rows = session.execute(
@@ -564,13 +565,10 @@ def resolve_flows(
     )
   if entity_id is not None:
     from robosystems.operations.roboledger.reports.network_picker import (
-      load_entity_reporting_style,
-      taggable_flow_qnames,
+      entity_taggable_flows,
     )
 
-    rows = taggable_flow_qnames(
-      session, load_entity_reporting_style(session, entity_id)
-    )
+    rows = entity_taggable_flows(session, entity_id)
     if not rows:
       logger.warning(
         "Entity %s's reporting style presents no cash flow rows; its flow "

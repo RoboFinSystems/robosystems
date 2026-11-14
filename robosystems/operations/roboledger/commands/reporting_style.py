@@ -17,7 +17,11 @@ from robosystems.models.api.extensions.entity import (
   ChangeReportingStyleResponse,
 )
 from robosystems.models.extensions import Entity
-from robosystems.operations.roboledger.entity_scope import resolve_entity
+from robosystems.operations.roboledger.entity_scope import (
+  find_consolidation_entity,
+  is_group_parent,
+  resolve_entity,
+)
 
 # Every Style needs a Network for each; ``comprehensive_income`` is optional.
 _REQUIRED_STATEMENT_TYPES: tuple[str, ...] = (
@@ -105,9 +109,18 @@ def change_reporting_style(
 ) -> ChangeReportingStyleResponse:
   """Switch a reporting entity's Reporting Style (default: the primary entity).
 
+  The consolidation entity has none of its own: its statements are the
+  group's adjustments, read under the group parent's, so its Style follows
+  the parent's and is not set here.
+
   Raises `EntityNotFoundError` or `ReportingStyleInvalidError`.
   """
   entity = _resolve_entity(session, body.entity_id)
+  if entity.entity_role == "consolidation":
+    raise ReportingStyleInvalidError(
+      f"{entity.name} holds the group's consolidating entries, which are read "
+      "under the group parent's Reporting Style. Change the parent's instead."
+    )
 
   previous_style_id = entity.reporting_style_id or None
 
@@ -122,8 +135,14 @@ def change_reporting_style(
 
   reporting_style_code = require_reporting_style(session, body.reporting_style_id)
 
+  now = datetime.now(UTC)
   entity.reporting_style_id = body.reporting_style_id
-  entity.updated_at = datetime.now(UTC)
+  entity.updated_at = now
+  if is_group_parent(session, str(entity.id)):
+    consolidation = find_consolidation_entity(session)
+    if consolidation is not None:
+      consolidation.reporting_style_id = body.reporting_style_id
+      consolidation.updated_at = now
   session.commit()
 
   return ChangeReportingStyleResponse(

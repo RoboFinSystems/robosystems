@@ -299,7 +299,8 @@ class CreateEntityRequest(BaseModel):
     description=(
       "Structure id of the Reporting Style to present under, validated in "
       "the graph like change-reporting-style. Omit to derive it from "
-      "`entity_type`."
+      "`entity_type`. A consolidation entity always takes the group "
+      "parent's."
     ),
   )
   parent_entity_id: str | None = Field(

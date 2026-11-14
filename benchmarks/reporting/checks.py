@@ -311,7 +311,11 @@ class Checker:
       if flows.section.get(f["qname"]) in (INVESTING, FINANCING)
       and not f.get("is_subtotal")
     }
-    unexplained, settled = settle(stated, from_lines.paid, owed, TOLERANCE)
+    paid: dict[str, float] = {}
+    for flow, amount in from_lines.paid.items():
+      row = flows.shown_as(flow, stated)
+      paid[row] = paid.get(row, 0.0) + amount
+    unexplained, settled = settle(stated, paid, owed, TOLERANCE)
     wrong = [
       f"{q} {_money(actual)} vs {_money(expected)}"
       for q, actual, expected in unexplained

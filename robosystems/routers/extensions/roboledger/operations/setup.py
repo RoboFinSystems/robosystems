@@ -355,7 +355,9 @@ change_reporting_style_op = _registrar.register(
       "Networks). Validates that the target Style has a complete "
       "composition in the tenant schema, then flips "
       "`entities.reporting_style_id`. Omit `entity_id` to target the "
-      "graph's primary entity. Filed Reports are unaffected (their "
+      "graph's primary entity. A group's consolidation entity follows the "
+      "parent's Style: changing the parent's changes both, and it cannot "
+      "be set on its own. Filed Reports are unaffected (their "
       "FactSet rows pin their structures at create-time); new reports use "
       "the new Style. Idempotent on the same id."
     ),

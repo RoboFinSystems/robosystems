@@ -17,6 +17,7 @@ from sqlalchemy.exc import OperationalError
 import robosystems.models.extensions  # noqa: F401  (register models on the Base)
 from robosystems.adapters.bank_feed.accounts import BANK_FEED_KEY
 from robosystems.config import env
+from robosystems.config.constants import ReportingStyleConstants
 from robosystems.db.extensions import ExtensionsBase, extensions_session
 from robosystems.models.api.extensions.consolidation import (
   AcquisitionAllocation,
@@ -545,13 +546,13 @@ def test_a_catch_up_from_earlier_months_moves_no_cash_in_this_one(group):
 
 
 def test_an_entry_that_cannot_offset_every_flow_offsets_none(group, monkeypatch):
-  """With no row for the member's capital on the consolidation entity's
-  statement, tagging the investment and outside owners alone would add a
-  flow nothing offsets."""
+  """With no row for the member's capital on any statement of the group,
+  tagging the investment and outside owners alone would add a flow nothing
+  offsets."""
   monkeypatch.setattr(
     engine,
-    "taggable_flow_qnames",
-    lambda _s, _style: {
+    "entity_taggable_flows",
+    lambda _s, _entity: {
       "rs-gaap:PaymentsToAcquireInterestInSubsidiariesAndAffiliates",
       "rs-gaap:ProceedsFromMinorityShareholders",
     },
@@ -561,6 +562,22 @@ def test_an_entry_that_cannot_offset_every_flow_offsets_none(group, monkeypatch)
 
   assert set(_flows(response, "elimination_investment").values()) == {None}
   assert any("ProceedsFromContributedCapital" in n for n in response.notes)
+
+
+def test_a_members_capital_is_offset_in_its_own_form_under_a_corporate_parent(group):
+  """The consolidation entity reads under the parent's Style, which has no
+  members' contribution row; the member's own does, so the line is tagged."""
+  with extensions_session(GRAPH) as session:
+    session.execute(
+      text("UPDATE entities SET reporting_style_id = :style WHERE is_parent"),
+      {"style": ReportingStyleConstants.DEFAULT_STYLE_ID},
+    )
+  _form_the_group(group)
+  response = preview("2025-12")
+
+  flows = _flows(response, "elimination_investment")
+  assert flows["rs-gaap:MembersEquity"] == "rs-gaap:ProceedsFromContributedCapital"
+  assert not any("left untagged" in note for note in response.notes)
 
 
 def test_a_tag_stays_on_the_line_it_was_written_on(group):

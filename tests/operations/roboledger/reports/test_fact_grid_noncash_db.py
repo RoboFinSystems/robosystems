@@ -19,6 +19,7 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.exc import OperationalError
 
 from robosystems.config import env
+from robosystems.config.constants import ReportingStyleConstants
 from robosystems.db.extensions import extensions_session, provision_tenant_schema
 from robosystems.models.extensions import Element, Entity
 from robosystems.models.extensions.association import Association
@@ -32,6 +33,7 @@ from robosystems.models.extensions.trait import Trait
 from robosystems.operations.roboledger.reports.fact_grid import (
   PeriodSpec,
   generate_report_facts,
+  render_structure_view,
 )
 
 pytestmark = pytest.mark.integration
@@ -807,6 +809,45 @@ def test_an_elimination_that_falls_away_when_a_member_leaves_is_no_flow(
   assert after.get(DUE_TO_ROW, 0.0) == 0.0, after
   assert after.get(DUE_FROM_ROW, 0.0) == 0.0, after
   _assert_no_reconciling_adjustment(after)
+
+
+MEMBER_CONTRIBUTIONS = "rs-gaap:ProceedsFromContributedCapital"
+
+
+def test_a_consolidation_entitys_flow_has_a_row_whatever_its_style_presents(tenant):
+  """It eliminates a member's contribution in the member's form. The
+  corporate cash flow has no members' contribution row, so the flow is
+  placed under financing, and nothing the operating section sums is."""
+  with extensions_session(GRAPH) as session:
+    flow_id = session.execute(
+      select(Element.id).where(Element.qname == MEMBER_CONTRIBUTIONS)
+    ).scalar_one()
+  ids = {**tenant, MEMBER_CONTRIBUTIONS: str(flow_id)}
+  _post(
+    ids,
+    [("capital", 450, 0, MEMBER_CONTRIBUTIONS), ("metals", 0, 450)],
+    entity_id=ADJUSTMENTS,
+  )
+  with extensions_session(GRAPH) as session:
+    facts = generate_report_facts(
+      session, "", ids["mapping"], [JAN], entity_id=ADJUSTMENTS
+    ).facts
+
+    def rows(places_flows: bool) -> dict[str, float | None]:
+      grid = render_structure_view(
+        session,
+        facts,
+        "cash_flow_statement",
+        [JAN],
+        ReportingStyleConstants.DEFAULT_STYLE_ID,
+        places_flows=places_flows,
+      )
+      return {row.element_qname: row.values[0] for row in grid.rows}
+
+    left_out, placed = rows(False), rows(True)
+  assert MEMBER_CONTRIBUTIONS not in left_out
+  assert placed[MEMBER_CONTRIBUTIONS] == -450.0
+  assert set(placed) - set(left_out) == {MEMBER_CONTRIBUTIONS}
 
 
 def test_an_owner_paying_the_card_is_not_operating_cash(tenant):

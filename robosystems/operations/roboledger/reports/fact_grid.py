@@ -460,17 +460,13 @@ def _flows_without_a_row(
     return []
   from robosystems.operations.roboledger.entity_scope import resolve_entity_id
   from robosystems.operations.roboledger.reports.network_picker import (
-    load_entity_reporting_style,
-    taggable_flow_qnames,
+    entity_taggable_flows,
   )
 
   try:
-    style = load_entity_reporting_style(
-      session, entity_id or resolve_entity_id(session)
-    )
+    rows = entity_taggable_flows(session, entity_id or resolve_entity_id(session))
   except LookupError:
     return []
-  rows = taggable_flow_qnames(session, style)
   if not rows:
     return []
   # Signed, per column: an inflow and an outflow of one flow stay distinct,
@@ -585,6 +581,8 @@ def render_structure_view(
   block_type: str,
   periods: list[PeriodSpec],
   reporting_style_id: str,
+  *,
+  places_flows: bool = False,
 ) -> FactGrid:
   """Apply the Reporting Style's structure for ``block_type`` to ``facts``.
 
@@ -593,6 +591,10 @@ def render_structure_view(
   fact with none takes a row of its own under the nearest calculation
   ancestor the statement presents (``_place_strays_by_calculation``);
   elsewhere it is dropped from the view (still persisted for audit).
+
+  ``places_flows`` extends that to the cash flow statement, for a group read
+  under the parent's Style: a member's flow and the consolidation entity's
+  offset of it carry the member's form, which the parent's need not present.
   """
   (
     structure_id,
@@ -635,10 +637,22 @@ def render_structure_view(
     pre_signed=True,
     keep=_ROLLFORWARD_ROOTS_BY_BLOCK.get(block_type, frozenset()),
   )
-  if strays and block_type in _PLACED_BY_CALCULATION:
+  if strays and (
+    block_type in _PLACED_BY_CALCULATION
+    or (places_flows and block_type == "cash_flow_statement")
+  ):
     ancestry = _calculation_ancestry(
       session, {f.element_id for f in strays}, {row.element_id for row in rows}
     )
+    if block_type == "cash_flow_statement":
+      # Only a flow of the two gross sections: an income statement concept
+      # the operating section sums is no row of this statement.
+      sections = {
+        row.element_id for row in rows if row.element_qname in _CF_GROSS_SECTIONS
+      }
+      strays = [
+        f for f in strays if sections.intersection(ancestry.get(f.element_id, ()))
+      ]
     rows = _place_strays_by_calculation(rows, strays, periods, ancestry)
   if block_type == "equity_statement":
     rows = _with_opening_balance(rows, facts, periods, hierarchy)
@@ -739,6 +753,13 @@ def _collect_hierarchy_element_ids(hierarchy: list[_HierarchyNode]) -> set[str]:
 # in ``ReportFacts.warnings`` rather than placed.
 _PLACED_BY_CALCULATION: frozenset[str] = frozenset(
   {"balance_sheet", "income_statement"}
+)
+# The cash flow sections stated gross, one row per flow.
+_CF_GROSS_SECTIONS: frozenset[str] = frozenset(
+  {
+    "rs-gaap:NetCashProvidedByUsedInInvestingActivities",
+    "rs-gaap:NetCashProvidedByUsedInFinancingActivities",
+  }
 )
 
 

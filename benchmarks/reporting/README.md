@@ -75,6 +75,9 @@ written a second time from the ledger's side:
   payables it is a bill, and reaches its row when the bill is paid.
 - A group's consolidation entity moves no cash; its tagged lines adjust the
   rows the members' entries produced.
+- A flow is stated on its own row, or on the nearest broader concept the
+  statement presents: a capital distribution on the dividends row of a
+  corporate statement, by the taxonomy's general-special arcs.
 - A member bought or sold is stated net of the cash it held at the month-end
   before. That is exact when it joins on a first day and leaves on a last one;
   a mid-month change with cash moving in between would show as a mismatch.

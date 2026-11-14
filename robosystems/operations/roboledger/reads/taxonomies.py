@@ -315,17 +315,20 @@ _FLOW_ACTIVITIES = {"investingActivity": "investing", "financingActivity": "fina
 
 
 def list_flow_candidates(
-  session: Session, reporting_style_id: str
+  session: Session, reporting_style_id: str, *, entity_id: str | None = None
 ) -> list[FlowCandidate]:
   """The investing and financing flows a line may be tagged with under this
   Reporting Style: the leaf rows of its cash flow statement, the set the
-  write path accepts (``bank_feed.resolve_flows``). With no cash flow network
+  write path accepts (``bank_feed.resolve_flows``). Given the entity, the
+  flows its lines may carry, which for the consolidation entity are every
+  group entity's rows. With no cash flow network
   composed, every flow concept carrying an investing or financing activity,
   which is what the write path then checks by. By section, investing then
   financing, and by name within each: a picker's order, not the statement's
   row order. A flow carrying both activities is listed under investing.
   """
   from robosystems.operations.roboledger.reports.network_picker import (
+    entity_taggable_flows,
     taggable_flow_qnames,
   )
 
@@ -339,7 +342,11 @@ def list_flow_candidates(
       Element.is_active.is_(True),
     )
   )
-  qnames = taggable_flow_qnames(session, reporting_style_id)
+  qnames = (
+    entity_taggable_flows(session, entity_id)
+    if entity_id
+    else taggable_flow_qnames(session, reporting_style_id)
+  )
   if qnames:
     stmt = stmt.where(Element.qname.in_(sorted(qnames)))
   rows = session.execute(stmt).all()

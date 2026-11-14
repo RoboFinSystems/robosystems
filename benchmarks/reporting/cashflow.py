@@ -52,6 +52,7 @@ class Flows:
   weight: dict[str, float] = field(default_factory=dict)
   defaults: dict[str, list[tuple[str, float]]] = field(default_factory=dict)
   derived_from: dict[str, list[str]] = field(default_factory=dict)
+  broader: dict[str, list[str]] = field(default_factory=dict)
 
   @classmethod
   def from_arcs(cls, arcs: Iterable[Mapping]) -> Flows:
@@ -67,7 +68,27 @@ class Flows:
       elif arc.get("associationType") == "derivation":
         flows.defaults.setdefault(child, []).append((parent, weight))
         flows.derived_from.setdefault(parent, []).append(child)
+      elif arc.get("associationType") == "general-special":
+        flows.broader.setdefault(child, []).append(parent)
     return flows
+
+  def shown_as(self, flow: str, rows: Collection[str]) -> str:
+    """The row a flow is stated on: its own, or the nearest broader concept
+    the statement presents (a capital distribution on the dividends row of a
+    corporate statement). Itself when neither is there."""
+    seen, frontier = {flow}, [flow]
+    while frontier:
+      found = next((concept for concept in frontier if concept in rows), None)
+      if found:
+        return found
+      wider: list[str] = []
+      for concept in frontier:
+        for parent in self.broader.get(concept, []):
+          if parent not in seen:
+            seen.add(parent)
+            wider.append(parent)
+      frontier = wider
+    return flow
 
   @property
   def working(self) -> frozenset[str]:
