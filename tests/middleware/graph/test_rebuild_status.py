@@ -67,13 +67,20 @@ async def test_cache_expires(monkeypatch):
   assert get_by_id.call_count == 2
 
 
-async def test_database_failure_fails_open_and_is_not_cached():
+async def test_database_failure_fails_open_and_is_remembered_briefly(monkeypatch):
   def boom(*_args, **_kwargs):
     raise RuntimeError("database unreachable")
 
   factory, lookup, get_by_id = _graph_lookup(boom)
+  clock = SimpleNamespace(now=1000.0)
+  monkeypatch.setattr(rebuild_status.time, "monotonic", lambda: clock.now)
   with factory, lookup:
     assert await is_graph_rebuilding(GRAPH) is False
+    # An unreachable database is not asked again by the next query...
     assert await is_graph_rebuilding(GRAPH) is False
-  # A failure is retried on the next query, not remembered for the TTL.
-  assert get_by_id.call_count == 2
+    assert get_by_id.call_count == 1
+
+    # ...but far sooner than a real answer would be.
+    clock.now += rebuild_status.FAILED_LOOKUP_TTL_SECONDS + 1
+    assert await is_graph_rebuilding(GRAPH) is False
+    assert get_by_id.call_count == 2

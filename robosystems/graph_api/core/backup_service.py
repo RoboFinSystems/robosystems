@@ -283,7 +283,7 @@ class OnInstanceBackupService:
     key: str,
     task_id: str,
     db_size: int,
-    s3_client=None,
+    s3_client,
   ) -> dict[str, Any]:
     """Compress the database with the bundled zstd binary and upload to R2.
 
@@ -292,9 +292,6 @@ class OnInstanceBackupService:
     stays at 128MB so subscribers can decompress with a plain ``zstd -d``.
     """
     logger.info(f"[Task {task_id}] Compressing {db_path.name} with zstd before upload")
-
-    if s3_client is None:
-      s3_client = self._get_r2_client()
 
     # On the data volume, not the container's /tmp (the root disk), which is too
     # small to hold a compressed multi-GB database.

@@ -4,7 +4,9 @@ A rebuild deletes and regenerates the database, so a query in that window
 would read a missing or half-loaded graph. The flag lives on the platform
 ``Graph`` row; the Graph API holds no database connection, so its callers
 check here. Cached per process to keep the lookup off the query path, and
-failing open: a database error must not take queries down with it.
+failing open: a database error must not take queries down with it. A failed
+lookup is remembered briefly, so an unreachable database is not asked again
+by every query.
 """
 
 import asyncio
@@ -13,16 +15,18 @@ import time
 from robosystems.logger import logger
 
 REBUILD_CACHE_TTL_SECONDS = 30
+FAILED_LOOKUP_TTL_SECONDS = 5
 
-_cache: dict[str, tuple[bool, float]] = {}
+# graph_id -> (is_rebuilding, cached_at, ttl)
+_cache: dict[str, tuple[bool, float, float]] = {}
 
 
 def _cached(graph_id: str) -> bool | None:
   entry = _cache.get(graph_id)
   if entry is None:
     return None
-  is_rebuilding, cached_at = entry
-  if time.monotonic() - cached_at >= REBUILD_CACHE_TTL_SECONDS:
+  is_rebuilding, cached_at, ttl = entry
+  if time.monotonic() - cached_at >= ttl:
     return None
   return is_rebuilding
 
@@ -42,8 +46,9 @@ def _lookup(graph_id: str) -> bool:
     logger.warning(
       f"Failed to check rebuild status for {graph_id}, assuming not rebuilding"
     )
+    _cache[graph_id] = (False, time.monotonic(), FAILED_LOOKUP_TTL_SECONDS)
     return False
-  _cache[graph_id] = (is_rebuilding, time.monotonic())
+  _cache[graph_id] = (is_rebuilding, time.monotonic(), REBUILD_CACHE_TTL_SECONDS)
   return is_rebuilding
 
 
