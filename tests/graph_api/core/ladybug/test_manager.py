@@ -368,6 +368,47 @@ class TestLadybugDatabaseManagerDeleteDatabase:
     assert result["status"] == "success"
     assert not any(path.exists() for path in paths)
 
+  def test_delete_database_removes_engine_upgrade_leftovers(self):
+    """A teardown leaves nothing named for the graph: the volume can be
+    attached to another graph next."""
+    manager = _make_manager(self.temp_dir)
+
+    base = Path(self.temp_dir)
+    (base / "testdb.lbdb").touch()
+    pre_migration = base / "testdb.lbug.pre-migration"
+    pre_migration.touch()
+    export_dir = base / "exports" / "testdb"
+    export_dir.mkdir(parents=True)
+    (export_dir / "nodes.parquet").touch()
+    other_graph = base / "otherdb.lbug.pre-migration"
+    other_graph.touch()
+
+    with patch("robosystems.graph_api.core.duckdb.get_duckdb_pool") as mock_get_duck:
+      mock_get_duck.return_value = MagicMock()
+      result = manager.delete_database("testdb")
+
+    assert result["status"] == "success"
+    assert not pre_migration.exists()
+    assert not export_dir.exists()
+    assert str(pre_migration) in result["removed"]
+    assert other_graph.exists()
+
+  def test_delete_database_rebuild_keeps_engine_upgrade_leftovers(self):
+    """A rebuild keeps the graph, so its rollback copy stays."""
+    manager = _make_manager(self.temp_dir)
+
+    base = Path(self.temp_dir)
+    (base / "testdb.lbdb").touch()
+    pre_migration = base / "testdb.lbug.pre-migration"
+    pre_migration.touch()
+
+    with patch("robosystems.graph_api.core.duckdb.get_duckdb_pool"):
+      result = manager.delete_database("testdb", preserve_duckdb=True)
+
+    assert result["status"] == "success"
+    assert not (base / "testdb.lbdb").exists()
+    assert pre_migration.exists()
+
   def test_delete_database_preserve_duckdb(self):
     """Should skip DuckDB cleanup when preserve_duckdb is True."""
     manager = _make_manager(self.temp_dir)
