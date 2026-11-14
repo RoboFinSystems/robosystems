@@ -211,17 +211,27 @@ class User(Model):
 
   def invalidate_sessions(self, session: Session) -> None:
     """Bump session_version, invalidating all JWTs, and revoke OAuth tokens
-    (which carry no session version)."""
+    (which carry no session version) in the same transaction, so a session
+    reset never commits with OAuth access still live."""
+    from .oauth_token import OAuthToken
+
     self.session_version = (self.session_version or 0) + 1
     self.updated_at = datetime.now(UTC)
     try:
+      revoked = OAuthToken.mark_revoked_for_user(str(self.id), session)
       session.commit()
       session.refresh(self)
       self._invalidate_auth_cache()
     except SQLAlchemyError:
       session.rollback()
       raise
-    self._revoke_oauth_tokens(session, reason="sessions_invalidated")
+    try:
+      for token in revoked:
+        token.invalidate_cache()
+    except Exception as e:
+      logger.error(f"OAuth tokens revoked; clearing their cache failed: {e}")
+    if revoked:
+      logger.info(f"Revoked {len(revoked)} OAuth tokens (sessions_invalidated)")
 
   def _revoke_oauth_tokens(self, session: Session, *, reason: str) -> int:
     """Revoke every OAuth token for this user. Best-effort: failures are

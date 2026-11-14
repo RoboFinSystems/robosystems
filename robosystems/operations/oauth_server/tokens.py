@@ -9,8 +9,10 @@ instead of retrying forever.
 
 import hmac
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from authlib.oauth2.rfc7636 import create_s256_code_challenge
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
@@ -23,7 +25,7 @@ from robosystems.models.core.user.oauth_token import (
 from robosystems.security import SecurityAuditLogger, SecurityEventType
 
 from .authorization import AuthorizationCodeStore
-from .clients import redirect_uri_matches
+from .clients import redirect_uri_matches, validate_redirect_uri
 from .resources import normalize_scope, resolve_resource
 
 # RFC 7636 §4.1: the verifier is 43-128 unreserved characters.
@@ -107,8 +109,9 @@ def exchange_authorization_code(
     )
     raise TokenError("invalid_grant", "Authorization code was issued to another client")
 
-  if redirect_uri is not None and not redirect_uri_matches(
-    str(payload.get("redirect_uri", "")), redirect_uri
+  if redirect_uri is not None and (
+    validate_redirect_uri(redirect_uri) is not None
+    or not redirect_uri_matches(str(payload.get("redirect_uri", "")), redirect_uri)
   ):
     raise TokenError("invalid_grant", "redirect_uri does not match")
 
@@ -215,37 +218,43 @@ def refresh_access_token(
     if requested is None or not set(requested.split()).issubset(granted):
       raise TokenError("invalid_scope", "Requested scope exceeds the grant")
 
-  # Claim the token. Losing the claim means a concurrent request rotated
-  # it first — replay.
-  if not OAuthToken.consume_refresh(str(row.id), session):
-    raise _replay()
-
-  # The previous access token dies with its refresh token: one live pair
-  # per family at a time.
-  previous_access = (
-    session.query(OAuthToken)
-    .filter(
-      OAuthToken.family_id == row.family_id,
-      OAuthToken.token_type == TOKEN_TYPE_ACCESS,
-      OAuthToken.revoked_at.is_(None),
+  # Claim, retire the previous access token and mint the successor in one
+  # transaction. The claim's row lock is held to the commit, so a concurrent
+  # replay waits for the successor to exist and its family sweep reaches it.
+  try:
+    if not OAuthToken.consume_refresh(str(row.id), session, commit=False):
+      session.rollback()
+      raise _replay()
+    previous_access = OAuthToken.mark_revoked_in_family(
+      str(row.family_id), TOKEN_TYPE_ACCESS, session
     )
-    .all()
-  )
-  for token in previous_access:
-    token.revoke(session, reason="refresh_rotation")
+    access, access_plain, refresh, refresh_plain, ttl = OAuthToken.mint_pair(
+      grant_id=str(grant.id),
+      user_id=str(grant.user_id),
+      session=session,
+      family_id=str(row.family_id),
+      commit=False,
+    )
+    grant.last_used_at = datetime.now(UTC)
+    granted_scope = str(grant.scope)
+    session.commit()
+  except SQLAlchemyError:
+    session.rollback()
+    raise
 
-  _, access_plain, _, refresh_plain, ttl = OAuthToken.mint_pair(
-    grant_id=str(grant.id),
-    user_id=str(grant.user_id),
-    session=session,
-    family_id=str(row.family_id),
-  )
-  grant.touch(session)
+  # The rotation is committed. What follows is best-effort, so a failure here
+  # never costs the client the pair it was just issued.
+  try:
+    for token in previous_access:
+      token.invalidate_cache()
+    OAuthToken.log_issued(access, refresh, rotation=True)
+  except Exception as e:
+    logger.error(f"OAuth rotation committed; a post-commit step failed: {e}")
   return TokenResponse(
     access_token=access_plain,
     refresh_token=refresh_plain,
     expires_in=ttl,
-    scope=str(grant.scope),
+    scope=granted_scope,
   )
 
 
