@@ -181,3 +181,34 @@ def test_the_newest_authorization_takes_the_books(test_db, test_user, sample_gra
   target = resolve_writeback_connection(test_db, graph_id, PARENT)
   assert target is not None and target.connection_id == second.id
   assert shadow_close_for_entity(test_db, graph_id, PARENT) is False
+
+
+def test_a_revived_connection_meets_no_second_keeper(test_db, test_user, sample_graph):
+  """A disconnected keeper still carries the flag, out of the index's sight.
+  Another connection taking the books clears it, so reviving the first
+  cannot put two keepers on the entity; it takes the books back when it
+  authorizes again."""
+  graph_id = sample_graph.graph_id
+  first = _connection(
+    test_db, graph_id, test_user.id, ConnectionStatus.CONNECTED.value, "shadow"
+  )
+  first.soft_delete(test_db)
+  second = _connection(
+    test_db,
+    graph_id,
+    test_user.id,
+    ConnectionStatus.CONNECTED.value,
+    "qb_authoritative",
+    created_offset=1,
+  )
+
+  first.restore(test_db)
+  assert (first.keeps_books, second.keeps_books) == (False, True)
+  kept = books_keeper(test_db, graph_id, PARENT)
+  assert kept is not None and kept.id == second.id
+
+  first.become_keeper(test_db)
+  test_db.refresh(second)
+  kept = books_keeper(test_db, graph_id, PARENT)
+  assert kept is not None and kept.id == first.id
+  assert second.keeps_books is False
