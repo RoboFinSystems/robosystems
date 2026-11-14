@@ -413,6 +413,70 @@ class TestLadybugConnectionPool:
     assert pool._is_connection_valid(expired_conn_info) is False
     assert pool._is_connection_valid(unhealthy_conn_info) is False
 
+  @pytest.mark.parametrize("maintenance", ["cleanup", "health"])
+  @patch("ladybug.Database")
+  @patch("ladybug.Connection")
+  def test_maintenance_never_holds_the_global_lock_while_waiting_on_a_database(
+    self, mock_conn_class, mock_db_class, maintenance
+  ):
+    """A swap holds a database lock and then takes the global lock;
+    maintenance must not take them in the reverse order."""
+    mock_conn = MagicMock()
+    mock_conn_class.return_value = mock_conn
+    mock_db_class.return_value = MagicMock()
+    pool = LadybugConnectionPool(base_path=self.base_path, connection_ttl_minutes=30)
+    with pool.get_connection("test_db"):
+      pass
+    for conn_info in pool._pools["test_db"].values():
+      conn_info.created_at = datetime.now(UTC) - timedelta(minutes=40)
+    if maintenance == "health":
+      mock_conn.execute.side_effect = RuntimeError("dead")
+    run = (
+      pool._cleanup_expired_connections
+      if maintenance == "cleanup"
+      else pool._check_connection_health
+    )
+
+    held, go_on = threading.Event(), threading.Event()
+    got_global: list[bool] = []
+
+    def swap() -> None:
+      with pool.exclusive("test_db"):
+        held.set()
+        go_on.wait(timeout=5)
+        # What a swap does next. A bounded wait, so a deadlock fails the
+        # test instead of hanging it: giving up releases the database lock.
+        acquired = pool._global_lock.acquire(timeout=2)
+        got_global.append(acquired)
+        if acquired:
+          pool._global_lock.release()
+
+    swapper = threading.Thread(target=swap, daemon=True)
+    swapper.start()
+    assert held.wait(timeout=5)
+
+    # Signal once maintenance asks for the database lock it will wait on, so
+    # the swap's global-lock attempt starts only after that point.
+    maintainer_waiting = threading.Event()
+    real_get_lock = pool._get_database_lock
+
+    def get_lock(name: str):
+      lock = real_get_lock(name)
+      maintainer_waiting.set()
+      return lock
+
+    with patch.object(pool, "_get_database_lock", side_effect=get_lock):
+      maintainer = threading.Thread(target=run, daemon=True)
+      maintainer.start()
+      assert maintainer_waiting.wait(timeout=5)
+      go_on.set()
+      swapper.join(timeout=5)
+      maintainer.join(timeout=5)
+
+    assert got_global == [True], "maintenance held the global lock while waiting"
+    assert not swapper.is_alive() and not maintainer.is_alive()
+    assert len(pool._pools.get("test_db", {})) == 0
+
   @patch("ladybug.Database")
   @patch("ladybug.Connection")
   def test_cleanup_expired_connections(self, mock_conn_class, mock_db_class):
