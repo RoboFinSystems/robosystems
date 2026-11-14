@@ -100,11 +100,14 @@ class OAuthToken(Model):
     user_id: str,
     session: Session,
     family_id: str | None = None,
+    commit: bool = True,
   ) -> tuple[OAuthToken, str, OAuthToken, str, int]:
     """Mint an access + refresh token for a grant.
 
     Returns ``(access_row, access_plain, refresh_row, refresh_plain,
     access_ttl_seconds)``. Rotation passes the existing ``family_id``.
+    With ``commit=False`` the pair is only flushed: the caller commits it
+    with the rest of its transaction, then calls :meth:`log_issued`.
     """
     family = family_id or generate_prefixed_ulid("oaf")
     now = datetime.now(UTC)
@@ -132,6 +135,15 @@ class OAuthToken(Model):
     )
     session.add(access)
     session.add(refresh)
+    if not commit:
+      session.flush()
+      return (
+        access,
+        access_plain,
+        refresh,
+        refresh_plain,
+        OAUTH_ACCESS_TOKEN_TTL_SECONDS,
+      )
     try:
       session.commit()
       session.refresh(access)
@@ -140,20 +152,24 @@ class OAuthToken(Model):
       session.rollback()
       raise
 
+    cls.log_issued(access, refresh, rotation=family_id is not None)
+    return access, access_plain, refresh, refresh_plain, OAUTH_ACCESS_TOKEN_TTL_SECONDS
+
+  @staticmethod
+  def log_issued(access: OAuthToken, refresh: OAuthToken, *, rotation: bool) -> None:
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.AUTH_SUCCESS,
-      user_id=user_id,
+      user_id=str(access.user_id),
       details={
         "action": "oauth_tokens_issued",
-        "oauth_grant_id": grant_id,
-        "family_id": family,
+        "oauth_grant_id": access.grant_id,
+        "family_id": access.family_id,
         "access_token_id": access.id,
         "refresh_token_id": refresh.id,
-        "rotation": family_id is not None,
+        "rotation": rotation,
       },
       risk_level="low",
     )
-    return access, access_plain, refresh, refresh_plain, OAUTH_ACCESS_TOKEN_TTL_SECONDS
 
   # --- lookup ----------------------------------------------------------
 
@@ -176,10 +192,14 @@ class OAuthToken(Model):
     )
 
   @classmethod
-  def consume_refresh(cls, token_id: str, session: Session) -> bool:
+  def consume_refresh(
+    cls, token_id: str, session: Session, *, commit: bool = True
+  ) -> bool:
     """Atomically mark a refresh token consumed. True when this caller won
     the claim; False when it was already consumed (replay) — a conditional
-    UPDATE, so two concurrent refreshes cannot both rotate."""
+    UPDATE, so two concurrent refreshes cannot both rotate. With
+    ``commit=False`` the claim's row lock is held until the caller commits,
+    so a concurrent claim waits for the whole rotation, not just the claim."""
     now = datetime.now(UTC)
     try:
       claimed = (
@@ -192,7 +212,8 @@ class OAuthToken(Model):
         )
         .update({"used_at": now, "last_used_at": now}, synchronize_session=False)
       )
-      session.commit()
+      if commit:
+        session.commit()
     except SQLAlchemyError:
       session.rollback()
       raise
@@ -213,12 +234,9 @@ class OAuthToken(Model):
     """Revoke every row the query selects and clear their cache entries.
     Returns the count revoked. Cache clearing is best-effort per row; the
     DB flip is the authoritative fact and the cache lapses on TTL."""
-    rows = query.filter(cls.revoked_at.is_(None)).all()
+    rows = cls._mark_revoked(query)
     if not rows:
       return 0
-    now = datetime.now(UTC)
-    for row in rows:
-      row.revoked_at = now
     try:
       session.commit()
     except SQLAlchemyError:
@@ -228,6 +246,30 @@ class OAuthToken(Model):
       row.invalidate_cache()
     logger.info(f"Revoked {len(rows)} OAuth tokens ({reason})")
     return len(rows)
+
+  @classmethod
+  def _mark_revoked(cls, query) -> list[OAuthToken]:
+    """Set ``revoked_at`` on every live row the query selects, without
+    committing. The caller commits, then clears the rows' cache entries."""
+    rows = query.filter(cls.revoked_at.is_(None)).all()
+    now = datetime.now(UTC)
+    for row in rows:
+      row.revoked_at = now
+    return rows
+
+  @classmethod
+  def mark_revoked_for_user(cls, user_id: str, session: Session) -> list[OAuthToken]:
+    return cls._mark_revoked(session.query(cls).filter(cls.user_id == user_id))
+
+  @classmethod
+  def mark_revoked_in_family(
+    cls, family_id: str, token_type: str, session: Session
+  ) -> list[OAuthToken]:
+    return cls._mark_revoked(
+      session.query(cls).filter(
+        cls.family_id == family_id, cls.token_type == token_type
+      )
+    )
 
   @classmethod
   def revoke_family(cls, family_id: str, session: Session, *, reason: str) -> int:

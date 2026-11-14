@@ -1,10 +1,13 @@
 """Code exchange, refresh rotation + replay, revocation, and validation."""
 
+import threading
 from datetime import UTC, datetime, timedelta
 from unittest.mock import Mock, patch
 
 import pytest
 from authlib.oauth2.rfc7636 import create_s256_code_challenge
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import sessionmaker
 
 from robosystems.middleware.auth.oauth import validate_oauth_access_token
 from robosystems.models.core import OAuthClient, OAuthGrant, OAuthToken
@@ -55,14 +58,14 @@ def grant(test_db, test_user, client_row):
   )
 
 
-def _issue_code(grant, client_row, user_id):
+def _issue_code(grant, client_row, user_id, redirect_uri=REDIRECT):
   return AuthorizationCodeStore.issue(
     {
       "user_id": user_id,
       "client_row_id": str(client_row.id),
       "client_id": str(client_row.client_id),
       "grant_id": str(grant.id),
-      "redirect_uri": REDIRECT,
+      "redirect_uri": redirect_uri,
       "code_challenge": CHALLENGE,
       "resource": RESOURCE,
       "scope": "mcp",
@@ -175,6 +178,34 @@ class TestExchange:
       )
     assert exc.value.error == "invalid_target"
 
+  def test_presented_redirect_must_itself_be_valid(self, test_db, test_user):
+    loopback = "http://127.0.0.1/callback"
+    client, _ = OAuthClient.register_preregistered(
+      client_name="Loopback",
+      redirect_uris=[loopback],
+      confidential=False,
+      session=test_db,
+    )
+    grant = OAuthGrant.create(
+      user_id=str(test_user.id),
+      oauth_client_id=str(client.id),
+      graph_id=KG,
+      resource=RESOURCE,
+      scope="mcp",
+      session=test_db,
+    )
+    code = _issue_code(grant, client, str(test_user.id), redirect_uri=loopback)
+    with pytest.raises(TokenError) as exc:
+      exchange_authorization_code(
+        code=code,
+        client=client,
+        code_verifier=VERIFIER,
+        redirect_uri="http://user@127.0.0.1:8080/callback",
+        resource=RESOURCE,
+        session=test_db,
+      )
+    assert exc.value.error == "invalid_grant"
+
   def test_revoked_grant(self, test_db, grant, client_row, test_user):
     code = _issue_code(grant, client_row, str(test_user.id))
     grant.revoke(test_db)
@@ -249,6 +280,83 @@ class TestRefresh:
         resource=None,
         session=test_db,
       )
+
+  def test_failed_rotation_leaves_the_presented_pair_untouched(
+    self, test_db, issued, client_row
+  ):
+    with (
+      patch.object(OAuthToken, "mint_pair", side_effect=SQLAlchemyError("boom")),
+      pytest.raises(SQLAlchemyError),
+    ):
+      refresh_access_token(
+        refresh_token=issued.refresh_token,
+        client=client_row,
+        scope=None,
+        resource=None,
+        session=test_db,
+      )
+    test_db.expire_all()
+    refresh = OAuthToken.get_by_plaintext(
+      issued.refresh_token, TOKEN_TYPE_REFRESH, test_db
+    )
+    access = OAuthToken.get_by_plaintext(
+      issued.access_token, TOKEN_TYPE_ACCESS, test_db
+    )
+    assert refresh.used_at is None
+    assert access.revoked_at is None
+
+  @pytest.mark.timeout(60)
+  def test_concurrent_replay_waits_for_the_rotation_and_revokes_its_successor(
+    self, test_db, issued, client_row
+  ):
+    """A replay racing a rotation must not finish its family sweep before the
+    successor exists: it waits on the claim, then revokes the successor."""
+    Session = sessionmaker(bind=test_db.get_bind())
+    real_mint = OAuthToken.mint_pair
+    claimed, proceed = threading.Event(), threading.Event()
+    outcome: dict[str, object] = {}
+
+    def paused_mint(*args, **kwargs):
+      claimed.set()
+      assert proceed.wait(timeout=20)
+      return real_mint(*args, **kwargs)
+
+    def run(name: str) -> None:
+      session = Session()
+      try:
+        outcome[name] = refresh_access_token(
+          refresh_token=issued.refresh_token,
+          client=client_row,
+          scope=None,
+          resource=None,
+          session=session,
+        )
+      except TokenError as e:
+        outcome[name] = e.error
+      finally:
+        session.close()
+
+    with patch.object(OAuthToken, "mint_pair", side_effect=paused_mint):
+      rotation = threading.Thread(target=run, args=("rotation",))
+      rotation.start()
+      assert claimed.wait(timeout=20)
+      replay = threading.Thread(target=run, args=("replay",))
+      replay.start()
+      replay.join(timeout=2)
+      assert replay.is_alive(), "the replay finished while the rotation held its claim"
+      proceed.set()
+      rotation.join(timeout=20)
+      replay.join(timeout=20)
+
+    assert outcome["replay"] == "invalid_grant"
+    successor = outcome["rotation"]
+    test_db.expire_all()
+    assert OAuthToken.get_by_plaintext(
+      successor.refresh_token, TOKEN_TYPE_REFRESH, test_db
+    ).revoked_at
+    assert OAuthToken.get_by_plaintext(
+      successor.access_token, TOKEN_TYPE_ACCESS, test_db
+    ).revoked_at
 
   def test_other_client_and_garbage(self, test_db, issued, other_client, client_row):
     with pytest.raises(TokenError):
@@ -463,6 +571,22 @@ class TestValidateAccessToken:
     ).revoked_at
     with patch("robosystems.database.SessionFactory", return_value=test_db):
       assert validate_oauth_access_token(issued.access_token) is None
+
+  def test_session_invalidation_revokes_in_the_same_commit(
+    self, test_db, issued, test_user
+  ):
+    from robosystems.models.core import User
+
+    user = User.get_by_id(str(test_user.id), test_db)
+    with (
+      patch.object(User, "_invalidate_auth_cache", return_value=True),
+      patch.object(test_db, "commit", wraps=test_db.commit) as commit,
+    ):
+      user.invalidate_sessions(test_db)
+    assert commit.call_count == 1
+    assert OAuthToken.get_by_plaintext(
+      issued.access_token, TOKEN_TYPE_ACCESS, test_db
+    ).revoked_at
 
   def test_client_deactivation_revokes_its_tokens(
     self, test_db, issued, client_row, grant
