@@ -42,13 +42,15 @@ _STYLE_OF_FORM = {
 
 # A template and form whose equity the form's Style does not carry whole.
 # The consolidation chart holds each member's capital in that member's form
-# and the parent's adjustments in the parent's, so only a Style whose equity
-# statement rolls forward every form (the corporate one) carries it all. Each
-# entry needs a reason, and fails once it is no longer true.
+# and the parent's adjustments in the parent's. A consolidation entity takes
+# its parent's Style, and the corporate equity statement rolls forward every
+# form, so a corporate parent's is whole. Under an LLC or partnership parent,
+# a member of another form leaves capital the Style's equity statement does
+# not carry. Each entry needs a reason, and fails once it is no longer true.
 _CONSOLIDATION = (
-  "the consolidation entity holds capital of every form; on this Style its own "
-  "equity statement leaves the other forms' out, and only the consolidated "
-  "statements, on the parent's Style, are read as statements"
+  "a consolidation entity under a parent of this form, with a member of "
+  "another form: its own equity statement leaves that member's capital out; "
+  "the consolidated statements net it to nothing"
 )
 EQUITY_LEFT_OUT: dict[tuple[str, str], str] = {
   ("consolidation", "llc"): _CONSOLIDATION,

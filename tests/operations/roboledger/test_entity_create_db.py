@@ -4,11 +4,13 @@ any entity of it. Runs the commands' real SQL against a tenant schema."""
 from __future__ import annotations
 
 from datetime import date
+from unittest.mock import patch
 
 import pytest
 
 from robosystems.config.constants import ReportingStyleConstants
 from robosystems.models.api.extensions.entity import (
+  ChangeReportingStyleRequest,
   CreateEntityRequest,
   UpdateEntityRequest,
 )
@@ -23,6 +25,7 @@ from robosystems.operations.roboledger.commands.entity import (
 )
 from robosystems.operations.roboledger.commands.reporting_style import (
   ReportingStyleInvalidError,
+  change_reporting_style,
 )
 from robosystems.operations.roboledger.entity_scope import (
   EntityNotInGraphError,
@@ -32,6 +35,9 @@ from robosystems.operations.roboledger.entity_scope import (
   resolve_entity_id,
 )
 from robosystems.operations.roboledger.reads.entity import get_entity, list_entities
+from robosystems.operations.roboledger.reports.network_picker import (
+  load_entity_reporting_style,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -113,6 +119,79 @@ class TestConsolidationFields:
         ),
         created_by="u",
       )
+
+  def test_the_consolidation_entity_takes_the_parents_style(self, two_entities):
+    """Its entries adjust statements rendered on the parent's Style, so its
+    own form does not pick another."""
+    session, parent = two_entities.session, two_entities.parent
+    parent.reporting_style_id = ReportingStyleConstants.PARTNERSHIP_STYLE_ID
+    session.flush()
+    created = create_entity(
+      session,
+      CreateEntityRequest(
+        name="Consolidation Adjustments", entity_type="llc", entity_role="consolidation"
+      ),
+      created_by="u",
+    )
+    assert created.reporting_style_id == ReportingStyleConstants.PARTNERSHIP_STYLE_ID
+
+  def test_an_entity_made_the_consolidation_entity_takes_the_parents_style(
+    self, two_entities
+  ):
+    session, parent, sub = two_entities.session, two_entities.parent, two_entities.sub
+    parent.reporting_style_id = ReportingStyleConstants.PARTNERSHIP_STYLE_ID
+    session.flush()
+    updated = update_entity(
+      session,
+      UpdateEntityRequest(entity_id=sub.id, entity_role="consolidation"),
+      created_by="u",
+    )
+    assert updated.reporting_style_id == ReportingStyleConstants.PARTNERSHIP_STYLE_ID
+
+  def test_the_consolidation_entity_has_no_style_of_its_own(self, two_entities):
+    """A Style asked for at creation is not taken, one left on the row from
+    before is not read, one set on it is refused, and the parent's change
+    carries it."""
+    session, parent = two_entities.session, two_entities.parent
+    created = create_entity(
+      session,
+      CreateEntityRequest(
+        name="Consolidation Adjustments",
+        entity_role="consolidation",
+        reporting_style_id=ReportingStyleConstants.PARTNERSHIP_STYLE_ID,
+      ),
+      created_by="u",
+    )
+    assert created.reporting_style_id == parent.reporting_style_id
+
+    row = session.get(Entity, created.id)
+    row.reporting_style_id = ReportingStyleConstants.LLC_STYLE_ID
+    session.flush()
+    assert load_entity_reporting_style(session, created.id) == (
+      parent.reporting_style_id
+    )
+
+    partnership = ReportingStyleConstants.PARTNERSHIP_STYLE_ID
+    with patch(
+      "robosystems.operations.roboledger.commands.reporting_style."
+      "require_reporting_style",
+      return_value=None,
+    ):
+      with pytest.raises(ReportingStyleInvalidError):
+        change_reporting_style(
+          session,
+          ChangeReportingStyleRequest(
+            entity_id=created.id, reporting_style_id=partnership
+          ),
+        )
+      change_reporting_style(
+        session, ChangeReportingStyleRequest(reporting_style_id=partnership)
+      )
+    session.refresh(row)
+    assert (parent.reporting_style_id, row.reporting_style_id) == (
+      partnership,
+      partnership,
+    )
 
   def test_a_new_share_re_derives_the_method_unless_both_are_given(self, two_entities):
     session, sub = two_entities.session, two_entities.sub

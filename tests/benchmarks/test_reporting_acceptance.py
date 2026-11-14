@@ -511,6 +511,25 @@ class TestLineFlows:
     }
 
 
+class TestShownAs:
+  ARCS = [
+    {
+      "associationType": "general-special",
+      "fromElementQname": "rs-gaap:PaymentsOfDividends",
+      "toElementQname": "rs-gaap:PaymentsOfCapitalDistribution",
+    }
+  ]
+
+  def test_a_flow_is_stated_on_the_broader_row_the_statement_presents(self):
+    flows = Flows.from_arcs(self.ARCS)
+    distribution = "rs-gaap:PaymentsOfCapitalDistribution"
+    assert flows.shown_as(distribution, {distribution}) == distribution
+    assert flows.shown_as(distribution, {"rs-gaap:PaymentsOfDividends"}) == (
+      "rs-gaap:PaymentsOfDividends"
+    )
+    assert flows.shown_as(distribution, set()) == distribution
+
+
 class TestSettle:
   def test_a_payment_larger_than_the_open_bills_is_unexplained(self):
     owed = {CAPEX: -500.0}

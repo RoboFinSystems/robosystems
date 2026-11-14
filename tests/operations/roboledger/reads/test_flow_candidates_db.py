@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import pytest
 
+from robosystems.config.constants import ReportingStyleConstants
+from robosystems.models.api.extensions.entity import CreateEntityRequest
 from robosystems.models.extensions import (
   Association,
   Element,
@@ -15,8 +17,14 @@ from robosystems.models.extensions import (
   Taxonomy,
   Trait,
 )
+from robosystems.operations.event_block.python_handlers.bank_feed import resolve_flows
+from robosystems.operations.event_block.python_handlers.types import (
+  HandlerMetadataValidationError,
+)
+from robosystems.operations.roboledger.commands.entity import create_entity
 from robosystems.operations.roboledger.reads.taxonomies import list_flow_candidates
 from robosystems.operations.roboledger.reports.network_picker import (
+  entity_taggable_flows,
   load_entity_reporting_style,
 )
 from tests.ledger_entity import entity_account
@@ -78,9 +86,9 @@ def flows(two_entities):
   return t
 
 
-def _compose_statement(t, rows: list[Element]) -> None:
-  """A cash flow network for the parent's Style presenting ``rows`` under
-  one subtotal, each footing it through a calc arc."""
+def _compose_statement(t, rows: list[Element], *, style: str | None = None) -> None:
+  """A cash flow network for ``style`` (the parent's by default) presenting
+  ``rows`` under one subtotal, each footing it through a calc arc."""
   session = t.session
   taxonomy = Taxonomy(
     name="pres", taxonomy_type="reporting_standard", created_by="test"
@@ -95,7 +103,9 @@ def _compose_statement(t, rows: list[Element]) -> None:
   )
   session.add(network)
   session.flush()
-  subtotal = _element(session, SUBTOTAL, "Net Cash from Financing")
+  subtotal = session.query(Element).filter(Element.qname == SUBTOTAL).first()
+  if subtotal is None:
+    subtotal = _element(session, SUBTOTAL, "Net Cash from Financing")
   for order, leaf in enumerate(rows, start=1):
     for association_type in ("presentation", "calculation"):
       session.add(
@@ -111,7 +121,7 @@ def _compose_statement(t, rows: list[Element]) -> None:
       )
   session.add(
     ReportingStyleNetwork(
-      reporting_style_id=load_entity_reporting_style(session, t.parent.id),
+      reporting_style_id=style or load_entity_reporting_style(session, t.parent.id),
       statement_type="cash_flow_statement",
       network_id=network.id,
     )
@@ -167,3 +177,38 @@ def test_a_flow_carrying_both_activities_is_listed_once_under_investing(flows):
     (NOTE_PROCEEDS, "investing"),
     (CONTRIBUTIONS, "financing"),
   ]
+
+
+def test_the_consolidation_entity_carries_every_group_entitys_rows(flows):
+  """It offsets a member's flow in the member's form, so its lines take a
+  row the parent's statement lacks; an operating entity's take only its own."""
+  session = flows.session
+  flows.sub.reporting_style_id = ReportingStyleConstants.LLC_STYLE_ID
+  _compose_statement(flows, [flows.note])
+  _compose_statement(
+    flows, [flows.contribution], style=ReportingStyleConstants.LLC_STYLE_ID
+  )
+  adjustments = create_entity(
+    session,
+    CreateEntityRequest(name="Consolidation Adjustments", entity_role="consolidation"),
+    created_by="u",
+  )
+
+  assert entity_taggable_flows(session, flows.parent.id) == {NOTE_PROCEEDS}
+  assert entity_taggable_flows(session, flows.sub.id) == {CONTRIBUTIONS}
+  assert entity_taggable_flows(session, adjustments.id) == {
+    NOTE_PROCEEDS,
+    CONTRIBUTIONS,
+  }
+  offered = list_flow_candidates(
+    session,
+    load_entity_reporting_style(session, adjustments.id),
+    entity_id=adjustments.id,
+  )
+  assert {c.qname for c in offered} == {NOTE_PROCEEDS, CONTRIBUTIONS}
+  assert resolve_flows(session, {CONTRIBUTIONS}, entity_id=adjustments.id)
+  with pytest.raises(HandlerMetadataValidationError):
+    resolve_flows(session, {CONTRIBUTIONS}, entity_id=flows.parent.id)
+  # A flow no entity of the group presents stays refused.
+  with pytest.raises(HandlerMetadataValidationError):
+    resolve_flows(session, {CAPEX}, entity_id=adjustments.id)

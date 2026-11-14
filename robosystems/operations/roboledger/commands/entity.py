@@ -376,6 +376,9 @@ def _apply_updates(session: Session, entity: Entity, updates: dict[str, Any]):
       )
   if retyped and role == _ROLE_CONSOLIDATION:
     _refuse_second_consolidation_entity(session, exclude_id=str(entity.id))
+    group_parent = find_parent_entity(session)
+    if group_parent is not None:
+      updates["reporting_style_id"] = group_parent.reporting_style_id
   _check_membership(
     updates.get("joined_on", entity.joined_on), updates.get("left_on", entity.left_on)
   )
@@ -535,7 +538,12 @@ def create_entity(
         f"{closed_through}."
       )
 
-  if body.reporting_style_id:
+  group_parent = find_parent_entity(session)
+  if role == _ROLE_CONSOLIDATION and group_parent is not None:
+    # Its entries adjust the group's statements, which render on the parent's
+    # Style, so it takes that one whatever is asked or its form implies.
+    reporting_style_id = group_parent.reporting_style_id
+  elif body.reporting_style_id:
     require_reporting_style(session, body.reporting_style_id)
     reporting_style_id = body.reporting_style_id
   else:

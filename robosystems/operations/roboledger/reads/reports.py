@@ -52,6 +52,7 @@ from robosystems.operations.roboledger.entity_scope import (
   books_entity_id,
   find_entity_id,
   group_members,
+  is_consolidation_entity,
   is_group_parent,
   left_eve,
   membership_window,
@@ -204,9 +205,15 @@ def generate_adhoc_private_statement(
   summed: list[bool] | None = None,
   acquired_on: date | None = None,
   left_on: date | None = None,
+  places_flows: bool | None = None,
 ):
   """Build a one-shot statement from one entity's current ledger, with no
   saved Report; ``line_slice`` sums one management dimension member's lines.
+
+  ``places_flows`` gives a cash flow the Style has no row for a row under its
+  section. By default that is a consolidation entity's reading; a group's
+  combined statement asks it of every member, so the two sides of a flow the
+  group eliminates meet on one row whatever form each member takes.
 
   The Network comes from the entity's Reporting Style. The arc walk is scoped
   to rs-gaap-presentation, where every Default Style Network lives; a Style
@@ -250,6 +257,11 @@ def generate_adhoc_private_statement(
     block_type=statement_type,
     periods=periods,
     reporting_style_id=reporting_style_id,
+    places_flows=(
+      entity_id is not None and is_consolidation_entity(session, entity_id)
+      if places_flows is None
+      else places_flows
+    ),
   )
   if statement_type == "cash_flow_statement":
     grid.warnings = facts.warnings
@@ -1109,6 +1121,8 @@ def get_statement(
     block_type=block_type,
     periods=periods,
     reporting_style_id=reporting_style_id,
+    places_flows=bool(report_def.entity_id)
+    and is_consolidation_entity(session, report_def.entity_id),
   )
 
   if not grid.structure_id:
@@ -1306,6 +1320,7 @@ def _combined_statement(
         summed=summed,
         acquired_on=acquired_eve(session, member),
         left_on=left_eve(member),
+        places_flows=True,
       )
     except CoaMappingNotFoundError as exc:
       first_error = first_error or exc

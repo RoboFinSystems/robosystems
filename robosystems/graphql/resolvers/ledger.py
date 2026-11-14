@@ -1236,12 +1236,13 @@ class LedgerQuery:
     try:
       with _open_session(info, "roboledger") as session:
         try:
-          reporting_style_id = load_entity_reporting_style(
-            session, resolve_entity_id(session, entity_id)
-          )
+          resolved = resolve_entity_id(session, entity_id)
+          reporting_style_id = load_entity_reporting_style(session, resolved)
         except NoEntityError:
-          reporting_style_id = DEFAULT_STYLE_ID
-        rows = reads_taxonomies.list_flow_candidates(session, reporting_style_id)
+          resolved, reporting_style_id = None, DEFAULT_STYLE_ID
+        rows = reads_taxonomies.list_flow_candidates(
+          session, reporting_style_id, entity_id=resolved
+        )
     except EntityNotInGraphError as exc:
       raise strawberry.exceptions.StrawberryGraphQLError(str(exc)) from exc
     except ValueError, ProgrammingError:

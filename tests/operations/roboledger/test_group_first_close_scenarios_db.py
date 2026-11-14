@@ -15,6 +15,7 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.exc import OperationalError
 
 from robosystems.config import env
+from robosystems.config.constants import ReportingStyleConstants
 from robosystems.db.extensions import extensions_session, provision_tenant_schema
 from robosystems.models.api.extensions.chart_of_accounts import (
   InitializeChartOfAccountsRequest,
@@ -1133,29 +1134,13 @@ def test_r1_the_opening_leaves_the_parents_equity_row(group):
 
 
 def test_r1b_corporate_parent_llc_consolidation_entity(group):
-  """The configuration docs/technical/Group-Consolidation.md recommends for a
-  group of LLCs under a corporate parent."""
-  llc = _sql(
-    group,
-    "SELECT reporting_style_id FROM entities WHERE id = :p",
-    p=group["ids"]["parent"],
-  ).scalar()
-  corp = _sql(
-    group,
-    "SELECT reporting_style_id FROM entities WHERE id = :a",
-    a=group["ids"]["adjustments"],
-  ).scalar()
+  """A group of LLCs under a corporate parent: the consolidation entity is
+  an LLC by form and reads under the parent's Style all the same."""
   _sql(
     group,
     "UPDATE entities SET reporting_style_id = :s, entity_type = 'corporation' WHERE id = :p",
-    s=corp,
+    s=ReportingStyleConstants.DEFAULT_STYLE_ID,
     p=group["ids"]["parent"],
-  )
-  _sql(
-    group,
-    "UPDATE entities SET reporting_style_id = :s, entity_type = 'llc' WHERE id = :a",
-    s=llc,
-    a=group["ids"]["adjustments"],
   )
   group["session"].commit()
   _styles(group)

@@ -82,9 +82,9 @@ from robosystems.operations.roboledger.reads.consolidation import (
   share_of,
 )
 from robosystems.operations.roboledger.reports.network_picker import (
+  entity_taggable_flows,
   load_close_target_concept,
   load_entity_reporting_style,
-  taggable_flow_qnames,
 )
 from robosystems.operations.roboledger.supersede import (
   record_replacements,
@@ -872,9 +872,7 @@ def record_ownership_change(
     else financing_flow
     for q in wanted
   }
-  taggable = taggable_flow_qnames(
-    session, load_entity_reporting_style(session, consolidation_id)
-  )
+  taggable = entity_taggable_flows(session, consolidation_id)
   # As the engine tags: a Style with no rows read restricts nothing.
   if taggable and not all(f in taggable for f in flows.values()):
     flows = {}

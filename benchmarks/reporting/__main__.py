@@ -197,30 +197,35 @@ def cumulative(api: Api, entity: Entity, end: date) -> Ledger:
   return fold(rows, entity.concepts_by_code, entity.id)
 
 
+_ARC_TAXONOMIES = ("rs-gaap-calculations", "rs-gaap-type-subtype", "rs-gaap-hierarchy")
+
+
 def load_flows(api: Api) -> Flows:
-  """The cash flow statement's arcs from the library's calculation taxonomy."""
-  taxonomy = next(
-    (
-      t["id"]
-      for t in api.graphql("{ libraryTaxonomies { id standard } }")["libraryTaxonomies"]
-      if t["standard"] == "rs-gaap-calculations"
-    ),
-    None,
-  )
-  if taxonomy is None:
+  """The cash flow statement's arcs from the library: its sections and
+  default rows from the calculation taxonomy, and which concept is a kind of
+  which from the two hierarchies."""
+  listed = api.graphql("{ libraryTaxonomies { id standard } }")["libraryTaxonomies"]
+  ids = {t["standard"]: t["id"] for t in listed}
+  if "rs-gaap-calculations" not in ids:
     raise RuntimeError(
       "the rs-gaap-calculations taxonomy is not in this graph's library"
     )
   arcs: list[dict] = []
-  while True:
-    page = api.graphql(
-      "query($t: ID!, $o: Int!) { libraryTaxonomyArcs(taxonomyId: $t, limit: 1000, "
-      "offset: $o) { fromElementQname toElementQname associationType weight } }",
-      {"t": taxonomy, "o": len(arcs)},
-    )["libraryTaxonomyArcs"]
-    arcs.extend(page)
-    if len(page) < 1000:
-      return Flows.from_arcs(arcs)
+  for standard in _ARC_TAXONOMIES:
+    if standard not in ids:
+      continue
+    offset = 0
+    while True:
+      page = api.graphql(
+        "query($t: ID!, $o: Int!) { libraryTaxonomyArcs(taxonomyId: $t, limit: 1000, "
+        "offset: $o) { fromElementQname toElementQname associationType weight } }",
+        {"t": ids[standard], "o": offset},
+      )["libraryTaxonomyArcs"]
+      arcs.extend(page)
+      offset += len(page)
+      if len(page) < 1000:
+        break
+  return Flows.from_arcs(arcs)
 
 
 def journal(

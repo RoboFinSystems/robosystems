@@ -12,7 +12,11 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from robosystems.config.constants import ReportingStyleConstants
-from robosystems.operations.roboledger.entity_scope import resolve_entity_id
+from robosystems.operations.roboledger.entity_scope import (
+  books_entity_id,
+  is_consolidation_entity,
+  resolve_entity_id,
+)
 from robosystems.operations.roboledger.reports.calc_dag import EXTENDS_NETWORK_KEY
 
 DEFAULT_STYLE_ID = ReportingStyleConstants.DEFAULT_STYLE_ID
@@ -159,11 +163,46 @@ def taggable_flow_qnames(session: Session, reporting_style_id: str) -> set[str]:
   return {str(r.qname) for r in rows}
 
 
+def entity_taggable_flows(session: Session, entity_id: str) -> set[str]:
+  """The investing and financing flows a line of ``entity_id`` may carry.
+
+  An operating entity's are the rows of its own cash flow statement. The
+  consolidation entity offsets each member's flows in the member's form, so
+  its are the rows any entity of the group presents. Empty when no Style
+  involved composes a cash flow network, which restricts nothing.
+  """
+  if not is_consolidation_entity(session, entity_id):
+    return taggable_flow_qnames(
+      session, load_entity_reporting_style(session, entity_id)
+    )
+  styles = (
+    session.execute(
+      text(
+        """
+      SELECT DISTINCT COALESCE(reporting_style_id, :default)
+      FROM entities
+      WHERE source <> 'linked' AND entity_role <> 'consolidation'
+      """
+      ),
+      {"default": DEFAULT_STYLE_ID},
+    )
+    .scalars()
+    .all()
+  )
+  flows: set[str] = set()
+  for style in styles:
+    flows |= taggable_flow_qnames(session, str(style))
+  return flows
+
+
 def load_entity_reporting_style(session: Session, entity_id: str) -> str:
-  """The Reporting Style pinned on an entity. Raises ``LookupError`` if absent."""
+  """The Reporting Style an entity's statements are read under: its own, or
+  the group parent's for the consolidation entity, whose books are the
+  group's adjustments and have no form of their own. Raises ``LookupError``
+  if the entity is absent."""
   row = session.execute(
     text("SELECT reporting_style_id FROM entities WHERE id = :eid"),
-    {"eid": entity_id},
+    {"eid": books_entity_id(session, entity_id)},
   ).fetchone()
   if row is None:
     raise LookupError(f"Entity {entity_id!r} not found in tenant schema.")
