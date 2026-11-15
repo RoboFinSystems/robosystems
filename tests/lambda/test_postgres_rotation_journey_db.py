@@ -37,10 +37,11 @@ STEPS = ("createSecret", "setSecret", "testSecret", "finishSecret")
 def journey(pgrot, role, monkeypatch):
   name, password, db_info = role
   monkeypatch.setattr(pgrot, "get_database_connection_info", lambda arn, env: db_info)
+  monkeypatch.setenv("EXTENSIONS_DATABASE_NAME", db_info["database"])
   secrets = boto3.client("secretsmanager", region_name="us-east-1")
   arn = secrets.create_secret(
     Name=SECRET_NAME,
-    SecretString=json.dumps({"POSTGRES_USER": name, "POSTGRES_PASSWORD": password}),
+    SecretString=_db.seed_secret(name, password),
   )["ARN"]
   return pgrot, secrets, arn, name, password, db_info
 

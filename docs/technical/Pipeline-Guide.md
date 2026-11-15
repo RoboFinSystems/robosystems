@@ -78,7 +78,7 @@ Extensions PostgreSQL → postgres_scanner → DuckDB Staging → LadybugDB
 - **Why**: The extensions database is the system of record for a company graph; the graph is its analytical projection, so queries can see ledger data alongside SEC data
 - **Trigger**: Event-driven rather than scheduled. Each write calls `mark_graph_stale`; the stale-graph sensor (`dagster/sensors/materialization.py`) batches bursts of writes — it waits for them to settle, a few minutes at most — and submits one materialization. `POST /v1/graphs/{graph_id}/operations/materialize` runs one on demand
 - **Blue-green**: an existing graph is rebuilt whole into a fresh copy and swapped in, so readers never see a half-built graph; a graph's first build goes in place
-- **No Parquet intermediate**: DuckDB's `postgres_scanner` reads the extensions schema directly — each staging table is a `CREATE TABLE ... AS SELECT ... FROM postgres_scan(...)` shaped to the graph schema — skipping the S3 round-trip Pattern A needs
+- **No Parquet intermediate**: DuckDB's `postgres_scanner` reads the extensions schema directly — each staging table is a `CREATE TABLE ... AS SELECT ... FROM postgres_scan(...)` shaped to the graph schema — skipping the S3 round-trip Pattern A needs. The scan logs in read-only where a deployment has given it its own login (`EXTENSIONS_SCAN_DATABASE_URL`, or the one the rotation function maintains on AWS), and as `EXTENSIONS_DATABASE_URL` otherwise
 - **Not an adapter**: there's no `adapters/extensions/` directory — this pipeline is platform-internal. The materializer is `operations/extensions/materialize.py`, beside `loader.py` (the connector load) and `staleness.py`; see also [RoboLedger Operations](RoboLedger-Operations.md)
 
 ---

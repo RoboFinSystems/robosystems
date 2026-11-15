@@ -74,6 +74,42 @@ class TestBuildPostgresConnstr:
 
     assert "dbname=extensions" in result
 
+  def test_prefers_the_scan_login_when_one_is_configured(self, monkeypatch):
+    monkeypatch.setenv(
+      "EXTENSIONS_SCAN_DATABASE_URL",
+      "postgresql://scanner:scanpass@myhost:5433/extensions?sslmode=require",
+    )
+    with patch.object(
+      _env(),
+      "EXTENSIONS_DATABASE_URL",
+      "postgresql://myuser:mypass@myhost:5433/extensions",
+    ):
+      result = build_postgres_connstr()
+
+    assert "user=scanner" in result
+    assert "password=scanpass" in result
+    assert "dbname=extensions" in result
+    assert "mypass" not in result
+
+  def test_scan_login_is_built_from_the_secret_and_the_endpoint(self, monkeypatch):
+    monkeypatch.delenv("EXTENSIONS_SCAN_DATABASE_URL", raising=False)
+    monkeypatch.setenv("DATABASE_ENDPOINT", "db.internal")
+    monkeypatch.setenv("POSTGRES_SCAN_USER", "scanner")
+    monkeypatch.setenv("POSTGRES_SCAN_PASSWORD", "scanpass")
+
+    url = _env().get_extensions_scan_database_url()
+
+    assert url.startswith("postgresql://scanner:scanpass@db.internal:")
+    assert "/extensions" in url
+
+  def test_no_scan_login_without_its_password(self, monkeypatch):
+    monkeypatch.delenv("EXTENSIONS_SCAN_DATABASE_URL", raising=False)
+    monkeypatch.setenv("DATABASE_ENDPOINT", "db.internal")
+    monkeypatch.setenv("POSTGRES_SCAN_USER", "scanner")
+    monkeypatch.delenv("POSTGRES_SCAN_PASSWORD", raising=False)
+
+    assert _env().get_extensions_scan_database_url() == ""
+
 
 class TestStagingSql:
   def test_generates_all_tables(self):

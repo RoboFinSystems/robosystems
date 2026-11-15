@@ -324,15 +324,30 @@ def validate_materializer_against_schema() -> None:
     )
 
 
+_warned_scan_fallback = False
+
+
 def build_postgres_connstr() -> str:
   """Connection string for ``postgres_scan()`` against the extensions database.
 
-  Built from this process's ``EXTENSIONS_DATABASE_URL``, but the scanner runs
-  inside the Graph API process, so the host must be reachable from there.
+  The scanner runs inside the Graph API process, so the host must be reachable
+  from there and the login is handed to that instance: the read-only scan
+  login where one is configured, else this process's own
+  ``EXTENSIONS_DATABASE_URL``.
   """
+  global _warned_scan_fallback
   from robosystems.config import env
 
-  url = env.EXTENSIONS_DATABASE_URL
+  url = env.get_extensions_scan_database_url()
+  if not url:
+    if env.is_production() or env.is_staging():
+      if not _warned_scan_fallback:
+        logger.warning(
+          "No read-only scan login is configured; staging scans use the "
+          "application's database login"
+        )
+        _warned_scan_fallback = True
+    url = env.EXTENSIONS_DATABASE_URL
   parsed = urlparse(url)
 
   host = parsed.hostname or "localhost"

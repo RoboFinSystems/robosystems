@@ -174,6 +174,9 @@ SECRET_MAPPINGS = {
   # --- PostgreSQL ---
   # Only EC2 hosts read this; ECS gets DATABASE_URL from the task definition.
   "POSTGRES_PASSWORD": ("postgres", "POSTGRES_PASSWORD"),
+  # The read-only login for staging scans; absent until a rotation creates it.
+  "POSTGRES_SCAN_USER": ("postgres", "POSTGRES_SCAN_USER"),
+  "POSTGRES_SCAN_PASSWORD": ("postgres", "POSTGRES_SCAN_PASSWORD"),
   # --- Valkey/Redis ---
   "VALKEY_AUTH_TOKEN": ("valkey", "VALKEY_AUTH_TOKEN"),
   # --- AWS: S3 Credentials ---
