@@ -87,7 +87,7 @@ async def register(
         endpoint="/v1/auth/register",
         details={
           "reason": "registration_disabled",
-          "attempted_email": request.email,
+          "attempted_email": sanitize_string(request.email, max_length=254),
           "invitation_presented": request.invite_token is not None,
         },
         risk_level="low",
@@ -180,7 +180,7 @@ async def register(
       "error": "captcha_verification_failed",
       "captcha_error_codes": captcha_result.error_codes,
       "environment": env.ENVIRONMENT,
-      "attempted_email": request.email,
+      "attempted_email": sanitized_email,
     }
 
     SecurityAuditLogger.log_security_event(
