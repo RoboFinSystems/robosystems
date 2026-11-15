@@ -365,15 +365,18 @@ class TestFullFlow:
     assert refreshed.status_code == 200, refreshed.text
     assert refreshed.json()["refresh_token"] != tokens["refresh_token"]
 
-    # 6. the old refresh token is a replay → invalid_grant
-    replay = client.post(
-      "/v1/oauth/token",
-      data={
-        "grant_type": "refresh_token",
-        "refresh_token": tokens["refresh_token"],
-        "client_id": client_id,
-      },
-    )
+    # 6. the old refresh token, past the reuse grace, is a replay → invalid_grant
+    with patch(
+      "robosystems.operations.oauth_server.tokens.REFRESH_REUSE_GRACE_SECONDS", -1
+    ):
+      replay = client.post(
+        "/v1/oauth/token",
+        data={
+          "grant_type": "refresh_token",
+          "refresh_token": tokens["refresh_token"],
+          "client_id": client_id,
+        },
+      )
     assert replay.status_code == 400
     assert replay.json()["error"] == "invalid_grant"
 

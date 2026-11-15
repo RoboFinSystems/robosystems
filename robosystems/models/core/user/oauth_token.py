@@ -90,6 +90,15 @@ class OAuthToken(Model):
   def is_live(self) -> bool:
     return self.revoked_at is None and self.used_at is None and not self.is_expired
 
+  def rotated_within(self, seconds: float) -> bool:
+    """Consumed no more than ``seconds`` ago, and not revoked since."""
+    used_at = _as_utc(self.used_at)
+    return (
+      used_at is not None
+      and self.revoked_at is None
+      and datetime.now(UTC) - used_at <= timedelta(seconds=seconds)
+    )
+
   # --- minting ---------------------------------------------------------
 
   @classmethod
@@ -123,6 +132,7 @@ class OAuthToken(Model):
       prefix=access_plain[:TOKEN_ID_PREFIX_LENGTH],
       family_id=family,
       expires_at=now + timedelta(seconds=OAUTH_ACCESS_TOKEN_TTL_SECONDS),
+      created_at=now,
     )
     refresh = cls(
       grant_id=grant_id,
@@ -132,6 +142,7 @@ class OAuthToken(Model):
       prefix=refresh_plain[:TOKEN_ID_PREFIX_LENGTH],
       family_id=family,
       expires_at=now + timedelta(days=OAUTH_REFRESH_TOKEN_TTL_DAYS),
+      created_at=now,
     )
     session.add(access)
     session.add(refresh)
@@ -156,7 +167,13 @@ class OAuthToken(Model):
     return access, access_plain, refresh, refresh_plain, OAUTH_ACCESS_TOKEN_TTL_SECONDS
 
   @staticmethod
-  def log_issued(access: OAuthToken, refresh: OAuthToken, *, rotation: bool) -> None:
+  def log_issued(
+    access: OAuthToken,
+    refresh: OAuthToken,
+    *,
+    rotation: bool,
+    reuse_grace: bool = False,
+  ) -> None:
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.AUTH_SUCCESS,
       user_id=str(access.user_id),
@@ -167,6 +184,7 @@ class OAuthToken(Model):
         "access_token_id": access.id,
         "refresh_token_id": refresh.id,
         "rotation": rotation,
+        "reuse_grace": reuse_grace,
       },
       risk_level="low",
     )
@@ -262,12 +280,18 @@ class OAuthToken(Model):
     return cls._mark_revoked(session.query(cls).filter(cls.user_id == user_id))
 
   @classmethod
-  def mark_revoked_in_family(
-    cls, family_id: str, token_type: str, session: Session
+  def mark_pair_access_revoked(
+    cls, refresh: OAuthToken, session: Session
   ) -> list[OAuthToken]:
+    """Retire the access token minted with ``refresh`` (``mint_pair`` stamps
+    both with one ``created_at``). Each pair's access token goes when its own
+    refresh token rotates, so a sibling pair from the reuse grace, held by
+    another caller, keeps working whichever sibling rotates first."""
     return cls._mark_revoked(
       session.query(cls).filter(
-        cls.family_id == family_id, cls.token_type == token_type
+        cls.family_id == refresh.family_id,
+        cls.token_type == TOKEN_TYPE_ACCESS,
+        cls.created_at == refresh.created_at,
       )
     )
 

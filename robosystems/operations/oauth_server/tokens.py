@@ -28,6 +28,12 @@ from .authorization import AuthorizationCodeStore
 from .clients import redirect_uri_matches, validate_redirect_uri
 from .resources import normalize_scope, resolve_resource
 
+# A client's concurrent refreshes (several connectors or processes sharing one
+# stored refresh token) present the token again moments after it rotated.
+# Inside this window a re-presentation is issued a sibling pair in the same
+# family; past it, it is replay and the family is revoked.
+REFRESH_REUSE_GRACE_SECONDS = 60
+
 # RFC 7636 §4.1: the verifier is 43-128 unreserved characters.
 _VERIFIER_MIN = 43
 _VERIFIER_MAX = 128
@@ -155,8 +161,10 @@ def refresh_access_token(
   """``grant_type=refresh_token`` with rotation and replay detection.
 
   The presented token is claimed with a conditional UPDATE; losing the
-  claim means it was already rotated — replay — and the whole family is
-  revoked so neither the attacker's nor the victim's copy works again.
+  claim means it was already rotated. Within ``REFRESH_REUSE_GRACE_SECONDS``
+  of that rotation the caller is a concurrent refresh and gets a sibling pair;
+  after it, it is replay, and the whole family is revoked so neither the
+  attacker's nor the victim's copy works again.
   """
   if not refresh_token or not refresh_token.startswith(REFRESH_TOKEN_PREFIX):
     raise TokenError("invalid_grant", "Invalid refresh token")
@@ -190,10 +198,12 @@ def refresh_access_token(
   # row: an expired one may still have a live successor in its family, so
   # this comes before the expiry check, not after it. Once the family is
   # revoked there is nothing left to revoke, and the replay is not re-logged.
-  if row.used_at is not None:
-    if row.revoked_at is None:
+  reused = row.used_at is not None
+  if reused:
+    if row.revoked_at is not None:
+      raise TokenError("invalid_grant", "Refresh token has already been used")
+    if not row.rotated_within(REFRESH_REUSE_GRACE_SECONDS):
       raise _replay()
-    raise TokenError("invalid_grant", "Refresh token has already been used")
 
   if row.revoked_at is not None or row.is_expired:
     raise TokenError("invalid_grant", "Refresh token expired or revoked")
@@ -218,16 +228,21 @@ def refresh_access_token(
     if requested is None or not set(requested.split()).issubset(granted):
       raise TokenError("invalid_scope", "Requested scope exceeds the grant")
 
+  if reused:
+    return _issue_sibling_pair(row, grant, session)
+
   # Claim, retire the previous access token and mint the successor in one
   # transaction. The claim's row lock is held to the commit, so a concurrent
   # replay waits for the successor to exist and its family sweep reaches it.
   try:
     if not OAuthToken.consume_refresh(str(row.id), session, commit=False):
       session.rollback()
+      # Read committed: the reload sees the rotation that won the claim.
+      session.refresh(row)
+      if row.rotated_within(REFRESH_REUSE_GRACE_SECONDS):
+        return _issue_sibling_pair(row, grant, session)
       raise _replay()
-    previous_access = OAuthToken.mark_revoked_in_family(
-      str(row.family_id), TOKEN_TYPE_ACCESS, session
-    )
+    previous_access = OAuthToken.mark_pair_access_revoked(row, session)
     access, access_plain, refresh, refresh_plain, ttl = OAuthToken.mint_pair(
       grant_id=str(grant.id),
       user_id=str(grant.user_id),
@@ -250,6 +265,45 @@ def refresh_access_token(
     OAuthToken.log_issued(access, refresh, rotation=True)
   except Exception as e:
     logger.error(f"OAuth rotation committed; a post-commit step failed: {e}")
+  return TokenResponse(
+    access_token=access_plain,
+    refresh_token=refresh_plain,
+    expires_in=ttl,
+    scope=granted_scope,
+  )
+
+
+def _issue_sibling_pair(
+  row: OAuthToken, grant: OAuthGrant, session: Session
+) -> TokenResponse:
+  """A fresh pair in ``row``'s family for a refresh inside the reuse grace.
+
+  The rotation that consumed ``row`` already issued a pair, which another
+  caller holds, so no access token is retired here.
+  """
+  try:
+    access, access_plain, refresh, refresh_plain, ttl = OAuthToken.mint_pair(
+      grant_id=str(grant.id),
+      user_id=str(grant.user_id),
+      session=session,
+      family_id=str(row.family_id),
+      commit=False,
+    )
+    grant.last_used_at = datetime.now(UTC)
+    granted_scope = str(grant.scope)
+    session.commit()
+  except SQLAlchemyError:
+    session.rollback()
+    raise
+
+  logger.info(
+    f"OAuth refresh token reused within the grace window; "
+    f"issued a sibling pair in family {row.family_id}"
+  )
+  try:
+    OAuthToken.log_issued(access, refresh, rotation=True, reuse_grace=True)
+  except Exception as e:
+    logger.error(f"OAuth sibling pair committed; a post-commit step failed: {e}")
   return TokenResponse(
     access_token=access_plain,
     refresh_token=refresh_plain,
