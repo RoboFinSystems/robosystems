@@ -17,7 +17,9 @@ from robosystems.models.core.user.oauth_token import (
 )
 from robosystems.operations.oauth_server.authorization import AuthorizationCodeStore
 from robosystems.operations.oauth_server.tokens import (
+  REFRESH_REUSE_GRACE_SECONDS,
   TokenError,
+  TokenResponse,
   exchange_authorization_code,
   refresh_access_token,
   revoke_presented_token,
@@ -221,6 +223,13 @@ class TestExchange:
     assert exc.value.error == "invalid_grant"
 
 
+def _age_rotation(refresh_plain, session, seconds=REFRESH_REUSE_GRACE_SECONDS + 60):
+  """Move a consumed refresh token's rotation back past the reuse grace."""
+  row = OAuthToken.get_by_plaintext(refresh_plain, TOKEN_TYPE_REFRESH, session)
+  row.used_at = datetime.now(UTC) - timedelta(seconds=seconds)
+  session.commit()
+
+
 @pytest.mark.usefixtures("oauth_env", "fake_redis")
 class TestRefresh:
   def test_rotation(self, test_db, issued, client_row):
@@ -254,6 +263,7 @@ class TestRefresh:
       resource=None,
       session=test_db,
     )
+    _age_rotation(issued.refresh_token, test_db)
     with pytest.raises(TokenError) as exc:
       refresh_access_token(
         refresh_token=issued.refresh_token,
@@ -322,11 +332,11 @@ class TestRefresh:
     assert new_refresh is not None and new_refresh.is_live
 
   @pytest.mark.timeout(60)
-  def test_concurrent_replay_waits_for_the_rotation_and_revokes_its_successor(
+  def test_a_concurrent_refresh_waits_for_the_rotation_and_gets_a_sibling_pair(
     self, test_db, issued, client_row
   ):
-    """A replay racing a rotation must not finish its family sweep before the
-    successor exists: it waits on the claim, then revokes the successor."""
+    """A second refresh racing a rotation waits on the claim, then, inside the
+    reuse grace, gets its own pair; neither caller loses its tokens."""
     Session = sessionmaker(bind=test_db.get_bind())
     real_mint = OAuthToken.mint_pair
     claimed, proceed = threading.Event(), threading.Event()
@@ -364,15 +374,17 @@ class TestRefresh:
       rotation.join(timeout=20)
       replay.join(timeout=20)
 
-    assert outcome["replay"] == "invalid_grant"
-    successor = outcome["rotation"]
+    successor, sibling = outcome["rotation"], outcome["replay"]
+    assert isinstance(successor, TokenResponse)
+    assert isinstance(sibling, TokenResponse)
     test_db.expire_all()
-    assert OAuthToken.get_by_plaintext(
-      successor.refresh_token, TOKEN_TYPE_REFRESH, test_db
-    ).revoked_at
-    assert OAuthToken.get_by_plaintext(
-      successor.access_token, TOKEN_TYPE_ACCESS, test_db
-    ).revoked_at
+    for pair in (successor, sibling):
+      assert OAuthToken.get_by_plaintext(
+        pair.refresh_token, TOKEN_TYPE_REFRESH, test_db
+      ).is_live
+      assert OAuthToken.get_by_plaintext(
+        pair.access_token, TOKEN_TYPE_ACCESS, test_db
+      ).is_live
 
   def test_other_client_and_garbage(self, test_db, issued, other_client, client_row):
     with pytest.raises(TokenError):
@@ -436,6 +448,102 @@ class TestRefresh:
       )
     assert exc.value.error == "invalid_grant"
 
+  def test_a_refresh_repeated_inside_the_grace_gets_a_sibling_pair(
+    self, test_db, issued, client_row
+  ):
+    """Several connectors sharing one stored refresh token refresh together;
+    the late ones are not replay and must not sign the account out."""
+    first = refresh_access_token(
+      refresh_token=issued.refresh_token,
+      client=client_row,
+      scope=None,
+      resource=None,
+      session=test_db,
+    )
+    second = refresh_access_token(
+      refresh_token=issued.refresh_token,
+      client=client_row,
+      scope=None,
+      resource=None,
+      session=test_db,
+    )
+    assert second.refresh_token not in (first.refresh_token, issued.refresh_token)
+    test_db.expire_all()
+    rows = [
+      OAuthToken.get_by_plaintext(t, kind, test_db)
+      for t, kind in (
+        (first.refresh_token, TOKEN_TYPE_REFRESH),
+        (first.access_token, TOKEN_TYPE_ACCESS),
+        (second.refresh_token, TOKEN_TYPE_REFRESH),
+        (second.access_token, TOKEN_TYPE_ACCESS),
+      )
+    ]
+    assert all(row.is_live for row in rows)
+    assert len({row.family_id for row in rows}) == 1
+
+  def test_rotating_one_sibling_leaves_the_others_access_token_alone(
+    self, test_db, issued, client_row
+  ):
+    first = refresh_access_token(
+      refresh_token=issued.refresh_token,
+      client=client_row,
+      scope=None,
+      resource=None,
+      session=test_db,
+    )
+    second = refresh_access_token(
+      refresh_token=issued.refresh_token,
+      client=client_row,
+      scope=None,
+      resource=None,
+      session=test_db,
+    )
+    refresh_access_token(
+      refresh_token=first.refresh_token,
+      client=client_row,
+      scope=None,
+      resource=None,
+      session=test_db,
+    )
+    test_db.expire_all()
+    assert OAuthToken.get_by_plaintext(
+      first.access_token, TOKEN_TYPE_ACCESS, test_db
+    ).revoked_at
+    assert OAuthToken.get_by_plaintext(
+      second.access_token, TOKEN_TYPE_ACCESS, test_db
+    ).is_live
+
+  def test_a_replay_past_the_grace_revokes_the_siblings_too(
+    self, test_db, issued, client_row
+  ):
+    refresh_access_token(
+      refresh_token=issued.refresh_token,
+      client=client_row,
+      scope=None,
+      resource=None,
+      session=test_db,
+    )
+    sibling = refresh_access_token(
+      refresh_token=issued.refresh_token,
+      client=client_row,
+      scope=None,
+      resource=None,
+      session=test_db,
+    )
+    _age_rotation(issued.refresh_token, test_db)
+    with pytest.raises(TokenError):
+      refresh_access_token(
+        refresh_token=issued.refresh_token,
+        client=client_row,
+        scope=None,
+        resource=None,
+        session=test_db,
+      )
+    test_db.expire_all()
+    assert OAuthToken.get_by_plaintext(
+      sibling.refresh_token, TOKEN_TYPE_REFRESH, test_db
+    ).revoked_at
+
   def test_replay_of_an_expired_consumed_token_still_revokes_the_family(
     self, test_db, issued, client_row
   ):
@@ -454,6 +562,7 @@ class TestRefresh:
     )
     consumed.expires_at = datetime.now(UTC) - timedelta(days=1)
     test_db.commit()
+    _age_rotation(issued.refresh_token, test_db)
 
     with pytest.raises(TokenError) as exc:
       refresh_access_token(

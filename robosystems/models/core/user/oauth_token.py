@@ -90,6 +90,15 @@ class OAuthToken(Model):
   def is_live(self) -> bool:
     return self.revoked_at is None and self.used_at is None and not self.is_expired
 
+  def rotated_within(self, seconds: float) -> bool:
+    """Consumed no more than ``seconds`` ago, and not revoked since."""
+    used_at = _as_utc(self.used_at)
+    return (
+      used_at is not None
+      and self.revoked_at is None
+      and datetime.now(UTC) - used_at <= timedelta(seconds=seconds)
+    )
+
   # --- minting ---------------------------------------------------------
 
   @classmethod
@@ -123,6 +132,7 @@ class OAuthToken(Model):
       prefix=access_plain[:TOKEN_ID_PREFIX_LENGTH],
       family_id=family,
       expires_at=now + timedelta(seconds=OAUTH_ACCESS_TOKEN_TTL_SECONDS),
+      created_at=now,
     )
     refresh = cls(
       grant_id=grant_id,
@@ -132,6 +142,7 @@ class OAuthToken(Model):
       prefix=refresh_plain[:TOKEN_ID_PREFIX_LENGTH],
       family_id=family,
       expires_at=now + timedelta(days=OAUTH_REFRESH_TOKEN_TTL_DAYS),
+      created_at=now,
     )
     session.add(access)
     session.add(refresh)
@@ -262,12 +273,17 @@ class OAuthToken(Model):
     return cls._mark_revoked(session.query(cls).filter(cls.user_id == user_id))
 
   @classmethod
-  def mark_revoked_in_family(
-    cls, family_id: str, token_type: str, session: Session
+  def mark_access_revoked_through(
+    cls, refresh: OAuthToken, session: Session
   ) -> list[OAuthToken]:
+    """Retire the access tokens of ``refresh``'s family minted with it or
+    before it. A sibling pair issued later, inside the reuse grace, belongs to
+    another caller and keeps working."""
     return cls._mark_revoked(
       session.query(cls).filter(
-        cls.family_id == family_id, cls.token_type == token_type
+        cls.family_id == refresh.family_id,
+        cls.token_type == TOKEN_TYPE_ACCESS,
+        cls.created_at <= refresh.created_at,
       )
     )
 
