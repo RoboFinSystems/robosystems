@@ -17,6 +17,14 @@ from typing import Any
 import pandas as pd
 from dagster import AssetExecutionContext, BackfillPolicy, MaterializeResult, asset
 
+from robosystems.adapters.sec.successions import (
+  REASSIGNMENTS,
+  SUCCESSIONS,
+  Reassignment,
+  Succession,
+  predecessors_of,
+  recorded_pairs,
+)
 from robosystems.adapters.sec.tickers import (
   apply_ticker_map,
   current_ticker_map,
@@ -166,6 +174,45 @@ def one_filer_per_ticker(
   return kept, contested
 
 
+def merge_successions(
+  listed: dict[str, tuple[dict[str, Any], list[dict[str, Any]]]],
+  by_cik: dict[str, list[dict[str, Any]]],
+  successions: tuple[Succession, ...] | None = None,
+) -> tuple[
+  dict[str, tuple[dict[str, Any], list[dict[str, Any]]]], dict[str, list[str]]
+]:
+  """The listing with each successor holding its predecessors' filings too,
+  and the predecessors merged into each, nearest first.
+
+  A company that changes registrant keeps its ticker and its history, so the
+  ticker's file carries both registrants' filings, each under its own CIK. A
+  predecessor is merged once it no longer lists on its own: it lost the
+  ticker to its successor, or still shares it. One that lists under another
+  ticker keeps its own file.
+  """
+  successions = SUCCESSIONS if successions is None else successions
+  out = dict(listed)
+  merged: dict[str, list[str]] = {}
+  for cik, (filer, filings) in listed.items():
+    if cik not in out:
+      continue
+    joined = list(filings)
+    for predecessor in predecessors_of(cik, successions):
+      theirs = by_cik.get(predecessor)
+      own = out.get(predecessor)
+      if own and (own[0]["ticker"] or "").upper() != (filer["ticker"] or "").upper():
+        continue
+      if not theirs:
+        continue
+      out.pop(predecessor, None)
+      joined.extend(theirs)
+      merged.setdefault(cik, []).append(predecessor)
+    if cik in merged:
+      joined.sort(key=lambda f: (f["filing_date"] or "", f["accession"]), reverse=True)
+      out[cik] = (filer, joined)
+  return out, merged
+
+
 def filings_by_cik(
   reports: pd.DataFrame,
   relationships: pd.DataFrame,
@@ -278,6 +325,8 @@ def build_company(
     entries.append(
       {
         "accession": filing["accession"],
+        # The registrant that filed it: a predecessor's, on a merged ticker.
+        "cik": filing["cik"],
         "form": filing["form"],
         "filing_date": filing["filing_date"],
         "report_date": filing["report_date"],
@@ -306,12 +355,15 @@ def index_row(
   filer: dict[str, Any],
   filings: list[dict[str, Any]],
   summary: dict[str, Any] | None = None,
+  predecessors: list[str] | None = None,
 ) -> dict[str, Any]:
   """One filer's row. ``summary`` is its :func:`renderable_summary` — from this
   run for a filer it rewrote, carried forward from the previous index otherwise,
-  and absent (so: not renderable) for a filer neither has seen."""
+  and absent (so: not renderable) for a filer neither has seen. ``predecessors``
+  are the registrants whose filings its file also carries."""
   newest = filings[0]
   return {
+    **({"predecessors": predecessors} if predecessors else {}),
     "ticker": filer["ticker"],
     "cik": filer["cik"],
     "name": filer["name"],
@@ -331,7 +383,11 @@ def index_row(
   }
 
 
-def build_index(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def build_index(
+  rows: list[dict[str, Any]], released: list[dict[str, str]] | None = None
+) -> dict[str, Any]:
+  """The corpus index. ``released`` names each filer that gave a ticker up to
+  a holder it is unrelated to, for the graph to follow."""
   companies = sorted(rows, key=lambda r: (r["ticker"] or "", r["cik"]))
   return {
     "version": CATALOG_VERSION,
@@ -339,7 +395,36 @@ def build_index(rows: list[dict[str, Any]]) -> dict[str, Any]:
     "source": "SEC EDGAR",
     "count": len(companies),
     "companies": companies,
+    "released": released or [],
   }
+
+
+def released_tickers(
+  holders: dict[str, str],
+  reassignments: tuple[Reassignment, ...] | None = None,
+) -> list[dict[str, str]]:
+  """The reassignments in force: ``holders`` is ``{cik: ticker}`` as listed,
+  and a former holder is released once the recorded holder lists the ticker."""
+  return [
+    {"cik": row.former, "ticker": row.ticker}
+    for row in (REASSIGNMENTS if reassignments is None else reassignments)
+    if (holders.get(row.holder) or "").upper() == row.ticker
+  ]
+
+
+def unrecorded_takeovers(
+  displaced: dict[str, str | None], holders: dict[str, str]
+) -> list[str]:
+  """Filers that lost a ticker to another registrant with no finding on
+  record: ``"TICKER old→new"``, for someone to read the filings and add one."""
+  by_ticker = {ticker.upper(): cik for cik, ticker in holders.items()}
+  known = recorded_pairs()
+  out = []
+  for cik, ticker in sorted(displaced.items()):
+    holder = by_ticker.get((ticker or "").upper())
+    if holder and holder != cik and (cik, holder) not in known:
+      out.append(f"{ticker} {cik}→{holder}")
+  return out
 
 
 # ── reads ────────────────────────────────────────────────────────────────────
@@ -484,6 +569,7 @@ def read_prior_index(s3: Any, bucket: str) -> dict[str, dict[str, Any]]:
       "ticker": row.get("ticker"),
       "renderable": row.get("renderable", False),
       "latest_renderable": row.get("latest_renderable"),
+      "predecessors": row.get("predecessors"),
     }
     for row in companies
     if row.get("cik")
@@ -570,8 +656,9 @@ def sec_filing_catalog(
     prior, prior_aliases = {}, {}
   prior_tickers = {c: r["ticker"] for c, r in prior.items() if r.get("ticker")}
   # Applied even with no map: the published tickers still outrank the rows' own.
+  stored_rows = filers(entities)
   filer_rows = apply_ticker_map(
-    filers(entities),
+    stored_rows,
     current_ticker_map(s3, env.SHARED_RAW_BUCKET) or {},
     filed=set(by_cik),
     prior=prior_tickers,
@@ -585,6 +672,9 @@ def sec_filing_catalog(
     if filings:
       listed[cik] = (filer, filings)
 
+  # Before the last-filer rule: a recorded successor holds a shared ticker
+  # whichever of the two filed last.
+  listed, merged = merge_successions(listed, by_cik)
   listed, contested = one_filer_per_ticker(listed)
 
   if config.full_rebuild:
@@ -600,6 +690,12 @@ def sec_filing_catalog(
       cik
       for cik, (filer, _) in listed.items()
       if ((prior.get(cik) or {}).get("ticker") or "").upper() != filer["ticker"].upper()
+    }
+    # A filer whose file gains or loses a predecessor's filings.
+    touched |= {
+      cik
+      for cik in listed
+      if (merged.get(cik) or []) != ((prior.get(cik) or {}).get("predecessors") or [])
     }
   context.log.info(
     f"{len(listed)} filers listed; rewriting {len(touched)}"
@@ -623,9 +719,28 @@ def sec_filing_catalog(
   for old, entry in sorted(aliases.items()):
     old_tickers.setdefault(entry["cik"], []).append(old)
 
-  # Nothing should leave the index except through a rename, which is an alias.
+  # A filer leaves the index when its ticker goes to another registrant: its
+  # successor, whose file now carries its filings, or an unrelated holder.
+  succeeded = {p for predecessors in merged.values() for p in predecessors}
+  displaced = {
+    cik: stored_rows[cik]["ticker"]
+    for cik in by_cik
+    if cik in filer_rows
+    and cik not in succeeded
+    and stored_rows[cik]["ticker"]
+    and not filer_rows[cik]["ticker"]
+  }
+  unrecorded = unrecorded_takeovers(displaced, listed_tickers)
+  if unrecorded:
+    context.log.error(
+      f"{len(unrecorded)} tickers changed registrant with no succession or "
+      f"reassignment on record: {', '.join(unrecorded[:50])}"
+    )
+  # Nothing else should leave it except through a rename, which is an alias.
   dropped = sorted(
-    str(row["ticker"]) for cik, row in prior.items() if cik not in listed
+    str(row["ticker"])
+    for cik, row in prior.items()
+    if cik not in listed and cik not in succeeded and cik not in displaced
   )
   if dropped:
     context.log.error(
@@ -642,6 +757,10 @@ def sec_filing_catalog(
     former = old_tickers.get(cik)
     if former:
       document["former_tickers"] = former
+    if cik in merged:
+      document["predecessors"] = [
+        {"cik": p, "name": (filer_rows.get(p) or {}).get("name")} for p in merged[cik]
+      ]
     summaries[cik] = {
       "renderable": document["renderable"],
       "latest_renderable": document["latest_renderable"],
@@ -680,9 +799,10 @@ def sec_filing_catalog(
 
   index = build_index(
     [
-      index_row(filer, fs, summaries.get(cik) or prior.get(cik))
+      index_row(filer, fs, summaries.get(cik) or prior.get(cik), merged.get(cik))
       for cik, (filer, fs) in listed.items()
-    ]
+    ],
+    released_tickers(listed_tickers),
   )
   # The index is what the next run compares against, so it goes last, and not
   # at all without the aliases: that run then finds the same renames again.
@@ -721,6 +841,8 @@ def sec_filing_catalog(
       "filers_written": written,
       "filers_failed": failed,
       "filers_dropped": len(dropped),
+      "filers_merged": len(succeeded),
+      "tickers_unrecorded": len(unrecorded),
       "ticker_aliases": len(aliases),
       "index_written": index_ok,
       "partitions": len(partitions),

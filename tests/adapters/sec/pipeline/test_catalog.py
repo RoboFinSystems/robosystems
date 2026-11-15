@@ -557,6 +557,7 @@ class TestPriorIndex:
       "ticker": "MMM",
       "renderable": True,
       "latest_renderable": {"accession": "x", "form": "10-K"},
+      "predecessors": None,
     }
     assert prior[NVDA]["renderable"] is False
     # A row with no CIK cannot be keyed and is dropped rather than crashing.
@@ -573,5 +574,10 @@ class TestPriorIndex:
     index = {"companies": [{"cik": MMM, "ticker": "MMM", "latest": {"accession": "x"}}]}
 
     assert read_prior_index(self._s3(index), "public") == {
-      MMM: {"ticker": "MMM", "renderable": False, "latest_renderable": None}
+      MMM: {
+        "ticker": "MMM",
+        "renderable": False,
+        "latest_renderable": None,
+        "predecessors": None,
+      }
     }

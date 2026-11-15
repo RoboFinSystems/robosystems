@@ -128,9 +128,10 @@ def apply_ticker_map(
   off the map keeps it rather than reverting to the one in its old rows. Absence
   from the map never clears a ticker.
 
-  A ticker another filer still holds is held back: the mover stays where it is.
-  Taking ``XOM`` from Exxon Mobil Corp for its new holding company, which has no
-  annual report yet, would empty the ticker's annual requests.
+  A ticker names one filer, and EDGAR's holder owns it outright: when two
+  filers end on the same ticker and EDGAR lists it for one of them, the other
+  gives it up and comes back with none. With no listed holder among them
+  nothing moves, since absence clears nothing.
   """
   prior = prior or {}
   current: dict[str, str | None] = {}
@@ -143,22 +144,16 @@ def apply_ticker_map(
     cik: choose_ticker(ticker, ticker_map[cik].tickers) if cik in ticker_map else ticker
     for cik, ticker in current.items()
   }
-  while True:
-    holders: dict[str, list[str]] = {}
-    for cik, ticker in final.items():
-      if ticker:
-        holders.setdefault(ticker, []).append(cik)
-    held_back = [
-      cik
-      for owners in holders.values()
-      if len(owners) > 1
-      for cik in owners
-      if final[cik] != current[cik]
-    ]
-    if not held_back:
-      break
-    for cik in held_back:
-      final[cik] = current[cik]
+  owners: dict[str, list[str]] = {}
+  for cik, ticker in final.items():
+    if ticker:
+      owners.setdefault(ticker, []).append(cik)
+  for ticker, ciks in owners.items():
+    holders = [c for c in ciks if c in ticker_map and ticker in ticker_map[c].tickers]
+    if len(ciks) > 1 and holders:
+      for cik in ciks:
+        if cik not in holders:
+          final[cik] = None
 
   out = dict(rows)
   for cik, ticker in final.items():

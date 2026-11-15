@@ -277,6 +277,9 @@ async def resolve_filing(
 
 
 def _report_ref(cik: str, entry: dict[str, Any]) -> FilingRef:
+  # A ticker's file can carry a predecessor registrant's filings, each in
+  # that registrant's own folder.
+  cik = str(entry.get("cik") or cik)
   accession = str(entry.get("accession") or "")
   filing_date = str(entry.get("filing_date") or "")
   resolved: dict[str, Any] = {

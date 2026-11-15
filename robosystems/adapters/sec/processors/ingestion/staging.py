@@ -8,7 +8,7 @@ import asyncio
 import json
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
   from robosystems.graph_api.client.client import GraphClient
@@ -38,6 +38,29 @@ from .models import (
 
 # The scheme of a filer's own rows; other schemes can carry a numeric identifier.
 CIK_SCHEME = "http://www.sec.gov/CIK"
+
+
+def entity_identities(
+  index: dict[str, Any],
+) -> tuple[list[tuple[str, str, str | None]], list[tuple[str, str]]]:
+  """What a catalog index says about Entity rows: ``(cik, ticker, name)`` for
+  each listed filer and, under the filer's ticker with no name, each of its
+  predecessors; and ``(cik, ticker)`` for each filer released from a ticker."""
+  identities: list[tuple[str, str, str | None]] = []
+  for row in index.get("companies") or []:
+    if not (row.get("cik") and row.get("ticker")):
+      continue
+    identities.append((row["cik"], row["ticker"], row.get("name")))
+    identities.extend(
+      (predecessor, row["ticker"], None)
+      for predecessor in row.get("predecessors") or []
+    )
+  released = [
+    (row["cik"], str(row["ticker"]).upper())
+    for row in index.get("released") or []
+    if row.get("cik") and row.get("ticker")
+  ]
+  return identities, released
 
 
 class DuckDBStager:
@@ -599,20 +622,22 @@ class DuckDBStager:
     """Set each listed filer's ticker and name on Entity from the catalog index.
 
     The catalog decides a filer's current ticker; staging follows it, so the two
-    cannot disagree. Runs after every stage. A catalog that cannot be read skips
-    the stamp: the rows stay as they were, and a missing stamp must not stop the
-    nightly chain. Returns rows stamped.
+    cannot disagree. A filer's predecessors take its ticker too, so a lookup by
+    ticker spans the registrants one company has filed under, and a filer the
+    catalog released from a ticker gives it up. Runs after every stage. A
+    catalog that cannot be read skips the stamp: the rows stay as they were,
+    and a missing stamp must not stop the nightly chain. Returns rows stamped.
     """
     try:
       text = await asyncio.to_thread(
         S3Client().read_string, env.PUBLIC_DATA_BUCKET, FILING_CATALOG_INDEX_KEY
       )
-      companies = json.loads(text).get("companies") if text else None
+      index = json.loads(text) if text else {}
     except Exception as e:
       logger.warning(f"Catalog index unavailable, Entity stamp skipped: {e}")
       return 0
-    rows = [r for r in companies or [] if r.get("cik") and r.get("ticker")]
-    if not rows:
+    identities, released = entity_identities(index)
+    if not identities:
       return 0
 
     started = time.time()
@@ -627,17 +652,38 @@ class DuckDBStager:
         'OR "Entity".name IS DISTINCT FROM COALESCE(m.name, "Entity".name))'
       ),
       parameters=[
-        [r["cik"] for r in rows],
-        [r["ticker"] for r in rows],
-        [r.get("name") for r in rows],
+        [cik for cik, _, _ in identities],
+        [ticker for _, ticker, _ in identities],
+        [name for _, _, name in identities],
         CIK_SCHEME,
       ],
       timeout=get_staging_timeout("Entity"),
     )
     result_rows = response.get("rows") or []
     stamped = int(result_rows[0][0]) if result_rows and result_rows[0] else 0
+    cleared = 0
+    if released:
+      response = await client.execute_write(
+        graph_id=self.graph_id,
+        sql=(
+          'UPDATE "Entity" SET ticker = NULL '
+          "FROM (SELECT unnest(?::VARCHAR[]) AS cik, "
+          "unnest(?::VARCHAR[]) AS ticker) AS m "
+          'WHERE "Entity".cik = m.cik AND "Entity".scheme = ? '
+          'AND upper("Entity".ticker) = m.ticker'
+        ),
+        parameters=[
+          [cik for cik, _ in released],
+          [ticker for _, ticker in released],
+          CIK_SCHEME,
+        ],
+        timeout=get_staging_timeout("Entity"),
+      )
+      result_rows = response.get("rows") or []
+      cleared = int(result_rows[0][0]) if result_rows and result_rows[0] else 0
     message = (
-      f"Entity identity: {stamped:,} rows stamped from {len(rows):,} catalog filers "
+      f"Entity identity: {stamped:,} rows stamped from {len(identities):,} catalog "
+      f"filers and predecessors, {cleared:,} released from a ticker "
       f"in {time.time() - started:.1f}s"
     )
     logger.info(message)

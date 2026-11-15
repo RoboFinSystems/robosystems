@@ -268,6 +268,13 @@ every 30 min, 06:00–20:30 ET — sec_current_reports_intraday_schedule
   the two cannot disagree. A renamed filer's old file stays whole, with
   `moved_to`, and `aliases.json` names it. Tools go by CIK for a renamed filer,
   so they work in the hours before the graph catches up.
+- **Registrants:** a ticker that moves to another CIK is decided by
+  `adapters/sec/successions.py`. A recorded successor's file carries its
+  predecessors' filings (each entry names the `cik` that filed it), and the
+  stamp puts the ticker on both Entity rows. A recorded reassignment releases
+  the former holder. A pair with neither is logged as an error on every run
+  (`tickers_unrecorded`): read the two filers' forms on EDGAR, look for an
+  8-K12B on the new one, and add a row.
 - **Next morning:** the graph (`financial-statement-analysis`,
   `build-fact-grid`, Cypher) and document search (indexing stays on the
   nightly chain). For those hours a filing is known to the tools that read it

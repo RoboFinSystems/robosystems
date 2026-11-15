@@ -936,6 +936,72 @@ class TestStampCanonicalConcepts:
 
   @pytest.mark.asyncio
   @patch("robosystems.adapters.sec.processors.ingestion.staging.S3Client")
+  async def test_entity_identity_follows_successions_and_releases(self, mock_s3):
+    """A predecessor takes its successor's ticker and keeps its own name, so a
+    lookup by ticker spans both registrants; a filer the catalog released
+    gives the ticker up, and only that ticker."""
+    import duckdb
+
+    from robosystems.adapters.sec.processors.ingestion.staging import DuckDBStager
+
+    cik_scheme = "http://www.sec.gov/CIK"
+    index = {
+      "companies": [
+        {
+          "cik": "0000000002",
+          "ticker": "XOM",
+          "name": "Holdings",
+          "predecessors": ["0000000001"],
+        },
+        {"cik": "0000000004", "ticker": "MTAL", "name": "New Shell"},
+      ],
+      "released": [
+        {"cik": "0000000003", "ticker": "MTAL"},
+        {"cik": "0000000005", "ticker": "GONE"},
+      ],
+    }
+    mock_s3.return_value.read_string.return_value = json.dumps(index)
+    conn = duckdb.connect()
+    conn.execute(
+      'CREATE TABLE "Entity" (identifier VARCHAR, cik VARCHAR, ticker VARCHAR, '
+      "name VARCHAR, scheme VARCHAR)"
+    )
+    conn.executemany(
+      'INSERT INTO "Entity" VALUES (?, ?, ?, ?, ?)',
+      [
+        ("old", "0000000001", None, "Exxon Mobil Corp", cik_scheme),
+        ("new", "0000000002", "XOM", "Holdings", cik_scheme),
+        ("former", "0000000003", "MTAL", "MAC Copper", cik_scheme),
+        ("holder", "0000000004", "MTAL", "New Shell", cik_scheme),
+        # Released from a ticker it no longer carries: left alone.
+        ("moved", "0000000005", "ELSE", "Moved On", cik_scheme),
+      ],
+    )
+
+    async def execute_write(graph_id, sql, parameters, timeout):
+      return {"rows": conn.execute(sql, parameters).fetchall()}
+
+    client = AsyncMock()
+    client.execute_write.side_effect = execute_write
+
+    await DuckDBStager().stamp_entity_identity(client)
+
+    rows = {
+      identifier: (ticker, name)
+      for identifier, ticker, name in conn.execute(
+        'SELECT identifier, ticker, name FROM "Entity"'
+      ).fetchall()
+    }
+    assert rows == {
+      "old": ("XOM", "Exxon Mobil Corp"),
+      "new": ("XOM", "Holdings"),
+      "former": (None, "MAC Copper"),
+      "holder": ("MTAL", "New Shell"),
+      "moved": ("ELSE", "Moved On"),
+    }
+
+  @pytest.mark.asyncio
+  @patch("robosystems.adapters.sec.processors.ingestion.staging.S3Client")
   async def test_entity_identity_runs_on_real_duckdb(self, mock_s3):
     import duckdb
 
