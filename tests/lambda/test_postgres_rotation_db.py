@@ -179,6 +179,10 @@ def test_scan_login_reads_what_the_master_owns_and_writes_nothing(rotation):
   with scan.cursor() as cur:
     cur.execute(f'SELECT count(*) FROM "{schema}".entries')
     assert cur.fetchone()[0] == 1
+    with pytest.raises(psycopg2.errors.ReadOnlySqlTransaction):
+      cur.execute(f'INSERT INTO "{schema}".entries VALUES (2)')
+    # A session can lift the read-only default; the grants still refuse.
+    cur.execute("SET default_transaction_read_only = off")
     with pytest.raises(psycopg2.errors.InsufficientPrivilege):
       cur.execute(f'INSERT INTO "{schema}".entries VALUES (2)')
     with pytest.raises(psycopg2.errors.InsufficientPrivilege):

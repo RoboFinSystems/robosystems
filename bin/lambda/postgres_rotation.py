@@ -249,6 +249,12 @@ def _ensure_scan_login(conn, db_info: dict, login: dict, pending: dict) -> None:
       sql.SQL(verb + " ROLE {scan} WITH LOGIN PASSWORD %s").format(scan=scan),
       (scan_password,),
     )
+    # Grants are what make the login read-only; this is the second lock.
+    cursor.execute(
+      sql.SQL("ALTER ROLE {scan} SET default_transaction_read_only = on").format(
+        scan=scan
+      )
+    )
 
   extensions_info = {**db_info, "database": _extensions_database()}
   try:
