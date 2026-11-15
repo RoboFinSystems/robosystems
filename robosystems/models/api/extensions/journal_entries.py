@@ -71,9 +71,8 @@ class JournalEntryLineItemInput(BaseModel):
     description=(
       "Optional per-line metadata stamped on `LineItem.metadata_`. "
       "Used to carry source-system fields the standard columns don't "
-      "cover — e.g. an external flow-tag code that drives rollforward "
-      "attribution (`transaction_description_code`), an external "
-      "memo, or a cost-center hint. Pass-through is non-validating; "
+      "cover — e.g. an external memo or a cost-center hint. A flow tag "
+      "goes in `flow_qname`, not here. Pass-through is non-validating; "
       "the renderer / filter engine reads keys it knows about and "
       "ignores the rest. `None` is normalized to `{}` at persist "
       "time."

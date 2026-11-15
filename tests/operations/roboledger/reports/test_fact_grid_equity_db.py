@@ -25,6 +25,7 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   FactRow,
   PeriodSpec,
   _build_rows,
+  _equity_outside_every_rollforward,
   _facts_to_balance_dict,
   _HierarchyNode,
   _with_opening_balance,
@@ -602,3 +603,91 @@ def test_a_roll_forward_with_nothing_in_it_is_left_out(tenant):
   )
   rows = _with_opening_balance(rows, facts, [FY26], hierarchy)
   assert {r.element_qname for r in rows} == {SE}
+
+
+def _root_row(element_id: str, qname: str) -> FactRow:
+  return FactRow(
+    element_id=element_id,
+    element_qname=qname,
+    element_name=qname.split(":")[1],
+    classification=None,
+    balance_type="credit",
+    values=[0.0],
+    is_subtotal=True,
+    depth=0,
+    position=0.0,
+  )
+
+
+def _outside(facts, root: FactRow) -> list[str]:
+  strays = [f for f in facts if f.element_id != root.element_id]
+  with extensions_session(GRAPH) as session:
+    return _equity_outside_every_rollforward(session, strays, [root], [FY26])
+
+
+def test_capital_no_rollforward_includes_is_named(tenant):
+  """On an LLC Style the roll-forward roots at members' equity, a calc leaf,
+  so paid-in capital is outside its closing balance while the balance sheet
+  holds it: the $476 the reporting harness found on Driftline."""
+  _post(tenant, date(2026, 2, 1), [("cash", 1000, 0), ("members", 0, 1000)])
+  _post(tenant, date(2026, 3, 1), [("cash", 476, 0), ("apic", 0, 476)])
+  facts = _facts(tenant, [FY26], close_target=MEMBERS)
+
+  (warning,) = _outside(facts, _root_row(tenant["members_concept"], MEMBERS))
+  assert warning.startswith("AdditionalPaidInCapital holds 476.00 at 2026-12-31")
+
+
+def test_capital_a_root_sums_is_not_named(tenant):
+  """The corporate root sums paid-in capital through the calc DAG."""
+  _post(tenant, date(2026, 3, 1), [("cash", 476, 0), ("apic", 0, 476)])
+  facts = _facts(tenant, [FY26])
+  se_id = next(f.element_id for f in facts if f.element_qname == SE)
+
+  assert _outside(facts, _root_row(se_id, SE)) == []
+
+
+def test_capital_under_a_presented_subtotal_is_not_named(tenant):
+  """A presented row between the balance and its root does not end the walk:
+  the root still sums the balance, so the closing balance holds it."""
+  _post(tenant, date(2026, 3, 1), [("cash", 476, 0), ("apic", 0, 476)])
+  facts = _facts(tenant, [FY26], close_target=MEMBERS)
+  with extensions_session(GRAPH) as session:
+    calc_id = session.execute(
+      text("SELECT id FROM structures WHERE name = 'BS calc'")
+    ).scalar()
+    between = _element("test:PaidInTotal", "credit", "instant")
+    session.add(between)
+    session.flush()
+    between_id = between.id
+    arcs = [
+      Association(
+        structure_id=calc_id,
+        from_element_id=parent,
+        to_element_id=child,
+        association_type="calculation",
+        weight=1,
+      )
+      for parent, child in (
+        (tenant["members_concept"], between_id),
+        (between_id, tenant["apic_concept"]),
+      )
+    ]
+    session.add_all(arcs)
+  try:
+    root = _root_row(tenant["members_concept"], MEMBERS)
+    subtotal = _root_row(between_id, "test:PaidInTotal")
+    strays = [f for f in facts if f.element_id != root.element_id]
+    with extensions_session(GRAPH) as session:
+      assert (
+        _equity_outside_every_rollforward(session, strays, [subtotal, root], [FY26])
+        == []
+      )
+  finally:
+    with extensions_session(GRAPH) as session:
+      session.execute(
+        text(
+          "DELETE FROM associations WHERE from_element_id = :e OR to_element_id = :e"
+        ),
+        {"e": between_id},
+      )
+      session.execute(text("DELETE FROM elements WHERE id = :e"), {"e": between_id})

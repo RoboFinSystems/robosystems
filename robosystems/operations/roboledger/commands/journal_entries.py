@@ -15,7 +15,6 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
-from robosystems.logger import logger
 from robosystems.models.api.extensions.journal_entries import (
   CreateJournalEntryRequest,
   DeleteJournalEntryRequest,
@@ -160,48 +159,13 @@ class UnbalancedJournalEntryError(ValueError):
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 
+# Legacy: a flow tag belongs in ``flow_qname``. Still read, and still checked.
 _FLOW_TAG_KEY = "transaction_description_code"
 
 
-def resolve_flow_element_id(session: Session, metadata: dict | None) -> str | None:
-  """Resolve a line's flow tag (``transaction_description_code`` qname) to the
-  Element id it names, or ``None`` when absent or unresolved. Warns, without
-  failing, when the element has no ``activityType`` trait.
-  """
-  if not metadata:
-    return None
-  qname = metadata.get(_FLOW_TAG_KEY)
-  if not qname:
-    return None
-  row = session.execute(
-    text("SELECT id FROM elements WHERE qname = :qname LIMIT 1"),
-    {"qname": qname},
-  ).fetchone()
-  if row is None:
-    logger.warning(
-      "flow tag %s did not resolve to an element; flow_element_id left NULL", qname
-    )
-    return None
-  element_id = row[0]
-  has_activity_type = session.execute(
-    text(
-      """
-      SELECT 1 FROM element_traits et
-      JOIN traits t ON t.id = et.trait_id
-      WHERE et.element_id = :eid AND t.category = 'activityType'
-      LIMIT 1
-      """
-    ),
-    {"eid": element_id},
-  ).fetchone()
-  if has_activity_type is None:
-    logger.warning(
-      "flow element %s (%s) has no activityType trait — not a recognized flow "
-      "concept (advisory; trait coverage backfilled in the rs-gaap content phase)",
-      qname,
-      element_id,
-    )
-  return element_id
+def _line_flow_qname(line: dict) -> str | None:
+  """A line's flow tag: ``flow_qname``, else the legacy metadata key."""
+  return line.get("flow_qname") or (line.get("metadata") or {}).get(_FLOW_TAG_KEY)
 
 
 def _split_flow_tag(metadata: dict | None) -> dict:
@@ -233,27 +197,22 @@ def propagate_flows(lines: list[tuple[str, str | None]]) -> list[str | None]:
 def resolve_line_flows(
   session: Session, normalized: list[dict], *, entity_id: str
 ) -> list[str | None]:
-  """Each line's ``flow_element_id``. A first-class ``flow_qname`` must be a
-  row of the entity's cash flow statement (``resolve_flows`` refuses one that
-  is not, listing the rows); the legacy ``transaction_description_code``
-  metadata key resolves by name only, as before. Then the both-lines rule,
+  """Each line's ``flow_element_id``. A flow tag must be a row of the
+  entity's cash flow statement (``resolve_flows`` refuses one that is not,
+  listing the rows), whether it came as ``flow_qname`` or under the legacy
+  ``transaction_description_code`` metadata key. Then the both-lines rule,
   except on the consolidation entity."""
-  strict = {li["flow_qname"] for li in normalized if li.get("flow_qname")}
+  qnames = [_line_flow_qname(li) for li in normalized]
   resolved: dict[str, str] = {}
-  if strict:
+  if any(qnames):
     from robosystems.operations.event_block.python_handlers.bank_feed import (
       resolve_flows,
     )
 
-    resolved = resolve_flows(session, strict, entity_id=entity_id)
+    resolved = resolve_flows(session, {q for q in qnames if q}, entity_id=entity_id)
   tagged = [
-    (
-      "debit" if li["debit_amount"] > 0 else "credit",
-      resolved[li["flow_qname"]]
-      if li.get("flow_qname")
-      else resolve_flow_element_id(session, li.get("metadata")),
-    )
-    for li in normalized
+    ("debit" if li["debit_amount"] > 0 else "credit", resolved[q] if q else None)
+    for li, q in zip(normalized, qnames, strict=True)
   ]
   # The consolidation entity moves no cash: each tagged line counts on its
   # own, so a tag stays on the line it was written on.
