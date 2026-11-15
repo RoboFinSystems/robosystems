@@ -1915,9 +1915,10 @@ def _check_associates(
     -_value(cf_all, "rs-gaap:PaymentsToAcquireEquityMethodInvestments", end),
     sum(_share(m.contributed_capital, m.parent_share) for m in associates) / 100,
   )
+  # A return on the investment, so operating (ASC 230-10-45-21D).
   check(
-    "distributions from associates on their own row",
-    _value(cf_all, "rs-gaap:ProceedsFromSaleOfEquityMethodInvestments", end),
+    "distributions from associates on their own operating row",
+    _value(cf_all, "rs-gaap:EquityMethodInvestmentDividendsOrDistributions", end),
     sum(_share(m.distribution, m.parent_share) * paid_months for m in associates) / 100,
   )
 

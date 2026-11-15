@@ -33,7 +33,10 @@ from robosystems.taxonomy.discovery import framework_root
 _PACKAGES = framework_root("rs-gaap") / "packages"
 _PRES = "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/"
 _HAS_TRAIT = "https://robosystems.ai/vocab/hasTrait"
+# A flow is any concept with an activity; an operating one is a gross receipt
+# the indirect method cannot reach (an equity-method distribution, 0068).
 _SUBTOTALS = {
+  "operatingActivity": "rs-gaap:NetCashProvidedByUsedInOperatingActivities",
   "investingActivity": "rs-gaap:NetCashProvidedByUsedInInvestingActivities",
   "financingActivity": "rs-gaap:NetCashProvidedByUsedInFinancingActivities",
 }
@@ -65,7 +68,7 @@ def declared() -> set[str]:
 
 @pytest.fixture(scope="module")
 def activity() -> dict[str, str]:
-  """``{qname: investingActivity | financingActivity}`` from the traits package."""
+  """``{qname: its activity}`` from the traits package."""
   out: dict[str, str] = {}
   for n in _graph("rs-gaap-traits"):
     for t in n.get(_HAS_TRAIT, []):
@@ -209,9 +212,7 @@ def test_every_default_flow_carries_its_activity_trait(
     and not flow.startswith(operating_prefix)
     and flow != "rs-gaap:DepreciationDepletionAndAmortization"
   )
-  assert not untraited, (
-    f"investing/financing defaults with no activityType trait: {untraited}"
-  )
+  assert not untraited, f"default flows with no activityType trait: {untraited}"
   undeclared = sorted(
     flow
     for flows in calc["derivations"].values()

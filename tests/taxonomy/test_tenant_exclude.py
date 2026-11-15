@@ -63,6 +63,9 @@ def test_keep_critical_concepts_are_never_excluded() -> None:
     "rs-gaap:IncomeLossFromEquityMethodInvestments",
     "rs-gaap:PaymentsToAcquireEquityMethodInvestments",
     "rs-gaap:ProceedsFromSaleOfEquityMethodInvestments",
+    # A distribution, operating, and a return of capital (migration 0068).
+    "rs-gaap:EquityMethodInvestmentDividendsOrDistributions",
+    "rs-gaap:ProceedsFromEquityMethodInvestmentDividendsOrDistributionsReturnOfCapital",
     # The gain on selling a member's shares (migration 0066), the line the
     # parent's sale and the group's adjustment to it share.
     "rs-gaap:GainOrLossOnSaleOfStockInSubsidiary",

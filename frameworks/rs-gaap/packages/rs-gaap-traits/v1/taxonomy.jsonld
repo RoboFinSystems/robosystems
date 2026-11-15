@@ -5076,6 +5076,12 @@
       "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "trait:operatingNonoperating/operating"
+        },
+        {
+          "@id": "trait:activityType/operatingActivity"
+        },
+        {
+          "@id": "trait:flowClassification/inflow"
         }
       ]
     },

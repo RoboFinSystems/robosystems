@@ -37,6 +37,7 @@ from robosystems.operations.roboledger.reports.calc_dag import (
   resolve_calc_dag,
   topo_sort_calculations,
 )
+from robosystems.operations.roboledger.reports.flow_activity import FLOW_ACTIVITIES_SQL
 
 # ── Data classes ──────────────────────────────────────────────────────────
 
@@ -1755,16 +1756,18 @@ def _emit_flow_facts(
   arc_type: str,
   entity_id: str | None = None,
 ) -> set[str]:
-  """Emit investing/financing CF facts from per-line flows, per period.
+  """Emit gross CF facts from per-line flows, per period.
 
   Pass 1 (explicit): the cash line carries ``flow_element_id``; its
   ``debit - credit`` is the flow. Pass 2 (fallback, the path for QuickBooks
   data): each untagged non-cash line of a cash-moving entry whose cash line
   is untagged routes to its element's default flow via a ``derivation`` arc
   whose weight sign is the cash direction. The passes agree in sign because
-  a balanced entry's cash side negates its non-cash side. Operating flows
-  are excluded — indirect operating is NI + addbacks + ΔWC. Replaces any
-  existing fact for the leaf. Returns the ids of the flows emitted.
+  a balanced entry's cash side negates its non-cash side. A flow is any
+  concept with an activity trait (``flow_activity``): investing and
+  financing, and the operating receipts the indirect method cannot reach
+  from net income and working capital. Replaces any existing fact for the
+  leaf. Returns the ids of the flows emitted.
 
   The group's consolidation entity moves no cash: its eliminations carry,
   on the lines themselves, the flows the members' lines produced, so there
@@ -1799,7 +1802,7 @@ def _emit_flow_facts(
         JOIN element_traits et ON et.element_id = rf.id
         JOIN traits t ON t.id = et.trait_id
           AND t.category = 'activityType'
-          AND t.identifier IN ('investingActivity', 'financingActivity')
+          AND t.identifier IN {FLOW_ACTIVITIES_SQL}
         WHERE li.flow_element_id IS NOT NULL
           AND en.status IN :landed_entry_statuses
           AND en.type <> 'opening'
@@ -1840,7 +1843,7 @@ def _emit_flow_facts(
         JOIN element_traits et ON et.element_id = rf.id
         JOIN traits t ON t.id = et.trait_id
           AND t.category = 'activityType'
-          AND t.identifier IN ('investingActivity', 'financingActivity')
+          AND t.identifier IN {FLOW_ACTIVITIES_SQL}
         WHERE li.flow_element_id IS NULL
           AND en.status IN :landed_entry_statuses
           AND en.type <> 'opening'
@@ -2008,10 +2011,11 @@ def _derive_cash_flow_facts(
 
   # Unscoped on purpose: derivation arcs are library-only (tenants can't
   # insert them). Tenant-authored derivations would need a scope here.
-  # Investing/financing arcs are excluded: net-delta can't present gross
-  # flows; _emit_flow_facts uses them as default-flow lookups instead.
+  # Flow arcs are excluded: net-delta can't present gross flows (an equity
+  # investment's change is its income less its distributions);
+  # _emit_flow_facts uses them as default-flow lookups instead.
   rows = session.execute(
-    text("""
+    text(f"""
       SELECT a.from_element_id, a.to_element_id, a.weight
       FROM associations a
       WHERE a.association_type = 'derivation'
@@ -2020,7 +2024,7 @@ def _derive_cash_flow_facts(
           JOIN traits t ON t.id = et.trait_id
           WHERE et.element_id = a.from_element_id
             AND t.category = 'activityType'
-            AND t.identifier IN ('investingActivity', 'financingActivity')
+            AND t.identifier IN {FLOW_ACTIVITIES_SQL}
         )
     """)
   ).fetchall()
@@ -2269,14 +2273,14 @@ def _emit_noncash_and_settlement_facts(
     return set(), []
 
   derivation_rows = session.execute(
-    text("""
+    text(f"""
       SELECT a.from_element_id, a.to_element_id, a.weight, fe.qname AS from_qname,
         (
           SELECT t.identifier FROM element_traits et
           JOIN traits t ON t.id = et.trait_id
           WHERE et.element_id = a.from_element_id
             AND t.category = 'activityType'
-            AND t.identifier IN ('investingActivity', 'financingActivity')
+            AND t.identifier IN {FLOW_ACTIVITIES_SQL}
           LIMIT 1
         ) AS activity
       FROM associations a

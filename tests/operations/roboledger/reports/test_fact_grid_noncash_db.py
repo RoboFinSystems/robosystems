@@ -55,6 +55,11 @@ PPE_PROCEEDS = "rs-gaap:ProceedsFromSaleOfPropertyPlantAndEquipment"
 DISPOSAL_GAIN = "rs-gaap:GainLossOnDispositionOfAssets"
 OTHER_INVESTMENTS = "rs-gaap:PaymentsToAcquireOtherInvestments"
 NET_CHANGE = "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+DISTRIBUTIONS = "rs-gaap:EquityMethodInvestmentDividendsOrDistributions"
+RETURN_OF_CAPITAL = (
+  "rs-gaap:ProceedsFromEquityMethodInvestmentDividendsOrDistributionsReturnOfCapital"
+)
+EQUITY_METHOD_SALE = "rs-gaap:ProceedsFromSaleOfEquityMethodInvestments"
 
 ACCOUNTS = {
   "cash": ("rs-gaap:CashAndCashEquivalentsAtCarryingValue", "debit", "instant"),
@@ -89,6 +94,12 @@ ACCOUNTS = {
   "receivable": ("rs-gaap:ReceivablesNetCurrent", "debit", "instant"),
   "due_from": ("rs-gaap:DueFromAffiliateCurrent", "debit", "instant"),
   "due_to": ("rs-gaap:DueToAffiliateCurrent", "credit", "instant"),
+  "associate": ("rs-gaap:EquityMethodInvestments", "debit", "instant"),
+  "equity_income": (
+    "rs-gaap:IncomeLossFromEquityMethodInvestments",
+    "credit",
+    "duration",
+  ),
   "extinguishment_gain": (
     "rs-gaap:GainsLossesOnExtinguishmentOfDebt",
     "credit",
@@ -207,7 +218,7 @@ def _seed() -> dict[str, str]:
         association_type="mapping",
       )
     )
-    for qname in (REPAYMENTS, CAPEX, OTHER_INVESTMENTS):
+    for qname in (REPAYMENTS, CAPEX, OTHER_INVESTMENTS, RETURN_OF_CAPITAL):
       ids[qname] = str(
         session.execute(select(Element.id).where(Element.qname == qname)).scalar_one()
       )
@@ -1303,4 +1314,33 @@ def test_two_shared_payments_settle_a_capex_bill_between_them(tenant):
   assert cf[CAPEX] == -1000.0
   assert cf[OPERATING] == -200.0
   assert CAPEX_UNPAID not in cf
+  _assert_no_reconciling_adjustment(cf)
+
+
+def test_a_distribution_from_an_associate_is_operating(tenant):
+  """The parent's share of the associate's income is non-cash and comes back
+  out; the cash it receives against the investment is a return on it, an
+  operating row of its own, and no sale (ASC 230-10-45-21D)."""
+  _post(tenant, [("associate", 1080, 0), ("equity_income", 0, 1080)])
+  _post(tenant, [("cash", 480, 0), ("associate", 0, 480)], posted=date(2026, 1, 31))
+  cf = _cash_flow(tenant)
+  assert cf[DISTRIBUTIONS] == 480.0
+  assert cf["rs-gaap:IncomeLossFromEquityMethodInvestments"] == 1080.0
+  assert cf[OPERATING] == 480.0
+  assert EQUITY_METHOD_SALE not in cf
+  assert cf[NET_CHANGE] == 480.0
+  _assert_no_reconciling_adjustment(cf)
+
+
+def test_a_return_of_capital_is_tagged_into_investing(tenant):
+  """The exception: a distribution past the investor's share of earnings is
+  a return of the investment, which a line tag sends to investing."""
+  _post(
+    tenant,
+    [("cash", 2000, 0, RETURN_OF_CAPITAL), ("associate", 0, 2000)],
+  )
+  cf = _cash_flow(tenant)
+  assert cf[RETURN_OF_CAPITAL] == 2000.0
+  assert DISTRIBUTIONS not in cf
+  assert cf.get(OPERATING, 0.0) == 0.0
   _assert_no_reconciling_adjustment(cf)

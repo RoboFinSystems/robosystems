@@ -40,6 +40,7 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   _CF_OPERATING_SUBTOTAL_QNAME,
   _CF_RECONCILING_LEAF_QNAME,
 )
+from robosystems.operations.roboledger.reports.flow_activity import FLOW_ACTIVITIES_SQL
 
 if TYPE_CHECKING:
   from datetime import date
@@ -138,10 +139,10 @@ def _load_operating_derivations(
   session: Session,
 ) -> dict[str, list[tuple[str, float]]]:
   """Operating derivation arcs (CF leaf ← BS source, signed weight), as in
-  ``fact_grid._derive_cash_flow_facts``: investing/financing lines can't come
+  ``fact_grid._derive_cash_flow_facts``: flow lines (``flow_activity``) can't come
   from balance deltas."""
   rows = session.execute(
-    text("""
+    text(f"""
       SELECT a.from_element_id, a.to_element_id, a.weight
       FROM associations a
       WHERE a.association_type = 'derivation'
@@ -150,7 +151,7 @@ def _load_operating_derivations(
           JOIN traits t ON t.id = et.trait_id
           WHERE et.element_id = a.from_element_id
             AND t.category = 'activityType'
-            AND t.identifier IN ('investingActivity', 'financingActivity')
+            AND t.identifier IN {FLOW_ACTIVITIES_SQL}
         )
     """)
   ).fetchall()

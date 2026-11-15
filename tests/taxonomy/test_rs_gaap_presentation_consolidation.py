@@ -81,6 +81,7 @@ class TestConsolidationRowsInEveryStyle:
     assert {
       "rs-gaap:NetIncomeLossAttributableToNoncontrollingInterest",
       "rs-gaap:IncomeLossFromEquityMethodInvestments",
+      "rs-gaap:EquityMethodInvestmentDividendsOrDistributions",
       "rs-gaap:IncreaseDecreaseInDueFromAffiliatesCurrent",
       "rs-gaap:IncreaseDecreaseInDueToAffiliatesCurrent",
     } <= operating
@@ -92,6 +93,7 @@ class TestConsolidationRowsInEveryStyle:
       "rs-gaap:ProceedsFromDivestitureOfInterestInSubsidiariesAndAffiliates",
       "rs-gaap:PaymentsToAcquireEquityMethodInvestments",
       "rs-gaap:ProceedsFromSaleOfEquityMethodInvestments",
+      "rs-gaap:ProceedsFromEquityMethodInvestmentDividendsOrDistributionsReturnOfCapital",
     } <= investing
     financing = _children(
       presentation, role, "rs-gaap:NetCashProvidedByUsedInFinancingActivities"

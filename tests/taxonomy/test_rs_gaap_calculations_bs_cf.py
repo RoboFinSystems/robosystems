@@ -188,6 +188,8 @@ class TestEquityMethodRows:
       "rs-gaap:NetCashProvidedByUsedInOperatingActivities",
     )
     assert operating["rs-gaap:IncomeLossFromEquityMethodInvestments"] == -1.0
+    # A distribution is a return on the investment (migration 0068).
+    assert operating["rs-gaap:EquityMethodInvestmentDividendsOrDistributions"] == 1.0
     investing = _equation(
       calculations,
       "CashFlowStatement",
@@ -195,6 +197,28 @@ class TestEquityMethodRows:
     )
     assert investing["rs-gaap:PaymentsToAcquireEquityMethodInvestments"] == 1.0
     assert investing["rs-gaap:ProceedsFromSaleOfEquityMethodInvestments"] == 1.0
+    assert (
+      investing[
+        "rs-gaap:ProceedsFromEquityMethodInvestmentDividendsOrDistributionsReturnOfCapital"
+      ]
+      == 1.0
+    )
+
+  def test_cash_received_on_the_investment_defaults_to_a_distribution(
+    self, calculations: TaxonomyPackage
+  ) -> None:
+    """The investment's default rows: a payment is a purchase, a receipt a
+    distribution, operating. A sale or a return of capital is tagged."""
+    defaults = {
+      (a.from_qname, a.weight)
+      for a in calculations.associations
+      if a.association_type == "derivation"
+      and a.to_qname == "rs-gaap:EquityMethodInvestments"
+    }
+    assert defaults == {
+      ("rs-gaap:PaymentsToAcquireEquityMethodInvestments", -1.0),
+      ("rs-gaap:EquityMethodInvestmentDividendsOrDistributions", 1.0),
+    }
 
 
 class TestSubsidiarySaleGain:

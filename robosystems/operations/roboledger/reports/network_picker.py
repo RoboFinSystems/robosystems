@@ -18,6 +18,7 @@ from robosystems.operations.roboledger.entity_scope import (
   resolve_entity_id,
 )
 from robosystems.operations.roboledger.reports.calc_dag import EXTENDS_NETWORK_KEY
+from robosystems.operations.roboledger.reports.flow_activity import FLOW_ACTIVITIES_SQL
 
 DEFAULT_STYLE_ID = ReportingStyleConstants.DEFAULT_STYLE_ID
 
@@ -116,8 +117,8 @@ def style_structures_cte(style_param: str = "rsid") -> str:
 
 
 def taggable_flow_qnames(session: Session, reporting_style_id: str) -> set[str]:
-  """The investing and financing flows a Reporting Style's cash flow
-  statement presents as leaf rows that also foot a subtotal.
+  """The flows (concepts with an activity, ``flow_activity``) a Reporting
+  Style's cash flow statement presents as leaf rows that also foot a subtotal.
 
   These are the flows a line may be tagged with and the ones a default may
   land on: a flow outside the set computes a fact no row shows. Rows a
@@ -130,7 +131,7 @@ def taggable_flow_qnames(session: Session, reporting_style_id: str) -> set[str]:
     return set()
   rows = session.execute(
     text(
-      """
+      f"""
       SELECT e.qname
       FROM associations p
       JOIN elements e ON e.id = p.to_element_id
@@ -154,7 +155,7 @@ def taggable_flow_qnames(session: Session, reporting_style_id: str) -> set[str]:
           JOIN traits t ON t.id = et.trait_id
           WHERE et.element_id = e.id
             AND t.category = 'activityType'
-            AND t.identifier IN ('investingActivity', 'financingActivity')
+            AND t.identifier IN {FLOW_ACTIVITIES_SQL}
         )
       """
     ),
@@ -164,7 +165,7 @@ def taggable_flow_qnames(session: Session, reporting_style_id: str) -> set[str]:
 
 
 def entity_taggable_flows(session: Session, entity_id: str) -> set[str]:
-  """The investing and financing flows a line of ``entity_id`` may carry.
+  """The flows a line of ``entity_id`` may carry.
 
   An operating entity's are the rows of its own cash flow statement. The
   consolidation entity offsets each member's flows in the member's form, so
