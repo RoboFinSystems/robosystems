@@ -42,7 +42,8 @@ def seal_paused_task(operation_id: str, task: dict[str, Any]) -> dict[str, Any]:
 
 def paused_task_is_sealed(operation_id: str, task: Any) -> bool:
   return (
-    is_sealed(PAUSED_TASK_SEAL_PURPOSE, task) and task["operation_id"] == operation_id
+    is_sealed(PAUSED_TASK_SEAL_PURPOSE, task)
+    and task.get("operation_id") == operation_id
   )
 
 
