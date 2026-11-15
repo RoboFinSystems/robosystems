@@ -11,11 +11,40 @@ from typing import Any
 
 from robosystems.config.valkey_registry import ValkeyDatabase, create_async_redis_client
 from robosystems.middleware.sse.operation_manager import create_operation_response
+from robosystems.security.sealed_records import is_sealed, seal
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 # Deduplication window in seconds. Prevents duplicate tasks from
 # double-clicks or frontend retries within this window.
 DEDUP_TTL = 30
+
+# The queue shares Valkey with graph instances, so the consumer runs only
+# payloads the platform sealed.
+TASK_SEAL_PURPOSE = "worker-task"
+
+
+def dump_task(task: dict[str, Any]) -> str:
+  """The queue form of a task payload: sealed JSON."""
+  return json.dumps(seal(TASK_SEAL_PURPOSE, task))
+
+
+def task_is_sealed(task: Any) -> bool:
+  return is_sealed(TASK_SEAL_PURPOSE, task)
+
+
+# A paused task's payload waits on its operation record, also in Valkey.
+PAUSED_TASK_SEAL_PURPOSE = "paused-task"
+
+
+def seal_paused_task(operation_id: str, task: dict[str, Any]) -> dict[str, Any]:
+  return seal(PAUSED_TASK_SEAL_PURPOSE, {**task, "operation_id": operation_id})
+
+
+def paused_task_is_sealed(operation_id: str, task: Any) -> bool:
+  return (
+    is_sealed(PAUSED_TASK_SEAL_PURPOSE, task)
+    and task.get("operation_id") == operation_id
+  )
 
 
 async def enqueue_task(
@@ -73,7 +102,7 @@ async def enqueue_task(
       operation_id=task_id,
     )
 
-    task_payload = json.dumps(
+    task_payload = dump_task(
       {
         "task_id": task_id,
         "task_type": task_type,
@@ -107,7 +136,7 @@ async def requeue_task(
   links the caller already holds keep working. No dedup: a resume is an
   explicit human action, never a double-click.
   """
-  task_payload = json.dumps(
+  task_payload = dump_task(
     {
       "task_id": operation_id,
       "task_type": task["task_type"],

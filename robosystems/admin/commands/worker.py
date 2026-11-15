@@ -84,6 +84,7 @@ def dlq_list(client, limit):
 def dlq_retry(client, yes):
   """Requeue all DLQ tasks for another attempt."""
   from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
+  from robosystems.worker.client import dump_task, task_is_sealed
 
   queue = create_redis_client(ValkeyDatabase.WORKER_QUEUE, decode_responses=True)
   try:
@@ -103,11 +104,17 @@ def dlq_retry(client, yes):
 
       try:
         task_data = json.loads(task_json)
-        task_data["attempt"] = 1  # Reset attempt counter
-        queue.rpush("worker:tasks", json.dumps(task_data))
-        requeued += 1
       except json.JSONDecodeError:
         console.print("[yellow]Skipped malformed entry[/yellow]")
+        continue
+      if not task_is_sealed(task_data):
+        console.print(
+          f"[yellow]Dropped unsealed entry {task_data.get('task_id', '?')}[/yellow]"
+        )
+        continue
+      task_data["attempt"] = 1  # Reset attempt counter
+      queue.rpush("worker:tasks", dump_task(task_data))
+      requeued += 1
 
     console.print(f"[green]Requeued {requeued} tasks[/green]")
   finally:

@@ -191,18 +191,23 @@ class BaseTask(ABC):
     The checkpoint must be JSON-serializable and must not carry the original
     ``resume`` (a second pause records a fresh one).
     """
+    from robosystems.worker.client import seal_paused_task
+
     params = {key: value for key, value in self.params.items() if key != "resume"}
     await self.manager.await_input(
       self.task_id,
       prompt=prompt,
       checkpoint=checkpoint,
       details=details,
-      task={
-        "task_type": self.task_type,
-        "graph_id": self.graph_id,
-        "user_id": self.user_id,
-        "params": params,
-      },
+      task=seal_paused_task(
+        self.task_id,
+        {
+          "task_type": self.task_type,
+          "graph_id": self.graph_id,
+          "user_id": self.user_id,
+          "params": params,
+        },
+      ),
     )
     raise TaskPaused(prompt)
 

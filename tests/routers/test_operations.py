@@ -16,6 +16,7 @@ from fastapi import HTTPException
 
 from robosystems.middleware.sse.event_storage import OperationStatus
 from robosystems.routers.operations import cancel_operation, get_operation_status
+from robosystems.worker.client import seal_paused_task
 
 MODULE = "robosystems.routers.operations"
 
@@ -383,12 +384,15 @@ class TestAwaitingInput:
       "checkpoint": {"step": "post"},
       "task": task
       if task is not None
-      else {
-        "task_type": "operator",
-        "graph_id": "kg01234567890abcdef",
-        "user_id": "usr_test123",
-        "params": {"operator_type": "analyst"},
-      },
+      else seal_paused_task(
+        "op_123",
+        {
+          "task_type": "operator",
+          "graph_id": "kg01234567890abcdef",
+          "user_id": "usr_test123",
+          "params": {"operator_type": "analyst"},
+        },
+      ),
       "requested_at": "2024-01-01T00:02:00Z",
     }
     return metadata
@@ -443,6 +447,46 @@ class TestAwaitingInput:
     )
     assert result["status"] == OperationStatus.RUNNING
     assert result["_links"]["stream"] == "/v1/operations/op_123/stream"
+
+  @pytest.mark.unit
+  @pytest.mark.parametrize(
+    "task",
+    [
+      {"task_type": "operator", "user_id": "usr_test123", "params": {}},
+      seal_paused_task(
+        "op_other", {"task_type": "operator", "user_id": "usr_test123", "params": {}}
+      ),
+      seal_paused_task(
+        "op_123", {"task_type": "operator", "user_id": "usr_other", "params": {}}
+      ),
+    ],
+    ids=["unsealed", "sealed-for-another-operation", "another-users-task"],
+  )
+  async def test_resume_refuses_a_checkpoint_the_platform_did_not_seal_for_it(
+    self, task
+  ):
+    """The checkpoint waits in Valkey, which graph instances can write; only
+    the task the platform paused, for this operation and user, is requeued."""
+    from robosystems.models.api.operations import OperationResumeRequest
+    from robosystems.routers.operations import resume_operation
+
+    mock_storage = AsyncMock()
+    mock_storage.get_operation_metadata.return_value = self._paused_metadata(task)
+
+    with (
+      patch(f"{MODULE}.get_event_storage", return_value=mock_storage),
+      patch(f"{MODULE}.get_operation_manager", return_value=AsyncMock()),
+      patch(f"{MODULE}.requeue_task", AsyncMock()) as requeue,
+      pytest.raises(HTTPException) as exc_info,
+    ):
+      await resume_operation(
+        body=OperationResumeRequest(input={"approved": True}),
+        operation_id="op_123",
+        current_user=_make_mock_user(),
+      )
+
+    assert exc_info.value.status_code == 409
+    requeue.assert_not_awaited()
 
   @pytest.mark.unit
   async def test_resume_rejects_an_operation_that_is_not_paused(self):
@@ -545,7 +589,9 @@ class TestResumeOrdering:
     metadata.input_request = {
       "prompt": "?",
       "checkpoint": {},
-      "task": {"task_type": "operator", "user_id": "usr_test123", "params": {}},
+      "task": seal_paused_task(
+        "op_123", {"task_type": "operator", "user_id": "usr_test123", "params": {}}
+      ),
     }
     mock_storage = AsyncMock()
     mock_storage.get_operation_metadata.return_value = metadata
