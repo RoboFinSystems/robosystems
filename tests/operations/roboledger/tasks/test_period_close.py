@@ -115,7 +115,7 @@ def _patched(close_result=None, close_error=None, session=None, close_spy=None):
       return_value=_Ctx(MagicMock()),
     ),
     patch(
-      "robosystems.operations.roboledger.reads.fiscal_calendar.qb_sync_state",
+      "robosystems.operations.roboledger.reads.fiscal_calendar.keeper_sync_state",
       return_value=(True, None),
     ),
   )

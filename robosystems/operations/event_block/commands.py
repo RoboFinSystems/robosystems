@@ -49,7 +49,6 @@ from robosystems.operations.roboledger.commands._guards import (
 from robosystems.operations.roboledger.entity_scope import (
   ensure_entity_id,
   find_entity_id,
-  is_group_parent,
 )
 from robosystems.operations.roboledger.entry_status import (
   LANDED_ENTRY_STATUSES,
@@ -1630,15 +1629,6 @@ def execute_event_block(
       qb_error=None,
     )
 
-  # The close skips subsidiaries before it gets here; the direct operation
-  # has to refuse them itself.
-  if not is_group_parent(session, str(event.entity_id)):
-    raise EventNotOnSourceBooksError(
-      f"Event {event.id} belongs to entity {event.entity_id}, whose books "
-      "QuickBooks does not keep; its entries post here at close and are "
-      "never published."
-    )
-
   # Caller can override the connection (used by the close-period batch
   # where schedule events don't carry connection_id in metadata).
   connection_id = body.connection_id or metadata.get("connection_id")
@@ -1672,6 +1662,14 @@ def execute_event_block(
     if str(connection.graph_id) != str(graph_id):
       raise ConnectionNotOnGraphError(
         f"Connection {connection_id!r} is not registered on this graph."
+      )
+    # And only the connection that keeps the event's own entity's books:
+    # another entity's ledger must never receive it.
+    if not connection.keeps_books or str(connection.entity_id) != str(event.entity_id):
+      raise EventNotOnSourceBooksError(
+        f"Event {event.id} belongs to entity {event.entity_id}, whose books "
+        f"connection {connection_id!r} does not keep; its entries post here "
+        "at close and are never published to it."
       )
 
     from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (

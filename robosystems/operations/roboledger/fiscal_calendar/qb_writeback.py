@@ -2,7 +2,7 @@
 
 Shared by the close path (which publishes) and the outbox read (which
 previews), so the preview can't drift from the write. A draft publishes iff
-the graph has a write-back QB connection (platform DB) and the draft is
+the entity's books have a write-back keeper (platform DB) and the draft is
 eligible (extensions DB): in period, its event not retracted, not already in
 QB, and the event publishes. ``metadata.publish_to_source`` decides that
 when present; otherwise ``Event.source`` does. The explicit flag exists so an
@@ -12,8 +12,8 @@ applying twice.
 A ``shadow`` connection is the third answer, read here too: nothing
 publishes and the close posts nothing locally. QuickBooks keeps the books;
 the close's drafts become ``shadowed`` expectations, and the gates it would
-have refused on are findings. The predicate is per entity through the
-connection, which books for the group parent only.
+have refused on are findings. Each answer is per entity, read from the
+connection that keeps that entity's books (`books_keeper`).
 """
 
 from __future__ import annotations
@@ -69,28 +69,39 @@ class WritebackConnection:
   write_policy: str
 
 
-def live_quickbooks_connection(
-  platform_session: Session, graph_id: str
-) -> Connection | None:
-  """The graph's live QuickBooks connection, or None: not deleted, past OAuth,
-  neither disconnected nor severed. Newest wins if several.
+# The ledgers a keeper can be written back to. A keeper of any other
+# provider is read-only whatever its policy says.
+WRITEBACK_PROVIDERS = frozenset({"quickbooks"})
 
-  A row still in ``pending_oauth`` is a connect attempt, not a connection: it
-  has no credentials and carries the provider's default policy, so it must
-  never stand in for the live row beside it. Both predicates below read this
-  one row, so the policy the close publishes under and the policy that
-  shadows it can never come from different connections.
+_KEEPER_MEMO = "books_keepers"
+
+
+def books_keeper(
+  platform_session: Session, graph_id: str, entity_id: str | None
+) -> Connection | None:
+  """The connection that keeps ``entity_id``'s books, or None when the entity
+  keeps its own: the live row flagged as its ledger of record.
+
+  Live is not deleted, past OAuth, and neither disconnected nor severed. A
+  row still in ``pending_oauth`` is a connect attempt, not a connection: it
+  has no credentials and carries the provider's default policy. Every policy
+  question about an entity reads this one row, so the policy the close
+  publishes under and the policy that shadows it cannot come from different
+  connections.
   """
   from robosystems.models.core.connection.connection import (
     Connection,
     ConnectionStatus,
   )
 
+  if not entity_id:
+    return None
   return (
     platform_session.query(Connection)
     .filter(
       Connection.graph_id == graph_id,
-      Connection.provider == "quickbooks",
+      Connection.entity_id == entity_id,
+      Connection.keeps_books.is_(True),
       Connection.deleted_at.is_(None),
       Connection.status.notin_(
         [
@@ -100,42 +111,46 @@ def live_quickbooks_connection(
         ]
       ),
     )
-    .order_by(Connection.created_at.desc())
     .first()
   )
 
 
 def resolve_writeback_connection(
-  platform_session: Session, graph_id: str
+  platform_session: Session, graph_id: str, entity_id: str | None
 ) -> WritebackConnection | None:
-  """The QB connection close publishes to, or None: the live connection, when
-  its policy writes back. A shadow ledger publishes nothing even with an
-  older write-back row beside it."""
-  candidate = live_quickbooks_connection(platform_session, graph_id)
-  if candidate is None or candidate.write_policy not in WRITEBACK_WRITE_POLICIES:
+  """The connection the entity's close publishes to, or None: its keeper,
+  when the keeper's ledger can be written to and its policy writes back."""
+  keeper = books_keeper(platform_session, graph_id, entity_id)
+  if (
+    keeper is None
+    or (keeper.provider or "").lower() not in WRITEBACK_PROVIDERS
+    or keeper.write_policy not in WRITEBACK_WRITE_POLICIES
+  ):
     return None
   return WritebackConnection(
-    connection_id=str(candidate.id),
-    write_policy=str(candidate.write_policy),
+    connection_id=str(keeper.id),
+    write_policy=str(keeper.write_policy),
   )
 
 
-def shadow_ledger(platform_session: Session, graph_id: str) -> bool:
-  """Whether the graph's live QuickBooks connection runs in shadow."""
-  candidate = live_quickbooks_connection(platform_session, graph_id)
-  return candidate is not None and candidate.write_policy == SHADOW_WRITE_POLICY
-
-
 def shadow_close_for_entity(
-  session: Session, platform_session: Session, graph_id: str, entity_id: str | None
+  platform_session: Session, graph_id: str, entity_id: str | None
 ) -> bool:
-  """Whether this entity's close runs in shadow: only the group parent's
-  books are QuickBooks', so only its close can be."""
-  from robosystems.operations.roboledger.entity_scope import is_group_parent
+  """Whether this entity's close runs in shadow: its books have a keeper,
+  and the keeper's policy is ``shadow``."""
+  keeper = books_keeper(platform_session, graph_id, entity_id)
+  return keeper is not None and keeper.write_policy == SHADOW_WRITE_POLICY
 
-  if entity_id is None or not is_group_parent(session, entity_id):
-    return False
-  return shadow_ledger(platform_session, graph_id)
+
+def publish_posture(
+  platform_session: Session, graph_id: str, entity_id: str | None
+) -> tuple[WritebackConnection | None, bool]:
+  """`(writeback, shadow)` for an entity's drafts: where its close would
+  publish them, and whether it would shadow them instead. Never both."""
+  return (
+    resolve_writeback_connection(platform_session, graph_id, entity_id),
+    shadow_close_for_entity(platform_session, graph_id, entity_id),
+  )
 
 
 class ShadowLedgerPostingError(ValueError):
@@ -153,14 +168,20 @@ class ShadowLedgerPostingError(ValueError):
 def shadow_books(session: Session, entity_id: str | None) -> bool:
   """Whether this entity's books run a shadow close, for a session opened on
   a graph (`extensions_session` records which). A session that names no
-  graph has no QuickBooks connection to consult, so it is never shadow."""
-  graph_id = session.info.get("graph_id")
-  if not isinstance(graph_id, str) or not graph_id:
-    return False
-  from robosystems.database import SessionFactory
+  graph has no connection to consult, so it is never shadow.
 
-  with SessionFactory() as platform_session:
-    return shadow_close_for_entity(session, platform_session, graph_id, entity_id)
+  Remembered for the session: a posting path asks once per line, and the
+  answer is a read of another database."""
+  graph_id = session.info.get("graph_id")
+  if not isinstance(graph_id, str) or not graph_id or not entity_id:
+    return False
+  memo: dict[str, bool] = session.info.setdefault(_KEEPER_MEMO, {})
+  if entity_id not in memo:
+    from robosystems.database import SessionFactory
+
+    with SessionFactory() as platform_session:
+      memo[entity_id] = shadow_close_for_entity(platform_session, graph_id, entity_id)
+  return memo[entity_id]
 
 
 def closed_under_shadow(

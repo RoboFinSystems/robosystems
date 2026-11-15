@@ -1,13 +1,15 @@
-"""The close sync gate counts only QuickBooks connections that still feed the ledger."""
+"""The close sync gate counts only the connection that still keeps the entity's books."""
 
 from datetime import UTC, datetime
 
 import pytest
 
 from robosystems.models.core.connection.connection import Connection, ConnectionStatus
-from robosystems.operations.roboledger.reads.fiscal_calendar import qb_sync_state
+from robosystems.operations.roboledger.reads.fiscal_calendar import keeper_sync_state
 
 pytestmark = pytest.mark.unit
+
+ENTITY = "ent_parent"
 
 
 def _connection(test_db, graph_id, user_id, status, *, deleted=False):
@@ -17,7 +19,9 @@ def _connection(test_db, graph_id, user_id, status, *, deleted=False):
     provider="quickbooks",
     session=test_db,
     status=status,
+    entity_id=ENTITY,
   )
+  conn.keeps_books = True
   conn.last_sync = datetime(2026, 1, 5, tzinfo=UTC)
   if deleted:
     conn.deleted_at = datetime.now(UTC)
@@ -39,7 +43,7 @@ def test_ended_connection_does_not_gate_close(
 ):
   _connection(test_db, sample_graph.graph_id, test_user.id, status, deleted=deleted)
 
-  assert qb_sync_state(test_db, sample_graph.graph_id) == (False, None)
+  assert keeper_sync_state(test_db, sample_graph.graph_id, ENTITY) == (False, None)
 
 
 def test_live_connection_still_gates_close(test_db, test_user, sample_graph):
@@ -47,6 +51,6 @@ def test_live_connection_still_gates_close(test_db, test_user, sample_graph):
     test_db, sample_graph.graph_id, test_user.id, ConnectionStatus.CONNECTED.value
   )
 
-  has_connection, last_sync = qb_sync_state(test_db, sample_graph.graph_id)
+  has_connection, last_sync = keeper_sync_state(test_db, sample_graph.graph_id, ENTITY)
   assert has_connection is True
   assert last_sync is not None

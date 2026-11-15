@@ -448,10 +448,10 @@ async def oauth_callback(
       # Revive a soft-deleted connection for this graph+provider+realm in
       # place, keeping its connection_id so tenant-side data scoped to it
       # stays attached.
+      from robosystems.models.core.connection.connection import Connection
+
       revived_id: str | None = None
       if returned_realm_id:
-        from robosystems.models.core.connection.connection import Connection
-
         prior = Connection.find_soft_deleted_for_realm(
           graph_id=graph_id,
           provider="quickbooks",
@@ -510,6 +510,14 @@ async def oauth_callback(
         graph_id=graph_id,
         db_session=db,
       )
+
+      # Authorized: from here this connection is the entity's ledger of
+      # record, in place of any earlier row for the same entity.
+      keeper = Connection.get_by_id(target_connection_id, db)
+      if keeper is not None:
+        if not keeper.entity_id:
+          keeper.entity_id = f"entity_{graph_id}"
+        keeper.become_keeper(db)
 
       is_valid = await quickbooks_oauth_provider.validate_connection(
         tokens["access_token"], provider_data.get("realm_id")

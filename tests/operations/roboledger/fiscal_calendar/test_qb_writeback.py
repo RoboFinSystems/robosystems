@@ -10,74 +10,74 @@ from __future__ import annotations
 
 from datetime import date
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
   SHADOW_WRITE_POLICY,
   WRITEBACK_EXCLUDED_EVENT_STATUSES,
   WRITEBACK_WRITE_POLICIES,
   WritebackConnection,
+  books_keeper,
+  publish_posture,
   resolve_writeback_connection,
   select_writeback_eligible_entries,
   shadow_close_for_entity,
-  shadow_ledger,
   writeback_eligible_entry_ids,
 )
 
 GRAPH_ID = "kg01234567890abcdef"
+ENTITY = "ent_p"
+
+
+def _keeper(policy, *, provider="quickbooks", id="conn-live"):
+  return SimpleNamespace(id=id, write_policy=policy, provider=provider)
 
 
 def _platform_session_returning(candidate):
-  """Mock platform session whose Connection query resolves to `candidate`."""
+  """Mock platform session whose keeper query resolves to `candidate`."""
   session = MagicMock()
-  session.query.return_value.filter.return_value.order_by.return_value.first.return_value = candidate
+  session.query.return_value.filter.return_value.first.return_value = candidate
   return session
 
 
 def _platform_session_with_policy(policy):
-  """Mock platform session whose live-connection query resolves to a row
-  holding ``policy``, or to no row when ``policy`` is None."""
-  row = None if policy is None else SimpleNamespace(id="conn-live", write_policy=policy)
-  return _platform_session_returning(row)
+  """Mock platform session whose keeper query resolves to a row holding
+  ``policy``, or to no row when ``policy`` is None."""
+  return _platform_session_returning(None if policy is None else _keeper(policy))
 
 
-class TestShadowLedger:
-  def test_a_shadow_connection_is_a_shadow_ledger(self):
-    assert shadow_ledger(_platform_session_with_policy("shadow"), GRAPH_ID) is True
+class TestShadowClose:
+  def test_a_shadow_keeper_shadows_its_entitys_close(self):
+    platform = _platform_session_with_policy("shadow")
+    assert shadow_close_for_entity(platform, GRAPH_ID, ENTITY) is True
 
-  def test_other_policies_and_no_connection_are_not(self):
-    assert (
-      shadow_ledger(_platform_session_with_policy("qb_authoritative"), GRAPH_ID)
-      is False
-    )
-    assert shadow_ledger(_platform_session_with_policy(None), GRAPH_ID) is False
+  def test_other_policies_and_no_keeper_do_not(self):
+    for policy in ("qb_authoritative", None):
+      platform = _platform_session_with_policy(policy)
+      assert shadow_close_for_entity(platform, GRAPH_ID, ENTITY) is False
 
   def test_shadow_is_never_a_writeback_policy(self):
     assert SHADOW_WRITE_POLICY not in WRITEBACK_WRITE_POLICIES
 
-  def test_the_live_row_decides_both_predicates(self):
-    """One row answers "does it shadow" and "where does it publish", so a
-    shadow ledger never resolves a publish target."""
+  def test_the_keeper_decides_both_predicates(self):
+    """One row answers "does it shadow" and "where does it publish", so
+    shadow books never resolve a publish target."""
     session = _platform_session_with_policy("shadow")
-    assert shadow_ledger(session, GRAPH_ID) is True
-    assert resolve_writeback_connection(session, GRAPH_ID) is None
+    assert publish_posture(session, GRAPH_ID, ENTITY) == (None, True)
 
-  def test_only_the_group_parents_close_shadows(self):
+  def test_no_entity_has_no_keeper_and_is_never_asked(self):
     platform = _platform_session_with_policy("shadow")
-    module = "robosystems.operations.roboledger.entity_scope.is_group_parent"
-    with patch(module, return_value=True):
-      assert shadow_close_for_entity(MagicMock(), platform, GRAPH_ID, "ent_p")
-    with patch(module, return_value=False):
-      assert not shadow_close_for_entity(MagicMock(), platform, GRAPH_ID, "ent_s")
-    assert not shadow_close_for_entity(MagicMock(), platform, GRAPH_ID, None)
+    assert books_keeper(platform, GRAPH_ID, None) is None
+    assert not shadow_close_for_entity(platform, GRAPH_ID, None)
+    platform.query.assert_not_called()
 
 
 class TestResolveWritebackConnection:
   def test_returns_writeback_connection_when_candidate_exists(self):
-    candidate = SimpleNamespace(id="conn-123", write_policy="qb_authoritative")
+    candidate = _keeper("qb_authoritative", id="conn-123")
     session = _platform_session_returning(candidate)
 
-    result = resolve_writeback_connection(session, GRAPH_ID)
+    result = resolve_writeback_connection(session, GRAPH_ID, ENTITY)
 
     assert result == WritebackConnection(
       connection_id="conn-123", write_policy="qb_authoritative"
@@ -86,22 +86,28 @@ class TestResolveWritebackConnection:
   def test_returns_none_when_no_writeback_connection(self):
     session = _platform_session_returning(None)
 
-    assert resolve_writeback_connection(session, GRAPH_ID) is None
+    assert resolve_writeback_connection(session, GRAPH_ID, ENTITY) is None
 
   def test_a_live_row_that_does_not_write_back_is_no_target(self):
     """The policy is read from the live row, never searched for among older
     rows: a `native` live row resolves to no target."""
+    session = _platform_session_returning(_keeper("native"))
+
+    assert resolve_writeback_connection(session, GRAPH_ID, ENTITY) is None
+
+  def test_a_ledger_that_cannot_be_written_to_is_no_target(self):
+    """A keeper of another provider is read-only whatever its policy says."""
     session = _platform_session_returning(
-      SimpleNamespace(id="conn-live", write_policy="native")
+      _keeper("qb_authoritative", provider="external")
     )
 
-    assert resolve_writeback_connection(session, GRAPH_ID) is None
+    assert resolve_writeback_connection(session, GRAPH_ID, ENTITY) is None
 
   def test_coerces_connection_id_to_str(self):
-    candidate = SimpleNamespace(id=42, write_policy="hybrid")
+    candidate = _keeper("hybrid", id=42)
     session = _platform_session_returning(candidate)
 
-    result = resolve_writeback_connection(session, GRAPH_ID)
+    result = resolve_writeback_connection(session, GRAPH_ID, ENTITY)
 
     assert result is not None
     assert result.connection_id == "42"

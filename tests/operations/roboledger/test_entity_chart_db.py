@@ -257,7 +257,7 @@ class TestEachEntityStampsItsOwnStatements:
       patch(f"{_COMMANDS}.exclusive_period_fence"),
       patch("robosystems.operations.extensions.staleness.mark_graph_stale"),
       patch(
-        "robosystems.operations.roboledger.reads.fiscal_calendar.qb_sync_state",
+        "robosystems.operations.roboledger.reads.fiscal_calendar.keeper_sync_state",
         return_value=(False, None),
       ),
     ):
@@ -649,7 +649,7 @@ class TestMembershipWindows:
   @pytest.fixture(autouse=True)
   def _no_platform(self):
     with patch(
-      "robosystems.operations.roboledger.reads.fiscal_calendar.qb_sync_state",
+      "robosystems.operations.roboledger.reads.fiscal_calendar.keeper_sync_state",
       return_value=(False, None),
     ):
       yield

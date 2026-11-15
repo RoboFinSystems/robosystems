@@ -95,6 +95,7 @@ def _execute(
 ):
   connection = MagicMock(
     graph_id=GRAPH_ID,
+    entity_id=PARENT_ENTITY_ID,
     write_policy="qb_authoritative",
     provider="quickbooks",
     realm_id="9341",

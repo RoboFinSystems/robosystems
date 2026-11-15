@@ -88,7 +88,6 @@ def test_a_failed_publish_does_not_cost_the_markers_of_earlier_ones():
       return_value=MagicMock(connection_id="conn_1"),
     ),
     patch(f"{_QB}.select_writeback_eligible_entries", return_value=drafts),
-    patch(f"{_MODULE}.is_group_parent", return_value=True),
   ):
     with pytest.raises(WritebackFailed) as exc:
       PeriodCloseService(MagicMock())._publish_drafts_to_qb(

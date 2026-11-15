@@ -1778,8 +1778,12 @@ class TestPeriodDraftsResolver:
       patch("robosystems.db.platform.platform_session", return_value=platform_ctx),
       patch(
         "robosystems.operations.roboledger.fiscal_calendar.qb_writeback."
-        "resolve_writeback_connection",
-        return_value=None,
+        "publish_posture",
+        return_value=(None, False),
+      ) as posture,
+      patch(
+        "robosystems.operations.roboledger.entity_scope.find_entity_id",
+        side_effect=lambda _session, entity_id=None: entity_id or "ent_parent",
       ),
       patch(f"{_OPS}.period_drafts.list_period_drafts", return_value=drafts) as read,
     ):
@@ -1789,6 +1793,8 @@ class TestPeriodDraftsResolver:
     assert result.errors is None
     assert result.data == {"periodDrafts": {"draftCount": 0}}
     assert read.call_args.kwargs["entity_id"] == "ent_sub"
+    # The outbox is decided by the named entity's keeper, not the graph's.
+    assert posture.call_args.args[2] == "ent_sub"
 
   def test_lists_drafts_with_the_writeback_connection(self) -> None:
     from datetime import date
@@ -1835,9 +1841,13 @@ class TestPeriodDraftsResolver:
       patch("robosystems.db.platform.platform_session", return_value=platform_ctx),
       patch(
         "robosystems.operations.roboledger.fiscal_calendar.qb_writeback."
-        "resolve_writeback_connection",
-        return_value=writeback,
+        "publish_posture",
+        return_value=(writeback, False),
       ) as resolve,
+      patch(
+        "robosystems.operations.roboledger.entity_scope.find_entity_id",
+        side_effect=lambda _session, entity_id=None: entity_id or "ent_parent",
+      ),
       patch(f"{_OPS}.period_drafts.list_period_drafts", return_value=drafts) as read,
     ):
       result = _run(
@@ -1859,7 +1869,7 @@ class TestPeriodDraftsResolver:
     assert resolve.call_args.args[1] == GRAPH_ID
     assert read.call_args.kwargs == {
       "writeback": writeback,
-      "entity_id": None,
+      "entity_id": "ent_parent",
       "shadow": False,
     }
 

@@ -40,6 +40,8 @@ def _make_mock_connection(**overrides):
   conn.institution_name = overrides.get("institution_name")
   conn.auto_sync_enabled = overrides.get("auto_sync_enabled", True)
   conn.last_sync = overrides.get("last_sync")
+  conn.entity_id = overrides.get("entity_id")
+  conn.keeps_books = overrides.get("keeps_books", conn.provider == "quickbooks")
   conn.created_at = overrides.get("created_at", datetime.now(UTC))
   conn.updated_at = overrides.get("updated_at", datetime.now(UTC))
   conn.to_dict.return_value = {
@@ -48,6 +50,7 @@ def _make_mock_connection(**overrides):
     "status": conn.status,
     "graph_id": conn.graph_id,
     "user_id": conn.user_id,
+    "entity_id": conn.entity_id,
     "metadata": {
       "realm_id": conn.realm_id,
       "item_id": conn.item_id,
@@ -954,6 +957,57 @@ class TestSetWritePolicy:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
+  @pytest.mark.parametrize(
+    ("provider", "keeps_books", "policy", "reason"),
+    [
+      # A source that keeps nobody's books has no policy to set.
+      ("external", False, "shadow", "keeps none"),
+      ("plaid", False, "qb_authoritative", "keeps none"),
+      # A ledger nothing can be written to can only be mirrored.
+      ("external", True, "qb_authoritative", "written back"),
+    ],
+  )
+  async def test_a_policy_the_connection_cannot_hold_is_refused(
+    self, provider, keeps_books, policy, reason
+  ):
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection(
+      graph_id="kg_test", provider=provider, keeps_books=keeps_books
+    )
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = mock_conn
+      with pytest.raises(ValueError, match=reason):
+        await ConnectionService.set_write_policy(
+          connection_id="conn_test123",
+          write_policy=policy,
+          user_id="usr_123",
+          graph_id="kg_test",
+          db_session=mock_session,
+        )
+    mock_conn.set_write_policy.assert_not_called()
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_a_keeper_that_cannot_be_written_to_may_shadow(self):
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection(
+      graph_id="kg_test", provider="external", keeps_books=True
+    )
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = mock_conn
+      await ConnectionService.set_write_policy(
+        connection_id="conn_test123",
+        write_policy="shadow",
+        user_id="usr_123",
+        graph_id="kg_test",
+        db_session=mock_session,
+      )
+    mock_conn.set_write_policy.assert_called_once_with(mock_session, "shadow")
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
   async def test_not_found_returns_none(self):
     mock_session = MagicMock()
     with patch(f"{MODULE}.Connection") as MockConn:
@@ -1448,6 +1502,21 @@ class TestProviderCompatibility:
   def _live(*providers: str) -> list:
     return [_make_mock_connection(provider=p) for p in providers]
 
+  @pytest.fixture(autouse=True)
+  def keeper(self):
+    """The group parent is ``ent_p``, and no ledger keeps any entity's books
+    unless a test says so (`_quickbooks_keeps`)."""
+    with (
+      patch(f"{MODULE}.books_keeper", return_value=None) as keeper,
+      patch(f"{MODULE}.group_parent_reader", return_value=lambda: "ent_p"),
+    ):
+      yield keeper
+
+  @staticmethod
+  def _quickbooks_keeps(entity_id: str):
+    ledger = _make_mock_connection(provider="quickbooks", entity_id=entity_id)
+    return lambda _session, _graph, asked: ledger if asked == entity_id else None
+
   @pytest.mark.unit
   def test_quickbooks_named_for_a_subsidiary_is_refused(self):
     from robosystems.operations.connection_service import (
@@ -1488,12 +1557,13 @@ class TestProviderCompatibility:
     native.assert_called_once()
 
   @pytest.mark.unit
-  def test_bank_feed_refused_on_the_parent_while_quickbooks_is_live(self):
+  def test_bank_feed_refused_on_the_parent_while_quickbooks_is_live(self, keeper):
     from robosystems.operations.connection_service import (
       ProviderConflictError,
       assert_provider_compatible,
     )
 
+    keeper.side_effect = self._quickbooks_keeps("ent_p")
     with (
       patch(f"{MODULE}.Connection") as MockConn,
       patch(f"{MODULE}._graph_has_chart", return_value=True) as has_chart,
@@ -1503,15 +1573,17 @@ class TestProviderCompatibility:
         assert_provider_compatible("kg_test", "mercury", MagicMock())
 
     assert exc.value.code == "QUICKBOOKS_ACTIVE"
-    assert "Quickbooks keeps the group parent" in exc.value.message
+    assert "Quickbooks keeps this entity's books" in exc.value.message
     has_chart.assert_not_called()
 
   @pytest.mark.unit
-  def test_bank_feed_allowed_for_a_subsidiary_beside_quickbooks(self):
+  def test_bank_feed_allowed_for_a_subsidiary_beside_quickbooks(self, keeper):
     """The holdco: the parent on QuickBooks, an LLC on Plaid. The feed names
-    the subsidiary it lands on, and the chart checked is that entity's."""
+    the subsidiary it lands on, and the keeper and the chart checked are
+    that entity's."""
     from robosystems.operations.connection_service import assert_provider_compatible
 
+    keeper.side_effect = self._quickbooks_keeps("ent_p")
     with (
       patch(f"{MODULE}.Connection") as MockConn,
       patch(f"{MODULE}._is_group_parent", return_value=False) as parent,
@@ -1521,15 +1593,17 @@ class TestProviderCompatibility:
       MockConn.get_all_for_graph.return_value = self._live("quickbooks")
       assert_provider_compatible("kg_test", "plaid", MagicMock(), entity_id="ent_sub")
     parent.assert_called_once_with("kg_test", "ent_sub")
+    assert keeper.call_args.args[1:] == ("kg_test", "ent_sub")
     has_chart.assert_called_once_with("kg_test", "ent_sub")
 
   @pytest.mark.unit
-  def test_bank_feed_naming_the_parent_by_id_is_still_the_parent(self):
+  def test_bank_feed_naming_the_parent_by_id_is_still_the_parent(self, keeper):
     from robosystems.operations.connection_service import (
       ProviderConflictError,
       assert_provider_compatible,
     )
 
+    keeper.side_effect = self._quickbooks_keeps("ent_p")
     with (
       patch(f"{MODULE}.Connection") as MockConn,
       patch(f"{MODULE}._is_group_parent", return_value=True),
@@ -1786,12 +1860,13 @@ class TestProviderCompatibility:
     chart.assert_not_called()
 
   @pytest.mark.unit
-  def test_a_reconnecting_bank_feed_is_still_checked(self):
+  def test_a_reconnecting_bank_feed_is_still_checked(self, keeper):
     from robosystems.operations.connection_service import (
       ProviderConflictError,
       assert_provider_compatible,
     )
 
+    keeper.side_effect = self._quickbooks_keeps("ent_p")
     with (
       patch(f"{MODULE}.Connection") as MockConn,
       patch(f"{MODULE}._is_group_parent", return_value=True),

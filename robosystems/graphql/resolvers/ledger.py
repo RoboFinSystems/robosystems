@@ -1508,17 +1508,18 @@ class LedgerQuery:
       entity_id: The entity whose drafts to list. Omit for the group parent.
     """
     from robosystems.db.platform import platform_session
+    from robosystems.operations.roboledger.entity_scope import find_entity_id
     from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
-      resolve_writeback_connection,
-      shadow_ledger,
+      publish_posture,
     )
 
     graph_id = require_graph_id(info)
     try:
-      with platform_session() as platform_db:
-        writeback = resolve_writeback_connection(platform_db, graph_id)
-        shadow = shadow_ledger(platform_db, graph_id)
       with _open_session(info, "roboledger") as session:
+        # The entity first: its keeper, not the graph's, decides the outbox.
+        entity_id = find_entity_id(session, entity_id)
+        with platform_session() as platform_db:
+          writeback, shadow = publish_posture(platform_db, graph_id, entity_id)
         response = reads_period_drafts.list_period_drafts(
           session, period, writeback=writeback, entity_id=entity_id, shadow=shadow
         )

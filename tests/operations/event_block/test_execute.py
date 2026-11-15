@@ -26,18 +26,11 @@ def _period_gate_open():
     yield
 
 
-@pytest.fixture(autouse=True)
-def _event_on_the_group_parent():
-  """Mock sessions cannot resolve the group parent either; every event here
-  is the parent's unless a test says otherwise."""
-  with patch(
-    "robosystems.operations.event_block.commands.is_group_parent", return_value=True
-  ):
-    yield
-
-
 COMMANDS_MODULE = "robosystems.operations.event_block.commands"
 GRAPH_ID = "kg00000000000000aa"
+# The entity every event here belongs to, and whose books each mocked
+# connection keeps, unless a test says otherwise.
+ENTITY_ID = "ent_parent"
 
 
 def _make_event(
@@ -49,6 +42,7 @@ def _make_event(
   """A MagicMock Event row matching the shape the command reads."""
   evt = MagicMock()
   evt.id = event_id
+  evt.entity_id = ENTITY_ID
   evt.status = status
   evt.source = source
   evt.metadata_ = metadata or {
@@ -94,11 +88,10 @@ def _make_session(
 
 
 @pytest.mark.unit
-class TestExecuteEventBlockRefusesASubsidiary:
-  def test_a_subsidiarys_event_is_refused_before_any_platform_lookup(self):
-    """QuickBooks keeps the group parent's books only. The close skips a
-    subsidiary before publishing; the direct operation refuses it, whatever
-    connection the event names, and never opens the platform session."""
+class TestExecuteEventBlockRefusesAnotherEntitysLedger:
+  def test_an_event_is_never_published_to_a_ledger_that_keeps_other_books(self):
+    """A connection keeps one entity's books. An event of another entity is
+    refused whatever connection it names, before any QuickBooks client."""
     from robosystems.models.api.event_block import ExecuteEventBlockRequest
     from robosystems.operations.event_block.commands import (
       EventNotOnSourceBooksError,
@@ -108,10 +101,24 @@ class TestExecuteEventBlockRefusesASubsidiary:
     evt = _make_event(source="schedule")
     evt.entity_id = "ent_subsidiary"
     session = _make_session(evt)
+    parents_ledger = MagicMock(
+      graph_id=GRAPH_ID,
+      entity_id=ENTITY_ID,
+      keeps_books=True,
+      write_policy="qb_authoritative",
+      provider="quickbooks",
+    )
+    platform = MagicMock()
+    platform.__enter__ = MagicMock(return_value=platform)
+    platform.__exit__ = MagicMock(return_value=False)
 
     with (
-      patch(f"{COMMANDS_MODULE}.is_group_parent", return_value=False) as parent,
-      patch("robosystems.database.SessionFactory") as platform,
+      patch("robosystems.database.SessionFactory", return_value=platform),
+      patch(
+        "robosystems.models.core.connection.connection.Connection.get_by_id",
+        return_value=parents_ledger,
+      ),
+      patch("robosystems.adapters.quickbooks.client.QBClient") as client,
     ):
       with pytest.raises(EventNotOnSourceBooksError, match="ent_subsidiary"):
         execute_event_block(
@@ -120,9 +127,19 @@ class TestExecuteEventBlockRefusesASubsidiary:
           "usr_1",
           graph_id=GRAPH_ID,
         )
+      # A row that is not the keeper is refused the same way, on the right
+      # entity or not.
+      parents_ledger.keeps_books = False
+      evt.entity_id = ENTITY_ID
+      with pytest.raises(EventNotOnSourceBooksError):
+        execute_event_block(
+          session,
+          ExecuteEventBlockRequest(event_id=evt.id, connection_id="conn_qb_1"),
+          "usr_1",
+          graph_id=GRAPH_ID,
+        )
 
-    parent.assert_called_once_with(session, "ent_subsidiary")
-    platform.assert_not_called()
+    client.assert_not_called()
 
 
 @pytest.mark.unit
@@ -195,6 +212,7 @@ class TestExecuteEventBlockNativeFastPath:
 
     mock_connection = MagicMock()
     mock_connection.graph_id = GRAPH_ID
+    mock_connection.entity_id = ENTITY_ID
     mock_connection.write_policy = "native"
     mock_connection.provider = "quickbooks"
     mock_platform_session = MagicMock()
@@ -228,6 +246,7 @@ class TestExecuteEventBlockNativeFastPath:
 
     mock_connection = MagicMock()
     mock_connection.graph_id = GRAPH_ID
+    mock_connection.entity_id = ENTITY_ID
     mock_connection.write_policy = "shadow"
     mock_connection.provider = "quickbooks"
     mock_platform_session = MagicMock()
@@ -364,6 +383,7 @@ class TestExecuteEventBlockQBAuthoritativeAccept:
 
     mock_connection = MagicMock()
     mock_connection.graph_id = GRAPH_ID
+    mock_connection.entity_id = ENTITY_ID
     mock_connection.write_policy = "qb_authoritative"
     mock_connection.provider = "quickbooks"
     mock_connection.realm_id = "9341452700148642"
@@ -455,6 +475,7 @@ class TestExecuteEventBlockQBAuthoritativeAccept:
 
     mock_connection = MagicMock(
       graph_id=GRAPH_ID,
+      entity_id=ENTITY_ID,
       write_policy="qb_authoritative",
       provider="quickbooks",
       realm_id="9341",
@@ -533,6 +554,7 @@ class TestExecuteEventBlockQBReject:
 
     mock_connection = MagicMock(
       graph_id=GRAPH_ID,
+      entity_id=ENTITY_ID,
       write_policy="qb_authoritative",
       provider="quickbooks",
       realm_id="9341",
@@ -761,6 +783,7 @@ def _run_against_qb(evt, session, *, post_result=None, post_error=None):
 
   connection = MagicMock(
     graph_id=GRAPH_ID,
+    entity_id=ENTITY_ID,
     write_policy="qb_authoritative",
     provider="quickbooks",
     realm_id="9341",

@@ -186,24 +186,25 @@ class ListPeriodDraftsTool:
 
   def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     from robosystems.db.platform import platform_session
+    from robosystems.operations.roboledger.entity_scope import find_entity_id
     from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
-      resolve_writeback_connection,
-      shadow_ledger,
+      publish_posture,
     )
 
     graph_id = self.client.graph_id
     period = arguments["period"]
 
     try:
-      with platform_session() as platform_db:
-        writeback = resolve_writeback_connection(platform_db, graph_id)
-        shadow = shadow_ledger(platform_db, graph_id)
       with extensions_session(graph_id) as session:
+        # The entity first: its keeper, not the graph's, decides the outbox.
+        entity_id = find_entity_id(session, arguments.get("entity_id"))
+        with platform_session() as platform_db:
+          writeback, shadow = publish_posture(platform_db, graph_id, entity_id)
         response = list_period_drafts(
           session,
           period,
           writeback=writeback,
-          entity_id=arguments.get("entity_id"),
+          entity_id=entity_id,
           shadow=shadow,
         )
         return response.model_dump(mode="json")

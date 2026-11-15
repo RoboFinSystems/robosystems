@@ -15,7 +15,9 @@ from robosystems.models.api.extensions.fiscal_calendar import (
 from robosystems.models.core.connection.connection import Connection, ConnectionStatus
 from robosystems.models.extensions.roboledger.fiscal_calendar import FiscalCalendar
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
-from robosystems.operations.roboledger.entity_scope import is_group_parent
+from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+  books_keeper,
+)
 
 
 def get_fiscal_year_start_month(session: Session) -> int:
@@ -27,35 +29,16 @@ def get_fiscal_year_start_month(session: Session) -> int:
   return 1
 
 
-def live_qb_connection(platform_db: Session, graph_id: str) -> Connection | None:
-  """The graph's live QB connection. Disconnected and severed rows don't
-  count; among the rest a connected one wins, then the most recently updated.
-  """
-  return (
-    platform_db.query(Connection)
-    .filter(
-      Connection.graph_id == graph_id,
-      Connection.provider == "quickbooks",
-      Connection.deleted_at.is_(None),
-      Connection.status.notin_(
-        [ConnectionStatus.DISCONNECTED.value, ConnectionStatus.SEVERED.value]
-      ),
-    )
-    .order_by(
-      (Connection.status == "connected").desc(),
-      Connection.updated_at.desc(),
-    )
-    .first()
-  )
-
-
-def qb_sync_state(platform_db: Session, graph_id: str) -> tuple[bool, datetime | None]:
-  """`(has_connection, last_sync_at)` for the graph's live QB connection.
+def keeper_sync_state(
+  platform_db: Session, graph_id: str, entity_id: str | None
+) -> tuple[bool, datetime | None]:
+  """`(has_connection, last_sync_at)` for the connection that keeps the
+  entity's books.
 
   `(True, None)` means connected but never synced, which the close gate
   treats as stale.
   """
-  connection = live_qb_connection(platform_db, graph_id)
+  connection = books_keeper(platform_db, graph_id, entity_id)
   if connection is None:
     return (False, None)
   return (True, connection.last_sync)
@@ -86,16 +69,15 @@ def entity_sync_state(
   session: Session, platform_db: Session, graph_id: str, entity_id: str | None
 ) -> tuple[bool, datetime | None]:
   """`(has_connection, last_sync_at)` over every source that books for one
-  entity: the graph's QuickBooks connection for the group parent, and each
-  live bank feed with an account on the entity's chart. The stalest of them is
+  entity: the connection that keeps its books, if one does, and each live
+  bank feed with an account on the entity's chart. The stalest of them is
   the one the close waits on, and one never synced makes the whole `None`."""
   if entity_id is None:
     return (False, None)
   syncs: list[datetime | None] = []
-  if is_group_parent(session, entity_id):
-    has_qb, qb_last_sync = qb_sync_state(platform_db, graph_id)
-    if has_qb:
-      syncs.append(qb_last_sync)
+  has_keeper, keeper_last_sync = keeper_sync_state(platform_db, graph_id, entity_id)
+  if has_keeper:
+    syncs.append(keeper_last_sync)
   feed_ids = feed_connection_ids(session, entity_id)
   if feed_ids:
     feeds = (
