@@ -389,7 +389,7 @@ def sec_processed_filings(
           sf = SourceFile.get_by_storage_key(storage_key, session)
           if sf:
             sf.status = "skipped"
-            sf.error_message = result.skipped_reason
+            sf.error_reason = result.skipped_reason
             session.commit()
         skipped += 1
         context.log.debug(
