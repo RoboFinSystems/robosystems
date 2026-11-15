@@ -40,6 +40,11 @@ on:
         required: false
         type: string
         default: ""
+      graph_api_client_sg_id:
+        description: "Security group carried by clients of the Graph API"
+        required: false
+        type: string
+        default: ""
 
       # S3 Bucket Configuration (from S3 stack outputs)
       deployment_bucket_arn:
@@ -117,6 +122,10 @@ jobs:
           if [ -n "${{ inputs.valkey_sg_id }}" ] && [ "${{ inputs.valkey_sg_id }}" != "" ]; then
             BASTION_PARAMS="$BASTION_PARAMS ParameterKey=ValkeySecurityGroupId,ParameterValue=${{ inputs.valkey_sg_id }}"
             echo "Adding Valkey client security group: ${{ inputs.valkey_sg_id }}"
+          fi
+
+          if [ -n "${{ inputs.graph_api_client_sg_id }}" ]; then
+            BASTION_PARAMS="$BASTION_PARAMS ParameterKey=GraphApiClientSecurityGroupId,ParameterValue=${{ inputs.graph_api_client_sg_id }}"
           fi
 
           # Add S3 bucket configuration (required)

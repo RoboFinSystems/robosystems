@@ -169,6 +169,10 @@ Parameters:
   ValkeyClientSecurityGroupId:
     Type: String
     AllowedPattern: ^sg-[0-9a-f]+$
+  GraphApiClientSecurityGroupId:
+    Type: String
+    Default: ""
+    Description: Security group carried by clients of the Graph API (from the VPC stack)
   OpenSearchEndpoint:
     Type: String
     Default: ""
@@ -215,6 +219,8 @@ Parameters:
 
 Conditions:
   HasObservabilityStack: !Not [!Equals [!Ref PrometheusStackName, ""]]
+  HasGraphApiClientSecurityGroup:
+    !Not [!Equals [!Ref GraphApiClientSecurityGroupId, ""]]
   IsProduction: !Equals [!Ref Environment, "prod"]
   HasLambdaImage: !Not [!Equals [!Ref LambdaImageUri, ""]]
   # Access mode conditions
@@ -892,6 +898,10 @@ Resources:
           SecurityGroups:
             - !Ref ApiSecurityGroup
             - !Ref ValkeyClientSecurityGroupId
+            - !If
+              - HasGraphApiClientSecurityGroup
+              - !Ref GraphApiClientSecurityGroupId
+              - !Ref AWS::NoValue
             - !If [
                 HasOpenSearch,
                 !Ref OpenSearchClientSecurityGroupId,

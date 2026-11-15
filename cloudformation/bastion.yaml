@@ -22,6 +22,10 @@ Parameters:
     Type: String
     Description: Security group ID for accessing Valkey ElastiCache (from Valkey stack)
     Default: ""
+  GraphApiClientSecurityGroupId:
+    Type: String
+    Description: Security group carried by clients of the Graph API (from the VPC stack)
+    Default: ""
 
   # Instance Configuration
   AmiId:
@@ -59,6 +63,8 @@ Parameters:
 
 Conditions:
   HasValkeySecurityGroup: !Not [!Equals [!Ref ValkeySecurityGroupId, ""]]
+  HasGraphApiClientSecurityGroup:
+    !Not [!Equals [!Ref GraphApiClientSecurityGroupId, ""]]
 
 Resources:
   # Security group for bastion host (SSM access - no inbound ports needed)
@@ -259,10 +265,16 @@ Resources:
         - DeviceIndex: 0
           SubnetId: !Ref PublicSubnetId
           AssociatePublicIpAddress: true
-          GroupSet: !If
-            - HasValkeySecurityGroup
-            - [!Ref BastionHostSecurityGroup, !Ref ValkeySecurityGroupId]
-            - [!Ref BastionHostSecurityGroup]
+          GroupSet:
+            - !Ref BastionHostSecurityGroup
+            - !If
+              - HasValkeySecurityGroup
+              - !Ref ValkeySecurityGroupId
+              - !Ref AWS::NoValue
+            - !If
+              - HasGraphApiClientSecurityGroup
+              - !Ref GraphApiClientSecurityGroupId
+              - !Ref AWS::NoValue
       MetadataOptions:
         HttpEndpoint: enabled
         HttpTokens: required

@@ -96,6 +96,10 @@ Parameters:
     Type: String
     Description: Security group ID for applications connecting to Valkey
     AllowedPattern: ^sg-[0-9a-f]+$
+  GraphApiClientSecurityGroupId:
+    Type: String
+    Default: ""
+    Description: Security group carried by clients of the Graph API (from the VPC stack)
 
   # OpenSearch (optional)
   OpenSearchEndpoint:
@@ -162,6 +166,10 @@ Parameters:
 
 Conditions:
   HasOpenSearch: !Not [!Equals [!Ref OpenSearchEndpoint, ""]]
+  # With this group the tasks carry five security groups, the default limit
+  # per network interface; a sixth needs the quota raised first.
+  HasGraphApiClientSecurityGroup:
+    !Not [!Equals [!Ref GraphApiClientSecurityGroupId, ""]]
   AutoscalingEnabled: !Equals [!Ref WorkerAutoscalingEnabled, "true"]
   HasAlertEmail: !Not [!Equals [!Ref SNSAlertEmail, ""]]
 
@@ -522,6 +530,10 @@ Resources:
             - !Ref DagsterSecurityGroupId
             - !Ref ValkeyClientSecurityGroupId
             - !Ref DatabaseSecurityGroupId
+            - !If
+              - HasGraphApiClientSecurityGroup
+              - !Ref GraphApiClientSecurityGroupId
+              - !Ref AWS::NoValue
             - !If [HasOpenSearch, !Ref OpenSearchClientSecurityGroupId, !Ref "AWS::NoValue"]
       TaskDefinition: !Ref WorkerTaskDefinition
       EnableExecuteCommand: true

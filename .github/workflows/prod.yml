@@ -414,6 +414,7 @@ jobs:
       public_subnet_ids: ${{ needs.deploy-vpc.outputs.public_subnet_ids }}
       # Security Groups (SSM-only access - no SSH parameters needed)
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
+      graph_api_client_sg_id: ${{ needs.deploy-vpc.outputs.graph_api_client_sg_id }}
       # S3 Bucket Configuration (from S3 stack outputs)
       deployment_bucket_arn: ${{ needs.deploy-s3.outputs.deployment_bucket_arn }}
     secrets: inherit
@@ -451,6 +452,7 @@ jobs:
       aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
       vpc_id: ${{ needs.deploy-vpc.outputs.vpc_id }}
       subnet_ids: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
+      graph_api_client_sg_id: ${{ needs.deploy-vpc.outputs.graph_api_client_sg_id }}
       # Registry Configuration
       volume_registry_table: ${{ needs.deploy-graph-infra.outputs.volume_registry_table }}
       # Lambda Configuration (container-based)
@@ -488,6 +490,7 @@ jobs:
       subnet_ids: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
       public_subnet_ids: ${{ needs.deploy-vpc.outputs.public_subnet_ids }}
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
+      graph_api_client_sg_id: ${{ needs.deploy-vpc.outputs.graph_api_client_sg_id }}
       valkey_url: ${{ needs.deploy-valkey.outputs.valkey_url }}
       database_endpoint: ${{ needs.deploy-postgres.outputs.database_endpoint }}
       database_port: ${{ needs.deploy-postgres.outputs.database_port }}
@@ -603,6 +606,7 @@ jobs:
       # Cache Configuration
       valkey_url: ${{ needs.deploy-valkey.outputs.valkey_url }}
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
+      graph_api_client_sg_id: ${{ needs.deploy-vpc.outputs.graph_api_client_sg_id }}
       bastion_sg_id: ${{ needs.deploy-bastion.outputs.bastion_sg_id }}
       # OpenSearch Configuration (optional, empty when OPENSEARCH_ENABLED_PROD=false)
       opensearch_endpoint: ${{ needs.deploy-opensearch.outputs.opensearch_endpoint || '' }}
@@ -694,6 +698,7 @@ jobs:
       # Cache Configuration
       valkey_url: ${{ needs.deploy-valkey.outputs.valkey_url }}
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
+      graph_api_client_sg_id: ${{ needs.deploy-vpc.outputs.graph_api_client_sg_id }}
       # Database Security Group
       database_sg_id: ${{ needs.deploy-postgres.outputs.database_sg_id }}
       # OpenSearch Configuration (optional, empty when OPENSEARCH_ENABLED_PROD=false)

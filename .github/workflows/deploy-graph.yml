@@ -31,6 +31,11 @@ on:
         required: true
         type: string
         description: Security Group ID for Valkey/Redis client access
+      graph_api_client_sg_id:
+        required: false
+        type: string
+        default: ""
+        description: Security group carried by clients of the Graph API
       valkey_url:
         required: true
         type: string
@@ -552,6 +557,7 @@ jobs:
       ami_id: ${{ needs.resolve-ami.outputs.ami_id }}
       # Valkey Configuration
       valkey_sg_id: ${{ inputs.valkey_sg_id }}
+      graph_api_client_sg_id: ${{ inputs.graph_api_client_sg_id }}
       valkey_url: ${{ inputs.valkey_url }}
       # Database Configuration
       database_endpoint: ${{ inputs.database_endpoint }}

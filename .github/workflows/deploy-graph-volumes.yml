@@ -29,6 +29,11 @@ on:
         description: "VPC ID for deployment"
         required: true
         type: string
+      graph_api_client_sg_id:
+        description: "Security group carried by clients of the Graph API"
+        required: false
+        type: string
+        default: ""
       subnet_ids:
         description: "Comma-separated list of private subnet IDs for Lambda"
         required: true
@@ -138,6 +143,11 @@ jobs:
           if [ -n "${{ inputs.graph_api_secret_arn }}" ]; then
             STACK_PARAMS="$STACK_PARAMS \
                   ParameterKey=GraphApiSecretArn,ParameterValue=${{ inputs.graph_api_secret_arn }}"
+          fi
+
+          if [ -n "${{ inputs.graph_api_client_sg_id }}" ]; then
+            STACK_PARAMS="$STACK_PARAMS \
+                  ParameterKey=GraphApiClientSecurityGroupId,ParameterValue=${{ inputs.graph_api_client_sg_id }}"
           fi
 
           # Deploy or update the stack

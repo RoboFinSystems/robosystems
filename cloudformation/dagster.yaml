@@ -133,6 +133,10 @@ Parameters:
     Type: String
     Description: Security group ID for applications connecting to Valkey
     AllowedPattern: ^sg-[0-9a-f]+$
+  GraphApiClientSecurityGroupId:
+    Type: String
+    Default: ""
+    Description: Security group carried by clients of the Graph API (from the VPC stack)
   OpenSearchEndpoint:
     Type: String
     Description: OpenSearch domain endpoint URL (empty if not deployed)
@@ -231,6 +235,10 @@ Parameters:
 
 Conditions:
   HasAlertEmail: !Not [!Equals [!Ref SNSAlertEmail, ""]]
+  # With this group the tasks carry five security groups, the default limit
+  # per network interface; a sixth needs the quota raised first.
+  HasGraphApiClientSecurityGroup:
+    !Not [!Equals [!Ref GraphApiClientSecurityGroupId, ""]]
   HasBastionAccess: !Not [!Equals [!Ref BastionSecurityGroupId, ""]]
   HasApiAccess: !Not [!Equals [!Ref ApiSecurityGroupId, ""]]
   HasOpenSearch: !Not [!Equals [!Ref OpenSearchEndpoint, ""]]
@@ -972,6 +980,10 @@ Resources:
             - !Ref DagsterSecurityGroup
             - !Ref ValkeyClientSecurityGroupId
             - !Ref DatabaseSecurityGroupId
+            - !If
+              - HasGraphApiClientSecurityGroup
+              - !Ref GraphApiClientSecurityGroupId
+              - !Ref AWS::NoValue
             - !If [HasOpenSearch, !Ref OpenSearchClientSecurityGroupId, !Ref "AWS::NoValue"]
       TaskDefinition: !Ref DaemonTaskDefinition
       EnableExecuteCommand: true
@@ -1009,6 +1021,10 @@ Resources:
             - !Ref DagsterSecurityGroup
             - !Ref ValkeyClientSecurityGroupId
             - !Ref DatabaseSecurityGroupId
+            - !If
+              - HasGraphApiClientSecurityGroup
+              - !Ref GraphApiClientSecurityGroupId
+              - !Ref AWS::NoValue
             - !If [HasOpenSearch, !Ref OpenSearchClientSecurityGroupId, !Ref "AWS::NoValue"]
       TaskDefinition: !Ref WebserverTaskDefinition
       # Service Discovery registration

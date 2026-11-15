@@ -343,3 +343,35 @@ class TestUserDataBucketIsNamedWhereItIsGranted:
       f"{template.name} grants a task role the user-data bucket but gives no "
       f"container USER_DATA_BUCKET"
     )
+
+
+# template -> the workflow that deploys it. Everything that calls the Graph
+# API, plus the writers that admit the port from the group they carry.
+_GRAPH_API_CLIENT_STACKS = {
+  "api": "deploy-api.yml",
+  "worker": "deploy-dagster.yml",
+  "dagster": "deploy-dagster.yml",
+  "bastion": "deploy-bastion.yml",
+  "graph-volumes": "deploy-graph-volumes.yml",
+  "graph-ladybug": "deploy-graph-ladybug.yml",
+}
+
+
+class TestGraphApiClientSecurityGroup:
+  """A caller that stops carrying the client group loses the Graph API once
+  the writers admit the port from that group alone."""
+
+  @pytest.mark.parametrize("stem", sorted(_GRAPH_API_CLIENT_STACKS))
+  def test_template_uses_the_group(self, stem):
+    text = (CFN_DIR / f"{stem}.yaml").read_text()
+    assert "\n  GraphApiClientSecurityGroupId:\n" in text
+    assert "!Ref GraphApiClientSecurityGroupId" in text
+
+  @pytest.mark.parametrize("stem", sorted(_GRAPH_API_CLIENT_STACKS))
+  def test_workflow_passes_the_group(self, stem):
+    workflow = (WORKFLOW_DIR / _GRAPH_API_CLIENT_STACKS[stem]).read_text()
+    assert "ParameterKey=GraphApiClientSecurityGroupId" in workflow
+
+  def test_writers_admit_the_port_from_the_group(self):
+    text = (CFN_DIR / "graph-ladybug.yaml").read_text()
+    assert "SourceSecurityGroupId: !Ref GraphApiClientSecurityGroupId" in text
