@@ -204,37 +204,89 @@ def _qnames(session: Session, element_ids: Sequence[str]) -> dict[str, str]:
   return {str(row.id): str(row.qname) for row in rows}
 
 
-def _in_equity(session: Session, element_ids: Sequence[str]) -> dict[str, bool]:
-  """Whether each concept is, or sums by calculation arc into, a root the
-  equity statement rolls forward (the capital concept of any Style, or the
+_ROOT_LABELS = {
+  "rs-gaap:StockholdersEquity": "stockholders' equity",
+  "rs-gaap:MembersEquity": "members' equity",
+  "rs-gaap:PartnersCapital": "partners' capital",
+  "rs-gaap:MinorityInterest": "the non-controlling interest",
+}
+
+
+def _first_roots(
+  concept: str, roots: dict[str, str], parents_of: dict[str, list[str]]
+) -> frozenset[str]:
+  """The root qnames a concept reaches first, walking its calculation
+  parents upward; empty when it sums into none of them."""
+  seen, frontier = {concept}, [concept]
+  while frontier:
+    reached = frozenset(roots[c] for c in frontier if c in roots)
+    if reached:
+      return reached
+    frontier = [p for c in frontier for p in parents_of.get(c, ()) if p not in seen]
+    seen.update(frontier)
+  return frozenset()
+
+
+def _equity_moved(
+  session: Session, style: str, account: str, old_target_id: str, new_target_id: str
+) -> str | None:
+  """Why a balance sheet remap moves an equity total: across the edge of
+  equity (any root an equity statement rolls forward), or between the roots
+  this Style's equity statement rolls forward (its capital concept, the
   outside owners' share)."""
-  from robosystems.operations.roboledger.reports.fact_grid import ROLLFORWARD_ROOTS
+  from robosystems.operations.roboledger.reports.fact_grid import (
+    _NCI_ROOT,  # pyright: ignore[reportPrivateUsage]
+    ROLLFORWARD_ROOTS,
+    _equity_rollforward_form,  # pyright: ignore[reportPrivateUsage]
+  )
+  from robosystems.operations.roboledger.reports.network_picker import (
+    load_close_target_concept,
+  )
 
   roots = {
-    str(row.id)
+    str(row.id): str(row.qname)
     for row in session.execute(
-      text("SELECT id FROM elements WHERE qname = ANY(:roots)"),
+      text("SELECT id, qname FROM elements WHERE qname = ANY(:roots)"),
       {"roots": sorted(ROLLFORWARD_ROOTS)},
     ).fetchall()
   }
   parents_of = _calculation_parents(session)
-  found: dict[str, bool] = {}
-  for concept in element_ids:
-    seen, frontier = {concept}, [concept]
-    while frontier and not seen & roots:
-      frontier = [p for c in frontier for p in parents_of.get(c, ()) if p not in seen]
-      seen.update(frontier)
-    found[concept] = bool(seen & roots)
-  return found
+  old_roots = _first_roots(old_target_id, roots, parents_of)
+  new_roots = _first_roots(new_target_id, roots, parents_of)
+  if bool(old_roots) != bool(new_roots):
+    direction = "out of equity" if old_roots else "into equity"
+    return (
+      f"Moving {account} {direction} changes total equity in every closed "
+      "month: a restatement, not a reclassification."
+    )
+  capital, _ = _equity_rollforward_form(load_close_target_concept(session, style))
+  style_roots = {i: q for i, q in roots.items() if q in (capital, _NCI_ROOT)}
+  old_root = _first_roots(old_target_id, style_roots, parents_of)
+  new_root = _first_roots(new_target_id, style_roots, parents_of)
+  if old_root == new_root:
+    return None
+
+  def label(found: frozenset[str]) -> str:
+    if len(found) != 1:
+      return "equity the statement does not roll forward"
+    (qname,) = found
+    return _ROOT_LABELS.get(qname, qname)
+
+  return (
+    f"Moving {account} from {label(old_root)} to {label(new_root)} changes "
+    "the closing balance of each on the equity statement in every closed "
+    "month: a restatement, not a reclassification."
+  )
 
 
 def _balance_sheet_total_moved(
-  session: Session, account: str, old_target_id: str, new_target_id: str
+  session: Session, style: str, account: str, old_target_id: str, new_target_id: str
 ) -> str | None:
   """Why a remap within the balance sheet still moves a total the close
   asserted: ending cash when the account crosses the cash the cash flow
-  statement reconciles to, total equity when it crosses into or out of
-  equity. ``None`` when it moves neither."""
+  statement reconciles to, an equity total when it crosses into or out of
+  equity or between the roots the equity statement rolls forward. ``None``
+  when it moves none."""
   from robosystems.operations.roboledger.reports.fact_grid import (
     _CASH_ANCHOR_QNAMES,  # pyright: ignore[reportPrivateUsage]
   )
@@ -248,14 +300,7 @@ def _balance_sheet_total_moved(
       f"Moving {account} {direction} changes ending cash and the change in "
       "cash in every closed month: a restatement, not a reclassification."
     )
-  equity = _in_equity(session, [old_target_id, new_target_id])
-  if equity[old_target_id] != equity[new_target_id]:
-    direction = "out of equity" if equity[old_target_id] else "into equity"
-    return (
-      f"Moving {account} {direction} changes total equity in every closed "
-      "month: a restatement, not a reclassification."
-    )
-  return None
+  return _equity_moved(session, style, account, old_target_id, new_target_id)
 
 
 def judge_remap(
@@ -284,7 +329,9 @@ def judge_remap(
   if before is None or before != after:
     raise ReclassificationRefusedError(protected, _why_refused(account, before, after))
   if before == "balance_sheet":
-    moved = _balance_sheet_total_moved(session, account, old_target_id, new_target_id)
+    moved = _balance_sheet_total_moved(
+      session, style, account, old_target_id, new_target_id
+    )
     if moved is not None:
       raise ReclassificationRefusedError(protected, moved)
   return Reclassification(

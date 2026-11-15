@@ -182,7 +182,8 @@ def _presents(
 def reclassification_books(s: Session) -> dict:
   """A chart on the group parent, whose style composes a balance sheet (cash,
   restricted cash, short-term investments, PP&E net, short-term debt, other
-  current liabilities, retained earnings and APIC under stockholders' equity)
+  current liabilities, retained earnings, APIC and members' equity under
+  stockholders' equity, the non-controlling interest beside it)
   and an income statement (rent); PP&E gross is synthesized detail under PP&E
   net by calculation arc; one concept is presented nowhere. The card account has
   landed history before closed June; the newer card has history in open
@@ -228,6 +229,8 @@ def reclassification_books(s: Session) -> dict:
   equity = _library(s, "rs-gaap:StockholdersEquity", "Stockholders' equity")
   retained = _library(s, "rs-gaap:RetainedEarningsAccumulatedDeficit", "Retained")
   apic = _library(s, "rs-gaap:AdditionalPaidInCapital", "APIC")
+  members = _library(s, "rs-gaap:MembersEquity", "Members' equity")
+  nci = _library(s, "rs-gaap:MinorityInterest", "Non-controlling interest")
 
   balance_sheet = _network(s, library, "balance_sheet", "balance_sheet")
   income = _network(s, library, "income_statement", "income_statement")
@@ -237,13 +240,20 @@ def reclassification_books(s: Session) -> dict:
     _presents(s, balance_sheet, liabilities, child)
   _presents(s, balance_sheet, equity, retained)
   _presents(s, balance_sheet, equity, apic)
+  _presents(s, balance_sheet, equity, members)
+  _presents(s, balance_sheet, equity, nci)
   _presents(s, income, expenses, rent)
   calc = Structure(
     name="BS calculation", block_type="balance_sheet", taxonomy_id=calculations.id
   )
   s.add(calc)
   s.flush()
-  for parent, child in ((ppe_net, ppe_gross), (equity, retained), (equity, apic)):
+  for parent, child in (
+    (ppe_net, ppe_gross),
+    (equity, retained),
+    (equity, apic),
+    (equity, members),
+  ):
     s.add(
       Association(
         structure_id=calc.id,
@@ -282,4 +292,6 @@ def reclassification_books(s: Session) -> dict:
     "investments": investments,
     "retained": retained,
     "apic": apic,
+    "members": members,
+    "nci": nci,
   }
