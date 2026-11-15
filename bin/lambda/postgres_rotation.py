@@ -16,6 +16,11 @@ On each rotation, the secret is written with four keys:
 Both key sets hold the same value. The proxy-compatible keys are populated on
 every rotation so that EnableRDSProxy can be flipped to true at any time after
 at least one rotation has occurred against a freshly deployed stack.
+
+The same secret carries a second, read-only login (POSTGRES_SCAN_USER /
+POSTGRES_SCAN_PASSWORD) for staging scans of the extensions database. Each
+rotation creates it if it is missing, gives it a new password and re-applies
+its grants.
 """
 
 import json
@@ -29,6 +34,8 @@ from psycopg2 import sql
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+DEFAULT_SCAN_USER = "extensions_scan"
 
 # Initialize AWS clients
 secrets_client = boto3.client("secretsmanager")
@@ -175,6 +182,10 @@ def create_secret(arn: str, token: str) -> None:
   current_dict["POSTGRES_PASSWORD"] = new_password
   current_dict["username"] = username
   current_dict["password"] = new_password
+  current_dict["POSTGRES_SCAN_USER"] = (
+    current_dict.get("POSTGRES_SCAN_USER") or DEFAULT_SCAN_USER
+  )
+  current_dict["POSTGRES_SCAN_PASSWORD"] = create_new_password()
 
   # Put the secret
   secrets_client.put_secret_value(
@@ -210,13 +221,103 @@ def _secret_at(arn: str, stage: str, version_id: str | None = None) -> dict | No
     return None
 
 
-def set_secret(arn: str, token: str, environment: str) -> None:
-  """Step 2: apply the pending password in PostgreSQL via ALTER USER.
+def _extensions_database() -> str:
+  return os.environ.get("EXTENSIONS_DATABASE_NAME", "extensions")
 
-  Idempotent, in the order AWS's rotation template uses: if the pending
-  password already logs in, it was applied by an earlier attempt and nothing
-  is done. Otherwise it logs in with the current password, then the previous
-  one, and applies the pending password.
+
+def _ensure_scan_login(conn, db_info: dict, login: dict, pending: dict) -> None:
+  """Create or re-password the read-only scan login and re-apply its grants.
+
+  ``conn`` is an autocommit session as the master user and ``login`` the
+  secret version that opened it. Grants cover every schema the master may
+  grant on, and default privileges cover the schemas and tables it creates
+  later, so a new tenant needs no step of its own.
+  """
+  scan_user = pending.get("POSTGRES_SCAN_USER")
+  scan_password = pending.get("POSTGRES_SCAN_PASSWORD")
+  if not scan_user or not scan_password:
+    return
+  master = pending.get("POSTGRES_USER", "postgres")
+  if scan_user == master:
+    raise ValueError("setSecret: the scan login cannot be the master user")
+  scan = sql.Identifier(scan_user)
+
+  with conn.cursor() as cursor:
+    cursor.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (scan_user,))
+    verb = "ALTER" if cursor.fetchone() else "CREATE"
+    cursor.execute(
+      sql.SQL(verb + " ROLE {scan} WITH LOGIN PASSWORD %s").format(scan=scan),
+      (scan_password,),
+    )
+
+  extensions_info = {**db_info, "database": _extensions_database()}
+  try:
+    ext = _connect(extensions_info, login, user=master)
+  except psycopg2.OperationalError as e:
+    if getattr(e, "pgcode", None) == "3D000" or "does not exist" in str(e):
+      logger.warning("setSecret: no extensions database yet; scan grants skipped")
+      return
+    raise
+
+  try:
+    ext.autocommit = True
+    with ext.cursor() as cursor:
+      cursor.execute(
+        """
+        SELECT nspname,
+               has_schema_privilege(nspname, 'USAGE WITH GRANT OPTION')
+        FROM pg_namespace
+        WHERE left(nspname, 3) <> 'pg_' AND nspname <> 'information_schema'
+        """
+      )
+      schemas = cursor.fetchall()
+      skipped = 0
+      for name, grantable in schemas:
+        if not grantable:
+          skipped += 1
+          continue
+        schema = sql.Identifier(name)
+        cursor.execute(
+          sql.SQL("GRANT USAGE ON SCHEMA {schema} TO {scan}").format(
+            schema=schema, scan=scan
+          )
+        )
+        cursor.execute(
+          sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA {schema} TO {scan}").format(
+            schema=schema, scan=scan
+          )
+        )
+      for grant in (
+        "GRANT USAGE ON SCHEMAS TO {scan}",
+        "GRANT SELECT ON TABLES TO {scan}",
+      ):
+        cursor.execute(
+          sql.SQL("ALTER DEFAULT PRIVILEGES FOR ROLE {master} " + grant).format(
+            master=sql.Identifier(master), scan=scan
+          )
+        )
+    logger.info(
+      f"setSecret: scan login granted on {len(schemas) - skipped} schemas"
+      + (f"; {skipped} not grantable by the master user" if skipped else "")
+    )
+  finally:
+    ext.close()
+
+  _connect(
+    extensions_info,
+    {"POSTGRES_PASSWORD": scan_password},
+    user=scan_user,
+  ).close()
+
+
+def set_secret(arn: str, token: str, environment: str) -> None:
+  """Step 2: apply the pending passwords in PostgreSQL.
+
+  Idempotent, in the order AWS's rotation template uses: it logs in with the
+  pending password, then the current one, then the previous one. The scan
+  login is brought up first, so a failure there leaves the master password
+  where it was; the master password is then applied unless the pending one
+  was what logged in.
   """
   pending_dict = _secret_at(arn, "AWSPENDING", token)
   if pending_dict is None:
@@ -224,25 +325,22 @@ def set_secret(arn: str, token: str, environment: str) -> None:
   username = pending_dict.get("POSTGRES_USER", "postgres")
   db_info = get_database_connection_info(arn, environment)
 
-  try:
-    _connect(db_info, pending_dict).close()
-    logger.info("setSecret: the pending password is already applied")
-    return
-  except psycopg2.OperationalError:
-    pass
-
   conn = None
+  login: dict | None = None
+  already_applied = False
   last_error: Exception | None = None
-  for stage in ("AWSCURRENT", "AWSPREVIOUS"):
-    login = _secret_at(arn, stage)
-    if login is None:
+  for stage in ("AWSPENDING", "AWSCURRENT", "AWSPREVIOUS"):
+    candidate = pending_dict if stage == "AWSPENDING" else _secret_at(arn, stage)
+    if candidate is None:
       continue
     try:
-      conn = _connect(db_info, login, user=username)
+      conn = _connect(db_info, candidate, user=username)
+      login = candidate
+      already_applied = stage == "AWSPENDING"
       break
     except psycopg2.OperationalError as e:
       last_error = e
-  if conn is None:
+  if conn is None or login is None:
     error_type = type(last_error).__name__ if last_error else "NoCredential"
     logger.error(f"setSecret: Unable to log into database: {error_type}")
     raise ValueError(
@@ -251,6 +349,10 @@ def set_secret(arn: str, token: str, environment: str) -> None:
 
   try:
     conn.autocommit = True
+    _ensure_scan_login(conn, db_info, login, pending_dict)
+    if already_applied:
+      logger.info("setSecret: the pending password is already applied")
+      return
     with conn.cursor() as cursor:
       # Quote the identifier (user name) safely via psycopg2.sql.Identifier
       # so a hostile username in the secret can't inject SQL.

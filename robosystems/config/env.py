@@ -1228,6 +1228,27 @@ class EnvConfig:
     return f"{base_url}/{database_name}"
 
   @classmethod
+  def get_extensions_scan_database_url(cls) -> str:
+    """The read-only login for staging scans of the extensions database, or
+    "" when none is configured.
+
+    Read at call time, so a rotated password is picked up without a restart.
+    """
+    url = get_str_env("EXTENSIONS_SCAN_DATABASE_URL", "")
+    if url:
+      return url
+
+    endpoint = get_str_env("DATABASE_ENDPOINT", "")
+    user = get_secret_value("POSTGRES_SCAN_USER", "")
+    password = get_secret_value("POSTGRES_SCAN_PASSWORD", "")
+    if not (endpoint and user and password):
+      return ""
+
+    dbname = urlparse(cls.EXTENSIONS_DATABASE_URL).path.lstrip("/") or "extensions"
+    port = get_str_env("DATABASE_PORT", "5432")
+    return f"postgresql://{user}:{password}@{endpoint}:{port}/{dbname}?sslmode=require"
+
+  @classmethod
   def get_s3_config(cls) -> dict:
     """boto3 kwargs for S3; S3-specific credentials when set, else IAM roles."""
     config = {
