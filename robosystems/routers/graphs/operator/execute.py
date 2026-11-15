@@ -353,7 +353,8 @@ async def list_operators_endpoint(
     "reads, documents, memory, and read-only Cypher; supports `quick`, "
     "`standard`, `extended`; `cypher` is accepted as its former name) and "
     "`mapping` (autonomous Chart of Accounts → rs-gaap mapping; roboledger "
-    "graphs only, `extended` only). "
+    "graphs only, `extended` only). `author` makes writes, so it is never "
+    "chosen here: call it by name. "
     "`GET /v1/graphs/{graph_id}/operator` lists what is registered. Credits "
     "are consumed by actual token usage, not a fixed price per mode. "
     "The run executes on the background worker: the default answer is 202 "
@@ -417,7 +418,7 @@ async def get_operator_metadata(
   ),
   operator_type: str = Path(
     ...,
-    description="Operator type identifier (e.g., 'analyst', 'mapping')",
+    description="Operator type identifier: 'analyst', 'mapping' or 'author'",
     pattern="^[a-zA-Z][a-zA-Z0-9_]{2,32}$",
   ),
   _current_user: User = Depends(get_current_user_with_graph),
@@ -440,8 +441,12 @@ async def get_operator_metadata(
     "Available: `analyst` (natural-language questions over the graph — "
     "curated financial reads, documents, memory, and read-only Cypher; RAG "
     "retrieval is one of its capabilities, not a separate operator; `cypher` "
-    "is accepted as its former name) and `mapping` (Chart of Accounts → "
-    "rs-gaap mapping, roboledger graphs only). `GET /v1/graphs/{graph_id}/operator` lists what is registered. "
+    "is accepted as its former name), `mapping` (Chart of Accounts → "
+    "rs-gaap mapping, roboledger graphs only) and `author` (makes the change "
+    "a request asks for, such as metric and forecast blocks, counterparties, "
+    "memories, draft reports and inbox classifications, through writes that "
+    "are reversible or wait on a person's step; needs write access to the "
+    "graph). `GET /v1/graphs/{graph_id}/operator` lists what is registered. "
     "The run executes on the background worker: the default answer is 202 "
     "with the operation's `_links` (stream, status, cancel); `?mode=sync` "
     "waits up to 50s and answers 200 with the result."
