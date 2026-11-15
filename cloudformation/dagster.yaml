@@ -235,6 +235,8 @@ Parameters:
 
 Conditions:
   HasAlertEmail: !Not [!Equals [!Ref SNSAlertEmail, ""]]
+  # With this group the tasks carry five security groups, the default limit
+  # per network interface; a sixth needs the quota raised first.
   HasGraphApiClientSecurityGroup:
     !Not [!Equals [!Ref GraphApiClientSecurityGroupId, ""]]
   HasBastionAccess: !Not [!Equals [!Ref BastionSecurityGroupId, ""]]

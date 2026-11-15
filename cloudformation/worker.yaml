@@ -166,6 +166,8 @@ Parameters:
 
 Conditions:
   HasOpenSearch: !Not [!Equals [!Ref OpenSearchEndpoint, ""]]
+  # With this group the tasks carry five security groups, the default limit
+  # per network interface; a sixth needs the quota raised first.
   HasGraphApiClientSecurityGroup:
     !Not [!Equals [!Ref GraphApiClientSecurityGroupId, ""]]
   AutoscalingEnabled: !Equals [!Ref WorkerAutoscalingEnabled, "true"]
