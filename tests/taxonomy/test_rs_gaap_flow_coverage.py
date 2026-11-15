@@ -222,6 +222,40 @@ def test_every_default_flow_carries_its_activity_trait(
   assert not undeclared, f"defaults naming undeclared concepts: {undeclared}"
 
 
+def test_an_operating_flow_is_only_ever_an_investments_default(calc, activity) -> None:
+  """The engine reads any concept with an activity gross, from the cash
+  lines, and every other operating row from a balance's change. So an
+  operating default is safe only on a balance that is no working capital: one
+  that also has an investing or financing default (the equity-method
+  investment's distribution, 0068). An activity trait on a working-capital
+  or add-back row would silently turn it from a balance change into a flow."""
+  invested = {
+    bs
+    for bs, flows in calc["derivations"].items()
+    if any(
+      activity.get(flow) in ("investingActivity", "financingActivity")
+      for flow, _w in flows
+    )
+  }
+  misplaced = sorted(
+    f"{flow} (default of {bs})"
+    for bs, flows in calc["derivations"].items()
+    for flow, _w in flows
+    if activity.get(flow) == "operatingActivity" and bs not in invested
+  )
+  assert not misplaced, (
+    f"operating flows on a balance with no investing or financing default: {misplaced}"
+  )
+  # The reconciling rows the operating section is built from carry none.
+  reconciling_with_activity = sorted(
+    flow
+    for flows in calc["derivations"].values()
+    for flow, _w in flows
+    if flow.startswith("rs-gaap:IncreaseDecreaseIn") and flow in activity
+  )
+  assert not reconciling_with_activity, reconciling_with_activity
+
+
 def test_the_equity_statement_has_rows_of_its_own(styles, networks) -> None:
   """The roll-forward's change rows are equity movement concepts, never the
   cash flow's (Joey, 2026-10-16, replacing the 2026-10-13 shared-concept
