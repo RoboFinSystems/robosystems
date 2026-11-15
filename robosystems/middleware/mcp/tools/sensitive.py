@@ -30,6 +30,13 @@ def withhold_input_fields(schema: dict[str, Any]) -> dict[str, Any]:
   }
   if isinstance(schema.get("required"), list):
     out["required"] = [k for k in schema["required"] if k not in WITHHELD_INPUT_FIELDS]
+  if isinstance(schema.get("examples"), list):
+    # An example that only showed a withheld field shows nothing left.
+    examples = [
+      drop_withheld_arguments(e) if isinstance(e, dict) else e
+      for e in schema["examples"]
+    ]
+    out["examples"] = [e for e in examples if e != {}]
   return out
 
 

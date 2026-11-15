@@ -21,6 +21,8 @@ def test_no_generated_tool_asks_for_a_tax_id(extension):
     schema = tool.get_tool_definition()["inputSchema"]
     assert "tax_id" not in schema.get("properties", {}), name
     assert "tax_id" not in schema.get("required", []), name
+    for example in schema.get("examples", []):
+      assert "tax_id" not in example, name
 
 
 @pytest.mark.unit
@@ -34,6 +36,18 @@ def test_withhold_input_fields_drops_property_and_requirement():
   assert out["properties"] == {"name": {"type": "string"}}
   assert out["required"] == ["name"]
   assert "tax_id" in schema["properties"]
+
+
+@pytest.mark.unit
+def test_withhold_input_fields_drops_the_field_from_examples():
+  schema = {
+    "type": "object",
+    "properties": {"name": {"type": "string"}, "tax_id": {"type": "string"}},
+    "examples": [{"name": "Acme", "tax_id": "12-3456789"}, {"tax_id": "1"}],
+  }
+  out = withhold_input_fields(schema)
+  assert out["examples"] == [{"name": "Acme"}]
+  assert schema["examples"][0]["tax_id"] == "12-3456789"
 
 
 @pytest.mark.unit
