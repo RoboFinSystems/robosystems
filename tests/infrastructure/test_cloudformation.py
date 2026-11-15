@@ -375,3 +375,15 @@ class TestGraphApiClientSecurityGroup:
   def test_writers_admit_the_port_from_the_group(self):
     text = (CFN_DIR / "graph-ladybug.yaml").read_text()
     assert "SourceSecurityGroupId: !Ref GraphApiClientSecurityGroupId" in text
+
+  def test_writers_admit_the_vpc_only_without_the_group(self):
+    text = (CFN_DIR / "graph-ladybug.yaml").read_text()
+    group = text.split("\n  WriterSecurityGroup:\n", 1)[1].split("\n  # ====", 1)[0]
+    ingress = group.split("      SecurityGroupIngress:\n", 1)[1].split(
+      "      Tags:", 1
+    )[0]
+    rules = re.findall(r"^        - (.*)$", ingress, flags=re.MULTILINE)
+    assert rules == ["!If"], "the writer group takes one conditional 8001 rule"
+    client, fallback = ingress.split("          - IpProtocol: tcp\n")[1:]
+    assert "SourceSecurityGroupId: !Ref GraphApiClientSecurityGroupId" in client
+    assert "CidrIp: !Ref VpcCidr" in fallback

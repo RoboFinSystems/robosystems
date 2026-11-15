@@ -185,12 +185,9 @@ Resources:
       GroupName: !Sub "${AWS::StackName}-writers-sg"
       GroupDescription: Security group for LadybugDB database writers
       VpcId: !Ref VpcId
+      # Without the client group (a stack deployed before the VPC stack exported
+      # it), the whole VPC keeps access so the writers stay reachable.
       SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 8001
-          ToPort: 8001
-          CidrIp: !Ref VpcCidr
-          Description: Allow Graph API access from VPC
         - !If
           - HasGraphApiClientSecurityGroup
           - IpProtocol: tcp
@@ -198,7 +195,11 @@ Resources:
             ToPort: 8001
             SourceSecurityGroupId: !Ref GraphApiClientSecurityGroupId
             Description: Graph API clients
-          - !Ref AWS::NoValue
+          - IpProtocol: tcp
+            FromPort: 8001
+            ToPort: 8001
+            CidrIp: !Ref VpcCidr
+            Description: Allow Graph API access from VPC
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-writers-sg"
