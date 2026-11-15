@@ -167,7 +167,13 @@ class OAuthToken(Model):
     return access, access_plain, refresh, refresh_plain, OAUTH_ACCESS_TOKEN_TTL_SECONDS
 
   @staticmethod
-  def log_issued(access: OAuthToken, refresh: OAuthToken, *, rotation: bool) -> None:
+  def log_issued(
+    access: OAuthToken,
+    refresh: OAuthToken,
+    *,
+    rotation: bool,
+    reuse_grace: bool = False,
+  ) -> None:
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.AUTH_SUCCESS,
       user_id=str(access.user_id),
@@ -178,6 +184,7 @@ class OAuthToken(Model):
         "access_token_id": access.id,
         "refresh_token_id": refresh.id,
         "rotation": rotation,
+        "reuse_grace": reuse_grace,
       },
       risk_level="low",
     )
@@ -273,17 +280,18 @@ class OAuthToken(Model):
     return cls._mark_revoked(session.query(cls).filter(cls.user_id == user_id))
 
   @classmethod
-  def mark_access_revoked_through(
+  def mark_pair_access_revoked(
     cls, refresh: OAuthToken, session: Session
   ) -> list[OAuthToken]:
-    """Retire the access tokens of ``refresh``'s family minted with it or
-    before it. A sibling pair issued later, inside the reuse grace, belongs to
-    another caller and keeps working."""
+    """Retire the access token minted with ``refresh`` (``mint_pair`` stamps
+    both with one ``created_at``). Each pair's access token goes when its own
+    refresh token rotates, so a sibling pair from the reuse grace, held by
+    another caller, keeps working whichever sibling rotates first."""
     return cls._mark_revoked(
       session.query(cls).filter(
         cls.family_id == refresh.family_id,
         cls.token_type == TOKEN_TYPE_ACCESS,
-        cls.created_at <= refresh.created_at,
+        cls.created_at == refresh.created_at,
       )
     )
 

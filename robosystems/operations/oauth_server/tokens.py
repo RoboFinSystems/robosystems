@@ -28,13 +28,13 @@ from .authorization import AuthorizationCodeStore
 from .clients import redirect_uri_matches, validate_redirect_uri
 from .resources import normalize_scope, resolve_resource
 
-# RFC 7636 §4.1: the verifier is 43-128 unreserved characters.
 # A client's concurrent refreshes (several connectors or processes sharing one
 # stored refresh token) present the token again moments after it rotated.
 # Inside this window a re-presentation is issued a sibling pair in the same
 # family; past it, it is replay and the family is revoked.
 REFRESH_REUSE_GRACE_SECONDS = 60
 
+# RFC 7636 §4.1: the verifier is 43-128 unreserved characters.
 _VERIFIER_MIN = 43
 _VERIFIER_MAX = 128
 
@@ -237,11 +237,12 @@ def refresh_access_token(
   try:
     if not OAuthToken.consume_refresh(str(row.id), session, commit=False):
       session.rollback()
+      # Read committed: the reload sees the rotation that won the claim.
       session.refresh(row)
       if row.rotated_within(REFRESH_REUSE_GRACE_SECONDS):
         return _issue_sibling_pair(row, grant, session)
       raise _replay()
-    previous_access = OAuthToken.mark_access_revoked_through(row, session)
+    previous_access = OAuthToken.mark_pair_access_revoked(row, session)
     access, access_plain, refresh, refresh_plain, ttl = OAuthToken.mint_pair(
       grant_id=str(grant.id),
       user_id=str(grant.user_id),
@@ -300,7 +301,7 @@ def _issue_sibling_pair(
     f"issued a sibling pair in family {row.family_id}"
   )
   try:
-    OAuthToken.log_issued(access, refresh, rotation=True)
+    OAuthToken.log_issued(access, refresh, rotation=True, reuse_grace=True)
   except Exception as e:
     logger.error(f"OAuth sibling pair committed; a post-commit step failed: {e}")
   return TokenResponse(

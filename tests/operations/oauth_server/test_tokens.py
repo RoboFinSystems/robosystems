@@ -481,8 +481,9 @@ class TestRefresh:
     assert all(row.is_live for row in rows)
     assert len({row.family_id for row in rows}) == 1
 
+  @pytest.mark.parametrize("rotate", ["first", "second"])
   def test_rotating_one_sibling_leaves_the_others_access_token_alone(
-    self, test_db, issued, client_row
+    self, test_db, issued, client_row, rotate
   ):
     first = refresh_access_token(
       refresh_token=issued.refresh_token,
@@ -498,8 +499,9 @@ class TestRefresh:
       resource=None,
       session=test_db,
     )
+    rotated, other = (first, second) if rotate == "first" else (second, first)
     refresh_access_token(
-      refresh_token=first.refresh_token,
+      refresh_token=rotated.refresh_token,
       client=client_row,
       scope=None,
       resource=None,
@@ -507,10 +509,10 @@ class TestRefresh:
     )
     test_db.expire_all()
     assert OAuthToken.get_by_plaintext(
-      first.access_token, TOKEN_TYPE_ACCESS, test_db
+      rotated.access_token, TOKEN_TYPE_ACCESS, test_db
     ).revoked_at
     assert OAuthToken.get_by_plaintext(
-      second.access_token, TOKEN_TYPE_ACCESS, test_db
+      other.access_token, TOKEN_TYPE_ACCESS, test_db
     ).is_live
 
   def test_a_replay_past_the_grace_revokes_the_siblings_too(
