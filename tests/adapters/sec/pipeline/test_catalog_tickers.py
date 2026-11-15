@@ -11,6 +11,7 @@ from dagster import build_asset_context
 from robosystems.adapters.sec.pipeline import catalog as catalog_module
 from robosystems.adapters.sec.pipeline.catalog import sec_filing_catalog
 from robosystems.adapters.sec.pipeline.configs import SECFilingCatalogConfig
+from robosystems.adapters.sec.successions import Reassignment, Succession
 from robosystems.adapters.sec.tickers import Listing
 from robosystems.config.storage.shared import (
   FILING_CATALOG_ALIASES_KEY,
@@ -209,12 +210,76 @@ class TestCatalogWhenTickersMove:
     # The renamed filer files in this partition, so both its files stay current.
     assert {"companies/bny.json", "companies/bk.json"} <= set(bucket.writes)
 
-  def test_a_shared_ticker_is_not_taken_from_its_old_holder(self, bucket):
-    _run(self._seeded(bucket))
+  def test_edgars_holder_has_a_shared_ticker_and_the_gap_is_reported(self, bucket):
+    """With nothing on record about the two registrants, EDGAR's holder has
+    the ticker, the other leaves the catalog, and the run says someone has to
+    read the filings."""
+    with (
+      patch.object(catalog_module, "SUCCESSIONS", ()),
+      patch.object(catalog_module, "REASSIGNMENTS", ()),
+      patch.object(catalog_module, "recorded_pairs", return_value=set()),
+    ):
+      result = _run(self._seeded(bucket))
 
-    index = {r["cik"]: r for r in bucket.json(FILING_CATALOG_INDEX_KEY)["companies"]}
-    assert index[NEW_HOLDER]["ticker"] == "XOM"
+    index = bucket.json(FILING_CATALOG_INDEX_KEY)
+    rows = {r["cik"]: r for r in index["companies"]}
+    assert rows[NEW_HOLDER]["ticker"] == "XOM"
+    assert OLD_HOLDER not in rows
     assert "XOM" not in bucket.json(FILING_CATALOG_ALIASES_KEY)["aliases"]
+    assert index["released"] == []
+    assert result.metadata["tickers_unrecorded"] == 1
+    assert result.metadata["filers_dropped"] == 0
+
+  def test_a_successor_carries_its_predecessors_filings(self, bucket):
+    """One company, two registrants: the ticker's file lists both sets of
+    filings, each under the CIK that filed it, and the index says whose."""
+    succession = Succession("XOM", OLD_HOLDER, NEW_HOLDER, "2026-07-01", "evidence")
+    bucket.seed_index(_prior(OLD_HOLDER, "XOM"), _prior(UNTOUCHED, "UNT"))
+    with (
+      patch.object(catalog_module, "SUCCESSIONS", (succession,)),
+      patch.object(catalog_module, "REASSIGNMENTS", ()),
+      patch.object(
+        catalog_module, "recorded_pairs", return_value={(OLD_HOLDER, NEW_HOLDER)}
+      ),
+    ):
+      result = _run(bucket)
+
+    document = bucket.json("companies/xom.json")
+    assert document["cik"] == NEW_HOLDER
+    assert {(f["cik"], f["accession"]) for f in document["filings"]} == {
+      (NEW_HOLDER, f"{NEW_HOLDER}-26-000001"),
+      (OLD_HOLDER, f"{OLD_HOLDER}-26-000001"),
+    }
+    assert document["predecessors"] == [{"cik": OLD_HOLDER, "name": "FILER 4"}]
+    index = bucket.json(FILING_CATALOG_INDEX_KEY)
+    rows = {r["cik"]: r for r in index["companies"]}
+    assert OLD_HOLDER not in rows
+    assert rows[NEW_HOLDER]["predecessors"] == [OLD_HOLDER]
+    assert rows[NEW_HOLDER]["filings"] == 2
+    # The predecessor left the index through its successor, which is no loss.
+    assert result.metadata["filers_dropped"] == 0
+    assert result.metadata["filers_merged"] == 1
+    assert result.metadata["tickers_unrecorded"] == 0
+
+  def test_a_recorded_reassignment_releases_the_former_holder(self, bucket):
+    """Another company on an old symbol: nothing is joined, and the index
+    tells the graph which filer gave the ticker up."""
+    reassignment = Reassignment("XOM", OLD_HOLDER, NEW_HOLDER, "unrelated")
+    with (
+      patch.object(catalog_module, "SUCCESSIONS", ()),
+      patch.object(catalog_module, "REASSIGNMENTS", (reassignment,)),
+      patch.object(
+        catalog_module, "recorded_pairs", return_value={(OLD_HOLDER, NEW_HOLDER)}
+      ),
+    ):
+      result = _run(self._seeded(bucket), full_rebuild=True)
+
+    document = bucket.json("companies/xom.json")
+    assert [f["cik"] for f in document["filings"]] == [NEW_HOLDER]
+    assert "predecessors" not in document
+    index = bucket.json(FILING_CATALOG_INDEX_KEY)
+    assert index["released"] == [{"cik": OLD_HOLDER, "ticker": "XOM"}]
+    assert result.metadata["tickers_unrecorded"] == 0
 
   def test_no_map_keeps_the_published_tickers_rather_than_the_rows(self, bucket):
     """The rows still say BK. Going back to them would undo the rename and

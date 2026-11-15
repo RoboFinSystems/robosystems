@@ -89,18 +89,27 @@ class TestApplyTickerMap:
     out = apply_ticker_map({ACME: _filer("OLD")}, {}, filed={ACME}, prior={ACME: "NEW"})
     assert out[ACME]["ticker"] == "NEW"
 
-  def test_a_ticker_another_filer_still_holds_is_held_back(self):
+  def test_edgars_holder_takes_a_ticker_from_a_filer_edgar_no_longer_lists(self):
+    """A ticker names one filer. The filer EDGAR lists it for holds it, and
+    the one that carried it comes back with none."""
     rows = {ACME: _filer("XOM"), BETA: _filer("ZZZ", "BETA INC")}
 
     out = apply_ticker_map(rows, {BETA: Listing(("XOM",))}, filed={ACME, BETA})
 
-    assert out[ACME]["ticker"] == "XOM"
-    assert out[BETA]["ticker"] == "ZZZ"
+    assert (out[ACME]["ticker"], out[BETA]["ticker"]) == (None, "XOM")
 
-  def test_two_filers_already_on_a_ticker_are_left_as_they_are(self):
+  def test_two_filers_already_on_a_ticker_leave_it_to_edgars_holder(self):
     rows = {ACME: _filer("XOM"), BETA: _filer("XOM", "BETA INC")}
 
     out = apply_ticker_map(rows, {BETA: Listing(("XOM",))}, filed={ACME, BETA})
+
+    assert (out[ACME]["ticker"], out[BETA]["ticker"]) == (None, "XOM")
+
+  def test_a_ticker_edgar_lists_for_neither_filer_moves_nowhere(self):
+    """Absence clears nothing: with no listed holder, both keep it."""
+    rows = {ACME: _filer("XOM"), BETA: _filer("XOM", "BETA INC")}
+
+    out = apply_ticker_map(rows, {}, filed={ACME, BETA})
 
     assert (out[ACME]["ticker"], out[BETA]["ticker"]) == ("XOM", "XOM")
 
@@ -112,14 +121,14 @@ class TestApplyTickerMap:
 
     assert (out[ACME]["ticker"], out[BETA]["ticker"]) == ("ECHO", "SATS")
 
-  def test_holding_one_filer_back_can_hold_back_the_next(self):
+  def test_a_chain_of_moves_settles_in_one_pass(self):
     rows = {ACME: _filer("AAA"), BETA: _filer("BBB", "B"), GAMMA: _filer("CCC", "C")}
-    # BETA wants CCC, which stays held, so AAA's mover cannot take BBB either.
+    # BETA takes CCC from the filer EDGAR dropped, which frees BBB for ACME.
     ticker_map = {ACME: Listing(("BBB",)), BETA: Listing(("CCC",))}
 
     out = apply_ticker_map(rows, ticker_map, filed={ACME, BETA, GAMMA})
 
-    assert [out[c]["ticker"] for c in (ACME, BETA, GAMMA)] == ["AAA", "BBB", "CCC"]
+    assert [out[c]["ticker"] for c in (ACME, BETA, GAMMA)] == ["BBB", "CCC", None]
 
   def test_a_filer_with_no_filings_holds_nothing_back(self):
     rows = {ACME: _filer("XOM"), BETA: _filer("ZZZ", "BETA INC")}

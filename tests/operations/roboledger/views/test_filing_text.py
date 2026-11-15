@@ -921,3 +921,21 @@ def test_request_caps_match_xbrlkit():
   assert SEARCH_TEXT_MAX_WINDOW == xbrlkit_tools.MAX_WINDOW
   assert SEARCH_TEXT_MAX_HITS == xbrlkit_tools.MAX_HITS
   assert READ_TEXT_MAX_LENGTH == xbrlkit_tools.MAX_READ
+
+
+def test_a_predecessors_filing_is_read_from_its_own_folder():
+  """A ticker's file can carry the filings of the registrant its holder
+  succeeded; each names the CIK that filed it, which is where it lives."""
+  from robosystems.operations.roboledger.views.filing_text import _report_ref
+
+  entry = {
+    "cik": "0000034088",
+    "accession": "0000034088-26-000045",
+    "form": "10-K",
+    "filing_date": "2026-02-18",
+    "report_id": "r1",
+  }
+
+  assert _report_ref("0002115436", entry).cik == "0000034088"
+  # An entry written before filings named their filer is the document's own.
+  assert _report_ref("0002115436", {**entry, "cik": None}).cik == "0002115436"

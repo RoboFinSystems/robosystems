@@ -573,6 +573,14 @@ A filer is identified by its CIK, and its ticker is whatever EDGAR lists for it 
 
 The old ticker keeps working. `companies/{old}.json` stays a whole company document with a `moved_to` field, `companies/aliases.json` lists every old ticker with its filer's CIK, and the tools and `search-documents` accept either ticker. Raw Cypher sees only the current one, so match `Entity.cik` when a query has to survive a rename.
 
+### When a company changes registrant
+
+A company can move to a new CIK and stay the same company: a holding-company reorganization, a redomicile, a second-step conversion. EDGAR then lists the ticker under the new registrant and links the two nowhere in its data; the successor says so itself, on Form 8-K12B. Those links are kept in a curated table (`adapters/sec/successions.py`), each row with the filing that states it.
+
+For a recorded succession the ticker carries the whole history. `companies/{ticker}.json` is the successor's document with `predecessors` (each a `cik` and `name`), and its `filings` list holds both registrants' filings, newest first. Every filing entry names the `cik` that filed it, which is the folder it is published under, so read a filing's location from the entry and never from the document's own `cik`. In the graph both registrants' `Entity` rows carry the ticker, so a query by ticker spans them and one by `Entity.cik` reads a single registrant.
+
+When the new holder of a ticker is another company (a spin-off, a new shell on an old symbol, a symbol reused), nothing is joined: the ticker names its current holder, and the former holder is reached by CIK. A ticker that changes registrant with neither finding on record is reported by the catalog run until someone reads the filings and records one.
+
 On a stack of your own, every SEC schedule and sensor ships stopped; turn on the ones you want in the Dagster UI.
 
 ## Common Tasks
