@@ -6,8 +6,6 @@ from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 
 from .cashflow import (
-  FINANCING,
-  INVESTING,
   PAYABLES,
   Flows,
   LineFlows,
@@ -299,8 +297,9 @@ class Checker:
     flows: Flows,
     owed: dict[str, float],
   ) -> None:
-    """The rows themselves: investing and financing against the journal
-    lines, operating against the income statement and the balance changes."""
+    """The rows themselves: investing, financing and the gross operating rows
+    against the journal lines, the rest of operating against the income
+    statement and the balance changes."""
     kind = "cash_flow_statement"
     if not _stated(statement):
       return
@@ -308,8 +307,7 @@ class Checker:
     stated = {
       f["qname"]: _first(f)
       for f in rows
-      if flows.section.get(f["qname"]) in (INVESTING, FINANCING)
-      and not f.get("is_subtotal")
+      if f["qname"] in flows.gross and not f.get("is_subtotal")
     }
     paid: dict[str, float] = {}
     for flow, amount in from_lines.paid.items():
@@ -322,7 +320,7 @@ class Checker:
     ]
     self._add(
       kind,
-      "investing and financing rows equal their ledger lines",
+      "investing, financing and gross operating rows equal their ledger lines",
       not wrong,
       "; ".join(wrong[:4]) or f"{len(stated)} rows",
     )

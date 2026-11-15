@@ -374,7 +374,8 @@ class FlowCandidate(BaseModel):
   activity: str = Field(
     ...,
     description=(
-      "`investing` or `financing`: the section of the statement the row sits in."
+      "`operating`, `investing` or `financing`: the section of the statement "
+      "the row sits in."
     ),
   )
 

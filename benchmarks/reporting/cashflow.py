@@ -91,12 +91,41 @@ class Flows:
     return flow
 
   @property
-  def working(self) -> frozenset[str]:
-    """The balance concepts whose change is an operating row."""
+  def invested(self) -> frozenset[str]:
+    """The balance concepts with an investing or financing default row: an
+    investment, a debt, equity. Their change is never working capital."""
     return frozenset(
       concept
       for flow, concepts in self.derived_from.items()
-      if self.section.get(flow) == OPERATING
+      if self.section.get(flow) in (INVESTING, FINANCING)
+      for concept in concepts
+    )
+
+  @property
+  def gross(self) -> frozenset[str]:
+    """The rows read from cash lines rather than from balance changes: every
+    investing and financing row, and an operating row that is a default of an
+    invested balance (a distribution from an equity-method investee, a
+    return on the investment where its sale is a return of it)."""
+    invested = self.invested
+    return frozenset(
+      flow
+      for flow, section in self.section.items()
+      if section in (INVESTING, FINANCING)
+      or (
+        section == OPERATING
+        and any(c in invested for c in self.derived_from.get(flow, ()))
+      )
+    )
+
+  @property
+  def working(self) -> frozenset[str]:
+    """The balance concepts whose change is an operating row."""
+    gross = self.gross
+    return frozenset(
+      concept
+      for flow, concepts in self.derived_from.items()
+      if self.section.get(flow) == OPERATING and flow not in gross
       for concept in concepts
     )
 
@@ -143,9 +172,10 @@ def line_flows(
   the members' own entries put it on."""
   out = LineFlows()
   working = flows.working
+  gross_rows = flows.gross
 
   def gross(flow: str | None) -> bool:
-    return flows.section.get(flow or "") in (INVESTING, FINANCING)
+    return (flow or "") in gross_rows
 
   def add(to: dict[str, float], key: str | None, amount: float) -> None:
     if key and amount:
@@ -261,8 +291,10 @@ def operating_rows(
     if flows.section.get(fact["qname"]) == OPERATING and not fact.get("is_subtotal")
   }
   out: list[tuple[str, float, float]] = []
+  gross = flows.gross
   for qname in [*stated, *(q for q in flows.derived_from if q not in stated)]:
-    if flows.section.get(qname) != OPERATING:
+    # A gross operating row is checked against its ledger lines, as investing.
+    if flows.section.get(qname) != OPERATING or qname in gross:
       continue
     if qname in income:
       expected = flows.weight.get(qname, 1.0) * income[qname]

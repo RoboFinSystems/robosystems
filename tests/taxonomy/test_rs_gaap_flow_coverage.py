@@ -33,7 +33,10 @@ from robosystems.taxonomy.discovery import framework_root
 _PACKAGES = framework_root("rs-gaap") / "packages"
 _PRES = "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/"
 _HAS_TRAIT = "https://robosystems.ai/vocab/hasTrait"
+# A flow is any concept with an activity; an operating one is a gross receipt
+# the indirect method cannot reach (an equity-method distribution, 0068).
 _SUBTOTALS = {
+  "operatingActivity": "rs-gaap:NetCashProvidedByUsedInOperatingActivities",
   "investingActivity": "rs-gaap:NetCashProvidedByUsedInInvestingActivities",
   "financingActivity": "rs-gaap:NetCashProvidedByUsedInFinancingActivities",
 }
@@ -65,7 +68,7 @@ def declared() -> set[str]:
 
 @pytest.fixture(scope="module")
 def activity() -> dict[str, str]:
-  """``{qname: investingActivity | financingActivity}`` from the traits package."""
+  """``{qname: its activity}`` from the traits package."""
   out: dict[str, str] = {}
   for n in _graph("rs-gaap-traits"):
     for t in n.get(_HAS_TRAIT, []):
@@ -209,9 +212,7 @@ def test_every_default_flow_carries_its_activity_trait(
     and not flow.startswith(operating_prefix)
     and flow != "rs-gaap:DepreciationDepletionAndAmortization"
   )
-  assert not untraited, (
-    f"investing/financing defaults with no activityType trait: {untraited}"
-  )
+  assert not untraited, f"default flows with no activityType trait: {untraited}"
   undeclared = sorted(
     flow
     for flows in calc["derivations"].values()
@@ -219,6 +220,40 @@ def test_every_default_flow_carries_its_activity_trait(
     if flow not in declared
   )
   assert not undeclared, f"defaults naming undeclared concepts: {undeclared}"
+
+
+def test_an_operating_flow_is_only_ever_an_investments_default(calc, activity) -> None:
+  """The engine reads any concept with an activity gross, from the cash
+  lines, and every other operating row from a balance's change. So an
+  operating default is safe only on a balance that is no working capital: one
+  that also has an investing or financing default (the equity-method
+  investment's distribution, 0068). An activity trait on a working-capital
+  or add-back row would silently turn it from a balance change into a flow."""
+  invested = {
+    bs
+    for bs, flows in calc["derivations"].items()
+    if any(
+      activity.get(flow) in ("investingActivity", "financingActivity")
+      for flow, _w in flows
+    )
+  }
+  misplaced = sorted(
+    f"{flow} (default of {bs})"
+    for bs, flows in calc["derivations"].items()
+    for flow, _w in flows
+    if activity.get(flow) == "operatingActivity" and bs not in invested
+  )
+  assert not misplaced, (
+    f"operating flows on a balance with no investing or financing default: {misplaced}"
+  )
+  # The reconciling rows the operating section is built from carry none.
+  reconciling_with_activity = sorted(
+    flow
+    for flows in calc["derivations"].values()
+    for flow, _w in flows
+    if flow.startswith("rs-gaap:IncreaseDecreaseIn") and flow in activity
+  )
+  assert not reconciling_with_activity, reconciling_with_activity
 
 
 def test_the_equity_statement_has_rows_of_its_own(styles, networks) -> None:
