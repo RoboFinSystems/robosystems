@@ -3,10 +3,11 @@
 The closed-period guard refuses a mapping arc for an account with landed
 history in a closed month, because the month's stamped statements were
 computed through the arcs as they stood. A remap that keeps the account on
-the same primary statement preserves every total the close asserted (net
-income, total assets, liabilities, equity, the change in cash): it is a
-reclassification, applied to the comparatives and disclosed, not a
-restatement. This module judges which one a remap is. Either way the
+the same primary statement, and on the balance sheet stays on its side of
+cash and of equity, preserves the totals the close asserted (net income,
+total equity, ending cash and the change in it): it is a reclassification,
+applied to the comparatives and disclosed, not a restatement. This module
+judges which one a remap is. Either way the
 stamped sets keep the answer as closed; a live render follows the new arc.
 """
 
@@ -195,6 +196,68 @@ def _why_refused(account: str, before: str | None, after: str | None) -> str:
   )
 
 
+def _qnames(session: Session, element_ids: Sequence[str]) -> dict[str, str]:
+  rows = session.execute(
+    text("SELECT id, qname FROM elements WHERE id = ANY(:ids)"),
+    {"ids": list(element_ids)},
+  ).fetchall()
+  return {str(row.id): str(row.qname) for row in rows}
+
+
+def _in_equity(session: Session, element_ids: Sequence[str]) -> dict[str, bool]:
+  """Whether each concept is, or sums by calculation arc into, a root the
+  equity statement rolls forward (the capital concept of any Style, or the
+  outside owners' share)."""
+  from robosystems.operations.roboledger.reports.fact_grid import ROLLFORWARD_ROOTS
+
+  roots = {
+    str(row.id)
+    for row in session.execute(
+      text("SELECT id FROM elements WHERE qname = ANY(:roots)"),
+      {"roots": sorted(ROLLFORWARD_ROOTS)},
+    ).fetchall()
+  }
+  parents_of = _calculation_parents(session)
+  found: dict[str, bool] = {}
+  for concept in element_ids:
+    seen, frontier = {concept}, [concept]
+    while frontier and not seen & roots:
+      frontier = [p for c in frontier for p in parents_of.get(c, ()) if p not in seen]
+      seen.update(frontier)
+    found[concept] = bool(seen & roots)
+  return found
+
+
+def _balance_sheet_total_moved(
+  session: Session, account: str, old_target_id: str, new_target_id: str
+) -> str | None:
+  """Why a remap within the balance sheet still moves a total the close
+  asserted: ending cash when the account crosses the cash the cash flow
+  statement reconciles to, total equity when it crosses into or out of
+  equity. ``None`` when it moves neither."""
+  from robosystems.operations.roboledger.reports.fact_grid import (
+    _CASH_ANCHOR_QNAMES,  # pyright: ignore[reportPrivateUsage]
+  )
+
+  qnames = _qnames(session, [old_target_id, new_target_id])
+  was_cash = qnames.get(old_target_id) in _CASH_ANCHOR_QNAMES
+  is_cash = qnames.get(new_target_id) in _CASH_ANCHOR_QNAMES
+  if was_cash != is_cash:
+    direction = "out of cash" if was_cash else "into cash"
+    return (
+      f"Moving {account} {direction} changes ending cash and the change in "
+      "cash in every closed month: a restatement, not a reclassification."
+    )
+  equity = _in_equity(session, [old_target_id, new_target_id])
+  if equity[old_target_id] != equity[new_target_id]:
+    direction = "out of equity" if equity[old_target_id] else "into equity"
+    return (
+      f"Moving {account} {direction} changes total equity in every closed "
+      "month: a restatement, not a reclassification."
+    )
+  return None
+
+
 def judge_remap(
   session: Session,
   *,
@@ -208,20 +271,24 @@ def judge_remap(
   ``new_target_id`` is a reclassification. ``None`` when the account has no
   landed history in a closed month (an ordinary write). Raises
   :class:`ReclassificationRefusedError` when the move crosses a primary
-  statement, or either concept sits on none, so a closed month's totals
-  would change."""
+  statement, either concept sits on none, or, within the balance sheet, it
+  crosses into or out of cash or equity, so a closed month's totals would
+  change."""
   protected = find_protected_fact_sets(session, account_ids=[account_id])
   if not protected.any:
     return None
+  account = account_qname or account_id
   style = reporting_style_for_account(session, account_taxonomy_id)
   placed = statement_of_concepts(session, style, [old_target_id, new_target_id])
   before, after = placed.get(old_target_id), placed.get(new_target_id)
-  if before is not None and before == after:
-    return Reclassification(
-      statement_type=before, closed_periods=protected.closed_period_names
-    )
-  raise ReclassificationRefusedError(
-    protected, _why_refused(account_qname or account_id, before, after)
+  if before is None or before != after:
+    raise ReclassificationRefusedError(protected, _why_refused(account, before, after))
+  if before == "balance_sheet":
+    moved = _balance_sheet_total_moved(session, account, old_target_id, new_target_id)
+    if moved is not None:
+      raise ReclassificationRefusedError(protected, moved)
+  return Reclassification(
+    statement_type=before, closed_periods=protected.closed_period_names
   )
 
 

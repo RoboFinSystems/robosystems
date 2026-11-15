@@ -64,6 +64,40 @@ def test_a_move_across_statements_is_refused_naming_the_months(ext_session, book
   assert err.value.protected.closed_period_names == ("2026-06",)
 
 
+def test_a_move_between_liabilities_and_equity_is_refused(ext_session, books):
+  with pytest.raises(ReclassificationRefusedError) as err:
+    _judge(ext_session, books, books["card"], books["debt"], books["retained"])
+
+  message = str(err.value)
+  assert "into equity changes total equity" in message
+  assert "a restatement, not a reclassification" in message
+
+
+def test_a_move_within_equity_is_a_reclassification(ext_session, books):
+  judged = _judge(ext_session, books, books["card"], books["retained"], books["apic"])
+
+  assert judged == Reclassification(
+    statement_type="balance_sheet", closed_periods=("2026-06",)
+  )
+
+
+def test_a_move_between_cash_and_a_non_cash_asset_is_refused(ext_session, books):
+  with pytest.raises(ReclassificationRefusedError) as err:
+    _judge(ext_session, books, books["card"], books["cash"], books["investments"])
+
+  message = str(err.value)
+  assert "out of cash changes ending cash" in message
+  assert "a restatement, not a reclassification" in message
+
+
+def test_a_move_inside_the_cash_total_is_a_reclassification(ext_session, books):
+  judged = _judge(ext_session, books, books["card"], books["cash"], books["restricted"])
+
+  assert judged == Reclassification(
+    statement_type="balance_sheet", closed_periods=("2026-06",)
+  )
+
+
 def test_a_concept_no_statement_presents_is_refused(ext_session, books):
   with pytest.raises(ReclassificationRefusedError, match="on no primary statement"):
     _judge(ext_session, books, books["card"], books["debt"], books["orphan"])
