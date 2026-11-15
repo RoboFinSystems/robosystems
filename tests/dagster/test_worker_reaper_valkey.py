@@ -22,6 +22,7 @@ from robosystems.dagster.sensors.worker_reaper import (
   SSE_META_PREFIX,
   worker_inflight_reaper_sensor,
 )
+from robosystems.worker.client import dump_task, task_is_sealed
 from robosystems.worker.constants import worker_heartbeat_key
 
 pytestmark = pytest.mark.integration
@@ -58,7 +59,7 @@ def _stale_task(queue, sse, worker_id, task_id):
     "params": {},
     "attempt": 1,
   }
-  queue.lpush(f"worker:inflight:{worker_id}", json.dumps(task))
+  queue.lpush(f"worker:inflight:{worker_id}", dump_task(task))
   created = datetime.now(UTC) - timedelta(hours=3)
   sse.set(
     f"{SSE_META_PREFIX}{task_id}",
@@ -90,6 +91,23 @@ def test_a_dead_workers_stale_task_is_requeued(valkey):
 
   requeued = [json.loads(t) for t in queue.lrange("worker:tasks", 0, -1)]
   assert [(t["task_id"], t["attempt"]) for t in requeued] == [(task_id, 2)]
+  assert task_is_sealed(requeued[0])
+  assert queue.llen(f"worker:inflight:{worker_id}") == 0
+
+
+def test_an_unsealed_task_is_dropped_never_requeued(valkey):
+  """The reaper re-seals what it requeues, so it must not vouch for an entry
+  something holding only the Valkey token wrote."""
+  queue, sse, worker_id, task_id = valkey
+  _stale_task(queue, sse, worker_id, task_id)
+  forged = json.loads(queue.lpop(f"worker:inflight:{worker_id}"))
+  forged.pop("seal")
+  queue.lpush(f"worker:inflight:{worker_id}", json.dumps(forged))
+
+  _reap()
+
+  assert queue.llen("worker:tasks") == 0
+  assert queue.llen("worker:dlq") == 0
   assert queue.llen(f"worker:inflight:{worker_id}") == 0
 
 

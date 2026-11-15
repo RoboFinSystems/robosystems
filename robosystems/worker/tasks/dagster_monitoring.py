@@ -17,6 +17,30 @@ from robosystems.worker.tasks.base import BaseTask
 
 logger = get_logger(__name__)
 
+# The jobs the API hands this task; each acts on the graph named in its op
+# config, which must be the graph the task was authorized against.
+MONITORED_JOBS = frozenset(
+  {
+    "backup_graph_job",
+    "materialize_graph_job",
+    "stage_file_job",
+    "materialize_file_job",
+  }
+)
+
+
+def job_refusal(graph_id: str | None, params: dict[str, Any]) -> str | None:
+  """Why this payload may not run, or None."""
+  job_name = params.get("job_name")
+  if job_name not in MONITORED_JOBS:
+    return f"Job {job_name!r} is not run by the worker"
+  ops = (params.get("run_config") or {}).get("ops") or {}
+  for op_name, op in ops.items():
+    target = ((op or {}).get("config") or {}).get("graph_id")
+    if target != graph_id:
+      return f"Op {op_name} targets graph {target!r}, not {graph_id!r}"
+  return None
+
 
 @register_task("dagster_job_monitor")
 class DagsterJobMonitorTask(BaseTask):
@@ -57,6 +81,10 @@ class DagsterJobMonitorTask(BaseTask):
     import asyncio
 
     from robosystems.middleware.sse.dagster_monitor import DagsterRunMonitor
+
+    refusal = job_refusal(self.graph_id, self.params)
+    if refusal:
+      raise ValueError(refusal)
 
     job_name = self.params["job_name"]
     run_config = self.params.get("run_config")

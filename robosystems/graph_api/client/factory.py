@@ -28,6 +28,26 @@ from robosystems.graph_api.client import GraphClient
 from robosystems.logger import logger
 from robosystems.middleware.graph.allocation_manager import LadybugAllocationManager
 from robosystems.middleware.graph.utils import parse_subgraph_id
+from robosystems.security.sealed_records import seal, unseal
+
+# Graph instances hold the Valkey token, so cached routes are sealed: a
+# forged entry could otherwise steer graph traffic to any address.
+_LOCATION_SEAL = "graph-location"
+_SHARED_MASTER_SEAL = "shared-master-url"
+
+
+def _unseal_cached(purpose: str, cached: Any, field: str | None = None) -> Any:
+  """A sealed cache entry's record (or one field of it); None if absent or unsealed."""
+  if not cached:
+    return None
+  try:
+    record = unseal(purpose, json.loads(cached))
+  except ValueError:
+    return None
+  if record is None:
+    logger.warning(f"Ignored an unsealed {purpose} cache entry")
+    return None
+  return record.get(field) if field else record
 
 
 class GraphClientError(Exception):
@@ -410,7 +430,8 @@ class GraphClientFactory:
 
       if redis_client:
         try:
-          cached_url = await redis_client.get(cache_key)
+          cached = await redis_client.get(cache_key)
+          cached_url = _unseal_cached(_SHARED_MASTER_SEAL, cached, "url")
           if cached_url:
             logger.debug(f"Using cached shared master URL: {cached_url}")
             if env.GRAPH_CIRCUIT_BREAKERS_ENABLED:
@@ -453,7 +474,11 @@ class GraphClientFactory:
 
             if redis_client:
               try:
-                await redis_client.setex(cache_key, 300, url)
+                await redis_client.setex(
+                  cache_key,
+                  300,
+                  json.dumps(seal(_SHARED_MASTER_SEAL, {"url": url})),
+                )
               except Exception as e:
                 logger.warning(f"Redis cache write failed: {e}")
 
@@ -544,13 +569,18 @@ class GraphClientFactory:
     if redis_client:
       try:
         cached = await redis_client.get(cache_key)
-        if cached:
-          location_data = json.loads(cached)
-          if time.time() - location_data.get("timestamp", 0) < cls._instance_cache_ttl:
-            location = location_data["location"]
-            private_ip = location["private_ip"]
-            instance_id = location["instance_id"]
-            logger.debug(f"Using cached location for {graph_id}")
+        location_data = _unseal_cached(_LOCATION_SEAL, cached)
+        # The seal binds the entry to its graph, so one graph's location
+        # cannot be copied under another's key.
+        if (
+          location_data
+          and location_data.get("graph_id") == actual_graph_id
+          and time.time() - location_data.get("timestamp", 0) < cls._instance_cache_ttl
+        ):
+          location = location_data["location"]
+          private_ip = location["private_ip"]
+          instance_id = location["instance_id"]
+          logger.debug(f"Using cached location for {graph_id}")
       except Exception as e:
         logger.warning(f"Redis cache read failed for location: {e}")
 
@@ -578,6 +608,7 @@ class GraphClientFactory:
       if redis_client:
         try:
           location_data = {
+            "graph_id": actual_graph_id,
             "location": {
               "instance_id": instance_id,
               "private_ip": private_ip,
@@ -585,7 +616,9 @@ class GraphClientFactory:
             "timestamp": time.time(),
           }
           await redis_client.setex(
-            cache_key, cls._instance_cache_ttl, json.dumps(location_data)
+            cache_key,
+            cls._instance_cache_ttl,
+            json.dumps(seal(_LOCATION_SEAL, location_data)),
           )
         except Exception as e:
           logger.warning(f"Redis cache write failed for location: {e}")

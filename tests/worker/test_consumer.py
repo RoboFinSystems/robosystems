@@ -464,3 +464,43 @@ async def test_a_maintenance_pause_fails_the_task_outside_the_alarm_pattern(
   assert "paused for maintenance until 2026-09-26T03:00:00+00:00" in error
   assert "Task failed:" not in caplog.text
   mock_manager.complete_operation.assert_not_called()
+
+
+class TestUnsealedPayloads:
+  """The queue shares Valkey with graph instances; only what the platform
+  sealed runs."""
+
+  def test_an_enqueued_payload_is_sealed_and_a_changed_one_is_not(self):
+    from robosystems.worker.client import dump_task, task_is_sealed
+
+    task = json.loads(
+      dump_task(
+        {
+          "task_id": "op_1",
+          "task_type": "test_success",
+          "graph_id": "kg1",
+          "user_id": "usr_1",
+          "attempt": 1,
+          "params": {"job_name": "backup_graph_job"},
+        }
+      )
+    )
+    assert task_is_sealed(task)
+    task["params"]["job_name"] = "send_email_job"
+    assert not task_is_sealed(task)
+
+  @pytest.mark.asyncio
+  async def test_an_unsealed_payload_fails_its_operation_and_leaves_the_inflight_list(
+    self,
+  ):
+    from robosystems.worker.consumer import _refuse_unsealed
+
+    task = {"task_id": "op_1", "task_type": "test_success", "params": {}}
+    queue = AsyncMock()
+    manager = AsyncMock()
+
+    await _refuse_unsealed(task, json.dumps(task), queue, "worker:inflight:w", manager)
+
+    manager.fail_operation.assert_awaited_once()
+    assert manager.fail_operation.await_args.args == ("op_1",)
+    queue.lrem.assert_awaited_once_with("worker:inflight:w", 1, json.dumps(task))

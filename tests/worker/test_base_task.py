@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from robosystems.middleware.sse.event_storage import OperationStatus
+from robosystems.worker.client import seal_paused_task
 from robosystems.worker.tasks.base import BaseTask
 
 
@@ -299,12 +300,15 @@ async def test_pause_for_input_records_the_request_and_unwinds(task, mock_manage
     prompt="Post the close?",
     checkpoint={"step": 3},
     details={"period": "2026-07"},
-    task={
-      "task_type": "operator",
-      "graph_id": "kg0123456789abcdef",
-      "user_id": "user_01TEST",
-      "params": {"key": "value"},
-    },
+    task=seal_paused_task(
+      "op_01TEST",
+      {
+        "task_type": "operator",
+        "graph_id": "kg0123456789abcdef",
+        "user_id": "user_01TEST",
+        "params": {"key": "value"},
+      },
+    ),
   )
 
 

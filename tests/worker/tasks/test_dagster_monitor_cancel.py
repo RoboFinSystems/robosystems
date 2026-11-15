@@ -37,7 +37,7 @@ def _task():
     task_id="op_test",
     graph_id="kg0000000000000001",
     user_id="usr_test",
-    params={"job_name": "materialize", "lock_key": "lock:materialize:kg1"},
+    params={"job_name": "materialize_graph_job", "lock_key": "lock:materialize:kg1"},
     manager=MagicMock(),
   )
   task.is_cancelled = AsyncMock(return_value=True)
@@ -133,7 +133,9 @@ async def test_the_operation_id_reaches_a_job_that_asks_for_it():
     params={
       "job_name": "materialize_graph_job",
       "run_config": {
-        "ops": {"materialize_graph_tables": {"config": {"graph_id": "g"}}}
+        "ops": {
+          "materialize_graph_tables": {"config": {"graph_id": "kg0000000000000001"}}
+        }
       },
       "pass_operation_id": True,
     },
@@ -154,3 +156,47 @@ async def test_the_operation_id_reaches_a_job_that_asks_for_it():
   assert (
     run_config["ops"]["materialize_graph_tables"]["config"]["operation_id"] == "op_test"
   )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+  ("params", "refused"),
+  [
+    (
+      {
+        "job_name": "materialize_graph_job",
+        "run_config": {
+          "ops": {"materialize_graph_tables": {"config": {"graph_id": "kg1"}}}
+        },
+      },
+      False,
+    ),
+    ({"job_name": "send_email_job", "run_config": {}}, True),
+    (
+      {
+        "job_name": "restore_graph_job",
+        "run_config": {"ops": {"restore_backup": {"config": {"graph_id": "kg1"}}}},
+      },
+      True,
+    ),
+    (
+      {
+        "job_name": "materialize_graph_job",
+        "run_config": {
+          "ops": {"materialize_graph_tables": {"config": {"graph_id": "kg2"}}}
+        },
+      },
+      True,
+    ),
+  ],
+  ids=[
+    "the-authorized-graph",
+    "a-platform-job",
+    "a-job-the-api-never-sends",
+    "another-graph",
+  ],
+)
+def test_the_monitor_runs_only_the_api_jobs_on_the_authorized_graph(params, refused):
+  from robosystems.worker.tasks.dagster_monitoring import job_refusal
+
+  assert (job_refusal("kg1", params) is not None) is refused

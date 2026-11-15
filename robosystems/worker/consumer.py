@@ -32,6 +32,7 @@ from robosystems.middleware.sse.operation_manager import (
 )
 from robosystems.security.error_handling import safe_error_message
 from robosystems.worker.cleanup import cleanup_connections
+from robosystems.worker.client import task_is_sealed
 from robosystems.worker.constants import (
   DEFAULT_TASK_TIMEOUT,
   TASK_TIMEOUTS,
@@ -123,6 +124,10 @@ async def run() -> None:
         await queue.lrem(inflight_key, 1, task_json)
         continue
 
+      if not task_is_sealed(task_data):
+        await _refuse_unsealed(task_data, task_json, queue, inflight_key, manager)
+        continue
+
       try:
         await _process_task(
           task_data, task_json, queue, inflight_key, manager, worker_id, protection
@@ -194,6 +199,27 @@ async def _fail_quietly(manager: OperationManager, task_id: str, **kwargs: Any) 
     logger.error(
       f"Could not record failure for task {task_id}: {type(exc).__name__}: {exc}"
     )
+
+
+async def _refuse_unsealed(
+  task_data: Any,
+  task_json: str,
+  queue: Any,
+  inflight_key: str,
+  manager: OperationManager,
+) -> None:
+  """Drop a payload the platform did not seal, failing its operation if named."""
+  task_id = task_data.get("task_id") if isinstance(task_data, dict) else None
+  task_type = task_data.get("task_type") if isinstance(task_data, dict) else None
+  logger.error(f"Refused unsealed task payload: {task_type} ({task_id})")
+  if isinstance(task_id, str):
+    await _fail_quietly(
+      manager,
+      task_id,
+      error="Task payload could not be verified",
+      error_details={"error_type": "UnsealedTask"},
+    )
+  await queue.lrem(inflight_key, 1, task_json)
 
 
 async def _process_task(

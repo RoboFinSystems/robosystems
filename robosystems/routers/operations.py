@@ -25,7 +25,11 @@ from robosystems.middleware.sse.streaming import create_sse_response_starlette
 from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.operations import OperationResumeRequest
 from robosystems.models.core import User
-from robosystems.worker.client import get_queue_position, requeue_task
+from robosystems.worker.client import (
+  get_queue_position,
+  paused_task_is_sealed,
+  requeue_task,
+)
 
 OPERATION_ID_PATTERN = (
   "^(op_[0-9A-Z]{26}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$"
@@ -506,6 +510,15 @@ async def resume_operation(
     raise HTTPException(
       status_code=http_status.HTTP_409_CONFLICT,
       detail="Operation cannot be resumed: its checkpoint was not recorded.",
+    )
+  if (
+    not paused_task_is_sealed(operation_id, task)
+    or task.get("user_id") != current_user.id
+  ):
+    logger.warning(f"Refused to resume operation {operation_id}: unsealed checkpoint")
+    raise HTTPException(
+      status_code=http_status.HTTP_409_CONFLICT,
+      detail="Operation cannot be resumed: its checkpoint could not be verified.",
     )
 
   # Queue first: if the push fails the operation stays awaiting_input with its

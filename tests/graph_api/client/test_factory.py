@@ -26,6 +26,7 @@ from robosystems.graph_api.client.factory import (
   get_graph_client_for_sec_ingestion,
   with_retry,
 )
+from robosystems.security.sealed_records import seal
 
 FACTORY_MODULE = "robosystems.graph_api.client.factory"
 
@@ -892,10 +893,14 @@ class TestUserGraphLocationCache:
     """A fresh cached location routes without touching the allocation manager."""
     mock_redis = AsyncMock()
     mock_redis.get.return_value = json.dumps(
-      {
-        "location": {"instance_id": "i-cached", "private_ip": "10.0.5.5"},
-        "timestamp": time.time(),
-      }
+      seal(
+        "graph-location",
+        {
+          "graph_id": "kg123",
+          "location": {"instance_id": "i-cached", "private_ip": "10.0.5.5"},
+          "timestamp": time.time(),
+        },
+      )
     )
 
     with patch(f"{FACTORY_MODULE}.env") as mock_env:
@@ -924,6 +929,62 @@ class TestUserGraphLocationCache:
         base_url="http://10.0.5.5:8001", api_key="prod-key"
       )
       assert mock_client._instance_id == "i-cached"
+
+  @pytest.mark.parametrize(
+    "cached",
+    [
+      {
+        "graph_id": "kg123",
+        "location": {"instance_id": "i-forged", "private_ip": "10.0.9.9"},
+        "timestamp": "now",
+      },
+      seal(
+        "graph-location",
+        {
+          "graph_id": "kgother",
+          "location": {"instance_id": "i-other", "private_ip": "10.0.9.9"},
+          "timestamp": time.time(),
+        },
+      ),
+    ],
+    ids=["unsealed", "sealed-for-another-graph"],
+  )
+  @pytest.mark.asyncio
+  async def test_a_cached_location_the_platform_did_not_seal_for_this_graph_is_ignored(
+    self, cached
+  ):
+    """Graph instances hold the Valkey token; a route they could write is not
+    followed."""
+    if cached.get("timestamp") == "now":
+      cached["timestamp"] = time.time()
+    mock_redis = AsyncMock()
+    mock_redis.get.return_value = json.dumps(cached)
+
+    with patch(f"{FACTORY_MODULE}.env") as mock_env:
+      mock_env.is_development.return_value = False
+      mock_env.ENVIRONMENT = "prod"
+      mock_env.GRAPH_API_KEY = "prod-key"
+
+      with (
+        patch(f"{FACTORY_MODULE}.parse_subgraph_id", return_value=None),
+        patch.object(
+          GraphClientFactory,
+          "_get_redis",
+          new_callable=AsyncMock,
+          return_value=mock_redis,
+        ),
+        patch(f"{FACTORY_MODULE}.LadybugAllocationManager") as MockAllocManager,
+        patch(f"{FACTORY_MODULE}.GraphClient") as MockClient,
+      ):
+        location = MagicMock(private_ip="10.0.1.1", instance_id="i-real")
+        MockAllocManager.return_value.find_database_location = AsyncMock(
+          return_value=location
+        )
+        await GraphClientFactory._create_user_graph_client("kg123", "prod", None)
+
+      MockClient.assert_called_once_with(
+        base_url="http://10.0.1.1:8001", api_key="prod-key"
+      )
 
 
 # ---------------------------------------------------------------------------

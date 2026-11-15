@@ -27,6 +27,8 @@ The AI Operator endpoints (`POST /v1/graphs/{graph_id}/operator[/{operator_type}
 
 RPUSH plus BLMOVE gives FIFO ordering. The inflight list is the reliability half: if a worker crashes mid-task, the task stays there until the `worker_inflight_reaper_sensor` in the Dagster daemon finds it and requeues it. A task that stays stale past its attempt budget is moved to `worker:dlq` with a `dlq_reason`; inspect and drain it with `just admin <env> worker dlq list|retry|clear`.
 
+Every payload is sealed (`dump_task`, an HMAC under a key derived from `JWT_SECRET_KEY`). The consumer runs only sealed payloads and fails the operation of any other; the reaper and `dlq retry` check the seal before they re-seal a payload they change. Graph instances share this Valkey but not that secret.
+
 ## Running
 
 ```bash
@@ -105,7 +107,7 @@ async def execute(self) -> dict[str, Any]:
     return {"posted": 0, "declined": True}
 ```
 
-`pause_for_input` records the prompt, the checkpoint and this task's queue payload on the operation (status `awaiting_input`), then raises `TaskPaused` so `execute` unwinds without a result — the consumer neither completes nor fails it. `/v1/operations/{id}/status` shows the prompt and a `resume` link; `POST /v1/operations/{id}/resume` with `{"input": {...}}` puts the same operation back on the queue with `params["resume"] = {"checkpoint", "input"}`, which the task reads back through `self.resume`. A paused operation's stream replays and closes; reconnect after the resume to follow the rest. Cancelling a paused operation works like cancelling a running one.
+`pause_for_input` records the prompt, the checkpoint and this task's queue payload, sealed to the operation, on the operation (status `awaiting_input`), then raises `TaskPaused` so `execute` unwinds without a result — the consumer neither completes nor fails it. `/v1/operations/{id}/status` shows the prompt and a `resume` link; `POST /v1/operations/{id}/resume` with `{"input": {...}}` puts the same operation back on the queue with `params["resume"] = {"checkpoint", "input"}`, which the task reads back through `self.resume`. A paused operation's stream replays and closes; reconnect after the resume to follow the rest. Cancelling a paused operation works like cancelling a running one.
 
 ## Layout
 

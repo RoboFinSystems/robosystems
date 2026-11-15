@@ -67,6 +67,7 @@ def _get_age_from_metadata(meta: dict[str, Any]) -> float | None:
 def worker_inflight_reaper_sensor(context: SensorEvaluationContext):
   """Scan worker inflight lists and requeue stale tasks."""
   from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
+  from robosystems.worker.client import dump_task, task_is_sealed
 
   queue = create_redis_client(ValkeyDatabase.WORKER_QUEUE, decode_responses=True)
   sse = create_redis_client(ValkeyDatabase.SSE, decode_responses=True)
@@ -96,6 +97,14 @@ def worker_inflight_reaper_sensor(context: SensorEvaluationContext):
           cleaned += 1
           continue
 
+        # Re-sealing below would vouch for whatever is here, so an entry the
+        # platform did not seal is dropped, never requeued.
+        if not task_is_sealed(task_data):
+          logger.error(f"Dropped unsealed task from {inflight_key}")
+          queue.lrem(inflight_key, 1, task_json)
+          cleaned += 1
+          continue
+
         task_id = task_data.get("task_id", "unknown")
         task_type = task_data.get("task_type", "unknown")
         attempt = task_data.get("attempt", 1)
@@ -109,7 +118,7 @@ def worker_inflight_reaper_sensor(context: SensorEvaluationContext):
             task_data["dlq_reason"] = "no_sse_metadata"
             task_data["dlq_at"] = datetime.now(UTC).isoformat()
             task_data["dlq_attempts"] = attempt
-            queue.rpush("worker:dlq", json.dumps(task_data))
+            queue.rpush("worker:dlq", dump_task(task_data))
             dlq_count += 1
             logger.warning(
               f"Task {task_id} ({task_type}) has no SSE metadata, "
@@ -117,7 +126,7 @@ def worker_inflight_reaper_sensor(context: SensorEvaluationContext):
             )
           else:
             task_data["attempt"] = attempt + 1
-            queue.rpush("worker:tasks", json.dumps(task_data))
+            queue.rpush("worker:tasks", dump_task(task_data))
             requeued += 1
             logger.warning(
               f"Task {task_id} ({task_type}) has no SSE metadata, "
@@ -144,7 +153,7 @@ def worker_inflight_reaper_sensor(context: SensorEvaluationContext):
           task_data["dlq_reason"] = f"stale_after_{attempt}_attempts"
           task_data["dlq_at"] = datetime.now(UTC).isoformat()
           task_data["dlq_attempts"] = attempt
-          queue.rpush("worker:dlq", json.dumps(task_data))
+          queue.rpush("worker:dlq", dump_task(task_data))
           _fail_operation_sync(sse, task_id, attempt)
           dlq_count += 1
           logger.warning(
@@ -152,7 +161,7 @@ def worker_inflight_reaper_sensor(context: SensorEvaluationContext):
           )
         else:
           task_data["attempt"] = attempt + 1
-          queue.rpush("worker:tasks", json.dumps(task_data))
+          queue.rpush("worker:tasks", dump_task(task_data))
           requeued += 1
           logger.info(
             f"Requeued stale task {task_id} ({task_type}), attempt {attempt + 1}"
