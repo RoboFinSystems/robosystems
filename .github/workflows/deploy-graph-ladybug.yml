@@ -37,6 +37,11 @@ on:
         description: "Security Group ID for Valkey/Redis client access"
         required: true
         type: string
+      graph_api_client_sg_id:
+        description: "Security group carried by clients of the Graph API"
+        required: false
+        type: string
+        default: ""
       valkey_url:
         description: "Valkey ElastiCache endpoint URL (e.g., redis://endpoint:6379)"
         required: true
@@ -350,6 +355,7 @@ jobs:
                 ParameterKey=VpcCidr,ParameterValue=\"10.0.0.0/16\" \
                 ParameterKey=SubnetIds,ParameterValue=\"$SUBNET_PARAM\" \
                 ParameterKey=ValkeyClientSecurityGroupId,ParameterValue=${{ inputs.valkey_sg_id }} \
+                ParameterKey=GraphApiClientSecurityGroupId,ParameterValue=\"${{ inputs.graph_api_client_sg_id }}\" \
                 ParameterKey=ValkeyUrl,ParameterValue=${{ inputs.valkey_url }} \
                 ParameterKey=DatabaseEndpoint,ParameterValue=${{ inputs.database_endpoint }} \
                 ParameterKey=DatabasePort,ParameterValue=${{ inputs.database_port }} \

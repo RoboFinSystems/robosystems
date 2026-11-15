@@ -43,6 +43,11 @@ Parameters:
     AllowedPattern: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$
     ConstraintDescription: Must be a valid email address
 
+  GraphApiClientSecurityGroupId:
+    Type: String
+    Default: ""
+    Description: Security group carried by clients of the Graph API (from the VPC stack)
+
   # Tagging
   ServiceTag:
     Type: String
@@ -56,6 +61,8 @@ Parameters:
 Conditions:
   UseProvidedVolumeRegistry: !Not [!Equals [!Ref VolumeRegistryTable, ""]]
   HasGraphApiSecret: !Not [!Equals [!Ref GraphApiSecretArn, ""]]
+  HasGraphApiClientSecurityGroup:
+    !Not [!Equals [!Ref GraphApiClientSecurityGroupId, ""]]
 
 Resources:
   # ========================================
@@ -418,6 +425,10 @@ Resources:
       VpcConfig:
         SecurityGroupIds:
           - !Ref VolumeMonitorSecurityGroup
+          - !If
+            - HasGraphApiClientSecurityGroup
+            - !Ref GraphApiClientSecurityGroupId
+            - !Ref AWS::NoValue
         SubnetIds: !Ref SubnetIds
       Tags:
         - Key: Name

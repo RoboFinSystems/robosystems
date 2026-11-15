@@ -118,6 +118,9 @@ on:
       public_subnet_ids:
         description: "Public Subnet IDs"
         value: ${{ jobs.deploy.outputs.public_subnet_ids }}
+      graph_api_client_sg_id:
+        description: "Security group carried by clients of the Graph API"
+        value: ${{ jobs.deploy.outputs.graph_api_client_sg_id }}
 
 jobs:
   deploy:
@@ -131,6 +134,7 @@ jobs:
       vpc_cidr: ${{ steps.stack-outputs.outputs.vpc_cidr }}
       private_subnet_ids: ${{ steps.stack-outputs.outputs.private_subnet_ids }}
       public_subnet_ids: ${{ steps.stack-outputs.outputs.public_subnet_ids }}
+      graph_api_client_sg_id: ${{ steps.stack-outputs.outputs.graph_api_client_sg_id }}
 
     steps:
       - name: Checkout
@@ -283,6 +287,19 @@ jobs:
           else
             echo "Error: Could not retrieve Public Subnet IDs"
             exit 1
+          fi
+
+          # Get the Graph API client security group
+          GRAPH_API_CLIENT_SG=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='GraphApiClientSecurityGroupId'].OutputValue" \
+            --output text)
+
+          if [ -n "$GRAPH_API_CLIENT_SG" ] && [ "$GRAPH_API_CLIENT_SG" != "None" ]; then
+            echo "graph_api_client_sg_id=$GRAPH_API_CLIENT_SG" >> $GITHUB_OUTPUT
+            echo "Graph API client security group: $GRAPH_API_CLIENT_SG"
+          else
+            echo "::warning::The VPC stack has no Graph API client security group output; callers deploy without it"
           fi
 
   # CloudTrail deployment as separate job (only runs when enabled)

@@ -589,6 +589,32 @@ Resources:
       SubnetId: !Ref PrivateSubnet5
       RouteTableId: !Ref PrivateRouteTable5
 
+  # Carried by everything that calls the Graph API (API, worker, Dagster, the
+  # bastion, the volume monitor); the graph writers admit their port from it.
+  # It lives here because the graph stacks deploy before their callers do.
+  GraphApiClientSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Clients of the Graph API
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 8001
+          ToPort: 8001
+          CidrIp: !Sub "10.${VpcSecondOctet}.0.0/16"
+          Description: Graph API
+      Tags:
+        - Key: Name
+          Value: sg-robosystems-graph-api-clients
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
   # Security Group for VPC Endpoints (only needed for Interface endpoints)
   VPCEndpointSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -903,6 +929,12 @@ Outputs:
     Value: !Sub "10.${VpcSecondOctet}.0.0/16"
     Export:
       Name: !Sub ${AWS::StackName}-${Environment}-VpcCidr
+
+  GraphApiClientSecurityGroupId:
+    Description: Security group carried by clients of the Graph API
+    Value: !Ref GraphApiClientSecurityGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-GraphApiClientSecurityGroupId
 
   PublicSubnetIds:
     Description: Public subnet IDs (for ALBs)

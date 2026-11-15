@@ -162,6 +162,11 @@ on:
         description: "Security group ID for Valkey access"
         required: true
         type: string
+      graph_api_client_sg_id:
+        description: "Security group carried by clients of the Graph API"
+        required: false
+        type: string
+        default: ""
       opensearch_endpoint:
         description: "OpenSearch domain endpoint URL (empty if not deployed)"
         required: false
@@ -339,6 +344,7 @@ jobs:
                 ParameterKey=WebserverFargateBase,ParameterValue=${{ inputs.webserver_fargate_base }} \
                 ParameterKey=ValkeyUrl,ParameterValue=${{ inputs.valkey_url }} \
                 ParameterKey=ValkeyClientSecurityGroupId,ParameterValue=${{ inputs.valkey_sg_id }} \
+                ParameterKey=GraphApiClientSecurityGroupId,ParameterValue=\"${{ inputs.graph_api_client_sg_id }}\" \
                 ParameterKey=OpenSearchEndpoint,ParameterValue=\"${{ inputs.opensearch_endpoint }}\" \
                 ParameterKey=OpenSearchClientSecurityGroupId,ParameterValue=\"${{ inputs.opensearch_sg_id }}\" \
                 ParameterKey=DatabaseEndpoint,ParameterValue=${{ inputs.database_endpoint }} \
@@ -464,6 +470,7 @@ jobs:
                 ParameterKey=DatabaseSecurityGroupId,ParameterValue=${{ inputs.database_sg_id }} \
                 ParameterKey=ValkeyUrl,ParameterValue=${{ inputs.valkey_url }} \
                 ParameterKey=ValkeyClientSecurityGroupId,ParameterValue=${{ inputs.valkey_sg_id }} \
+                ParameterKey=GraphApiClientSecurityGroupId,ParameterValue=\"${{ inputs.graph_api_client_sg_id }}\" \
                 ParameterKey=OpenSearchEndpoint,ParameterValue=\"${{ inputs.opensearch_endpoint }}\" \
                 ParameterKey=OpenSearchClientSecurityGroupId,ParameterValue=\"${{ inputs.opensearch_sg_id }}\" \
                 ParameterKey=SharedRawBucketArn,ParameterValue=\"${{ inputs.shared_raw_bucket_arn }}\" \

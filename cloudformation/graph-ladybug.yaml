@@ -39,6 +39,10 @@ Parameters:
   ValkeyClientSecurityGroupId:
     Type: AWS::EC2::SecurityGroup::Id
     Description: Security Group ID for Valkey/Redis client access (REQUIRED)
+  GraphApiClientSecurityGroupId:
+    Type: String
+    Default: ""
+    Description: Security group carried by clients of the Graph API (from the VPC stack)
   ValkeyUrl:
     Type: String
     Description: Valkey/Redis URL for cache connections (e.g., redis://endpoint:6379)
@@ -139,6 +143,8 @@ Parameters:
 
 Conditions:
   HasMinInstances: !Not [!Equals [!Ref MinInstances, 0]]
+  HasGraphApiClientSecurityGroup:
+    !Not [!Equals [!Ref GraphApiClientSecurityGroupId, ""]]
 
 Resources:
   # ========================================
@@ -185,6 +191,14 @@ Resources:
           ToPort: 8001
           CidrIp: !Ref VpcCidr
           Description: Allow Graph API access from VPC
+        - !If
+          - HasGraphApiClientSecurityGroup
+          - IpProtocol: tcp
+            FromPort: 8001
+            ToPort: 8001
+            SourceSecurityGroupId: !Ref GraphApiClientSecurityGroupId
+            Description: Graph API clients
+          - !Ref AWS::NoValue
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-writers-sg"
@@ -234,10 +248,8 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-instance-registry"
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-graph-registry"
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-volume-registry"
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-instance-registry/index/*"
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-graph-registry/index/*"
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-volume-registry/index/*"
               - Effect: Allow
                 Action:
                   - secretsmanager:GetSecretValue
