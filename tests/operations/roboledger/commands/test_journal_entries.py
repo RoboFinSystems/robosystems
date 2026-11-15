@@ -25,6 +25,9 @@ from robosystems.models.api.extensions.journal_entries import (
   ReverseJournalEntryRequest,
   UpdateJournalEntryRequest,
 )
+from robosystems.operations.event_block.python_handlers.types import (
+  HandlerMetadataValidationError,
+)
 from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands._guards import ClosedPeriodError
 from robosystems.operations.roboledger.commands.journal_entries import (
@@ -36,7 +39,6 @@ from robosystems.operations.roboledger.commands.journal_entries import (
   delete_journal_entry,
   propagate_flows,
   provenance_for_source,
-  resolve_flow_element_id,
   reverse_journal_entry,
   update_journal_entry,
   validate_and_normalize_lines,
@@ -285,15 +287,21 @@ class TestLineMetadataPassthrough:
 
   @patch(f"{MODULE}._entry_to_response")
   @patch(f"{MODULE}.assert_period_not_closed")
-  @patch(f"{MODULE}.resolve_flow_element_id")
+  @patch(
+    "robosystems.operations.event_block.python_handlers.bank_feed.resolve_flows",
+    return_value={
+      "mini:ProceedsFromInvestmentsByOwner": "elem_flow_a",
+      "mini:InvestmentsByOwner": "elem_flow_b",
+    },
+  )
   def test_create_journal_entry_promotes_flow_tag(
     self, mock_resolve, _mock_guard, _mock_resp
   ):
-    """A flow-tagged line resolves to ``flow_element_id`` and strips the
-    legacy ``transaction_description_code`` key from the stored metadata."""
+    """A line tagged under the legacy ``transaction_description_code`` key is
+    held to the same check as ``flow_qname``, resolves to ``flow_element_id``,
+    and the key is stripped from the stored metadata."""
     from robosystems.models.extensions.roboledger.line_item import LineItem
 
-    mock_resolve.side_effect = ["elem_flow_a", "elem_flow_b"]
     session = MagicMock()
     body = CreateJournalEntryRequest(
       posting_date=_DATE,
@@ -316,6 +324,11 @@ class TestLineMetadataPassthrough:
     )
     create_journal_entry(session, body, "usr_1")
 
+    mock_resolve.assert_called_once_with(
+      session,
+      {"mini:ProceedsFromInvestmentsByOwner", "mini:InvestmentsByOwner"},
+      entity_id=ENTITY_ID,
+    )
     line_adds = [
       call[0][0]
       for call in session.add.call_args_list
@@ -331,41 +344,38 @@ class TestLineMetadataPassthrough:
     assert "transaction_description_code" not in line_adds[1].metadata_
 
 
-class TestResolveFlowElementId:
-  """``resolve_flow_element_id`` maps a line's flow tag (a flow-concept qname)
-  to its Element id for ``LineItem.flow_element_id``."""
-
-  def test_resolves_qname_to_element_id(self):
+class TestLegacyFlowKeyIsGated:
+  @patch(f"{MODULE}.assert_period_not_closed")
+  @patch(
+    "robosystems.operations.event_block.python_handlers.bank_feed.resolve_flows",
+    side_effect=HandlerMetadataValidationError(
+      "mini:PaymentsToAcquireSoftware is not a row of this company's cash flow"
+    ),
+  )
+  def test_a_legacy_tag_off_the_statement_is_refused(self, _resolve, _guard):
+    """The legacy key once resolved by name alone, so a flow the statement
+    has no row for landed in the operating reconciling adjustment."""
     session = MagicMock()
-    el_row = MagicMock()
-    el_row.fetchone.return_value = ("elem_x",)
-    activity_row = MagicMock()
-    activity_row.fetchone.return_value = (1,)  # has an activityType trait
-    session.execute.side_effect = [el_row, activity_row]
-    assert (
-      resolve_flow_element_id(
-        session, {"transaction_description_code": "mini:CollectionOfReceivables"}
-      )
-      == "elem_x"
+    body = CreateJournalEntryRequest(
+      posting_date=_DATE,
+      memo="Software",
+      line_items=[
+        JournalEntryLineItemInput(
+          element_id="elem_software",
+          debit_amount=5_000,
+          metadata={"transaction_description_code": "mini:PaymentsToAcquireSoftware"},
+        ),
+        JournalEntryLineItemInput(element_id="elem_cash", credit_amount=5_000),
+      ],
     )
+    with pytest.raises(HandlerMetadataValidationError, match="not a row"):
+      create_journal_entry(session, body, "usr_1")
 
-  def test_returns_none_when_tag_absent(self):
-    session = MagicMock()
-    assert resolve_flow_element_id(session, None) is None
-    assert resolve_flow_element_id(session, {}) is None
-    assert resolve_flow_element_id(session, {"other": "x"}) is None
+    from robosystems.models.extensions.roboledger.line_item import LineItem
 
-  def test_returns_none_when_qname_unresolvable(self):
-    session = MagicMock()
-    miss = MagicMock()
-    miss.fetchone.return_value = None
-    session.execute.side_effect = [miss]
-    assert (
-      resolve_flow_element_id(
-        session, {"transaction_description_code": "mini:NoSuchConcept"}
-      )
-      is None
-    )
+    assert not [
+      call for call in session.add.call_args_list if isinstance(call[0][0], LineItem)
+    ]
 
 
 # ── create_journal_entry ──────────────────────────────────────────────────
@@ -1001,9 +1011,8 @@ class TestProvenanceForSource:
 class TestInactiveAccountGuard:
   @patch(f"{MODULE}._entry_to_response")
   @patch(f"{MODULE}.assert_period_not_closed")
-  @patch(f"{MODULE}.resolve_flow_element_id", return_value=None)
   def test_create_checks_every_line_with_the_replay_source(
-    self, _mock_resolve, _mock_guard, _mock_resp, _accounts_postable
+    self, _mock_guard, _mock_resp, _accounts_postable
   ):
     """A synced ledger's replayed history is `posted` with its source; that
     is the one shape whose source reaches the guard's exemption."""
@@ -1025,9 +1034,8 @@ class TestInactiveAccountGuard:
 
   @patch(f"{MODULE}._entry_to_response")
   @patch(f"{MODULE}.assert_period_not_closed")
-  @patch(f"{MODULE}.resolve_flow_element_id", return_value=None)
   def test_a_draft_naming_a_synced_source_is_still_authored(
-    self, _mock_resolve, _mock_guard, _mock_resp, _accounts_postable
+    self, _mock_guard, _mock_resp, _accounts_postable
   ):
     """Naming `source='quickbooks'` on a draft does not buy the replay
     exemption — the source is dropped and the lines are checked."""
@@ -1041,9 +1049,8 @@ class TestInactiveAccountGuard:
     assert kwargs == {"source": None, "entity_id": ENTITY_ID}
 
   @patch(f"{MODULE}.assert_period_not_closed")
-  @patch(f"{MODULE}.resolve_flow_element_id", return_value=None)
   def test_create_refuses_before_any_line_is_written(
-    self, _mock_resolve, _mock_guard, _accounts_postable
+    self, _mock_guard, _accounts_postable
   ):
     from robosystems.operations.roboledger.commands._guards import (
       InactiveAccountError,
@@ -1062,10 +1069,9 @@ class TestInactiveAccountGuard:
 
   @patch(f"{MODULE}._entry_to_response")
   @patch(f"{MODULE}.assert_period_not_closed")
-  @patch(f"{MODULE}.resolve_flow_element_id", return_value=None)
   @patch(f"{MODULE}.lock_by_id")
   def test_update_checks_replacement_lines_as_authored(
-    self, mock_lock, _mock_resolve, _mock_guard, _mock_resp, _accounts_postable
+    self, mock_lock, _mock_guard, _mock_resp, _accounts_postable
   ):
     entry = _mock_entry(status="draft")
     mock_lock.return_value = entry

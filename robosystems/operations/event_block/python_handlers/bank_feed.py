@@ -241,7 +241,7 @@ def plan_lines(
       element_id=allocation.element_id,
       debit_amount=0 if money_in else allocation.amount,
       credit_amount=allocation.amount if money_in else 0,
-      metadata=_flow_tag(allocation.flow_qname),
+      flow_qname=allocation.flow_qname,
       dimension_ids=allocation.dimension_ids,
     )
     for allocation in contras
@@ -258,17 +258,11 @@ def plan_lines(
       element_id=resource_element_id,
       debit_amount=part if money_in else 0,
       credit_amount=0 if money_in else part,
-      metadata=_flow_tag(flow),
+      flow_qname=flow,
     )
     for part, flow in bank_parts
   ]
   return [*bank_lines, *contra_lines] if money_in else [*contra_lines, *bank_lines]
-
-
-def _flow_tag(flow_qname: str | None) -> dict[str, Any] | None:
-  # `transaction_description_code` is the key journal entries resolve into
-  # the line's `flow_element_id`.
-  return {"transaction_description_code": flow_qname} if flow_qname else None
 
 
 def _journal_metadata(

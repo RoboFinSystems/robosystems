@@ -655,7 +655,9 @@ def render_structure_view(
         f for f in strays if sections.intersection(ancestry.get(f.element_id, ()))
       ]
     rows = _place_strays_by_calculation(rows, strays, periods, ancestry)
+  warnings: list[str] = []
   if block_type == "equity_statement":
+    warnings = _equity_outside_every_rollforward(session, strays, rows, periods)
     rows = _with_opening_balance(rows, facts, periods, hierarchy)
   if block_type == "cash_flow_statement":
     _show_cash_signed(rows, hierarchy, calculations)
@@ -674,7 +676,61 @@ def render_structure_view(
     block_type=block_type,
     periods=periods,
     rows=rows,
+    warnings=warnings,
   )
+
+
+def _equity_outside_every_rollforward(
+  session: Session,
+  strays: list[ReportFact],
+  rows: list[FactRow],
+  periods: list[PeriodSpec],
+) -> list[str]:
+  """Equity balances the statement's closing balance leaves out: no row, and
+  no roll-forward root sums them through the calc DAG. The balance sheet's
+  equity holds them, so the two disagree by their amount. The case is an
+  LLC or partnership Style, whose capital root is a calc leaf, holding
+  another form's capital."""
+  ends = {p.end for p in periods}
+  balances = [
+    f
+    for f in strays
+    if f.period_type == "instant"
+    and f.classification == "equity"
+    and not f.audit_only
+    and f.period_end in ends
+    and abs(f.value) >= 0.005
+  ]
+  if not balances:
+    return []
+  roots = {r.element_id for r in rows if r.element_qname in ROLLFORWARD_ROOTS}
+  parents = _calculation_ancestry(
+    session, {f.element_id for f in balances}, {r.element_id for r in rows}
+  )
+
+  def reaches_a_root(element_id: str) -> bool:
+    frontier, seen = [element_id], {element_id}
+    while frontier:
+      for parent in parents.get(frontier.pop(), []):
+        if parent in roots:
+          return True
+        if parent not in seen:
+          seen.add(parent)
+          frontier.append(parent)
+    return False
+
+  latest: dict[str, ReportFact] = {}
+  for fact in balances:
+    held = latest.get(fact.element_id)
+    if held is None or fact.period_end > held.period_end:
+      latest[fact.element_id] = fact
+  return [
+    f"{fact.element_name} holds {fact.value:,.2f} at {fact.period_end} that no "
+    "roll-forward on this statement includes, so its ending balance is short "
+    "of the balance sheet's equity by that amount."
+    for element_id, fact in sorted(latest.items(), key=lambda kv: kv[1].element_name)
+    if not reaches_a_root(element_id)
+  ]
 
 
 # Cash flow rows on an asset or on operating capital, whose facts hold the cash

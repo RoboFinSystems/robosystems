@@ -365,7 +365,7 @@ class FlowCandidate(BaseModel):
     ...,
     description=(
       "The flow's qname, the value a bank line's `classified_flow_qname` and a "
-      "journal-entry line's `transaction_description_code` take."
+      "journal-entry line's `flow_qname` take."
     ),
   )
   name: str = Field(
