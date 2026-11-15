@@ -644,3 +644,50 @@ def test_capital_a_root_sums_is_not_named(tenant):
   se_id = next(f.element_id for f in facts if f.element_qname == SE)
 
   assert _outside(facts, _root_row(se_id, SE)) == []
+
+
+def test_capital_under_a_presented_subtotal_is_not_named(tenant):
+  """A presented row between the balance and its root does not end the walk:
+  the root still sums the balance, so the closing balance holds it."""
+  _post(tenant, date(2026, 3, 1), [("cash", 476, 0), ("apic", 0, 476)])
+  facts = _facts(tenant, [FY26], close_target=MEMBERS)
+  with extensions_session(GRAPH) as session:
+    calc_id = session.execute(
+      text("SELECT id FROM structures WHERE name = 'BS calc'")
+    ).scalar()
+    between = _element("test:PaidInTotal", "credit", "instant")
+    session.add(between)
+    session.flush()
+    between_id = between.id
+    arcs = [
+      Association(
+        structure_id=calc_id,
+        from_element_id=parent,
+        to_element_id=child,
+        association_type="calculation",
+        weight=1,
+      )
+      for parent, child in (
+        (tenant["members_concept"], between_id),
+        (between_id, tenant["apic_concept"]),
+      )
+    ]
+    session.add_all(arcs)
+  try:
+    root = _root_row(tenant["members_concept"], MEMBERS)
+    subtotal = _root_row(between_id, "test:PaidInTotal")
+    strays = [f for f in facts if f.element_id != root.element_id]
+    with extensions_session(GRAPH) as session:
+      assert (
+        _equity_outside_every_rollforward(session, strays, [subtotal, root], [FY26])
+        == []
+      )
+  finally:
+    with extensions_session(GRAPH) as session:
+      session.execute(
+        text(
+          "DELETE FROM associations WHERE from_element_id = :e OR to_element_id = :e"
+        ),
+        {"e": between_id},
+      )
+      session.execute(text("DELETE FROM elements WHERE id = :e"), {"e": between_id})

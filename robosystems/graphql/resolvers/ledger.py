@@ -1224,8 +1224,8 @@ class LedgerQuery:
     A flow is a second classification beside the account: it overrides the
     account's default flow on the cash flow and equity statements (a bank
     line's `classified_flow_qname`, a journal-entry line's `flow_qname`).
-    These are the leaf investing and
-    financing rows of the entity's cash flow statement under its Reporting
+    These are the leaf investing and financing rows of the entity's cash
+    flow statement under its Reporting
     Style - the set the write path accepts - so a picker built from them
     never offers a row the statement cannot present. By section, investing
     then financing, and by name within each.

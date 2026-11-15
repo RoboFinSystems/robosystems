@@ -704,9 +704,8 @@ def _equity_outside_every_rollforward(
   if not balances:
     return []
   roots = {r.element_id for r in rows if r.element_qname in ROLLFORWARD_ROOTS}
-  parents = _calculation_ancestry(
-    session, {f.element_id for f in balances}, {r.element_id for r in rows}
-  )
+  # Climb past presented rows: only a root's sum decides the closing balance.
+  parents = _calculation_ancestry(session, {f.element_id for f in balances}, roots)
 
   def reaches_a_root(element_id: str) -> bool:
     frontier, seen = [element_id], {element_id}

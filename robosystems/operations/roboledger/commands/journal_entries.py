@@ -159,6 +159,7 @@ class UnbalancedJournalEntryError(ValueError):
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 
+# Legacy: a flow tag belongs in ``flow_qname``. Still read, and still checked.
 _FLOW_TAG_KEY = "transaction_description_code"
 
 
