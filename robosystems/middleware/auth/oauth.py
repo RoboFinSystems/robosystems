@@ -93,9 +93,10 @@ def cached_oauth_identity(plain_token: str) -> tuple[str, str] | None:
   """``(user_id, graph_id)`` for a token the validation cache holds live.
 
   For code that runs before authentication, the rate limiter above all: the
-  cache is written only by ``validate_oauth_access_token``, so an entry makes
-  the token an identity the way a cached API key is. Reads the cache only,
-  never the database; a miss or any failure is ``None``.
+  cache is written only by ``validate_oauth_access_token`` and
+  ``prime_oauth_validation_cache``, so an entry makes the token an identity
+  the way a cached API key is. Reads the cache only, never the database; a
+  miss or any failure is ``None``.
   """
   if not is_oauth_access_token(plain_token) or len(plain_token) > 256:
     return None
@@ -113,6 +114,22 @@ def cached_oauth_identity(plain_token: str) -> tuple[str, str] | None:
   if principal is None:
     return None
   return principal.user_id, principal.graph_id
+
+
+def prime_oauth_validation_cache(user: User, token: OAuthToken, grant: Any) -> None:
+  """Cache a just-issued access token as its first validation would.
+
+  The token endpoint calls this once the pair is committed, having checked
+  the user, grant and client itself. Without it a token's first call reaches
+  the rate limiter uncached and is charged to the anonymous per-IP bucket.
+  Best-effort: a failure leaves the token to be cached on first use.
+  """
+  try:
+    api_key_cache.cache_api_key_validation(
+      str(token.token_hash), _serialize(user, token, grant)
+    )
+  except Exception as exc:
+    logger.warning(f"OAuth token cache prime failed: {exc}")
 
 
 def validate_oauth_access_token(plain_token: str) -> OAuthPrincipal | None:

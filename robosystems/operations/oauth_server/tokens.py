@@ -16,6 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
+from robosystems.middleware.auth.oauth import prime_oauth_validation_cache
 from robosystems.models.core import OAuthClient, OAuthGrant, OAuthToken, User
 from robosystems.models.core.user.oauth_token import (
   REFRESH_TOKEN_PREFIX,
@@ -76,14 +77,23 @@ def _verify_pkce(code_verifier: str | None, code_challenge: str) -> bool:
   return hmac.compare_digest(create_s256_code_challenge(code_verifier), code_challenge)
 
 
-def _live_grant(grant_id: str, session: Session) -> OAuthGrant:
+def _live_grant(grant_id: str, session: Session) -> tuple[OAuthGrant, User]:
   grant = OAuthGrant.get_by_id(grant_id, session)
   if grant is None or grant.is_revoked:
     raise TokenError("invalid_grant", "The grant has been revoked")
   user = User.get_by_id(str(grant.user_id), session)
   if user is None or not bool(user.is_active):
     raise TokenError("invalid_grant", "The grant has been revoked")
-  return grant
+  return grant, user
+
+
+def _prime_validation_cache(
+  user: User, access: OAuthToken, grant: OAuthGrant, client: OAuthClient
+) -> None:
+  """Cache the new access token so its first call is not anonymous to the
+  rate limiter."""
+  if client.is_active:
+    prime_oauth_validation_cache(user, access, grant)
 
 
 def exchange_authorization_code(
@@ -137,11 +147,12 @@ def exchange_authorization_code(
     )
     raise TokenError("invalid_grant", "PKCE verification failed")
 
-  grant = _live_grant(str(payload.get("grant_id", "")), session)
-  _, access_plain, _, refresh_plain, ttl = OAuthToken.mint_pair(
+  grant, user = _live_grant(str(payload.get("grant_id", "")), session)
+  access, access_plain, _, refresh_plain, ttl = OAuthToken.mint_pair(
     grant_id=str(grant.id), user_id=str(grant.user_id), session=session
   )
   grant.touch(session)
+  _prime_validation_cache(user, access, grant, client)
   return TokenResponse(
     access_token=access_plain,
     refresh_token=refresh_plain,
@@ -229,7 +240,7 @@ def refresh_access_token(
       raise TokenError("invalid_scope", "Requested scope exceeds the grant")
 
   if reused:
-    return _issue_sibling_pair(row, grant, session)
+    return _issue_sibling_pair(row, grant, user, client, session)
 
   # Claim, retire the previous access token and mint the successor in one
   # transaction. The claim's row lock is held to the commit, so a concurrent
@@ -240,7 +251,7 @@ def refresh_access_token(
       # Read committed: the reload sees the rotation that won the claim.
       session.refresh(row)
       if row.rotated_within(REFRESH_REUSE_GRACE_SECONDS):
-        return _issue_sibling_pair(row, grant, session)
+        return _issue_sibling_pair(row, grant, user, client, session)
       raise _replay()
     previous_access = OAuthToken.mark_pair_access_revoked(row, session)
     access, access_plain, refresh, refresh_plain, ttl = OAuthToken.mint_pair(
@@ -263,6 +274,7 @@ def refresh_access_token(
     for token in previous_access:
       token.invalidate_cache()
     OAuthToken.log_issued(access, refresh, rotation=True)
+    _prime_validation_cache(user, access, grant, client)
   except Exception as e:
     logger.error(f"OAuth rotation committed; a post-commit step failed: {e}")
   return TokenResponse(
@@ -274,7 +286,11 @@ def refresh_access_token(
 
 
 def _issue_sibling_pair(
-  row: OAuthToken, grant: OAuthGrant, session: Session
+  row: OAuthToken,
+  grant: OAuthGrant,
+  user: User,
+  client: OAuthClient,
+  session: Session,
 ) -> TokenResponse:
   """A fresh pair in ``row``'s family for a refresh inside the reuse grace.
 
@@ -302,6 +318,7 @@ def _issue_sibling_pair(
   )
   try:
     OAuthToken.log_issued(access, refresh, rotation=True, reuse_grace=True)
+    _prime_validation_cache(user, access, grant, client)
   except Exception as e:
     logger.error(f"OAuth sibling pair committed; a post-commit step failed: {e}")
   return TokenResponse(
