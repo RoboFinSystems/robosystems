@@ -6,7 +6,7 @@ Three kinds of graph on one platform: your ledger, the public filings, and graph
 
 [RoboLedger](https://roboledger.ai), the general ledger built on it, is in [roboledger-app](https://github.com/RoboFinSystems/roboledger-app): a full accounting system in its own right, every number traced to the entry. Our own companies' books are kept on it. [RoboInvestor](https://roboinvestor.ai) runs on it too: equity research on public companies, your fund's positions with their terms, and the reports your portfolio companies share from RoboLedger.
 
-Built by a CPA and former Workiva XBRL engineer. Open source (Apache 2.0 here; MIT on the clients, the shared UI and xbrlkit): you keep the code and the data whatever happens to any vendor, including us.
+Built by an inactive CPA and ex-Workiva knowledge engineer. Open source (Apache 2.0 here; MIT on the clients, the shared UI and xbrlkit): you keep the code and the data whatever happens to any vendor, including us.
 
 **Run it yourself:** [on one server](https://robosystems.ai/docs/technical/self-hosting-on-a-server) · [in your AWS account](https://robosystems.ai/docs/technical/bootstrap-guide) · [with open-weight models](https://robosystems.ai/docs/technical/self-hosted-ai-models). Or let us run it: [robosystems.ai](https://robosystems.ai).
 
