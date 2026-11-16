@@ -1,10 +1,10 @@
 ---
 title: RoboLedger documentation
-description: Use RoboLedger through Claude, ChatGPT and other MCP clients. Connect QuickBooks, analyze and report on your books, plan, and close the month.
+description: The general ledger built on RoboSystems. Close, consolidation, schedules, bank feeds, reconciliations and forecasting, from Claude, ChatGPT or any MCP client.
 order: 0
 ---
 
-RoboLedger connects your QuickBooks books to Claude, ChatGPT and any other MCP client. You ask questions about your numbers, build reports and forecasts, compare your company with public filers, and when you trust it, close the month. Nothing is written to QuickBooks until you post an entry.
+RoboLedger is the general ledger built on RoboSystems, the open-source knowledge graph for finance: close, consolidation, schedules, bank feeds, reconciliations and forecasting, every number traced to the entry. Work on it from Claude, ChatGPT or any MCP client; nothing is written to QuickBooks until you post an entry.
 
 ## Get started
 
@@ -14,7 +14,8 @@ RoboLedger connects your QuickBooks books to Claude, ChatGPT and any other MCP c
 4. [How RoboLedger works](how-roboledger-works.md): from an event to a report, and the information blocks your statements are made of.
 5. [Find your way around the app](the-roboledger-app.md): a tour, page by page, with screenshots.
 6. [Work across several companies](working-across-companies.md): for fractional CFOs and controllers, one graph and one connection per client.
-7. [Your books and your data](your-books-and-your-data.md): what's copied from QuickBooks, who can see it, and how to take it with you.
+7. [Consolidate a group of companies](consolidate-a-group.md): each company keeps its own books, and the group's consolidated statements are drafted from them every month.
+8. [Your books and your data](your-books-and-your-data.md): what's copied from QuickBooks, who can see it, and how to take it with you.
 
 ## Work with your books
 
@@ -43,4 +44,4 @@ RoboLedger connects your QuickBooks books to Claude, ChatGPT and any other MCP c
 
 ## Building on RoboLedger
 
-RoboLedger runs on the open-source RoboSystems platform. The technical documentation, covering the API, self-hosting and custom integrations, is at [robosystems.ai/docs/technical](https://robosystems.ai/docs/technical).
+RoboLedger is built on RoboSystems, the open-source knowledge graph for finance. The technical documentation, covering the API, self-hosting and custom integrations, is at [robosystems.ai/docs/technical](https://robosystems.ai/docs/technical).

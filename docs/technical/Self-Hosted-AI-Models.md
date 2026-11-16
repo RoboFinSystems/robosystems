@@ -2,7 +2,7 @@
 
 The server-side AI operators can run on an open-weight model through any OpenAI-compatible server, so the platform's AI does not depend on one vendor. On a stack you run, both AI lanes can be pointed at open-weight models: the MCP clients that call your tools bring their own model, and the server-side operators can run on any server that implements the OpenAI Chat Completions API with tool calling.
 
-> **This is for a deployment you run** — locally, in your own AWS account, or a dedicated deployment that asks for it. Hosted RoboSystems runs the operators on Claude through AWS Bedrock; `OPENAI_COMPAT_ENABLED` is off there and there is no model selector in the app.
+> **This is for a deployment you run**: locally, on your own server, or in your own AWS account. Hosted RoboSystems, managed and Dedicated alike, runs the operators on frontier models (Claude through AWS Bedrock); `OPENAI_COMPAT_ENABLED` is off there and there is no model selector in the app.
 
 ## The Two Lanes
 

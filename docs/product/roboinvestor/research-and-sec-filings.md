@@ -37,7 +37,7 @@ What you can ask of the filings, and the rules that decide whether a number is r
 
 ## Console and Search
 
-With a graph selected — your portfolio graph or the SEC filings — **Console** asks questions inside the app. It runs on RoboSystems' own AI and uses credits. **Search** finds text in the SEC filings, or, on your portfolio graph, in the documents saved there.
+With a graph selected (your portfolio graph or the SEC filings), **Console** asks questions inside the app. It runs on RoboSystems' own AI and uses credits. **Search** finds text in the SEC filings, or, on your portfolio graph, in the documents saved there.
 
 Claude, ChatGPT and other clients you connect yourself don't use RoboSystems credits. See [Graphs, tiers and credits](https://robosystems.ai/docs/guides/graphs-tiers-and-credits).
 

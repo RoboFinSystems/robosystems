@@ -65,7 +65,7 @@ def _deterministic_rs_gaap_override(coa_elem: dict) -> str | None:
 class MappingOperator(Operator):
   spec = OperatorSpec(
     name="Mapping Operator",
-    description="Autonomous Chart of Accounts to rs-gaap reporting-concept mapping",
+    description="Automatic Chart of Accounts to rs-gaap reporting-concept mapping",
     capabilities=[OperatorCapability.FINANCIAL_ANALYSIS],
     version="1.0.0",
     requires_credits=True,

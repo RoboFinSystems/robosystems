@@ -1,6 +1,14 @@
 # RoboSystems
 
-RoboSystems is an open-source, AI-native financial intelligence platform for accounting, financial reporting, and investment management. It models your financial data as a **knowledge graph** — transactions, facts, reporting elements, and the calculation structures that relate them are all nodes and edges, with the semantics preserved rather than flattened into rows you query around. On top of that graph it gives AI agents and analysts a ledger-grade system of record they can both query and operate — closing the books, producing reports, and analyzing portfolios across your own ledger, your holdings, and SEC public filings queryable alongside them. Powers [RoboLedger](https://roboledger.ai) and [RoboInvestor](https://roboinvestor.ai).
+**Finance AI that ties to the books.** RoboSystems is an open-source knowledge graph that gives your AI agents your general ledger and public companies' filings as structured, traceable data, on your infrastructure, with the model you choose.
+
+Three kinds of graph on one platform: your ledger, the public filings, and graphs you model yourself, from your own schema, loaded from Parquet and queried with Cypher. One ontology underneath: the RoboSystems graph model, labelled in XBRL's standard terms wherever XBRL has one. Every graph runs on it in LadybugDB, and reports leave as a holon (RDF), XBRL 2.1 or Tavi. Subgraphs give your AI a workspace it extends over MCP, and semantic memory carries its work between sessions.
+
+[RoboLedger](https://roboledger.ai), the general ledger built on it, is in [roboledger-app](https://github.com/RoboFinSystems/roboledger-app): a full accounting system in its own right, every number traced to the entry. Our own companies' books are kept on it. [RoboInvestor](https://roboinvestor.ai) runs on it too: equity research on public companies, your fund's positions with their terms, and the reports your portfolio companies share from RoboLedger.
+
+Built by a CPA and former Workiva XBRL engineer. Open source (Apache 2.0 here; MIT on the clients, the shared UI and xbrlkit): you keep the code and the data whatever happens to any vendor, including us.
+
+**Run it yourself:** [on one server](https://robosystems.ai/docs/technical/self-hosting-on-a-server) · [in your AWS account](https://robosystems.ai/docs/technical/bootstrap-guide) · [with open-weight models](https://robosystems.ai/docs/technical/self-hosted-ai-models). Or let us run it: [robosystems.ai](https://robosystems.ai).
 
 **Every tenant gets their own graph.** Not a row-level slice of a shared table — a dedicated graph database on its own instance, with a dedicated OLTP schema behind it. Your ontology, your taxonomies, and your calculation structures live in it as artifacts you can read, export, and take with you.
 
@@ -9,11 +17,11 @@ RoboSystems is an open-source, AI-native financial intelligence platform for acc
 The platform provides the core infrastructure that all extensions build on:
 
 - **Dedicated Infrastructure**: Tiered LadybugDB graph infrastructure with dedicated instances and configurable memory allocation
-- **AI Operator System**: Autonomous financial Operators (Claude/MCP executors) with automatic credit tracking and SSE progress streaming.
-- **Shared Repositories**: SEC XBRL filings knowledge graph for context mining and benchmarking
+- **AI Operator System**: AI Operators (Claude/MCP executors) with automatic credit tracking and SSE progress streaming.
+- **Shared Repositories**: SEC XBRL filings knowledge graph for comparison and benchmarking
 - **Document Management**: Upload, index, and search documents with full-text and semantic search via OpenSearch
 - **Credit-Based Billing**: Flexible credits for AI operations based on token usage
-- **Subgraphs (Workspaces)**: AI memory graphs and isolated environments for development and team collaboration
+- **Subgraphs (Workspaces)**: isolated workspaces beside a graph, for agent scratch data, development and team collaboration (semantic memory stays on the parent graph)
 - **Web Application**: Primary web interface — graph management, the AI query console (natural-language + Cypher over MCP), schema explorer, document search, shared-repository access, and billing — [`robosystems-app`](https://github.com/RoboFinSystems/robosystems-app)
 
 The **core platform API** lives at `/v1` — auth, orgs, billing, graph lifecycle (subgraphs, backups, materialize, tier changes), Cypher, and MCP — with reads as REST `GET`. Every write — across both the core and extensions surfaces — is a named **`OperationEnvelope`** operation with `Idempotency-Key` support, audit logging, and SSE progress streaming via `/v1/operations/{id}/stream`.
@@ -188,7 +196,7 @@ See the **[Bootstrap Guide](https://robosystems.ai/docs/technical/bootstrap-guid
 
 Built end-to-end on open-source engines — PostgreSQL, LadybugDB, DuckDB, LanceDB, OpenSearch, and Valkey — assembled into a transactional core with a materialized analytical graph and integrated vector search, with no proprietary database lock-in.
 
-That openness runs up the stack as well as down: the accounting ontology, reporting taxonomies, and calculation structures are inspectable, portable artifacts you own, not configuration trapped in a vendor platform — [semantic sovereignty](https://robosystems.ai/blog/semantic-sovereignty) for your financial data.
+That openness runs up the stack as well as down: the ontology, reporting taxonomies, and calculation structures are inspectable, portable artifacts you own, not configuration trapped in a vendor platform — [semantic sovereignty](https://robosystems.ai/blog/semantic-sovereignty) for your financial data.
 
 ### Multi-Tenancy & Isolation
 
@@ -198,7 +206,7 @@ One rule: **every isolation primitive keys on `graph_id`, never on an organizati
 - **Schema-per-graph OLTP** — each graph gets its own PostgreSQL schema, with `search_path` re-stamped on every request rather than inherited from a pooled connection. A CI structural test pins the contract.
 - **Two databases, two migration histories** — platform state (identity, orgs, billing) is separate from extensions OLTP; a migration to one never touches the other.
 - **The graph is a derived projection** — OLTP rows are the system of record and the analytical graph is rebuilt from them blue-green, which is what makes a rebuild routine rather than risky.
-- **Subgraphs** are isolated environments inside a tenant, sharing the parent's credits and permissions — AI memory, development, team workspaces.
+- **Subgraphs** are isolated workspaces beside a tenant's graph, sharing the parent's credits and permissions: agent scratch data, development, team workspaces. Semantic memory stays on the parent graph.
 - **Shared repositories** (SEC XBRL) are the one multi-reader surface: read-only, separately replicated, queryable alongside your own graph but never writable through it.
 
 Because tenancy is enforced at the graph rather than in application predicates, the same codebase serves managed SaaS, a dedicated single-tenant deployment, and a fully self-hosted install with no fork. Details: [Graphs & Multi-Tenancy](https://robosystems.ai/docs/technical/graphs-and-multi-tenancy).
@@ -218,7 +226,7 @@ Details: [Enterprise SSO & SCIM](https://robosystems.ai/docs/technical/enterpris
 - FastAPI REST API with versioned endpoints
 - Extension GraphQL read API plus named REST command operations (CQRS)
 - MCP server for AI-powered graph database access — every graph speaks the MCP Streamable HTTP transport, with OAuth or API-key auth
-- AI Operator System for autonomous financial operations with automatic credit tracking
+- AI Operators (analyst, author, mapping) with automatic credit tracking
 - Dagster for data pipeline orchestration and background jobs
 
 **LadybugDB Graph Database:**

@@ -35,9 +35,9 @@ A plan starts from closed months. If you haven't closed any in RoboLedger yet, y
 
 ## Compare with public companies
 
-Add the SEC filings graph as a second connection beside your books, with its own address, `https://api.robosystems.ai/v1/graphs/sec/mcp`. You can also add RoboSystems SEC from Claude's connector directory, or the RoboSystems plugin in ChatGPT. With both connected, your assistant can put your margins, growth and expense ratios next to public companies in your industry. The SEC graph is a separate RoboSystems subscription. See [Compare with public companies](compare-with-public-companies.md).
+Add the SEC filings graph as a second connection beside your books, with its own address, `https://api.robosystems.ai/v1/graphs/sec/mcp`. You can also add RoboSystems SEC from Claude's connector directory, or the RoboSystems plugin in ChatGPT. With both connected, your assistant can put your margins, growth and expense ratios next to the public companies you choose. The SEC graph is a separate RoboSystems subscription. See [Compare with public companies](compare-with-public-companies.md).
 
-- "Compare our gross margin with three small public companies in our industry."
+- "Compare our gross margin with three public companies we name."
 - "How does our revenue growth stack up against those filers over the last eight quarters?"
 
 ## Keep the books right

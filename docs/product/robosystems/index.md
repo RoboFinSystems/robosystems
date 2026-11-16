@@ -4,7 +4,7 @@ description: Use RoboSystems through Claude, ChatGPT and other MCP clients. Conn
 order: 0
 ---
 
-RoboSystems gives AI clients a financial knowledge graph to work on: your company's books and reports, your portfolios, or the SEC filings of public companies. You connect Claude, ChatGPT or any MCP client, sign in, choose a graph, and ask in plain language. These guides cover what's the same whichever graph you use.
+RoboSystems is the open-source knowledge graph for finance. It gives your AI client your company's books and reports, the filings of 8,000+ public companies, or a graph you model yourself, and every number opens to the entries or tagged facts behind it. You connect Claude, ChatGPT or any MCP client, sign in, choose a graph, and ask in plain language. These guides cover what's the same whichever graph you use.
 
 ## Start here
 
@@ -33,5 +33,5 @@ RoboSystems gives AI clients a financial knowledge graph to work on: your compan
 ## By product
 
 - **Your books:** the [RoboLedger docs](https://roboledger.ai/docs) cover connecting QuickBooks, reporting, planning and the month-end close.
-- **Your holdings:** the [RoboInvestor docs](https://roboinvestor.ai/docs) cover private-company portfolios, reports shared from RoboLedger, and public-company research. RoboInvestor is in beta.
+- **Your holdings:** the [RoboInvestor docs](https://roboinvestor.ai/docs) cover private-company portfolios, reports shared from RoboLedger, and public-company research. Building next: positions linked to the ledger, brokerage sync, and portfolio analytics.
 - **Building on the platform:** the [technical docs](https://robosystems.ai/docs/technical) cover the API, the MCP server in depth, and self-hosting.

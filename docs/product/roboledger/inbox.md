@@ -29,8 +29,8 @@ Open a row to see the event and, for a QuickBooks transaction, its journal lines
 
 A bank feed brings in every transaction the bank has posted, each as a **Captured** event with nothing in the ledger. Most arrive with a suggested account, and the badge on the row says where the suggestion came from:
 
-- **Learned** — the counterparty's own default account, learned from the lines you approved before. The event says how often it held, such as "classified to Payroll on 7 of 8 past lines". This is the one to trust.
-- **Bank category** — only the bank's category for the transaction, matched to your chart. Check it.
+- **Learned**: the counterparty's own default account, learned from the lines you approved before. The event says how often it held, such as "classified to Payroll on 7 of 8 past lines". This is the one to trust.
+- **Bank category**: only the bank's category for the transaction, matched to your chart. Check it.
 
 A line with no badge carries no suggestion and needs a choice. A transfer between two of your own accounts arrives as one event with both sides known, and posts as it is.
 
@@ -56,10 +56,10 @@ You can attach one to any event that hasn't been rejected or replaced, so a bill
 
 The Inbox opens on **Captured**. Change the status filter to see the rest.
 
-- **Captured** — waiting for you. Nothing is in the ledger yet.
-- **Classified** — its accounts are decided. When its draft entry is already in the ledger, as it is for entries your assistant or a schedule drafted, the next close posts it without an approval; reject it if it shouldn't post. One classified without an entry waits until it's approved, and holds the close of its month until you approve or reject it.
-- **Committed** — approved. Its draft posts at the next close.
-- **Voided** — rejected, or a schedule month the ledger retired.
+- **Captured**: waiting for you. Nothing is in the ledger yet.
+- **Classified**: its accounts are decided. When its draft entry is already in the ledger, as it is for entries your assistant or a schedule drafted, the next close posts it without an approval; reject it if it shouldn't post. One classified without an entry waits until it's approved, and holds the close of its month until you approve or reject it.
+- **Committed**: approved. Its draft posts at the next close.
+- **Voided**: rejected, or a schedule month the ledger retired.
 
 Under **All statuses** you will also see **Fulfilled**, where most transactions synced from QuickBooks end up; **Pending**, a schedule's entries for months still to come; and occasionally **Superseded**.
 

@@ -51,7 +51,7 @@ Every Console run on a graph, question or change, is recorded with the graph: th
 
 RoboSystems is not SOC 2 attested today. A SOC 2 Type II examination is in progress.
 
-The platform is open source under Apache 2.0, so the controls on this page can be read in the code rather than taken on trust. The [Security and compliance](https://robosystems.ai/docs/technical/security-and-compliance) page in the technical docs lists them.
+The platform is open source (Apache 2.0 for the platform, MIT for the clients), so the controls on this page can be read in the code rather than taken on trust. The [Security and compliance](https://robosystems.ai/docs/technical/security-and-compliance) page in the technical docs lists them.
 
 ## Report a problem
 

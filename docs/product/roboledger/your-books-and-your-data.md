@@ -21,9 +21,11 @@ RoboLedger never sees your QuickBooks password. The access Intuit grants it is e
 
 ## What your AI assistant sees
 
-Your assistant reads what it needs to answer, through RoboLedger's tools, and those answers go to its model provider under your AI client's terms. **Ask about this report**, the Console and account mapping run instead on RoboSystems' own AI: Claude models hosted in AWS Bedrock, with inference kept in the United States. A change you ask the Console to make runs on Claude Opus, the most capable of them; questions, report answers and mapping run on Claude Sonnet. RoboSystems' AI doesn't use your data to train models. See [Security and your data](https://robosystems.ai/docs/guides/security-and-your-data).
+Your assistant reads what it needs to answer, through RoboLedger's tools, and those answers go to its model provider under your AI client's terms. **Ask about this report**, the Console and account mapping run instead on RoboSystems' own AI: Claude models hosted in AWS Bedrock, with inference kept in the United States. A change you ask the Console to make runs on Claude Opus, the most capable of them; questions, report answers and mapping run on Claude Sonnet. Your data trains no one's model: RoboSystems' AI doesn't train on it, and what your own AI client's provider does is set by that client's terms. See [Security and your data](https://robosystems.ai/docs/guides/security-and-your-data).
 
 ## Taking it with you
+
+You keep the code and the data whatever happens to any vendor, including us. RoboLedger is built on RoboSystems, which is open source (Apache 2.0 for the platform, MIT for the clients): run it in your cloud, on [your own server](https://robosystems.ai/docs/technical/self-hosting-on-a-server), or let us run it.
 
 - **Reports** download as holon, Tavi or XBRL 2.1 files. The holon is the complete one.
 - **Explorer** series and **Plan** scenarios download as CSV or JSON.

@@ -19,11 +19,11 @@ Open **Ledger → Closing Book → Reconciliations**, pick the month, and choose
 
 Each row shows its status:
 
-- **Not run** — nothing has been compared for this month.
-- **Does not tie** — the two sides differ by more than the materiality.
-- **Out of date** — the books changed after it was compared. Run reconciliations again.
-- **Reconciled** — the two sides agree within the materiality.
-- **Reviewed** — reconciled and signed off.
+- **Not run**: nothing has been compared for this month.
+- **Does not tie**: the two sides differ by more than the materiality.
+- **Out of date**: the books changed after it was compared. Run reconciliations again.
+- **Reconciled**: the two sides agree within the materiality.
+- **Reviewed**: reconciled and signed off.
 
 Materiality is zero unless you set one, so the two sides have to agree to the cent. Ask your assistant to set a materiality on a reconciliation, and a difference up to that amount still counts as tied. It applies from the next comparison.
 
