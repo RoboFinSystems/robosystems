@@ -1,6 +1,6 @@
 # Architecture Overview
 
-How RoboSystems is built: the knowledge graph at the center, the operational and analytical planes around it, and the AWS infrastructure a fork deploys. RoboSystems is an AI-native financial intelligence platform for accounting, financial reporting, and investment management, and this page maps the services, code, storage, and infrastructure that carry it.
+How RoboSystems is built: the knowledge graph at the center, the operational and analytical planes around it, and the AWS infrastructure a fork deploys. RoboSystems is the open-source knowledge graph for finance: ledger graphs, the SEC shared repository and graphs you model yourself, on one ontology. This page maps the services, code, storage, and infrastructure that carry it.
 
 ## Documentation Map
 
@@ -162,7 +162,7 @@ Model Context Protocol server for AI integration:
 
 **Location**: `/robosystems/operations/operators/`
 
-Unified operator architecture for autonomous financial operations:
+Unified architecture for the server-side AI Operators:
 
 - **Three-Layer Design**: Operator (domain logic), OperatorContext (services), Adapters (execution lifecycle)
 - **Stateless Operators**: Declare capabilities via `OperatorSpec`, receive services via `OperatorContext` — no graph_id or user in constructor
@@ -1070,7 +1070,7 @@ See individual app repositories for specific deployment workflows.
 - AWS Bedrock (the Converse API) for model access: Claude Sonnet 5.5 by default (the balanced profile), with Claude Opus 5.5 (quality) and OpenAI GPT-5.6 Luna (economy) as the other profiles; the `author` operator runs on the quality profile
 - Self-hosted stacks can point operators at any OpenAI-compatible server instead (see [Self-Hosted AI Models](Self-Hosted-AI-Models.md))
 - Unified operator system: stateless operators with automatic credit tracking per call
-- Three registered operators: `analyst` (`AnalystOperator`, answers a question from the graph's read-only tools), `author` (`AuthorOperator`, makes a requested change through writes that are reversible or wait on a person's step — metric and forecast blocks, counterparties, memories, draft reports, inbox classifications), and `mapping` (`MappingOperator`, autonomous CoA→rs-gaap taxonomy mapping)
+- Three registered operators: `analyst` (`AnalystOperator`, answers a question from the graph's read-only tools), `author` (`AuthorOperator`, makes a requested change through writes that are reversible or wait on a person's step — metric and forecast blocks, counterparties, memories, draft reports, inbox classifications), and `mapping` (`MappingOperator`, automatic CoA→rs-gaap taxonomy mapping)
 - MCP tools provide operators with graph queries, taxonomy operations, SEC structure discovery, and document search
 - Every operator run executes on the background worker, with progress over SSE; `?mode=sync` waits up to 50 seconds for the answer
 

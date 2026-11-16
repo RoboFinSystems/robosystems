@@ -5,7 +5,7 @@ order: 1
 section: Get started
 ---
 
-A RoboInvestor graph holds what you own: portfolios, the securities in them, and the positions that make up each holding. It is built for holders of private-company securities — funds, trusts and people who hold stock, notes, SAFEs and similar instruments — not for a public brokerage feed.
+A RoboInvestor graph holds what you own: portfolios, the securities in them, and the positions that make up each holding. It is built for holders of private-company securities (funds, trusts and people who hold stock, notes, SAFEs and similar instruments), not for a public brokerage feed.
 
 Create a graph with RoboInvestor turned on at [robosystems.ai](https://robosystems.ai). Organization owners and admins create graphs, and creating one starts a subscription. If the page says graph creation requires approval, choose **Request access** and we'll set it up.
 

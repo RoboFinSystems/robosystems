@@ -1,6 +1,6 @@
 # Core Concepts
 
-A glossary of the terms that run through RoboSystems: `graph_id`, tiers, subgraphs, Elements, block envelopes, operators, and the two graph stores. RoboSystems is a financial intelligence platform for accounting, financial reporting, and investment management, built on a multi-tenant knowledge graph, and these terms recur in every endpoint, SDK call, and README. The definitions are short and plain, build on one another, and each links to its deep-dive page. Read it once to get your bearings, then follow the links when you need detail.
+A glossary of the terms that run through RoboSystems: `graph_id`, tiers, subgraphs, Elements, block envelopes, operators, and the two graph stores. RoboSystems is the open-source knowledge graph for finance, with one graph database per tenant, and these terms recur in every endpoint, SDK call, and README. The definitions are short and plain, build on one another, and each links to its deep-dive page. Read it once to get your bearings, then follow the links when you need detail.
 
 > **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
@@ -63,7 +63,7 @@ the same file that drives provisioning — so they cannot fall out of step with 
 
 ## Subgraphs
 
-A subgraph is an isolated database *inside* a parent graph — a workspace for AI memory, forks and testing, or team collaboration. Subgraphs run on the same instance as their parent (no extra infrastructure cost), share the parent's credit pool and subscription limits, and keep their data fully isolated: queries cannot cross a subgraph boundary.
+A subgraph is an isolated database *beside* its parent graph: a workspace for agent scratch data, forks and testing, or team collaboration. Semantic memory stays on the parent graph, not in a subgraph. Subgraphs run on the same instance as their parent (no extra infrastructure cost), share the parent's credit pool and subscription limits, and keep their data fully isolated: queries cannot cross a subgraph boundary.
 
 A subgraph ID is the parent ID plus the subgraph name, joined by an underscore: `{parent_graph_id}_{subgraph_name}` (for example `kg1234567890abcdef_dev`). Subgraph names are alphanumeric, 1–20 characters, with no hyphens or underscores. Subgraphs are created through the graph-lifecycle command surface (`POST /v1/graphs/{graph_id}/operations/create-subgraph`).
 
@@ -119,7 +119,7 @@ The principle is the same as for Information Blocks: vocabulary changes go throu
 Two distinct concepts share the word "agent," and the platform keeps them separate on purpose.
 
 - **REA Agent** — an economic counterparty in a business event: a customer, vendor, or employee. This is the canonical ontology term, drawn from the Resources-Events-Agents accounting model. An REA Agent is data: a party an event happened *with*. It is distinct from the reporting `Entity`, which is the graph owner.
-- **Operator** — the AI executor layer (model- and MCP-driven). Three are registered: `analyst` (`AnalystOperator`, which answers a question from the graph's read-only tools), `author` (`AuthorOperator`, which makes the change a request asks for — metric and forecast blocks, counterparties, memories, draft reports, inbox classifications — through writes that are reversible or wait on a person's step, and needs the graph write role), and `mapping` (`MappingOperator`, autonomous chart-of-accounts mapping). Operators live at `POST /v1/graphs/{graph_id}/operator` and execute work; the former name `cypher` still resolves to `analyst`.
+- **Operator** — the AI executor layer (model- and MCP-driven). Three are registered: `analyst` (`AnalystOperator`, which answers a question from the graph's read-only tools), `author` (`AuthorOperator`, which makes the change a request asks for — metric and forecast blocks, counterparties, memories, draft reports, inbox classifications — through writes that are reversible or wait on a person's step, and needs the graph write role), and `mapping` (`MappingOperator`, automatic chart-of-accounts mapping). Operators live at `POST /v1/graphs/{graph_id}/operator` and execute work; the former name `cypher` still resolves to `analyst`.
 
 The rename resolved an "agent operates on agent" naming collision: an AI Operator can act on REA Agent data. Marketing copy may still say "AI agent," but in the API and codebase the executor is always an **Operator**.
 

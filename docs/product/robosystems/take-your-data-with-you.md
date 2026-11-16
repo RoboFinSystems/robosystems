@@ -5,7 +5,7 @@ order: 11
 section: Your account and data
 ---
 
-Your data is yours, and so is the software: RoboSystems is open source under Apache 2.0. This page lists every way to take a copy out, and what happens to your data when you disconnect QuickBooks, cancel a graph or close your account.
+Your data is yours, and so is the software: RoboSystems is open source (Apache 2.0 for the platform, MIT for the clients). This page lists every way to take a copy out, and what happens to your data when you disconnect QuickBooks, cancel a graph or close your account.
 
 ## Take a copy at any time
 

@@ -1,6 +1,6 @@
 ---
 title: Consolidate a group of companies
-description: Several companies in one set of books, the consolidated statements drafted from them each month, and what changes when a company is bought or sold.
+description: Several companies in one graph, each with its own books, the consolidated statements drafted each month, and what changes when a company is bought or sold.
 order: 26
 section: Keep the books right
 ---

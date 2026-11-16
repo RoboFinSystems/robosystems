@@ -33,5 +33,5 @@ RoboSystems is the open-source knowledge graph for finance. It gives your AI cli
 ## By product
 
 - **Your books:** the [RoboLedger docs](https://roboledger.ai/docs) cover connecting QuickBooks, reporting, planning and the month-end close.
-- **Your holdings:** the [RoboInvestor docs](https://roboinvestor.ai/docs) cover private-company portfolios, reports shared from RoboLedger, and public-company research. RoboInvestor is in beta.
+- **Your holdings:** the [RoboInvestor docs](https://roboinvestor.ai/docs) cover private-company portfolios, reports shared from RoboLedger, and public-company research. Building next: positions linked to the ledger, brokerage sync, and portfolio analytics.
 - **Building on the platform:** the [technical docs](https://robosystems.ai/docs/technical) cover the API, the MCP server in depth, and self-hosting.

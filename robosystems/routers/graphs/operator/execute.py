@@ -352,7 +352,7 @@ async def list_operators_endpoint(
     "(answers natural-language questions over the graph — curated financial "
     "reads, documents, memory, and read-only Cypher; supports `quick`, "
     "`standard`, `extended`; `cypher` is accepted as its former name) and "
-    "`mapping` (autonomous Chart of Accounts → rs-gaap mapping; roboledger "
+    "`mapping` (automatic Chart of Accounts → rs-gaap mapping; roboledger "
     "graphs only, `extended` only). `author` makes writes, so it is never "
     "chosen here: call it by name. "
     "`GET /v1/graphs/{graph_id}/operator` lists what is registered. Credits "

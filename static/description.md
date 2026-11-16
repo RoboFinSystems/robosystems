@@ -1,4 +1,4 @@
-The REST and GraphQL API for [RoboSystems](https://robosystems.ai) — an open-source, AI-native platform for accounting, financial reporting and investment management. It powers [RoboLedger](https://roboledger.ai) and [RoboInvestor](https://roboinvestor.ai).
+The REST and GraphQL API for [RoboSystems](https://robosystems.ai), the open-source knowledge graph for finance: your general ledger, public companies' filings and graphs you model yourself, as traceable data for your AI agents. [RoboLedger](https://roboledger.ai), the general ledger built on it, and [RoboInvestor](https://roboinvestor.ai) run on it.
 
 ## Two surfaces
 

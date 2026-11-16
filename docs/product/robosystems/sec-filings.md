@@ -27,7 +27,7 @@ You do not have to wait 14 days for the rest. **Start Plan Now**, on the **Subsc
 
 After you subscribe, the repository's getting-started page shows how to connect. Without a subscription, a connected client gets an access-denied error.
 
-RoboSystems is open source, so the free route is to run it yourself and load the filings you need. See [Local Development](https://robosystems.ai/docs/technical/local-development).
+RoboSystems is open source, so the free route is to run it yourself and load the filings you need. See [Self-Hosting on a Server](https://robosystems.ai/docs/technical/self-hosting-on-a-server).
 
 To read one filing at a time, [xbrlkit](https://xbrlkit.com), an open-source RoboSystems project, is free and needs no account. The site opens a listed company's 10-K, 10-Q, 20-F or 40-F in your browser, and its [local MCP server](https://xbrlkit.com/mcp) lets Claude, Cursor or any MCP client read filings on your own computer. It holds only the filings you load, with no index across companies. For questions that span the market, such as a screen of every filer, a cohort or a long time series, use the graph.
 

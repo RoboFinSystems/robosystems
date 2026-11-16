@@ -17,12 +17,12 @@ Statements show each closed month. Metrics show the months that have been comput
 
 ## Switch how you look at it
 
-- **Rendered** — the table, the way it appears on a statement.
-- **Chart** — the same series as a chart.
-- **Facts** — the numbers underneath, one row a fact.
-- **Elements** — the accounts and reporting concepts it is built from.
-- **Validation** — each check and its result: passed, failed, errored or skipped.
-- **Rules** — the checks its numbers are held to, and how serious a failure of each would be.
+- **Rendered**: the table, the way it appears on a statement.
+- **Chart**: the same series as a chart.
+- **Facts**: the numbers underneath, one row a fact.
+- **Elements**: the accounts and reporting concepts it is built from.
+- **Validation**: each check and its result: passed, failed, errored or skipped.
+- **Rules**: the checks its numbers are held to, and how serious a failure of each would be.
 
 Export the block's table as CSV or JSON. The export is the table whichever view you are on.
 
