@@ -7,7 +7,15 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 from uuid import uuid4
 
-from robosystems.models.core import Graph, OperatorRun, Org, OrgRole, OrgType, OrgUser
+from robosystems.models.core import (
+  Graph,
+  OperatorRun,
+  OperatorRunContext,
+  Org,
+  OrgRole,
+  OrgType,
+  OrgUser,
+)
 from robosystems.operations.operators.run_record import (
   OperatorRunRecord,
   result_summary,
@@ -147,6 +155,47 @@ def test_nul_bytes_are_stripped_from_every_text(test_db, test_user):
   assert row.answer == "A file"
   assert row.history[0]["content"] == "earlier"
   assert row.transcript[0]["input"][0]["toolResult"]["text"] == "binary"
+
+
+def test_contexts_are_stored_once_per_graph_and_stamped_when_reused(test_db, test_user):
+  graph = _graph(test_db, test_user.id)
+  system_sha, tools_sha = "a" * 64, "b" * 64
+  contexts = {
+    system_sha: {"kind": "system", "content": "You are\x00 the analyst."},
+    tools_sha: {"kind": "tools", "content": [{"name": "recall"}]},
+  }
+  first_id, second_id = f"op_{uuid4().hex}", f"op_{uuid4().hex}"
+  with patch("robosystems.db.platform.SessionFactory", return_value=test_db):
+    with patch.object(test_db, "close"):
+      write_run_record(
+        _record(
+          graph.graph_id,
+          test_user.id,
+          first_id,
+          contexts=contexts,
+          code_version="1.23.4",
+        )
+      )
+      first_seen = {
+        c.sha256: c.last_seen_at for c in test_db.query(OperatorRunContext).all()
+      }
+      write_run_record(
+        _record(graph.graph_id, test_user.id, second_id, contexts=contexts)
+      )
+
+  rows = (
+    test_db.query(OperatorRunContext)
+    .filter(OperatorRunContext.graph_id == graph.graph_id)
+    .all()
+  )
+  by_sha = {row.sha256: row for row in rows}
+  assert set(by_sha) == {system_sha, tools_sha}
+  assert by_sha[system_sha].kind == "system"
+  assert by_sha[system_sha].content == "You are the analyst."
+  assert by_sha[tools_sha].content == [{"name": "recall"}]
+  assert by_sha[system_sha].last_seen_at >= first_seen[system_sha]
+  run = test_db.query(OperatorRun).filter(OperatorRun.operation_id == first_id).one()
+  assert run.code_version == "1.23.4"
 
 
 def test_a_failed_write_never_raises(test_db, test_user):

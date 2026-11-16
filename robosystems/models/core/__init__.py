@@ -40,6 +40,7 @@ from .graph import (
   MutationSurface,
   OperationMutationAudit,
   OperatorRun,
+  OperatorRunContext,
   SourceFile,
   UsageEventType,
 )
@@ -106,6 +107,7 @@ __all__ = [
   "OAuthToken",
   "OperationMutationAudit",
   "OperatorRun",
+  "OperatorRunContext",
   "Org",
   "OrgInvitation",
   "OrgLimits",

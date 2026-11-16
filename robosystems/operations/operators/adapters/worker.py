@@ -21,6 +21,7 @@ from robosystems.operations.operators.operator_context import OperatorContext
 from robosystems.operations.operators.progress import OperationManagerProgress
 from robosystems.operations.operators.run_record import (
   OperatorRunRecord,
+  code_version,
   record_operator_run,
   result_summary,
 )
@@ -183,6 +184,8 @@ async def run_operator_worker(
         answer=answer,
         error=error,
         result=recorded_result,
+        contexts=dict(tracked_ai.contexts),
+        code_version=code_version(),
         started_at=started_at,
         finished_at=finished_at,
         duration_ms=round((time.monotonic() - started) * 1000, 2),

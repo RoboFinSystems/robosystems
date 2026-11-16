@@ -123,9 +123,10 @@ class OperatorRunDetail(OperatorRunSummary):
     description=(
       "One entry per model call, in order: the input added since the previous "
       "call (the question, then each turn's tool results), the model's output "
-      "blocks (text and tool calls), stop reason, token usage and credits. The "
-      "first entry also carries the system prompt's SHA-256 and size and the "
-      "tool names offered; later entries repeat them only when they change"
+      "blocks (text and tool calls), stop reason, token usage, credits and "
+      "sampling settings. The first entry also carries the SHA-256 and size of "
+      "the system prompt and the SHA-256 and names of the tools offered; later "
+      "entries repeat them only when they change"
     ),
   )
   result: dict[str, Any] = Field(
