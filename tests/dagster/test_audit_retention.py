@@ -61,12 +61,18 @@ def test_prunes_rows_past_retention(test_db):
   assert remaining == {"oma_new"}
 
 
-def test_prunes_operator_runs_past_retention(test_db):
+def test_prunes_operator_runs_and_their_contexts_past_retention(test_db):
   from datetime import UTC, datetime, timedelta
   from uuid import uuid4
 
   from robosystems.dagster.jobs.audit_retention import prune_operator_runs
-  from robosystems.models.core import Graph, OperatorRun, Org, OrgType
+  from robosystems.models.core import (
+    Graph,
+    OperatorRun,
+    OperatorRunContext,
+    Org,
+    OrgType,
+  )
 
   factory = sessionmaker(bind=test_db.get_bind())
   seed = factory()
@@ -100,7 +106,19 @@ def test_prunes_operator_runs_past_retention(test_db):
       duration_ms=1.0,
     )
 
+  def context(sha: str, age_days: int) -> OperatorRunContext:
+    seen = datetime.now(UTC) - timedelta(days=age_days)
+    return OperatorRunContext(
+      graph_id=graph_id,
+      sha256=sha,
+      kind="system",
+      content="prompt",
+      first_seen_at=seen,
+      last_seen_at=seen,
+    )
+
   seed.add_all([run("op_old", 400), run("op_new", 10)])
+  seed.add_all([context("a" * 64, 400), context("b" * 64, 10)])
   seed.commit()
   seed.close()
 
@@ -121,12 +139,20 @@ def test_prunes_operator_runs_past_retention(test_db):
     result = prune_operator_runs(build_op_context(), db)
 
   assert result["deleted"] == 1
+  assert result["contexts_deleted"] == 1
   check = factory()
   try:
     remaining = {
       r.operation_id
       for r in check.query(OperatorRun).filter(OperatorRun.graph_id == graph_id)
     }
+    contexts = {
+      c.sha256
+      for c in check.query(OperatorRunContext).filter(
+        OperatorRunContext.graph_id == graph_id
+      )
+    }
   finally:
     check.close()
   assert remaining == {"op_new"}
+  assert contexts == {"b" * 64}

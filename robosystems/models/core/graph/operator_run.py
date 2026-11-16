@@ -48,6 +48,8 @@ class OperatorRun(Base):
   # The response envelope's metadata minus result rows: tokens, credits,
   # tools called, the Cypher run, the writes made, confidence, loop flags.
   result = Column(JSONB, nullable=False, default=dict)
+  # The release that ran it: the code that built its prompts and tools.
+  code_version = Column(String(32), nullable=True)
 
   started_at = Column(
     DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)

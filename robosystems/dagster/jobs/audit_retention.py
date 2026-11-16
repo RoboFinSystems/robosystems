@@ -1,4 +1,5 @@
-"""Daily retention for operation_mutation_audit and operator_runs.
+"""Daily retention for operation_mutation_audit, operator_runs and the
+operator_run_contexts those runs name.
 
 Its own job, not a step of the billing jobs: those schedules are gated on
 billing, and dedicated deployments run with billing off but still keep an
@@ -53,8 +54,10 @@ def prune_operator_runs(
   context: OpExecutionContext, db: DatabaseResource
 ) -> dict[str, Any]:
   """Delete operator run records older than OPERATION_AUDIT_RETENTION_DAYS —
-  the same window as the audit rows that point at them."""
-  from robosystems.models.core import OperatorRun
+  the same window as the audit rows that point at them — and the contexts no
+  run inside the window used. A context's `last_seen_at` is stamped when a run
+  that used it is written, so every such run started before it."""
+  from robosystems.models.core import OperatorRun, OperatorRunContext
 
   cutoff = datetime.now(UTC) - timedelta(days=env.OPERATION_AUDIT_RETENTION_DAYS)
   with db.get_session() as session:
@@ -63,12 +66,21 @@ def prune_operator_runs(
       .filter(OperatorRun.started_at < cutoff)
       .delete(synchronize_session=False)
     )
+    contexts_deleted = (
+      session.query(OperatorRunContext)
+      .filter(OperatorRunContext.last_seen_at < cutoff)
+      .delete(synchronize_session=False)
+    )
 
   context.log.info(
-    f"Operator run retention: deleted {deleted} rows older than "
-    f"{env.OPERATION_AUDIT_RETENTION_DAYS} days"
+    f"Operator run retention: deleted {deleted} runs and {contexts_deleted} "
+    f"contexts older than {env.OPERATION_AUDIT_RETENTION_DAYS} days"
   )
-  return {"deleted": deleted, "cutoff": cutoff.isoformat()}
+  return {
+    "deleted": deleted,
+    "contexts_deleted": contexts_deleted,
+    "cutoff": cutoff.isoformat(),
+  }
 
 
 @job(tags={"dagster/priority": "3"})

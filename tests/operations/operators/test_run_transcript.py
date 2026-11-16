@@ -78,6 +78,7 @@ async def test_a_continuing_call_records_only_what_it_added():
     "cache_write": 0,
   }
   assert opening["billed"] is True
+  assert opening["params"] == {"temperature": 0.7, "max_tokens": 4000, "effort": None}
 
   assert follow["continues"] is True
   assert follow["input"] == [
@@ -86,7 +87,52 @@ async def test_a_continuing_call_records_only_what_it_added():
   assert follow["output"] == [{"text": "42"}]
   # Unchanged prefix and tools are not repeated.
   assert "tools" not in follow
+  assert "tools_sha256" not in follow
   assert "system_sha256" not in follow
+
+  # The hashes resolve to the text the model was given, held once each.
+  assert tracked.contexts[opening["system_sha256"]] == {
+    "kind": "system",
+    "content": "SYSTEM",
+  }
+  assert tracked.contexts[opening["tools_sha256"]] == {
+    "kind": "tools",
+    "content": tools,
+  }
+  assert len(tracked.contexts) == 2
+
+
+async def test_a_tool_schema_change_under_the_same_names_is_noted():
+  tracked = _client([_response("a"), _response("b")])
+  before = [{"name": "recall", "description": "old"}]
+  after = [{"name": "recall", "description": "new"}]
+  await tracked.create_message(
+    messages=[AIMessage(role="user", content="x")], tools=before
+  )
+  await tracked.create_message(
+    messages=[AIMessage(role="user", content="x")], tools=after
+  )
+
+  first, second = tracked.transcript
+  assert first["tools"] == second["tools"] == ["recall"]
+  assert first["tools_sha256"] != second["tools_sha256"]
+  assert tracked.contexts[second["tools_sha256"]]["content"] == after
+
+
+async def test_sampling_settings_are_recorded_per_call():
+  tracked = _client([_response("a")])
+  await tracked.create_message(
+    messages=[AIMessage(role="user", content="x")],
+    temperature=0.3,
+    max_tokens=1200,
+    effort="high",
+  )
+
+  assert tracked.transcript[0]["params"] == {
+    "temperature": 0.3,
+    "max_tokens": 1200,
+    "effort": "high",
+  }
 
 
 async def test_a_fresh_conversation_records_its_whole_input():

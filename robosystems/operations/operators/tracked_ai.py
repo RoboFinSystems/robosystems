@@ -1,6 +1,7 @@
 """TrackedAIClient — AIClient that bills every call through the injected
 `CreditConsumer`, so no operator can forget to, and keeps the run's
-transcript: every model call's new input, output, usage and credits."""
+transcript: every model call's new input, output, usage and credits, and the
+system prompts and tool sets it was given, by hash."""
 
 from __future__ import annotations
 
@@ -64,8 +65,11 @@ class TrackedAIClient:
     self._last_messages: list[AIMessage] = []
     self._last_output: list[dict[str, Any]] | None = None
     self._last_system_sha: str | None = None
-    self._last_tool_names: list[str] | None = None
+    self._last_tools_sha: str | None = None
     self._transcript_chars = 0
+    # The system prompts and tool sets the transcript names by hash, held
+    # once each: sha256 -> {"kind": "system" | "tools", "content": ...}.
+    self.contexts: dict[str, dict[str, Any]] = {}
 
   async def create_message(
     self,
@@ -124,7 +128,15 @@ class TrackedAIClient:
         billed = False
         self._mark_unbilled(response, str(e))
 
-    self._record_call(messages, system, tools, response, credits, billed)
+    self._record_call(
+      messages,
+      system,
+      tools,
+      response,
+      credits,
+      billed,
+      params={"temperature": temperature, "max_tokens": max_tokens, "effort": effort},
+    )
     return response
 
   def _record_call(
@@ -135,6 +147,7 @@ class TrackedAIClient:
     response: AIResponse,
     credits: float | None,
     billed: bool,
+    params: dict[str, Any],
   ) -> None:
     """Append this call to the transcript. The tool loop replays the previous
     output verbatim as the assistant turn, so a continuing call is the
@@ -167,18 +180,31 @@ class TrackedAIClient:
       },
       "credits": credits,
       "billed": billed,
+      "params": params,
     }
-    # The system prompt is our own code's output and large (the cached
-    # prefix), so the record carries its fingerprint, noted when it changes.
+    # The system prompt and the tool set are large and repeat across calls
+    # and runs, so an entry names each by hash when it changes, and the text
+    # is kept once in `contexts`.
     system_sha = hashlib.sha256(system.encode("utf-8")).hexdigest() if system else None
     if system_sha != self._last_system_sha or not self.transcript:
       entry["system_sha256"] = system_sha
       entry["system_chars"] = len(system or "")
       self._last_system_sha = system_sha
-    tool_names = sorted(t.get("name", "") for t in tools) if tools else None
-    if tool_names != self._last_tool_names or not self.transcript:
-      entry["tools"] = tool_names
-      self._last_tool_names = tool_names
+      if system_sha:
+        self.contexts[system_sha] = {"kind": "system", "content": system}
+    tools_sha = (
+      hashlib.sha256(
+        json.dumps(tools, sort_keys=True, default=str).encode("utf-8")
+      ).hexdigest()
+      if tools
+      else None
+    )
+    if tools_sha != self._last_tools_sha or not self.transcript:
+      entry["tools"] = sorted(t.get("name", "") for t in tools) if tools else None
+      entry["tools_sha256"] = tools_sha
+      self._last_tools_sha = tools_sha
+      if tools_sha:
+        self.contexts[tools_sha] = {"kind": "tools", "content": tools}
 
     size = len(json.dumps(entry, default=str))
     if self._transcript_chars + size > TRANSCRIPT_CHAR_BUDGET:
