@@ -9,7 +9,10 @@ from authlib.oauth2.rfc7636 import create_s256_code_challenge
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
-from robosystems.middleware.auth.oauth import validate_oauth_access_token
+from robosystems.middleware.auth.oauth import (
+  cached_oauth_identity,
+  validate_oauth_access_token,
+)
 from robosystems.models.core import OAuthClient, OAuthGrant, OAuthToken
 from robosystems.models.core.user.oauth_token import (
   TOKEN_TYPE_ACCESS,
@@ -635,6 +638,7 @@ class TestValidateAccessToken:
   def test_valid_token_resolves_to_principal(
     self, test_db, issued, grant, test_user, no_cache
   ):
+    no_cache.cache_api_key_validation.reset_mock()  # the issue-time prime
     with patch("robosystems.database.SessionFactory", return_value=test_db):
       principal = validate_oauth_access_token(issued.access_token)
     assert principal is not None
@@ -739,3 +743,95 @@ class TestValidateAccessToken:
     assert OAuthToken.get_by_plaintext(
       issued.access_token, TOKEN_TYPE_ACCESS, test_db
     ).revoked_at
+
+
+class DictCache:
+  """The two validation-cache verbs, in memory."""
+
+  def __init__(self):
+    self.store: dict[str, dict] = {}
+
+  def cache_api_key_validation(self, key, user_data, is_active=True):
+    self.store[key] = {"user_data": user_data, "is_active": is_active}
+
+  def get_cached_api_key_validation(self, key):
+    return self.store.get(key)
+
+
+@pytest.fixture
+def dict_cache():
+  cache = DictCache()
+  with patch("robosystems.middleware.auth.oauth.api_key_cache", cache):
+    yield cache
+
+
+@pytest.mark.usefixtures("oauth_env", "fake_redis", "dict_cache")
+class TestIssuedTokenIsAnIdentity:
+  """The rate limiter runs before validation and reads only the cache, so a
+  token must be cached when issued or its first call is anonymous."""
+
+  def test_code_exchange(self, issued, test_user):
+    assert cached_oauth_identity(issued.access_token) == (str(test_user.id), KG)
+
+  def test_rotation(self, test_db, issued, client_row, test_user):
+    rotated = refresh_access_token(
+      refresh_token=issued.refresh_token,
+      client=client_row,
+      scope=None,
+      resource=None,
+      session=test_db,
+    )
+    assert cached_oauth_identity(rotated.access_token) == (str(test_user.id), KG)
+
+  def test_sibling_pair(self, test_db, issued, client_row, test_user):
+    for _ in range(2):
+      pair = refresh_access_token(
+        refresh_token=issued.refresh_token,
+        client=client_row,
+        scope=None,
+        resource=None,
+        session=test_db,
+      )
+    assert cached_oauth_identity(pair.access_token) == (str(test_user.id), KG)
+
+  def test_the_primed_entry_is_the_one_validation_writes(
+    self, test_db, issued, dict_cache
+  ):
+    primed = dict(dict_cache.store)
+    dict_cache.store.clear()
+    with patch("robosystems.database.SessionFactory", return_value=test_db):
+      validate_oauth_access_token(issued.access_token)
+    assert dict_cache.store == primed
+
+  def test_an_inactive_client_is_not_primed(
+    self, test_db, grant, client_row, test_user, dict_cache
+  ):
+    code = _issue_code(grant, client_row, str(test_user.id))
+    client_row.is_active = False
+    issued = exchange_authorization_code(
+      code=code,
+      client=client_row,
+      code_verifier=VERIFIER,
+      redirect_uri=REDIRECT,
+      resource=RESOURCE,
+      session=test_db,
+    )
+    assert dict_cache.store == {}
+    assert cached_oauth_identity(issued.access_token) is None
+
+  def test_a_cache_failure_still_issues_the_pair(
+    self, test_db, grant, client_row, test_user
+  ):
+    broken = Mock()
+    broken.cache_api_key_validation.side_effect = ConnectionError("valkey down")
+    code = _issue_code(grant, client_row, str(test_user.id))
+    with patch("robosystems.middleware.auth.oauth.api_key_cache", broken):
+      issued = exchange_authorization_code(
+        code=code,
+        client=client_row,
+        code_verifier=VERIFIER,
+        redirect_uri=REDIRECT,
+        resource=RESOURCE,
+        session=test_db,
+      )
+    assert issued.access_token.startswith("rfso")
