@@ -602,3 +602,93 @@ def test_each_is_an_explicit_read(tool_class):
     "idempotentHint": True,
     "openWorldHint": False,
   }
+
+
+@pytest.mark.unit
+class TestFaultsAndBounds:
+  @pytest.mark.parametrize("limit", [0, -5, 1001, "many", True, 2.5, 2.5e9])
+  def test_a_limit_outside_the_schema_is_refused(self, limit):
+    with patch(f"{_READS}.account_register.get_account_register") as read:
+      result = GetAccountRegisterTool(_client())._execute_sync(
+        {"account_id": "el_rent", "limit": limit}
+      )
+    assert result == {
+      "error": "invalid_arguments",
+      "message": "limit must be between 1 and 1000",
+    }
+    read.assert_not_called()
+
+  @pytest.mark.parametrize("limit", [1, 1000, "50"])
+  def test_a_limit_inside_it_is_passed_on(self, limit):
+    with (
+      _sessions(),
+      patch(
+        f"{_READS}.account_register.get_account_register", return_value=_REGISTER
+      ) as read,
+    ):
+      GetAccountRegisterTool(_client())._execute_sync(
+        {"account_id": "el_rent", "limit": limit}
+      )
+    assert read.call_args.kwargs["limit"] == int(limit)
+
+  def test_a_window_that_ends_before_it_starts_is_passed_on(self):
+    """The read answers an inverted window as an empty one (see
+    `test_account_register_db`); the tool does not refuse it first."""
+    with (
+      _sessions(),
+      patch(
+        f"{_READS}.account_register.get_account_register", return_value=_REGISTER
+      ) as read,
+    ):
+      result = GetAccountRegisterTool(_client())._execute_sync(
+        {
+          "account_id": "el_rent",
+          "start_date": "2026-09-30",
+          "end_date": "2026-09-01",
+        }
+      )
+    assert "error" not in result
+    assert read.call_args.kwargs["start_date"] == date(2026, 9, 30)
+    assert read.call_args.kwargs["end_date"] == date(2026, 9, 1)
+
+  @pytest.mark.parametrize(
+    ("tool_class", "target", "arguments"),
+    [
+      (
+        GetAccountRegisterTool,
+        f"{_READS}.account_register.get_account_register",
+        {"account_id": "el_rent"},
+      ),
+      (ListBankAccountsTool, f"{_READS}.bank_accounts.list_bank_accounts", {}),
+      (ListFlowCandidatesTool, f"{_READS}.taxonomies.list_entity_flow_candidates", {}),
+      (
+        GetClassificationStatsTool,
+        f"{_READS}.classification.classification_stats",
+        {"period": "2026-09"},
+      ),
+      (
+        ListDischargeCandidatesTool,
+        f"{_READS}.ar_ap.list_discharge_candidates",
+        {"event_id": "evt_1"},
+      ),
+      (ListReportsTool, f"{_READS}.reports.list_reports", {}),
+      (
+        ListElementArcsTool,
+        "robosystems.operations.library.reads.get_element_arcs",
+        {"element_id": "el_rent"},
+      ),
+    ],
+  )
+  def test_an_unexpected_fault_answers_a_fixed_message(
+    self, tool_class, target, arguments
+  ):
+    secret = "connection to 10.0.0.12:5432 refused for role tenant_kg01"
+    with (
+      _sessions(),
+      patch(f"{_READS}.bank_accounts.load_connection_health", return_value={}),
+      patch(target, side_effect=RuntimeError(secret)),
+    ):
+      tool = tool_class(_client())
+      result = tool._execute_sync(arguments)
+    name = tool.get_tool_definition()["name"]
+    assert result == {"error": "command_failed", "message": f"{name} failed"}

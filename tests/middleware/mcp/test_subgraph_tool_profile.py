@@ -45,6 +45,7 @@ def all_flags_on(monkeypatch):
     "FACT_GRID_ENABLED",
     "SEMANTIC_MEMORY_ENABLED",
     "MCP_SEMANTIC_MEMORY_ENABLED",
+    "SEMANTIC_SEARCH_ENABLED",
   ):
     monkeypatch.setattr(env, flag, True, raising=False)
 
@@ -221,11 +222,29 @@ class TestRoboLedgerRouteToolProfile:
 
   @staticmethod
   def _route(all_tools):
+    from robosystems.middleware.mcp.tools.route_profile import ROBOLEDGER_ROUTE
+
+    return ROBOLEDGER_ROUTE.serve(all_tools)
+
+  def _withheld(self) -> set[str]:
+    """Every tool the graph serves elsewhere that the route does not."""
     from robosystems.middleware.mcp.tools.manager import (
       ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS,
     )
 
-    return [t for t in all_tools if t["name"] not in ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS]
+    every = _tools_for(PARENT).get_tool_definitions_as_dict()
+    route = {t["name"] for t in self._route(every)}
+    return {t["name"] for t in every} - route | ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS
+
+  @staticmethod
+  def _naming(text: str, names: set[str]) -> list[str]:
+    import re
+
+    return sorted(
+      name
+      for name in names
+      if re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", text)
+    )
 
   def test_generic_and_rule_tools_are_withheld_only_on_the_route(self, all_flags_on):
     real = {t["name"] for t in _tools_for(PARENT).get_tool_definitions_as_dict()}
@@ -247,26 +266,19 @@ class TestRoboLedgerRouteToolProfile:
 
   def test_no_route_tool_text_points_at_a_withheld_tool(self, all_flags_on):
     """A description or schema naming a tool the route lacks sends the model
-    after an operation it cannot call."""
+    after an operation it cannot call. Every withheld tool, not only the
+    latest: a stale reference outlives the exclusion that made it one."""
     import json
-    import re
 
+    withheld = self._withheld()
+    assert self._NEWLY_WITHHELD and set(self._NEWLY_WITHHELD) <= withheld
     for tool in self._route(_tools_for(PARENT).get_tool_definitions_as_dict()):
       text = tool["description"] + json.dumps(tool.get("inputSchema", {}))
-      named = [
-        name
-        for name in self._NEWLY_WITHHELD
-        if re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", text)
-      ]
+      named = self._naming(text, withheld)
       assert not named, f"{tool['name']} names {named}"
 
   def test_route_instructions_name_no_withheld_tool(self, all_flags_on):
-    import re
-
     from robosystems.middleware.mcp.tools.instructions import build_instructions
-    from robosystems.middleware.mcp.tools.manager import (
-      ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS,
-    )
 
     names = {
       t["name"] for t in self._route(_tools_for(PARENT).get_tool_definitions_as_dict())
@@ -284,12 +296,7 @@ class TestRoboLedgerRouteToolProfile:
       entities=group,
     )
     assert out is not None
-    named = [
-      name
-      for name in ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS
-      if re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", out)
-    ]
-    assert named == []
+    assert self._naming(out, self._withheld()) == []
     assert "graphql" not in out.lower()
     for read in (
       "get-account-register",
@@ -299,14 +306,14 @@ class TestRoboLedgerRouteToolProfile:
     ):
       assert f"`{read}(" in out, read
 
-  def test_the_close_playbook_names_no_withheld_tool(self):
+  @pytest.mark.parametrize("mode", ["overview", "initiate", "recurring"])
+  def test_the_close_playbook_names_no_withheld_tool(self, all_flags_on, mode):
     import json
 
     from robosystems.middleware.mcp.tools.playbook_tools import _build_playbook
 
-    text = json.dumps(_build_playbook("overview"))
-    for name in self._NEWLY_WITHHELD:
-      assert name not in text, name
+    text = json.dumps(_build_playbook(mode))
+    assert self._naming(text, self._withheld()) == []
 
   @pytest.mark.asyncio
   async def test_a_typed_read_dispatches_by_name(self, all_flags_on):
@@ -337,3 +344,17 @@ class TestRoboLedgerRouteToolProfile:
         "list-flow-candidates", {}, return_raw=True
       )
     assert result["flows"][0]["qname"] == flow.qname
+
+  def test_the_real_event_tools_carry_the_enum_on_the_route_only(self, all_flags_on):
+    from robosystems.middleware.mcp.tools.route_profile import BUILT_IN_EVENT_TYPES
+
+    every = _tools_for(PARENT).get_tool_definitions_as_dict()
+    universal = {t["name"]: t for t in every}
+    route = {t["name"]: t for t in self._route(every)}
+    for name in ("create-event-block", "preview-event-block"):
+      held = route[name]["inputSchema"]["properties"]["event_type"]
+      assert held["enum"] == list(BUILT_IN_EVENT_TYPES)
+      assert "enum" not in universal[name]["inputSchema"]["properties"]["event_type"]
+    # The inbox writes still take what they took.
+    update = route["update-event-block"]["inputSchema"]["properties"]
+    assert {"event_id", "transition_to", "metadata_patch"} <= set(update)

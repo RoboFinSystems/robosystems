@@ -127,6 +127,20 @@ ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS = frozenset(
 )
 
 
+# Named ledger reads, each a tool of its own: what a GraphQL field answers
+# elsewhere, as an operation a directory review can see. Registration and
+# dispatch both read this.
+TYPED_READ_TOOL_NAMES: tuple[str, ...] = (
+  "get-account-register",
+  "list-flow-candidates",
+  "get-classification-stats",
+  "list-discharge-candidates",
+  "list-bank-accounts",
+  "list-reports",
+  "list-element-arcs",
+)
+
+
 # ValueErrors that are never the caller's: a response model rejecting a row,
 # or a body that will not decode. Argument validation catches its own.
 _FAULT_VALUE_ERRORS = (pydantic.ValidationError, json.JSONDecodeError, UnicodeError)
@@ -447,16 +461,20 @@ class GraphMCPTools:
       from .report_tools import ListReportsTool
       from .taxonomy_tools import ListElementArcsTool
 
-      for tool in (
-        GetAccountRegisterTool(graph_client),
-        ListFlowCandidatesTool(graph_client),
-        GetClassificationStatsTool(graph_client),
-        ListDischargeCandidatesTool(graph_client),
-        ListBankAccountsTool(graph_client),
-        ListReportsTool(graph_client),
-        ListElementArcsTool(graph_client),
-      ):
-        self._typed_read_tools[tool.get_tool_definition()["name"]] = tool
+      built = {
+        tool.get_tool_definition()["name"]: tool
+        for tool in (
+          GetAccountRegisterTool(graph_client),
+          ListFlowCandidatesTool(graph_client),
+          GetClassificationStatsTool(graph_client),
+          ListDischargeCandidatesTool(graph_client),
+          ListBankAccountsTool(graph_client),
+          ListReportsTool(graph_client),
+          ListElementArcsTool(graph_client),
+        )
+      }
+      # A name missing from either side fails here, not on a client's call.
+      self._typed_read_tools = {name: built[name] for name in TYPED_READ_TOOL_NAMES}
 
     # Layer 2: taxonomy mapping reads; the writes are registrar-generated.
     self.list_mapping_structures_tool = None
@@ -1010,15 +1028,7 @@ class GraphMCPTools:
         result = await registrar_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      if name in (
-        "get-account-register",
-        "list-flow-candidates",
-        "get-classification-stats",
-        "list-discharge-candidates",
-        "list-bank-accounts",
-        "list-reports",
-        "list-element-arcs",
-      ):
+      if name in TYPED_READ_TOOL_NAMES:
         typed_read_tool = self._typed_read_tools.get(name)
         if typed_read_tool is None:
           raise ValueError(

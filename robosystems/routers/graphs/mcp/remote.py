@@ -44,7 +44,11 @@ from robosystems.middleware.graph.query_telemetry import (
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.mcp.tools.annotations import tool_annotations
 from robosystems.middleware.mcp.tools.classification import CYPHER_READ_TOOLS
-from robosystems.middleware.mcp.tools.manager import ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS
+from robosystems.middleware.mcp.tools.route_profile import (
+  ROBOLEDGER_ROUTE,
+  UNIVERSAL_ROUTE,
+  RouteProfile,
+)
 from robosystems.middleware.mcp.tools.sensitive import mask_tax_ids_for_graph
 from robosystems.middleware.operations import run_off_loop
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
@@ -282,7 +286,7 @@ async def _handle_initialize(
   graph_id: str,
   current_user: User,
   params: dict[str, Any],
-  excluded_tools: frozenset[str] = _NO_EXCLUSIONS,
+  profile: RouteProfile = UNIVERSAL_ROUTE,
 ) -> dict[str, Any]:
   requested = params.get("protocolVersion")
   protocol_version = (
@@ -293,14 +297,13 @@ async def _handle_initialize(
 
   await _validate_read_access(graph_id, current_user)
   trial_exclusions = await run_off_loop(_trial_exclusions, graph_id, current_user)
-  excluded_tools = excluded_tools | trial_exclusions
 
   # Rebuilt per initialize so a reconnecting client sees the live tool set.
   instructions: str | None = None
   repository = await get_graph_repository(graph_id, _get_mcp_operation_type(graph_id))
   handler = MCPHandler(repository, graph_id, current_user)
   try:
-    tools = _without(await handler.get_tools(), excluded_tools)
+    tools = profile.serve(await handler.get_tools(), trial_exclusions)
     try:
       # Names the reporting group, which is a database read.
       instructions = await run_off_loop(handler.get_instructions, tools)
@@ -327,29 +330,18 @@ async def _handle_initialize(
   return result
 
 
-def _without(
-  tools: list[dict[str, Any]], excluded_tools: frozenset[str]
-) -> list[dict[str, Any]]:
-  """Filtered before instructions are built so they never name a withheld tool."""
-  if not excluded_tools:
-    return tools
-  return [t for t in tools if t.get("name") not in excluded_tools]
-
-
 async def _handle_tools_list(
   graph_id: str,
   current_user: User,
-  excluded_tools: frozenset[str] = _NO_EXCLUSIONS,
+  profile: RouteProfile = UNIVERSAL_ROUTE,
 ) -> dict[str, Any]:
   await _validate_read_access(graph_id, current_user)
-  excluded_tools = excluded_tools | await run_off_loop(
-    _trial_exclusions, graph_id, current_user
-  )
+  trial_exclusions = await run_off_loop(_trial_exclusions, graph_id, current_user)
 
   repository = await get_graph_repository(graph_id, _get_mcp_operation_type(graph_id))
   handler = MCPHandler(repository, graph_id, current_user)
   try:
-    tools = _without(await handler.get_tools(), excluded_tools)
+    tools = profile.serve(await handler.get_tools(), trial_exclusions)
   finally:
     await handler.close()
 
@@ -767,13 +759,13 @@ async def _handle_tools_call(
   current_user: User,
   msg_id: Any,
   params: dict[str, Any],
-  excluded_tools: frozenset[str] = _NO_EXCLUSIONS,
+  profile: RouteProfile = UNIVERSAL_ROUTE,
 ) -> Response:
   name = params.get("name")
   if not isinstance(name, str) or not name:
     return _rpc_error(msg_id, INVALID_PARAMS, "Invalid params: 'name' is required")
   # Refused, not just hidden: a client can call a name it never listed.
-  if name in excluded_tools:
+  if profile.withholds(name):
     return _tool_error_result(
       msg_id, f"Tool '{name}' is not available on this connection."
     )
@@ -804,6 +796,12 @@ async def _handle_tools_call(
     )
     detail = e.detail if isinstance(e.detail, str) else json.dumps(e.detail)
     return _tool_error_result(msg_id, detail)
+
+  # After authorization: it may read the event the call names.
+  if profile.screens(name):
+    refusal = await run_off_loop(profile.refusal, graph_id, name, arguments)
+    if refusal:
+      return _tool_error_result(msg_id, refusal)
 
   api_logger.info(
     f"Remote MCP tool execution started: {name}",
@@ -1003,12 +1001,12 @@ async def dispatch_jsonrpc(
   request: Request,
   graph_id: str,
   current_user: User,
-  excluded_tools: frozenset[str] = _NO_EXCLUSIONS,
+  profile: RouteProfile = UNIVERSAL_ROUTE,
 ) -> Response:
   """Parse and dispatch one JSON-RPC message (the transport's whole surface).
 
-  ``excluded_tools`` is the route's tool profile: withheld from
-  ``initialize`` and ``tools/list`` and refused on ``tools/call``.
+  ``profile`` is the route's cut of the tool list: what it withholds from
+  ``initialize`` and ``tools/list``, and what it refuses on ``tools/call``.
   """
   try:
     message = await request.json()
@@ -1074,17 +1072,17 @@ async def dispatch_jsonrpc(
     if method == "initialize":
       return _rpc_result(
         msg_id,
-        await _handle_initialize(graph_id, current_user, params, excluded_tools),
+        await _handle_initialize(graph_id, current_user, params, profile),
       )
     elif method == "ping":
       return _rpc_result(msg_id, {})
     elif method == "tools/list":
       return _rpc_result(
-        msg_id, await _handle_tools_list(graph_id, current_user, excluded_tools)
+        msg_id, await _handle_tools_list(graph_id, current_user, profile)
       )
     elif method == "tools/call":
       return await _handle_tools_call(
-        request, graph_id, current_user, msg_id, params, excluded_tools
+        request, graph_id, current_user, msg_id, params, profile
       )
     else:
       return _rpc_error(msg_id, METHOD_NOT_FOUND, f"Method not found: {method}")
@@ -1150,11 +1148,11 @@ async def mcp_roboledger_transport(
 
   The graph-agnostic transport with the RoboLedger tool profile: the grant's
   graph (a RoboLedger graph, checked at consent) is the resolved
-  ``graph_id``, and ``ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS`` is withheld.
+  ``graph_id``, served through ``ROBOLEDGER_ROUTE``.
   """
   return await dispatch_jsonrpc(
     request,
     principal.graph_id,
     principal.user,
-    excluded_tools=ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS,
+    profile=ROBOLEDGER_ROUTE,
   )

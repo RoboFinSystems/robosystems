@@ -97,9 +97,9 @@ class ListReportsTool:
       return {"error": "entity_not_found", "message": str(e)}
     except SQLAlchemyError as e:
       return database_failure("list-reports", e)
-    except Exception as e:
-      logger.warning(f"list-reports failed: {e}")
-      return {"error": "command_failed", "message": str(e)}
+    except Exception:
+      logger.warning("list-reports failed", exc_info=True)
+      return {"error": "command_failed", "message": "list-reports failed"}
     # The taxonomy's structures repeat on every report of it; a report's
     # sections are read through `disclosures`.
     return response.model_dump(

@@ -629,9 +629,9 @@ preview_schedule_op = _registrar.register(
       "`warnings` names any active schedule already posting the same "
       "accounts in the same months. With `replaces_structure_id`, "
       "`replaces` says what the schedule being edited or recreated has "
-      "posted, by month, and the path the change takes: `rebuild` "
-      "(rebuild-schedule with the new definition) while nothing has posted, "
-      "`terminate_and_succeed` after."
+      "posted, by month, and the path the change takes: `rebuild` (the "
+      "schedule regenerated in place from the new definition) while nothing "
+      "has posted, `terminate_and_succeed` after."
     ),
     command=cmd_preview_schedule,
     request_model=PreviewScheduleRequest,

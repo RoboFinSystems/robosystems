@@ -435,9 +435,9 @@ class ListElementArcsTool:
         }
     except SQLAlchemyError as exc:
       return database_failure("list-element-arcs", exc)
-    except Exception as exc:
-      logger.warning(f"list-element-arcs failed: {exc}")
-      return {"error": "command_failed", "message": str(exc)}
+    except Exception:
+      logger.warning("list-element-arcs failed", exc_info=True)
+      return {"error": "command_failed", "message": "list-element-arcs failed"}
 
 
 class CreateMappingAssociationTool:

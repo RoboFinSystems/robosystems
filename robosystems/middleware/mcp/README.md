@@ -106,7 +106,12 @@ The GraphQL pair requires `EXTENSIONS_GRAPHQL_ENABLED=true` **and**
 tools without a redeploy. The `/v1/mcp/roboledger` route withholds both
 (`ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS` in `tools/manager.py`): a directory review
 needs every model-callable operation exposed as its own tool, so a read that
-tool text names is a typed tool (Layer 2b), never a GraphQL field.
+tool text names is a typed tool (Layer 2b), never a GraphQL field. The route's
+cut is `ROBOLEDGER_ROUTE` in `tools/route_profile.py`, which the transport
+applies: it withholds the exclusions, holds the event-block tools' `event_type`
+to the built-in kinds (the Python handler registry, described per kind in the
+schema), and refuses any other kind at call time. No text the route serves may
+name a tool it withholds; `test_subgraph_tool_profile` checks every one.
 
 The intended pattern is the index once, the types a question needs, then typed
 queries against them:

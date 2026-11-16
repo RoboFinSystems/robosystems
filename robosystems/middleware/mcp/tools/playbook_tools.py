@@ -210,7 +210,8 @@ _SCHEDULE_AUTHORING: list[str] = [
   "generator on a definition and keeps nothing: show the person its "
   "roll_forward before creating. To change a schedule, read its definition "
   "from get-information-block (artifact.mechanics) and save the changed "
-  "fields with rebuild-schedule; once a month has posted "
+  "fields by rebuilding the schedule in place (the app's schedule editor "
+  "does it); once a month has posted "
   "(mechanics.posted_periods, edit_warning) terminate it and create a "
   "successor instead. Never recreate a schedule beside the one it replaces: "
   "both would book the overlapping months.",
@@ -337,7 +338,7 @@ _KEY_RULES: list[str] = [
   "subsidiaries under it, each with its own books, chart of accounts, "
   "calendar and close. Every close tool (get-fiscal-calendar, "
   "initialize-fiscal-calendar, get-period-close-status, list-period-drafts, promote-obligations, "
-  "close-period, reopen-period, backfill-plan-history) and every ledger "
+  "close-period, reopen-period) and every ledger "
   "write take entity_id; omitted, they act on the group parent. To close a "
   "subsidiary, pass its entity_id on EVERY call of the sequence — its "
   "siblings stay open, and a close with no entity_id closes the parent. "
@@ -390,7 +391,6 @@ def _build_playbook(mode: str) -> dict[str, Any]:
     "create-event-block",
     "list-period-drafts",
     "close-period",
-    "backfill-plan-history",
     "search-documents",
     "get-graph-schema",
     "get-unmapped-elements",

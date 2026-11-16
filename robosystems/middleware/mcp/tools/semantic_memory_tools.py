@@ -76,9 +76,9 @@ class SemanticRememberTool(_SemanticMemoryToolMixin, BaseTool):
         "**RETURNS:** The stored memory's id, for later `update-memory` or "
         "`forget`.\n\n"
         "**RELATED TOOLS:**\n"
-        "- `recall` retrieves what this stores\n"
-        "- write-graph-cypher builds structural graph data on subgraphs; this "
-        "is vector memory and does not put anything in the graph"
+        "- `recall` retrieves what this stores\n\n"
+        "**NOTES:**\n"
+        "- This is vector memory: it puts nothing in the graph"
       ),
       "inputSchema": {
         "type": "object",

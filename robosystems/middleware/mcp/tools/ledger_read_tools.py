@@ -36,6 +36,29 @@ def _invalid(message: str) -> dict[str, Any]:
   return {"error": "invalid_arguments", "message": message}
 
 
+def _unexpected(tool_name: str) -> dict[str, Any]:
+  """A fault that is not the caller's: the detail goes to the log, never to
+  the client."""
+  logger.warning("MCP tool %s failed", tool_name, exc_info=True)
+  return {"error": "command_failed", "message": f"{tool_name} failed"}
+
+
+def _page_size(arguments: dict[str, Any]) -> int:
+  """`arguments["limit"]`, held to the range its schema declares."""
+  value = arguments.get("limit")
+  if value is None:
+    return reads_register.DEFAULT_PAGE_SIZE
+  try:
+    if isinstance(value, bool) or (isinstance(value, float) and not value.is_integer()):
+      raise ValueError
+    limit = int(value)
+  except TypeError, ValueError:
+    limit = 0
+  if not 1 <= limit <= reads_register.MAX_PAGE_SIZE:
+    raise ValueError(f"limit must be between 1 and {reads_register.MAX_PAGE_SIZE}")
+  return limit
+
+
 def _optional_date(arguments: dict[str, Any], key: str) -> date | None:
   """`arguments[key]` as a date; ValueError names the argument."""
   value = arguments.get(key)
@@ -71,7 +94,7 @@ class GetAccountRegisterTool:
 - flow_element_id (optional): only the lines tagged to that cash flow or equity row
 - include_drafts (optional, default false): also return the window's draft lines, outside every balance
 - after (optional): the `next_cursor` of the page before
-- limit (optional, default 200, at most 1000): lines per page
+- limit (optional, default 200): lines per page, 1 to 1000; anything else is refused
 
 **RETURNS:**
 `account`, the window, `opening_balance`, `total_debits`, `total_credits`, `closing_balance`, `line_count`, `page_opening_balance` and `lines`: each with its entry, posting date, memo, debit, credit, the balance after it, and the event that wrote it. Amounts are in dollars, in the account's natural sign. `next_cursor` is set while more lines follow. An income or expense account's opening counts from the fiscal year's start.
@@ -145,7 +168,7 @@ class GetAccountRegisterTool:
     try:
       start_date = _optional_date(arguments, "start_date")
       end_date = _optional_date(arguments, "end_date")
-      limit = int(arguments.get("limit") or reads_register.DEFAULT_PAGE_SIZE)
+      limit = _page_size(arguments)
     except ValueError as exc:
       return _invalid(str(exc))
 
@@ -171,9 +194,8 @@ class GetAccountRegisterTool:
       return _invalid(str(exc))
     except SQLAlchemyError as exc:
       return database_failure("get-account-register", exc)
-    except Exception as exc:
-      logger.warning(f"get-account-register failed: {exc}")
-      return {"error": "command_failed", "message": str(exc)}
+    except Exception:
+      return _unexpected("get-account-register")
 
 
 class ListFlowCandidatesTool:
@@ -222,9 +244,8 @@ class ListFlowCandidatesTool:
       return {"error": "entity_not_found", "message": str(exc)}
     except SQLAlchemyError as exc:
       return database_failure("list-flow-candidates", exc)
-    except Exception as exc:
-      logger.warning(f"list-flow-candidates failed: {exc}")
-      return {"error": "command_failed", "message": str(exc)}
+    except Exception:
+      return _unexpected("list-flow-candidates")
 
 
 class GetClassificationStatsTool:
@@ -283,9 +304,8 @@ class GetClassificationStatsTool:
       return {"error": "entity_not_found", "message": str(exc)}
     except SQLAlchemyError as exc:
       return database_failure("get-classification-stats", exc)
-    except Exception as exc:
-      logger.warning(f"get-classification-stats failed: {exc}")
-      return {"error": "command_failed", "message": str(exc)}
+    except Exception:
+      return _unexpected("get-classification-stats")
 
 
 class ListDischargeCandidatesTool:
@@ -342,9 +362,8 @@ class ListDischargeCandidatesTool:
         return response.model_dump(mode="json")
     except SQLAlchemyError as exc:
       return database_failure("list-discharge-candidates", exc)
-    except Exception as exc:
-      logger.warning(f"list-discharge-candidates failed: {exc}")
-      return {"error": "command_failed", "message": str(exc)}
+    except Exception:
+      return _unexpected("list-discharge-candidates")
 
 
 class ListBankAccountsTool:
@@ -400,9 +419,8 @@ class ListBankAccountsTool:
       return {"error": "entity_not_found", "message": str(exc)}
     except SQLAlchemyError as exc:
       return database_failure("list-bank-accounts", exc)
-    except Exception as exc:
-      logger.warning(f"list-bank-accounts failed: {exc}")
-      return {"error": "command_failed", "message": str(exc)}
+    except Exception:
+      return _unexpected("list-bank-accounts")
 
 
 __all__ = [

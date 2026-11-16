@@ -38,9 +38,7 @@ def test_agnostic_router_is_exported():
 
 
 async def test_roboledger_transport_dispatches_on_the_grant_graph_with_the_profile():
-  from robosystems.middleware.mcp.tools.manager import (
-    ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS,
-  )
+  from robosystems.middleware.mcp.tools.route_profile import ROBOLEDGER_ROUTE
 
   user = User(id="user-1", email="u@example.com", is_active=True)
   principal = OAuthPrincipal(
@@ -60,9 +58,7 @@ async def test_roboledger_transport_dispatches_on_the_grant_graph_with_the_profi
       request, _transport=None, principal=principal, _rate_limit=None
     )
   assert result == "resp"
-  dispatch.assert_awaited_once_with(
-    request, KG, user, excluded_tools=ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS
-  )
+  dispatch.assert_awaited_once_with(request, KG, user, profile=ROBOLEDGER_ROUTE)
 
 
 def test_roboledger_router_is_exported():

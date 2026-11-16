@@ -456,3 +456,17 @@ def test_an_event_lists_the_entries_it_wrote_and_the_journal_names_it(session, b
   named = {entry.id: entry.triggered_by_event_type for entry in journal.entries}
   assert named[first] == "invoice_issued"
   assert sorted(v for v in named.values() if v is None) == [None]
+
+
+def test_a_window_that_ends_before_it_starts_is_empty_not_an_error(session, books):
+  cash, revenue = books
+  _entry(session, [(cash, 10000, 0), (revenue, 0, 10000)], date(2026, 8, 10))
+  _entry(session, [(cash, 2500, 0), (revenue, 0, 2500)], date(2026, 9, 3))
+
+  register = get_account_register(session, cash, date(2026, 9, 30), date(2026, 9, 1))
+
+  assert register.lines == []
+  assert register.line_count == 0
+  assert register.next_cursor is None
+  assert register.total_debits == register.total_credits == 0.0
+  assert register.closing_balance == register.opening_balance
