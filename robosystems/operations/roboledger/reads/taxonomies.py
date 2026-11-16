@@ -37,6 +37,7 @@ from robosystems.operations.library.reads import (
   liquidity_by_element,
 )
 from robosystems.operations.roboledger.entity_scope import (
+  NoEntityError,
   find_entity_id,
   resolve_entity_id,
 )
@@ -370,6 +371,24 @@ def list_flow_candidates(
       ),
     )
   return list(candidates.values())
+
+
+def list_entity_flow_candidates(
+  session: Session, entity_id: str | None = None
+) -> list[FlowCandidate]:
+  """``list_flow_candidates`` under the entity's own Reporting Style, default
+  the group parent; a graph with no entity yet reads the default style."""
+  from robosystems.operations.roboledger.reports.network_picker import (
+    DEFAULT_STYLE_ID,
+    load_entity_reporting_style,
+  )
+
+  try:
+    resolved = resolve_entity_id(session, entity_id)
+    reporting_style_id = load_entity_reporting_style(session, resolved)
+  except NoEntityError:
+    resolved, reporting_style_id = None, DEFAULT_STYLE_ID
+  return list_flow_candidates(session, reporting_style_id, entity_id=resolved)
 
 
 def list_unmapped_elements(

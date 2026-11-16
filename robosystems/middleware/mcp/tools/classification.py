@@ -45,6 +45,14 @@ READ_ONLY_MCP_TOOLS: frozenset[str] = frozenset(
     "suggest-mapping",
     "list-mapping-structures",
     "get-mapping-summary",
+    "list-element-arcs",
+    # Named ledger reads
+    "get-account-register",
+    "list-flow-candidates",
+    "get-classification-stats",
+    "list-discharge-candidates",
+    "list-bank-accounts",
+    "list-reports",
     # Agent reads
     "get-agent",
     "list-agents",

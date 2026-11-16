@@ -102,10 +102,10 @@ def build_instructions(
       "`suggest-mapping`; inspect structures → `list-mapping-structures` / "
       "`get-mapping-summary`.",
     ]
-    if has("query-graphql"):
+    if has("get-account-register"):
       coa_lines.append(
-        "- Why an account's balance is what it is → `accountRegister(accountId, "
-        "startDate, endDate, entityId)` over `query-graphql`: its posted lines, "
+        "- Why an account's balance is what it is → `get-account-register("
+        "account_id, start_date, end_date, entity_id)`: its posted lines, "
         "oldest first, each with the balance it leaves and the entry and event "
         "behind it."
       )
@@ -154,8 +154,14 @@ def build_instructions(
         "capital contribution, an equipment purchase) also gets "
         "`classified_flow_qname` (e.g. `rs-gaap:ProceedsFromIssuanceOfLongTermDebt`), "
         "the override of the account's default flow that the cash flow and "
-        "equity statements read. The rows this company's statement offers "
-        "are `flowCandidates(entityId)` over `query-graphql`. It can be set "
+        "equity statements read."
+        + (
+          " The rows this company's statement offers are "
+          "`list-flow-candidates(entity_id)`."
+          if has("list-flow-candidates")
+          else ""
+        )
+        + " It can be set "
         "on a posted line too: that re-tags it in place. A journal entry's "
         "line takes `flow_qname` the same way, at creation or through "
         "`update-journal-entry(line_flows=[{line_id, flow_qname}])` on a "
@@ -174,9 +180,13 @@ def build_instructions(
         "`suggestion_source='agent_default'` for the learned ones, a date "
         "range, or explicit `event_ids`) is classified to it, and posted too "
         "with `commit: true`; a line it cannot take comes back `skipped` with "
-        "the reason, never forced. `dry_run: true` counts first. What share "
-        "of a month's lines needed a person's choice is "
-        "`classificationStats(period)` over `query-graphql`."
+        "the reason, never forced. `dry_run: true` counts first."
+        + (
+          " What share of a month's lines needed a person's choice is "
+          "`get-classification-stats(period)`."
+          if has("get-classification-stats")
+          else ""
+        )
       ),
     ]
     if has("recall") and has("remember"):
@@ -213,11 +223,16 @@ def build_instructions(
       )
       inbox_lines.append(
         "- A bank line that pays a bill or an invoice settles it only by a "
-        "person's choice: `dischargeCandidates(eventId)` over `query-graphql` "
-        "ranks the open items (exact amount first), and the commit records "
-        "the pick with `discharge_allocations: [{obligation_event_id, "
-        "amount}]`, several for a split. A line with no pick commits as it is, "
-        "and its bill stays open."
+        "person's choice: "
+        + (
+          "`list-discharge-candidates(event_id)` ranks the open items (exact "
+          "amount first), and "
+          if has("list-discharge-candidates")
+          else ""
+        )
+        + "the commit records the pick with `discharge_allocations: "
+        "[{obligation_event_id, amount}]`, several for a split. A line with no "
+        "pick commits as it is, and its bill stays open."
       )
     if has("preview-event-block"):
       inbox_lines.append(

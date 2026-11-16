@@ -4,8 +4,8 @@
 ENTITY_ID_ARGUMENT = {
   "type": "string",
   "description": (
-    "The entity whose books this acts on, by id (get-graph-info and the "
-    "`entities` GraphQL field list them). Omit for the group parent."
+    "The entity whose books this acts on, by id (get-graph-info lists "
+    "them). Omit for the group parent."
   ),
 }
 
@@ -31,10 +31,10 @@ Note: Element.period_type indicates the expected period type for that metric - d
 
 MATERIALIZED_GRAPH_GUIDANCE = """**⚠️ THE GRAPH LAGS THE BOOKS:** this tool reads the materialized
 graph, which a write reaches only at the next materialization. For current state (an entry,
-schedule or classification just written, or "did my write land") use `query-graphql` or the
-typed reads (`get-information-block`, `get-event-block`, `list-event-blocks`); they read the
-live ledger. Use Cypher for traversal and analysis the typed reads cannot express, and check
-`get-graph-sync-status` when freshness matters."""
+schedule or classification just written, or "did my write land") use the typed reads
+(`get-information-block`, `get-event-block`, `list-event-blocks`, `get-account-register`);
+they read the live ledger. Use Cypher for traversal and analysis the typed reads cannot
+express, and check `get-graph-sync-status` when freshness matters."""
 
 LEDGER_STATUS_GUIDANCE = """**⚠️ LEDGER STATUS FILTERING (Event / Entry / Transaction / LineItem):**
 The graph is a faithful mirror of the ledger and KEEPS cancelled and replaced rows —

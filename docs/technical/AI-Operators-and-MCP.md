@@ -95,7 +95,7 @@ The tool names below are the exact `name` strings for `tools/call`, grouped by f
 | `get-graph-schema` | The Cypher schema: node tables with their properties, relationship tables with their endpoints | Every graph |
 | `read-graph-cypher` | Read-only Cypher (Plane B) | Every graph |
 | `get-example-queries` | Working Cypher patterns for the graph's schema | Graphs with the `roboledger` extension, `sec` included |
-| `get-graphql-schema` / `query-graphql` | The GraphQL SDL, and a read-only GraphQL query over the extensions OLTP (Plane A) | Tenant graphs, not shared repositories; `EXTENSIONS_GRAPHQL_ENABLED` + `MCP_GRAPHQL_ENABLED` |
+| `get-graphql-schema` / `query-graphql` | The GraphQL SDL, and a read-only GraphQL query over the extensions OLTP (Plane A) | Tenant graphs, not shared repositories, and not the [RoboLedger route](#the-roboledger-route); `EXTENSIONS_GRAPHQL_ENABLED` + `MCP_GRAPHQL_ENABLED` |
 
 **Statements and report views** — read the analytical graph, or the report held whole:
 
@@ -106,6 +106,7 @@ The tool names below are the exact `name` strings for `tools/call`, grouped by f
 | `disclosures` | The map of a report's sections — one row per note or statement; with `topic`, one family's blocks | Graphs with the `roboledger` extension |
 | `information-block` | One section of a report read whole: rows, breakdowns by its own axes, calculation footing, text blocks | Graphs with the `roboledger` extension |
 | `live-financial-statement` | A statement straight from the OLTP books, before materialization | RoboLedger tenant |
+| `get-account-register` | One account's posted lines over a window, oldest first, each with the balance it leaves and the entry and event behind it | RoboLedger tenant |
 | `consolidation-worksheet` | The group's statement with each entity as a column: members, combined, adjustments, consolidated, and equity-method members beside the sum | RoboLedger tenant |
 | `preview-consolidation-entries` | The consolidating entries a group's month needs, computed from the books: each kind and member brought to its month-end balance, less what the consolidation entity holds; residuals and disagreements returned, never plugged | RoboLedger tenant |
 
@@ -187,6 +188,7 @@ The tool names below are the exact `name` strings for `tools/call`, grouped by f
 | --- | --- |
 | `list-mapping-structures` / `get-mapping-summary` | The chart-of-accounts mapping structures, and their coverage |
 | `get-unmapped-elements` / `suggest-mapping` | Accounts not yet mapped, and heuristic reporting-concept candidates for one (no AI, no writes) |
+| `list-element-arcs` | An account's or a concept's mapping arcs, each with the association id the mapping writes take |
 | `create-mapping-association` / `delete-mapping-association` | Add or remove one account → reporting-concept mapping |
 | `initialize-chart-of-accounts` | Create the chart from a shipped template, for a graph that has none |
 | `create-taxonomy-block` / `update-taxonomy-block` / `delete-taxonomy-block` | Author a taxonomy — a chart of accounts, a reporting extension, a custom ontology — as one envelope |
@@ -209,6 +211,10 @@ The tool names below are the exact `name` strings for `tools/call`, grouped by f
 | `list-event-blocks` / `get-event-block` | Find and read business events |
 | `create-event-block` / `update-event-block` | Capture an event (optionally applying its handler); move it through `captured` → `classified` → `committed` or `voided` |
 | `preview-event-block` | Dry-run a handler against an event, writing nothing |
+| `list-flow-candidates` | The cash flow rows a bank line or journal-entry line may be tagged with |
+| `list-discharge-candidates` | The open invoices or bills a payment or bank line may settle, best match first |
+| `get-classification-stats` | How a month's bank-feed lines were classified, per suggestion source |
+| `list-bank-accounts` | The group's bank and card accounts, the entity each belongs to, and the connection that writes to it |
 | `execute-event-block` | Publish an event's entries to QuickBooks, for a connection whose write policy sends them |
 | `list-event-handlers` / `get-event-handler` / `create-event-handler` / `update-event-handler` | The rules that turn events into entries |
 
@@ -232,6 +238,7 @@ The tool names below are the exact `name` strings for `tools/call`, grouped by f
 
 | Tool | Purpose |
 | --- | --- |
+| `list-reports` | One entity's reports, newest first, with where each stands |
 | `create-report` / `regenerate-report` | Generate a report's facts from the ledger; re-run them against the latest ledger |
 | `delete-report` | Delete a report that has not been filed, with its facts and published files |
 | `get-report-bundle` | A short-lived download link for a published report, for a tool that opens a file by URL |
@@ -252,7 +259,7 @@ A tenant subgraph has no extensions OLTP schema, no connections and no materiali
 
 #### The RoboLedger route
 
-`/v1/mcp/roboledger` serves a RoboLedger tenant graph's full catalog minus what a chat client cannot use or should not drive. It withholds the subgraph tools (`write-graph-cypher`, `add-node-table`, `add-relationship-table`), the workspace administration tools (`create-subgraph`, `delete-subgraph`, `list-subgraphs`, `create-backup`, `materialize`), `get-report-bundle` (its credentialed link has nowhere to go but the transcript), `set-write-policy` (QuickBooks write-back is an owner decision made in the app), `rebuild-schedule` and `backfill-plan-history` (maintenance, not the close), and `delete-taxonomy-block`. It is an exclusion list, so a new ledger tool appears on the route by default.
+`/v1/mcp/roboledger` serves a RoboLedger tenant graph's full catalog minus what a chat client cannot use or should not drive. It withholds the subgraph tools (`write-graph-cypher`, `add-node-table`, `add-relationship-table`), the workspace administration tools (`create-subgraph`, `delete-subgraph`, `list-subgraphs`, `create-backup`, `materialize`), `get-report-bundle` (its credentialed link has nowhere to go but the transcript), `set-write-policy` (QuickBooks write-back is an owner decision made in the app), `rebuild-schedule` and `backfill-plan-history` (maintenance, not the close), `delete-taxonomy-block`, `create-event-handler` and `update-event-handler` (posting rules are written and approved in the app), `execute-event-block` (QuickBooks write-back of one event), and the GraphQL pair, `get-graphql-schema` and `query-graphql`. A directory review asks for every operation a model can call to be its own tool, so the reads the GraphQL pair would carry there are typed tools instead: `get-account-register`, `list-flow-candidates`, `get-classification-stats`, `list-discharge-candidates`, `list-bank-accounts`, `list-reports` and `list-element-arcs`, which every tenant connection also serves. It is an exclusion list, so a new ledger tool appears on the route by default.
 
 Each tool's input schema comes back with `tools/list`. The MCP surface is deliberately absent from the OpenAPI spec — and therefore from the generated SDKs: the REST API at [robosystems.ai/docs/api](https://robosystems.ai/docs/api) is the human-and-SDK surface, the transport is the MCP-client surface.
 

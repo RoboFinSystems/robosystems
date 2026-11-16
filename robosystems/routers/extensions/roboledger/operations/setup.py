@@ -237,8 +237,7 @@ initialize_chart_of_accounts_op = _registrar.register(
       "the sync and stays after a sever) and before connecting a bank feed, "
       "which needs a chart to resolve against. Templates: `saas` "
       "(subscription software), `services` (professional services), "
-      "`product` (inventory and COGS) — the `chartTemplates` GraphQL field "
-      "lists them with names and account counts. Creates the chart, its "
+      "`product` (inventory and COGS). Creates the chart, its "
       "`coa_mapping` structure and the template's CoA → rs-gaap mapping "
       "associations in one transaction, with the equity rows mapped by the "
       "entity's legal form (`entity_type`, defaulting to the entity's). "
@@ -391,8 +390,9 @@ link_bank_account_op = _registrar.register(
       "An account the feed created "
       "and then left stays on its chart as an ordinary account. A sync "
       "already in flight when the link moves can still land a line or two "
-      "on the old account; running this again moves them. Read the group's "
-      "accounts with the `bankAccounts` GraphQL field."
+      "on the old account; running this again moves them. The group's "
+      "accounts are `list-bank-accounts` over MCP and the `bankAccounts` "
+      "GraphQL field."
     ),
     command=cmd_link_bank_account,
     request_model=LinkBankAccountRequest,

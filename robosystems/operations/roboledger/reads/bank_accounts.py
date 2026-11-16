@@ -13,6 +13,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from robosystems.adapters.bank_feed.accounts import BANK_FEED_KEY, account_entities
+from robosystems.logger import logger
 from robosystems.models.api.extensions.bank_accounts import (
   BankAccountListResponse,
   BankAccountResponse,
@@ -31,12 +32,35 @@ QB_BANK_ACCOUNT_TYPES = ("Bank", "Credit Card")
 @dataclass(frozen=True)
 class ConnectionHealth:
   """What the platform knows about a connection, keyed by its id. Read on
-  the platform database by the caller; this module never opens it."""
+  the platform database by ``load_connection_health``; ``list_bank_accounts``
+  takes it as given and never opens that database."""
 
   status: str | None
   institution: str | None = None
   last_sync_at: datetime | None = None
   last_sync_status: str | None = None
+
+
+def load_connection_health(graph_id: str) -> dict[str, ConnectionHealth]:
+  """The graph's connections' health, by connection id. Empty when the
+  platform database cannot be read: the accounts still list, without it."""
+  from robosystems.db.platform import platform_session
+  from robosystems.models.core.connection.connection import Connection
+
+  health: dict[str, ConnectionHealth] = {}
+  try:
+    with platform_session() as platform_db:
+      for conn in Connection.get_all_for_graph(graph_id, platform_db):
+        result = conn.last_sync_result or {}
+        health[str(conn.id)] = ConnectionHealth(
+          status=conn.status,
+          institution=conn.institution_name or conn.source_name,
+          last_sync_at=conn.last_sync,
+          last_sync_status=result.get("status") if isinstance(result, dict) else None,
+        )
+  except Exception:
+    logger.warning("Failed to fetch connection health for %s", graph_id, exc_info=True)
+  return health
 
 
 def bank_account_clause():

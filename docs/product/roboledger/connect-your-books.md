@@ -63,7 +63,7 @@ RoboSystems answers on three addresses:
 
 - **`https://api.robosystems.ai/v1/mcp`** is the general address used above. At sign-in you choose any of your graphs, or the SEC filings if you subscribe to them.
 - **`https://api.robosystems.ai/v1/graphs/{graph_id}/mcp`** is one graph's own address, with that graph already chosen. The **MCP** page at robosystems.ai gives you the address for any graph. Use it to keep your books and the SEC filings connected side by side. The SEC filings are `https://api.robosystems.ai/v1/graphs/sec/mcp`.
-- **`https://api.robosystems.ai/v1/mcp/roboledger`** is RoboLedger's own address. At sign-in it shows only your ledgers, and it leaves out a few maintenance and administration tools, including filling in plan history, rebuilding a schedule, backups and choosing whether entries write back to QuickBooks. Use one of the other two when you need those.
+- **`https://api.robosystems.ai/v1/mcp/roboledger`** is RoboLedger's own address. At sign-in it shows only your ledgers, and it leaves out a few tools: maintenance and administration ones such as filling in plan history, rebuilding a schedule, backups and choosing whether entries write back to QuickBooks; writing posting rules; and the general-purpose query tool, whose ledger reads it offers as tools of their own. Use one of the other two when you need those.
 
 If you're not sure, use the general address.
 

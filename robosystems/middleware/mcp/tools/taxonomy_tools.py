@@ -15,6 +15,7 @@ from robosystems.models.api.extensions.taxonomies import (
   CreateMappingAssociationOperation,
 )
 from robosystems.operations.extensions.staleness import mark_graph_stale
+from robosystems.operations.library import reads as library_reads
 from robosystems.operations.roboledger.commands.taxonomies import (
   create_mapping_association,
 )
@@ -380,6 +381,63 @@ class GetMappingSummaryTool:
     except Exception as exc:
       logger.warning(f"get-mapping-summary failed: {exc}")
       return {"error": str(exc)}
+
+
+class ListElementArcsTool:
+  """The mapping arcs an element is an end of, each with its association id."""
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "list-element-arcs",
+      "description": """The mapping arcs an element is an end of: an account's arc to its reporting concept, and the cross-taxonomy arcs of a concept, each with its association id.
+
+**WHEN TO USE:**
+- Before `delete-mapping-association`, or `create-mapping-association` with `replaces_association_id`: the id of the account's current arc
+- "What does this account map to?" or "which accounts map to this concept?"
+
+**PARAMETERS:**
+- element_id (required): the account or concept (element id)
+
+**RETURNS:**
+`arcs`: each with `id` (the association id), `direction` (`outgoing` when this element is the source, `incoming` when it is the target), `association_type`, `arcrole`, the structure and taxonomy it belongs to, and `peer`, the element at the other end with its `qname`, `name` and `trait`.
+
+**RELATED TOOLS:**
+- create-mapping-association / delete-mapping-association — move or remove an arc
+- suggest-mapping — candidate concepts for an account""",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "element_id": {
+            "type": "string",
+            "description": "The account or concept (element id).",
+          },
+        },
+        "required": ["element_id"],
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
+    element_id = arguments.get("element_id")
+    if not isinstance(element_id, str) or not element_id:
+      return {"error": "invalid_arguments", "message": "element_id is required"}
+    try:
+      with extensions_session(self.client.graph_id) as session:
+        arcs = library_reads.get_element_arcs(session, element_id=element_id)
+        return {
+          "element_id": element_id,
+          "arcs": [arc.model_dump(mode="json") for arc in arcs],
+        }
+    except SQLAlchemyError as exc:
+      return database_failure("list-element-arcs", exc)
+    except Exception as exc:
+      logger.warning(f"list-element-arcs failed: {exc}")
+      return {"error": "command_failed", "message": str(exc)}
 
 
 class CreateMappingAssociationTool:

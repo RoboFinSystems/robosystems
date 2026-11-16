@@ -1,10 +1,10 @@
-"""Report tools: delete-report and get-report-bundle.
+"""Report tools: list-reports, delete-report and get-report-bundle.
 
 delete-report is hand-written because after the rows commit it removes the
 report's published artifacts from the object store, which the registrar
-runner cannot do (it only marks the graph stale). get-report-bundle is a
-read the registrar does not generate: a presigned link to a published
-report's serialization.
+runner cannot do (it only marks the graph stale). list-reports and
+get-report-bundle are reads the registrar does not generate: the report
+list, and a presigned link to a published report's serialization.
 """
 
 from typing import Any
@@ -15,6 +15,7 @@ from robosystems.db.extensions import extensions_session
 from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import user_is_graph_admin
 from robosystems.middleware.operations import run_off_loop
+from robosystems.models.api.extensions.reports import ReportLifecycle
 from robosystems.operations.extensions.staleness import mark_graph_stale
 from robosystems.operations.locking import RowLockedError
 from robosystems.operations.roboledger.commands.reports import (
@@ -24,11 +25,86 @@ from robosystems.operations.roboledger.commands.reports import (
   delete_report,
   delete_report_artifacts,
 )
+from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
 from robosystems.operations.roboledger.reads import reports as reads_reports
 from robosystems.operations.serialization.flavors import RdfFlavor, XbrlFlavor
 
 from ._errors import database_failure
 from .document_tools import _check_graph_access, _resolve_acting_user
+
+_LIFECYCLES = tuple(lifecycle.value for lifecycle in ReportLifecycle)
+
+
+class ListReportsTool:
+  """One entity's report definitions, newest first."""
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "list-reports",
+      "description": """List one entity's reports, newest first: each report's id, name, periods and where it stands.
+
+**WHEN TO USE:**
+- "What reports do we have?", or finding a report's id before reading, regenerating or deleting it
+- Checking whether a report finished generating, or has been filed
+
+**PARAMETERS:**
+- lifecycle (optional, default `current`): `current` leaves out archived reports, `archived` returns only those, `all` returns every report
+- entity_id (optional): omit for the group parent, whose list also carries reports shared in from other graphs
+
+**RETURNS:**
+`reports`: each with `id`, `name`, `taxonomy_id`, `generation_status` (`generating`, `published`, `failed`), `filing_status` (`draft`, `under_review`, `filed`, `archived`), `period_type`, `period_start`, `period_end`, `periods`, `entity_id` and `entity_name`, and when it was created and last generated. The renderable structures each report's taxonomy offers are left out.
+
+**RELATED TOOLS:**
+- create-report / regenerate-report — generate a report, or re-run one against the latest ledger
+- disclosures — a report's sections, read by its id""",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "lifecycle": {
+            "type": "string",
+            "enum": list(_LIFECYCLES),
+            "default": ReportLifecycle.CURRENT.value,
+          },
+          "entity_id": {
+            "type": "string",
+            "description": "The entity whose reports to list. Omit for the group parent.",
+          },
+        },
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
+    lifecycle = arguments.get("lifecycle") or ReportLifecycle.CURRENT.value
+    if lifecycle not in _LIFECYCLES:
+      return {
+        "error": "invalid_input",
+        "message": f"lifecycle must be one of {', '.join(_LIFECYCLES)}",
+      }
+    try:
+      with extensions_session(self.client.graph_id) as session:
+        response = reads_reports.list_reports(
+          session,
+          lifecycle=ReportLifecycle(lifecycle),
+          entity_id=arguments.get("entity_id") or None,
+        )
+    except EntityNotInGraphError as e:
+      return {"error": "entity_not_found", "message": str(e)}
+    except SQLAlchemyError as e:
+      return database_failure("list-reports", e)
+    except Exception as e:
+      logger.warning(f"list-reports failed: {e}")
+      return {"error": "command_failed", "message": str(e)}
+    # The taxonomy's structures repeat on every report of it; a report's
+    # sections are read through `disclosures`.
+    return response.model_dump(
+      mode="json", exclude={"reports": {"__all__": {"structures"}}}
+    )
 
 
 class DeleteReportTool:
@@ -144,7 +220,7 @@ class GetReportBundleTool:
 - To hand a report to a tool outside this graph as a standards-form document
 
 **PARAMETERS:**
-- `report_id`: the report. List them with query-graphql: `{ reports { reports { id name generationStatus } } }`
+- `report_id`: the report. `list-reports` lists them with their `generation_status`
 - `format`: `holon-jsonld` (default) is the JSON-LD holon, the one format that carries the whole report; `holon-jsonld-lineage` the same holon with its `#lineage` graph — the ledger lines, entries and events behind every frozen figure, for this graph's own members, never shared to another graph; `tavi` the Project Tavi compiled model; `xbrl-2.1` the XBRL 2.1 package
 
 **RETURNS:** `download_url`, `expires_at`, `content_type`, `format`, and `omitted_content` — what the report carries that this format does not.

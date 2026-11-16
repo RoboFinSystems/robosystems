@@ -45,8 +45,9 @@ class JournalEntryLineItemInput(BaseModel):
     None,
     description=(
       "The cash flow row this line's cash belongs to, an rs-gaap flow qname "
-      "(`flowCandidates(entityId)` lists the rows this company's statement "
-      "offers). Only for a loan drawn or repaid, capital put in or taken out, "
+      "(`list-flow-candidates` over MCP and `flowCandidates` over GraphQL "
+      "list the rows this company's statement offers). Only for a loan drawn "
+      "or repaid, capital put in or taken out, "
       "an asset bought or sold; omitted, the account's default flow applies. "
       "A flow set on one side of the entry tags the untagged lines on the "
       "other: the cash flow statement reads the cash line and the "

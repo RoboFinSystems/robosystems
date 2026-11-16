@@ -114,6 +114,15 @@ ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS = frozenset(
     "backfill-plan-history",
     # The most destructive tool on the surface (`cascade_facts=true`).
     "delete-taxonomy-block",
+    # A generic query a directory review cannot see the operations of; each
+    # named read it carried is a typed tool of its own.
+    "query-graphql",
+    "get-graphql-schema",
+    # User-authored posting rules, and QuickBooks write-back of one event:
+    # rules are written and approved in the app.
+    "create-event-handler",
+    "update-event-handler",
+    "execute-event-block",
   }
 )
 
@@ -420,6 +429,34 @@ class GraphMCPTools:
 
       self.get_event_block_tool = GetEventBlockTool(graph_client)
       self.list_event_blocks_tool = ListEventBlocksTool(graph_client)
+
+    # Named ledger reads, each its own tool, dispatched by name.
+    self._typed_read_tools: dict[str, Any] = {}
+    if (
+      self._has_extension("roboledger")
+      and env.ROBOLEDGER_ENABLED
+      and not self._is_shared_repository()
+    ):
+      from .ledger_read_tools import (
+        GetAccountRegisterTool,
+        GetClassificationStatsTool,
+        ListBankAccountsTool,
+        ListDischargeCandidatesTool,
+        ListFlowCandidatesTool,
+      )
+      from .report_tools import ListReportsTool
+      from .taxonomy_tools import ListElementArcsTool
+
+      for tool in (
+        GetAccountRegisterTool(graph_client),
+        ListFlowCandidatesTool(graph_client),
+        GetClassificationStatsTool(graph_client),
+        ListDischargeCandidatesTool(graph_client),
+        ListBankAccountsTool(graph_client),
+        ListReportsTool(graph_client),
+        ListElementArcsTool(graph_client),
+      ):
+        self._typed_read_tools[tool.get_tool_definition()["name"]] = tool
 
     # Layer 2: taxonomy mapping reads; the writes are registrar-generated.
     self.list_mapping_structures_tool = None
@@ -820,6 +857,7 @@ class GraphMCPTools:
       tools.extend(self._get_agent_tool_definitions())
       tools.extend(self._get_event_handler_tool_definitions())
       tools.extend(self._get_event_block_tool_definitions())
+      tools.extend(t.get_tool_definition() for t in self._typed_read_tools.values())
 
     tools.extend(self._get_navigation_tool_definitions())
     if self.set_write_policy_tool is not None:
@@ -970,6 +1008,24 @@ class GraphMCPTools:
       registrar_tool = self._registrar_dispatch.get(name)
       if registrar_tool is not None:
         result = await registrar_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      if name in (
+        "get-account-register",
+        "list-flow-candidates",
+        "get-classification-stats",
+        "list-discharge-candidates",
+        "list-bank-accounts",
+        "list-reports",
+        "list-element-arcs",
+      ):
+        typed_read_tool = self._typed_read_tools.get(name)
+        if typed_read_tool is None:
+          raise ValueError(
+            f"{name} tool is not available. "
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
+          )
+        result = await typed_read_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       if name == "read-graph-cypher":

@@ -198,3 +198,142 @@ class TestRoboLedgerRouteToolProfile:
       "read-graph-cypher",
     ):
       assert tool in kept, tool
+
+  # Withheld because a directory review needs every operation a model can
+  # call to be its own reviewed tool.
+  _NEWLY_WITHHELD = (
+    "query-graphql",
+    "get-graphql-schema",
+    "create-event-handler",
+    "update-event-handler",
+    "execute-event-block",
+  )
+  # The reads tool text routed through `query-graphql`, each its own tool.
+  _TYPED_READS = (
+    "get-account-register",
+    "list-flow-candidates",
+    "get-classification-stats",
+    "list-discharge-candidates",
+    "list-bank-accounts",
+    "list-reports",
+    "list-element-arcs",
+  )
+
+  @staticmethod
+  def _route(all_tools):
+    from robosystems.middleware.mcp.tools.manager import (
+      ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS,
+    )
+
+    return [t for t in all_tools if t["name"] not in ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS]
+
+  def test_generic_and_rule_tools_are_withheld_only_on_the_route(self, all_flags_on):
+    real = {t["name"] for t in _tools_for(PARENT).get_tool_definitions_as_dict()}
+    route = {
+      t["name"] for t in self._route(_tools_for(PARENT).get_tool_definitions_as_dict())
+    }
+    for name in self._NEWLY_WITHHELD:
+      assert name in real, f"{name} must stay on the universal and per-graph routes"
+      assert name not in route, f"{name} must not be offered on the route"
+
+  def test_the_named_reads_are_typed_tools_on_both(self, all_flags_on):
+    real = {t["name"] for t in _tools_for(PARENT).get_tool_definitions_as_dict()}
+    route = {
+      t["name"] for t in self._route(_tools_for(PARENT).get_tool_definitions_as_dict())
+    }
+    for name in self._TYPED_READS:
+      assert name in real, name
+      assert name in route, name
+
+  def test_no_route_tool_text_points_at_a_withheld_tool(self, all_flags_on):
+    """A description or schema naming a tool the route lacks sends the model
+    after an operation it cannot call."""
+    import json
+    import re
+
+    for tool in self._route(_tools_for(PARENT).get_tool_definitions_as_dict()):
+      text = tool["description"] + json.dumps(tool.get("inputSchema", {}))
+      named = [
+        name
+        for name in self._NEWLY_WITHHELD
+        if re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", text)
+      ]
+      assert not named, f"{tool['name']} names {named}"
+
+  def test_route_instructions_name_no_withheld_tool(self, all_flags_on):
+    import re
+
+    from robosystems.middleware.mcp.tools.instructions import build_instructions
+    from robosystems.middleware.mcp.tools.manager import (
+      ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS,
+    )
+
+    names = {
+      t["name"] for t in self._route(_tools_for(PARENT).get_tool_definitions_as_dict())
+    } | {"get-graph-info"}
+    group = [
+      {"id": "ent_p", "name": "Parent", "is_group_parent": True},
+      {"id": "ent_s", "name": "Sub", "consolidation_method": "equity"},
+      {"id": "ent_c", "name": "Group", "entity_role": "consolidation"},
+    ]
+    out = build_instructions(
+      graph_id=PARENT,
+      tool_names=names,
+      is_shared_repo=False,
+      read_only=False,
+      entities=group,
+    )
+    assert out is not None
+    named = [
+      name
+      for name in ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS
+      if re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", out)
+    ]
+    assert named == []
+    assert "graphql" not in out.lower()
+    for read in (
+      "get-account-register",
+      "list-flow-candidates",
+      "get-classification-stats",
+      "list-discharge-candidates",
+    ):
+      assert f"`{read}(" in out, read
+
+  def test_the_close_playbook_names_no_withheld_tool(self):
+    import json
+
+    from robosystems.middleware.mcp.tools.playbook_tools import _build_playbook
+
+    text = json.dumps(_build_playbook("overview"))
+    for name in self._NEWLY_WITHHELD:
+      assert name not in text, name
+
+  @pytest.mark.asyncio
+  async def test_a_typed_read_dispatches_by_name(self, all_flags_on):
+    from unittest.mock import patch
+
+    from robosystems.models.api.extensions.taxonomies import FlowCandidate
+
+    flow = FlowCandidate(
+      element_id="el_debt",
+      qname="rs-gaap:ProceedsFromIssuanceOfLongTermDebt",
+      name="Proceeds from long-term debt",
+      activity="financing",
+    )
+    session_cm = MagicMock()
+    session_cm.__enter__ = MagicMock(return_value=MagicMock())
+    session_cm.__exit__ = MagicMock(return_value=False)
+    with (
+      patch(
+        "robosystems.middleware.mcp.tools.ledger_read_tools.extensions_session",
+        return_value=session_cm,
+      ),
+      patch(
+        "robosystems.operations.roboledger.reads.taxonomies.list_entity_flow_candidates",
+        return_value=[flow],
+      ),
+    ):
+      result = await _tools_for(PARENT).call_tool(
+        "list-flow-candidates", {}, return_raw=True
+      )
+    assert result["flows"][0]["qname"] == flow.qname

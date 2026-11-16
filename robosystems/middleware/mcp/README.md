@@ -103,7 +103,10 @@ Claude.
 
 The GraphQL pair requires `EXTENSIONS_GRAPHQL_ENABLED=true` **and**
 `MCP_GRAPHQL_ENABLED=true`. The latter is an SSM kill switch that disables both
-tools without a redeploy.
+tools without a redeploy. The `/v1/mcp/roboledger` route withholds both
+(`ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS` in `tools/manager.py`): a directory review
+needs every model-callable operation exposed as its own tool, so a read that
+tool text names is a typed tool (Layer 2b), never a GraphQL field.
 
 The intended pattern is the index once, the types a question needs, then typed
 queries against them:
@@ -175,6 +178,13 @@ delegates to `robosystems.operations.roboledger.{reads,commands}.*`.
 | `suggest-mapping` | `reads/taxonomies.suggest_mapping_candidates` |
 | `create-mapping-association` | `commands/taxonomies.create_mapping_association` |
 | `get-mapping-summary` | `reads/taxonomies.get_mapping_coverage` |
+| `list-element-arcs` | `operations/library/reads.get_element_arcs` |
+| `get-account-register` | `reads/account_register.get_account_register` |
+| `list-flow-candidates` | `reads/taxonomies.list_entity_flow_candidates` |
+| `get-classification-stats` | `reads/classification.classification_stats` |
+| `list-discharge-candidates` | `reads/ar_ap.list_discharge_candidates` |
+| `list-bank-accounts` | `reads/bank_accounts.list_bank_accounts` |
+| `list-reports` | `reads/reports.list_reports` |
 
 Tool names and ops-function names are deliberately *not* kept in lockstep — the
 tool name is the agent-facing contract and the function name is the kernel's,
