@@ -198,6 +198,26 @@ def test_contexts_are_stored_once_per_graph_and_stamped_when_reused(test_db, tes
   assert run.code_version == "1.23.4"
 
 
+def test_a_context_that_fails_to_store_keeps_the_run(test_db, test_user):
+  graph = _graph(test_db, test_user.id)
+  op_id = f"op_{uuid4().hex}"
+  # `kind` is String(16): this one is refused by the database.
+  contexts = {"c" * 64: {"kind": "k" * 40, "content": "prompt"}}
+  with patch("robosystems.db.platform.SessionFactory", return_value=test_db):
+    with patch.object(test_db, "close"):
+      write_run_record(_record(graph.graph_id, test_user.id, op_id, contexts=contexts))
+
+  assert (
+    test_db.query(OperatorRun).filter(OperatorRun.operation_id == op_id).count() == 1
+  )
+  assert (
+    test_db.query(OperatorRunContext)
+    .filter(OperatorRunContext.graph_id == graph.graph_id)
+    .count()
+    == 0
+  )
+
+
 def test_a_failed_write_never_raises(test_db, test_user):
   graph = _graph(test_db, test_user.id)
   record = _record(graph.graph_id, test_user.id, f"op_{uuid4().hex}")
