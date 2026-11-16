@@ -275,7 +275,7 @@ async def reset_password(
   }
 
   if not may_issue_session_without_login(session, user):
-    logger.info(f"Password reset completed for user {user.email}; sign-in required")
+    logger.info(f"Password reset completed for user {user.id}; sign-in required")
     return AuthResponse(
       user=user_info,
       message="Password reset successfully. Sign in to continue.",
@@ -285,7 +285,7 @@ async def reset_password(
   device_fingerprint = extract_device_fingerprint(fastapi_request)
   jwt_token = create_jwt_token(user.id, device_fingerprint, session=session)
 
-  logger.info(f"Password reset completed for user {user.email}")
+  logger.info(f"Password reset completed for user {user.id}")
 
   expires_in = int(JWT_EXPIRY_HOURS * 3600)
   refresh_threshold = int(TOKEN_GRACE_PERIOD_MINUTES * 60)

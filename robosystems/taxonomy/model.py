@@ -217,7 +217,7 @@ class StructureSpec(BaseModel):
   concept_arrangement: str | None = Field(
     None,
     description=(
-      "Charlie's Concept Arrangement Pattern declared on this Disclosure. "
+      "The Concept Arrangement Pattern declared on this Disclosure. "
       "Drives the renderer's compilation strategy. Values:\n"
       "  arithmetic       — additive identity (Assets = Liabilities + Equity)\n"
       "  roll_up          — sub-totals roll up to a parent total\n"
@@ -316,7 +316,7 @@ class RuleSpec(BaseModel):
   rule_expression: str = Field(
     ...,
     description=(
-      "XPath-flavored predicate (verbatim from Charlie's XBRL Formula "
+      "XPath-flavored predicate (verbatim from XBRL Formula "
       "linkbases) or natural-language condition for structural rules. "
       "Evaluation DSL selection is the engine's job."
     ),

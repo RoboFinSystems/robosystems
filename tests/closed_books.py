@@ -181,9 +181,11 @@ def _presents(
 
 def reclassification_books(s: Session) -> dict:
   """A chart on the group parent, whose style composes a balance sheet (cash,
-  PP&E net, short-term debt, other current liabilities) and an income
-  statement (rent); PP&E gross is synthesized detail under PP&E net by
-  calculation arc; one concept is presented nowhere. The card account has
+  restricted cash, short-term investments, PP&E net, short-term debt, other
+  current liabilities, retained earnings, APIC and members' equity under
+  stockholders' equity, the non-controlling interest beside it)
+  and an income statement (rent); PP&E gross is synthesized detail under PP&E
+  net by calculation arc; one concept is presented nowhere. The card account has
   landed history before closed June; the newer card has history in open
   July only."""
   entity = s.get(Entity, PARENT_ENTITY_ID)
@@ -220,29 +222,48 @@ def reclassification_books(s: Session) -> dict:
   ppe_net = _library(s, "rs-gaap:PropertyPlantAndEquipmentNet", "PP&E, net")
   ppe_gross = _library(s, "rs-gaap:PropertyPlantAndEquipmentGross", "PP&E, gross")
   orphan = _library(s, "rs-gaap:Orphan", "Presented nowhere")
+  restricted = _library(
+    s, "rs-gaap:RestrictedCashAndInvestmentsCurrent", "Restricted cash"
+  )
+  investments = _library(s, "rs-gaap:ShortTermInvestments", "Short-term investments")
+  equity = _library(s, "rs-gaap:StockholdersEquity", "Stockholders' equity")
+  retained = _library(s, "rs-gaap:RetainedEarningsAccumulatedDeficit", "Retained")
+  apic = _library(s, "rs-gaap:AdditionalPaidInCapital", "APIC")
+  members = _library(s, "rs-gaap:MembersEquity", "Members' equity")
+  nci = _library(s, "rs-gaap:MinorityInterest", "Non-controlling interest")
 
   balance_sheet = _network(s, library, "balance_sheet", "balance_sheet")
   income = _network(s, library, "income_statement", "income_statement")
-  for child in (cash, ppe_net):
+  for child in (cash, restricted, investments, ppe_net):
     _presents(s, balance_sheet, assets, child)
   for child in (debt, other):
     _presents(s, balance_sheet, liabilities, child)
+  _presents(s, balance_sheet, equity, retained)
+  _presents(s, balance_sheet, equity, apic)
+  _presents(s, balance_sheet, equity, members)
+  _presents(s, balance_sheet, equity, nci)
   _presents(s, income, expenses, rent)
   calc = Structure(
     name="BS calculation", block_type="balance_sheet", taxonomy_id=calculations.id
   )
   s.add(calc)
   s.flush()
-  s.add(
-    Association(
-      structure_id=calc.id,
-      from_element_id=ppe_net.id,
-      to_element_id=ppe_gross.id,
-      association_type="calculation",
-      weight=1.0,
-      created_by="library-seeder",
+  for parent, child in (
+    (ppe_net, ppe_gross),
+    (equity, retained),
+    (equity, apic),
+    (equity, members),
+  ):
+    s.add(
+      Association(
+        structure_id=calc.id,
+        from_element_id=parent.id,
+        to_element_id=child.id,
+        association_type="calculation",
+        weight=1.0,
+        created_by="library-seeder",
+      )
     )
-  )
 
   card = Element(name="2110 Card", qname="coa:2110", taxonomy_id=chart.id)
   newer = Element(name="2111 Newer card", qname="coa:2111", taxonomy_id=chart.id)
@@ -266,4 +287,11 @@ def reclassification_books(s: Session) -> dict:
     "rent": rent,
     "ppe_gross": ppe_gross,
     "orphan": orphan,
+    "cash": cash,
+    "restricted": restricted,
+    "investments": investments,
+    "retained": retained,
+    "apic": apic,
+    "members": members,
+    "nci": nci,
   }

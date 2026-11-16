@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from robosystems.models.extensions import Element
+from robosystems.models.extensions import Element, Structure
 from robosystems.operations.taxonomy_block.reclassification import (
   Reclassification,
   ReclassificationRefusedError,
@@ -62,6 +62,81 @@ def test_a_move_across_statements_is_refused_naming_the_months(ext_session, book
   assert "a restatement, not a reclassification" in message
   assert "reopen latest-first down to 2026-06" in message
   assert err.value.protected.closed_period_names == ("2026-06",)
+
+
+def test_a_move_between_liabilities_and_equity_is_refused(ext_session, books):
+  with pytest.raises(ReclassificationRefusedError) as err:
+    _judge(ext_session, books, books["card"], books["debt"], books["retained"])
+
+  message = str(err.value)
+  assert "into equity changes total equity" in message
+  assert "a restatement, not a reclassification" in message
+
+
+def test_a_move_within_equity_is_a_reclassification(ext_session, books):
+  judged = _judge(ext_session, books, books["card"], books["retained"], books["apic"])
+
+  assert judged == Reclassification(
+    statement_type="balance_sheet", closed_periods=("2026-06",)
+  )
+
+
+def test_a_move_between_parent_equity_and_the_nci_is_refused(ext_session, books):
+  with pytest.raises(ReclassificationRefusedError) as err:
+    _judge(ext_session, books, books["card"], books["apic"], books["nci"])
+
+  message = str(err.value)
+  assert "from stockholders' equity to the non-controlling interest" in message
+  assert "a restatement, not a reclassification" in message
+
+
+def test_members_equity_to_retained_earnings_is_a_reclassification_on_a_corporate_style(
+  ext_session, books
+):
+  judged = _judge(
+    ext_session, books, books["card"], books["members"], books["retained"]
+  )
+
+  assert judged == Reclassification(
+    statement_type="balance_sheet", closed_periods=("2026-06",)
+  )
+
+
+def test_an_llc_style_refuses_a_move_out_of_the_capital_it_rolls_forward(
+  ext_session, books
+):
+  ext_session.add(
+    Structure(
+      id=STYLE,
+      name="LLC",
+      block_type="reporting_style",
+      taxonomy_id=books["chart"].id,
+      metadata_={"retained_earnings_concept": "rs-gaap:MembersEquity"},
+    )
+  )
+  ext_session.commit()
+
+  with pytest.raises(ReclassificationRefusedError) as err:
+    _judge(ext_session, books, books["card"], books["members"], books["retained"])
+
+  assert "from members' equity to equity the statement does not roll" in str(err.value)
+
+
+def test_a_move_between_cash_and_a_non_cash_asset_is_refused(ext_session, books):
+  with pytest.raises(ReclassificationRefusedError) as err:
+    _judge(ext_session, books, books["card"], books["cash"], books["investments"])
+
+  message = str(err.value)
+  assert "out of cash changes ending cash" in message
+  assert "a restatement, not a reclassification" in message
+
+
+def test_a_move_inside_the_cash_total_is_a_reclassification(ext_session, books):
+  judged = _judge(ext_session, books, books["card"], books["cash"], books["restricted"])
+
+  assert judged == Reclassification(
+    statement_type="balance_sheet", closed_periods=("2026-06",)
+  )
 
 
 def test_a_concept_no_statement_presents_is_refused(ext_session, books):
