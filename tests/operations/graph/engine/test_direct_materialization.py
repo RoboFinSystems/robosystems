@@ -59,6 +59,8 @@ class TestMaterializeGraphDirectly:
 
       # Mock graph client
       mock_client = AsyncMock()
+      # No instance: an AsyncMock attribute would send the real lease to DynamoDB.
+      mock_client._instance_id = ""
       mock_client.materialize_table.return_value = {"rows_ingested": 100}
       mock_factory.create_client = AsyncMock(return_value=mock_client)
 
@@ -185,6 +187,8 @@ class TestMaterializeGraphDirectly:
       mock_db_session.query.return_value.join.return_value.filter.return_value.filter.return_value.distinct.return_value.count.return_value = 0
 
       mock_client = AsyncMock()
+      # No instance: an AsyncMock attribute would send the real lease to DynamoDB.
+      mock_client._instance_id = ""
       mock_client.materialize_table.return_value = {"rows_ingested": 50}
       mock_factory.create_client = AsyncMock(return_value=mock_client)
 
@@ -241,6 +245,8 @@ class TestMaterializeGraphDirectly:
       ]
 
       mock_client = AsyncMock()
+      # No instance: an AsyncMock attribute would send the real lease to DynamoDB.
+      mock_client._instance_id = ""
       mock_client.materialize_table.return_value = {"rows_ingested": 100}
       mock_factory.create_client = AsyncMock(return_value=mock_client)
 
@@ -311,6 +317,8 @@ class TestMaterializeGraphDirectly:
       mock_db_session.query.return_value.join.return_value.filter.return_value.filter.return_value.distinct.return_value.count.return_value = 0
 
       mock_client = AsyncMock()
+      # No instance: an AsyncMock attribute would send the real lease to DynamoDB.
+      mock_client._instance_id = ""
       mock_client.materialize_table.return_value = {"rows_ingested": 10}
       mock_factory.create_client = AsyncMock(return_value=mock_client)
 
@@ -364,6 +372,8 @@ class TestMaterializeGraphDirectly:
       mock_db_session.query.return_value.join.return_value.filter.return_value.filter.return_value.distinct.return_value.count.return_value = 0
 
       mock_client = AsyncMock()
+      # No instance: an AsyncMock attribute would send the real lease to DynamoDB.
+      mock_client._instance_id = ""
       mock_client.materialize_table.side_effect = Exception("Materialization failed")
       mock_factory.create_client = AsyncMock(return_value=mock_client)
 
@@ -519,6 +529,8 @@ class TestProgressTracking:
       mock_db_session.query.return_value.join.return_value.filter.return_value.filter.return_value.distinct.return_value.count.return_value = 0
 
       mock_client = AsyncMock()
+      # No instance: an AsyncMock attribute would send the real lease to DynamoDB.
+      mock_client._instance_id = ""
       mock_client.materialize_table.return_value = {"rows_ingested": 100}
       mock_factory.create_client = AsyncMock(return_value=mock_client)
 
