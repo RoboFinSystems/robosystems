@@ -4,7 +4,7 @@
 
 Three kinds of graph on one platform: your ledger, the public filings, and graphs you model yourself, from your own schema, loaded from Parquet and queried with Cypher. One ontology underneath: the RoboSystems graph model, labelled in XBRL's standard terms wherever XBRL has one. Every graph runs on it in LadybugDB, and reports leave as a holon (RDF), XBRL 2.1 or Tavi. Subgraphs give your AI a workspace it extends over MCP, and semantic memory carries its work between sessions.
 
-[RoboLedger](https://roboledger.ai), the general ledger built on it, is in [roboledger-app](https://github.com/RoboFinSystems/roboledger-app): a full accounting system in its own right, every number traced to the entry. Our own companies' books are kept on it. [RoboInvestor](https://roboinvestor.ai) is early.
+[RoboLedger](https://roboledger.ai), the general ledger built on it, is in [roboledger-app](https://github.com/RoboFinSystems/roboledger-app): a full accounting system in its own right, every number traced to the entry. Our own companies' books are kept on it. [RoboInvestor](https://roboinvestor.ai) runs on it too: equity research on public companies, your fund's positions with their terms, and the reports portfolio companies share from RoboLedger.
 
 Built by a CPA and former Workiva XBRL engineer. Open source (Apache 2.0 here; MIT on the clients, the shared UI and xbrlkit): you keep the code and the data whatever happens to any vendor, including us.
 
