@@ -1,19 +1,22 @@
 ---
-description: Draft curated release notes for a milestone release.
+name: release-notes
+description: "Draft curated release notes for a milestone release (a minor, a headline capability, or a version the docs will reference), following the repo's release-notes convention. Use for \"release notes\", \"curate the notes for vX.Y\", or before a milestone release is cut."
 argument-hint: "[version]"
+metadata:
+  lane: build
 ---
 
 Draft curated release notes for an upcoming milestone release, following the convention in `.github/release-notes/README.md`.
 
-## Why this command exists
+## Why this skill exists
 
-`tag-release.yml` generates release bodies from the changes since the last tag. That suits routine releases but reads poorly for milestones, where the story is what the version *is*. The curated-notes override has non-obvious rules (body-only format, the file must exist at the tagged ref), and release notes are the repo's most-read public text — this command encodes the review and hygiene checks that keep them accurate and safe to publish.
+`tag-release.yml` generates release bodies from the changes since the last tag. That suits routine releases but reads poorly for milestones, where the story is what the version *is*. The curated-notes override has non-obvious rules (body-only format, the file must exist at the tagged ref), and release notes are the repo's most-read public text — this skill encodes the review and hygiene checks that keep them accurate and safe to publish.
 
 ## Instructions
 
 ### 1. Decide whether to curate at all
 
-Not every release deserves curated notes. Routine patch releases should keep the generated changelog — skipping is a normal outcome, not a failure. Curate when the release is a milestone: a minor, a headline capability, or a version the documentation will reference. If the user invoked this command for a plain patch, say so and confirm they still want curated notes.
+Not every release deserves curated notes. Routine patch releases should keep the generated changelog — skipping is a normal outcome, not a failure. Curate when the release is a milestone: a minor, a headline capability, or a version the documentation will reference. If the user invoked this skill for a plain patch, say so and confirm they still want curated notes.
 
 ### 2. Establish the version and the range
 

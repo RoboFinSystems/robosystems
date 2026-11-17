@@ -1,6 +1,9 @@
 ---
-description: Review a pull request — gather metadata, diff, and existing feedback, then give a verdict.
+name: pr-review
+description: "Review a pull request: gather its metadata, diff and existing feedback, then give a verdict with findings. Use for \"review PR <n>\", \"review this PR\", or a pasted pull request URL."
 argument-hint: "[pr-number-or-url]"
+metadata:
+  lane: build
 ---
 
 Review a pull request by gathering all PR metadata, diff, and review comments, then provide a comprehensive review summary.

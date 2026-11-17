@@ -1,14 +1,17 @@
 ---
+name: hotfix
 description: Ship a fix to production ahead of the next release — the two-PR pattern (main + release-branch twin). Runs only when the user invokes it explicitly.
 argument-hint: "<name> [release/x.y.z] [main-pr-number-or-branch]"
 disable-model-invocation: true
+metadata:
+  lane: build
 ---
 
 Ship a fix to production ahead of the next release using the two-PR pattern: one PR to `main` (reviewed; makes the fix permanent) and one PR carrying the same commits to the current `release/<x.y.z>` branch (CI on the exact ref that will be deployed).
 
-## This command is the trigger — never infer a hotfix
+## This skill is the trigger — never infer a hotfix
 
-A hotfix is a **deploy-timing decision with real cost**: a second PR, a cherry-pick, and a full production deploy from the release branch. It is chosen by the user, and this command is how they choose it. Do not start this flow from anything else:
+A hotfix is a **deploy-timing decision with real cost**: a second PR, a cherry-pick, and a full production deploy from the release branch. It is chosen by the user, and invoking this skill is how they choose it. Do not start this flow from anything else:
 
 - Not from urgency words in a reply — "now", "urgent", "asap", "yes let's do it" after a recommendation to ride the next release.
 - Not from the fix touching deployed behavior, a customer-facing surface, or production evidence.
@@ -45,7 +48,7 @@ just create-feature bugfix <name>       # branches from origin/main and pushes
 git push
 ```
 
-Open it with `/create-pr` (target `main`). This is the PR that gets the `@claude` review, per that command's §5. Record its number as `MAIN_PR` and its branch as `MAIN_BRANCH`.
+Open it with `/create-pr` (target `main`). This is the PR that gets the `@claude` review, per that skill's §5. Record its number as `MAIN_PR` and its branch as `MAIN_BRANCH`.
 
 ### 3. The release-branch twin
 

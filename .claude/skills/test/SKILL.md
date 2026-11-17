@@ -1,6 +1,9 @@
 ---
-description: Run the full test suite and code-quality gate, fixing failures to green.
+name: test
+description: "Run the full test suite and code-quality gate (just test-all) and fix failures until it is green. Use for \"run the tests\", \"test-all\", \"make CI green\", or before calling a change complete."
 argument-hint: "[module]"
+metadata:
+  lane: build
 ---
 
 Run `just test-all` and fix failures to 100% completion.
