@@ -92,6 +92,26 @@ def build_instructions(
         "(connections[].last_sync_result), then re-check "
         "`get-fiscal-calendar`."
       )
+    books = [
+      text
+      for tool, text in (
+        ("get-trial-balance", "`get-trial-balance`"),
+        (
+          "list-journal-entries",
+          "`list-journal-entries` (`status='draft'` is what the close will post)",
+        ),
+        (
+          "list-reconciliations",
+          "`list-reconciliations(period)`, what the close waits on",
+        ),
+      )
+      if has(tool)
+    ]
+    if books:
+      close_lines.append(
+        "- The books as they stand, from the ledger rather than the graph that "
+        "lags it: " + "; ".join(books) + "."
+      )
     sections.append(_block(*close_lines))
 
   # Chart-of-accounts mapping.
@@ -102,6 +122,21 @@ def build_instructions(
       "`suggest-mapping`; inspect structures → `list-mapping-structures` / "
       "`get-mapping-summary`.",
     ]
+    if has("list-accounts"):
+      coa_lines.append(
+        "- The chart itself → `list-accounts`"
+        + (
+          "; a reporting concept by phrase or qname → `search-library-elements`"
+          if has("search-library-elements")
+          else ""
+        )
+        + (
+          "; balances rolled up to reporting concepts → `get-mapped-trial-balance`"
+          if has("get-mapped-trial-balance")
+          else ""
+        )
+        + "."
+      )
     if has("get-account-register"):
       coa_lines.append(
         "- Why an account's balance is what it is → `get-account-register("

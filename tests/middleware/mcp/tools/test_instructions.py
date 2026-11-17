@@ -398,3 +398,43 @@ class TestNamedReadsRideTheirTools:
     # The surrounding guidance survives the cut.
     assert "`classified_flow_qname`" in out
     assert "`discharge_allocations: [{obligation_event_id, amount}]`" in out
+
+
+class TestTheBooksAsTheyStand:
+  """The live-ledger reads are named where the close and the chart are
+  discussed, each only when the graph serves it."""
+
+  _READS = {
+    "get-trial-balance",
+    "list-journal-entries",
+    "list-reconciliations",
+    "list-accounts",
+    "search-library-elements",
+    "get-mapped-trial-balance",
+  }
+
+  def _build(self, tools):
+    return build_instructions(
+      graph_id="kg1", tool_names=tools, is_shared_repo=False, read_only=False
+    )
+
+  def test_the_close_names_the_ledger_reads(self) -> None:
+    out = self._build(_LEDGER | self._READS)
+    assert "`get-trial-balance`" in out
+    assert "`list-journal-entries` (`status='draft'`" in out
+    assert "`list-reconciliations(period)`" in out
+    assert "`list-accounts`" in out
+    assert "`search-library-elements`" in out
+    assert "`get-mapped-trial-balance`" in out
+
+  def test_without_them_nothing_is_said(self) -> None:
+    out = self._build(_LEDGER)
+    for read in self._READS:
+      assert read not in out
+    assert "The books as they stand" not in out
+    assert "The chart itself" not in out
+
+  def test_one_read_alone_is_named_alone(self) -> None:
+    out = self._build(_LEDGER | {"get-trial-balance"})
+    assert "`get-trial-balance`." in out
+    assert "list-journal-entries" not in out

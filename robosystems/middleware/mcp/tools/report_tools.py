@@ -29,6 +29,7 @@ from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
 from robosystems.operations.roboledger.reads import reports as reads_reports
 from robosystems.operations.serialization.flavors import RdfFlavor, XbrlFlavor
 
+from ._arguments import unexpected
 from ._errors import database_failure
 from .document_tools import _check_graph_access, _resolve_acting_user
 
@@ -98,8 +99,7 @@ class ListReportsTool:
     except SQLAlchemyError as e:
       return database_failure("list-reports", e)
     except Exception:
-      logger.warning("list-reports failed", exc_info=True)
-      return {"error": "command_failed", "message": "list-reports failed"}
+      return unexpected("list-reports")
     # The taxonomy's structures repeat on every report of it; a report's
     # sections are read through `disclosures`.
     return response.model_dump(

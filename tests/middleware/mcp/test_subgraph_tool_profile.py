@@ -32,9 +32,11 @@ def all_flags_on(monkeypatch):
   """Register every optional family, so the cut is measured at full surface.
 
   Without this the parent registers a partial surface and the filter looks
-  more effective than it is.
+  more effective than it is. The flags are patched on the class: undoing a
+  patch on the `env` instance leaves an instance attribute behind, which
+  shadows every later class-level patch of the same flag in that worker.
   """
-  from robosystems.config import env
+  from robosystems.config.env import EnvConfig
 
   for flag in (
     "MCP_WORKSPACE_ENABLED",
@@ -47,7 +49,7 @@ def all_flags_on(monkeypatch):
     "MCP_SEMANTIC_MEMORY_ENABLED",
     "SEMANTIC_SEARCH_ENABLED",
   ):
-    monkeypatch.setattr(env, flag, True, raising=False)
+    monkeypatch.setattr(EnvConfig, flag, True)
 
 
 @pytest.mark.unit
@@ -211,6 +213,13 @@ class TestRoboLedgerRouteToolProfile:
   )
   # The reads tool text routed through `query-graphql`, each its own tool.
   _TYPED_READS = (
+    "list-accounts",
+    "list-journal-entries",
+    "list-transactions",
+    "get-trial-balance",
+    "get-mapped-trial-balance",
+    "list-reconciliations",
+    "search-library-elements",
     "get-account-register",
     "list-flow-candidates",
     "get-classification-stats",
@@ -303,8 +312,17 @@ class TestRoboLedgerRouteToolProfile:
       "list-flow-candidates",
       "get-classification-stats",
       "list-discharge-candidates",
+      "list-reconciliations",
     ):
       assert f"`{read}(" in out, read
+    for read in (
+      "get-trial-balance",
+      "list-journal-entries",
+      "list-accounts",
+      "search-library-elements",
+      "get-mapped-trial-balance",
+    ):
+      assert f"`{read}`" in out, read
 
   @pytest.mark.parametrize("mode", ["overview", "initiate", "recurring"])
   def test_the_close_playbook_names_no_withheld_tool(self, all_flags_on, mode):

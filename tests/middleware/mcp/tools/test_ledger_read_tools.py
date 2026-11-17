@@ -18,16 +18,30 @@ from robosystems.middleware.mcp.tools.annotations import tool_annotations
 from robosystems.middleware.mcp.tools.ledger_read_tools import (
   GetAccountRegisterTool,
   GetClassificationStatsTool,
+  GetMappedTrialBalanceTool,
+  GetTrialBalanceTool,
+  ListAccountsTool,
   ListBankAccountsTool,
   ListDischargeCandidatesTool,
   ListFlowCandidatesTool,
+  ListJournalEntriesTool,
+  ListReconciliationsTool,
+  ListTransactionsTool,
 )
 from robosystems.middleware.mcp.tools.report_tools import ListReportsTool
-from robosystems.middleware.mcp.tools.taxonomy_tools import ListElementArcsTool
+from robosystems.middleware.mcp.tools.taxonomy_tools import (
+  ListElementArcsTool,
+  SearchLibraryElementsTool,
+)
+from robosystems.models.api.common import PaginationInfo
 from robosystems.models.api.extensions.account_register import (
   AccountRegisterResponse,
   RegisterAccount,
   RegisterLine,
+)
+from robosystems.models.api.extensions.accounts import (
+  AccountListResponse,
+  AccountResponse,
 )
 from robosystems.models.api.extensions.agent import (
   ClassificationSourceStats,
@@ -39,13 +53,32 @@ from robosystems.models.api.extensions.bank_accounts import (
   BankAccountResponse,
 )
 from robosystems.models.api.extensions.dimensions import LineDimension
+from robosystems.models.api.extensions.reconciliations import (
+  ReconciliationListResponse,
+  ReconciliationSummary,
+)
 from robosystems.models.api.extensions.reports import (
   PeriodSpec,
   ReportListResponse,
   ReportResponse,
   StructureSummary,
 )
-from robosystems.models.api.extensions.taxonomies import FlowCandidate
+from robosystems.models.api.extensions.taxonomies import (
+  FlowCandidate,
+  MappedTrialBalanceResponse,
+  MappedTrialBalanceRow,
+)
+from robosystems.models.api.extensions.transactions import (
+  LedgerJournalEntryListResponse,
+  LedgerJournalEntryResponse,
+  LedgerLineItemResponse,
+  LedgerTransactionListResponse,
+  LedgerTransactionSummaryResponse,
+)
+from robosystems.models.api.extensions.trial_balance import (
+  TrialBalanceResponse,
+  TrialBalanceRow,
+)
 from robosystems.models.api.library import (
   LibraryElementArcResponse,
   LibraryElementResponse,
@@ -578,7 +611,336 @@ class TestListElementArcs:
     assert tool_read.call_args.args == (session,)
 
 
+_PAGE = PaginationInfo(total=1, limit=100, offset=0, has_more=False)
+
+_ACCOUNTS = AccountListResponse(
+  accounts=[
+    AccountResponse(
+      id="el_rent",
+      code="6100",
+      name="Rent",
+      description="Office rent",
+      trait="expense",
+      balance_type="debit",
+      parent_id="el_opex",
+      depth=2,
+      currency="USD",
+      is_active=True,
+      is_placeholder=False,
+      account_type="Expense",
+      external_id="qb_58",
+      external_source="quickbooks",
+    )
+  ],
+  pagination=_PAGE,
+)
+
+_JOURNAL = LedgerJournalEntryListResponse(
+  entries=[
+    LedgerJournalEntryResponse(
+      id="je_1",
+      number="JE-9",
+      transaction_id=None,
+      type="adjusting",
+      status="draft",
+      posting_date=date(2026, 9, 30),
+      memo="September depreciation",
+      provenance="schedule_derived",
+      source_structure_id="str_dep",
+      source_structure_name="Laptops",
+      triggered_by_event_id="evt_due",
+      triggered_by_event_type="schedule_entry_due",
+      line_items=[
+        LedgerLineItemResponse(
+          id="li_1",
+          account_id="el_dep",
+          account_name="Depreciation",
+          account_code="6500",
+          debit_amount=125.0,
+          credit_amount=0.0,
+          line_order=0,
+          dimensions=[
+            LineDimension(id="dim_ops", dimension_type="department", name="Ops")
+          ],
+        ),
+        LedgerLineItemResponse(
+          id="li_2",
+          account_id="el_acc_dep",
+          debit_amount=0.0,
+          credit_amount=125.0,
+          line_order=1,
+        ),
+      ],
+      total_debit=125.0,
+      total_credit=125.0,
+      balanced=True,
+    )
+  ],
+  pagination=_PAGE,
+)
+
+_TRANSACTIONS = LedgerTransactionListResponse(
+  transactions=[
+    LedgerTransactionSummaryResponse(
+      id="txn_1",
+      number="1042",
+      type="Invoice",
+      amount=2500.0,
+      currency="USD",
+      date=date(2026, 9, 12),
+      due_date=date(2026, 10, 12),
+      reference_number="INV-1042",
+      description="September retainer",
+      source="quickbooks",
+      status="posted",
+    )
+  ],
+  pagination=_PAGE,
+)
+
+_TRIAL_BALANCE = TrialBalanceResponse(
+  rows=[
+    TrialBalanceRow(
+      account_id="el_cash",
+      account_code="1010",
+      account_name="Checking",
+      trait="asset",
+      account_type="Bank",
+      total_debits=9000.0,
+      total_credits=1500.0,
+      net_balance=7500.0,
+    )
+  ],
+  total_debits=9000.0,
+  total_credits=9000.0,
+)
+
+_MAPPED = MappedTrialBalanceResponse(
+  mapping_id="map_1",
+  rows=[
+    MappedTrialBalanceRow(
+      reporting_element_id="el_rs_cash",
+      qname="rs-gaap:CashAndCashEquivalents",
+      reporting_name="Cash and cash equivalents",
+      trait="asset",
+      balance_type="debit",
+      total_debits=9000.0,
+      total_credits=1500.0,
+      net_balance=7500.0,
+    )
+  ],
+)
+
+_RECONCILIATIONS = ReconciliationListResponse(
+  period="2026-09",
+  as_of=date(2026, 9, 30),
+  reconciliations=[
+    ReconciliationSummary(
+      structure_id="str_rec_bank",
+      name="Checking to statement",
+      scope="account",
+      method="statement",
+      element_id="el_cash",
+      required_for_close=True,
+      materiality=1.0,
+      statement_cycle="monthly",
+      period="2026-09",
+      as_of=date(2026, 9, 30),
+      status="unreconciled",
+      unreconciled_difference=42.5,
+      ledger_balance=7500.0,
+      independent_balance=7457.5,
+      review_required=True,
+      separate_reviewer=False,
+    )
+  ],
+)
+
+_ELEMENTS = [
+  LibraryElementResponse(
+    id="el_rs_debt",
+    qname="rs-gaap:ProceedsFromIssuanceOfLongTermDebt",
+    name="Proceeds from long-term debt",
+    trait=None,
+    balance_type="debit",
+    period_type="duration",
+    element_type="concept",
+    source="rs-gaap",
+    taxonomy_id="tax_rs_gaap",
+  )
+]
+
+
+@pytest.mark.unit
+class TestTheLedgerAsItStands:
+  """Each read answers what its GraphQL field answers, from one fixture."""
+
+  def test_list_accounts(self):
+    with (
+      _sessions() as session,
+      patch(f"{_READS}.accounts.list_accounts", return_value=_ACCOUNTS) as read,
+    ):
+      field = _graphql(
+        '{ accounts(classification: "expense", isActive: true, limit: 20) '
+        f"{{ {_selection('AccountList')} }} }}"
+      )["accounts"]
+      tool = ListAccountsTool(_client())._execute_sync(
+        {"classification": "expense", "is_active": True, "limit": 20}
+      )
+    _assert_answers(_snake(field), tool)
+    assert read.call_args_list[0].kwargs == read.call_args_list[1].kwargs
+    assert read.call_args.args == (session,)
+    assert read.call_args.kwargs["trait"] == "expense"
+
+  def test_list_journal_entries(self):
+    with (
+      _sessions(),
+      patch(
+        f"{_READS}.journal_entries.list_journal_entries", return_value=_JOURNAL
+      ) as read,
+    ):
+      field = _graphql(
+        '{ journalEntries(startDate: "2026-09-01", endDate: "2026-09-30", '
+        'status: "draft", provenance: "schedule_derived") '
+        f"{{ {_selection('LedgerJournalEntryList')} }} }}"
+      )["journalEntries"]
+      tool = ListJournalEntriesTool(_client())._execute_sync(
+        {
+          "start_date": "2026-09-01",
+          "end_date": "2026-09-30",
+          "status": "draft",
+          "provenance": "schedule_derived",
+        }
+      )
+    _assert_answers(_snake(field), tool)
+    assert read.call_args_list[0].kwargs == read.call_args_list[1].kwargs
+
+  def test_list_transactions(self):
+    with (
+      _sessions(),
+      patch(
+        f"{_READS}.transactions.list_transactions", return_value=_TRANSACTIONS
+      ) as read,
+    ):
+      field = _graphql(
+        '{ transactions(type: "Invoice", startDate: "2026-09-01") '
+        f"{{ {_selection('LedgerTransactionList')} }} }}"
+      )["transactions"]
+      tool = ListTransactionsTool(_client())._execute_sync(
+        {"type": "Invoice", "start_date": "2026-09-01"}
+      )
+    _assert_answers(_snake(field), tool)
+    assert read.call_args_list[0].kwargs == read.call_args_list[1].kwargs
+
+  def test_get_trial_balance(self):
+    with (
+      _sessions(),
+      patch(
+        f"{_READS}.trial_balance.get_trial_balance", return_value=_TRIAL_BALANCE
+      ) as read,
+    ):
+      field = _graphql(
+        '{ trialBalance(endDate: "2026-09-30", entityId: "ent_sub", '
+        'dimensionType: "department", dimensionMemberId: "unallocated") '
+        f"{{ {_selection('TrialBalance')} }} }}"
+      )["trialBalance"]
+      tool = GetTrialBalanceTool(_client())._execute_sync(
+        {
+          "end_date": "2026-09-30",
+          "entity_id": "ent_sub",
+          "dimension_type": "department",
+          "dimension_member_id": "unallocated",
+        }
+      )
+    _assert_answers(_snake(field), tool)
+    assert read.call_args_list[0].kwargs == read.call_args_list[1].kwargs
+    assert read.call_args.kwargs["line_slice"].member_id is None
+
+  def test_get_mapped_trial_balance(self):
+    with (
+      _sessions() as session,
+      patch(
+        f"{_READS}.taxonomies.get_mapped_trial_balance", return_value=_MAPPED
+      ) as read,
+    ):
+      field = _graphql(
+        '{ mappedTrialBalance(mappingId: "map_1", endDate: "2026-09-30") '
+        f"{{ {_selection('MappedTrialBalance')} }} }}"
+      )["mappedTrialBalance"]
+      tool = GetMappedTrialBalanceTool(_client())._execute_sync(
+        {"mapping_id": "map_1", "end_date": "2026-09-30"}
+      )
+    _assert_answers(_snake(field), tool)
+    assert read.call_args_list[0] == read.call_args_list[1]
+    assert read.call_args.args == (session, "map_1")
+
+  def test_list_reconciliations(self):
+    with (
+      _sessions(),
+      patch(
+        f"{_READS}.reconciliations.list_reconciliations",
+        return_value=_RECONCILIATIONS,
+      ) as read,
+    ):
+      field = _graphql(
+        '{ reconciliations(period: "2026-09") '
+        f"{{ {_selection('ReconciliationList')} }} }}"
+      )["reconciliations"]
+      tool = ListReconciliationsTool(_client())._execute_sync({"period": "2026-09"})
+    _assert_answers(_snake(field), tool)
+    assert read.call_args_list[0] == read.call_args_list[1]
+
+  def test_search_library_elements(self):
+    with (
+      _sessions() as session,
+      patch(
+        "robosystems.graphql.resolvers.library.search_elements",
+        return_value=_ELEMENTS,
+      ) as field_read,
+      patch(
+        "robosystems.operations.library.reads.search_elements",
+        return_value=_ELEMENTS,
+      ) as tool_read,
+    ):
+      field = _graphql(
+        '{ searchLibraryElements(query: "IssuanceOfLongTermDebt", '
+        'source: "rs-gaap", limit: 10) '
+        f"{{ {_selection('LibraryElement')} }} }}"
+      )["searchLibraryElements"]
+      tool = SearchLibraryElementsTool(_client())._execute_sync(
+        {"query": "IssuanceOfLongTermDebt", "source": "rs-gaap", "limit": 10}
+      )
+    _assert_answers(_snake(field), tool["elements"])
+    assert field_read.call_args.kwargs == tool_read.call_args.kwargs
+    assert tool_read.call_args.args == (session,)
+
+  @pytest.mark.parametrize(
+    ("tool_class", "arguments", "message"),
+    [
+      (ListAccountsTool, {"limit": 0}, "limit must be between 1 and 1000"),
+      (ListJournalEntriesTool, {"offset": -1}, "offset must be between 0"),
+      (ListTransactionsTool, {"start_date": "Sept"}, "start_date must be YYYY-MM-DD"),
+      (GetTrialBalanceTool, {"dimension_type": "department"}, "go together"),
+      (GetMappedTrialBalanceTool, {}, "mapping_id is required"),
+      (ListReconciliationsTool, {"period": "2026-9"}, "Invalid period format"),
+      (SearchLibraryElementsTool, {"query": "cash", "limit": 501}, "between 1 and 500"),
+      (SearchLibraryElementsTool, {"query": "  "}, "query is required"),
+    ],
+  )
+  def test_bad_arguments_are_named(self, tool_class, arguments, message):
+    result = tool_class(_client())._execute_sync(arguments)
+    assert result["error"] == "invalid_arguments"
+    assert message in result["message"]
+
+
 _TOOLS_UNDER_TEST = (
+  ListAccountsTool,
+  ListJournalEntriesTool,
+  ListTransactionsTool,
+  GetTrialBalanceTool,
+  GetMappedTrialBalanceTool,
+  ListReconciliationsTool,
+  SearchLibraryElementsTool,
   GetAccountRegisterTool,
   ListFlowCandidatesTool,
   GetClassificationStatsTool,
@@ -676,6 +1038,29 @@ class TestFaultsAndBounds:
         ListElementArcsTool,
         "robosystems.operations.library.reads.get_element_arcs",
         {"element_id": "el_rent"},
+      ),
+      (ListAccountsTool, f"{_READS}.accounts.list_accounts", {}),
+      (
+        ListJournalEntriesTool,
+        f"{_READS}.journal_entries.list_journal_entries",
+        {},
+      ),
+      (ListTransactionsTool, f"{_READS}.transactions.list_transactions", {}),
+      (GetTrialBalanceTool, f"{_READS}.trial_balance.get_trial_balance", {}),
+      (
+        GetMappedTrialBalanceTool,
+        f"{_READS}.taxonomies.get_mapped_trial_balance",
+        {"mapping_id": "map_1"},
+      ),
+      (
+        ListReconciliationsTool,
+        f"{_READS}.reconciliations.list_reconciliations",
+        {"period": "2026-09"},
+      ),
+      (
+        SearchLibraryElementsTool,
+        "robosystems.operations.library.reads.search_elements",
+        {"query": "cash"},
       ),
     ],
   )

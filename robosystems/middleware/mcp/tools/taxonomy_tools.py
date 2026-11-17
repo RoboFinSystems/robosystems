@@ -16,6 +16,10 @@ from robosystems.models.api.extensions.taxonomies import (
 )
 from robosystems.operations.extensions.staleness import mark_graph_stale
 from robosystems.operations.library import reads as library_reads
+from robosystems.operations.library.reads.elements import (
+  DEFAULT_ELEMENT_LIMIT,
+  MAX_ELEMENT_LIMIT,
+)
 from robosystems.operations.roboledger.commands.taxonomies import (
   create_mapping_association,
 )
@@ -31,6 +35,7 @@ from robosystems.operations.roboledger.reads.taxonomies import (
 from robosystems.operations.taxonomy_block.coa_mappings import mapping_owner_id
 from robosystems.operations.taxonomy_block.immutability import ProtectedFactsError
 
+from ._arguments import bounded_int, invalid, unexpected
 from ._errors import database_failure
 from .constants import ENTITY_ID_ARGUMENT
 
@@ -436,8 +441,80 @@ class ListElementArcsTool:
     except SQLAlchemyError as exc:
       return database_failure("list-element-arcs", exc)
     except Exception:
-      logger.warning("list-element-arcs failed", exc_info=True)
-      return {"error": "command_failed", "message": "list-element-arcs failed"}
+      return unexpected("list-element-arcs")
+
+
+class SearchLibraryElementsTool:
+  """Reporting concepts and accounts found by a phrase or a qname."""
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "search-library-elements",
+      "description": """Find taxonomy elements by a phrase or a qname: reporting concepts (rs-gaap and the other standards) and this graph's own accounts, matched against qname, name and label.
+
+**WHEN TO USE:**
+- Turning a qname (`rs-gaap:ProceedsFromIssuanceOfLongTermDebt`) or a phrase ("deferred revenue") into an element id for a mapping, a flow or a schedule
+- Checking which reporting concept an idea is called before mapping to it
+
+**PARAMETERS:**
+- query (required): a substring of the qname, name or label text
+- source (optional): one standard only, e.g. `rs-gaap`
+- limit (optional, default 50, 1 to 500)
+
+**RETURNS:**
+`elements`, by qname: each with `id`, `qname`, `namespace`, `name`, `trait`, `balance_type`, `period_type`, `is_abstract`, `is_monetary`, `element_type`, `source`, `taxonomy_id`, `parent_id`, `labels` and `references`.
+
+**RELATED TOOLS:**
+- suggest-mapping — ranked concepts for one account
+- list-element-arcs — what an element maps to""",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Substring of the qname, name or label text.",
+          },
+          "source": {"type": "string", "description": "One standard, e.g. rs-gaap."},
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": MAX_ELEMENT_LIMIT,
+            "default": DEFAULT_ELEMENT_LIMIT,
+          },
+        },
+        "required": ["query"],
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
+    query = arguments.get("query")
+    if not isinstance(query, str) or not query.strip():
+      return {"error": "invalid_arguments", "message": "query is required"}
+    try:
+      limit = bounded_int(
+        arguments, "limit", default=DEFAULT_ELEMENT_LIMIT, low=1, high=MAX_ELEMENT_LIMIT
+      )
+    except ValueError as exc:
+      return invalid(str(exc))
+    try:
+      with extensions_session(self.client.graph_id) as session:
+        elements = library_reads.search_elements(
+          session,
+          query_text=query,
+          limit=limit,
+          source=arguments.get("source") or None,
+        )
+        return {"elements": [e.model_dump(mode="json") for e in elements]}
+    except SQLAlchemyError as exc:
+      return database_failure("search-library-elements", exc)
+    except Exception:
+      return unexpected("search-library-elements")
 
 
 class CreateMappingAssociationTool:

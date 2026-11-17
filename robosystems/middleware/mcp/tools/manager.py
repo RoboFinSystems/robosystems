@@ -131,13 +131,20 @@ ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS = frozenset(
 # elsewhere, as an operation a directory review can see. Registration and
 # dispatch both read this.
 TYPED_READ_TOOL_NAMES: tuple[str, ...] = (
+  "list-accounts",
+  "list-journal-entries",
+  "list-transactions",
+  "get-trial-balance",
+  "get-mapped-trial-balance",
   "get-account-register",
+  "list-reconciliations",
   "list-flow-candidates",
   "get-classification-stats",
   "list-discharge-candidates",
   "list-bank-accounts",
   "list-reports",
   "list-element-arcs",
+  "search-library-elements",
 )
 
 
@@ -454,16 +461,29 @@ class GraphMCPTools:
       from .ledger_read_tools import (
         GetAccountRegisterTool,
         GetClassificationStatsTool,
+        GetMappedTrialBalanceTool,
+        GetTrialBalanceTool,
+        ListAccountsTool,
         ListBankAccountsTool,
         ListDischargeCandidatesTool,
         ListFlowCandidatesTool,
+        ListJournalEntriesTool,
+        ListReconciliationsTool,
+        ListTransactionsTool,
       )
       from .report_tools import ListReportsTool
-      from .taxonomy_tools import ListElementArcsTool
+      from .taxonomy_tools import ListElementArcsTool, SearchLibraryElementsTool
 
       built = {
         tool.get_tool_definition()["name"]: tool
         for tool in (
+          ListAccountsTool(graph_client),
+          ListJournalEntriesTool(graph_client),
+          ListTransactionsTool(graph_client),
+          GetTrialBalanceTool(graph_client),
+          GetMappedTrialBalanceTool(graph_client),
+          ListReconciliationsTool(graph_client),
+          SearchLibraryElementsTool(graph_client),
           GetAccountRegisterTool(graph_client),
           ListFlowCandidatesTool(graph_client),
           GetClassificationStatsTool(graph_client),

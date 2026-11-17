@@ -184,6 +184,13 @@ delegates to `robosystems.operations.roboledger.{reads,commands}.*`.
 | `create-mapping-association` | `commands/taxonomies.create_mapping_association` |
 | `get-mapping-summary` | `reads/taxonomies.get_mapping_coverage` |
 | `list-element-arcs` | `operations/library/reads.get_element_arcs` |
+| `search-library-elements` | `operations/library/reads.search_elements` |
+| `list-accounts` | `reads/accounts.list_accounts` |
+| `list-journal-entries` | `reads/journal_entries.list_journal_entries` |
+| `list-transactions` | `reads/transactions.list_transactions` |
+| `get-trial-balance` | `reads/trial_balance.get_trial_balance` |
+| `get-mapped-trial-balance` | `reads/taxonomies.get_mapped_trial_balance` |
+| `list-reconciliations` | `reads/reconciliations.list_reconciliations` |
 | `get-account-register` | `reads/account_register.get_account_register` |
 | `list-flow-candidates` | `reads/taxonomies.list_entity_flow_candidates` |
 | `get-classification-stats` | `reads/classification.classification_stats` |
