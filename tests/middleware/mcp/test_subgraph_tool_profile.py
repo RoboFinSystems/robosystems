@@ -202,16 +202,16 @@ class TestRoboLedgerRouteToolProfile:
     ):
       assert tool in kept, tool
 
-  # Withheld because a directory review needs every operation a model can
-  # call to be its own reviewed tool.
-  _NEWLY_WITHHELD = (
+  # The event-block design whole: rules a tenant writes, the event that runs
+  # them, and the GraphQL pair. One tool set on every route.
+  _SERVED_ON_EVERY_ROUTE = (
     "query-graphql",
     "get-graphql-schema",
     "create-event-handler",
     "update-event-handler",
     "execute-event-block",
   )
-  # The reads tool text routed through `query-graphql`, each its own tool.
+  # The common ledger reads, each its own tool.
   _TYPED_READS = (
     "list-accounts",
     "list-journal-entries",
@@ -255,14 +255,14 @@ class TestRoboLedgerRouteToolProfile:
       if re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", text)
     )
 
-  def test_generic_and_rule_tools_are_withheld_only_on_the_route(self, all_flags_on):
+  def test_rule_event_and_graphql_tools_are_on_the_route(self, all_flags_on):
     real = {t["name"] for t in _tools_for(PARENT).get_tool_definitions_as_dict()}
     route = {
       t["name"] for t in self._route(_tools_for(PARENT).get_tool_definitions_as_dict())
     }
-    for name in self._NEWLY_WITHHELD:
-      assert name in real, f"{name} must stay on the universal and per-graph routes"
-      assert name not in route, f"{name} must not be offered on the route"
+    for name in self._SERVED_ON_EVERY_ROUTE:
+      assert name in real, name
+      assert name in route, f"{name} must be offered on the route too"
 
   def test_the_named_reads_are_typed_tools_on_both(self, all_flags_on):
     real = {t["name"] for t in _tools_for(PARENT).get_tool_definitions_as_dict()}
@@ -280,7 +280,6 @@ class TestRoboLedgerRouteToolProfile:
     import json
 
     withheld = self._withheld()
-    assert self._NEWLY_WITHHELD and set(self._NEWLY_WITHHELD) <= withheld
     for tool in self._route(_tools_for(PARENT).get_tool_definitions_as_dict()):
       text = tool["description"] + json.dumps(tool.get("inputSchema", {}))
       named = self._naming(text, withheld)
@@ -306,7 +305,6 @@ class TestRoboLedgerRouteToolProfile:
     )
     assert out is not None
     assert self._naming(out, self._withheld()) == []
-    assert "graphql" not in out.lower()
     for read in (
       "get-account-register",
       "list-flow-candidates",
@@ -363,16 +361,13 @@ class TestRoboLedgerRouteToolProfile:
       )
     assert result["flows"][0]["qname"] == flow.qname
 
-  def test_the_real_event_tools_carry_the_enum_on_the_route_only(self, all_flags_on):
-    from robosystems.middleware.mcp.tools.route_profile import BUILT_IN_EVENT_TYPES
-
+  def test_the_route_serves_each_tool_as_the_universal_route_does(self, all_flags_on):
+    """The route only withholds; every tool it serves is the same definition,
+    so an event block takes any event kind there too."""
     every = _tools_for(PARENT).get_tool_definitions_as_dict()
     universal = {t["name"]: t for t in every}
-    route = {t["name"]: t for t in self._route(every)}
+    for tool in self._route(every):
+      assert tool == universal[tool["name"]], tool["name"]
     for name in ("create-event-block", "preview-event-block"):
-      held = route[name]["inputSchema"]["properties"]["event_type"]
-      assert held["enum"] == list(BUILT_IN_EVENT_TYPES)
-      assert "enum" not in universal[name]["inputSchema"]["properties"]["event_type"]
-    # The inbox writes still take what they took.
-    update = route["update-event-block"]["inputSchema"]["properties"]
-    assert {"event_id", "transition_to", "metadata_patch"} <= set(update)
+      event_type = universal[name]["inputSchema"]["properties"]["event_type"]
+      assert "enum" not in event_type

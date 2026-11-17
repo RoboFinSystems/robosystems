@@ -45,6 +45,8 @@ is_active, origin, and AI provenance fields.
 **RELATED TOOLS:**
 - list-event-handlers — browse handlers with filters
 - preview-event-block — dry-run to see which handler fires for an event
+- create-event-handler — define a new rule
+- update-event-handler — patch or approve a handler
 
 **NOTES:**
 - An AI-suggested handler takes no part in matching until a person approves it""",
@@ -97,7 +99,7 @@ class ListEventHandlersTool:
 **WHEN TO USE:**
 - To see all handlers for a specific event type (e.g., 'invoice_issued')
 - To find handlers awaiting approval (approved=false)
-- To audit the active rule set
+- To audit the active rule set before adding a new handler
 - To check which event types currently have an active handler set
 
 **PARAMETERS:**

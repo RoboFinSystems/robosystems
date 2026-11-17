@@ -276,7 +276,7 @@ The intended flow is to find the field, read the types it returns, then query.
 
 `query-graphql` is strictly read-only. It rejects mutations and subscriptions before execution, and enforces a complexity gate: maximum query depth 10, maximum 200 fields, and maximum 20 aliases. Queries that exceed these limits are rejected rather than executed.
 
-The RoboLedger connector address (`/v1/mcp/roboledger`) serves neither tool. The ledger reads an agent needs there, such as an account's register or the open items a payment may settle, are typed tools of their own; see [AI Operators and MCP](AI-Operators-and-MCP.md#the-roboledger-route).
+The common ledger reads, such as an account's register or the open items a payment may settle, are also typed tools of their own on every tenant connection; see [AI Operators and MCP](AI-Operators-and-MCP.md#the-roboledger-route).
 
 Direct HTTP queries are bounded too, just more loosely, and on a different third axis. The endpoint applies Strawberry limiters for maximum depth 15, maximum 30 aliases, and maximum 2000 **tokens** — deployment settings `EXTENSIONS_GRAPHQL_MAX_DEPTH`, `EXTENSIONS_GRAPHQL_MAX_ALIASES`, and `EXTENSIONS_GRAPHQL_MAX_TOKENS`, which a deployment's operator can tune at runtime through SSM without a redeploy. They exist to bound query cost against the small extensions OLTP connection pool, where each resolved field can open a session. Introspection is exempt from the depth limiter, so SDK codegen is unaffected.
 

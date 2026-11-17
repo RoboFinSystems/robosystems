@@ -114,22 +114,12 @@ ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS = frozenset(
     "backfill-plan-history",
     # The most destructive tool on the surface (`cascade_facts=true`).
     "delete-taxonomy-block",
-    # A generic query a directory review cannot see the operations of; each
-    # named read it carried is a typed tool of its own.
-    "query-graphql",
-    "get-graphql-schema",
-    # User-authored posting rules, and QuickBooks write-back of one event:
-    # rules are written and approved in the app.
-    "create-event-handler",
-    "update-event-handler",
-    "execute-event-block",
   }
 )
 
 
-# Named ledger reads, each a tool of its own: what a GraphQL field answers
-# elsewhere, as an operation a directory review can see. Registration and
-# dispatch both read this.
+# Named ledger reads, each a tool of its own, so the common reads need no
+# GraphQL. Registration and dispatch both read this.
 TYPED_READ_TOOL_NAMES: tuple[str, ...] = (
   "list-accounts",
   "list-journal-entries",

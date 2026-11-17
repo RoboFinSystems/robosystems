@@ -797,12 +797,6 @@ async def _handle_tools_call(
     detail = e.detail if isinstance(e.detail, str) else json.dumps(e.detail)
     return _tool_error_result(msg_id, detail)
 
-  # After authorization: it may read the event the call names.
-  if profile.screens(name):
-    refusal = await run_off_loop(profile.refusal, graph_id, name, arguments)
-    if refusal:
-      return _tool_error_result(msg_id, refusal)
-
   api_logger.info(
     f"Remote MCP tool execution started: {name}",
     extra={
