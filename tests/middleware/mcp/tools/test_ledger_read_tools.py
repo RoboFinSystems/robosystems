@@ -801,7 +801,7 @@ class TestTheLedgerAsItStands:
     ):
       field = _graphql(
         '{ journalEntries(startDate: "2026-09-01", endDate: "2026-09-30", '
-        'status: "draft", provenance: "schedule_derived") '
+        'status: "draft", provenance: "schedule_derived", limit: 20) '
         f"{{ {_selection('LedgerJournalEntryList')} }} }}"
       )["journalEntries"]
       tool = ListJournalEntriesTool(_client())._execute_sync(
@@ -810,6 +810,7 @@ class TestTheLedgerAsItStands:
           "end_date": "2026-09-30",
           "status": "draft",
           "provenance": "schedule_derived",
+          "limit": 20,
         }
       )
     _assert_answers(_snake(field), tool)
@@ -859,6 +860,7 @@ class TestTheLedgerAsItStands:
   def test_get_mapped_trial_balance(self):
     with (
       _sessions() as session,
+      patch(f"{_READS}.taxonomies.mapping_exists", return_value=True),
       patch(
         f"{_READS}.taxonomies.get_mapped_trial_balance", return_value=_MAPPED
       ) as read,
@@ -913,6 +915,107 @@ class TestTheLedgerAsItStands:
     _assert_answers(_snake(field), tool["elements"])
     assert field_read.call_args.kwargs == tool_read.call_args.kwargs
     assert tool_read.call_args.args == (session,)
+
+  def test_an_unknown_mapping_is_not_found(self):
+    with (
+      _sessions() as session,
+      patch(f"{_READS}.taxonomies.mapping_exists", return_value=False) as exists,
+      patch(f"{_READS}.taxonomies.get_mapped_trial_balance") as read,
+    ):
+      result = GetMappedTrialBalanceTool(_client())._execute_sync(
+        {"mapping_id": "str_missing"}
+      )
+    assert result["error"] == "not_found"
+    assert "'str_missing'" in result["message"]
+    exists.assert_called_once_with(session, "str_missing")
+    read.assert_not_called()
+
+  def test_a_journal_page_defaults_to_fifty_entries(self):
+    tool = ListJournalEntriesTool(_client())
+    assert tool.get_tool_definition()["inputSchema"]["properties"]["limit"] == {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000,
+      "default": 50,
+    }
+    with (
+      _sessions(),
+      patch(
+        f"{_READS}.journal_entries.list_journal_entries", return_value=_JOURNAL
+      ) as read,
+    ):
+      tool._execute_sync({})
+    assert read.call_args.kwargs["limit"] == 50
+
+  def test_a_transaction_page_keeps_its_default(self):
+    """Transactions answer headers only, so the page stays at 100."""
+    with (
+      _sessions(),
+      patch(
+        f"{_READS}.transactions.list_transactions", return_value=_TRANSACTIONS
+      ) as read,
+    ):
+      ListTransactionsTool(_client())._execute_sync({})
+    assert read.call_args.kwargs["limit"] == 100
+
+  @pytest.mark.parametrize(
+    ("tool_class", "target", "arguments"),
+    [
+      (
+        GetTrialBalanceTool,
+        f"{_READS}.trial_balance.get_trial_balance",
+        {"start_date": "2026-09-30", "end_date": "2026-09-01"},
+      ),
+      (
+        GetMappedTrialBalanceTool,
+        f"{_READS}.taxonomies.get_mapped_trial_balance",
+        {"mapping_id": "map_1", "start_date": "2026-09-30", "end_date": "2026-09-01"},
+      ),
+    ],
+  )
+  def test_an_inverted_window_is_passed_on(self, tool_class, target, arguments):
+    """The reads answer it with no balance (`test_trial_balance_window_db`);
+    the tools do not refuse it first."""
+    empty = (
+      TrialBalanceResponse(rows=[], total_debits=0.0, total_credits=0.0)
+      if tool_class is GetTrialBalanceTool
+      else MappedTrialBalanceResponse(mapping_id="map_1", rows=[])
+    )
+    with (
+      _sessions(),
+      patch(f"{_READS}.taxonomies.mapping_exists", return_value=True),
+      patch(target, return_value=empty) as read,
+    ):
+      result = tool_class(_client())._execute_sync(arguments)
+    assert "error" not in result
+    assert result["rows"] == []
+    assert read.call_args.kwargs["start_date"] == date(2026, 9, 30)
+
+  @pytest.mark.parametrize(
+    ("tool_class", "arguments"),
+    [
+      (ListAccountsTool, {"is_active": "false"}),
+      (ListAccountsTool, {"is_active": 0}),
+      (GetAccountRegisterTool, {"account_id": "el_rent", "include_drafts": "false"}),
+    ],
+  )
+  def test_a_flag_that_is_not_a_boolean_is_refused(self, tool_class, arguments):
+    flag = next(k for k in arguments if k in ("is_active", "include_drafts"))
+    with patch(f"{_READS}.accounts.list_accounts") as read:
+      result = tool_class(_client())._execute_sync(arguments)
+    assert result == {
+      "error": "invalid_arguments",
+      "message": f"{flag} must be true or false",
+    }
+    read.assert_not_called()
+
+  def test_a_boolean_flag_is_passed_as_given(self):
+    with (
+      _sessions(),
+      patch(f"{_READS}.accounts.list_accounts", return_value=_ACCOUNTS) as read,
+    ):
+      ListAccountsTool(_client())._execute_sync({"is_active": False})
+    assert read.call_args.kwargs["is_active"] is False
 
   @pytest.mark.parametrize(
     ("tool_class", "arguments", "message"),

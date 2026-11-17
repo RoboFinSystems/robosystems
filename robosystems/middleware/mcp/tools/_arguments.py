@@ -38,6 +38,15 @@ def bounded_int(
   return number
 
 
+def optional_bool(arguments: dict[str, Any], key: str) -> bool | None:
+  """`arguments[key]` when it is a JSON boolean, None when absent; anything
+  else (the string "false" included) is refused rather than coerced."""
+  value = arguments.get(key)
+  if value is None or isinstance(value, bool):
+    return value
+  raise ValueError(f"{key} must be true or false")
+
+
 def optional_date(arguments: dict[str, Any], key: str) -> date | None:
   """`arguments[key]` as a date; ValueError names the argument."""
   value = arguments.get(key)
@@ -49,4 +58,4 @@ def optional_date(arguments: dict[str, Any], key: str) -> date | None:
     raise ValueError(f"{key} must be YYYY-MM-DD") from None
 
 
-__all__ = ["bounded_int", "invalid", "optional_date", "unexpected"]
+__all__ = ["bounded_int", "invalid", "optional_bool", "optional_date", "unexpected"]

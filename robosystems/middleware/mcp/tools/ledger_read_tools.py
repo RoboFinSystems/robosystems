@@ -40,6 +40,7 @@ from robosystems.operations.roboledger.reads import (
 
 from ._arguments import bounded_int as _bounded_int
 from ._arguments import invalid as _invalid
+from ._arguments import optional_bool as _optional_bool
 from ._arguments import optional_date as _optional_date
 from ._arguments import unexpected as _unexpected
 from ._errors import database_failure
@@ -51,6 +52,8 @@ _MAX_LIMIT = 1000
 _MAX_OFFSET = 1_000_000
 
 _LIMIT = {"type": "integer", "minimum": 1, "maximum": _MAX_LIMIT, "default": 100}
+# A journal page carries every entry's lines, so it starts smaller.
+_JOURNAL_DEFAULT_LIMIT = 50
 _OFFSET = {"type": "integer", "minimum": 0, "maximum": _MAX_OFFSET, "default": 0}
 _DATE = {"type": "string", "description": "YYYY-MM-DD."}
 
@@ -65,10 +68,12 @@ def _page_size(arguments: dict[str, Any]) -> int:
   )
 
 
-def _pagination(arguments: dict[str, Any]) -> tuple[int, int]:
+def _pagination(
+  arguments: dict[str, Any], default_limit: int = _DEFAULT_LIMIT
+) -> tuple[int, int]:
   """`limit` and `offset` with the bounds the GraphQL lists apply."""
   limit = _bounded_int(
-    arguments, "limit", default=_DEFAULT_LIMIT, low=1, high=_MAX_LIMIT
+    arguments, "limit", default=default_limit, low=1, high=_MAX_LIMIT
   )
   offset = _bounded_int(arguments, "offset", default=0, low=0, high=_MAX_OFFSET)
   return limit, offset
@@ -176,6 +181,7 @@ class GetAccountRegisterTool:
       start_date = _optional_date(arguments, "start_date")
       end_date = _optional_date(arguments, "end_date")
       limit = _page_size(arguments)
+      include_drafts = bool(_optional_bool(arguments, "include_drafts"))
     except ValueError as exc:
       return _invalid(str(exc))
 
@@ -189,7 +195,7 @@ class GetAccountRegisterTool:
           entity_id=arguments.get("entity_id") or None,
           line_slice=line_slice,
           flow_element_id=arguments.get("flow_element_id") or None,
-          include_drafts=bool(arguments.get("include_drafts", False)),
+          include_drafts=include_drafts,
           after=arguments.get("after") or None,
           limit=limit,
         ).model_dump(mode="json")
@@ -478,15 +484,15 @@ class ListAccountsTool:
   def _execute_sync(self, arguments: dict[str, Any]) -> Any:
     try:
       limit, offset = _pagination(arguments)
+      is_active = _optional_bool(arguments, "is_active")
     except ValueError as exc:
       return _invalid(str(exc))
-    is_active = arguments.get("is_active")
     try:
       with extensions_session(self.client.graph_id) as session:
         return reads_accounts.list_accounts(
           session,
           trait=arguments.get("classification") or None,
-          is_active=None if is_active is None else bool(is_active),
+          is_active=is_active,
           limit=limit,
           offset=offset,
           entity_id=arguments.get("entity_id") or None,
@@ -522,7 +528,7 @@ class ListJournalEntriesTool:
 - provenance (optional): what created the entry; `schedule_derived` is what the close posted
 - transaction_id (optional): only the entries under one transaction (from `list-transactions`)
 - entity_id (optional): omit for the group parent
-- limit (optional, default 100, 1 to 1000) and offset (optional, default 0): one page of entries
+- limit (optional, default 50, 1 to 1000) and offset (optional, default 0): one page of entries; each entry carries its lines, so a page is larger than its count suggests
 
 **RETURNS:**
 `entries`: each with `id`, `number`, `transaction_id` (null for a standalone entry), `type`, `status`, `posting_date`, `memo`, `provenance`, the schedule it came from, the event that wrote it, `reversal_of`, `line_items` (account, debit and credit amounts, description, flow and dimension tags), `total_debit`, `total_credit` and `balanced`. Amounts are in dollars. `pagination` counts entries.
@@ -546,7 +552,7 @@ class ListJournalEntriesTool:
           },
           "transaction_id": {"type": "string"},
           "entity_id": ENTITY_ID_ARGUMENT,
-          "limit": _LIMIT,
+          "limit": {**_LIMIT, "default": _JOURNAL_DEFAULT_LIMIT},
           "offset": _OFFSET,
         },
       },
@@ -559,7 +565,7 @@ class ListJournalEntriesTool:
     try:
       start_date = _optional_date(arguments, "start_date")
       end_date = _optional_date(arguments, "end_date")
-      limit, offset = _pagination(arguments)
+      limit, offset = _pagination(arguments, _JOURNAL_DEFAULT_LIMIT)
     except ValueError as exc:
       return _invalid(str(exc))
     try:
@@ -744,7 +750,7 @@ class GetMappedTrialBalanceTool:
 - start_date / end_date (optional, YYYY-MM-DD): the posting window, both inclusive
 
 **RETURNS:**
-`mapping_id` and `rows`: each concept's `reporting_element_id`, `qname`, `reporting_name`, `trait`, `balance_type`, `total_debits`, `total_credits` and `net_balance`. Amounts are in dollars. An account the mapping does not reach is in no row: `get-unmapped-elements` lists those.
+`mapping_id` and `rows`: each concept's `reporting_element_id`, `qname`, `reporting_name`, `trait`, `balance_type`, `total_debits`, `total_credits` and `net_balance`. Amounts are in dollars. An account the mapping does not reach is in no row: `get-unmapped-elements` lists those. An id that is not one of this graph's mappings answers `not_found`.
 
 **RELATED TOOLS:**
 - get-trial-balance — the same window by account
@@ -777,6 +783,11 @@ class GetMappedTrialBalanceTool:
       return _invalid(str(exc))
     try:
       with extensions_session(self.client.graph_id) as session:
+        if not reads_taxonomies.mapping_exists(session, mapping_id):
+          return {
+            "error": "not_found",
+            "message": f"Mapping structure {mapping_id!r} not found in this graph.",
+          }
         return reads_taxonomies.get_mapped_trial_balance(
           session, mapping_id, start_date=start_date, end_date=end_date
         ).model_dump(mode="json")

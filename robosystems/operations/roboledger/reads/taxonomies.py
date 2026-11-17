@@ -1090,6 +1090,19 @@ _MAPPED_TRIAL_BALANCE_SQL = text("""
 """).bindparams(landed_entry_bindparam())
 
 
+def mapping_exists(session: Session, mapping_id: str) -> bool:
+  """Whether ``mapping_id`` is one of this graph's chart-of-accounts mapping
+  structures; ``get_mapped_trial_balance`` answers no rows for any other id."""
+  return (
+    session.execute(
+      select(Structure.id).where(
+        Structure.id == mapping_id, Structure.block_type == "coa_mapping"
+      )
+    ).first()
+    is not None
+  )
+
+
 def get_mapped_trial_balance(
   session: Session,
   mapping_id: str,
