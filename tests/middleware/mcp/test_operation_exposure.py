@@ -201,22 +201,41 @@ def _assigned_tool_attributes() -> dict[str, str]:
   return mapping
 
 
+def _module_name_tuples(tree: ast.Module) -> dict[str, list[ast.expr]]:
+  """Module-level ``NAME = (...)`` / ``NAME: T = (...)`` tuples and lists."""
+  found: dict[str, list[ast.expr]] = {}
+  for node in tree.body:
+    if isinstance(node, ast.Assign) and len(node.targets) == 1:
+      target, value = node.targets[0], node.value
+    elif isinstance(node, ast.AnnAssign) and node.value is not None:
+      target, value = node.target, node.value
+    else:
+      continue
+    if isinstance(target, ast.Name) and isinstance(value, ast.Tuple | ast.List):
+      found[target.id] = list(value.elts)
+  return found
+
+
 def _dispatchable_tool_names() -> set[str]:
   """String literals the dispatch ladder (``_dispatch_tool``, behind the
-  audited ``call_tool``) compares the incoming tool name against."""
+  audited ``call_tool``) compares the incoming tool name against, directly or
+  through a module-level tuple of them."""
   names: set[str] = set()
-  for node in ast.walk(_parse(MANAGER)):
+  tree = _parse(MANAGER)
+  constants = _module_name_tuples(tree)
+  for node in ast.walk(tree):
     if not isinstance(node, ast.AsyncFunctionDef) or node.name != "_dispatch_tool":
       continue
     for inner in ast.walk(node):
       if not isinstance(inner, ast.Compare):
         continue
       for comparator in inner.comparators:
-        candidates = (
-          comparator.elts
-          if isinstance(comparator, ast.Tuple | ast.List | ast.Set)
-          else [comparator]
-        )
+        if isinstance(comparator, ast.Name) and comparator.id in constants:
+          candidates = constants[comparator.id]
+        elif isinstance(comparator, ast.Tuple | ast.List | ast.Set):
+          candidates = comparator.elts
+        else:
+          candidates = [comparator]
         for element in candidates:
           if isinstance(element, ast.Constant) and isinstance(element.value, str):
             names.add(element.value)

@@ -7,6 +7,7 @@ import pytest
 from fastapi import HTTPException
 
 from robosystems.middleware.graph.query_queue import QueryStatus
+from robosystems.middleware.mcp.tools.route_profile import RouteProfile
 from robosystems.routers.graphs.mcp import remote
 from robosystems.routers.graphs.mcp.handlers import tool_error_result
 from robosystems.routers.graphs.mcp.remote import (
@@ -1006,7 +1007,9 @@ class TestRouteToolProfile:
     ):
       request = _make_request({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
       body = _body(
-        await dispatch_jsonrpc(request, KG, _make_user(), excluded_tools=self.EXCLUDED)
+        await dispatch_jsonrpc(
+          request, KG, _make_user(), profile=RouteProfile(excluded_tools=self.EXCLUDED)
+        )
       )
     assert [t["name"] for t in body["result"]["tools"]] == ["read-graph-cypher"]
 
@@ -1034,7 +1037,9 @@ class TestRouteToolProfile:
       request = _make_request(
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
       )
-      await dispatch_jsonrpc(request, KG, _make_user(), excluded_tools=self.EXCLUDED)
+      await dispatch_jsonrpc(
+        request, KG, _make_user(), profile=RouteProfile(excluded_tools=self.EXCLUDED)
+      )
     (tools,) = handler.get_instructions.call_args.args
     assert [t["name"] for t in tools] == ["read-graph-cypher"]
 
@@ -1053,7 +1058,7 @@ class TestRouteToolProfile:
         }
       )
       response = await dispatch_jsonrpc(
-        request, KG, _make_user(), excluded_tools=self.EXCLUDED
+        request, KG, _make_user(), profile=RouteProfile(excluded_tools=self.EXCLUDED)
       )
     body = _body(response)
     assert response.status_code == 200
@@ -1112,3 +1117,143 @@ class TestTrialToolList:
     assert len(listed["result"]["tools"]) == 2
     handshake = await self._dispatch("initialize", frozenset())
     assert "TRIAL" not in handshake["result"]["instructions"]
+
+
+@pytest.mark.asyncio
+class TestRoboLedgerRouteEventKinds:
+  """On the RoboLedger route an event-block call runs only a built-in event
+  kind; the universal route runs whatever the graph's rules handle."""
+
+  _STORED = "robosystems.middleware.mcp.tools.route_profile._stored_event_type"
+
+  async def _call(self, name, arguments, profile, *, executed=None):
+    from robosystems.middleware.mcp.tools.route_profile import UNIVERSAL_ROUTE
+
+    execute = executed or AsyncMock(return_value={"success": True})
+    with (
+      patch.object(remote, "circuit_breaker", Mock()),
+      patch.object(remote, "authorize_mcp_tool_call", AsyncMock(return_value="write")),
+      patch.object(remote, "get_graph_repository", AsyncMock(return_value=Mock())),
+      patch.object(remote, "MCPHandler", Mock(return_value=_make_handler())),
+      patch.object(remote, "execute_tool_to_json", execute),
+    ):
+      request = _make_request(
+        {
+          "jsonrpc": "2.0",
+          "id": 31,
+          "method": "tools/call",
+          "params": {"name": name, "arguments": arguments},
+        },
+        accept="application/json",
+      )
+      body = _body(
+        await dispatch_jsonrpc(
+          request, KG, _make_user(), profile=profile or UNIVERSAL_ROUTE
+        )
+      )
+    return body, execute
+
+  @staticmethod
+  def _roboledger():
+    from robosystems.middleware.mcp.tools.route_profile import ROBOLEDGER_ROUTE
+
+    return ROBOLEDGER_ROUTE
+
+  @pytest.mark.parametrize("tool", ["create-event-block", "preview-event-block"])
+  async def test_a_custom_event_type_is_refused_on_the_route(self, tool):
+    body, execute = await self._call(
+      tool,
+      {"event_type": "consignment_shipped", "event_category": "sales"},
+      self._roboledger(),
+    )
+    assert body["result"]["isError"] is True
+    text = body["result"]["content"][0]["text"]
+    assert "'consignment_shipped' is not available on this connection" in text
+    execute.assert_not_awaited()
+
+  @pytest.mark.parametrize("tool", ["create-event-block", "preview-event-block"])
+  async def test_the_universal_route_still_runs_a_custom_event_type(self, tool):
+    body, execute = await self._call(
+      tool, {"event_type": "consignment_shipped", "event_category": "sales"}, None
+    )
+    assert body["result"]["isError"] is False
+    execute.assert_awaited_once()
+
+  async def test_a_built_in_kind_runs_on_the_route(self):
+    body, execute = await self._call(
+      "create-event-block",
+      {"event_type": "journal_entry_recorded", "event_category": "adjustment"},
+      self._roboledger(),
+    )
+    assert body["result"]["isError"] is False
+    execute.assert_awaited_once()
+
+  @pytest.mark.parametrize(
+    "arguments",
+    [
+      {
+        "event_id": "evt_bank",
+        "transition_to": "classified",
+        "metadata_patch": {"classified_element_id": "el_rent"},
+      },
+      {"event_id": "evt_bank", "transition_to": "committed"},
+    ],
+  )
+  async def test_the_inbox_classifies_and_commits_on_the_route(self, arguments):
+    with patch(self._STORED, return_value="bank_transaction") as stored:
+      body, execute = await self._call(
+        "update-event-block", arguments, self._roboledger()
+      )
+    assert body["result"]["isError"] is False
+    execute.assert_awaited_once()
+    stored.assert_called_once_with(KG, "evt_bank")
+
+  async def test_an_event_of_a_custom_kind_is_not_updated_on_the_route(self):
+    with patch(self._STORED, return_value="consignment_shipped"):
+      body, execute = await self._call(
+        "update-event-block",
+        {"event_id": "evt_custom", "transition_to": "committed"},
+        self._roboledger(),
+      )
+    assert body["result"]["isError"] is True
+    execute.assert_not_awaited()
+
+  async def test_the_universal_route_reads_no_event_kind(self):
+    with patch(self._STORED) as stored:
+      body, execute = await self._call(
+        "update-event-block",
+        {"event_id": "evt_custom", "transition_to": "committed"},
+        None,
+      )
+    assert body["result"]["isError"] is False
+    stored.assert_not_called()
+    execute.assert_awaited_once()
+
+  async def test_the_kind_is_checked_after_authorization(self):
+    """A caller the gauntlet refuses learns nothing about the event."""
+    with (
+      patch(self._STORED) as stored,
+      patch.object(remote, "circuit_breaker", Mock()),
+      patch.object(
+        remote,
+        "authorize_mcp_tool_call",
+        AsyncMock(side_effect=HTTPException(status_code=403, detail="Forbidden")),
+      ),
+    ):
+      request = _make_request(
+        {
+          "jsonrpc": "2.0",
+          "id": 32,
+          "method": "tools/call",
+          "params": {
+            "name": "update-event-block",
+            "arguments": {"event_id": "evt_custom", "transition_to": "committed"},
+          },
+        },
+        accept="application/json",
+      )
+      body = _body(
+        await dispatch_jsonrpc(request, KG, _make_user(), profile=self._roboledger())
+      )
+    assert body["result"]["isError"] is True
+    stored.assert_not_called()

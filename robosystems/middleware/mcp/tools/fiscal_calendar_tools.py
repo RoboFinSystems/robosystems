@@ -410,9 +410,10 @@ class ChangeCalendarStartTool:
   journal entry (drafts included) or unposted source line. Each move records
   a `start_changed` audit event
 - Refused once any month of the calendar has closed (`calendar_start_locked`
-  — history behind the close boundary is reopen-period / backfill-plan-history
-  territory), when moving later would drop activity (`calendar_start_blocked`,
-  with the counts), and for a future month (`invalid_period`)""",
+  — history behind the close boundary is reopen-period territory, or is
+  compiled as plan history), when moving later would drop activity
+  (`calendar_start_blocked`, with the counts), and for a future month
+  (`invalid_period`)""",
       "inputSchema": {
         "type": "object",
         "properties": {

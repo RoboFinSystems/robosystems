@@ -15,6 +15,11 @@ from robosystems.models.api.extensions.taxonomies import (
   CreateMappingAssociationOperation,
 )
 from robosystems.operations.extensions.staleness import mark_graph_stale
+from robosystems.operations.library import reads as library_reads
+from robosystems.operations.library.reads.elements import (
+  DEFAULT_ELEMENT_LIMIT,
+  MAX_ELEMENT_LIMIT,
+)
 from robosystems.operations.roboledger.commands.taxonomies import (
   create_mapping_association,
 )
@@ -30,6 +35,7 @@ from robosystems.operations.roboledger.reads.taxonomies import (
 from robosystems.operations.taxonomy_block.coa_mappings import mapping_owner_id
 from robosystems.operations.taxonomy_block.immutability import ProtectedFactsError
 
+from ._arguments import bounded_int, invalid, unexpected
 from ._errors import database_failure
 from .constants import ENTITY_ID_ARGUMENT
 
@@ -380,6 +386,135 @@ class GetMappingSummaryTool:
     except Exception as exc:
       logger.warning(f"get-mapping-summary failed: {exc}")
       return {"error": str(exc)}
+
+
+class ListElementArcsTool:
+  """The mapping arcs an element is an end of, each with its association id."""
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "list-element-arcs",
+      "description": """The mapping arcs an element is an end of: an account's arc to its reporting concept, and the cross-taxonomy arcs of a concept, each with its association id.
+
+**WHEN TO USE:**
+- Before `delete-mapping-association`, or `create-mapping-association` with `replaces_association_id`: the id of the account's current arc
+- "What does this account map to?" or "which accounts map to this concept?"
+
+**PARAMETERS:**
+- element_id (required): the account or concept (element id)
+
+**RETURNS:**
+`arcs`: each with `id` (the association id), `direction` (`outgoing` when this element is the source, `incoming` when it is the target), `association_type`, `arcrole`, the structure and taxonomy it belongs to, and `peer`, the element at the other end with its `qname`, `name` and `trait`.
+
+**RELATED TOOLS:**
+- create-mapping-association / delete-mapping-association — move or remove an arc
+- suggest-mapping — candidate concepts for an account""",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "element_id": {
+            "type": "string",
+            "description": "The account or concept (element id).",
+          },
+        },
+        "required": ["element_id"],
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
+    element_id = arguments.get("element_id")
+    if not isinstance(element_id, str) or not element_id:
+      return {"error": "invalid_arguments", "message": "element_id is required"}
+    try:
+      with extensions_session(self.client.graph_id) as session:
+        arcs = library_reads.get_element_arcs(session, element_id=element_id)
+        return {
+          "element_id": element_id,
+          "arcs": [arc.model_dump(mode="json") for arc in arcs],
+        }
+    except SQLAlchemyError as exc:
+      return database_failure("list-element-arcs", exc)
+    except Exception:
+      return unexpected("list-element-arcs")
+
+
+class SearchLibraryElementsTool:
+  """Reporting concepts and accounts found by a phrase or a qname."""
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "search-library-elements",
+      "description": """Find taxonomy elements by a phrase or a qname: reporting concepts (rs-gaap and the other standards) and this graph's own accounts, matched against qname, name and label.
+
+**WHEN TO USE:**
+- Turning a qname (`rs-gaap:ProceedsFromIssuanceOfLongTermDebt`) or a phrase ("deferred revenue") into an element id for a mapping, a flow or a schedule
+- Checking which reporting concept an idea is called before mapping to it
+
+**PARAMETERS:**
+- query (required): a substring of the qname, name or label text
+- source (optional): one standard only, e.g. `rs-gaap`
+- limit (optional, default 50, 1 to 500)
+
+**RETURNS:**
+`elements`, by qname: each with `id`, `qname`, `namespace`, `name`, `trait`, `balance_type`, `period_type`, `is_abstract`, `is_monetary`, `element_type`, `source`, `taxonomy_id`, `parent_id`, `labels` and `references`.
+
+**RELATED TOOLS:**
+- suggest-mapping — ranked concepts for one account
+- list-element-arcs — what an element maps to""",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Substring of the qname, name or label text.",
+          },
+          "source": {"type": "string", "description": "One standard, e.g. rs-gaap."},
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": MAX_ELEMENT_LIMIT,
+            "default": DEFAULT_ELEMENT_LIMIT,
+          },
+        },
+        "required": ["query"],
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> Any:
+    return await run_off_loop(self._execute_sync, arguments)
+
+  def _execute_sync(self, arguments: dict[str, Any]) -> Any:
+    query = arguments.get("query")
+    if not isinstance(query, str) or not query.strip():
+      return {"error": "invalid_arguments", "message": "query is required"}
+    try:
+      limit = bounded_int(
+        arguments, "limit", default=DEFAULT_ELEMENT_LIMIT, low=1, high=MAX_ELEMENT_LIMIT
+      )
+    except ValueError as exc:
+      return invalid(str(exc))
+    try:
+      with extensions_session(self.client.graph_id) as session:
+        elements = library_reads.search_elements(
+          session,
+          query_text=query,
+          limit=limit,
+          source=arguments.get("source") or None,
+        )
+        return {"elements": [e.model_dump(mode="json") for e in elements]}
+    except SQLAlchemyError as exc:
+      return database_failure("search-library-elements", exc)
+    except Exception:
+      return unexpected("search-library-elements")
 
 
 class CreateMappingAssociationTool:

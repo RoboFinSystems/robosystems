@@ -175,7 +175,6 @@ from robosystems.operations.roboledger.reads import (
   trial_balance as reads_trial_balance,
 )
 from robosystems.operations.roboledger.reports.network_picker import (
-  DEFAULT_STYLE_ID,
   load_entity_reporting_style,
 )
 from robosystems.operations.roboledger.schedules import ScheduleService
@@ -748,27 +747,7 @@ class LedgerQuery:
     Args:
       entity_id: One entity's accounts. Omit for every entity in the group.
     """
-    import logging
-
-    from robosystems.db.platform import platform_session
-    from robosystems.models.core.connection.connection import Connection
-
-    graph_id = require_graph_id(info)
-    health: dict[str, reads_bank_accounts.ConnectionHealth] = {}
-    try:
-      with platform_session() as platform_db:
-        for conn in Connection.get_all_for_graph(graph_id, platform_db):
-          result = conn.last_sync_result or {}
-          health[str(conn.id)] = reads_bank_accounts.ConnectionHealth(
-            status=conn.status,
-            institution=conn.institution_name or conn.source_name,
-            last_sync_at=conn.last_sync,
-            last_sync_status=result.get("status") if isinstance(result, dict) else None,
-          )
-    except Exception:
-      logging.getLogger(__name__).warning(
-        "Failed to fetch connection health for %s", graph_id, exc_info=True
-      )
+    health = reads_bank_accounts.load_connection_health(require_graph_id(info))
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_bank_accounts.list_bank_accounts(
@@ -1235,14 +1214,7 @@ class LedgerQuery:
     """
     try:
       with _open_session(info, "roboledger") as session:
-        try:
-          resolved = resolve_entity_id(session, entity_id)
-          reporting_style_id = load_entity_reporting_style(session, resolved)
-        except NoEntityError:
-          resolved, reporting_style_id = None, DEFAULT_STYLE_ID
-        rows = reads_taxonomies.list_flow_candidates(
-          session, reporting_style_id, entity_id=resolved
-        )
+        rows = reads_taxonomies.list_entity_flow_candidates(session, entity_id)
     except EntityNotInGraphError as exc:
       raise strawberry.exceptions.StrawberryGraphQLError(str(exc)) from exc
     except ValueError, ProgrammingError:

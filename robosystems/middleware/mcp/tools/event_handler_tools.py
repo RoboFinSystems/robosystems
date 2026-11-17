@@ -31,7 +31,7 @@ class GetEventHandlerTool:
       "description": """Fetch a single event handler rule by id.
 
 **WHEN TO USE:**
-- To inspect what a specific handler does before modifying it
+- To inspect what a specific handler books before an event commits through it
 - To verify whether a handler is active or approved
 - To check the transaction_template DSL for a handler
 
@@ -45,8 +45,9 @@ is_active, origin, and AI provenance fields.
 **RELATED TOOLS:**
 - list-event-handlers — browse handlers with filters
 - preview-event-block — dry-run to see which handler fires for an event
-- create-event-handler — define a new rule
-- update-event-handler — patch or approve a handler""",
+
+**NOTES:**
+- An AI-suggested handler takes no part in matching until a person approves it""",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -96,7 +97,7 @@ class ListEventHandlersTool:
 **WHEN TO USE:**
 - To see all handlers for a specific event type (e.g., 'invoice_issued')
 - To find handlers awaiting approval (approved=false)
-- To audit the active rule set before adding a new handler
+- To audit the active rule set
 - To check which event types currently have an active handler set
 
 **PARAMETERS:**

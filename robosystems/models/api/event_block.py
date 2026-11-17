@@ -657,8 +657,8 @@ class UpdateEventBlockRequest(BaseModel):
       "an empty list clears them, and the settlement link becomes the first "
       "row's. Each must be an obligation of this event's entity, not voided: "
       "an invoice for money in, a bill for money out. A person chooses them; "
-      "the open items a bank line may settle are `dischargeCandidates` over "
-      "GraphQL."
+      "the open items a bank line may settle are `list-discharge-candidates` "
+      "over MCP and `dischargeCandidates` over GraphQL."
     ),
   )
   document_id: str | None = Field(

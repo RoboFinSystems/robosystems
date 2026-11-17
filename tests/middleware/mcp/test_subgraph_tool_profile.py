@@ -32,9 +32,11 @@ def all_flags_on(monkeypatch):
   """Register every optional family, so the cut is measured at full surface.
 
   Without this the parent registers a partial surface and the filter looks
-  more effective than it is.
+  more effective than it is. The flags are patched on the class: undoing a
+  patch on the `env` instance leaves an instance attribute behind, which
+  shadows every later class-level patch of the same flag in that worker.
   """
-  from robosystems.config import env
+  from robosystems.config.env import EnvConfig
 
   for flag in (
     "MCP_WORKSPACE_ENABLED",
@@ -45,8 +47,9 @@ def all_flags_on(monkeypatch):
     "FACT_GRID_ENABLED",
     "SEMANTIC_MEMORY_ENABLED",
     "MCP_SEMANTIC_MEMORY_ENABLED",
+    "SEMANTIC_SEARCH_ENABLED",
   ):
-    monkeypatch.setattr(env, flag, True, raising=False)
+    monkeypatch.setattr(EnvConfig, flag, True)
 
 
 @pytest.mark.unit
@@ -198,3 +201,178 @@ class TestRoboLedgerRouteToolProfile:
       "read-graph-cypher",
     ):
       assert tool in kept, tool
+
+  # Withheld because a directory review needs every operation a model can
+  # call to be its own reviewed tool.
+  _NEWLY_WITHHELD = (
+    "query-graphql",
+    "get-graphql-schema",
+    "create-event-handler",
+    "update-event-handler",
+    "execute-event-block",
+  )
+  # The reads tool text routed through `query-graphql`, each its own tool.
+  _TYPED_READS = (
+    "list-accounts",
+    "list-journal-entries",
+    "list-transactions",
+    "get-trial-balance",
+    "get-mapped-trial-balance",
+    "list-reconciliations",
+    "search-library-elements",
+    "get-account-register",
+    "list-flow-candidates",
+    "get-classification-stats",
+    "list-discharge-candidates",
+    "list-bank-accounts",
+    "list-reports",
+    "list-element-arcs",
+  )
+
+  @staticmethod
+  def _route(all_tools):
+    from robosystems.middleware.mcp.tools.route_profile import ROBOLEDGER_ROUTE
+
+    return ROBOLEDGER_ROUTE.serve(all_tools)
+
+  def _withheld(self) -> set[str]:
+    """Every tool the graph serves elsewhere that the route does not."""
+    from robosystems.middleware.mcp.tools.manager import (
+      ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS,
+    )
+
+    every = _tools_for(PARENT).get_tool_definitions_as_dict()
+    route = {t["name"] for t in self._route(every)}
+    return {t["name"] for t in every} - route | ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS
+
+  @staticmethod
+  def _naming(text: str, names: set[str]) -> list[str]:
+    import re
+
+    return sorted(
+      name
+      for name in names
+      if re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", text)
+    )
+
+  def test_generic_and_rule_tools_are_withheld_only_on_the_route(self, all_flags_on):
+    real = {t["name"] for t in _tools_for(PARENT).get_tool_definitions_as_dict()}
+    route = {
+      t["name"] for t in self._route(_tools_for(PARENT).get_tool_definitions_as_dict())
+    }
+    for name in self._NEWLY_WITHHELD:
+      assert name in real, f"{name} must stay on the universal and per-graph routes"
+      assert name not in route, f"{name} must not be offered on the route"
+
+  def test_the_named_reads_are_typed_tools_on_both(self, all_flags_on):
+    real = {t["name"] for t in _tools_for(PARENT).get_tool_definitions_as_dict()}
+    route = {
+      t["name"] for t in self._route(_tools_for(PARENT).get_tool_definitions_as_dict())
+    }
+    for name in self._TYPED_READS:
+      assert name in real, name
+      assert name in route, name
+
+  def test_no_route_tool_text_points_at_a_withheld_tool(self, all_flags_on):
+    """A description or schema naming a tool the route lacks sends the model
+    after an operation it cannot call. Every withheld tool, not only the
+    latest: a stale reference outlives the exclusion that made it one."""
+    import json
+
+    withheld = self._withheld()
+    assert self._NEWLY_WITHHELD and set(self._NEWLY_WITHHELD) <= withheld
+    for tool in self._route(_tools_for(PARENT).get_tool_definitions_as_dict()):
+      text = tool["description"] + json.dumps(tool.get("inputSchema", {}))
+      named = self._naming(text, withheld)
+      assert not named, f"{tool['name']} names {named}"
+
+  def test_route_instructions_name_no_withheld_tool(self, all_flags_on):
+    from robosystems.middleware.mcp.tools.instructions import build_instructions
+
+    names = {
+      t["name"] for t in self._route(_tools_for(PARENT).get_tool_definitions_as_dict())
+    } | {"get-graph-info"}
+    group = [
+      {"id": "ent_p", "name": "Parent", "is_group_parent": True},
+      {"id": "ent_s", "name": "Sub", "consolidation_method": "equity"},
+      {"id": "ent_c", "name": "Group", "entity_role": "consolidation"},
+    ]
+    out = build_instructions(
+      graph_id=PARENT,
+      tool_names=names,
+      is_shared_repo=False,
+      read_only=False,
+      entities=group,
+    )
+    assert out is not None
+    assert self._naming(out, self._withheld()) == []
+    assert "graphql" not in out.lower()
+    for read in (
+      "get-account-register",
+      "list-flow-candidates",
+      "get-classification-stats",
+      "list-discharge-candidates",
+      "list-reconciliations",
+    ):
+      assert f"`{read}(" in out, read
+    for read in (
+      "get-trial-balance",
+      "list-journal-entries",
+      "list-accounts",
+      "search-library-elements",
+      "get-mapped-trial-balance",
+    ):
+      assert f"`{read}`" in out, read
+
+  @pytest.mark.parametrize("mode", ["overview", "initiate", "recurring"])
+  def test_the_close_playbook_names_no_withheld_tool(self, all_flags_on, mode):
+    import json
+
+    from robosystems.middleware.mcp.tools.playbook_tools import _build_playbook
+
+    text = json.dumps(_build_playbook(mode))
+    assert self._naming(text, self._withheld()) == []
+
+  @pytest.mark.asyncio
+  async def test_a_typed_read_dispatches_by_name(self, all_flags_on):
+    from unittest.mock import patch
+
+    from robosystems.models.api.extensions.taxonomies import FlowCandidate
+
+    flow = FlowCandidate(
+      element_id="el_debt",
+      qname="rs-gaap:ProceedsFromIssuanceOfLongTermDebt",
+      name="Proceeds from long-term debt",
+      activity="financing",
+    )
+    session_cm = MagicMock()
+    session_cm.__enter__ = MagicMock(return_value=MagicMock())
+    session_cm.__exit__ = MagicMock(return_value=False)
+    with (
+      patch(
+        "robosystems.middleware.mcp.tools.ledger_read_tools.extensions_session",
+        return_value=session_cm,
+      ),
+      patch(
+        "robosystems.operations.roboledger.reads.taxonomies.list_entity_flow_candidates",
+        return_value=[flow],
+      ),
+    ):
+      result = await _tools_for(PARENT).call_tool(
+        "list-flow-candidates", {}, return_raw=True
+      )
+    assert result["flows"][0]["qname"] == flow.qname
+
+  def test_the_real_event_tools_carry_the_enum_on_the_route_only(self, all_flags_on):
+    from robosystems.middleware.mcp.tools.route_profile import BUILT_IN_EVENT_TYPES
+
+    every = _tools_for(PARENT).get_tool_definitions_as_dict()
+    universal = {t["name"]: t for t in every}
+    route = {t["name"]: t for t in self._route(every)}
+    for name in ("create-event-block", "preview-event-block"):
+      held = route[name]["inputSchema"]["properties"]["event_type"]
+      assert held["enum"] == list(BUILT_IN_EVENT_TYPES)
+      assert "enum" not in universal[name]["inputSchema"]["properties"]["event_type"]
+    # The inbox writes still take what they took.
+    update = route["update-event-block"]["inputSchema"]["properties"]
+    assert {"event_id", "transition_to", "metadata_patch"} <= set(update)

@@ -106,6 +106,12 @@ _RECURRING_SEQUENCE: list[str] = [
   "document behind it (a write-off, an unlinked payment, an opening balance); "
   "explain it, never plug it. An obligation whose entry is still a draft "
   "shows in it until the close posts the entry.",
+  "get-trial-balance (end_date the month-end) and list-reconciliations "
+  "(period as YYYY-MM) — the books as they stand, read from the ledger, not "
+  "the graph, which lags it: each account's balance, and each "
+  "reconciliation's standing for the month. Drafts count in neither balance "
+  "until the close posts them; list-journal-entries (status='draft') lists "
+  "every draft entry, schedule-derived or not.",
   "Summarize to the user (totals, balance check, per-schedule amounts, what "
   "will publish to QuickBooks) and get explicit approval.",
   "close-period (period as YYYY-MM) — atomic: posts the drafts, runs the "
@@ -210,7 +216,8 @@ _SCHEDULE_AUTHORING: list[str] = [
   "generator on a definition and keeps nothing: show the person its "
   "roll_forward before creating. To change a schedule, read its definition "
   "from get-information-block (artifact.mechanics) and save the changed "
-  "fields with rebuild-schedule; once a month has posted "
+  "fields by rebuilding the schedule in place (the app's schedule editor "
+  "does it); once a month has posted "
   "(mechanics.posted_periods, edit_warning) terminate it and create a "
   "successor instead. Never recreate a schedule beside the one it replaces: "
   "both would book the overlapping months.",
@@ -295,8 +302,9 @@ _KEY_RULES: list[str] = [
   "them back to post, and allow_held_bank_lines closes over them, recording "
   "each as decided; held_bank_line_sample names them), "
   "and unreconciled_accounts (a reconciliation the close waits on is not "
-  "reconciled for the month, or was never compared for it; run "
-  "refresh-reconciliations, which compares the ledger with the books it was "
+  "reconciled for the month, or was never compared for it; "
+  "list-reconciliations shows each one's standing without comparing again; "
+  "run refresh-reconciliations, which compares the ledger with the books it was "
   "synced from and each scheduled asset account with its schedules, and "
   "lists what does not tie; an account waiting on a statement needs "
   "record-statement-balance with that period's statement, passing the "
@@ -337,7 +345,7 @@ _KEY_RULES: list[str] = [
   "subsidiaries under it, each with its own books, chart of accounts, "
   "calendar and close. Every close tool (get-fiscal-calendar, "
   "initialize-fiscal-calendar, get-period-close-status, list-period-drafts, promote-obligations, "
-  "close-period, reopen-period, backfill-plan-history) and every ledger "
+  "close-period, reopen-period) and every ledger "
   "write take entity_id; omitted, they act on the group parent. To close a "
   "subsidiary, pass its entity_id on EVERY call of the sequence — its "
   "siblings stay open, and a close with no entity_id closes the parent. "
@@ -389,8 +397,10 @@ def _build_playbook(mode: str) -> dict[str, Any]:
     "promote-obligations",
     "create-event-block",
     "list-period-drafts",
+    "get-trial-balance",
+    "list-journal-entries",
+    "list-reconciliations",
     "close-period",
-    "backfill-plan-history",
     "search-documents",
     "get-graph-schema",
     "get-unmapped-elements",

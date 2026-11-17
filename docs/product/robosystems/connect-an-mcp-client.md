@@ -103,7 +103,7 @@ A key never goes in the address. For how keys and their scopes work, see [Authen
 |---|---|---|
 | `https://api.robosystems.ai/v1/mcp` | Any graph or shared repository you can use, chosen when you sign in, with every tool that graph runs | Sign-in only |
 | `https://api.robosystems.ai/v1/graphs/{graph_id}/mcp` | That one graph or subgraph, already selected. Use one per graph to keep several connected. `sec` is the SEC filings | Sign-in or an API key |
-| `https://api.robosystems.ai/v1/mcp/roboledger` | **RoboLedger only**: your own graphs running RoboLedger, with the ledger and close tools but not subgraph, backup or other administration tools. The app's **MCP** page shows it when you have a RoboLedger graph | Sign-in only |
+| `https://api.robosystems.ai/v1/mcp/roboledger` | **RoboLedger only**: your own graphs running RoboLedger, with the ledger and close tools but not subgraph, backup or other administration tools, nor the general-purpose query tool. The app's **MCP** page shows it when you have a RoboLedger graph | Sign-in only |
 | RoboSystems SEC in Claude's directory, RoboSystems in ChatGPT's | The SEC filings only, with nothing to paste | Sign-in, and an SEC filings subscription |
 
 When in doubt, use the first one.

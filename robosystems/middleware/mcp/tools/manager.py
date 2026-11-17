@@ -114,7 +114,37 @@ ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS = frozenset(
     "backfill-plan-history",
     # The most destructive tool on the surface (`cascade_facts=true`).
     "delete-taxonomy-block",
+    # A generic query a directory review cannot see the operations of; each
+    # named read it carried is a typed tool of its own.
+    "query-graphql",
+    "get-graphql-schema",
+    # User-authored posting rules, and QuickBooks write-back of one event:
+    # rules are written and approved in the app.
+    "create-event-handler",
+    "update-event-handler",
+    "execute-event-block",
   }
+)
+
+
+# Named ledger reads, each a tool of its own: what a GraphQL field answers
+# elsewhere, as an operation a directory review can see. Registration and
+# dispatch both read this.
+TYPED_READ_TOOL_NAMES: tuple[str, ...] = (
+  "list-accounts",
+  "list-journal-entries",
+  "list-transactions",
+  "get-trial-balance",
+  "get-mapped-trial-balance",
+  "get-account-register",
+  "list-reconciliations",
+  "list-flow-candidates",
+  "get-classification-stats",
+  "list-discharge-candidates",
+  "list-bank-accounts",
+  "list-reports",
+  "list-element-arcs",
+  "search-library-elements",
 )
 
 
@@ -420,6 +450,51 @@ class GraphMCPTools:
 
       self.get_event_block_tool = GetEventBlockTool(graph_client)
       self.list_event_blocks_tool = ListEventBlocksTool(graph_client)
+
+    # Named ledger reads, each its own tool, dispatched by name.
+    self._typed_read_tools: dict[str, Any] = {}
+    if (
+      self._has_extension("roboledger")
+      and env.ROBOLEDGER_ENABLED
+      and not self._is_shared_repository()
+    ):
+      from .ledger_read_tools import (
+        GetAccountRegisterTool,
+        GetClassificationStatsTool,
+        GetMappedTrialBalanceTool,
+        GetTrialBalanceTool,
+        ListAccountsTool,
+        ListBankAccountsTool,
+        ListDischargeCandidatesTool,
+        ListFlowCandidatesTool,
+        ListJournalEntriesTool,
+        ListReconciliationsTool,
+        ListTransactionsTool,
+      )
+      from .report_tools import ListReportsTool
+      from .taxonomy_tools import ListElementArcsTool, SearchLibraryElementsTool
+
+      built = {
+        tool.get_tool_definition()["name"]: tool
+        for tool in (
+          ListAccountsTool(graph_client),
+          ListJournalEntriesTool(graph_client),
+          ListTransactionsTool(graph_client),
+          GetTrialBalanceTool(graph_client),
+          GetMappedTrialBalanceTool(graph_client),
+          ListReconciliationsTool(graph_client),
+          SearchLibraryElementsTool(graph_client),
+          GetAccountRegisterTool(graph_client),
+          ListFlowCandidatesTool(graph_client),
+          GetClassificationStatsTool(graph_client),
+          ListDischargeCandidatesTool(graph_client),
+          ListBankAccountsTool(graph_client),
+          ListReportsTool(graph_client),
+          ListElementArcsTool(graph_client),
+        )
+      }
+      # A name missing from either side fails here, not on a client's call.
+      self._typed_read_tools = {name: built[name] for name in TYPED_READ_TOOL_NAMES}
 
     # Layer 2: taxonomy mapping reads; the writes are registrar-generated.
     self.list_mapping_structures_tool = None
@@ -820,6 +895,7 @@ class GraphMCPTools:
       tools.extend(self._get_agent_tool_definitions())
       tools.extend(self._get_event_handler_tool_definitions())
       tools.extend(self._get_event_block_tool_definitions())
+      tools.extend(t.get_tool_definition() for t in self._typed_read_tools.values())
 
     tools.extend(self._get_navigation_tool_definitions())
     if self.set_write_policy_tool is not None:
@@ -970,6 +1046,16 @@ class GraphMCPTools:
       registrar_tool = self._registrar_dispatch.get(name)
       if registrar_tool is not None:
         result = await registrar_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      if name in TYPED_READ_TOOL_NAMES:
+        typed_read_tool = self._typed_read_tools.get(name)
+        if typed_read_tool is None:
+          raise ValueError(
+            f"{name} tool is not available. "
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
+          )
+        result = await typed_read_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       if name == "read-graph-cypher":

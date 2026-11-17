@@ -1622,11 +1622,11 @@ class TestFlowCandidatesResolver:
   def test_reads_the_parents_style_by_default(self) -> None:
     with (
       patch(
-        "robosystems.graphql.resolvers.ledger.resolve_entity_id",
+        "robosystems.operations.roboledger.reads.taxonomies.resolve_entity_id",
         return_value="ent_parent",
       ) as resolve,
       patch(
-        "robosystems.graphql.resolvers.ledger.load_entity_reporting_style",
+        "robosystems.operations.roboledger.reports.network_picker.load_entity_reporting_style",
         return_value="style_1",
       ) as style,
       patch(
@@ -1653,11 +1653,11 @@ class TestFlowCandidatesResolver:
   def test_reads_a_named_entitys_style(self) -> None:
     with (
       patch(
-        "robosystems.graphql.resolvers.ledger.resolve_entity_id",
+        "robosystems.operations.roboledger.reads.taxonomies.resolve_entity_id",
         return_value="ent_sub",
       ) as resolve,
       patch(
-        "robosystems.graphql.resolvers.ledger.load_entity_reporting_style",
+        "robosystems.operations.roboledger.reports.network_picker.load_entity_reporting_style",
         return_value="style_llc",
       ),
       patch(f"{_OPS}.taxonomies.list_flow_candidates", return_value=[]) as flows,
@@ -1669,7 +1669,7 @@ class TestFlowCandidatesResolver:
 
   def test_an_entity_outside_the_graph_is_an_error(self) -> None:
     with patch(
-      "robosystems.graphql.resolvers.ledger.resolve_entity_id",
+      "robosystems.operations.roboledger.reads.taxonomies.resolve_entity_id",
       side_effect=EntityNotInGraphError("Entity 'x' not found in this graph."),
     ):
       result = _run('query { flowCandidates(entityId: "x") { qname } }')
@@ -1684,7 +1684,7 @@ class TestFlowCandidatesResolver:
 
     with (
       patch(
-        "robosystems.graphql.resolvers.ledger.resolve_entity_id",
+        "robosystems.operations.roboledger.reads.taxonomies.resolve_entity_id",
         side_effect=NoEntityError("no entity"),
       ),
       patch(f"{_OPS}.taxonomies.list_flow_candidates", return_value=[]) as flows,
