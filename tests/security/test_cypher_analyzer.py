@@ -841,6 +841,9 @@ class TestGuardedStringMatchCost:
 
   GUARDED = ("Fact.value", "Fact.uri")
   SIZE = 100_000
+  # Each case runs in ~0.1s alone but has reached ~6s inside a full parallel
+  # run; a quadratic walk over 100 KB would take minutes, so this still catches it.
+  BUDGET_SECONDS = 10.0
 
   @staticmethod
   def _repeat(unit: str, prefix: str = "", suffix: str = "", size: int = 100_000):
@@ -862,7 +865,7 @@ class TestGuardedStringMatchCost:
     query = self._repeat(unit, prefix, suffix, self.SIZE)
     started = time.perf_counter()
     find_guarded_string_match(query, self.GUARDED)
-    assert time.perf_counter() - started < 2.0
+    assert time.perf_counter() - started < self.BUDGET_SECONDS
 
   @pytest.mark.parametrize("distinct_targets", [True, False])
   def test_many_labels_rebound_many_times_stay_linear(self, distinct_targets):
@@ -877,7 +880,7 @@ class TestGuardedStringMatchCost:
     query += "1 AS z RETURN z"
     started = time.perf_counter()
     find_guarded_string_match(query, self.GUARDED)
-    assert time.perf_counter() - started < 2.0
+    assert time.perf_counter() - started < self.BUDGET_SECONDS
 
   def test_a_scan_buried_in_a_long_statement_is_still_found(self):
     query = self._repeat(
