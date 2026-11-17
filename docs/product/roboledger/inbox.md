@@ -29,7 +29,8 @@ Open a row to see the event and, for a QuickBooks transaction, its journal lines
 
 A bank feed brings in every transaction the bank has posted, each as a **Captured** event with nothing in the ledger. Most arrive with a suggested account, and the badge on the row says where the suggestion came from:
 
-- **Learned**: the counterparty's own default account, learned from the lines you approved before. The event says how often it held, such as "classified to Payroll on 7 of 8 past lines". This is the one to trust.
+- **Open item**: the line pays an open bill or invoice of the counterparty's for exactly its amount, and the event names which one. Taking it books the line to payables or receivables and settles that bill or invoice, so the cost isn't counted twice.
+- **Learned**: the counterparty's own default account, learned from the lines you approved before. The event says how often it held, such as "classified to Payroll on 7 of 8 past lines". This is the one to trust, unless the event says the line is far larger than that counterparty's usual: then read it, since it may belong elsewhere or need a split.
 - **Bank category**: only the bank's category for the transaction, matched to your chart. Check it.
 
 A line with no badge carries no suggestion and needs a choice. A transfer between two of your own accounts arrives as one event with both sides known, and posts as it is.
@@ -42,7 +43,7 @@ Every approval teaches. Under **Agents**, a customer or vendor shows its **Defau
 
 ### Approve many at once
 
-The **Suggestion** filter narrows the list to lines by where their suggestion came from, or to lines with none. Tick the lines to take, press **Select learned** for every line whose suggestion is learned, or tick the box in the header for every line that has a suggestion. **Approve** then takes each line's suggestion and posts it, oldest first, through the same checks as approving one at a time, so a line that can't post is skipped rather than forced. The summary says how many posted and names each line skipped with the reason: already handled, no suggestion to take, changed by the feed since it was captured, in a closed month, or busy. A line with no suggestion, or whose suggestion names an account that isn't on your chart, is left for you to open.
+The **Suggestion** filter narrows the list to lines by where their suggestion came from, or to lines with none. Tick the lines to take, press **Select learned** for every line whose suggestion is learned, or tick the box in the header for every line that has a suggestion. **Approve** then takes each line's suggestion and posts it, oldest first, through the same checks as approving one at a time, so a line that can't post is skipped rather than forced. The summary says how many posted and names each line skipped with the reason: already handled, no suggestion to take, changed by the feed since it was captured, unusual for that counterparty, its suggestion changed while the batch ran, in a closed month, refused by the ledger's checks, or busy. A line with no suggestion, one whose suggestion names an account that isn't on your chart, or one flagged as unusual for its counterparty, is left for you to open.
 
 Your assistant can do the same from the Inbox's lines: ask it to take the learned suggestions on the month's bank lines and tell you what it skipped. From the Console, `/do` can sort lines into accounts for you, and a line it sorts posts only when someone approves it.
 

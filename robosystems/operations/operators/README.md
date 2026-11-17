@@ -64,7 +64,8 @@ Import the module in `implementations/__init__.py` so the decorator runs.
 | Operator | Context | Purpose |
 | -------- | ------- | ------- |
 | `analyst` (alias: `cypher`, its former name) | Worker, `run_operator_worker()` — queued by `POST /v1/graphs/{g}/operator[/analyst]` | Natural-language questions over the graph — curated financial reads, documents, memory, GraphQL, read-only Cypher as the fallback |
-| `mapping` | Worker, `run_operator_worker()` — queued by `auto-map-elements` and the QuickBooks first sync | Autonomous CoA → US GAAP taxonomy mapping |
+| `mapping` | Worker, `run_operator_worker()` — queued by `auto-map-elements` and the QuickBooks first sync | Autonomous CoA → rs-gaap concept mapping |
+| `author` | Worker, `run_operator_worker()` — queued by `POST /v1/graphs/{g}/operator/author` (never auto-selected) | Makes the change a request asks for (metric and forecast blocks, counterparties, memories, draft reports, inbox classifications) through an allowlist of write tools that are reversible or wait on a person's step; reads like the analyst |
 
 ## Module layout
 
@@ -73,9 +74,11 @@ Import the module in `implementations/__init__.py` so the decorator runs.
 | `base.py` | `Operator` ABC, `OperatorSpec`, `OperatorResult`, `OperatorCapability`, `OperatorMode`, `GraphScope` + `matches_graph_scope`, `enforce_operator_write_role`, and the legacy `BaseOperator` classes |
 | `operator_context.py` | `OperatorContext` dataclass; `ToolAccess` / `ProgressReporter` protocols |
 | `operator_registry.py` | `@register_operator`, `get_operator()`, `list_operators()`, adapter loading |
-| `ai_client.py` / `tracked_ai.py` | Bedrock Converse client (one request shape for every model in the registry), and the tracking wrapper around it |
+| `ai_client.py` / `tracked_ai.py` | The model client — Converse content blocks are the one request shape; it dispatches each registry row to its provider (Bedrock, a self-hosted OpenAI-compatible endpoint, or the Anthropic API in local development) — and the tracking wrapper around it |
+| `openai_compat.py` | Self-hosted Chat Completions endpoint, off unless `OPENAI_COMPAT_ENABLED`; translates to and from Converse blocks |
+| `anthropic_api.py` | Claude on the Anthropic API, off unless `ANTHROPIC_API_ENABLED` and refused outside local development; translates to and from Converse blocks |
 | `credit_consumer.py` | `FactoryCreditConsumer` (worker) |
-| `credit_preflight.py` | Pre-flight balance check before any Bedrock spend |
+| `credit_preflight.py` | Pre-flight balance check before any model spend |
 | `tool_access.py` | `HttpToolAccess` (MCP over HTTP), `DirectToolAccess` (in-process) |
 | `tool_loop.py` | Bounded, model-driven tool-use loop shared by read/analysis operators |
 | `progress.py` | `OperationManagerProgress` (worker SSE) |
@@ -83,7 +86,7 @@ Import the module in `implementations/__init__.py` so the decorator runs.
 | `run_record.py` | `OperatorRunRecord` + `record_operator_run()` — the durable row in `operator_runs`, written at the end of every run |
 | `adapters/worker.py` | `run_operator_worker()` — builds the context for worker tasks, returns the response envelope, and records the run |
 | `adapters/worker_task.py` | `@register_task("operator")` bridge into the worker consumer |
-| `implementations/` | `analyst.py`, `mapping/` (operator, prompt, constants) |
+| `implementations/` | `analyst.py`, `author.py`, `mapping/` (operator, prompt, constants) |
 
 ## Execution paths
 
@@ -95,7 +98,7 @@ POST /v1/graphs/{g}/operator[/{type}]   (or auto-map-elements, or the QB first s
                                               "history", "thread_id", "context"})
   → Valkey queue → worker consumer (marks RUNNING) → OperatorWorkerTask
   → run_operator_worker() → operator.run(ctx) → response envelope
-  Context: DirectToolAccess + FactoryCreditConsumer + OperationManagerProgress
+  Context: HttpToolAccess + FactoryCreditConsumer + OperationManagerProgress
 ```
 
 The envelope (`content`, `operator_used`, `mode_used`, `metadata`, `tokens_used`, `confidence_score`, `execution_time`) is what `/status` returns under `result` and what the SSE `operation_completed` event carries; the operator's own metadata keys are also merged flat for the mapping operation's consumers. The worker re-runs the three gates with its own session before the first model call — a task can sit in the queue past a role change or a spent balance.

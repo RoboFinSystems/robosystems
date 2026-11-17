@@ -27,7 +27,7 @@ A QuickBooks connection is a platform row (`Connection`) scoped to one graph. It
 
 | Direction | What moves | When |
 | --- | --- | --- |
-| **Inbound (sync)** | Chart of accounts, transactions, customers, vendors, employees, company info | On connect, and whenever a sync is requested |
+| **Inbound (sync)** | Chart of accounts, transactions, customers, vendors, employees, company info | On connect, once a day on a schedule, and whenever a sync is requested |
 | **Outbound (write-back)** | Journal entries that RoboLedger drafted (schedule entries, manual adjustments) | At period close, or when one entry is published on its own with `execute-event-block` |
 
 The two directions are independent. A sync reads QuickBooks and never writes to it. Write-back sends only entries that originated in RoboLedger. A transaction that came in from QuickBooks is never sent back.
@@ -52,7 +52,7 @@ A sync pulls one date window from QuickBooks. The request body picks the window:
 | `{"since_date": "2026-01-01"}` | From that date to today | No |
 | `{"full_rebuild": true}` | All history (from 2000-01-01) | Yes, of unposted events only (see below) |
 
-`full_rebuild` takes precedence over `since_date`. The 60-day default suits day-to-day use. If someone edits a transaction in QuickBooks that is older than 60 days, the default sync never sees it. Use `since_date` from a date that covers the edit, or `full_rebuild`.
+`full_rebuild` takes precedence over `since_date`. The 60-day default suits day-to-day use. Outside the window, a sync also asks QuickBooks what changed since the previous sync, and pulls those dates again: an edit to an older transaction, and a transaction deleted or voided in QuickBooks, reach the graph even though they fall before the 60 days. QuickBooks keeps that change history for about 30 days, so a connection whose last sync is older than that falls back to the window alone. Then use `since_date` from a date that covers the edit, or `full_rebuild`.
 
 ```bash
 curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/connections/$CONN_ID/sync" \
@@ -73,9 +73,9 @@ The first sync also does two one-time setup steps:
 - **Bootstraps the fiscal calendar**, so the close workflow is reachable without a separate `initialize` call. See [Period Close](Period-Close.md).
 - **Starts AI auto-mapping** of the chart of accounts when the mapping structure has no associations yet. This is the one sync step that consumes credits. See [Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md).
 
-### On demand only
+### Scheduled and on-demand syncs
 
-Syncs run when something requests them: the Connections page in the app, `POST .../sync`, or the `sync-connection` MCP tool. The platform does not schedule QuickBooks syncs. The connection's `auto_sync_enabled` field is stored but currently has no effect.
+A sync runs when something requests it: the Connections page in the app, `POST .../sync`, or the `sync-connection` MCP tool. The platform also syncs each connection once a day: an hourly sweep starts the sync of every connection whose `auto_sync_enabled` is on (the default) and whose last sync is a day old or more. It covers connections in `connected` or `error` status on active graphs. A connection whose login was revoked waits for a fresh OAuth consent, and one whose last attempt failed is retried a day later, not every hour. A scheduled sync takes the default 60-day window.
 
 ### Tracking a sync
 
@@ -138,13 +138,14 @@ A connection's `write_policy` decides which ledger is the book of record, and th
 | Policy | Book of record | RoboLedger-originated entries |
 | --- | --- | --- |
 | `qb_authoritative` | QuickBooks | Written to QuickBooks at close, or when published on their own with `execute-event-block`. They stay `draft` in RoboLedger until QuickBooks accepts them. |
+| `shadow` | QuickBooks | Nothing is written to QuickBooks, and the close posts nothing locally either: its drafts become `shadowed` expectations compared with what QuickBooks holds, and what would have blocked the close is recorded as a finding instead of enforced. |
 | `native` | RoboSystems | Post locally. Nothing is written to any external system. |
 
 **The policy belongs to one entity's books.** A graph is a reporting group, and a connected ledger keeps the books of exactly one entity in it: the connection's `entity_id`, with `keeps_books: true` on the connection that is that entity's ledger of record. QuickBooks keeps the group parent's. Every question the policy answers is asked about an entity and read from the connection that keeps that entity's books: whether its close writes back, where its drafts would publish, whether a bank feed may book there. A subsidiary with no such connection keeps its books natively whatever the parent's connection says. When a company is authorized again, the newest authorization becomes the keeper. The policy can be set only on a connection that keeps books.
 
-A new QuickBooks connection defaults to `qb_authoritative`. Other connection types default to `native`. `native` describes a graph with no authoritative external ledger: before any connection, after a sever, or books kept natively. It does not mean "connected, but keep the ledgers apart." The platform assumes no steady state in which QuickBooks stays connected while the two ledgers diverge.
+A new QuickBooks connection defaults to `qb_authoritative`, and a live connection chooses between `qb_authoritative` and `shadow`. `shadow` is for running RoboLedger's close beside the one already done in QuickBooks, before letting it post. Other connection types default to `native`. `native` describes a graph with no authoritative external ledger: before any connection, after a sever, or books kept natively. It is what severing leaves, not a setting for a live connection, and it does not mean "connected, but keep the ledgers apart." The platform assumes no steady state in which QuickBooks stays connected while the two ledgers diverge.
 
-**`hybrid` is reserved and cannot be set.** The `WritePolicy` enum declares a third value, `hybrid`, for a future QuickBooks-authoritative mode that would flag exceptions (low-confidence mappings, amounts over a threshold) for review. That mode is not implemented, and the write-policy endpoint rejects it. The close and publish code paths list `hybrid` alongside `qb_authoritative` in their eligibility checks, so a row that somehow carried it would behave exactly like `qb_authoritative`. No supported path creates such a row. In practice there are two policies.
+**`hybrid` is reserved and cannot be set.** The `WritePolicy` enum declares a fourth value, `hybrid`, for a future QuickBooks-authoritative mode that would flag exceptions (low-confidence mappings, amounts over a threshold) for review. That mode is not implemented, and the write-policy endpoint rejects it. The close and publish code paths list `hybrid` alongside `qb_authoritative` in their eligibility checks, so a row that somehow carried it would behave exactly like `qb_authoritative`. No supported path creates such a row. In practice a live connection has two policies to choose from, and `native` is where a sever leaves the books.
 
 Switch policies with:
 
@@ -152,10 +153,10 @@ Switch policies with:
 curl -X PUT "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/connections/$CONN_ID/write-policy" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"write_policy": "native"}'
+  -d '{"write_policy": "shadow"}'
 ```
 
-The same control is the `set-write-policy` MCP tool. Changing the policy requires a member or admin role on the graph. A viewer can't opt a graph into writing to its book of record.
+The request accepts `qb_authoritative` or `shadow`, and `native` is refused: a graph reaches it by severing the connection (see [Disconnect vs. Sever](#disconnect-vs-sever)). The policy can be set only on a connection that keeps books. The same control is the `set-write-policy` MCP tool. Changing the policy requires a member or admin role on the graph. A viewer can't opt a graph into writing to its book of record.
 
 ## The Write-Back Outbox
 
@@ -165,7 +166,7 @@ On a `qb_authoritative` graph, the drafts RoboLedger holds for a month are the o
 
 A draft entry in the month being closed publishes when **both** of these hold:
 
-1. **The graph has a write-back connection.** A non-deleted QuickBooks connection with a write-back policy exists. If several exist, the newest wins.
+1. **The entity has a write-back connection.** The connection that keeps the closing entity's books (see [Write Policy](#write-policy)) is a live QuickBooks connection, not disconnected, severed or awaiting OAuth, and its policy is `qb_authoritative`. There is at most one such keeper per entity, so no ordering decides between connections.
 2. **The draft's event publishes.** The event is not `voided` or `superseded`, the entry has not already been written (its id is not in the event's `metadata.qb_entry_ids`), and either:
    - its `metadata.publish_to_source` is `true`, or
    - `publish_to_source` is unset and its `source` is `schedule` or `manual`.
@@ -378,7 +379,7 @@ curl -X DELETE "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/connections/$CONN
 | OAuth grant | Revoked | Revoked |
 | Synced books | Stay in the graph | Stay in the graph |
 | Chart of accounts | Still owned by the QuickBooks connection | Stamped as the graph's own native chart |
-| Write policy | n/a (the connection is inactive) | Drops to `native` |
+| Write policy | Kept on the connection, inert while it is disconnected. Reconnecting keeps the choice. | Drops to `native` |
 | Reconnecting the same company | Revives the connection and picks up where it left off | Never revives it. QuickBooks can't resume over books kept natively since. |
 
 Both require the admin role on the graph. `sever` applies to QuickBooks only, and other providers return `400`. Choose `sever` when the graph is leaving QuickBooks for good and will keep its books in RoboLedger from now on. Choose `disconnect` for everything else.
@@ -387,7 +388,7 @@ Both require the admin role on the graph. `sever` applies to QuickBooks only, an
 
 ### The default window is 60 days
 
-An edit to a transaction older than 60 days is invisible to a default sync, and so is any reconciling item it would raise. Sync with `since_date` from a date that covers it.
+A default sync reaches an edit older than 60 days through QuickBooks' change history, which covers about the last 30 days of changes. When the previous sync is older than that, an old edit is invisible to a default sync, and so is any reconciling item it would raise. Sync with `since_date` from a date that covers it.
 
 ### A catch-up entry is local on purpose
 
@@ -403,7 +404,7 @@ The sync loads amounts in USD only. A sync that finds a transaction in another c
 
 ### `hybrid` can't be set
 
-`PUT .../write-policy` accepts `native` and `qb_authoritative` only. See [Write Policy](#write-policy).
+`PUT .../write-policy` accepts `qb_authoritative` and `shadow` only. `native` comes from a sever. See [Write Policy](#write-policy).
 
 ## Self-hosted deployments
 

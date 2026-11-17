@@ -46,10 +46,13 @@ class TargetGraphsNotFoundError(LookupError):
 
 
 class TargetGraphMissingExtensionError(Exception):
-  """Raised when a target graph doesn't have the roboledger extension."""
+  """Raised when a target graph carries no extension that can receive a share."""
 
   def __init__(self, graph_id: str) -> None:
-    super().__init__(f"Graph '{graph_id}' does not have the roboledger extension.")
+    super().__init__(
+      f"Graph '{graph_id}' cannot receive a share: it needs the roboledger or "
+      "roboinvestor extension."
+    )
     self.graph_id = graph_id
 
 

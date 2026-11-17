@@ -143,7 +143,7 @@ These two terms describe different layers of how numbers become a report, and th
 
 A practical consequence: banking and insurance presentations are **reporting styles within `rs-gaap`**, not separate frameworks, because they re-present the same GAAP measurements. The decision rule is whether the underlying recognition and measurement change (framework) or only the layout changes (reporting style).
 
-→ Deep-dive: [Information Blocks](Information-Blocks.md)
+→ Deep-dive: [Reporting and Rendering](Reporting-and-Rendering.md#reporting-style-decides-which-structures-the-renderer-walks)
 
 ## OLTP vs OLAP (Operational vs Analytical Graph)
 

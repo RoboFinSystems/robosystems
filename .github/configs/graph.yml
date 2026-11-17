@@ -35,7 +35,7 @@ production:
 
       # Graph content limits
       graph_limits:
-        instance_storage_limit_gb: 20 # Soft storage cap for entire instance (parent + subgraphs + staging)
+        instance_storage_limit_gb: 20 # Enforced storage cap for entire instance (parent + subgraphs + staging); materialize is refused above it
         max_rows_per_copy: 1000000   # 1M rows per copy operation (hard limit, prevents OOM during materialization)
         max_single_table_rows: 2500000 # 2.5M rows per staging table
         chunk_size_rows: 250000      # 250K rows per materialization chunk (conservative for 1GB parent buffer pool)
@@ -100,7 +100,7 @@ production:
 
       # Graph content limits
       graph_limits:
-        instance_storage_limit_gb: 50 # Soft storage cap for entire instance (parent + subgraphs + staging)
+        instance_storage_limit_gb: 50 # Enforced storage cap for entire instance (parent + subgraphs + staging); materialize is refused above it
         max_rows_per_copy: 5000000   # 5M rows per copy operation (hard limit, prevents OOM during materialization)
         max_single_table_rows: 12500000 # 12.5M rows per staging table
         chunk_size_rows: 500000      # 500K rows per materialization chunk (conservative for 2GB parent buffer pool)
@@ -164,7 +164,7 @@ production:
 
       # Graph content limits
       graph_limits:
-        instance_storage_limit_gb: 100 # Soft storage cap for entire instance (parent + subgraphs + staging)
+        instance_storage_limit_gb: 100 # Enforced storage cap for entire instance (parent + subgraphs + staging); materialize is refused above it
         max_rows_per_copy: 50000000  # 50M rows per copy operation (hard limit, prevents OOM during materialization)
         max_single_table_rows: 100000000 # 100M rows per staging table
         chunk_size_rows: 5000000     # 5M rows per materialization chunk

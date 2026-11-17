@@ -871,9 +871,12 @@ class InformationModelResponse(BaseModel):
   concept_arrangement: str | None = Field(
     None,
     description=(
-      "roll_up | roll_forward | variance | adjustment | set | arithmetic | "
-      "textblock. Null for block types where the concept arrangement is "
-      "implicit in their mechanics."
+      "A Concept Arrangement Pattern: set | roll_up | roll_forward | "
+      "roll_forward_info | adjustment | variance | arithmetic | text_block, "
+      "a text-block or detail level (level1_textblock … level4_detail, "
+      "table_equivalent_textblock), or grid | compound_fact. Null for "
+      "block types where the concept arrangement is implicit in their "
+      "mechanics."
     ),
   )
   member_arrangement: str | None = Field(
@@ -912,10 +915,12 @@ class ArtifactResponse(BaseModel):
 class RenderingRowLite(BaseModel):
   """One row of a server-side rendered statement.
 
-  Mirrors :class:`FactRow` in
+  Drawn from :class:`FactRow` in
   :mod:`robosystems.operations.roboledger.reports.fact_grid`, restated at the
-  API boundary so envelope consumers don't depend on that module. `values`
-  holds one entry per period column in :class:`RenderingLite.periods`.
+  API boundary so envelope consumers don't depend on that module. It does not
+  carry FactRow's `is_abstract`, `position` or `period_role` (the start/end
+  role that tells a roll-forward's two balance rows apart).
+  `values` holds one entry per period column in :class:`RenderingLite.periods`.
   """
 
   model_config = ConfigDict(from_attributes=True)
@@ -1080,20 +1085,17 @@ class ChartLite(BaseModel):
 
 
 class ViewProjections(BaseModel):
-  """The six `type-of` View projections of an Information Block (Rendering,
-  FactTable, ModelStructure, VerificationResults, ReportElements,
-  BusinessRules), surfaced at the envelope boundary.
+  """The server-computed View projections of an Information Block,
+  surfaced at the envelope boundary.
 
-  Each projection is computed server-side at envelope-build time when
-  its source data is available. The frontend's `BlockView` dispatcher
-  routes to the projection component matching the user's selected view
-  mode; missing projections render as empty states without breaking the
-  dispatcher.
-
-  Today: `rendering` is computed for the statement family, and
-  `chart` (panel/series config over the rendering's rows and periods)
-  for metric blocks. Projections without backend support yet are empty;
-  `fact_table` is derivable from `InformationBlockEnvelope.facts`.
+  Two are computed at envelope-build time when their source data is
+  available: `rendering` (the rendered rows and periods) for the
+  statement family, disclosures, metrics, forecasts and reconciliations,
+  and `chart` (panel/series config over the rendering's rows and
+  periods) for metric blocks. The other views a client shows are
+  derived from the envelope itself — a fact table from
+  `InformationBlockEnvelope.facts`, rule outcomes from its rules and
+  verification results.
   """
 
   model_config = ConfigDict(from_attributes=True)
@@ -1338,26 +1340,28 @@ _LEGACY_BLOCK_TYPES = Literal[
 
 
 class _CreateLegacyArm(BaseModel):
-  """Create-information-block body for block types that don't yet have
-  a typed construction path at the API boundary.
+  """Create-information-block body for block types constructed through
+  another operation.
 
   Statement-family blocks (balance_sheet, income_statement,
   cash_flow_statement, equity_statement, comprehensive_income) are
   constructed via `create-report`, not this endpoint. Disclosure
   structures (regulatory_disclosure) are vocabulary, authored via
   `create-taxonomy-block`; their facts land when `create-report`
-  picks them. Metric blocks are recognized but their evaluator has
-  not shipped. Calling this endpoint with one of these block types
-  returns HTTP 501 with a hint pointing to the correct construction
-  path.
+  picks them. Metric structures are authored via
+  `create-taxonomy-block` and their facts written by `compute-metrics`
+  or `assert-metrics`. Reconciliation blocks are created by
+  `refresh-reconciliations`. Calling this endpoint with one of these
+  block types returns HTTP 501 with a hint pointing to the correct
+  construction path.
   """
 
   block_type: _LEGACY_BLOCK_TYPES = Field(
     ...,
     description=(
-      "Statement-family or metric block type. The endpoint returns "
-      "501 for these values — statements are constructed via "
-      "`create-report`; metric construction is pending."
+      "Statement-family, disclosure, metric or reconciliation block "
+      "type. The endpoint returns 501 for these values with a hint "
+      "naming the operation that constructs each."
     ),
   )
   payload: dict[str, Any] = Field(
@@ -1418,10 +1422,11 @@ _CreateInformationBlockArms = Annotated[
 class CreateInformationBlockRequest(RootModel[_CreateInformationBlockArms]):
   """Create an Information Block. The body is a discriminated union on
   `block_type`: pick the arm matching the block type you want to
-  create. The schedule arm carries a fully typed payload; statement
-  and metric arms accept an untyped payload but currently return HTTP
-  501 (statements are constructed via `create-report`; metric
-  construction is pending)."""
+  create. The schedule and forecast arms carry fully typed payloads;
+  the remaining arms accept an untyped payload and return HTTP 501
+  with a hint naming the operation that constructs them (statements
+  via `create-report`, disclosure and metric structures via
+  `create-taxonomy-block`)."""
 
   @property
   def block_type(self) -> str:
@@ -1471,20 +1476,22 @@ class _UpdateScheduleArm(BaseModel):
 
 
 class _UpdateLegacyArm(BaseModel):
-  """Update-information-block body for block types that don't yet have
-  a typed update path at the API boundary.
+  """Update-information-block body for block types updated through
+  another operation.
 
-  Statement-family blocks are library-seeded and immutable. Metric
-  block updates are not yet implemented. Calling this endpoint with
-  one of these block types returns HTTP 501.
+  Statement-family blocks are library-seeded and immutable. Disclosure
+  and metric structures change through the taxonomy-block operations;
+  a reconciliation's policy through `set-reconciliation-policy`.
+  Calling this endpoint with one of these block types returns HTTP 501.
   """
 
   block_type: _LEGACY_BLOCK_TYPES = Field(
     ...,
     description=(
-      "Statement-family or metric block type. Updates return 501 — "
-      "statement Structures are library-seeded; metric updates are "
-      "pending."
+      "Statement-family, disclosure, metric or reconciliation block "
+      "type. Updates return 501 — statement Structures are "
+      "library-seeded; the others change through their own operations, "
+      "named in the 501's hint."
     ),
   )
   payload: dict[str, Any] = Field(
@@ -1546,9 +1553,9 @@ _UpdateInformationBlockArms = Annotated[
 class UpdateInformationBlockRequest(RootModel[_UpdateInformationBlockArms]):
   """Update an Information Block. The body is a discriminated union on
   `block_type` mirroring `CreateInformationBlockRequest`. The schedule
-  arm carries a fully typed update payload; statement and metric arms
-  return HTTP 501 (statements are library-seeded; metric updates are
-  pending)."""
+  and forecast arms carry fully typed update payloads; the remaining
+  arms return HTTP 501 (statements are library-seeded; the others
+  change through their own operations)."""
 
   @property
   def block_type(self) -> str:
@@ -1593,16 +1600,19 @@ class _DeleteLegacyArm(BaseModel):
   a typed delete path at the API boundary.
 
   Statement-family blocks cannot be deleted per tenant (the underlying
-  Report should be archived via the report APIs instead). Metric
-  deletion is not yet implemented. Calls return HTTP 501.
+  Report should be archived via the report APIs instead). Disclosure
+  and metric structures are removed through the taxonomy-block
+  operations; a reconciliation stops holding the close through
+  `set-reconciliation-policy`. Calls return HTTP 501.
   """
 
   block_type: _LEGACY_BLOCK_TYPES = Field(
     ...,
     description=(
-      "Statement-family or metric block type. Deletion returns 501 — "
-      "statements are library-seeded (archive the underlying Report "
-      "instead); metric deletion is pending."
+      "Statement-family, disclosure, metric or reconciliation block "
+      "type. Deletion returns 501 — statements are library-seeded "
+      "(archive the underlying Report instead); the others are managed "
+      "through their own operations, named in the 501's hint."
     ),
   )
   payload: dict[str, Any] = Field(
@@ -1651,8 +1661,8 @@ _DeleteInformationBlockArms = Annotated[
 class DeleteInformationBlockRequest(RootModel[_DeleteInformationBlockArms]):
   """Delete an Information Block. The body is a discriminated union on
   `block_type` mirroring `CreateInformationBlockRequest`. The schedule
-  arm carries a fully typed delete payload; statement and metric arms
-  return HTTP 501."""
+  and forecast arms carry fully typed delete payloads; the remaining
+  arms return HTTP 501."""
 
   @property
   def block_type(self) -> str:
@@ -2078,14 +2088,18 @@ class SkippedForecastLite(BaseModel):
 class ComputeForecastRequest(BaseModel):
   """Request body for the `compute-forecast` operation.
 
-  Walks the scenario's driver cascade month-by-month forward from the
-  forecast block's `base_period`: lever-driven Derive rules in
-  dependency order, carry-forward for unmodeled IS lines, calc-DAG
-  subtotals — upserting one scenario IS FactSet (+ a working-capital BS
-  set) per forward month, all keyed by the forecast block's
-  `scenario_id`. Re-running replaces each month's values (the
-  compute-metrics drift semantics). Deterministic and non-AI — no
-  credits consumed.
+  Walks the scenario's driver cascade month-by-month forward from its
+  anchor — the newest closed month inside the horizon under
+  `base_anchor='seam'` (the default), the block's `base_period` under
+  `'fixed'`: lever-driven Derive rules in dependency order, carry-forward
+  for unmodeled IS lines, calc-DAG subtotals — upserting per forward
+  month a scenario IS FactSet, a BS set (the full roll when the anchor
+  month has an actual balance sheet, else the rule-driven working-capital
+  instants) and a derived CF set when an actual one exists, all keyed by
+  the forecast block's `scenario_id`. Re-running replaces each month's
+  values (the compute-metrics drift semantics). A month that fails
+  verification halts the walk (`halted_at`). Deterministic and non-AI —
+  no credits consumed.
   """
 
   structure_id: str = Field(

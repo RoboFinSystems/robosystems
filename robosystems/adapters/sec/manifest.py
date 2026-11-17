@@ -45,8 +45,8 @@ SEC_MANIFEST = SharedRepositoryManifest(
     "- Raw graph traversal → `read-graph-cypher`.\n"
     "\n"
     "NOTES\n"
-    # Don't advertise `sec_historical` here until a read against it succeeds;
-    # the replicas serve `sec` only.
+    # `sec_historical` is retired and not advertised; the replicas serve `sec`
+    # only.
     "- Raw Cypher on this graph has four rules that decide whether a number is "
     "right: `Fact {has_dimensions: false}` for consolidated totals, "
     "each filer's own element qnames (from `resolve-element`), a pinned `Period` shape "

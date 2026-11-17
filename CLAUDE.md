@@ -39,7 +39,7 @@ Extensions (roboledger, roboinvestor) live under `/extensions` and are
 
 - **Typed reads** → `POST /extensions/{graph_id}/graphql` (Strawberry + GraphiQL in dev)
 - **Command writes** → `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{operation_name}`
-- **Analytical view operations** → `POST /extensions/{domain}/{graph_id}/operations/{view_name}` — graph-backed operations that query LadybugDB rather than the extensions OLTP database. Read-only, same envelope contract as command writes. `build-fact-grid` (pivot tables over the XBRL hypercube), `financial-statement-analysis`, and the pair `disclosures` (the map of a report's sections) / `information-block` (one section read whole — xbrlkit's own tools run over the report held whole: the published holon on `sec`, the report bundle on a tenant; the graph is not in that path); gated independently of the OLTP domain flags so deployments without the corresponding tenants can still mount them
+- **Analytical view operations** → `POST /extensions/{domain}/{graph_id}/operations/{view_name}` — read-only, same envelope contract as command writes; mounted from `views.py` on `FACT_GRID_ENABLED`, independently of the OLTP domain flags, so deployments without the corresponding tenants can still mount them. Seven views: `build-fact-grid` (pivot tables over the XBRL hypercube) and `financial-statement-analysis` query LadybugDB; the pair `disclosures` (the map of a report's sections) / `information-block` (one section read whole) run xbrlkit's own tools over the report held whole — the published holon on `sec`, the report bundle on a tenant; and the filing-text trio `describe-filing` / `search-text` / `read-text` (shared repositories only) runs xbrlkit's text tools over one filing read from its public folder. Neither path queries the graph's facts
 
 All three surfaces take `graph_id` as a URL path parameter — auth + per-graph
 access are validated by FastAPI dependencies before the handler runs.
@@ -244,7 +244,7 @@ Workflow for any change:
 robosystems/
 ├── routers/                      # API endpoints (thin layer, calls operations)
 │   ├── extensions/               # Extensions command + analytical view surface
-│   │   ├── roboledger/           # operations/ + reads.py + views.py (build-fact-grid, disclosures, information-block)
+│   │   ├── roboledger/           # operations/ + reads.py + views.py (build-fact-grid, financial-statement-analysis, disclosures, information-block, describe-filing, search-text, read-text)
 │   │   │                         # /extensions/roboledger/{g}/operations/*
 │   │   └── roboinvestor/         # /extensions/roboinvestor/{g}/operations/*
 │   └── …                         # Core platform routers (graphs, billing, auth, …)
@@ -258,7 +258,7 @@ robosystems/
 │   ├── roboledger/
 │   │   ├── reads/                # OLTP reads (PostgreSQL extensions DB)
 │   │   ├── commands/             # OLTP writes (PostgreSQL extensions DB)
-│   │   ├── views/                # Graph reads (LadybugDB XBRL hypercube; information_blocks.py = xbrlkit over the report held whole)
+│   │   ├── views/                # Analytical views (LadybugDB XBRL hypercube; information_blocks.py + filing_text.py = xbrlkit over the report held whole)
 │   │   ├── fiscal_calendar/      # FiscalCalendarService, PeriodCloseService
 │   │   ├── reports/              # fact_grid, guard_rails
 │   │   └── schedules/            # ScheduleService
@@ -276,7 +276,8 @@ robosystems/
 │   ├── graph/                    # Graph routing and multi-tenancy
 │   ├── rate_limits/              # Burst protection
 │   ├── sse/                      # Server-Sent Events
-│   ├── extensions.py             # OperationEnvelope, IdempotencyCache, execute_operation, audit
+│   ├── operations.py             # OperationEnvelope, IdempotencyCache, execute_operation, audit
+│   ├── extensions.py             # Operation registrar: OperationSpec, OperationRegistrar, require_graph_extension, guard_command_runner
 │   └── …                         # mcp, otel, robustness
 ├── dagster/                      # Dagster orchestration (jobs, sensors, assets, resources)
 ├── adapters/                     # External service integrations (SEC, QuickBooks)

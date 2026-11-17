@@ -43,34 +43,38 @@ which is authoritative: one rate card per model family, keyed by the registry's
 A family priced by prompt length (Haiku 5.5) also has a `LONG_CONTEXT_PRICING`
 entry, and `rates_for()` picks the card per call from the call's whole prompt.
 
-Consumption happens *after* the AI call, from the response's real token counts:
+Consumption happens *after* the AI call, from the response's real token counts
+(an `AIResponse` from the operator model client):
 
 ```python
 from robosystems.operations.graph import CreditService
 
 credit_service = CreditService(session)
-usage = anthropic_response.usage
 credit_service.consume_ai_tokens(
     graph_id="kg1a2b3c",
-    input_tokens=usage.input_tokens,
-    output_tokens=usage.output_tokens,
-    model="us.anthropic.claude-sonnet-4-6",
+    input_tokens=response.input_tokens,  # uncached input only
+    output_tokens=response.output_tokens,
+    model=response.model,  # wire id, e.g. "us.anthropic.claude-sonnet-4-6"
     operation_description="operator query",
     user_id="user_456",
+    cache_read_input_tokens=response.cache_read_input_tokens,
+    cache_creation_input_tokens=response.cache_creation_input_tokens,
 )
 ```
 
 Note the argument is `operation_description` — free text for the transaction
-record — not an `operation_type`. `model` takes the Bedrock inference-profile id
-and is mapped through a hardcoded id → `TOKEN_PRICING`-key table inside
-`consume_ai_tokens`.
+record — not an `operation_type`. The charge covers four token classes —
+uncached input, output, cache reads and cache writes — each at its own rate
+from the card, and all four counts land in the transaction metadata. The card
+itself is chosen from the call's whole prompt (all three input counts).
 
-**An unrecognised model does not fail — it bills at Sonnet rates.** The lookup
-defaults to `anthropic_claude_4_sonnet`, and if even that key were missing it
-falls back to a literal `3`/`15`, logging a warning either way. So adding a
-model without adding its mapping mis-bills quietly rather than erroring. When
-you introduce a new model, update the map in `consume_ai_tokens` and
-`TOKEN_PRICING` together.
+`model` is resolved through the model registry: `consume_ai_tokens` calls
+`OperatorConfig.pricing_key_for(model)` (`config/operators.py`), which returns
+the registry row's `pricing_key`. **An unregistered model raises
+`ValueError`** — there is no fallback rate, because the credits are a cost
+passthrough and a borrowed rate would be a wrong invoice. Adding a model means
+adding its registry row (with its `pricing_key`) and, for a new family, its
+`TOKEN_PRICING` card.
 
 ## Enforcement
 
@@ -91,8 +95,9 @@ inside `require_graph_access`, which is where subscription status is actually
 enforced. Treat it as dead surface pending removal; do not reach for it when
 adding a new gate, or you will add a check that never fires.
 
-`require_graph_access(graph_id, session, require_write=False)` returns the
-`Graph` or raises. This is the billing-side gate; the *authorization* side —
+`require_graph_access(graph_id, session, require_write=False, export=False)`
+returns the `Graph` or raises. `export` marks a read that must not run during a
+tier upgrade (a backup) but stays open in a cancellation grace period. This is the billing-side gate; the *authorization* side —
 whether the user's role permits writes — is `require_graph_write_role` in
 [`../auth/`](../auth/README.md). Both apply.
 

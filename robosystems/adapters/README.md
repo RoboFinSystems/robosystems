@@ -180,9 +180,10 @@ and see
 [`robosystems-marketing-integration`](https://github.com/RoboFinSystems/robosystems-marketing-integration)
 for a working one. Integrations survive every platform release, work identically
 against managed and self-hosted deployments, and hold their own source
-credentials. The platform's own adapters prove the surface: the QuickBooks
-adapter writes through the same public event envelope an external integration
-would use.
+credentials. The platform's own adapters land in the same model: the QuickBooks
+adapter writes the same `Event` shape and commits it through the same handler
+engine an integration's events run on, and the bank feeds go through the
+event-block kernel's create path.
 
 This directory is maintained by the platform team. Both classes of adapter keep
 expanding, but platform-operated deployments run an unmodified core, so it is not

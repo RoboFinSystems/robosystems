@@ -246,7 +246,7 @@ uv run examples/custom_graph_demo/generate_data.py --regenerate  # Force regener
 1. **Upload**: Files uploaded to S3 (SeaweedFS in development)
 2. **Stage**: Data loaded into DuckDB staging tables
 3. **Validate**: Automatic data quality checks
-4. **Ingest**: DuckDB → Ladybug graph database via extension
+4. **Ingest**: DuckDB → Ladybug graph database, streamed as Arrow record batches through `COPY`
 5. **Verify**: Counts verified, relationships checked
 
 **Manual execution (if needed):**

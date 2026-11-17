@@ -241,7 +241,7 @@ class CreateForecastRequest(BaseModel):
     None,
     pattern=_PERIOD_PATTERN,
     description=(
-      "Seed month (`YYYY-MM`) the walk projects forward from. "
+      "Origin month (`YYYY-MM`) of the authored window. "
       "Defaults to the fiscal calendar's closed-through period, else "
       "the newest actual report month. Resolved and stored at create "
       "time, and it never moves afterwards — every lever is keyed to a "

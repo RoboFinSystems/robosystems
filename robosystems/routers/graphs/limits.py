@@ -104,7 +104,8 @@ async def get_graph_limits(
     else:
       graph_tier = "ladybug-standard"
 
-    # Subgraph-aware, so sec_historical also skips the storage walks below.
+    # Subgraph-aware, so a shared repository's subgraph also skips the storage
+    # walks below.
     is_shared = MultiTenantUtils.is_shared_repository_or_subgraph(graph_id)
 
     # The tier whose rate-limit table the limiter enforces here. Shared repos

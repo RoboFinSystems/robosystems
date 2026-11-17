@@ -1,6 +1,6 @@
 # Information Block Operations
 
-Registry-driven construction and reading of structured financial data blocks — schedules, statements, rollforwards, forecasts, disclosures, metrics, and reconciliations.
+Registry-driven construction and reading of structured financial data blocks — schedules, statements, forecasts, disclosures, metrics, and reconciliations.
 
 ## What is an Information Block?
 
@@ -18,7 +18,7 @@ Every block has a `block_type` that determines how it is constructed and read. `
 | `commands.py` | Generic create/update/delete dispatch, routed by `block_type` |
 | `reads.py` | `get_information_block`, `list_information_blocks` |
 | `envelope.py` | Shared ORM → Lite projectors used by every handler |
-| `schedule.py`, `rollforward.py` | Declarative handlers |
+| `schedule.py` | Declarative schedule handler |
 | `forecast.py` | Declarative forecast scenarios (authored surface) |
 | `forecast_compute.py` | `compute-forecast` — walks a scenario's driver cascade into forward FactSets |
 | `forecast_articulation.py` | Balance-sheet roll, schedule projection, derived cash flow per forward month |
@@ -36,11 +36,11 @@ Every block has a `block_type` that determines how it is constructed and read. `
 
 | Mode | Meaning | Block types |
 | ---- | ------- | ----------- |
-| `declarative` | The user declares mechanics plus seed params; the system generates atoms | `schedule`, `rollforward`, `forecast` |
+| `declarative` | The user declares mechanics plus seed params; the system generates atoms | `schedule`, `forecast` |
 | `compositional` | Atoms already exist; the block is a view assembled at read time | `balance_sheet`, `income_statement`, `cash_flow_statement`, `equity_statement`, `comprehensive_income`, `regulatory_disclosure` |
 | `derivative` | Facts are computed from other blocks | `metric`, `reconciliation` |
 
-Eleven block types are registered. Not all of them are authored through `create-information-block`: statements are produced by `create-report`, disclosure structures are authored as vocabulary through `create-taxonomy-block`, metrics are written by `compute-metrics` / `assert-metrics`, and reconciliations are created and recorded by `refresh-reconciliations` (`operations/roboledger/reconciliations/`). Those types install not-implemented create/update/delete handlers (HTTP 501) via `make_not_implemented_handler`, while their `build_envelope` paths are fully wired and serve read envelopes normally.
+Ten block types are registered. Not all of them are authored through `create-information-block`: statements are produced by `create-report`, disclosure structures are authored as vocabulary through `create-taxonomy-block`, metrics are written by `compute-metrics` / `assert-metrics`, and reconciliations are created and recorded by `refresh-reconciliations` (`operations/roboledger/reconciliations/`). Those types install not-implemented create/update/delete handlers (HTTP 501) via `make_not_implemented_handler`, while their `build_envelope` paths are fully wired and serve read envelopes normally.
 
 ## Adding a block type
 
@@ -49,7 +49,7 @@ Eleven block types are registered. Not all of them are authored through `create-
    - `update(session, payload, updated_by) -> str`
    - `delete(session, payload, deleted_by) -> str`
    - `build_envelope(session, structure_id) -> InformationBlockEnvelope | None`
-2. **Add a mechanics model** to `models/api/information_block.py` and add it to the `ArtifactMechanics` discriminated union (existing arms: `ScheduleMechanics`, `RollforwardMechanics`, `ForecastMechanics`, `StatementMechanics`, `MetricMechanics`, `ReconciliationMechanics`).
+2. **Add a mechanics model** to `models/api/information_block.py` and add it to the `ArtifactMechanics` discriminated union (existing arms: `ScheduleMechanics`, `StatementMechanics`, `MetricMechanics`, `ForecastMechanics`, `ReconciliationMechanics`).
 3. **Register the entry** in `registry.py` — declare a `BlockTypeRegistryEntry` and insert it into `REGISTRY`. The generic REST operations and the MCP tools pick it up from there; no further wiring.
 4. **Widen the database CHECK constraint** — add the new `block_type` value in `migrations/extensions/versions/` and to `_widen_library_checks` in `db/extensions.py`.
 
@@ -96,8 +96,8 @@ The engine loads rules via `envelope.load_rules_for_structure` (so element- and 
 
 ## FactSet construction
 
-`operations/roboledger/fact_set.py::create_fact_set` is the single blessed writer. It validates a typed `FactProvenance` descriptor and writes `fact_sets.provenance`; `ProvenanceRequiredError` plus a `before_insert` model backstop reject any unstamped insert. Every producer — the report pivot, schedules, statement sets, text blocks, metrics, forecasts — routes through it, so every FactSet is stamped and `provenance` surfaces on the envelope as JSON. The union arms are `pivot`, `schedule`, `derived`, `asserted`, `document`, `forecast`, `filed`, and `observed`.
+`operations/roboledger/fact_set.py::create_fact_set` is the single blessed writer. It validates a typed `FactProvenance` descriptor and writes `fact_sets.provenance`; `ProvenanceRequiredError` plus a `before_insert` model backstop reject any unstamped insert. Every producer — the report pivot, schedules, statement sets, text blocks, metrics, forecasts — routes through it, so every FactSet is stamped and `provenance` surfaces on the envelope as JSON. The union arms are `pivot`, `rollup`, `schedule`, `derived`, `asserted`, `document`, `forecast`, `filed`, and `observed`.
 
 ## Not implemented
 
-- **Custom metric authoring** — `metric.py`'s create/update/delete handlers raise `NotImplementedError` (HTTP 501). The metric write surface is the seeded catalog plus `compute-metrics` / `assert-metrics`.
+- **Metric writes through the generic block operations** — by design. The `metric` registry entry installs 501 stubs (`make_not_implemented_handler` in `registry.py`) for create/update/delete; `metric.py` only builds the read envelope. A metric structure is authored with `create-taxonomy-block`, and its facts are written by `compute-metrics` (Derive rules) or `assert-metrics` (externally observed values).

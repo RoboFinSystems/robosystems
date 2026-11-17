@@ -485,8 +485,8 @@ def tenant_schema_exists(graph_id: str) -> bool:
   """Whether ``graph_id`` has a tenant schema.
 
   Lets cross-graph paths report a deprovisioned recipient as an outcome
-  before a session would fail. False for non-tenant ids (subgraphs share
-  their parent's schema).
+  before a session would fail. False for non-tenant ids, subgraphs
+  included: a subgraph has no OLTP schema.
   """
   if not env.EXTENSIONS_ENABLED:
     return False

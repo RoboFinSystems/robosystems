@@ -66,7 +66,9 @@ The holon, the Tavi model and the filed document are stored gzipped, as
 neither `application/ld+json` nor anything over 10 MB itself, and serves a
 stored encoding as it is. A browser or an HTTP library decodes it before
 anything reads a byte; **boto3 does not**, so a reader that takes these objects
-straight from the bucket goes through `S3Client.download_string`, which does.
+straight from the bucket goes through `S3Client.read_string`, which does
+(`download_string` decodes too, but returns `None` on any failure, so it is
+kept for best-effort reads such as text-block fragments).
 The manifest stays plain (the catalog reads it with raw boto3) and its `bytes`
 are the decoded sizes. The bytes are deterministic (`gzip_artifact`: level 6,
 no timestamp), so a reprocess still rewrites the same object. Every write to
@@ -102,7 +104,8 @@ uv run dagster asset materialize -m robosystems.dagster --select sec_duckdb_incr
 ### 4. Materialize — `sec_graph_materialized`
 
 Full LadybugDB rebuild from DuckDB staging.
-`sec_historical_materialized` covers the historical corpus separately.
+`sec_historical_materialized` built the historical corpus separately; that
+repository is retired, and the asset is kept but serves nothing.
 
 ```bash
 uv run dagster asset materialize -m robosystems.dagster --select sec_graph_materialized
@@ -143,7 +146,7 @@ on, joined to each filing's `manifest.json`, into `companies/{ticker}.json`
 per filer and `companies/index.json` for the corpus, on the public CDN.
 Files are regenerated whole — every filer with a filing in the run's
 partitions, all of them on `full_rebuild`, the index always — so overlapping
-runs cannot corrupt one. Also writes `robots.txt` when it is missing.
+runs cannot corrupt one. Also writes `robots.txt` (`Allow: /`) on every run.
 Chained off staging by `sec_post_stage_index_sensor`, beside the text index,
 and off processing by an intraday pass; the job is `sec_catalog` (a job may
 not share its asset's name).
@@ -332,11 +335,13 @@ Twenty-one jobs are exported. The nightly path uses `sec_download_job`,
 `sec_lbug_s3_publish_job`, `sec_duckdb_s3_publish_job`, the two index jobs,
 `sec_filing_catalog_job` and `sec_current_reports_job`;
 `sec_filing_documents_job` is a backfill run by hand.
-The rest cover the historical corpus (`sec_historical_stage_job`,
+The rest are staged variants (`sec_stage_job`, `sec_staged_materialize_job`),
+snapshot publishing to R2 and Hugging Face (`sec_lbug_r2_publish_job`,
+`sec_lbug_hf_publish_job`), artifacts (`sec_artifact_generation_job`), and the
+historical-corpus jobs (`sec_historical_stage_job`,
 `sec_historical_materialize_job`, `sec_historical_staged_materialize_job`,
 `sec_historical_duckdb_s3_publish_job`, `sec_historical_lbug_s3_publish_job`),
-staged variants (`sec_stage_job`, `sec_staged_materialize_job`), R2 publishing
-(`sec_lbug_r2_publish_job`), and artifacts (`sec_artifact_generation_job`).
+kept although the historical repository is retired, so they serve nothing.
 
 ## Run configurations
 

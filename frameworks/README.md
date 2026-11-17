@@ -118,15 +118,16 @@ frameworks/
 │   ├── README.md
 │   ├── saas/v1/                chart.jsonld (accounts, framework-free) · mappings/rs-gaap.jsonld
 │   ├── services/v1/
-│   └── product/v1/
+│   ├── product/v1/
+│   └── consolidation/v1/       a group's eliminations column
 │
 └── ontology/                   NOT a framework — the canonical RDF ontology
     └── v1/                     context.jsonld · ontology.ttl · shapes.ttl
 ```
 
-### `chart-templates/` — stencils, not a framework (added 2026-09-11)
+### `chart-templates/` — stencils, not a framework
 
-The three shipped chart-of-accounts templates that `initialize-chart-of-accounts`
+The four shipped chart-of-accounts templates that `initialize-chart-of-accounts`
 instantiates for a company keeping native books. Authored JSON-LD, maintained
 here with the library's vocabulary, but **not a framework and not a package**:
 no manifest, so discovery never sees it; nothing is seeded into `public`;
@@ -160,9 +161,9 @@ manifest — _not_ a package. Packages are JSON-LD taxonomy content **seeded int
 the DB** and listed in the manifest's `packages[]`; this artifact is a flat
 qname list **consumed by the copy path** (`taxonomy/writer.py`) at provision
 time to decide which rs-gaap concepts a _tenant_ receives. The full rs-gaap
-catalog (~2155 concepts) stays in the **public** library (it backs the future
-SEC us-gaap bridge); a tenant gets the keep-critical curation (~143) under the
-`tenant_exclude_keep_critical` policy (public ~2,155 → tenant ~143) — the
+catalog (~2,183 concepts) stays in the **public** library (it backs the future
+SEC us-gaap bridge); a tenant gets the keep-critical curation (~227) under the
+`tenant_exclude_keep_critical` policy (public ~2,183 → tenant ~227) — the
 high-level aggregates that render/foot/map today. Omitted: XBRL dimension members/domains,
 general-special-disconnected concepts, industry verticals (peer-framework
 material), and the general-special **leaf** level — the finest disaggregation

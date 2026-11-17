@@ -34,7 +34,11 @@ class QueryConfiguration(BaseModel):
 
   timeout_seconds: int = Field(..., description="Query execution timeout in seconds")
   max_connections_per_db: int = Field(
-    ..., description="Maximum connections per database"
+    ...,
+    description=(
+      "Admission control's limit on concurrent requests per database; the "
+      "connection pool itself holds at most 3 connections per database"
+    ),
   )
   connection_ttl_minutes: float = Field(..., description="Connection TTL in minutes")
   health_check_interval_minutes: float = Field(

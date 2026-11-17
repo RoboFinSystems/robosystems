@@ -1,7 +1,28 @@
 {
-  "mcpServers": {
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "robosystems-api-key",
+      "description": "RoboSystems API key (api_key in .local/config.json)",
+      "password": true
+    },
+    {
+      "type": "promptString",
+      "id": "robosystems-graph-id",
+      "description": "Graph id (kg…)"
+    }
+  ],
+  "servers": {
     "robosystems": {
+      "type": "http",
       "url": "http://localhost:8000/v1/mcp"
+    },
+    "robosystems-graph": {
+      "type": "http",
+      "url": "http://localhost:8000/v1/graphs/${input:robosystems-graph-id}/mcp",
+      "headers": {
+        "X-API-Key": "${input:robosystems-api-key}"
+      }
     },
     "aws-documentation": {
       "command": "uvx",

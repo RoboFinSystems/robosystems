@@ -69,7 +69,8 @@ SUBGRAPH_TOOL_PROFILE = frozenset(
     "read-graph-cypher",
     "write-graph-cypher",
     "get-example-queries",
-    # Per-graph semantic memory (LanceDB, genuinely per-graph)
+    # Semantic memory. A subgraph gets no memory store, so remember and
+    # update-memory are never registered on one; recall and forget are.
     "recall",
     "remember",
     "forget",

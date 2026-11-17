@@ -367,8 +367,8 @@ class Graph(Model):
   def update_extensions(self, extensions: list[str], session: Session) -> None:
     """Record the schema extensions (``["roboledger", "roboinvestor"]``).
 
-    Metadata only — the physical graph schema is unchanged. Use
-    ``SchemaManager.apply_extensions()`` for that.
+    Metadata only — the physical graph schema is unchanged, and nothing
+    here applies an extension's schema to an existing graph.
     """
     self.schema_extensions = extensions
     self.updated_at = datetime.now(UTC)
@@ -574,7 +574,7 @@ class Graph(Model):
     return time_since_sync > sync_interval
 
   def mark_stale(self, session: Session, reason: str) -> None:
-    """Mark the graph stale — DuckDB holds changes the graph lacks.
+    """Mark the graph stale — the extensions database holds changes it lacks.
 
     ``graph_stale_at`` moves on every write; ``graph_stale_since`` only on the
     first, in SQL so concurrent writers cannot reset it.

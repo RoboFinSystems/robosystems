@@ -77,8 +77,8 @@ An event moves through a small state machine. The forward path runs from the inb
 
  create with apply_handlers=true lands at classified (draft entry) or fulfilled (posted entry)
 
- pending      waiting on something outside: an upstream rejection to retry, or a
-              scheduled obligation whose month has not arrived
+ pending      waiting on something outside: a scheduled obligation whose month has
+              not arrived, or an event an integration holds for an outside step
  voided       retracted; allowed only while nothing the event wrote has posted
  superseded   replaced by a corrected event (superseded_by_id)
 ```
@@ -96,7 +96,7 @@ There are two ways in, and they meet at the draft.
 **Capture, classify, commit.** A plain create (`apply_handlers` defaults to `false`) lands the event at `captured` and writes no ledger rows. It sits in the inbox until someone decides how to book it:
 
 1. **Classify.** `update-event-block` with `transition_to: "classified"` records the choice, supplied in `metadata_patch` in the same call. Nothing posts yet. A handler that validates classifications checks the choice here and refuses one it could not post, with the reason, rather than failing later at commit. Today the bank-feed handlers are the ones that do (see [Event Block Reference § Bank-feed handlers](Event-Block-Reference.md#bank-feed-handlers)). For every other type the choice is checked at commit.
-2. **Commit.** `update-event-block` with `transition_to: "committed"` fires the event's Python handler against the final metadata and writes the event's entry, normally as a draft. If the handler already wrote the event's entry when it was created, committing does not write a second one. A handler error rolls the whole update back, so a Python-handled event never sits at `committed` with no entry behind it. Commit fires Python handlers only: an event type covered only by a DSL handler commits with no entry, so book those with `apply_handlers: true` at create.
+2. **Commit.** `update-event-block` with `transition_to: "committed"` fires the event's Python handler against the final metadata and writes the event's entry, normally as a draft. If the handler already wrote the event's entry when it was created, committing does not write a second one. A handler error rolls the whole update back, so an event never sits at `committed` with no entry behind it. An event type with no Python handler commits through its matching DSL handler, which writes the entry from its template; a type that matches neither is capture-only and commits with no entry.
 
 ```bash
 # Classify: record the entry's date, memo and accounts, no GL yet
@@ -126,7 +126,7 @@ To see what a close will post, list the period's drafts with `list-period-drafts
 Two operations move events forward without a new create:
 
 - **`promote-obligations`** sweeps scheduled obligations whose month has arrived, moves them to `classified`, and drafts their closing entries. A background sensor runs the same sweep; the operation runs it now.
-- **`execute-event-block`** publishes an event to its source-of-truth system when the event's connection has the `qb_authoritative` write policy, moving it to `fulfilled` (or `pending` if QuickBooks rejects it) and posting its drafts. On a `native` connection, or an event with no connection, it returns without an external write. See [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md).
+- **`execute-event-block`** publishes an event to its source-of-truth system when the event's connection has the `qb_authoritative` write policy, posting its drafts and moving it to `fulfilled`. If QuickBooks rejects an entry, the entries already sent are kept and posted, the rejection is recorded on `metadata.last_outbound_error`, and the event keeps its status, so a retry sends only what is left. On a `native` or `shadow` connection, or an event with no connection, it returns without an external write. See [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md).
 
 ## Handlers: How Events Become GL Entries
 
@@ -149,7 +149,7 @@ To change a closed month, reopen it with `reopen-period`, make the correction, a
 
 `source` names where an event came from. The platform's own values (`manual`, `system`, `schedule`) are always accepted; any other value must be a provider or source name registered as a connection on the graph. Supply `external_id` with the source's own id: events are idempotent on `(source, external_id)`, so a retried delivery does not create a duplicate.
 
-**Write policy** decides who is the system of record for a connection. `native` means RoboLedger is; nothing is written back. `qb_authoritative` means QuickBooks is, and RoboLedger's own entries are published to it (at `execute-event-block`, or in a batch at close). These are the two policies that can be set; `hybrid` is reserved and is rejected. Detail is in [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md).
+**Write policy** decides who is the system of record for a connection. `qb_authoritative` means QuickBooks is, and RoboLedger's own entries are published to it (at `execute-event-block`, or in a batch at close). `shadow` keeps QuickBooks the system of record and writes nothing to it: the close posts nothing locally and compares its drafts with what QuickBooks holds. These are the two policies a live connection can set. `native` means RoboLedger is the system of record and nothing is written back; it is what severing a connection leaves, not a setting. `hybrid` is reserved and is rejected. Detail is in [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md).
 
 **Reconciling items** handle a source that changes its mind. When a re-sync brings a changed payload for an event whose entry has already posted, the platform does not rewrite the books. It keeps the posted entry and the stored payload, holds the incoming one aside, and flags the event as a reconciling item (`isReconcilingItem` on `eventBlocks`). Each one waits for an explicit disposition: **restate** the affected months, **catch up** with an entry in the open period, or **acknowledge** it as handled, with a note. `preview-reconciling-item` shows what each would do and `resolve-reconciling-item` applies one. See [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md).
 

@@ -83,7 +83,7 @@ curl -X POST "https://api.robosystems.ai/v1/graphs/sec/query/cypher" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "query": "MATCH (ent:Entity {ticker: $ticker})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})-[:FACT_HAS_ELEMENT]->(e:Element), (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: '\''annual'\''}) WHERE e.qname IN $qnames AND f.numeric_value IS NOT NULL RETURN DISTINCT ent.ticker AS ticker, e.qname AS qname, p.end_date AS end_date, f.numeric_value AS value ORDER BY end_date DESC LIMIT $limit",
+    "query": "MATCH (ent:Entity {ticker: $ticker})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})-[:FACT_HAS_ELEMENT]->(e:Element), (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: '\''annual'\''}) WHERE e.qname IN $qnames AND f.numeric_value IS NOT NULL RETURN DISTINCT ent.ticker AS ticker, e.qname AS qname, p.end_date AS end_date, f.value AS value ORDER BY end_date DESC LIMIT $limit",
     "parameters": {"ticker": "NVDA", "qnames": ["us-gaap:Revenues", "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"], "limit": 3},
     "timeout": 60
   }'
@@ -94,7 +94,7 @@ The response is a `CypherStatementResponse`, where each row is a dictionary keye
 ```json
 {
   "success": true,
-  "data": [{"ticker": "NVDA", "qname": "us-gaap:Revenues", "end_date": "2026-01-25", "value": 215938000000.0}],
+  "data": [{"ticker": "NVDA", "qname": "us-gaap:Revenues", "end_date": "2026-01-25", "value": "215938000000"}],
   "columns": ["ticker", "qname", "end_date", "value"],
   "row_count": 1,
   "execution_time_ms": 18.4,
@@ -300,7 +300,7 @@ MATCH (ent:Entity {ticker: $ticker})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions
       (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'})
 WHERE e.qname = 'us-gaap:NetIncomeLoss' AND f.numeric_value IS NOT NULL
 RETURN DISTINCT e.qname AS qname, p.start_date AS start_date, p.end_date AS end_date,
-       f.numeric_value AS value
+       f.value AS value
 ORDER BY end_date DESC
 LIMIT 5
 ```
@@ -316,7 +316,7 @@ MATCH (ent:Entity {ticker: $ticker})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions
 WHERE p.end_date = $as_of
   AND e.qname IN ['us-gaap:Assets', 'us-gaap:Liabilities', 'us-gaap:StockholdersEquity']
 RETURN DISTINCT e.qname AS qname,
-       f.numeric_value AS value, u.measure AS unit
+       f.value AS value, u.measure AS unit
 LIMIT 25
 ```
 
@@ -331,7 +331,7 @@ MATCH (r:Report {identifier: $report_id})-[:REPORT_HAS_FACT]->(f:Fact {has_dimen
       (s:Structure {canonical_type: 'income_statement'})-[:STRUCTURE_HAS_FACT_SET]->(fs)
 WHERE f.numeric_value IS NOT NULL
 RETURN DISTINCT e.qname AS qname,
-       p.end_date AS end_date, f.numeric_value AS value
+       p.end_date AS end_date, f.value AS value
 ORDER BY end_date DESC, qname
 LIMIT 60
 ```
@@ -350,7 +350,7 @@ WHERE ent.ticker IN $tickers
   AND p.end_date >= '2025-01-01'
   AND f.numeric_value IS NOT NULL
 RETURN DISTINCT ent.ticker AS ticker, e.qname AS qname,
-       p.end_date AS end_date, f.numeric_value AS value
+       p.end_date AS end_date, f.value AS value
 ORDER BY ticker, end_date DESC
 LIMIT 50
 ```
@@ -372,7 +372,7 @@ More worked queries — a statement for a ticker's latest 10-K, a metric across 
 
 ## Gotchas and Limits
 
-- **SEC numbers have four rules.** Consolidated facts (`has_dimensions: false`), each filer's own element qnames, a pinned `Period` shape, and `RETURN DISTINCT` anchored on the `Entity`. A query that skips one returns a plausible wrong number rather than an error — see [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules.md).
+- **SEC numbers have four rules.** Consolidated facts (`has_dimensions: false`), each filer's own element qnames, a pinned `Period` shape, and `RETURN DISTINCT` anchored on the `Entity`. A query that skips one returns a plausible wrong number rather than an error. Return the number as `f.value`, its exact text, and keep `f.numeric_value` for the `IS NOT NULL` filter — see [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules.md).
 - **Two parameter conventions.** Cypher takes named `$param` with a `parameters` object. Staging SQL takes either a `parameters` list for positional `?` (or `$1`, `$2`), or an object for named `$param` — never both in one statement.
 - **Write attempts return 403 on main graphs.** Data enters by materialization — from the extensions database on an entity graph, from staged uploads on a custom graph. Only *user* subgraphs accept writes through the query path — and only for callers with the `member` or `admin` role. Shared repositories and their subgraphs never do.
 - **Shared-repo staging SQL is blocked on the public API.** `POST /v1/graphs/{shared}/query/sql` returns 403 for shared repositories and their subgraphs — query the graph with Cypher instead.

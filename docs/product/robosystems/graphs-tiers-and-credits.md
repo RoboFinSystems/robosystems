@@ -39,7 +39,7 @@ Standard is self-serve. Large and XLarge may be set up on request: when **Create
 
 ## Subgraphs
 
-A **subgraph** is a separate workspace inside a graph, for trying a different model or a what-if without touching the main graph. It has its own data, runs on its parent's instance, shares its parent's permissions and credits, and connects to an AI client with its own address. Each tier allows a set number of subgraphs.
+A **subgraph** is a separate workspace beside a graph, for trying a different model or a what-if without touching the main graph. It has its own data, runs on its parent's instance, shares its parent's permissions and credits, and connects to an AI client with its own address. Each tier allows a set number of subgraphs.
 
 ## Credits
 

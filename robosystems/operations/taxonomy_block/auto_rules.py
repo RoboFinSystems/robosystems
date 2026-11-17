@@ -1,9 +1,9 @@
 """Structural auto-rule emission for Taxonomy Block envelopes.
 
 Each taxonomy block gets ``rule_origin='auto'`` rules encoding the invariants
-the create validator checks, so ``evaluate-rules`` can re-check them later.
-``rules_to_remove`` can't remove them. All but RollUp are model-structure
-checks with no expression or variables.
+the create validator checks. ``rules_to_remove`` can't remove them. All but
+RollUp are model-structure checks with no expression or variables, which
+``evaluate-rules`` reports as ``skipped``; only the RollUp rules evaluate.
 
 Rules emitted:
 

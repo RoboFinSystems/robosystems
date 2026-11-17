@@ -60,9 +60,9 @@ Every format is built from the same contents:
 
 The holon is built and stored as part of publishing. `create-report` and `regenerate-report` write it inside the publish itself: if the file cannot be stored, the publish fails, so there is no published report without its file.
 
-Each publish writes a **generation**. The first publish is generation 1, and each `regenerate-report` rebuilds the report from the current ledger and writes the next one. `file-report` also stamps a new generation, so the filed record's downloads carry its filing date. A generation never changes once written, and earlier generations are kept. `reportDownloadUrl` returns the current generation and tells you its number.
+Each publish writes a **generation**. The first publish is generation 1, and each `regenerate-report` rebuilds the report from the current ledger and writes the next one. `file-report` also stamps a new generation, so the filed record's downloads carry its filing date. A download stamps one too when the report's live columns have moved since its holon was built (an open month that took postings since), so the file matches the report as it stands; a published report whose holon was never stamped gets its first one the same way. A generation never changes once written, and earlier generations are kept. `reportDownloadUrl` returns the current generation and tells you its number.
 
-The holon exists from the moment of publish. The Tavi and XBRL files are built from the same generation the first time someone asks for them, then kept, so later downloads of that generation are immediate. Because a generation is immutable, a cached file can never be stale.
+The holon exists from the moment of publish. The Tavi, XBRL and lineage-holon files are built for a generation the first time someone asks for them, then kept, so later downloads of that generation are immediate. Because a generation is immutable, a cached file can never be stale.
 
 ```bash
 export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
@@ -97,7 +97,7 @@ POST /extensions/{graph_id}/graphql
 | Argument | Default | Notes |
 | --- | --- | --- |
 | `reportId` | | Required; the report's id |
-| `format` | `HOLON_JSONLD` | `HOLON_JSONLD`, `TAVI`, or `XBRL_2_1` |
+| `format` | `HOLON_JSONLD` | `HOLON_JSONLD`, `HOLON_JSONLD_LINEAGE`, `TAVI`, or `XBRL_2_1` |
 | `expiresIn` | `300` | Lifetime of the link in seconds, 60 to 3600 |
 
 Every format answers with the same envelope: a short-lived signed link that the client follows to fetch the file. The API never streams the bytes itself.
@@ -124,11 +124,12 @@ curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
 curl -L "<downloadUrl>" -o report.holon.jsonld
 ```
 
-Pass `format: TAVI` (`-o report.tavi.json`) or `format: XBRL_2_1` (`-o report.zip`) for the other two; the query and the envelope are the same.
+Pass `format: HOLON_JSONLD_LINEAGE` (`-o report.lineage.holon.jsonld`), `format: TAVI` (`-o report.tavi.json`) or `format: XBRL_2_1` (`-o report.zip`) for the others; the query and the envelope are the same.
 
 | Format | `format` in the response | `contentType` |
 | --- | --- | --- |
 | `HOLON_JSONLD` | `holon-jsonld` | `application/ld+json` |
+| `HOLON_JSONLD_LINEAGE` | `holon-jsonld-lineage` | `application/ld+json` |
 | `TAVI` | `tavi` | `application/json` |
 | `XBRL_2_1` | `xbrl-2.1` | `application/zip` |
 
@@ -136,7 +137,7 @@ Pass `format: TAVI` (`-o report.tavi.json`) or `format: XBRL_2_1` (`-o report.zi
 
 ## Downloading from Code
 
-**From an AI client.** On a graph's MCP connection, the `get-report-bundle` tool returns the same short-lived link, with the same `format` choices (`holon-jsonld` by default, `tavi`, `xbrl-2.1`). It is meant for a reader on the same machine that loads a file by URL, such as `xbrlkit serve`. The link carries its own credential, so pass it straight to the tool that fetches it rather than into a message. The RoboLedger connector address (`/v1/mcp/roboledger`) does not offer this tool; see [AI Operators & MCP](AI-Operators-and-MCP.md).
+**From an AI client.** On a graph's MCP connection, the `get-report-bundle` tool returns the same short-lived link, with the same `format` choices (`holon-jsonld` by default, `holon-jsonld-lineage`, `tavi`, `xbrl-2.1`). It is meant for a reader on the same machine that loads a file by URL, such as `xbrlkit serve`. The link carries its own credential, so pass it straight to the tool that fetches it rather than into a message. The RoboLedger connector address (`/v1/mcp/roboledger`) does not offer this tool; see [AI Operators & MCP](AI-Operators-and-MCP.md).
 
 **From Python.** The [Python SDK](https://github.com/RoboFinSystems/robosystems-python-client) resolves the link and follows it in one call:
 
@@ -307,7 +308,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
 
 ### `REPORT_BUNDLE_NOT_AVAILABLE`
 
-The report has no stored bundle: it was never published, or its generation did not finish. There is no automatic backfill.
+The report has no bundle to serve: it was never published, or its generation did not finish. (A published report whose holon was never stamped is not this case: its first download stamps one.)
 
 **Solution:** Run `regenerate-report` to write a current generation.
 
@@ -323,11 +324,11 @@ The link could not be signed, or a format could not be built. Retry; if it persi
 
 `format` is a GraphQL enum, so an unknown name fails validation before the request runs.
 
-**Solution:** Use `HOLON_JSONLD`, `TAVI`, or `XBRL_2_1`. The flat `JSONLD` format was retired.
+**Solution:** Use `HOLON_JSONLD`, `HOLON_JSONLD_LINEAGE`, `TAVI`, or `XBRL_2_1`. The flat `JSONLD` format was retired.
 
 ### The First Download of a Format Is Slow
 
-The first request for the Tavi or XBRL file of a generation builds it. Later requests for that generation return immediately. A `regenerate-report` or `file-report` starts a new generation, so the first download after it builds again. The holon needs no build: it is stored at publish.
+The first request for the Tavi, XBRL or lineage file of a generation builds it. Later requests for that generation return immediately. A `regenerate-report` or `file-report` starts a new generation, and so does a download after the report's live columns have moved, so the first download after either builds again. The holon is stored when its generation is stamped, so it needs no build of its own.
 
 ### Publish Fails on Bundle Upload
 

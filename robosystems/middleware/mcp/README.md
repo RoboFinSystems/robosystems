@@ -263,7 +263,10 @@ is read-only from MCP; these apply to subgraphs.
 Semantic memory (`SEMANTIC_MEMORY_ENABLED` plus the sub-gate
 `MCP_SEMANTIC_MEMORY_ENABLED`): `remember`, `recall`, `update-memory`, `forget`
 — a per-graph LanceDB vector store giving an Operator a stateful memory layer,
-adapting over the `MemoryService` kernel. This is distinct from
+adapting over the `MemoryService` kernel. None of them is offered on a shared
+repository; on a subgraph, `remember` and `update-memory` are withheld (a
+subgraph gets no memory store) while `recall` and `forget` remain. The write
+tools also follow the read-only gate. This is distinct from
 `subgraph_write_tools.py`, which builds structural knowledge graphs.
 
 **Navigating between graphs.** `list-subgraphs` is the entire navigation

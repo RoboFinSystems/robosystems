@@ -215,8 +215,9 @@ create_security_op = _registrar.register(
     summary="Create Security",
     description=(
       "Register a security (common stock, preferred stock, warrant, "
-      "convertible note, etc.) owned by this graph's entity. Optionally "
-      "cross-links to an issuing entity in another graph via "
+      "convertible note, etc.) in this graph's registry. Its `entity_id` "
+      "is the issuer, not the holder; a portfolio's `entity_id` is the "
+      "owner. Optionally cross-links to the issuer's own graph via "
       "`source_graph_id` for mutual-handshake attribution."
     ),
     command=cmd_create_security,

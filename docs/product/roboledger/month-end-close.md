@@ -30,7 +30,7 @@ ChatGPT asks you to allow the close before it runs. Then the receipt: five entri
 ## Before your first close
 
 - **Your books are connected and synced.** See [Connect your books to your AI assistant](connect-your-books.md).
-- **Your chart of accounts is mapped.** A close still posts without it, but it can't save the month's statements. Map before you close: once a month is closed, the mapping of an account with activity in that month can't change unless you reopen it. See [Map your chart of accounts](map-your-chart-of-accounts.md).
+- **Your chart of accounts is mapped.** A month won't close while an account with activity has no mapping, because its balances would be left out of every statement. Map before you close: once a month is closed, the mapping of an account with activity in that month can't change unless you reopen it. See [Map your chart of accounts](map-your-chart-of-accounts.md).
 - **Your recurring entries are schedules.** Depreciation, amortization and prepaid expenses that roll off each month are set up once as schedules, and every close drafts them. Your assistant can build them with you. It reads a past month's entries for the amounts and asks you for what history can't tell it, like an asset's cost, its useful life and the method. See [Schedules for recurring entries](schedules.md).
 - **Your own procedures are written down, if you have any.** Ask your assistant to save them as a close procedures document. It looks for that document before every close and follows it.
 

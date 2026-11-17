@@ -2,8 +2,8 @@
 
 A FastAPI service (port 8001) that owns the graph data plane. It runs on the same
 host as the databases it serves: LadybugDB holds the graph, DuckDB holds the
-staging tables data lands in before it becomes graph, and LanceDB holds vector
-indexes. Everything is embedded and local — the HTTP layer exists so the rest of
+staging tables data lands in before it becomes graph, and LanceDB holds each
+graph's semantic memory (graph vector search is a LadybugDB HNSW index). Everything is embedded and local — the HTTP layer exists so the rest of
 the platform (API, workers, Dagster) can reach a specific instance's files
 without sharing a filesystem with it.
 

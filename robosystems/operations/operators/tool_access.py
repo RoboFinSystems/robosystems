@@ -1,5 +1,5 @@
 """`ToolAccess` implementations: `HttpToolAccess` (the GraphMCPTools pipeline,
-used by both adapters) and `DirectToolAccess` (in-process tool classes)."""
+used by the worker adapter) and `DirectToolAccess` (in-process tool classes)."""
 
 from __future__ import annotations
 

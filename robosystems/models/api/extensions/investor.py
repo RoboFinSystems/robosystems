@@ -201,8 +201,8 @@ class UpdateSecurityRequest(BaseModel):
   terms: dict | None = Field(
     None,
     description=(
-      "Replacement terms blob. Pass `null`/omit to leave existing "
-      "terms unchanged; pass `{}` to clear them."
+      "Replacement terms blob. Omit to leave existing terms unchanged; "
+      "pass `{}` to clear them."
     ),
   )
   is_active: bool | None = Field(
@@ -397,8 +397,7 @@ class PositionResponse(BaseModel):
     ...,
     description=(
       "Lifecycle state. One of: `active` (currently held), `disposed` "
-      "(soft-deleted via `update-portfolio-block` dispose), `archived` "
-      "(historical record only)."
+      "(soft-deleted via `update-portfolio-block` dispose)."
     ),
   )
   notes: str | None = Field(
@@ -419,41 +418,38 @@ class PositionListResponse(BaseModel):
 
 
 class HoldingSecuritySummary(BaseModel):
-  """One security held by an entity, rolled up across portfolios."""
+  """One security held in the portfolio, issued by the holding's entity."""
 
   security_id: str = Field(..., description="Security ID.")
   security_name: str = Field(..., description="Display name of the security.")
   security_type: str = Field(
     ..., description="Instrument family (e.g. `common_stock`, `warrant`)."
   )
-  quantity: float = Field(
-    ..., description="Total quantity held in `quantity_type` units."
-  )
+  quantity: float = Field(..., description="Quantity held in `quantity_type` units.")
   quantity_type: str = Field(
     ..., description="Unit basis (`shares`, `units`, `principal`)."
   )
   cost_basis_dollars: float = Field(
     ...,
-    description="Aggregate cost basis in dollars, summed across all positions.",
+    description="Cost basis in dollars.",
   )
   current_value_dollars: float | None = Field(
     None,
-    description=(
-      "Aggregate current value in dollars, or `null` if any underlying "
-      "position lacks a mark."
-    ),
+    description="Current value in dollars, or `null` if the position has no mark.",
   )
 
 
 class HoldingResponse(BaseModel):
-  """All securities held in a single entity, rolled up across the
-  caller's portfolios."""
+  """All securities one portfolio holds in a single issuing entity."""
 
   entity_id: str = Field(..., description="Issuing entity ID.")
   entity_name: str = Field(..., description="Display name of the entity.")
   source_graph_id: str | None = Field(
     None,
-    description="Pre-association tenant graph, when set on the securities.",
+    description=(
+      "The issuer's tenant graph as recorded on the issuing entity, when "
+      "set. Null for the unlinked group."
+    ),
   )
   securities: list[HoldingSecuritySummary] = Field(
     ..., description="One row per security held in this entity."
@@ -464,8 +460,8 @@ class HoldingResponse(BaseModel):
   total_current_value_dollars: float | None = Field(
     None,
     description=(
-      "Sum of current value across all securities, in dollars. `null` "
-      "if any security lacks a mark."
+      "Sum of current value across the marked securities, in dollars; "
+      "an unmarked one adds nothing. `null` only when none has a mark."
     ),
   )
   position_count: int = Field(
@@ -474,7 +470,7 @@ class HoldingResponse(BaseModel):
 
 
 class HoldingsListResponse(BaseModel):
-  """Aggregated holdings across all of the caller's portfolios."""
+  """One portfolio's active positions, grouped by issuing entity."""
 
   holdings: list[HoldingResponse] = Field(
     ..., description="One row per issuing entity."
@@ -570,7 +566,7 @@ class PositionBlock(BaseModel):
   status: str = Field(
     ...,
     description=(
-      "Lifecycle state (`active`, `disposed`, `archived`). See "
+      "Lifecycle state (`active`, `disposed`). See "
       "`PositionResponse.status` for the full vocabulary."
     ),
   )
@@ -610,20 +606,18 @@ class PortfolioBlockEnvelope(BaseModel):
   )
   positions: list[PositionBlock] = Field(
     ...,
-    description=(
-      "All positions in this portfolio, including disposed ones "
-      "(filter by `status` for active-only display)."
-    ),
+    description=("The portfolio's active positions; disposed ones are not included."),
   )
   total_cost_basis_dollars: float = Field(
     ...,
-    description="Sum of `cost_basis_dollars` across every position.",
+    description="Sum of `cost_basis_dollars` across the active positions.",
   )
   total_current_value_dollars: float | None = Field(
     None,
     description=(
-      "Sum of `current_value_dollars` across every position. `null` "
-      "when any active position lacks a mark."
+      "Sum of `current_value_dollars` across the marked active positions; "
+      "an unmarked one adds nothing. `null` only when no active position "
+      "has a mark."
     ),
   )
   active_position_count: int = Field(

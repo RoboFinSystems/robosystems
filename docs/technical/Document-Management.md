@@ -138,7 +138,7 @@ curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/operations/delete-d
   -d '{"document_id": "doc_01J9XYZ..."}'
 ```
 
-Delete returns a **200 `OperationEnvelope`** whose `result` is `{"document_id": "doc_01J9XYZ...", "deleted": true}`; a document that does not exist returns 404. It removes the PostgreSQL row and the document's OpenSearch sections together, so the document disappears from search immediately.
+Delete returns a **200 `OperationEnvelope`** whose `result` is `{"document_id": "doc_01J9XYZ...", "deleted": true}`; a document that does not exist returns 404, and a document that a live ledger event cites as its evidence (an invoice, a bill, a statement balance) is refused with 409 until that event no longer points at it. It removes the PostgreSQL row and the document's OpenSearch sections together, so the document disappears from search immediately.
 
 ## Markdown Frontmatter and Sectioning
 
@@ -193,7 +193,7 @@ The first call creates the document; subsequent calls with the same `external_id
 
 Documents become discoverable through the search and retrieval layer. The two surfaces are connected but distinct.
 
-When a document is created or updated, its sections are indexed into OpenSearch under a stable base id. User-authored documents use a `udoc_` prefix (in contrast to SEC and pipeline documents, which use a `doc_` prefix and have no PostgreSQL row). Each section is indexed as `udoc_{base}_{index}`, and a search hit's document id maps back to the PostgreSQL document id.
+When a document is created or updated, its sections are indexed into OpenSearch under a stable base id. User-authored documents use a `udoc_` prefix; SEC filing sections, which have no PostgreSQL row, are indexed under a hash of the filing and section instead. Each section is indexed as `udoc_{base}_{index}`, and a search hit's document id maps back to the PostgreSQL document id.
 
 The read side lives under `/v1/graphs/{graph_id}/search`:
 

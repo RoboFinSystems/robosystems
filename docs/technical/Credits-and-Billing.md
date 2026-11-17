@@ -12,7 +12,7 @@ In RoboSystems, only AI operations consume credits — every database, graph, MC
 - [Reviewing Usage and Transaction History](#reviewing-usage-and-transaction-history)
 - [Public Pricing and Offerings](#public-pricing-and-offerings)
 - [Shared Repository Credits](#shared-repository-credits)
-- [Alerts and Low-Balance Thresholds](#alerts-and-low-balance-thresholds)
+- [Low-Balance Thresholds](#low-balance-thresholds)
 - [Storage Is Not Paid For With Credits](#storage-is-not-paid-for-with-credits)
 - [Organizations and Account Limits](#organizations-and-account-limits)
 - [Billing Endpoints](#billing-endpoints)
@@ -44,7 +44,7 @@ Everything that does not call an AI model is free and unmetered by credits:
 
 ### Token-Based Pricing
 
-AI operations are priced on the tokens consumed by the model call, not as a flat per-call fee. Nothing is reserved up front: the charge is computed *after* the model responds, from the input and output token counts it actually reported, at a per-1,000-token rate for each direction. A **minimum charge of 1 credit** then applies, so a very small call still costs something — but a call that consumed nothing costs nothing rather than being rounded up. An unregistered model raises at billing time rather than guessing a rate, so a model has to be priced before it can be used.
+AI operations are priced on the tokens consumed by the model call, not as a flat per-call fee. Nothing is reserved up front: the charge is computed *after* the model responds, from the token counts it actually reported, at a per-1,000-token rate for each of four classes: uncached input, output, prompt-cache reads and prompt-cache writes. A **minimum charge of 1 credit** then applies, so a very small call still costs something — but a call that consumed nothing costs nothing rather than being rounded up. An unregistered model raises at billing time rather than guessing a rate, so a model has to be priced before it can be used.
 
 The current rates are served as `operation_costs.token_pricing` from `GET /v1/offering`, which is where to read them rather than from a copy on this page. What a call costs depends on how many tokens it uses, so the way to plan is to run representative calls and read their actual charges from the transaction history (see [Reviewing Usage and Transaction History](#reviewing-usage-and-transaction-history)); the charge is always the real measured token cost, never a fixed estimate.
 
@@ -75,7 +75,7 @@ To estimate how many operator calls an allocation covers, divide the monthly cre
 charge of your own calls, from the transaction history's per-operation `summary`. That is a planning
 estimate only; the charge is always the real measured token cost.
 
-A graph's **current balance** is its monthly allocation minus the credits consumed so far in the current calendar month. Subgraphs do not receive their own allocation — they draw from the parent graph's pool, so checking a subgraph's credits reports the parent pool's numbers. The single source of truth for these allocations is the [Billing Configuration](https://github.com/RoboFinSystems/robosystems/tree/main/robosystems/config/billing) in the codebase.
+A graph's **current balance** is the pool's running balance: set to the monthly allocation at the monthly reset, debited by each charge as it lands, and credited by any bonus or refund. It is the figure a charge is checked against, so it need not equal the allocation minus this month's consumption. Subgraphs do not receive their own allocation — they draw from the parent graph's pool, so checking a subgraph's credits reports the parent pool's numbers. The single source of truth for these allocations is the [Billing Configuration](https://github.com/RoboFinSystems/robosystems/tree/main/robosystems/config/billing) in the codebase.
 
 ## Checking Your Credit Balance
 
@@ -106,7 +106,7 @@ The response is a credit summary for the graph:
 }
 ```
 
-**Note:** `monthly_allocation` is whatever the graph's tier grants — the `8000.0` above is one tier's figure, not a platform constant. `consumed_this_month`, `current_balance`, and `usage_percentage` are computed from the consumption transactions recorded in the current calendar month — they reflect the live ledger, not a single stored counter. Storage limits are intentionally not part of this response (see [Storage Is Not Paid For With Credits](#storage-is-not-paid-for-with-credits)).
+**Note:** `monthly_allocation` is whatever the graph's tier grants — the `8000.0` above is one tier's figure, not a platform constant. `consumed_this_month` and `usage_percentage` are computed from the consumption transactions recorded in the current calendar month. `current_balance` is the pool's stored running balance, the one each charge is checked against. Storage limits are intentionally not part of this response (see [Storage Is Not Paid For With Credits](#storage-is-not-paid-for-with-credits)).
 
 ## Reviewing Usage and Transaction History
 
@@ -165,9 +165,9 @@ curl -X GET "https://api.robosystems.ai/v1/graphs/sec/credits" \
 
 This keeps shared-repository AI usage metered independently from the credits attached to your own graphs. As with graph pools, only AI operations against the repository consume these credits — browsing and querying the repository data is free.
 
-## Alerts and Low-Balance Thresholds
+## Low-Balance Thresholds
 
-The platform tracks balance against three thresholds so usage can be flagged before the pool runs dry:
+The credit configuration defines three balance states. The platform does not send low-balance notifications today, so watch `current_balance` and `usage_percentage` on the `/credits` response yourself:
 
 | State | Remaining balance |
 | --- | --- |
@@ -179,9 +179,9 @@ Because credits only gate AI operations, an exhausted pool stops AI Operator cal
 
 ## Storage Is Not Paid For With Credits
 
-Storage is a distinct axis from credits. Each tier **includes** its storage: there is no metering and no overage billing, only the tier's limit (with an optional override and auto-expand behavior), tracked independently of the credit pool. Storage is **never paid for with credits**, and storage limit fields are deliberately absent from the `/credits` response.
+Storage is a distinct axis from credits. Each tier **includes** its storage: there is no metering and no overage billing, only the tier's limit, tracked independently of the credit pool. The limit is enforced: ingesting files or materializing the graph is refused once its instance would go past it. Storage is **never paid for with credits**, and storage limit fields are deliberately absent from the `/credits` response.
 
-To see storage usage, use the analytics endpoint described above — storage figures appear in its `storage_summary`, not in the credit balance. Tier storage limits are defined alongside the rest of the billing configuration; see the [Billing Configuration](https://github.com/RoboFinSystems/robosystems/tree/main/robosystems/config/billing) and [Graph Configuration](https://github.com/RoboFinSystems/robosystems/blob/main/.github/configs/graph.yml) in the codebase.
+To see storage usage, use the analytics endpoint described above — storage figures appear in its `storage_summary`, not in the credit balance. Tier storage limits are defined in the [Graph Configuration](https://github.com/RoboFinSystems/robosystems/blob/main/.github/configs/graph.yml) in the codebase, not in the billing configuration.
 
 ## Organizations and Account Limits
 

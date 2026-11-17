@@ -23,9 +23,6 @@ package** — the `ontology/` precedent:
   initialized here — the operation refuses (409). A chart is never
   replaced; customization is `update-taxonomy-block`.
 
-Design record: `local/RoboSystems/specs/taxonomy/chart-templates-as-data.md`.
-Doctrine: `specs/adapters/mercury-adapter.md` §8.1.
-
 ## Layout
 
 ```
@@ -100,5 +97,4 @@ the operation.
    starts from — the parent-standalone rows that eliminate, the
    subsidiaries' equity rows that eliminate, and the noncontrolling-interest
    rows — so every balance in it is an adjustment the consolidated
-   statements read and no operating entity's ever includes
-   (`local/RoboSystems/specs/ledger/consolidation.md` §4.2).
+   statements read and no operating entity's ever includes.

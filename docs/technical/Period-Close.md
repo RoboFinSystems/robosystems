@@ -91,13 +91,14 @@ The closeable gate returns structured codes. The calendar read lists them, and `
 | `unposted_source_events` | A source event dated in this month was captured or classified but never committed, so it has no entry. See [Unposted source events](#unposted-source-events). | Commit each one with `update-event-block`, or void it | `allow_unposted_source_events` |
 | `unreconciled_accounts` | A reconciliation the close waits on isn't reconciled for this month, or was never compared for it. See [Reconciliations](#reconciliations). | `refresh-reconciliations` and clear what it reports, sign off where a review is required, or release the reconciliation with `set-reconciliation-policy` | `allow_unreconciled_accounts` |
 | `unmapped_accounts` | An account in this entity's chart has postings through the month and no mapping to a reporting concept, so its balances are in no statement and in no consolidating entry. A chart brought from QuickBooks or built by hand is where this shows up; the templates arrive mapped. | `get-unmapped-elements`, then `suggest-mapping` and `create-mapping-association` for each | — |
+| `held_bank_lines` | A bank feed delivered lines dated in an earlier month after that month closed. A closed month takes no new lines, so the sync holds them (`voided` with `void_reason: "feed_in_closed_month"`), and they block every later close until someone decides on them | Reopen the month they are dated in, which gives them back as `captured` to classify and commit | `allow_held_bank_lines`, which records the decision on each line; none of them posts |
 | `calendar_not_initialized` | No fiscal calendar yet | `initialize`, or connect a data source | — |
 
-Detail fields accompany some codes: `pending_obligation_count`, `pending_obligation_sample[]` (up to five, each with `event_id`, `schedule_id`, `schedule_name` and `period`), `earliest_pending_period`, `stranded_obligation_count`, `stranded_obligation_sample[]`, `reconciling_item_count`, `reconciling_item_sample[]` (source ids), `unposted_source_event_count`, `unposted_source_event_sample[]` (source ids, or event ids where there is none), `unreconciled_account_count`, `unreconciled_account_sample[]` (each reconciliation's name and why it isn't ready, such as `"Source ledger (QuickBooks): unreconciled"` or `"...: awaiting review"`), `unmapped_account_count`, `unmapped_account_sample[]` (code and name) and `sync_stale_days`. The calendar read carries the same fields in camelCase.
+Detail fields accompany some codes: `pending_obligation_count`, `pending_obligation_sample[]` (up to five, each with `event_id`, `schedule_id`, `schedule_name` and `period`), `earliest_pending_period`, `stranded_obligation_count`, `stranded_obligation_sample[]`, `reconciling_item_count`, `reconciling_item_sample[]` (source ids), `unposted_source_event_count`, `unposted_source_event_sample[]` (source ids, or event ids where there is none), `unreconciled_account_count`, `unreconciled_account_sample[]` (each reconciliation's name and why it isn't ready, such as `"Source ledger (QuickBooks): unreconciled"` or `"...: awaiting review"`), `unmapped_account_count`, `unmapped_account_sample[]` (code and name), `held_bank_line_count`, `held_bank_line_sample[]` (date, description, amount and event id) and `sync_stale_days`. The calendar read carries the same fields in camelCase.
 
 The consolidation entity's close is the group close and adds four blockers of its own, `entity_open`, `adjustments_unposted`, `residual_unexplained` and `consolidated_does_not_foot`, each naming its items in a `group_*` list; see [Group Consolidation](Group-Consolidation.md#the-group-close).
 
-Every override the close accepts is written into the close's audit note. A close over stranded obligations knowingly leaves those adjusting entries out of the month. A close over reconciling items stamps statements that may disagree with QuickBooks. A close over unposted source events leaves those transactions out of the month for good, and a close over unreconciled accounts closes the books without that check. Settling the item is almost always the better choice. See [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md#reconciling-items).
+Every override the close accepts is written into the close's audit note. A close over stranded obligations knowingly leaves those adjusting entries out of the month. A close over reconciling items stamps statements that may disagree with QuickBooks. A close over unposted source events leaves those transactions out of the month for good, a close over unreconciled accounts closes the books without that check, and a close over held bank lines leaves them out of the books. Settling the item is almost always the better choice. See [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md#reconciling-items).
 
 ### Unposted source events
 
@@ -114,7 +115,7 @@ There are three methods, each answering a different question:
 | Method | Compares | Scope | A difference means |
 | --- | --- | --- | --- |
 | `source_ledger` | Every account against the synced QuickBooks company's own trial balance | One block for the whole ledger | The ledger's copy of the books has drifted from the source: a transaction deleted or back-dated there after it synced, or activity not yet synced |
-| `schedule_register` | Each asset account a schedule carries a balance on (a prepaid, accumulated depreciation, a fixed-asset cost account) against what its schedules say it holds | One block per account | A balance with no schedule behind it, or a scheduled amount the ledger doesn't hold |
+| `schedule_register` | Each account a schedule carries a balance on (a prepaid, accumulated depreciation, a fixed-asset cost account, a loan's note payable) against what its schedules say it holds | One block per account | A balance with no schedule behind it, or a scheduled amount the ledger doesn't hold |
 | `statement` | One account against the ending balance of a statement recorded for it (bank, card or loan) | One block per account | Activity one side has and the other doesn't yet, or an error on either |
 
 Balance-sheet accounts are compared cumulatively to the month-end, and income and expense accounts from the start of the fiscal year. The `source_ledger` side counts landed entries only. The `schedule_register` and `statement` sides count the ledger as the close will leave it, drafts awaiting the close included. Each reconciliation is an Information Block of type `reconciliation`, so its comparisons are FactSets like any other block's.
@@ -252,7 +253,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
   -d '{"period": "2026-08"}'
 ```
 
-The body takes `period` (`^\d{4}-(0[1-9]|1[0-2])$`), an optional `note` for the audit trail, and the five override flags `allow_stale_sync`, `allow_stranded_obligations`, `allow_reconciling_items`, `allow_unposted_source_events` and `allow_unreconciled_accounts`. All five default to `false`.
+The body takes `period` (`^\d{4}-(0[1-9]|1[0-2])$`), an optional `note` for the audit trail, and the override flags `allow_stale_sync`, `allow_stranded_obligations`, `allow_reconciling_items`, `allow_unposted_source_events`, `allow_unreconciled_accounts` and `allow_held_bank_lines`, plus `allow_unexplained_residuals` for the group close on the consolidation entity ([Group Consolidation](Group-Consolidation.md#the-group-close)). All default to `false`.
 
 On success, the envelope's `result` is the close summary:
 
@@ -324,7 +325,7 @@ One close runs these steps in order. The ordering carries the atomicity guarante
 
 1. **Gate.** The blockers above. A failure raises before anything is touched.
 2. **Balance pre-flight.** Total debits and credits across the month's draft *and* posted entries must agree, so the close never has to undo a half-posted month.
-3. **QuickBooks publish.** On a write-back graph, eligible drafts are written to QuickBooks and promoted to `posted` one by one. This is the only step that commits separately: each draft's `qb_external_id` marker is committed before any failure is raised, so a retried close never writes the same entry to QuickBooks twice. Any rejection stops the close here.
+3. **QuickBooks publish.** On a write-back graph, eligible drafts are written to QuickBooks and promoted to `posted` one by one. This is the only step that commits separately: each entry's QuickBooks id, recorded in its event's `metadata.qb_entry_ids`, is committed before any failure is raised, so a retried close never writes the same entry to QuickBooks twice. Any rejection stops the close here.
 4. **Post the rest.** Every remaining draft dated in the month is posted in one transition. Drafts belonging to voided or superseded events are left alone.
 5. **Advance the calendar.** `closed_through` moves to this month, and `close_target` advances if the close reached it.
 6. **Lock the month.** The `FiscalPeriod` row becomes `closed`, with `closed_at` and `closed_by`.
@@ -457,7 +458,7 @@ Ending a schedule after its month's entry is drafted leaves a stale draft for a 
 
 ### Overrides are recorded
 
-`allow_stale_sync`, `allow_stranded_obligations`, `allow_reconciling_items`, `allow_unposted_source_events` and `allow_unreconciled_accounts` all leave a trace in the close's audit note. Use them only for a decision you would defend in review.
+`allow_stale_sync`, `allow_stranded_obligations`, `allow_reconciling_items`, `allow_unposted_source_events`, `allow_unreconciled_accounts`, `allow_held_bank_lines` and `allow_unexplained_residuals` all leave a trace in the close's audit note. Use them only for a decision you would defend in review.
 
 ## Self-hosted deployments
 

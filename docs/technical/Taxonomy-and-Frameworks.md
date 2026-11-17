@@ -54,9 +54,9 @@ Every JSON-LD seed in the library conforms to one RDF vocabulary, stored at `fra
 
 | File | Purpose |
 | --- | --- |
-| `context.jsonld` | The published `@context` every package is interpreted against |
+| `context.jsonld` | A published copy of the `@context`. Each package inlines the canonical context, and the authority is the one in code (`robosystems/arelle/context.py`), which this file can trail |
 | `ontology.ttl` | OWL class and property declarations |
-| `shapes.ttl` | SHACL shapes that enforce the model |
+| `shapes.ttl` | SHACL shapes that describe the model's constraints. The platform does not run them |
 
 The guiding principle is simple: **model the RoboSystems graph topology, and label it with XBRL's standard vocabulary wherever XBRL already has a term.** Balance type is `xbrli:balance`; arc roles are `xlink:arcrole`; calculation weights are `link:weight`. The `rs:` namespace is reserved only for concepts XBRL lacks. This keeps the seed data interoperable with the wider XBRL ecosystem while letting the graph carry structure XBRL cannot express directly.
 
@@ -104,7 +104,7 @@ frameworks/
 ├── ontology/v1/   → context.jsonld, ontology.ttl, shapes.ttl
 ├── fac/           → v1.json + packages/{fac-traits, fac, fac-presentation, fac-calculations}
 ├── cm/            → v1.json + packages/cm
-├── chart-templates/ → saas/, services/, product/ (chart-of-accounts stencils; never seeded)
+├── chart-templates/ → saas/, services/, product/, consolidation/ (chart-of-accounts stencils; never seeded)
 └── rs-gaap/       → v1.json + tenant-exclude/ + bridges/ + packages/{rs-gaap, rs-gaap-traits,
                       rs-gaap-hierarchy, rs-gaap-presentation, rs-gaap-calculations,
                       rs-gaap-type-subtype, rs-gaap-references, rs-gaap-labels, rs-gaap-disclosures,
@@ -170,7 +170,7 @@ POST /extensions/roboledger/{graph_id}/operations/{op_name}
 | `change-reporting-style` | Switch the reporting entity's Reporting Style after validating the target Style composes completely in the tenant schema |
 | `bind-text-block` | Bind a platform Document (or one of its sections) to a disclosure element as a Nonnumeric text-block fact |
 
-**Starting from a template.** A graph with no chart of accounts can take a shipped one: `initialize-chart-of-accounts` with `template` set to `saas` (subscription software), `services` (professional services, no inventory), or `product` (inventory and cost of goods sold). It creates the chart, its `coa_mapping` structure, and the template's mapping arcs into `rs-gaap` in one transaction, mapping the equity rows by the entity's legal form (`entity_type`: `corporation`, `llc`, or `partnership`, defaulting to the graph's primary entity). It is one-time: once a chart exists it returns `409`, and a QuickBooks-synced graph never needs it because its chart arrives with the sync. The `chartTemplates` GraphQL field lists the templates with their names and account counts. Customize the result afterwards with `update-taxonomy-block`.
+**Starting from a template.** A graph with no chart of accounts can take a shipped one: `initialize-chart-of-accounts` with `template` set to `saas` (subscription software), `services` (professional services, no inventory), `product` (inventory and cost of goods sold), or `consolidation` (a group's consolidation entity: the elimination, intercompany and noncontrolling-interest rows, never an operating company's chart). It creates the chart, its `coa_mapping` structure, and the template's mapping arcs into `rs-gaap` in one transaction, mapping the equity rows by the entity's legal form (`entity_type`: `corporation`, `llc`, or `partnership`, defaulting to the graph's primary entity). Each entity of a group keeps its own chart, so `entity_id` names the entity (omitted, the group parent). It is one-time per entity: once that entity has a chart it returns `409`, and a QuickBooks-synced graph never needs it because its chart arrives with the sync. The `chartTemplates` GraphQL field lists the templates with their names and account counts. Customize the result afterwards with `update-taxonomy-block`.
 
 `auto-map-elements` is a worker-backed operation that returns `202` with a `pending` envelope, then streams progress over SSE. It auto-approves mappings with confidence at or above `0.90`, flags those between `0.70` and `0.89` for review, and skips anything below `0.70`.
 

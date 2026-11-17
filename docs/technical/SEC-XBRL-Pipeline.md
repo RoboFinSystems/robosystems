@@ -277,7 +277,7 @@ The AI will use:
 
 ### Option 2: Direct Cypher Queries (For Development)
 
-Query the local database directly using Cypher (no authentication required for local queries). Queries that read numbers follow the [four SEC query rules](SEC-Data-Model-and-Query-Rules.md#the-four-rules): consolidated facts (`has_dimensions: false`), each filer's own element qnames, a pinned period shape, and `RETURN DISTINCT` from an `Entity` anchor. `just graph-query` rewrites single quotes to double quotes, so string literals inside the query are fine.
+Query the local database directly using Cypher (no authentication required for local queries). Queries that read numbers follow the [four SEC query rules](SEC-Data-Model-and-Query-Rules.md#the-four-rules): consolidated facts (`has_dimensions: false`), each filer's own element qnames, a pinned period shape, and `RETURN DISTINCT` from an `Entity` anchor — and return the number as `f.value`, its exact text. `just graph-query` rewrites single quotes to double quotes, so string literals inside the query are fine.
 
 ```bash
 # List the companies in the database
@@ -287,7 +287,7 @@ just graph-query sec "MATCH (e:Entity) RETURN e.ticker, e.name, e.cik LIMIT 10"
 just graph-query sec "MATCH (e:Entity {ticker: 'NVDA'})-[:ENTITY_HAS_REPORT]->(r:Report) RETURN r.form, r.filing_date, r.fiscal_year_focus ORDER BY r.filing_date DESC LIMIT 10"
 
 # Consolidated annual net income
-just graph-query sec "MATCH (e:Entity {ticker: 'NVDA'})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})-[:FACT_HAS_ELEMENT]->(el:Element), (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'}) WHERE el.qname = 'us-gaap:NetIncomeLoss' RETURN DISTINCT el.qname AS qname, p.end_date AS end_date, f.numeric_value AS value ORDER BY end_date DESC LIMIT 5"
+just graph-query sec "MATCH (e:Entity {ticker: 'NVDA'})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})-[:FACT_HAS_ELEMENT]->(el:Element), (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'}) WHERE el.qname = 'us-gaap:NetIncomeLoss' RETURN DISTINCT el.qname AS qname, p.end_date AS end_date, f.value AS value ORDER BY end_date DESC LIMIT 5"
 ```
 
 **Common Cypher Patterns:**
@@ -299,7 +299,7 @@ MATCH (e:Entity {cik: '0001045810'})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions
       (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'quarterly'})
 WHERE el.qname IN ['us-gaap:Revenues', 'us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax']
 RETURN DISTINCT el.qname AS qname, p.start_date AS start_date, p.end_date AS end_date,
-       f.numeric_value AS value
+       f.value AS value
 ORDER BY end_date DESC
 LIMIT 8
 
@@ -309,7 +309,7 @@ MATCH (e:Entity {ticker: 'NVDA'})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: f
       (f)-[:FACT_HAS_PERIOD]->(p:Period {period_type: 'instant'})
 WHERE p.end_date = '2025-01-26'
   AND el.qname IN ['us-gaap:Assets', 'us-gaap:Liabilities', 'us-gaap:StockholdersEquity']
-RETURN DISTINCT el.qname AS qname, f.numeric_value AS value
+RETURN DISTINCT el.qname AS qname, f.value AS value
 
 -- The income statement of one filing, through its structure
 MATCH (r:Report {identifier: $report_id})-[:REPORT_HAS_FACT]->(f:Fact {has_dimensions: false})
@@ -318,7 +318,7 @@ MATCH (r:Report {identifier: $report_id})-[:REPORT_HAS_FACT]->(f:Fact {has_dimen
       (fs:FactSet)-[:FACT_SET_CONTAINS_FACT]->(f),
       (s:Structure {canonical_type: 'income_statement'})-[:STRUCTURE_HAS_FACT_SET]->(fs)
 RETURN DISTINCT el.qname AS qname,
-       p.end_date AS end_date, f.numeric_value AS value
+       p.end_date AS end_date, f.value AS value
 ORDER BY end_date DESC
 LIMIT 60
 ```
@@ -396,7 +396,7 @@ request = CypherStatementRequest(
           -[:FACT_HAS_ELEMENT]->(el:Element),
           (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'})
     WHERE el.qname IN $qnames
-    RETURN DISTINCT el.qname AS qname, p.end_date AS end_date, f.numeric_value AS value
+    RETURN DISTINCT el.qname AS qname, p.end_date AS end_date, f.value AS value
     ORDER BY end_date DESC
     LIMIT 10
     """,

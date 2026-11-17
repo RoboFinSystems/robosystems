@@ -1,7 +1,7 @@
 """Cross-encoder fact-equivalence assertion.
 
-The claim: *one bundle, three encoders, one fact set*. The Tavi flavor (the
-anchor stamped at publish), the holon (dataset-form JSON-LD) and the XBRL 2.1
+The claim: *one bundle, three encoders, one fact set*. The holon (the
+anchor stamped at publish, dataset-form JSON-LD), the Tavi flavor and the XBRL 2.1
 emitter (which re-derives ``<context>``) share the same
 :class:`StatementBundle` and produce semantically equivalent output — every
 fact emerges in all three projections with matching

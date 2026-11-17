@@ -145,7 +145,7 @@ MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact {has_dimensions: false}),
       (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'})
 WHERE e.qname IN ['us-gaap:Revenues', 'us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax']
   AND f.numeric_value IS NOT NULL
-RETURN p.end_date, f.numeric_value AS revenue, r.form, r.filing_date, r.accession_number
+RETURN p.end_date, f.value AS revenue, r.form, r.filing_date, r.accession_number
 ORDER BY p.end_date DESC, r.filing_date LIMIT 20
 ```
 
@@ -162,7 +162,7 @@ MATCH (ent:Entity {ticker: 'NVDA'})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions:
       (fs:FactSet)-[:FACT_SET_CONTAINS_FACT]->(f),
       (s:Structure {canonical_type: 'income_statement'})-[:STRUCTURE_HAS_FACT_SET]->(fs)
 WHERE f.numeric_value IS NOT NULL
-RETURN DISTINCT e.qname, f.numeric_value AS value, p.end_date
+RETURN DISTINCT e.qname, f.value AS value, p.end_date
 ORDER BY p.end_date DESC LIMIT 40
 ```
 
@@ -172,12 +172,13 @@ Revenue by segment (dimensional breakdown):
 MATCH (f:Fact {has_dimensions: true})-[:FACT_HAS_ELEMENT]->(e:Element),
       (f)-[:FACT_HAS_DIMENSION]->(d:Dimension)
 WHERE e.qname = 'us-gaap:Revenues' AND f.numeric_value IS NOT NULL
-RETURN d.axis_uri, d.member_uri, f.numeric_value LIMIT 10
+RETURN d.axis_uri, d.member_uri, f.value LIMIT 10
 ```
 
 Two things every query should do: filter `Fact.has_dimensions = false` for consolidated totals (true when
 you *want* segment breakdowns), and anchor on an entity, report, element, or date before reaching
-`Structure` — an unanchored structure scan touches every filing.
+`Structure` — an unanchored structure scan touches every filing. Read a fact's number from `f.value`, its exact
+text, and keep `f.numeric_value` for the `IS NOT NULL` filter.
 
 ## Versioning
 
