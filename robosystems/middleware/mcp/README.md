@@ -103,15 +103,13 @@ Claude.
 
 The GraphQL pair requires `EXTENSIONS_GRAPHQL_ENABLED=true` **and**
 `MCP_GRAPHQL_ENABLED=true`. The latter is an SSM kill switch that disables both
-tools without a redeploy. The `/v1/mcp/roboledger` route withholds both
-(`ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS` in `tools/manager.py`): a directory review
-needs every model-callable operation exposed as its own tool, so a read that
-tool text names is a typed tool (Layer 2b), never a GraphQL field. The route's
-cut is `ROBOLEDGER_ROUTE` in `tools/route_profile.py`, which the transport
-applies: it withholds the exclusions, holds the event-block tools' `event_type`
-to the built-in kinds (the Python handler registry, described per kind in the
-schema), and refuses any other kind at call time. No text the route serves may
-name a tool it withholds; `test_subgraph_tool_profile` checks every one.
+tools without a redeploy. A read that tool text names is a typed tool
+(Layer 2b), so the common reads never need GraphQL. The `/v1/mcp/roboledger`
+route serves the same tools as any tenant connection, less
+`ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS` (`tools/manager.py`): only what a chat client
+cannot use. `ROBOLEDGER_ROUTE` in `tools/route_profile.py` is the cut the
+transport applies. No text the route serves may name a tool it withholds;
+`test_subgraph_tool_profile` checks every one.
 
 The intended pattern is the index once, the types a question needs, then typed
 queries against them:

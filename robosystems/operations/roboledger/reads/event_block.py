@@ -72,14 +72,6 @@ def get_event_block(session: Session, event_id: str) -> EventBlockEnvelope | Non
   return _to_envelope(event, _load_dimension_ids(session, event.id))
 
 
-def get_event_type(session: Session, event_id: str) -> str | None:
-  """The event's ``event_type``, which picks the handler a commit runs; None
-  when there is no such event."""
-  return session.execute(
-    select(Event.event_type).where(Event.id == event_id)
-  ).scalar_one_or_none()
-
-
 def list_event_blocks(
   session: Session,
   *,

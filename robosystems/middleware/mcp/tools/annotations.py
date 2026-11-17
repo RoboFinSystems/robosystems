@@ -125,7 +125,8 @@ WRITE_TOOL_HINTS: dict[str, ToolHints] = {
   "delete-taxonomy-block": _REPLACES,
   "link-entity-taxonomy": _REPLACES,
   "change-reporting-style": _REPLACES,
-  "create-mapping-association": _ADDS_ONCE,
+  # replaces_association_id removes the current arc and reclassifies closed months.
+  "create-mapping-association": _REPLACES,
   "delete-mapping-association": _REPLACES,
   # Information blocks, metrics, forecasts.
   "create-information-block": _ADDS,
