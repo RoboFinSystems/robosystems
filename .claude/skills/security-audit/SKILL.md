@@ -3,7 +3,6 @@ name: security-audit
 description: "Read-only AWS and GitHub security-posture audit (detective controls, live findings, data protection) with a prioritized remediation plan. Infrastructure posture, not code review. Use for \"security audit\", \"security posture\", \"what is GuardDuty finding\", or ahead of the SOC 2 review."
 metadata:
   lane: operate
-  paired_runbook: runbooks/security-posture-audit.md
 ---
 
 Run a read-only AWS + GitHub security-posture review, then produce a findings report and a prioritized remediation plan.

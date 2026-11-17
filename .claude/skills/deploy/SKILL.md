@@ -5,7 +5,6 @@ argument-hint: "[staging|prod] [run-id]"
 disable-model-invocation: true
 metadata:
   lane: operate
-  paired_runbook: runbooks/deployment-monitoring.md, runbooks/graph-writer-roll.md
 ---
 
 Monitor a deployment run — pinpoint why it failed, drive it to green on a re-run, and verify health. Deploys go through GitHub Actions (`workflow_dispatch`); this skill is about watching and diagnosing them, not replacing the pipeline. Pairs with the `deployment-monitoring` runbook in `local/RoboSystems/runbooks/` for account-specific stack names and failure classes — read it alongside this file.

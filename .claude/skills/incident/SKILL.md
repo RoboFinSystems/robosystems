@@ -4,7 +4,6 @@ description: "Triage a production signal (a customer report, an alarm email, a s
 argument-hint: "[what's wrong]"
 metadata:
   lane: operate
-  paired_runbook: runbooks/incident-triage.md
 ---
 
 A signal says something is wrong — a customer report, an internal user, an alarm email, a spike. This skill gives you a fast, ordered headstart on **where to look**: triage the signal to a likely subsystem, gather the state that confirms or rules it out, and hand back a crisp picture (impact, likely cause, next action). Pairs with the `incident-triage` runbook in `local/RoboSystems/runbooks/` for the account's known failure classes and exact log groups — read it alongside this file.

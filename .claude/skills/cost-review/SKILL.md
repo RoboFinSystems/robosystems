@@ -3,7 +3,6 @@ name: cost-review
 description: "Read-only AWS cost and usage review: spend by service and resource, tied to the usage that drives it, producing a cost report and a savings plan ranked by dollar impact. Use for \"cost review\", \"what are we spending\", \"the AWS bill\", \"savings plan\", or before a pricing or capacity decision."
 metadata:
   lane: operate
-  paired_runbook: runbooks/cost-analysis-cur-athena.md, runbooks/prometheus-usage-amp-cli.md
 ---
 
 Run a read-only AWS cost & usage review, then produce a cost report and a prioritized savings plan ranked by dollar impact. Pairs with the `cost-analysis-cur-athena` (the $ side) and `prometheus-usage-amp-cli` (the usage-driver side) runbooks in `local/RoboSystems/runbooks/` for the account-specific query detail — read them alongside this file.

@@ -3,7 +3,6 @@ name: reliability-review
 description: "Read-only AWS reliability and resilience review (the Well-Architected Reliability pillar) producing a report and a prioritized plan; doubles as SOC 2 Availability evidence. Use for \"reliability review\", \"resilience review\", \"what breaks if an AZ goes\", or ahead of the SOC 2 review."
 metadata:
   lane: operate
-  paired_runbook: runbooks/reliability-review.md
 ---
 
 Run a read-only AWS reliability & resilience review (the Well-Architected Reliability pillar), then produce a report and a prioritized plan. Doubles as **SOC 2 Availability (A1)** evidence. Pairs with the `reliability-review` runbook (`local/RoboSystems/runbooks/`) for the account-specific detail — read it alongside this file, since it holds the live record of what's been accepted, deferred, or already remediated.

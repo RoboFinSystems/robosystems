@@ -3,7 +3,6 @@ name: soc2-review
 description: "Assess SOC 2 readiness against the Trust Services Criteria: map the security posture to the criteria, inventory policies and evidence, and produce a readiness dashboard and remediation plan. Use for \"SOC 2 review\", \"SOC 2 readiness\", \"audit readiness\", or after a /security-audit."
 metadata:
   lane: operate
-  paired_runbook: runbooks/soc2-readiness-review.md
 ---
 
 Assess SOC 2 readiness: map the security posture to the Trust Services Criteria, inventory policies and evidence, and produce a readiness dashboard plus a before-vs-with-the-auditor remediation plan. This is the compliance-framed companion to `/security-audit` (which gathers the raw posture).
