@@ -1517,8 +1517,8 @@ def execute_event_block(
   ones in the period it is closing, so an event whose entries span periods
   publishes each with its own period.
 
-  A ``native`` connection (or none) is a no-op. Otherwise each unpublished
-  draft Entry posts as its own QB JournalEntry, recorded in
+  A ``native`` or ``shadow`` connection (or none) is a no-op. Otherwise each
+  unpublished draft Entry posts as its own QB JournalEntry, recorded in
   ``metadata.qb_entry_ids`` and promoted to ``posted``; once no draft
   remains the event goes ``fulfilled``. On rejection what landed is kept,
   ``metadata.last_outbound_error`` is stamped, and the status is unchanged.

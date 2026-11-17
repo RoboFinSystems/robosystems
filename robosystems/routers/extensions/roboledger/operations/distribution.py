@@ -501,7 +501,7 @@ async def delete_publish_list_op(
   summary="Add Members to Publish List",
   description=(
     "Add one or more recipient graphs to a publish list. Targets must "
-    "exist and have the same extension enabled (e.g. roboledger). "
+    "exist and carry the roboledger or roboinvestor extension. "
     "Self-graph rejected (422); already-member rejected (409)."
   ),
   tags=[_OP_TAG],

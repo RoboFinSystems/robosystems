@@ -1196,8 +1196,9 @@ def _mint_periods(
 def _mint_units(facts: list[Any]) -> tuple[list[BundleUnit], dict[str, str]]:
   """Dedupe facts' units; returns ``(units, fact_id -> unit ref)``.
 
-  Three-letter upper-case codes become ``iso4217:``; anything else passes
-  through for the encoder to prefix. Nonnumeric facts get no unit.
+  Three-letter upper-case codes become ``iso4217:``; anything else (``shares``,
+  ``pure``) passes through unprefixed, and the XBRL 2.1 encoder writes the
+  measure as given. Nonnumeric facts get no unit.
   """
   seen: dict[str, str] = {}
   units: list[BundleUnit] = []

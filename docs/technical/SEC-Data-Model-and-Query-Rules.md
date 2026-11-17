@@ -2,7 +2,7 @@
 
 This page is for integrators querying the hosted `sec` graph — the shared repository of public-company XBRL filings — with Cypher. It describes the node and relationship model, the four rules that decide whether a number read from it is right, and a set of worked queries that follow them.
 
-**Quick Start:** Before writing Cypher, try the ready-made views: `financial-statement-analysis` returns a company's statement by ticker, and `build-fact-grid` pivots facts across companies and periods. Both already apply the rules on this page. When you do write Cypher, filter `Fact {has_dimensions: false}`, name each filer's element qnames, pin the `Period` shape, and `RETURN DISTINCT` from an `Entity` anchor.
+**Quick Start:** Before writing Cypher, try the ready-made views: `financial-statement-analysis` returns a company's statement by ticker, and `build-fact-grid` pivots facts across companies and periods. Both already apply the rules on this page. When you do write Cypher, filter `Fact {has_dimensions: false}`, name each filer's element qnames, pin the `Period` shape, `RETURN DISTINCT` from an `Entity` anchor, and return the number as `f.value`.
 
 > **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
@@ -185,7 +185,7 @@ Two properties are added during processing, beyond what the filings carry:
 
 ## The Four Rules
 
-A query that ignores one of these returns a plausible wrong number, not an error. The platform's MCP server gives the same four to every client connected to `sec`.
+A query that ignores one of these returns a plausible wrong number, not an error. The platform's MCP server gives the same four to every client connected to `sec`, together with the rule that follows them on which property to read a number from.
 
 ### Rule 1: Consolidated Facts Only — `Fact {has_dimensions: false}`
 
@@ -209,7 +209,7 @@ MATCH (ent:Entity {ticker: $ticker})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions
       -[:FACT_HAS_ELEMENT]->(e:Element),
       (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'})
 WHERE e.qname IN $revenue_qnames AND p.end_date = $fy_end
-RETURN DISTINCT e.qname AS qname, f.numeric_value AS revenue
+RETURN DISTINCT e.qname AS qname, f.value AS revenue
 ```
 
 When you want the breakdown, filter `has_dimensions: true` and return the `Dimension` beside the value — and don't add the rows back to the total.
@@ -225,7 +225,7 @@ MATCH (ent:Entity)<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})
       -[:FACT_HAS_ELEMENT]->(e:Element {qname: 'us-gaap:Revenues'}),
       (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'})
 WHERE ent.ticker IN $tickers
-RETURN DISTINCT ent.ticker AS ticker, p.end_date AS end_date, f.numeric_value AS revenue
+RETURN DISTINCT ent.ticker AS ticker, p.end_date AS end_date, f.value AS revenue
 ```
 
 In a three-company peer group, two of the three tag revenue `RevenueFromContractWithCustomerExcludingAssessedTax`, so this returned revenue for one company and nothing for the other two.
@@ -239,7 +239,7 @@ MATCH (ent:Entity)<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})
 WHERE ent.ticker IN $tickers
   AND e.qname IN ['us-gaap:Revenues', 'us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax']
 RETURN DISTINCT ent.ticker AS ticker, e.qname AS qname, p.end_date AS end_date,
-       f.numeric_value AS revenue
+       f.value AS revenue
 ```
 
 Get each filer's qnames from `resolve-element` with its `ticker`, and read the labels. Return `e.qname` beside the value: a filing can report more than one of the listed elements — a subtotal and one of its components, for instance — so check that each row is the line you mean. `Element.canonical_concept` reaches only the standard elements, so it misses a filer whose line is its own extension. In the examples on this page, `$revenue_qnames` and `$qnames` are lists resolved this way.
@@ -255,7 +255,7 @@ MATCH (ent:Entity {ticker: $ticker})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions
       -[:FACT_HAS_ELEMENT]->(e:Element),
       (f)-[:FACT_HAS_PERIOD]->(p:Period)
 WHERE e.qname IN $revenue_qnames
-RETURN DISTINCT p.end_date AS end_date, f.numeric_value AS revenue
+RETURN DISTINCT p.end_date AS end_date, f.value AS revenue
 ORDER BY end_date DESC
 ```
 
@@ -268,7 +268,7 @@ MATCH (ent:Entity {ticker: $ticker})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions
       -[:FACT_HAS_ELEMENT]->(e:Element),
       (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'quarterly'})
 WHERE e.qname IN $revenue_qnames
-RETURN DISTINCT p.start_date AS start_date, p.end_date AS end_date, f.numeric_value AS revenue
+RETURN DISTINCT p.start_date AS start_date, p.end_date AS end_date, f.value AS revenue
 ORDER BY end_date DESC
 ```
 
@@ -284,7 +284,7 @@ The same fact reaches a query by more than one path: a figure sits in more than 
 MATCH (s:Structure {canonical_type: 'income_statement'})-[:STRUCTURE_HAS_FACT_SET]->(fs:FactSet)
       -[:FACT_SET_CONTAINS_FACT]->(f:Fact {has_dimensions: false})-[:FACT_HAS_ENTITY]->(ent:Entity {ticker: $ticker}),
       (f)-[:FACT_HAS_ELEMENT]->(e:Element)
-RETURN e.qname, f.numeric_value
+RETURN e.qname, f.value
 ```
 
 This leads with a node that tens of thousands of filings share, so it scans all of them before reaching the one company, and times out. Had it finished, it would have repeated rows.
@@ -299,12 +299,16 @@ MATCH (ent:Entity {ticker: $ticker})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions
       (s:Structure {canonical_type: 'income_statement'})-[:STRUCTURE_HAS_FACT_SET]->(fs)
 WHERE f.numeric_value IS NOT NULL
 RETURN DISTINCT e.qname AS qname,
-       p.end_date AS end_date, f.numeric_value AS value
+       p.end_date AS end_date, f.value AS value
 ORDER BY end_date DESC
 LIMIT 40
 ```
 
 `DISTINCT` collapses identical rows. If a later filing revised a figure, both values come back; anchor on one `Report` to read a figure as that filing reported it. Write every joined pattern into a single `MATCH` separated by commas — separate `MATCH` clauses on the same node can time out — and always end with `LIMIT`. Alias returned columns (`AS value`): an unaliased expression after `DISTINCT` comes back under a column name that includes the keyword.
+
+### Read the Number From `f.value`
+
+Return a fact's number as `f.value`, its exact text as filed. Keep `f.numeric_value` for the filter `f.numeric_value IS NOT NULL`, which keeps the numeric facts, not for the number you read. For a sum, a difference or a ratio, return the `f.value`s and compute from them. The worked queries below follow it.
 
 ## Worked Queries
 
@@ -333,7 +337,7 @@ MATCH (r:Report {identifier: $report_id})-[:REPORT_HAS_FACT]->(f:Fact {has_dimen
       (s:Structure {canonical_type: 'income_statement'})-[:STRUCTURE_HAS_FACT_SET]->(fs)
 WHERE f.numeric_value IS NOT NULL
 RETURN DISTINCT e.qname AS qname,
-       p.start_date AS start_date, p.end_date AS end_date, f.numeric_value AS value
+       p.start_date AS start_date, p.end_date AS end_date, f.value AS value
 ORDER BY end_date DESC, qname
 LIMIT 60
 ```
@@ -348,7 +352,7 @@ MATCH (ent:Entity {ticker: $ticker})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions
       (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'quarterly'})
 WHERE e.qname IN $qnames AND f.numeric_value IS NOT NULL
 RETURN DISTINCT e.qname AS qname, p.start_date AS start_date, p.end_date AS end_date,
-       f.numeric_value AS value
+       f.value AS value
 ORDER BY end_date DESC
 LIMIT 8
 ```
@@ -366,7 +370,7 @@ WHERE ent.ticker IN $tickers
   AND p.end_date >= $since
   AND f.numeric_value IS NOT NULL
 RETURN DISTINCT ent.ticker AS ticker, e.qname AS qname,
-       p.end_date AS end_date, f.numeric_value AS value
+       p.end_date AS end_date, f.value AS value
 ORDER BY ticker, end_date DESC, qname
 LIMIT 50
 ```
@@ -384,7 +388,7 @@ WHERE p.end_date = $as_of
   AND e.qname IN $qnames
   AND f.numeric_value IS NOT NULL
 RETURN DISTINCT e.qname AS qname,
-       f.numeric_value AS value, u.measure AS unit
+       f.value AS value, u.measure AS unit
 ORDER BY qname
 LIMIT 20
 ```
@@ -402,8 +406,8 @@ MATCH (ent:Entity {ticker: $ticker})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions
       (f)-[:FACT_HAS_DIMENSION]->(d:Dimension)
 WHERE e.qname IN $revenue_qnames AND p.end_date = $fy_end
 RETURN DISTINCT e.qname AS qname, d.axis AS axis, d.member AS member,
-       f.numeric_value AS value, f.dimension_count AS dimensions
-ORDER BY axis, value DESC
+       f.value AS value, f.dimension_count AS dimensions
+ORDER BY axis, member
 LIMIT 50
 ```
 

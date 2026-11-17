@@ -150,7 +150,7 @@ For each forward month, in order, the engine:
 1. **Builds the income statement.** Each detail line takes its value from its one owner for the month: a line value if one is set, else its driver rule (evaluated in dependency order) or its growth rate, else the prior month's value carried forward. [Schedules](Information-Blocks.md) keep running, so depreciation and amortization continue at their scheduled amounts and stop when the schedule ends. The calc-DAG subtotals are then derived down to net income.
 2. **Rolls the balance sheet.** Receivables and payables follow DSO and DPO. Schedules move the assets they belong to. Net income rolls into retained earnings. Cash is the balancing figure, so assets equal liabilities plus equity by construction.
 3. **Derives the cash flow** by the indirect method, from the balance-sheet changes and net income, reconciled to the change in cash.
-4. **Verifies the month** with the rules that check actual statements: subtotals foot, the balance sheet balances, the cash flow ties to cash.
+4. **Verifies the month** with the rules that check actual statements, so every subtotal must foot. The balance sheet balances and the cash flow ties to cash by construction: cash is the balancing line of the balance-sheet roll, and the cash flow's reconciling line takes whatever the derived flows leave against the change in cash.
 
 Each month writes one income-statement, balance-sheet and cash-flow FactSet stamped with the scenario. Re-running replaces them.
 

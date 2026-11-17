@@ -134,7 +134,10 @@ Operators query period membership through `Entry.posting_date` ranges.
 ## Extensions
 
 Three extension modules exist. An extension's schema lands alongside its OLTP
-models and adapters, never as a speculative placeholder.
+models and adapters. One exception: roboinvestor's `Trade`, `Benchmark` and
+`MarketData` (and their relationships) are declared ahead of their OLTP models
+and are not materialized — the materializer lists them as schema-declared,
+not yet wired.
 
 | Module | Nodes | Domain |
 | --- | --- | --- |
@@ -185,8 +188,8 @@ QuickBooks ELT pipeline, and a dedicated frontend.
 
 ### RoboInvestor
 
-Portfolio management, securities, and position tracking, with lot-level
-positions and cross-graph report sharing (investor access to ledger reports).
+Portfolio management, securities, and position tracking, with holdings-level
+positions (one active position per portfolio and security) and cross-graph report sharing (investor access to ledger reports).
 Its product stack: OLTP models in the `extensions` database, an operations
 kernel at `operations/roboinvestor/{reads,commands}/`, a command operations
 router, 7 GraphQL fields, and a dedicated frontend.
@@ -219,7 +222,7 @@ resolved by FastAPI dependencies before the handler runs.
 | `ROBOLEDGER_ENABLED` | Mounts the roboledger operations router; adds `LedgerQuery` to the GraphQL schema |
 | `ROBOINVESTOR_ENABLED` | Mounts the roboinvestor operations router; adds `InvestorQuery` |
 | `EXTENSIONS_GRAPHQL_ENABLED` | Kill switch for `/extensions/{graph_id}/graphql` (default `true`) |
-| `FACT_GRID_ENABLED` | Gates the graph-backed fact-grid view independently of roboledger, so SEC-only deployments can use it |
+| `FACT_GRID_ENABLED` | Mounts the analytical views router — `build-fact-grid`, `financial-statement-analysis`, `disclosures`, `information-block`, `describe-filing`, `search-text`, `read-text` — independently of roboledger, so SEC-only deployments can use them |
 | `EXTENSIONS_ENABLED` | Derived (`ROBOLEDGER_ENABLED or ROBOINVESTOR_ENABLED`); controls the extensions DB engine |
 
 The schema is composed at class-construction time from the enabled domain

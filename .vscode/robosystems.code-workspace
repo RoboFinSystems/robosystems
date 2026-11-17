@@ -15,18 +15,6 @@
     {
       "name": "roboinvestor-app",
       "path": "../../roboinvestor-app"
-    },
-    {
-      "name": "robosystems-mcp-client",
-      "path": "../../robosystems-mcp-client"
-    },
-    {
-      "name": "robosystems-typescript-client",
-      "path": "../../robosystems-typescript-client"
-    },
-    {
-      "name": "robosystems-python-client",
-      "path": "../../robosystems-python-client"
     }
   ]
 }

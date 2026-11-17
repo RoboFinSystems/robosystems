@@ -26,7 +26,7 @@ POST /v1/graphs/{graph_id}/operations/{operation_name}                  # graph 
 POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{operation_name}   # extension domains
 ```
 
-The first carries graph lifecycle and content writes (`create-subgraph`, `create-backup`, `materialize`, `create-file-upload`, `ingest-file`, and the rest). The second carries the RoboLedger and RoboInvestor command writes (`create-event-block`, `close-period`, `create-security`) and the analytical view operations (`build-fact-grid`, `financial-statement-analysis`), which are read-only but ride the same envelope.
+The first carries graph lifecycle and content writes (`create-subgraph`, `create-backup`, `materialize`, `create-file-upload`, `ingest-file`, and the rest). The second carries the RoboLedger and RoboInvestor command writes (`create-event-block`, `close-period`, `create-security`) and the analytical view operations (`build-fact-grid`, `financial-statement-analysis`, `disclosures`, `information-block`, `describe-filing`, `search-text`, `read-text`), which are read-only but ride the same envelope.
 
 In both, `graph_id` is a URL path parameter, authentication is the `X-API-Key` header, and access to the graph is checked before the operation runs. The body is JSON. Reads are not operations: they are REST `GET`s under `/v1` or GraphQL at `/extensions/{graph_id}/graphql`.
 
@@ -119,7 +119,7 @@ Nothing was written: a synchronous operation that raises rolls back its whole un
 
 ## Idempotency-Key
 
-Every operation accepts an optional `Idempotency-Key` header. Without one, a retried POST runs the operation again. With one, the platform recognises the retry:
+Every operation accepts an optional `Idempotency-Key` header. Without one, a retried POST runs the operation again. With one, the platform recognises the retry, except on the analytical view operations, which accept the key and ignore it: a read has nothing to deduplicate, so each call runs fresh.
 
 | Situation | Response |
 | --- | --- |

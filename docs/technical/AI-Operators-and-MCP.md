@@ -378,7 +378,7 @@ The Operator endpoint runs a model-driven executor against a graph. It is mounte
 | `extended` | ≤ 12 | 300 s | `high` |
 | `streaming` | ≤ 8 | 120 s | `medium` |
 
-Effort controls how hard the model thinks and how many tool calls it chooses to make. It is sent only to models that support it, which today are Claude Sonnet 5.5 (the `balanced` tier, the platform default) and Claude Opus 5.5 (the `quality` tier); on other models the request is unchanged. The author operator (below) replaces the tool-call budget with a fixed 25-step backstop, since a write plan cut off partway would leave some changes made and some not.
+Effort controls how hard the model thinks and how many tool calls it chooses to make. It is sent only to models that support it, which today are Claude Haiku 5.5 (the `economy` tier), Claude Sonnet 5.5 (the `balanced` tier, the platform default) and Claude Opus 5.5 (the `quality` tier); on other models the request is unchanged. The author operator (below) replaces the tool-call budget with a fixed 25-step backstop, since a write plan cut off partway would leave some changes made and some not.
 
 **Where a run executes.** Every operator run executes on the background worker. By default an operator `POST` queues the run and answers **202** with the operation's `_links` (`stream`, `status`, `cancel`); follow `stream` for progress and the result. `?mode=sync` waits up to 50 seconds and answers **200** with the `OperatorResponse` when the run finishes in time, or 202 with the links when it is still going. `async`, `stream` and `auto` are accepted and behave like the default.
 

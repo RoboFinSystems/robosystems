@@ -52,7 +52,8 @@ class StructureResponse(BaseModel):
 
   `block_type` drives presentation: 'balance_sheet',
   'income_statement', 'cash_flow_statement', 'equity_statement',
-  'schedule', 'chart_of_accounts', 'coa_mapping', 'rollforward', etc.
+  'schedule', 'forecast', 'metric', 'reconciliation', 'chart_of_accounts',
+  'coa_mapping', etc.
   """
 
   id: str

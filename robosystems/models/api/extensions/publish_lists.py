@@ -79,8 +79,9 @@ class AddMembersRequest(BaseModel):
   """Add one or more recipient graphs to a publish list.
 
   Each `target_graph_id` must reference an existing graph in the
-  same deployment that has the same extension enabled (e.g.,
-  roboledger). Adding your own graph is rejected (422). Adding a
+  same deployment that can receive a share — one carrying the
+  roboledger or roboinvestor extension. Adding your own graph is
+  rejected (422). Adding a
   graph that is already a member is rejected (409).
   """
 
@@ -89,8 +90,8 @@ class AddMembersRequest(BaseModel):
     min_length=1,
     max_length=100,
     description=(
-      "Graph IDs to add. Each must exist and have the same extension "
-      "(roboledger / roboinvestor) enabled. Self-graph rejected."
+      "Graph IDs to add. Each must exist and carry the roboledger or "
+      "roboinvestor extension. Self-graph rejected."
     ),
   )
 

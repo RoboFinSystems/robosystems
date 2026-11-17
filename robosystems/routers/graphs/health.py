@@ -42,7 +42,7 @@ def _resources_exposable(graph_id: str, graph_tier: str) -> bool:
   from robosystems.config.graph_tier import GraphTierConfig
   from robosystems.middleware.graph.utils import MultiTenantUtils
 
-  # Subgraph-aware: sec_historical is served from the shared master like sec.
+  # Subgraph-aware: a shared repository's subgraph is shared like its parent.
   if MultiTenantUtils.is_shared_repository_or_subgraph(graph_id):
     return False
   return GraphTierConfig.get_databases_per_instance(graph_tier) == 1

@@ -102,7 +102,7 @@ async def get_connection_options(
           "credit_card",
           "tier0_suggestions",
         ],
-        sync_frequency="On-demand; a 60-day incremental window",
+        sync_frequency="On-demand or scheduled daily; a 60-day incremental window",
         data_types=["Accounts", "Transactions", "Treasury", "Cards"],
         setup_instructions=(
           "Initialize a chart of accounts first (or sever a QuickBooks "
@@ -143,7 +143,9 @@ async def get_connection_options(
           "tier0_suggestions",
           "multi_institution",
         ],
-        sync_frequency="On-demand; each sync continues from the last one",
+        sync_frequency=(
+          "On-demand or scheduled daily; each sync continues from the last one"
+        ),
         data_types=["Accounts", "Transactions", "Cards"],
         setup_instructions=(
           "Initialize a chart of accounts first (or sever a QuickBooks "

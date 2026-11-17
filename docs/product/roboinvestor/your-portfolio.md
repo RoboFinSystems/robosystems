@@ -26,7 +26,7 @@ A company that wants to share reports with you needs this graph's ID. It is on t
 
 When a portfolio company keeps its books in RoboLedger, you can record its graph ID on the security, when you add it or later with the pencil beside it (**Link Security**). The two graphs stay separate.
 
-The company decides where its reports go, by adding your graph to a publish list. The link is how a report meets the holding: when that company first shares a report with this graph, every security carrying its graph ID is attached to it. A graph ID you add after that first share is attached the next time the company shares. See [Reports shared with you](reports-you-receive.md).
+The company decides where its reports go, by adding your graph to a publish list. The link is how a report meets the holding: when that company first shares a report with this graph, every security carrying its graph ID is attached to it. A security you add with its graph ID after that first share is attached at once. A graph ID you add to an existing security later is attached the next time the company shares. See [Reports shared with you](reports-you-receive.md).
 
 You do not need the link to track a position. Use it when both sides are on RoboSystems.
 

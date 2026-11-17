@@ -115,9 +115,10 @@ Rendering runs **synchronous footing checks** at the moment a statement is produ
 
 - `Assets = Liabilities + Equity`
 - `Net Income = Revenue − Expenses`
-- The cash-flow statement foots (operating + investing + financing reconciles to the change in cash)
+- The cash-flow statement foots (operating + investing + financing reconciles to the change in cash), and rolls forward: cash at the beginning of the period plus the net change equals cash at the end
+- The statement of equity rolls forward: each beginning balance plus the changes beneath it equals its ending balance (the parent's capital, and a group's noncontrolling interest beside it)
 
-Guard-rail results surface in the `validation` block of a `RenderingLite` payload (`passed`, `status`, `checks`, `failures`, `warnings`) and, with the same shape, on saved-report statements and the live statement. Every check runs on every rendered column; on a comparative statement each failure and warning is prefixed with the column it was found in (`[Prior] Balance sheet does not balance …`). `status` is `passed`, `failed`, or `inconclusive` — the last means no rules exist for that block type (the statement of equity today), nothing was checked, and `passed` is `false` rather than vacuously `true`.
+Guard-rail results surface in the `validation` block of a `RenderingLite` payload (`passed`, `status`, `checks`, `failures`, `warnings`) and, with the same shape, on saved-report statements and the live statement. Every check runs on every rendered column; on a comparative statement each failure and warning is prefixed with the column it was found in (`[Prior] Balance sheet does not balance …`). `status` is `passed`, `failed`, or `inconclusive` — the last means nothing was checked, because no rules exist for that block type (the comprehensive income statement today) or because no column has any activity, and `passed` is `false` rather than vacuously `true`.
 
 **Do not conflate guard rails with rule-engine verification.** Guard rails are render-time footing checks — "does this statement balance right now." Rule-engine verification (`verificationResults` / `verificationSummary` on the envelope) is a separate, persisted audit-corpus outcome. Both can assert `Assets = L + E`, but they answer different questions and run at different times.
 
@@ -131,7 +132,7 @@ The `reports` table **is** the package container. A Report row carries:
 - Two independent lifecycles:
   - **Generation** — `generation_status` moves `pending → generating → complete → published`
   - **Filing** — `filing_status` moves `draft → under_review → filed → archived`, with `filed_at` / `filed_by`
-- A **restatement chain** via `supersedes_id` / `superseded_by_id`, so a corrected report links to the one it replaces
+- **Restatement fields** `supersedes_id` / `superseded_by_id`, reserved for linking a corrected report to the one it replaces. No operation sets them today, so they read as null
 - Sharing provenance: `source_graph_id`, `source_report_id`, `shared_at`
 
 Package membership is **implicit in fact dual-stamping**: a Report owns FactSets (`fact_sets.report_id`), and FactSets own Facts (`facts.fact_set_id`). That dual stamp *is* the membership — there is no separate join table listing which statements belong to a report. The statement display order is fixed: Balance Sheet (1), Income Statement (2), Cash Flow (3), Equity (4), then Schedules (100).
@@ -185,9 +186,9 @@ curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
   -d '{"query": "{ informationBlock(id: \"<structure_id>\") { blockType displayName view { rendering { rows { elementName depth isSubtotal values } periods { label start end } validation { passed checks failures } } } verificationSummary { passed failed } } }"}'
 ```
 
-`informationBlock(id)` returns the **latest** FactSet — the live closing-book view. To pin a specific frozen snapshot, query `reportPackage(reportId)`, which rehydrates a saved Report as a package of rendered envelopes with each member pinned to its own FactSet.
+`informationBlock(id)` returns the **latest** FactSet — the live closing-book view. To read a saved Report, query `reportPackage(reportId)`, which rehydrates it as a package of rendered envelopes with each member pinned to its own FactSet.
 
-> **Live versus pinned reads differ.** `informationBlock(id)` always reflects current facts; `reportPackage(reportId)` reflects the facts as they were when the report was created. The snapshot unit is the FactSet, not the structure.
+> **Live versus report reads differ.** `informationBlock(id)` always reflects current facts; `reportPackage(reportId)` reflects the report's facts, which are fixed for its frozen columns and refreshed on read for a column whose period is still open (see [Columns freeze by the calendar](#the-report-is-the-package)). The snapshot unit is the FactSet, not the structure.
 
 ### Render a Live Ad-Hoc Statement
 
@@ -200,7 +201,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
   -d '{"statement_type": "income_statement", "period_type": "annual", "fiscal_year": 2026}'
 ```
 
-The cash-flow path on this surface needs at least two periods so the indirect-method deltas can be computed. For comparative graph-hypercube analysis on the SEC repo, use `financial-statement-analysis` instead.
+Each cash-flow column computes its indirect-method deltas from its own opening balances, the day before it starts, so a single period renders on its own. For comparative graph-hypercube analysis on the SEC repo, use `financial-statement-analysis` instead.
 
 ### From an MCP Client
 

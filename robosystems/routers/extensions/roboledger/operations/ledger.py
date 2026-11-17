@@ -523,9 +523,11 @@ execute_event_block_op = _registrar.register(
       "source-of-truth system (QuickBooks), each as its own JournalEntry. "
       "Records the QuickBooks ids per entry on event.metadata.qb_entry_ids "
       "and promotes the published entries to 'posted'; the event goes "
-      "'fulfilled' once no draft remains, or 'pending' on rejection (what "
-      "landed is kept). Native-policy events fast-path through with no QB "
-      "write — RoboSystems is the system of record. Only the group parent's "
+      "'fulfilled' once no draft remains. On rejection what landed is kept, "
+      "the status is unchanged and the error is stamped on "
+      "event.metadata.last_outbound_error (and returned as qb_error). "
+      "Events on 'native' or 'shadow' books pass through with no QB write. "
+      "Only the group parent's "
       "books are QuickBooks': an event on a subsidiary's books is refused."
     ),
     command=cmd_execute_event_block,

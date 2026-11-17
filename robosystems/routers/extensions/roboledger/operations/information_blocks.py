@@ -87,9 +87,10 @@ create_information_block_op = _registrar.register(
     description=(
       "Generic Information Block construction entry. `block_type` selects "
       "the registered block type; `payload` is validated against that "
-      "type's creation schema at dispatch. Schedule dispatches to the "
-      "existing Schedule machinery; statement block types raise 501 "
-      "(use create-report instead). Authoring schedules for a close? Call "
+      "type's creation schema at dispatch. Only schedule and forecast are "
+      "constructed here; the other block types raise 501 with a hint "
+      "naming their own operation (statements: create-report; disclosure "
+      "and metric structures: create-taxonomy-block). Authoring schedules for a close? Call "
       "`get-close-playbook` (mode='initiate') first — one schedule is a "
       "single debit/credit element pair, so multi-line entries become "
       "multiple schedules, and element ids must be real (discover via "
@@ -113,8 +114,10 @@ update_information_block_op = _registrar.register(
     summary="Update Information Block",
     description=(
       "Generic Information Block update entry. Dispatches by `block_type` "
-      "to the registered mutation handler. Block types whose Structures "
-      "are library-seeded and immutable (statement family) surface 501."
+      "to the registered mutation handler. Only schedule and forecast "
+      "blocks update here; the statement family (library-seeded and "
+      "immutable), disclosure, metric and reconciliation blocks surface "
+      "501 with a hint naming the operation that changes them."
     ),
     command=cmd_update_information_block,
     request_model=UpdateInformationBlockRequest,
@@ -137,8 +140,9 @@ delete_information_block_op = _registrar.register(
     description=(
       "Generic Information Block deletion entry. Returns a thin "
       "confirmation (deleted / structure_id / block_type / name). "
-      "Block types whose Structures are library-seeded cannot be "
-      "deleted per tenant and surface 501."
+      "Only schedule and forecast blocks delete here; statement, "
+      "disclosure, metric and reconciliation blocks surface 501 with a "
+      "hint naming the operation that manages them."
     ),
     command=cmd_delete_information_block,
     request_model=DeleteInformationBlockRequest,
@@ -228,16 +232,21 @@ compute_forecast_op = _registrar.register(
     summary="Compute Forecast for a Forecast Block",
     description=(
       "Walks a forecast block's driver cascade month-by-month forward "
-      "from its base period: lever-driven rs-driver Derive rules in "
-      "dependency order, carry-forward for unmodeled income-statement "
-      "lines, calc-DAG subtotals — upserting one scenario "
-      "income-statement FactSet (plus a working-capital balance-sheet "
-      "set) per forward month, all keyed by the block's scenario_id "
-      "(NULL = actuals; scenario reads pass it as a filter). Re-running "
-      "replaces each month's values. Rules with missing lever months or "
-      "unbound operands are skipped with a reason (their targets fall "
-      "back to carry-forward), never errored. Deterministic and non-AI "
-      "— no credits consumed."
+      "from its anchor (with base_anchor='seam', the default, the newest "
+      "closed month inside the horizon; with 'fixed', the block's "
+      "base_period): lever-driven rs-driver Derive rules in dependency "
+      "order, carry-forward for unmodeled income-statement lines, calc-DAG "
+      "subtotals — upserting per forward month a scenario income-statement "
+      "FactSet, a balance-sheet set (the full roll when the anchor month has "
+      "an actual balance sheet, else only the rule-driven working-capital "
+      "instants) and a derived cash-flow set when an actual one exists, all "
+      "keyed by the block's scenario_id (NULL = actuals; scenario reads "
+      "pass it as a filter). Re-running replaces each month's values. "
+      "Rules with missing lever months or unbound operands are skipped "
+      "with a reason (their targets fall back to carry-forward). Each "
+      "month's sets are verified; a month that fails halts the walk there "
+      "(halted_at), since every later month would be derived from it. "
+      "Deterministic and non-AI — no credits consumed."
     ),
     command=cmd_compute_forecast,
     request_model=ComputeForecastRequest,

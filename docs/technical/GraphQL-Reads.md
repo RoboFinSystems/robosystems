@@ -298,6 +298,8 @@ GraphQL data errors return HTTP 200 with a typed code in `extensions.code`, so c
 | `INVALID_EXPIRES_IN` | `reportDownloadUrl`'s `expiresIn` is outside 60–3600 seconds |
 | `REPORT_BUNDLE_NOT_AVAILABLE` | The report exists but has no published bundle yet |
 | `REPORT_BUNDLE_SIGNING_FAILED` | The bundle couldn't be built or its link signed, a server-side fault rather than a missing bundle |
+| `STATEMENT_TIMEOUT` | The query ran past the database's time limit for an interactive read. Narrow it (a smaller `limit`, a shorter range) or retry |
+| `INTERNAL_ERROR` | An unexpected server-side fault. The message is fixed and `extensions.requestId` identifies the request when you report it |
 
 Three failures never reach the GraphQL layer, so they carry no `extensions.code`: invalid or expired credentials are HTTP 401, and a graph you have no access to, or a subgraph id, is HTTP 403.
 

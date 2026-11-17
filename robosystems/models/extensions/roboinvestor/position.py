@@ -60,7 +60,7 @@ class Position(ExtensionsBase):
   )  # manual, report_derived, market, formula
   acquisition_date = Column(Date, nullable=True)
   disposition_date = Column(Date, nullable=True)
-  status = Column(String, nullable=False, default="active")  # active, disposed, pending
+  status = Column(String, nullable=False, default="active")  # active, disposed
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
   notes = Column(String, nullable=True)
   version = Column(Integer, nullable=False, default=1)

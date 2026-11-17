@@ -162,9 +162,9 @@ class Element(ExtensionsBase):
   # another's in the same graph. NULL for library and native elements.
   connection_id = Column(String, nullable=True)
 
-  # agent_id: shared by elements denoting the same canonical concept across
-  # tenants. aliases: alternate spellings and qname variants of that concept.
-  # embedding: 1024-dim sentence embedding for mapping similarity lookups.
+  # aliases: alternate spellings and qname variants of the concept.
+  # agent_id and embedding (a 1024-dim sentence embedding) are reserved:
+  # library rows copy them, but nothing populates or reads them yet.
   agent_id = Column(String, nullable=True)
   aliases = Column(ARRAY(String), nullable=False, default=list)
   embedding = Column(ARRAY(Float), nullable=True)

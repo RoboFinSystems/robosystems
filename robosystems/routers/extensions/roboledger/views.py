@@ -3,8 +3,9 @@ the `disclosures` / `information-block` pair, and the filing-text trio
 `describe-filing` / `search-text` / `read-text`.
 
 The first two read the LadybugDB graph; the rest run xbrlkit's tools over the
-report held whole (the published filing on a shared repository, the ledger's
-own report on a tenant). A separate router from the operations package so the
+report held whole. The section pair reads the published filing on a shared
+repository and the ledger's own report on a tenant; the filing-text trio runs
+on shared repositories only. A separate router from the operations package so the
 mount gates on `FACT_GRID_ENABLED`: a deployment serving SEC research without
 RoboLedger tenants still gets these endpoints.
 """

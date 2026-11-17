@@ -27,7 +27,7 @@ extensions database:
 └── ...
 ```
 
-Isolation is enforced by PostgreSQL via `SET search_path`. Two tenants can hold rows with the same ULID and never collide, because they live in different schemas.
+Isolation is enforced by PostgreSQL via a per-transaction `search_path` bind. Two tenants can hold rows with the same ULID and never collide, because they live in different schemas.
 
 **Almost every table in this directory is tenant-scoped.** A model with no explicit `__table_args__` schema belongs in each `kg*` schema — that absence is the signal to `provision_tenant_schema`. The exceptions are the shared tables in `framework.py`, `framework_package.py`, `framework_bridge.py`, and `bridge.py`, which declare `{"schema": "public"}`: one copy, read by every tenant.
 
@@ -36,14 +36,14 @@ Isolation is enforced by PostgreSQL via `SET search_path`. Two tenants can hold 
 ```python
 from robosystems.db.extensions import extensions_session
 
-with extensions_session("kg123abc456") as session:
-    # SET search_path TO kg123abc456, public is applied before any query.
+with extensions_session("kg0123456789abcdef") as session:
+    # Each transaction runs under SET LOCAL search_path TO kg0123456789abcdef, public.
     txns = session.query(Transaction).order_by(Transaction.date).all()
 ```
 
-The context manager validates the graph id against `_sanitize_schema` (hard stop on anything that isn't a legal PostgreSQL identifier — this is the barrier against SQL injection through a schema name), opens a session on the extensions engine, issues `SET search_path TO {schema}, public`, and commits or rolls back on exit.
+The context manager validates the graph id against `_sanitize_schema` (graph ids are interpolated into SQL, so anything that is not a well-formed graph id — `kg` followed by hex — is refused), opens a session on the extensions engine, and binds it to `{schema}, public` with `bind_search_path`. The bind is a `SET LOCAL search_path`, re-applied at the start of every transaction from an `after_begin` listener, so it holds across commits and never lingers on a pooled connection. It fails closed: a tenant schema that does not exist raises `invalid_schema_name` on the first statement rather than falling through to `public`. The session commits on exit, or rolls back on an exception.
 
-**Never hand-roll a session against the extensions engine.** The `SET search_path` step is load-bearing for tenant isolation; skipping it leaks one tenant's writes into another's schema.
+**Never hand-roll a session against the extensions engine.** The search-path bind is load-bearing for tenant isolation; use `extensions_session` (or `bind_search_path` on a session you were handed).
 
 ### Schema provisioning
 
@@ -52,8 +52,8 @@ A graph gets its tenant schema when it is created: `GraphCreationService` calls 
 ```python
 from robosystems.db.extensions import provision_tenant_schema
 
-provision_tenant_schema("kg123abc456")
-# CREATE SCHEMA kg123abc456, then create every table registered on
+provision_tenant_schema("kg0123456789abcdef")
+# CREATE SCHEMA kg0123456789abcdef, then create every table registered on
 # ExtensionsBase.metadata that doesn't declare its own schema.
 ```
 
@@ -94,7 +94,7 @@ Top-level files mirror `schemas/base.py` — **base ontology concepts** applicab
 
 ### RoboInvestor (`roboinvestor/`)
 
-`portfolio.py`, `position.py` (lot-level), `security.py`.
+`portfolio.py`, `position.py` (holdings: one active position per portfolio and security, enforced by a partial unique index), `security.py`.
 
 ## Domain notes
 

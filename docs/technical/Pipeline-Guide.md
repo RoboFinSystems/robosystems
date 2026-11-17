@@ -53,7 +53,7 @@ QB API → Parquet → dbt-duckdb → Extensions PostgreSQL → (Pattern C) → 
 - **Used for**: QuickBooks, and the model for a self-hosted fork's API-based `custom_*` adapters. A custom source on a platform-operated deployment is an integration instead — see [Adding Custom Data Sources](#adding-custom-data-sources)
 - **Assets** (job `qb_sync`): `qb_extract` pulls the QuickBooks API into raw Parquet in a per-graph work directory; `qb_transform` runs the dbt project (`adapters/quickbooks/dbt/`) over it with dbt-duckdb, producing the ledger's OLTP tables in a DuckDB file; `qb_load` upserts those rows into the graph's schema in the extensions database (`operations/extensions/loader.py`) and marks the graph stale
 - **Why**: QuickBooks data becomes ledger rows — events, entries, agents — in the same PostgreSQL schema the ledger's own writes use, so reads, close and reconciliations see one book. The graph is a projection of that schema, rebuilt by Pattern C
-- **Trigger**: On demand — a sync request (`POST /v1/graphs/{graph_id}/connections/{connection_id}/sync`). There is no schedule
+- **Trigger**: On demand — a sync request (`POST /v1/graphs/{graph_id}/connections/{connection_id}/sync`) — and once a day from the hourly `scheduled_connection_sync_job` sweep, which syncs each connection with `auto_sync_enabled` on whose last sync is a day old (`CONNECTION_SYNC_INTERVAL_HOURS`, default 24)
 - **dbt provides**: SQL-based transforms, testing, documentation
 
 ### Bank feeds (Mercury, Plaid)
@@ -65,7 +65,7 @@ Bank API → capture into the Inbox (extensions PostgreSQL) → (Pattern C) → 
 - **Off by default**: each feed is behind its own flag (`CONNECTION_MERCURY_ENABLED`, `CONNECTION_PLAID_ENABLED`) and needs its provider credentials in the deployment's secret
 - **One asset each**: `mercury_feed` (job `mercury_sync`) and `plaid_feed` (job `plaid_sync`) pull the feed, link or create a chart account per bank account, and capture each posted transaction as an event in the ledger's Inbox with a suggested account. No dbt and no DuckDB; the shared contract lives in `adapters/bank_feed/`
 - **Nothing posts on capture**: a captured line reaches the books only once it is classified and committed. The sync marks the graph stale, and Pattern C carries the change into the graph
-- **Trigger**: On demand, the same sync request as QuickBooks
+- **Trigger**: On demand, the same sync request as QuickBooks, and the same daily scheduled sweep
 
 ### Pattern C: OLTP-Based (Extensions Materialization)
 

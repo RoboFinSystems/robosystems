@@ -18,7 +18,7 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
   {
     "name": "ladybug-standard",
     "display_name": "Standard",
-    "description": "Dedicated infrastructure with subgraph support - AI controller layer for one company's books, or a reporting group's",
+    "description": "Dedicated infrastructure with subgraph support - for one company's books, or a reporting group's",
     "base_price_cents": 9900,  # $99/month
     "monthly_credit_allocation": 8000,  # ~200 agent calls/month
     "backup_downloads_per_month": 10,
@@ -160,7 +160,7 @@ class BillingConfig:
     """Resolve a plan's internal name to its human-readable display name.
 
     For graphs: "ladybug-standard" -> "Standard"
-    For repos:  "sec-advanced"     -> "SEC EDGAR Filings - Pro"
+    For repos:  "sec-advanced"     -> "SEC EDGAR Filings - Advanced"
 
     Falls back to the raw plan name when no display mapping is found.
     """

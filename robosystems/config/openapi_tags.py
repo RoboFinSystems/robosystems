@@ -110,7 +110,7 @@ MAIN_API_TAGS = [
   },
   {
     "name": "RoboInvestor",
-    "description": "📈 RoboInvestor operations - Named commands for portfolio management writes and analytical views",
+    "description": "📈 RoboInvestor operations - Named commands for portfolio and securities writes",
   },
   # ── Monitor & operate ─────────────────────────────────────────────────────
   {

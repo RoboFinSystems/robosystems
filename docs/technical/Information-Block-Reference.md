@@ -32,6 +32,7 @@ Names below are the REST and MCP spelling (snake_case). GraphQL serves the same 
 | `category` | string | The registry grouping: `Close`, `Reporting`, or `Planning`. |
 | `taxonomy_id` | string \| null | The taxonomy the Structure belongs to. |
 | `taxonomy_name` | string \| null | Its display name. |
+| `entity_id` | string \| null | The entity whose books the envelope reads. A schedule, reconciliation or forecast is one entity's own and always reads its owner's; a block shared by the group (statements, metrics) reads the entity asked for, else the group parent. Null on the library and on a graph with no entity yet. |
 | `disclosure_id` | string \| null | Qname of the named Disclosure the block corresponds to (e.g. `disclosures:BalanceSheet`), when one is mapped. Null for tenant-authored blocks without one. |
 | `information_model` | object | `concept_arrangement` and `member_arrangement`. See [Information Model Vocabulary](#information-model-vocabulary). |
 | `artifact.topic` | string \| null | The block's human-readable topic. |
@@ -52,7 +53,7 @@ Names below are the REST and MCP spelling (snake_case). GraphQL serves the same 
 
 **Element** (`elements[]`): `id`, `qname` (null for tenant chart-of-accounts accounts), `name`, `code`, `element_type`, `is_abstract`, `is_monetary`, `balance_type` (`debit` / `credit`), `period_type` (`instant` / `duration`), `item_type` (the value-domain format family), `documentation`.
 
-**Connection** (`connections[]`): `id`, `from_element_id`, `to_element_id`, `association_type` (`presentation`, `calculation`, `mapping`, `equivalence`, `general-special`, `essence-alias`), `arcrole`, `order_value`, `weight`, and `classifications[]` (each `id`, `category`, `identifier`, `is_primary`, `confidence`, `source`).
+**Connection** (`connections[]`): `id`, `from_element_id`, `to_element_id`, `association_type` (`presentation`, `calculation`, `mapping`, `equivalence`, `general-special`, `essence-alias`, `definition`, `derivation`, `has-part`), `arcrole`, `order_value`, `weight`, and `classifications[]` (each `id`, `category`, `identifier`, `is_primary`, `confidence`, `source`).
 
 **Fact** (`facts[]`):
 
@@ -257,12 +258,12 @@ The rendering payload (`rows`, `periods`, `validation`, `unmapped_count`) is des
 
 GraphQL at `POST /extensions/{graph_id}/graphql`:
 
-- `informationBlock(id, scenarioId, series, seriesHistory, seriesForecast)`: one envelope. `scenarioId` selects a forecast scenario (omit for actuals). `series: true` renders a statement block as its whole monthly series; non-statement types ignore it. `seriesHistory` / `seriesForecast` cap the series at the last N actual and first N forecast columns.
-- `informationBlocks(blockType, category, limit, offset, scenarioId)`: a list; filters combine as AND; `limit` defaults to 50. Every row is a full envelope, built one block at a time — the read for atoms, not for a picker.
+- `informationBlock(id, scenarioId, series, seriesHistory, seriesForecast, entityId)`: one envelope. `entityId` names whose books a block shared by the group reads (omit for the group parent). `scenarioId` selects a forecast scenario (omit for actuals). `series: true` renders a statement block as its whole monthly series; non-statement types ignore it. `seriesHistory` / `seriesForecast` cap the series at the last N actual and first N forecast columns.
+- `informationBlocks(blockType, category, limit, offset, scenarioId, entityId)`: a list; filters combine as AND; `limit` defaults to 50. Every row is a full envelope, built one block at a time — the read for atoms, not for a picker.
 - `informationBlockSummaries(blockType, category, limit, offset, scenarioId, entityId)`: the same rows, filters, order and page as identities and counts (`factCount`, the facts in scope for the entity read; `connectionCount`), read in one query. A list of a hundred blocks returns in the time one envelope builds; `factCount > 0` is the test for a block whose envelope carries facts — a library-seeded structure variant carries none, nor does a schedule that has run off into history.
 - `reportPackage(reportId)`: a saved Report's metadata plus `items[]`, each with `fact_set_id`, `structure_id`, `display_order`, and the pinned `block` envelope.
 
-MCP: `get-information-block` (`id`, `scenario_id`, `series`, `series_history`, `series_forecast`, `include_provenance` — the facts' own descriptors and `frozen_at` ride only when asked) and `list-information-blocks` (`block_type`, `category`, `limit`, `offset`, `include_atoms`, `scenario_id`). The list's default mode is the summaries read; `include_atoms: true` builds every envelope.
+MCP: `get-information-block` (`id`, `scenario_id`, `series`, `series_history`, `series_forecast`, `entity_id`, `include_provenance` — the facts' own descriptors and `frozen_at` ride only when asked) and `list-information-blocks` (`block_type`, `category`, `limit`, `offset`, `include_atoms`, `scenario_id`, `entity_id`). The list's default mode is the summaries read; `include_atoms: true` builds every envelope.
 
 ## Gotchas
 

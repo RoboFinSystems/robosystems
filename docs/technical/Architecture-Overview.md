@@ -298,8 +298,8 @@ RoboSystems is built on **LadybugDB**, a high-performance embedded graph databas
 **Enterprise Features:**
 - **Multi-Tenant Isolation**: Separate databases per customer with memory and storage isolation
 - **Subgraph Support**: Isolated workspaces within a parent graph for AI memory, testing, and team collaboration (see [Subgraphs](#subgraphs-workspaces))
-- **Automated Backups**: EBS snapshots with configurable retention
-- **Auto-Scaling**: EC2 writer clusters scale based on demand
+- **Automated Backups**: Nightly dumps of every customer graph and subgraph to S3, plus on-demand `create-backup`, with retention set per tier
+- **Capacity**: One graph per writer instance; a new graph is placed on a free instance and allocation fails fast when none is free, since writer capacity is added deliberately rather than on demand. Shared-repository read replicas scale with load
 
 **Pluggable Architecture:**
 Engines sit behind a common interface (`graph_api/interfaces/engine.py`), so alternative implementations are possible. LadybugDB is the only one today.
@@ -358,7 +358,7 @@ High-performance data ingestion pipeline bridging raw data to LadybugDB:
 
 - **Staging Tables**: DuckDB materialized tables for data validation and transformation
 - **File-Based Workflow**: Users upload Parquet → DuckDB validates → LadybugDB ingests
-- **Native Integration**: Direct DuckDB → LadybugDB materialization via database extensions (no intermediate files)
+- **Native Integration**: DuckDB rows stream into LadybugDB as Arrow record batches through `COPY`, with no database extension and no intermediate files
 - **Schema-Driven**: Tables auto-created from graph schema DDL
 - **S3 Integration**: Direct S3 file access via httpfs extension
 - **SQL Preview**: Query staged data with full SQL before graph materialization

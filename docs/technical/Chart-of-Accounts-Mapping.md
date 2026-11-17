@@ -49,7 +49,7 @@ export GRAPH_ID=kg...
 A mapping has two separate measurements, and a mapping can do well on one and badly on the other:
 
 - **Coverage.** How many active, non-abstract chart-of-accounts elements have a mapping arc at all.
-- **Renderability.** Whether each arc's target is reachable from a statement Network under the active Reporting Style. An arc whose target isn't reachable is **unreachable**. The mapping is durable, but the renderer never walks to it, so its balance is missing from the statements.
+- **Renderability.** Whether each arc's target walks up the `rs-gaap` calculation network to a statement total: total assets, total liabilities and equity, net income, or the net change in cash. The walk also follows the net property, plant and equipment line the renderer builds from its gross cost and accumulated depreciation, and it does not depend on the Reporting Style. An arc whose target reaches none of them is **unreachable**. The mapping is durable, but no statement total rolls it up, so its balance is missing from the statements.
 
 A chart can be 100% covered and still produce a thin income statement or an unbalanced balance sheet, because some accounts are mapped where no statement looks. Read both:
 
@@ -60,9 +60,9 @@ curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
   -d '{"query": "{ mappingCoverage(mappingId: \"'$MAPPING_ID'\") { totalCoaElements mappedCount unmappedCount coveragePercent highConfidence mediumConfidence lowConfidence manualConfidence unreachableCount unreachable { coaCode coaName targetQname } } }"}'
 ```
 
-`{ mappings { structures { id name } } }` returns the mapping structure id. `manualConfidence` counts arcs written without a confidence score. The MCP `get-mapping-summary` returns the same numbers, with that count as its `manual` bucket.
+`{ mappings { structures { id name } } }` returns the mapping structure id. The confidence bands count accounts, not arcs: an account mapped more than once falls in the band of its highest-confidence arc, so the four bands sum to `mappedCount`. `manualConfidence` counts the accounts whose arcs carry no confidence score. The MCP `get-mapping-summary` returns the same numbers, with that count as its `manual` bucket.
 
-An unreachable arc isn't always a mistake. A gross/contra pair (equipment at cost and its accumulated depreciation) mapped at a grain the Style presents net is a correct mapping that has no line of its own. `unreachable_count` makes such cases visible so you can decide which ones they are. The [RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough.md#the-mapping-view) shows a tenant at 27 of 27 mapped with 3 unreachable.
+`unreachable_count` makes unreachable arcs visible so you can decide which ones need a different target.
 
 `live-financial-statement` reports an `unmapped_count` on every render. That is the quickest check for unmapped accounts that carry balances. An unmapped account with postings also holds the month's close with the `unmapped_accounts` blocker, since its balances are in no statement and no consolidating entry; see [Period Close](Period-Close.md#blockers). A group's own charts have a second requirement, the concepts the consolidation engine posts to; see [Group Consolidation](Group-Consolidation.md#charts-and-mapping).
 
@@ -116,7 +116,7 @@ Each candidate appears in at least one presentation Network, and statement subto
 
 ### Templates (native books)
 
-A graph with no chart can start from a shipped template with `initialize-chart-of-accounts`: `saas`, `services` or `product`. The operation creates the chart, the `coa_mapping` structure and the template's mappings in one transaction, and maps the equity accounts by the entity's legal form. It is one-time and returns `409` once a chart exists. A QuickBooks-synced graph never needs it.
+A graph with no chart can start from a shipped template with `initialize-chart-of-accounts`: `saas`, `services` or `product`, or `consolidation` for a group's consolidation entity. The operation creates the chart, the `coa_mapping` structure and the template's mappings in one transaction, and maps the equity accounts by the entity's legal form. Each entity keeps its own chart, so the call takes an `entity_id` (omitted, the group parent). It is one-time per entity and returns `409` once that entity has a chart. A QuickBooks-synced graph never needs it.
 
 ## Working a Mapping by Hand
 
@@ -211,7 +211,7 @@ Accounts added after the first sync stay unmapped until someone maps them. Re-ch
 
 ## Self-hosted deployments
 
-On your own stack, `just demo-roboledger` provisions a fully mapped tenant (pass `--ai` to have the MappingOperator produce the mappings, which needs Bedrock). See the [RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough.md). Every call on this page works against `http://localhost:8000` with the key from `just demo-user`.
+On your own stack, `just demo-roboledger` provisions a fully mapped tenant (pass `--ai` to have the MappingOperator produce the mappings, which needs an AI model configured; see [Local Development](Local-Development.md#ai-models)). See the [RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough.md). Every call on this page works against `http://localhost:8000` with the key from `just demo-user`.
 
 ## Related Documentation
 

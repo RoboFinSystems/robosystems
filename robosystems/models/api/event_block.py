@@ -690,11 +690,11 @@ class ExecuteEventBlockRequest(BaseModel):
   each draft entry posts as its own JournalEntry, with the entry id as
   the RequestId, and its QuickBooks id is recorded per entry on
   `event.metadata.qb_entry_ids`. The event goes `fulfilled` once no
-  draft remains, or `pending` when QuickBooks rejects an entry (what
-  landed is kept).
+  draft remains. When QuickBooks rejects an entry, what landed is kept,
+  the status is unchanged, and the error is stamped on
+  `event.metadata.last_outbound_error` and returned as `qb_error`.
 
-  `'native'`-policy events fast-path through with no QB write —
-  RoboSystems IS the source of truth, no outbound publish needed.
+  Events on `'native'` or `'shadow'` books pass through with no QB write.
   """
 
   event_id: str = Field(
@@ -726,7 +726,7 @@ class ExecuteEventBlockResponse(BaseModel):
       "The event's status after the call. Unchanged when no write fired "
       "(native policy, a source that does not publish) or when drafts in a "
       "later period are still unpublished. `'fulfilled'` once every draft "
-      "entry of the event is in QuickBooks and posted. `'pending'` when "
+      "entry of the event is in QuickBooks and posted. Also unchanged when "
       "QuickBooks rejected an entry — see `qb_error`; retry after fixing "
       "the underlying issue."
     ),

@@ -65,7 +65,7 @@ The template's SDK pin covers exactly what its emitters import. When you call an
 
 ## Why integrations live outside the core
 
-Platform-operated deployments run an **unmodified core** — that's what keeps every deployment identical, auditable, and safe to upgrade, and it's why the in-core adapter registry (`robosystems/adapters/`) is maintained exclusively by the platform team. Custom code never enters it. The public API is deliberately rich enough that it doesn't need to: the platform's own QuickBooks adapter writes through the same event envelope an external integration would use.
+Platform-operated deployments run an **unmodified core** — that's what keeps every deployment identical, auditable, and safe to upgrade, and it's why the in-core adapter registry (`robosystems/adapters/`) is maintained exclusively by the platform team. Custom code never enters it. The public API is deliberately rich enough that it doesn't need to: the platform's own QuickBooks adapter lands the same `Event` rows an external integration creates, booked by the same handlers.
 
 Platform-built adapters keep expanding — both connection adapters (QuickBooks-class) and shared-repository adapters (SEC-class). If there's a source you'd like the platform to support natively, open a [discussion](https://github.com/orgs/RoboFinSystems/discussions).
 

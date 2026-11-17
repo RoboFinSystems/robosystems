@@ -261,7 +261,7 @@ Those five are the whole set. `memory` is **not** among them — semantic memori
 
 **Local embeddings, no credits.** Embeddings are produced in-image by a small open model (`BAAI/bge-small-en-v1.5`, 384 dimensions). There are no external API calls and **no AI credits are consumed** for indexing or semantic search.
 
-**Tenant isolation.** Every search and document operation is filtered by `graph_id`. Your uploaded documents are scoped to their graph and never surface in another graph's results. The MCP search tools resolve a shared repository's subgraph to the parent repository's index — subgraphs are a storage split, not a search boundary.
+**Tenant isolation.** Every search and document operation is filtered by `graph_id`. Your uploaded documents are scoped to their graph and never surface in another graph's results. The MCP search tools resolve a shared repository's subgraph to the parent repository's index, so a repository's subgraphs search as one. A subgraph of your own graph is its own search scope: its documents are indexed under the subgraph's id and do not appear in the parent's results, or the parent's in the subgraph's.
 
 ## Semantic Memory: The Second Retrieval Plane
 
@@ -355,7 +355,7 @@ Document content is excluded from the search response body, so when there are no
 
 ## Self-hosted deployments
 
-**Flags and OpenSearch.** `SEMANTIC_SEARCH_ENABLED` gates document search, the documents router and all seven search/document MCP tools (`search-documents`, `get-document-section`, `create-document`, `update-document`, `delete-document`, `get-document`, `list-documents`) at once. Memory, `POST /memory/recall` included, mounts with `SEMANTIC_MEMORY_ENABLED` instead. OpenSearch must be reachable at `OPENSEARCH_URL` (default `http://localhost:9200`).
+**Flags and OpenSearch.** `SEMANTIC_SEARCH_ENABLED` gates document search, the documents router and all ten search/document MCP tools (`search-documents`, `get-document-section`, `create-document`, `update-document`, `delete-document`, `get-document`, `list-documents`, `read-document-file`, `create-document-upload`, `complete-document-upload`) at once. Memory, `POST /memory/recall` included, mounts with `SEMANTIC_MEMORY_ENABLED` instead. OpenSearch must be reachable at `OPENSEARCH_URL` (default `http://localhost:9200`).
 
 If search returns 503, confirm the routes are mounted with `curl -s http://localhost:8000/openapi.json | jq '.paths | keys | map(select(test("/search")))'` and that OpenSearch answers with `curl http://localhost:9200`. `grep SEMANTIC_SEARCH_ENABLED .env.local` is not a useful check — the flag defaults to `true` and ships commented out, so no output means the default applies, not that the feature is off. Set `SEMANTIC_SEARCH_ENABLED=true`, ensure OpenSearch is reachable, then `just restart`.
 

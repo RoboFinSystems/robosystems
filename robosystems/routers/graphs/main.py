@@ -67,8 +67,8 @@ _ROBOLEDGER_DESCRIPTION = (
 _ROBOINVESTOR_DESCRIPTION = (
   "Private-market portfolio tracking — positions with cost basis, and a "
   "securities registry for stock, LLC and LP units, SAFEs, notes, warrants and "
-  "options. Link a holding to its issuer's graph and that company's reports "
-  "publish straight into yours."
+  "options. Link a holding to its issuer's graph, and the reports that company "
+  "shares with you attach to it."
 )
 
 

@@ -82,7 +82,7 @@ For every month of the scenario, in order:
 2. The balance sheet. Receivables and payables follow their drivers, schedules move the assets they belong to, net income rolls into retained earnings, and cash is whatever makes the balance sheet balance.
 3. The cash flow statement, from the changes in the balance sheet, so it ties to the change in cash.
 
-Then the month is checked with the same rules that check your actual statements: subtotals add up, assets equal liabilities plus equity, the cash flow ties to the balance sheet. If a month fails, the run stops there. Your assistant tells you which month and which check, and nothing after it is calculated from a month that was wrong.
+Then the month is checked with the same rules that check your actual statements, so every subtotal has to add up. Assets equal liabilities plus equity, and the cash flow ties to the balance sheet, because cash is the figure RoboLedger calculates to make them. If a month fails, the run stops there. Your assistant tells you which month and which check, and nothing after it is calculated from a month that was wrong.
 
 ## See it on the Plan page
 

@@ -11,7 +11,7 @@ month inside the horizon, so the first forward month opens on real balances;
 ``base_anchor='fixed'`` pins it to ``base_period``. Per month, in order:
 
 1. **Carry-forward** — every income-statement leaf that carried a fact in the
-   base month's actual report and isn't rule-driven repeats its prior value.
+   anchor month's actual report and isn't rule-driven repeats its prior value.
    Line assertions override both carry and schedule projection for the months
    they name, and displace a driver rule targeting the same element that
    month (the rule lands in ``skipped``).
@@ -31,8 +31,10 @@ Each month upserts a scenario income-statement set
 (``factset_type='report'``, congruent with the actual monthly sets), a
 balance-sheet set, and a derived cash-flow set when an actual one exists, all
 keyed by ``fact_sets.scenario_id``; re-running a month replaces its values.
-Without an actual balance sheet at the base period, the balance-sheet set is
-only the rule-driven working-capital instants.
+Without an actual balance sheet at the anchor, the balance-sheet set is only
+the rule-driven working-capital instants. A month whose sets fail
+verification halts the walk (``halted_at``): every later month would chain
+off it.
 
 Soft-fail per rule per month: a missing lever month or unbound operand skips
 that rule with a reason and its target falls back to carry-forward.
