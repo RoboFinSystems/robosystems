@@ -1,6 +1,9 @@
 ---
-description: Sweep the production logs for errors and warnings, separate bugs from noise, and hand back the signals worth acting on.
+name: log-review
+description: "Sweep the production logs for errors and warnings over a window, set aside the known noise, and trace each remaining signal to a bug, a transient, or new noise. Use for \"log review\", \"check the logs\", \"anything new in prod\", after every production deploy, and weekly."
 argument-hint: "[window, e.g. 24h | since-deploy | 4d] [env]"
+metadata:
+  lane: operate
 ---
 
 The logs are a bug detector only if someone reads them. This skill reads them: pull every ERROR and WARNING over a window, collapse them into distinct messages, set aside the known noise, and trace each remaining signal far enough to say whether it is a bug, a transient, or noise nobody has named yet. Pairs with the `log-review` runbook in `local/RoboSystems/runbooks/`, which holds this environment's **known-noise list**, the signals already accepted or routed, and the last run's findings. Read it first: a review that rediscovers last week's accepted noise wastes the pass.

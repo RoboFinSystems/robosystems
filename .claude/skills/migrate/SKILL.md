@@ -1,6 +1,9 @@
 ---
-description: Verify a release's database migrations applied cleanly on the orchestrator daemon's boot.
+name: migrate
+description: "Verify that a release's database migrations applied cleanly on the orchestrator daemon's boot, and fall back to a manual run only when that boot did not apply them. Use for \"check the migrations\", \"did the migration run\", or after a deploy that carries migrations."
 argument-hint: "[staging|prod]"
+metadata:
+  lane: operate
 ---
 
 Verify that a release's database migrations applied cleanly. In this system migrations run automatically on the orchestrator daemon's boot during a deploy — so "running a migration" is almost always **watching that boot succeed**, not invoking anything by hand. Pairs with the `migration-monitoring` runbook in `local/RoboSystems/runbooks/` for exact service/log-group names and the manual fallback — read it alongside this file.

@@ -1,6 +1,9 @@
 ---
-description: Create a GitHub issue from the repo's templates, with the right type and labels.
+name: create-issue
+description: "Create a GitHub issue from the repo's templates, with the right type and labels. Use for \"open an issue\", \"file a bug\", \"create a ticket\", or when a finding should be tracked rather than fixed now."
 argument-hint: "[what the issue is about]"
+metadata:
+  lane: build
 ---
 
 Create a GitHub issue for the current repository based on the user's input.

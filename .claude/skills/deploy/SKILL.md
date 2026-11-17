@@ -1,6 +1,10 @@
 ---
-description: Monitor a deployment run — diagnose failures, drive a re-run to green, verify health.
+name: deploy
+description: "Monitor a deployment run: pinpoint why it failed, drive a re-run to green, and verify health. Deploys run through GitHub Actions; this watches and diagnoses them. Started only by the user, because a re-run repeats a deploy's side effects."
 argument-hint: "[staging|prod] [run-id]"
+disable-model-invocation: true
+metadata:
+  lane: operate
 ---
 
 Monitor a deployment run — pinpoint why it failed, drive it to green on a re-run, and verify health. Deploys go through GitHub Actions (`workflow_dispatch`); this skill is about watching and diagnosing them, not replacing the pipeline. Pairs with the `deployment-monitoring` runbook in `local/RoboSystems/runbooks/` for account-specific stack names and failure classes — read it alongside this file.

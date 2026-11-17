@@ -1,5 +1,8 @@
 ---
-description: Start the local development stack and tail service logs.
+name: dev
+description: "Start the local development stack (the full Docker stack under the robosystems profile) and tail service logs. Use for \"start the stack\", \"bring up dev\", \"start the local environment\", or \"tail the logs\"."
+metadata:
+  lane: build
 ---
 
 Start the development environment — the full Docker stack under the `robosystems` profile.

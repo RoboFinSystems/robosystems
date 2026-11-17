@@ -1,13 +1,16 @@
 ---
-description: Open a pull request for the current branch, writing the description from the work actually done.
+name: create-pr
+description: "Open a pull request for the current branch, writing the title and description from the work actually done in this session rather than reconstructing it from the diff. Use for \"create a PR\", \"open a PR\", \"ship it\", or after committing a finished unit of work."
 argument-hint: "[target-branch] [review]"
+metadata:
+  lane: build
 ---
 
 Create a GitHub pull request for the current branch, writing the title and description from the actual work done in this session — not reconstructed from the diff.
 
-## Why this command exists
+## Why this skill exists
 
-The previous flow outsourced PR-description authoring to a GitHub Action that only saw the diff and commit messages. It could not know _why_ the changes were made, so it frequently described things that weren't true. Those inaccurate descriptions then fed `@claude` reviews, compounding the bad information. This command fixes that at the root: **you author the description here, where the full context of what was done and why is available.**
+The previous flow outsourced PR-description authoring to a GitHub Action that only saw the diff and commit messages. It could not know _why_ the changes were made, so it frequently described things that weren't true. Those inaccurate descriptions then fed `@claude` reviews, compounding the bad information. This skill fixes that at the root: **you author the description here, where the full context of what was done and why is available.**
 
 This is a Python backend service (FastAPI + LadybugDB graphs, managed with `uv` and `just`). Ground every description in the actual code that changed, and stay mindful of multi-tenancy (graph operations scoped to `graph_id`).
 
@@ -92,7 +95,7 @@ Posting the request here as well would trigger a second review of the same chang
 Two things this is **not**:
 
 - **Not an approval.** The review posts as a comment from `claude[bot]`, not as an approving review, and it must stay that way. An unconditional bot approval on every PR is a rubber stamp, and it would be worse evidence than the documented exception it replaced. The reviewer's job is to find problems, not to sign off.
-- **Not a substitute for `/pr-review`.** That command runs locally with full session context and is the deeper pass. This is the standing automatic one.
+- **Not a substitute for `/pr-review`.** That skill runs locally with full session context and is the deeper pass. This is the standing automatic one.
 
 If the review workflow does not fire (it is gated to `OWNER`/`MEMBER`/`COLLABORATOR` authors, so fork PRs are excluded by design and get a maintainer's own review), say so in the output rather than silently moving on.
 

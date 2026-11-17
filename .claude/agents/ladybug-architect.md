@@ -19,6 +19,8 @@ tools:
   - mcp__Context7__get-library-docs
   - mcp__aws-documentation__search_documentation
   - mcp__aws-documentation__read_documentation
+metadata:
+  lane: operate
 ---
 
 # LadybugDB Architect Agent
