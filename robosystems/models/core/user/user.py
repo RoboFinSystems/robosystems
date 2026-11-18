@@ -170,6 +170,16 @@ class User(Model):
       session.rollback()
       raise
 
+    # The cached profile still says unverified, and the trial checkout reads it.
+    import importlib
+
+    try:
+      cache_module = importlib.import_module("robosystems.middleware.auth.cache")
+      if not cache_module.api_key_cache.invalidate_jwt_user_data(str(self.id)):
+        logger.warning(f"Cached profile not cleared after verifying user {self.id}")
+    except Exception as e:
+      logger.warning(f"Cached profile not cleared after verifying user {self.id}: {e}")
+
   def deactivate(self, session: Session) -> DeactivationResult:
     """Deactivate the user, reporting how completely the kill switch applied.
 
