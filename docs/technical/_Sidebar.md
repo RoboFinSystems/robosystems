@@ -53,6 +53,7 @@
 - [Windows Setup (WSL2)](Windows-Setup-with-WSL2.md)
 - [Self-Hosted AI Models](Self-Hosted-AI-Models.md)
 - [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally.md)
+- [Connecting Bank Feeds Locally](Connecting-Bank-Feeds-Locally.md)
 - [Bootstrap Guide](Bootstrap-Guide.md)
 - [Enterprise SSO & SCIM](Enterprise-SSO-and-SCIM.md)
 - [Security & Compliance](Security-and-Compliance.md)
