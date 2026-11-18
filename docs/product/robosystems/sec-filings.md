@@ -15,7 +15,7 @@ The graph is read-only and shared: everyone who subscribes reads the same filing
 
 Access is a subscription. In the app, open **Repositories**, browse to **SEC EDGAR Filings** and choose a plan. There are two plans, **Starter** and **Advanced**. Each limits how many requests a connected client can make a minute and an hour, and Advanced allows five times as many. A client that goes over is refused until the limit resets. Current plans and prices are on the [pricing page](https://robosystems.ai/pricing).
 
-Your first subscription starts with a 14-day free trial of the plan you picked, and no card is needed to start it. Add a card on the **Billing** tab of your organization page before the trial ends and the plan starts when it does; without one the trial ends on its last day and nothing is charged. If your organization already has a card on file, it is charged when the trial ends, and you can cancel before then and keep access until its last day.
+Your first subscription starts with a 14-day free trial of the plan you picked, and no card is needed to start it. You need a verified email address to start one. Add a card on the **Billing** tab of your organization page before the trial ends and the plan starts when it does; without one the trial ends on its last day and nothing is charged. If your organization already has a card on file, it is charged when the trial ends, and you can cancel before then and keep access until its last day.
 
 What the trial is, compared with the plan:
 

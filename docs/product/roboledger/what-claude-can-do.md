@@ -5,7 +5,7 @@ order: 2
 section: Get started
 ---
 
-Once your books are connected, your AI assistant works from the ledger itself, not from an export or a screenshot: every account and transaction, as of your last sync. Most people start with questions, then reports and plans, and close the month last, once they trust what they're seeing.
+Once your books are connected, your AI assistant works from the ledger itself, not from an export or a screenshot: every account and transaction, as of your last sync. Start with questions, then reports and plans. The close is there when you want it.
 
 ## Analyze
 
