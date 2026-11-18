@@ -208,7 +208,8 @@ class StripePaymentProvider(PaymentProvider):
       payment_method_collection="if_required" if trial_days > 0 else "always",
       payment_method_types=["card"],
       billing_address_collection="auto",
-      allow_promotion_codes=True,
+      # Promotion codes are retired; the field would invite one nobody holds.
+      allow_promotion_codes=False,
     )
 
     logger.info(
