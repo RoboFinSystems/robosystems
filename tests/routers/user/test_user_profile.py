@@ -197,10 +197,6 @@ class TestUserProfile:
     address lowercased, and notifies the previous address of the change."""
     import uuid
 
-    from robosystems.dagster.jobs.notifications import (
-      build_email_job_config as real_build_email_job_config,
-    )
-
     # Ensure test_user is in the database
     db_session.merge(test_user)
     db_session.commit()
@@ -219,18 +215,7 @@ class TestUserProfile:
       "reauth_password": "irrelevant-because-verify-is-mocked",
     }
 
-    # The autouse mock_email_dagster_jobs fixture mocks both the job runner and
-    # build_email_job_config in this module; restore the real config builder so
-    # the queued run_config can be inspected.
-    with (
-      patch(
-        "robosystems.routers.user.main.build_email_job_config",
-        real_build_email_job_config,
-      ),
-      patch(
-        "robosystems.routers.user.main.run_and_monitor_dagster_job"
-      ) as mock_run_job,
-    ):
+    with patch("robosystems.routers.user.main.deliver_email") as mock_deliver:
       response = client_with_real_user.put("/v1/user/", json=update_data)
 
     assert response.status_code == 200
@@ -245,15 +230,14 @@ class TestUserProfile:
     assert test_user.name == "Updated Test User"
     assert test_user.email == new_email.lower()
 
-    # The previous address was notified with the email_changed job
-    changed_jobs = [
+    # The previous address was notified with the email_changed email
+    changed = [
       c
-      for c in mock_run_job.call_args_list
-      if c.kwargs["run_config"]["ops"]["send_email_op"]["config"]["email_type"]
-      == "email_changed"
+      for c in mock_deliver.call_args_list
+      if c.kwargs["email_type"] == "email_changed"
     ]
-    assert len(changed_jobs) == 1
-    cfg = changed_jobs[0].kwargs["run_config"]["ops"]["send_email_op"]["config"]
+    assert len(changed) == 1
+    cfg = changed[0].kwargs
     assert cfg["to_email"] == previous_email
     assert cfg["new_email"].startswith(new_email[0].lower())
     assert cfg["new_email"].endswith("@example.com")
@@ -339,12 +323,12 @@ class TestUserProfile:
     assert response.status_code == 401
     assert on_loop == [False]
 
-  @patch("robosystems.routers.user.main.run_and_monitor_dagster_job")
+  @patch("robosystems.routers.user.main.deliver_email")
   @patch("robosystems.routers.user.main.passkey_ops.verify_reauth")
   def test_own_email_in_different_case_is_a_noop(
     self,
     mock_verify_reauth,
-    mock_run_job,
+    mock_deliver,
     client_with_real_user: TestClient,
     db_session,
     test_user,
@@ -360,15 +344,15 @@ class TestUserProfile:
 
     assert response.status_code == 200
     mock_verify_reauth.assert_not_called()
-    assert mock_run_job.call_count == 0
+    assert mock_deliver.call_count == 0
     db_session.refresh(test_user)
     assert test_user.email == test_user.email.lower()
 
-  @patch("robosystems.routers.user.main.run_and_monitor_dagster_job")
+  @patch("robosystems.routers.user.main.deliver_email")
   def test_name_only_update_needs_no_reauth(
-    self, mock_run_job, client_with_real_user: TestClient, db_session, test_user
+    self, mock_deliver, client_with_real_user: TestClient, db_session, test_user
   ):
-    """A name-only change needs no reauth and queues no email jobs."""
+    """A name-only change needs no reauth and sends no email."""
     db_session.merge(test_user)
     db_session.commit()
 
@@ -376,7 +360,7 @@ class TestUserProfile:
 
     assert response.status_code == 200
     assert response.json()["name"] == "Just A Name"
-    assert mock_run_job.call_count == 0
+    assert mock_deliver.call_count == 0
 
   def test_update_user_profile_empty_data(self, client_with_user: TestClient):
     """Test user profile update with no data."""

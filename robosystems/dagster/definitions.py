@@ -16,6 +16,7 @@ from robosystems.dagster.assets.graphs import (
   user_repository_provisioning_source,
   user_subgraph_creation_source,
 )
+from robosystems.dagster.assets.notifications import transactional_email_sent_source
 from robosystems.dagster.assets.shared_repositories import (
   build_shared_replicas_refreshed,
   shared_master_asleep,
@@ -194,6 +195,8 @@ all_assets = [
   user_subgraph_creation_source,
   user_repository_provisioning_source,
   user_graph_backup_source,
+  # Platform: Notifications
+  transactional_email_sent_source,
   # Platform: Shared repository infrastructure
   shared_master_awake,
   shared_master_asleep,

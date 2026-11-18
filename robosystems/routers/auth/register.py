@@ -21,10 +21,10 @@ from ...logger import logger
 from ...middleware.auth.jwt import create_jwt_token
 from ...middleware.otel.metrics import endpoint_metrics_decorator, record_auth_metrics
 from ...middleware.rate_limits import auth_rate_limit_dependency
-from ...middleware.sse import build_email_job_config, run_and_monitor_dagster_job
 from ...models.api.auth import AuthResponse, RegisterRequest
 from ...models.api.common import COMMON_ERROR_RESPONSES, ErrorResponse
 from ...models.core import Org, OrgInvitation, User
+from ...operations.notifications import deliver_email
 from ...operations.user_provisioning import (
   EmailAlreadyRegisteredError,
   provision_user,
@@ -304,18 +304,13 @@ async def register(
   if provisioned.verification_token is not None:
     app = detect_app_source(fastapi_request)
 
-    run_config = build_email_job_config(
+    background_tasks.add_task(
+      deliver_email,
       email_type="email_verification",
       to_email=sanitized_email,
       user_name=sanitized_name,
       token=provisioned.verification_token,
       app=app,
-    )
-    background_tasks.add_task(
-      run_and_monitor_dagster_job,
-      job_name="send_email_job",
-      operation_id=None,
-      run_config=run_config,
     )
 
     SecurityAuditLogger.log_security_event(

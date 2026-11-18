@@ -1,5 +1,6 @@
 """AWS SES adapter for sending transactional emails."""
 
+import asyncio
 import html
 import smtplib
 import ssl
@@ -20,15 +21,57 @@ from robosystems.config.constants import (
 )
 from robosystems.logger import logger
 
-# Brand colors (from tailwind.config.ts)
-_BRAND_PRIMARY = "#1B3A57"  # primary-800 (dark blue)
-_BRAND_BLUE = "#3B7AF5"  # primary-500 (bright blue)
-_BRAND_GREEN = "#00D4AA"  # secondary-500 (bright green)
-_BRAND_DARK = "#172E47"  # primary-950
-_BRAND_LIGHT = "#EFF6FF"  # primary-50
-_BRAND_BORDER = "#BFDBFE"  # primary-200
-_BRAND_MUTED = "#64748b"
-_BRAND_DANGER = "#dc2626"
+# The apps are dark, so the email is dark in every client: one palette, and a
+# declared dark color scheme so a client's own dark mode leaves it alone.
+_PAGE_BG = "#09090B"  # zinc-950
+_CARD_BG = "#18181B"  # zinc-900
+_PANEL_BG = "#111113"
+_BORDER = "#27272A"  # zinc-800
+_TEXT = "#E4E4E7"  # zinc-200
+_HEADING = "#FAFAFA"
+_MUTED = "#A1A1AA"  # zinc-400
+_FAINT = "#71717A"  # zinc-500
+_DANGER = "#F87171"
+_DANGER_BG = "#2A1114"
+_DANGER_BORDER = "#7F1D1D"
+_DANGER_TEXT = "#FECACA"
+_WARNING = "#FBBF24"
+
+# Space Grotesk and Orbitron are the apps' fonts. Clients that load web fonts
+# (Apple Mail, iOS Mail) get them from Google Fonts; the rest fall back.
+_FONT_BODY = (
+  "'Space Grotesk',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,"
+  "'Helvetica Neue',Arial,sans-serif"
+)
+_FONT_HEADING = f"Orbitron,{_FONT_BODY}"
+_FONT_MONO = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"
+_FONTS_URL = (
+  "https://fonts.googleapis.com/css2?"
+  "family=Orbitron:wght@600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+)
+
+# Each app's accent, from its tailwind.config.ts: the bar's gradient, a button
+# shade that holds white text, and a link shade that reads on the dark card.
+_APP_ACCENTS = {
+  "robosystems": {
+    "from": "#3B7AF5",
+    "to": "#06B6D4",
+    "button": "#2563EB",
+    "link": "#6098FA",
+  },
+  "roboledger": {
+    "from": "#8B5CF6",
+    "to": "#D946EF",
+    "button": "#7C3AED",
+    "link": "#A78BFA",
+  },
+  "roboinvestor": {
+    "from": "#10B981",
+    "to": "#06B6D4",
+    "button": "#047857",
+    "link": "#34D399",
+  },
+}
 
 # App display names
 _APP_DISPLAY_NAMES = {
@@ -39,42 +82,85 @@ _APP_DISPLAY_NAMES = {
 _DEFAULT_APP = "robosystems"
 
 
-def _base_template(app_name: str, content_html: str) -> str:
-  """Wrap content in the shared email layout."""
+def _accent(data: dict[str, Any]) -> dict[str, str]:
+  return _APP_ACCENTS.get(data.get("app", ""), _APP_ACCENTS[_DEFAULT_APP])
+
+
+def _esc(value: Any) -> str:
+  return html.escape(str(value), quote=True)
+
+
+def _base_template(
+  data: dict[str, Any], content_html: str, heading: str, preheader: str = ""
+) -> str:
+  """Wrap content in the shared email layout.
+
+  `data` carries the brand keys `_brand` adds (`app`, `app_name`, `home_url`,
+  `logo_url`). `heading` and `preheader` are escaped here.
+  """
   year = datetime.now(UTC).year
-  return f"""\
-<!DOCTYPE html>
+  accent = _accent(data)
+  app_name = _esc(data.get("app_name", _APP_DISPLAY_NAMES[_DEFAULT_APP]))
+  home_url = _esc(data.get("home_url", "#"))
+  logo_url = data.get("logo_url")
+  logo = (
+    f'<td style="padding-right:12px;"><img src="{_esc(logo_url)}" width="32" height="32" alt="" '
+    'style="display:block;border:0;outline:none;"></td>'
+    if logo_url
+    else ""
+  )
+  return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <meta name="supported-color-schemes" content="dark">
   <title>{app_name}</title>
+  <!--[if !mso]><!-->
+  <link href="{_FONTS_URL}" rel="stylesheet">
+  <!--<![endif]-->
+  <style>
+    :root {{ color-scheme: dark; }}
+    @media only screen and (max-width: 480px) {{
+      .rs-outer {{ padding: 16px 8px !important; }}
+      .rs-pad {{ padding-left: 20px !important; padding-right: 20px !important; }}
+    }}
+  </style>
 </head>
-<body style="margin:0;padding:0;background-color:{_BRAND_LIGHT};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:{_BRAND_LIGHT};">
+<body style="margin:0;padding:0;background-color:{_PAGE_BG};font-family:{_FONT_BODY};">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:{_PAGE_BG};">{_esc(preheader)}</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="{_PAGE_BG}" style="background-color:{_PAGE_BG};">
     <tr>
-      <td align="center" style="padding:40px 20px;">
+      <td class="rs-outer" align="center" style="padding:40px 16px;">
         <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
-          <!-- Header -->
+          <!-- Brand -->
           <tr>
-            <td style="padding:28px 32px;background-color:{_BRAND_PRIMARY};border-radius:12px 12px 0 0;">
-              <span style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">{app_name}</span>
+            <td style="padding:0 4px 20px;">
+              <table role="presentation" cellpadding="0" cellspacing="0">
+                <tr>
+                  {logo}
+                  <td style="font-family:{_FONT_HEADING};font-size:18px;font-weight:700;letter-spacing:0.5px;color:{_HEADING};"><a href="{home_url}" target="_blank" style="color:{_HEADING};text-decoration:none;">{app_name}</a></td>
+                </tr>
+              </table>
             </td>
           </tr>
           <!-- Accent bar -->
           <tr>
-            <td style="height:3px;background-color:{_BRAND_GREEN};font-size:0;line-height:0;">&nbsp;</td>
+            <td bgcolor="{accent["from"]}" style="height:3px;font-size:0;line-height:0;background-color:{accent["from"]};background-image:linear-gradient(90deg,{accent["from"]},{accent["to"]});border-radius:12px 12px 0 0;">&nbsp;</td>
           </tr>
           <!-- Body -->
           <tr>
-            <td style="padding:36px 32px;background-color:#ffffff;border-left:1px solid {_BRAND_BORDER};border-right:1px solid {_BRAND_BORDER};">
+            <td class="rs-pad" bgcolor="{_CARD_BG}" style="padding:36px 36px 28px;background-color:{_CARD_BG};border:1px solid {_BORDER};border-top:none;border-radius:0 0 12px 12px;">
+              <h1 style="margin:0 0 20px;font-family:{_FONT_HEADING};font-size:20px;line-height:1.35;font-weight:600;color:{_HEADING};">{_esc(heading)}</h1>
               {content_html}
             </td>
           </tr>
           <!-- Footer -->
           <tr>
-            <td style="padding:24px 32px;background-color:{_BRAND_LIGHT};border:1px solid {_BRAND_BORDER};border-top:none;border-radius:0 0 12px 12px;text-align:center;">
-              <p style="margin:0;font-size:12px;color:{_BRAND_MUTED};">&copy; {year} RFS LLC. All rights reserved.</p>
+            <td style="padding:24px 4px 0;text-align:center;font-family:{_FONT_BODY};">
+              <p style="margin:0 0 6px;font-size:12px;line-height:1.5;color:{_FAINT};">You are receiving this email because of activity on your <a href="{home_url}" target="_blank" style="color:{_MUTED};text-decoration:underline;">{app_name}</a> account.</p>
+              <p style="margin:0;font-size:12px;line-height:1.5;color:{_FAINT};">&copy; {year} RFS LLC. All rights reserved.</p>
             </td>
           </tr>
         </table>
@@ -85,24 +171,42 @@ def _base_template(app_name: str, content_html: str) -> str:
 </html>"""
 
 
-def _button(url: str, label: str, color: str = _BRAND_BLUE) -> str:
-  """Render a CTA button."""
-  return f"""\
-<table role="presentation" cellpadding="0" cellspacing="0" style="margin:28px 0;">
+def _button(data: dict[str, Any], url: str, label: str) -> str:
+  """Render a CTA button in the app's accent."""
+  color = _accent(data)["button"]
+  return f"""<table role="presentation" cellpadding="0" cellspacing="0" style="margin:28px 0;">
   <tr>
-    <td style="border-radius:8px;background-color:{color};">
-      <a href="{url}" target="_blank" style="display:inline-block;padding:14px 32px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">{label}</a>
+    <td bgcolor="{color}" style="border-radius:8px;background-color:{color};">
+      <a href="{_esc(url)}" target="_blank" style="display:inline-block;padding:13px 28px;font-family:{_FONT_BODY};font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">{label}</a>
     </td>
   </tr>
 </table>"""
 
 
+def _link_fallback(data: dict[str, Any], url: str) -> str:
+  """The button's URL in the open, for a client that will not follow a button."""
+  return (
+    _muted("Or copy and paste this URL into your browser:")
+    + f'<p style="margin:0 0 20px;padding:12px 14px;background-color:{_PANEL_BG};border:1px solid {_BORDER};border-radius:8px;font-family:{_FONT_MONO};font-size:12px;line-height:1.5;word-break:break-all;">'
+    f'<a href="{_esc(url)}" target="_blank" style="color:{_accent(data)["link"]};text-decoration:none;">{_esc(url)}</a></p>'
+  )
+
+
+def _callout(text: str) -> str:
+  """A security notice: what to do if the recipient did not take this action."""
+  return (
+    f'<div style="margin-top:24px;padding:14px 16px;background-color:{_DANGER_BG};'
+    f'border:1px solid {_DANGER_BORDER};border-radius:8px;">'
+    f'<p style="margin:0;font-size:13px;line-height:1.5;color:{_DANGER_TEXT};">{text}</p></div>'
+  )
+
+
 def _muted(text: str) -> str:
-  return f'<p style="margin:0 0 8px;font-size:13px;line-height:1.5;color:{_BRAND_MUTED};">{text}</p>'
+  return f'<p style="margin:0 0 8px;font-size:13px;line-height:1.5;color:{_MUTED};">{text}</p>'
 
 
 def _paragraph(text: str) -> str:
-  return f'<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:{_BRAND_DARK};">{text}</p>'
+  return f'<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:{_TEXT};">{text}</p>'
 
 
 class SMTPTransport:
@@ -208,6 +312,17 @@ class SESEmailService:
     suffix = "" if app == env.LOGIN_HOME_APP else f"&return_to={quote(app)}"
     return self.login_home_url, suffix
 
+  def _brand(self, app: str) -> dict[str, str]:
+    """Brand keys every template's layout reads (unknown app → robosystems)."""
+    key = app if app in _APP_DISPLAY_NAMES else _DEFAULT_APP
+    home_url = self.app_urls[key]
+    return {
+      "app": key,
+      "app_name": _APP_DISPLAY_NAMES[key],
+      "home_url": home_url,
+      "logo_url": f"{home_url}/images/logos/{key}.png",
+    }
+
   def _get_email_template(
     self, email_type: str, template_data: dict[str, Any]
   ) -> dict[str, str]:
@@ -221,33 +336,27 @@ class SESEmailService:
     user_name = template_data.get("user_name", "there")
 
     templates = {
-      "email_verification": self._verification_template(
-        app_name, user_name, template_data
-      ),
-      "password_reset": self._password_reset_template(
-        app_name, user_name, template_data
-      ),
-      "welcome": self._welcome_template(app_name, user_name, template_data),
-      "org_invitation": self._org_invitation_template(app_name, template_data),
-      "capacity_warning": self._capacity_warning_template(
-        app_name, user_name, template_data
-      ),
-      "passkey_enrolled": self._passkey_enrolled_template(
-        app_name, user_name, template_data
-      ),
-      "email_changed": self._email_changed_template(app_name, user_name, template_data),
+      "email_verification": self._verification_template,
+      "password_reset": self._password_reset_template,
+      "welcome": self._welcome_template,
+      "org_invitation": self._org_invitation_template,
+      "capacity_warning": self._capacity_warning_template,
+      "passkey_enrolled": self._passkey_enrolled_template,
+      "email_changed": self._email_changed_template,
     }
 
-    return templates.get(
-      email_type,
-      {
+    render = templates.get(email_type)
+    if render is None:
+      return {
         "subject": f"{app_name} Notification",
-        "html": f"<p>{template_data}</p>",
+        "html": f"<p>{_esc(template_data)}</p>",
         "text": str(template_data),
-      },
-    )
+      }
+    return render(app_name, user_name, template_data)
 
   # -- Templates --------------------------------------------------------
+  # user_name, org and inviter names, and passkey names are user-controlled:
+  # every one is escaped before it reaches the HTML part.
 
   @staticmethod
   def _verification_template(
@@ -257,21 +366,25 @@ class SESEmailService:
     expiry = data.get("expiry_hours", 24)
 
     content = (
-      _paragraph(f"Hi {user_name},")
+      _paragraph(f"Hi {_esc(user_name)},")
       + _paragraph(
         f"Thanks for creating a {app_name} account. "
         "Please verify your email address to get started."
       )
-      + _button(url, "Verify Email Address")
-      + _muted("Or copy and paste this URL into your browser:")
-      + f'<p style="margin:0 0 20px;font-size:13px;line-height:1.5;color:{_BRAND_PRIMARY};word-break:break-all;">{url}</p>'
+      + _button(data, url, "Verify Email Address")
+      + _link_fallback(data, url)
       + _muted(f"This link expires in {expiry} hours.")
       + _muted("If you didn't create this account, you can safely ignore this email.")
     )
 
     return {
       "subject": f"Verify your {app_name} email",
-      "html": _base_template(app_name, content),
+      "html": _base_template(
+        data,
+        content,
+        heading="Verify your email address",
+        preheader=f"Confirm this address to finish setting up your {app_name} account.",
+      ),
       "text": f"""Hi {user_name},
 
 Thanks for creating a {app_name} account. Please verify your email address by visiting:
@@ -291,32 +404,36 @@ If you didn't create this account, you can safely ignore this email.
   ) -> dict[str, str]:
     url = data.get("reset_url", "#")
     expiry = data.get("expiry_hours", 1)
+    expires = f"This link expires in {expiry} hour{'s' if expiry != 1 else ''}."
 
     content = (
-      _paragraph(f"Hi {user_name},")
+      _paragraph(f"Hi {_esc(user_name)},")
       + _paragraph(
         f"We received a request to reset the password for your {app_name} account."
       )
-      + _button(url, "Reset Password", _BRAND_DANGER)
-      + _muted("Or copy and paste this URL into your browser:")
-      + f'<p style="margin:0 0 20px;font-size:13px;line-height:1.5;color:{_BRAND_PRIMARY};word-break:break-all;">{url}</p>'
-      + _muted(f"This link expires in {expiry} hour{'s' if expiry != 1 else ''}.")
-      + '<div style="margin-top:24px;padding:16px;background-color:#fef2f2;border:1px solid #fecaca;border-radius:8px;">'
-      + '<p style="margin:0;font-size:13px;line-height:1.5;color:#991b1b;">'
-      "If you didn't request this, no action is needed. Your password will not change."
-      "</p></div>"
+      + _button(data, url, "Reset Password")
+      + _link_fallback(data, url)
+      + _muted(expires)
+      + _callout(
+        "If you didn't request this, no action is needed. Your password will not change."
+      )
     )
 
     return {
       "subject": f"{app_name} password reset",
-      "html": _base_template(app_name, content),
+      "html": _base_template(
+        data,
+        content,
+        heading="Reset your password",
+        preheader=f"Use this link to choose a new password. {expires}",
+      ),
       "text": f"""Hi {user_name},
 
 We received a request to reset the password for your {app_name} account.
 
 Reset your password: {url}
 
-This link expires in {expiry} hour{"s" if expiry != 1 else ""}.
+{expires}
 
 If you didn't request this, no action is needed. Your password will not change.
 
@@ -327,29 +444,30 @@ If you didn't request this, no action is needed. Your password will not change.
   def _passkey_enrolled_template(
     app_name: str, user_name: str, data: dict[str, Any]
   ) -> dict[str, str]:
+    # This email exists to catch an attacker enrolling a credential, so its
+    # HTML must not be overridable by the very input that attacker chose.
     passkey_name = data.get("passkey_name", "a new passkey")
-    # passkey_name and user_name are user-controlled; this email exists to
-    # catch an attacker enrolling a credential, so its HTML must not be
-    # overridable by the very input that attacker chose.
-    safe_passkey_name = html.escape(str(passkey_name))
-    safe_user_name = html.escape(str(user_name))
 
     content = (
-      _paragraph(f"Hi {safe_user_name},")
+      _paragraph(f"Hi {_esc(user_name)},")
       + _paragraph(
-        f"A passkey ({safe_passkey_name}) was just added to your {app_name} "
+        f"A passkey ({_esc(passkey_name)}) was just added to your {app_name} "
         "account. It can now be used to sign in."
       )
-      + '<div style="margin-top:24px;padding:16px;background-color:#fef2f2;border:1px solid #fecaca;border-radius:8px;">'
-      + '<p style="margin:0;font-size:13px;line-height:1.5;color:#991b1b;">'
-      "If you didn't add this passkey, reset your password immediately and "
-      "remove it from your account's security settings."
-      "</p></div>"
+      + _callout(
+        "If you didn't add this passkey, reset your password immediately and "
+        "remove it from your account's security settings."
+      )
     )
 
     return {
       "subject": f"A passkey was added to your {app_name} account",
-      "html": _base_template(app_name, content),
+      "html": _base_template(
+        data,
+        content,
+        heading="A passkey was added",
+        preheader=f"A new passkey can now sign in to your {app_name} account.",
+      ),
       "text": f"""Hi {user_name},
 
 A passkey ({passkey_name}) was just added to your {app_name} account. It can now be used to sign in.
@@ -363,28 +481,29 @@ If you didn't add this passkey, reset your password immediately and remove it fr
   def _email_changed_template(
     app_name: str, user_name: str, data: dict[str, Any]
   ) -> dict[str, str]:
-    # Goes to the PREVIOUS address. new_email is already masked by the caller,
-    # but escape anyway — user_name is attacker-controllable on a takeover.
+    # Goes to the PREVIOUS address. new_email is already masked by the caller.
     new_email = data.get("new_email", "a new address")
-    safe_new_email = html.escape(str(new_email))
-    safe_user_name = html.escape(str(user_name))
 
     content = (
-      _paragraph(f"Hi {safe_user_name},")
+      _paragraph(f"Hi {_esc(user_name)},")
       + _paragraph(
         f"The email address on your {app_name} account was just changed to "
-        f"{safe_new_email}. You are receiving this at your previous address."
+        f"{_esc(new_email)}. You are receiving this at your previous address."
       )
-      + '<div style="margin-top:24px;padding:16px;background-color:#fef2f2;border:1px solid #fecaca;border-radius:8px;">'
-      + '<p style="margin:0;font-size:13px;line-height:1.5;color:#991b1b;">'
-      "If you didn't make this change, contact support immediately — someone "
-      "may have access to your account."
-      "</p></div>"
+      + _callout(
+        "If you didn't make this change, contact support immediately — someone "
+        "may have access to your account."
+      )
     )
 
     return {
       "subject": f"The email on your {app_name} account was changed",
-      "html": _base_template(app_name, content),
+      "html": _base_template(
+        data,
+        content,
+        heading="Your email address was changed",
+        preheader=f"The sign-in email on your {app_name} account is now different.",
+      ),
       "text": f"""Hi {user_name},
 
 The email address on your {app_name} account was just changed to {new_email}. You are receiving this at your previous address.
@@ -401,14 +520,19 @@ If you didn't make this change, contact support immediately — someone may have
     url = data.get("dashboard_url", "#")
 
     content = (
-      _paragraph(f"Hi {user_name},")
+      _paragraph(f"Hi {_esc(user_name)},")
       + _paragraph("Your email has been verified and your account is ready to go.")
-      + _button(url, "Go to Dashboard")
+      + _button(data, url, "Go to Dashboard")
     )
 
     return {
       "subject": f"Welcome to {app_name}",
-      "html": _base_template(app_name, content),
+      "html": _base_template(
+        data,
+        content,
+        heading=f"Welcome to {app_name}",
+        preheader="Your email is verified and your account is ready.",
+      ),
       "text": f"""Hi {user_name},
 
 Your email has been verified and your account is ready to go.
@@ -419,25 +543,23 @@ Visit your dashboard: {url}
     }
 
   @staticmethod
-  def _org_invitation_template(app_name: str, data: dict[str, Any]) -> dict[str, str]:
+  def _org_invitation_template(
+    app_name: str, user_name: str, data: dict[str, Any]
+  ) -> dict[str, str]:
     url = data.get("invite_url", "#")
     inviter_name = data.get("inviter_name", "A teammate")
     org_name = data.get("org_name", "an organization")
     expiry_days = data.get("expiry_days", ORG_INVITATION_EXPIRY_DAYS)
 
-    safe_inviter_name = html.escape(str(inviter_name))
-    safe_org_name = html.escape(str(org_name))
-
     content = (
       _paragraph("Hi there,")
       + _paragraph(
-        f"<strong>{safe_inviter_name}</strong> has invited you to join "
-        f"<strong>{safe_org_name}</strong> on {app_name}. "
+        f'<strong style="color:{_HEADING};">{_esc(inviter_name)}</strong> has invited you to join '
+        f'<strong style="color:{_HEADING};">{_esc(org_name)}</strong> on {app_name}. '
         "Accept the invitation to create your account and join the team."
       )
-      + _button(url, "Accept Invitation")
-      + _muted("Or copy and paste this URL into your browser:")
-      + f'<p style="margin:0 0 20px;font-size:13px;line-height:1.5;color:{_BRAND_PRIMARY};word-break:break-all;">{url}</p>'
+      + _button(data, url, "Accept Invitation")
+      + _link_fallback(data, url)
       + _muted(f"This invitation expires in {expiry_days} days.")
       + _muted(
         "If you weren't expecting this invitation, you can safely ignore this email."
@@ -446,7 +568,12 @@ Visit your dashboard: {url}
 
     return {
       "subject": f"You've been invited to join {org_name} on {app_name}",
-      "html": _base_template(app_name, content),
+      "html": _base_template(
+        data,
+        content,
+        heading=f"Join {org_name} on {app_name}",
+        preheader=f"{inviter_name} invited you. The invitation expires in {expiry_days} days.",
+      ),
       "text": f"""Hi there,
 
 {inviter_name} has invited you to join {org_name} on {app_name}. Accept the invitation to create your account and join the team:
@@ -474,9 +601,10 @@ If you weren't expecting this invitation, you can safely ignore this email.
     databases: list[dict[str, Any]] = data.get("databases", [])
 
     is_over = instance_status == "over_limit"
-    status_color = _BRAND_DANGER if is_over else "#d97706"  # red or amber
+    status_color = _DANGER if is_over else _WARNING
     status_label = "Over Limit" if is_over else "Approaching Limit"
 
+    cell = f"padding:8px 12px;border-bottom:1px solid {_BORDER};font-size:13px"
     db_rows = ""
     for db in databases:
       db_id = db.get("graph_id", "")
@@ -484,54 +612,49 @@ If you weren't expecting this invitation, you can safely ignore this email.
       label = "parent" if db.get("is_parent") else "subgraph"
       size_str = f"{size:,.1f} MB" if size is not None else "N/A"
       db_rows += (
-        f'<tr><td style="padding:6px 12px;border-bottom:1px solid #e2e8f0;font-size:13px;color:{_BRAND_DARK};">'
-        f"{db_id} ({label})</td>"
-        f'<td style="padding:6px 12px;border-bottom:1px solid #e2e8f0;font-size:13px;color:{_BRAND_DARK};text-align:right;">'
-        f"{size_str}</td></tr>"
+        f'<tr><td style="{cell};color:{_TEXT};">{_esc(db_id)} ({label})</td>'
+        f'<td style="{cell};color:{_TEXT};text-align:right;">{size_str}</td></tr>'
       )
 
     db_table = ""
     if db_rows:
+      head = f"{cell};font-size:12px;font-weight:600;color:{_MUTED};background-color:{_PANEL_BG}"
       db_table = (
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        f'style="margin:16px 0;border:1px solid #e2e8f0;border-radius:8px;border-collapse:collapse;">'
-        f'<tr><th style="padding:8px 12px;text-align:left;font-size:12px;color:{_BRAND_MUTED};'
-        f'border-bottom:2px solid #e2e8f0;background:{_BRAND_LIGHT};">Database</th>'
-        f'<th style="padding:8px 12px;text-align:right;font-size:12px;color:{_BRAND_MUTED};'
-        f'border-bottom:2px solid #e2e8f0;background:{_BRAND_LIGHT};">Size</th></tr>'
+        f'style="margin:16px 0;border:1px solid {_BORDER};border-bottom:none;">'
+        f'<tr><th style="{head};text-align:left;">Database</th>'
+        f'<th style="{head};text-align:right;">Size</th></tr>'
         f"{db_rows}</table>"
       )
 
     perf_warning = ""
     if is_over:
-      perf_warning = (
-        '<div style="margin:16px 0;padding:16px;background-color:#fef2f2;'
-        'border:1px solid #fecaca;border-radius:8px;">'
-        '<p style="margin:0;font-size:13px;line-height:1.5;color:#991b1b;">'
+      perf_warning = _callout(
         "Your instance is over its storage limit. Query performance may degrade "
-        "and operations may become unreliable. Consider upgrading your tier.</p></div>"
+        "and operations may become unreliable. Consider upgrading your tier."
       )
 
     content = (
-      _paragraph(f"Hi {user_name},")
+      _paragraph(f"Hi {_esc(user_name)},")
       + _paragraph(
-        f"Your graph instance <strong>{graph_id}</strong> ({tier}) is at "
-        f"<strong style='color:{status_color}'>{usage_pct:.0f}%</strong> storage capacity."
+        f'Your graph instance <strong style="color:{_HEADING};">{_esc(graph_id)}</strong> '
+        f"({_esc(tier)}) is at "
+        f'<strong style="color:{status_color};">{usage_pct:.0f}%</strong> storage capacity.'
       )
-      + f'<div style="margin:20px 0;padding:20px;background:{_BRAND_LIGHT};'
-      f'border:1px solid {_BRAND_BORDER};border-radius:8px;">'
+      + f'<div style="margin:20px 0;padding:20px;background-color:{_PANEL_BG};'
+      f'border:1px solid {_BORDER};border-radius:8px;">'
       f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
       f'<td style="vertical-align:middle;">'
       f'<span style="font-size:28px;font-weight:700;color:{status_color};">'
       f"{used_gb:.1f} GB</span>"
-      f'<span style="font-size:14px;color:{_BRAND_MUTED};"> / {limit_gb:.0f} GB</span></td>'
+      f'<span style="font-size:14px;color:{_MUTED};"> / {limit_gb:.0f} GB</span></td>'
       f'<td style="vertical-align:middle;text-align:right;">'
       f'<span style="display:inline-block;padding:4px 12px;border-radius:4px;'
-      f'background-color:{status_color};color:#fff;font-size:12px;font-weight:600;">'
+      f'border:1px solid {status_color};color:{status_color};font-size:12px;font-weight:600;">'
       f"{status_label}</span></td></tr></table></div>"
       + db_table
       + perf_warning
-      + _button(url, "View Usage Details")
+      + _button(data, url, "View Usage Details")
     )
 
     db_lines = ""
@@ -551,7 +674,12 @@ If you weren't expecting this invitation, you can safely ignore this email.
 
     return {
       "subject": f"{app_name} — Your graph instance is at {usage_pct:.0f}% storage capacity",
-      "html": _base_template(app_name, content),
+      "html": _base_template(
+        data,
+        content,
+        heading=f"Storage at {usage_pct:.0f}% of capacity",
+        preheader=f"{graph_id}: {used_gb:.1f} GB of {limit_gb:.0f} GB used.",
+      ),
       "text": f"""Hi {user_name},
 
 Your graph instance {graph_id} ({tier}) is at {usage_pct:.0f}% storage capacity.
@@ -588,7 +716,8 @@ View usage details: {url}
       template = self._get_email_template(email_type, template_data)
 
       if self.smtp:
-        message_id = self.smtp.send(
+        message_id = await asyncio.to_thread(
+          self.smtp.send,
           from_name=self.from_name,
           from_address=self.from_address,
           to_email=to_email,
@@ -611,7 +740,8 @@ View usage details: {url}
         },
       }
 
-      response = self.ses_client.send_email(
+      response = await asyncio.to_thread(
+        self.ses_client.send_email,
         Source=f"{self.from_name} <{self.from_address}>",
         Destination={"ToAddresses": [to_email]},
         Message=message,
@@ -658,7 +788,7 @@ View usage details: {url}
 
     template_data = {
       "user_name": user_name,
-      "app_name": _APP_DISPLAY_NAMES.get(app, _APP_DISPLAY_NAMES[_DEFAULT_APP]),
+      **self._brand(app),
       "verification_url": f"{base_url}/auth/verify-email?token={token}{return_to}",
       "expiry_hours": EMAIL_TOKEN_EXPIRY_HOURS,
     }
@@ -677,7 +807,7 @@ View usage details: {url}
 
     template_data = {
       "user_name": user_name,
-      "app_name": _APP_DISPLAY_NAMES.get(app, _APP_DISPLAY_NAMES[_DEFAULT_APP]),
+      **self._brand(app),
       "reset_url": f"{base_url}/auth/reset-password?token={token}{return_to}",
       "expiry_hours": PASSWORD_RESET_TOKEN_EXPIRY_HOURS,
     }
@@ -692,7 +822,7 @@ View usage details: {url}
 
     template_data = {
       "user_name": user_name,
-      "app_name": _APP_DISPLAY_NAMES.get(app, _APP_DISPLAY_NAMES[_DEFAULT_APP]),
+      **self._brand(app),
       "dashboard_url": f"{base_url}/home",
     }
 
@@ -708,7 +838,7 @@ View usage details: {url}
     """Security notification: a passkey was added to the account."""
     template_data = {
       "user_name": user_name,
-      "app_name": _APP_DISPLAY_NAMES.get(app, _APP_DISPLAY_NAMES[_DEFAULT_APP]),
+      **self._brand(app),
       "passkey_name": passkey_name,
     }
 
@@ -725,7 +855,7 @@ View usage details: {url}
     was changed. ``new_email`` is expected pre-masked by the caller."""
     template_data = {
       "user_name": user_name,
-      "app_name": _APP_DISPLAY_NAMES.get(app, _APP_DISPLAY_NAMES[_DEFAULT_APP]),
+      **self._brand(app),
       "new_email": new_email,
     }
 
@@ -747,7 +877,7 @@ View usage details: {url}
     base_url, return_to = self._auth_link_parts(app)
 
     template_data = {
-      "app_name": _APP_DISPLAY_NAMES.get(app, _APP_DISPLAY_NAMES[_DEFAULT_APP]),
+      **self._brand(app),
       "inviter_name": inviter_name,
       "org_name": org_name,
       "invite_url": f"{base_url}/register?invite={token}{return_to}",
@@ -780,7 +910,7 @@ View usage details: {url}
 
     template_data = {
       "user_name": user_name,
-      "app_name": _APP_DISPLAY_NAMES.get(app, _APP_DISPLAY_NAMES[_DEFAULT_APP]),
+      **self._brand(app),
       "dashboard_url": f"{base_url}/home",
       "graph_id": graph_id,
       "tier": tier,

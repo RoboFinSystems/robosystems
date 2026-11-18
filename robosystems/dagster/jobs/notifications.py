@@ -22,9 +22,7 @@ logger = get_logger(__name__)
 class SendEmailConfig(Config):
   """Configuration for sending an email."""
 
-  email_type: (
-    str  # email_verification, password_reset, welcome, org_invitation, passkey_enrolled
-  )
+  email_type: str  # a key of operations.notifications.EMAIL_SENDERS
   to_email: str
   user_name: str
   # Reference to the raw token parked in Valkey. The raw token must never enter
@@ -101,21 +99,18 @@ def _discard_email_token(ref: str) -> None:
 )
 def send_email_op(context: OpExecutionContext, config: SendEmailConfig) -> dict:
   """Send an email through the configured transport: SES, or SMTP when
-  SMTP_HOST is set.
+  SMTP_HOST is set. The retry lane behind `operations.notifications.deliver_email`.
 
-  Token requirements by email_type:
-  - email_verification, password_reset, org_invitation: token_ref required,
-    and it must still resolve (the parked token expires after
-    CacheDefaults.EMAIL_TOKEN_REF_TTL and is discarded once sent)
-  - org_invitation: org_name also required
-  - welcome: no token
+  A type that carries a token needs a `token_ref` that still resolves (the
+  parked token expires after CacheDefaults.EMAIL_TOKEN_REF_TTL and is
+  discarded once sent).
 
   A send failure raises, so the op's RetryPolicy retries it. When
   operation_id is set, the result is written to the SSE operation metadata.
   """
   import asyncio
 
-  from robosystems.operations.aws.ses import ses_service
+  from robosystems.operations.notifications import send_email_by_type
 
   context.log.info(
     f"Sending {config.email_type} email to {config.to_email} for app {config.app}"
@@ -133,71 +128,19 @@ def send_email_op(context: OpExecutionContext, config: SendEmailConfig) -> dict:
 
   loop = asyncio.new_event_loop()
   try:
-    if config.email_type == "email_verification":
-      if not token:
-        raise ValueError("Token required for email_verification")
-      success = loop.run_until_complete(
-        ses_service.send_verification_email(
-          user_email=config.to_email,
-          user_name=config.user_name,
-          token=token,
-          app=config.app,
-        )
+    success = loop.run_until_complete(
+      send_email_by_type(
+        email_type=config.email_type,
+        to_email=config.to_email,
+        user_name=config.user_name,
+        token=token,
+        app=config.app,
+        org_name=config.org_name,
+        inviter_name=config.inviter_name,
+        passkey_name=config.passkey_name,
+        new_email=config.new_email,
       )
-    elif config.email_type == "password_reset":
-      if not token:
-        raise ValueError("Token required for password_reset")
-      success = loop.run_until_complete(
-        ses_service.send_password_reset_email(
-          user_email=config.to_email,
-          user_name=config.user_name,
-          token=token,
-          app=config.app,
-        )
-      )
-    elif config.email_type == "welcome":
-      success = loop.run_until_complete(
-        ses_service.send_welcome_email(
-          user_email=config.to_email,
-          user_name=config.user_name,
-          app=config.app,
-        )
-      )
-    elif config.email_type == "org_invitation":
-      if not token:
-        raise ValueError("Token required for org_invitation")
-      if not config.org_name:
-        raise ValueError("org_name required for org_invitation")
-      success = loop.run_until_complete(
-        ses_service.send_org_invitation_email(
-          user_email=config.to_email,
-          inviter_name=config.inviter_name or "A teammate",
-          org_name=config.org_name,
-          token=token,
-          app=config.app,
-        )
-      )
-    elif config.email_type == "passkey_enrolled":
-      success = loop.run_until_complete(
-        ses_service.send_passkey_enrolled_email(
-          user_email=config.to_email,
-          user_name=config.user_name,
-          passkey_name=config.passkey_name or "a new passkey",
-          app=config.app,
-        )
-      )
-    elif config.email_type == "email_changed":
-      success = loop.run_until_complete(
-        ses_service.send_email_changed_notice(
-          user_email=config.to_email,
-          user_name=config.user_name,
-          new_email=config.new_email or "a new address",
-          app=config.app,
-        )
-      )
-    else:
-      raise ValueError(f"Unknown email type: {config.email_type}")
-
+    )
   finally:
     loop.close()
 

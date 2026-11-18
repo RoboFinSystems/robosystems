@@ -20,7 +20,6 @@ from ...database import get_db_session
 from ...logger import get_logger
 from ...middleware.auth.dependencies import get_current_user, require_jwt_user
 from ...middleware.rate_limits import general_api_rate_limit_dependency
-from ...middleware.sse import build_email_job_config, run_and_monitor_dagster_job
 from ...models.api.common import RESOURCE_ERROR_RESPONSES, ErrorResponse
 from ...models.api.orgs import (
   CreateInvitationRequest,
@@ -28,6 +27,7 @@ from ...models.api.orgs import (
   OrgInvitationResponse,
 )
 from ...models.core import Org, OrgInvitation, OrgRole, OrgUser, User
+from ...operations.notifications import deliver_email
 from ...security import SecurityAuditLogger, SecurityEventType
 from ..auth.utils import detect_app_source
 
@@ -84,7 +84,8 @@ def _queue_invitation_email(
   raw_token: str,
 ) -> None:
   app = detect_app_source(fastapi_request)
-  run_config = build_email_job_config(
+  background_tasks.add_task(
+    deliver_email,
     email_type="org_invitation",
     to_email=invitation.email,
     user_name="there",
@@ -92,12 +93,6 @@ def _queue_invitation_email(
     app=app,
     org_name=org_name,
     inviter_name=inviter.name,
-  )
-  background_tasks.add_task(
-    run_and_monitor_dagster_job,
-    job_name="send_email_job",
-    operation_id=None,
-    run_config=run_config,
   )
 
   client_ip = fastapi_request.client.host if fastapi_request.client else None

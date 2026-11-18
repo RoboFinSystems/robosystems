@@ -7,7 +7,7 @@ import pytest
 from botocore.exceptions import ClientError
 
 from robosystems.config import env
-from robosystems.operations.aws.ses import SESEmailService, SMTPTransport
+from robosystems.operations.aws.ses import _FONTS_URL, SESEmailService, SMTPTransport
 
 
 @pytest.fixture
@@ -720,3 +720,52 @@ class TestSMTPTransport:
     assert not connection.starttls.called
     assert not connection.login.called
     connection.send_message.assert_called_once()
+
+
+class TestEmailLayout:
+  """The shared layout: dark in every client, branded per app, names escaped."""
+
+  async def _html(self, ses_service, mock_ses_client, **kwargs) -> str:
+    mock_ses_client.send_email.return_value = {"MessageId": "layout"}
+    await ses_service.send_verification_email(
+      **{"user_email": "u@example.com", "user_name": "U", "token": "t", **kwargs}
+    )
+    return mock_ses_client.send_email.call_args.kwargs["Message"]["Body"]["Html"][
+      "Data"
+    ]
+
+  @pytest.mark.asyncio
+  async def test_declares_a_dark_color_scheme(self, ses_service, mock_ses_client):
+    html = await self._html(ses_service, mock_ses_client, app="robosystems")
+
+    assert '<meta name="color-scheme" content="dark">' in html
+    assert f'<link href="{_FONTS_URL}" rel="stylesheet">' in html
+
+  @pytest.mark.asyncio
+  async def test_logo_and_accent_follow_the_app(self, ses_service, mock_ses_client):
+    ledger = await self._html(ses_service, mock_ses_client, app="roboledger")
+    investor = await self._html(ses_service, mock_ses_client, app="roboinvestor")
+
+    assert f"{ses_service.app_urls['roboledger']}/images/logos/roboledger.png" in ledger
+    assert "#7C3AED" in ledger
+    assert (
+      f"{ses_service.app_urls['roboinvestor']}/images/logos/roboinvestor.png"
+      in investor
+    )
+    assert "#047857" in investor
+
+  @pytest.mark.asyncio
+  async def test_unknown_app_gets_the_default_brand(self, ses_service, mock_ses_client):
+    html = await self._html(ses_service, mock_ses_client, app="nope")
+
+    assert "/images/logos/robosystems.png" in html
+    assert "RoboSystems" in html
+
+  @pytest.mark.asyncio
+  async def test_verification_escapes_the_user_name(self, ses_service, mock_ses_client):
+    html = await self._html(
+      ses_service, mock_ses_client, user_name="<script>x</script>", app="robosystems"
+    )
+
+    assert "<script>x" not in html
+    assert "&lt;script&gt;" in html

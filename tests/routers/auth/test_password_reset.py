@@ -11,16 +11,14 @@ class TestPasswordResetEndpoints:
   """Tests for password reset functionality."""
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.auth.password_reset.run_and_monitor_dagster_job")
-  @patch("robosystems.routers.auth.password_reset.build_email_job_config")
+  @patch("robosystems.routers.auth.password_reset.deliver_email")
   @patch.object(UserToken, "create_token")
   @patch.object(User, "get_by_email")
   async def test_forgot_password_success(
     self,
     mock_get_user,
     mock_create_token,
-    mock_build_config,
-    mock_dagster_job,
+    mock_deliver_email,
     client,
     test_db,
   ):
@@ -36,10 +34,6 @@ class TestPasswordResetEndpoints:
 
     # Mock token creation
     mock_create_token.return_value = "reset_token_123"
-
-    # Mock Dagster job
-    mock_build_config.return_value = {"ops": {"send_email_op": {"config": {}}}}
-    mock_dagster_job.return_value = {"status": "success"}
 
     # Request password reset
     response = client.post(
@@ -66,8 +60,8 @@ class TestPasswordResetEndpoints:
     assert token_args.kwargs["hours"] == 1  # Default expiry
 
     # Verify email job config was built
-    mock_build_config.assert_called_once()
-    config_args = mock_build_config.call_args
+    mock_deliver_email.assert_called_once()
+    config_args = mock_deliver_email.call_args
     assert config_args.kwargs["email_type"] == "password_reset"
     assert config_args.kwargs["to_email"] == "forgot@example.com"
     assert config_args.kwargs["user_name"] == "Forgot User"
@@ -303,8 +297,7 @@ class TestPasswordResetEndpoints:
     assert response.status_code == 422  # Validation error
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.auth.password_reset.run_and_monitor_dagster_job")
-  @patch("robosystems.routers.auth.password_reset.build_email_job_config")
+  @patch("robosystems.routers.auth.password_reset.deliver_email")
   @patch("robosystems.routers.auth.password_reset.detect_app_source")
   @patch.object(UserToken, "create_token")
   @patch.object(User, "get_by_email")
@@ -313,8 +306,7 @@ class TestPasswordResetEndpoints:
     mock_get_user,
     mock_create_token,
     mock_detect_app,
-    mock_build_config,
-    mock_dagster_job,
+    mock_deliver_email,
     client,
     test_db,
   ):
@@ -328,8 +320,6 @@ class TestPasswordResetEndpoints:
     mock_get_user.return_value = mock_user
 
     mock_create_token.return_value = "token_app"
-    mock_build_config.return_value = {"ops": {"send_email_op": {"config": {}}}}
-    mock_dagster_job.return_value = {"status": "success"}
     mock_detect_app.return_value = "robosystems"
 
     response = client.post(
@@ -344,12 +334,11 @@ class TestPasswordResetEndpoints:
     mock_detect_app.assert_called_once()
 
     # Verify correct app was passed to email job config
-    config_args = mock_build_config.call_args
+    config_args = mock_deliver_email.call_args
     assert config_args.kwargs["app"] == "robosystems"
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.auth.password_reset.run_and_monitor_dagster_job")
-  @patch("robosystems.routers.auth.password_reset.build_email_job_config")
+  @patch("robosystems.routers.auth.password_reset.deliver_email")
   @patch("robosystems.routers.auth.password_reset.SecurityAuditLogger")
   @patch.object(UserToken, "create_token")
   @patch.object(User, "get_by_email")
@@ -358,8 +347,7 @@ class TestPasswordResetEndpoints:
     mock_get_user,
     mock_create_token,
     mock_audit_logger,
-    mock_build_config,
-    mock_dagster_job,
+    mock_deliver_email,
     client,
     test_db,
   ):
@@ -374,8 +362,6 @@ class TestPasswordResetEndpoints:
     mock_get_user.return_value = mock_user
 
     mock_create_token.return_value = "token_audit"
-    mock_build_config.return_value = {"ops": {"send_email_op": {"config": {}}}}
-    mock_dagster_job.return_value = {"status": "success"}
 
     response = client.post(
       "/v1/auth/password/forgot",

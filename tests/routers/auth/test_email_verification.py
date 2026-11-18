@@ -11,16 +11,14 @@ class TestEmailVerificationEndpoints:
   """Tests for email verification functionality."""
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.auth.email_verification.run_and_monitor_dagster_job")
-  @patch("robosystems.routers.auth.email_verification.build_email_job_config")
+  @patch("robosystems.routers.auth.email_verification.deliver_email")
   @patch.object(UserToken, "create_token")
   @patch("robosystems.routers.auth.email_verification.verify_jwt_claims")
   async def test_resend_verification_email_success(
     self,
     mock_verify_jwt,
     mock_create_token,
-    mock_build_config,
-    mock_dagster_job,
+    mock_deliver_email,
     client,
     test_user,
     test_db,
@@ -38,12 +36,6 @@ class TestEmailVerificationEndpoints:
 
     # Mock token creation
     mock_create_token.return_value = "verification_token_123"
-
-    # Mock Dagster job config builder
-    mock_build_config.return_value = {"ops": {"send_email_op": {"config": {}}}}
-
-    # Mock Dagster job (called via BackgroundTasks, so it's queued not awaited)
-    mock_dagster_job.return_value = {"status": "success"}
 
     # Request to resend verification
     response = client.post(
@@ -63,8 +55,8 @@ class TestEmailVerificationEndpoints:
     assert call_args.kwargs["hours"] == 24
 
     # Verify email job config was built
-    mock_build_config.assert_called_once()
-    config_args = mock_build_config.call_args
+    mock_deliver_email.assert_called_once()
+    config_args = mock_deliver_email.call_args
     assert config_args.kwargs["email_type"] == "email_verification"
     assert config_args.kwargs["to_email"] == test_user.email
     assert config_args.kwargs["user_name"] == test_user.name
@@ -104,16 +96,14 @@ class TestEmailVerificationEndpoints:
     assert "Authentication required" in data["detail"]
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.auth.email_verification.run_and_monitor_dagster_job")
-  @patch("robosystems.routers.auth.email_verification.build_email_job_config")
+  @patch("robosystems.routers.auth.email_verification.deliver_email")
   @patch.object(UserToken, "verify_token")
   @patch.object(User, "get_by_id")
   async def test_verify_email_success(
     self,
     mock_get_user,
     mock_verify_token,
-    mock_build_config,
-    mock_dagster_job,
+    mock_deliver_email,
     client,
     test_db,
   ):
@@ -130,10 +120,6 @@ class TestEmailVerificationEndpoints:
     mock_user.is_active = True
     mock_user.verify_email = Mock()  # Mock the verify_email method
     mock_get_user.return_value = mock_user
-
-    # Mock Dagster job config builder
-    mock_build_config.return_value = {"ops": {"send_email_op": {"config": {}}}}
-    mock_dagster_job.return_value = {"status": "success"}
 
     # Verify email
     response = client.post(
@@ -159,8 +145,8 @@ class TestEmailVerificationEndpoints:
     mock_user.verify_email.assert_called_once_with(test_db)
 
     # Verify welcome email job config was built
-    mock_build_config.assert_called_once()
-    config_args = mock_build_config.call_args
+    mock_deliver_email.assert_called_once()
+    config_args = mock_deliver_email.call_args
     assert config_args.kwargs["email_type"] == "welcome"
 
   @pytest.mark.asyncio
@@ -198,16 +184,14 @@ class TestEmailVerificationEndpoints:
     assert data["detail"] == "User not found"
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.auth.email_verification.run_and_monitor_dagster_job")
-  @patch("robosystems.routers.auth.email_verification.build_email_job_config")
+  @patch("robosystems.routers.auth.email_verification.deliver_email")
   @patch.object(UserToken, "verify_token")
   @patch.object(User, "get_by_id")
   async def test_verify_email_already_verified(
     self,
     mock_get_user,
     mock_verify_token,
-    mock_build_config,
-    mock_dagster_job,
+    mock_deliver_email,
     client,
     test_db,
   ):
@@ -223,10 +207,6 @@ class TestEmailVerificationEndpoints:
     mock_user.is_active = True
     mock_user.verify_email = Mock()  # Mock the verify_email method
     mock_get_user.return_value = mock_user
-
-    # Mock Dagster job
-    mock_build_config.return_value = {"ops": {"send_email_op": {"config": {}}}}
-    mock_dagster_job.return_value = {"status": "success"}
 
     response = client.post(
       "/v1/auth/email/verify",
@@ -250,8 +230,7 @@ class TestEmailVerificationEndpoints:
     assert response.status_code == 422  # Validation error
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.auth.email_verification.run_and_monitor_dagster_job")
-  @patch("robosystems.routers.auth.email_verification.build_email_job_config")
+  @patch("robosystems.routers.auth.email_verification.deliver_email")
   @patch("robosystems.routers.auth.email_verification.detect_app_source")
   @patch.object(UserToken, "create_token")
   @patch("robosystems.routers.auth.email_verification.verify_jwt_claims")
@@ -260,8 +239,7 @@ class TestEmailVerificationEndpoints:
     mock_verify_jwt,
     mock_create_token,
     mock_detect_app,
-    mock_build_config,
-    mock_dagster_job,
+    mock_deliver_email,
     client,
     test_user,
     test_db,
@@ -277,8 +255,6 @@ class TestEmailVerificationEndpoints:
     token = "test_jwt_token"
 
     mock_create_token.return_value = "token_789"
-    mock_build_config.return_value = {"ops": {"send_email_op": {"config": {}}}}
-    mock_dagster_job.return_value = {"status": "success"}
     mock_detect_app.return_value = "roboinvestor"
 
     response = client.post(
@@ -295,12 +271,11 @@ class TestEmailVerificationEndpoints:
     mock_detect_app.assert_called_once()
 
     # Verify correct app was passed to email job config
-    config_args = mock_build_config.call_args
+    config_args = mock_deliver_email.call_args
     assert config_args.kwargs["app"] == "roboinvestor"
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.auth.email_verification.run_and_monitor_dagster_job")
-  @patch("robosystems.routers.auth.email_verification.build_email_job_config")
+  @patch("robosystems.routers.auth.email_verification.deliver_email")
   @patch("robosystems.routers.auth.email_verification.SecurityAuditLogger")
   @patch.object(UserToken, "verify_token")
   @patch.object(User, "get_by_id")
@@ -309,8 +284,7 @@ class TestEmailVerificationEndpoints:
     mock_get_user,
     mock_verify_token,
     mock_audit_logger,
-    mock_build_config,
-    mock_dagster_job,
+    mock_deliver_email,
     client,
     test_db,
   ):
@@ -325,10 +299,6 @@ class TestEmailVerificationEndpoints:
     mock_user.is_active = True
     mock_user.verify_email = Mock()  # Mock the verify_email method
     mock_get_user.return_value = mock_user
-
-    # Mock Dagster job
-    mock_build_config.return_value = {"ops": {"send_email_op": {"config": {}}}}
-    mock_dagster_job.return_value = {"status": "success"}
 
     response = client.post(
       "/v1/auth/email/verify",
@@ -349,16 +319,14 @@ class TestEmailVerificationEndpoints:
     assert log_args.kwargs["endpoint"] == "/v1/auth/email/verify"
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.auth.email_verification.run_and_monitor_dagster_job")
-  @patch("robosystems.routers.auth.email_verification.build_email_job_config")
+  @patch("robosystems.routers.auth.email_verification.deliver_email")
   @patch.object(UserToken, "create_token")
   @patch("robosystems.routers.auth.email_verification.verify_jwt_claims")
   async def test_resend_verification_rate_limiting(
     self,
     mock_verify_jwt,
     mock_create_token,
-    mock_build_config,
-    mock_dagster_job,
+    mock_deliver_email,
     client,
     test_user,
     test_db,
@@ -374,8 +342,6 @@ class TestEmailVerificationEndpoints:
     token = "test_jwt_token"
 
     mock_create_token.return_value = "token_rate"
-    mock_build_config.return_value = {"ops": {"send_email_op": {"config": {}}}}
-    mock_dagster_job.return_value = {"status": "success"}
 
     # Make multiple requests quickly
     for i in range(5):
@@ -399,12 +365,11 @@ class TestVerifySessionIssuance:
     "robosystems.routers.auth.email_verification.may_issue_session_without_login",
     return_value=False,
   )
-  @patch("robosystems.routers.auth.email_verification.run_and_monitor_dagster_job")
-  @patch("robosystems.routers.auth.email_verification.build_email_job_config")
+  @patch("robosystems.routers.auth.email_verification.deliver_email")
   @patch.object(UserToken, "verify_token")
   @patch.object(User, "get_by_id")
   async def test_verify_for_mfa_user_returns_no_session(
-    self, mock_get_user, mock_verify_token, mock_build_config, _job, _gate, client
+    self, mock_get_user, mock_verify_token, mock_deliver_email, _gate, client
   ):
     mock_verify_token.return_value = ("user_mfa", 0)
     mock_user = Mock(spec=User)
@@ -415,7 +380,6 @@ class TestVerifySessionIssuance:
     mock_user.is_active = True
     mock_user.verify_email = Mock()
     mock_get_user.return_value = mock_user
-    mock_build_config.return_value = {"ops": {}}
 
     response = client.post("/v1/auth/email/verify", json={"token": "tok"})
 
