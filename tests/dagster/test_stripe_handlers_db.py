@@ -407,6 +407,7 @@ class TestAnEventMovesARowOnlyToWhatIsStillTrue:
           "customer": "cus_test_retry",
           "subscription": f"sub_test_{uuid.uuid4().hex[:10]}",
           "payment_status": "paid",
+          "amount_total": 2900,
           "status": "complete",
           "metadata": {"subscription_id": sub.id},
         },
@@ -484,6 +485,40 @@ class TestAnEventMovesARowOnlyToWhatIsStillTrue:
         MagicMock(),
       )
 
+    test_db.expire_all()
+    assert not BillingCustomer.get_by_org_id(sub.org_id, test_db).has_payment_method
+
+  @pytest.mark.asyncio
+  async def test_a_free_trial_checkout_reported_paid_records_no_card(self, test_db):
+    """Stripe reports a $0 trial session with no card as "paid"."""
+    sub = _checkout_row(test_db)
+    test_db.add(BillingCustomer(org_id=sub.org_id))
+    test_db.commit()
+
+    with (
+      patch("robosystems.dagster.jobs.billing._trigger_resource_provisioning"),
+      patch(
+        "robosystems.dagster.jobs.billing._stripe_subscription_has_payment_method",
+        return_value=False,
+      ) as live_check,
+      patch("robosystems.dagster.jobs.billing._ensure_default_payment_method"),
+    ):
+      await _handle_checkout_completed(
+        {
+          "id": sub.provider_subscription_id,
+          "object": "checkout.session",
+          "customer": "cus_test_trial",
+          "subscription": f"sub_test_{uuid.uuid4().hex[:10]}",
+          "payment_status": "paid",
+          "amount_total": 0,
+          "status": "complete",
+          "metadata": {"subscription_id": sub.id},
+        },
+        test_db,
+        MagicMock(),
+      )
+
+    live_check.assert_called_once()
     test_db.expire_all()
     assert not BillingCustomer.get_by_org_id(sub.org_id, test_db).has_payment_method
 
