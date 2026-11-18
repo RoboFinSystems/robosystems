@@ -2,7 +2,7 @@
 
 **Finance AI that ties to the books.** RoboSystems is an open-source knowledge graph that gives your AI agents your general ledger and public companies' filings as structured, traceable data, on your infrastructure, with the model you choose.
 
-Three kinds of graph on one platform: your ledger, the public filings, and graphs you model yourself, from your own schema, loaded from Parquet and queried with Cypher. One ontology underneath: the RoboSystems graph model, labelled in XBRL's standard terms wherever XBRL has one. Every graph runs on it in LadybugDB, and reports leave as a holon (RDF), XBRL 2.1 or Tavi. Subgraphs give your AI a workspace it extends over MCP, and semantic memory carries its work between sessions.
+Three kinds of graph on one platform. Your ledger and the public filings share the RoboSystems ontology, labelled in XBRL's standard terms wherever XBRL has one, so your numbers and a public company's line up. Graphs you model yourself take your own schema instead: define it, load it from Parquet, query it with Cypher. All three run on LadybugDB. Ledger reports use rs-gaap, the RoboSystems reporting taxonomy, and leave as XBRL 2.1 or a holon (RDF). Subgraphs give your AI a workspace it extends over MCP, and semantic memory carries its work between sessions.
 
 [RoboLedger](https://roboledger.ai), the general ledger built on it, is in [roboledger-app](https://github.com/RoboFinSystems/roboledger-app): a full accounting system in its own right, every number traced to the entry. Our own companies' books are kept on it. [RoboInvestor](https://roboinvestor.ai) runs on it too: equity research on public companies, your fund's positions with their terms, and the reports your portfolio companies share from RoboLedger.
 
