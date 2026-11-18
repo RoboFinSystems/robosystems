@@ -124,11 +124,13 @@ def make_checkout_session(
   payment_status="paid",
   subscription_id="sub_stripe_abc",
   metadata=None,
+  amount_total=2900,
 ):
   return {
     "id": session_id,
     "customer": customer_id,
     "payment_status": payment_status,
+    "amount_total": amount_total,
     "subscription": subscription_id,
     "metadata": metadata or {},
   }

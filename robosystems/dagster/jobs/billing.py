@@ -124,7 +124,11 @@ async def _handle_checkout_completed(
       subscription.status = "pending_payment"
 
     # A trial checkout takes no payment, and a card only if one was given.
-    has_card = payment_status == "paid"
+    # Stripe still reports a $0 trial session as "paid", so only money taken
+    # counts; otherwise ask Stripe whether the subscription has a card.
+    has_card = (
+      payment_status == "paid" and int(session_data.get("amount_total") or 0) > 0
+    )
     if not has_card and not customer.has_payment_method and stripe_subscription_id:
       has_card = await asyncio.to_thread(
         _stripe_subscription_has_payment_method, stripe_subscription_id, context
