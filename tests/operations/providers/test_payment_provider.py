@@ -131,6 +131,18 @@ class TestStripeCheckoutSessions:
     call_args = stripe_provider.stripe.checkout.Session.create.call_args
     assert call_args[1]["metadata"] == metadata
 
+  def test_checkout_session_offers_no_promotion_code_field(self, stripe_provider):
+    """Promotion codes are retired, so Checkout shows no field for one."""
+    mock_session = Mock()
+    mock_session.id = "cs_test_789"
+    mock_session.url = "https://checkout.stripe.com/test"
+    stripe_provider.stripe.checkout.Session.create.return_value = mock_session
+
+    stripe_provider.create_checkout_session("cus_123", "price_456", {})
+
+    call_args = stripe_provider.stripe.checkout.Session.create.call_args
+    assert call_args[1]["allow_promotion_codes"] is False
+
   def _with_stripe_errors(self, stripe_provider):
     import stripe as stripe_module
 
