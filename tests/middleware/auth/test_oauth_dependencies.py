@@ -166,6 +166,29 @@ class TestPerGraphRoute:
     assert exc.value.status_code == 403
     assert 'error="insufficient_scope"' in exc.value.headers["WWW-Authenticate"]
 
+  async def test_lapsed_repository_says_the_subscription_ended(self):
+    sec_resource = f"{ISSUER}/v1/graphs/sec/mcp"
+    request = _request({"authorization": f"Bearer {TOKEN}"}, path="/v1/graphs/sec/mcp")
+    with (
+      patch.object(
+        deps,
+        "validate_oauth_access_token",
+        return_value=_principal(graph_id="sec", resource=sec_resource),
+      ),
+      patch.object(
+        deps.api_key_cache, "get_cached_jwt_graph_access", return_value=False
+      ),
+      patch.object(deps, "SecurityAuditLogger"),
+      patch.object(env, "ROBOSYSTEMS_URL", "https://app.test.example"),
+      pytest.raises(HTTPException) as exc,
+    ):
+      await deps.get_current_user_with_graph_or_oauth(request, "sec", api_key=None)
+    assert exc.value.status_code == 403
+    assert "No active subscription to the SEC repository" in exc.value.detail
+    challenge = exc.value.headers["WWW-Authenticate"]
+    assert 'error="insufficient_scope"' in challenge
+    assert "https://app.test.example/repositories/browse" in challenge
+
   async def test_no_credentials_carries_the_discovery_challenge(self):
     request = _request({})
     with (

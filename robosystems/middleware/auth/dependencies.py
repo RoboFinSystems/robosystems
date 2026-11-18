@@ -615,15 +615,16 @@ def _oauth_principal_graph_access(
   endpoint = str(request.url.path)
   user_id = principal.user_id
 
+  from robosystems.config.shared_repositories import (
+    is_shared_repository_or_subgraph,
+  )
+
+  is_repository = is_shared_repository_or_subgraph(graph_id)
   has_access = api_key_cache.get_cached_jwt_graph_access(user_id, graph_id)
   if has_access is None:
-    from robosystems.config.shared_repositories import (
-      is_shared_repository_or_subgraph,
-    )
-
     from ..graph.utils import MultiTenantUtils
 
-    if is_shared_repository_or_subgraph(graph_id):
+    if is_repository:
       has_access = MultiTenantUtils.validate_repository_access(
         graph_id, user_id, "read"
       )
@@ -639,16 +640,34 @@ def _oauth_principal_graph_access(
       ip_address=client_ip,
       endpoint=endpoint,
     )
+    # A repository is reached by subscription, so the likely cause is a trial
+    # or plan that ended: say so, or the client only offers to sign in again.
+    detail = (
+      _lapsed_repository_message(graph_id)
+      if is_repository
+      else "Access denied to graph"
+    )
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
-      detail="Access denied to graph",
+      detail=detail,
       headers=_mcp_challenge_headers(
         route_graph_id,
         product=product,
         error="insufficient_scope",
-        description="Access denied to graph",
+        description=detail,
       ),
     )
+
+
+def _lapsed_repository_message(graph_id: str) -> str:
+  from robosystems.config import env
+
+  repository = graph_id.split("_", 1)[0].upper()
+  return (
+    f"No active subscription to the {repository} repository: a trial or plan "
+    f"that has ended stops access. Subscribe at "
+    f"{env.ROBOSYSTEMS_URL}/repositories/browse, then try again."
+  )
 
 
 def _resolve_oauth_principal(
