@@ -7,7 +7,7 @@ section: Keep the books right
 
 Closing a month in RoboLedger locks the period, posts its adjusting entries, and saves that month's balance sheet, income statement and cash flow. Your AI assistant does the legwork. It checks what's blocking the close, drafts the entries, and shows you every one before anything posts.
 
-Close is the last thing to set up, on purpose. Connect your books, ask questions, build reports and plans first. Once you trust the numbers, closing is the same conversation with one more step.
+You don't need a close to start. Connect your books, ask questions, build reports and plans; closing is the same conversation with one more step.
 
 ![Close the month with ChatGPT: RoboLedger month-end close](https://youtu.be/bKgMr-bxnk0)
 

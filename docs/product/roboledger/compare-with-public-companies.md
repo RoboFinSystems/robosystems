@@ -5,7 +5,7 @@ order: 16
 section: Work with your books
 ---
 
-Public companies report their financials to the SEC in a structured format, tagged with the same kind of reporting concepts your chart of accounts is mapped to. RoboSystems keeps those filings in a graph of their own. Connect it beside your books, and your AI assistant can put your gross margin, revenue growth or expense ratios next to companies in your industry, in one conversation.
+Public companies report their financials to the SEC in a structured format, tagged with the same kind of reporting concepts your chart of accounts is mapped to. RoboSystems keeps those filings in a graph of their own. Connect it beside your books, and your AI assistant can put your gross margin, revenue growth or expense ratios next to public companies you choose, in one conversation.
 
 ![Compare with public companies in Claude: your margins beside their SEC filings](https://youtu.be/qK2xPNSYfaQ)
 

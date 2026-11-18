@@ -2,7 +2,7 @@
 
 RoboSystems is the open-source knowledge graph for finance. It gives your AI agents your general ledger and public companies' filings as structured, traceable data, on your infrastructure, with the model you choose. Three kinds of graph run on one platform: ledger graphs ([RoboLedger](https://roboledger.ai), the general ledger built on it), the SEC shared repository, and graphs you model yourself from your own schema ([Custom Graph Schema](Custom-Graph-Schema.md)), loaded from Parquet and queried with Cypher. The ledger and the SEC repository share the RoboSystems ontology, labelled in XBRL's standard terms wherever XBRL has one; a graph you model yourself takes your own schema. All three run on LadybugDB. Ledger reports use rs-gaap, the RoboSystems reporting taxonomy ([Taxonomy & Frameworks](Taxonomy-and-Frameworks.md)), and leave as XBRL 2.1 or a holon (RDF). Subgraphs give your AI a workspace it extends over MCP. [RoboInvestor](https://roboinvestor.ai) runs on it too: equity research on public companies, a fund's positions with their terms, and the reports portfolio companies share from RoboLedger.
 
-**Every tenant gets their own graph** — not a row-level slice of a shared table, but a dedicated graph database on its own instance with a dedicated OLTP schema behind it. Your ontology, your taxonomies, and your calculation structures live in it as artifacts you can read, export, and take with you.
+**Every tenant gets their own graph** — not a row-level slice of a shared table, but a dedicated graph database on its own instance with a dedicated OLTP schema behind it. Your schema, your taxonomies, and your calculation structures live in it as artifacts you can read, export, and take with you.
 
 **Run it yourself.** The software is open source (Apache 2.0 and MIT). Run it [on one server](Self-Hosting-on-a-Server.md), [in your own AWS account](Bootstrap-Guide.md) with the repository's GitHub Actions CI/CD, or [with open-weight models](Self-Hosted-AI-Models.md) on your own hardware.
 
@@ -73,7 +73,7 @@ The financial-content model underneath the products. Each concept page has a ref
 - **[Event Block Reference](Event-Block-Reference.md)** - Fields, vocabularies, transitions, handlers, errors
 - **[Taxonomy & Frameworks](Taxonomy-and-Frameworks.md)** - The rs-gaap and fac frameworks, the library, and the Taxonomy Block
 - **[Reporting & Rendering](Reporting-and-Rendering.md)** - The calc-DAG, what the renderer derives, reporting styles, views
-- **[Serialization & Export](Serialization-and-Export.md)** - Holon, Tavi and XBRL exports, and reading them without the platform
+- **[Serialization & Export](Serialization-and-Export.md)** - Report exports (holon, XBRL 2.1 and a compiled JSON model), and reading them without the platform
 
 ## Run It Yourself
 

@@ -9,7 +9,7 @@ Everything in RoboSystems lives in a graph, and every graph runs on its own tier
 
 ## Graphs
 
-A **graph** is one reporting group's own database: its books, reports, plans, documents and memory. Most graphs hold one company; a holding company and its subsidiaries can share one, each keeping its own books. Each graph runs on a dedicated instance, so no other customer's data or workload shares it.
+A **graph** is one reporting group's own database: its books, reports, plans, documents and memory. Most graphs hold one company; a holding company and its subsidiaries can share one, each keeping its own books. Each graph runs on a dedicated instance, so no other organization's data or workload shares it.
 
 Graphs belong to an **organization**. Organization owners and admins create them with **Create Graph** in the app, and creating one starts a subscription on the organization's payment method. Members work on the graphs they've been given access to. An organization has a limit on how many graphs it can create; if you reach it, the app lets you ask for more.
 
