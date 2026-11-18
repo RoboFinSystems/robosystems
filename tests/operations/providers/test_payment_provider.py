@@ -954,7 +954,8 @@ class TestStripeCancelIdempotency:
 
 
 class TestStripeTrial:
-  """A trial rides on the subscription Stripe opens, with the card still taken."""
+  """A trial rides on the subscription Stripe opens. Checkout asks for no card
+  for it, and Stripe cancels a trial that ends without one."""
 
   @pytest.fixture
   def stripe_provider(self):
@@ -965,9 +966,7 @@ class TestStripeTrial:
         provider.stripe = Mock()
         return provider
 
-  def test_checkout_carries_the_trial_and_still_collects_the_card(
-    self, stripe_provider
-  ):
+  def test_checkout_carries_the_trial_without_asking_for_a_card(self, stripe_provider):
     stripe_provider.create_checkout_session(
       "cus_123", "price_456", {"subscription_id": "bsub_1"}, trial_days=14
     )
@@ -975,13 +974,55 @@ class TestStripeTrial:
     assert kwargs["subscription_data"] == {
       "metadata": {"subscription_id": "bsub_1"},
       "trial_period_days": 14,
+      "trial_settings": {"end_behavior": {"missing_payment_method": "cancel"}},
     }
-    assert kwargs["payment_method_collection"] == "always"
+    assert kwargs["payment_method_collection"] == "if_required"
 
-  def test_checkout_without_a_trial_sends_no_trial_period(self, stripe_provider):
+  def test_checkout_without_a_trial_takes_the_card(self, stripe_provider):
     stripe_provider.create_checkout_session("cus_123", "price_456", {})
     kwargs = stripe_provider.stripe.checkout.Session.create.call_args.kwargs
     assert "trial_period_days" not in kwargs["subscription_data"]
+    assert "trial_settings" not in kwargs["subscription_data"]
+    assert kwargs["payment_method_collection"] == "always"
+
+  def test_an_attached_card_becomes_the_default_when_none_is(self, stripe_provider):
+    stripe_provider.stripe.Customer.retrieve.return_value.to_dict.return_value = {
+      "invoice_settings": {"default_payment_method": None}
+    }
+    stripe_provider.stripe.PaymentMethod.list.return_value.data = [Mock(id="pm_1")]
+
+    assert stripe_provider.ensure_default_payment_method("cus_1") is True
+    stripe_provider.stripe.Customer.modify.assert_called_once_with(
+      "cus_1", invoice_settings={"default_payment_method": "pm_1"}
+    )
+
+  def test_a_default_already_set_is_left_alone(self, stripe_provider):
+    stripe_provider.stripe.Customer.retrieve.return_value.to_dict.return_value = {
+      "invoice_settings": {"default_payment_method": "pm_9"}
+    }
+
+    assert stripe_provider.ensure_default_payment_method("cus_1") is True
+    stripe_provider.stripe.Customer.modify.assert_not_called()
+
+  def test_no_card_means_nothing_to_charge(self, stripe_provider):
+    stripe_provider.stripe.Customer.retrieve.return_value.to_dict.return_value = {}
+    stripe_provider.stripe.PaymentMethod.list.return_value.data = []
+
+    assert stripe_provider.ensure_default_payment_method("cus_1") is False
+
+  def test_subscription_state_says_whether_a_card_is_on_it(self, stripe_provider):
+    stripe_provider.stripe.Subscription.retrieve.return_value.to_dict.return_value = {
+      "status": "trialing",
+      "default_payment_method": None,
+    }
+    assert (
+      stripe_provider.get_subscription_state("sub_1")["has_payment_method"] is False
+    )
+    stripe_provider.stripe.Subscription.retrieve.return_value.to_dict.return_value = {
+      "status": "trialing",
+      "default_payment_method": "pm_1",
+    }
+    assert stripe_provider.get_subscription_state("sub_1")["has_payment_method"] is True
 
   def test_a_card_on_file_subscription_carries_the_trial(self, stripe_provider):
     stripe_provider.stripe.Subscription.create.return_value = Mock(

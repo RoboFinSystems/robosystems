@@ -890,7 +890,7 @@ async def _check_shared_repository_limits(
 
     raise HTTPException(
       status_code=http_status.HTTP_403_FORBIDDEN,
-      detail=trial_refusal(parent_repo_id, operation),
+      detail=trial_refusal(parent_repo_id, operation, user_id=str(user.id)),
     )
 
   if not env.RATE_LIMIT_ENABLED:

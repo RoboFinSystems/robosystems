@@ -1,5 +1,6 @@
 """Dagster billing jobs: Stripe webhook handling, credit allocation, usage reporting."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -122,8 +123,21 @@ async def _handle_checkout_completed(
       # checkout state the provisioning claim accepts.
       subscription.status = "pending_payment"
 
-    if payment_status == "paid":
+    # A trial checkout takes no payment, and a card only if one was given.
+    has_card = payment_status == "paid"
+    if not has_card and not customer.has_payment_method and stripe_subscription_id:
+      has_card = await asyncio.to_thread(
+        _stripe_subscription_has_payment_method, stripe_subscription_id, context
+      )
+    if has_card:
       customer.has_payment_method = True
+      # Checkout saves the card on its own subscription; as the org's default
+      # it also carries a trial running without one.
+      await asyncio.to_thread(
+        _ensure_default_payment_method,
+        customer.stripe_customer_id or customer_id,
+        context,
+      )
 
     if not customer.stripe_customer_id:
       customer.stripe_customer_id = customer_id
@@ -188,6 +202,21 @@ def _stripe_confirms_reactivation(stripe_subscription_id: str | None, context) -
       f"Ignoring stale reactivation for {stripe_subscription_id}: live state {live}"
     )
   return confirmed
+
+
+def _stripe_subscription_has_payment_method(
+  stripe_subscription_id: str, context
+) -> bool:
+  from robosystems.operations.providers.payment_provider import get_payment_provider
+
+  try:
+    live = get_payment_provider("stripe").get_subscription_state(stripe_subscription_id)
+  except Exception as e:
+    context.log.warning(
+      f"Could not read the payment method of {stripe_subscription_id}: {e}"
+    )
+    return False
+  return bool(live.get("has_payment_method"))
 
 
 def _stripe_still_says(
@@ -461,7 +490,8 @@ async def _handle_payment_succeeded(
 
   customer = BillingCustomer.get_by_stripe_customer_id(customer_id, db_session)
 
-  if customer:
+  # Only money taken proves a card: a trial's $0 first invoice is paid too.
+  if customer and int(invoice_data.get("amount_paid") or 0) > 0:
     customer.has_payment_method = True
     db_session.commit()
 
@@ -976,7 +1006,20 @@ async def _handle_subscription_updated(
   await _apply_subscription_updated(
     subscription_data, db_session, context, subscription
   )
+  if subscription_data.get("default_payment_method"):
+    _record_payment_method(subscription, db_session, context)
   _reconcile_repository_grant(subscription, db_session)
+
+
+def _record_payment_method(subscription: Any, db_session: Any, context) -> None:
+  """The subscription has a card now: a trial taken without one gained it."""
+  from robosystems.models.core.billing import BillingCustomer
+
+  customer = BillingCustomer.get_by_org_id(subscription.org_id, db_session)
+  if customer and not customer.has_payment_method:
+    customer.has_payment_method = True
+    db_session.commit()
+    context.log.info(f"Recorded a payment method for org {subscription.org_id}")
 
 
 async def _handle_subscription_deleted(
@@ -1030,6 +1073,9 @@ async def _handle_setup_intent_succeeded(
 
   changed = False
 
+  # A trial with no card of its own converts on the customer's default.
+  await asyncio.to_thread(_ensure_default_payment_method, customer_id, context)
+
   if not customer.has_payment_method:
     customer.has_payment_method = True
     changed = True
@@ -1059,6 +1105,17 @@ async def _handle_setup_intent_succeeded(
         "payment_method_id": payment_method_id,
         "setup_intent_id": setup_intent_data.get("id"),
       },
+    )
+
+
+def _ensure_default_payment_method(stripe_customer_id: str, context) -> None:
+  from robosystems.operations.providers.payment_provider import get_payment_provider
+
+  try:
+    get_payment_provider("stripe").ensure_default_payment_method(stripe_customer_id)
+  except Exception as e:
+    context.log.warning(
+      f"Could not set a default payment method for {stripe_customer_id}: {e}"
     )
 
 

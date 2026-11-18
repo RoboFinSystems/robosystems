@@ -114,6 +114,8 @@ class TestCreateCheckoutSession:
     assert result.requires_checkout is True
 
     mock_provider.create_checkout_session.assert_called_once()
+    # A graph runs real infrastructure: no trial, so the card is always taken.
+    assert mock_provider.create_checkout_session.call_args.kwargs["trial_days"] == 0
     assert mock_subscription.status == "pending_payment"
     assert mock_subscription.payment_provider == "stripe"
 
@@ -422,6 +424,71 @@ class TestCreateCheckoutSession:
 
     assert result.checkout_url == "https://checkout.stripe.com/test"
     mock_get_plan.assert_called_once_with("sec", "starter")
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.core.OrgUser.get_user_orgs")
+  @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
+  @patch("robosystems.routers.billing.checkout.BillingConfig.get_repository_plan")
+  @patch("robosystems.routers.billing.checkout.BillingSubscription.create_subscription")
+  @patch("robosystems.routers.billing.checkout.get_payment_provider")
+  @pytest.mark.parametrize("trial_days", [14, 0])
+  async def test_a_trial_needs_a_verified_email(
+    self,
+    mock_get_provider,
+    mock_create_sub,
+    mock_get_plan,
+    mock_get_customer,
+    mock_get_user_orgs,
+    trial_days,
+    mock_user,
+    mock_db,
+  ):
+    """A trial asks for no card, so an unverified address cannot start one; a
+    checkout that takes a card is not held up by it."""
+    from robosystems.models.core import OrgRole
+    from robosystems.routers.billing import checkout
+
+    mock_user.email_verified = False
+    mock_get_user_orgs.return_value = [Mock(org_id="org_123", role=OrgRole.OWNER)]
+    mock_customer = Mock(spec=BillingCustomer)
+    mock_customer.invoice_billing_enabled = False
+    mock_customer.has_payment_method = False
+    mock_customer.stripe_customer_id = "cus_123"
+    mock_get_customer.return_value = mock_customer
+    mock_get_plan.return_value = {"price_cents": 2900}
+    mock_create_sub.return_value = Mock(spec=BillingSubscription, id="sub_456")
+    mock_provider = Mock()
+    mock_provider.get_or_create_price.return_value = "price_789"
+    mock_provider.create_checkout_session.return_value = {
+      "checkout_url": "https://checkout.stripe.com/test",
+      "session_id": "cs_test",
+    }
+    mock_get_provider.return_value = mock_provider
+    request = CreateCheckoutRequest(
+      resource_type="repository",
+      plan_name="starter",
+      resource_config={"repository_name": "sec"},
+    )
+
+    with (
+      patch.object(checkout.env, "EMAIL_VERIFICATION_ENABLED", True),
+      patch(
+        "robosystems.operations.billing.repository_subscriptions.repository_trial_days",
+        return_value=trial_days,
+      ),
+    ):
+      if trial_days:
+        with pytest.raises(HTTPException) as exc:
+          await create_checkout_session(request, mock_user, mock_db, None)
+        assert exc.value.status_code == 403
+        assert "Verify your email to start the free trial" in exc.value.detail
+        assert "test@example.com" in exc.value.detail
+        assert f"{checkout.env.ROBOSYSTEMS_URL}/settings" in exc.value.detail
+        mock_create_sub.assert_not_called()
+        mock_provider.create_checkout_session.assert_not_called()
+      else:
+        result = await create_checkout_session(request, mock_user, mock_db, None)
+        assert result.checkout_url == "https://checkout.stripe.com/test"
 
   @pytest.mark.asyncio
   @patch("robosystems.models.core.OrgUser.get_user_orgs")

@@ -112,14 +112,14 @@ Prices, monthly AI credit allocations and download allowances are served live an
 
 ### The free trial
 
-A first subscription to `sec` opens with a 14-day free trial, on either plan. A card is taken at the start and charged when the trial ends, at which point the subscription carries on as the plan you chose. The repository's `trial_days` in `GET /v1/offering` is the length, and a subscription's `trial_ends_at` is the day the charge is made.
+A first subscription to `sec` opens with a 14-day free trial, on either plan, and checkout asks for no card to start it. When the trial ends, a card on file is charged and the subscription carries on as the plan you chose; with no card, the subscription ends, access with it, and nothing is charged. A card added during the trial (on the Billing tab of your organization page) is what the plan starts on. The repository's `trial_days` in `GET /v1/offering` is the length, and a subscription's `trial_ends_at` is the day the trial ends.
 
 During the trial:
 
 - **The analysis tools are open** — `financial-statement-analysis`, `build-fact-grid`, `disclosures`, `information-block`, `resolve-element`, `search-documents`, `search-text`, `read-text` and `describe-filing`, over MCP or their REST operations — along with the snapshot download.
 - **Raw Cypher is not.** `POST /v1/graphs/sec/query/cypher` and the `read-graph-cypher` tool answer `403` with the way to open them, and the tool is left out of a trial connection's MCP tool list.
 - **The AI analyst is not**, and no AI credits are granted. The plan's monthly allocation arrives with the first charge.
-- **The trial has its own rate limits**, lower than either plan's and the same whichever plan it converts to: 5 tool calls a minute, 50 an hour and 300 a day over MCP, and 5, 25 and 150 for search. A `429` at one of them says it is the trial's limit, names your plan's own, and gives the link that starts the plan. `X-RateLimit-Plan` reads `trial`.
+- **The trial has its own rate limits**, lower than either plan's and the same whichever plan it converts to: 5 tool calls a minute, 50 an hour and 300 a day over MCP, and 5, 25 and 150 for search. A `429` at one of them says it is the trial's limit, names your plan's own, and gives the link that starts the plan, or, with no card on file, the link to add one and the day the trial ends. `X-RateLimit-Plan` reads `trial`.
 
 Cancelling during the trial keeps access until the trial's last day and nothing is charged. To skip the rest of the trial and start the plan at once:
 
@@ -128,7 +128,7 @@ curl -X POST "https://api.robosystems.ai/v1/graphs/sec/subscriptions/end-trial" 
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
-The same thing is the **Start Plan Now** button on the Subscriptions tab of your organization page. The first period is charged to the card on file, and the plan's rate limits, raw Cypher, the AI analyst and the credits open when the payment clears. Nothing else changes: the same connection and the same API key carry on. There is one trial per subscriber and per organization: a later subscription to the same repository starts paid.
+The same thing is the **Start Plan Now** button on the Subscriptions tab of your organization page. The first period is charged to the card on file, so with none it answers `400` and asks for one, and the plan's rate limits, raw Cypher, the AI analyst and the credits open when the payment clears. Nothing else changes: the same connection and the same API key carry on. There is one trial per subscriber and per organization: a later subscription to the same repository starts paid.
 
 The repository id is `sec`. For the data model and the rules a query must follow to return the right number, see [SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules.md); for loading filings into a local stack, the [SEC XBRL Pipeline](SEC-XBRL-Pipeline.md) demo.
 

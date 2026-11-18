@@ -127,9 +127,14 @@ async def get_graphs(
 
     from robosystems.models.core.user.user_repository import UserRepository
 
-    user_repositories = UserRepository.get_user_repositories(
-      current_user.id, session, active_only=True
-    )
+    # An expired grant (a lapsed trial) no longer opens the repository.
+    user_repositories = [
+      grant
+      for grant in UserRepository.get_user_repositories(
+        current_user.id, session, active_only=True
+      )
+      if not grant.is_expired()
+    ]
 
     selected_graph_id = None
     graphs = []

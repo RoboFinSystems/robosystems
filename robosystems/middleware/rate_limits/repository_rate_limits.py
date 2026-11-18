@@ -32,15 +32,89 @@ def start_plan_url() -> str:
   return f"{env.ROBOSYSTEMS_URL}/organization?tab=subscriptions"
 
 
-def trial_refusal(repository: str, operation: str = "query") -> str:
+def subscribe_url() -> str:
+  """Where someone with no subscription picks a plan."""
+  from robosystems.config import env
+
+  return f"{env.ROBOSYSTEMS_URL}/repositories/browse"
+
+
+def add_card_url() -> str:
+  """Where an organization owner adds a payment method."""
+  from robosystems.config import env
+
+  return f"{env.ROBOSYSTEMS_URL}/organization?tab=billing"
+
+
+def trial_end_date(ends_at: datetime) -> str:
+  return f"{ends_at:%B} {ends_at.day}, {ends_at.year}"
+
+
+def no_card_way_on(ends_at: datetime) -> str:
+  """A trial taken without a card does not become the plan by itself."""
+  return (
+    f"No card is on file: add one at {add_card_url()} to keep the plan when the "
+    f"trial ends, or to start it now. Without a card the trial ends on "
+    f"{trial_end_date(ends_at)} and nothing is charged."
+  )
+
+
+def _read(reader, repository: str, user_id: str):
+  """Run a billing read on the refusal path; None when it fails."""
+  from robosystems.database import SessionFactory
+
+  session = SessionFactory()
+  try:
+    return reader(repository, user_id, session)
+  except Exception:
+    return None
+  finally:
+    session.close()
+
+
+def _trial_without_card_ends_at(repository: str, user_id: str) -> datetime | None:
+  from robosystems.operations.billing.repository_subscriptions import (
+    trial_without_card_ends_at,
+  )
+
+  return _read(trial_without_card_ends_at, repository, user_id)
+
+
+def trial_refusal(
+  repository: str, operation: str = "query", *, user_id: str | None = None
+) -> str:
   """What a trial subscriber is told when they reach past the trial: raw
   queries, or the AI analyst (``operation="agent"``), which runs on credits."""
   what = "The AI analyst is" if operation == "agent" else "Raw queries are"
   opens = "It opens" if operation == "agent" else "They open"
-  return (
+  lead = (
     f"{what} not part of the {repository.upper()} trial, which covers the "
-    f"analysis tools. {opens} with your first payment, and you do not have to "
-    f"wait for the trial to end: start your plan now at {start_plan_url()}"
+    f"analysis tools. {opens} with your first payment"
+  )
+  ends_at = _trial_without_card_ends_at(repository, user_id) if user_id else None
+  if ends_at is not None:
+    return f"{lead}. {no_card_way_on(ends_at)}"
+  return (
+    f"{lead}, and you do not have to wait for the trial to end: start your plan "
+    f"now at {start_plan_url()}"
+  )
+
+
+def trial_ended_refusal(graph_id: str, user_id: str) -> str | None:
+  """The refusal for a trial that ended without becoming the plan, or None
+  when that is not why the caller has no access. Read on the refusal path."""
+  from robosystems.operations.billing.repository_subscriptions import trial_ended_at
+
+  try:
+    repository = resolve_shared_repository_parent(graph_id)
+  except ValueError:
+    return None
+  ended = _read(trial_ended_at, repository, user_id)
+  if ended is None:
+    return None
+  return (
+    f"Your {repository.upper()} trial ended on {trial_end_date(ended)}. "
+    f"Subscribe at {subscribe_url()} to keep using it."
   )
 
 
@@ -70,7 +144,8 @@ def limit_message(
 ) -> str:
   """What a subscriber is told at a volume limit. On a trial it says the limit
   is the trial's, what the plan's own is, and how to start the plan now.
-  ``user_id`` lets a cancelled trial be told it runs out instead."""
+  ``user_id`` lets a trial with no card be told to add one, and a cancelled
+  trial that it runs out."""
   from robosystems.config import env
 
   window = detail.get("window", "period")
@@ -99,6 +174,9 @@ def limit_message(
     f"You have reached the {repository.upper()} trial's {reached}. {resets} "
     f"A trial runs at lower limits than the plan.{plans_own}"
   )
+  ends_at = _trial_without_card_ends_at(repository, user_id) if user_id else None
+  if ends_at is not None:
+    return f"{lead} {no_card_way_on(ends_at)}"
   if user_id and _trial_is_canceled(repository, user_id):
     return f"{lead} Your trial is cancelled and keeps these limits to its last day."
   return (

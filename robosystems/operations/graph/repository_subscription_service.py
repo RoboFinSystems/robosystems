@@ -288,6 +288,11 @@ class RepositorySubscriptionService:
       logger.info(
         f"Access already exists for user {user_id}, repository {repository_type.value}"
       )
+      if existing.is_trial and not trial and repository_plan:
+        # A paid subscription replaces an ended or cancelled trial's grant:
+        # the plan's limits, no expiry. Credits are the caller's
+        # `allocate_credits`.
+        self._promote_trial_grant(existing, repository_type, repository_plan)
       if not existing.is_active:
         existing.is_active = True
         existing.updated_at = datetime.now(UTC)
@@ -333,6 +338,38 @@ class RepositorySubscriptionService:
     )
 
     return True
+
+  def _promote_trial_grant(
+    self,
+    grant: UserRepository,
+    repository_type: RepositoryType,
+    repository_plan: str,
+  ) -> None:
+    plan_config = _get_plan_details(repository_plan, repo_id=repository_type.value)
+    if not plan_config:
+      raise ValueError(
+        f"Plan {repository_plan} not available for repository {repository_type.value}"
+      )
+    try:
+      access_level = RepositoryAccessLevel(
+        str(plan_config.get("access_level", "READ")).lower()
+      )
+    except ValueError:
+      access_level = RepositoryAccessLevel.READ
+
+    grant.is_trial = False
+    grant.repository_plan = repository_plan
+    grant.access_level = access_level
+    grant.monthly_price_cents = plan_config["price_cents"]
+    grant.monthly_credit_allocation = plan_config["monthly_credits"]
+    grant.expires_at = None
+    grant.updated_at = datetime.now(UTC)
+    self.session.commit()
+    grant.invalidate_access_cache()
+    logger.info(
+      f"Trial grant for user {grant.user_id} on {repository_type.value} "
+      f"replaced by the {repository_plan} plan"
+    )
 
   def revoke_access(
     self,

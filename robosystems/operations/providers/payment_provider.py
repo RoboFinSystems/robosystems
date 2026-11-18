@@ -44,8 +44,9 @@ class PaymentProvider(ABC):
   ) -> dict[str, Any]:
     """Start a hosted checkout. Returns ``{checkout_url, session_id}``.
 
-    ``trial_days`` opens the subscription with a free trial; the card is
-    still collected.
+    ``trial_days`` opens the subscription with a free trial that needs no
+    card: one added before the trial ends starts the plan, and without one
+    the subscription cancels when the trial ends.
     """
     pass
 
@@ -86,6 +87,12 @@ class PaymentProvider(ABC):
   @abstractmethod
   def list_payment_methods(self, customer_id: str) -> list[dict[str, Any]]:
     """List a customer's payment methods, each flagged with ``is_default``."""
+    pass
+
+  @abstractmethod
+  def ensure_default_payment_method(self, customer_id: str) -> bool:
+    """Make an attached payment method the customer's invoice default when
+    none is. False when the customer has none to charge."""
     pass
 
   @abstractmethod
@@ -144,7 +151,8 @@ class PaymentProvider(ABC):
 
   @abstractmethod
   def get_subscription_state(self, subscription_id: str) -> dict[str, Any]:
-    """The live ``status`` and ``cancel_at_period_end`` of a subscription."""
+    """The live ``status`` and ``cancel_at_period_end`` of a subscription, and
+    ``has_payment_method``: whether it has a default payment method."""
     pass
 
 
@@ -183,6 +191,9 @@ class StripePaymentProvider(PaymentProvider):
     subscription_data: dict[str, Any] = {"metadata": metadata}
     if trial_days > 0:
       subscription_data["trial_period_days"] = trial_days
+      subscription_data["trial_settings"] = {
+        "end_behavior": {"missing_payment_method": "cancel"}
+      }
     session = self.stripe.checkout.Session.create(
       customer=customer_id,
       mode="subscription",
@@ -193,8 +204,8 @@ class StripePaymentProvider(PaymentProvider):
       # Stripe does not copy session metadata onto the subscription; webhook
       # resolution needs it there.
       subscription_data=subscription_data,
-      # A trial still takes the card: it is what the trial converts on.
-      payment_method_collection="always",
+      # A trial asks for no card; without a trial the first period is due now.
+      payment_method_collection="if_required" if trial_days > 0 else "always",
       payment_method_types=["card"],
       billing_address_collection="auto",
       allow_promotion_codes=True,
@@ -583,6 +594,21 @@ class StripePaymentProvider(PaymentProvider):
       logger.error(f"Failed to list payment methods: {e}", exc_info=True)
       raise
 
+  def ensure_default_payment_method(self, customer_id: str) -> bool:
+    # A trial, or any subscription without a card of its own, is charged to
+    # the customer's default: a card attached elsewhere does not count.
+    customer = self.stripe.Customer.retrieve(customer_id).to_dict()
+    if (customer.get("invoice_settings") or {}).get("default_payment_method"):
+      return True
+    methods = self.stripe.PaymentMethod.list(customer=customer_id, limit=1).data
+    if not methods:
+      return False
+    self.stripe.Customer.modify(
+      customer_id, invoice_settings={"default_payment_method": methods[0].id}
+    )
+    logger.info(f"Set a default payment method for customer {customer_id}")
+    return True
+
   def list_invoices(self, customer_id: str, limit: int = 10) -> dict[str, Any]:
     try:
       invoices = self.stripe.Invoice.list(customer=customer_id, limit=limit)
@@ -861,6 +887,7 @@ class StripePaymentProvider(PaymentProvider):
     return {
       "status": subscription.get("status"),
       "cancel_at_period_end": bool(subscription.get("cancel_at_period_end")),
+      "has_payment_method": bool(subscription.get("default_payment_method")),
     }
 
   def _subscription_already_terminal(self, subscription_id: str) -> bool:

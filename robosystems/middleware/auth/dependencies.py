@@ -862,9 +862,14 @@ async def get_current_user_with_repository_access(
   current_user = await get_current_user(request, api_key)
 
   if not validate_repository_access(current_user, repository_id, operation_type):
+    from robosystems.middleware.rate_limits.repository_rate_limits import (
+      trial_ended_refusal,
+    )
+
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
-      detail=f"{repository_id.upper()} repository {operation_type} access denied",
+      detail=trial_ended_refusal(repository_id, str(current_user.id))
+      or f"{repository_id.upper()} repository {operation_type} access denied",
     )
 
   return current_user
