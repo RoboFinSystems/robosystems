@@ -7,7 +7,7 @@ import pytest
 from botocore.exceptions import ClientError
 
 from robosystems.config import env
-from robosystems.operations.aws.ses import SESEmailService, SMTPTransport
+from robosystems.operations.aws.ses import _FONTS_URL, SESEmailService, SMTPTransport
 
 
 @pytest.fixture
@@ -739,7 +739,7 @@ class TestEmailLayout:
     html = await self._html(ses_service, mock_ses_client, app="robosystems")
 
     assert '<meta name="color-scheme" content="dark">' in html
-    assert "fonts.googleapis.com" in html
+    assert f'<link href="{_FONTS_URL}" rel="stylesheet">' in html
 
   @pytest.mark.asyncio
   async def test_logo_and_accent_follow_the_app(self, ses_service, mock_ses_client):

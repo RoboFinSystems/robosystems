@@ -130,7 +130,8 @@ async def deliver_email(
   """Send a transactional email now; if that fails, queue it on the email job.
 
   Built to run as a background task: it never raises. True means the email
-  was sent or the job that retries it finished.
+  was sent or the job that retries it finished. Delivery is at least once: a
+  send that timed out after the transport accepted it is sent again.
   """
   fields: dict[str, Any] = {
     "email_type": email_type,
@@ -181,7 +182,8 @@ async def _queue_on_email_job(fields: dict[str, Any]) -> bool:
     await run_and_monitor_dagster_job(
       job_name="send_email_job",
       operation_id=None,
-      run_config=build_email_job_config(**fields),
+      # Parks the token in Valkey: a blocking call.
+      run_config=await asyncio.to_thread(build_email_job_config, **fields),
     )
     return True
   except Exception as e:
