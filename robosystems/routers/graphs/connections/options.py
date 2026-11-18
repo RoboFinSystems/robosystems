@@ -23,7 +23,7 @@ MERCURY_PARTNER_URL = "https://mercury.com/partner/robosystems"
   "/options",
   response_model=ConnectionOptionsResponse,
   summary="List Connection Options",
-  description="Returns available providers and their requirements. Only enabled providers are included (gated by feature flags). QuickBooks and Mercury require OAuth 2.0; Plaid authorizes through Plaid Link (auth_type `link`); external connections require no auth.",
+  description="Returns available providers and their requirements. Only enabled providers are included (gated by feature flags). QuickBooks requires OAuth 2.0; Mercury connects over OAuth 2.0, or with a personal API token (auth_type `api_key`) on a deployment with no Mercury OAuth client that allows tokens; Plaid authorizes through Plaid Link (auth_type `link`); external connections require no auth.",
   operation_id="getConnectionOptions",
   responses={**RESOURCE_ERROR_RESPONSES},
 )
@@ -67,10 +67,24 @@ async def get_connection_options(
       )
     )
 
-  # Mercury: the api_key credential mode is advertised only where the
-  # deployment allows it (self-hosted / local); hosted shows OAuth alone.
-  if env.CONNECTION_MERCURY_ENABLED:
-    api_key_mode = bool(env.MERCURY_API_KEY_CONNECTIONS_ENABLED)
+  # Mercury has two credential routes: partner OAuth, which needs the
+  # deployment's Mercury client, and a pasted personal token, which hosted
+  # production never allows. Listed only when at least one route works.
+  oauth_mode = bool(env.MERCURY_CLIENT_ID and env.MERCURY_CLIENT_SECRET)
+  api_key_mode = bool(env.MERCURY_API_KEY_CONNECTIONS_ENABLED)
+  if env.CONNECTION_MERCURY_ENABLED and (oauth_mode or api_key_mode):
+    if oauth_mode:
+      auth_flow = (
+        "OAuth 2.0 — you'll be redirected to Mercury to authorize read-only "
+        "access for this organization"
+      )
+      if api_key_mode:
+        auth_flow += "; or paste a personal read-only API token to connect at once"
+    else:
+      auth_flow = (
+        "Paste a personal read-only API token for this company's Mercury "
+        "organization; each company connects with its own"
+      )
     providers.append(
       ConnectionProviderInfo(
         provider="mercury",
@@ -82,19 +96,11 @@ async def get_connection_options(
           "accounts, and cannot be the one QuickBooks keeps (the group "
           "parent, while QuickBooks is connected)."
         ),
-        auth_type="oauth",
-        auth_flow=(
-          "OAuth 2.0 — you'll be redirected to Mercury to authorize read-only "
-          "access for this organization"
-          + (
-            "; or paste a personal read-only API token to connect at once"
-            if api_key_mode
-            else ""
-          )
-        ),
-        required_config=[],
+        auth_type="oauth" if oauth_mode else "api_key",
+        auth_flow=auth_flow,
+        required_config=[] if oauth_mode else ["api_key"],
         optional_config=["since_date", "include_treasury"]
-        + (["api_key"] if api_key_mode else []),
+        + (["api_key"] if oauth_mode and api_key_mode else []),
         features=[
           "bank_transactions",
           "internal_transfers",
@@ -103,14 +109,20 @@ async def get_connection_options(
           "tier0_suggestions",
         ],
         sync_frequency="On-demand or scheduled daily; a 60-day incremental window",
-        data_types=["Accounts", "Transactions", "Treasury", "Cards"],
+        # Product names stay off the badges: Mercury's partner guidance
+        # requires a disclosure beside any mention of Treasury or its cards.
+        data_types=["Accounts", "Transactions"],
         setup_instructions=(
           "Initialize a chart of accounts first (or sever a QuickBooks "
-          "connection to keep its chart), then click 'Connect' and log in "
-          "to Mercury to authorize this organization. Each bank account is "
-          "linked to a chart account by name, or one is added for it. "
-          "Not banking with Mercury yet? Open an account through our partner "
-          f"page: {MERCURY_PARTNER_URL}"
+          "connection to keep its chart), then click 'Connect' and "
+          + (
+            "log in to Mercury to authorize this organization. "
+            if oauth_mode
+            else "paste a read-only API token from Mercury's settings. "
+          )
+          + "Each Mercury account is linked to a chart account by name, or "
+          "one is added for it. No Mercury account yet? Apply through our "
+          f"partner page: {MERCURY_PARTNER_URL}"
         ),
         documentation_url=MERCURY_PARTNER_URL,
       )

@@ -29,6 +29,7 @@ def _make_mock_env(
   external_enabled: bool = True,
   mercury_enabled: bool = False,
   mercury_api_key_enabled: bool = False,
+  mercury_oauth_configured: bool = True,
   plaid_enabled: bool = False,
 ):
   """Create a mock env object with connection feature flags."""
@@ -37,6 +38,8 @@ def _make_mock_env(
   mock_env.CONNECTION_EXTERNAL_ENABLED = external_enabled
   mock_env.CONNECTION_MERCURY_ENABLED = mercury_enabled
   mock_env.MERCURY_API_KEY_CONNECTIONS_ENABLED = mercury_api_key_enabled
+  mock_env.MERCURY_CLIENT_ID = "client-id" if mercury_oauth_configured else ""
+  mock_env.MERCURY_CLIENT_SECRET = "secret" if mercury_oauth_configured else ""
   mock_env.CONNECTION_PLAID_ENABLED = plaid_enabled
   return mock_env
 
@@ -384,6 +387,54 @@ class TestMercuryOption:
     mercury = next(p for p in result.providers if p.provider == "mercury")
     assert "api_key" in mercury.optional_config
     assert "API token" in (mercury.auth_flow or "")
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_mercury_requires_a_token_without_an_oauth_client(self):
+    mock_env = _make_mock_env(
+      mercury_enabled=True,
+      mercury_api_key_enabled=True,
+      mercury_oauth_configured=False,
+    )
+    with patch(f"{OPTIONS_MODULE}.env", mock_env):
+      result = await get_connection_options(
+        graph_id=GRAPH_ID, current_user=_make_mock_user(), _rate_limit=None
+      )
+    mercury = next(p for p in result.providers if p.provider == "mercury")
+    assert mercury.auth_type == "api_key"
+    assert mercury.required_config == ["api_key"]
+    assert "api_key" not in mercury.optional_config
+    assert "OAuth" not in (mercury.auth_flow or "")
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_mercury_absent_with_no_usable_route(self):
+    mock_env = _make_mock_env(
+      mercury_enabled=True,
+      mercury_api_key_enabled=False,
+      mercury_oauth_configured=False,
+    )
+    with patch(f"{OPTIONS_MODULE}.env", mock_env):
+      result = await get_connection_options(
+        graph_id=GRAPH_ID, current_user=_make_mock_user(), _rate_limit=None
+      )
+    assert "mercury" not in [p.provider for p in result.providers]
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_mercury_badges_name_no_mercury_product(self):
+    mock_env = _make_mock_env(mercury_enabled=True)
+    with patch(f"{OPTIONS_MODULE}.env", mock_env):
+      result = await get_connection_options(
+        graph_id=GRAPH_ID, current_user=_make_mock_user(), _rate_limit=None
+      )
+    mercury = next(p for p in result.providers if p.provider == "mercury")
+    assert mercury.data_types == ["Accounts", "Transactions"]
+    shown = " ".join(
+      [*mercury.data_types, mercury.setup_instructions or "", mercury.auth_flow or ""]
+    ).lower()
+    for word in ("treasury", "card", "banking"):
+      assert word not in shown
 
   @pytest.mark.unit
   @pytest.mark.asyncio
