@@ -22,7 +22,12 @@ from robosystems.dagster.jobs.billing import (
   _handle_payment_succeeded,
   _handle_subscription_updated,
 )
-from robosystems.models.core import BillingSubscription, OrgRole, OrgUser
+from robosystems.models.core import (
+  BillingCustomer,
+  BillingSubscription,
+  OrgRole,
+  OrgUser,
+)
 from robosystems.models.core.billing.subscription import SubscriptionStatus
 from robosystems.models.core.user.user_repository import RepositoryType, UserRepository
 from robosystems.operations.billing.repository_subscriptions import (
@@ -482,6 +487,8 @@ class TestTrialGate:
     self, test_db, test_user, test_org
   ):
     member, _subscription, _grant = _on_trial(test_db, test_user, test_org)
+    BillingCustomer.get_or_create(test_org.id, test_db).has_payment_method = True
+    test_db.commit()
 
     with pytest.raises(HTTPException) as exc:
       await _check_shared_repository_limits("sec", member, test_db, raw_query=True)

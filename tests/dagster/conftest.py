@@ -7,7 +7,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from dagster import build_op_context, build_sensor_context
@@ -147,3 +147,17 @@ def mock_user_credits():
   credits.current_balance = 100000
   credits.monthly_allocation = 100000
   return credits
+
+
+@pytest.fixture(autouse=True)
+def _no_stripe_from_webhook_handlers():
+  """The handlers ask Stripe about payment methods; a test that cares patches
+  these itself."""
+  with (
+    patch(
+      "robosystems.dagster.jobs.billing._stripe_subscription_has_payment_method",
+      return_value=False,
+    ),
+    patch("robosystems.dagster.jobs.billing._ensure_default_payment_method"),
+  ):
+    yield

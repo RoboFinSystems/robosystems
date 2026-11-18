@@ -427,9 +427,15 @@ class TestAnEventMovesARowOnlyToWhatIsStillTrue:
     test_db.commit()
     stripe_sub = f"sub_test_{uuid.uuid4().hex[:10]}"
 
-    with patch(
-      "robosystems.dagster.jobs.billing._trigger_resource_provisioning"
-    ) as provision:
+    with (
+      patch(
+        "robosystems.dagster.jobs.billing._trigger_resource_provisioning"
+      ) as provision,
+      patch(
+        "robosystems.dagster.jobs.billing._stripe_subscription_has_payment_method",
+        return_value=True,
+      ),
+    ):
       await _handle_checkout_completed(
         {
           "id": sub.provider_subscription_id,
@@ -449,6 +455,37 @@ class TestAnEventMovesARowOnlyToWhatIsStillTrue:
     assert fresh.stripe_subscription_id == stripe_sub
     assert fresh.provider_subscription_id == stripe_sub
     provision.assert_awaited_once()
+    assert BillingCustomer.get_by_org_id(sub.org_id, test_db).has_payment_method
+
+  @pytest.mark.asyncio
+  async def test_a_trial_checkout_without_a_card_records_none(self, test_db):
+    sub = _checkout_row(test_db)
+    test_db.add(BillingCustomer(org_id=sub.org_id))
+    test_db.commit()
+
+    with (
+      patch("robosystems.dagster.jobs.billing._trigger_resource_provisioning"),
+      patch(
+        "robosystems.dagster.jobs.billing._stripe_subscription_has_payment_method",
+        return_value=False,
+      ),
+    ):
+      await _handle_checkout_completed(
+        {
+          "id": sub.provider_subscription_id,
+          "object": "checkout.session",
+          "customer": "cus_test_trial",
+          "subscription": f"sub_test_{uuid.uuid4().hex[:10]}",
+          "payment_status": "no_payment_required",
+          "status": "complete",
+          "metadata": {"subscription_id": sub.id},
+        },
+        test_db,
+        MagicMock(),
+      )
+
+    test_db.expire_all()
+    assert not BillingCustomer.get_by_org_id(sub.org_id, test_db).has_payment_method
 
   @pytest.mark.asyncio
   async def test_a_late_failure_for_a_paid_invoice_is_ignored(self, test_db):

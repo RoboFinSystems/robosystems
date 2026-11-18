@@ -282,6 +282,74 @@ def _as_utc(value):
   return value
 
 
+def org_has_payment_method(org_id: str, session: Session) -> bool:
+  """Whether a subscription of the org's that has no card of its own can be
+  charged: the provider is asked, and an attached card is made the default."""
+  from robosystems.models.core.billing import BillingCustomer
+  from robosystems.operations.providers.payment_provider import get_payment_provider
+
+  customer = BillingCustomer.get_by_org_id(org_id, session)
+  if customer is None:
+    return False
+  if customer.invoice_billing_enabled:
+    return True
+  if not customer.stripe_customer_id:
+    return False
+  try:
+    chargeable = get_payment_provider("stripe").ensure_default_payment_method(
+      customer.stripe_customer_id
+    )
+  except Exception as e:
+    logger.warning(f"Could not read the payment methods of org {org_id}: {e}")
+    return False
+  if chargeable and not customer.has_payment_method:
+    customer.has_payment_method = True
+    session.commit()
+  return chargeable
+
+
+def trial_without_card_ends_at(repository: str, user_id: str, session: Session):
+  """When the member's running trial ends, if no card is on file to start the
+  plan then; None for any other subscription. Read from the database only."""
+  from datetime import UTC, datetime
+
+  from robosystems.models.core.billing import BillingCustomer
+  from robosystems.models.core.billing.subscription import (
+    TERMINAL_SUBSCRIPTION_STATUSES,
+  )
+
+  subscription = _current_subscription(session, user_id, repository)
+  if subscription is None or subscription.status in TERMINAL_SUBSCRIPTION_STATUSES:
+    return None
+  ends = _as_utc(subscription.trial_ends_at)
+  if ends is None or ends <= datetime.now(UTC):
+    return None
+  customer = BillingCustomer.get_by_org_id(subscription.org_id, session)
+  if customer is not None and (
+    customer.has_payment_method or customer.invoice_billing_enabled
+  ):
+    return None
+  return ends
+
+
+def trial_ended_at(repository: str, user_id: str, session: Session):
+  """When the member's trial ended without becoming the plan, if that is why
+  they have no access; None otherwise."""
+  grant = UserRepository.get_by_user_and_repository(user_id, repository, session)
+  if grant is None or not grant.is_trial:
+    return None
+  if grant.is_active and not grant.is_expired():
+    return None
+  subscription = _current_subscription(session, user_id, repository)
+  if (
+    subscription is None
+    or subscription.status != "canceled"
+    or subscription.trial_ends_at is None
+  ):
+    return None
+  return _as_utc(subscription.ends_at or subscription.trial_ends_at)
+
+
 def _current_subscription(
   session: Session, user_id: str, repository: str
 ) -> BillingSubscription | None:

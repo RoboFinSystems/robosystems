@@ -17,6 +17,7 @@ write classification, circuit breaker).
 import asyncio
 import json
 import time
+from datetime import datetime
 from importlib.metadata import version as pkg_version
 from typing import Any
 
@@ -221,17 +222,22 @@ async def _validate_read_access(graph_id: str, current_user: User) -> None:
     sess.close()
 
 
-def _trial_instructions_note(graph_id: str) -> str:
+def _trial_instructions_note(
+  graph_id: str, no_card_ends_at: datetime | None = None
+) -> str:
   """What an MCP client is told about a trial connection. A subscriber working
   from a chat never sees the app, so the model has to be able to explain the
-  trial and how to leave it."""
+  trial and how to leave it. ``no_card_ends_at`` is the end of a trial with no
+  card on file, which does not become the plan by itself."""
   from robosystems.config.shared_repositories import (
     get_rate_limits,
     get_trial_days,
     resolve_shared_repository_parent,
   )
   from robosystems.middleware.rate_limits.repository_rate_limits import (
+    no_card_way_on,
     start_plan_url,
+    trial_end_date,
   )
 
   repository = resolve_shared_repository_parent(graph_id)
@@ -241,11 +247,19 @@ def _trial_instructions_note(graph_id: str) -> str:
     for window in ("minute", "hour", "day")
     if (key := f"mcp_queries_per_{window}") in limits
   )
-  days = get_trial_days(repository)
+  if no_card_ends_at is not None:
+    # The date, not a length: an extended trial is no longer the default length.
+    trial = f"a trial of the subscriber's plan until {trial_end_date(no_card_ends_at)}"
+    way_on = f"- {no_card_way_on(no_card_ends_at)}\n"
+  else:
+    trial = f"a {get_trial_days(repository)}-day trial of the subscriber's plan"
+    way_on = (
+      "- The plan starts by itself when the trial ends. The subscriber can start "
+      f"it sooner, which lifts the trial limits at once, at {start_plan_url()}\n"
+    )
   return (
     "\n\nTRIAL\n"
-    f"- This connection is on a {days}-day trial of the subscriber's plan. The "
-    "analysis tools above are all available.\n"
+    f"- This connection is on {trial}. The analysis tools above are all available.\n"
     + (
       f"- Trial rate limits are lower than the plan's: {calls}, counted in tool calls.\n"
       if calls
@@ -253,11 +267,29 @@ def _trial_instructions_note(graph_id: str) -> str:
     )
     + "- Raw Cypher (`read-graph-cypher`) and the AI analyst are not part of the "
     "trial. They open with the first payment.\n"
-    "- The plan starts by itself when the trial ends. The subscriber can start it "
-    f"sooner, which lifts the trial limits at once, at {start_plan_url()}\n"
-    "- When a call is refused for a trial limit, say that it is the trial's "
+    + way_on
+    + "- When a call is refused for a trial limit, say that it is the trial's "
     "limit and give the subscriber that link. Do not retry in a loop."
   )
+
+
+def _trial_without_card_ends_at(graph_id: str, current_user: User) -> datetime | None:
+  """The end of the caller's trial when no card is on file to start the plan."""
+  from robosystems.config.shared_repositories import resolve_shared_repository_parent
+  from robosystems.database import SessionFactory
+  from robosystems.operations.billing.repository_subscriptions import (
+    trial_without_card_ends_at,
+  )
+
+  sess = SessionFactory()
+  try:
+    return trial_without_card_ends_at(
+      resolve_shared_repository_parent(graph_id), str(current_user.id), sess
+    )
+  except Exception:
+    return None
+  finally:
+    sess.close()
 
 
 def _trial_exclusions(graph_id: str, current_user: User) -> frozenset[str]:
@@ -325,7 +357,8 @@ async def _handle_initialize(
   }
   if instructions:
     if trial_exclusions:
-      instructions += _trial_instructions_note(graph_id)
+      ends_at = await run_off_loop(_trial_without_card_ends_at, graph_id, current_user)
+      instructions += _trial_instructions_note(graph_id, ends_at)
     result["instructions"] = instructions
   return result
 

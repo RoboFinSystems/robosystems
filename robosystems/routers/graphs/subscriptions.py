@@ -671,7 +671,7 @@ async def _change_repository_plan(
     "The first period is charged to the payment method on file; raw queries, "
     "the AI analyst and the plan's credits open once the payment clears, "
     "usually within a minute. Returns 400 when the subscription is not on a "
-    "trial."
+    "trial, or when no payment method is on file yet."
   ),
   operation_id="endRepositorySubscriptionTrial",
   responses={**RESOURCE_ERROR_RESPONSES},
@@ -706,7 +706,18 @@ async def end_repository_trial(
   ):
     raise HTTPException(status_code=400, detail=f"No trial is running for {graph_id}")
 
+  from ...middleware.rate_limits.repository_rate_limits import add_card_url
+  from ...operations.billing.repository_subscriptions import org_has_payment_method
   from ...operations.providers.payment_provider import get_payment_provider
+
+  if not org_has_payment_method(subscription.org_id, db):
+    raise HTTPException(
+      status_code=400,
+      detail=(
+        f"Add a card first: the plan's first period is charged when it starts. "
+        f"Add one at {add_card_url()}"
+      ),
+    )
 
   try:
     get_payment_provider("stripe").end_trial(subscription.stripe_subscription_id)

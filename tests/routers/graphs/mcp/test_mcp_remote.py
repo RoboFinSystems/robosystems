@@ -1083,11 +1083,14 @@ class TestTrialToolList:
     handler.get_instructions = Mock(return_value="START HERE")
     return handler
 
-  async def _dispatch(self, method: str, exclusions):
+  async def _dispatch(self, method: str, exclusions, no_card_ends_at=None):
     handler = self._handler()
     with (
       patch.object(remote, "_validate_read_access", AsyncMock()),
       patch.object(remote, "_trial_exclusions", Mock(return_value=exclusions)),
+      patch.object(
+        remote, "_trial_without_card_ends_at", Mock(return_value=no_card_ends_at)
+      ),
       patch.object(remote, "get_graph_repository", AsyncMock(return_value=Mock())),
       patch.object(remote, "MCPHandler", Mock(return_value=handler)),
     ):
@@ -1111,6 +1114,22 @@ class TestTrialToolList:
     assert "5 per minute, 50 per hour, 300 per day" in note
     assert "`read-graph-cypher`" in note
     assert "/organization?tab=subscriptions" in note
+
+  async def test_a_trial_with_no_card_names_its_end_and_the_way_on(self):
+    from datetime import UTC, datetime
+
+    body = await self._dispatch(
+      "initialize",
+      remote.CYPHER_READ_TOOLS,
+      no_card_ends_at=datetime(2026, 12, 1, tzinfo=UTC),
+    )
+    note = body["result"]["instructions"]
+    assert "on a trial of the subscriber's plan until December 1, 2026" in note
+    assert "14-day" not in note
+    assert "No card is on file" in note
+    assert "/organization?tab=billing" in note
+    assert "trial ends on December 1, 2026 and nothing is charged" in note
+    assert "starts by itself" not in note
 
   async def test_a_paid_subscriber_sees_every_tool_and_no_note(self):
     listed = await self._dispatch("tools/list", frozenset())

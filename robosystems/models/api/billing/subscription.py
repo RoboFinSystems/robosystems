@@ -197,8 +197,9 @@ class GraphSubscriptionResponse(BaseModel):
   trial_ends_at: str | None = Field(
     None,
     description=(
-      "When the free trial ends and the first charge is made. Null for a "
-      "subscription that opened without a trial; kept after the trial is over."
+      "When the free trial ends: the first charge is made then to a card on "
+      "file, and with none the subscription ends. Null for a subscription that "
+      "opened without a trial; kept after the trial is over."
     ),
   )
   ends_at: str | None = Field(

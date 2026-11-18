@@ -68,9 +68,14 @@ async def validate_mcp_access(
     from robosystems.middleware.auth.utils import validate_repository_access
 
     if not validate_repository_access(current_user, graph_id, operation_type):
+      from robosystems.middleware.rate_limits.repository_rate_limits import (
+        trial_ended_refusal,
+      )
+
       raise HTTPException(
         status_code=403,
-        detail=f"{graph_id.upper()} repository {operation_type} access denied",
+        detail=trial_ended_refusal(graph_id, str(current_user.id))
+        or f"{graph_id.upper()} repository {operation_type} access denied",
       )
   else:
     from robosystems.models.core import GraphUser

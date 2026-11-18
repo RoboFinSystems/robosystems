@@ -157,6 +157,7 @@ def make_invoice_data(
     "subtotal": 2999,
     "tax": 0,
     "total": 2999,
+    "amount_paid": 2999,
     "currency": "usd",
     "invoice_pdf": "https://invoice.stripe.com/inv.pdf",
     "hosted_invoice_url": "https://invoice.stripe.com/inv",
@@ -244,6 +245,33 @@ class TestHandleCheckoutCompleted:
     mock_trigger.assert_awaited_once_with(
       mock_subscription, mock_db_session, mock_context
     )
+
+  async def test_a_paid_checkouts_card_becomes_the_orgs_default(
+    self, mock_db_session, mock_context, mock_subscription, mock_customer
+  ):
+    """Checkout saves the card on its own subscription; a trial the org runs
+    without one converts on the customer's default."""
+    mock_customer.stripe_customer_id = "cus_stripe_abc"
+    with (
+      patch(PATCH_BILLING_SUB) as MockSub,
+      patch(PATCH_BILLING_CUST),
+      patch(PATCH_TRIGGER, new_callable=AsyncMock),
+      patch(f"{_BILLING_JOBS}._ensure_default_payment_method") as ensure,
+    ):
+      MockSub.get_by_provider_subscription_id.return_value = mock_subscription
+      mock_db_session.query.return_value.filter.return_value.first.return_value = (
+        mock_customer
+      )
+
+      from robosystems.dagster.jobs.billing import _handle_checkout_completed
+
+      await _handle_checkout_completed(
+        make_checkout_session(subscription_id="sub_stripe_new"),
+        mock_db_session,
+        mock_context,
+      )
+
+    ensure.assert_called_once_with("cus_stripe_abc", mock_context)
 
   async def test_paid_checkout_reclaims_a_retired_row(
     self, mock_db_session, mock_context, mock_subscription, mock_customer
@@ -834,6 +862,33 @@ class TestHandlePaymentSucceeded:
     assert mock_invoice.payment_reference == "in_stripe_abc"
     assert mock_invoice.paid_at is not None
     mock_trigger.assert_awaited_once()
+
+  async def test_a_trials_free_first_invoice_is_no_proof_of_a_card(
+    self, mock_db_session, mock_context, mock_subscription, mock_customer, mock_invoice
+  ):
+    """A trial taken without a card still gets a paid $0 first invoice."""
+    invoice_data = make_invoice_data(status="paid")
+    invoice_data.update(subtotal=0, total=0, amount_paid=0)
+    mock_subscription.status = "active"
+    mock_customer.has_payment_method = False
+
+    with (
+      patch(PATCH_BILLING_SUB) as MockSub,
+      patch(PATCH_BILLING_CUST) as MockCust,
+      patch(PATCH_BILLING_INV),
+      patch(PATCH_TRIGGER, new_callable=AsyncMock),
+    ):
+      MockSub.get_by_provider_subscription_id.return_value = mock_subscription
+      MockCust.get_by_stripe_customer_id.return_value = mock_customer
+      mock_db_session.query.return_value.filter.return_value.first.return_value = (
+        mock_invoice
+      )
+
+      from robosystems.dagster.jobs.billing import _handle_payment_succeeded
+
+      await _handle_payment_succeeded(invoice_data, mock_db_session, mock_context)
+
+    assert mock_customer.has_payment_method is False
 
   async def test_provisioning_status_triggers_provisioning(
     self, mock_db_session, mock_context, mock_subscription, mock_customer, mock_invoice
@@ -1947,6 +2002,30 @@ class TestHandleSubscriptionDeleted:
 @pytest.mark.unit
 @pytest.mark.asyncio
 class TestHandleSetupIntentSucceeded:
+  @pytest.fixture(autouse=True)
+  def ensure_default(self):
+    with patch(f"{_BILLING_JOBS}._ensure_default_payment_method") as ensure:
+      yield ensure
+
+  async def test_makes_the_card_the_customers_default(
+    self, mock_db_session, mock_context, mock_customer, ensure_default
+  ):
+    """A trial with no card of its own converts on the customer's default."""
+    mock_customer.has_payment_method = False
+    with (
+      patch(PATCH_BILLING_CUST) as MockCust,
+      patch(f"{_BILLING}.BillingAuditLog"),
+    ):
+      MockCust.get_by_stripe_customer_id.return_value = mock_customer
+
+      from robosystems.dagster.jobs.billing import _handle_setup_intent_succeeded
+
+      await _handle_setup_intent_succeeded(
+        make_setup_intent_data(), mock_db_session, mock_context
+      )
+
+    ensure_default.assert_called_once_with("cus_stripe_abc", mock_context)
+
   async def test_marks_customer_as_having_payment_method(
     self, mock_db_session, mock_context, mock_customer
   ):

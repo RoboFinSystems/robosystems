@@ -208,7 +208,9 @@ async def authorize_mcp_tool_call(
 
     raise HTTPException(
       status_code=http_status.HTTP_403_FORBIDDEN,
-      detail=trial_refusal(resolve_shared_repository_parent(graph_id)),
+      detail=trial_refusal(
+        resolve_shared_repository_parent(graph_id), user_id=str(current_user.id)
+      ),
     )
 
   if (

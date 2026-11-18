@@ -33,7 +33,7 @@ router = APIRouter(prefix="/billing", tags=["Billing"])
   response_model=CheckoutResponse,
   status_code=status.HTTP_201_CREATED,
   summary="Create Payment Checkout Session",
-  description="Initiates a Stripe checkout session for payment collection. Creates a pending subscription; the webhook activates it and provisions the resource after payment completes. Returns billing_disabled=true with no URL when billing is off. Requires org owner role.",
+  description="Initiates a Stripe checkout session for payment collection. Creates a pending subscription; the webhook activates it and provisions the resource after payment completes. Returns billing_disabled=true with no URL when billing is off. Requires org owner role. A repository's free trial asks for no card but needs a verified email: an unverified account starting one gets 403.",
   operation_id="createCheckoutSession",
   responses={
     **AUTHENTICATED_ERROR_RESPONSES,
@@ -146,6 +146,27 @@ async def create_checkout_session(
       "base_price_cents", plan_config.get("price_cents", 0)
     )
 
+    trial_days = 0
+    if request.resource_type == "repository" and repo_name:
+      from ...operations.billing.repository_subscriptions import (
+        repository_trial_days,
+      )
+
+      trial_days = repository_trial_days(repo_name, current_user.id, org_id, db)
+
+    # A trial asks for no card, so the address is what stands behind it.
+    if (
+      trial_days and env.EMAIL_VERIFICATION_ENABLED and not current_user.email_verified
+    ):
+      raise HTTPException(
+        status_code=403,
+        detail=(
+          f"Verify your email to start the free trial: use the link we sent to "
+          f"{current_user.email}, or send a new one from Settings at "
+          f"{env.ROBOSYSTEMS_URL}/settings"
+        ),
+      )
+
     provider = get_payment_provider("stripe")
 
     # Retire any earlier checkout for this resource. The hosted session stays
@@ -216,14 +237,6 @@ async def create_checkout_session(
 
     # For the post-payment provisioning step. user_id stays in metadata for
     # older webhook payloads; the column is the authoritative copy.
-    trial_days = 0
-    if request.resource_type == "repository" and repo_name:
-      from ...operations.billing.repository_subscriptions import (
-        repository_trial_days,
-      )
-
-      trial_days = repository_trial_days(repo_name, current_user.id, org_id, db)
-
     subscription.subscription_metadata = {
       "resource_config": request.resource_config,
       "user_id": current_user.id,
