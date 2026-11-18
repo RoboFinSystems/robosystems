@@ -430,7 +430,11 @@ class TestMercuryOption:
       )
     mercury = next(p for p in result.providers if p.provider == "mercury")
     assert mercury.data_types == ["Accounts", "Transactions"]
-    assert "banking" not in (mercury.setup_instructions or "").lower()
+    shown = " ".join(
+      [*mercury.data_types, mercury.setup_instructions or "", mercury.auth_flow or ""]
+    ).lower()
+    for word in ("treasury", "card", "banking"):
+      assert word not in shown
 
   @pytest.mark.unit
   @pytest.mark.asyncio
