@@ -418,6 +418,40 @@ class TestUserModel:
     db_user = db_session.query(User).filter_by(id=user.id).first()
     assert db_user.email_verified is True
 
+  def test_verify_email_clears_cached_profile(self, db_session):
+    """A signed-in user's cached profile must not keep reporting unverified."""
+    user = User.create(
+      email="verify-cache@example.com",
+      name="Unverified User",
+      password_hash="hashed_password",
+      session=db_session,
+    )
+
+    with patch(
+      "robosystems.middleware.auth.cache.api_key_cache.invalidate_jwt_user_data",
+      return_value=True,
+    ) as invalidate:
+      user.verify_email(db_session)
+
+    invalidate.assert_called_once_with(str(user.id))
+
+  def test_verify_email_survives_cache_failure(self, db_session):
+    """The verification stands even when the cache cannot be cleared."""
+    user = User.create(
+      email="verify-cache-down@example.com",
+      name="Unverified User",
+      password_hash="hashed_password",
+      session=db_session,
+    )
+
+    with patch(
+      "robosystems.middleware.auth.cache.api_key_cache.invalidate_jwt_user_data",
+      side_effect=RuntimeError("valkey down"),
+    ):
+      user.verify_email(db_session)
+
+    assert user.email_verified is True
+
   def test_deactivate_user(self, db_session):
     """Test deactivating a user."""
     # Create an active user
