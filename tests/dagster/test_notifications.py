@@ -153,3 +153,36 @@ class TestSendEmailOpResolvesTheReference:
 
     assert result["success"] is True
     ses.send_welcome_email.assert_awaited_once()
+
+
+def test_send_email_job_runs_in_process():
+  """One step: the job runs in the run worker, without a step subprocess."""
+  from dagster import in_process_executor
+
+  from robosystems.dagster.jobs.notifications import send_email_job
+
+  assert send_email_job.executor_def is in_process_executor
+
+
+def test_email_run_config_carries_no_executor_choice():
+  """The job fixes its executor; the run config the API builds does not pick one."""
+  from unittest.mock import patch
+
+  from robosystems.dagster.jobs.notifications import (
+    build_email_job_config,
+    send_email_job,
+  )
+
+  with patch(
+    "robosystems.dagster.jobs.notifications._stash_email_token",
+    return_value="ref",
+  ):
+    run_config = build_email_job_config(
+      email_type="email_verification",
+      to_email="someone@example.com",
+      user_name="Someone",
+      token="t",
+    )
+
+  assert "execution" not in run_config
+  assert send_email_job.run_config_schema.config_type is not None

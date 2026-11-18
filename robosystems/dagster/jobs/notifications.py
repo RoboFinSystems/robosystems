@@ -8,6 +8,7 @@ from dagster import (
   Config,
   OpExecutionContext,
   RetryPolicy,
+  in_process_executor,
   job,
   op,
 )
@@ -246,6 +247,8 @@ def _emit_email_result_to_sse(
 
 
 @job(
+  # One step: a subprocess per run only adds a second code load (~35 s in prod).
+  executor_def=in_process_executor,
   tags={
     "dagster/priority": "1",
     "dagster/max_runtime": 300,  # 5 minute max
@@ -278,8 +281,6 @@ def build_email_job_config(
   ``token`` (required except for welcome) is parked in Valkey; the run config
   carries only an opaque reference. ``org_name`` is required for org_invitation.
   """
-  from robosystems.config import env
-
   config = {
     "email_type": email_type,
     "to_email": to_email,
@@ -305,13 +306,8 @@ def build_email_job_config(
   if new_email:
     config["new_email"] = new_email
 
-  run_config: dict = {
+  return {
     "ops": {
       "send_email_op": {"config": config},
     },
   }
-
-  if env.ENVIRONMENT == "dev":
-    run_config["execution"] = {"config": {"in_process": {}}}
-
-  return run_config
