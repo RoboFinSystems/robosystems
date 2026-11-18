@@ -34,7 +34,6 @@ from ...middleware.rate_limits import (
   mfa_rate_limit_dependency,
   passkey_management_rate_limit_dependency,
 )
-from ...middleware.sse import build_email_job_config, run_and_monitor_dagster_job
 from ...models.api.auth import AuthResponse
 from ...models.api.common import (
   COMMON_ERROR_RESPONSES,
@@ -53,6 +52,7 @@ from ...models.api.passkeys import (
 )
 from ...models.core import User, UserPasskey
 from ...operations import passkeys as passkey_ops
+from ...operations.notifications import deliver_email
 from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.auth_protection import AdvancedAuthProtection
 from ...security.device_fingerprinting import extract_device_fingerprint
@@ -214,16 +214,12 @@ async def verify_registration(
 
   # Notify: mitigates a stolen first factor enrolling its own second factor.
   background_tasks.add_task(
-    run_and_monitor_dagster_job,
-    job_name="send_email_job",
-    operation_id=None,
-    run_config=build_email_job_config(
-      email_type="passkey_enrolled",
-      to_email=str(user.email),
-      user_name=str(user.name or user.email),
-      app=detect_app_source(fastapi_request),
-      passkey_name=str(registered.passkey.name),
-    ),
+    deliver_email,
+    email_type="passkey_enrolled",
+    to_email=str(user.email),
+    user_name=str(user.name or user.email),
+    app=detect_app_source(fastapi_request),
+    passkey_name=str(registered.passkey.name),
   )
 
   auth: AuthResponse | None = None

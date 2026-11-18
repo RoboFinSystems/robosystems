@@ -11,10 +11,7 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
-from robosystems.middleware.sse import (
-  build_email_job_config,
-  run_and_monitor_dagster_job,
-)
+from robosystems.operations.notifications import deliver_email
 
 from ...config.constants import (
   JWT_EXPIRY_HOURS,
@@ -93,19 +90,13 @@ async def forgot_password(
 
     app = detect_app_source(fastapi_request)
 
-    # Queued via Dagster, with retries.
-    run_config = build_email_job_config(
+    background_tasks.add_task(
+      deliver_email,
       email_type="password_reset",
       to_email=user.email,
       user_name=user.name,
       token=token,
       app=app,
-    )
-    background_tasks.add_task(
-      run_and_monitor_dagster_job,
-      job_name="send_email_job",
-      operation_id=None,  # No SSE tracking needed for auth emails
-      run_config=run_config,
     )
 
     logger.info(f"Queued password reset email to {sanitized_email}")

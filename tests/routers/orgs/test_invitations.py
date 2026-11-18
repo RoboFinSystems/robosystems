@@ -24,7 +24,7 @@ from robosystems.models.core import (
 
 pytestmark = pytest.mark.asyncio
 
-DISPATCH = "robosystems.routers.orgs.invitations.run_and_monitor_dagster_job"
+DISPATCH = "robosystems.routers.orgs.invitations.deliver_email"
 
 
 def _make_org(session, user_id: str, role: OrgRole) -> Org:
@@ -79,17 +79,12 @@ class TestCreateInvitation:
     assert invitation.org_id == org.id
 
     assert mock_dispatch.call_count == 1
-    email_config = mock_dispatch.call_args.kwargs["run_config"]["ops"]["send_email_op"][
-      "config"
-    ]
+    email_config = mock_dispatch.call_args.kwargs
     assert email_config["email_type"] == "org_invitation"
     assert email_config["to_email"] == "invitee@example.com"
     assert email_config["org_name"] == org.name
     assert email_config["inviter_name"] == test_user.name
-    # The raw invitation token is parked in Valkey; run config carries a
-    # reference only.
-    assert email_config["token_ref"]
-    assert "token" not in email_config
+    assert email_config["token"]
 
   async def test_member_cannot_invite(self, async_client, test_db, test_user):
     org = _make_org(test_db, test_user.id, OrgRole.MEMBER)

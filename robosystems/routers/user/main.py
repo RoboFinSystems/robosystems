@@ -19,7 +19,6 @@ from ...middleware.otel.metrics import (
   get_endpoint_metrics,
 )
 from ...middleware.rate_limits import user_management_rate_limit_dependency
-from ...middleware.sse import build_email_job_config, run_and_monitor_dagster_job
 from ...models.api.common import (
   AUTHENTICATED_ERROR_RESPONSES,
   ErrorCode,
@@ -32,6 +31,7 @@ from ...models.api.user import (
 )
 from ...models.core import User, UserToken
 from ...operations import passkeys as passkey_ops
+from ...operations.notifications import deliver_email
 from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.input_validation import (
   sanitize_string,
@@ -245,16 +245,12 @@ async def update_user_profile(
     # fire-and-forget.
     if email_changed and previous_email:
       background_tasks.add_task(
-        run_and_monitor_dagster_job,
-        job_name="send_email_job",
-        operation_id=None,
-        run_config=build_email_job_config(
-          email_type="email_changed",
-          to_email=previous_email,
-          user_name=user_in_session.name or "there",
-          new_email=_mask_email(user_in_session.email),
-          app=app_source or "roboledger",
-        ),
+        deliver_email,
+        email_type="email_changed",
+        to_email=previous_email,
+        user_name=user_in_session.name or "there",
+        new_email=_mask_email(user_in_session.email),
+        app=app_source or "roboledger",
       )
 
     if email_changed and env.EMAIL_VERIFICATION_ENABLED:
@@ -272,18 +268,13 @@ async def update_user_profile(
 
       app = app_source or detect_app_source(fastapi_request)
 
-      run_config = build_email_job_config(
+      background_tasks.add_task(
+        deliver_email,
         email_type="email_verification",
         to_email=user_in_session.email,
         user_name=user_in_session.name,
         token=token,
         app=app,
-      )
-      background_tasks.add_task(
-        run_and_monitor_dagster_job,
-        job_name="send_email_job",
-        operation_id=None,
-        run_config=run_config,
       )
 
       SecurityAuditLogger.log_security_event(

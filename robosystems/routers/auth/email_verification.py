@@ -3,10 +3,7 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from robosystems.middleware.sse import (
-  build_email_job_config,
-  run_and_monitor_dagster_job,
-)
+from robosystems.operations.notifications import deliver_email
 from robosystems.security.request_context import publish_principal
 
 from ...config.constants import (
@@ -122,18 +119,13 @@ async def resend_verification_email(
 
   app = detect_app_source(request)
 
-  run_config = build_email_job_config(
+  background_tasks.add_task(
+    deliver_email,
     email_type="email_verification",
     to_email=current_user.email,
     user_name=current_user.name,
     token=token,
     app=app,
-  )
-  background_tasks.add_task(
-    run_and_monitor_dagster_job,
-    job_name="send_email_job",
-    operation_id=None,  # No SSE tracking needed for auth emails
-    run_config=run_config,
   )
 
   SecurityAuditLogger.log_security_event(
@@ -193,17 +185,12 @@ async def verify_email(
 
   app = detect_app_source(fastapi_request)
 
-  run_config = build_email_job_config(
+  background_tasks.add_task(
+    deliver_email,
     email_type="welcome",
     to_email=user.email,
     user_name=user.name,
     app=app,
-  )
-  background_tasks.add_task(
-    run_and_monitor_dagster_job,
-    job_name="send_email_job",
-    operation_id=None,  # No SSE tracking needed for auth emails
-    run_config=run_config,
   )
 
   SecurityAuditLogger.log_security_event(

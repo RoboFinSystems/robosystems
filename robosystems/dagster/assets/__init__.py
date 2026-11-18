@@ -18,6 +18,7 @@ from robosystems.dagster.assets.graphs import (
   user_repository_provisioning_source,
   user_subgraph_creation_source,
 )
+from robosystems.dagster.assets.notifications import transactional_email_sent_source
 from robosystems.dagster.assets.shared_repositories import (
   SharedReplicaRefreshConfig,
   build_shared_replicas_refreshed,
@@ -26,6 +27,7 @@ from robosystems.dagster.assets.shared_repositories import (
 __all__ = [
   "SharedReplicaRefreshConfig",
   "build_shared_replicas_refreshed",
+  "transactional_email_sent_source",
   "user_graph_backup_source",
   "user_graph_creation_source",
   "user_graph_extensions_materialized_source",

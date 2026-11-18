@@ -104,7 +104,7 @@ class TestSendEmailOpResolvesTheReference:
     ref = run_config["ops"]["send_email_op"]["config"]["token_ref"]
     ses = _ses()
 
-    with patch("robosystems.operations.aws.ses.ses_service", ses):
+    with patch("robosystems.operations.notifications.ses_service", ses):
       result = send_email_op(context=build_op_context(), config=_op_config(run_config))
 
     assert result["success"] is True
@@ -121,7 +121,7 @@ class TestSendEmailOpResolvesTheReference:
     )
     ses = _ses()
 
-    with patch("robosystems.operations.aws.ses.ses_service", ses):
+    with patch("robosystems.operations.notifications.ses_service", ses):
       with pytest.raises(ValueError, match="expired or was already used"):
         send_email_op(context=build_op_context(), config=cfg)
 
@@ -138,7 +138,7 @@ class TestSendEmailOpResolvesTheReference:
     ref = run_config["ops"]["send_email_op"]["config"]["token_ref"]
     ses = _ses(send_result=False)
 
-    with patch("robosystems.operations.aws.ses.ses_service", ses):
+    with patch("robosystems.operations.notifications.ses_service", ses):
       with pytest.raises(RuntimeError, match="Failed to send"):
         send_email_op(context=build_op_context(), config=_op_config(run_config))
 
@@ -148,7 +148,7 @@ class TestSendEmailOpResolvesTheReference:
     run_config = build_email_job_config("welcome", "u@example.com", "U")
     ses = _ses()
 
-    with patch("robosystems.operations.aws.ses.ses_service", ses):
+    with patch("robosystems.operations.notifications.ses_service", ses):
       result = send_email_op(context=build_op_context(), config=_op_config(run_config))
 
     assert result["success"] is True
