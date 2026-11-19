@@ -87,6 +87,9 @@ class ImportedReport:
   # Facts qualified by a dimension stay in the stored file; the tenant rows
   # hold the report's totals.
   dimensional_facts_not_loaded: int = 0
+  calculations_checked: int = 0
+  balance_checked: bool = False
+  dry_run: bool = False
   # Reports this one replaced, whose stored artifacts the caller deletes
   # after commit.
   replaced_report_ids: list[str] = field(default_factory=list)
@@ -102,12 +105,14 @@ def import_report(
   name: str | None = None,
   expected_facts: int | None = None,
   require_source: bool = False,
+  dry_run: bool = False,
 ) -> ImportedReport:
   """Load one holon onto ``entity_id`` as an ``uploaded`` report.
 
   A second import for the same entity, period end and kind replaces the
   first. Raises ``ReportImportRefusedError`` with the reasons when the file
-  cannot be read or does not check, and writes nothing. Does not commit.
+  cannot be read or does not check, and writes nothing. ``dry_run`` checks
+  the file and says what would load, writing nothing. Does not commit.
   """
   model = _read(holon_text)
   verdict = check_report(
@@ -136,9 +141,27 @@ def import_report(
       [{"code": "no_period", "message": "The report states no dated period."}]
     )
   kind = model.filing.form or "report"
+  sections = _sections(model, loadable)
+  checks: dict[str, Any] = {
+    "calculations_checked": verdict.calculations_checked,
+    "balance_checked": bool(verdict.balance_checked),
+    "dimensional_facts_not_loaded": len(model.facts) - len(loadable),
+  }
+  if dry_run:
+    dated = {p.id for p in model.periods if p.end is not None}
+    return ImportedReport(
+      report_id="",
+      entity_id=entity_id,
+      period_end=period_end,
+      kind=kind,
+      fact_count=sum(1 for f in loadable if f.period_id in dated),
+      structure_count=len(sections.blocks),
+      concepts_added=_unknown_qnames(session, _cited(sections, loadable)),
+      dry_run=True,
+      **checks,
+    )
 
   replaced = _delete_previous(session, entity_id, period_end, kind)
-  sections = _sections(model, loadable)
   extension, structure_ids, concepts_added = _write_vocabulary(
     session,
     model,
@@ -234,8 +257,8 @@ def import_report(
     fact_count=written,
     structure_count=len(structure_ids),
     concepts_added=concepts_added,
-    dimensional_facts_not_loaded=len(model.facts) - len(loadable),
     replaced_report_ids=replaced.report_ids,
+    **checks,
   )
 
 
@@ -424,6 +447,34 @@ def _arcs(block: InformationBlock) -> list[tuple[str, Network]]:
   ]
 
 
+def _cited(sections: _Sections, loadable: list[XbrlFact]) -> set[str]:
+  """Every concept the loaded facts and the kept sections name."""
+  cited = {f.concept_qname for f in loadable}
+  for block in sections.blocks:
+    for _, network in _arcs(block):
+      for arc in network.arcs:
+        cited.update((arc.from_qname, arc.to_qname))
+  return cited
+
+
+def _unknown_qnames(session: Session, cited: set[str]) -> list[str]:
+  """The concepts neither this graph nor the library has, without writing."""
+  library = _library_taxonomy(session)
+  missing = cited - set(_element_ids(session, cited))
+  if not missing:
+    return []
+  in_library = set(
+    session.execute(
+      text(
+        "SELECT qname FROM public.elements "
+        "WHERE taxonomy_id = :tid AND qname = ANY(:qnames)"
+      ),
+      {"tid": str(library.id), "qnames": sorted(missing)},
+    ).scalars()
+  )
+  return sorted(missing - in_library)
+
+
 def _write_vocabulary(
   session: Session,
   model: XbrlModel,
@@ -438,11 +489,7 @@ def _write_vocabulary(
   extension. Returns the extension, role URI to structure id, and the qnames
   of the concepts it had to add."""
   library = _library_taxonomy(session)
-  cited = {f.concept_qname for f in loadable}
-  for block in sections.blocks:
-    for _, network in _arcs(block):
-      for arc in network.arcs:
-        cited.update((arc.from_qname, arc.to_qname))
+  cited = _cited(sections, loadable)
 
   known = _element_ids(session, cited)
   schema = session.execute(text("SELECT current_schema()")).scalar()
