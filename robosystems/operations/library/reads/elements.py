@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import or_, select
+from sqlalchemy import case, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.library import (
@@ -291,35 +291,52 @@ def get_element_by_qname(session: Session, qname: str) -> LibraryElementResponse
   return _element_to_response(session, element)
 
 
+def _like(text: str) -> str:
+  """``text`` with LIKE's wildcards escaped, to match as written."""
+  return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def search_elements(
   session: Session,
   query_text: str,
   limit: int = DEFAULT_ELEMENT_LIMIT,
   source: str | None = None,
 ) -> list[LibraryElementResponse]:
-  """Substring search across qname, name and label text.
+  """Search qname, name and label text: every word of the query must appear
+  somewhere, best match on the name first.
 
-  ILIKE with no index, so cost scales with library size.
+  A concept named exactly what was asked comes before one whose name starts
+  with it, then one whose name contains it, then one matched only by a label;
+  within each, the shorter name first. ILIKE with no index, so cost scales
+  with library size.
   """
   limit = max(1, min(limit, MAX_ELEMENT_LIMIT))
-  pattern = f"%{query_text.lower()}%"
+  words = [_like(word) for word in query_text.lower().split()]
+  compact = "".join(words)
+  plain = "".join(query_text.lower().split())
 
-  q = (
-    select(Element)
-    .outerjoin(ElementLabel, ElementLabel.element_id == Element.id)
-    .where(
+  q = select(Element)
+  for word in words:
+    pattern = f"%{word}%"
+    q = q.where(
       or_(
-        Element.qname.ilike(pattern),
-        Element.name.ilike(pattern),
-        ElementLabel.text.ilike(pattern),
+        Element.qname.ilike(pattern, escape="\\"),
+        Element.name.ilike(pattern, escape="\\"),
+        exists().where(
+          ElementLabel.element_id == Element.id,
+          ElementLabel.text.ilike(pattern, escape="\\"),
+        ),
       )
     )
-    .distinct()
-    .order_by(Element.qname.asc())
-    .limit(limit)
-  )
   if source is not None:
     q = q.where(Element.source == source)
+  rank = case(
+    (func.lower(Element.name) == plain, 0),
+    (Element.name.ilike(f"{compact}%", escape="\\"), 1),
+    (Element.name.ilike(f"%{compact}%", escape="\\"), 2),
+    else_=3,
+  )
+  q = q.order_by(rank, func.length(Element.name), Element.qname.asc()).limit(limit)
 
   elements = session.execute(q).scalars().all()
   return [_element_to_response(session, e) for e in elements]

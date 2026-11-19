@@ -706,3 +706,44 @@ def test_a_total_that_does_not_foot_shows_what_was_counted() -> None:
     "The report was not loaded. rs-gaap:AssetsCurrent (2026-10-31) is reported as "
     "900 and its terms sum to 1,100: + rs-gaap:Cash 1,000 - acme:Allowance -100."
   )
+
+
+def test_a_total_that_fails_in_several_periods_is_written_out_once() -> None:
+  from robosystems.operations.roboledger.commands.report_import import (
+    ReportImportRefusedError,
+  )
+  from robosystems.routers.extensions.roboinvestor.operations import _refusal
+
+  def problem(concept: str, when: str) -> dict:
+    return {
+      "code": "does_not_foot",
+      "message": "x",
+      "concept": concept,
+      "reported": 10.0,
+      "computed": 9.0,
+      "when": when,
+    }
+
+  detail = _refusal(
+    ReportImportRefusedError(
+      [
+        problem("rs-gaap:OperatingExpenses", "2026-01-01 to 2026-03-31"),
+        problem("rs-gaap:Assets", "2026-06-30"),
+        problem("rs-gaap:OperatingExpenses", "2026-04-01 to 2026-06-30"),
+        problem("rs-gaap:OperatingExpenses", "2025-10-01 to 2025-12-31"),
+      ]
+    )
+  )
+  assert detail == (
+    "The report was not loaded. rs-gaap:OperatingExpenses (2026-04-01 to "
+    "2026-06-30) is reported as 10 and its terms sum to 9. It also does not foot "
+    "in 2 other period(s): 2025-10-01 to 2025-12-31, 2026-01-01 to 2026-03-31. "
+    "rs-gaap:Assets (2026-06-30) is reported as 10 and its terms sum to 9."
+  )
+
+  everywhere = _refusal(
+    ReportImportRefusedError(
+      [problem("rs-gaap:Assets", f"2026-0{month}-28") for month in range(1, 8)]
+    )
+  )
+  assert everywhere.endswith("It also does not foot in 6 other period(s).")

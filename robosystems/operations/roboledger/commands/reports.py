@@ -741,9 +741,11 @@ def delete_report(
   if report_def.origin == "uploaded":
     from robosystems.operations.roboledger.commands.report_import import (
       remove_report_sections,
+      remove_unused_concepts,
     )
 
     remove_report_sections(session, report_def, acting_user_id)
+    remove_unused_concepts(session, acting_user_id)
   session.delete(report_def)
   session.commit()
   return True

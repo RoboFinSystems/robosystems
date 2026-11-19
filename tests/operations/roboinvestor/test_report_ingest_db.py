@@ -561,3 +561,122 @@ def test_a_subtotal_given_its_own_line_keeps_the_lines_beneath_it(fund):
   }
   assert ("rs-gaap:AssetsCurrent", "rs-gaap:AccountsReceivableNetCurrent") in arcs
   assert ("rs-gaap:Assets", "rs-gaap:AccountsReceivableNetCurrent") not in arcs
+
+
+def test_a_library_line_reads_back_in_the_documents_wording(fund):
+  rows = _values_only()
+  rows["labels"] = {"rs-gaap:OperatingExpenses": "Total Operating Expense"}
+
+  _ingest(fund, report=rows)
+
+  model, _ = from_holon_report(fund["s3"].upload_string.call_args.kwargs["content"])
+
+  def wording(qname: str) -> list[str | None]:
+    return [label.value for label in model.concepts[qname].labels]
+
+  assert wording("rs-gaap:OperatingExpenses") == ["Total Operating Expense"]
+  assert wording("rs-gaap:Revenues") != ["Total Operating Expense"]
+
+
+def _own(name: str, label: str, balance: str = "debit") -> dict:
+  return {
+    "qname": f"acme:{name}",
+    "label": label,
+    "period_type": "instant",
+    "balance": balance,
+  }
+
+
+def _with_own_line(line: dict | None) -> dict:
+  """The values-only package with cash replaced by a concept of the firm's
+  own, given ``line`` on the balance sheet."""
+  rows = _values_only()
+  rows["namespaces"] = {"acme": "https://example.com/taxonomy/acme/v1/"}
+  rows["concepts"] = [_own("Operating", "Cash - operating")]
+  for fact in rows["facts"]:
+    if fact["concept"] == "rs-gaap:CashAndCashEquivalentsAtCarryingValue":
+      fact["concept"] = "acme:Operating"
+  if line is not None:
+    rows["sections"][0] |= {"layout": "library", "lines": [line]}
+  return rows
+
+
+def test_values_laid_out_by_the_library_conform_to_it(fund):
+  result = _ingest(fund, report=_values_only())
+  assert result.conforms_to_library is True
+  assert result.departures == []
+
+
+def test_a_firms_own_line_under_a_library_total_conforms(fund):
+  line = {"concept": "acme:Operating", "parent": "rs-gaap:AssetsCurrent", "weight": 1}
+  result = _ingest(fund, report=_with_own_line(line))
+  assert result.conforms_to_library is True
+
+
+@pytest.mark.parametrize(
+  "line",
+  [
+    {"concept": "acme:Operating"},
+    {"concept": "acme:Operating", "parent": "rs-gaap:AssetsCurrent"},
+  ],
+)
+def test_a_firms_own_line_on_a_statement_must_add_into_a_library_total(fund, line):
+  with pytest.raises(ReportImportRefusedError) as refused:
+    _ingest(fund, report=_with_own_line(line))
+  problem = refused.value.problems[0]
+  assert (problem["code"], problem["concept"]) == ("unanchored", "acme:Operating")
+
+
+def test_a_firms_own_concept_with_a_value_and_no_line_is_refused(fund):
+  with pytest.raises(ReportImportRefusedError) as refused:
+    _ingest(fund, report=_with_own_line(None))
+  assert refused.value.problems[0]["code"] == "unanchored"
+  assert "acme:Operating" in refused.value.problems[0]["message"]
+
+
+def test_a_moved_line_loads_and_is_recorded_as_a_departure(fund):
+  rows = _values_only()
+  rows["sections"][0] |= {
+    "layout": "library",
+    "lines": [
+      {
+        "concept": "rs-gaap:AccountsReceivableNetCurrent",
+        "parent": "rs-gaap:Assets",
+        "weight": 1,
+      }
+    ],
+  }
+  for fact in rows["facts"]:
+    if fact["concept"] == "rs-gaap:AssetsCurrent":
+      fact["value"] = 600
+
+  result = _ingest(fund, report=rows)
+
+  assert result.conforms_to_library is False
+  [departure] = result.departures
+  assert (departure.kind, departure.concept) == (
+    "moved",
+    "rs-gaap:AccountsReceivableNetCurrent",
+  )
+  assert (departure.library_parent, departure.parent) == (
+    "rs-gaap:AssetsCurrent",
+    "rs-gaap:Assets",
+  )
+  stored = fund["session"].get(Report, result.report_id).metadata_["layout"]
+  assert stored["conforms_to_library"] is False
+  assert stored["departures"][0]["kind"] == "moved"
+
+
+def test_a_statement_sent_with_all_its_own_lines_is_a_departure(fund):
+  result = _ingest(fund, report=_rows())
+  assert [d.kind for d in result.departures] == ["own_layout"]
+
+
+def test_a_holon_is_not_compared_with_the_library(fund):
+  _ingest(fund, report=_rows())
+  holon = fund["s3"].upload_string.call_args.kwargs["content"]
+  other = create_issuer(
+    fund["session"], CreateIssuerRequest(name="Bolt Co"), created_by="u"
+  )
+  result = _ingest({**fund, "issuer": other}, holon=holon)
+  assert result.conforms_to_library is None

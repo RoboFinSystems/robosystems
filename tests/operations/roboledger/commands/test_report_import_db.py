@@ -42,6 +42,7 @@ from robosystems.operations.roboledger.commands.report_import import (
   ReportImportEntityNotFoundError,
   ReportImportRefusedError,
   import_report,
+  remove_unused_concepts,
 )
 from robosystems.operations.roboledger.commands.reports import delete_report
 
@@ -378,8 +379,13 @@ def test_a_second_import_for_the_period_replaces_the_first(tenant):
   assert session.execute(select(FactSet.id)).scalars().all().__len__() == 3
 
 
-def test_deleting_an_uploaded_report_takes_its_sections_and_keeps_its_concepts(tenant):
+def test_deleting_an_uploaded_report_takes_what_it_brought_and_nothing_else(tenant):
   session = tenant["session"]
+  library_before = set(
+    session.execute(select(Element.qname).where(Element.qname.like("rs-gaap:%")))
+    .scalars()
+    .all()
+  )
   result = import_report(
     session, GRAPH, holon_text=_holon(), entity_id=ISSUER, created_by="usr_1"
   )
@@ -395,6 +401,28 @@ def test_deleting_an_uploaded_report_takes_its_sections_and_keeps_its_concepts(t
     .all()
     == []
   )
+  # The concepts it brought go with it; the library's stay.
+  assert (
+    session.execute(select(Element.id).where(Element.taxonomy_id == extension_id))
+    .scalars()
+    .all()
+    == []
+  )
+  library_after = set(
+    session.execute(select(Element.qname).where(Element.qname.like("rs-gaap:%")))
+    .scalars()
+    .all()
+  )
+  assert library_before <= library_after
+
+
+def test_a_concept_a_report_still_uses_is_not_removed(tenant):
+  session = tenant["session"]
+  import_report(
+    session, GRAPH, holon_text=_holon(), entity_id=ISSUER, created_by="usr_1"
+  )
+
+  assert remove_unused_concepts(session, "usr_1") == []
   assert session.execute(
     select(Element.id).where(Element.qname == "kpi:Headcount")
   ).scalar_one()

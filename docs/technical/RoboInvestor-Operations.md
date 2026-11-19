@@ -255,10 +255,29 @@ Real packages rarely fit the library exactly, so a laid-out statement also takes
 
 The first is a concept of the firm's own, declared in `concepts` with a prefix bound in `namespaces`. The second is a library concept the library files under long-term debt, moved to where this company's balance sheet shows it. A line given replaces the library's placement of that concept; everything else is still laid out and checked.
 
+A library concept reads back with the library's label unless the rows say how the document words it. `labels` maps a concept to that wording, and the stored report keeps it:
+
+```json
+{"labels": {"rs-gaap:LaborAndRelatedExpense": "Personnel Expense"}}
+```
+
 When a total does not foot, the refusal gives its date, the reported amount and every line that was counted toward it, which is how a misplaced or unplaced line is found:
 
 ```text
 rs-gaap:LongTermDebtCurrent (2026-10-31) is reported as 1,400,000 and its terms sum to 3,200,000: + rs-gaap:LinesOfCreditCurrent 3,200,000.
+```
+
+A total that fails in several periods is written out once, for its latest period, with the other periods listed after it.
+
+A primary statement keeps the library's structure, so a line means the same thing in every report that uses it. Two rules follow:
+
+- A concept of the firm's own on a balance sheet, an income statement or a cash flow statement must be a term of a library concept's total, directly or through another line that is: it needs a `parent` and a `weight`. One that is not is refused, as is one that has a value and no line at all. A table of metrics is not a primary statement and takes any lines.
+- A report that arranges a balance sheet or an income statement differently than the library still loads, and the response says where. `conforms_to_library` is `false` and `departures` lists each difference: a library concept `moved` to another line, one `placed` on a statement the library does not put it on, an `own_subtotal` of the firm's with library concepts beneath it, or an `own_layout` when the statement came with all of its own lines. The list is kept with the report.
+
+```json
+{"section": "Income Statement", "kind": "moved", "concept": "rs-gaap:Depreciation",
+ "library_parent": "rs-gaap:OperatingExpenses", "parent": "rs-gaap:OperatingIncomeLoss",
+ "detail": "rs-gaap:Depreciation sits under rs-gaap:OperatingIncomeLoss with weight -1.0; the library puts it under rs-gaap:OperatingExpenses with weight 1.0."}
 ```
 
 Any other section gives all of its `lines`, top to bottom: a KPI table, a cash flow statement, a statement of equity. A line names its `parent`, and a `weight` (`1` adds, `-1` subtracts) makes it a term of the parent's total. With `layout` set to `given`, a balance sheet or an income statement is taken that way too.
@@ -275,7 +294,7 @@ What lands:
 - A concept the library has (`rs-gaap:…`) is the library's own, so the company's numbers sit beside every other company's and beside SEC filers'. A concept it does not have, such as a KPI, is added to the graph's **Received Reports** vocabulary, a reporting extension shared by every company the fund receives from.
 - After the next materialization, `Portfolio → Position → Security → Entity → Report → Fact` resolves to the ingested facts.
 
-A second ingest for the same entity, period end and `kind` replaces the first. Values broken out by a dimension are kept in the stored file and reported in `dimensional_facts_not_loaded`; the graph holds the report's totals.
+A second ingest for the same entity, period end and `kind` replaces the first. Deleting a received report with `delete-report` removes its facts, its sections and the concepts it brought that no other report uses; the library's concepts and the issuer stay. A replacement cleans up the same way. Values broken out by a dimension are kept in the stored file and reported in `dimensional_facts_not_loaded`; the graph holds the report's totals.
 
 ## Reading Data Back With GraphQL
 
