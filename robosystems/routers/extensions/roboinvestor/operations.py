@@ -315,9 +315,30 @@ def _reason(problem: dict) -> str:
   return str(problem.get("message"))
 
 
+_PERIODS_NAMED = 4
+
+
 def _refusal(exc: ReportImportRefusedError) -> str:
-  reasons = " ".join(_reason(p) for p in exc.problems)
-  return f"The report was not loaded. {reasons}"
+  """Every reason once. A total that fails in several periods is written out
+  for its latest one, with the others named: a report with history would
+  otherwise repeat the same sentence per period."""
+  groups: dict[object, list[dict]] = {}
+  for index, problem in enumerate(exc.problems):
+    by_total = problem.get("code") == "does_not_foot" and problem.get("concept")
+    groups.setdefault(problem["concept"] if by_total else index, []).append(problem)
+  reasons = []
+  for problems in groups.values():
+    latest = max(problems, key=lambda p: str(p.get("when") or ""))
+    reason = _reason(latest)
+    others = sorted(
+      str(p["when"]) for p in problems if p is not latest and p.get("when")
+    )
+    if others:
+      # Name a few; a total that fails everywhere is one mistake, not many.
+      named = f": {', '.join(others)}" if len(others) <= _PERIODS_NAMED else ""
+      reason += f" It also does not foot in {len(others)} other period(s){named}."
+    reasons.append(reason)
+  return f"The report was not loaded. {' '.join(reasons)}"
 
 
 create_issuer_op = _registrar.register(

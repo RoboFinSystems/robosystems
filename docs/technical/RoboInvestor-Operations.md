@@ -255,11 +255,19 @@ Real packages rarely fit the library exactly, so a laid-out statement also takes
 
 The first is a concept of the firm's own, declared in `concepts` with a prefix bound in `namespaces`. The second is a library concept the library files under long-term debt, moved to where this company's balance sheet shows it. A line given replaces the library's placement of that concept; everything else is still laid out and checked.
 
+A library concept reads back with the library's label unless the rows say how the document words it. `labels` maps a concept to that wording, and the stored report keeps it:
+
+```json
+{"labels": {"rs-gaap:LaborAndRelatedExpense": "Personnel Expense"}}
+```
+
 When a total does not foot, the refusal gives its date, the reported amount and every line that was counted toward it, which is how a misplaced or unplaced line is found:
 
 ```text
 rs-gaap:LongTermDebtCurrent (2026-10-31) is reported as 1,400,000 and its terms sum to 3,200,000: + rs-gaap:LinesOfCreditCurrent 3,200,000.
 ```
+
+A total that fails in several periods is written out once, for its latest period, with the other periods listed after it.
 
 Any other section gives all of its `lines`, top to bottom: a KPI table, a cash flow statement, a statement of equity. A line names its `parent`, and a `weight` (`1` adds, `-1` subtracts) makes it a term of the parent's total. With `layout` set to `given`, a balance sheet or an income statement is taken that way too.
 

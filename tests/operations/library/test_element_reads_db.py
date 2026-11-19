@@ -259,6 +259,24 @@ class TestSearchElements:
       "rs-gaap:AssetsNoncurrent",
     ]
 
+  def test_the_closest_name_comes_first(self, library):
+    # Name order would put AssetsCurrent ahead of nothing here, but a longer
+    # name that only contains the word must not outrank the exact one.
+    hits = search_elements(library, "current")
+    assert [e.qname for e in hits] == [
+      "rs-gaap:AssetsCurrent",
+      "rs-gaap:AssetsNoncurrent",
+    ]
+    assert search_elements(library, "ASSETS")[0].qname == "rs-gaap:Assets"
+
+  def test_every_word_must_match_and_wildcards_are_literal(self, library):
+    assert [e.qname for e in search_elements(library, "assets current")] == [
+      "rs-gaap:AssetsCurrent",
+      "rs-gaap:AssetsNoncurrent",
+    ]
+    assert search_elements(library, "assets equipment") == []
+    assert search_elements(library, "a_s") == []
+
   def test_source_filter_and_no_duplicate_rows_per_label(self, library):
     hits = search_elements(library, "cash", source="rs-gaap")
     # el_cash has two labels matching "cash"; it still appears once.

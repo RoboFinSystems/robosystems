@@ -476,14 +476,14 @@ class SearchLibraryElementsTool:
 - Checking which reporting concept an idea is called before mapping to it
 
 **PARAMETERS:**
-- query (required): a substring of the qname, name or label text
+- query (required): one or more words; each must appear in the qname, name or label text
 - source (optional): one standard only, e.g. `rs-gaap`
 - whole_library (optional, default false): search every concept the reporting library has, not only the ones this graph already holds. Use it to name a line of a report being received with `ingest-report`; a mapping or a schedule needs a concept this graph holds
 - brief (optional, default false): return one short row per concept (`id`, `qname`, `label`, `balance_type`, `period_type`, `trait`, `is_abstract`) without documentation and references. Use it when choosing among many candidates
 - limit (optional, default 50, 1 to 500)
 
 **RETURNS:**
-`elements`, by qname: each with `id`, `qname`, `namespace`, `name`, `trait`, `balance_type`, `period_type`, `is_abstract`, `is_monetary`, `element_type`, `source`, `taxonomy_id`, `parent_id`, `labels` and `references`; with `brief`, the short row.
+`elements`, closest name first (the exact name, then names that start with the query, then names that contain it, shorter names first): each with `id`, `qname`, `namespace`, `name`, `trait`, `balance_type`, `period_type`, `is_abstract`, `is_monetary`, `element_type`, `source`, `taxonomy_id`, `parent_id`, `labels` and `references`; with `brief`, the short row.
 
 **RELATED TOOLS:**
 - suggest-mapping — ranked concepts for one account

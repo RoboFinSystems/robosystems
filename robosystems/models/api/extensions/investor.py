@@ -1265,6 +1265,14 @@ class ReportRowsInput(BaseModel):
       "differently."
     ),
   )
+  labels: dict[str, str] = Field(
+    default_factory=dict,
+    description=(
+      "The document's own wording for a line, by library concept "
+      "(`rs-gaap:LaborAndRelatedExpense`: `Personnel Expense`). The report "
+      "reads back with this wording; the concept stays the library's."
+    ),
+  )
   sections: list[ReportSectionRow] = Field(
     default_factory=list, description="The report's statements and tables."
   )

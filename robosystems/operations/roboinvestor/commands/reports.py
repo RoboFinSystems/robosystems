@@ -342,7 +342,8 @@ def _concepts(
   heads: dict[str, str],
 ) -> list[ConceptRow]:
   """The declared concepts, then the library's own description of any library
-  concept the report uses without declaring it."""
+  concept the report uses without declaring it, worded as the document words
+  it where the rows say how."""
   concepts = [ConceptRow.model_validate(c.model_dump()) for c in rows.concepts]
   declared = {c.qname for c in concepts}
   for qname, label in heads.items():
@@ -358,7 +359,7 @@ def _concepts(
     concepts.append(
       ConceptRow(
         qname=qname,
-        label=concept.label,
+        label=rows.labels.get(qname) or concept.label,
         kind="monetary" if concept.monetary else "string",
         period_type=concept.period_type,
         balance=concept.balance if concept.monetary else None,

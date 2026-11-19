@@ -339,8 +339,9 @@ def build_instructions(
     if has("search-library-elements"):
       receive_lines.append(
         "- Name each line with a library concept → `search-library-elements` "
-        "with `whole_library: true` and `brief: true`; search by a distinctive "
-        "word of the concept's name, since results come in name order. Only "
+        "with `whole_library: true` and `brief: true`; the closest name comes "
+        "first. Where the document words the line differently, send its wording "
+        "in `labels`. Only "
         "when the library has none, declare a concept of the firm's own in "
         "`concepts` and give it a line in the section's `lines` with the "
         "`parent` it adds into and `weight: 1`. A KPI table gives all its lines."

@@ -561,3 +561,18 @@ def test_a_subtotal_given_its_own_line_keeps_the_lines_beneath_it(fund):
   }
   assert ("rs-gaap:AssetsCurrent", "rs-gaap:AccountsReceivableNetCurrent") in arcs
   assert ("rs-gaap:Assets", "rs-gaap:AccountsReceivableNetCurrent") not in arcs
+
+
+def test_a_library_line_reads_back_in_the_documents_wording(fund):
+  rows = _values_only()
+  rows["labels"] = {"rs-gaap:OperatingExpenses": "Total Operating Expense"}
+
+  _ingest(fund, report=rows)
+
+  model, _ = from_holon_report(fund["s3"].upload_string.call_args.kwargs["content"])
+
+  def wording(qname: str) -> list[str | None]:
+    return [label.value for label in model.concepts[qname].labels]
+
+  assert wording("rs-gaap:OperatingExpenses") == ["Total Operating Expense"]
+  assert wording("rs-gaap:Revenues") != ["Total Operating Expense"]
