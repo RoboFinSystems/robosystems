@@ -81,6 +81,7 @@ def list_event_blocks(
   status: str | None = None,
   agent_id: str | None = None,
   source: str | None = None,
+  external_id: str | None = None,
   is_reconciling_item: bool | None = None,
   limit: int = 50,
   offset: int = 0,
@@ -108,6 +109,9 @@ def list_event_blocks(
     stmt = stmt.where(Event.agent_id == agent_id)
   if source is not None:
     stmt = stmt.where(Event.source == source)
+  if external_id is not None:
+    # With `source`, the pair `idx_events_source_external` keeps unique.
+    stmt = stmt.where(Event.external_id == external_id)
   if is_reconciling_item is not None:
     # True rides idx_events_payload_drift (partial index on the storage
     # column, which keeps its mechanical name).

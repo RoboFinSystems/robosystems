@@ -28,6 +28,8 @@ _SINGLE_REALM_SITES: dict[str, tuple[re.Pattern[str], Counter[str]]] = {
         "robosystems/operations/event_block/commands.py": 1,
         "robosystems/operations/event_block/python_handlers/payment_received.py": 1,
         "robosystems/operations/extensions/loader.py": 3,
+        # The `eventBlocks` filter: a read, already scoped to one entity.
+        "robosystems/operations/roboledger/reads/event_block.py": 1,
       }
     ),
   ),

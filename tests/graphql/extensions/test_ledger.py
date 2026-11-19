@@ -595,6 +595,30 @@ class TestEventBlockResolvers:
       ]
     }
 
+  @pytest.mark.asyncio
+  async def test_event_blocks_filters_by_the_sources_own_id(self) -> None:
+    with (
+      _patch_session(),
+      patch(
+        "robosystems.operations.roboledger.reads.event_block.list_event_blocks",
+        return_value=[self._event(id="evt_01", source="netsuite-uk")],
+      ) as read,
+      patch(
+        "robosystems.operations.roboledger.reads.journal_entries.entries_by_event",
+        return_value={},
+      ),
+    ):
+      result = await schema.execute(
+        'query { eventBlocks(source: "netsuite-uk", externalId: "JE-1") '
+        "{ id externalId } }",
+        context_value=_ctx(),
+      )
+
+    assert result.errors is None, result.errors
+    assert read.call_args.kwargs["source"] == "netsuite-uk"
+    assert read.call_args.kwargs["external_id"] == "JE-1"
+    assert result.data == {"eventBlocks": [{"id": "evt_01", "externalId": "qb_txn_42"}]}
+
   def test_returns_event_when_found(self) -> None:
     with (
       _patch_session(),

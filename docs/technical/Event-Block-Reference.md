@@ -295,7 +295,7 @@ Run it with the MCP `read-graph-cypher` tool or the query endpoint in [Querying 
 
 GraphQL at `POST /extensions/{graph_id}/graphql`:
 
-- `eventBlocks(eventType, eventCategory, status, agentId, source, isReconcilingItem, limit, offset)`
+- `eventBlocks(eventType, eventCategory, status, agentId, source, externalId, isReconcilingItem, limit, offset)`
 - `eventBlock(id)`
 
 MCP: `list-event-blocks`, `get-event-block`, and the write tools `create-event-block`, `update-event-block`, `preview-event-block`, `execute-event-block`, `promote-obligations`.
