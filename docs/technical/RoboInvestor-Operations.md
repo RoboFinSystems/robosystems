@@ -1,8 +1,8 @@
 # RoboInvestor Operations
 
-RoboInvestor's API is six command operations for securities and portfolio blocks, plus GraphQL reads of portfolios, positions and holdings. This page walks through creating securities, building portfolio blocks with positions, updating and disposing positions, and reading the data back. It also explains the cross-graph issuer-linking concept that connects an investor's holdings to the companies that issue them.
+RoboInvestor's API is eight command operations for securities, portfolio blocks, issuers and received reports, plus GraphQL reads of portfolios, positions and holdings. This page walks through creating securities, building portfolio blocks with positions, updating and disposing positions, and reading the data back. It also explains the two ways a company's report reaches the fund's graph: shared in from the company's own graph, or ingested from a file or from rows.
 
-RoboInvestor is focused on private-company portfolio management. This page documents what the command surface exposes: six write operations plus a GraphQL read surface. It is an API-first walkthrough — every step is a `curl` against a graph you provision yourself.
+RoboInvestor is focused on private-company portfolio management. This page documents what the command surface exposes: eight write operations plus a GraphQL read surface. It is an API-first walkthrough — every step is a `curl` against a graph you provision yourself.
 
 > **Running your own stack?** Every example here works against a local deployment: use `http://localhost:8000` and the key from `just demo-user`. See [Local Development](Local-Development.md).
 
@@ -15,6 +15,7 @@ RoboInvestor is focused on private-company portfolio management. This page docum
 - [Quick Start](#quick-start)
 - [Walkthrough](#walkthrough)
 - [Cross-Graph Issuer Linking](#cross-graph-issuer-linking)
+- [Receiving a Report From a Company That Is Not on the Platform](#receiving-a-report-from-a-company-that-is-not-on-the-platform)
 - [Reading Data Back With GraphQL](#reading-data-back-with-graphql)
 - [Operations Reference](#operations-reference)
 - [Gotchas](#gotchas)
@@ -33,7 +34,7 @@ The RoboInvestor command surface lives under the extensions mount and is graph-s
 POST /extensions/roboinvestor/{graph_id}/operations/{op_name}
 ```
 
-The RoboInvestor surface follows CQRS strictly: **all six operations are writes, and reads go through GraphQL only.** There are no REST read routes here. Each write returns an `OperationEnvelope` and accepts an `Idempotency-Key` header. (RoboLedger additionally exposes a few read-shaped analytical operations on its own mount — see [Extensions Surface Overview](Extensions-Surface-Overview.md) — so the "operations are always writes" rule is a RoboInvestor property, not a corpus-wide one.)
+The RoboInvestor surface follows CQRS strictly: **all eight operations are writes, and reads go through GraphQL only.** There are no REST read routes here. Each write returns an `OperationEnvelope` and accepts an `Idempotency-Key` header. (RoboLedger additionally exposes a few read-shaped analytical operations on its own mount — see [Extensions Surface Overview](Extensions-Surface-Overview.md) — so the "operations are always writes" rule is a RoboInvestor property, not a corpus-wide one.)
 
 The surface is intentionally small. Portfolios and positions are written through a single molecule — the **Portfolio Block** — rather than through atom-level CRUD. Securities are the one standalone entity with their own create / update / delete operations.
 
@@ -45,12 +46,13 @@ The surface is intentionally small. Portfolios and positions are written through
 
 ## The Two Write Surfaces
 
-RoboInvestor exposes exactly two write surfaces plus a read surface:
+RoboInvestor exposes three write surfaces plus a read surface:
 
 | Surface | Mechanism | Operations |
 | --- | --- | --- |
 | **Portfolio Block** | REST command operations | `create-portfolio-block`, `update-portfolio-block`, `delete-portfolio-block` |
 | **Security Master Data** | REST command operations | `create-security`, `update-security`, `delete-security` |
+| **Issuers and received reports** | REST command operations | `create-issuer`, `ingest-report` |
 | **Reads** | GraphQL only | `portfolios`, `securities`, `security`, `positions`, `position`, `holdings`, `portfolioBlock` |
 
 All portfolio and position writes flow through the three Portfolio Block operations. There are no separate `create-portfolio`, `create-position`, or `update-position` endpoints — atom-level portfolio and position CRUD was retired in favor of the molecule.
@@ -197,6 +199,63 @@ When you call `create-security`, the issuer link is resolved in priority order:
 
 This is a **mutual handshake**: the investor records the company's `graph_id`, *and* the company shares a report into the investor's graph. Neither alone establishes the link. Authorization lives at the report-sharing boundary, not in the RoboInvestor OLTP layer — recording a `source_graph_id` for a company that has not shared a report simply leaves the security unlinked until that report arrives.
 
+## Receiving a Report From a Company That Is Not on the Platform
+
+Sharing covers a company that keeps its books in its own graph. Most companies a fund holds do not: they send a workbook or a PDF each month. Two operations bring those in.
+
+**`create-issuer`** adds the company as an entity in the fund's graph. It is a counterparty, not a member of the fund's own reporting group, and it is what securities and reports attach to:
+
+```bash
+curl -X POST "https://api.robosystems.ai/extensions/roboinvestor/$GRAPH_ID/operations/create-issuer" \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"name": "Northwind Robotics, Inc.", "tax_id": "98-7654321"}'
+```
+
+Pass the returned `id` as `entity_id` to `create-security` and to `ingest-report`. An identifier (`lei`, `cik` or `tax_id`) that another entity already carries is refused with HTTP 409.
+
+**`ingest-report`** loads one report onto that entity. Give it one of:
+
+- `holon`: the text of a `.holon.jsonld` report file.
+- `report`: the report as rows, read from the PDF or the workbook. Each concept is declared once, each section lists its lines top to bottom, and each value carries its period, its unit and the page or cell it was read from.
+
+```json
+{
+  "entity_id": "ent_...",
+  "require_source": true,
+  "report": {
+    "period_end": "2026-10-31",
+    "kind": "monthly-package",
+    "namespaces": {"kpi": "https://example.com/taxonomy/kpi/v1/"},
+    "concepts": [
+      {"qname": "rs-gaap:Assets", "label": "Total assets", "period_type": "instant", "balance": "debit"},
+      {"qname": "rs-gaap:Cash", "label": "Cash", "period_type": "instant", "balance": "debit"}
+    ],
+    "sections": [
+      {"name": "Balance Sheet", "block_type": "balance_sheet", "lines": [
+        {"concept": "rs-gaap:Assets"},
+        {"concept": "rs-gaap:Cash", "parent": "rs-gaap:Assets", "weight": 1}
+      ]}
+    ],
+    "facts": [
+      {"concept": "rs-gaap:Assets", "value": 600, "end": "2026-10-31", "unit": "USD", "decimals": 0, "source": "package.xlsx#sheet=BS&cell=B10"},
+      {"concept": "rs-gaap:Cash", "value": 600, "end": "2026-10-31", "unit": "USD", "decimals": 0, "source": "package.xlsx#sheet=BS&cell=B4"}
+    ]
+  }
+}
+```
+
+Rows are assembled into a holon on the server, so either way the graph loads a report from a serialization, and that file is kept as the record of what was received. It downloads through `reportDownloadUrl` like any published report.
+
+Before anything is written the report is checked: every value resolves to a declared concept and period, two values for one line agree, every total with a `weight` on its lines foots to them at the total's `decimals`, and total assets equal total liabilities and equity where both are present. With `require_source`, every value must name where it came from. A report that fails comes back as HTTP 422 naming each reason, and nothing is loaded. `dry_run: true` runs the same checks and reports what would load without writing.
+
+What lands:
+
+- A report whose `origin` is `uploaded`: read-only, never rebuilt from the rows, and listed by `reports` for the fund and by `reports(entityId:)` for the company.
+- A concept the library has (`rs-gaap:…`) is the library's own, so the company's numbers sit beside every other company's and beside SEC filers'. A concept it does not have, such as a KPI, is added to the graph's **Received Reports** vocabulary, a reporting extension shared by every company the fund receives from.
+- After the next materialization, `Portfolio → Position → Security → Entity → Report → Fact` resolves to the ingested facts.
+
+A second ingest for the same entity, period end and `kind` replaces the first. Values broken out by a dimension are kept in the stored file and reported in `dimensional_facts_not_loaded`; the graph holds the report's totals.
+
 ## Reading Data Back With GraphQL
 
 The read side is GraphQL only. The endpoint is graph-scoped by URL and is **not** roboinvestor-prefixed:
@@ -234,7 +293,7 @@ For agent-driven reads, the same GraphQL surface is reachable through the MCP `q
 
 ## Operations Reference
 
-The full request and response schemas are published in the live OpenAPI spec — see the [RoboInvestor API reference](https://robosystems.ai/docs/extensions/roboinvestor) rather than re-tabulating every field here. The six operations are:
+The full request and response schemas are published in the live OpenAPI spec — see the [RoboInvestor API reference](https://robosystems.ai/docs/extensions/roboinvestor) rather than re-tabulating every field here. The eight operations are:
 
 | Operation | Request model | Result in envelope |
 | --- | --- | --- |
@@ -244,6 +303,8 @@ The full request and response schemas are published in the live OpenAPI spec —
 | `create-security` | `CreateSecurityRequest` | `SecurityResponse` |
 | `update-security` | `UpdateSecurityOperation` | `SecurityResponse` |
 | `delete-security` | `DeleteSecurityOperation` | `DeleteResult` |
+| `create-issuer` | `CreateIssuerRequest` | `IssuerResponse` |
+| `ingest-report` | `IngestReportRequest` | `IngestReportResponse` |
 
 Every response is wrapped in an `OperationEnvelope` with these wire fields: `operation` (the kebab-case op name), `operationId` (an `op_`-prefixed ULID), `status` (`completed` for these synchronous operations, HTTP 200), `result` (the domain payload), `at` (ISO-8601 UTC), `createdBy`, and `idempotentReplay`. All six accept an `Idempotency-Key` header.
 
@@ -298,6 +359,7 @@ The RoboInvestor surface covers private-company portfolio management:
 - Portfolio Block writes: create, update (with add / update / dispose position deltas), delete (with active-position confirmation).
 - GraphQL reads across portfolios, securities, positions, holdings, and the assembled Portfolio Block.
 - Cross-graph issuer linking via `source_graph_id` and the report-sharing handshake.
+- Issuers that keep their books elsewhere, and their reports ingested from a holon or from rows.
 
 Atom-level portfolio and position CRUD endpoints do not exist — all portfolio and position writes go through the Portfolio Block. The surface is deliberately narrow; the molecule is the contract.
 
@@ -328,7 +390,7 @@ GRAPH_ID=$(jq -r '.graphs.roboinvestor_demo.graph_id' .local/config.json)
 
 **API Reference:**
 
-- **[RoboInvestor API reference](https://robosystems.ai/docs/extensions/roboinvestor)** - Full request and response schemas for all six operations.
+- **[RoboInvestor API reference](https://robosystems.ai/docs/extensions/roboinvestor)** - Full request and response schemas for all eight operations.
 
 ## Support
 
