@@ -64,7 +64,7 @@ class BuildFactGridTool:
 - On a tenant graph, a value a period's close stamped carries `presentation: 'as_closed'` and `stamped_at`: the month as it closed, which a live read of the books (live-financial-statement) can differ from once a mapping was reclassified after the close
 
 **NOTES:**
-On shared repositories (e.g. SEC) entity or entities is REQUIRED — those graphs host thousands of filers, so an unscoped query returns an arbitrary slice of arbitrary companies. On a tenant graph the URL already scopes to one entity, so the filter is optional there.
+On shared repositories (e.g. SEC) entity or entities is REQUIRED — those graphs host thousands of filers, so an unscoped query returns an arbitrary slice of arbitrary companies. On a tenant graph the filter is optional: without it a ledger returns its own entities' facts, the group parent and its subsidiaries, each row naming its entity. A company whose report the graph received (an issuer, or the sender of a shared report) is returned only when named in entity or entities.
 On a tenant graph select by `elements` with `periods` or `period_type`: `canonical_concepts`, `form`, `fiscal_year` and `fiscal_period` exist only on shared repositories and are refused there rather than answered with nothing.
 For income statement items (revenue, net income), always specify period_type='annual' or 'quarterly' to avoid mixing duration types. Companies may tag the same concept differently: for a cross-company comparison, run resolve-element per company (with its ticker), check the labels, and pass each company's qnames as elements.
 """,
@@ -88,7 +88,7 @@ For income statement items (revenue, net income), always specify period_type='an
           },
           "entity": {
             "type": "string",
-            "description": "Filter by entity ticker (e.g., 'NVDA'), CIK, or name. Matches against Entity ticker, cik, and name properties.",
+            "description": "Filter by entity ticker (e.g., 'NVDA'), CIK, or name. Matches against Entity ticker, cik, and name properties; on a tenant graph an entity id matches too.",
           },
           "entities": {
             "type": "array",
@@ -175,7 +175,7 @@ For income statement items (revenue, net income), always specify period_type='an
       }
 
     # As on REST: an entity-less query on a shared repo returns an arbitrary
-    # slice of thousands of filers. Tenant graphs are entity-scoped already.
+    # slice of thousands of filers. A tenant graph answers for its own entities.
     if (
       is_shared_repository_or_subgraph(self.client.graph_id)
       and not entity
