@@ -7,7 +7,7 @@ Extends the base schema with investment-specific entities.
 Ontology:
   Entity -[ENTITY_HAS_PORTFOLIO]-> Portfolio -[PORTFOLIO_HAS_POSITION]-> Position -[POSITION_IN_SECURITY]-> Security
   Entity -[ENTITY_ISSUES_SECURITY]-> Security
-  Entity -[ENTITY_HAS_REPORT]-> Report  (from roboledger schema — shared reports)
+  Entity -[ENTITY_HAS_REPORT]-> Report  (RoboLedger's reporting section — received reports)
   Entity -[ENTITY_HAS_TAXONOMY]-> Taxonomy (from base schema — shared ontology)
 
 The entity-focused pattern holds: an investing entity owns portfolios, an
@@ -17,12 +17,13 @@ source.
 """
 
 from ..models import Node, Property, Relationship
+from .roboledger import REPORTING_NODES, REPORTING_RELATIONSHIPS
 
 # Review the invariants in schemas/base.py before adding nodes or edges here.
 
 # ── Nodes (materialized from OLTP) ───────────────────────────────────────
 
-EXTENSION_NODES = [
+PORTFOLIO_NODES = [
   Node(
     name="Portfolio",
     description="Investment portfolio with strategy and performance tracking",
@@ -107,7 +108,7 @@ EXTENSION_NODES = [
 
 # ── Relationships ────────────────────────────────────────────────────────
 
-EXTENSION_RELATIONSHIPS = [
+PORTFOLIO_RELATIONSHIPS = [
   # Entity → Portfolio ownership (the investing entity)
   Relationship(
     name="ENTITY_HAS_PORTFOLIO",
@@ -182,3 +183,8 @@ EXTENSION_RELATIONSHIPS = [
     ],
   ),
 ]
+
+# An investor graph receives reports, so it carries RoboLedger's reporting
+# section the way the SEC repository does, and none of its general ledger.
+EXTENSION_NODES = PORTFOLIO_NODES + REPORTING_NODES
+EXTENSION_RELATIONSHIPS = PORTFOLIO_RELATIONSHIPS + REPORTING_RELATIONSHIPS

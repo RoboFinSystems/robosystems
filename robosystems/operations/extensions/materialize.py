@@ -151,6 +151,12 @@ RELATIONSHIP_TABLES = [
 # Owning extension per table; a non-base table is materialized only when its
 # extension is enabled, since otherwise its graph table doesn't exist. An edge
 # belongs to its more specific endpoint's extension.
+# RoboLedger's reporting tables (reports and their facts) are one section of
+# its schema, carried by every graph that can receive a report: a ledger
+# authors them, an investor graph is sent them.
+REPORTING_SECTION = "reporting"
+RECEIVING_EXTENSIONS = frozenset({"roboledger", "roboinvestor"})
+
 TABLE_EXTENSIONS: dict[str, str] = {
   # ── Nodes ────────────────────────────────────────────────────────────
   "Entity": "base",
@@ -169,9 +175,9 @@ TABLE_EXTENSIONS: dict[str, str] = {
   "Transaction": "roboledger",
   "Entry": "roboledger",
   "LineItem": "roboledger",
-  "Report": "roboledger",
-  "Fact": "roboledger",
-  "FactSet": "roboledger",
+  "Report": REPORTING_SECTION,
+  "Fact": REPORTING_SECTION,
+  "FactSet": REPORTING_SECTION,
   # roboinvestor nodes
   "Portfolio": "roboinvestor",
   "Security": "roboinvestor",
@@ -204,16 +210,16 @@ TABLE_EXTENSIONS: dict[str, str] = {
   "ENTRY_HAS_DIMENSION": "roboledger",
   "LINE_ITEM_HAS_DIMENSION": "roboledger",
   "ENTRY_FROM_SCHEDULE": "roboledger",
-  "ENTITY_HAS_REPORT": "roboledger",
-  "REPORT_USES_TAXONOMY": "roboledger",
-  "REPORT_HAS_FACT": "roboledger",
-  "FACT_HAS_ELEMENT": "roboledger",
-  "FACT_HAS_PERIOD": "roboledger",
-  "FACT_HAS_UNIT": "roboledger",
-  "FACT_HAS_ENTITY": "roboledger",
-  "STRUCTURE_HAS_FACT_SET": "roboledger",
-  "REPORT_HAS_FACT_SET": "roboledger",
-  "FACT_SET_CONTAINS_FACT": "roboledger",
+  "ENTITY_HAS_REPORT": REPORTING_SECTION,
+  "REPORT_USES_TAXONOMY": REPORTING_SECTION,
+  "REPORT_HAS_FACT": REPORTING_SECTION,
+  "FACT_HAS_ELEMENT": REPORTING_SECTION,
+  "FACT_HAS_PERIOD": REPORTING_SECTION,
+  "FACT_HAS_UNIT": REPORTING_SECTION,
+  "FACT_HAS_ENTITY": REPORTING_SECTION,
+  "STRUCTURE_HAS_FACT_SET": REPORTING_SECTION,
+  "REPORT_HAS_FACT_SET": REPORTING_SECTION,
+  "FACT_SET_CONTAINS_FACT": REPORTING_SECTION,
   # roboinvestor edges
   "ENTITY_HAS_PORTFOLIO": "roboinvestor",
   "PORTFOLIO_HAS_POSITION": "roboinvestor",
@@ -230,6 +236,8 @@ def _filter_tables_for_extensions(
   Unknown tables are kept so a typo fails loud instead of being skipped.
   """
   effective = set(enabled_extensions) | {"base"}
+  if effective & RECEIVING_EXTENSIONS:
+    effective.add(REPORTING_SECTION)
   return [t for t in tables if TABLE_EXTENSIONS.get(t, "base") in effective]
 
 
