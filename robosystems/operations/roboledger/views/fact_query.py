@@ -162,18 +162,27 @@ def _build_element_match(
 def _build_entity_match(
   entity_list: list[str] | None,
   parameters: dict[str, Any],
+  *,
+  tenant: bool = False,
 ) -> tuple[str | None, list[str]]:
   if not entity_list:
     return None, []
 
-  if len(entity_list) == 1 and _is_ticker(entity_list[0]):
+  # A tenant's entity often has no ticker, and a one-word name reads as one,
+  # so there the name and the entity id are always tried too.
+  if len(entity_list) == 1 and _is_ticker(entity_list[0]) and not tenant:
     safe_ticker = _safe_str(entity_list[0].upper()) or entity_list[0].upper()
     return f"(ent:Entity {{ticker: '{safe_ticker}'}})", []
 
-  parameters["entities"] = entity_list
+  parameters["entities"] = (
+    list(dict.fromkeys([*entity_list, *(value.upper() for value in entity_list)]))
+    if tenant
+    else entity_list
+  )
+  fields = ["ticker", "cik", "name", *(["identifier"] if tenant else [])]
   return (
     "(ent:Entity)",
-    ["(ent.ticker IN $entities OR ent.cik IN $entities OR ent.name IN $entities)"],
+    ["(" + " OR ".join(f"ent.{field} IN $entities" for field in fields) + ")"],
   )
 
 
@@ -243,6 +252,18 @@ def _has_ledger_schema(graph_id: str) -> bool:
     return "roboledger" in load_graph_metadata(graph_id, session).schema_extensions
   finally:
     session.close()
+
+
+def _outside_entity_ids(graph_id: str) -> list[str]:
+  """Entities on the graph that are not the group's own: the company behind a
+  received report."""
+  from sqlalchemy import text
+
+  from robosystems.db.extensions import extensions_session
+
+  with extensions_session(graph_id) as session:
+    rows = session.execute(text("SELECT id FROM entities WHERE source = 'linked'"))
+    return [row.id for row in rows]
 
 
 # A schedule fact is one schedule's planned amount, never the account's value:
@@ -327,7 +348,10 @@ async def query_fact_grid(
   entity_list = await _with_renamed_filers(
     graph_id, entities if entities else ([entity] if entity else None)
   )
-  entity_filter, entity_where = _build_entity_match(entity_list, parameters)
+  tenant = is_ledger_graph(graph_id)
+  entity_filter, entity_where = _build_entity_match(
+    entity_list, parameters, tenant=tenant
+  )
   element_pattern, element_where = _build_element_match(
     elements, canonical_concepts, parameters, inline=entity_filter is None
   )
@@ -348,9 +372,15 @@ async def query_fact_grid(
   # Predicates on the nodes around the fact: its element, period and report.
   dimension_where = [*element_where]
 
-  tenant = is_ledger_graph(graph_id)
   if tenant and await run_off_loop(_has_ledger_schema, graph_id):
     fact_where.append(_NOT_A_SCHEDULE_FACT)
+    # A ledger's unscoped read is its own books. A company whose report it
+    # received has facts under the same concepts and comes back only by name.
+    if not entity_filter:
+      outside = await run_off_loop(_outside_entity_ids, graph_id)
+      if outside:
+        fact_where.append("NOT ent.identifier IN $outside_entities")
+        parameters["outside_entities"] = outside
 
   if periods:
     dimension_where.append("p.end_date IN $periods")

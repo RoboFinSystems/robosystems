@@ -32,6 +32,8 @@ from robosystems.operations.roboledger.views.fact_query import (
 
 MOCK_GRAPH_ID = "kg_test123"
 PATCH_REPO = "robosystems.operations.roboledger.views.fact_query.get_graph_repository"
+PATCH_TENANT = "robosystems.operations.roboledger.views.fact_query.is_ledger_graph"
+PATCH_OUTSIDE = "robosystems.operations.roboledger.views.fact_query._outside_entity_ids"
 
 
 @pytest.fixture(autouse=True)
@@ -194,8 +196,11 @@ class TestQueryFactGrid:
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_ticker_entity_uses_inline_anchor(self, mock_repository):
-    """Single ticker → inline `(ent:Entity {ticker: 'NVDA'})`."""
-    with patch(PATCH_REPO, return_value=mock_repository):
+    """Single ticker on a shared repository → inline `(ent:Entity {ticker: 'NVDA'})`."""
+    with (
+      patch(PATCH_REPO, return_value=mock_repository),
+      patch(PATCH_TENANT, return_value=False),
+    ):
       await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"], entity="NVDA")
 
     query = mock_repository.execute_query.call_args[0][0]
@@ -298,7 +303,10 @@ class TestQueryFactGrid:
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_leads_with_entity_anchor_when_filtered(self, mock_repository):
-    with patch(PATCH_REPO, return_value=mock_repository):
+    with (
+      patch(PATCH_REPO, return_value=mock_repository),
+      patch(PATCH_TENANT, return_value=False),
+    ):
       await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"], entity="NVDA")
     query = mock_repository.execute_query.call_args[0][0]
     assert query.startswith("MATCH (ent:Entity {ticker: 'NVDA'})")
@@ -368,6 +376,75 @@ class TestQueryFactGrid:
     match, late = query.split("\nWITH ")
     assert "sfs.factset_type = 'schedule'" in match
     assert "sfs.factset_type" not in late
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_a_tenant_entity_matches_by_name_or_id(self, mock_repository):
+    """A one-word company name reads as a ticker; a tenant's entity often
+    has none, so the name and the id are tried as well."""
+    with patch(PATCH_REPO, return_value=mock_repository):
+      await query_fact_grid(
+        MOCK_GRAPH_ID, elements=["rs-gaap:Assets"], entity="Corvane"
+      )
+    query = mock_repository.execute_query.call_args[0][0]
+    params = mock_repository.execute_query.call_args[0][1]
+    assert "{ticker:" not in query
+    assert "ent.name IN $entities" in query
+    assert "ent.identifier IN $entities" in query
+    assert params["entities"] == ["Corvane", "CORVANE"]
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_a_ledger_unscoped_read_leaves_out_received_companies(
+    self, mock_repository
+  ):
+    """A company whose report the ledger received reports the same concepts;
+    unscoped, the grid answers for the ledger's own entities."""
+    with (
+      patch(PATCH_REPO, return_value=mock_repository),
+      patch(
+        "robosystems.operations.roboledger.views.fact_query._has_ledger_schema",
+        return_value=True,
+      ),
+      patch(PATCH_OUTSIDE, return_value=["ent_issuer"]),
+    ):
+      await query_fact_grid(MOCK_GRAPH_ID, elements=["rs-gaap:Assets"])
+    query = mock_repository.execute_query.call_args[0][0]
+    params = mock_repository.execute_query.call_args[0][1]
+    assert "NOT ent.identifier IN $outside_entities" in query
+    assert params["outside_entities"] == ["ent_issuer"]
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_a_named_received_company_is_returned(self, mock_repository):
+    with (
+      patch(PATCH_REPO, return_value=mock_repository),
+      patch(
+        "robosystems.operations.roboledger.views.fact_query._has_ledger_schema",
+        return_value=True,
+      ),
+      patch(PATCH_OUTSIDE, return_value=["ent_issuer"]) as outside,
+    ):
+      await query_fact_grid(
+        MOCK_GRAPH_ID, elements=["rs-gaap:Assets"], entity="ent_issuer"
+      )
+    query = mock_repository.execute_query.call_args[0][0]
+    assert "outside_entities" not in query
+    outside.assert_not_called()
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_a_graph_without_books_returns_every_company(self, mock_repository):
+    """A fund's graph holds no books of its own: the companies whose reports
+    it received are what an unscoped read is for."""
+    with (
+      patch(PATCH_REPO, return_value=mock_repository),
+      patch(PATCH_OUTSIDE, return_value=["ent_issuer"]) as outside,
+    ):
+      await query_fact_grid(MOCK_GRAPH_ID, elements=["rs-gaap:Assets"])
+    query = mock_repository.execute_query.call_args[0][0]
+    assert "outside_entities" not in query
+    outside.assert_not_called()
 
   @pytest.mark.asyncio
   @pytest.mark.unit

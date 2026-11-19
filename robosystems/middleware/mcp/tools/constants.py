@@ -68,7 +68,10 @@ What `is_live` means per node (the equivalent `status` filter, if you need finer
 - `Transaction.is_live` ⇔ `status <> 'void'`. (The `pending` boolean is also still exposed.)
 - `Fact` nodes (the XBRL hypercube / published statements) have NO status and are already
   filtered at generation time — always safe to aggregate. This note applies ONLY to the
-  ledger spine, not to Fact queries."""
+  ledger spine, not to Fact queries. Scope a Fact aggregate by entity
+  (`(f)-[:FACT_HAS_ENTITY]->(ent:Entity)`) all the same: each entity of the group has
+  its own facts, and a company whose report the graph received has facts under the same
+  concepts. That company's Entity has `is_parent` false and no `parent_entity_id`."""
 
 LEDGER_ANCHOR_GUIDANCE = """**⚠️ LEDGER TRAVERSAL ANCHOR — start at `Entry`, not `Transaction`:**
 `Transaction` is NOT the top of the ledger and NOT a layer every entry passes through.

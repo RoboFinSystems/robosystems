@@ -177,8 +177,8 @@ async def build_fact_grid_op(
     raise HTTPException(status_code=400, detail=period_scope_hint(graph_id))
 
   # Only on shared repos, where an entity-less query returns an arbitrary
-  # slice across thousands of filers. A tenant graph is already scoped to its
-  # entity by the URL (often a private company with no ticker or CIK).
+  # slice across thousands of filers. A tenant graph answers for its own
+  # entities (often private companies with no ticker or CIK).
   if (
     is_shared_repository_or_subgraph(graph_id) and not body.entity and not body.entities
   ):

@@ -26,7 +26,7 @@ SCHEMA = [
   "CREATE NODE TABLE Period(identifier STRING, start_date STRING, end_date STRING, "
   "duration_type STRING, period_type STRING, PRIMARY KEY(identifier))",
   "CREATE NODE TABLE Unit(identifier STRING, value STRING, PRIMARY KEY(identifier))",
-  "CREATE NODE TABLE Entity(identifier STRING, ticker STRING, name STRING, "
+  "CREATE NODE TABLE Entity(identifier STRING, ticker STRING, cik STRING, name STRING, "
   "PRIMARY KEY(identifier))",
   "CREATE NODE TABLE FactSet(identifier STRING, factset_type STRING, "
   "PRIMARY KEY(identifier))",
@@ -44,6 +44,13 @@ FACTS = [
   ("fact_sched_b", "fs_sched_b", "schedule", ("2026-07-01", "2026-07-31"), 1_071.42),
   ("fact_sched_2031", "fs_sched_a", "schedule", ("2031-01-01", "2031-01-31"), 400.0),
 ]
+
+
+@pytest.fixture(autouse=True)
+def outside_entities():
+  """The companies whose reports the ledger received: none unless a test says."""
+  with patch.object(fact_query, "_outside_entity_ids", return_value=[]) as lookup:
+    yield lookup
 
 
 @pytest.fixture()
@@ -120,6 +127,42 @@ async def test_the_account_value_is_the_close_not_a_schedule(graph):
 
   assert [(f["period_end"], f["value"]) for f in facts] == [("2026-07-31", 1_471.42)]
   assert truncated is False
+
+
+async def test_a_received_company_is_left_out_unless_named(graph, outside_entities):
+  """Its facts report the same concept for the same period as the ledger's own."""
+  graph.execute("CREATE (:Entity {identifier: 'ent_out', ticker: '', name: 'Corvane'})")
+  graph.execute(
+    "CREATE (:Fact {identifier: 'fact_out', value: '9000.0', numeric_value: 9000.0, "
+    "decimals: '2', has_dimensions: false})"
+  )
+  for rel, label, key in (
+    ("FACT_HAS_ELEMENT", "Element", "el_7000"),
+    ("FACT_HAS_ENTITY", "Entity", "ent_out"),
+    ("FACT_HAS_PERIOD", "Period", "2026-07-01_2026-07-31"),
+    ("FACT_HAS_UNIT", "Unit", "unit_usd"),
+  ):
+    graph.execute(
+      f"MATCH (f:Fact {{identifier: 'fact_out'}}), (n:{label} {{identifier: $n}}) "
+      f"CREATE (f)-[:{rel}]->(n)",
+      {"n": key},
+    )
+  outside_entities.return_value = ["ent_out"]
+
+  async def grid(**scope):
+    with (
+      patch.object(
+        fact_query, "get_graph_repository", AsyncMock(return_value=_repository(graph))
+      ),
+      patch.object(fact_query, "_has_ledger_schema", return_value=True),
+      patch.object(fact_query, "_report_standing", return_value={}),
+    ):
+      facts, _ = await fact_query.query_fact_grid(GRAPH, elements=["coa:7000"], **scope)
+    return [(f["entity_name"], f["value"]) for f in facts]
+
+  assert await grid() == [("Driftline", 1_471.42)]
+  assert await grid(entity="Corvane") == [("Corvane", 9000.0)]
+  assert await grid(entity="ent_out") == [("Corvane", 9000.0)]
 
 
 async def test_a_value_the_close_stamped_says_so(graph):

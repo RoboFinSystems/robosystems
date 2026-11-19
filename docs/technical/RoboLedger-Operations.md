@@ -165,6 +165,8 @@ Three view operations read an SEC filing's own text, and work on the SEC shared 
 
 `build-fact-grid` is the primary view operation. It takes a set of concept filters and period filters, walks the matching `Fact` nodes, deduplicates them, and returns them as a **flat list** alongside the aspects those facts span.
 
+On a ledger's graph, a request with no `entity` or `entities` returns the facts of the ledger's own entities: the group parent and its subsidiaries, each row naming its entity. A company whose report the graph received reports the same concepts, and is returned only when named, by its name or its entity id.
+
 **It does not pivot.** Arranging the facts into a table is the consumer's job, because collapsing cells safely requires the full aspect signature — two facts can share an element and a period end and still differ on `period_start`, `duration_type`, `unit`, or entity. Summing across those is a presentation decision the endpoint deliberately refuses to make on the caller's behalf. The same logic is exposed as the MCP tool `build-fact-grid`, with the same flat contract.
 
 Two things make this router distinct from the command writes:
