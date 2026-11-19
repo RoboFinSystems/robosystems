@@ -76,6 +76,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from datetime import date
@@ -657,20 +658,16 @@ def show_handshake_result(
 # ---------------------------------------------------------------------------
 
 
-def _investor_operation(
-  graph_id: str, name: str, body: dict[str, Any]
-) -> tuple[int, dict[str, Any]]:
-  """Call a RoboInvestor operation the SDK facade does not wrap yet."""
-  response = (
-    _authenticated_client()
-    .get_httpx_client()
-    .post(f"/extensions/roboinvestor/{graph_id}/operations/{name}", json=body)
-  )
+def _refusal(exc: RuntimeError) -> tuple[int | None, str]:
+  """The status and body of an operation the facade raised for."""
+  match = re.search(r"failed: (\d+): b'(.*)'$", str(exc), re.DOTALL)
+  if not match:
+    return None, str(exc)
   try:
-    payload = response.json()
-  except ValueError:
-    payload = {"detail": response.text[:200]}
-  return response.status_code, payload
+    detail = str(json.loads(match.group(2))["detail"])
+  except (ValueError, KeyError, TypeError):
+    detail = match.group(2)
+  return int(match.group(1)), detail
 
 
 def receive_package(
@@ -679,54 +676,53 @@ def receive_package(
   """A holding whose issuer keeps its books elsewhere: create the issuer,
   attach the holding, and ingest its monthly package from rows."""
   out: dict[str, Any] = {}
-  status, created = _investor_operation(
-    investor_graph, "create-issuer", portfolio_data.OFF_PLATFORM_ISSUER
-  )
-  issuer_id = (created.get("result") or {}).get("id")
-  out["issuer_id"] = issuer_id
-  if not issuer_id:
-    print(f"    FAILED: create-issuer HTTP {status}: {str(created)[:160]}")
+  investor = _investor_client()
+  try:
+    issuer = investor.create_issuer(investor_graph, portfolio_data.OFF_PLATFORM_ISSUER)
+  except RuntimeError as exc:
+    print(f"    FAILED: {str(exc)[:200]}")
     return out
+  issuer_id = _field(issuer, "id")
+  out["issuer_id"] = issuer_id
   print(
     f"    Issuer:        {portfolio_data.OFF_PLATFORM_ISSUER['name']} ({issuer_id})"
   )
 
   security_id = security_ids[portfolio_data.OFF_PLATFORM_SECURITY_KEY]
-  _investor_client().update_security(
-    investor_graph, security_id, {"entity_id": issuer_id}
-  )
+  investor.update_security(investor_graph, security_id, {"entity_id": issuer_id})
   out["security_id"] = security_id
   print("    Holding:       attached to the issuer")
 
   # The reader mistyped cash: the total no longer foots, and nothing loads.
-  status, refused = _investor_operation(
-    investor_graph,
-    "ingest-report",
-    {"entity_id": issuer_id, "report": portfolio_data.package_that_does_not_foot()},
+  try:
+    investor.ingest_report(
+      investor_graph,
+      {"entity_id": issuer_id, "report": portfolio_data.package_that_does_not_foot()},
+    )
+    out["refused_status"], out["refused_detail"] = None, "the report loaded"
+  except RuntimeError as exc:
+    out["refused_status"], out["refused_detail"] = _refusal(exc)
+  print(
+    f"    Mistyped:      HTTP {out['refused_status']}: {out['refused_detail'][:110]}"
   )
-  out["refused_status"] = status
-  out["refused_detail"] = str(refused.get("detail", ""))
-  print(f"    Mistyped:      HTTP {status}: {out['refused_detail'][:110]}")
 
   body = {
     "entity_id": issuer_id,
     "report": portfolio_data.monthly_package(),
     "require_source": True,
   }
-  status, dry = _investor_operation(
-    investor_graph, "ingest-report", {**body, "dry_run": True}
-  )
-  out["dry_run"] = dry.get("result") or {}
-  print(
-    f"    Dry run:       {out['dry_run'].get('fact_count')} facts, "
-    f"{out['dry_run'].get('section_count')} sections, "
-    f"{out['dry_run'].get('calculations_checked')} totals footed, nothing written"
-  )
-
-  status, loaded = _investor_operation(investor_graph, "ingest-report", body)
-  out["result"] = loaded.get("result") or {}
-  if status != 200 or not out["result"].get("report_id"):
-    print(f"    FAILED: ingest-report HTTP {status}: {str(loaded)[:200]}")
+  try:
+    out["dry_run"] = investor.ingest_report(
+      investor_graph, {**body, "dry_run": True}
+    ).to_dict()
+    print(
+      f"    Dry run:       {out['dry_run'].get('fact_count')} facts, "
+      f"{out['dry_run'].get('section_count')} sections, "
+      f"{out['dry_run'].get('calculations_checked')} totals footed, nothing written"
+    )
+    out["result"] = investor.ingest_report(investor_graph, body).to_dict()
+  except RuntimeError as exc:
+    print(f"    FAILED: {str(exc)[:200]}")
     return out
   print(
     f"    Ingested:      {out['result']['report_id']} "
@@ -741,6 +737,7 @@ def receive_as_file(investor_graph: str, issuer_graph: str) -> dict[str, Any]:
   file onto a second entity: the same report by the other route."""
   out: dict[str, Any] = {}
   ledger = _ledger_client()
+  investor = _investor_client()
   shared_copy = next(
     (
       r
@@ -759,21 +756,16 @@ def receive_as_file(investor_graph: str, issuer_graph: str) -> dict[str, Any]:
   out["holon_bytes"] = len(holon)
   print(f"    Downloaded:    the shared report's holon ({len(holon):,} bytes)")
 
-  status, created = _investor_operation(
-    investor_graph,
-    "create-issuer",
-    {"name": f"{_field(shared_copy, 'entity_name', 'Issuer')} (received as a file)"},
-  )
-  issuer_id = (created.get("result") or {}).get("id")
-  if not issuer_id:
-    print(f"    FAILED: create-issuer HTTP {status}: {str(created)[:160]}")
-    return out
-  status, loaded = _investor_operation(
-    investor_graph, "ingest-report", {"entity_id": issuer_id, "holon": holon}
-  )
-  out["result"] = loaded.get("result") or {}
-  if status != 200 or not out["result"].get("report_id"):
-    print(f"    FAILED: ingest-report HTTP {status}: {str(loaded)[:200]}")
+  try:
+    issuer = investor.create_issuer(
+      investor_graph,
+      {"name": f"{_field(shared_copy, 'entity_name', 'Issuer')} (received as a file)"},
+    )
+    out["result"] = investor.ingest_report(
+      investor_graph, {"entity_id": _field(issuer, "id"), "holon": holon}
+    ).to_dict()
+  except RuntimeError as exc:
+    print(f"    FAILED: {str(exc)[:200]}")
     return out
   print(
     f"    Ingested:      {out['result']['report_id']} "
