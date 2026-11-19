@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -1181,15 +1182,25 @@ class ReportSectionRow(BaseModel):
       "a top line has nothing beneath it, as in a flat KPI table."
     ),
   )
+  layout: Literal["library", "given"] | None = Field(
+    None,
+    description=(
+      "`library` lays a `balance_sheet` or an `income_statement` out from the "
+      "library: every value sent for a concept the statement places becomes "
+      "a line under the nearest line above it that also has a value, and "
+      "each total is checked against the lines beneath it. `given` uses "
+      "`lines` exactly as sent. Omitted, it is `library` when there are no "
+      "`lines` and `given` when there are."
+    ),
+  )
   lines: list[ReportLineRow] = Field(
     default_factory=list,
     description=(
-      "The lines, in order. Omit them for a `balance_sheet` or an "
-      "`income_statement` and the server lays the statement out from the "
-      "library: every value sent for a concept the statement places becomes "
-      "a line under the nearest line above it that also has a value, and "
-      "each total is checked against the lines beneath it. Send the whole "
-      "statement that way, or give the lines yourself."
+      "The lines, in order. With `layout: library` these are only the lines "
+      "the library cannot place, or places differently than the document: a "
+      "concept of the firm's own, each with the `parent` it sits under (a "
+      "line of the statement that has a value) and its `weight`. A line "
+      "given here replaces the library's placement of that concept."
     ),
   )
 

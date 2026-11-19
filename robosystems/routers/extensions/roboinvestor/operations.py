@@ -296,9 +296,16 @@ def _amount(value: object) -> str:
 def _reason(problem: dict) -> str:
   """One refusal reason as a sentence, with its amounts written out."""
   if problem.get("code") == "does_not_foot":
+    when = f" ({problem['when']})" if problem.get("when") else ""
+    terms = "".join(
+      f" {'+' if (term.get('weight') or 0) >= 0 else '-'} {term.get('concept')} "
+      f"{_amount(term.get('value'))}"
+      for term in problem.get("terms") or []
+    )
     return (
-      f"{problem.get('concept')} is reported as {_amount(problem.get('reported'))} "
-      f"and its terms sum to {_amount(problem.get('computed'))}."
+      f"{problem.get('concept')}{when} is reported as "
+      f"{_amount(problem.get('reported'))} and its terms sum to "
+      f"{_amount(problem.get('computed'))}{':' + terms if terms else ''}."
     )
   if problem.get("code") == "does_not_balance":
     return (

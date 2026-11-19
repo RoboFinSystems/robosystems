@@ -275,6 +275,12 @@ def test_rows_that_do_not_foot_are_refused_with_the_numbers(fund):
   [problem] = refused.value.problems
   assert problem["code"] == "does_not_foot"
   assert (problem["reported"], problem["computed"]) == (1000, 900)
+  # The date and the lines counted toward the total come with it.
+  assert problem["when"] == "2026-10-31"
+  assert problem["terms"] == [
+    {"concept": "rs-gaap:Cash", "weight": 1.0, "value": 500.0},
+    {"concept": "rs-gaap:AccountsReceivableNetCurrent", "weight": 1.0, "value": 400.0},
+  ]
 
 
 def test_a_row_that_cannot_be_placed_is_refused_by_name(fund):
@@ -471,3 +477,64 @@ def test_a_refusal_names_the_values_no_statement_places(fund):
   unplaced = [p for p in refused.value.problems if p["code"] == "unplaced"]
   assert len(unplaced) == 1
   assert "rs-gaap:CostsAndExpenses" in unplaced[0]["message"]
+
+
+def test_a_statement_laid_out_from_the_library_takes_the_firms_own_lines(fund):
+  # Cash is split into two lines the library does not have; receivables are
+  # moved from current assets to sit directly under total assets.
+  rows = _values_only()
+  rows["namespaces"] = {"acme": "https://example.com/taxonomy/acme/v1/"}
+  rows["concepts"] = [
+    {
+      "qname": f"acme:{name}",
+      "label": label,
+      "period_type": "instant",
+      "balance": "debit",
+    }
+    for name, label in (("Operating", "Cash - operating"), ("Sweep", "Cash - sweep"))
+  ]
+  rows["facts"] = [
+    f
+    for f in rows["facts"]
+    if f["concept"] != "rs-gaap:CashAndCashEquivalentsAtCarryingValue"
+  ]
+  for name, amount in (("Operating", 450), ("Sweep", 150)):
+    rows["facts"].append(
+      {
+        "concept": f"acme:{name}",
+        "value": amount,
+        "end": "2026-10-31",
+        "unit": "USD",
+        "decimals": 0,
+      }
+    )
+  for fact in rows["facts"]:
+    if fact["concept"] == "rs-gaap:AssetsCurrent":
+      fact["value"] = 600
+  rows["sections"][0] |= {
+    "layout": "library",
+    "lines": [
+      {"concept": "acme:Operating", "parent": "rs-gaap:AssetsCurrent", "weight": 1},
+      {"concept": "acme:Sweep", "parent": "rs-gaap:AssetsCurrent", "weight": 1},
+      {
+        "concept": "rs-gaap:AccountsReceivableNetCurrent",
+        "parent": "rs-gaap:Assets",
+        "weight": 1,
+      },
+    ],
+  }
+
+  result = _ingest(fund, report=rows)
+
+  assert result.unplaced_concepts == []
+  assert result.calculations_checked == 5
+  model, _ = from_holon_report(fund["s3"].upload_string.call_args.kwargs["content"])
+  arcs = {
+    (arc.from_qname, arc.to_qname)
+    for network in model.networks
+    if network.kind == "calculation"
+    for arc in network.arcs
+  }
+  assert ("rs-gaap:AssetsCurrent", "acme:Sweep") in arcs
+  assert ("rs-gaap:Assets", "rs-gaap:AccountsReceivableNetCurrent") in arcs
+  assert ("rs-gaap:AssetsCurrent", "rs-gaap:AccountsReceivableNetCurrent") not in arcs

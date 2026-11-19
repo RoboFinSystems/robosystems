@@ -461,8 +461,9 @@ class TestReceivingReports:
     out = self._build(self._RECEIVE)
     assert "RECEIVING REPORTS" in out
     assert "`create-issuer`" in out
-    assert "`block_type` and no `lines`" in out
-    assert "`whole_library: true`" in out
+    assert "`layout: library`" in out
+    assert "sign of its concept" in out
+    assert "`whole_library: true` and `brief: true`" in out
     assert "`dry_run: true`" in out
     assert "`list-reports(entity_id)`" in out
 

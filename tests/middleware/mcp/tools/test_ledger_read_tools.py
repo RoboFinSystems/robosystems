@@ -938,6 +938,28 @@ class TestTheLedgerAsItStands:
     assert whole == ("library",)
     assert "whole_library" in refused["message"]
 
+  def test_a_brief_search_returns_one_short_row_per_concept(self):
+    with (
+      _sessions(),
+      patch(
+        "robosystems.operations.library.reads.search_elements",
+        return_value=_ELEMENTS,
+      ),
+    ):
+      result = SearchLibraryElementsTool(_client())._execute_sync(
+        {"query": "debt", "brief": True}
+      )
+    assert set(result["elements"][0]) == {
+      "id",
+      "qname",
+      "label",
+      "balance_type",
+      "period_type",
+      "trait",
+      "is_abstract",
+    }
+    assert result["elements"][0]["qname"] == _ELEMENTS[0].qname
+
   def test_an_unknown_mapping_is_not_found(self):
     with (
       _sessions() as session,

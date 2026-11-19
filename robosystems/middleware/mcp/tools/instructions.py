@@ -326,27 +326,40 @@ def build_instructions(
       "- Send values, not layout: one fact per number with its concept, date, "
       "unit, `decimals` and the `source` it was read from (`file.pdf#page=3`, "
       "`file.xlsx#sheet=BS&cell=B10`). For a balance sheet or an income "
-      "statement, name the section with its `block_type` and no `lines`: the "
-      "statement is laid out from the library and every total is checked "
-      "against the lines beneath it. Send every line the statement prints, "
-      "totals and subtotals included, or a total will not foot.",
+      "statement, name the section with its `block_type` and "
+      "`layout: library`: the statement is laid out from the library and "
+      "every total is checked against the lines beneath it. Send every line "
+      "the statement prints, totals and subtotals included, for every column "
+      "you load.",
+      "- A value carries the sign of its concept, not of the page: a contra "
+      "line printed as (179,000) under a credit-balance concept (an "
+      "allowance, accumulated depreciation, an inventory reserve) is sent as "
+      "179000, and a loss under a gain concept is negative.",
     ]
     if has("search-library-elements"):
       receive_lines.append(
         "- Name each line with a library concept → `search-library-elements` "
-        "with `whole_library: true`. Declare a concept of the firm's own "
-        "(a KPI) only when the library has none, and give its table its lines."
+        "with `whole_library: true` and `brief: true`; search by a distinctive "
+        "word of the concept's name, since results come in name order. Only "
+        "when the library has none, declare a concept of the firm's own in "
+        "`concepts` and give it a line in the section's `lines` with the "
+        "`parent` it adds into and `weight: 1`. A KPI table gives all its lines."
       )
     receive_lines.append(
-      "- Run `dry_run: true` first. A refusal lists what is wrong by line "
-      "(`does_not_foot` gives the reported and the computed amounts): fix the "
-      "value or the concept and try again; never drop a line to make a total "
-      "agree. `unplaced_concepts` names values that landed on no statement."
+      "- Run `dry_run: true` first and expect a refusal or two. "
+      "`does_not_foot` lists the date, the reported total and every line that "
+      "was counted toward it, so the cause is visible: a wrong sign, a "
+      "mistyped value, a line the library files under a different total than "
+      "this company does, or a line it does not place (named at the end). For "
+      "the last two, add the line to the section's `lines` with the `parent` "
+      "this document puts it under; a line given replaces the library's "
+      "placement. Never drop or change a value to make a total agree."
     )
     if has("list-reports") and has("information-block"):
       receive_lines.append(
         "- Read it back → `list-reports(entity_id)` for its id, `disclosures` "
-        "for its sections, `information-block` for one section's rows."
+        "for its sections, `information-block` for one section's rows, and "
+        "compare a few totals with the document."
       )
     sections.append(_block("RECEIVING REPORTS", *receive_lines))
 

@@ -676,3 +676,33 @@ def test_a_refusal_writes_its_amounts_out() -> None:
     "terms sum to 3,820,000. Total assets are 4,180,000.50 and total liabilities "
     "and equity are 4,000,000. Fact f-1 does not say where it came from."
   )
+
+
+def test_a_total_that_does_not_foot_shows_what_was_counted() -> None:
+  from robosystems.operations.roboledger.commands.report_import import (
+    ReportImportRefusedError,
+  )
+  from robosystems.routers.extensions.roboinvestor.operations import _refusal
+
+  detail = _refusal(
+    ReportImportRefusedError(
+      [
+        {
+          "code": "does_not_foot",
+          "message": "x",
+          "concept": "rs-gaap:AssetsCurrent",
+          "reported": 900.0,
+          "computed": 1_100.0,
+          "when": "2026-10-31",
+          "terms": [
+            {"concept": "rs-gaap:Cash", "weight": 1.0, "value": 1_000.0},
+            {"concept": "acme:Allowance", "weight": -1.0, "value": -100.0},
+          ],
+        }
+      ]
+    )
+  )
+  assert detail == (
+    "The report was not loaded. rs-gaap:AssetsCurrent (2026-10-31) is reported as "
+    "900 and its terms sum to 1,100: + rs-gaap:Cash 1,000 - acme:Allowance -100."
+  )

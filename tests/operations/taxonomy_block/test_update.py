@@ -849,6 +849,12 @@ class TestResolveForeignElementQnames:
     e.parent_id = parent_id
     return e
 
+  def _taxonomy(self) -> MagicMock:
+    t = MagicMock()
+    t.id = "tax_ext"
+    t.parent_taxonomy_id = "tax_lib"
+    return t
+
   def test_resolves_library_arc_endpoints_and_parents(self) -> None:
     from robosystems.operations.taxonomy_block.update_validator import (
       _resolve_foreign_element_qnames,
@@ -856,15 +862,23 @@ class TestResolveForeignElementQnames:
 
     session = MagicMock()
     session.execute.return_value.all.return_value = [
-      ("elem_lib_total", "rs-gaap:InventoryNet"),
+      ("elem_lib_total", "rs-gaap:InventoryNet", "tax_lib"),
+      ("elem_firm_kpi", "kpi:Headcount", "tax_firm"),
     ]
     qname_by_id = {"elem_member": "driftline:RawMaterials"}
     elements = [self._element("elem_member", parent_id="elem_lib_total")]
-    associations = [self._assoc("elem_lib_total", "elem_member")]
+    associations = [
+      self._assoc("elem_lib_total", "elem_member"),
+      self._assoc("elem_member", "elem_firm_kpi"),
+    ]
 
-    _resolve_foreign_element_qnames(session, qname_by_id, elements, associations)
+    elsewhere = _resolve_foreign_element_qnames(
+      session, qname_by_id, elements, associations, self._taxonomy()
+    )
 
     assert qname_by_id["elem_lib_total"] == "rs-gaap:InventoryNet"
+    # A concept of a third taxonomy is named, and reported as outside.
+    assert elsewhere == {"elem_firm_kpi"}
     session.execute.assert_called_once()
 
   def test_no_foreign_ids_skips_query(self) -> None:
@@ -877,8 +891,11 @@ class TestResolveForeignElementQnames:
     elements = [self._element("elem_a"), self._element("elem_b", parent_id="elem_a")]
     associations = [self._assoc("elem_a", "elem_b")]
 
-    _resolve_foreign_element_qnames(session, qname_by_id, elements, associations)
+    elsewhere = _resolve_foreign_element_qnames(
+      session, qname_by_id, elements, associations, self._taxonomy()
+    )
 
+    assert elsewhere == set()
     session.execute.assert_not_called()
 
 

@@ -242,11 +242,26 @@ For a balance sheet or an income statement, rows are values only. Name the secti
 
 The server lays the statement out from the library. Every value sent for a concept the statement places becomes a line under the nearest line above it that also has a value, so a subtotal the package does not print is stepped over: here cash and receivables add straight into total assets, with no current-assets line between them. Each total is then checked against the lines beneath it, which means the statement has to be sent whole. Leave out a line the document prints and the total above it will not foot.
 
-Three things still take more than values:
+A value carries the sign of its concept, not of the page. A contra line printed as `(179,000)` under a credit-balance concept, such as an allowance or accumulated depreciation, is sent as `179000`; the layout subtracts it.
 
-- **A concept the library does not have**, such as a KPI, is declared in `concepts` with a prefix bound in `namespaces`. A library concept needs no entry unless the report words it differently.
-- **Any other section** gives its `lines`, top to bottom: a KPI table, a cash flow statement, a statement of equity. A line names its `parent`, and a `weight` (`1` adds, `-1` subtracts) makes it a term of the parent's total.
-- **A statement the library would lay out differently** than the document does can give its `lines` too. Lines given are used as they are.
+Real packages rarely fit the library exactly, so a laid-out statement also takes `lines` of its own. Set `layout` to `library` and give only the lines the library cannot place or places differently than the document:
+
+```json
+{"name": "Balance Sheet", "block_type": "balance_sheet", "layout": "library", "lines": [
+  {"concept": "acme:InventoryRawMaterials", "parent": "rs-gaap:AssetsCurrent", "weight": 1},
+  {"concept": "rs-gaap:LinesOfCreditCurrent", "parent": "rs-gaap:LiabilitiesCurrent", "weight": 1}
+]}
+```
+
+The first is a concept of the firm's own, declared in `concepts` with a prefix bound in `namespaces`. The second is a library concept the library files under long-term debt, moved to where this company's balance sheet shows it. A line given replaces the library's placement of that concept; everything else is still laid out and checked.
+
+When a total does not foot, the refusal gives its date, the reported amount and every line that was counted toward it, which is how a misplaced or unplaced line is found:
+
+```text
+rs-gaap:LongTermDebtCurrent (2026-10-31) is reported as 1,400,000 and its terms sum to 3,200,000: + rs-gaap:LinesOfCreditCurrent 3,200,000.
+```
+
+Any other section gives all of its `lines`, top to bottom: a KPI table, a cash flow statement, a statement of equity. A line names its `parent`, and a `weight` (`1` adds, `-1` subtracts) makes it a term of the parent's total. With `layout` set to `given`, a balance sheet or an income statement is taken that way too.
 
 A value whose concept no section places still loads, and the response names it in `unplaced_concepts`.
 
@@ -295,7 +310,7 @@ curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
 
 The Portfolio Block read returns **active positions only**. Its dollar totals are pre-converted from cents; `total_current_value_dollars` sums the marked positions and is null only when no active position has a mark at all. If you need cents-precision position values, read through the `positions` / `position` fields rather than the assembled block.
 
-For agent-driven reads, the same GraphQL surface is reachable through the MCP `query-graphql` and `get-graphql-schema` tools; `graph_id` is taken from context, not passed as an argument. A fund's graph also serves the tools that work a received report: `search-library-elements` (with `whole_library: true` to name a line with any concept the library has), `list-reports`, `disclosures` and `information-block` to read a report back, `get-report-bundle` for its file, and `delete-report`.
+For agent-driven reads, the same GraphQL surface is reachable through the MCP `query-graphql` and `get-graphql-schema` tools; `graph_id` is taken from context, not passed as an argument. A fund's graph also serves the tools that work a received report: `search-library-elements` (with `whole_library: true` to name a line with any concept the library has, and `brief: true` for one short row per concept), `list-reports`, `disclosures` and `information-block` to read a report back, `get-report-bundle` for its file, and `delete-report`.
 
 ## Operations Reference
 

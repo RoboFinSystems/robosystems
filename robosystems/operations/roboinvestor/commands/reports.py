@@ -23,6 +23,7 @@ from xbrlkit.author import (
   build_report,
 )
 from xbrlkit.deserialize import TaviError, from_tavi_report
+from xbrlkit.model import XbrlModel
 from xbrlkit.namespaces import ENTITY_SCHEME
 from xbrlkit.serialize import to_holon
 
@@ -142,10 +143,11 @@ def ingest_report(
 
   expected: int | None = None
   unplaced: list[str] = []
+  built: XbrlModel | None = None
   if body.report is not None:
-    holon_text, expected, unplaced = _holon_from_rows(
-      session, body.entity_id, body.report
-    )
+    holon_text, built, unplaced = _holon_from_rows(session, body.entity_id, body.report)
+    # Identical rows collapse to one fact, so the count is the model's own.
+    expected = len(built.facts)
   elif body.tavi is not None:
     holon_text, expected = _holon_from_tavi(body.tavi)
   else:
@@ -164,21 +166,22 @@ def ingest_report(
       dry_run=body.dry_run,
     )
   except ReportImportRefusedError as exc:
-    if not unplaced:
+    if built is None:
       raise
-    # A value on no statement is the usual reason a total above it is short.
-    raise ReportImportRefusedError(
-      [
-        *exc.problems,
+    problems = [_with_terms(built, problem) for problem in exc.problems]
+    if unplaced:
+      # A value on no statement is the usual reason a total above it is short.
+      problems.append(
         {
           "code": "unplaced",
           "message": (
-            "No section places these concepts, so no total counts them: "
+            "No section places these concepts, so no total counts them; give "
+            "each a line with the `parent` it sits under: "
             f"{', '.join(unplaced)}."
           ),
-        },
-      ]
-    ) from exc
+        }
+      )
+    raise ReportImportRefusedError(problems) from exc
   return IngestReportResponse(
     dry_run=result.dry_run,
     report_id=result.report_id or None,
@@ -194,6 +197,43 @@ def ingest_report(
     replaced_report_ids=result.replaced_report_ids,
     unplaced_concepts=unplaced,
   )
+
+
+def _with_terms(model: XbrlModel, problem: dict) -> dict:
+  """A total that does not foot, with the date it is for and the lines that
+  were counted toward it: what a reader needs to see which line is wrong,
+  missing, or sitting under another total."""
+  if problem.get("code") != "does_not_foot":
+    return problem
+  period = next((p for p in model.periods if p.id == problem.get("period")), None)
+  network = next(
+    (
+      n
+      for n in model.networks
+      if n.kind == "calculation" and n.role_uri == problem.get("role")
+    ),
+    None,
+  )
+  if period is None or network is None:
+    return problem
+  values = {
+    fact.concept_qname: fact.numeric_value
+    for fact in model.facts
+    if fact.period_id == period.id and not fact.dims
+  }
+  terms = [
+    {"concept": arc.to_qname, "weight": arc.weight, "value": values[arc.to_qname]}
+    for arc in network.arcs
+    if arc.from_qname == problem.get("concept") and values.get(arc.to_qname) is not None
+  ]
+  when = (
+    f"{period.start.isoformat()} to {period.end.isoformat()}"
+    if period.start and period.end
+    else period.end.isoformat()
+    if period.end
+    else None
+  )
+  return {**problem, "when": when, "terms": terms}
 
 
 def _holon_from_tavi(tavi_text: str) -> tuple[str, int]:
@@ -242,24 +282,27 @@ def _sections(
   for section in rows.sections:
     lines = [LineRow.model_validate(line.model_dump()) for line in section.lines]
     head = section.head
-    if not lines:
+    from_library = section.layout == "library" or (section.layout is None and not lines)
+    if from_library:
       if section.block_type not in LAID_OUT_STATEMENTS:
         problems.append(
           {
             "code": "row",
             "message": (
-              f"section {section.name!r}: no lines. Only a balance_sheet or an "
+              f"section {section.name!r}: only a balance_sheet or an "
               "income_statement is laid out from the library; give this one "
               "its lines."
             ),
           }
         )
         continue
-      lines = [
+      # A line given wins: the library places everything else around it.
+      given = {line.concept for line in lines}
+      laid_out = [
         LineRow(concept=line.concept, parent=line.parent, weight=line.weight)
-        for line in lay_out_statement(session, section.block_type, reported)
+        for line in lay_out_statement(session, section.block_type, reported - given)
       ]
-      if not lines:
+      if not laid_out:
         problems.append(
           {
             "code": "row",
@@ -270,10 +313,16 @@ def _sections(
           }
         )
         continue
+      lines = laid_out + lines
       if head is None:
         local, label = _SECTION_HEADS[section.block_type]
         head = f"{SECTION_HEAD_PREFIX}:{local}"
         heads[head] = label
+    elif not lines:
+      problems.append(
+        {"code": "row", "message": f"section {section.name!r}: no lines."}
+      )
+      continue
     sections.append(
       SectionRow(
         name=section.name, block_type=section.block_type, head=head, lines=lines
@@ -319,9 +368,9 @@ def _concepts(
 
 def _holon_from_rows(
   session: Session, entity_id: str, rows: ReportRowsInput
-) -> tuple[str, int, list[str]]:
-  """Assemble the rows into a holon; returns it with the fact count sent and
-  the reported concepts no section places."""
+) -> tuple[str, XbrlModel, list[str]]:
+  """Assemble the rows into a holon; returns it with the model it was written
+  from and the reported concepts no section places."""
   entity = session.get(Entity, entity_id)
   if entity is None:
     raise ReportImportEntityNotFoundError(f"Entity '{entity_id}' is not in this graph.")
@@ -358,5 +407,4 @@ def _holon_from_rows(
     raise ReportImportRefusedError([{"code": "row", "message": str(exc)}]) from exc
   placed = {line.concept for section in sections for line in section.lines}
   unplaced = sorted({fact.concept for fact in rows.facts} - placed)
-  # Identical rows collapse to one fact, so the count is the model's own.
-  return to_holon(model), len(model.facts), unplaced
+  return to_holon(model), model, unplaced
