@@ -257,6 +257,10 @@ The tool names below are the exact `name` strings for `tools/call`, grouped by f
 | --- | --- |
 | `create-portfolio-block` / `update-portfolio-block` / `delete-portfolio-block` | A portfolio and its positions, as one envelope |
 | `create-security` / `update-security` / `delete-security` | A security held by the graph's entity (delete is a soft delete) |
+| `create-issuer` | A company the fund holds or follows that keeps its books elsewhere, as an entity securities and reports attach to |
+| `ingest-report` | Load a report that company sent, from a holon, a Tavi model or rows read out of a PDF or a workbook; checked before anything is written, with a dry run |
+
+A RoboInvestor graph that does not also run RoboLedger still gets the tools for reading what it received: `list-reports`, `disclosures`, `information-block`, `get-report-bundle`, `search-library-elements` (to name a report's lines from the whole library) and `delete-report`. [RoboInvestor Operations](RoboInvestor-Operations.md) covers receiving a report end to end.
 
 Most extension writes are generated from the `OperationSpec`s that back `/extensions/{domain}/{graph_id}/operations/*`, so an MCP write and its REST operation share one validation, one extension gate and one error map; a few that need more than that runner gives (the close and reopen, `bind-text-block`, `delete-report`) are written by hand. Enumerate what a given graph serves with `tools/list`.
 
