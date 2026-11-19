@@ -520,8 +520,9 @@ async def report_external_sync(
   """Record an external integration's own report of a run.
 
   A success is the connection's `last_sync`; a failure is recorded and
-  leaves it. Returns None when the connection is missing or on another
-  graph. Raises ValueError for a connection the platform syncs itself, whose
+  leaves it. Reports are not ordered or locked: the last one written is the
+  one shown, and `last_sync` only ever moves forward to now. Returns None
+  when the connection is missing or on another graph. Raises ValueError for a connection the platform syncs itself, whose
   freshness is not the caller's to state.
   """
   session = db_session or SessionFactory()

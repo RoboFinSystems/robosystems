@@ -1983,3 +1983,22 @@ class TestReportConnectionSync:
     with pytest.raises(HTTPException) as exc_info:
       await self._report(result)
     assert exc_info.value.status_code == status_code
+
+  @pytest.mark.unit
+  @pytest.mark.parametrize(
+    "body",
+    [
+      {},
+      {"status": "succeeded", "counts": {"entries_sent": -1}},
+      {"status": "succeeded", "counts": {"k" * 65: 1}},
+      {"status": "succeeded", "message": "m" * 501},
+      {"status": "done"},
+    ],
+  )
+  def test_a_report_says_how_the_run_went_and_stays_small(self, body):
+    from pydantic import ValidationError
+
+    from robosystems.models.api.graphs.connections import ReportSyncRequest
+
+    with pytest.raises(ValidationError):
+      ReportSyncRequest(**body)

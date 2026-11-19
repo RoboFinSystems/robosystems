@@ -1,12 +1,14 @@
 """Shared connection models for all providers."""
 
 from datetime import date, datetime
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import (
   BaseModel,
   ConfigDict,
   Field,
+  NonNegativeInt,
+  StringConstraints,
   ValidationInfo,
   field_validator,
   model_validator,
@@ -314,20 +316,22 @@ class ReportSyncRequest(BaseModel):
   mirrors are current."""
 
   status: Literal["succeeded", "failed"] = Field(
-    "succeeded",
+    ...,
     description=(
       "'succeeded' moves `last_sync` to now. 'failed' records the outcome "
       "and leaves `last_sync` where it was."
     ),
   )
-  counts: dict[str, int] = Field(
-    default_factory=dict,
-    max_length=50,
-    description=(
-      "What the run did, as the integration counts it (for example "
-      "`entries_sent`, `entries_replaced`, `entries_withdrawn`). Shown with "
-      "the connection; nothing reads the names."
-    ),
+  counts: dict[Annotated[str, StringConstraints(max_length=64)], NonNegativeInt] = (
+    Field(
+      default_factory=dict,
+      max_length=50,
+      description=(
+        "What the run did, as the integration counts it (for example "
+        "`entries_sent`, `entries_replaced`, `entries_withdrawn`). Shown with "
+        "the connection; nothing reads the names."
+      ),
+    )
   )
   message: str | None = Field(
     None,
