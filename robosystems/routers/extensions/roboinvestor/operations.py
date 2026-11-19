@@ -296,9 +296,16 @@ def _amount(value: object) -> str:
 def _reason(problem: dict) -> str:
   """One refusal reason as a sentence, with its amounts written out."""
   if problem.get("code") == "does_not_foot":
+    when = f" ({problem['when']})" if problem.get("when") else ""
+    terms = "".join(
+      f" {'+' if (term.get('weight') or 0) >= 0 else '-'} {term.get('concept')} "
+      f"{_amount(term.get('value'))}"
+      for term in problem.get("terms") or []
+    )
     return (
-      f"{problem.get('concept')} is reported as {_amount(problem.get('reported'))} "
-      f"and its terms sum to {_amount(problem.get('computed'))}."
+      f"{problem.get('concept')}{when} is reported as "
+      f"{_amount(problem.get('reported'))} and its terms sum to "
+      f"{_amount(problem.get('computed'))}{':' + terms if terms else ''}."
     )
   if problem.get("code") == "does_not_balance":
     return (
@@ -338,9 +345,12 @@ ingest_report_op = _registrar.register(
     summary="Ingest Report",
     description=(
       "Load a report a company sent onto its entity. Give the report as "
-      "`holon` (the text of a `.holon.jsonld` file) or as `report` (rows read "
-      "from a PDF or a workbook: concepts, sections and values with the page "
-      "or cell each came from), which is assembled into a holon here. The "
+      "`holon` (the text of a `.holon.jsonld` file), as `tavi` (the text of a "
+      "`.tavi.json` compiled model) or as `report` (rows read from a PDF or a "
+      "workbook: each value with the page or cell it came from). Rows and a "
+      "Tavi model are turned into a holon here. For rows, a balance sheet or "
+      "an income statement named without its lines is laid out from the "
+      "library, so only the values need sending. The "
       "holon is checked before anything is written: every value resolves, "
       "duplicate values agree, every total foots to its terms, and total "
       "assets equal total liabilities and equity. A report that fails is "

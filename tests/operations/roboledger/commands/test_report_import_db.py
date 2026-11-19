@@ -444,6 +444,18 @@ def test_a_concept_the_graph_holds_in_another_vocabulary_is_linked_not_copied(
   )
   assert [a.association_type for a in linked] == ["presentation"]
 
+  # A later report still loads: the vocabulary's update does not trip over
+  # the arc to a concept it does not hold.
+  later = import_report(
+    session,
+    GRAPH,
+    holon_text=_holon().replace("2026-10-31", "2026-11-30"),
+    entity_id=ISSUER,
+    created_by="usr_1",
+  )
+  assert later.report_id != result.report_id
+  assert _values(session, later.report_id)["kpi:Headcount"] == 42
+
 
 def test_a_line_shown_twice_under_one_parent_is_one_association(tenant):
   """A ledger's own roll-forward presents a balance at its start and its end

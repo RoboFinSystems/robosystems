@@ -195,6 +195,41 @@ class TestGetToolDefinitionHelpers:
     assert tools.sync_connection_tool is None
     assert tools.bind_text_block_tool is None
 
+  def test_a_fund_graph_without_a_ledger_reads_the_reports_it_receives(
+    self, mock_client
+  ):
+    with (
+      patch.object(GraphMCPTools, "_should_include_semantic_tools", return_value=False),
+      patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
+    ):
+      mock_env.MCP_WORKSPACE_ENABLED = False
+      mock_env.MCP_SUBGRAPH_OPS_ENABLED = False
+      mock_env.FACT_GRID_ENABLED = False
+      mock_env.SEMANTIC_SEARCH_ENABLED = False
+      mock_env.SEMANTIC_MEMORY_ENABLED = False
+      mock_env.EXTENSIONS_GRAPHQL_ENABLED = False
+      mock_env.ROBOINVESTOR_ENABLED = True
+      tools = GraphMCPTools(mock_client, schema_extensions=["roboinvestor"])
+      read_only = GraphMCPTools(
+        mock_client, schema_extensions=["roboinvestor"], read_only=True
+      )
+      names = {t["name"] for t in tools.get_tool_definitions_as_dict()}
+      read_only_names = {t["name"] for t in read_only.get_tool_definitions_as_dict()}
+
+    reads = {
+      "search-library-elements",
+      "list-reports",
+      "disclosures",
+      "information-block",
+      "get-report-bundle",
+    }
+    assert reads <= names
+    assert {"ingest-report", "create-issuer", "delete-report"} <= names
+    # The ledger's own reads and writes are not a fund's.
+    assert not names & {"get-trial-balance", "list-accounts", "create-report"}
+    assert reads <= read_only_names
+    assert not read_only_names & {"ingest-report", "delete-report"}
+
   def test_split_oltp_reads_stay_off_shared_repos(self, mock_client):
     """The unbundled reads are extensions-OLTP-backed, and the OLTP DB has no
     per-graph schema for a shared repo — the new gates must exclude SEC even

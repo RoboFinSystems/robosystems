@@ -76,9 +76,11 @@ which is the thing that has no equivalent outside this platform.
 **6 · A company that is not on the platform.** Halyard Robotics keeps its
 books elsewhere and sends a workbook every month. `create-issuer` adds it as
 an entity and its SAFE is attached to it. Its September package is then
-ingested with `ingest-report` from rows: the values, the lines of each
-section, and the cell each value was read from. The server assembles the
-rows into a holon, checks it, stores it, and loads it. A copy of the package
+ingested with `ingest-report` from rows: each value and the cell it was read
+from. The balance sheet and the income statement are only named; the server
+lays them out from the library and checks every total against the lines
+beneath it. It assembles the rows into a holon, checks it, stores it, and
+loads it. A copy of the package
 with cash mistyped is sent first and refused with the two numbers that
 disagree; a dry run then reports what would load and writes nothing. After
 materialization the traversal reaches Halyard's facts exactly as it reaches

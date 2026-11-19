@@ -99,8 +99,8 @@ def validate_update_envelope(
       )
     )
 
-  _resolve_foreign_element_qnames(
-    session, qname_by_element_id, current_elements, current_associations
+  elsewhere = _resolve_foreign_element_qnames(
+    session, qname_by_element_id, current_elements, current_associations, taxonomy
   )
 
   structures_to_remove = set(payload.structures_to_remove or [])
@@ -217,6 +217,11 @@ def validate_update_envelope(
       or str(a.to_element_id) in missing_qname_element_ids
     ):
       continue  # endpoint reported via element_missing_qname above
+    if a.from_element_id in elsewhere or a.to_element_id in elsewhere:
+      # An arc to a concept of a third taxonomy was written by the command
+      # that owns it (a received report naming a concept another extension
+      # holds); the create phases resolve only this taxonomy and its parent.
+      continue
     from_qname = qname_by_element_id.get(a.from_element_id, "") or ""
     to_qname = qname_by_element_id.get(a.to_element_id, "") or ""
     if from_qname in elements_to_remove_qnames:
@@ -317,12 +322,14 @@ def _resolve_foreign_element_qnames(
   qname_by_element_id: dict,
   current_elements: list[Element],
   current_associations: list[Association],
-) -> None:
+  taxonomy: Taxonomy,
+) -> set:
   """Fold library-element qnames into the projection's id→qname map.
 
   Extend-mode taxonomies arc to and parent under library concepts, which
   would otherwise project as ``""`` and fail reference resolution. Mutates
-  ``qname_by_element_id`` in place.
+  ``qname_by_element_id`` in place, and returns the ids of the elements that
+  belong to neither this taxonomy nor its parent.
   """
   foreign_ids = {
     eid
@@ -335,12 +342,19 @@ def _resolve_foreign_element_qnames(
     if e.parent_id and e.parent_id not in qname_by_element_id
   }
   if not foreign_ids:
-    return
-  for eid, qname in session.execute(
-    select(Element.id, Element.qname).where(Element.id.in_(foreign_ids))
+    return set()
+  home = {taxonomy.id, taxonomy.parent_taxonomy_id}
+  elsewhere = set()
+  for eid, qname, taxonomy_id in session.execute(
+    select(Element.id, Element.qname, Element.taxonomy_id).where(
+      Element.id.in_(foreign_ids)
+    )
   ).all():
     if qname:
       qname_by_element_id[eid] = qname
+    if taxonomy.parent_taxonomy_id is not None and taxonomy_id not in home:
+      elsewhere.add(eid)
+  return elsewhere
 
 
 def _load_efs_traits(

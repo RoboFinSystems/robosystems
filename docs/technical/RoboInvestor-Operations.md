@@ -216,7 +216,10 @@ Pass the returned `id` as `entity_id` to `create-security` and to `ingest-report
 **`ingest-report`** loads one report onto that entity. Give it one of:
 
 - `holon`: the text of a `.holon.jsonld` report file.
-- `report`: the report as rows, read from the PDF or the workbook. Each concept is declared once, each section lists its lines top to bottom, and each value carries its period, its unit and the page or cell it was read from.
+- `tavi`: the text of a `.tavi.json` compiled model.
+- `report`: the report as rows, read from the PDF or the workbook. Each value carries its concept, its period, its unit and the page or cell it was read from.
+
+For a balance sheet or an income statement, rows are values only. Name the section with its `block_type` and leave out `lines`:
 
 ```json
 {
@@ -225,28 +228,46 @@ Pass the returned `id` as `entity_id` to `create-security` and to `ingest-report
   "report": {
     "period_end": "2026-10-31",
     "kind": "monthly-package",
-    "namespaces": {"kpi": "https://example.com/taxonomy/kpi/v1/"},
-    "concepts": [
-      {"qname": "rs-gaap:Assets", "label": "Total assets", "period_type": "instant", "balance": "debit"},
-      {"qname": "rs-gaap:Cash", "label": "Cash", "period_type": "instant", "balance": "debit"}
-    ],
     "sections": [
-      {"name": "Balance Sheet", "block_type": "balance_sheet", "lines": [
-        {"concept": "rs-gaap:Assets"},
-        {"concept": "rs-gaap:Cash", "parent": "rs-gaap:Assets", "weight": 1}
-      ]}
+      {"name": "Balance Sheet", "block_type": "balance_sheet"}
     ],
     "facts": [
-      {"concept": "rs-gaap:Assets", "value": 600, "end": "2026-10-31", "unit": "USD", "decimals": 0, "source": "package.xlsx#sheet=BS&cell=B10"},
-      {"concept": "rs-gaap:Cash", "value": 600, "end": "2026-10-31", "unit": "USD", "decimals": 0, "source": "package.xlsx#sheet=BS&cell=B4"}
+      {"concept": "rs-gaap:Assets", "value": 900, "end": "2026-10-31", "unit": "USD", "decimals": 0, "source": "package.xlsx#sheet=BS&cell=B10"},
+      {"concept": "rs-gaap:CashAndCashEquivalentsAtCarryingValue", "value": 600, "end": "2026-10-31", "unit": "USD", "decimals": 0, "source": "package.xlsx#sheet=BS&cell=B4"},
+      {"concept": "rs-gaap:AccountsReceivableNetCurrent", "value": 300, "end": "2026-10-31", "unit": "USD", "decimals": 0, "source": "package.xlsx#sheet=BS&cell=B5"}
     ]
   }
 }
 ```
 
-Rows are assembled into a holon on the server, so either way the graph loads a report from a serialization, and that file is kept as the record of what was received. It downloads through `reportDownloadUrl` like any published report.
+The server lays the statement out from the library. Every value sent for a concept the statement places becomes a line under the nearest line above it that also has a value, so a subtotal the package does not print is stepped over: here cash and receivables add straight into total assets, with no current-assets line between them. Each total is then checked against the lines beneath it, which means the statement has to be sent whole. Leave out a line the document prints and the total above it will not foot.
 
-Before anything is written the report is checked: every value resolves to a declared concept and period, two values for one line agree, every total with a `weight` on its lines foots to them at the total's `decimals`, and total assets equal total liabilities and equity where both are present. With `require_source`, every value must name where it came from. A report that fails comes back as HTTP 422 naming each reason, and nothing is loaded. `dry_run: true` runs the same checks and reports what would load without writing.
+A value carries the sign of its concept, not of the page. A contra line printed as `(179,000)` under a credit-balance concept, such as an allowance or accumulated depreciation, is sent as `179000`; the layout subtracts it.
+
+Real packages rarely fit the library exactly, so a laid-out statement also takes `lines` of its own. Set `layout` to `library` and give only the lines the library cannot place or places differently than the document:
+
+```json
+{"name": "Balance Sheet", "block_type": "balance_sheet", "layout": "library", "lines": [
+  {"concept": "acme:InventoryRawMaterials", "parent": "rs-gaap:AssetsCurrent", "weight": 1},
+  {"concept": "rs-gaap:LinesOfCreditCurrent", "parent": "rs-gaap:LiabilitiesCurrent", "weight": 1}
+]}
+```
+
+The first is a concept of the firm's own, declared in `concepts` with a prefix bound in `namespaces`. The second is a library concept the library files under long-term debt, moved to where this company's balance sheet shows it. A line given replaces the library's placement of that concept; everything else is still laid out and checked.
+
+When a total does not foot, the refusal gives its date, the reported amount and every line that was counted toward it, which is how a misplaced or unplaced line is found:
+
+```text
+rs-gaap:LongTermDebtCurrent (2026-10-31) is reported as 1,400,000 and its terms sum to 3,200,000: + rs-gaap:LinesOfCreditCurrent 3,200,000.
+```
+
+Any other section gives all of its `lines`, top to bottom: a KPI table, a cash flow statement, a statement of equity. A line names its `parent`, and a `weight` (`1` adds, `-1` subtracts) makes it a term of the parent's total. With `layout` set to `given`, a balance sheet or an income statement is taken that way too.
+
+A value whose concept no section places still loads, and the response names it in `unplaced_concepts`.
+
+Rows and a Tavi model are turned into a holon on the server, so whichever is sent the graph loads a report from a serialization, and that file is kept as the record of what was received. It downloads through `reportDownloadUrl` like any published report.
+
+Before anything is written the report is checked: every value resolves to a concept and a period, two values for one line agree, every total with a `weight` on its lines foots to them at the total's `decimals`, and total assets equal total liabilities and equity where both are present. With `require_source`, every value must name where it came from. A report that fails comes back as HTTP 422 naming each reason, and nothing is loaded. `dry_run: true` runs the same checks and reports what would load without writing.
 
 What lands:
 
@@ -289,7 +310,7 @@ curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
 
 The Portfolio Block read returns **active positions only**. Its dollar totals are pre-converted from cents; `total_current_value_dollars` sums the marked positions and is null only when no active position has a mark at all. If you need cents-precision position values, read through the `positions` / `position` fields rather than the assembled block.
 
-For agent-driven reads, the same GraphQL surface is reachable through the MCP `query-graphql` and `get-graphql-schema` tools; `graph_id` is taken from context, not passed as an argument.
+For agent-driven reads, the same GraphQL surface is reachable through the MCP `query-graphql` and `get-graphql-schema` tools; `graph_id` is taken from context, not passed as an argument. A fund's graph also serves the tools that work a received report: `search-library-elements` (with `whole_library: true` to name a line with any concept the library has, and `brief: true` for one short row per concept), `list-reports`, `disclosures` and `information-block` to read a report back, `get-report-bundle` for its file, and `delete-report`.
 
 ## Operations Reference
 

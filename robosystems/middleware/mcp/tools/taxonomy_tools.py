@@ -8,7 +8,7 @@ from typing import Any
 
 from sqlalchemy.exc import SQLAlchemyError
 
-from robosystems.db.extensions import extensions_session
+from robosystems.db.extensions import LIBRARY_GRAPH_ID, extensions_session
 from robosystems.logger import logger
 from robosystems.middleware.operations import run_off_loop
 from robosystems.models.api.extensions.taxonomies import (
@@ -444,6 +444,22 @@ class ListElementArcsTool:
       return unexpected("list-element-arcs")
 
 
+def _brief(element: Any) -> dict[str, Any]:
+  """A concept in one short row: enough to choose it, not to cite it."""
+  label = next(
+    (row.text for row in element.labels if row.role == "standard"), element.name
+  )
+  return {
+    "id": element.id,
+    "qname": element.qname,
+    "label": label,
+    "balance_type": element.balance_type,
+    "period_type": element.period_type,
+    "trait": element.trait,
+    "is_abstract": element.is_abstract,
+  }
+
+
 class SearchLibraryElementsTool:
   """Reporting concepts and accounts found by a phrase or a qname."""
 
@@ -462,10 +478,12 @@ class SearchLibraryElementsTool:
 **PARAMETERS:**
 - query (required): a substring of the qname, name or label text
 - source (optional): one standard only, e.g. `rs-gaap`
+- whole_library (optional, default false): search every concept the reporting library has, not only the ones this graph already holds. Use it to name a line of a report being received with `ingest-report`; a mapping or a schedule needs a concept this graph holds
+- brief (optional, default false): return one short row per concept (`id`, `qname`, `label`, `balance_type`, `period_type`, `trait`, `is_abstract`) without documentation and references. Use it when choosing among many candidates
 - limit (optional, default 50, 1 to 500)
 
 **RETURNS:**
-`elements`, by qname: each with `id`, `qname`, `namespace`, `name`, `trait`, `balance_type`, `period_type`, `is_abstract`, `is_monetary`, `element_type`, `source`, `taxonomy_id`, `parent_id`, `labels` and `references`.
+`elements`, by qname: each with `id`, `qname`, `namespace`, `name`, `trait`, `balance_type`, `period_type`, `is_abstract`, `is_monetary`, `element_type`, `source`, `taxonomy_id`, `parent_id`, `labels` and `references`; with `brief`, the short row.
 
 **RELATED TOOLS:**
 - suggest-mapping — ranked concepts for one account
@@ -478,6 +496,19 @@ class SearchLibraryElementsTool:
             "description": "Substring of the qname, name or label text.",
           },
           "source": {"type": "string", "description": "One standard, e.g. rs-gaap."},
+          "whole_library": {
+            "type": "boolean",
+            "default": False,
+            "description": (
+              "Search the whole reporting library rather than this graph's own "
+              "working set."
+            ),
+          },
+          "brief": {
+            "type": "boolean",
+            "default": False,
+            "description": "One short row per concept, without documentation and references.",
+          },
           "limit": {
             "type": "integer",
             "minimum": 1,
@@ -502,14 +533,23 @@ class SearchLibraryElementsTool:
       )
     except ValueError as exc:
       return invalid(str(exc))
+    whole_library = arguments.get("whole_library", False)
+    if not isinstance(whole_library, bool):
+      return invalid("whole_library must be true or false")
+    brief = arguments.get("brief", False)
+    if not isinstance(brief, bool):
+      return invalid("brief must be true or false")
+    scope = LIBRARY_GRAPH_ID if whole_library else self.client.graph_id
     try:
-      with extensions_session(self.client.graph_id) as session:
+      with extensions_session(scope) as session:
         elements = library_reads.search_elements(
           session,
           query_text=query,
           limit=limit,
           source=arguments.get("source") or None,
         )
+        if brief:
+          return {"elements": [_brief(e) for e in elements]}
         return {"elements": [e.model_dump(mode="json") for e in elements]}
     except SQLAlchemyError as exc:
       return database_failure("search-library-elements", exc)
