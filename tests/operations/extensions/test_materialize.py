@@ -445,6 +445,7 @@ class TestTableOrdering:
     by_extension: dict[str, list[str]] = {
       "base": [],
       "roboledger": [],
+      "reporting": [],
       "roboinvestor": [],
     }
     for name in NODE_TABLES:
@@ -466,15 +467,10 @@ class TestTableOrdering:
       "Agent",
       "Event",
     }
-    # RoboLedger-specific: the three-level ledger + reporting layer nodes
-    assert set(by_extension["roboledger"]) == {
-      "Transaction",
-      "Entry",
-      "LineItem",
-      "Report",
-      "Fact",
-      "FactSet",
-    }
+    # RoboLedger-specific: the three-level ledger
+    assert set(by_extension["roboledger"]) == {"Transaction", "Entry", "LineItem"}
+    # The reporting section, on every graph that can receive a report
+    assert set(by_extension["reporting"]) == {"Report", "Fact", "FactSet"}
     # RoboInvestor-specific nodes
     assert set(by_extension["roboinvestor"]) == {
       "Portfolio",
@@ -488,6 +484,7 @@ class TestTableOrdering:
     by_extension: dict[str, list[str]] = {
       "base": [],
       "roboledger": [],
+      "reporting": [],
       "roboinvestor": [],
     }
     for name in RELATIONSHIP_TABLES:
@@ -512,7 +509,7 @@ class TestTableOrdering:
       "EVENT_DISCHARGES_EVENT",
       "EVENT_REPLACES_EVENT",
     }
-    # RoboLedger edges: three-level ledger + dimensional tags + reporting
+    # RoboLedger edges: three-level ledger + dimensional tags
     assert set(by_extension["roboledger"]) == {
       "ENTITY_OWNS_ENTITY",
       "ENTITY_HAS_TRANSACTION",
@@ -524,6 +521,9 @@ class TestTableOrdering:
       "ENTRY_HAS_DIMENSION",
       "LINE_ITEM_HAS_DIMENSION",
       "ENTRY_FROM_SCHEDULE",
+    }
+    # The reporting section's edges
+    assert set(by_extension["reporting"]) == {
       "ENTITY_HAS_REPORT",
       "REPORT_USES_TAXONOMY",
       "REPORT_HAS_FACT",
@@ -592,8 +592,8 @@ class TestSchemaConsistency:
     )
 
   def test_extension_filter_excludes_ledger_from_investor_only_graph(self):
-    """Symmetrically — ledger-specific tables must not leak into an
-    investor-only materialization."""
+    """Symmetrically — the general ledger must not leak into an investor-only
+    materialization."""
     tables = _filter_tables_for_extensions(
       NODE_TABLES + RELATIONSHIP_TABLES, {"roboinvestor"}
     )
@@ -601,14 +601,27 @@ class TestSchemaConsistency:
       "Transaction",
       "Entry",
       "LineItem",
-      "Report",
-      "Fact",
-      "FactSet",
       "ENTITY_HAS_TRANSACTION",
-      "REPORT_HAS_FACT",
+      "ENTRY_HAS_LINE_ITEM",
     } & set(tables)
     assert not ledger_leak, (
       f"Ledger tables leaked into investor-only filter: {sorted(ledger_leak)}"
+    )
+
+  def test_a_receiving_graph_stages_the_reporting_section(self):
+    """An investor graph receives reports, so their tables stage there as on
+    a ledger; a graph with neither extension has nowhere to put them."""
+    reporting = {
+      name for name, section in TABLE_EXTENSIONS.items() if section == "reporting"
+    }
+    assert {"Report", "Fact", "FactSet", "ENTITY_HAS_REPORT"} <= reporting
+    for enabled in ({"roboledger"}, {"roboinvestor"}, {"roboledger", "roboinvestor"}):
+      staged = set(
+        _filter_tables_for_extensions(NODE_TABLES + RELATIONSHIP_TABLES, enabled)
+      )
+      assert reporting <= staged, f"reporting tables missing with enabled={enabled}"
+    assert not reporting & set(
+      _filter_tables_for_extensions(NODE_TABLES + RELATIONSHIP_TABLES, set())
     )
 
   def test_extension_filter_base_always_included(self):

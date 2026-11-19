@@ -133,7 +133,8 @@ The `reports` table **is** the package container. A Report row carries:
   - **Generation** — `generation_status` moves `pending → generating → complete → published`
   - **Filing** — `filing_status` moves `draft → under_review → filed → archived`, with `filed_at` / `filed_by`
 - **Restatement fields** `supersedes_id` / `superseded_by_id`, reserved for linking a corrected report to the one it replaces. No operation sets them today, so they read as null
-- Sharing provenance: `source_graph_id`, `source_report_id`, `shared_at`
+- How it arrived: `origin` is `authored` (from this graph's own books), `shared` (in from another graph) or `uploaded` (as a file). Anything but `authored` is a received report: read-only here, and served as the artifact that arrived rather than rebuilt from the rows
+- Sharing provenance, on a shared report: `source_graph_id`, `source_report_id`, `shared_at`
 
 Package membership is **implicit in fact dual-stamping**: a Report owns FactSets (`fact_sets.report_id`), and FactSets own Facts (`facts.fact_set_id`). That dual stamp *is* the membership — there is no separate join table listing which statements belong to a report. The statement display order is fixed: Balance Sheet (1), Income Statement (2), Cash Flow (3), Equity (4), then Schedules (100).
 

@@ -105,7 +105,10 @@ class LadybugSchemaBuilder:
             ),
             version=self.config.get("version", "1.0.0"),
           )
-        self.schema.nodes.extend(module.EXTENSION_NODES)
+        named = {node.name for node in self.schema.nodes}
+        self.schema.nodes.extend(
+          node for node in module.EXTENSION_NODES if node.name not in named
+        )
         logger.debug(
           f"Loaded {len(module.EXTENSION_NODES)} extension nodes from {extension_name}"
         )
@@ -113,7 +116,10 @@ class LadybugSchemaBuilder:
       # Load extension relationships
       if hasattr(module, "EXTENSION_RELATIONSHIPS"):
         if self.schema is not None:
-          self.schema.relationships.extend(module.EXTENSION_RELATIONSHIPS)
+          named = {rel.name for rel in self.schema.relationships}
+          self.schema.relationships.extend(
+            rel for rel in module.EXTENSION_RELATIONSHIPS if rel.name not in named
+          )
         logger.debug(
           f"Loaded {len(module.EXTENSION_RELATIONSHIPS)} extension relationships from {extension_name}"
         )

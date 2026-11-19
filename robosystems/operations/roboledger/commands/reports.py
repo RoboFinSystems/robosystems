@@ -418,12 +418,18 @@ def create_report(
 def _assert_report_mutable_by(
   report_def: Report, acting_user_id: str, verb: str
 ) -> None:
-  """Only the author may change a report; a shared-in copy is read-only to all.
+  """Only the author may change a report; a received one is read-only to all.
 
-  That includes the sender, whose ``created_by`` the copy carries. Deleting a
-  shared-in copy is widened to graph admins separately in ``delete_report``.
+  That includes the sender, whose ``created_by`` a shared-in copy carries.
+  Deleting a received report is widened to graph admins separately in
+  ``delete_report``.
   """
-  if report_def.source_graph_id is not None:
+  if report_def.origin == "uploaded":
+    raise NotAuthorizedError(
+      f"Report '{report_def.id}' was received as a file and cannot be changed "
+      f"here; ingest the corrected file instead."
+    )
+  if report_def.is_received:
     raise NotAuthorizedError(
       f"Report '{report_def.id}' is a copy shared in from another graph and "
       f"cannot be changed here; re-share it from the source graph instead."
@@ -705,8 +711,7 @@ def delete_report(
   if report_def is None:
     return False
   if report_def.created_by != acting_user_id:
-    is_shared_copy = report_def.source_graph_id is not None
-    if not (is_shared_copy and acting_user_is_graph_admin):
+    if not (report_def.is_received and acting_user_is_graph_admin):
       raise NotAuthorizedError("Not authorized to delete this report.")
   active_share_targets = list(
     session.execute(
@@ -720,9 +725,9 @@ def delete_report(
   )
   if active_share_targets:
     raise ReportHasActiveSharesError(report_id, active_share_targets)
-  # A shared-in copy carries the sender's filing status; guarding it would
+  # A received report carries its sender's filing status; guarding it would
   # close the recipient's only exit once a sender filed before sharing.
-  if report_def.source_graph_id is None and report_def.filing_status in {
+  if not report_def.is_received and report_def.filing_status in {
     "filed",
     "archived",
   }:
@@ -795,6 +800,10 @@ def share_report(
     # re-share replace delete copies in raw SQL without orphaning share rows.
     if report_def.created_by != acting_user_id:
       raise NotAuthorizedError("Not authorized to share this report.")
+    # A received report is someone else's statement; it is not this graph's
+    # to publish onward.
+    if report_def.is_received:
+      raise NotAuthorizedError("A received report cannot be shared onward.")
     if report_def.generation_status != "published":
       raise ReportNotPublishedError("Only published reports can be shared.")
 
@@ -1333,6 +1342,7 @@ def _share_to_target(
         filing_status=report_snapshot.get("filing_status") or "draft",
         filed_at=report_snapshot.get("filed_at"),
         created_by=shared_by,
+        origin="shared",
         source_graph_id=source_graph_id,
         source_report_id=report_snapshot["id"],
         shared_at=now,

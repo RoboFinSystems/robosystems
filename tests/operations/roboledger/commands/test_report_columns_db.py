@@ -39,7 +39,10 @@ from robosystems.operations.roboledger.commands.fiscal_calendar import (
   reopen_period,
 )
 from robosystems.operations.roboledger.commands.report_columns import (
+  freeze_reports_for_close,
   refresh_report_columns,
+  refreshable,
+  unfreeze_reports_after_reopen,
 )
 from robosystems.operations.roboledger.commands.reports import (
   InvalidFilingTransitionError,
@@ -264,6 +267,19 @@ def _revenue_rows(g, report_id: str) -> dict[date, Fact]:
   return by_end
 
 
+def _facts(g, report_id: str) -> list[Fact]:
+  return list(
+    g["session"]
+    .execute(
+      select(Fact)
+      .join(FactSet, FactSet.id == Fact.fact_set_id)
+      .where(FactSet.report_id == report_id)
+    )
+    .scalars()
+    .all()
+  )
+
+
 def _frozen(g, report_id: str) -> dict[date, bool]:
   rows = (
     g["session"]
@@ -367,6 +383,35 @@ def test_columns_freeze_as_the_calendar_closes_and_open_ones_accrue(books):
   # Nothing landed since: a read rewrites nothing.
   assert refresh_report_columns(session, report.id, actor_id="usr_1").rewritten is False
   assert session.get(Report, report.id).last_generated == refreshed_at
+
+
+@pytest.mark.parametrize("origin", ["shared", "uploaded"])
+def test_a_received_report_never_moves_with_these_books(books, origin):
+  """A report that came from outside is someone else's statement: a close
+  here does not rewrite or freeze it, and a reopen does not thaw it."""
+  g = books
+  session = g["session"]
+  report = session.get(Report, _report(g).id)
+  report.origin = origin
+  session.flush()
+  before = {row.id: (row.value, row.frozen_at) for row in _facts(g, report.id)}
+  assert before
+
+  assert refreshable(report) is False
+  assert refreshable(report, forced=True) is False
+  assert freeze_reports_for_close(session, entity_id=g["entity"], actor_id="u") == 0
+  session.execute(
+    text(
+      "UPDATE facts SET frozen_at = now() WHERE fact_set_id IN "
+      "(SELECT id FROM fact_sets WHERE report_id = :rid)"
+    ),
+    {"rid": report.id},
+  )
+  assert unfreeze_reports_after_reopen(session, entity_id=g["entity"]) == 0
+  session.expire_all()
+  assert {row.id: row.value for row in _facts(g, report.id)} == {
+    fact_id: value for fact_id, (value, _) in before.items()
+  }
 
 
 def test_filing_waits_for_every_column_and_a_reopen_puts_one_back_to_live(books):

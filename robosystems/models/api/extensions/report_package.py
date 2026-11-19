@@ -144,7 +144,9 @@ class ReportPackageEnvelope(BaseModel):
   supersedes_id: str | None = None
   superseded_by_id: str | None = None
 
-  # Sharing provenance (populated for received reports)
+  # How the report arrived: authored, shared or uploaded
+  origin: str = "authored"
+  # Sharing provenance (populated for shared reports)
   source_graph_id: str | None = None
   source_report_id: str | None = None
   shared_at: datetime | None = None

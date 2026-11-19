@@ -640,6 +640,12 @@ def test_share_to_target_carries_nonnumeric_columns() -> None:
     if isinstance(call.args[0], FactModel)
   ]
   assert len(copied) == 1
+  [report_copy] = [
+    call.args[0]
+    for call in target_session.add.call_args_list
+    if isinstance(call.args[0], ReportModel)
+  ]
+  assert (report_copy.origin, report_copy.is_received) == ("shared", True)
   assert copied[0].fact_type == "Nonnumeric"
   assert copied[0].string_value.startswith("# Inventory Policy")
   assert copied[0].value is None
@@ -747,6 +753,8 @@ class _FakeReport:
     self.created_by = created_by
     self.filing_status = filing_status
     self.source_graph_id = source_graph_id
+    self.origin = "shared" if source_graph_id else "authored"
+    self.is_received = source_graph_id is not None
 
 
 def _body_with_id(body, report_id: str):
@@ -804,6 +812,21 @@ def test_regenerate_report_refuses_a_shared_in_copy_even_for_its_sender() -> Non
       created_by="usr_sender",
     )
   assert "shared in" in str(exc.value)
+
+
+def test_regenerate_report_refuses_a_report_received_as_a_file() -> None:
+  """An uploaded report's `created_by` is the person who ingested it, so the
+  owner rule would pass; its origin is what keeps the books from replacing it."""
+  report = _FakeReport("rpt_file", created_by="usr_test", filing_status="draft")
+  report.origin, report.is_received = "uploaded", True
+  session = _session_with_report(report)
+  with pytest.raises(NotAuthorizedError, match="received as a file"):
+    regenerate_report(
+      session,
+      _body_with_id(MagicMock(), "rpt_file"),
+      graph_id="kg_demo",
+      created_by="usr_test",
+    )
 
 
 def test_regenerate_report_raises_on_filed_report() -> None:

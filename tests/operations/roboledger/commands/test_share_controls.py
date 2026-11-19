@@ -55,6 +55,8 @@ def _make_report(
   r.created_by = created_by
   r.source_graph_id = source_graph_id
   r.source_report_id = "rpt_source" if source_graph_id else None
+  r.origin = "shared" if source_graph_id else "authored"
+  r.is_received = source_graph_id is not None
   r.filing_status = filing_status
   r.generation_status = "published"
   return r

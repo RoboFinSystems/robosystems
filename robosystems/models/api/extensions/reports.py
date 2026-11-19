@@ -433,6 +433,15 @@ class ReportResponse(BaseModel):
     None,
     description=("When this report has been restated, the successor's report ID."),
   )
+  origin: str = Field(
+    "authored",
+    description=(
+      "How the report came to be in this graph: `authored` from its own books, "
+      "`shared` in from another graph, or `uploaded` as a file. Anything but "
+      "`authored` is a received report: read-only, and served as the artifact "
+      "that arrived."
+    ),
+  )
   source_graph_id: str | None = Field(
     None,
     description=(

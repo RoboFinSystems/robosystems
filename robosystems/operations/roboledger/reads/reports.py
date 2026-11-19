@@ -395,6 +395,7 @@ def report_to_response(
     filed_by=report_def.filed_by,
     supersedes_id=report_def.supersedes_id,
     superseded_by_id=report_def.superseded_by_id,
+    origin=report_def.origin,
     source_graph_id=report_def.source_graph_id,
     source_report_id=report_def.source_report_id,
     shared_at=report_def.shared_at,
@@ -470,8 +471,8 @@ def get_report(session: Session, report_id: str) -> ReportResponse | None:
 def _bundle_outran(report: Report) -> bool:
   """Whether the report's columns moved after its holon was built: the file
   is a snapshot, and a download takes a fresh one. A shared-in copy keeps
-  the file it was given."""
-  if report.source_report_id is not None or report.generation_status != "published":
+  the file it was given, as does a report that arrived as a file."""
+  if report.is_received or report.generation_status != "published":
     return False
   if report.last_generated is None:
     return False
@@ -543,11 +544,11 @@ def get_report_download_url(
         f"Report '{report_id}' is not published — publish or regenerate the "
         f"report to produce a holon."
       )
-    if report.source_graph_id is not None:
+    if report.is_received:
       raise ReportBundleNotAvailableError(
-        f"Report '{report_id}' was shared in from another graph and carries no "
-        f"lineage: the books behind a report never leave the graph that keeps "
-        f"them. Ask the sender for the file with lineage."
+        f"Report '{report_id}' was received from outside this graph and carries "
+        f"no lineage here: the books behind a report never leave the graph that "
+        f"keeps them. Ask the sender for the file with lineage."
       )
     response = _materialize_and_presign_lineage_holon(
       session=session,
@@ -579,7 +580,7 @@ def get_report_download_url(
       report_id=report_id,
       generation_count=generation_count,
       expires_in=expires_in,
-      source_graph_id=report.source_graph_id,
+      origin=report.origin,
     )
 
   # TAVI is in XbrlFlavor, so it precedes that branch.
@@ -595,7 +596,7 @@ def get_report_download_url(
       report_id=report_id,
       generation_count=generation_count,
       expires_in=expires_in,
-      source_graph_id=report.source_graph_id,
+      origin=report.origin,
     )
 
   if not report.bundle_url:
@@ -611,7 +612,7 @@ def get_report_download_url(
       flavor=XbrlFlavor(flavor),
       generation_count=generation_count,
       expires_in=expires_in,
-      source_graph_id=report.source_graph_id,
+      origin=report.origin,
     )
   raise ValueError(
     f"Unsupported download format '{flavor}'. "
@@ -619,16 +620,20 @@ def get_report_download_url(
   )
 
 
-def _refuse_local_rederivation(
-  report_id: str, source_graph_id: str | None, artifact: str
-) -> None:
+def _refuse_local_rederivation(report_id: str, origin: str, artifact: str) -> None:
   """Refuse to re-derive a received report's artifact from local rows.
 
-  For a shared-in report the sender's artifact is the truth and the rows are a
-  partial projection of it, so a cache miss is a miss, not a build order.
+  For a received report the artifact that arrived is the truth and the rows
+  are a projection of it, so a cache miss is a miss, not a build order.
   """
-  if source_graph_id is None:
+  if origin == "authored":
     return
+  if origin == "uploaded":
+    raise ReportBundleNotAvailableError(
+      f"Report '{report_id}' was received as a file and its {artifact} is no "
+      f"longer in storage. A received report is served as the file that "
+      f"arrived and is never re-derived locally; ingest the file again."
+    )
   raise ReportBundleNotAvailableError(
     f"Report '{report_id}' was shared from another graph and its {artifact} is "
     f"no longer in storage. A received report is served as the sender's "
@@ -644,7 +649,7 @@ def _materialize_and_presign_xbrl(
   flavor: XbrlFlavor,
   generation_count: int,
   expires_in: int,
-  source_graph_id: str | None = None,
+  origin: str = "authored",
 ) -> ReportBundleDownloadResponse:
   """Presign the XBRL zip, materializing + caching it on first download.
 
@@ -655,7 +660,7 @@ def _materialize_and_presign_xbrl(
   s3 = S3Client()
 
   if not s3.object_exists(bucket, key):
-    _refuse_local_rederivation(report_id, source_graph_id, "XBRL bundle")
+    _refuse_local_rederivation(report_id, origin, "XBRL bundle")
     from robosystems.operations.serialization import (
       build_report_bundle,
       serialize_to_xbrl,
@@ -710,7 +715,7 @@ def _materialize_and_presign_holon(
   report_id: str,
   generation_count: int,
   expires_in: int,
-  source_graph_id: str | None = None,
+  origin: str = "authored",
 ) -> ReportBundleDownloadResponse:
   """Presign the JSON-LD holon, materializing + caching it on first download."""
   bucket = env.USER_DATA_BUCKET
@@ -720,7 +725,7 @@ def _materialize_and_presign_holon(
   s3 = S3Client()
 
   if not s3.object_exists(bucket, key):
-    _refuse_local_rederivation(report_id, source_graph_id, "holon")
+    _refuse_local_rederivation(report_id, origin, "holon")
     from robosystems.operations.serialization import (
       build_report_bundle,
       serialize_to_holon_jsonld,
@@ -856,7 +861,7 @@ def _materialize_and_presign_tavi(
   report_id: str,
   generation_count: int,
   expires_in: int,
-  source_graph_id: str | None = None,
+  origin: str = "authored",
 ) -> ReportBundleDownloadResponse:
   """Presign the Tavi compiled model, materializing + caching it on first download."""
   bucket = env.USER_DATA_BUCKET
@@ -866,7 +871,7 @@ def _materialize_and_presign_tavi(
   s3 = S3Client()
 
   if not s3.object_exists(bucket, key):
-    _refuse_local_rederivation(report_id, source_graph_id, "Tavi model")
+    _refuse_local_rederivation(report_id, origin, "Tavi model")
     from robosystems.operations.serialization import (
       build_report_bundle,
       serialize_to_tavi,
@@ -997,6 +1002,7 @@ def get_report_package(
     filed_by=report_def.filed_by,
     supersedes_id=report_def.supersedes_id,
     superseded_by_id=report_def.superseded_by_id,
+    origin=report_def.origin,
     source_graph_id=report_def.source_graph_id,
     source_report_id=report_def.source_report_id,
     shared_at=report_def.shared_at,

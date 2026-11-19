@@ -41,7 +41,7 @@ The surface is intentionally small. Portfolios and positions are written through
 
 - A RoboSystems account and an API key, created in the app under **Settings → API keys**. See [Quick Start](Quick-Start.md).
 - RoboInvestor enabled on the deployment. The `ROBOINVESTOR_ENABLED` flag gates both the RoboInvestor operations and the GraphQL investor fields; on robosystems.ai it is on. On a deployment where it is off, the operation routes aren't mounted, so a call is a plain HTTP 404, and the investor fields are absent from the GraphQL schema.
-- A graph provisioned with the `roboinvestor` schema extension. The operations and the GraphQL investor fields only appear on graphs that carry this extension. In the app, **Create Graph** lets you select it among the graph's schema extensions.
+- A graph provisioned with the `roboinvestor` schema extension. The operations and the GraphQL investor fields only appear on graphs that carry this extension. In the app, **Create Graph** lets you select it among the graph's schema extensions. The extension is enough on its own to receive reports: an investor graph carries the reporting tables (reports, fact sets and facts), so a report an issuer shares in materializes into the graph and `Portfolio → Position → Security → Entity → Report → Fact` resolves without the `roboledger` extension. Add `roboledger` when the fund keeps its own books in the same graph.
 
 ## The Two Write Surfaces
 
@@ -303,7 +303,7 @@ Atom-level portfolio and position CRUD endpoints do not exist — all portfolio 
 
 ## Self-hosted deployments
 
-On your own stack, `just demo-roboinvestor` drives the whole surface end-to-end and is the executable proof of the [cross-graph handshake](#cross-graph-issuer-linking): it provisions the **Meridian Ventures Fund I** investor graph into the `roboinvestor_demo` slot of `.local/config.json`, provisions an issuer graph (the SaaS startup scenario) into `saas_startup`, and performs the report share that links the two. Its flags drive each half separately — `--issuer <id>` targets an existing issuer graph, `--reload-issuer` rebuilds it, `--skip-share` stops short of the share so you can watch a security sit unlinked, and `--revoke` shares, then revokes and verifies the teardown. `--dry-run` previews the portfolio without writing anything.
+On your own stack, `just demo-roboinvestor` drives the whole surface end-to-end and is the executable proof of the [cross-graph handshake](#cross-graph-issuer-linking): it provisions the **Meridian Ventures Fund I** investor graph, with the `roboinvestor` extension alone, into the `roboinvestor_demo` slot of `.local/config.json`, provisions an issuer graph (the SaaS startup scenario) into `saas_startup`, and performs the report share that links the two. Its flags drive each half separately — `--issuer <id>` targets an existing issuer graph, `--reload-issuer` rebuilds it, `--skip-share` stops short of the share so you can watch a security sit unlinked, and `--revoke` shares, then revokes and verifies the teardown. `--dry-run` previews the portfolio without writing anything.
 
 The `graph_id` is nested under `graphs.<slot>.graph_id` — not a top-level key. **Name the slot; do not pick one positionally:** `to_entries[0]` typically grabs a RoboLedger graph.
 

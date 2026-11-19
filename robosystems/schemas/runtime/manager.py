@@ -118,14 +118,24 @@ class SchemaManager:
     for extension_name in config.extensions:
       extension_module = self._load_extension_module(extension_name)
 
+      # Two extensions may carry the same section (RoboInvestor brings
+      # RoboLedger's reporting tables); the first to name a table defines it.
       if hasattr(extension_module, "EXTENSION_NODES"):
-        schema.nodes.extend(extension_module.EXTENSION_NODES)
+        named = {node.name for node in schema.nodes}
+        schema.nodes.extend(
+          node for node in extension_module.EXTENSION_NODES if node.name not in named
+        )
         logger.debug(
           f"Loaded {len(extension_module.EXTENSION_NODES)} nodes from {extension_name}"
         )
 
       if hasattr(extension_module, "EXTENSION_RELATIONSHIPS"):
-        schema.relationships.extend(extension_module.EXTENSION_RELATIONSHIPS)
+        named = {rel.name for rel in schema.relationships}
+        schema.relationships.extend(
+          rel
+          for rel in extension_module.EXTENSION_RELATIONSHIPS
+          if rel.name not in named
+        )
         logger.debug(
           f"Loaded {len(extension_module.EXTENSION_RELATIONSHIPS)} relationships from {extension_name}"
         )

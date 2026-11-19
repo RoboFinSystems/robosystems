@@ -289,7 +289,7 @@ def create_investor_graph() -> str:
   metadata = GraphMetadata(
     graph_name=portfolio_data.FUND_NAME,
     description="Early-stage venture fund — private-markets portfolio",
-    schema_extensions=["roboinvestor", "roboledger"],
+    schema_extensions=["roboinvestor"],
   )
   request = CreateGraphRequest(
     metadata=metadata,
