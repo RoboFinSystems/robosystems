@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     ReportPackageEnvelope,
   )
 
-from sqlalchemy import ColumnElement, or_, true
+from sqlalchemy import ColumnElement, and_, or_, true
 
 from robosystems.config import env
 from robosystems.config.storage.graph import get_report_bundle_key
@@ -404,7 +404,8 @@ def report_to_response(
 
 def report_entity_clause(entity_id: str | None, is_parent: bool) -> ColumnElement[bool]:
   """Predicate for the reports that are ``entity_id``'s. A report with no
-  entity (shared in, or from before the column) is the group parent's; on a
+  entity (shared in, or from before the column) is the group parent's, and so
+  is one received about a counterparty, which a shared report also is; on a
   graph with no entity yet every report passes."""
   if entity_id is None:
     return true()
@@ -414,10 +415,12 @@ def report_entity_clause(entity_id: str | None, is_parent: bool) -> ColumnElemen
     consolidated = select(Entity.id).where(
       Entity.entity_role == "consolidation", Entity.source != "linked"
     )
+    counterparties = select(Entity.id).where(Entity.source == "linked")
     return or_(
       Report.entity_id == entity_id,
       Report.entity_id.is_(None),
       Report.entity_id.in_(consolidated),
+      and_(Report.origin != "authored", Report.entity_id.in_(counterparties)),
     )
   return Report.entity_id == entity_id
 
@@ -432,15 +435,18 @@ def list_reports(
   recent first.
 
   ``current`` (the default) leaves out archived reports, ``archived`` returns
-  only those, and ``all`` returns every report.
+  only those, and ``all`` returns every report. Naming a counterparty (a
+  company the graph holds or was sent reports by) lists the reports received
+  about it.
   """
-  entity_id = find_entity_id(session, entity_id)
-  is_parent = entity_id is not None and is_group_parent(session, entity_id)
-  query = (
-    select(Report)
-    .where(report_entity_clause(entity_id, is_parent))
-    .order_by(Report.created_at.desc())
-  )
+  counterparty = _counterparty(session, entity_id)
+  if counterparty is not None:
+    clause = _counterparty_report_clause(counterparty)
+  else:
+    entity_id = find_entity_id(session, entity_id)
+    is_parent = entity_id is not None and is_group_parent(session, entity_id)
+    clause = report_entity_clause(entity_id, is_parent)
+  query = select(Report).where(clause).order_by(Report.created_at.desc())
   if lifecycle == ReportLifecycle.CURRENT:
     query = query.where(Report.filing_status != "archived")
   elif lifecycle == ReportLifecycle.ARCHIVED:
@@ -453,9 +459,45 @@ def list_reports(
     if r.taxonomy_id not in structure_cache:
       structure_cache[r.taxonomy_id] = load_structures(session, r.taxonomy_id)
     entity_name = resolve_entity_name(session, r)
-    reports.append(report_to_response(r, structure_cache[r.taxonomy_id], entity_name))
+    reports.append(
+      report_to_response(
+        r, own_structures(r, structure_cache[r.taxonomy_id]), entity_name
+      )
+    )
 
   return ReportListResponse(reports=reports)
+
+
+def own_structures(
+  report: Report, structures: list[StructureSummary]
+) -> list[StructureSummary]:
+  """The sections that are this report's. A report that arrived as a file
+  brought its own, and its vocabulary holds every such report's."""
+  brought = ((report.metadata_ or {}).get("import") or {}).get("structure_ids")
+  if report.origin != "uploaded" or brought is None:
+    return structures
+  own = set(brought)
+  return [s for s in structures if s.id in own]
+
+
+def _counterparty(session: Session, entity_id: str | None) -> Entity | None:
+  if entity_id is None:
+    return None
+  entity = session.get(Entity, entity_id)
+  return entity if entity is not None and entity.source == "linked" else None
+
+
+def _counterparty_report_clause(entity: Entity) -> ColumnElement[bool]:
+  """Reports received about ``entity``: those loaded onto it, and those its
+  own graph shared in."""
+  loaded = and_(Report.origin != "authored", Report.entity_id == entity.id)
+  source_graph_id = (entity.metadata_ or {}).get("source_graph_id")
+  if not source_graph_id:
+    return loaded
+  return or_(
+    loaded,
+    and_(Report.origin == "shared", Report.source_graph_id == source_graph_id),
+  )
 
 
 def get_report(session: Session, report_id: str) -> ReportResponse | None:
@@ -463,7 +505,9 @@ def get_report(session: Session, report_id: str) -> ReportResponse | None:
   report_def = session.get(Report, report_id)
   if report_def is None:
     return None
-  structures = load_structures(session, report_def.taxonomy_id)
+  structures = own_structures(
+    report_def, load_structures(session, report_def.taxonomy_id)
+  )
   entity_name = resolve_entity_name(session, report_def)
   return report_to_response(report_def, structures, entity_name)
 

@@ -168,6 +168,8 @@ WRITE_TOOL_HINTS: dict[str, ToolHints] = {
   "create-portfolio-block": _ADDS,
   "update-portfolio-block": _REPLACES,
   "delete-portfolio-block": _REPLACES,
+  "create-issuer": _ADDS,
+  "ingest-report": _REPLACES,
 }
 
 

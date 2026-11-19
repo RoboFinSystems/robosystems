@@ -1069,3 +1069,240 @@ class DeletePortfolioBlockResponse(BaseModel):
     ...,
     description="Count of position rows cascade-deleted with the portfolio.",
   )
+
+
+# ── Issuers and received reports ─────────────────────────────────────────
+
+
+class CreateIssuerRequest(BaseModel):
+  """CQRS body for `POST /operations/create-issuer`.
+
+  An issuer is a company the fund holds or follows that does not keep its
+  books on this platform: an entity in the fund's graph that securities and
+  received reports attach to. A company that shares a report in from its own
+  graph gets its entity from the share instead.
+  """
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {"name": "Acme Co", "legal_name": "Acme Company, Inc.", "tax_id": "12-3456789"}
+      ]
+    }
+  )
+
+  name: str = Field(..., min_length=1, description="The company's name.")
+  legal_name: str | None = Field(None, description="Its legal name, when different.")
+  lei: str | None = Field(None, description="Legal Entity Identifier, if it has one.")
+  cik: str | None = Field(None, description="SEC Central Index Key, if it has one.")
+  tax_id: str | None = Field(
+    None, description="Tax identifier (an EIN in the United States)."
+  )
+  entity_type: str | None = Field(
+    None, description="Legal form, e.g. `corporation`, `llc`, `partnership`."
+  )
+  industry: str | None = Field(None, description="Industry, as free text.")
+  website: str | None = Field(None, description="The company's website.")
+
+
+class IssuerResponse(BaseModel):
+  """An issuer entity in the fund's graph."""
+
+  id: str = Field(..., description="Entity ID; pass it to `ingest-report`.")
+  name: str = Field(..., description="The company's name.")
+  legal_name: str | None = Field(None, description="Its legal name.")
+  lei: str | None = Field(None, description="Legal Entity Identifier.")
+  cik: str | None = Field(None, description="SEC Central Index Key.")
+  tax_id: str | None = Field(None, description="Tax identifier.")
+  entity_type: str | None = Field(None, description="Legal form.")
+
+
+class ReportConceptRow(BaseModel):
+  """A concept the report uses that the library may not have."""
+
+  qname: str = Field(
+    ...,
+    description=(
+      "Prefixed name, e.g. `rs-gaap:Assets` for a library concept or "
+      "`kpi:Headcount` for one of the firm's own. A prefix other than a "
+      "library's must be bound in `namespaces`."
+    ),
+  )
+  label: str | None = Field(None, description="The line's wording in the report.")
+  kind: str = Field(
+    "monetary",
+    description=(
+      "The value's type: `monetary`, `shares`, `percent`, `pure`, `decimal`, "
+      "`integer`, `string`, `text_block`, `date` or `boolean`."
+    ),
+  )
+  period_type: str | None = Field(
+    None,
+    description="`instant` for a balance at a date, `duration` for a flow over a period.",
+  )
+  balance: str | None = Field(None, description="`debit` or `credit`, when monetary.")
+  abstract: bool = Field(
+    False, description="True for a heading that carries no value of its own."
+  )
+
+
+class ReportLineRow(BaseModel):
+  """One line of a section, top to bottom."""
+
+  concept: str = Field(..., description="The line's concept qname.")
+  parent: str | None = Field(
+    None,
+    description="The qname of the line this one sits under; omit for a top line.",
+  )
+  weight: float | None = Field(
+    None,
+    description=(
+      "Set to make the line a term of its parent's total: `1` adds, `-1` "
+      "subtracts. The total is then checked against its terms."
+    ),
+  )
+
+
+class ReportSectionRow(BaseModel):
+  """A statement or a table of the report."""
+
+  name: str = Field(..., description="The section's title, e.g. `Balance Sheet`.")
+  block_type: str | None = Field(
+    None,
+    description=(
+      "`balance_sheet`, `income_statement`, `cash_flow_statement` or "
+      "`equity_statement` for a primary statement; omit for any other table."
+    ),
+  )
+  head: str | None = Field(
+    None,
+    description=(
+      "An abstract concept the section's top lines hang from. Required when "
+      "a top line has nothing beneath it, as in a flat KPI table."
+    ),
+  )
+  lines: list[ReportLineRow] = Field(..., description="The lines, in order.")
+
+
+class ReportFactRow(BaseModel):
+  """One value read from the report."""
+
+  concept: str = Field(..., description="The concept qname the value is for.")
+  value: float | str | None = Field(
+    ..., description="The number, or the text for a non-numeric concept."
+  )
+  end: date = Field(
+    ..., description="The date the value is as of, or the last day of its period."
+  )
+  start: date | None = Field(
+    None, description="The first day of the period; omit for a balance at a date."
+  )
+  unit: str | None = Field(
+    None,
+    description="A currency code (`USD`), `shares` or `pure`. Required for a number.",
+  )
+  decimals: int | None = Field(
+    None,
+    description=(
+      "Precision of the number: `0` to the unit, `-3` to the thousand, `2` to "
+      "the cent. Totals are checked to this precision."
+    ),
+  )
+  source: str | None = Field(
+    None,
+    description=(
+      "Where the value was read from: the document, then `#page=3` for a PDF "
+      "or `#sheet=BS&cell=B10` for a workbook, with `&label=` and the line's "
+      "wording when useful. Kept on the fact."
+    ),
+  )
+
+
+class ReportRowsInput(BaseModel):
+  """A report as rows, for the server to assemble into a holon."""
+
+  period_end: date = Field(..., description="The last day the report covers.")
+  kind: str = Field(
+    "monthly-package",
+    description=(
+      "What the report is, e.g. `monthly-package`, `quarterly-financials`. A "
+      "later ingest for the same entity, period end and kind replaces this one."
+    ),
+  )
+  attributed_to: str | None = Field(
+    None, description="Who or what read the values out of the source document."
+  )
+  namespaces: dict[str, str] = Field(
+    default_factory=dict,
+    description="Prefix to namespace URI, for concept prefixes that are not a library's.",
+  )
+  concepts: list[ReportConceptRow] = Field(
+    ..., description="Every concept the facts and sections use, each declared once."
+  )
+  sections: list[ReportSectionRow] = Field(
+    default_factory=list, description="The report's statements and tables."
+  )
+  facts: list[ReportFactRow] = Field(..., min_length=1, description="The values.")
+
+
+class IngestReportRequest(BaseModel):
+  """CQRS body for `POST /operations/ingest-report`.
+
+  Give exactly one of `holon` (a report file already in the holon format) or
+  `report` (rows read from a PDF or a workbook, which the server assembles
+  into a holon). Either way the holon is checked, stored as the record of
+  what was received, and loaded onto the entity.
+  """
+
+  entity_id: str = Field(
+    ..., description="The entity the report is about (see `create-issuer`)."
+  )
+  holon: str | None = Field(
+    None,
+    max_length=25 * 1024 * 1024,
+    description="The text of a `.holon.jsonld` report file.",
+  )
+  report: ReportRowsInput | None = Field(None, description="The report as rows.")
+  name: str | None = Field(None, description="A display name for the report.")
+  require_source: bool = Field(
+    False, description="Refuse the report unless every value names its source."
+  )
+  dry_run: bool = Field(
+    False,
+    description=("Check the report and say what would load, without writing anything."),
+  )
+
+
+class IngestReportResponse(BaseModel):
+  """What an ingest loaded, or on a dry run what it would load."""
+
+  dry_run: bool = Field(..., description="True when nothing was written.")
+  report_id: str | None = Field(
+    None, description="The report's ID in this graph; null on a dry run."
+  )
+  entity_id: str = Field(..., description="The entity the report hangs on.")
+  period_end: date = Field(..., description="The last day the report covers.")
+  kind: str = Field(..., description="What the report is.")
+  fact_count: int = Field(..., description="Values loaded as facts.")
+  section_count: int = Field(..., description="Statements and tables loaded.")
+  calculations_checked: int = Field(
+    ..., description="Totals that were compared with their terms; all agreed."
+  )
+  balance_checked: bool = Field(
+    ..., description="Whether total assets were compared with liabilities and equity."
+  )
+  concepts_added: list[str] = Field(
+    default_factory=list,
+    description="Concepts the graph did not have, added to its received-reports vocabulary.",
+  )
+  dimensional_facts_not_loaded: int = Field(
+    0,
+    description=(
+      "Values broken out by a dimension. They stay in the stored file; the "
+      "graph holds the report's totals."
+    ),
+  )
+  replaced_report_ids: list[str] = Field(
+    default_factory=list,
+    description="Earlier ingests for the same entity, period end and kind, now replaced.",
+  )

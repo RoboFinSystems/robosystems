@@ -28,12 +28,16 @@ from robosystems.middleware.operations import (
 )
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.extensions.investor import (
+  CreateIssuerRequest,
   CreatePortfolioBlockRequest,
   CreateSecurityRequest,
   DeletePortfolioBlockOperation,
   DeletePortfolioBlockResponse,
   DeleteResult,
   DeleteSecurityOperation,
+  IngestReportRequest,
+  IngestReportResponse,
+  IssuerResponse,
   PortfolioBlockEnvelope,
   SecurityResponse,
   UpdatePortfolioBlockOperation,
@@ -56,6 +60,16 @@ from robosystems.operations.roboinvestor.commands.portfolio_block import (
 from robosystems.operations.roboinvestor.commands.portfolio_block import (
   update_portfolio_block as cmd_update_portfolio_block,
 )
+from robosystems.operations.roboinvestor.commands.reports import (
+  IngestRequestError,
+  IssuerAlreadyExistsError,
+)
+from robosystems.operations.roboinvestor.commands.reports import (
+  create_issuer as cmd_create_issuer,
+)
+from robosystems.operations.roboinvestor.commands.reports import (
+  ingest_report as cmd_ingest_report,
+)
 from robosystems.operations.roboinvestor.commands.securities import (
   EntityNotFoundError,
 )
@@ -70,6 +84,13 @@ from robosystems.operations.roboinvestor.commands.securities import (
 )
 from robosystems.operations.roboinvestor.commands.securities import (
   update_security as cmd_update_security,
+)
+from robosystems.operations.roboledger.commands.report_import import (
+  ReportImportEntityNotFoundError,
+  ReportImportRefusedError,
+)
+from robosystems.operations.taxonomy_block.validators import (
+  TaxonomyBlockValidationError,
 )
 
 router = APIRouter()
@@ -259,5 +280,86 @@ delete_security_op = _registrar.register(
     error_map={SecurityMasterNotFoundError: (404, lambda _e: "Security not found.")},
     mark_stale_reason="security_deleted",
     requires_created_by=False,
+  )
+)
+
+
+# ── Issuers and received reports ──────────────────────────────────────────
+
+
+def _amount(value: object) -> str:
+  if not isinstance(value, (int, float)):
+    return str(value)
+  return f"{value:,.0f}" if float(value).is_integer() else f"{value:,.2f}"
+
+
+def _reason(problem: dict) -> str:
+  """One refusal reason as a sentence, with its amounts written out."""
+  if problem.get("code") == "does_not_foot":
+    return (
+      f"{problem.get('concept')} is reported as {_amount(problem.get('reported'))} "
+      f"and its terms sum to {_amount(problem.get('computed'))}."
+    )
+  if problem.get("code") == "does_not_balance":
+    return (
+      f"Total assets are {_amount(problem.get('assets'))} and total liabilities "
+      f"and equity are {_amount(problem.get('liabilities_and_equity'))}."
+    )
+  return str(problem.get("message"))
+
+
+def _refusal(exc: ReportImportRefusedError) -> str:
+  reasons = " ".join(_reason(p) for p in exc.problems)
+  return f"The report was not loaded. {reasons}"
+
+
+create_issuer_op = _registrar.register(
+  OperationSpec(
+    name="create-issuer",
+    summary="Create Issuer",
+    description=(
+      "Add a company the fund holds or follows that keeps its books "
+      "elsewhere. The issuer is an entity in this graph: securities attach "
+      "to it with `create-security`, and its reports with `ingest-report`. A "
+      "company that shares a report in from its own graph gets its entity "
+      "from the share, so it needs no issuer created here."
+    ),
+    command=cmd_create_issuer,
+    request_model=CreateIssuerRequest,
+    result_type=IssuerResponse,
+    error_map={IssuerAlreadyExistsError: (409, str)},
+    mark_stale_reason="issuer_created",
+  )
+)
+
+ingest_report_op = _registrar.register(
+  OperationSpec(
+    name="ingest-report",
+    summary="Ingest Report",
+    description=(
+      "Load a report a company sent onto its entity. Give the report as "
+      "`holon` (the text of a `.holon.jsonld` file) or as `report` (rows read "
+      "from a PDF or a workbook: concepts, sections and values with the page "
+      "or cell each came from), which is assembled into a holon here. The "
+      "holon is checked before anything is written: every value resolves, "
+      "duplicate values agree, every total foots to its terms, and total "
+      "assets equal total liabilities and equity. A report that fails is "
+      "refused with each reason and nothing is loaded. One that passes is "
+      "stored as the record of what was received, and its facts become "
+      "queryable from every holding in the company. A second ingest for the "
+      "same entity, period end and kind replaces the first. Set `dry_run` to "
+      "run the checks and see what would load without writing."
+    ),
+    command=cmd_ingest_report,
+    request_model=IngestReportRequest,
+    result_type=IngestReportResponse,
+    requires_graph_id=True,
+    error_map={
+      IngestRequestError: (422, str),
+      ReportImportEntityNotFoundError: (404, str),
+      ReportImportRefusedError: (422, _refusal),
+      TaxonomyBlockValidationError: (422, str),
+    },
+    mark_stale_reason="report_ingested",
   )
 )

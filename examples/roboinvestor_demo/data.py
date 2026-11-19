@@ -281,7 +281,7 @@ def _preview() -> None:
   print(f"    {'':<44} {'':>12} {'cost basis':<9} ${opening / 100:>14,.2f}")
 
   added = sum(p.cost_basis for p in ADDED_POSITIONS)
-  print(f"\n  Deltas (one atomic update-portfolio-block call):")
+  print("\n  Deltas (one atomic update-portfolio-block call):")
   for pos in ADDED_POSITIONS:
     spec = security_by_key(pos.security_key)
     print(f"    add      {spec.name[:52]:<52} ${pos.cost_basis / 100:>14,.2f}")
@@ -295,11 +295,187 @@ def _preview() -> None:
     p.cost_basis for p in INITIAL_POSITIONS if p.security_key == "aldergrove_seed"
   )
   print(f"\n  Ending cost basis: ${(opening + added - disposed) / 100:,.2f}")
-  print(
-    f"  Active positions:  "
-    f"{len(INITIAL_POSITIONS) + len(ADDED_POSITIONS) - 1}\n"
-  )
+  print(f"  Active positions:  {len(INITIAL_POSITIONS) + len(ADDED_POSITIONS) - 1}\n")
 
 
 if __name__ == "__main__":
   _preview()
+
+
+# ---------------------------------------------------------------------------
+# A company that is not on the platform: it sends a package every month
+# ---------------------------------------------------------------------------
+
+# The holding whose issuer keeps its books elsewhere.
+OFF_PLATFORM_SECURITY_KEY = "halyard_safe"
+OFF_PLATFORM_ISSUER = {
+  "name": "Halyard Robotics, Inc.",
+  "legal_name": "Halyard Robotics, Inc.",
+  "tax_id": "84-1122334",
+  "entity_type": "corporation",
+  "industry": "Industrial robotics",
+}
+PACKAGE_PERIOD_END = date(2026, 9, 30)
+PACKAGE_PERIOD_START = date(2026, 9, 1)
+PACKAGE_KPI_NAMESPACE = "https://meridian.example/taxonomy/kpi/v1/"
+# What the fund's own vocabulary adds to the library.
+PACKAGE_KPIS = ["kpi:Headcount", "kpi:UnitsShipped"]
+
+
+def monthly_package() -> dict:
+  """Halyard's September package as rows: a balance sheet and an income
+  statement on library concepts, two KPIs of the fund's own, and the cell
+  each value was read from."""
+
+  def money(qname: str, label: str, period: str, balance: str) -> dict:
+    return {"qname": qname, "label": label, "period_type": period, "balance": balance}
+
+  def bs(concept: str, value: float, cell: str) -> dict:
+    return {
+      "concept": concept,
+      "value": value,
+      "end": PACKAGE_PERIOD_END.isoformat(),
+      "unit": "USD",
+      "decimals": 0,
+      "source": f"halyard-2026-09.xlsx#sheet=Balance%20Sheet&cell={cell}",
+    }
+
+  def pl(concept: str, value: float, cell: str) -> dict:
+    return {
+      "concept": concept,
+      "value": value,
+      "start": PACKAGE_PERIOD_START.isoformat(),
+      "end": PACKAGE_PERIOD_END.isoformat(),
+      "unit": "USD",
+      "decimals": 0,
+      "source": f"halyard-2026-09.xlsx#sheet=P%26L&cell={cell}",
+    }
+
+  def kpi(concept: str, value: float, page: int) -> dict:
+    return {
+      "concept": concept,
+      "value": value,
+      "end": PACKAGE_PERIOD_END.isoformat(),
+      "unit": "pure",
+      "decimals": 0,
+      "source": f"halyard-2026-09-board.pdf#page={page}",
+    }
+
+  return {
+    "period_end": PACKAGE_PERIOD_END.isoformat(),
+    "kind": "monthly-package",
+    "attributed_to": "roboinvestor-demo",
+    "namespaces": {"kpi": PACKAGE_KPI_NAMESPACE},
+    "concepts": [
+      {"qname": "kpi:BalanceSheetHead", "label": "Balance Sheet", "abstract": True},
+      money("rs-gaap:Assets", "Total assets", "instant", "debit"),
+      money(
+        "rs-gaap:CashAndCashEquivalentsAtCarryingValue", "Cash", "instant", "debit"
+      ),
+      money("rs-gaap:AccountsReceivableNetCurrent", "Receivables", "instant", "debit"),
+      money("rs-gaap:InventoryNet", "Inventory", "instant", "debit"),
+      money(
+        "rs-gaap:LiabilitiesAndStockholdersEquity",
+        "Total liabilities and equity",
+        "instant",
+        "credit",
+      ),
+      money("rs-gaap:Liabilities", "Total liabilities", "instant", "credit"),
+      money("rs-gaap:StockholdersEquity", "Total equity", "instant", "credit"),
+      money("rs-gaap:NetIncomeLoss", "Net loss", "duration", "credit"),
+      money("rs-gaap:Revenues", "Revenue", "duration", "credit"),
+      money(
+        "rs-gaap:CostsAndExpenses", "Total costs and expenses", "duration", "debit"
+      ),
+      {"qname": "kpi:KpiHead", "label": "Operating KPIs", "abstract": True},
+      {
+        "qname": "kpi:Headcount",
+        "label": "Headcount",
+        "kind": "integer",
+        "period_type": "instant",
+      },
+      {
+        "qname": "kpi:UnitsShipped",
+        "label": "Units shipped",
+        "kind": "integer",
+        "period_type": "instant",
+      },
+    ],
+    "sections": [
+      {
+        "name": "Balance Sheet",
+        "block_type": "balance_sheet",
+        "head": "kpi:BalanceSheetHead",
+        "lines": [
+          {"concept": "rs-gaap:Assets"},
+          {
+            "concept": "rs-gaap:CashAndCashEquivalentsAtCarryingValue",
+            "parent": "rs-gaap:Assets",
+            "weight": 1,
+          },
+          {
+            "concept": "rs-gaap:AccountsReceivableNetCurrent",
+            "parent": "rs-gaap:Assets",
+            "weight": 1,
+          },
+          {"concept": "rs-gaap:InventoryNet", "parent": "rs-gaap:Assets", "weight": 1},
+          {"concept": "rs-gaap:LiabilitiesAndStockholdersEquity"},
+          {
+            "concept": "rs-gaap:Liabilities",
+            "parent": "rs-gaap:LiabilitiesAndStockholdersEquity",
+            "weight": 1,
+          },
+          {
+            "concept": "rs-gaap:StockholdersEquity",
+            "parent": "rs-gaap:LiabilitiesAndStockholdersEquity",
+            "weight": 1,
+          },
+        ],
+      },
+      {
+        "name": "Income Statement",
+        "block_type": "income_statement",
+        "lines": [
+          {"concept": "rs-gaap:NetIncomeLoss"},
+          {
+            "concept": "rs-gaap:Revenues",
+            "parent": "rs-gaap:NetIncomeLoss",
+            "weight": 1,
+          },
+          {
+            "concept": "rs-gaap:CostsAndExpenses",
+            "parent": "rs-gaap:NetIncomeLoss",
+            "weight": -1,
+          },
+        ],
+      },
+      {
+        "name": "Operating KPIs",
+        "head": "kpi:KpiHead",
+        "lines": [{"concept": q} for q in PACKAGE_KPIS],
+      },
+    ],
+    "facts": [
+      bs("rs-gaap:Assets", 4_180_000, "C18"),
+      bs("rs-gaap:CashAndCashEquivalentsAtCarryingValue", 2_950_000, "C6"),
+      bs("rs-gaap:AccountsReceivableNetCurrent", 410_000, "C7"),
+      bs("rs-gaap:InventoryNet", 820_000, "C8"),
+      bs("rs-gaap:LiabilitiesAndStockholdersEquity", 4_180_000, "C34"),
+      bs("rs-gaap:Liabilities", 1_240_000, "C26"),
+      bs("rs-gaap:StockholdersEquity", 2_940_000, "C32"),
+      pl("rs-gaap:NetIncomeLoss", -265_000, "C29"),
+      pl("rs-gaap:Revenues", 385_000, "C5"),
+      pl("rs-gaap:CostsAndExpenses", 650_000, "C22"),
+      kpi("kpi:Headcount", 31, 4),
+      kpi("kpi:UnitsShipped", 12, 4),
+    ],
+  }
+
+
+def package_that_does_not_foot() -> dict:
+  """The same package with cash mistyped, as a reader might."""
+  package = monthly_package()
+  for fact in package["facts"]:
+    if fact["concept"] == "rs-gaap:CashAndCashEquivalentsAtCarryingValue":
+      fact["value"] = 2_590_000
+  return package
