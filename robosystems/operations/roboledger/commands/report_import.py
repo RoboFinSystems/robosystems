@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 from sqlalchemy.orm import Session
 from xbrlkit.check import check_report
 from xbrlkit.deserialize import from_holon_report
@@ -48,6 +48,7 @@ from robosystems.taxonomy.writer import pull_library_elements
 UPLOAD_SOURCE_SYSTEM = "report_upload"
 # The library a received report's own concepts extend.
 BOOK_STANDARD = "rs-gaap"
+RECEIVED_ELEMENT_SOURCE = "linked"
 RECEIVED_TAXONOMY_NAME = "Received Reports"
 RECEIVED_TAXONOMY_KEY = "received_reports"
 MAX_HOLON_BYTES = 25 * 1024 * 1024
@@ -572,6 +573,15 @@ def _write_vocabulary(
       created_by,
     )
   session.flush()
+  if new_qnames:
+    # A received concept is not an account of this graph: ``linked`` keeps it
+    # out of the chart of accounts and gives the graph its qname as written.
+    session.execute(
+      update(Element)
+      .where(Element.taxonomy_id == taxonomy_id, Element.qname.in_(new_qnames))
+      .values(source=RECEIVED_ELEMENT_SOURCE)
+    )
+    session.flush()
   extension = session.get(Taxonomy, taxonomy_id)
   assert extension is not None
   by_name = dict(

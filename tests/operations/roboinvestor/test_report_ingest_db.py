@@ -30,6 +30,7 @@ from robosystems.operations.roboinvestor.commands.reports import (
 from robosystems.operations.roboledger.commands.report_import import (
   ReportImportRefusedError,
 )
+from robosystems.operations.roboledger.reads.reports import list_reports
 
 pytestmark = pytest.mark.integration
 
@@ -214,6 +215,29 @@ def test_rows_become_a_stored_holon_and_then_facts(fund):
     ("rs-gaap:Assets", 1000.0, "USD"),
     ("kpi:Headcount", 42.0, "pure"),
   }
+
+
+def test_an_ingested_report_is_listed_for_the_fund_and_for_its_issuer(fund):
+  """The fund's own list shows what it received about a company, as it shows
+  a shared report; the issuer's list shows only that company's."""
+  session = fund["session"]
+  session.add(
+    Entity(id="ent_fund", name="Meridian Fund I", is_parent=True, created_by="usr_1")
+  )
+  other = create_issuer(
+    session, CreateIssuerRequest(name="Borealis Ltd"), created_by="usr_1"
+  )
+  session.flush()
+  result = _ingest(fund, report=_rows())
+
+  listed = list_reports(session).reports
+  assert [(r.id, r.origin, r.entity_name) for r in listed] == [
+    (result.report_id, "uploaded", "Acme Co")
+  ]
+  assert [r.id for r in list_reports(session, entity_id=fund["issuer"].id).reports] == [
+    result.report_id
+  ]
+  assert list_reports(session, entity_id=other.id).reports == []
 
 
 def test_a_dry_run_checks_and_writes_nothing(fund):

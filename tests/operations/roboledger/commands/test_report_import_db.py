@@ -300,6 +300,13 @@ def test_a_package_lands_as_an_uploaded_report_on_its_entity(tenant):
     "kpi:Headcount",
     "kpi:KpiHead",
   ]
+  # A received concept is not one of this graph's accounts.
+  session.expire_all()
+  assert set(
+    session.execute(
+      select(Element.source).where(Element.qname.in_(result.concepts_added))
+    ).scalars()
+  ) == {"linked"}
   library = session.execute(
     select(Taxonomy).where(Taxonomy.standard == "rs-gaap")
   ).scalar_one()
