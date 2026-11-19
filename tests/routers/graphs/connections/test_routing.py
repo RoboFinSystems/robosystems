@@ -65,5 +65,6 @@ def test_routes_follow_documented_order():
     "getConnection",
     "deleteConnection",
     "syncConnection",
+    "reportConnectionSync",
     "setConnectionWritePolicy",
   ]

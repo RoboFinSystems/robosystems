@@ -6,7 +6,7 @@ sync endpoint and the `sync-connection` MCP tool.
 
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy.exc import ProgrammingError
@@ -506,6 +506,50 @@ class ConnectionService:
     finally:
       if session_created:
         session.close()
+
+
+async def report_external_sync(
+  connection_id: str,
+  graph_id: str,
+  *,
+  succeeded: bool,
+  counts: dict[str, int],
+  message: str | None,
+  db_session: Session | None = None,
+) -> dict[str, Any] | None:
+  """Record an external integration's own report of a run.
+
+  A success is the connection's `last_sync`; a failure is recorded and
+  leaves it. Reports are not ordered or locked: the last one written is the
+  one shown, and `last_sync` only ever moves forward to now. Returns None
+  when the connection is missing or on another graph. Raises ValueError for a connection the platform syncs itself, whose
+  freshness is not the caller's to state.
+  """
+  session = db_session or SessionFactory()
+  try:
+    conn = Connection.get_by_id(connection_id, session)
+    if conn is None or conn.graph_id != graph_id:
+      return None
+    if (conn.provider or "").lower() != "external":
+      raise ValueError(
+        f"The platform runs a {conn.provider} connection's sync and records "
+        "it; only an external source reports its own."
+      )
+    result: dict[str, Any] = {
+      "status": "succeeded" if succeeded else "failed",
+      "synced_at": datetime.now(UTC).isoformat(),
+      "reported": True,
+      "counts": counts,
+      "message": message,
+    }
+    if succeeded:
+      conn.update_last_sync(session, result)
+    else:
+      conn.record_sync_result(session, result)
+    return conn.to_dict()
+  finally:
+    if db_session is None:
+      session.close()
 
 
 # ---------------------------------------------------------------------------

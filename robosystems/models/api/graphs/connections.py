@@ -1,12 +1,14 @@
 """Shared connection models for all providers."""
 
 from datetime import date, datetime
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import (
   BaseModel,
   ConfigDict,
   Field,
+  NonNegativeInt,
+  StringConstraints,
   ValidationInfo,
   field_validator,
   model_validator,
@@ -303,6 +305,39 @@ class ConnectionResponse(BaseModel):
     ),
   )
   metadata: dict[str, object] = Field(..., description="Provider-specific metadata")
+
+
+class ReportSyncRequest(BaseModel):
+  """An external integration's report of a run it just finished.
+
+  The platform runs no sync for an external source, so the integration says
+  when its last run was: a successful report is the connection's
+  `last_sync`, which a period close reads to tell whether the books it
+  mirrors are current."""
+
+  status: Literal["succeeded", "failed"] = Field(
+    ...,
+    description=(
+      "'succeeded' moves `last_sync` to now. 'failed' records the outcome "
+      "and leaves `last_sync` where it was."
+    ),
+  )
+  counts: dict[Annotated[str, StringConstraints(max_length=64)], NonNegativeInt] = (
+    Field(
+      default_factory=dict,
+      max_length=50,
+      description=(
+        "What the run did, as the integration counts it (for example "
+        "`entries_sent`, `entries_replaced`, `entries_withdrawn`). Shown with "
+        "the connection; nothing reads the names."
+      ),
+    )
+  )
+  message: str | None = Field(
+    None,
+    max_length=500,
+    description="A line about the run: the window it covered, or why it failed.",
+  )
 
 
 class SetWritePolicyRequest(BaseModel):
