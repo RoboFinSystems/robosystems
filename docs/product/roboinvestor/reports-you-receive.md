@@ -7,6 +7,8 @@ section: Get started
 
 A company that keeps its books in RoboLedger can send you a report. You receive the statements they chose to publish, such as the balance sheet, income statement, cash flow and statement of equity, with any notes attached. You do not receive their transactions, customers or journal. That is the point: they share a snapshot, not the ledger.
 
+A company that is not on RoboLedger can still send you a report as a file. See [Load a report from a PDF or a spreadsheet](reports-from-a-file.md).
+
 ## How they send it
 
 Give them your graph ID, from the graph's **Dashboard** at [robosystems.ai](https://robosystems.ai). They add it to a publish list and share from the report; how is in the [RoboLedger reports guide](https://roboledger.ai/docs/reports-and-sharing). The company then appears in your graph, and the report arrives with its statements, facts and files. Nothing is copied the other way.
@@ -15,7 +17,7 @@ If they withdraw the share, the report is removed from your graph. Your own grap
 
 ## In the app
 
-**Portfolio Reports** lists the reports that have been shared into this graph. Open one to read its statements and notes. The viewer shows the copy you received, with who shared it and when.
+**Portfolio Reports** lists the reports this graph has received: those shared with you, and any [loaded from a file](reports-from-a-file.md). Open one to read its statements and notes. The viewer shows the copy you received, with who shared it and when.
 
 **Ask about this report** answers questions from the report inside the app. It runs on RoboSystems' own AI, so it uses this graph's credits. Asking your own AI assistant doesn't.
 

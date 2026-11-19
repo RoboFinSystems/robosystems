@@ -4,7 +4,7 @@ description: Private-company portfolios, reports shared from RoboLedger, and pub
 order: 0
 ---
 
-RoboInvestor: equity research on public companies, your fund's positions with their terms, and the reports your portfolio companies share from RoboLedger. It is the holder's view of a company: what you own, in whom, and the statements they send you. Today it covers private-company portfolios, reports shared from a RoboLedger graph, the SEC filings of public companies, and research written from those filings. Building next: positions linked to the ledger, brokerage sync, and portfolio analytics.
+RoboInvestor: equity research on public companies, your fund's positions with their terms, and the reports your portfolio companies share from RoboLedger. It is the holder's view of a company: what you own, in whom, and the statements they send you. Today it covers private-company portfolios, reports shared from a RoboLedger graph or loaded from a file a company sent, the SEC filings of public companies, and research written from those filings. Building next: positions linked to the ledger, brokerage sync, and portfolio analytics.
 
 Sign up at [roboinvestor.ai](https://roboinvestor.ai/register). One account covers RoboSystems, RoboLedger and RoboInvestor. Creating a graph, your password, API keys and billing live in your RoboSystems account at [robosystems.ai](https://robosystems.ai). The SEC filings subscription can also be bought here, under **Repositories**.
 
@@ -12,7 +12,8 @@ Sign up at [roboinvestor.ai](https://roboinvestor.ai/register). One account cove
 
 1. [Track private-company holdings](your-portfolio.md): portfolios, securities and positions, and a link back to the issuer when you have one.
 2. [Reports shared with you](reports-you-receive.md): a portfolio company sends statements from RoboLedger. You get the report, never their ledger.
-3. [Public companies and SEC filings](research-and-sec-filings.md): the research lane, and the SEC filings graph your AI assistant can read.
+3. [Load a report from a PDF or a spreadsheet](reports-from-a-file.md): a company that isn't on RoboLedger sends a board package, and your AI assistant reads it into your graph.
+4. [Public companies and SEC filings](research-and-sec-filings.md): the research lane, and the SEC filings graph your AI assistant can read.
 
 ## Connect an AI client
 
