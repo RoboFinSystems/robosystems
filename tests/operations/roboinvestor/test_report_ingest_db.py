@@ -538,3 +538,26 @@ def test_a_statement_laid_out_from_the_library_takes_the_firms_own_lines(fund):
   assert ("rs-gaap:AssetsCurrent", "acme:Sweep") in arcs
   assert ("rs-gaap:Assets", "rs-gaap:AccountsReceivableNetCurrent") in arcs
   assert ("rs-gaap:AssetsCurrent", "rs-gaap:AccountsReceivableNetCurrent") not in arcs
+
+
+def test_a_subtotal_given_its_own_line_keeps_the_lines_beneath_it(fund):
+  rows = _values_only()
+  rows["sections"][0] |= {
+    "layout": "library",
+    "lines": [
+      {"concept": "rs-gaap:AssetsCurrent", "parent": "rs-gaap:Assets", "weight": 1}
+    ],
+  }
+
+  result = _ingest(fund, report=rows)
+
+  assert result.calculations_checked == 5
+  model, _ = from_holon_report(fund["s3"].upload_string.call_args.kwargs["content"])
+  arcs = {
+    (arc.from_qname, arc.to_qname)
+    for network in model.networks
+    if network.kind == "calculation"
+    for arc in network.arcs
+  }
+  assert ("rs-gaap:AssetsCurrent", "rs-gaap:AccountsReceivableNetCurrent") in arcs
+  assert ("rs-gaap:Assets", "rs-gaap:AccountsReceivableNetCurrent") not in arcs

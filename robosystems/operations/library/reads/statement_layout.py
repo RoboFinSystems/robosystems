@@ -13,6 +13,7 @@ concepts its curation excludes, and a received report may use any of them.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from sqlalchemy import text
@@ -146,7 +147,7 @@ def _nearest_reported(
   placed: set[str],
   parents: dict[str, set[str]],
   calculation: dict[tuple[str, str], tuple[float, float]],
-  weight,
+  weight: Callable[[str, str], float],
 ) -> tuple[str | None, float | None]:
   """The closest ancestor that is itself reported, and the product of the
   weights on the way up to it. A calculation arc is preferred at each step."""

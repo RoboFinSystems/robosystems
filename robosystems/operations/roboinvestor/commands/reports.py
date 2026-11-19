@@ -296,11 +296,13 @@ def _sections(
           }
         )
         continue
-      # A line given wins: the library places everything else around it.
+      # A line given wins for its own placement; the lines the library hangs
+      # beneath it stay beneath it.
       given = {line.concept for line in lines}
       laid_out = [
         LineRow(concept=line.concept, parent=line.parent, weight=line.weight)
-        for line in lay_out_statement(session, section.block_type, reported - given)
+        for line in lay_out_statement(session, section.block_type, reported)
+        if line.concept not in given
       ]
       if not laid_out:
         problems.append(
