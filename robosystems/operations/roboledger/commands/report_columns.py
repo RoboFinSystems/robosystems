@@ -62,7 +62,7 @@ def closed_through_end(session: Session, entity_id: str) -> date | None:
 def refreshable(report_def: Report, *, forced: bool = False) -> bool:
   """A report that moves with the books: its own and not final, and — unless
   a regenerate is driving — generated."""
-  if report_def.source_report_id is not None:
+  if report_def.is_received:
     return False
   if report_def.filing_status in {"filed", "archived"}:
     return False
@@ -379,7 +379,7 @@ def freeze_reports_for_close(session: Session, *, entity_id: str, actor_id: str)
     text(
       "SELECT id FROM reports "
       "WHERE (entity_id = :entity OR entity_id IS NULL) "
-      "  AND source_report_id IS NULL "
+      "  AND origin = 'authored' "
       "  AND filing_status NOT IN ('filed', 'archived') "
       "  AND generation_status IN ('complete', 'published')"
     ),
@@ -415,7 +415,7 @@ def unfreeze_reports_after_reopen(session: Session, *, entity_id: str) -> int:
       "WHERE frozen_at IS NOT NULL AND period_end > :cutoff "
       "  AND fact_set_id IN ("
       "    SELECT fs.id FROM fact_sets fs JOIN reports r ON r.id = fs.report_id "
-      "    WHERE fs.entity_id = :entity AND r.source_report_id IS NULL "
+      "    WHERE fs.entity_id = :entity AND r.origin = 'authored' "
       "      AND r.filing_status NOT IN ('filed', 'archived'))"
     ),
     {"cutoff": cutoff or date.min, "entity": entity_id},
