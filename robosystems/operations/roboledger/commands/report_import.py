@@ -21,7 +21,7 @@ from xbrlkit.check import check_report
 from xbrlkit.deserialize import from_holon_report
 from xbrlkit.deserialize.holon import HolonError
 from xbrlkit.information_block import InformationBlock, fact_membership, plan_blocks
-from xbrlkit.model import Concept, Network, XbrlFact, XbrlModel
+from xbrlkit.model import Arc, Concept, Network, XbrlFact, XbrlModel
 
 from robosystems.config import env
 from robosystems.config.storage.graph import (
@@ -37,7 +37,14 @@ from robosystems.models.api.taxonomy_block import (
   TaxonomyBlockStructureRequest,
   UpdateTaxonomyBlockRequest,
 )
-from robosystems.models.extensions import Element, Fact, Report, Structure, Taxonomy
+from robosystems.models.extensions import (
+  Association,
+  Element,
+  Fact,
+  Report,
+  Structure,
+  Taxonomy,
+)
 from robosystems.models.extensions.entity import Entity
 from robosystems.operations.aws.s3 import S3Client
 from robosystems.operations.roboledger.fact_set import create_fact_set
@@ -527,6 +534,14 @@ def _write_vocabulary(
   )
   new_qnames = sorted(cited - set(known))
   elements = [_element_request(q, model.concepts.get(q)) for q in new_qnames]
+  extension = _received_taxonomy(session)
+  # The extension command resolves a concept in its own vocabulary or in the
+  # library. One this graph holds elsewhere (a firm's own extension, or what a
+  # share brought) is linked here instead, once the structures exist.
+  foreign = _foreign_qnames(
+    session, set(known), {str(library.id), str(extension.id) if extension else ""}
+  )
+  placed_here: list[tuple[str, str, Arc]] = []
 
   structures: list[TaxonomyBlockStructureRequest] = []
   associations: list[TaxonomyBlockAssociationRequest] = []
@@ -546,8 +561,18 @@ def _write_vocabulary(
         metadata={"received": True},
       )
     )
+    # A line shown twice under one parent (a balance at the start and at the
+    # end of a roll-forward) is one association here: the pair is unique.
+    linked: set[tuple[str, str, str]] = set()
     for kind, network in _arcs(block):
       for arc in network.arcs:
+        pair = (kind, arc.from_qname, arc.to_qname)
+        if pair in linked:
+          continue
+        linked.add(pair)
+        if arc.from_qname in foreign or arc.to_qname in foreign:
+          placed_here.append((block.role_uri, kind, arc))
+          continue
         associations.append(
           TaxonomyBlockAssociationRequest(
             structure_ref=structure_name,
@@ -560,7 +585,6 @@ def _write_vocabulary(
           )
         )
 
-  extension = _received_taxonomy(session)
   if extension is None:
     taxonomy_id = reporting_extension.create(
       session,
@@ -619,7 +643,38 @@ def _write_vocabulary(
     ).all()
   )
   structure_ids = {role: str(by_name[name]) for role, name in names.items()}
+  if placed_here:
+    element_ids = _element_ids(session, cited)
+    for role, kind, arc in placed_here:
+      session.add(
+        Association(
+          structure_id=structure_ids[role],
+          from_element_id=element_ids[arc.from_qname],
+          to_element_id=element_ids[arc.to_qname],
+          association_type=kind,
+          order_value=arc.order,
+          arcrole=arc.arcrole,
+          weight=arc.weight if kind == "calculation" else None,
+          created_by=created_by,
+        )
+      )
+    session.flush()
   return extension, structure_ids, new_qnames
+
+
+def _foreign_qnames(
+  session: Session, qnames: set[str], home_taxonomy_ids: set[str]
+) -> set[str]:
+  """The concepts this graph holds outside the given taxonomies."""
+  if not qnames:
+    return set()
+  return {
+    str(qname)
+    for qname, taxonomy_id in session.execute(
+      select(Element.qname, Element.taxonomy_id).where(Element.qname.in_(qnames))
+    ).all()
+    if str(taxonomy_id) not in home_taxonomy_ids
+  }
 
 
 def _element_request(

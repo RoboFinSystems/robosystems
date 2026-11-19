@@ -8,6 +8,7 @@ rows door will write it.
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from unittest.mock import patch
 
@@ -397,6 +398,78 @@ def test_deleting_an_uploaded_report_takes_its_sections_and_keeps_its_concepts(t
   assert session.execute(
     select(Element.id).where(Element.qname == "kpi:Headcount")
   ).scalar_one()
+
+
+def test_a_concept_the_graph_holds_in_another_vocabulary_is_linked_not_copied(
+  tenant,
+):
+  """A firm's own extension, or one a share brought, already names the KPI:
+  the report's section links to that element rather than adding a second."""
+  session = tenant["session"]
+  library = session.execute(
+    select(Taxonomy).where(Taxonomy.standard == "rs-gaap")
+  ).scalar_one()
+  firm = Taxonomy(
+    name="Firm KPIs",
+    taxonomy_type="reporting_extension",
+    parent_taxonomy_id=library.id,
+    created_by="usr_1",
+  )
+  session.add(firm)
+  session.flush()
+  headcount = Element(
+    qname="kpi:Headcount",
+    name="Headcount",
+    period_type="instant",
+    is_monetary=False,
+    taxonomy_id=firm.id,
+    source="linked",
+    created_by="usr_1",
+  )
+  session.add(headcount)
+  session.flush()
+
+  result = import_report(
+    session, GRAPH, holon_text=_holon(), entity_id=ISSUER, created_by="usr_1"
+  )
+
+  assert result.concepts_added == ["kpi:BalanceSheetHead", "kpi:KpiHead"]
+  assert _values(session, result.report_id)["kpi:Headcount"] == 42
+  linked = (
+    session.execute(
+      select(Association).where(Association.to_element_id == headcount.id)
+    )
+    .scalars()
+    .all()
+  )
+  assert [a.association_type for a in linked] == ["presentation"]
+
+
+def test_a_line_shown_twice_under_one_parent_is_one_association(tenant):
+  """A ledger's own roll-forward presents a balance at its start and its end
+  under one parent; the pair is unique in the graph."""
+  session = tenant["session"]
+  document = json.loads(_holon())
+  arcs = [
+    node
+    for graph in document["@graph"]
+    for node in graph.get("@graph", [])
+    if "rs:Association" in str(node.get("@type")) and "RollUp" not in str(node)
+  ]
+  twin = dict(arcs[0])
+  twin["@id"] = twin["@id"] + "-again"
+  next(graph for graph in document["@graph"] if arcs[0] in graph.get("@graph", []))[
+    "@graph"
+  ].append(twin)
+
+  result = import_report(
+    session,
+    GRAPH,
+    holon_text=json.dumps(document),
+    entity_id=ISSUER,
+    created_by="usr_1",
+  )
+  assert result.fact_count == 10 and result.structure_count == 3
 
 
 def test_the_stored_files_follow_the_transaction(tenant):
