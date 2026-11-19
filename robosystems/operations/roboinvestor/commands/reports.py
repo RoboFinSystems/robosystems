@@ -33,6 +33,7 @@ from robosystems.models.api.extensions.investor import (
 )
 from robosystems.models.extensions.entity import Entity
 from robosystems.operations.roboledger.commands.report_import import (
+  ReportImportEntityNotFoundError,
   ReportImportRefusedError,
   import_report,
 )
@@ -171,8 +172,9 @@ def _holon_from_rows(
 ) -> tuple[str, int]:
   """Assemble the rows into a holon; returns it with the fact count sent."""
   entity = session.get(Entity, entity_id)
-  # The importer names a missing entity; a placeholder identity gets it there.
-  identifier, scheme = _identity(entity) if entity else (entity_id, ENTITY_SCHEME)
+  if entity is None:
+    raise ReportImportEntityNotFoundError(f"Entity '{entity_id}' is not in this graph.")
+  identifier, scheme = _identity(entity)
   try:
     model = build_report(
       ReportRows(
@@ -180,8 +182,8 @@ def _holon_from_rows(
         entity=EntityRow(
           identifier=identifier,
           scheme=scheme,
-          name=str(entity.name) if entity else entity_id,
-          legal_name=entity.legal_name if entity else None,
+          name=str(entity.name),
+          legal_name=entity.legal_name,
         ),
         reporting_style=ROWS_REPORTING_STYLE,
         period_end=rows.period_end,

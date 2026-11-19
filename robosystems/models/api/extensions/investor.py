@@ -1258,7 +1258,9 @@ class IngestReportRequest(BaseModel):
     ..., description="The entity the report is about (see `create-issuer`)."
   )
   holon: str | None = Field(
-    None, description="The text of a `.holon.jsonld` report file."
+    None,
+    max_length=25 * 1024 * 1024,
+    description="The text of a `.holon.jsonld` report file.",
   )
   report: ReportRowsInput | None = Field(None, description="The report as rows.")
   name: str | None = Field(None, description="A display name for the report.")

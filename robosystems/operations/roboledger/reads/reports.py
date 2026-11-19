@@ -476,7 +476,8 @@ def own_structures(
   brought = ((report.metadata_ or {}).get("import") or {}).get("structure_ids")
   if report.origin != "uploaded" or brought is None:
     return structures
-  return [s for s in structures if s.id in set(brought)]
+  own = set(brought)
+  return [s for s in structures if s.id in own]
 
 
 def _counterparty(session: Session, entity_id: str | None) -> Entity | None:

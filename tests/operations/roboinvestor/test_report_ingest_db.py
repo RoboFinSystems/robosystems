@@ -28,6 +28,7 @@ from robosystems.operations.roboinvestor.commands.reports import (
   ingest_report,
 )
 from robosystems.operations.roboledger.commands.report_import import (
+  ReportImportEntityNotFoundError,
   ReportImportRefusedError,
 )
 from robosystems.operations.roboledger.reads.reports import list_reports
@@ -54,7 +55,13 @@ def fund():
     conn.execute(text(f"DROP SCHEMA IF EXISTS {GRAPH} CASCADE"))
   try:
     provision_tenant_schema(GRAPH)
-    with patch(_S3) as s3, extensions_session(GRAPH) as session:
+    with (
+      patch(_S3) as s3,
+      patch(
+        "robosystems.operations.roboledger.commands.reports.delete_report_artifacts"
+      ),
+      extensions_session(GRAPH) as session,
+    ):
       s3.return_value.upload_string.return_value = True
       issuer = create_issuer(
         session,
@@ -277,6 +284,20 @@ def test_a_row_that_cannot_be_placed_is_refused_by_name(fund):
   with pytest.raises(ReportImportRefusedError) as refused:
     _ingest(fund, report=rows)
   assert "undeclared concept" in refused.value.problems[0]["message"]
+
+
+def test_rows_for_an_entity_outside_the_graph_are_refused_before_anything_is_built(
+  fund,
+):
+  with pytest.raises(ReportImportEntityNotFoundError):
+    ingest_report(
+      fund["session"],
+      IngestReportRequest.model_validate(
+        {"entity_id": "ent_nobody", "report": _rows()}
+      ),
+      created_by="usr_1",
+      graph_id=GRAPH,
+    )
 
 
 def test_the_request_names_exactly_one_report(fund):

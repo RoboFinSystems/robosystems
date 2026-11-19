@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
-from sqlalchemy import select, text, update
+from sqlalchemy import event, select, text, update
 from sqlalchemy.orm import Session
 from xbrlkit.check import check_report
 from xbrlkit.deserialize import from_holon_report
@@ -91,8 +91,7 @@ class ImportedReport:
   calculations_checked: int = 0
   balance_checked: bool = False
   dry_run: bool = False
-  # Reports this one replaced, whose stored artifacts the caller deletes
-  # after commit.
+  # Reports this one replaced; their stored files go when this commits.
   replaced_report_ids: list[str] = field(default_factory=list)
 
 
@@ -122,11 +121,14 @@ def import_report(
   if not verdict.ok:
     raise ReportImportRefusedError([p.to_dict() for p in verdict.problems])
 
-  entity = session.get(Entity, entity_id)
+  # Locked for the import, so two for one company cannot both find nothing
+  # to replace and leave the period with two reports.
+  entity = session.get(Entity, entity_id, with_for_update=not dry_run)
   if entity is None:
     raise ReportImportEntityNotFoundError(f"Entity '{entity_id}' is not in this graph.")
 
-  loadable = [f for f in model.facts if not f.dims]
+  # A nil value states that nothing was disclosed; there is nothing to load.
+  loadable = [f for f in model.facts if not f.dims and not f.is_nil]
   if not loadable:
     raise ReportImportRefusedError(
       [
@@ -146,7 +148,7 @@ def import_report(
   checks: dict[str, Any] = {
     "calculations_checked": verdict.calculations_checked,
     "balance_checked": bool(verdict.balance_checked),
-    "dimensional_facts_not_loaded": len(model.facts) - len(loadable),
+    "dimensional_facts_not_loaded": sum(1 for f in model.facts if f.dims),
   }
   if dry_run:
     dated = {p.id for p in model.periods if p.end is not None}
@@ -250,6 +252,7 @@ def import_report(
   session.flush()
 
   _store(graph_id, report, holon_text)
+  _settle_artifacts(session, graph_id, str(report.id), replaced.report_ids)
   return ImportedReport(
     report_id=str(report.id),
     entity_id=entity_id,
@@ -261,6 +264,29 @@ def import_report(
     replaced_report_ids=replaced.report_ids,
     **checks,
   )
+
+
+def _settle_artifacts(
+  session: Session, graph_id: str, report_id: str, replaced_report_ids: list[str]
+) -> None:
+  """Tie the stored files to the transaction's outcome: when it commits, the
+  reports this one replaced lose theirs; when it does not, this one's goes,
+  since no row will ever name it."""
+  from robosystems.operations.roboledger.commands.reports import (
+    delete_report_artifacts,
+  )
+
+  def _committed(_session: Session) -> None:
+    event.remove(session, "after_rollback", _rolled_back)
+    if replaced_report_ids:
+      delete_report_artifacts(graph_id, replaced_report_ids)
+
+  def _rolled_back(_session: Session) -> None:
+    event.remove(session, "after_commit", _committed)
+    delete_report_artifacts(graph_id, [report_id])
+
+  event.listen(session, "after_commit", _committed, once=True)
+  event.listen(session, "after_rollback", _rolled_back, once=True)
 
 
 def _read(holon_text: str) -> XbrlModel:

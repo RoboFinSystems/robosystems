@@ -51,6 +51,9 @@ ISSUER = "ent_issuer_acme"
 OCT = date(2026, 10, 31)
 OCT_1 = date(2026, 10, 1)
 _S3 = "robosystems.operations.roboledger.commands.report_import.S3Client"
+_DELETE_ARTIFACTS = (
+  "robosystems.operations.roboledger.commands.reports.delete_report_artifacts"
+)
 
 
 @pytest.fixture()
@@ -69,7 +72,11 @@ def tenant():
     conn.execute(text(f"DROP SCHEMA IF EXISTS {GRAPH} CASCADE"))
   try:
     provision_tenant_schema(GRAPH)
-    with patch(_S3) as s3, extensions_session(GRAPH) as session:
+    with (
+      patch(_S3) as s3,
+      patch(_DELETE_ARTIFACTS) as delete_artifacts,
+      extensions_session(GRAPH) as session,
+    ):
       s3.return_value.upload_string.return_value = True
       session.add(
         Entity(
@@ -82,7 +89,11 @@ def tenant():
         )
       )
       session.flush()
-      yield {"session": session, "s3": s3.return_value}
+      yield {
+        "session": session,
+        "s3": s3.return_value,
+        "delete_artifacts": delete_artifacts,
+      }
   finally:
     with db.begin() as conn:
       conn.execute(text(f"DROP SCHEMA IF EXISTS {GRAPH} CASCADE"))
@@ -386,6 +397,36 @@ def test_deleting_an_uploaded_report_takes_its_sections_and_keeps_its_concepts(t
   assert session.execute(
     select(Element.id).where(Element.qname == "kpi:Headcount")
   ).scalar_one()
+
+
+def test_the_stored_files_follow_the_transaction(tenant):
+  """A replaced report's file goes only once the replacement commits, and a
+  report whose transaction is undone takes its own file with it."""
+  session, deleted = tenant["session"], tenant["delete_artifacts"]
+
+  def run(**kwargs):
+    return import_report(
+      session,
+      GRAPH,
+      holon_text=_holon(**kwargs),
+      entity_id=ISSUER,
+      created_by="usr_1",
+    )
+
+  first = run()
+  session.commit()
+  deleted.assert_not_called()
+
+  second = run(headcount=45)
+  deleted.assert_not_called()
+  session.commit()
+  deleted.assert_called_once_with(GRAPH, [first.report_id])
+
+  deleted.reset_mock()
+  third = run(headcount=50)
+  session.rollback()
+  deleted.assert_called_once_with(GRAPH, [third.report_id])
+  assert session.execute(select(Report.id)).scalars().all() == [second.report_id]
 
 
 def test_a_package_that_does_not_foot_is_refused_and_nothing_is_written(tenant):
