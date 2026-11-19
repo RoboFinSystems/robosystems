@@ -240,3 +240,37 @@ class TestGetPortfolioBlock:
 
     assert block.total_current_value_dollars is None
     assert block.total_cost_basis_dollars == 300.0
+    assert block.marked_position_count == 0
+    assert block.current_value_is_partial is False
+
+  def test_a_total_over_some_positions_says_so(self) -> None:
+    """One unmarked position leaves the value total short of the cost total."""
+    portfolio = _make_portfolio(entity_id=None)
+    positions = [
+      _make_position(id="pos_1", current_value=15000, cost_basis=10000),
+      _make_position(id="pos_2", current_value=None, cost_basis=20000),
+    ]
+    securities = [_make_security(entity_id=None)]
+    session = _build_session(portfolio, None, positions, securities)
+
+    block = get_portfolio_block(session, "port_01")
+
+    assert block.total_current_value_dollars == 150.0
+    assert block.total_cost_basis_dollars == 300.0
+    assert block.active_position_count == 2
+    assert block.marked_position_count == 1
+    assert block.current_value_is_partial is True
+
+  def test_a_total_over_every_position_is_whole(self) -> None:
+    portfolio = _make_portfolio(entity_id=None)
+    positions = [
+      _make_position(id="pos_1", current_value=15000, cost_basis=10000),
+      _make_position(id="pos_2", current_value=25000, cost_basis=20000),
+    ]
+    securities = [_make_security(entity_id=None)]
+    session = _build_session(portfolio, None, positions, securities)
+
+    block = get_portfolio_block(session, "port_01")
+
+    assert block.marked_position_count == 2
+    assert block.current_value_is_partial is False

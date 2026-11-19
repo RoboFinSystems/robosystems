@@ -160,6 +160,27 @@ class TestListHoldings:
     # total_current_value_dollars is None because no position had a value
     assert result.holdings[0].total_current_value_dollars is None
     assert result.holdings[0].securities[0].current_value_dollars is None
+    assert result.holdings[0].marked_position_count == 0
+    assert result.holdings[0].current_value_is_partial is False
+
+  def test_a_total_over_some_positions_says_so(self) -> None:
+    positions = [
+      _make_position(id="pos_1", security_id="sec_1", current_value=15000),
+      _make_position(id="pos_2", security_id="sec_2", current_value=None),
+    ]
+    securities = [
+      _make_security(id="sec_1", entity_id="ent_1"),
+      _make_security(id="sec_2", entity_id="ent_1"),
+    ]
+    entities = [_make_entity(id="ent_1")]
+    session = _build_session(_make_portfolio(), positions, securities, entities)
+
+    holding = list_holdings(session, "pf_01").holdings[0]
+
+    assert holding.total_current_value_dollars == 150.0
+    assert holding.position_count == 2
+    assert holding.marked_position_count == 1
+    assert holding.current_value_is_partial is True
 
   def test_preserves_source_graph_id_from_metadata(self) -> None:
     positions = [_make_position()]

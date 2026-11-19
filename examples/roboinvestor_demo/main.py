@@ -547,9 +547,10 @@ def _print_block(block: Any) -> None:
   owner = _field(block, "owner", None)
   print(f"    Active positions: {active}")
   print(f"    Cost basis:       ${cost:,.2f}")
-  print(
-    f"    Current value:    {f'${value:,.2f}' if value is not None else '(unmarked)'}"
-  )
+  shown = f"${value:,.2f}" if value is not None else "(unmarked)"
+  if _field(block, "current_value_is_partial", False):
+    shown += f" ({_field(block, 'marked_position_count', 0)} of {active} marked)"
+  print(f"    Current value:    {shown}")
   if owner:
     print(f"    Owner:            {_field(owner, 'name')}")
 
@@ -665,7 +666,7 @@ def _refusal(exc: RuntimeError) -> tuple[int | None, str]:
     return None, str(exc)
   try:
     detail = str(json.loads(match.group(2))["detail"])
-  except (ValueError, KeyError, TypeError):
+  except ValueError, KeyError, TypeError:
     detail = match.group(2)
   return int(match.group(1)), detail
 
