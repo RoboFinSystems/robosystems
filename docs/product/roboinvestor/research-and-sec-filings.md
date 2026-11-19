@@ -1,7 +1,7 @@
 ---
 title: Public companies and SEC filings
 description: Read research and filings in the app, subscribe to the SEC graph, and connect it to your AI assistant.
-order: 3
+order: 4
 section: Get started
 ---
 
