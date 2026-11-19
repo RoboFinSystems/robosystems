@@ -52,6 +52,7 @@ from robosystems.operations.roboledger.entity_scope import (
 )
 from robosystems.operations.roboledger.entry_status import (
   LANDED_ENTRY_STATUSES,
+  SUPERSEDED_ENTRY_STATUS,
 )
 from robosystems.operations.roboledger.line_dimensions import (
   inherit_event_dimensions,
@@ -60,6 +61,10 @@ from robosystems.operations.roboledger.line_dimensions import (
 from robosystems.operations.roboledger.reads.event_block import (
   _load_dimension_ids,
   _to_envelope,
+)
+from robosystems.operations.roboledger.supersede import (
+  record_replacements,
+  supersede_entries,
 )
 
 from . import discharges
@@ -350,9 +355,6 @@ def _take_out_of_the_books(
 ) -> list[str]:
   """Supersede the entries a ledger's event posted, as its correction asks.
   The caller holds the period fence on their dates."""
-  from robosystems.operations.roboledger.entry_status import SUPERSEDED_ENTRY_STATUS
-  from robosystems.operations.roboledger.supersede import supersede_entries
-
   live = session.execute(
     select(Entry.id, Entry.status).where(
       Entry.triggered_by_event_id == event.id,
@@ -385,10 +387,11 @@ def _replace_with_later_version(
 ) -> tuple[Event, EventBlockEnvelope]:
   """Apply a ledger's later version of a journal entry it already sent: the
   entries it posted leave the books and the handler posts the new ones, the
-  event keeping its id. Both the old dates and the new must be open."""
-  from robosystems.operations.roboledger.entry_status import SUPERSEDED_ENTRY_STATUS
-  from robosystems.operations.roboledger.supersede import record_replacements
+  event keeping its id. Both the old dates and the new must be open.
 
+  The later version is the whole record: its dimensions replace the ones
+  first sent. What a journal entry never carries (its category, its links
+  to other events, its document) stays as first sent."""
   if str(held.entity_id) != entity_id:
     raise SourceCorrectionError(
       f"Event {held.id} is in entity {held.entity_id}'s books; a later version "
@@ -404,10 +407,21 @@ def _replace_with_later_version(
       f"event_type='{body.event_type}' metadata validation failed: {e}"
     )
 
-  # Fence, then the row: the order close takes them in.
-  old_dates = _retraction_fence_dates(session, held.id)
-  if old_dates:
-    assert_period_not_closed(session, *old_dates, entity_id=entity_id)
+  if body.metadata.get("resolves_reconciling_items"):
+    raise SourceCorrectionError(
+      "A later version of a ledger's entry cannot settle reconciling items; "
+      "send the entry that settles them as its own event."
+    )
+
+  # Fence, then the row: the order close takes them in. The dates the
+  # entries leave and the dates they move to, in one sorted pass.
+  entries = getattr(typed_metadata, "entries", None) or [typed_metadata]
+  fence_dates = {
+    *_retraction_fence_dates(session, held.id),
+    *(e.posting_date for e in entries if getattr(e, "posting_date", None)),
+  }
+  if fence_dates:
+    assert_period_not_closed(session, *sorted(fence_dates), entity_id=entity_id)
   with bounded_lock_wait(
     session,
     f"Event {held.id} is being written by another process. Retry in a moment.",
@@ -444,6 +458,10 @@ def _replace_with_later_version(
   event.external_url = body.external_url
   event.agent_id = body.agent_id
   event.metadata_ = _metadata_with_version(body)
+  session.execute(
+    event_dimensions.delete().where(event_dimensions.c.event_id == event.id)
+  )
+  _tag_event(session, event, body.dimension_ids)
   handler.dispatch(session, event, typed_metadata, created_by)
   inherit_event_dimensions(session, str(event.id))
   session.flush()
@@ -1278,6 +1296,8 @@ def update_event_block(
 
     if body.source_retracted:
       # The fence on these entries' dates is held already (a retraction's).
+      # Runs before `_assert_retractable`, which then finds nothing landed:
+      # a superseded entry is not, and its transaction was voided with it.
       if not _sent_by_the_books_keeper(session, event):
         raise InvalidEventTransitionError(
           "source_retracted is for an event from the external ledger that "

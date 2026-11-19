@@ -13,6 +13,7 @@ from robosystems.models.api.event_block import (
   CreateEventBlockRequest,
   UpdateEventBlockRequest,
 )
+from robosystems.models.extensions import Dimension
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
@@ -63,7 +64,19 @@ def mirrored(two_entities):
     yield t
 
 
-def _send(t, *, amount, version=None, day=15, source=LEDGER, entity=None, ref="JE-1"):
+def _send(
+  t,
+  *,
+  amount,
+  version=None,
+  day=15,
+  month=9,
+  source=LEDGER,
+  entity=None,
+  ref="JE-1",
+  extra=None,
+  dimensions=None,
+):
   entity_id = entity or t.sub.id
   cash, rent = t.accounts[entity_id]
   event, _envelope = create_event_block_in_session(
@@ -74,11 +87,13 @@ def _send(t, *, amount, version=None, day=15, source=LEDGER, entity=None, ref="J
       source=source,
       external_id=ref,
       source_version=version,
-      occurred_at=datetime(2026, 9, day),
+      occurred_at=datetime(2026, month, day),
       amount=amount,
       apply_handlers=True,
+      dimension_ids=dimensions or [],
       metadata={
-        "posting_date": date(2026, 9, day).isoformat(),
+        "posting_date": date(2026, month, day).isoformat(),
+        **(extra or {}),
         "memo": "Rent received",
         "line_items": [
           {"element_id": cash, "debit_amount": amount, "credit_amount": 0},
@@ -184,6 +199,66 @@ def test_a_stamped_month_is_not_rewritten(mirrored):
   with pytest.raises(ClosedPeriodError):
     _send(mirrored, amount=62_500, version=2)
   assert _books(mirrored, first) == [("posted", 50_000)]
+
+
+def test_an_entry_is_not_moved_into_a_stamped_month(mirrored):
+  first = _send(mirrored, amount=50_000, version=1, day=15)
+  mirrored.session.add(
+    FiscalPeriod(
+      graph_id=GRAPH_ID,
+      entity_id=mirrored.sub.id,
+      name="2026-08",
+      start_date=date(2026, 8, 1),
+      end_date=date(2026, 8, 31),
+      period_type="month",
+      status="closed",
+    )
+  )
+  mirrored.session.flush()
+  with pytest.raises(ClosedPeriodError):
+    _send(mirrored, amount=62_500, version=2, month=8)
+  assert _books(mirrored, first) == [("posted", 50_000)]
+
+
+def test_a_later_versions_dimensions_replace_the_first(mirrored):
+  from robosystems.models.extensions.roboledger.dimension_junctions import (
+    event_dimensions,
+  )
+
+  old, new = (
+    Dimension(dimension_type="project", name=name, value=name.lower())
+    for name in ("Harbor", "Pier")
+  )
+  mirrored.session.add_all([old, new])
+  mirrored.session.flush()
+
+  def tags(event_id):
+    return list(
+      mirrored.session.scalars(
+        select(event_dimensions.c.dimension_id).where(
+          event_dimensions.c.event_id == event_id
+        )
+      )
+    )
+
+  first = _send(mirrored, amount=50_000, version=1, dimensions=[old.id])
+  assert tags(first) == [old.id]
+  _send(mirrored, amount=62_500, version=2, dimensions=[new.id])
+  assert tags(first) == [new.id]
+  _send(mirrored, amount=62_500, version=3)
+  assert tags(first) == []
+
+
+def test_a_later_version_settles_no_reconciling_items(mirrored):
+  _send(mirrored, amount=50_000, version=1)
+  with pytest.raises(SourceCorrectionError, match="reconciling items"):
+    _send(
+      mirrored,
+      amount=62_500,
+      version=2,
+      extra={"resolves_reconciling_items": []}
+      | {"resolves_reconciling_items": [{"event_id": "evt_x"}]},
+    )
 
 
 def test_a_later_version_cannot_move_the_entry_to_another_entity(mirrored):
