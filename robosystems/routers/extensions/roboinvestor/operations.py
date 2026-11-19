@@ -287,8 +287,29 @@ delete_security_op = _registrar.register(
 # ── Issuers and received reports ──────────────────────────────────────────
 
 
+def _amount(value: object) -> str:
+  if not isinstance(value, (int, float)):
+    return str(value)
+  return f"{value:,.0f}" if float(value).is_integer() else f"{value:,.2f}"
+
+
+def _reason(problem: dict) -> str:
+  """One refusal reason as a sentence, with its amounts written out."""
+  if problem.get("code") == "does_not_foot":
+    return (
+      f"{problem.get('concept')} is reported as {_amount(problem.get('reported'))} "
+      f"and its terms sum to {_amount(problem.get('computed'))}."
+    )
+  if problem.get("code") == "does_not_balance":
+    return (
+      f"Total assets are {_amount(problem.get('assets'))} and total liabilities "
+      f"and equity are {_amount(problem.get('liabilities_and_equity'))}."
+    )
+  return str(problem.get("message"))
+
+
 def _refusal(exc: ReportImportRefusedError) -> str:
-  reasons = "; ".join(str(p.get("message")) for p in exc.problems)
+  reasons = " ".join(_reason(p) for p in exc.problems)
   return f"The report was not loaded. {reasons}"
 
 

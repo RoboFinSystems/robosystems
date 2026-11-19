@@ -35,7 +35,15 @@ What each phase proves:
    to the issuer.
 5. **The traversal executes.** After materialization, one Cypher query
    walks from the fund's portfolio to the issuer's reported facts.
-6. **Revocation withdraws the copy** while leaving the linked entity — the
+6. **A company that is not on the platform reports too.** Its holding gets
+   an issuer entity, and its monthly package is ingested from rows read out
+   of a workbook: assembled into a holon, checked (a mistyped total is
+   refused with the numbers), stored, and loaded. The traversal then reaches
+   its facts the same way.
+7. **A report is the same by either route.** The issuer's published holon is
+   downloaded and ingested as a file; it lands with the same facts and the
+   same values as the copy the share delivered.
+8. **Revocation withdraws the copy** while leaving the linked entity — the
    relationship survives one report being pulled.
 
 Every write goes through the HTTP API via the SDK facades, the same
@@ -645,7 +653,139 @@ def show_handshake_result(
 
 
 # ---------------------------------------------------------------------------
-# Step 7: materialize + traverse
+# Step 8: reports from outside the platform, and the same report as a file
+# ---------------------------------------------------------------------------
+
+
+def _investor_operation(
+  graph_id: str, name: str, body: dict[str, Any]
+) -> tuple[int, dict[str, Any]]:
+  """Call a RoboInvestor operation the SDK facade does not wrap yet."""
+  response = (
+    _authenticated_client()
+    .get_httpx_client()
+    .post(f"/extensions/roboinvestor/{graph_id}/operations/{name}", json=body)
+  )
+  try:
+    payload = response.json()
+  except ValueError:
+    payload = {"detail": response.text[:200]}
+  return response.status_code, payload
+
+
+def receive_package(
+  investor_graph: str, security_ids: dict[str, str]
+) -> dict[str, Any]:
+  """A holding whose issuer keeps its books elsewhere: create the issuer,
+  attach the holding, and ingest its monthly package from rows."""
+  out: dict[str, Any] = {}
+  status, created = _investor_operation(
+    investor_graph, "create-issuer", portfolio_data.OFF_PLATFORM_ISSUER
+  )
+  issuer_id = (created.get("result") or {}).get("id")
+  out["issuer_id"] = issuer_id
+  if not issuer_id:
+    print(f"    FAILED: create-issuer HTTP {status}: {str(created)[:160]}")
+    return out
+  print(
+    f"    Issuer:        {portfolio_data.OFF_PLATFORM_ISSUER['name']} ({issuer_id})"
+  )
+
+  security_id = security_ids[portfolio_data.OFF_PLATFORM_SECURITY_KEY]
+  _investor_client().update_security(
+    investor_graph, security_id, {"entity_id": issuer_id}
+  )
+  out["security_id"] = security_id
+  print("    Holding:       attached to the issuer")
+
+  # The reader mistyped cash: the total no longer foots, and nothing loads.
+  status, refused = _investor_operation(
+    investor_graph,
+    "ingest-report",
+    {"entity_id": issuer_id, "report": portfolio_data.package_that_does_not_foot()},
+  )
+  out["refused_status"] = status
+  out["refused_detail"] = str(refused.get("detail", ""))
+  print(f"    Mistyped:      HTTP {status}: {out['refused_detail'][:110]}")
+
+  body = {
+    "entity_id": issuer_id,
+    "report": portfolio_data.monthly_package(),
+    "require_source": True,
+  }
+  status, dry = _investor_operation(
+    investor_graph, "ingest-report", {**body, "dry_run": True}
+  )
+  out["dry_run"] = dry.get("result") or {}
+  print(
+    f"    Dry run:       {out['dry_run'].get('fact_count')} facts, "
+    f"{out['dry_run'].get('section_count')} sections, "
+    f"{out['dry_run'].get('calculations_checked')} totals footed, nothing written"
+  )
+
+  status, loaded = _investor_operation(investor_graph, "ingest-report", body)
+  out["result"] = loaded.get("result") or {}
+  if status != 200 or not out["result"].get("report_id"):
+    print(f"    FAILED: ingest-report HTTP {status}: {str(loaded)[:200]}")
+    return out
+  print(
+    f"    Ingested:      {out['result']['report_id']} "
+    f"({out['result']['fact_count']} facts; added to the fund's vocabulary: "
+    f"{', '.join(out['result'].get('concepts_added') or []) or 'nothing'})"
+  )
+  return out
+
+
+def receive_as_file(investor_graph: str, issuer_graph: str) -> dict[str, Any]:
+  """Take the report the share delivered, download its holon, and ingest that
+  file onto a second entity: the same report by the other route."""
+  out: dict[str, Any] = {}
+  ledger = _ledger_client()
+  shared_copy = next(
+    (
+      r
+      for r in (ledger.list_reports(investor_graph) or [])
+      if _field(r, "source_graph_id", None) == issuer_graph
+    ),
+    None,
+  )
+  if shared_copy is None:
+    print("    FAILED: no shared copy to download")
+    return out
+  out["shared_report_id"] = _field(shared_copy, "id")
+  holon = ledger.download_report_bundle(
+    investor_graph, out["shared_report_id"]
+  ).content.decode("utf-8")
+  out["holon_bytes"] = len(holon)
+  print(f"    Downloaded:    the shared report's holon ({len(holon):,} bytes)")
+
+  status, created = _investor_operation(
+    investor_graph,
+    "create-issuer",
+    {"name": f"{_field(shared_copy, 'entity_name', 'Issuer')} (received as a file)"},
+  )
+  issuer_id = (created.get("result") or {}).get("id")
+  if not issuer_id:
+    print(f"    FAILED: create-issuer HTTP {status}: {str(created)[:160]}")
+    return out
+  status, loaded = _investor_operation(
+    investor_graph, "ingest-report", {"entity_id": issuer_id, "holon": holon}
+  )
+  out["result"] = loaded.get("result") or {}
+  if status != 200 or not out["result"].get("report_id"):
+    print(f"    FAILED: ingest-report HTTP {status}: {str(loaded)[:200]}")
+    return out
+  print(
+    f"    Ingested:      {out['result']['report_id']} "
+    f"({out['result']['fact_count']} facts, "
+    f"{out['result']['section_count']} sections, "
+    f"{out['result']['calculations_checked']} totals footed)"
+  )
+  return out
+
+
+# ---------------------------------------------------------------------------
+# Step 9: materialize + traverse
 # ---------------------------------------------------------------------------
 
 
@@ -730,7 +870,7 @@ def run_traversal(investor_graph: str) -> list[dict[str, Any]]:
     rendered = f"${value:,.0f}" if isinstance(value, (int, float)) else "—"
     print(
       f"    {str(row.get('security'))[:38]:<38} "
-      f"{str(row.get('concept')):<48} {rendered:>18}"
+      f"{row.get('concept')!s:<48} {rendered:>18}"
     )
   return rows
 
@@ -762,7 +902,7 @@ def show_graphql_reads(investor_graph: str, portfolio_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Step 8: revocation
+# Step 10: revocation
 # ---------------------------------------------------------------------------
 
 
@@ -874,7 +1014,7 @@ def main(argv: list[str] | None = None) -> None:
     print("Dry run complete. No data written.")
     return
 
-  _heading("[1/9]", "Issuer graph — a portfolio company that keeps its books here")
+  _heading("[1/10]", "Issuer graph — a portfolio company that keeps its books here")
   issuer_graph = ensure_issuer_graph(reload=reload_issuer, explicit=issuer_override)
   report_id = _published_report_id(issuer_graph)
   if not report_id and not skip_share:
@@ -882,7 +1022,7 @@ def main(argv: list[str] | None = None) -> None:
     print("  Re-run with --reload-issuer to rebuild its ledger.")
     sys.exit(1)
 
-  _heading("[2/9]", "Investor graph — the fund")
+  _heading("[2/10]", "Investor graph — the fund")
   investor_graph = positional[0] if positional else create_investor_graph()
 
   # Local targets only (F10): the reset issues raw DELETEs against whatever
@@ -912,22 +1052,22 @@ def main(argv: list[str] | None = None) -> None:
   fund_entity = _ledger_client().get_entity(investor_graph)
   fund_entity_id = _field(fund_entity, "id", None) if fund_entity else None
 
-  _heading("[3/9]", "Securities — Master Data, with two pre-associations")
+  _heading("[3/10]", "Securities — Master Data, with two pre-associations")
   security_ids = register_securities(investor_graph, issuer_graph)
 
   print("\n  Pre-association state (declared intent, no link yet):")
   show_pre_association(investor_graph, security_ids)
 
-  _heading("[4/9]", "Portfolio Block — create (atomic envelope)")
+  _heading("[4/10]", "Portfolio Block — create (atomic envelope)")
   portfolio_id = create_portfolio(investor_graph, security_ids, fund_entity_id)
 
-  _heading("[5/9]", "Portfolio Block — update (add / update / dispose, one call)")
+  _heading("[5/10]", "Portfolio Block — update (add / update / dispose, one call)")
   apply_position_deltas(investor_graph, portfolio_id, security_ids)
 
   print("\n  Cascade-delete guard:")
   guard_held = prove_cascade_guard(investor_graph, portfolio_id)
 
-  _heading("[6/9]", "Staleness — every write marks its graph")
+  _heading("[6/10]", "Staleness — every write marks its graph")
   is_stale, stale_reason = read_staleness(investor_graph)
   print(f"    is_stale:     {is_stale}")
   print(f"    stale_reason: {stale_reason}")
@@ -936,16 +1076,24 @@ def main(argv: list[str] | None = None) -> None:
 
   shared = False
   if skip_share:
-    _heading("[7/9]", "Report share — SKIPPED (--skip-share)")
+    _heading("[7/10]", "Report share — SKIPPED (--skip-share)")
   else:
-    _heading("[7/9]", "Cross-graph handshake — the issuer publishes into the fund")
+    _heading("[7/10]", "Cross-graph handshake — the issuer publishes into the fund")
     assert report_id is not None
     share_report(issuer_graph, investor_graph, report_id)
     print("\n  What the share created in the fund's graph:")
     show_handshake_result(investor_graph, issuer_graph, security_ids)
     shared = True
 
-  _heading("[8/9]", "Materialize + traverse")
+  package: dict[str, Any] = {}
+  as_file: dict[str, Any] = {}
+  if shared:
+    _heading("[8/10]", "A company that is not on the platform — its package, from rows")
+    package = receive_package(investor_graph, security_ids)
+    print("\n  The shared report again, this time arriving as a file:")
+    as_file = receive_as_file(investor_graph, issuer_graph)
+
+  _heading("[9/10]", "Materialize + traverse")
   print("  Materializing the fund's graph...")
   materialized = materialize(investor_graph)
 
@@ -957,7 +1105,7 @@ def main(argv: list[str] | None = None) -> None:
   print("\n  GraphQL reads:")
   show_graphql_reads(investor_graph, portfolio_id)
 
-  _heading("[9/9]", "Validation")
+  _heading("[10/10]", "Validation")
   from .validate import validate_run
 
   ok = validate_run(
@@ -972,6 +1120,8 @@ def main(argv: list[str] | None = None) -> None:
     was_stale=is_stale,
     stale_reason=stale_reason,
     traversal_rows=rows,
+    package=package,
+    as_file=as_file,
   )
 
   # Revocation runs last, after the assertions, because it dismantles the

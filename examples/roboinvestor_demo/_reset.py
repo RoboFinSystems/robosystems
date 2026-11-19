@@ -46,27 +46,36 @@ def reset_investor_state(graph_id: str) -> None:
     session.execute(text("DELETE FROM portfolios"))
     session.execute(text("DELETE FROM securities"))
 
-    # Shared-in reports and their facts. `source_graph_id IS NOT NULL` is
-    # exactly the set that arrived from elsewhere — a report the investor
-    # authored has a null source graph. Facts hang off fact_sets, which
+    # Received reports and their facts. `origin <> 'authored'` is exactly the
+    # set that arrived from elsewhere, by a share or as a file. Facts hang off fact_sets, which
     # hang off the report.
     session.execute(
       text("""
         DELETE FROM facts WHERE fact_set_id IN (
           SELECT fs.id FROM fact_sets fs
           JOIN reports r ON r.id = fs.report_id
-          WHERE r.source_graph_id IS NOT NULL
+          WHERE r.origin <> 'authored'
         )
       """)
     )
     session.execute(
       text("""
         DELETE FROM fact_sets WHERE report_id IN (
-          SELECT id FROM reports WHERE source_graph_id IS NOT NULL
+          SELECT id FROM reports WHERE origin <> 'authored'
         )
       """)
     )
-    session.execute(text("DELETE FROM reports WHERE source_graph_id IS NOT NULL"))
+    session.execute(text("DELETE FROM reports WHERE origin <> 'authored'"))
+
+    # The vocabulary ingested reports built up: their sections, and the
+    # concepts the library did not have. Gone with them, so a re-run adds
+    # them again rather than finding them present.
+    from robosystems.operations.taxonomy_block.cascade import cascade_delete_taxonomy
+
+    for (taxonomy_id,) in session.execute(
+      text("SELECT id FROM taxonomies WHERE metadata->>'received_reports' = 'true'")
+    ).all():
+      cascade_delete_taxonomy(session, str(taxonomy_id), cascade_facts=True)
 
     # The concepts the share carried in. These have to go for the re-run to
     # exercise the copy at all — left in place, `_ensure_shared_elements`

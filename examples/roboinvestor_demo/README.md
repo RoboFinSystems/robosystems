@@ -19,7 +19,7 @@ Two tenants, because the interesting part needs two:
 | Graph | Who | Extensions | Role |
 | --- | --- | --- | --- |
 | Issuer | Cadence Labs, Inc. | `roboledger` | A seed-funded B2B SaaS company that keeps its books here and files an annual report |
-| Investor | Meridian Ventures Fund I, LP | `roboinvestor`, `roboledger` | An early-stage venture fund holding five private instruments |
+| Investor | Meridian Ventures Fund I, LP | `roboinvestor` | An early-stage venture fund holding five private instruments |
 
 The issuer is the existing `saas_startup` showcase scenario, provisioned
 inline on the first run and reused afterwards. Both graphs belong to the
@@ -73,7 +73,25 @@ query. Because SEC filings are a shared repository on the same platform, a
 private position and public-company facts sit in the same query surface —
 which is the thing that has no equivalent outside this platform.
 
-**6 · Revocation** (`--revoke`, opt-in). The sender withdraws the copy.
+**6 · A company that is not on the platform.** Halyard Robotics keeps its
+books elsewhere and sends a workbook every month. `create-issuer` adds it as
+an entity and its SAFE is attached to it. Its September package is then
+ingested with `ingest-report` from rows: the values, the lines of each
+section, and the cell each value was read from. The server assembles the
+rows into a holon, checks it, stores it, and loads it. A copy of the package
+with cash mistyped is sent first and refused with the two numbers that
+disagree; a dry run then reports what would load and writes nothing. After
+materialization the traversal reaches Halyard's facts exactly as it reaches
+Cadence's, and the two KPIs the library does not have sit in the fund's own
+vocabulary.
+
+**7 · The same report by either route.** The holon of the report Cadence
+shared is downloaded from the fund's graph and ingested as a file onto a
+second entity. The run asserts that it lands the same number of facts and
+the same values as the copy the share wrote: one report, two ways in, one
+result.
+
+**8 · Revocation** (`--revoke`, opt-in). The sender withdraws the copy.
 The report leaves the fund's schema; the linked entity and the securities
 pointing at it stay. A declared holding is a relationship, not an artifact
 of one filing.
@@ -96,19 +114,18 @@ Offline preview of the portfolio arc, no platform needed:
 uv run python -m examples.roboinvestor_demo.data
 ```
 
-## Why the investor graph carries `roboledger`
+## The investor graph carries `roboinvestor` alone
 
-`add-publish-list-members` rejects any target graph whose
-`schema_extensions` doesn't list `roboledger`. A fund keeps no books, so
-that predicate really wants to be "target can receive reports" — until it
-is, a graph that only wants to *receive* reporting has to declare the
-ledger extension it will never write to. The demo provisions both rather
-than working around it, so the constraint stays visible.
+A fund that keeps no books needs no ledger to receive a report. The
+`roboinvestor` extension brings the reporting tables (reports, fact sets and
+facts) the same way the SEC repository has them, so a shared or ingested
+report materializes into the fund's graph and the traversal resolves there.
+Add `roboledger` when the fund keeps its own books in the same graph.
 
 ## Re-runs
 
 `_reset.py` wipes the fund's portfolios, securities, positions, anything
-the handshake delivered, and the issuer's publish lists — the only
+the handshake or an ingest delivered (with the vocabulary the ingests built), and the issuer's publish lists — the only
 direct-DB step in the demo, and deliberately not a product operation.
 Everything else goes through the HTTP API via the SDK facades, the same
 surface the frontends and MCP tools use.

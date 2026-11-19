@@ -97,6 +97,140 @@ def _first_row(
   return (result.data or [{}])[0]
 
 
+def _validate_received(
+  checks: Checks,
+  *,
+  investor_graph: str,
+  security_ids: dict[str, str],
+  securities: list[Any],
+  materialized: bool,
+  traversal_rows: list[dict[str, Any]],
+  package: dict[str, Any],
+  as_file: dict[str, Any],
+) -> None:
+  """Reports that arrived from outside the platform, and the route check."""
+  from .main import _field, _ledger_client, _query_client
+
+  ledger = _ledger_client()
+  issuer_id = package.get("issuer_id")
+  if not checks.check(
+    "off-platform issuer created", bool(issuer_id), "create-issuer returned no id"
+  ):
+    return
+  holding = next(
+    (
+      s
+      for s in securities
+      if _field(s, "id", None) == security_ids[portfolio_data.OFF_PLATFORM_SECURITY_KEY]
+    ),
+    None,
+  )
+  checks.equal(
+    "the holding is attached to its issuer",
+    _field(holding, "entity_id", None) if holding else None,
+    issuer_id,
+  )
+  checks.check(
+    "a package that does not foot is refused with the numbers",
+    package.get("refused_status") == 422
+    and "sum to" in package.get("refused_detail", ""),
+    f"HTTP {package.get('refused_status')}: {package.get('refused_detail', '')[:120]}",
+  )
+
+  expected_facts = len(portfolio_data.monthly_package()["facts"])
+  dry = package.get("dry_run") or {}
+  checks.check(
+    "the dry run checks the package and writes nothing",
+    dry.get("dry_run") is True
+    and dry.get("report_id") is None
+    and dry.get("fact_count") == expected_facts,
+    f"got {dry}",
+  )
+  result = package.get("result") or {}
+  report_id = result.get("report_id")
+  if not checks.equal("package ingested", result.get("fact_count"), expected_facts):
+    return
+  checks.equal("its three sections loaded", result.get("section_count"), 3)
+  checks.check(
+    "every total footed and the balance sheet balanced",
+    result.get("calculations_checked") == 3 and result.get("balance_checked") is True,
+    f"got {result}",
+  )
+  checks.equal(
+    "only the fund's own KPIs were added to its vocabulary",
+    sorted(q for q in result.get("concepts_added") or [] if not q.endswith("Head")),
+    sorted(portfolio_data.PACKAGE_KPIS),
+  )
+
+  listed = {_field(r, "id", None) for r in (ledger.list_reports(investor_graph) or [])}
+  checks.check(
+    "the ingested report is listed for the fund", report_id in listed, f"{listed}"
+  )
+  stored = ledger.download_report_bundle(investor_graph, report_id).content.decode()
+  checks.check(
+    "its stored holon downloads, naming the company and a source cell",
+    portfolio_data.OFF_PLATFORM_ISSUER["name"] in stored
+    and "halyard-2026-09.xlsx#sheet=Balance%20Sheet&cell=C18" in stored,
+    f"{len(stored)} bytes",
+  )
+
+  if not materialized:
+    return
+  issuer_name = portfolio_data.OFF_PLATFORM_ISSUER["name"]
+  reached = {
+    r.get("concept"): r.get("value")
+    for r in traversal_rows
+    if r.get("issuer") == issuer_name
+  }
+  checks.equal(
+    "the traversal reaches the off-platform company's facts",
+    reached.get("rs-gaap:Assets"),
+    4_180_000,
+  )
+  query = _query_client()
+  kpi = _first_row(
+    query,
+    investor_graph,
+    f"""
+    MATCH (e:Entity {{identifier: '{issuer_id}'}})-[:ENTITY_HAS_REPORT]->(:Report)
+          -[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element)
+    WHERE el.qname = 'kpi:Headcount'
+    RETURN f.numeric_value AS value
+    """,
+    checks,
+  )
+  checks.equal("a KPI of the fund's own is in the graph by name", kpi.get("value"), 31)
+
+  # The same report by both routes: the copy the share wrote, and the file.
+  shared_id = as_file.get("shared_report_id")
+  file_id = (as_file.get("result") or {}).get("report_id")
+  if not checks.check(
+    "the shared report's holon ingested as a file",
+    bool(shared_id and file_id),
+    f"got {as_file}",
+  ):
+    return
+  by_route: dict[str, dict[str, Any]] = {}
+  for label, report in (("shared", shared_id), ("file", file_id)):
+    by_route[label] = _first_row(
+      query,
+      investor_graph,
+      f"""
+      MATCH (r:Report {{identifier: '{report}'}})-[:REPORT_HAS_FACT]->(f:Fact)
+      RETURN count(f) AS facts, sum(f.numeric_value) AS total
+      """,
+      checks,
+    )
+  checks.check(
+    "the file lands the same facts and values as the share",
+    by_route["shared"].get("facts") == by_route["file"].get("facts")
+    and by_route["shared"].get("facts", 0) > 0
+    and round(by_route["shared"].get("total") or 0)
+    == round(by_route["file"].get("total") or 0),
+    f"shared {by_route['shared']} vs file {by_route['file']}",
+  )
+
+
 def validate_run(
   *,
   investor_graph: str,
@@ -110,6 +244,8 @@ def validate_run(
   was_stale: bool,
   stale_reason: str | None,
   traversal_rows: list[dict[str, Any]],
+  package: dict[str, Any] | None = None,
+  as_file: dict[str, Any] | None = None,
 ) -> bool:
   """Assert every invariant the run is supposed to establish."""
   from .main import _field, _investor_client, _ledger_client, _query_client
@@ -351,10 +487,23 @@ def validate_run(
       "the differentiated capability did not execute",
     )
     issuers = {r.get("issuer") for r in traversal_rows}
+    expected_issuers = 2 if (package or {}).get("result") else 1
     checks.check(
-      "traversal attributes facts to the issuer",
-      len(issuers) == 1 and all(issuers),
+      "traversal attributes facts to each issuer",
+      len(issuers) == expected_issuers and all(issuers),
       f"issuers seen: {issuers}",
+    )
+
+  if package is not None and shared:
+    _validate_received(
+      checks,
+      investor_graph=investor_graph,
+      security_ids=security_ids,
+      securities=securities,
+      materialized=materialized,
+      traversal_rows=traversal_rows,
+      package=package,
+      as_file=as_file or {},
     )
 
   # ── Summary ──────────────────────────────────────────────────────────

@@ -642,3 +642,37 @@ class TestDeleteSecurityOp:
       )
 
     assert env.result == {"deleted": True}
+
+
+def test_a_refusal_writes_its_amounts_out() -> None:
+  """A reader fixing a package needs the two numbers, not 4.18e+06."""
+  from robosystems.operations.roboledger.commands.report_import import (
+    ReportImportRefusedError,
+  )
+  from robosystems.routers.extensions.roboinvestor.operations import _refusal
+
+  detail = _refusal(
+    ReportImportRefusedError(
+      [
+        {
+          "code": "does_not_foot",
+          "message": "x",
+          "concept": "rs-gaap:Assets",
+          "reported": 4_180_000.0,
+          "computed": 3_820_000.0,
+        },
+        {
+          "code": "does_not_balance",
+          "message": "x",
+          "assets": 4_180_000.5,
+          "liabilities_and_equity": 4_000_000.0,
+        },
+        {"code": "no_source", "message": "Fact f-1 does not say where it came from."},
+      ]
+    )
+  )
+  assert detail == (
+    "The report was not loaded. rs-gaap:Assets is reported as 4,180,000 and its "
+    "terms sum to 3,820,000. Total assets are 4,180,000.50 and total liabilities "
+    "and equity are 4,000,000. Fact f-1 does not say where it came from."
+  )
