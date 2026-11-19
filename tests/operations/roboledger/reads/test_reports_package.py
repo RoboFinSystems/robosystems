@@ -37,6 +37,8 @@ def _make_report_def() -> MagicMock:
   r.filed_by = None
   r.supersedes_id = None
   r.superseded_by_id = None
+  r.origin = "authored"
+  r.is_received = False
   r.source_graph_id = None
   r.source_report_id = None
   r.shared_at = None

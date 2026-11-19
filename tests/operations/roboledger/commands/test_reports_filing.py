@@ -45,6 +45,8 @@ def _make_report_def(
   r.filed_by = filed_by
   r.supersedes_id = None
   r.superseded_by_id = None
+  r.origin = "authored"
+  r.is_received = False
   r.source_graph_id = None
   r.source_report_id = None
   r.shared_at = None
@@ -349,6 +351,8 @@ def test_file_report_refuses_a_shared_in_copy() -> None:
   snapshot it did not author — and its own delete then refuses it as filed."""
   report = _make_report_def(filing_status="draft")
   report.source_graph_id = "kg_sender"
+  report.origin = "shared"
+  report.is_received = True
   session = MagicMock()
   session.get.return_value = report
   with pytest.raises(NotAuthorizedError):

@@ -40,6 +40,10 @@ class Report(ExtensionsBase):
       "filing_status IN ('draft', 'under_review', 'filed', 'archived')",
       name="check_report_filing_status",
     ),
+    CheckConstraint(
+      "origin IN ('authored', 'shared', 'uploaded')",
+      name="check_report_origin",
+    ),
   )
 
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("rpt"))
@@ -88,12 +92,23 @@ class Report(ExtensionsBase):
   ai_workspace_id = Column(String, nullable=True)
   ai_confidence = Column(Float, nullable=True)
 
+  # How the report came to be here: ``authored`` from this graph's own books,
+  # ``shared`` in from another graph, or ``uploaded`` as a file. Anything but
+  # ``authored`` is received: its stored artifact is the record and is never
+  # rebuilt from the rows.
+  origin = Column(String, nullable=False, default="authored", server_default="authored")
+
   # Set on reports received from another graph.
   source_graph_id = Column(String, nullable=True)
   source_report_id = Column(String, nullable=True)
   shared_at = Column(DateTime, nullable=True)
 
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
+
+  @property
+  def is_received(self) -> bool:
+    """Whether the report came from outside this graph's own books."""
+    return self.origin != "authored"
 
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   updated_at = Column(

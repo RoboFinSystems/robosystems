@@ -60,6 +60,7 @@ class ReportPackage:
   supersedes_id: str | None
   superseded_by_id: str | None
 
+  origin: str
   source_graph_id: str | None
   source_report_id: str | None
   shared_at: _dt.datetime | None
@@ -88,6 +89,7 @@ class ReportPackage:
       filed_by=envelope.filed_by,
       supersedes_id=envelope.supersedes_id,
       superseded_by_id=envelope.superseded_by_id,
+      origin=envelope.origin,
       source_graph_id=envelope.source_graph_id,
       source_report_id=envelope.source_report_id,
       shared_at=envelope.shared_at,

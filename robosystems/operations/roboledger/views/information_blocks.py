@@ -441,7 +441,7 @@ def _tenant_model(graph_id: str, report_id: str) -> XbrlModel:
     report = session.get(Report, report_id)
     if report is None:
       raise ReportNotFoundError(f"No report {report_id!r} on graph {graph_id}.")
-    if report.source_graph_id is not None:
+    if report.is_received:
       return _received_model(graph_id, report_id, int(report.generation_count or 0))
     try:
       bundle = build_report_bundle(session, graph_id, report_id)
@@ -453,8 +453,8 @@ def _tenant_model(graph_id: str, report_id: str) -> XbrlModel:
 
 
 def _received_model(graph_id: str, report_id: str, generation_count: int) -> XbrlModel:
-  """A report shared in from another graph, from the publication the share
-  copied under this graph's own bundle key. The rows that came with it are a
+  """A received report, from the publication stored under this graph's own
+  bundle key when it arrived (a share's copy, or the file that was ingested). The rows that came with it are a
   partial projection of that artifact, so a miss is a miss, never a build
   order — the same rule the downloads apply."""
   key = get_report_bundle_key(graph_id, report_id, generation_count)
@@ -466,10 +466,10 @@ def _received_model(graph_id: str, report_id: str, generation_count: int) -> Xbr
     ) from exc
   if text is None:
     raise ReceivedReportUnavailableError(
-      f"Report {report_id!r} was shared from another graph and its publication "
-      f"is no longer in storage. A received report is read as the sender's "
-      f"published artifact and is never re-derived locally; ask the sender to "
-      f"share it again."
+      f"Report {report_id!r} was received from outside this graph and its "
+      f"publication is no longer in storage. A received report is read as the "
+      f"artifact that arrived and is never re-derived locally; have it shared "
+      f"or ingested again."
     )
   try:
     model, _gaps = from_holon_report(text)

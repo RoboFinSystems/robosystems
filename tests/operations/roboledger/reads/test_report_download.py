@@ -34,6 +34,8 @@ def _report(
     bundle_url=bundle_url,
     generation_count=generation_count,
     generation_status=generation_status,
+    origin="shared" if source_graph_id else "authored",
+    is_received=source_graph_id is not None,
     source_graph_id=source_graph_id,
     source_report_id=None,
     filing_status="draft",
@@ -123,6 +125,23 @@ class TestReceivedReportsAreNeverRederived:
     ):
       s3_cls.return_value.object_exists.return_value = False
       with pytest.raises(ReportBundleNotAvailableError, match=artifact):
+        get_report_download_url(session, "kg1", "rpt_1", flavor=flavor)
+
+    build.assert_not_called()
+
+  @pytest.mark.unit
+  @pytest.mark.parametrize("flavor", ["holon-jsonld", "xbrl-2.1", "tavi"])
+  def test_a_report_that_arrived_as_a_file_is_never_rederived(self, flavor):
+    """A file has no source graph; its origin alone marks it received."""
+    report = _report()
+    report.origin, report.is_received = "uploaded", True
+    session = _session(report)
+    with (
+      patch(f"{_REPORTS}.S3Client") as s3_cls,
+      patch("robosystems.operations.serialization.build_report_bundle") as build,
+    ):
+      s3_cls.return_value.object_exists.return_value = False
+      with pytest.raises(ReportBundleNotAvailableError, match="ingest the file again"):
         get_report_download_url(session, "kg1", "rpt_1", flavor=flavor)
 
     build.assert_not_called()
@@ -519,7 +538,7 @@ class TestLineageHolon:
       patch("robosystems.operations.serialization.build_report_bundle") as build,
     ):
       s3_cls.return_value.object_exists.return_value = True
-      with pytest.raises(ReportBundleNotAvailableError, match="shared in"):
+      with pytest.raises(ReportBundleNotAvailableError, match="received from outside"):
         get_report_download_url(session, "kg1", "rpt_1", flavor="holon-jsonld-lineage")
 
     build.assert_not_called()

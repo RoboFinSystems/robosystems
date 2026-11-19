@@ -549,7 +549,7 @@ def tenant(monkeypatch: pytest.MonkeyPatch):
   session.__enter__ = MagicMock(return_value=session)
   session.__exit__ = MagicMock(return_value=False)
   # The ledger's own report: authored here, so it is built from its rows.
-  session.get.return_value = MagicMock(source_graph_id=None, generation_count=1)
+  session.get.return_value = MagicMock(is_received=False, generation_count=1)
   monkeypatch.setattr(extensions_db, "extensions_session", lambda graph_id: session)
   builder = MagicMock(return_value=_bundle())
   monkeypatch.setattr(serialization, "build_report_bundle", builder)
@@ -570,7 +570,7 @@ def received(monkeypatch: pytest.MonkeyPatch, tenant):
   import robosystems.db.extensions as extensions_db
 
   session = extensions_db.extensions_session("kg1234567890abcdef")
-  session.get.return_value = MagicMock(source_graph_id="kgsender", generation_count=3)
+  session.get.return_value = MagicMock(is_received=True, generation_count=3)
   bucket = _FakeBucket({RECEIVED_HOLON_KEY: to_holon(_model())})
   monkeypatch.setattr(module, "S3Client", lambda: bucket)
   monkeypatch.setattr(module.env, "USER_DATA_BUCKET", "user-data-test")
@@ -852,7 +852,9 @@ class TestReceivedReport:
     """The downloads' rule: the rows a share leaves are a partial projection
     of the sender's artifact, so a miss asks for a re-share, never a build."""
     received.objects.clear()
-    with pytest.raises(ReceivedReportUnavailableError, match="share it again"):
+    with pytest.raises(
+      ReceivedReportUnavailableError, match="shared or ingested again"
+    ):
       await query_disclosures("kg1234567890abcdef", REPORT_ID)
     tenant.assert_not_called()
 
