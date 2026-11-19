@@ -1928,3 +1928,58 @@ class TestCreateMercuryConnection:
         )
     assert excinfo.value.status_code == 409
     registry.create_connection.assert_not_called()
+
+
+class TestReportConnectionSync:
+  """POST /{connection_id}/sync-report."""
+
+  @staticmethod
+  async def _report(result, *, status="succeeded"):
+    from robosystems.models.api.graphs.connections import ReportSyncRequest
+    from robosystems.routers.graphs.connections.management import (
+      report_connection_sync,
+    )
+
+    with (
+      patch(f"{MANAGEMENT_MODULE}.require_graph_write_role") as role,
+      patch(
+        f"{MANAGEMENT_MODULE}.report_external_sync",
+        new_callable=AsyncMock,
+        **result,
+      ) as report,
+    ):
+      response = await report_connection_sync(
+        graph_id=GRAPH_ID,
+        connection_id=CONNECTION_ID,
+        request=ReportSyncRequest(status=status, counts={"entries_sent": 3}),
+        current_user=_make_mock_user(),
+        db=MagicMock(),
+        _rate_limit=None,
+      )
+    role.assert_called_once()
+    return response, report
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_a_report_is_scoped_to_the_graph_and_needs_a_write_role(self):
+    response, report = await self._report(
+      {"return_value": _make_connection_dict()}, status="failed"
+    )
+    assert response.connection_id == CONNECTION_ID
+    assert report.call_args.args == (CONNECTION_ID, GRAPH_ID)
+    assert report.call_args.kwargs["succeeded"] is False
+    assert report.call_args.kwargs["counts"] == {"entries_sent": 3}
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  @pytest.mark.parametrize(
+    ("result", "status_code"),
+    [
+      ({"return_value": None}, 404),
+      ({"side_effect": ValueError("only an external source reports its own")}, 400),
+    ],
+  )
+  async def test_refusals(self, result, status_code):
+    with pytest.raises(HTTPException) as exc_info:
+      await self._report(result)
+    assert exc_info.value.status_code == status_code

@@ -21,6 +21,7 @@ DOCUMENTED_ORDER = (
   "getConnection",
   "deleteConnection",
   "syncConnection",
+  "reportConnectionSync",
   "setConnectionWritePolicy",
 )
 

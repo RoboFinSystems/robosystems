@@ -154,7 +154,18 @@ Registration is refused with a 409 when another ledger already keeps the entity'
 
 The entry leaves the books and the event is voided. A withdrawn record cannot be brought back under the same `external_id`.
 
-Both work in open periods only. A change that reaches into a closed month is refused by the closed-period gate: reopen the month, send the change, and close it again, which on these books posts nothing. Only the ledger that keeps the entity's books corrects this way; from any other source `source_version` is stored and has no effect.
+**Reporting a run.** The platform runs no sync for an external source, so the integration says when it last ran. At the end of each run, post to the connection:
+
+```bash
+curl -s -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/connections/$CONNECTION_ID/sync-report" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"status": "succeeded", "counts": {"entries_sent": 12, "entries_replaced": 1}}'
+```
+
+A `succeeded` report sets the connection's `last_sync` to now; a `failed` one records the outcome and leaves it. A period close reads `last_sync` to tell whether the books it mirrors are current, and on these books a stale or missing one is a finding on the close's receipt, not a refusal.
+
+Corrections work in open periods only. A change that reaches into a closed month is refused by the closed-period gate: reopen the month, send the change, and close it again, which on these books posts nothing. Only the ledger that keeps the entity's books corrects this way; from any other source `source_version` is stored and has no effect.
 
 ## Step 2: Find the Accounts
 

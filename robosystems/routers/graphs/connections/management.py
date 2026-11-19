@@ -24,6 +24,7 @@ from robosystems.models.api.graphs.connections import (
   ConnectionResponse,
   CreateConnectionRequest,
   ProviderType,
+  ReportSyncRequest,
   SetWritePolicyRequest,
 )
 from robosystems.models.core import GraphUser, User
@@ -33,6 +34,7 @@ from robosystems.operations.connection_service import (
   SeverNotSupportedError,
   SyncInProgressError,
   assert_provider_compatible,
+  report_external_sync,
   sync_fence,
 )
 from robosystems.operations.locking import RowLockedError
@@ -509,6 +511,72 @@ async def set_connection_write_policy(
       detail="Failed to set connection write policy",
       code=ErrorCode.INTERNAL_ERROR,
     )
+
+
+@router.post(
+  "/{connection_id}/sync-report",
+  response_model=ConnectionResponse,
+  summary="Report an External Sync",
+  operation_id="reportConnectionSync",
+  description=(
+    "For an external connection: the integration reports a run it just "
+    "finished. The platform runs no sync for an external source, so this is "
+    "how the connection's `last_sync` moves. A 'succeeded' report sets it to "
+    "now; a 'failed' one records the outcome and leaves it. For an external "
+    "ledger that keeps an entity's books, a period close reads `last_sync` "
+    "to tell whether the books it mirrors are current. Refused (400) for a "
+    "connection the platform syncs itself."
+  ),
+  responses={**RESOURCE_ERROR_RESPONSES},
+)
+async def report_connection_sync(
+  graph_id: str = Path(
+    ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
+  ),
+  connection_id: str = Path(..., description="Unique connection identifier"),
+  request: ReportSyncRequest = ...,
+  current_user: User = Depends(get_current_user_with_graph),
+  db: Session = Depends(get_db_session),
+  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
+) -> ConnectionResponse:
+  # It moves what the close reads as the books' freshness: a graph write.
+  require_graph_write_role(str(current_user.id), graph_id)
+
+  try:
+    connection = await report_external_sync(
+      connection_id,
+      graph_id,
+      succeeded=request.status == "succeeded",
+      counts=request.counts,
+      message=request.message,
+      db_session=db,
+    )
+  except ValueError as exc:
+    raise create_error_response(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail=str(exc),
+      code=ErrorCode.INVALID_INPUT,
+    )
+  if not connection:
+    raise create_error_response(
+      status_code=status.HTTP_404_NOT_FOUND,
+      detail="Connection not found",
+      code=ErrorCode.NOT_FOUND,
+    )
+
+  return ConnectionResponse(
+    connection_id=connection["connection_id"],
+    provider=connection["provider"].lower(),
+    entity_id=connection.get("entity_id"),
+    keeps_books=bool(connection.get("keeps_books")),
+    status=connection["status"],
+    created_at=connection["created_at"],
+    updated_at=connection.get("updated_at"),
+    last_sync=connection["metadata"].get("last_sync"),
+    write_policy=connection.get("write_policy"),
+    source_name=connection.get("source_name"),
+    metadata=connection["metadata"],
+  )
 
 
 @router.delete(
