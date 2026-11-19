@@ -600,6 +600,27 @@ class GraphMCPTools:
 
       self.delete_report_tool = DeleteReportTool(graph_client)
 
+    # A fund's graph with no ledger of its own still holds the reports it
+    # receives: the tools that find, read back and remove one, and the
+    # library search that names its concepts.
+    if self._receives_reports_only():
+      from .disclosure_tools import DisclosuresTool, InformationBlockTool
+      from .report_tools import DeleteReportTool, GetReportBundleTool, ListReportsTool
+      from .taxonomy_tools import SearchLibraryElementsTool
+
+      self.disclosures_tool = DisclosuresTool(graph_client)
+      self.information_block_tool = InformationBlockTool(graph_client)
+      self.get_report_bundle_tool = GetReportBundleTool(graph_client)
+      self._typed_read_tools = {
+        tool.get_tool_definition()["name"]: tool
+        for tool in (
+          SearchLibraryElementsTool(graph_client),
+          ListReportsTool(graph_client),
+        )
+      }
+      if not read_only:
+        self.delete_report_tool = DeleteReportTool(graph_client)
+
     self._cache_hits = 0
     self._cache_misses = 0
 
@@ -647,6 +668,16 @@ class GraphMCPTools:
 
   def _has_extension(self, extension: str) -> bool:
     return extension in self.schema_extensions
+
+  def _receives_reports_only(self) -> bool:
+    """An investor graph without the ledger, whose reports are all received."""
+    return (
+      self._has_extension("roboinvestor")
+      and not self._has_extension("roboledger")
+      and env.ROBOINVESTOR_ENABLED
+      and not self._is_shared_repository()
+      and not self._is_subgraph()
+    )
 
   def _is_shared_repository(self) -> bool:
     try:
@@ -887,6 +918,15 @@ class GraphMCPTools:
       tools.extend(self._get_event_handler_tool_definitions())
       tools.extend(self._get_event_block_tool_definitions())
       tools.extend(t.get_tool_definition() for t in self._typed_read_tools.values())
+    elif self._receives_reports_only():
+      tools.extend(t.get_tool_definition() for t in self._typed_read_tools.values())
+      for tool in (
+        self.disclosures_tool,
+        self.information_block_tool,
+        self.get_report_bundle_tool,
+      ):
+        if tool is not None:
+          tools.append(tool.get_tool_definition())
 
     tools.extend(self._get_navigation_tool_definitions())
     if self.set_write_policy_tool is not None:
@@ -1043,8 +1083,8 @@ class GraphMCPTools:
         typed_read_tool = self._typed_read_tools.get(name)
         if typed_read_tool is None:
           raise ValueError(
-            f"{name} tool is not available. "
-            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
+            f"{name} tool is not available on this graph. A ledger read "
+            "needs the roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await typed_read_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)

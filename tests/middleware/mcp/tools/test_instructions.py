@@ -438,3 +438,33 @@ class TestTheBooksAsTheyStand:
     out = self._build(_LEDGER | {"get-trial-balance"})
     assert "`get-trial-balance`." in out
     assert "list-journal-entries" not in out
+
+
+class TestReceivingReports:
+  """A graph that can ingest a report is told how: values, not layout."""
+
+  _RECEIVE = _PORTFOLIO | {
+    "create-issuer",
+    "ingest-report",
+    "search-library-elements",
+    "list-reports",
+    "disclosures",
+    "information-block",
+  }
+
+  def _build(self, tools):
+    return build_instructions(
+      graph_id="kg1", tool_names=tools, is_shared_repo=False, read_only=False
+    )
+
+  def test_the_route_from_a_document_to_a_report_is_named(self) -> None:
+    out = self._build(self._RECEIVE)
+    assert "RECEIVING REPORTS" in out
+    assert "`create-issuer`" in out
+    assert "`block_type` and no `lines`" in out
+    assert "`whole_library: true`" in out
+    assert "`dry_run: true`" in out
+    assert "`list-reports(entity_id)`" in out
+
+  def test_a_graph_that_cannot_ingest_is_told_nothing(self) -> None:
+    assert "RECEIVING REPORTS" not in self._build(_PORTFOLIO)

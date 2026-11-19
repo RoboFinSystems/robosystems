@@ -1181,7 +1181,17 @@ class ReportSectionRow(BaseModel):
       "a top line has nothing beneath it, as in a flat KPI table."
     ),
   )
-  lines: list[ReportLineRow] = Field(..., description="The lines, in order.")
+  lines: list[ReportLineRow] = Field(
+    default_factory=list,
+    description=(
+      "The lines, in order. Omit them for a `balance_sheet` or an "
+      "`income_statement` and the server lays the statement out from the "
+      "library: every value sent for a concept the statement places becomes "
+      "a line under the nearest line above it that also has a value, and "
+      "each total is checked against the lines beneath it. Send the whole "
+      "statement that way, or give the lines yourself."
+    ),
+  )
 
 
 class ReportFactRow(BaseModel):
@@ -1237,7 +1247,12 @@ class ReportRowsInput(BaseModel):
     description="Prefix to namespace URI, for concept prefixes that are not a library's.",
   )
   concepts: list[ReportConceptRow] = Field(
-    ..., description="Every concept the facts and sections use, each declared once."
+    default_factory=list,
+    description=(
+      "The concepts the library does not have, each declared once. A library "
+      "concept (`rs-gaap:Assets`) needs no entry unless the report words it "
+      "differently."
+    ),
   )
   sections: list[ReportSectionRow] = Field(
     default_factory=list, description="The report's statements and tables."
@@ -1248,10 +1263,11 @@ class ReportRowsInput(BaseModel):
 class IngestReportRequest(BaseModel):
   """CQRS body for `POST /operations/ingest-report`.
 
-  Give exactly one of `holon` (a report file already in the holon format) or
-  `report` (rows read from a PDF or a workbook, which the server assembles
-  into a holon). Either way the holon is checked, stored as the record of
-  what was received, and loaded onto the entity.
+  Give exactly one of `holon` (a report file already in the holon format),
+  `tavi` (a Tavi compiled model) or `report` (rows read from a PDF or a
+  workbook, which the server assembles into a holon). Every route ends in a
+  holon that is checked, stored as the record of what was received, and
+  loaded onto the entity.
   """
 
   entity_id: str = Field(
@@ -1261,6 +1277,14 @@ class IngestReportRequest(BaseModel):
     None,
     max_length=25 * 1024 * 1024,
     description="The text of a `.holon.jsonld` report file.",
+  )
+  tavi: str | None = Field(
+    None,
+    max_length=25 * 1024 * 1024,
+    description=(
+      "The text of a `.tavi.json` compiled model. It is converted to a holon, "
+      "which is what is stored."
+    ),
   )
   report: ReportRowsInput | None = Field(None, description="The report as rows.")
   name: str | None = Field(None, description="A display name for the report.")
@@ -1305,4 +1329,11 @@ class IngestReportResponse(BaseModel):
   replaced_report_ids: list[str] = Field(
     default_factory=list,
     description="Earlier ingests for the same entity, period end and kind, now replaced.",
+  )
+  unplaced_concepts: list[str] = Field(
+    default_factory=list,
+    description=(
+      "Concepts with a value that no section places, for a report sent as "
+      "rows. Their values load, but appear on no statement or table."
+    ),
   )

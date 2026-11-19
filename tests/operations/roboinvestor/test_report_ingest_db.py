@@ -11,6 +11,7 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.exc import OperationalError
 from xbrlkit.check import check_report
 from xbrlkit.deserialize import from_holon_report
+from xbrlkit.serialize import to_tavi
 
 from robosystems.config import env
 from robosystems.db.extensions import extensions_session, provision_tenant_schema
@@ -279,11 +280,21 @@ def test_rows_that_do_not_foot_are_refused_with_the_numbers(fund):
 def test_a_row_that_cannot_be_placed_is_refused_by_name(fund):
   rows = _rows()
   rows["facts"].append(
-    {"concept": "rs-gaap:Goodwill", "value": 5, "end": "2026-10-31", "unit": "USD"}
+    {"concept": "kpi:Backlog", "value": 5, "end": "2026-10-31", "unit": "USD"}
   )
   with pytest.raises(ReportImportRefusedError) as refused:
     _ingest(fund, report=rows)
   assert "undeclared concept" in refused.value.problems[0]["message"]
+
+
+def test_a_library_concept_needs_no_declaration_and_an_unplaced_one_is_named(fund):
+  rows = _rows()
+  rows["facts"].append(
+    {"concept": "rs-gaap:Goodwill", "value": 5, "end": "2026-10-31", "unit": "USD"}
+  )
+  result = _ingest(fund, report=rows, dry_run=True)
+  assert result.fact_count == 6
+  assert result.unplaced_concepts == ["rs-gaap:Goodwill"]
 
 
 def test_rows_for_an_entity_outside_the_graph_are_refused_before_anything_is_built(
@@ -305,3 +316,158 @@ def test_the_request_names_exactly_one_report(fund):
     _ingest(fund)
   with pytest.raises(IngestRequestError):
     _ingest(fund, report=_rows(), holon="{}")
+
+
+def _values_only(*, opex: float = 300, **extra_sections) -> dict:
+  """A package that sends values and names its statements, nothing else."""
+
+  def value(concept: str, amount: float, *, flow: bool = False) -> dict:
+    row = {
+      "concept": concept,
+      "value": amount,
+      "end": "2026-10-31",
+      "unit": "USD",
+      "decimals": 0,
+    }
+    if flow:
+      row["start"] = "2026-10-01"
+    return row
+
+  return {
+    "period_end": "2026-10-31",
+    "kind": "monthly-package",
+    "sections": [
+      {"name": "Balance Sheet", "block_type": "balance_sheet"},
+      {"name": "Income Statement", "block_type": "income_statement"},
+      *extra_sections.get("sections", []),
+    ],
+    "facts": [
+      value("rs-gaap:Assets", 1000),
+      value("rs-gaap:AssetsCurrent", 700),
+      value("rs-gaap:CashAndCashEquivalentsAtCarryingValue", 600),
+      value("rs-gaap:AccountsReceivableNetCurrent", 100),
+      value("rs-gaap:PropertyPlantAndEquipmentNet", 300),
+      value("rs-gaap:LiabilitiesAndStockholdersEquity", 1000),
+      value("rs-gaap:Liabilities", 400),
+      value("rs-gaap:StockholdersEquity", 600),
+      value("rs-gaap:Revenues", 900, flow=True),
+      value("rs-gaap:CostOfRevenue", 400, flow=True),
+      value("rs-gaap:GrossProfit", 500, flow=True),
+      value("rs-gaap:OperatingExpenses", opex, flow=True),
+      value("rs-gaap:InterestExpense", 50, flow=True),
+      value("rs-gaap:NetIncomeLoss", 150, flow=True),
+    ],
+  }
+
+
+def test_statements_sent_as_values_are_laid_out_from_the_library(fund):
+  response = ingest_report(
+    fund["session"],
+    IngestReportRequest(entity_id=fund["issuer"].id, report=_values_only()),
+    created_by="usr_1",
+    graph_id=GRAPH,
+  )
+
+  assert response.fact_count == 14
+  assert response.section_count == 2
+  assert response.balance_checked
+  # Assets, current assets, liabilities and equity, gross profit, net income.
+  assert response.calculations_checked == 5
+  assert response.unplaced_concepts == []
+
+  holon = fund["s3"].upload_string.call_args.kwargs["content"]
+  model, _ = from_holon_report(holon)
+  arcs = {
+    (arc.from_qname, arc.to_qname): arc.weight
+    for network in model.networks
+    if network.kind == "calculation"
+    for arc in network.arcs
+  }
+  # Receivables hang from current assets, the nearest line with a value.
+  assert arcs[("rs-gaap:AssetsCurrent", "rs-gaap:AccountsReceivableNetCurrent")] == 1
+  # With no noncurrent subtotal sent, equipment adds straight into assets.
+  assert arcs[("rs-gaap:Assets", "rs-gaap:PropertyPlantAndEquipmentNet")] == 1
+  # Subtotals the package leaves out are stepped over, signs carried.
+  assert arcs[("rs-gaap:NetIncomeLoss", "rs-gaap:GrossProfit")] == 1
+  assert arcs[("rs-gaap:NetIncomeLoss", "rs-gaap:OperatingExpenses")] == -1
+  assert arcs[("rs-gaap:NetIncomeLoss", "rs-gaap:InterestExpense")] == -1
+  assert model.concepts["rs-gaap:Assets"].balance == "debit"
+
+
+def test_a_statement_laid_out_from_the_library_must_foot(fund):
+  with pytest.raises(ReportImportRefusedError) as refused:
+    ingest_report(
+      fund["session"],
+      IngestReportRequest(entity_id=fund["issuer"].id, report=_values_only(opex=250)),
+      created_by="usr_1",
+      graph_id=GRAPH,
+    )
+
+  codes = {problem["code"] for problem in refused.value.problems}
+  assert codes == {"does_not_foot"}
+
+
+def test_a_section_the_library_does_not_lay_out_needs_its_lines(fund):
+  with pytest.raises(ReportImportRefusedError) as refused:
+    ingest_report(
+      fund["session"],
+      IngestReportRequest(
+        entity_id=fund["issuer"].id,
+        report=_values_only(
+          sections=[{"name": "Cash Flow", "block_type": "cash_flow_statement"}]
+        ),
+      ),
+      created_by="usr_1",
+      graph_id=GRAPH,
+    )
+
+  assert "give this one its lines" in refused.value.problems[0]["message"]
+
+
+def test_a_tavi_model_is_stored_as_a_holon_and_loaded(fund):
+  # A Tavi model of a package: what the rows build, written out as Tavi.
+  session = fund["session"]
+  _ingest(fund, report=_rows())
+  built, _ = from_holon_report(fund["s3"].upload_string.call_args.kwargs["content"])
+  other = create_issuer(session, CreateIssuerRequest(name="Bolt Co"), created_by="u")
+
+  result = _ingest({**fund, "issuer": other}, tavi=to_tavi(built), dry_run=False)
+
+  assert (result.fact_count, result.section_count) == (5, 2)
+  assert (result.calculations_checked, result.balance_checked) == (1, True)
+  stored = fund["s3"].upload_string.call_args.kwargs["content"]
+  model, _ = from_holon_report(stored)
+  assert len(model.facts) == 5
+  headcount = next(f for f in model.facts if f.concept_qname == "kpi:Headcount")
+  assert headcount.numeric_value == 42
+
+
+def test_text_that_is_not_a_tavi_model_is_refused(fund):
+  with pytest.raises(ReportImportRefusedError) as refused:
+    _ingest(fund, tavi="[1, 2]")
+  assert refused.value.problems[0]["code"] == "unreadable"
+
+
+def test_two_forms_of_one_report_are_refused(fund):
+  with pytest.raises(IngestRequestError):
+    _ingest(fund, tavi="{}", report=_rows())
+
+
+def test_a_refusal_names_the_values_no_statement_places(fund):
+  rows = _values_only(opex=250)
+  rows["facts"].append(
+    {
+      "concept": "rs-gaap:CostsAndExpenses",
+      "value": 50,
+      "start": "2026-10-01",
+      "end": "2026-10-31",
+      "unit": "USD",
+      "decimals": 0,
+    }
+  )
+  with pytest.raises(ReportImportRefusedError) as refused:
+    _ingest(fund, report=rows)
+
+  unplaced = [p for p in refused.value.problems if p["code"] == "unplaced"]
+  assert len(unplaced) == 1
+  assert "rs-gaap:CostsAndExpenses" in unplaced[0]["message"]

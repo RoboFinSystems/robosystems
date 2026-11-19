@@ -338,9 +338,12 @@ ingest_report_op = _registrar.register(
     summary="Ingest Report",
     description=(
       "Load a report a company sent onto its entity. Give the report as "
-      "`holon` (the text of a `.holon.jsonld` file) or as `report` (rows read "
-      "from a PDF or a workbook: concepts, sections and values with the page "
-      "or cell each came from), which is assembled into a holon here. The "
+      "`holon` (the text of a `.holon.jsonld` file), as `tavi` (the text of a "
+      "`.tavi.json` compiled model) or as `report` (rows read from a PDF or a "
+      "workbook: each value with the page or cell it came from). Rows and a "
+      "Tavi model are turned into a holon here. For rows, a balance sheet or "
+      "an income statement named without its lines is laid out from the "
+      "library, so only the values need sending. The "
       "holon is checked before anything is written: every value resolves, "
       "duplicate values agree, every total foots to its terms, and total "
       "assets equal total liabilities and equity. A report that fails is "

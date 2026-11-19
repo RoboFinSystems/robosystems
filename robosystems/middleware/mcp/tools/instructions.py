@@ -317,6 +317,39 @@ def build_instructions(
       )
     )
 
+  # Reports received from companies that keep their books elsewhere.
+  if has("ingest-report"):
+    receive_lines = [
+      "- A company that is not on the platform is an issuer → `create-issuer`, "
+      "once. Its reports, read out of a PDF or a workbook, load with "
+      "`ingest-report`.",
+      "- Send values, not layout: one fact per number with its concept, date, "
+      "unit, `decimals` and the `source` it was read from (`file.pdf#page=3`, "
+      "`file.xlsx#sheet=BS&cell=B10`). For a balance sheet or an income "
+      "statement, name the section with its `block_type` and no `lines`: the "
+      "statement is laid out from the library and every total is checked "
+      "against the lines beneath it. Send every line the statement prints, "
+      "totals and subtotals included, or a total will not foot.",
+    ]
+    if has("search-library-elements"):
+      receive_lines.append(
+        "- Name each line with a library concept → `search-library-elements` "
+        "with `whole_library: true`. Declare a concept of the firm's own "
+        "(a KPI) only when the library has none, and give its table its lines."
+      )
+    receive_lines.append(
+      "- Run `dry_run: true` first. A refusal lists what is wrong by line "
+      "(`does_not_foot` gives the reported and the computed amounts): fix the "
+      "value or the concept and try again; never drop a line to make a total "
+      "agree. `unplaced_concepts` names values that landed on no statement."
+    )
+    if has("list-reports") and has("information-block"):
+      receive_lines.append(
+        "- Read it back → `list-reports(entity_id)` for its id, `disclosures` "
+        "for its sections, `information-block` for one section's rows."
+      )
+    sections.append(_block("RECEIVING REPORTS", *receive_lines))
+
   # Exploration / querying — present on essentially every graph.
   explore_lines = ["EXPLORE"]
   explore_start = [t for t in ("get-graph-schema", "get-example-queries") if has(t)]

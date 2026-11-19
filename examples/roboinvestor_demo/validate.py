@@ -153,12 +153,21 @@ def _validate_received(
   checks.equal("its three sections loaded", result.get("section_count"), 3)
   checks.check(
     "every total footed and the balance sheet balanced",
-    result.get("calculations_checked") == 3 and result.get("balance_checked") is True,
+    result.get("calculations_checked") == 4 and result.get("balance_checked") is True,
     f"got {result}",
   )
   checks.equal(
+    "every value landed on a statement or a table",
+    result.get("unplaced_concepts"),
+    [],
+  )
+  checks.equal(
     "only the fund's own KPIs were added to its vocabulary",
-    sorted(q for q in result.get("concepts_added") or [] if not q.endswith("Head")),
+    sorted(
+      q
+      for q in result.get("concepts_added") or []
+      if q.startswith("kpi:") and not q.endswith("Head")
+    ),
     sorted(portfolio_data.PACKAGE_KPIS),
   )
 

@@ -8,7 +8,7 @@ from typing import Any
 
 from sqlalchemy.exc import SQLAlchemyError
 
-from robosystems.db.extensions import extensions_session
+from robosystems.db.extensions import LIBRARY_GRAPH_ID, extensions_session
 from robosystems.logger import logger
 from robosystems.middleware.operations import run_off_loop
 from robosystems.models.api.extensions.taxonomies import (
@@ -462,6 +462,7 @@ class SearchLibraryElementsTool:
 **PARAMETERS:**
 - query (required): a substring of the qname, name or label text
 - source (optional): one standard only, e.g. `rs-gaap`
+- whole_library (optional, default false): search every concept the reporting library has, not only the ones this graph already holds. Use it to name a line of a report being received with `ingest-report`; a mapping or a schedule needs a concept this graph holds
 - limit (optional, default 50, 1 to 500)
 
 **RETURNS:**
@@ -478,6 +479,14 @@ class SearchLibraryElementsTool:
             "description": "Substring of the qname, name or label text.",
           },
           "source": {"type": "string", "description": "One standard, e.g. rs-gaap."},
+          "whole_library": {
+            "type": "boolean",
+            "default": False,
+            "description": (
+              "Search the whole reporting library rather than this graph's own "
+              "working set."
+            ),
+          },
           "limit": {
             "type": "integer",
             "minimum": 1,
@@ -502,8 +511,12 @@ class SearchLibraryElementsTool:
       )
     except ValueError as exc:
       return invalid(str(exc))
+    whole_library = arguments.get("whole_library", False)
+    if not isinstance(whole_library, bool):
+      return invalid("whole_library must be true or false")
+    scope = LIBRARY_GRAPH_ID if whole_library else self.client.graph_id
     try:
-      with extensions_session(self.client.graph_id) as session:
+      with extensions_session(scope) as session:
         elements = library_reads.search_elements(
           session,
           query_text=query,

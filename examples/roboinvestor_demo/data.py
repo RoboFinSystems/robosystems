@@ -323,12 +323,10 @@ PACKAGE_KPIS = ["kpi:Headcount", "kpi:UnitsShipped"]
 
 
 def monthly_package() -> dict:
-  """Halyard's September package as rows: a balance sheet and an income
-  statement on library concepts, two KPIs of the fund's own, and the cell
-  each value was read from."""
-
-  def money(qname: str, label: str, period: str, balance: str) -> dict:
-    return {"qname": qname, "label": label, "period_type": period, "balance": balance}
+  """Halyard's September package as rows: the values of a balance sheet and
+  an income statement on library concepts, which the server lays out and
+  foots; two KPIs of the fund's own with their table; and the cell each value
+  was read from."""
 
   def bs(concept: str, value: float, cell: str) -> dict:
     return {
@@ -366,27 +364,8 @@ def monthly_package() -> dict:
     "kind": "monthly-package",
     "attributed_to": "roboinvestor-demo",
     "namespaces": {"kpi": PACKAGE_KPI_NAMESPACE},
+    # Only what the library does not have is declared.
     "concepts": [
-      {"qname": "kpi:BalanceSheetHead", "label": "Balance Sheet", "abstract": True},
-      money("rs-gaap:Assets", "Total assets", "instant", "debit"),
-      money(
-        "rs-gaap:CashAndCashEquivalentsAtCarryingValue", "Cash", "instant", "debit"
-      ),
-      money("rs-gaap:AccountsReceivableNetCurrent", "Receivables", "instant", "debit"),
-      money("rs-gaap:InventoryNet", "Inventory", "instant", "debit"),
-      money(
-        "rs-gaap:LiabilitiesAndStockholdersEquity",
-        "Total liabilities and equity",
-        "instant",
-        "credit",
-      ),
-      money("rs-gaap:Liabilities", "Total liabilities", "instant", "credit"),
-      money("rs-gaap:StockholdersEquity", "Total equity", "instant", "credit"),
-      money("rs-gaap:NetIncomeLoss", "Net loss", "duration", "credit"),
-      money("rs-gaap:Revenues", "Revenue", "duration", "credit"),
-      money(
-        "rs-gaap:CostsAndExpenses", "Total costs and expenses", "duration", "debit"
-      ),
       {"qname": "kpi:KpiHead", "label": "Operating KPIs", "abstract": True},
       {
         "qname": "kpi:Headcount",
@@ -401,54 +380,11 @@ def monthly_package() -> dict:
         "period_type": "instant",
       },
     ],
+    # A statement is named, not described: its lines and totals come from
+    # the library. The KPI table is the fund's own, so it gives its lines.
     "sections": [
-      {
-        "name": "Balance Sheet",
-        "block_type": "balance_sheet",
-        "head": "kpi:BalanceSheetHead",
-        "lines": [
-          {"concept": "rs-gaap:Assets"},
-          {
-            "concept": "rs-gaap:CashAndCashEquivalentsAtCarryingValue",
-            "parent": "rs-gaap:Assets",
-            "weight": 1,
-          },
-          {
-            "concept": "rs-gaap:AccountsReceivableNetCurrent",
-            "parent": "rs-gaap:Assets",
-            "weight": 1,
-          },
-          {"concept": "rs-gaap:InventoryNet", "parent": "rs-gaap:Assets", "weight": 1},
-          {"concept": "rs-gaap:LiabilitiesAndStockholdersEquity"},
-          {
-            "concept": "rs-gaap:Liabilities",
-            "parent": "rs-gaap:LiabilitiesAndStockholdersEquity",
-            "weight": 1,
-          },
-          {
-            "concept": "rs-gaap:StockholdersEquity",
-            "parent": "rs-gaap:LiabilitiesAndStockholdersEquity",
-            "weight": 1,
-          },
-        ],
-      },
-      {
-        "name": "Income Statement",
-        "block_type": "income_statement",
-        "lines": [
-          {"concept": "rs-gaap:NetIncomeLoss"},
-          {
-            "concept": "rs-gaap:Revenues",
-            "parent": "rs-gaap:NetIncomeLoss",
-            "weight": 1,
-          },
-          {
-            "concept": "rs-gaap:CostsAndExpenses",
-            "parent": "rs-gaap:NetIncomeLoss",
-            "weight": -1,
-          },
-        ],
-      },
+      {"name": "Balance Sheet", "block_type": "balance_sheet"},
+      {"name": "Income Statement", "block_type": "income_statement"},
       {
         "name": "Operating KPIs",
         "head": "kpi:KpiHead",
@@ -463,9 +399,11 @@ def monthly_package() -> dict:
       bs("rs-gaap:LiabilitiesAndStockholdersEquity", 4_180_000, "C34"),
       bs("rs-gaap:Liabilities", 1_240_000, "C26"),
       bs("rs-gaap:StockholdersEquity", 2_940_000, "C32"),
-      pl("rs-gaap:NetIncomeLoss", -265_000, "C29"),
       pl("rs-gaap:Revenues", 385_000, "C5"),
-      pl("rs-gaap:CostsAndExpenses", 650_000, "C22"),
+      pl("rs-gaap:CostOfRevenue", 240_000, "C8"),
+      pl("rs-gaap:GrossProfit", 145_000, "C10"),
+      pl("rs-gaap:OperatingExpenses", 410_000, "C22"),
+      pl("rs-gaap:NetIncomeLoss", -265_000, "C29"),
       kpi("kpi:Headcount", 31, 4),
       kpi("kpi:UnitsShipped", 12, 4),
     ],

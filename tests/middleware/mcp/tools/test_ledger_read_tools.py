@@ -916,6 +916,28 @@ class TestTheLedgerAsItStands:
     assert field_read.call_args.kwargs == tool_read.call_args.kwargs
     assert tool_read.call_args.args == (session,)
 
+  def test_a_whole_library_search_reads_the_library_not_the_graph(self):
+    with (
+      patch(f"{_TOOLS}.taxonomy_tools.extensions_session") as opened,
+      patch(
+        "robosystems.operations.library.reads.search_elements",
+        return_value=_ELEMENTS,
+      ),
+    ):
+      client = _client()
+      SearchLibraryElementsTool(client)._execute_sync({"query": "cash"})
+      own = opened.call_args.args
+      SearchLibraryElementsTool(client)._execute_sync(
+        {"query": "cash", "whole_library": True}
+      )
+      whole = opened.call_args.args
+      refused = SearchLibraryElementsTool(client)._execute_sync(
+        {"query": "cash", "whole_library": "yes"}
+      )
+    assert own == (client.graph_id,)
+    assert whole == ("library",)
+    assert "whole_library" in refused["message"]
+
   def test_an_unknown_mapping_is_not_found(self):
     with (
       _sessions() as session,
