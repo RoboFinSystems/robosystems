@@ -76,7 +76,7 @@ def get_portfolio_block(session: Session, portfolio_id: str) -> PortfolioBlockEn
   position_blocks: list[PositionBlock] = []
   total_cost = 0.0
   total_value = 0.0
-  has_value = False
+  marked = 0
 
   for p in positions:
     sec = sec_map.get(p.security_id)
@@ -92,7 +92,7 @@ def get_portfolio_block(session: Session, portfolio_id: str) -> PortfolioBlockEn
     total_cost += cost_dollars
     if value_dollars is not None:
       total_value += value_dollars
-      has_value = True
+      marked += 1
 
     position_blocks.append(
       PositionBlock(
@@ -128,8 +128,10 @@ def get_portfolio_block(session: Session, portfolio_id: str) -> PortfolioBlockEn
     owner=_entity_to_lite(owner),
     positions=position_blocks,
     total_cost_basis_dollars=total_cost,
-    total_current_value_dollars=total_value if has_value else None,
+    total_current_value_dollars=total_value if marked else None,
     active_position_count=len(position_blocks),
+    marked_position_count=marked,
+    current_value_is_partial=0 < marked < len(position_blocks),
     created_at=portfolio.created_at,
     updated_at=portfolio.updated_at,
   )

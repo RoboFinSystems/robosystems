@@ -468,6 +468,21 @@ class HoldingResponse(BaseModel):
   position_count: int = Field(
     ..., description="Number of distinct active positions backing these holdings."
   )
+  marked_position_count: int = Field(
+    0,
+    description=(
+      "How many of those positions have a mark, and so how many "
+      "`total_current_value_dollars` covers."
+    ),
+  )
+  current_value_is_partial: bool = Field(
+    False,
+    description=(
+      "True when some positions have a mark and some do not: "
+      "`total_current_value_dollars` then leaves the unmarked ones out and is "
+      "not comparable with `total_cost_basis_dollars`, which covers them all."
+    ),
+  )
 
 
 class HoldingsListResponse(BaseModel):
@@ -623,6 +638,21 @@ class PortfolioBlockEnvelope(BaseModel):
   )
   active_position_count: int = Field(
     ..., description="Count of positions with `status='active'`."
+  )
+  marked_position_count: int = Field(
+    0,
+    description=(
+      "How many active positions have a mark, and so how many "
+      "`total_current_value_dollars` covers."
+    ),
+  )
+  current_value_is_partial: bool = Field(
+    False,
+    description=(
+      "True when some active positions have a mark and some do not: "
+      "`total_current_value_dollars` then leaves the unmarked ones out and is "
+      "not comparable with `total_cost_basis_dollars`, which covers them all."
+    ),
   )
   created_at: datetime = Field(..., description="Row creation timestamp (UTC).")
   updated_at: datetime = Field(..., description="Last-modified timestamp (UTC).")

@@ -73,7 +73,7 @@ def list_holdings(session: Session, portfolio_id: str) -> HoldingsListResponse:
     security_summaries: list[HoldingSecuritySummary] = []
     total_cost = 0.0
     total_value = 0.0
-    has_value = False
+    marked = 0
 
     for p in entity_positions:
       sec = sec_map.get(p.security_id)
@@ -84,7 +84,7 @@ def list_holdings(session: Session, portfolio_id: str) -> HoldingsListResponse:
       total_cost += cost_dollars
       if value_dollars is not None:
         total_value += value_dollars
-        has_value = True
+        marked += 1
 
       security_summaries.append(
         HoldingSecuritySummary(
@@ -105,8 +105,10 @@ def list_holdings(session: Session, portfolio_id: str) -> HoldingsListResponse:
         source_graph_id=meta.get("source_graph_id"),
         securities=security_summaries,
         total_cost_basis_dollars=total_cost,
-        total_current_value_dollars=total_value if has_value else None,
+        total_current_value_dollars=total_value if marked else None,
         position_count=len(entity_positions),
+        marked_position_count=marked,
+        current_value_is_partial=0 < marked < len(entity_positions),
       )
     )
 
