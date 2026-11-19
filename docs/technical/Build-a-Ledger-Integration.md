@@ -137,14 +137,24 @@ Driftline sends invoices into books kept in RoboLedger. A source that *is* the b
 The connection becomes that entity's ledger of record with the `shadow` write policy, the only one it can hold, and the entity's books are read-only to everything but the source:
 
 - A `journal_entry_recorded` event from the source lands posted, whatever `status` it carries, so step 6 below does not apply to it. The closed-period gate of step 7 does.
-- A posted entry from any other source, or one written by hand, is refused. A draft is still accepted and never posts.
+- A posted entry under any other source, or under none, is refused. A draft is still accepted and never posts. This is a rule about sources, not about people: an entry sent under the ledger's own `source_name` is taken as the ledger's, so keep that name to the integration.
 - Nothing is written back, and closing a period posts nothing: it moves the closed-through date, stamps the statements, and records what would have held the close as findings.
 - The opening balance (`record-opening-balance`) is the mirror's starting point, so history before it need not be sent.
 - One source keeps one entity's books. A group with several companies registers a source per company.
 
 Registration is refused with a 409 when another ledger already keeps the entity's books (`BOOKS_KEPT_ELSEWHERE`), when the entity has books of its own (`NATIVE_BOOKS_PRESENT`), or for the consolidation entity (`CONSOLIDATION_ENTITY`). When every company of a group is mirrored this way, the group is read combined; consolidating entries are not drafted for it.
 
-An entry the source has sent cannot yet be replaced or withdrawn by sending it again: a repeated `external_id` is refused as a duplicate, like any other event.
+**Correcting an entry.** The ledger changes what it sent by sending it again. Give each `journal_entry_recorded` event a `source_version`, a number that only grows (the record's revision counter, or its last-modified time as an integer). The same `external_id` with a higher version replaces the entry: the lines it posted leave the books, the new ones are posted, and the event keeps its id. An equal or lower version, or none, is the 409 of a repeat delivery, so a retry is still safe.
+
+**Withdrawing an entry.** When the ledger no longer holds a record, void its event with `source_retracted`:
+
+```json
+{ "event_id": "evt_01...", "transition_to": "voided", "source_retracted": true }
+```
+
+The entry leaves the books and the event is voided. A withdrawn record cannot be brought back under the same `external_id`.
+
+Both work in open periods only. A change that reaches into a closed month is refused by the closed-period gate: reopen the month, send the change, and close it again, which on these books posts nothing. Only the ledger that keeps the entity's books corrects this way; from any other source `source_version` is stored and has no effect.
 
 ## Step 2: Find the Accounts
 

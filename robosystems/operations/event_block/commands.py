@@ -282,21 +282,191 @@ _UNPUBLISHABLE_STATUSES = frozenset({"voided", "superseded"})
 _STATIC_EVENT_SOURCES = frozenset({"manual", "system", "schedule"})
 
 
-def _assert_not_duplicate(session: Session, body: CreateEventBlockRequest) -> None:
-  """Reject a re-post of an already-ingested (source, external_id) pair.
+def _already_ingested(session: Session, body: CreateEventBlockRequest) -> Event | None:
+  """The event an earlier delivery of this (source, external_id) pair made.
 
   Mirrors the partial unique index, which only applies when external_id is
   not null — events without one are not deduplicated and are skipped here too.
   """
   if not body.external_id:
-    return
-  existing = (
-    session.query(Event.id)
+    return None
+  return (
+    session.query(Event)
     .filter(Event.source == body.source, Event.external_id == body.external_id)
     .first()
   )
-  if existing is not None:
-    raise DuplicateEventError(body.source, body.external_id)
+
+
+# The revision of its record a source last sent, kept on the event.
+SOURCE_VERSION_KEY = "source_version"
+
+# The only event a ledger of record corrects by sending it again: its
+# handler rebuilds the entries from the payload alone.
+_SOURCE_CORRECTED_EVENT_TYPE = "journal_entry_recorded"
+
+
+class SourceCorrectionError(ValueError):
+  """A ledger's correction of its own record that cannot be applied."""
+
+
+def _sent_by_the_books_keeper(session: Session, event: Event) -> bool:
+  """Whether the event came from the external ledger that keeps its
+  entity's books. A synced ledger corrects through its own sync."""
+  from robosystems.operations.roboledger.commands.connections import (
+    SEVERABLE_SOURCES,
+  )
+  from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+    books_keeper_source,
+  )
+
+  source = str(event.source or "").lower()
+  return (
+    bool(source)
+    and source not in SEVERABLE_SOURCES
+    and source == books_keeper_source(session, str(event.entity_id))
+  )
+
+
+def _is_a_later_version(
+  session: Session, held: Event, body: CreateEventBlockRequest
+) -> bool:
+  """Whether a repeat delivery is its source's correction of ``held`` rather
+  than a retry: a higher version of a journal entry, from the ledger that
+  keeps the entity's books."""
+  if (
+    body.source_version is None
+    or not body.apply_handlers
+    or body.event_type != _SOURCE_CORRECTED_EVENT_TYPE
+    or held.event_type != body.event_type
+    or not _sent_by_the_books_keeper(session, held)
+  ):
+    return False
+  version = (held.metadata_ or {}).get(SOURCE_VERSION_KEY)
+  return not isinstance(version, int) or body.source_version > version
+
+
+def _take_out_of_the_books(
+  session: Session, event: Event, *, op: str, actor: str, reason: str
+) -> list[str]:
+  """Supersede the entries a ledger's event posted, as its correction asks.
+  The caller holds the period fence on their dates."""
+  from robosystems.operations.roboledger.entry_status import SUPERSEDED_ENTRY_STATUS
+  from robosystems.operations.roboledger.supersede import supersede_entries
+
+  live = session.execute(
+    select(Entry.id, Entry.status).where(
+      Entry.triggered_by_event_id == event.id,
+      Entry.status != SUPERSEDED_ENTRY_STATUS,
+    )
+  ).all()
+  unposted = sorted(str(entry_id) for entry_id, status in live if status != "posted")
+  if unposted:
+    raise SourceCorrectionError(
+      f"Event {event.id} holds entries that are not posted "
+      f"({', '.join(unposted)}), so its source cannot correct it."
+    )
+  return supersede_entries(
+    session,
+    [str(entry_id) for entry_id, _ in live],
+    op=op,
+    actor=actor,
+    reason=reason,
+    event_id=str(event.id),
+  )
+
+
+def _replace_with_later_version(
+  session: Session,
+  held: Event,
+  body: CreateEventBlockRequest,
+  created_by: str,
+  *,
+  entity_id: str,
+) -> tuple[Event, EventBlockEnvelope]:
+  """Apply a ledger's later version of a journal entry it already sent: the
+  entries it posted leave the books and the handler posts the new ones, the
+  event keeping its id. Both the old dates and the new must be open."""
+  from robosystems.operations.roboledger.entry_status import SUPERSEDED_ENTRY_STATUS
+  from robosystems.operations.roboledger.supersede import record_replacements
+
+  if str(held.entity_id) != entity_id:
+    raise SourceCorrectionError(
+      f"Event {held.id} is in entity {held.entity_id}'s books; a later version "
+      "cannot move it to another entity."
+    )
+  handler = get_python_handler(body.event_type)
+  if handler is None:
+    raise SourceCorrectionError(f"{body.event_type} has no handler to rebuild from.")
+  try:
+    typed_metadata = handler.metadata_schema.model_validate(body.metadata)
+  except ValidationError as e:
+    raise HandlerMetadataValidationError(
+      f"event_type='{body.event_type}' metadata validation failed: {e}"
+    )
+
+  # Fence, then the row: the order close takes them in.
+  old_dates = _retraction_fence_dates(session, held.id)
+  if old_dates:
+    assert_period_not_closed(session, *old_dates, entity_id=entity_id)
+  with bounded_lock_wait(
+    session,
+    f"Event {held.id} is being written by another process. Retry in a moment.",
+  ):
+    event = (
+      session.query(Event)
+      .filter(Event.id == held.id)
+      .populate_existing()
+      .with_for_update()
+      .one()
+    )
+  # Decided again under the lock: two deliveries of one version would
+  # otherwise both replace.
+  if not _is_a_later_version(session, event, body):
+    raise DuplicateEventError(body.source, str(body.external_id))
+  if event.status in _RETRACTED_STATUSES:
+    raise SourceCorrectionError(
+      f"Event {event.id} is {event.status}; a later version cannot bring it "
+      "back. Send the record under a new external_id."
+    )
+
+  superseded = _take_out_of_the_books(
+    session,
+    event,
+    op="source_replaced",
+    actor=created_by,
+    reason=f"{body.source} sent version {body.source_version}",
+  )
+  event.occurred_at = body.occurred_at
+  event.effective_at = body.effective_at
+  event.amount = body.amount
+  event.currency = body.currency
+  event.description = body.description
+  event.external_url = body.external_url
+  event.agent_id = body.agent_id
+  event.metadata_ = _metadata_with_version(body)
+  handler.dispatch(session, event, typed_metadata, created_by)
+  inherit_event_dimensions(session, str(event.id))
+  session.flush()
+  record_replacements(
+    session,
+    superseded,
+    [
+      str(entry_id)
+      for entry_id in session.scalars(
+        select(Entry.id).where(
+          Entry.triggered_by_event_id == event.id,
+          Entry.status != SUPERSEDED_ENTRY_STATUS,
+        )
+      )
+    ],
+  )
+  return event, _to_envelope(event, _load_dimension_ids(session, event.id))
+
+
+def _metadata_with_version(body: CreateEventBlockRequest) -> dict[str, Any]:
+  if body.source_version is None:
+    return body.metadata
+  return {**body.metadata, SOURCE_VERSION_KEY: body.source_version}
 
 
 def _flush_new_event(
@@ -409,7 +579,7 @@ def _build_event_row(
     amount=body.amount,
     currency=body.currency,
     description=body.description,
-    metadata_=body.metadata,
+    metadata_=_metadata_with_version(body),
     status=status,
     obligated_by_event_id=body.obligated_by_event_id,
     discharges_event_id=body.discharges_event_id,
@@ -562,7 +732,13 @@ def create_event_block_in_session(
   # The entity the caller names, else the body's (a bank feed stamps each
   # line with its account's entity), else the group parent.
   entity_id = ensure_entity_id(session, entity_id or body.entity_id)
-  _assert_not_duplicate(session, body)
+  held = _already_ingested(session, body)
+  if held is not None:
+    if not _is_a_later_version(session, held, body):
+      raise DuplicateEventError(body.source, str(body.external_id))
+    return _replace_with_later_version(
+      session, held, body, created_by, entity_id=entity_id
+    )
   if body.discharges_event_id:
     discharges.check_settlement(
       session,
@@ -949,6 +1125,7 @@ def _refuse_system_metadata(patch: dict | None) -> None:
     "qb_sync_token",
     "drift_detected_at",
     "drift_payload",
+    SOURCE_VERSION_KEY,
     "reconciliation_history",
     # The suggestion ladder's and the commit's own record.
     "suggestion_source",
@@ -1098,6 +1275,24 @@ def update_event_block(
         f"Cannot transition event from '{event.status}' to '{body.transition_to}'. "
         f"Allowed transitions: {sorted(allowed) if allowed else 'none (terminal state)'}."
       )
+
+    if body.source_retracted:
+      # The fence on these entries' dates is held already (a retraction's).
+      if not _sent_by_the_books_keeper(session, event):
+        raise InvalidEventTransitionError(
+          "source_retracted is for an event from the external ledger that "
+          "keeps the entity's books; this one is not."
+        )
+      try:
+        _take_out_of_the_books(
+          session,
+          event,
+          op="source_retracted",
+          actor=created_by,
+          reason=f"{event.source} no longer holds this record",
+        )
+      except SourceCorrectionError as e:
+        raise InvalidEventTransitionError(str(e)) from e
 
     if body.transition_to in _RETRACTED_STATUSES:
       _assert_retractable(session, event)
