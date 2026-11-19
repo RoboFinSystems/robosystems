@@ -55,7 +55,7 @@ router = APIRouter()
   status_code=status.HTTP_201_CREATED,
   operation_id="createConnection",
   summary="Create Connection",
-  description="QuickBooks and Mercury: returns a pending connection — complete the OAuth flow to activate (Mercury may instead connect at once with a personal API token where the deployment allows it). External: registers a source namespace for an integration that writes through the public API. One connection allowed per provider per graph, except 'external' which allows one per source_name and 'plaid' which allows one per bank login (a connection still waiting on Link is returned instead of a second). Plaid: returns a pending connection — `POST /oauth/init` returns a `link_token` for Plaid Link. A bank feed (Mercury, Plaid) names the entity its accounts book to (`entity_id`, the group parent when omitted) and is refused (409) when that entity has no chart of accounts or is the one QuickBooks keeps. QuickBooks keeps the group parent's books only: `entity_id` may be omitted, and naming a subsidiary is refused (409 PARENT_ONLY); it is refused (409) too when the group parent's books are already native. Every connection's `entity_id` is the entity whose books it keeps.",
+  description="QuickBooks and Mercury: returns a pending connection — complete the OAuth flow to activate (Mercury may instead connect at once with a personal API token where the deployment allows it). External: registers a source namespace for an integration that writes through the public API; with `ledger` it is the general ledger that keeps an entity's books, mirrored read-only (the entries it sends land posted, nothing else posts to those books, and the close stamps the period without posting), and is refused (409) when another ledger keeps that entity's books or the entity has books of its own. One connection allowed per provider per graph, except 'external' which allows one per source_name and 'plaid' which allows one per bank login (a connection still waiting on Link is returned instead of a second). Plaid: returns a pending connection — `POST /oauth/init` returns a `link_token` for Plaid Link. A bank feed (Mercury, Plaid) names the entity its accounts book to (`entity_id`, the group parent when omitted) and is refused (409) when that entity has no chart of accounts or is the one QuickBooks keeps. QuickBooks keeps the group parent's books only: `entity_id` may be omitted, and naming a subsidiary is refused (409 PARENT_ONLY); it is refused (409) too when the group parent's books are already native. Every connection's `entity_id` is the entity whose books it keeps.",
   responses={
     **RESOURCE_ERROR_RESPONSES,
     409: {"description": "Connection already exists for this provider"},
@@ -140,6 +140,11 @@ async def create_connection(
         db,
         entity_id=books_entity,
         realm_id=getattr(config, "realm_id", None) or None,
+        ledger_source=(
+          request.external_config.source_name
+          if request.external_config is not None and request.external_config.ledger
+          else None
+        ),
       )
     except ProviderConflictError as conflict:
       raise create_error_response(

@@ -34,6 +34,9 @@ from robosystems.operations.roboledger.commands.journal_entries import (
 )
 from robosystems.operations.roboledger.entity_scope import ensure_entity_id
 from robosystems.operations.roboledger.entry_status import SUPERSEDED_ENTRY_STATUS
+from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+  assert_opening_balance_allowed,
+)
 from robosystems.operations.roboledger.supersede import (
   record_replacements,
   supersede_entries,
@@ -222,11 +225,13 @@ def record_opening_balance(
   """Record, or replace before the first close, the entity's opening balance:
   one posted ``opening`` entry dated the eve of its first fiscal period.
 
-  Raises `OpeningBalanceError` for balances that cannot stand as given and
-  `OpeningBalanceLockedError` once the entity has closed a period, besides
+  Raises `OpeningBalanceError` for balances that cannot stand as given,
+  `OpeningBalanceLockedError` once the entity has closed a period, and
+  `ShadowLedgerPostingError` on shadow books a synced ledger keeps, besides
   the account guards' own errors.
   """
   entity_id = ensure_entity_id(session, body.entity_id)
+  assert_opening_balance_allowed(session, entity_id)
   graph_id = _assert_not_closed(session, entity_id)
   eve = opening_date(session, entity_id)
   if eve is None:

@@ -1,9 +1,16 @@
 """Shared connection models for all providers."""
 
 from datetime import date, datetime
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import (
+  BaseModel,
+  ConfigDict,
+  Field,
+  ValidationInfo,
+  field_validator,
+  model_validator,
+)
 
 # Provider types
 ProviderType = Literal["quickbooks", "external", "mercury", "plaid"]
@@ -148,6 +155,35 @@ class ExternalConnectionConfig(BaseModel):
   display_name: str | None = Field(
     None, max_length=128, description="Human-readable label for the connections UI."
   )
+  ledger: bool = Field(
+    False,
+    description=(
+      "The source is the general ledger that keeps an entity's books. The "
+      "connection becomes that entity's ledger of record in `shadow`: the "
+      "journal entries the source sends land posted, nothing else posts to "
+      "those books, nothing is written back, and the close stamps the period "
+      "without posting. Refused (409) when another ledger already keeps the "
+      "entity's books or the entity has books of its own."
+    ),
+  )
+  entity_id: str | None = Field(
+    None,
+    min_length=1,
+    description=(
+      "With `ledger`, the entity whose books the source keeps: a "
+      "subsidiary's id, or omit for the group parent. One source keeps one "
+      "entity's books; register a source per entity."
+    ),
+  )
+
+  @model_validator(mode="after")
+  def entity_needs_ledger(self) -> Self:
+    if self.entity_id and not self.ledger:
+      raise ValueError(
+        "entity_id names the entity a ledger source keeps the books of; set "
+        "ledger, or omit it for a source whose events name their own entity"
+      )
+    return self
 
   @field_validator("source_name")
   @classmethod
@@ -228,7 +264,8 @@ class ConnectionResponse(BaseModel):
     description=(
       "The entity whose books the connection keeps: the group parent for "
       "QuickBooks, the entity a bank feed was connected for (each of its "
-      "accounts can move to another entity later), none for an external "
+      "accounts can move to another entity later), the entity an external "
+      "ledger source was registered for, and none for any other external "
       "source, whose events name their own."
     ),
   )
@@ -238,7 +275,7 @@ class ConnectionResponse(BaseModel):
       "Whether this connection is the ledger of record for `entity_id`: its "
       "books are kept in the connected system, and `write_policy` says "
       "whether entries are written back to it or only mirrored. False for a "
-      "bank feed or an external event source."
+      "bank feed or an external source that is not a ledger."
     ),
   )
   status: str = Field(..., description="Connection status")
@@ -250,8 +287,9 @@ class ConnectionResponse(BaseModel):
     description=(
       "Outbound write policy: 'qb_authoritative' (QuickBooks is the book of "
       "record and RoboSystems-originated entries publish to it at close), "
-      "'shadow' (QuickBooks is the book of record, nothing is written to it "
-      "and the close posts nothing locally), or 'native' (no external ledger; "
+      "'shadow' (the connected ledger is the book of record, nothing is "
+      "written to it and the close posts nothing locally; the only policy "
+      "an external ledger source can hold), or 'native' (no external ledger; "
       "what severing leaves). It governs the books of `entity_id`, and only "
       "on the connection that keeps them. Set via the write-policy endpoint."
     ),

@@ -608,3 +608,38 @@ class TestDispatchPreviewNested:
     assert any(
       "Entry 0" in e and "balance" in e.lower() for e in preview.validation_errors
     )
+
+
+_HANDLER = "robosystems.operations.event_block.python_handlers.journal_entry_recorded"
+
+
+class TestTheKeepersOwnEntries:
+  """An entry from the external ledger that keeps the entity's books lands
+  posted whatever status it was sent with."""
+
+  @pytest.mark.parametrize(
+    ("source", "keeper", "landed"),
+    [
+      ("netsuite-uk", "netsuite-uk", "posted"),
+      ("NetSuite-UK", "netsuite-uk", "posted"),
+      ("netsuite-us", "netsuite-uk", "draft"),
+      ("manual", "netsuite-uk", "draft"),
+      ("netsuite-uk", None, "draft"),
+      ("quickbooks", "quickbooks", "draft"),
+    ],
+  )
+  def test_a_draft_from_the_ledger_is_posted(self, source, keeper, landed) -> None:
+    event = _make_event()
+    event.source = source
+    event.entity_id = "ent_sub"
+
+    with (
+      patch(f"{_HANDLER}.books_keeper_source", return_value=keeper),
+      patch(
+        f"{_HANDLER}.create_journal_entry", return_value=_fake_response()
+      ) as create,
+    ):
+      dispatch(MagicMock(), event, _make_metadata(status="draft"), "usr_test")
+
+    assert create.call_args.args[1].status == landed
+    assert event.status == ("fulfilled" if landed == "posted" else "classified")

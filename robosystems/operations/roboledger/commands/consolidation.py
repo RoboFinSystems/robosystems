@@ -49,9 +49,13 @@ from robosystems.operations.roboledger.commands.opening_balances import (
 )
 from robosystems.operations.roboledger.entity_scope import (
   find_consolidation_entity,
+  group_members,
   is_group_parent,
   resolve_entity,
   resolve_entity_id,
+)
+from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+  assert_group_consolidates_here,
 )
 from robosystems.operations.roboledger.reads.consolidation import (
   ACQUISITION,
@@ -110,7 +114,8 @@ def propose_consolidation_entries(
   as posted. Drafts are not held until they post, so the proposals are the
   same whether or not earlier drafts exist.
 
-  Raises ``NoConsolidationEntityError`` when the group has none."""
+  Raises ``NoConsolidationEntityError`` when the group has none, and
+  ``MirroredGroupError`` when every member's books are kept elsewhere."""
   # One proposer per month at a time: two would each replace the same drafts
   # and each write a full set.
   session.execute(
@@ -122,6 +127,15 @@ def propose_consolidation_entries(
   )
   preview = preview_consolidation_entries(session, period=body.period)
   consolidation_id = preview.consolidation_entity_id
+  assert_group_consolidates_here(
+    session,
+    [
+      member.id
+      for member in group_members(
+        session, resolve_entity_id(session), consolidated=False
+      )
+    ],
+  )
   response = ProposeConsolidationEntriesResponse(
     period=preview.period,
     consolidation_entity_id=consolidation_id,
