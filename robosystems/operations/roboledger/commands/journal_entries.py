@@ -752,7 +752,9 @@ def create_journal_entry(
   assert_adjustment_allowed(session, entity_id, body)
   synced = (body.source or "").lower() in SEVERABLE_SOURCES
   if body.status == "posted" and not synced and not mirrors_source:
-    assert_local_posting_allowed(session, entity_id, "Posting this journal entry")
+    assert_local_posting_allowed(
+      session, entity_id, "Posting this journal entry", source=body.source
+    )
 
   normalized, total_debit, _total_credit = validate_and_normalize_lines(body.line_items)
   wanted = [li["dimension_ids"] for li in normalized]

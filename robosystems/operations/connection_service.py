@@ -60,7 +60,8 @@ class ConnectionService:
     session_created = db_session is None
 
     try:
-      for_entity = books_entity_id(
+      keeps_books = bool(metadata.get("keeps_books"))
+      for_entity = metadata.get("books_entity_id") or books_entity_id(
         provider, credentials or {}, group_parent_reader(target_graph_id)
       )
       if for_entity is None and provider.lower() in SYNCED_LEDGER_PROVIDERS:
@@ -80,12 +81,13 @@ class ConnectionService:
         source_name=metadata.get("source_name"),
         auto_sync_enabled=metadata.get("auto_sync_enabled", True),
         entity_id=for_entity,
+        write_policy=metadata.get("write_policy"),
       )
 
       # A synced ledger created already authorized keeps the books at once;
       # one still in OAuth takes them at its callback.
       if (
-        provider.lower() in SYNCED_LEDGER_PROVIDERS
+        (provider.lower() in SYNCED_LEDGER_PROVIDERS or keeps_books)
         and for_entity
         and conn.status
         not in (
@@ -563,7 +565,7 @@ class ProviderConflictError(Exception):
 
   ``code`` is stable for clients: ``QUICKBOOKS_ACTIVE``, ``CHART_REQUIRED``,
   ``NATIVE_BOOKS_PRESENT``, ``OTHER_COMPANY_BOOKS``, ``ENTITY_NOT_FOUND``,
-  ``CONSOLIDATION_ENTITY``, ``PARENT_ONLY``.
+  ``CONSOLIDATION_ENTITY``, ``PARENT_ONLY``, ``BOOKS_KEPT_ELSEWHERE``.
   """
 
   def __init__(self, code: str, message: str) -> None:
@@ -586,6 +588,7 @@ def assert_provider_compatible(
   entity_id: str | None = None,
   resuming: bool = False,
   realm_id: str | None = None,
+  ledger_source: str | None = None,
 ) -> None:
   """Refuse a provider that would mix native and synced books of one entity.
 
@@ -613,9 +616,17 @@ def assert_provider_compatible(
   re-authorizing: it already keeps the parent's books, so accounts added
   beside it since are not books it would take over. ``realm_id`` is the
   company a synced connection names before its callback, when it names one.
-  Anything else (``external`` sources, a second SEC repo …) passes.
+
+  ``ledger_source`` is the source name of an ``external`` connection that
+  registers as the ledger keeping ``entity_id``'s books (see
+  `_assert_external_ledger_compatible`). Anything else (other ``external``
+  sources, a second SEC repo …) passes.
   """
   wanted = (provider or "").lower()
+  if wanted == "external":
+    if ledger_source:
+      _assert_external_ledger_compatible(graph_id, entity_id, ledger_source, session)
+    return
   connections = list(Connection.get_all_for_graph(graph_id, session))
 
   if wanted in BANK_FEED_PROVIDERS:
@@ -681,6 +692,64 @@ def assert_provider_compatible(
       )
     if realm_id:
       assert_same_company(graph_id, wanted, realm_id, session)
+
+
+def books_entity_for(graph_id: str, entity_id: str | None) -> str:
+  """The id of the entity a connection naming ``entity_id`` keeps the books
+  of: itself, or the group parent when it names none. A parent that cannot
+  be read still has its id, fixed by construction."""
+  return entity_id or group_parent_reader(graph_id)() or f"entity_{graph_id}"
+
+
+def _assert_external_ledger_compatible(
+  graph_id: str, entity_id: str | None, source_name: str, session: Session
+) -> None:
+  """Refuse an external ledger that would keep books someone else keeps.
+
+  - an entity the graph does not have → ``ENTITY_NOT_FOUND``;
+  - the consolidation entity, whose books hold the group's consolidating
+    entries → ``CONSOLIDATION_ENTITY``;
+  - an entity whose books another connection keeps → ``BOOKS_KEPT_ELSEWHERE``
+    (the same source registering again is no conflict);
+  - an entity with books of its own (a bank feed account on its chart, or a
+    landed entry that came from anywhere but this source; its opening
+    balance is the mirror's starting point and is no bar) →
+    ``NATIVE_BOOKS_PRESENT``.
+  """
+  from robosystems.operations.roboledger.reads.books import (
+    entity_has_entries_from_elsewhere,
+    entity_has_feed_account,
+  )
+
+  _is_group_parent(graph_id, entity_id)
+  if _is_consolidation_entity(graph_id, entity_id):
+    raise ProviderConflictError(
+      "CONSOLIDATION_ENTITY",
+      "The consolidation entity's books hold the group's consolidating "
+      "entries, so an external ledger cannot keep them. Register the ledger "
+      "for the company whose books it keeps.",
+    )
+  target = books_entity_for(graph_id, entity_id)
+  keeper = books_keeper(session, graph_id, target)
+  if keeper is not None and keeper.source_name != source_name:
+    raise ProviderConflictError(
+      "BOOKS_KEPT_ELSEWHERE",
+      f"{(keeper.source_name or keeper.provider or 'A ledger').capitalize()} "
+      "already keeps this entity's books. Register this ledger for another "
+      "entity of the group, or remove that connection first.",
+    )
+  if _probe_books(
+    graph_id,
+    lambda ext: (
+      entity_has_feed_account(ext, entity_id)
+      or entity_has_entries_from_elsewhere(ext, target, source=source_name)
+    ),
+  ):
+    raise ProviderConflictError(
+      "NATIVE_BOOKS_PRESENT",
+      "This entity keeps books of its own; an external ledger cannot become "
+      "the source of truth over them.",
+    )
 
 
 def assert_same_company(

@@ -158,11 +158,20 @@ class ShadowLedgerPostingError(ValueError):
 
   def __init__(self, action: str) -> None:
     super().__init__(
-      f"{action} would post to books that run a shadow close beside "
-      "QuickBooks, where nothing posts here: these books mirror QuickBooks. "
-      "Record it as a draft, which the close keeps as an expectation, or "
-      "make the change in QuickBooks."
+      f"{action} would post to books that run a shadow close beside the "
+      "ledger that keeps them, where nothing posts here: these books mirror "
+      "that ledger. Record it as a draft, which the close keeps as an "
+      "expectation, or make the change in the ledger itself."
     )
+
+
+def keeper_event_source(keeper: Connection) -> str | None:
+  """The `Event.source` a keeper's own entries arrive under: the name an
+  external ledger registered, the provider for a synced one."""
+  provider = (keeper.provider or "").lower()
+  if provider == "external":
+    return str(keeper.source_name).lower() if keeper.source_name else None
+  return provider or None
 
 
 def shadow_books(session: Session, entity_id: str | None) -> bool:
@@ -209,14 +218,78 @@ def closed_under_shadow(
   return bool(receipt["shadow"])
 
 
+_KEEPER_SOURCE_MEMO = "books_keeper_sources"
+
+
+def books_keeper_source(session: Session, entity_id: str | None) -> str | None:
+  """The source whose entries are this entity's books, for a session opened
+  on a graph: its keeper's, or None when it keeps its own. Remembered for
+  the session, like `shadow_books`."""
+  graph_id = session.info.get("graph_id")
+  if not isinstance(graph_id, str) or not graph_id or not entity_id:
+    return None
+  memo: dict[str, str | None] = session.info.setdefault(_KEEPER_SOURCE_MEMO, {})
+  if entity_id not in memo:
+    from robosystems.database import SessionFactory
+
+    with SessionFactory() as platform_session:
+      keeper = books_keeper(platform_session, graph_id, entity_id)
+      memo[entity_id] = keeper_event_source(keeper) if keeper is not None else None
+  return memo[entity_id]
+
+
 def assert_local_posting_allowed(
-  session: Session, entity_id: str | None, action: str
+  session: Session,
+  entity_id: str | None,
+  action: str,
+  *,
+  source: str | None = None,
 ) -> None:
   """Refuse to post to books a shadow close keeps. Under shadow the ledger
-  mirrors QuickBooks: only the sync lands entries, and the close keeps every
+  mirrors the one that keeps it: only that ledger's own entries land
+  (``source`` names where this one came from), and the close keeps every
   draft as an expectation rather than posting it."""
-  if shadow_books(session, entity_id):
-    raise ShadowLedgerPostingError(action)
+  if not shadow_books(session, entity_id):
+    return
+  if source and source.lower() == books_keeper_source(session, entity_id):
+    return
+  raise ShadowLedgerPostingError(action)
+
+
+def assert_opening_balance_allowed(session: Session, entity_id: str | None) -> None:
+  """Refuse an opening balance on shadow books a synced ledger keeps: its
+  sync brings the balances it starts from, and an opening beside them would
+  count twice. An external ledger sends no such baseline, so the opening
+  balance is where its mirror starts."""
+  from robosystems.operations.roboledger.commands.connections import (
+    SEVERABLE_SOURCES,
+  )
+
+  if (
+    shadow_books(session, entity_id)
+    and books_keeper_source(session, entity_id) in SEVERABLE_SOURCES
+  ):
+    raise ShadowLedgerPostingError("Recording an opening balance")
+
+
+class MirroredGroupError(ValueError):
+  """Every company of the group is kept by a ledger elsewhere."""
+
+  def __init__(self) -> None:
+    super().__init__(
+      "Every company of this group is mirrored from a ledger kept elsewhere, "
+      "so the group is consolidated there and nothing is drafted here. Read "
+      "the group combined, or send the consolidating entries with the "
+      "ledger that holds them."
+    )
+
+
+def assert_group_consolidates_here(session: Session, member_ids: list[str]) -> None:
+  """Refuse to draft consolidating entries for a group whose members are all
+  shadow books: nothing we originate posts to any of them, and the entries
+  would be a second consolidation beside the source's own."""
+  if member_ids and all(shadow_books(session, member) for member in member_ids):
+    raise MirroredGroupError()
 
 
 def _entry_not_yet_in_qb() -> ColumnElement[bool]:

@@ -1509,7 +1509,12 @@ class TestCreateConnectionBooksGuard:
     assert exc_info.value.detail["code"] == "NATIVE_BOOKS_PRESENT"
     assert exc_info.value.detail["detail"] == "native books"
     guard.assert_called_once_with(
-      GRAPH_ID, "quickbooks", mock_db, entity_id=None, realm_id=None
+      GRAPH_ID,
+      "quickbooks",
+      mock_db,
+      entity_id=None,
+      realm_id=None,
+      ledger_source=None,
     )
     mock_list.assert_not_awaited()
     mock_registry.create_connection.assert_not_awaited()
@@ -1793,7 +1798,11 @@ class TestCreateMercuryConnection:
       )
     assert result.provider == "plaid"
     assert guard.call_args.args[1] == "plaid"
-    assert guard.call_args.kwargs == {"entity_id": "ent_sub", "realm_id": None}
+    assert guard.call_args.kwargs == {
+      "entity_id": "ent_sub",
+      "realm_id": None,
+      "ledger_source": None,
+    }
 
   @pytest.mark.unit
   @pytest.mark.asyncio
@@ -1844,7 +1853,11 @@ class TestCreateMercuryConnection:
         db=MagicMock(),
         _rate_limit=None,
       )
-    assert guard.call_args.kwargs == {"entity_id": judged, "realm_id": None}
+    assert guard.call_args.kwargs == {
+      "entity_id": judged,
+      "realm_id": None,
+      "ledger_source": None,
+    }
 
   @pytest.mark.unit
   @pytest.mark.asyncio

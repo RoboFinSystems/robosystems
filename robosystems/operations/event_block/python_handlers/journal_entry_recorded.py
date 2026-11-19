@@ -46,6 +46,7 @@ from robosystems.operations.roboledger.commands.journal_entries import (
 from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
   ShadowLedgerPostingError,
   assert_local_posting_allowed,
+  books_keeper_source,
 )
 from robosystems.operations.roboledger.line_dimensions import (
   resolve_dimension_refs,
@@ -429,6 +430,26 @@ def _dispatch_nested(
   return HandlerResult(entry_ids=entry_ids, transaction_ids=transaction_ids)
 
 
+def _as_the_books(
+  session: Session,
+  source: str | None,
+  entity_id: str | None,
+  metadata: JournalEntryRecordedMetadata,
+) -> JournalEntryRecordedMetadata:
+  """An entry sent by the external ledger that keeps the entity's books is
+  those books, so it lands posted whatever status it was sent with: a draft
+  there would be a line of the mirror that never arrives."""
+  wanted = (source or "").lower()
+  if (
+    metadata.status == "posted"
+    or not wanted
+    or wanted in SEVERABLE_SOURCES
+    or wanted != books_keeper_source(session, entity_id)
+  ):
+    return metadata
+  return metadata.model_copy(update={"status": "posted"})
+
+
 def dispatch(
   session: Session,
   event: Event,
@@ -437,6 +458,9 @@ def dispatch(
 ) -> HandlerResult:
   """Create the journal entries and link them to the event; sets the event
   ``fulfilled`` when ``metadata.status == 'posted'``."""
+  metadata = _as_the_books(
+    session, event.source, str(event.entity_id) if event.entity_id else None, metadata
+  )
   if metadata.is_nested:
     result = _dispatch_nested(session, event, metadata, created_by)
   else:
@@ -514,6 +538,7 @@ def dispatch_preview(
   entity_id: str | None = None,
 ) -> HandlerPreview:
   """Validate balance + closed-period + line items without persisting."""
+  metadata = _as_the_books(session, body.source, entity_id, metadata)
   errors: list[str] = []
 
   posting_dates: list[date] = []
@@ -550,7 +575,9 @@ def dispatch_preview(
   mirrors = bool((body.metadata or {}).get("reconciles_event_id"))
   if metadata.status == "posted" and not synced and not mirrors:
     try:
-      assert_local_posting_allowed(session, entity_id, "Posting this journal entry")
+      assert_local_posting_allowed(
+        session, entity_id, "Posting this journal entry", source=body.source
+      )
     except ShadowLedgerPostingError as e:
       errors.append(str(e))
 

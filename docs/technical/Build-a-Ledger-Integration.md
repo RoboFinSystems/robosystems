@@ -118,6 +118,34 @@ connection = client.unwrap(
 
 `create_connection` is in the SDK's generated tier rather than the template's stable set — fine for a one-time setup call. See [Versioning and Compatibility](Versioning-and-Compatibility.md#the-two-tier-sdk-contract).
 
+### When the source is the general ledger
+
+Driftline sends invoices into books kept in RoboLedger. A source that *is* the books — an ERP or accounting system whose journal the graph mirrors for reporting and analysis — registers with `ledger` set, naming the entity whose books it keeps (omit `entity_id` for the group parent):
+
+```json
+{
+  "provider": "external",
+  "external_config": {
+    "source_name": "netsuite-uk",
+    "display_name": "NetSuite (UK)",
+    "ledger": true,
+    "entity_id": "ent_01..."
+  }
+}
+```
+
+The connection becomes that entity's ledger of record with the `shadow` write policy, the only one it can hold, and the entity's books are read-only to everything but the source:
+
+- A `journal_entry_recorded` event from the source lands posted, whatever `status` it carries, so step 6 below does not apply to it. The closed-period gate of step 7 does.
+- A posted entry from any other source, or one written by hand, is refused. A draft is still accepted and never posts.
+- Nothing is written back, and closing a period posts nothing: it moves the closed-through date, stamps the statements, and records what would have held the close as findings.
+- The opening balance (`record-opening-balance`) is the mirror's starting point, so history before it need not be sent.
+- One source keeps one entity's books. A group with several companies registers a source per company.
+
+Registration is refused with a 409 when another ledger already keeps the entity's books (`BOOKS_KEPT_ELSEWHERE`), when the entity has books of its own (`NATIVE_BOOKS_PRESENT`), or for the consolidation entity (`CONSOLIDATION_ENTITY`). When every company of a group is mirrored this way, the group is read combined; consolidating entries are not drafted for it.
+
+An entry the source has sent cannot yet be replaced or withdrawn by sending it again: a repeated `external_id` is refused as a duplicate, like any other event.
+
 ## Step 2: Find the Accounts
 
 Journal lines name accounts by **element id**, the id of the account in the graph's chart of accounts. Look them up once with GraphQL and keep them in your integration's configuration — they don't change when account names do.

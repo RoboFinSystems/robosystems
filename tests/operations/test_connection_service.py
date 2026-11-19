@@ -2044,3 +2044,77 @@ class TestSeverConnection:
 
     mock_conn.set_write_policy.assert_not_called()
     mock_conn.update_status.assert_not_called()
+
+
+class TestExternalLedgerCompatibility:
+  """An external source registering as the ledger that keeps an entity's
+  books."""
+
+  @staticmethod
+  def _assert(entity_id="ent_sub", *, keeper=None, consolidation=False, books=False):
+    from robosystems.operations.connection_service import assert_provider_compatible
+
+    with (
+      patch(f"{MODULE}.books_keeper", return_value=keeper) as asked,
+      patch(f"{MODULE}.group_parent_reader", return_value=lambda: "ent_p"),
+      patch(f"{MODULE}._is_group_parent", return_value=entity_id is None),
+      patch(f"{MODULE}._is_consolidation_entity", return_value=consolidation),
+      patch(f"{MODULE}._probe_books", return_value=books),
+    ):
+      assert_provider_compatible(
+        "kg_test",
+        "external",
+        MagicMock(),
+        entity_id=entity_id,
+        ledger_source="netsuite-uk",
+      )
+    return asked
+
+  @pytest.mark.unit
+  def test_a_free_entity_takes_the_ledger(self):
+    asked = self._assert()
+    assert asked.call_args.args[1:] == ("kg_test", "ent_sub")
+
+  @pytest.mark.unit
+  def test_no_entity_named_is_the_group_parent(self):
+    asked = self._assert(entity_id=None)
+    assert asked.call_args.args[1:] == ("kg_test", "ent_p")
+
+  @pytest.mark.unit
+  def test_the_same_source_registering_again_is_no_conflict(self):
+    mine = _make_mock_connection(provider="external", entity_id="ent_sub")
+    mine.source_name = "netsuite-uk"
+    self._assert(keeper=mine)
+
+  @pytest.mark.unit
+  @pytest.mark.parametrize(
+    ("state", "code"),
+    [
+      ({"keeper": "quickbooks"}, "BOOKS_KEPT_ELSEWHERE"),
+      ({"consolidation": True}, "CONSOLIDATION_ENTITY"),
+      ({"books": True}, "NATIVE_BOOKS_PRESENT"),
+    ],
+  )
+  def test_books_someone_else_keeps_are_refused(self, state, code):
+    from robosystems.operations.connection_service import ProviderConflictError
+
+    if "keeper" in state:
+      other = _make_mock_connection(provider=state["keeper"], entity_id="ent_sub")
+      other.source_name = None
+      state = {"keeper": other}
+    with pytest.raises(ProviderConflictError) as exc:
+      self._assert(**state)
+    assert exc.value.code == code
+    assert exc.value.http_status == 409
+
+  @pytest.mark.unit
+  def test_a_source_that_is_no_ledger_is_never_probed(self):
+    from robosystems.operations.connection_service import assert_provider_compatible
+
+    with (
+      patch(f"{MODULE}.books_keeper") as keeper,
+      patch(f"{MODULE}._probe_books") as probe,
+    ):
+      assert_provider_compatible("kg_test", "external", MagicMock())
+    keeper.assert_not_called()
+    probe.assert_not_called()

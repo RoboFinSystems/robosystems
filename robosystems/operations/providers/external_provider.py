@@ -15,8 +15,8 @@ from sqlalchemy.orm import Session
 
 from ...logger import logger
 from ...models.api.graphs.connections import ExternalConnectionConfig
-from ...models.core.connection.connection import Connection
-from ...operations.connection_service import ConnectionService
+from ...models.core.connection.connection import Connection, WritePolicy
+from ...operations.connection_service import ConnectionService, books_entity_for
 from .types import SyncOutcome
 
 
@@ -34,7 +34,9 @@ async def create_external_connection(
   partial unique index on ``(graph_id, source_name)`` is the
   race-proof backstop; this pre-check produces the friendly error.
   The connection is born ``connected`` (there is no auth handshake to
-  wait for) and ``write_policy`` defaults to ``native``.
+  wait for) and ``write_policy`` defaults to ``native``. A ``ledger`` source
+  keeps the named entity's books (the group parent's when it names none)
+  from the start, in ``shadow``: nothing can be written back to it.
   """
   existing = Connection.get_all_for_graph(graph_id, db)
   for connection in existing:
@@ -56,6 +58,15 @@ async def create_external_connection(
       "status": "connected",
       "source_name": config.source_name,
       "entity_name": config.display_name,
+      **(
+        {
+          "keeps_books": True,
+          "books_entity_id": books_entity_for(graph_id, config.entity_id),
+          "write_policy": WritePolicy.SHADOW.value,
+        }
+        if config.ledger
+        else {}
+      ),
     },
     graph_id=graph_id,
     db_session=db,

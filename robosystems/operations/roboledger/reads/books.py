@@ -60,6 +60,30 @@ def graph_has_native_line_items(
   return bool(session.execute(select(exists().where(*clauses))).scalar())
 
 
+def entity_has_entries_from_elsewhere(
+  session: Session, entity_id: str, *, source: str
+) -> bool:
+  """True when ``entity_id``'s books hold a landed entry that did not come
+  from ``source``. Its opening balance does not count: that is where a
+  mirror of ``source`` starts, recorded here rather than sent as history."""
+  from robosystems.models.extensions.roboledger import Entry, Transaction
+  from robosystems.operations.roboledger.entry_status import LANDED_ENTRY_STATUSES
+
+  return bool(
+    session.execute(
+      select(
+        exists().where(
+          Entry.entity_id == entity_id,
+          Entry.status.in_(LANDED_ENTRY_STATUSES),
+          Entry.transaction_id == Transaction.id,
+          Transaction.source != source,
+          Transaction.type != "opening_balance",
+        )
+      )
+    ).scalar()
+  )
+
+
 def chart_built_elsewhere(
   session: Session, *, synced_source: str, entity_id: str | None = None
 ) -> bool:
