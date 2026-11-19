@@ -721,6 +721,7 @@ def _assert_external_ledger_compatible(
     entity_has_feed_account,
   )
 
+  # Asked only for its refusal: a named entity the graph lacks raises here.
   _is_group_parent(graph_id, entity_id)
   if _is_consolidation_entity(graph_id, entity_id):
     raise ProviderConflictError(

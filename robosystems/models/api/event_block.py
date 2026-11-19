@@ -248,6 +248,20 @@ class CreateEventBlockRequest(BaseModel):
   external_url: str | None = Field(
     None, description="Deep link back to source-system record"
   )
+  source_version: int | None = Field(
+    None,
+    ge=1,
+    description=(
+      "The source's revision of this record: a number that only grows, such "
+      "as a revision counter or a last-modified timestamp. It matters for a "
+      "`journal_entry_recorded` event from the external ledger that keeps "
+      "the entity's books (a connection registered with `ledger`): sending "
+      "the same `external_id` again with a higher version replaces the "
+      "entry in the books, in an open period. An equal or lower version, "
+      "or none, is the 409 of a repeat delivery. From any other source it is "
+      "stored and has no effect."
+    ),
+  )
 
   # Economic value (minor currency units — cents, signed)
   amount: int | None = Field(
@@ -670,10 +684,26 @@ class UpdateEventBlockRequest(BaseModel):
     ),
   )
 
+  source_retracted: bool = Field(
+    False,
+    description=(
+      "With `transition_to: voided`, for an event from the external ledger "
+      "that keeps the entity's books: the source no longer holds this "
+      "record, so its posted entries are taken out of the books and the "
+      "event is voided, in an open period. Refused for any other event."
+    ),
+  )
+
   @model_validator(mode="after")
   def _one_way_to_settle(self) -> UpdateEventBlockRequest:
     if self.discharges_event_id is not None and self.discharge_allocations is not None:
       raise ValueError("Give discharges_event_id or discharge_allocations, not both.")
+    return self
+
+  @model_validator(mode="after")
+  def _a_retraction_voids(self) -> UpdateEventBlockRequest:
+    if self.source_retracted and self.transition_to != "voided":
+      raise ValueError("source_retracted goes with transition_to='voided'.")
     return self
 
 

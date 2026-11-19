@@ -105,3 +105,12 @@ def test_one_native_member_keeps_consolidation_here(mirrored):
   ):
     mirrored.session.info.pop("books_keepers", None)
     assert_group_consolidates_here(mirrored.session, [parent, sub])
+
+
+def test_the_rule_reads_the_source_not_the_author(mirrored):
+  """An entry named for the ledger is taken as the ledger's, whoever sends
+  it: the guard is a rule about sources, and the entry records its author."""
+  created = _entry(mirrored, source=LEDGER)
+  entry = mirrored.session.get(Entry, created.id)
+  assert entry.status == "posted"
+  assert entry.created_by == "usr_1"

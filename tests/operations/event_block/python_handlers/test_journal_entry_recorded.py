@@ -643,3 +643,19 @@ class TestTheKeepersOwnEntries:
 
     assert create.call_args.args[1].status == landed
     assert event.status == ("fulfilled" if landed == "posted" else "classified")
+
+  def test_the_preview_says_a_draft_from_the_ledger_will_post(self) -> None:
+    body = _make_body()
+
+    with (
+      patch(f"{_HANDLER}.books_keeper_source", return_value=body.source),
+      patch(f"{_HANDLER}.assert_period_not_closed"),
+      patch(f"{_HANDLER}.assert_accounts_postable"),
+      patch(f"{_HANDLER}.assert_local_posting_allowed") as guard,
+    ):
+      preview = dispatch_preview(
+        MagicMock(), body, _make_metadata(status="draft"), entity_id="ent_sub"
+      )
+
+    assert preview.computed_values["target_status"] == "fulfilled"
+    guard.assert_called_once()
