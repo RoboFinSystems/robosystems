@@ -162,6 +162,11 @@ def _validate_received(
     [],
   )
   checks.equal(
+    "its statements are arranged as the library arranges them",
+    result.get("conforms_to_library"),
+    True,
+  )
+  checks.equal(
     "only the fund's own KPIs were added to its vocabulary",
     sorted(
       q

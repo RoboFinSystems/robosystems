@@ -673,6 +673,13 @@ def _refuse_local_rederivation(report_id: str, origin: str, artifact: str) -> No
   if origin == "authored":
     return
   if origin == "uploaded":
+    if artifact != "holon":
+      # Only the holon is kept for a report that arrived as a file.
+      raise ReportBundleNotAvailableError(
+        f"Report '{report_id}' was received as a file and is kept as a holon "
+        f"only, so it has no {artifact}. Download it as `holon-jsonld`; "
+        f"xbrlkit converts a holon to other formats."
+      )
     raise ReportBundleNotAvailableError(
       f"Report '{report_id}' was received as a file and its {artifact} is no "
       f"longer in storage. A received report is served as the file that "

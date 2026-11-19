@@ -15,8 +15,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
-from sqlalchemy import event, select, text, update
-from sqlalchemy.orm import Session
+from sqlalchemy import event, exists, or_, select, text, update
+from sqlalchemy.orm import Session, aliased
 from xbrlkit.check import check_report
 from xbrlkit.deserialize import from_holon_report
 from xbrlkit.deserialize.holon import HolonError
@@ -41,6 +41,7 @@ from robosystems.models.extensions import (
   Association,
   Element,
   Fact,
+  LineItem,
   Report,
   Structure,
   Taxonomy,
@@ -257,6 +258,9 @@ def import_report(
       )
       written += 1
   session.flush()
+  if replaced.report_ids:
+    # What the restatement no longer uses goes with the report it replaced.
+    remove_unused_concepts(session, created_by)
 
   _store(graph_id, report, holon_text)
   _settle_artifacts(session, graph_id, str(report.id), replaced.report_ids)
@@ -443,6 +447,51 @@ def _sections(model: XbrlModel, loadable: list[XbrlFact]) -> _Sections:
   if loose:
     membership[""] = loose
   return _Sections([b for b in blocks if b.role_uri in membership], membership)
+
+
+def remove_unused_concepts(session: Session, removed_by: str) -> list[str]:
+  """Drop the concepts received reports brought that nothing uses any more,
+  and return their qnames.
+
+  Only the received-reports vocabulary is looked at, so a library concept is
+  never a candidate, and only a concept with no fact, no line and no arc in
+  any section. The removal goes through the vocabulary's own update, which
+  refuses anything still referenced.
+  """
+  taxonomy = _received_taxonomy(session)
+  if taxonomy is None:
+    return []
+  child = aliased(Element)
+  unused = (
+    session.execute(
+      select(Element.qname)
+      .where(
+        Element.taxonomy_id == taxonomy.id,
+        ~exists().where(Fact.element_id == Element.id),
+        ~exists().where(LineItem.element_id == Element.id),
+        ~exists().where(child.parent_id == Element.id),
+        ~exists().where(
+          or_(
+            Association.from_element_id == Element.id,
+            Association.to_element_id == Element.id,
+          )
+        ),
+      )
+      .order_by(Element.qname)
+    )
+    .scalars()
+    .all()
+  )
+  qnames = [str(q) for q in unused if q]
+  if qnames:
+    reporting_extension.update(
+      session,
+      UpdateTaxonomyBlockRequest(
+        taxonomy_id=str(taxonomy.id), elements_to_remove=qnames
+      ),
+      removed_by,
+    )
+  return qnames
 
 
 def _received_taxonomy(session: Session) -> Taxonomy | None:

@@ -1316,6 +1316,29 @@ class IngestReportRequest(BaseModel):
   )
 
 
+class ReportDeparture(BaseModel):
+  """One place a report sent as rows arranges a primary statement differently
+  than the library does."""
+
+  section: str = Field(..., description="The section it is in.")
+  kind: Literal["moved", "placed", "own_subtotal", "own_layout"] = Field(
+    ...,
+    description=(
+      "moved: a library concept sits under a different line, or with a "
+      "different sign, than the library gives it. placed: a library concept "
+      "the library does not put on this statement was given a line. "
+      "own_subtotal: a concept of the firm's own has library concepts beneath "
+      "it. own_layout: the whole statement came with its own lines."
+    ),
+  )
+  concept: str | None = Field(None, description="The concept, when it is about one.")
+  library_parent: str | None = Field(
+    None, description="For `moved`: the line the library puts it under."
+  )
+  parent: str | None = Field(None, description="The line the report puts it under.")
+  detail: str = Field(..., description="The departure as a sentence.")
+
+
 class IngestReportResponse(BaseModel):
   """What an ingest loaded, or on a dry run what it would load."""
 
@@ -1352,7 +1375,23 @@ class IngestReportResponse(BaseModel):
   unplaced_concepts: list[str] = Field(
     default_factory=list,
     description=(
-      "Concepts with a value that no section places, for a report sent as "
-      "rows. Their values load, but appear on no statement or table."
+      "Library concepts with a value that no section places, for a report "
+      "sent as rows. Their values load, but appear on no statement or table."
+    ),
+  )
+  conforms_to_library: bool | None = Field(
+    None,
+    description=(
+      "For a report sent as rows: true when its balance sheet and income "
+      "statement are arranged as the library arranges them, so their lines "
+      "mean what the same lines mean in any other report. Null for a holon "
+      "or a Tavi model, which is not compared."
+    ),
+  )
+  departures: list[ReportDeparture] = Field(
+    default_factory=list,
+    description=(
+      "Each place the report departs from the library's arrangement. The "
+      "report still loads; the list is kept with it."
     ),
   )

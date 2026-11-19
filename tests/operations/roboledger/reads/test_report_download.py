@@ -141,7 +141,11 @@ class TestReceivedReportsAreNeverRederived:
       patch("robosystems.operations.serialization.build_report_bundle") as build,
     ):
       s3_cls.return_value.object_exists.return_value = False
-      with pytest.raises(ReportBundleNotAvailableError, match="ingest the file again"):
+      # Only the holon was ever stored; the other formats say so.
+      expected = (
+        "ingest the file again" if flavor == "holon-jsonld" else "kept as a holon only"
+      )
+      with pytest.raises(ReportBundleNotAvailableError, match=expected):
         get_report_download_url(session, "kg1", "rpt_1", flavor=flavor)
 
     build.assert_not_called()
