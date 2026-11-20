@@ -714,6 +714,14 @@ class GraphDeprovisionService:
       logger.warning(error_msg, extra={"graph_id": graph_id})
       return
 
+    # Named before the first provider call: a slow revoke is the last thing
+    # this step does, and a line written after it can be lost with the process.
+    logger.info(
+      f"Revoking provider grants for {len(rows)} connection(s) of {graph_id}: "
+      + ", ".join(f"{row[0]} ({row[1]})" for row in rows),
+      extra={"graph_id": graph_id},
+    )
+
     for connection_id, provider, entity_name in rows:
       provider_type = (provider or "").lower()
       try:
