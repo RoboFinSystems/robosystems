@@ -312,7 +312,7 @@ class TestWriteGuards:
       ]
     )
 
-    async def refuse(arguments, tool_access):
+    async def refuse(arguments, tool_access, writes):
       raise WriteRefusedError("not from the console")
 
     result = await run_tool_loop(
@@ -340,7 +340,7 @@ class TestWriteGuards:
       side_effect=[_turn(("update-agent", {"agent_id": "agt_1"})), _turn(text="No.")]
     )
 
-    async def broken(arguments, tool_access):
+    async def broken(arguments, tool_access, writes):
       raise RuntimeError("lookup failed")
 
     result = await run_tool_loop(
@@ -366,7 +366,7 @@ class TestWriteGuards:
     )
     seen = []
 
-    async def pin(arguments, tool_access):
+    async def pin(arguments, tool_access, writes):
       seen.append(tool_access)
       return {**arguments, "pinned": True}
 
@@ -392,6 +392,12 @@ class TestWriteGuards:
     analyst = await _loop_kwargs(AnalystOperator(), _tools(["read-graph-cypher"]))
     assert analyst["write_guards"] == {}
 
+  def test_no_update_tool_is_on_the_allowlist_without_a_guard(self):
+    # An update reaches what was already there, so each is narrowed.
+    updates = {t for t in AuthorOperator.WRITE_TOOLS if t.startswith("update-")}
+    assert updates
+    assert updates <= set(AuthorOperator.WRITE_GUARDS)
+
   def test_every_guard_narrows_an_allowlisted_tool(self):
     assert set(AuthorOperator.WRITE_GUARDS) <= set(AuthorOperator.WRITE_TOOLS)
 
@@ -400,20 +406,20 @@ class TestWriteGuards:
     guard = AuthorOperator.WRITE_GUARDS["create-taxonomy-block"]
     with pytest.raises(WriteRefusedError, match="primary chart"):
       await guard(
-        {"name": "New chart", "taxonomy_type": "chart_of_accounts"}, MagicMock()
+        {"name": "New chart", "taxonomy_type": "chart_of_accounts"}, MagicMock(), []
       )
 
   @pytest.mark.parametrize("taxonomy_type", ["custom_ontology", "reporting_extension"])
   async def test_other_taxonomy_blocks_pass_unchanged(self, taxonomy_type):
     guard = AuthorOperator.WRITE_GUARDS["create-taxonomy-block"]
     arguments = {"name": "Metrics", "taxonomy_type": taxonomy_type}
-    assert await guard(arguments, MagicMock()) == arguments
+    assert await guard(arguments, MagicMock(), []) == arguments
 
   @pytest.mark.parametrize("asked", [{}, {"dispatch_handlers": False}])
   async def test_the_sweep_always_drafts_what_it_promotes(self, asked):
     # Flip-only would strand the obligations and block the close.
     guard = AuthorOperator.WRITE_GUARDS["promote-obligations"]
-    assert (await guard(asked, MagicMock()))["dispatch_handlers"] is True
+    assert (await guard(asked, MagicMock(), []))["dispatch_handlers"] is True
 
   async def test_the_author_cannot_commit_an_inbox_line_through_the_loop(self):
     """The allowlisted tool, the author's own guards, the real loop: a commit
@@ -449,7 +455,10 @@ class TestWriteGuards:
 
 
 class TestClassifyGuard:
-  guard = staticmethod(AuthorOperator.WRITE_GUARDS["update-event-block"])
+  @staticmethod
+  async def guard(arguments, tools):
+    # This guard does not read the run's writes.
+    return await AuthorOperator.WRITE_GUARDS["update-event-block"](arguments, tools, [])
 
   async def test_a_classification_passes_and_is_stamped_as_the_ai(self):
     tools = _event_tools(BANK_LINE)
@@ -641,3 +650,97 @@ class TestWriteRecord:
 
   def test_a_result_with_no_id_records_none(self):
     assert write_record("remember", {"text": "x"}, "ok")["id"] is None
+
+
+class TestUpdatesReachOnlyWhatTheRunMade:
+  """Until a run can pause for the person's word, the author changes a block
+  or a counterparty only when the same request created it."""
+
+  async def _run(self, calls, results):
+    tools = _tools(list(results), results)
+    ai = MagicMock()
+    ai.create_message = AsyncMock(
+      side_effect=[*(_turn(call) for call in calls), _turn(text="Done.")]
+    )
+    result = await run_tool_loop(
+      _ctx(tools, ai),
+      system="s",
+      tool_names=list(results),
+      max_iterations=5,
+      max_tokens=100,
+      write_tools=frozenset(results),
+      write_guards=AuthorOperator.WRITE_GUARDS,
+    )
+    dispatched = [call.args[0] for call in tools.call_tool.await_args_list]
+    last = ai.create_message.await_args_list[-1].kwargs["messages"][-1].content
+    return result, dispatched, last[0]["toolResult"]
+
+  async def test_an_existing_forecast_is_not_updated(self):
+    update = {"block_type": "forecast", "payload": {"structure_id": "st_old"}}
+    result, dispatched, answer = await self._run(
+      [("update-information-block", update)],
+      {"update-information-block": {"id": "st_old"}},
+    )
+
+    assert dispatched == []
+    assert result.writes == []
+    assert answer["status"] == "error"
+    assert "Plan" in answer["content"][0]["text"]
+
+  async def test_a_forecast_the_run_created_is_updated(self):
+    create = {"block_type": "forecast", "payload": {"name": "FY27 plan"}}
+    update = {"block_type": "forecast", "payload": {"structure_id": "st_new"}}
+    result, dispatched, _ = await self._run(
+      [("create-information-block", create), ("update-information-block", update)],
+      {
+        "create-information-block": {"id": "st_new", "block_type": "forecast"},
+        "update-information-block": {"id": "st_new", "block_type": "forecast"},
+      },
+    )
+
+    assert dispatched == ["create-information-block", "update-information-block"]
+    assert [w["operation"] for w in result.writes] == dispatched
+
+  async def test_an_existing_counterparty_is_not_updated(self):
+    result, dispatched, answer = await self._run(
+      [("update-agent", {"agent_id": "agt_old", "name": "Acme Ltd"})],
+      {"update-agent": {"id": "agt_old"}},
+    )
+
+    assert dispatched == []
+    assert result.writes == []
+    assert "Agents" in answer["content"][0]["text"]
+
+  async def test_a_counterparty_the_run_created_is_updated(self):
+    result, dispatched, _ = await self._run(
+      [
+        ("create-agent", {"name": "Acme", "agent_type": "customer"}),
+        ("update-agent", {"agent_id": "agt_new", "legal_name": "Acme Ltd"}),
+      ],
+      {"create-agent": {"id": "agt_new"}, "update-agent": {"id": "agt_new"}},
+    )
+
+    assert dispatched == ["create-agent", "update-agent"]
+
+  async def test_an_update_does_not_vouch_for_a_later_one(self):
+    # Only a create makes an object the run's own.
+    update = ("update-agent", {"agent_id": "agt_old"})
+    _, dispatched, _ = await self._run(
+      [update, update], {"update-agent": {"id": "agt_old"}}
+    )
+
+    assert dispatched == []
+
+  async def test_a_block_created_as_another_kind_does_not_open_an_agent(self):
+    _, dispatched, _ = await self._run(
+      [
+        ("create-information-block", {"block_type": "forecast", "payload": {}}),
+        ("update-agent", {"agent_id": "same_id"}),
+      ],
+      {
+        "create-information-block": {"id": "same_id"},
+        "update-agent": {"id": "same_id"},
+      },
+    )
+
+    assert dispatched == ["create-information-block"]

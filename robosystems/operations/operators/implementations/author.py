@@ -7,6 +7,7 @@ takes.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from robosystems.config.operators import OperatorConfig
@@ -31,7 +32,7 @@ _STEP_CAP = 25
 
 
 async def _no_chart_of_accounts(
-  arguments: dict[str, Any], tools: ToolAccess
+  arguments: dict[str, Any], tools: ToolAccess, writes: Sequence[dict[str, Any]]
 ) -> dict[str, Any]:
   # Creating a chart links it as the entity's primary one and demotes the
   # chart the books run on.
@@ -60,7 +61,7 @@ _CLASSIFY_METADATA = frozenset(
 
 
 async def _classify_only(
-  arguments: dict[str, Any], tools: ToolAccess
+  arguments: dict[str, Any], tools: ToolAccess, writes: Sequence[dict[str, Any]]
 ) -> dict[str, Any]:
   # Committing a line is the person's approval, so it never happens here.
   from robosystems.operations.event_block.python_handlers.bank_feed import (
@@ -102,11 +103,42 @@ async def _classify_only(
 
 
 async def _draft_what_it_promotes(
-  arguments: dict[str, Any], tools: ToolAccess
+  arguments: dict[str, Any], tools: ToolAccess, writes: Sequence[dict[str, Any]]
 ) -> dict[str, Any]:
   # A sweep that only flips status strands the obligations: the close then
   # blocks on entries nobody drafted.
   return {**arguments, "dispatch_handlers": True}
+
+
+def _only_what_this_run_made(
+  tool: str,
+  *,
+  created_by: str,
+  target: Callable[[dict[str, Any]], Any],
+  elsewhere: str,
+) -> WriteGuard:
+  """A guard that lets `tool` change only an object `created_by` made earlier
+  in the same run. An object that was already there is the user's, and until
+  a run can stop for their word it is changed where they can see it."""
+
+  async def guard(
+    arguments: dict[str, Any], tools: ToolAccess, writes: Sequence[dict[str, Any]]
+  ) -> dict[str, Any]:
+    made = {w.get("id") for w in writes if w.get("operation") == created_by}
+    target_id = target(arguments)
+    if not target_id or str(target_id) not in made:
+      raise WriteRefusedError(
+        f"From the console, {tool} only changes what this request created "
+        f"with {created_by}. {elsewhere}"
+      )
+    return arguments
+
+  return guard
+
+
+def _block_target(arguments: dict[str, Any]) -> Any:
+  payload = arguments.get("payload")
+  return payload.get("structure_id") if isinstance(payload, dict) else None
 
 
 @register_operator("author")
@@ -145,6 +177,24 @@ class AuthorOperator(AnalystOperator):
   # be called with.
   WRITE_GUARDS: dict[str, WriteGuard] = {
     "create-taxonomy-block": _no_chart_of_accounts,
+    "update-information-block": _only_what_this_run_made(
+      "update-information-block",
+      created_by="create-information-block",
+      target=_block_target,
+      elsewhere=(
+        "An existing forecast is edited by the user in Plan, an existing "
+        "schedule in the Closing Book, or either through an MCP client."
+      ),
+    ),
+    "update-agent": _only_what_this_run_made(
+      "update-agent",
+      created_by="create-agent",
+      target=lambda arguments: arguments.get("agent_id"),
+      elsewhere=(
+        "An existing counterparty is edited by the user on the Agents page, "
+        "or through an MCP client."
+      ),
+    ),
     "update-event-block": _classify_only,
     "promote-obligations": _draft_what_it_promotes,
   }
@@ -220,12 +270,20 @@ class AuthorOperator(AnalystOperator):
       ledger_rules += (
         "\n- `create-report` builds a report; it does not file or share it."
       )
+    update_rule = ""
+    if {"update-information-block", "update-agent"} & set(write_tools):
+      update_rule = (
+        "\n- The update tools change only what this request itself created. "
+        "A block or counterparty that already existed is the user's to edit: "
+        "say where (Plan for a forecast, the Closing Book for a schedule, "
+        "the Agents page for a counterparty, or an MCP client) and stop."
+      )
     return f"""
 
 AUTHORING (this request may ask you to change the graph, not just read it):
 - You can write with these tools only: {names}. Nothing else changes data; Cypher stays read-only.
 - Read before you write. Find the real ids (elements, blocks, agents) with the read tools; never invent one. If what the user named does not exist or is ambiguous, stop and ask instead of guessing.
-- Make exactly the change asked for. Do not create extra blocks, edit objects the user did not mention, or repeat a write that already succeeded.
+- Make exactly the change asked for. Do not create extra blocks, edit objects the user did not mention, or repeat a write that already succeeded.{update_rule}
 - A write tool that returns an error changed nothing: read the message, fix the arguments, and retry at most once.
 - When done, say plainly what you created or changed, naming each object, and anything you could not do. If the request was only a question, answer it and write nothing.
 - When the request needs something you have no tool for (closing or reopening a period, committing or voiding an inbox line, editing a journal entry, deleting anything, filing or sharing a report), say where it is done: the Closing Book, the Inbox, the Journal, the report's own menu, or an MCP client.{ledger_rules}"""

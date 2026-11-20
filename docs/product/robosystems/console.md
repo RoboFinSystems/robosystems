@@ -32,7 +32,7 @@ A plain question only reads. To have the Console change something, start the req
 
 What it drafts stays a draft. Filing or sharing a report it created is done by a person in RoboLedger, a bank-feed line it sorts posts only when someone commits it, and a schedule entry it drafts posts only when someone closes the month.
 
-Some work stays out of the Console on purpose: posting and editing journal entries, closing or reopening a period, and deleting anything. Do those in the RoboLedger app or through your own AI assistant.
+Some work stays out of the Console on purpose: posting and editing journal entries, closing or reopening a period, changing a forecast, schedule or counterparty that already exists, and deleting anything. Do those in the RoboLedger app or through your own AI assistant. Within one request the Console can still adjust what that request just created.
 
 Graph admins can see every change made to a graph, from the Console, a connected AI assistant or the API, on the **Activity** page. Every Console run is recorded there too, question or change: what was asked, what it read and answered, how it ended and what it cost. Picking a run shows its question and answer above the changes it made. Shared repositories such as the SEC filings take no changes, so they have no **Activity** page. How long the record is kept is in [Security and your data](security-and-your-data.md#ai-that-runs-inside-robosystems).
 
