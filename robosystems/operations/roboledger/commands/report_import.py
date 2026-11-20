@@ -134,6 +134,23 @@ def import_report(
   entity = session.get(Entity, entity_id, with_for_update=not dry_run)
   if entity is None:
     raise ReportImportEntityNotFoundError(f"Entity '{entity_id}' is not in this graph.")
+  # A received report is about an outside company. One of the graph's own
+  # entities reports from its ledger, and a report loaded onto it would be
+  # read as its own figures.
+  if entity.source != "linked":
+    raise ReportImportRefusedError(
+      [
+        {
+          "code": "own_entity",
+          "message": (
+            f"'{entity.name}' is one of this graph's own entities, whose "
+            "reports come from its ledger. A received report is loaded onto "
+            "an issuer: add the company with `create-issuer`, whether or not "
+            "the fund holds a position in it."
+          ),
+        }
+      ]
+    )
 
   # A nil value states that nothing was disclosed; there is nothing to load.
   loadable = _one_per_coordinate(

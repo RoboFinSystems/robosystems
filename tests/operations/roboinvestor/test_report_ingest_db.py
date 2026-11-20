@@ -319,6 +319,24 @@ def test_rows_for_an_entity_outside_the_graph_are_refused_before_anything_is_bui
     )
 
 
+def test_a_report_is_not_loaded_onto_one_of_the_graphs_own_entities(fund):
+  session = fund["session"]
+  own = Entity(id="ent_fund", name="Meridian Fund I", is_parent=True, created_by="u")
+  session.add(own)
+  session.flush()
+
+  with pytest.raises(ReportImportRefusedError) as refused:
+    _ingest({**fund, "issuer": own}, report=_rows(), dry_run=True)
+
+  assert refused.value.problems[0]["code"] == "own_entity"
+  assert "create-issuer" in refused.value.problems[0]["message"]
+
+
+def test_an_issuer_the_fund_holds_no_position_in_still_takes_a_report(fund):
+  # The fixture's issuer has no security and no position.
+  assert _ingest(fund, report=_rows()).report_id
+
+
 def test_the_request_names_exactly_one_report(fund):
   with pytest.raises(IngestRequestError):
     _ingest(fund)
