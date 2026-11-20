@@ -278,7 +278,7 @@ def get_backup_prefix(
 
 
 # The artifact stamped at publish and named by ``Report.bundle_url``: the
-# holon, which carries the whole report. Earlier generations are stamped
+# holon, the report's primary serialization. Earlier generations are stamped
 # ``.tavi.json`` or, before that, ``.jsonld``.
 REPORT_ANCHOR_EXTENSION = ".holon.jsonld"
 

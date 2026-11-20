@@ -338,8 +338,9 @@ class AcceptSuggestionsRequest(BaseModel):
   suggestion_source: str | None = Field(
     None,
     description=(
-      "Only lines whose suggestion came from here: `agent_default` (the "
-      "counterparty's learned default), `tier0` (the bank's category) or `ai`."
+      "Only lines whose suggestion came from here: `open_item` (an open bill "
+      "or invoice the line pays exactly), `agent_default` (the "
+      "counterparty's learned default) or `tier0` (the bank's category)."
     ),
   )
   occurred_from: date | None = Field(

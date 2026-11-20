@@ -623,12 +623,12 @@ class ReportBundleDownloadResponse(BaseModel):
       "`disclosure_notes`: the XBRL 2.1 zip ships statements only — "
       "tenant-authored disclosure notes render on screen and ride the "
       "Tavi and holon flavors, but are excluded from this file. "
-      "The Tavi compiled model carries the statements, notes, reporting "
-      "style and FactSet partition but has no home for `ib_envelopes` "
-      "(the per-Network Information Block payloads), `definition_links` "
-      "(equivalence, general-special, essence-alias and mapping arcs), "
-      "`framework_pins` or `filing_lifecycle` (filing status, "
-      "supersession, share provenance); all of it rides the holon flavor."
+      "The holon and the Tavi compiled model carry the statements, notes, "
+      "reporting style and FactSet partition but have no home for "
+      "`ib_envelopes` (the per-Network Information Block payloads), "
+      "`definition_links` (equivalence, general-special, essence-alias and "
+      "mapping arcs), `framework_pins` or `filing_lifecycle` (filing status, "
+      "supersession, share provenance)."
     ),
   )
 

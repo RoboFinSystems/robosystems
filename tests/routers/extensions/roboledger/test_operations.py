@@ -81,6 +81,7 @@ from robosystems.routers.extensions.roboledger.operations import (
   change_calendar_start_op,
   close_period_op,
   create_entity_op,
+  create_event_block_op,
   create_report_op,
   delete_journal_entry_op,
   file_report_op,
@@ -1659,6 +1660,35 @@ def _make_event_envelope(status: str = "committed"):
     created_at=datetime(2026, 3, 31, tzinfo=UTC),
     created_by="usr_test",
   )
+
+
+class TestCreateEventBlockOp:
+  @pytest.mark.asyncio
+  async def test_system_metadata_key_is_422_not_500(self) -> None:
+    """The refusal raised before any write must map to 422, as on update."""
+    from robosystems.models.api.event_block import CreateEventBlockRequest
+
+    body = CreateEventBlockRequest(
+      event_type="journal_entry_recorded",
+      event_category="adjustment",
+      occurred_at="2026-03-31T00:00:00Z",
+      source="api",
+      metadata={"qb_external_id": "123"},
+    )
+    with _mock_session_ctx() as mock_session:
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      with pytest.raises(HTTPException) as exc:
+        await create_event_block_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+    assert exc.value.status_code == 422
+    assert "system-maintained" in str(exc.value.detail)
 
 
 class TestUpdateEventBlockOp:
