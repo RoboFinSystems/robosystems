@@ -49,6 +49,7 @@ from robosystems.operations.roboledger.fiscal_calendar.service import (
   CalendarOpeningBlockedError,
   CalendarStartBlockedError,
   CalendarStartLockedError,
+  CloseableGateResult,
   InvalidCloseTargetError,
 )
 
@@ -898,10 +899,6 @@ class TestPlanHistoryBackfillTask:
 
 
 def _precheck(blockers: list[str], *, shadow: bool):
-  from robosystems.operations.roboledger.fiscal_calendar.service import (
-    CloseableGateResult,
-  )
-
   tool = ClosePeriodTool(_client(user_id="usr_abc"))
   gate = CloseableGateResult(is_closeable=not blockers, blockers=list(blockers))
   with (
@@ -914,7 +911,10 @@ def _precheck(blockers: list[str], *, shadow: bool):
     patch(f"{MODULE}.FiscalCalendarService") as service,
   ):
     service.return_value.closeable_gate.return_value = gate
-    return tool._gate_check({"period": "2026-10"})
+    refusal = tool._gate_check({"period": "2026-10"})
+    # The gate and the shadow lookup are asked about the same entity.
+    assert service.return_value.closeable_gate.call_args.kwargs["entity_id"] == "ent_1"
+    return refusal
 
 
 class TestClosePrecheckUnderShadow:

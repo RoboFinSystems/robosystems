@@ -878,7 +878,7 @@ The receipt:
           session,
           graph_id,
           period,
-          entity_id=arguments.get("entity_id"),
+          entity_id=entity_id,
           has_sync_connection=has_sync,
           last_sync_at=last_sync_at,
           allow_stale_sync=bool(arguments.get("allow_stale_sync", False)),
