@@ -36,6 +36,7 @@ RoboLedger is the general ledger built on RoboSystems, the open-source knowledge
 - [Reconcile your accounts](reconcile-your-accounts.md): tie your balances to QuickBooks, a statement or a schedule, and sign off.
 - [Close the month with your AI assistant](month-end-close.md): blockers, drafts, approval and the receipt.
 - [Nothing writes to QuickBooks until you post](quickbooks-write-back.md): what gets written back, and when.
+- [Keep your books where they are](keep-your-books-where-they-are.md): run RoboLedger beside QuickBooks or your ERP, or keep the books here.
 
 ## Reference
 
