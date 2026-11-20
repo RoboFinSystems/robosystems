@@ -1,0 +1,205 @@
+"""An invoice and its payment written on native books age once a close posts
+them: a drafted document is not in the books yet, and a posted one is,
+whatever status its event was left in."""
+
+from __future__ import annotations
+
+from datetime import UTC, date, datetime
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from robosystems.models.api.event_block import CreateEventBlockRequest
+from robosystems.models.api.fact_provenance import AssertedProvenance
+from robosystems.models.extensions.element import Element
+from robosystems.models.extensions.roboledger import Agent, Event
+from robosystems.operations.event_block.commands import create_event_block_in_session
+from robosystems.operations.roboledger.commands.fiscal_calendar import close_period
+from robosystems.operations.roboledger.fact_set import create_fact_set
+from robosystems.operations.roboledger.fiscal_calendar import (
+  FiscalCalendarService,
+  PeriodCloseService,
+)
+from robosystems.operations.roboledger.reads.ar_ap import (
+  get_aged_balances,
+  list_open_items,
+)
+from robosystems.operations.roboledger.reports.statement_sets import (
+  StatementStampResult,
+)
+from tests.ledger_entity import entity_account
+from tests.operations.roboledger.conftest import (  # noqa: F401
+  tenant_session,
+  two_entities,
+)
+
+pytestmark = pytest.mark.unit
+
+GRAPH_ID = "kg0123456789abcdef09"
+_COMMANDS = "robosystems.operations.roboledger.commands.fiscal_calendar"
+JULY_END = date(2026, 7, 31)
+
+
+@pytest.fixture(autouse=True)
+def _no_platform():
+  with (
+    patch(f"{_COMMANDS}.exclusive_period_fence"),
+    patch("robosystems.operations.extensions.staleness.mark_graph_stale"),
+    patch(
+      "robosystems.operations.roboledger.reads.fiscal_calendar.keeper_sync_state",
+      return_value=(False, None),
+    ),
+  ):
+    yield
+
+
+def _stamp(session, *, graph_id, period_start, period_end, actor_id, entity_id):
+  fact_set = create_fact_set(
+    session,
+    period_start=period_start,
+    period_end=period_end,
+    factset_type="report",
+    entity_id=entity_id,
+    provenance=AssertedProvenance(
+      source_system="test", asserted_by=actor_id, basis_note="fixture"
+    ),
+    created_by=actor_id,
+  )
+  session.flush()
+  return StatementStampResult(stamped=True, fact_set_ids={"statement": fact_set.id})
+
+
+@pytest.fixture()
+def books(two_entities):  # noqa: F811
+  """The parent's native books, closed through June with July open."""
+  t = two_entities
+  entity = t.parent.id
+  t.service = FiscalCalendarService()
+  t.service.initialize(
+    t.session, GRAPH_ID, closed_through="2026-06", actor_id="usr_1", entity_id=entity
+  )
+  t.service.ensure_fiscal_periods(
+    t.session,
+    GRAPH_ID,
+    start_period="2026-06",
+    end_period="2026-08",
+    closed_through="2026-06",
+    entity_id=entity,
+  )
+  t.cash = entity_account(t.session, entity, "Checking")
+  t.revenue = entity_account(t.session, entity, "Consulting Revenue")
+  t.receivables = entity_account(t.session, entity, "Accounts Receivable")
+  t.session.get(Element, t.receivables).metadata_ = {
+    "account_type": "Accounts Receivable"
+  }
+  t.agent = Agent(agent_type="customer", name="Acme", created_by="test")
+  t.session.add(t.agent)
+  t.session.commit()
+  return t
+
+
+def _document(
+  t,
+  event_type: str,
+  cents: int,
+  day: int,
+  *,
+  debit: str,
+  credit: str,
+  settles: str | None = None,
+) -> str:
+  at = datetime(2026, 7, day, tzinfo=UTC)
+  body = CreateEventBlockRequest(
+    event_type=event_type,
+    event_category="sales",
+    source="manual",
+    occurred_at=at,
+    amount=cents,
+    agent_id=t.agent.id,
+    discharges_event_id=settles,
+    apply_handlers=True,
+    metadata={
+      "posting_date": at.date().isoformat(),
+      "memo": event_type,
+      "line_items": [
+        {"element_id": debit, "debit_amount": cents},
+        {"element_id": credit, "credit_amount": cents},
+      ],
+    },
+  )
+  event, _ = create_event_block_in_session(t.session, body, "usr_1", graph_id=GRAPH_ID)
+  t.session.commit()
+  return str(event.id)
+
+
+def _close_july(t) -> None:
+  close_period(
+    t.session,
+    MagicMock(),
+    GRAPH_ID,
+    "2026-07",
+    actor_id="usr_1",
+    allow_stale_sync=False,
+    note=None,
+    service=t.service,
+    close_service=PeriodCloseService(t.service, statement_stamper=_stamp),
+    entity_id=t.parent.id,
+  )
+  t.session.commit()
+  t.session.expire_all()
+
+
+def _open_receivables(t) -> list[int]:
+  items = list_open_items(
+    t.session, "receivables", as_of=JULY_END, entity_id=t.parent.id
+  )
+  return [item.open_cents for item in items]
+
+
+def test_a_drafted_invoice_is_not_a_receivable_yet(books):
+  t = books
+  _document(t, "invoice_issued", 120_000, 5, debit=t.receivables, credit=t.revenue)
+
+  assert _open_receivables(t) == []
+
+
+def test_an_invoice_the_close_posted_ages(books):
+  t = books
+  invoice = _document(
+    t, "invoice_issued", 120_000, 5, debit=t.receivables, credit=t.revenue
+  )
+
+  _close_july(t)
+
+  assert t.session.get(Event, invoice).status == "classified"
+  assert _open_receivables(t) == [120_000]
+  aged = get_aged_balances(
+    t.session, "receivables", as_of=JULY_END, entity_id=t.parent.id
+  )
+  assert aged.buckets.total_cents == 120_000
+
+
+def test_a_payment_the_close_posted_settles_its_invoice(books):
+  t = books
+  invoice = _document(
+    t, "invoice_issued", 120_000, 5, debit=t.receivables, credit=t.revenue
+  )
+  _document(
+    t,
+    "payment_received",
+    50_000,
+    20,
+    debit=t.cash,
+    credit=t.receivables,
+    settles=invoice,
+  )
+
+  _close_july(t)
+
+  assert _open_receivables(t) == [70_000]
+  aged = get_aged_balances(
+    t.session, "receivables", as_of=JULY_END, entity_id=t.parent.id
+  )
+  (tie_out,) = aged.tie_outs
+  assert tie_out.open_items_cents == 70_000
+  assert tie_out.control_balance_cents == 70_000

@@ -69,13 +69,27 @@ _OPEN_BALANCE_STATUSES: tuple[str, ...] = ("committed", "fulfilled")
 _CLAIMING_STATUSES: tuple[str, ...] = ("captured", "classified")
 
 
+def _in_the_books(events):
+  """Whether an event's document is in the ledger: by its status, or by an
+  entry of its own that landed. A document drafted on native books stays
+  ``classified`` after the close posts it."""
+  landed = exists().where(
+    Entry.triggered_by_event_id == events.c.id,
+    Entry.status.in_(LANDED_ENTRY_STATUSES),
+  )
+  return or_(
+    events.c.status.in_(_OPEN_BALANCE_STATUSES),
+    and_(events.c.status == "classified", landed),
+  )
+
+
 def _settled(
   bound: datetime | None = None,
   *,
   excluding: str | None = None,
   counting_claims: bool = False,
 ):
-  """``(obligation_id, settled)``: what committed payments, dated before
+  """``(obligation_id, settled)``: what payments in the books, dated before
   ``bound`` when one is given, have applied to each obligation. A payment with
   allocation rows settles through them; one without settles the obligation its
   ``discharges_event_id`` names, at its full magnitude. ``excluding`` leaves
@@ -84,7 +98,7 @@ def _settled(
   whatever their date: what they will settle is not on offer to another."""
   payments = Event.__table__.alias("payments_e")
   allocations = EventDischarge.__table__
-  counted = payments.c.status.in_(_OPEN_BALANCE_STATUSES)
+  counted = _in_the_books(payments)
   if bound is not None:
     counted = and_(counted, payments.c.occurred_at < bound)
   if counting_claims:
@@ -146,7 +160,7 @@ def _build_open_balance_subquery(
     )
     .where(
       originating.c.event_type.in_(tuple(originating_types)),
-      originating.c.status.in_(_OPEN_BALANCE_STATUSES),
+      _in_the_books(originating),
       originating.c.amount.is_not(None),
       *scope,
     )
@@ -376,7 +390,7 @@ def _open_items(
     )
     .where(
       originating.c.event_type.in_(_ORIGINATING_TYPES[kind]),
-      originating.c.status.in_(_OPEN_BALANCE_STATUSES),
+      _in_the_books(originating),
       originating.c.amount.is_not(None),
       originating.c.entity_id.in_(entity_ids),
       originating.c.occurred_at < bound,
