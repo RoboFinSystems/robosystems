@@ -14,6 +14,18 @@ from robosystems.routers.billing.checkout import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_seat_held():
+  """A repository checkout asks whether the user already holds the seat; these
+  tests run on a mock session, which would answer yes to anything. The refusal
+  is tested against the database in test_checkout_held_seat_db.py."""
+  with patch(
+    "robosystems.routers.billing.checkout.BillingSubscription.get_by_resource_and_user",
+    return_value=None,
+  ):
+    yield
+
+
 class TestCreateCheckoutSession:
   """Tests for create_checkout_session endpoint."""
 
