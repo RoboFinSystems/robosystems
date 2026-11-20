@@ -1,6 +1,6 @@
 # Connecting Bank Feeds Locally
 
-How to turn on the two bank feeds, Mercury and Plaid, on a **self-hosted** RoboSystems stack: the settings each needs, which credential route works where, and what connecting and disconnecting do on your machine. On robosystems.ai none of this is needed, because connecting a feed is a button in the app.
+How to turn on the two bank feeds, Mercury and Plaid, on a **self-hosted** RoboSystems stack: the settings each needs, which credential route works where, and what connecting and disconnecting do on your machine. On robosystems.ai a bank connects through Plaid from the app, and Mercury is not offered yet. Connecting and working a feed over the API, on any deployment, is [Connections & Bank Feeds](Connections-and-Bank-Feeds.md).
 
 Both feeds work the same way once connected. Each posted transaction lands in the ledger's Inbox with a suggested account, and nothing reaches the books until it is classified and committed. The [Pipeline Guide](Pipeline-Guide.md#bank-feeds-mercury-plaid) covers the sync, and [Event Block Reference](Event-Block-Reference.md) covers the captured lines.
 

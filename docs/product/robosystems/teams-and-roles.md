@@ -5,7 +5,7 @@ order: 12
 section: Your account and data
 ---
 
-People work on graphs through an **organization**. You invite someone into the organization, then give them a role on each graph they need. Members aren't billed per seat; each graph is its own subscription.
+People work on graphs through an **organization**. You invite someone into the organization, then give them a role on each graph they need. Members aren't billed for graphs: each graph is its own subscription. SEC filings access is a seat per person. See [Billing and subscriptions](billing-and-subscriptions.md).
 
 ## Invite someone
 
@@ -24,7 +24,7 @@ An invitation gives no graph access by itself. Admins see every graph; a member 
 | Create graphs | Yes | Yes, once the owner has added a payment method | No |
 | Every graph in the organization, as its admin | Yes | Yes | Only graphs they're given |
 | Invite, change roles, remove people | Yes | Yes | No |
-| Payment method, plan changes, cancelling | Yes | No | No |
+| Payment method, graph tier changes, cancelling a graph | Yes | No | No |
 | View invoices | Yes | Yes | No |
 
 The person who creates the organization is its owner. Ownership can't be changed in the app; contact support if it needs to move.

@@ -58,8 +58,10 @@ The per-graph extensions: typed reads, command writes, and the workflows built o
 - **[RoboLedger Operations](RoboLedger-Operations.md)** - The catalog of ledger operations and analytical views
 - **[Group Consolidation](Group-Consolidation.md)** - The reporting group end to end: treatment, charts and mapping, the consolidating entries, the group close, a member's lifecycle, and the statements
 - **[QuickBooks Sync & Write Policy](QuickBooks-Sync-and-Write-Policy.md)** - Sync windows, the book of record, write-back, and reconciling items
+- **[Connections & Bank Feeds](Connections-and-Bank-Feeds.md)** - Connecting a bank feed over the API, routing its accounts, working its lines through the Inbox, and disconnecting
 - **[Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md)** - The mapping model, auto-map vs suggestions, and the closed-period lock
 - **[Period Close](Period-Close.md)** - The fiscal calendar, blockers, the close and its receipt, reopening
+- **[Receivables & Payables](Receivables-and-Payables.md)** - Open items, settlement document by document, aging at a date, the control-account tie-out, and intercompany pairs
 - **[Forecasting & Metrics](Forecasting-and-Metrics.md)** - Forecast scenarios, the four drivers, plan history, and metrics
 - **[RoboInvestor Operations](RoboInvestor-Operations.md)** - Portfolios, securities, positions, issuer linking, and receiving a report from a company that is not on the platform
 

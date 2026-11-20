@@ -16,6 +16,7 @@ RoboLedger is the general ledger built on RoboSystems, the open-source knowledge
 6. [Work across several companies](working-across-companies.md): for fractional CFOs and controllers, one graph and one connection per client.
 7. [Consolidate a group of companies](consolidate-a-group.md): each company keeps its own books, and the group's consolidated statements are drafted from them every month.
 8. [Your books and your data](your-books-and-your-data.md): what's copied from QuickBooks, who can see it, and how to take it with you.
+9. [Connect a bank feed](connect-a-bank-feed.md): bring a bank's posted transactions into the Inbox for a company whose books RoboLedger keeps.
 
 ## Work with your books
 
@@ -26,6 +27,7 @@ RoboLedger is the general ledger built on RoboSystems, the open-source knowledge
 - [Plan and forecast with your AI assistant](plan-and-forecast.md): budgets and what-if scenarios that project all three statements, month by month.
 - [Explore statements and metrics over time](explorer.md): any statement, note, schedule or scenario as a series.
 - [Compare with public companies](compare-with-public-companies.md): your margins and ratios next to SEC filers.
+- [See who owes you and whom you owe](who-owes-you-and-whom-you-owe.md): open invoices and bills by counterparty and age, tied out to the ledger.
 
 ## Keep the books right
 

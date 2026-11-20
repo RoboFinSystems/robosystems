@@ -33,8 +33,10 @@
 - [RoboLedger Operations](RoboLedger-Operations.md)
 - [Group Consolidation](Group-Consolidation.md)
 - [QuickBooks Sync & Write Policy](QuickBooks-Sync-and-Write-Policy.md)
+- [Connections & Bank Feeds](Connections-and-Bank-Feeds.md)
 - [Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md)
 - [Period Close](Period-Close.md)
+- [Receivables & Payables](Receivables-and-Payables.md)
 - [Forecasting & Metrics](Forecasting-and-Metrics.md)
 - [RoboInvestor Operations](RoboInvestor-Operations.md)
 
