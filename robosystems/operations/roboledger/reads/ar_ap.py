@@ -89,7 +89,7 @@ def _settled(
   excluding: str | None = None,
   counting_claims: bool = False,
 ):
-  """``(obligation_id, settled)``: what committed payments, dated before
+  """``(obligation_id, settled)``: what payments in the books, dated before
   ``bound`` when one is given, have applied to each obligation. A payment with
   allocation rows settles through them; one without settles the obligation its
   ``discharges_event_id`` names, at its full magnitude. ``excluding`` leaves
