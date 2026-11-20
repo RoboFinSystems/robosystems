@@ -487,7 +487,7 @@ async def create_repository_subscription(
   "",
   response_model=GraphSubscriptionResponse,
   summary="Change Subscription Plan",
-  description="For repositories: synchronous tier change. For user graphs: use `POST /v1/graphs/{graph_id}/operations/change-tier` instead — this endpoint rejects graph tier changes. Requires org owner role.",
+  description="For repositories: synchronous tier change. For user graphs: use `POST /v1/graphs/{graph_id}/operations/change-tier` instead — this endpoint rejects graph tier changes. Members change their own seat; org owners and admins can change any member's by passing `user_id`.",
   operation_id="changeSubscriptionPlan",
   responses={**RESOURCE_ERROR_RESPONSES},
 )

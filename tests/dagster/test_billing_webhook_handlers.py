@@ -2028,6 +2028,43 @@ class TestHandleSetupIntentSucceeded:
 
     ensure_default.assert_called_once_with("cus_stripe_abc", mock_context)
 
+  async def test_a_new_card_settles_failed_subscriptions(
+    self, mock_db_session, mock_context, mock_customer
+  ):
+    """The card a customer adds after a failed payment pays it now."""
+    with (
+      patch(PATCH_BILLING_CUST) as MockCust,
+      patch(f"{_BILLING}.BillingAuditLog"),
+      patch(f"{_BILLING_JOBS}._recover_failed_subscriptions") as recover,
+    ):
+      MockCust.get_by_stripe_customer_id.return_value = mock_customer
+
+      from robosystems.dagster.jobs.billing import _handle_setup_intent_succeeded
+
+      await _handle_setup_intent_succeeded(
+        make_setup_intent_data(payment_method="pm_new"), mock_db_session, mock_context
+      )
+
+    recover.assert_called_once_with("cus_stripe_abc", "pm_new", mock_context)
+
+  async def test_no_card_on_the_intent_settles_nothing(
+    self, mock_db_session, mock_context, mock_customer
+  ):
+    with (
+      patch(PATCH_BILLING_CUST) as MockCust,
+      patch(f"{_BILLING}.BillingAuditLog"),
+      patch(f"{_BILLING_JOBS}._recover_failed_subscriptions") as recover,
+    ):
+      MockCust.get_by_stripe_customer_id.return_value = mock_customer
+
+      from robosystems.dagster.jobs.billing import _handle_setup_intent_succeeded
+
+      await _handle_setup_intent_succeeded(
+        make_setup_intent_data(), mock_db_session, mock_context
+      )
+
+    recover.assert_not_called()
+
   async def test_marks_customer_as_having_payment_method(
     self, mock_db_session, mock_context, mock_customer
   ):

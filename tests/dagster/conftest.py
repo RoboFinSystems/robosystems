@@ -159,5 +159,6 @@ def _no_stripe_from_webhook_handlers():
       return_value=False,
     ),
     patch("robosystems.dagster.jobs.billing._ensure_default_payment_method"),
+    patch("robosystems.dagster.jobs.billing._recover_failed_subscriptions"),
   ):
     yield

@@ -1063,3 +1063,60 @@ class TestStripeTrial:
     stripe_provider.stripe.Subscription.modify.assert_called_once_with(
       "sub_1", trial_end="now"
     )
+
+
+class TestRecoverFailedSubscriptions:
+  """A card added after a failed payment is put on the failed subscriptions
+  and pays their open invoices at once."""
+
+  @pytest.fixture
+  def provider(self):
+    with patch("robosystems.operations.providers.payment_provider.env"):
+      with patch.object(StripePaymentProvider, "__init__", lambda self: None):
+        provider = StripePaymentProvider()
+        provider.stripe = Mock()
+        return provider
+
+  @staticmethod
+  def _page(*ids):
+    page = Mock()
+    page.auto_paging_iter.return_value = [Mock(id=i) for i in ids]
+    return page
+
+  def test_moves_the_card_and_pays_open_invoices(self, provider):
+    provider.stripe.Subscription.list.side_effect = lambda **kw: self._page(
+      *({"past_due": ["sub_late"], "unpaid": ["sub_lapsing"]}[kw["status"]])
+    )
+    provider.stripe.Invoice.list.side_effect = lambda **kw: self._page(
+      f"in_{kw['subscription']}"
+    )
+
+    paid = provider.recover_failed_subscriptions("cus_1", "pm_new")
+
+    assert paid == ["in_sub_late", "in_sub_lapsing"]
+    provider.stripe.Subscription.modify.assert_any_call(
+      "sub_late", default_payment_method="pm_new"
+    )
+    provider.stripe.Subscription.modify.assert_any_call(
+      "sub_lapsing", default_payment_method="pm_new"
+    )
+    provider.stripe.Invoice.pay.assert_any_call("in_sub_late", payment_method="pm_new")
+
+  def test_a_decline_is_left_to_the_retry_schedule(self, provider):
+    provider.stripe.Subscription.list.side_effect = lambda **kw: self._page(
+      *(["sub_late"] if kw["status"] == "past_due" else [])
+    )
+    provider.stripe.Invoice.list.return_value = self._page("in_1")
+    provider.stripe.Invoice.pay.side_effect = RuntimeError("card_declined")
+
+    assert provider.recover_failed_subscriptions("cus_1", "pm_new") == []
+    provider.stripe.Subscription.modify.assert_called_once_with(
+      "sub_late", default_payment_method="pm_new"
+    )
+
+  def test_nothing_failed_changes_nothing(self, provider):
+    provider.stripe.Subscription.list.return_value = self._page()
+
+    assert provider.recover_failed_subscriptions("cus_1", "pm_new") == []
+    provider.stripe.Subscription.modify.assert_not_called()
+    provider.stripe.Invoice.pay.assert_not_called()

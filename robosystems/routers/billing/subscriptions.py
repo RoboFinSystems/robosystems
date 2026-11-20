@@ -398,3 +398,112 @@ async def cancel_subscription(
   except Exception as e:
     logger.error(f"Failed to cancel subscription: {e}", exc_info=True)
     raise HTTPException(status_code=500, detail="Failed to cancel subscription")
+
+
+@router.post(
+  "/{org_id}/subscription/{subscription_id}/resume",
+  response_model=GraphSubscriptionResponse,
+  summary="Keep Subscription",
+  description=(
+    "Takes back a cancellation scheduled for the end of the billing period, "
+    "before that period ends: the subscription renews as before and nothing "
+    "is torn down. A graph's subscription can be kept by an org owner; a "
+    "repository seat by the member who holds it or an org owner or admin. "
+    "An immediate cancellation cannot be taken back."
+  ),
+  operation_id="resumeOrgSubscription",
+  responses={**RESOURCE_ERROR_RESPONSES},
+)
+async def resume_subscription(
+  org_id: str,
+  subscription_id: str,
+  current_user: User = Depends(get_current_user),
+  db: Session = Depends(get_db_session),
+  _rate_limit: None = Depends(billing_rate_limit_dependency),
+) -> GraphSubscriptionResponse:
+  from ...models.core import OrgRole, OrgUser
+  from ...operations.billing.repository_subscriptions import (
+    reconcile_repository_grant,
+  )
+  from ..graphs.subscriptions import subscription_to_response
+
+  membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
+  if not membership:
+    raise HTTPException(
+      status_code=403, detail="You are not a member of this organization"
+    )
+
+  subscription = (
+    db.query(BillingSubscription)
+    .filter(
+      BillingSubscription.id == subscription_id,
+      BillingSubscription.org_id == org_id,
+    )
+    .first()
+  )
+  if not subscription:
+    raise HTTPException(status_code=404, detail="Subscription not found")
+
+  # The same authority that cancels: a graph is the owner's, a seat is its
+  # holder's or an owner's or admin's.
+  if subscription.resource_type == "repository":
+    allowed = subscription.user_id == current_user.id or membership.role in (
+      OrgRole.OWNER,
+      OrgRole.ADMIN,
+    )
+  else:
+    allowed = membership.role == OrgRole.OWNER
+  if not allowed:
+    raise HTTPException(
+      status_code=403,
+      detail="You do not have permission to keep this subscription",
+    )
+
+  if not subscription.is_resumable:
+    raise HTTPException(
+      status_code=409,
+      detail=(
+        "Only a cancellation scheduled for the end of the billing period can "
+        "be taken back, and only before the period ends."
+      ),
+    )
+
+  # Provider first: if Stripe still holds the cancel, nothing local changes.
+  if subscription.stripe_subscription_id:
+    try:
+      get_payment_provider("stripe").stripe.Subscription.modify(
+        subscription.stripe_subscription_id, cancel_at_period_end=False
+      )
+    except Exception as e:
+      logger.error(
+        f"Failed to resume Stripe subscription: {e}",
+        extra={"subscription_id": subscription_id},
+        exc_info=True,
+      )
+      raise HTTPException(
+        status_code=502,
+        detail=(
+          "The payment provider could not keep this subscription. "
+          "No changes were made; please try again."
+        ),
+      )
+
+  subscription.resume(db)
+  if subscription.resource_type == "repository":
+    reconcile_repository_grant(subscription, db)
+
+  BillingAuditLog.log_event(
+    session=db,
+    event_type=BillingEventType.SUBSCRIPTION_RESUMED,
+    description=f"Subscription {subscription_id} kept: scheduled cancellation taken back",
+    actor_type="user",
+    actor_user_id=current_user.id,
+    org_id=org_id,
+    subscription_id=subscription_id,
+    event_data={
+      "resource_type": subscription.resource_type,
+      "resource_id": subscription.resource_id,
+    },
+  )
+
+  return subscription_to_response(subscription)

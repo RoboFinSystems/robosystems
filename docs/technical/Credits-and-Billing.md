@@ -216,6 +216,7 @@ Credits meter AI usage inside a graph; the `/v1/billing/*` surface is where mone
 | `GET /v1/billing/subscriptions/{org_id}` | The org's subscriptions | Any member, but a plain member sees only their own rows |
 | `GET /v1/billing/subscriptions/{org_id}/subscription/{subscription_id}` | One subscription in detail | Same scoping as the list |
 | `POST /v1/billing/subscriptions/{org_id}/subscription/{subscription_id}/cancel` | Cancel a subscription | Owner |
+| `POST /v1/billing/subscriptions/{org_id}/subscription/{subscription_id}/resume` | Take back a cancellation scheduled for the end of the period, before it ends (409 otherwise) | A graph: owner. A repository seat: its holder, or an owner or admin |
 
 The read scoping on the last two is deliberate rather than incidental: billing is org-level but repository access is per-user, so an unfiltered org-wide list would hand every member a roster of everybody else's seats. Owners and admins manage billing and see the whole org; a plain member sees the rows attributed to them.
 
@@ -229,6 +230,8 @@ Checkout is asynchronous. After the user returns from Stripe, the status endpoin
 
 - **A graph** — `POST /v1/graphs/{graph_id}/operations/delete-graph`. This tears down **immediately** by default, crediting the unused part of the billed period (never a refund; a period buys time and AI credits, and the credit is the smaller unused share of the two, so credits consumed ahead of the time elapsed reduce it): to the organization's account balance at once on a card-billed plan, where it offsets the next invoice — a graph created right after pays the difference; on the period's invoice — or a separate credit invoice once that is paid — on an invoiced plan; pass `at_period_end: true` to keep the graph usable through the current billing period. The caller must be both an org owner (billing authority) and an admin on the graph (operational authority).
 - **A shared-repository subscription** — `POST /v1/graphs/{repo_id}/subscriptions/cancel`. This cancels **at period end** by default; pass `immediate: true` to stop access right away.
+
+A cancellation at period end can be taken back until the period ends with the `resume` route above; it clears the pending cancel with Stripe first and changes nothing if Stripe refuses (502). An immediate cancellation cannot be taken back.
 
 Each guards itself with a `confirm` value that must equal the resource id — `delete-graph` always, the repository cancel when you ask for immediate termination — so a mistyped call cannot destroy the wrong thing. See [Shared Repositories](Shared-Repositories.md) for the repository half.
 

@@ -96,6 +96,14 @@ class PaymentProvider(ABC):
     pass
 
   @abstractmethod
+  def recover_failed_subscriptions(
+    self, customer_id: str, payment_method_id: str
+  ) -> list[str]:
+    """Put a new card on the customer's failed subscriptions and pay their
+    open invoices with it. Returns the ids of the invoices paid."""
+    pass
+
+  @abstractmethod
   def list_invoices(self, customer_id: str, limit: int = 10) -> dict[str, Any]:
     """List invoices. Returns ``{invoices, has_more}``."""
     pass
@@ -609,6 +617,42 @@ class StripePaymentProvider(PaymentProvider):
     )
     logger.info(f"Set a default payment method for customer {customer_id}")
     return True
+
+  def recover_failed_subscriptions(
+    self, customer_id: str, payment_method_id: str
+  ) -> list[str]:
+    # A subscription made through Checkout keeps its own card, which Stripe's
+    # retries prefer to the customer's default: a card added later is never
+    # tried unless it is set on the subscription.
+    paid: list[str] = []
+    for status in ("past_due", "unpaid"):
+      for subscription in self.stripe.Subscription.list(
+        customer=customer_id, status=status, limit=100
+      ).auto_paging_iter():
+        try:
+          self.stripe.Subscription.modify(
+            subscription.id, default_payment_method=payment_method_id
+          )
+        except Exception as e:
+          logger.warning(
+            f"Could not set the new card on subscription {subscription.id}: {e}"
+          )
+          continue
+        for invoice in self.stripe.Invoice.list(
+          subscription=subscription.id, status="open", limit=100
+        ).auto_paging_iter():
+          try:
+            self.stripe.Invoice.pay(invoice.id, payment_method=payment_method_id)
+            paid.append(invoice.id)
+          except Exception as e:
+            # A decline leaves the invoice to the retry schedule, now on the
+            # new card.
+            logger.warning(f"Paying invoice {invoice.id} with the new card failed: {e}")
+    if paid:
+      logger.info(
+        f"Paid {len(paid)} open invoice(s) for customer {customer_id} with a new card"
+      )
+    return paid
 
   def list_invoices(self, customer_id: str, limit: int = 10) -> dict[str, Any]:
     try:

@@ -95,9 +95,12 @@ inside `require_graph_access`, which is where subscription status is actually
 enforced. Treat it as dead surface pending removal; do not reach for it when
 adding a new gate, or you will add a check that never fires.
 
-`require_graph_access(graph_id, session, require_write=False, export=False)`
-returns the `Graph` or raises. `export` marks a read that must not run during a
-tier upgrade (a backup) but stays open in a cancellation grace period. This is the billing-side gate; the *authorization* side —
+`require_graph_access(graph_id, session, require_write=False, export=False, spends_credits=False)`
+returns the `Graph` or raises. A subscription canceled at period end is served
+in full until its end. `past_due` (a failed renewal Stripe is retrying) stays
+readable and exportable but refuses writes and `spends_credits` (the AI
+operators). `export` marks a read that must not run during a tier upgrade (a
+backup). This is the billing-side gate; the *authorization* side —
 whether the user's role permits writes — is `require_graph_write_role` in
 [`../auth/`](../auth/README.md). Both apply.
 

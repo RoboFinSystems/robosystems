@@ -20,8 +20,9 @@ from ...models.core.billing import (
 
 logger = get_logger(__name__)
 
-# graph_id -> (result, expires_at); result is "active", "upgrading",
-# "no_subscription", "canceled_grace" or "canceled_expired".
+# graph_id -> (state, expires_at); state is a subscription status, or
+# "no_subscription" / "canceled_expired". A canceled subscription still inside
+# its paid period is cached as "active" until its end.
 _subscription_cache: dict[str, tuple[str, float]] = {}
 _subscription_lock = threading.Lock()
 
@@ -162,16 +163,18 @@ def require_graph_access(
   session: Session,
   require_write: bool = False,
   export: bool = False,
+  spends_credits: bool = False,
 ) -> Graph:
   """Validate the graph is accessible for the requested operation type.
 
   Layer 1 is lifecycle (gone -> 404, suspended -> 403); layer 2 is the
-  subscription (a canceled grace period or an upgrade allows reads only). A
+  subscription. A subscription canceled at period end serves the period it
+  paid for in full. A failed renewal (``past_due``) leaves the graph readable
+  and exportable while the payment provider retries, but refuses writes and
+  anything that spends AI credits. A tier upgrade allows reads only. A
   subgraph is held to its parent's lifecycle and subscription as well as its
   own. ``export`` is a read that must not run during a tier upgrade (a backup:
-  the migration snapshots the volume), but stays open during a cancellation
-  grace period, which exists so the customer can take their data. Returns the
-  row for ``graph_id`` itself.
+  the migration snapshots the volume). Returns the row for ``graph_id`` itself.
   """
   graph = _assert_graph_live(
     Graph.get_by_id(graph_id, session, include_deprovisioned=True)
@@ -190,101 +193,91 @@ def require_graph_access(
   if billing_graph.is_repository:
     return graph
 
-  cached = _get_cached_subscription(billing_graph_id)
-  if cached == "active":
-    return graph
-  elif cached == "upgrading":
-    if require_write:
-      raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Graph tier upgrade in progress. Write operations are temporarily disabled.",
-      )
-    if export:
-      raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN, detail=_UPGRADE_EXPORT_DETAIL
-      )
-    return graph
-  elif cached == "canceled_grace":
-    if require_write:
-      raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Subscription canceled. Write operations disabled until subscription ends.",
-      )
-    return graph
-  elif cached == "canceled_expired":
-    raise HTTPException(
-      status_code=status.HTTP_403_FORBIDDEN,
-      detail="Subscription has ended. Resubscribe to access this graph.",
-    )
-  elif cached == "no_subscription":
-    raise HTTPException(
-      status_code=status.HTTP_403_FORBIDDEN,
-      detail="No active subscription for this graph.",
-    )
+  state = _get_cached_subscription(billing_graph_id)
+  if state is None:
+    state, ttl = _subscription_state(billing_graph_id, session)
+    if state in _CACHED_STATES:
+      _cache_subscription(billing_graph_id, state, ttl)
 
-  subscription = BillingSubscription.get_by_resource(
-    resource_type="graph", resource_id=billing_graph_id, session=session
+  _enforce_subscription_state(
+    state, require_write=require_write, export=export, spends_credits=spends_credits
   )
+  return graph
 
+
+# The cache is per process and a webhook clears only its own, so a state a
+# customer can leave by paying (past_due, unpaid, paused, pending) is read
+# fresh: a payment opens the graph on the next request, not five minutes on.
+_CACHED_STATES = frozenset(
+  {
+    SubscriptionStatus.ACTIVE.value,
+    SubscriptionStatus.UPGRADING.value,
+    "canceled_expired",
+    "no_subscription",
+  }
+)
+
+_PAYMENT_FAILED_DETAIL = (
+  "The last payment for this graph failed. It stays readable while the payment "
+  "is retried; update the payment method to restore writes and AI operations."
+)
+
+_REFUSED_STATES: dict[str, str] = {
+  "canceled_expired": "Subscription has ended. Resubscribe to access this graph.",
+  "no_subscription": "No active subscription for this graph.",
+  SubscriptionStatus.PENDING.value: "Subscription is pending activation.",
+  SubscriptionStatus.PAUSED.value: "Subscription is paused. Please reactivate.",
+  SubscriptionStatus.UNPAID.value: "Subscription is unpaid. Please make payment.",
+}
+
+
+def _subscription_state(graph_id: str, session: Session) -> tuple[str, float | None]:
+  """The graph's subscription reduced to an access state, with how long that
+  state can be cached (None for the default)."""
+  subscription = BillingSubscription.get_by_resource(
+    resource_type="graph", resource_id=graph_id, session=session
+  )
   if not subscription:
-    logger.warning(f"No subscription found for graph {billing_graph_id}")
-    _cache_subscription(billing_graph_id, "no_subscription")
-    raise HTTPException(
-      status_code=status.HTTP_403_FORBIDDEN,
-      detail="No active subscription for this graph.",
-    )
+    logger.warning(f"No subscription found for graph {graph_id}")
+    return "no_subscription", None
 
-  if subscription.status == "upgrading":
-    _cache_subscription(billing_graph_id, "upgrading")
-    if require_write:
-      raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Graph tier upgrade in progress. Write operations are temporarily disabled.",
-      )
-    if export:
-      raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN, detail=_UPGRADE_EXPORT_DETAIL
-      )
-    return graph
-
-  if subscription.status == "canceled":
+  if subscription.status == SubscriptionStatus.CANCELED.value:
     now = datetime.now(UTC)
     ends_at = subscription.ends_at
     # The column is timezone-naive.
     if ends_at is not None and ends_at.tzinfo is None:
       ends_at = ends_at.replace(tzinfo=UTC)
-
     if ends_at and ends_at > now:
-      _cache_subscription(
-        billing_graph_id, "canceled_grace", (ends_at - now).total_seconds()
+      # The period it paid for, served in full until it ends.
+      return "active", (ends_at - now).total_seconds()
+    return "canceled_expired", None
+
+  return subscription.status, None
+
+
+def _enforce_subscription_state(
+  state: str, *, require_write: bool, export: bool, spends_credits: bool
+) -> None:
+  if state == SubscriptionStatus.ACTIVE.value:
+    return
+  if state == SubscriptionStatus.UPGRADING.value:
+    if require_write:
+      raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Graph tier upgrade in progress. Write operations are temporarily disabled.",
       )
-      if require_write:
-        raise HTTPException(
-          status_code=status.HTTP_403_FORBIDDEN,
-          detail="Subscription canceled. Write operations disabled until subscription ends.",
-        )
-      return graph
-
-    _cache_subscription(billing_graph_id, "canceled_expired")
-    raise HTTPException(
-      status_code=status.HTTP_403_FORBIDDEN,
-      detail="Subscription has ended. Resubscribe to access this graph.",
-    )
-
-  if subscription.status == SubscriptionStatus.ACTIVE.value:
-    _cache_subscription(billing_graph_id, "active")
-    return graph
-
-  error_messages: dict[str, str] = {
-    SubscriptionStatus.PENDING.value: "Subscription is pending activation.",
-    SubscriptionStatus.PAUSED.value: "Subscription is paused. Please reactivate.",
-    SubscriptionStatus.PAST_DUE.value: "Subscription is past due. Please update payment.",
-    SubscriptionStatus.UNPAID.value: "Subscription is unpaid. Please make payment.",
-  }
-  detail = error_messages.get(
-    subscription.status, f"Subscription status is {subscription.status}."
-  )
+    if export:
+      raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN, detail=_UPGRADE_EXPORT_DETAIL
+      )
+    return
+  if state == SubscriptionStatus.PAST_DUE.value:
+    if require_write or spends_credits:
+      raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN, detail=_PAYMENT_FAILED_DETAIL
+      )
+    return
   raise HTTPException(
     status_code=status.HTTP_403_FORBIDDEN,
-    detail=detail,
+    detail=_REFUSED_STATES.get(state, f"Subscription status is {state}."),
   )

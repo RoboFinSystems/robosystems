@@ -1080,6 +1080,13 @@ async def _handle_setup_intent_succeeded(
   # A trial with no card of its own converts on the customer's default.
   await asyncio.to_thread(_ensure_default_payment_method, customer_id, context)
 
+  # A new card is the customer's answer to a failed payment: settle what is
+  # overdue with it now rather than at the next scheduled retry.
+  if payment_method_id:
+    await asyncio.to_thread(
+      _recover_failed_subscriptions, customer_id, payment_method_id, context
+    )
+
   if not customer.has_payment_method:
     customer.has_payment_method = True
     changed = True
@@ -1120,6 +1127,26 @@ def _ensure_default_payment_method(stripe_customer_id: str, context) -> None:
   except Exception as e:
     context.log.warning(
       f"Could not set a default payment method for {stripe_customer_id}: {e}"
+    )
+
+
+def _recover_failed_subscriptions(
+  stripe_customer_id: str, payment_method_id: str, context
+) -> None:
+  from robosystems.operations.providers.payment_provider import get_payment_provider
+
+  try:
+    paid = get_payment_provider("stripe").recover_failed_subscriptions(
+      stripe_customer_id, payment_method_id
+    )
+    if paid:
+      context.log.info(
+        f"Paid {len(paid)} overdue invoice(s) for {stripe_customer_id} with the new card"
+      )
+  except Exception as e:
+    # The retry schedule still runs; the invoice.paid webhook does the rest.
+    context.log.warning(
+      f"Could not settle failed subscriptions for {stripe_customer_id}: {e}"
     )
 
 
