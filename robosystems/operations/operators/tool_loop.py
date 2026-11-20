@@ -4,7 +4,7 @@ go back to the model as error results so it can correct itself."""
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -57,10 +57,13 @@ class WriteRefusedError(Exception):
   goes back to the model as the tool's error."""
 
 
-# Takes a call's arguments and the tool surface (to read what the call
-# targets) and returns the arguments to dispatch, so a guard can pin a field
-# as well as refuse.
-WriteGuard = Callable[[dict[str, Any], "ToolAccess"], Awaitable[dict[str, Any]]]
+# Takes a call's arguments, the tool surface (to read what the call targets)
+# and the run's writes so far (to know what it made), and returns the
+# arguments to dispatch, so a guard can pin a field as well as refuse.
+WriteGuard = Callable[
+  [dict[str, Any], "ToolAccess", Sequence[dict[str, Any]]],
+  Awaitable[dict[str, Any]],
+]
 
 
 @dataclass
@@ -288,7 +291,7 @@ async def run_tool_loop(
       if guard is not None:
         refusal: str | None = None
         try:
-          args = await guard(args, ctx.tools)
+          args = await guard(args, ctx.tools, writes)
         except WriteRefusedError as refused:
           refusal = str(refused)
         except Exception:
