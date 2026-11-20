@@ -192,13 +192,18 @@ def load_graph_metadata(graph_id: str, session: Session) -> GraphExtensionContex
   )
 
 
-def require_graph_extension(extension: str) -> Callable[..., GraphExtensionContext]:
+def require_graph_extension(
+  *extensions: str,
+) -> Callable[..., GraphExtensionContext]:
   """Dependency factory gating an extensions route on the graph.
 
   Runs after graph-membership auth. Refuses subgraphs, repository graphs
-  (written only by ingestion) and graphs without `extension` provisioned,
-  then applies the lifecycle gate at read strength.
+  (written only by ingestion) and graphs with none of `extensions`
+  provisioned, then applies the lifecycle gate at read strength.
   """
+  if not extensions:
+    raise ValueError("require_graph_extension needs at least one extension")
+  extension = " or ".join(extensions)
 
   def _dep(
     graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
@@ -219,7 +224,7 @@ def require_graph_extension(extension: str) -> Callable[..., GraphExtensionConte
         status_code=403,
         detail=f"{extension} commands are not available on repository graphs",
       )
-    if extension not in meta.schema_extensions:
+    if not any(ext in meta.schema_extensions for ext in extensions):
       raise HTTPException(
         status_code=403,
         detail=f"{extension} is not provisioned for this graph",

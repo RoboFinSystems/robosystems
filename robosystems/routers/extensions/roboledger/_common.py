@@ -147,3 +147,21 @@ def _require_roboledger_write(
   """
   require_graph_write_role(str(user.id), graph_id)
   return user
+
+
+# A fund's graph has `roboinvestor` alone and still receives reports. The same
+# set as `commands.reports._RECEIVING_EXTENSIONS`, named here so this module
+# stays clear of the command surface.
+RECEIVING_EXTENSIONS = ("roboledger", "roboinvestor")
+_require_receiving = require_graph_extension(*RECEIVING_EXTENSIONS)
+
+
+def _require_receiving_write(
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  _ext: GraphExtensionContext = Depends(_require_receiving),
+) -> User:
+  """The write gate for a recipient's exits from a share (delete the copy,
+  block or unblock its sender): any graph that can receive may leave."""
+  require_graph_write_role(str(user.id), graph_id)
+  return user

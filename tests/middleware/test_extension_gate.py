@@ -137,6 +137,37 @@ class TestRequireGraphExtension:
     assert meta.graph_type == "entity"
     assert "roboledger" in meta.schema_extensions
 
+  def test_any_one_of_several_extensions_is_enough(self) -> None:
+    session = MagicMock()
+    dep = require_graph_extension("roboledger", "roboinvestor")
+    with (
+      patch(
+        f"{MODULE}.Graph.get_by_id",
+        return_value=_graph(graph_type="entity", schema_extensions=["roboinvestor"]),
+      ),
+      patch(f"{MODULE}.require_graph_access", return_value=None),
+    ):
+      meta = dep(graph_id=GRAPH_ID, session=session)
+    assert meta.schema_extensions == ("roboinvestor",)
+
+  def test_a_gate_on_no_extension_is_a_mistake_caught_at_import(self) -> None:
+    with pytest.raises(ValueError):
+      require_graph_extension()
+
+  def test_none_of_several_extensions_is_refused(self) -> None:
+    dep = require_graph_extension("roboledger", "roboinvestor")
+    with (
+      patch(
+        f"{MODULE}.Graph.get_by_id",
+        return_value=_graph(graph_type="entity", schema_extensions=[]),
+      ),
+      patch(f"{MODULE}.require_graph_access", return_value=None),
+    ):
+      with pytest.raises(HTTPException) as exc_info:
+        dep(graph_id=GRAPH_ID, session=MagicMock())
+    assert exc_info.value.status_code == 403
+    assert "roboledger or roboinvestor" in str(exc_info.value.detail)
+
   def test_passes_on_entity_graph_with_multiple_extensions(self) -> None:
     meta = self._call_dep(
       "roboinvestor",

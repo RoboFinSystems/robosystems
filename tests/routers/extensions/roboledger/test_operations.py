@@ -1911,6 +1911,7 @@ class TestHandWrittenWriteRoleGate:
     instance, so a newly added hand-written op that forgets the gate fails
     here instead of shipping."""
     from robosystems.routers.extensions.roboledger._common import (
+      _require_receiving_write,
       _require_roboledger_write,
     )
     from robosystems.routers.extensions.roboledger.operations import router
@@ -1932,7 +1933,10 @@ class TestHandWrittenWriteRoleGate:
       # `TestRegistrarWriteRoleGate`.
       if route.endpoint.__module__ == "robosystems.middleware.extensions":
         continue
-      if _require_roboledger_write not in _dependency_calls(route.dependant):
+      calls = _dependency_calls(route.dependant)
+      if _require_roboledger_write not in calls and (
+        _require_receiving_write not in calls
+      ):
         ungated.append(route.path)
 
     assert ungated == [], (
@@ -1973,6 +1977,89 @@ class TestHandWrittenWriteRoleGate:
 
     assert resolved is user
     gate.assert_called_once_with(str(user.id), GRAPH_ID)
+
+
+class TestARecipientCanAlwaysExitAShare:
+  """A graph that can receive a report can remove it and refuse its sender,
+  whether or not it keeps a ledger: a fund's graph has `roboinvestor` alone."""
+
+  EXITS = ("/delete-report", "/block-source-graph", "/unblock-source-graph")
+
+  def _extension_gate(self, path: str):
+    from robosystems.routers.extensions.roboledger.operations import router
+
+    def _calls(dependant) -> list:
+      found = []
+      for dep in dependant.dependencies:
+        if dep.call is not None:
+          found.append(dep.call)
+        found.extend(_calls(dep))
+      return found
+
+    (route,) = [r for r in router.routes if getattr(r, "path", "") == path]
+    (gate,) = [
+      call
+      for call in _calls(route.dependant)
+      if getattr(call, "__qualname__", "").startswith("require_graph_extension")
+    ]
+    return gate
+
+  def _graph(self, extensions: list[str]) -> MagicMock:
+    graph = MagicMock()
+    graph.graph_type = "entity"
+    graph.schema_extensions = extensions
+    graph.is_repository = False
+    return graph
+
+  @pytest.mark.parametrize("path", EXITS)
+  def test_an_investor_only_graph_reaches_the_exit(self, path: str) -> None:
+    gate = self._extension_gate(path)
+    with (
+      patch(
+        "robosystems.middleware.extensions.Graph.get_by_id",
+        return_value=self._graph(["roboinvestor"]),
+      ),
+      patch("robosystems.middleware.extensions.require_graph_access"),
+    ):
+      meta = gate(graph_id=GRAPH_ID, session=MagicMock())
+    assert meta.schema_extensions == ("roboinvestor",)
+
+  @pytest.mark.parametrize("path", EXITS)
+  def test_a_graph_that_cannot_receive_is_still_refused(self, path: str) -> None:
+    gate = self._extension_gate(path)
+    with (
+      patch(
+        "robosystems.middleware.extensions.Graph.get_by_id",
+        return_value=self._graph([]),
+      ),
+      patch("robosystems.middleware.extensions.require_graph_access"),
+    ):
+      with pytest.raises(HTTPException) as exc:
+        gate(graph_id=GRAPH_ID, session=MagicMock())
+    assert exc.value.status_code == 403
+
+  def test_the_exits_open_to_exactly_the_graphs_a_share_can_reach(self) -> None:
+    from robosystems.operations.roboledger.commands.reports import (
+      _RECEIVING_EXTENSIONS,
+    )
+    from robosystems.routers.extensions.roboledger._common import (
+      RECEIVING_EXTENSIONS,
+    )
+
+    assert RECEIVING_EXTENSIONS == _RECEIVING_EXTENSIONS
+
+  def test_sharing_out_still_needs_the_ledger(self) -> None:
+    gate = self._extension_gate("/share-report")
+    with (
+      patch(
+        "robosystems.middleware.extensions.Graph.get_by_id",
+        return_value=self._graph(["roboinvestor"]),
+      ),
+      patch("robosystems.middleware.extensions.require_graph_access"),
+    ):
+      with pytest.raises(HTTPException) as exc:
+        gate(graph_id=GRAPH_ID, session=MagicMock())
+    assert exc.value.status_code == 403
 
 
 class TestCrossGraphStalenessCallbacks:
