@@ -349,7 +349,9 @@ async def index_document_op(
     body=body,
   )
 
-  async def _runner():
+  # A sync runner goes to a worker thread: the service blocks (it embeds and
+  # indexes), and the API has one event loop.
+  def _runner():
     session = SessionFactory()
     try:
       service = DocumentService(session)
@@ -434,7 +436,7 @@ async def delete_document_op(
     body=body,
   )
 
-  async def _runner():
+  def _runner():
     session = SessionFactory()
     try:
       service = DocumentService(session)
@@ -503,7 +505,7 @@ async def create_document_upload_op(
     body=body,
   )
 
-  async def _runner():
+  def _runner():
     session = SessionFactory()
     try:
       upload_id, upload_url = DocumentService(session).begin_file_upload(

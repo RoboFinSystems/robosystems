@@ -4,6 +4,7 @@ These moved off the bespoke `/documents` write routes onto the operation
 envelope; they mirror the memory remember/forget op shape.
 """
 
+import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -705,3 +706,67 @@ async def test_delete_document_409_when_a_balance_cites_it():
       await _run(delete_document_op, DeleteDocumentOp(document_id="doc_1"))
 
   assert e.value.status_code == 409
+
+
+# ── The document service blocks, so it runs off the event loop ────────────
+
+
+def _thread_recorder(seen: list, result):
+  def record(*args, **kwargs):
+    seen.append(threading.get_ident())
+    return result
+
+  return record
+
+
+async def test_indexing_a_document_does_not_hold_the_event_loop():
+  seen: list[int] = []
+  g1, g2, g3 = _guards()
+  with (
+    g1,
+    g2,
+    g3,
+    patch(f"{MODULE}._resolve_graph_tier", return_value="ladybug-standard"),
+    patch("robosystems.database.SessionFactory", return_value=MagicMock()),
+    patch(_SERVICE) as svc,
+  ):
+    svc.return_value.create_document.side_effect = _thread_recorder(
+      seen, (MagicMock(), _upload_response())
+    )
+    await _run(index_document_op, IndexDocumentOp(title="T", content="C"))
+
+  assert seen and seen[0] != threading.get_ident()
+
+
+async def test_deleting_a_document_does_not_hold_the_event_loop():
+  seen: list[int] = []
+  g1, g2, g3 = _guards()
+  with (
+    g1,
+    g2,
+    g3,
+    patch("robosystems.database.SessionFactory", return_value=MagicMock()),
+    patch(_SERVICE) as svc,
+  ):
+    svc.return_value.delete_document.side_effect = _thread_recorder(seen, True)
+    await _run(delete_document_op, DeleteDocumentOp(document_id="doc_1"))
+
+  assert seen and seen[0] != threading.get_ident()
+
+
+async def test_starting_a_document_upload_does_not_hold_the_event_loop():
+  seen: list[int] = []
+  g1, g2, g3 = _guards()
+  with (
+    g1,
+    g2,
+    g3,
+    patch("robosystems.database.SessionFactory", return_value=MagicMock()),
+    patch(_SERVICE) as svc,
+  ):
+    svc.return_value.begin_file_upload.side_effect = _thread_recorder(
+      seen, (_UPLOAD_ID, "https://s3.example/put")
+    )
+    await _run(create_document_upload_op, _upload_body())
+
+  assert seen and seen[0] != threading.get_ident()
