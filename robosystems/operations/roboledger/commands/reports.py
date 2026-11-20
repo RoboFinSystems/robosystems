@@ -52,6 +52,7 @@ from robosystems.operations.roboledger.reads.blocked_source_graphs import (
   is_source_blocked,
 )
 from robosystems.operations.roboledger.reads.reports import (
+  _bundle_outran,
   build_periods,
   consolidated_name,
   load_structures,
@@ -244,7 +245,8 @@ def _stamp_report_bundle(
   graph_id: str,
   report_def: Report,
 ) -> None:
-  """Build, upload and stamp the holon for a Report about to publish or file.
+  """Build, upload and stamp the holon for a Report about to publish or file,
+  or one whose columns moved since its last stamp and is being shared.
 
   The holon is the report's anchor artifact: ``bundle_url`` points at it, and
   the Tavi and XBRL 2.1 are derived from the bundle on first download. Runs
@@ -819,8 +821,8 @@ def share_report(
     # The rows are copied as they stand and the holon is a snapshot of them:
     # a share carries one of the same moment, as a download does. Unlike a
     # download it fails rather than send the older file beside newer rows.
-    from robosystems.operations.roboledger.reads.reports import _bundle_outran
-
+    # The build and upload run under the report's lock, so another write to
+    # the report waits out a stale share's rebuild.
     if _bundle_outran(report_def):
       _stamp_report_bundle(source_session, graph_id, report_def)
 

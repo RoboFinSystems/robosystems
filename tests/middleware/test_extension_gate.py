@@ -150,6 +150,10 @@ class TestRequireGraphExtension:
       meta = dep(graph_id=GRAPH_ID, session=session)
     assert meta.schema_extensions == ("roboinvestor",)
 
+  def test_a_gate_on_no_extension_is_a_mistake_caught_at_import(self) -> None:
+    with pytest.raises(ValueError):
+      require_graph_extension()
+
   def test_none_of_several_extensions_is_refused(self) -> None:
     dep = require_graph_extension("roboledger", "roboinvestor")
     with (

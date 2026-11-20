@@ -201,6 +201,8 @@ def require_graph_extension(
   (written only by ingestion) and graphs with none of `extensions`
   provisioned, then applies the lifecycle gate at read strength.
   """
+  if not extensions:
+    raise ValueError("require_graph_extension needs at least one extension")
   extension = " or ".join(extensions)
 
   def _dep(

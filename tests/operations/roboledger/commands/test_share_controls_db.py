@@ -1142,6 +1142,42 @@ def test_a_share_carries_a_fresh_holon_when_the_columns_moved_since_the_stamp() 
   assert carried == [3]
 
 
+def test_a_share_whose_fresh_holon_cannot_be_stored_sends_nothing() -> None:
+  from robosystems.models.api.extensions.reports import ShareReportRequest
+  from robosystems.operations.roboledger.commands.reports import (
+    BundleUploadError,
+    share_report,
+  )
+
+  list_id = _seed_publishable_report()
+  _set_report_stamps(
+    last_generated=datetime(2026, 4, 10, tzinfo=UTC),
+    bundle_stamped_at=datetime(2026, 4, 2, tzinfo=UTC),
+  )
+
+  def _fail(session, graph_id, report_def) -> None:
+    # As the real stamp does: the generation moves before the upload fails.
+    report_def.generation_count = (report_def.generation_count or 0) + 1
+    raise BundleUploadError("storage unavailable")
+
+  with (
+    _patch_platform_graph_lookup(),
+    patch(f"{_REPORTS_CMD}._stamp_report_bundle", side_effect=_fail),
+    pytest.raises(BundleUploadError),
+  ):
+    share_report(
+      SOURCE_GRAPH,
+      _REPORT_SNAPSHOT["id"],
+      ShareReportRequest(publish_list_id=list_id),
+      acting_user_id=_SENDER,
+    )
+
+  assert _counts(TARGET_GRAPH)[0] == 0
+  with extensions_session(SOURCE_GRAPH) as session:
+    assert session.execute(text("SELECT count(*) FROM report_shares")).scalar() == 0
+    assert session.get(Report, _REPORT_SNAPSHOT["id"]).generation_count == 2
+
+
 def test_a_share_keeps_the_holon_that_is_already_current() -> None:
   list_id = _seed_publishable_report()
   _set_report_stamps(
