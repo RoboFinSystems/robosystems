@@ -122,7 +122,6 @@ class TaxonomyBlockStructureRequest(BaseModel):
     "equity_statement",
     "coa_mapping",
     "schedule",
-    "rollforward",
     "reconciliation",
     "policy",
     "metric",

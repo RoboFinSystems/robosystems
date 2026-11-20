@@ -887,8 +887,9 @@ def get_mapping_coverage(session: Session, mapping_id: str) -> MappingCoverageRe
   unmapped_count = total_coa - mapped_count
 
   scores = element_confidence.values()
-  high = sum(1 for c in scores if c is not None and c > 0.90)
-  medium = sum(1 for c in scores if c is not None and 0.70 <= c <= 0.90)
+  # 0.90 is the mapping operator's auto-approve threshold, so it is high.
+  high = sum(1 for c in scores if c is not None and c >= 0.90)
+  medium = sum(1 for c in scores if c is not None and 0.70 <= c < 0.90)
   low = sum(1 for c in scores if c is not None and c < 0.70)
   manual = sum(1 for c in scores if c is None)
 

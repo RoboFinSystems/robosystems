@@ -64,6 +64,9 @@ class TestDagsterShape:
     assert components["jobs"] == [mercury_sync_job]
     assert mercury_sync_job.name == "mercury_sync"
     assert mercury_sync_job.tags["dagster/max_retries"] == "3"
+    # A dead worker is retried; a sync that failed on its own has already
+    # recorded why on the connection.
+    assert mercury_sync_job.tags["dagster/retry_on_asset_or_op_failure"] == "false"
 
   def test_failure_is_recorded_and_the_lock_released(self):
     cfg = _config(sync_lock_id="lock_1")

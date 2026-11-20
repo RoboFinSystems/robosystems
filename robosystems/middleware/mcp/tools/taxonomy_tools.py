@@ -335,7 +335,7 @@ class GetMappingSummaryTool:
 
 **RETURNS:**
 - Total CoA elements, mapped count, unmapped count, coverage percentage
-- Confidence distribution: high (>0.90), medium (0.70-0.90), low (<0.70)""",
+- Confidence distribution: high (0.90 and up), medium (0.70 to under 0.90), low (<0.70)""",
       "inputSchema": {
         "type": "object",
         "properties": {
