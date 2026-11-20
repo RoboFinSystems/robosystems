@@ -49,6 +49,7 @@ from robosystems.operations.roboledger.fiscal_calendar.service import (
   CalendarOpeningBlockedError,
   CalendarStartBlockedError,
   CalendarStartLockedError,
+  CloseableGateResult,
   InvalidCloseTargetError,
 )
 
@@ -890,3 +891,43 @@ class TestPlanHistoryBackfillTask:
       result = backfill_payload(GRAPH_ID, {}, "usr_abc")
 
     assert result == {"error": "nothing_closed", "message": "Nothing is closed yet."}
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# The close-period pre-check refuses what the close would refuse, no more
+# ────────────────────────────────────────────────────────────────────────────
+
+
+def _precheck(blockers: list[str], *, shadow: bool):
+  tool = ClosePeriodTool(_client(user_id="usr_abc"))
+  gate = CloseableGateResult(is_closeable=not blockers, blockers=list(blockers))
+  with (
+    patch(f"{MODULE}.require_graph_extension_mcp"),
+    patch(f"{MODULE}.extensions_session"),
+    patch(f"{MODULE}._platform_session"),
+    patch(f"{MODULE}.find_entity_id", return_value="ent_1"),
+    patch(f"{MODULE}.entity_sync_state", return_value=(True, None)),
+    patch(f"{MODULE}.shadow_close_for_entity", return_value=shadow),
+    patch(f"{MODULE}.FiscalCalendarService") as service,
+  ):
+    service.return_value.closeable_gate.return_value = gate
+    refusal = tool._gate_check({"period": "2026-10"})
+    # The gate and the shadow lookup are asked about the same entity.
+    assert service.return_value.closeable_gate.call_args.kwargs["entity_id"] == "ent_1"
+    return refusal
+
+
+class TestClosePrecheckUnderShadow:
+  def test_a_finding_does_not_stop_a_shadow_close(self):
+    # Under shadow the close records an unmapped account; it does not refuse.
+    assert _precheck(["unmapped_accounts"], shadow=True) is None
+
+  def test_the_same_finding_stops_a_close_that_posts(self):
+    refusal = _precheck(["unmapped_accounts"], shadow=False)
+    assert refusal["error"] == "not_closeable"
+    assert refusal["blockers"] == ["unmapped_accounts"]
+
+  def test_a_structural_gate_still_stops_a_shadow_close(self):
+    refusal = _precheck(["period_incomplete", "unmapped_accounts"], shadow=True)
+    assert refusal["error"] == "not_closeable"
+    assert refusal["blockers"] == ["period_incomplete"]
