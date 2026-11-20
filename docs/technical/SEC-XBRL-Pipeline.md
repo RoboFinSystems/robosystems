@@ -575,7 +575,7 @@ The old ticker keeps working. `companies/{old}.json` stays a whole company docum
 
 ### When a company changes registrant
 
-A company can move to a new CIK and stay the same company: a holding-company reorganization, a redomicile, a second-step conversion. EDGAR then lists the ticker under the new registrant and links the two nowhere in its data; the successor says so itself, on Form 8-K12B. Those links are kept in a curated table (`adapters/sec/successions.py`), each row with the filing that states it.
+A company can move to a new CIK and stay the same company: a holding-company reorganization, a redomicile, a second-step conversion. EDGAR then lists the ticker under the new registrant and links the two nowhere in its data; the successor says so itself, usually on Form 8-K12B or 8-K12G3. Those links are kept in a curated table (`adapters/sec/successions.py`), each row with the filing that states it.
 
 For a recorded succession the ticker carries the whole history. `companies/{ticker}.json` is the successor's document with `predecessors` (each a `cik` and `name`), and its `filings` list holds both registrants' filings, newest first. Every filing entry names the `cik` that filed it, which is the folder it is published under, so read a filing's location from the entry and never from the document's own `cik`. In the graph both registrants' `Entity` rows carry the ticker, so a query by ticker spans them and one by `Entity.cik` reads a single registrant.
 

@@ -159,11 +159,12 @@ carries the sizes, and it has been resized more than once.
 ### S3 Publish → Replica Refresh Flow
 
 ```
-1. Dagster sensor: sec_post_materialize_publish_sensor
-   ├── Publish .lbdb to S3 (LadybugDB graph database)
-   └── Publish .duckdb to S3 (DuckDB with embeddings for vector search)
+1. Dagster sensor: sec_post_materialize_publish_sensor (after sec_materialize)
+   ├── sec_lbug_s3_publish: .lbdb to S3 (LadybugDB graph database)
+   └── then sec_duckdb_s3_publish: .duckdb to S3 (DuckDB with embeddings for vector search)
 
-2. Dagster sensor: triggers shared_repository_refresh_replicas_job
+2. The same sensor, after the DuckDB publish: shared_replicas_refresh
+   (and shared_master_sleep beside it)
    └── Rolling ASG instance refresh (min_healthy=100%, max_healthy=200%)
 
 3. New replicas boot alongside old ones
@@ -173,6 +174,8 @@ carries the sizes, and it has been resized more than once.
    ├── Lower the root volume to the gp3 baseline
    └── Register with ALB, old instance terminated
 ```
+
+`shared_repository_refresh_replicas_job` is the same refresh run by hand, outside the chain: to force one, recover from a failed one, or roll out an AMI or code change.
 
 ---
 

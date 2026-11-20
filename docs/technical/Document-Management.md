@@ -59,15 +59,17 @@ The operation returns an `OperationEnvelope`; the indexing report sits inside `r
   "result": {
     "id": "doc_01J9XYZ...",
     "document_id": "udoc_doc_01J9XYZ...",
-    "sections_indexed": 2,
-    "total_content_length": 187,
-    "section_ids": ["udoc_doc_01J9XYZ..._0", "udoc_doc_01J9XYZ..._1"]
+    "sections_indexed": 1,
+    "total_content_length": 172,
+    "section_ids": ["udoc_doc_01J9XYZ..._0"]
   },
-  "at": "2026-08-09T18:04:11.921Z",
+  "at": "2026-08-09T18:04:11Z",
   "createdBy": "user_01K2...",
   "idempotentReplay": false
 }
 ```
+
+Both sections here are under 20 words, so they are indexed as one; see [Sectioning Rules](#sectioning-rules).
 
 Envelope keys are camelCase on the wire; the payload fields inside `result` keep their snake_case names.
 
@@ -104,6 +106,8 @@ The document surface is split the way the platform splits every content surface:
 | Write | POST | `/v1/graphs/{graph_id}/operations/index-document` | Create a document (omit `document_id`) or update one (supply it) |
 | Write | POST | `/v1/graphs/{graph_id}/operations/delete-document` | Delete a document |
 
+A document can also be a file kept as it was received, which has three routes of its own: see [Stored Files](#stored-files).
+
 Both operations return an `OperationEnvelope` and accept an `Idempotency-Key` header — a retry with the same key inside 24 hours replays the original envelope with `idempotentReplay: true` rather than re-running the command.
 
 ### Get a Document
@@ -113,7 +117,7 @@ curl "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/documents/doc_01J9XYZ..." \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
-Returns the full document including raw `content`, `tags`, `folder`, `external_id`, `source_type`, `sections_indexed`, and timestamps.
+Returns the full document including raw `content`, `tags`, `folder`, `external_id`, `source_type`, `source_provider`, `sections_indexed`, and timestamps, plus `file` for a [stored file](#stored-files) and `evidence_for`, the ledger events that cite the document.
 
 ### Update a Document (Partial)
 
@@ -146,18 +150,19 @@ Documents are markdown, and the way they are split into sections determines how 
 
 ### YAML Frontmatter
 
-If the content opens with a YAML frontmatter block, it is stripped from the body and can fill **unset** metadata fields — `title`, `tags`, and `folder`. Explicit values in the request always win over frontmatter; frontmatter only fills gaps.
+If the content opens with a YAML frontmatter block, it is stripped from the body and can fill **unset** metadata fields: `tags` and `folder` on a create, and `title` too on an update that sends new `content` without one (a create always needs `title` in the request). Explicit values in the request always win over frontmatter; frontmatter only fills gaps.
 
 ```bash
 curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/operations/index-document" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "content": "---\ntitle: Close Checklist\ntags: close, monthly\nfolder: procedures\n---\n\n# Pre-Close\n\nReconcile all bank accounts.\n\n# Close\n\nPost accruals and run the trial balance.\n"
+    "title": "Close Checklist",
+    "content": "---\ntags: close, monthly\nfolder: procedures\n---\n\n# Pre-Close\n\nReconcile all bank accounts.\n\n# Close\n\nPost accruals and run the trial balance.\n"
   }'
 ```
 
-Here the request body sets no `title`, `tags`, or `folder`, so they are taken from the frontmatter.
+Here the request sets `title` and leaves `tags` and `folder` out, so those two are taken from the frontmatter.
 
 ### Sectioning Rules
 
@@ -188,6 +193,17 @@ curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/operations/index-do
 ```
 
 The first call creates the document; subsequent calls with the same `external_id` update it. The tier document limit is checked on create but **not** on the upsert path, so re-syncing an existing document never trips the limit.
+
+## Stored Files
+
+A document can also be a file kept as it was received: a bank statement, an invoice, a receipt. Files are PDF, PNG or JPEG, up to 25 MB each and 2,000 per graph, and are stored in two steps.
+
+1. `POST /v1/graphs/{graph_id}/operations/create-document-upload` with `file_name` and `content_type` (`application/pdf`, `image/png` or `image/jpeg`). The result carries an `upload_id` and a presigned `upload_url`, good for an hour. `PUT` the file there with the same `Content-Type`.
+2. `POST /v1/graphs/{graph_id}/operations/complete-document-upload` with the `upload_id` and a `title` (optional `folder`, `tags`). The bytes are checked against the file's type and the size cap and hashed (SHA-256); a file that fails the check is discarded and the call answers 422, and completing before the upload landed answers 409. Completing the same upload again returns the document it created.
+
+A stored file is not indexed for search, does not count toward the tier's document limit, and never changes once stored: its title, folder and tags can be changed, its content cannot. List and detail responses carry it as `file` (`file_name`, `content_type`, `size_bytes`, `sha256`). `GET /v1/graphs/{graph_id}/documents/{document_id}/file` answers a `download_url` good for five minutes. Files are refused on a subgraph, which keeps no ledger for one to evidence.
+
+A ledger event can name a document as its evidence (an invoice, a bill, a statement balance). The document's detail lists those events in `evidence_for`, and a document a live event cites cannot be deleted until the event points elsewhere.
 
 ## How Documents Feed Search
 
@@ -226,6 +242,9 @@ The same document operations are exposed as MCP tools for agent-driven workflows
 | `delete-document` | Delete a document |
 | `get-document` | Fetch one document |
 | `list-documents` | List documents in the active graph |
+| `create-document-upload` | Start storing a local PDF, PNG or JPEG as a document; answers with an upload command to run |
+| `complete-document-upload` | Create the document once the file is uploaded |
+| `read-document-file` | Read a stored PDF's text, page by page (3 pages by default, at most 10 a call) |
 | `search-documents` | Search the document index (returns a `document_id` per hit) |
 | `get-document-section` | Read a section by the id returned from search, a window at a time |
 
@@ -266,7 +285,7 @@ If the search service is unreachable (for example, OpenSearch is down but the fe
 
 ### 422 "Document Produced No Indexable Sections"
 
-If parsing the content yields no indexable text — for example, content that is empty or contains only headings with no body — the upload fails with 422. Add real text under your headings, or check that the content is not blank.
+If parsing the content yields no indexable text — content that is empty, or nothing but a frontmatter block — the upload fails with 422. A document of headings with no body does index, as one section holding the headings; add real text under them for it to be worth searching.
 
 ### 403 on a Shared Repository
 

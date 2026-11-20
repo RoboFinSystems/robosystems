@@ -9,12 +9,14 @@ Most portfolio companies do not keep their books in RoboLedger. They send a work
 
 You do this through your assistant. The app shows the result; it has no upload button.
 
+A company can also send the report as a file that is already structured: a holon (a file ending in .holon.jsonld) or a Tavi model (.tavi.json), which RoboLedger and other reporting tools export. Give your assistant that file instead and it is loaded as it stands, with nothing to read out or name. It goes through the same checks and is kept the same way.
+
 ## What your assistant does
 
-1. **Adds the company**, once, as an issuer in your graph. A holding you have in that company can then be attached to it.
+1. **Adds the company**, once, as an issuer in your graph. You do not need a holding in the company to load its report; a company you only follow works the same way. A holding you do have can then be attached to it on the Portfolio page (see [Track private-company holdings](your-portfolio.md)). A report is always loaded onto an issuer, never onto your own fund: your own entity's reports come from a ledger, and a load aimed at it is refused.
 2. **Reads the statements out of the file**, value by value. Each number keeps the cell or the page it came from.
 3. **Names each line** with a standard reporting concept, so a line means the same thing in every company's report. The company's own wording is kept: a line they call "Personnel Expense" still reads that way.
-4. **Checks the report before anything is saved.** Every total has to equal the lines beneath it, and total assets have to equal total liabilities and equity. A report that fails is refused, with the total, the period and the lines that were counted.
+4. **Checks the report before anything is saved.** Every total has to equal the lines beneath it, and total assets have to equal total liabilities and equity. A report that fails is refused, with the total, the period and the lines that were counted. A figure the package states twice, such as a total rounded to thousands on a summary page and in full on the statement, is loaded once, at the more precise of the two. If the two disagree, the report is refused.
 5. **Saves it and reads it back**, so you can compare it with the file.
 
 A second load for the same company, period and kind of report replaces the first, so a corrected package is just loaded again.
@@ -26,6 +28,8 @@ A second load for the same company, period and kind of report replaces the first
 - Anything the file does not say: whether figures are in dollars or thousands, and which columns are actual results.
 
 Budget and forecast columns are not loaded yet. Neither are columns that only restate other columns, such as a variance or a percentage change.
+
+One report holds up to 3,000 values and 750 concepts, a concept being one named line. A monthly package is a few hundred values, so the limit leaves room for a full annual report with its comparative years. A larger one is refused before anything is saved.
 
 ## What you should check
 

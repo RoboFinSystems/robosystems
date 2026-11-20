@@ -13,6 +13,8 @@ The server-side AI operators can run on an open-weight model through any OpenAI-
 
 Operators are the server-side AI: the chat assistant that answers questions by composing graph reads, the author operator behind the console's `/do` that makes a requested change through a narrow set of writes, and the chart-of-accounts mapping operator. The author operator always runs on the `quality` tier, so map that tier to move it. Everything else the platform does — ingestion, reporting, close, search — runs without a model at all.
 
+On a laptop there is a shorter path to the same Claude models without AWS: the Anthropic API with your own key, for local development only. See [Local Development](Local-Development.md#ai-models).
+
 ## Configuring the Operators
 
 Set these in `.env`, then run `just rebuild` (a plain `just restart` does not pick up environment changes):

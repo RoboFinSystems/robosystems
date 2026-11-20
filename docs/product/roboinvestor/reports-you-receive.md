@@ -13,7 +13,7 @@ A company that is not on RoboLedger can still send you a report as a file. See [
 
 Give them your graph ID, from the graph's **Dashboard** at [robosystems.ai](https://robosystems.ai). They add it to a publish list and share from the report; how is in the [RoboLedger reports guide](https://roboledger.ai/docs/reports-and-sharing). The company then appears in your graph, and the report arrives with its statements, facts and files. Nothing is copied the other way.
 
-If they withdraw the share, the report is removed from your graph. Your own graph does not have to run RoboLedger. RoboInvestor has no way to block a sender. If your graph also runs RoboLedger, you can block one there: in the RoboLedger app, open a report they shared and choose **Block sender** from its menu; **Reports → Blocked Senders** lists who is blocked. Otherwise, to stop a company's reports, ask them to withdraw the share.
+If they withdraw the share, the report is removed from your graph. Your own graph does not have to run RoboLedger. The RoboInvestor app has no control for blocking a sender, and your AI assistant cannot block one for you: refusing a sender is left to a person. If your graph also runs RoboLedger, block one there: in the RoboLedger app, open a report they shared and choose **Block sender** from its menu; **Reports → Blocked Senders** lists who is blocked. On a graph that runs RoboInvestor alone, someone with write access can block the sender's graph through the API (see [RoboLedger operations](https://robosystems.ai/docs/technical/roboledger-operations)); once blocked, the sender is told their share was refused. Or ask the company to withdraw the share.
 
 ## In the app
 
@@ -22,6 +22,8 @@ If they withdraw the share, the report is removed from your graph. Your own grap
 **Ask about this report** answers questions from the report inside the app. It runs on RoboSystems' own AI, so it uses this graph's credits. Asking your own AI assistant doesn't.
 
 A shared report is read-only. You cannot regenerate it, change it or share it on, and you cannot change their books from here.
+
+To remove a report you no longer want, ask your AI assistant to delete it. For a shared report that takes an admin of your graph. Only your copy goes: the company's own report and its books are untouched.
 
 ## Getting the files
 

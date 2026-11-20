@@ -97,9 +97,10 @@ The response is a `CypherStatementResponse`, where each row is a dictionary keye
   "data": [{"ticker": "NVDA", "qname": "us-gaap:Revenues", "end_date": "2026-01-25", "value": "215938000000"}],
   "columns": ["ticker", "qname", "end_date", "value"],
   "row_count": 1,
+  "truncated": false,
   "execution_time_ms": 18.4,
   "graph_id": "sec",
-  "timestamp": "2026-06-11T00:00:00Z",
+  "timestamp": "2026-06-11T00:00:00.000000+00:00",
   "error": null
 }
 ```
@@ -116,6 +117,8 @@ The request body is a `CypherStatementRequest`:
 
 The model forbids extra fields. **Always parameterize** with `$name` placeholders rather than interpolating literals into the query string.
 
+`timeout` is the budget for the whole request, not for the query alone. The query itself gets 60 seconds less, never under 30: the default `timeout: 60` runs a query for up to 30 seconds, and `timeout: 180` for up to 120. `mode=sync` caps it at 30. The engine also stops any query at its own ceiling, which `GET /v1/graphs/{graph_id}/limits` reports as `queries.max_timeout_seconds`. A query that outruns its budget on a shared repository such as `sec` returns **408** with the budget it had; on a graph you own a read is queued instead and answers **202** with an `operation_id`.
+
 ### Read-Only on Main Graphs
 
 Read-only is not a property of this endpoint — it is a property of the platform. Every statement, whichever transport carried it, runs through a single **`StatementKernel`** (`middleware/graph/statement_kernel.py`): a transport-independent authorization gauntlet shared by `/query/cypher`, `/query/sql`, the MCP `read-graph-cypher` tool, and the Operator path, delegating keyword analysis to `security/cypher_analyzer.py`. One implementation means those surfaces cannot drift apart from one another.
@@ -129,7 +132,7 @@ Subgraphs are the exception and do allow writes, subject to two carve-outs:
 
 Schema DDL and bulk operations are blocked everywhere: `COPY`/`LOAD`/`IMPORT` return 400; `EXPORT`/`INSTALL`/`ATTACH` and `CREATE`/`DROP`/`ALTER TABLE` return 403. A main graph's schema is fixed at creation; a subgraph's is extended through the MCP tools `add-node-table` and `add-relationship-table`, not through this endpoint.
 
-`CALL` is held to an allowlist. A call to any procedure outside the read-only set below counts as a write — so it is refused on a main graph and a shared repository with 403 — and a procedure that runs a statement passed as a string (`CALL GQL(...)`) is refused on every graph. Neo4j-style introspection such as `CALL db.labels()` or `CALL db.schema()` is not on the list; use `show_tables` and `table_info`, or the schema endpoints below.
+`CALL` is held to an allowlist. A call to any procedure outside the read-only set below counts as a write — so it is refused on a main graph and a shared repository with 403 — and a procedure that runs a statement passed as a string (`CALL GQL(...)`) is refused on every graph. Neo4j-style introspection such as `CALL db.labels()` or `CALL db.schema()` is not on the list; use `show_tables` and `table_info`, or the schema endpoints below. A statement that matches the engine's own catalog labels (`schema_table`, `schema_rel`) is refused on every graph with 403 as well, as is a `CALL` whose procedure name is quoted.
 
 | Read-only procedure | Returns |
 | --- | --- |
@@ -245,7 +248,7 @@ The older REST tool endpoints (`GET /mcp/tools`, `POST /mcp/call-tool`) no longe
 
 Alongside these two, `get-graph-info` is available on every graph, and graphs carrying the `roboledger` extension (including `sec`) also expose `get-example-queries`. `resolve-element`, which maps a concept such as "revenue" to the element qnames filers use, is served only on `sec`: it is gated on the shared-repository manifest's semantic enrichment, so a tenant RoboLedger graph does not list it. There is a separate operational MCP plane (`query-graphql`, `get-graphql-schema`) that reads the OLTP database, and an unstructured plane (`search-documents`, `get-document-section`) over the document index. For the full agent surface, see [AI Operators and MCP](AI-Operators-and-MCP.md).
 
-**Note:** `read-graph-cypher` strips string literals before scanning for write keywords, but the scan matches on whole words. A variable or property named exactly like a blocked keyword — for example a property access `n.set` or a variable `delete` — trips the word-boundary match and is rejected. Names that merely contain a keyword as a substring (such as `created_at` or `deleted`) are fine; avoid naming a read-only variable exactly `set`, `create`, `delete`, `merge`, `remove`, or `drop`.
+**Note:** The write check masks string literals and backtick-quoted identifiers, then matches whole words — on `read-graph-cypher` and on `POST /query/cypher` alike. A variable or property named exactly like a blocked keyword is therefore refused: `n.set`, a variable `delete`, a property `update`, `copy`, `load`, `import` or `use`. Names that only contain a keyword (`created_at`, `deleted`) are fine. When your data really has such a property, quote it with backticks (``n.`set` ``) and it is read as a name.
 
 ## Read Patterns and Example Cypher
 
@@ -376,7 +379,7 @@ More worked queries — a statement for a ticker's latest 10-K, a metric across 
 - **Two parameter conventions.** Cypher takes named `$param` with a `parameters` object. Staging SQL takes either a `parameters` list for positional `?` (or `$1`, `$2`), or an object for named `$param` — never both in one statement.
 - **Write attempts return 403 on main graphs.** Data enters by materialization — from the extensions database on an entity graph, from staged uploads on a custom graph. Only *user* subgraphs accept writes through the query path — and only for callers with the `member` or `admin` role. Shared repositories and their subgraphs never do.
 - **Shared-repo staging SQL is blocked on the public API.** `POST /v1/graphs/{shared}/query/sql` returns 403 for shared repositories and their subgraphs — query the graph with Cypher instead.
-- **Cypher query length is capped at 50,000 characters** and `timeout` is 1–300 seconds (default 60).
+- **Cypher query length is capped at 50,000 characters** and `timeout` is 1–300 seconds (default 60), of which the query gets 60 seconds less.
 - **Queries are scoped to one graph.** There are no cross-database or cross-graph queries; each request targets a single `graph_id`.
 - **Ingestion is sequential and single-writer.** Each database allows one writer at a time and a limited number of concurrent connections, so favor read-only traversals when querying live graphs.
 - **`CALL db.*` introspection is refused on main graphs and shared repositories.** Only the [read-only procedures](#read-only-on-main-graphs) pass; use `CALL show_tables() RETURN *`, `CALL table_info('Label') RETURN *`, or `get-graph-schema`.

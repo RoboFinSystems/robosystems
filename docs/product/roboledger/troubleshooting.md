@@ -35,7 +35,7 @@ The same goes for "roboledger is not provisioned for this graph": the connection
 
 ## "Scheduled entries for this period are still pending"
 
-A schedule has an entry due for the month and it hasn't been drafted yet. Ask your assistant to draft the month's schedule entries, or use **Draft entry** in **Ledger → Closing Book**. If the blocker names a month long before the one you're closing, a schedule was set up to draft months that were already behind you. Ask your assistant to rebuild that schedule, which starts it again from your first open month. If it can't, delete the schedule in **Ledger → Closing Book** and set it up again. See [Schedules for recurring entries](schedules.md).
+A schedule has an entry due for the month and it hasn't been drafted yet. Ask your assistant to draft the month's schedule entries, or use **Draft entry** in **Ledger → Closing Book**. If the blocker names a month long before the one you're closing, a schedule was set up to draft months that were already behind you. Ask your assistant to rebuild that schedule, which starts it again from your first open month. If it can't (rebuilding isn't offered on RoboLedger's own address), delete the schedule in **Ledger → Closing Book** and set it up again. See [Schedules for recurring entries](schedules.md).
 
 ## A close refuses to run
 
@@ -44,6 +44,9 @@ A schedule has an entry due for the month and it hasn't been drafted yet. Ask yo
 - **Transactions changed in QuickBooks after they synced.** Ask your assistant to show you each one and decide how to handle it. See [When QuickBooks changes after a sync](changes-after-sync.md).
 - **Events dated in this period were captured but never posted.** In **Ledger → Inbox**, check both **Captured** and **Classified** for events dated in the month, and approve or reject each one. See [Review events in the Inbox](inbox.md).
 - **A reconciliation this close waits on does not tie, or has not been run.** It may also be out of date, because the books changed after it ran, or waiting for a sign-off. Open **Ledger → Closing Book → Reconciliations**, see what's different, clear it, and run them again. See [Reconcile your accounts](reconcile-your-accounts.md).
+- **An account with activity isn't mapped.** Its balances would be in no statement. Open **Ledger → Chart of Accounts**, map each account the message names, then close. This one can't be closed over. See [Map your chart of accounts](map-your-chart-of-accounts.md).
+- **Bank lines arrived after an earlier month closed.** They were held out of that month. Reopen the month they're dated in to bring them back to the Inbox, or close over them on purpose.
+- **On a group's close, a company in the group hasn't closed the month,** or the consolidating entries aren't all drafted. Close each company first, then draft the entries in **Ledger → Closing Book**. See [Consolidate a group](consolidate-a-group.md).
 
 Some of these can be closed over on purpose, and the override is kept in the close's audit note. See [Overrides](month-end-close.md#overrides).
 
@@ -53,7 +56,7 @@ The month's entries don't balance in total: debits and credits differ by the amo
 
 ## The close couldn't save the month's statements
 
-The close stopped because it couldn't build the month's statements, and the month stays open. Entries it already wrote to QuickBooks aren't sent again when you retry. It's usually the mapping or the reporting style. Ask your assistant what failed, fix it, and close again. If the chart of accounts isn't mapped at all, the close still posts and just doesn't save statements; see [Map your chart of accounts](map-your-chart-of-accounts.md).
+The close stopped because it couldn't build the month's statements, and the month stays open. Entries it already wrote to QuickBooks aren't sent again when you retry. It's usually the mapping or the reporting style. Ask your assistant what failed, fix it, and close again. An account with activity and no mapping is different: it stops the close before it starts, and that can't be closed over. Map it first; see [Map your chart of accounts](map-your-chart-of-accounts.md).
 
 ## "Cannot write to closed period… Reopen the period first."
 
@@ -61,11 +64,11 @@ An entry is dated in a month that's already closed. Reopen it if the entry belon
 
 ## A mapping change is refused
 
-The account has activity in a month that's already closed, and that month's saved statements were built with the old mapping. The message names the earliest month affected. Reopen back to that month, change the mapping, and close forward again. See [Map your chart of accounts](map-your-chart-of-accounts.md).
+The account has activity in a month that's already closed, and the change would alter a total that month's saved statements recorded: it moves the account to a different statement, or on the balance sheet into or out of cash or equity. The message names the earliest month affected. Reopen back to that month, change the mapping, and close forward again. A move that stays on the same statement isn't refused; it's recorded as a reclassification. A first mapping for an account that had none when the month closed is refused the same way. See [Map your chart of accounts](map-your-chart-of-accounts.md).
 
 ## The Plan page has no history, or only yearly columns
 
-The Plan page shows a column for every closed month. If your history came over from QuickBooks and you haven't closed month by month in RoboLedger, there are no monthly statements behind it yet. Ask your assistant to fill in the plan history. See [Plan and forecast with your AI assistant](plan-and-forecast.md).
+The Plan page shows a column for every closed month. If your history came over from QuickBooks and you haven't closed month by month in RoboLedger, there are no monthly statements behind it yet. Ask your assistant to fill in the plan history. That needs the general address or your graph's own, not RoboLedger's own address ([Which address to use](connect-your-books.md#which-address-to-use)). See [Plan and forecast with your AI assistant](plan-and-forecast.md).
 
 ## A forecast stops partway
 
@@ -93,7 +96,7 @@ RoboLedger reads companies that keep their books in US dollars. A QuickBooks com
 
 ## "Insufficient credits for…"
 
-Something that runs on RoboLedger's own AI (AI mapping, a question in the Console, or **Ask about this report**) needs more credits than your graph has left this month. Reading, reporting, forecasting and closing don't use credits. Check your balance on the **Usage** page at [robosystems.ai](https://robosystems.ai).
+Something that runs on RoboLedger's own AI (AI mapping, a question or a `/do` change in the Console, or **Ask about this report**) needs more credits than your graph has left this month. Reading, reporting, forecasting and closing don't use credits. Check your balance on the **Usage** page at [robosystems.ai](https://robosystems.ai).
 
 ## "Rate limit exceeded"
 

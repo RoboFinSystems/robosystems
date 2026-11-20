@@ -11,11 +11,13 @@ RoboLedger keeps your QuickBooks books in a knowledge graph your AI assistant ca
 
 Sign up at [roboledger.ai](https://roboledger.ai/register). One account covers RoboSystems, RoboLedger and RoboInvestor.
 
-Then create a graph with RoboLedger turned on. A graph is your company's own database: its books, reports, plans and documents live in it, and no other customer's data does. **Create Graph** in RoboLedger takes you to [robosystems.ai](https://robosystems.ai), where you enter the company's details and choose a size: Standard is ready straight away, and Large and XLarge are set up on request. Only your organization's owners and admins can create a graph. If the page says graph creation requires approval, your account can't create one on its own yet. Get in touch and we'll set it up.
+Then create a graph with RoboLedger turned on. A graph is your company's own database: its books, reports, plans and documents live in it, and no other customer's data does. **Create Graph** in RoboLedger takes you to [robosystems.ai](https://robosystems.ai), where you enter the company's details and choose a size: Standard is usually ready straight away, and Large and XLarge may be set up on request. When a size is marked **Provisioned on request**, choose **Request access** and we'll set it up. Only your organization's owners and admins can create a graph. If the page says graph creation requires approval, your account can't create one on its own yet. Get in touch and we'll set it up.
 
 ## 2. Connect QuickBooks
 
 In RoboLedger, open **Entity → Connections** and connect QuickBooks Online. You sign in to Intuit and approve access. You need admin permissions in the QuickBooks company.
+
+A graph connects to one QuickBooks company, and it keeps the books of the company the graph was created for. To bring in another QuickBooks company, create another graph for it. See [Work across several companies](working-across-companies.md).
 
 The first sync starts on its own and brings over your full history:
 
@@ -27,7 +29,7 @@ Large companies can take several minutes. The first sync also sets up your fisca
 
 After the first sync, RoboLedger syncs each connection on its own once a day. For anything more recent, press **Sync Now** on the QuickBooks card, or ask your assistant to sync. The card shows when the last sync ran.
 
-**Sync Now** asks how far back to go. **Last 60 days** picks up recent changes. If something older changed in QuickBooks, choose **From a specific date**, or **Full rebuild** to pull your whole history again. Your assistant can sync from a date too. When a transaction RoboLedger already recorded has been edited, it's flagged for you to settle. See [When QuickBooks changes after a sync](changes-after-sync.md).
+**Sync Now** asks how far back to go. **Last 60 days** is the regular sync: it re-reads the last 60 days and also picks up older transactions that were edited or deleted since the last sync. **From a specific date** pulls again from that date, and **Full rebuild** pulls your whole history again, for a company that hasn't synced in more than a month or when you want to be sure. Your assistant can sync from a date too. When a transaction RoboLedger already recorded has been edited, it's flagged for you to settle. See [When QuickBooks changes after a sync](changes-after-sync.md).
 
 RoboLedger reads companies that keep their books in US dollars. A company with transactions in other currencies can't sync yet.
 
@@ -49,7 +51,7 @@ The first time a tool runs, you sign in to RoboSystems and choose which graph to
 claude mcp add --transport http robosystems https://api.robosystems.ai/v1/mcp
 ```
 
-**ChatGPT:** turn on developer mode in ChatGPT's settings, then create an app (ChatGPT has also called it a connector) and paste the address. Developer mode isn't available on every ChatGPT plan. A connection you add this way gets every RoboLedger tool. The RoboSystems plugin in ChatGPT's plugin directory reads SEC filings, so use a custom connector for your books.
+**ChatGPT:** open **Plugins**, then **Add → Create custom MCP server**. Paste the address under Connection, leave Authentication on OAuth, accept the warning about custom servers and choose **Create as a plugin**. Custom MCP servers aren't available on every ChatGPT plan; if the menu item is missing, turn on developer mode in ChatGPT's settings. A connection you add this way gets every RoboLedger tool. The RoboSystems plugin in ChatGPT's plugin directory reads SEC filings only, so add a custom server for your books.
 
 **Cursor, VS Code and other MCP clients:** add the address to the client's MCP configuration. The client runs the sign-in for you.
 

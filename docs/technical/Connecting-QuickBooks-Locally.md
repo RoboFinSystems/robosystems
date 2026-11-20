@@ -52,7 +52,7 @@ When you connect QuickBooks to a local stack, four things happen end to end:
 
 1. **Sync.** A Dagster job pulls the chart of accounts, transactions, customers, vendors, employees and company info from the QuickBooks API, normalizes them with dbt, and loads them into the graph's tenant schema in the extensions database.
 2. **Materialize.** A sensor sees the graph marked stale and projects the OLTP data into LadybugDB, the graph backend used for analytical reads.
-3. **Map.** On the first sync, the MappingOperator maps the chart of accounts to `rs-gaap` reporting concepts. On a local stack this needs Bedrock credentials. See [Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md).
+3. **Map.** On the first sync, the MappingOperator maps the chart of accounts to `rs-gaap` reporting concepts. On a local stack this needs a model for the operators: Bedrock credentials, an Anthropic API key, or a self-hosted model ([Local Development](Local-Development.md)). See [Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md).
 4. **Report.** Live statements, the close and saved reports read the synced ledger through that mapping. See [Reporting and Rendering](Reporting-and-Rendering.md).
 
 This page covers steps 1 and 2 and the setup in front of them. Steps 3 and 4 behave exactly as they do on the hosted platform.
@@ -69,7 +69,7 @@ This page covers steps 1 and 2 and the setup in front of them. Steps 3 and 4 beh
    ```
 
 2. **Complete the base local setup first** so `just start` works — see [Local Development](Local-Development.md) / [Bootstrap Guide](Bootstrap-Guide.md) (Docker, `uv`, `just`, the generated `.env`, migrations).
-3. **Install the frontend deps**: `cd roboledger-app && npm install` (Node 24+; `.nvmrc` pins the exact version). Run the frontend with `npm run dev` on the host for the OAuth step (see the Private-Network-Access note in [Troubleshooting](#troubleshooting)).
+3. **Install the frontend deps**: `cd roboledger-app && npm install` (Node 26+; `.nvmrc` pins the exact version). Run the frontend with `npm run dev` on the host for the OAuth step (see the Private-Network-Access note in [Troubleshooting](#troubleshooting)).
 
 ### Intuit Developer account (both paths)
 
@@ -131,7 +131,8 @@ just start                                       # backend (terminal 1)
 cd ../roboledger-app && npm run dev                # frontend (terminal 2)
 
 # 5. Open localhost:3001 in your browser, log in (just demo-user), navigate to
-#    Connections → Connect QuickBooks → sign in with sandbox credentials →
+#    Connections → Add Connection → QuickBooks → Connect QuickBooks →
+#    sign in with sandbox credentials →
 #    pick "Sample Company" → Connect.
 ```
 
@@ -205,6 +206,12 @@ INTUIT_CLIENT_ID=<development client id>
 INTUIT_CLIENT_SECRET=<development client secret>
 INTUIT_ENVIRONMENT=sandbox
 INTUIT_REDIRECT_URI=http://localhost:3001/connections/qb-callback
+```
+
+QuickBooks tokens are stored encrypted with `CONNECTION_CREDENTIALS_KEY`, on either path. Set it in `robosystems/.env` to a key of your own, in place of the template's placeholder:
+
+```bash
+uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
 No additional `roboledger-app/.env` changes needed for sandbox.
@@ -405,7 +412,7 @@ On Path B with ngrok, click through the interstitial warning page once per brows
 
 1. Log in (run `just demo-user` from `robosystems/` for fresh credentials; they're written to `.local/config.json`)
 2. Create or select an entity / graph
-3. Navigate to **Connections**
+3. Navigate to **Connections** and choose **Add Connection → QuickBooks**
 4. Click **Connect QuickBooks**
 5. Authenticate with the appropriate Intuit account (sandbox for Path A, real for Path B)
 6. On the consent screen, pick which QB Online company to connect
@@ -606,7 +613,7 @@ Open the Dagster UI at [localhost:8002](http://localhost:8002), find the failed 
 
 ### Statements come out empty or unbalanced after a sync
 
-These are mapping problems, not sync problems, and they look the same on a local stack as on the hosted platform: unmapped accounts with balances, mappings to concepts the Reporting Style doesn't render (`unreachable_count > 0`), or a mapping to a subtotal. Diagnose with `get-mapping-summary` and `get-unmapped-elements`. See [Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md). On a local stack, also confirm that auto-map actually ran: it needs Bedrock credentials, and without them the first sync leaves the chart unmapped.
+These are mapping problems, not sync problems, and they look the same on a local stack as on the hosted platform: unmapped accounts with balances, mappings to concepts the Reporting Style doesn't render (`unreachable_count > 0`), or a mapping to a subtotal. Diagnose with `get-mapping-summary` and `get-unmapped-elements`. See [Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md). On a local stack, also confirm that auto-map actually ran: it needs a model for the operators (Bedrock, an Anthropic API key or a self-hosted model), and without one the first sync leaves the chart unmapped.
 
 ### `endpoint already online` / `tunnel already in use` error
 
@@ -654,7 +661,7 @@ cd robosystems && just stop
 just reset-local
 ```
 
-Disconnecting a QB connection from RoboSystems revokes the OAuth tokens but leaves synced data in place. To remove everything, delete the graph itself from the platform.
+Disconnecting a QB connection from RoboSystems revokes the OAuth tokens (unless another graph is connected to the same company) but leaves synced data in place. To remove everything, delete the graph itself from the platform.
 
 Intuit Developer Portal entries (apps, registered redirect URIs, keys) are durable. Keep them around for future sessions — they cost nothing and re-registering is a hassle.
 

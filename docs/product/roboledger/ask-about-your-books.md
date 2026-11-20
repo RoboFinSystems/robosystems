@@ -28,7 +28,9 @@ One manual journal entry on July 28 for $60,000, with no reference number or ven
 - **Statements.** The balance sheet, income statement, cash flow and statement of equity for any period, built from the ledger when you ask. No close is needed. The statement of equity runs from the opening balance through net income, contributions and distributions to the closing balance, and counts contributions that never touched your bank, like an owner paying a company card directly.
 - **The trial balance,** with debits and credits for every account.
 - **Journal entries and transactions,** line by line.
+- **One account's activity,** line by line with the balance after each.
 - **Customers, vendors and employees,** and the activity with each one.
+- **What you're owed and what you owe,** aged as of any date: current, 1–30, 31–60, 61–90 and over 90 days, by customer or vendor, tied out to your receivables and payables accounts.
 - **Your chart of accounts** and how it's mapped.
 - **Reports** you've created, and the statements saved at each close.
 - **Forecast scenarios.** See [Plan and forecast with your AI assistant](plan-and-forecast.md).
@@ -43,7 +45,7 @@ The same line can come from three places, and it helps to know which one you're 
 |---|---|---|
 | **Live** | Built from the ledger when you ask | Yes, with every sync and every entry |
 | **Closed month** | The statements saved when the month closed | Only if the month is reopened |
-| **Report** | A snapshot you created for a period, to download or share | Only if you regenerate it |
+| **Report** | Statements you created for a period, to download or share | A closed month's column doesn't. An open month's column keeps up with the books until the month closes. A copy you shared or downloaded stays as it was |
 
 For "how are we doing this month", live is right. For "what did we tell the board", use the report. When two answers disagree, this is usually why, and your assistant can tell you which one it used.
 
@@ -56,7 +58,7 @@ Your assistant can calculate standard ratios from your saved statements, period 
 - **Name the period.** "August" or "the third quarter" beats "recently".
 - **Ask for the accounts.** "Break that down by account" turns a claim into something you can tie to QuickBooks.
 - **Ask for the entries.** For any figure that surprises you, ask which transactions make it up.
-- **Sync first** if the question is about the last few days. RoboLedger syncs when you ask, not on a schedule.
+- **Sync first** if the question is about the last day or so. RoboLedger syncs each connection on its own once a day; for anything newer, ask your assistant to sync or press **Sync Now**.
 
 Right after a sync or a close, some answers take a little while to catch up. Your assistant can check whether your graph is current before it answers.
 
@@ -64,6 +66,7 @@ Right after a sync or a close, some answers take a little while to catch up. You
 
 - **Ledger → Statements** shows live statements for any period, and on a group parent the combined and consolidated statements across the group.
 - **Ledger → Trial Balance** and **Ledger → Journal** show the detail underneath.
+- **Ledger → Account Register** shows one account's lines with a running balance, and **Ledger → Receivables & Payables** the aging.
 - **Explorer** opens any statement, note, schedule, set of ratios or scenario as a series over time. Switch between the table, a chart, the facts behind it and the checks it passed, and export to CSV or JSON. See [Explore statements and metrics over time](explorer.md).
 - **Search** finds text across the documents in your graph.
 - **Console** lets you ask questions inside the app. It runs on RoboLedger's own AI, so questions use credits. Claude, ChatGPT and other clients you connect yourself don't.

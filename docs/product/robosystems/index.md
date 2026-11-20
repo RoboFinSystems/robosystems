@@ -10,7 +10,7 @@ RoboSystems is the open-source knowledge graph for finance. It gives your AI cli
 
 1. [Connect Claude, ChatGPT or any MCP client](connect-an-mcp-client.md): one address, a sign-in, and the setup for each client.
 2. [Sign-in and graph access](oauth-and-graph-scope.md): the consent screen, one connection per graph, switching graphs, and revoking access.
-3. [Skills and the RoboSystems plugin](skills-and-the-plugin.md): four skills that teach your assistant a close, a board pack, SEC analysis and finding its way around a graph.
+3. [Skills and the RoboSystems plugin](skills-and-the-plugin.md): five skills that teach your assistant a close, a board pack, SEC analysis, loading a portfolio company's report from a file, and finding its way around a graph.
 
 ## Working with graphs
 
@@ -33,5 +33,5 @@ RoboSystems is the open-source knowledge graph for finance. It gives your AI cli
 ## By product
 
 - **Your books:** the [RoboLedger docs](https://roboledger.ai/docs) cover connecting QuickBooks, reporting, planning and the month-end close.
-- **Your holdings:** the [RoboInvestor docs](https://roboinvestor.ai/docs) cover private-company portfolios, reports shared from RoboLedger, and public-company research. Building next: positions linked to the ledger, brokerage sync, and portfolio analytics.
+- **Your holdings:** the [RoboInvestor docs](https://roboinvestor.ai/docs) cover private-company portfolios, reports shared from RoboLedger or loaded from a file, and public-company research. Building next: positions linked to the ledger, brokerage sync, and portfolio analytics.
 - **Building on the platform:** the [technical docs](https://robosystems.ai/docs/technical) cover the API, the MCP server in depth, and self-hosting.

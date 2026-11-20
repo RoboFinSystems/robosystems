@@ -269,7 +269,7 @@ The org surface lives under `/v1/orgs`:
 | `GET /v1/orgs/{org_id}/members` | Roster, with each member's role and join date |
 | `PUT \| DELETE /v1/orgs/{org_id}/members/{user_id}` | Change a member's role, or remove them (members may remove themselves) |
 | `GET /v1/orgs/{org_id}/limits` | Account-level limits, including the graph cap |
-| `GET /v1/orgs/{org_id}/usage` | Usage aggregated across every graph in the org (`days` controls the lookback, default 30) |
+| `GET /v1/orgs/{org_id}/usage` | Usage aggregated across every graph in the org (`days` controls the lookback, default 30); admin or owner only |
 
 Removing a member also removes their explicit [graph memberships](#graph-membership) on the org's graphs and cancels the repository subscriptions the org was paying for on their behalf. Admins and owners cannot remove themselves, and an org's last owner cannot be removed. **If the org was the person's last, removal deactivates the account**: their sessions end and their API keys and OAuth tokens are revoked. A platform administrator can reactivate it; nothing old resumes, so the person signs in and creates keys again.
 
@@ -283,7 +283,7 @@ Adding someone to an org is an invitation, not a direct write — there is no en
 
 Admins and owners can also list pending invitations (`GET /v1/orgs/{org_id}/invitations`), revoke a pending one (`DELETE .../invitations/{invitation_id}`), and resend (`POST .../invitations/{invitation_id}/resend` — this rotates the token, extends the expiry, and sends a fresh email).
 
-Invitations are gated by the `ORG_MEMBER_INVITATIONS_ENABLED` feature flag. A deployment with the flag off returns `501 Not Implemented` from every invitation endpoint.
+Invitations are gated by the `ORG_MEMBER_INVITATIONS_ENABLED` feature flag. With the flag off, sending an invitation and resending one return `501 Not Implemented`; listing, revoking and previewing still answer, and simply find nothing to act on.
 
 ## Graph Membership
 
@@ -300,9 +300,10 @@ Graph roles are their own three-level ladder, distinct from org roles: **`viewer
 
 A grant, role change, or revocation clears the affected user's cached access, so it normally applies on their next request. A browser session's per-graph access decision is cached for at most ten minutes, which bounds how long an old decision can outlive a change.
 
-Four rules govern the surface, and each one is a distinct error if you trip it:
+Five rules govern the surface, and each one is a distinct error if you trip it:
 
 - **You can only grant access to someone already in the graph's owning organization.** There is no cross-org sharing here; the invitation flow above is how a person enters the org in the first place.
+- **No one grants or changes their own graph access.** A graph admin targeting themselves on `POST` or `PUT` is refused with 403.
 - **Org owners and admins hold implicit graph admin** on every graph their org owns. They appear in the listing with `source: "org_role"` and a null `granted_at`, as opposed to `source: "explicit"` for a direct grant. Their access is managed by changing their org role — you cannot revoke it from the graph.
 - **Subgraphs inherit the parent's permissions.** Calling the member endpoints on a subgraph returns 400 and points you at the parent graph.
 - **Shared repositories have no member management.** They are subscription-based, so these endpoints return 403 for `sec` and its peers. See [Shared Repositories](Shared-Repositories.md).
@@ -350,7 +351,7 @@ An API key works your graphs; it does not hand out access to them. These take a 
 | Invite someone to the organization, or resend an invitation | `POST /v1/orgs/{org_id}/invitations`, `POST /v1/orgs/{org_id}/invitations/{invitation_id}/resend` |
 | Change an organization member's role | `PUT /v1/orgs/{org_id}/members/{user_id}` |
 | Grant a graph role, or change one | `POST /v1/graphs/{graph_id}/members`, `PUT /v1/graphs/{graph_id}/members/{user_id}` |
-| Change the account's email or password, manage passkeys, approve a connected app | the account routes below |
+| Update the profile (name or email) or change the password, manage passkeys, approve a connected app | the account routes below |
 
 Listing, and taking access away, stay open to a key: revoke a key, revoke an invitation, remove a member.
 
@@ -391,7 +392,7 @@ The practical consequence: **rotating a password is not a way to cut off program
 
 ### Updating your profile
 
-`PUT /v1/user` updates the authenticated user's own profile — `name` and `email`. It is the write counterpart to the `GET /v1/user` whoami call used in the [worked examples](#authenticated-rest-get-whoami) above.
+`PUT /v1/user` updates the authenticated user's own profile — `name` and `email`. It takes a signed-in session; an API key is answered with `401`. Changing `email` also needs a fresh proof in the same request: `reauth_password` for an account with a password, or `reauth_assertion` (a passkey assertion) for a passkey-only account. An address already in use answers `409`. It is the write counterpart to the `GET /v1/user` whoami call used in the [worked examples](#authenticated-rest-get-whoami) above.
 
 ## Login Methods
 
@@ -456,7 +457,7 @@ Things worth knowing before you wire a frontend against this:
 - **MFA challenge tokens are not session tokens.** They're short-lived (5 minutes), scoped to a single purpose (`login` versus `enroll`), and explicitly refused if presented as a session bearer.
 - **Recovery codes**: ten, single-use, stored hashed, regenerable. They are shown once.
 - **Stored credentials hold no secrets** — the public key, a signature counter, transports, and backup flags. There is nothing in the record to steal and replay.
-- **The relying-party identity is per-deployment**, derived from the deployment's root domain (overridable with `PASSKEY_RP_ID` / `PASSKEY_ORIGIN`). Each deployment is its own credential zone; a passkey enrolled on one does not exist on another.
+- **The relying-party identity is per-deployment**, taken from the hostname of the deployment's login home (`ROBOSYSTEMS_URL`), and overridable with `PASSKEY_RP_ID` / `PASSKEY_ORIGIN`. Each deployment is its own credential zone; a passkey enrolled on one does not exist on another.
 - **Enforcement keys on the password door.** When `MFA_ENFORCEMENT_ENABLED` is on, org owners and admins must enroll a passkey before a password login yields a session. Enrolled users are always challenged once passkeys are on, whether or not enforcement is.
 
 ## Enterprise SSO (OIDC)

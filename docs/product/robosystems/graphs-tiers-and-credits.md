@@ -16,7 +16,7 @@ Graphs belong to an **organization**. Organization owners and admins create them
 **Create Graph** first asks for the kind of graph. An **entity graph** is built around a company, and you choose which products it runs, either, both or neither:
 
 - **RoboLedger** for accounting: QuickBooks sync, statements, forecasts, the month-end close. See the [RoboLedger docs](https://roboledger.ai/docs).
-- **RoboInvestor** for private-company portfolios, securities and positions, and for reports a RoboLedger company shares with you. See the [RoboInvestor docs](https://roboinvestor.ai/docs). Building next: positions linked to the ledger, brokerage sync, and portfolio analytics.
+- **RoboInvestor** for private-company portfolios, securities and positions, and for the reports portfolio companies send you: shared from RoboLedger, or loaded from a PDF or a spreadsheet. See the [RoboInvestor docs](https://roboinvestor.ai/docs). Building next: positions linked to the ledger, brokerage sync, and portfolio analytics.
 - **Neither**, for a company graph without either product yet.
 
 A **generic graph** is for data you model and load yourself, from files you upload. It is created on the Standard tier.

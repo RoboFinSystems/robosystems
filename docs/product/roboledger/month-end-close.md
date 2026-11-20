@@ -30,19 +30,20 @@ ChatGPT asks you to allow the close before it runs. Then the receipt: five entri
 ## Before your first close
 
 - **Your books are connected and synced.** See [Connect your books to your AI assistant](connect-your-books.md).
-- **Your chart of accounts is mapped.** A month won't close while an account with activity has no mapping, because its balances would be left out of every statement. Map before you close: once a month is closed, the mapping of an account with activity in that month can't change unless you reopen it. See [Map your chart of accounts](map-your-chart-of-accounts.md).
+- **Your chart of accounts is mapped.** A month won't close while an account with activity has no mapping, because its balances would be left out of every statement. Map before you close: once a month is closed, an account with activity in that month can move to another line of the same statement, but a change that would move its balance onto a different statement, or across cash or equity on the balance sheet, is refused until the month is reopened. See [Map your chart of accounts](map-your-chart-of-accounts.md).
 - **Your recurring entries are schedules.** Depreciation, amortization and prepaid expenses that roll off each month are set up once as schedules, and every close drafts them. Your assistant can build them with you. It reads a past month's entries for the amounts and asks you for what history can't tell it, like an asset's cost, its useful life and the method. See [Schedules for recurring entries](schedules.md).
 - **Your own procedures are written down, if you have any.** Ask your assistant to save them as a close procedures document. It looks for that document before every close and follows it.
 
 ## What happens during a close
 
-1. **Your assistant checks where you stand.** It reads the last closed month, whether your QuickBooks sync is current, and anything blocking the next close. Months close in order, one at a time, and a month can't close until it's over.
+1. **Your assistant checks where you stand.** It reads the last closed month, whether every source that feeds this company's books (QuickBooks, a bank feed) has synced since the month ended, and anything blocking the next close. Months close in order, one at a time, and a month can't close until it's over.
 2. **It clears the blockers with you.**
-   - *The sync is behind.* Your assistant runs a fresh sync and waits for it.
+   - *A sync is behind.* The close waits on the source that synced longest ago, a bank feed included. Your assistant runs a fresh sync and waits for it.
    - *Transactions changed in QuickBooks after they synced.* These are normal. Your assistant shows you each one, and you choose to restate the month it belongs to, post the difference in an open month, or mark it as already handled. You can also settle them yourself under **Changed transactions** in the Closing Book. See [When QuickBooks changes after a sync](changes-after-sync.md).
    - *A schedule ends this month.* If an asset was sold or a policy cancelled, end its schedule before the month's entries are drafted.
    - *A schedule's entry for the month isn't drafted yet.* Your assistant drafts it.
    - *Events dated in the month never posted.* Once the month closes they could never post into it, so the close waits. In **Ledger → Inbox**, check both **Captured** and **Classified** for events dated in the month that have no entry, and approve or reject each one. See [Review events in the Inbox](inbox.md).
+   - *Bank lines arrived for a month that was already closed.* A closed month takes no new lines, so they were held out of it, and the next close waits until you decide. Reopen the month they are dated in, which brings them back to the Inbox, or close over them knowingly; lines closed over never post.
    - *A reconciliation the close waits on isn't ready.* It doesn't tie, it's out of date because the books changed after it ran, it hasn't been run for the month, or it's waiting for a sign-off. Your assistant runs them again and shows you what's different, and you sign off where a review is needed. See [Reconcile your accounts](reconcile-your-accounts.md).
 3. **It drafts the month's entries.** Every active schedule gets its entry for the month, plus any one-off adjustment you ask for.
 4. **It shows you the drafts.** Every entry with its debits and credits, whether they all balance, and which ones will be written to QuickBooks.
@@ -51,7 +52,7 @@ ChatGPT asks you to allow the close before it runs. Then the receipt: five entri
 
 ### Running the close in shadow
 
-If you keep closing from a spreadsheet for now and want to see how RoboLedger's close would have gone before you change anything, set the QuickBooks connection to **shadow**. Everything above still happens, with one difference: nothing is written to QuickBooks and nothing is posted. You book your own entries in QuickBooks as you always have; they sync down. Then your assistant runs the close. Each drafted entry becomes an expectation rather than a posting, and the receipt lists what would have blocked the close, such as an account that didn't reconcile or an accrual with no entry, instead of refusing. The month's statements are saved from what QuickBooks holds. When you trust it, switch the connection to QuickBooks authoritative and the next close posts for real. The months you closed in shadow keep their receipts and their expectations as they were; switching the setting never posts them.
+If you keep closing from a spreadsheet for now and want to see how RoboLedger's close would have gone before you change anything, set the QuickBooks connection to **shadow**. Everything above still happens, with one difference: nothing is written to QuickBooks and nothing is posted. You book your own entries in QuickBooks as you always have; they sync down. Then your assistant runs the close. Each drafted entry becomes an expectation rather than a posting, and the receipt lists what would have blocked the close, such as an account that didn't reconcile or an accrual with no entry, instead of refusing. A month out of order or not yet over is still refused. The month's statements are saved from what QuickBooks holds. When you trust it, switch the connection to QuickBooks authoritative and the next close posts for real. The months you closed in shadow keep their receipts and their expectations as they were; switching the setting never posts them. A company whose books are kept in another ledger or an ERP always closes this way. See [Keep your books where they are](keep-your-books-where-they-are.md).
 
 A busy month can take longer to close than your assistant's call waits for. The close keeps running, and your assistant checks back until the receipt is ready. It never needs to be started twice.
 
@@ -59,7 +60,7 @@ The close playbook tells your assistant to show you the drafts and wait for your
 
 ## Overrides
 
-A few blockers can be closed over on purpose. In the app, **Allow stale sync**, **Close without the undrafted entries** and **Close without reconciling** appear only when that blocker is the only one in the way. Your assistant can close over those three, and also over changed transactions nobody has settled or events left unposted, but only when you tell it to. Every override is kept in the close's audit note. Clearing the blocker is almost always the better answer: a month closed over a problem keeps it.
+A few blockers can be closed over on purpose. In the app, **Allow stale sync**, **Close without the undrafted entries**, **Close without reconciling**, **Close without the held bank lines** and, on a group close, **Close with the difference unexplained** each appear only when that blocker is the only one in the way. Your assistant can close over those five, and also over changed transactions nobody has settled or events left unposted, but only when you tell it to. Nothing closes over an account with activity and no mapping. Every override is kept in the close's audit note. Clearing the blocker is almost always the better answer: a month closed over a problem keeps it.
 
 ## In the app
 

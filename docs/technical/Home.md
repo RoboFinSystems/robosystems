@@ -61,7 +61,7 @@ The per-graph extensions: typed reads, command writes, and the workflows built o
 - **[Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md)** - The mapping model, auto-map vs suggestions, and the closed-period lock
 - **[Period Close](Period-Close.md)** - The fiscal calendar, blockers, the close and its receipt, reopening
 - **[Forecasting & Metrics](Forecasting-and-Metrics.md)** - Forecast scenarios, the four drivers, plan history, and metrics
-- **[RoboInvestor Operations](RoboInvestor-Operations.md)** - Portfolios, securities, positions, and issuer linking
+- **[RoboInvestor Operations](RoboInvestor-Operations.md)** - Portfolios, securities, positions, issuer linking, and receiving a report from a company that is not on the platform
 
 ## Concepts in Depth
 
@@ -84,6 +84,7 @@ Running, deploying, and operating your own stack.
 - **[Windows Setup (WSL2)](Windows-Setup-with-WSL2.md)** - Set up WSL2 and run the stack on Windows
 - **[Self-Hosted AI Models](Self-Hosted-AI-Models.md)** - Run the operators on open-weight models through any OpenAI-compatible endpoint
 - **[Connecting QuickBooks Locally](Connecting-QuickBooks-Locally.md)** - Run real QuickBooks OAuth against a local stack
+- **[Connecting Bank Feeds Locally](Connecting-Bank-Feeds-Locally.md)** - Turn on the Mercury and Plaid bank feeds on a self-hosted stack
 - **[Bootstrap Guide](Bootstrap-Guide.md)** - Set up AWS OIDC federation and GitHub Actions to deploy your own
 - **[Enterprise SSO & SCIM](Enterprise-SSO-and-SCIM.md)** - OIDC login and SCIM 2.0 provisioning for dedicated and self-hosted deployments
 - **[Security & Compliance](Security-and-Compliance.md)** - The security posture, built-in controls, and optional compliance stacks

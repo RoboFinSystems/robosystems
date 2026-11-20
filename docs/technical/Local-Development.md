@@ -16,7 +16,7 @@ Every API guide in these docs is written against the hosted platform at `https:/
 | **Account and API key** | Sign up, then **Settings → API keys** | `just demo-user` writes both to `.local/config.json` |
 | **Graphs** | **Create Graph** in the app (needs a payment method) | `just demo-*` recipes provision and populate them |
 | **Billing and credits** | On | Off by default (`BILLING_ENABLED=false` in `.env`) |
-| **SEC repository** | Paid subscription, from **Repositories** in the app | Free: load the filings you want with `just sec-load` |
+| **SEC repository** | Subscription, from **Repositories** in the app; the first one opens with a 14-day trial that asks for no card | Free: load the filings you want with `just sec-load` |
 | **GraphQL** | Queries and introspection; no browser playground | The same, plus the GraphiQL playground when you open the endpoint in a browser |
 | **Graph API** (Cypher without platform auth) | Not exposed | `http://localhost:8001`, used by `just graph-query` |
 | **Dagster UI** | Not exposed | `http://localhost:8002` |
@@ -265,7 +265,7 @@ just logs dagster-daemon    # Dagster daemon logs
 
 ## SEC Filings
 
-The hosted SEC repository is a paid subscription. Locally it is free: load the filings you want and query them through the same `sec` graph id the hosted examples use. The demo user still needs a subscription record to reach `sec`, so create one the first time.
+The hosted SEC repository is a subscription that opens with a card-free trial. Locally it is free: load the filings you want and query them through the same `sec` graph id the hosted examples use. The demo user still needs a subscription record to reach `sec`, so create one the first time.
 
 ```bash
 just sec-load <TICKER> 2025   # Load one company's filings for a year
@@ -282,7 +282,7 @@ just sec-reset                # Start over
 
 The RoboSystems, RoboLedger, and RoboInvestor web apps are open source too, each in its own repository ([robosystems-app](https://github.com/RoboFinSystems/robosystems-app), [roboledger-app](https://github.com/RoboFinSystems/roboledger-app), [roboinvestor-app](https://github.com/RoboFinSystems/roboinvestor-app)). Clone one next to this repository, copy its `.env.example` to `.env` (it already points at `http://localhost:8000`), and run `npm install` then `npm run dev`. They serve on `http://localhost:3000`, `http://localhost:3001`, and `http://localhost:3002`. Sign in with the demo user's email and password, which `just demo-user` prints and saves in `.local/config.json`.
 
-**Run the web apps in Docker.** To skip the Node toolchain, `just clone-apps` clones all three repositories next to this one, and `just start apps build` builds their images and starts them on the same three ports, pointed at your local API. In this profile the landing page at `/` shows a maintenance screen; sign in at `/login`.
+**Run the web apps in Docker.** To skip the Node toolchain, `just start apps` pulls the published app images and starts them on the same three ports, pointed at your local API. To build them from source instead, run `just clone-apps` (it clones all three repositories next to this one), comment out the three `*_APP_IMAGE` / `*_APP_PULL_POLICY` pairs in `.env`, and run `just start apps build`. In this profile the landing page at `/` shows a maintenance screen; sign in at `/login`.
 
 To connect a real QuickBooks company to a local stack, see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally.md).
 
@@ -311,18 +311,20 @@ Every Claude tier then runs on that key, and nothing else about the operators ch
 
 ## Restarting and Iterating
 
+`just start` runs the published images, so the stack is the last release, not your checkout. To work on the backend, comment out the `ROBOSYSTEMS_IMAGE` and `ROBOSYSTEMS_PULL_POLICY` lines in `.env` and run `just rebuild`: the image is built here, and the checkout's `robosystems/`, `migrations/` and `frameworks/` are mounted into it.
+
 As you make changes, choose the right restart command:
 
 | Command | Use when |
 | --- | --- |
-| **`just restart`** | You changed Python code or added a migration. Source is volume-mounted, so a container restart picks it up, and the Dagster daemon applies any new migrations as it boots. |
-| **`just rebuild`** | You changed dependencies, environment variables, or a Dockerfile. A plain restart will **not** pick these up. |
+| **`just restart`** | You changed Python code or added a migration, on a locally built backend. Its source is volume-mounted, so a container restart picks it up, and the Dagster daemon applies any new migrations as it boots. A published image carries its own source and ignores the checkout. |
+| **`just rebuild`** | You changed environment variables (any stack), or dependencies or a Dockerfile (a locally built backend). It recreates every container, and builds only the images whose `*_IMAGE` pair is commented out in `.env`; a published image is recreated as pulled. A plain restart will **not** pick these up. |
 | **`just upgrade`** | You pulled new commits and want the latest published images, recreating only what changed. |
-| **`just reset-local`** | You edited the taxonomy framework source (`frameworks/**/taxonomy.jsonld`). It tears the stack down, wipes local data, rebuilds, and reseeds the library; validate the edit first with `just framework-validate`. |
+| **`just reset-local`** | You edited the taxonomy framework source (`frameworks/**/taxonomy.jsonld`) on a locally built backend. It tears the stack down, wipes local data, rebuilds, and reseeds the library from the checkout; validate the edit first with `just framework-validate`. On a published image it wipes local data and reseeds from the image's own frameworks. |
 
 ```bash
-just restart   # Python code changes
-just rebuild   # dependency / env / Dockerfile changes
+just restart   # Python code changes (locally built backend)
+just rebuild   # env changes; dependency / Dockerfile changes on a locally built backend
 ```
 
 Before opening a pull request, run the same checks CI runs:
@@ -384,7 +386,7 @@ curl -H "X-API-Key: $ROBOSYSTEMS_API_KEY" http://localhost:8000/v1/user
 
 ### Code or Environment Changes Are Not Taking Effect
 
-**Solution:** Use `just restart` for Python code changes and `just rebuild` for dependency, environment, or Dockerfile changes — a plain restart does not pick up env changes.
+**Solution:** Use `just restart` for Python code changes and `just rebuild` for dependency, environment, or Dockerfile changes — a plain restart does not pick up env changes. Code, dependency and Dockerfile changes apply only to a locally built backend: with the published image in `.env`, the stack runs the release, not your checkout (see [Restarting and Iterating](#restarting-and-iterating)).
 
 ## Related Documentation
 

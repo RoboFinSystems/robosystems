@@ -94,7 +94,7 @@ Rules and behaviors:
 - Create the key in the app under **Settings → API keys**; it is shown once, and can be scoped to all your graphs or to one graph. Send it in the header — never put it in the URL.
 - `Authorization: Bearer` (JWT) is a frontend concern only — don't use it for backend `curl` testing.
 - **Introspection works without credentials; data does not.** You can fetch the schema (an introspection query over POST) without an API key. A query for real data with no valid credentials returns HTTP 200 with a GraphQL error whose `extensions.code` is `UNAUTHENTICATED` — not a transport-level 401. Invalid or expired credentials *do* produce an HTTP 401.
-- Access is checked per graph before any resolver runs. A valid key that lacks access to the requested `graph_id` is refused with HTTP 403 before the query executes, so there is no GraphQL error body to branch on.
+- Access is checked per graph before any resolver runs. A valid key that lacks access to the requested `graph_id` is refused with HTTP 403 before the query executes, so there is no GraphQL error body to branch on. A key scoped to one graph is the exception: sent to another graph's endpoint it is refused as an invalid key, HTTP 401, not 403.
 
 ## Schema-per-Flag Composition
 
@@ -159,7 +159,7 @@ A response looks like this:
 }
 ```
 
-The wire field names are the camelCase form of the underlying Pydantic fields: `closed_through` becomes `closedThrough`, `close_target` becomes `closeTarget`, `gap_periods` becomes `gapPeriods`, and so on. Querying the snake_case names fails. The full `fiscalCalendar` shape carries more than the five fields above — `fiscalYearStartMonth`, `catchUpSequence`, a count and a sample for each blocker that has detail (`pendingObligationCount`, `strandedObligationCount`, `reconcilingItemCount`, `unpostedSourceEventCount`, `unreconciledAccountCount`, each with its `…Sample`), `earliestPendingPeriod`, `syncStaleDays`, `lastCloseAt`, `lastSyncAt`, and a `periods` list — discover them through introspection. What each blocker means is on [Period Close](Period-Close.md#blockers).
+The wire field names are the camelCase form of the underlying Pydantic fields: `closed_through` becomes `closedThrough`, `close_target` becomes `closeTarget`, `gap_periods` becomes `gapPeriods`, and so on. Querying the snake_case names fails. The full `fiscalCalendar` shape carries more than the five fields above — `fiscalYearStartMonth`, `catchUpSequence`, a count and a sample for each blocker that has detail (`pendingObligationCount`, `strandedObligationCount`, `reconcilingItemCount`, `unpostedSourceEventCount`, `heldBankLineCount`, `unreconciledAccountCount`, `unmappedAccountCount`, each with its `…Sample`), the group close's four lists on a consolidation entity (`groupOpenEntities`, `groupPendingAdjustments`, `groupUnexplained`, `groupNotFooting`), `earliestPendingPeriod`, `syncStaleDays`, `lastCloseAt`, `initializedAt`, `lastSyncAt`, and a `periods` list — discover them through introspection. What each blocker means is on [Period Close](Period-Close.md#blockers).
 
 ### Parent entity
 
@@ -189,6 +189,8 @@ A response looks like this:
 
 Here too, `legalName`, `entityType`, and `fiscalYearEnd` are the camelCase of `legal_name`, `entity_type`, and `fiscal_year_end`. The `source` field reports where the entity's data originated (`native`, `sec`, `quickbooks`, `xero`, or `plaid`). The full entity shape also exposes identifiers (`cik`, `ticker`, `exchange`, `sic`, `lei`, `taxId`), `status`, `isParent`, `parentEntityId`, address fields, and timestamps.
 
+**A graph with more than one entity.** A reporting group keeps each entity's books in the one graph. `entities` lists them, and most ledger reads take an optional `entityId` (`entity`, `fiscalCalendar`, `trialBalance`, `accountRegister`, `accounts`, `journalEntries`, `reconciliations`, `periodCloseStatus`, `reports`, `summary` and more). Leave it out and the read is the group parent's, which on a single-entity graph is the only entity. Each entity also reports its place in the group: `isParent`, `parentEntityId`, `ownershipPct`, `consolidationMethod`, `entityRole`, `joinedOn` and `leftOn`. See [Group Consolidation](Group-Consolidation.md).
+
 ## More Example Queries
 
 ### A paginated list with arguments
@@ -212,7 +214,7 @@ This page does not repeat that list. What follows is the orientation the generat
 
 | You want to know | Start with |
 | --- | --- |
-| What is blocking the month-end close | `fiscalCalendar` — `closedThrough`, `blockers`, the per-blocker counts (`reconcilingItemCount`, `unpostedSourceEventCount`, `unreconciledAccountCount`, …) and `syncStaleDays` in one read |
+| What is blocking the month-end close | `fiscalCalendar` — `closedThrough`, `blockers`, the per-blocker counts (`reconcilingItemCount`, `unpostedSourceEventCount`, `heldBankLineCount`, `unreconciledAccountCount`, `unmappedAccountCount`, …) and `syncStaleDays` in one read |
 | Whether the books tie to their independent sources for a month | `reconciliations(period: "YYYY-MM")` — each reconciliation's `status`, `unreconciledDifference`, balances and sign-off. See [Period Close](Period-Close.md#reconciliations) |
 | Which schedules are drafted, posted or pending for a period | `periodCloseStatus`, then `periodDrafts` for the entries themselves |
 | Who owes us, and how concentrated it is | `agents(agentType: "customer")` with `openReceivable` on each — names and balances together. `openReceivablesByAgent` gives the same balances keyed by id only |
@@ -221,15 +223,18 @@ This page does not repeat that list. What follows is the orientation the generat
 | What a counterparty has done | `agent`, then the event and transaction history behind the balance |
 | The chart of accounts, and what is still unmapped | `accounts` / `accountTree`, then `unmappedElements` and `mappingCoverage` |
 | How an account's balance got there | `accountRegister(accountId:, startDate:, endDate:)` — one entity's posted lines on the account, oldest first, each with the balance it leaves, between an opening and a closing balance that agree with `trialBalance`. An income or expense account opens at the fiscal year's start. Each line names its entry, the event that wrote it and that event's counterparty; pages carry their own opening (`after:` takes the last page's `nextCursor`), and `includeDrafts` lists the window's drafts outside every balance |
-| What an event posted, and which event a posting came from | `eventBlock(id:) { triggeredEntries { … } }` — the journal entries the event's handler wrote, oldest first (what did post, where `previewEventBlock` is what would). The other way, every `journalEntries` entry and `accountRegister` line carries `triggeredByEventId` and `triggeredByEventType` |
+| What an event posted, and which event a posting came from | `eventBlock(id:) { triggeredEntries { … } }` — the journal entries the event's handler wrote, oldest first (what did post, where the `preview-event-block` operation shows what would). The other way, every `journalEntries` entry and `accountRegister` line carries `triggeredByEventId` and `triggeredByEventType` |
 | Balances rolled up to reporting concepts | `mappedTrialBalance`, or `accountRollups` for the CoA-level view |
 | A published report, whole | `reportPackage` — metadata plus every rendered block in one round trip |
 | A single statement out of a report | `statement(reportId:, blockType:)` |
 | A rendered schedule or statement block | `informationBlock`; pass `scenarioId` for a forecast slice and `series` for the whole period series |
 | The books' scale and sync freshness | `summary` |
+| Which entities the graph holds | `entities`, then pass an entity's `id` as `entityId` to the read you want |
 | What the taxonomy says about a concept | `libraryElement` / `searchLibraryElements`, then `libraryElementTree` and `libraryElementClassifications` |
 
-**Balances are in minor currency units.** `openBalanceCents` is cents. Convert once, on the way in.
+**Check the unit before you add anything up.** A field typed `BigInt` is a whole number of cents (or a count of shares): `openBalanceCents`, the aging buckets, an open item's `openCents`, an event block's `amount`, a position's `costBasis`. `BigInt` is sent as a plain JSON number and, unlike GraphQL's `Int`, does not stop at 2,147,483,647. A field typed `Float` is dollars: `trialBalance`, `accountRegister`, `reconciliations` and `journalEntries` all report dollars. A name ending in `Cents` is always cents; where the name does not say, the type does.
+
+Dates are the `Date` and `DateTime` scalars, sent as ISO-8601 strings, and free-form objects such as an event block's `metadata` are `JSON`. A typed client needs a mapping for all four scalars; the SDKs' typed GraphQL clients map `BigInt` from 2.42.0.
 
 `reportDownloadUrl(reportId, format, expiresIn)` is worth calling out on its own: it is how a client downloads a published report's serialization bundle. (The MCP tool `get-report-bundle` returns the same link to an AI agent.) A download is a read of stored state, so it lives here rather than as a REST resource. `format` is `HOLON_JSONLD` (the default), `HOLON_JSONLD_LINEAGE`, `TAVI` or `XBRL_2_1`. Every format resolves to a short-lived presigned S3 URL — the holon is stamped at publish time; the holon with lineage, Tavi and XBRL 2.1 are built and cached on first request — and the resolver returns that URL, never the bytes. `HOLON_JSONLD_LINEAGE` adds the `#lineage` graph, the ledger behind the report's frozen figures ([Serialization and Export](Serialization-and-Export.md#lineage)); it is for the graph's own members, and a report shared in from another graph raises `REPORT_BUNDLE_NOT_AVAILABLE` for it. The holon is the one format that carries the whole report, and the result's `omittedContent` names what the chosen format leaves out: Tavi has no place for four kinds of content, and XBRL 2.1 omits the disclosure notes. `expiresIn` is bounded between 60 and 3600 seconds; out of range returns `INVALID_EXPIRES_IN`. A report with no published bundle raises `REPORT_BUNDLE_NOT_AVAILABLE`; an unknown id returns `null`.
 
@@ -295,13 +300,14 @@ GraphQL data errors return HTTP 200 with a typed code in `extensions.code`, so c
 | `INVESTOR_NOT_INITIALIZED` | Same, for the investor surface |
 | `INVALID_PERIOD` | A `period` argument isn't a valid `YYYY-MM` month (`reconciliations`) |
 | `INVALID_ARGUMENT` | An argument failed a resolver's own check, such as a library tree's `maxDepth` outside 1–10 |
+| `BAD_USER_INPUT` | An argument names something the graph does not have, or is half of a pair: an unknown `accountId`, a bad `after` cursor or an `entityId` outside the graph on `accountRegister`, or `dimensionType` without `dimensionMemberId` |
 | `INVALID_EXPIRES_IN` | `reportDownloadUrl`'s `expiresIn` is outside 60–3600 seconds |
 | `REPORT_BUNDLE_NOT_AVAILABLE` | The report exists but has no published bundle yet |
 | `REPORT_BUNDLE_SIGNING_FAILED` | The bundle couldn't be built or its link signed, a server-side fault rather than a missing bundle |
 | `STATEMENT_TIMEOUT` | The query ran past the database's time limit for an interactive read. Narrow it (a smaller `limit`, a shorter range) or retry |
 | `INTERNAL_ERROR` | An unexpected server-side fault. The message is fixed and `extensions.requestId` identifies the request when you report it |
 
-Three failures never reach the GraphQL layer, so they carry no `extensions.code`: invalid or expired credentials are HTTP 401, and a graph you have no access to, or a subgraph id, is HTTP 403.
+Some failures never reach the GraphQL layer, so they carry no `extensions.code`: invalid or expired credentials, or a graph-scoped key sent to another graph, are HTTP 401, and a graph you have no access to, or a subgraph id, is HTTP 403.
 
 ## Troubleshooting
 

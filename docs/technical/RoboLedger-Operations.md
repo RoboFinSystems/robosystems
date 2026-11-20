@@ -71,9 +71,9 @@ Every command write and analytical view returns the same envelope. This uniformi
 
 The envelope is defined in [`middleware/operations.py`](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/middleware/operations.py). Wire aliases are camelCase (`operationId`, `createdBy`, `idempotentReplay`), and the model is `populate_by_name=True`, so both spellings are accepted on input.
 
-**Idempotency-Key.** Send an `Idempotency-Key` header to make a write safe to retry. A replay with the same key returns the cached envelope (with `idempotentReplay: true`) without re-executing. Reusing a key with a *different* request body returns `409` — the body fingerprint must match, so the cache never silently overwrites a different operation. The analytical views, apart from `live-financial-statement` and `consolidation-worksheet`, accept the header and ignore it: a read has nothing to deduplicate, so every call runs fresh and `idempotentReplay` is always `false`.
+**Idempotency-Key.** Send an `Idempotency-Key` header to make a write safe to retry. A replay with the same key returns the cached envelope (with `idempotentReplay: true`) without re-executing. Reusing a key with a *different* request body returns `409` — the body fingerprint must match, so the cache never silently overwrites a different operation. The seven graph- and report-backed views (`build-fact-grid`, `financial-statement-analysis`, `disclosures`, `information-block`, `describe-filing`, `search-text`, `read-text`) accept the header and ignore it: a read has nothing to deduplicate, so every call runs fresh and `idempotentReplay` is always `false`. The three ledger reads (`live-financial-statement`, `consolidation-worksheet`, `preview-consolidation-entries`) honor it like a command write.
 
-**Synchronous vs async.** Most operations run synchronously and return `200` with `status: completed`. A few — notably `auto-map-elements` — dispatch to the background worker, return `202` with `status: pending`, and stream progress. The `operation_id` bridges to the monitoring surface: subscribe to `GET /v1/operations/{operation_id}/stream` (SSE) to follow a long-running operation to completion.
+**Synchronous vs async.** Most operations run synchronously and return `200` with `status: completed`. Two — `auto-map-elements` and `backfill-plan-history` — dispatch to the background worker, return `202` with `status: pending`, and stream progress. The `operation_id` bridges to the monitoring surface: subscribe to `GET /v1/operations/{operation_id}/stream` (SSE) to follow a long-running operation to completion.
 
 ## Command Writes
 
@@ -83,7 +83,7 @@ The registered command-write operations, grouped by workflow stage. They live in
 
 | Stage | Operations |
 | --- | --- |
-| **Setup** | `initialize`, `initialize-chart-of-accounts`, `record-opening-balance`, `update-entity`, `change-reporting-style` |
+| **Setup** | `initialize`, `initialize-chart-of-accounts`, `record-opening-balance`, `change-calendar-start`, `create-entity`, `update-entity`, `change-reporting-style`, `link-bank-account` |
 | **Taxonomy Blocks** | `create-taxonomy-block`, `update-taxonomy-block`, `delete-taxonomy-block`, `link-entity-taxonomy` |
 | **Mapping** | `create-mapping-association`, `delete-mapping-association`, `auto-map-elements` |
 | **Information Blocks** | `create-information-block`, `update-information-block`, `delete-information-block`, `bind-text-block`, `evaluate-rules` |
@@ -91,16 +91,17 @@ The registered command-write operations, grouped by workflow stage. They live in
 | **Agents** | `create-agent`, `update-agent` |
 | **Management Dimensions** | `create-dimension`, `update-dimension` |
 | **Event Blocks** | `create-event-block`, `update-event-block`, `execute-event-block`, `preview-event-block` |
+| **Bank-Line Classification** | `accept-suggestions`, `learn-classification-defaults` |
 | **Reconciling Items** | `preview-reconciling-item`, `resolve-reconciling-item` |
 | **Reconciliations** | `preview-reconciliations`, `refresh-reconciliations`, `record-statement-balance`, `set-reconciliation-policy`, `sign-off-reconciliation` |
 | **Event Handlers** | `create-event-handler`, `update-event-handler` |
 | **Journal Entries** | `update-journal-entry`, `delete-journal-entry`, `propose-consolidation-entries`, `set-allocation-override`, `record-acquisition`, `record-ownership-change`, `record-deconsolidation` |
-| **Schedules** | `promote-obligations`, `rebuild-schedule`, `terminate-schedule` |
+| **Schedules** | `preview-schedule`, `promote-obligations`, `rebuild-schedule`, `terminate-schedule` |
 | **Close Workflow** | `set-close-target`, `close-period`, `reopen-period` |
 | **Reports** | `create-report`, `regenerate-report`, `delete-report`, `share-report`, `revoke-report-share`, `file-report`, `transition-filing-status` |
 | **Publish Lists and Distribution** | `create-publish-list`, `update-publish-list`, `delete-publish-list`, `add-publish-list-members`, `remove-publish-list-member`, `block-source-graph`, `unblock-source-graph` |
 
-`auto-map-elements` is the async one (returns `202 pending`); the rest complete synchronously. The exact request body for each is in the [extensions API reference](https://robosystems.ai/docs/extensions). The workflows with their own pages:
+`auto-map-elements` and `backfill-plan-history` are the async ones: each returns `202` with `status: pending` and delivers its result on `GET /v1/operations/{operation_id}/stream`. The rest complete synchronously. The exact request body for each is in the [extensions API reference](https://robosystems.ai/docs/extensions). The workflows with their own pages:
 
 | Workflow | Operations | Page |
 | --- | --- | --- |
@@ -112,9 +113,11 @@ The registered command-write operations, grouped by workflow stage. They live in
 | Events and journal entries | `create-event-block`, `update-event-block`, `preview-event-block`, `update-journal-entry`, `delete-journal-entry` | [Event-Driven Ledger](Event-Driven-Ledger.md) |
 | Schedules and other blocks | `create-information-block`, `update-information-block`, `evaluate-rules` | [Information Blocks](Information-Blocks.md) |
 
-**Forecasting and metrics.** A forecast is a scenario authored as a `forecast` Information Block. `compute-forecast` walks it forward month by month into scenario-stamped statement FactSets, halting at the first month that fails verification. `backfill-plan-history` stamps the historical months a scenario stands on. `compute-metrics` derives a metric block's ratios for a period, and `assert-metrics` records observed values into one. All four are deterministic and consume no credits. The block shape, the four drivers and a full scenario payload are on [Forecasting and Metrics](Forecasting-and-Metrics.md).
+**Forecasting and metrics.** A forecast is a scenario authored as a `forecast` Information Block. `compute-forecast` walks it forward month by month into scenario-stamped statement FactSets, halting at the first month that fails verification. `backfill-plan-history` stamps the historical months a scenario stands on, on the background worker and at most `max_periods` months a call: repeat it until `remaining_periods` comes back empty. `compute-metrics` derives a metric block's ratios for a period, and `assert-metrics` records observed values into one. All four are deterministic and consume no credits. The block shape, the four drivers and a full scenario payload are on [Forecasting and Metrics](Forecasting-and-Metrics.md).
 
 **Opening balances.** Books whose history does not come with them start from a balance sheet. `record-opening-balance` takes one balance per balance-sheet account, in cents, debit or credit in the account's normal direction, and posts them as one `opening` entry dated the day before the entity's first fiscal month. Every month's opening balances then include it and no month's activity does, so the first month's cash flow and statement of equity start from it rather than counting it. Any difference between debits and credits goes to the equity account named in `equity_element_id` (usually Opening Balance Equity), and an income or expense account is refused. It is one per entity: recording it again replaces it until the entity's first close, `change-calendar-start` moves it with the start, and it cannot be reversed. A live statement column that reaches back before the books begin is left out and named in `omitted_periods`.
+
+**Entities and bank lines.** `create-entity` adds a subsidiary, or the consolidation entity, to the graph's group. Give it a chart (`initialize-chart-of-accounts` with `entity_id`) and a calendar (`initialize` with `entity_id`); from then on every ledger operation takes `entity_id`, and omitting it means the group parent. `change-calendar-start` moves where an entity's calendar starts, before its first close only. `link-bank-account` points a bank feed's account at a chart account, which also decides whose books the feed's lines land in. `accept-suggestions` takes the suggestion on every open bank line its filters select (`commit: true` posts them too, `dry_run: true` only counts), and `learn-classification-defaults` seeds each counterparty's default account from the bank lines already committed. `preview-schedule` generates a schedule from a definition and rolls it back, returning the roll-forward to show before `create-information-block` keeps it.
 
 One example, `update-entity`, illustrates the partial-update convention. Only the non-null fields in the body are applied; an empty body returns `400 "No fields provided for update."`
 
@@ -449,7 +452,7 @@ A tenant ledger must be materialized into LadybugDB before its facts appear in a
 
 ### Posted Entries Are Immutable
 
-`update-journal-entry` and `delete-journal-entry` operate on **drafts** only. To correct a posted entry, record a reversal via `create-event-block` with `event_type='journal_entry_reversed'`. Library-seeded mapping associations are likewise immutable — deleting one returns `403`.
+`delete-journal-entry` removes a **draft** only, and `update-journal-entry` changes a draft's lines, date or memo. On a posted entry `update-journal-entry` accepts two things, both in place and in a closed month too, since neither moves a balance: `line_flows` (the cash flow row of the named lines) and `line_dimensions` (their department, class, location or project). To correct anything else on a posted entry, record a reversal via `create-event-block` with `event_type='journal_entry_reversed'`. Library-seeded mapping associations are likewise immutable — deleting one returns `403`.
 
 ### Idempotency-Key Reuse With a Changed Body
 

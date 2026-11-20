@@ -111,7 +111,7 @@ This is the **official RoboSystems template** for creating custom graph schemas.
       "name": "Person",
       "properties": [
         {"name": "identifier", "type": "STRING", "is_primary_key": true},
-        {"name": "name", "type": "STRING", "is_required": true},
+        {"name": "name", "type": "STRING", "nullable": false},
         {"name": "age", "type": "INT64"},
         {"name": "title", "type": "STRING"}
       ]
@@ -132,6 +132,8 @@ This is the **official RoboSystems template** for creating custom graph schemas.
   }
 }
 ```
+
+The snippet is abridged: the template also declares the `Company` and `Project` nodes, and a relationship must name nodes the schema declares.
 
 ### Property Types
 
@@ -154,7 +156,9 @@ The list lives in `CustomSchemaParser.VALID_TYPES`; see the [schemas README](htt
 - `is_primary_key: true` — the node's key. Every node needs at least one; it becomes the table's `PRIMARY KEY`.
 - `nullable: false` — marks a field required in the parsed schema. It adds no `NOT NULL` constraint to the table, so keep the field populated in your data.
 
-`is_required`, which `schema.json` and some API examples carry, is **not read** by the parser: a property without `nullable` is nullable. Use `nullable: false` when you mean required.
+A property without `nullable` is nullable. The parser reads only `is_primary_key` and `nullable` from a property; any other key (an `is_required`, say) is ignored without an error, so use `nullable: false` when you mean required.
+
+**Names.** A node, relationship or property name starts with a letter or underscore and holds only letters, digits and underscores, up to 128 characters. It cannot be a statement keyword, in any case: `CREATE`, `MERGE`, `SET`, `DELETE`, `REMOVE`, `DETACH`, `DROP`, `ALTER`, `INSERT`, `UPDATE`, `COPY`, `LOAD`, `IMPORT`, `EXPORT`, `INSTALL`, `UNINSTALL`, `ATTACH`, `USE` or `CALL` — so a property called `set` or `update` is refused. A type is a bare type name, optionally sized (`FLOAT[384]`). A schema that breaks any of these is refused with **422** before the graph is created; `POST /v1/graphs/schema/validate` runs the same checks without creating anything. A relationship's `from_node` and `to_node` must name a node in the schema, or be `*` for any node.
 
 Node and relationship names are checked against a short reserved list (`SystemConfig`, `SchemaVersion`, `AuditLog`, `Permission`, `Role`, `Session`, `Lock`, `Migration`, `SystemUser`, and the `SYSTEM_*` relationships).
 
@@ -535,6 +539,7 @@ A key never travels in the URL: a credential in the query string is rejected. Th
    **Documents** — the surface Step 6 exercises:
    - `search-documents`, `get-document-section`, `get-document`, `list-documents`
    - `create-document`, `update-document`, `delete-document`
+   - `create-document-upload`, `complete-document-upload`, `read-document-file` — document files (PDF, PNG, JPEG)
 
    The list also carries `get-graphql-schema` and `query-graphql`, but they are no use here: they serve the RoboLedger and RoboInvestor read schema, and a custom graph has no operational data behind it. Your tables are read with Cypher.
 

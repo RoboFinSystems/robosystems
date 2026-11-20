@@ -51,9 +51,9 @@ When `just demo-roboledger` finishes (a few minutes), the tenant has:
 - A new entity (or one provisioned into an existing graph) modeling **Cascade Advisory Group LLC**, a 3–5 person boutique consulting firm
 - **16 months** of business data on a rolling window ending at the current month, so the demo always covers "recent history" regardless of when you run it
 - A clean 27-account Chart of Accounts, fully mapped to rs-gaap
-- ~305 typed business events (`invoice_issued`, `payment_received`, `bill_received`, `bill_paid`, `journal_entry_recorded`) emulating data arriving via the same HTTP API a real adapter uses
+- ~250 typed business events (`invoice_issued`, `payment_received`, `bill_received`, `bill_paid`, `journal_entry_recorded` and, from the last three closed months on, `bank_transaction`) emulating data arriving via the same HTTP API a real adapter uses
 - ~132 discharge chains linking payments to their originating invoices/bills (REA duality)
-- A fiscal calendar with the prior month's prior month closed and the last completed month queued — **exactly one period ready to close**
+- A fiscal calendar closed through the month before last, with the last completed month queued — **one period to close**, once its bank lines in the inbox are worked
 - 6 schedules: 2 depreciation, 4 prepaid amortization, staggered across the window
 - 4 policy documents (close procedures, depreciation, prepaid, revenue)
 - An FY annual report — generated, packaged, and **filed** as a complete Report-Block lifecycle demonstration
@@ -95,7 +95,7 @@ cd ../robosystems
 just demo-roboledger
 ```
 
-Output includes the API key + user credentials and the graph id of the new tenant — copy them or read them from `.local/config.json`. It ends with the period queued for close, the filed report's id, and nine numbered prompts to try from your MCP client, written for that period: orient on the fiscal calendar, find the close procedures, draft the closing entries, an optional one-off disposal, then review the drafts, close the period, and read the balance sheet.
+Output includes the API key + user credentials and the graph id of the new tenant — copy them or read them from `.local/config.json`. It ends with the period queued for close, the filed report's id, and nine numbered steps, seven of them prompts to try from your MCP client, written for that period: orient on the fiscal calendar, find the close procedures, draft the closing entries, an optional one-off disposal, then review the drafts, close the period, and read the balance sheet.
 
 To load the demo into an existing graph (e.g. on a user / graph you've already provisioned):
 
@@ -123,7 +123,7 @@ To provision a user + empty roboledger graph **without** the synthetic data (for
 just demo-roboledger --skeleton
 ```
 
-To swap the hardcoded CoA → GAAP mappings for AI-driven mapping via the MappingOperator (requires Bedrock):
+To swap the hardcoded CoA → GAAP mappings for AI-driven mapping via the MappingOperator (needs a model: Bedrock, or an Anthropic API key — see [Local Development](Local-Development.md)):
 
 ```bash
 just demo-roboledger --ai
@@ -135,7 +135,7 @@ just demo-roboledger --ai
 |---|---|---|
 | **Chart of Accounts** | 27 | Clean asset / liability / equity / revenue / expense breakdown with realistic small-business categories |
 | **Agents** | 17 | 6 customers + 8 vendors + 2 employees + 1 government (IRS). Same shape a real QB sync produces. |
-| **Business events** | ~305 | Typed event stream: invoice/payment pairs, bill/payment pairs, opening-balance and payroll journal entries. Mirrors the exact event vocabulary QB ingestion emits. |
+| **Business events** | ~250 | Typed event stream. The older history is posted directly: invoice/payment pairs, bill/payment pairs, opening-balance, payroll and card-purchase journal entries. From the last three closed months on, money in and out arrives as `bank_transaction` lines, the way a bank feed delivers it: those months' lines were classified, committed and posted by each month's close, and the close target's wait unclassified in the inbox. |
 | **Discharge chains** | ~132 | `payment_received → invoice_issued` and `bill_paid → bill_received` links — the REA duality that drives open-AR / open-AP aging |
 | **CoA → rs-gaap mappings** | 27 | 100% coverage. 24 are renderable under the active Reporting Style; 3 PP&E-gross targets are unreachable — see [The Mapping View](#the-mapping-view) |
 | **Fiscal calendar** | 1 | `closed_through = month_before_last`, `close_target = last_completed_month` |
@@ -146,7 +146,7 @@ just demo-roboledger --ai
 | **Filed FY report** | 1 | Annual report — facts generated, package assembled, lifecycle stamped `filed`. Demonstrates the full Report-Block lifecycle end-to-end. |
 | **Verification rules** | ~134 | Not authored by the demo — auto-generated. One `SumEquals` proof per schedule, plus the `RollUp` / `EqualTo` / `Derive` rules that ship with the seeded rs-gaap statement structures. Count them yourself in [The Rule Engine](#the-rule-engine). |
 
-Every event flows through the same HTTP API the frontend UI and MCP tools call. The only direct-DB path is `_reset.py`, used to clean up between re-runs.
+Every event flows through the same HTTP API the frontend UI and MCP tools call. Bank lines land the way a feed lands them: `create-event-block` with `event_type: bank_transaction`, then `update-event-block` to classify and commit. The only direct-DB path is `_reset.py`, used to clean up between re-runs.
 
 ## The Company — Cascade Advisory Group
 
@@ -155,7 +155,7 @@ The demo emulates **Cascade Advisory Group LLC**, a 3–5 person boutique manage
 | Aspect | Value |
 |---|---|
 | **Service lines** | Three revenue streams: general consulting, strategy advisory, implementation services |
-| **Monthly revenue** | $18K – $22K, with seasonality |
+| **Monthly revenue** | Ramps from $9K to about $22K over the window, with a seasonal dip |
 | **Customers** | 6 named customers across professional-services verticals |
 | **Vendors** | 8 named vendors: landlord, payroll provider, AWS, software licenses, etc. |
 | **Employees** | 2 — driving the monthly payroll JE |
@@ -207,7 +207,7 @@ In the frontend, navigate to **Reports** → the filed FY report → view the re
 
 ## The Close-Period Workflow
 
-The fiscal calendar is initialized so the prior month's prior month is `closed_through` and the **last completed month is the close target** — exactly one period ready to close. This matches what a real business onboarding mid-year does: wall off pre-onboarding periods as `historical`, start running the close workflow from a clean boundary.
+The history through four months before the close target comes over already closed, and the load then closes the next three months one at a time, each posting the bank lines committed in it. That leaves the month before last as `closed_through` and the **last completed month as the close target**: one period to close, with its bank lines still in the inbox. A period cannot close over an uncommitted line, so working them is the first step of the close. The starting boundary matches what a real business onboarding mid-year does: wall off pre-onboarding periods as `historical`, start running the close workflow from a clean boundary.
 
 The natural way to drive the close is via the AI workflow. With Claude, ChatGPT or any MCP client connected to the local RoboSystems MCP server:
 
@@ -231,16 +231,17 @@ Two checklists are in play, and it's worth keeping them apart.
 
 1. `get-fiscal-calendar` — orient: `closed_through`, `close_target`, `closeable_now`, blockers
 2. `sync-connection` — only if the blockers include `sync_stale`; then poll until it clears
-3. `get-period-close-status` — which schedules are pending / drafted / posted, and for how much
-4. `promote-obligations` (`dispatch_handlers=true`) — drafts every matured schedule's closing entry in one sweep. **This is how schedule drafts come into being; there is no `create-closing-entry` tool.** Manual one-offs go through `create-event-block` with `event_type='journal_entry_recorded'`.
-5. `list-period-drafts` — review every draft with DR/CR detail and the `all_balanced` check
-6. Summarize to the user and get explicit approval
-7. `close-period` — atomic: posts the drafts, runs the balance-sheet equation check, stamps the period's statement FactSets, advances `closed_through`. The close runs on the worker, so a heavy month can outlast the call: a response of `status: "in_progress"` with an `operation_id` means it is running, and is never a reason to call again — poll `get-period-close-status` until `period_status` reads closed and `close_receipt` fills in
-8. Post-close verification — read the receipt back: `entries_posted`, `statements_stamped`, `rule_summary`, `statement_rule_summary`
+3. `list-event-blocks` (`event_type='bank_transaction'`, `status='captured'`) — the bank lines dated in the period. Classify and commit each with `update-event-block`; a payment that settles an open invoice or bill is classified to receivables or payables and linked to it. **The demo's close target starts with these waiting, and the close is refused with `unposted_source_events` until they are committed or voided.**
+4. `get-period-close-status` — which schedules are pending / drafted / posted, and for how much
+5. `promote-obligations` (`dispatch_handlers=true`) — drafts every matured schedule's closing entry in one sweep. **This is how schedule drafts come into being; there is no `create-closing-entry` tool.** Manual one-offs go through `create-event-block` with `event_type='journal_entry_recorded'`.
+6. `list-period-drafts` — review every draft with DR/CR detail and the `all_balanced` check
+7. Summarize to the user and get explicit approval
+8. `close-period` — atomic: posts the drafts, runs the balance-sheet equation check, stamps the period's statement FactSets, advances `closed_through`. The close runs on the worker, so a heavy month can outlast the call: a response of `status: "in_progress"` with an `operation_id` means it is running, and is never a reason to call again — poll `get-period-close-status` until `period_status` reads closed and `close_receipt` fills in
+9. Post-close verification — read the receipt back: `entries_posted`, `statements_stamped`, `rule_summary`, `statement_rule_summary`
 
-The playbook also covers the steps a clean demo skips — reconciling items from a sync, unmapped accounts, schedules that end early.
+The playbook also covers the steps this demo does not need — reconciling items from a sync, unmapped accounts, schedules that end early.
 
-**Account reconciliations.** The demo sets none up, so its close is not gated on them. To try them, ask for a refresh of the reconciliations for the target period (`refresh-reconciliations`): it compares each asset account a schedule carries a balance on with its schedules, and gives each its own reconciliation. One that ties on that first comparison starts out required for close, so from then on the close is blocked with `unreconciled_accounts` until it reconciles for the period (and is signed off, where its policy asks for review); `set-reconciliation-policy` changes that per reconciliation. Two other blockers can appear on a real ledger: `reconciling_items` and `unposted_source_events`.
+**Account reconciliations.** The demo sets none up, so its close is not gated on them. To try them, ask for a refresh of the reconciliations for the target period (`refresh-reconciliations`): it compares each asset account a schedule carries a balance on with its schedules, and gives each its own reconciliation. One that ties on that first comparison starts out required for close, so from then on the close is blocked with `unreconciled_accounts` until it reconciles for the period (and is signed off, where its policy asks for review); `set-reconciliation-policy` changes that per reconciliation. `unposted_source_events` is the blocker the demo starts with (its inbox lines). On a real ledger `reconciling_items` and `held_bank_lines` can appear too; `get-close-playbook` explains each.
 
 Note what is *not* in it: `evaluate-rules` is not a close step. The close runs the rules itself and hands the tallies back on its own response (see [The Rule Engine](#the-rule-engine)).
 
@@ -333,7 +334,7 @@ get-mapping-summary --mapping_id=<id>
 
 The three unreachable mappings are the PP&E-gross pair and its contra — correct mappings at a grain the active Reporting Style presents net, so they never surface as their own statement lines. That's a real modelling situation, not a defect, and it's exactly the case `unreachable_count` exists to make visible.
 
-By default the mappings come from the hardcoded table in `examples/roboledger_demo/mappings.py`. Pass `--ai` to have the **MappingOperator** generate them instead (requires Bedrock). The 27 accounts are chosen to have unambiguous canonical targets (Operating Cash → CashCashEquivalentsAndShortTermInvestments, Consulting Revenue → RevenueFromContractWithCustomerExcludingAssessedTax, etc.) — useful for showing how the workflow looks when coverage is complete, separately from the harder real-world mapping cases.
+By default the mappings come from the hardcoded table in `examples/roboledger_demo/mappings.py`. Pass `--ai` to have the **MappingOperator** generate them instead (needs a model: Bedrock, or an Anthropic API key). The 27 accounts are chosen to have unambiguous canonical targets (Operating Checking → CashAndCashEquivalentsAtCarryingValue, Consulting Revenue → RevenueFromContractWithCustomerExcludingAssessedTax, etc.) — useful for showing how the workflow looks when coverage is complete, separately from the harder real-world mapping cases.
 
 ## Schedules
 
@@ -375,11 +376,11 @@ Once the demo is loaded, walk through these screens in roboledger-app at `http:/
 | **Entity → Connections** | Empty for the synthetic demo (no QB connection — this is the whole point) |
 | **Agents** | The 17 parties: customers, vendors, employees, IRS |
 | **Ledger → Chart of Accounts** | 27 accounts, each with its rs-gaap mapping displayed inline |
-| **Ledger → Inbox** | Empty for the demo (events auto-commit for QB-style sources; demo events do the same) |
+| **Ledger → Inbox** | The close target's bank lines, waiting unclassified, most with a suggested account learned from the three months closed before it. Classify and commit them here, or leave them for the AI close |
 | **Ledger → Journal** | Every journal entry — invoices, payments, bills, payroll JEs — with the source transactions as a secondary view |
 | **Ledger → Trial Balance** | Debits and credits by account; balances to the cent |
 | **Ledger → Statements** | Live statements rendered from the current ledger, without waiting on a report |
-| **Ledger → Closing Book** | The fiscal calendar view + the one queued period ready to close + blocker payload (in_scope schedule facts) |
+| **Ledger → Closing Book** | The fiscal calendar view + the one queued period + what it waits on (the inbox lines, the in_scope schedule facts) |
 | **Reports → View Reports** | The filed FY annual report — click in for the full BS / IS / CF / SE rendering with Information Block drill-downs |
 | **Reports → Create Report** | The report-authoring path that produced it |
 | **Reports → Publish Lists / Blocked Senders** | Distribution controls for a filed report |
@@ -444,7 +445,7 @@ just demo-roboledger
 just reset-local
 ```
 
-On your own stack, `just demo-roboledger` always runs the demo's `_reset.py` first to clear prior events, transactions, line items, mappings, schedules, documents, fiscal calendar, and reports from the tenant, then re-loads the full data set. Useful for getting back to a known-good state after experimenting with the close workflow or breaking something with manual entries.
+On your own stack, `just demo-roboledger` always runs the demo's `_reset.py` first to clear prior events, transactions, line items, agents, mappings, schedules, fiscal calendar, and reports from the tenant, then re-loads the full data set; the policy documents from an earlier run are removed through the API when the new ones are uploaded. Useful for getting back to a known-good state after experimenting with the close workflow or breaking something with manual entries.
 
 `reset-local` is heavier — drops the entire local stack's data including all users, graphs, and credentials. Use when you want a fresh slate.
 
@@ -452,18 +453,18 @@ On your own stack, `just demo-roboledger` always runs the demo's `_reset.py` fir
 
 The demo's content lives in `examples/roboledger_demo/`:
 
-- `data.py` — event generators (the 305 transactions). Modify to change the business shape, transaction patterns, monthly volumes, or vendor / customer lists.
+- `data.py` — the event generators (about 230 transactions, which load as about 250 events) and the six schedule definitions (`SCHEDULES`). Modify to change the business shape, transaction patterns, monthly volumes, or vendor / customer lists.
 - `mappings.py` — the CoA → rs-gaap mapping table. Change targets to demo different statement compositions.
 - `policies.py` — the four policy documents loaded as searchable content.
 - `agents.py` — the 17 parties (customers, vendors, employees, government).
 - `validate.py` — a self-check run right after the schedules are created, proving the Information Block machinery holds together (FactSets exist, the auto-generated `SumEquals` rules evaluate clean, the GraphQL envelope resolves, an asset disposal computes the right NBV). Everything it creates is throwaway and removed before it returns. It also runs standalone: `uv run python -m examples.roboledger_demo.validate <graph_id>`.
 - `download_bundles.py` — renders the exported artifact set for the filed report.
-- `main.py` — the orchestration script, and where `COMPANY_NAME` and the schedule definitions live. Idempotent (unconditionally clears prior tenant state before loading); re-running picks up your edits.
+- `main.py` — the orchestration script, and where `COMPANY_NAME` lives. Idempotent (unconditionally clears prior tenant state before loading); re-running picks up your edits.
 
 Common customizations:
 
 - **Change the company name and shape** — edit `COMPANY_NAME` in `main.py` and the revenue / expense generators in `data.py`
-- **Make a rule fail** — schedules generate their `SumEquals` proof from `original_amount`; change a schedule's basis in `main.py` so the periodic amounts no longer sum back to it, then run `evaluate-rules` on that block to see it caught
+- **Make a rule fail** — schedules generate their `SumEquals` proof from `original_amount`; change a schedule's basis in `data.py` (`SCHEDULES`) so the periodic amounts no longer sum back to it, then run `evaluate-rules` on that block to see it caught
 - **Demo a different industry** — replace the consulting revenue generators with retail, SaaS, or manufacturing patterns
 - **Test multi-year history** — extend the rolling window beyond 16 months in `data.py`
 
@@ -492,7 +493,7 @@ just demo-coffee-roaster
 just demo-saas-startup
 ```
 
-Both take the same flags as `just demo-roboledger`: an optional `[graph_id]` to load into an existing graph, `--ai` to map the Chart of Accounts with the MappingOperator instead of the hardcoded table, and `--dry-run` to validate without writing. Either also loads into a graph on the hosted platform — see [On the hosted platform](#on-the-hosted-platform).
+Both take an optional `[graph_id]` to load into an existing graph, `--ai` to map the Chart of Accounts with the MappingOperator instead of the hardcoded table, and `--dry-run` to validate without writing; `--skeleton` and `--entity-type` are the Cascade demo's alone. Driftline loads as a group — the roaster, two café LLCs with their own books and closes (one with an outside partner holding thirty percent), and a consolidation entity carrying the eliminations — so its consolidated statements have a whole group in them; `--no-group` loads the roaster alone. Each run ends by checking every statement against the ledger, and `--no-acceptance` skips that. Either also loads into a graph on the hosted platform — see [On the hosted platform](#on-the-hosted-platform).
 
 There is also a RoboInvestor demo — Meridian Ventures Fund I, including the cross-graph report share between a fund and an issuer:
 

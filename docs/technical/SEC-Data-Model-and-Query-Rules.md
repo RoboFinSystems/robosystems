@@ -59,11 +59,11 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/sec/operations/se
 
 `statement_type` takes `income_statement`, `balance_sheet`, `cash_flow_statement` or `equity_statement`.
 
-The three text views read the filing's own document from its public folder, not the graph: any processed 10-K, 10-Q, 20-F or 40-F back to 2015, or, with `form: "8-K"`, the latest earnings release and its exhibits. A `ticker` picks the latest annual report unless `fiscal_year`, `period_type` or `accession` say otherwise. The `search-text` query is words matched in order (`|` between alternative phrases, a trailing `*` for a stem), not a regular expression. The full request and response schemas are in the [extensions reference](https://robosystems.ai/docs/extensions) (operations `financialStatementAnalysis`, `buildFactGrid`, `disclosures`, `informationBlock`, `describeFiling`, `searchText`, `readText`).
+The three text views read the filing's own document from its public folder, not the graph: an annual report (10-K, 20-F or 40-F) back to 2015, a 10-Q since January 2024, or, with `form: "8-K"`, the latest earnings release and its exhibits. A `ticker` picks the latest annual report unless `fiscal_year`, `period_type` or `accession` say otherwise. The `search-text` query is words matched in order (`|` between alternative phrases, a trailing `*` for a stem), not a regular expression. The full request and response schemas are in the [extensions reference](https://robosystems.ai/docs/extensions) (operations `financialStatementAnalysis`, `buildFactGrid`, `disclosures`, `informationBlock`, `describeFiling`, `searchText`, `readText`).
 
 ### Where a Filing Is Served
 
-Every view that resolves a filing on `sec` — `financial-statement-analysis`, `disclosures`, `information-block` and the three text views — returns `resolved_report` with the filing it picked (`report_id`, `form`, `filing_date`, `fiscal_year`, `fiscal_period`) and `links`, public CDN URLs that need no key:
+Every view that resolves a filing on `sec` — `financial-statement-analysis`, `disclosures`, `information-block` and the three text views — returns `resolved_report` with the filing it picked (`report_id`, `form`, `filing_date`, `fiscal_year`, `fiscal_period`) and `links`, public CDN URLs that need no key. The text views add `accession`; for an 8-K the block carries `accession`, `form`, `filing_date`, the release's `items` and the filer's `recent_releases` in place of the report and fiscal fields.
 
 | Link | What it opens |
 | --- | --- |
@@ -417,7 +417,7 @@ A filer usually breaks one figure down along several axes (segment, geography, p
 
 - **Text is not a Cypher question.** String matching (`CONTAINS`, `STARTS WITH`, `ENDS WITH`, `=~`) on `Fact.value` or `Fact.uri` is refused on `sec`. Search filing text with `search-documents` (MCP) to find which filings say something, or `search-text` to find where one filing says it; read one disclosure whole with `disclosures`, then `information-block`.
 - **Read-only.** `sec` and its subgraphs refuse every write, and the staging-table SQL endpoint returns 403 for shared repositories. Query the graph with Cypher.
-- **Scope.** The graph holds 10-K, 10-Q, 20-F and 40-F XBRL filings filed since January 2024, rebuilt nightly. The text views reach further back — any processed annual or quarterly report since 2015 — and pick up a filing the day it is filed; see [Shared Repositories](Shared-Repositories.md#freshness). For one filing on your own machine, with no account, [xbrlkit](https://xbrlkit.com) reads it with the same schema.
+- **Scope.** The graph holds 10-K, 10-Q, 20-F and 40-F XBRL filings filed since January 2024, rebuilt nightly. The text views reach further back — annual reports since 2015, quarterly reports since January 2024 — and pick up a filing the day it is filed; see [Shared Repositories](Shared-Repositories.md#freshness). For one filing on your own machine, with no account, [xbrlkit](https://xbrlkit.com) reads it with the same schema.
 - **Rate limits** follow your subscription plan; see [Shared Repositories](Shared-Repositories.md).
 
 ## Self-hosted deployments

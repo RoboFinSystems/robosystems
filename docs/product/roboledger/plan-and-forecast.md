@@ -37,6 +37,8 @@ A scenario starts from closed months, because that's where its opening balances 
 
 Ask: "Fill in our plan history for the last two years, then tell me which months it covered."
 
+Filling in history isn't offered on RoboLedger's own address; connect with the general address or your graph's own. See [Which address to use](connect-your-books.md#which-address-to-use).
+
 ## Build a scenario
 
 Tell your assistant what you want to plan for. It turns that into a scenario with a name, a kind (budget, forecast or projection, which is a label for you and doesn't change the math), a length in months, and assumptions.

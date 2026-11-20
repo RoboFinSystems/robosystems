@@ -14,6 +14,7 @@ Ask about your books in plain language. It reads your current statements, trial 
 - "Why did gross margin drop in August?"
 - "Which vendors grew fastest this year, and what did we spend with each?"
 - "Compare operating expenses for the last six months, by account."
+- "Who owes us money, and how much of it is more than 60 days late?"
 
 Reading your books uses no credits. See [Ask about your books](ask-about-your-books.md).
 

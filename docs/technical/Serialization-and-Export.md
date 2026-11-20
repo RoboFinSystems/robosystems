@@ -29,7 +29,7 @@ A published report is not a rendered document. It is a structured object: the re
 
 | Format | `format` value | What it is for |
 | --- | --- | --- |
-| **Holon JSON-LD** | `HOLON_JSONLD` | The report's anchor file, stored at publish, and the default download: JSON-LD in dataset form, as named graphs, and the one format that carries the whole report; opens in xbrlkit |
+| **Holon JSON-LD** | `HOLON_JSONLD` | The report's anchor file, stored at publish, and the default download: JSON-LD in dataset form, as named graphs; opens in xbrlkit, and reads with any RDF library |
 | **Holon JSON-LD with lineage** | `HOLON_JSONLD_LINEAGE` | The same holon with a fourth named graph, `#lineage`: the ledger lines, entries and events behind every frozen figure, so a reader with the file can trace a number to the books. For the graph's own members; built on first download. See [Lineage](#lineage) |
 | **Tavi** | `TAVI` | A compact compiled model in XBRL International's Project Tavi form, the form the SEC pipeline also publishes beside each filing; opens in xbrlkit |
 | **XBRL 2.1** | `XBRL_2_1` | A standard XBRL 2.1 package for regulators and XBRL tooling |
@@ -60,7 +60,7 @@ Every format is built from the same contents:
 
 The holon is built and stored as part of publishing. `create-report` and `regenerate-report` write it inside the publish itself: if the file cannot be stored, the publish fails, so there is no published report without its file.
 
-Each publish writes a **generation**. The first publish is generation 1, and each `regenerate-report` rebuilds the report from the current ledger and writes the next one. `file-report` also stamps a new generation, so the filed record's downloads carry its filing date. A download stamps one too when the report's live columns have moved since its holon was built (an open month that took postings since), so the file matches the report as it stands; a published report whose holon was never stamped gets its first one the same way. A generation never changes once written, and earlier generations are kept. `reportDownloadUrl` returns the current generation and tells you its number.
+Each publish writes a **generation**. The first publish is generation 1, and each `regenerate-report` rewrites the report's live columns from the current ledger and writes the next one; a column whose period is closed is frozen and keeps its facts. `file-report` also stamps a new generation, so the filed record's downloads carry its filing date. A download stamps one too when the report's live columns have moved since its holon was built (an open month that took postings since), so the file matches the report as it stands; a published report whose holon was never stamped gets its first one the same way. A generation never changes once written, and earlier generations are kept. `reportDownloadUrl` returns the current generation and tells you its number.
 
 The holon exists from the moment of publish. The Tavi, XBRL and lineage-holon files are built for a generation the first time someone asks for them, then kept, so later downloads of that generation are immediate. Because a generation is immutable, a cached file can never be stale.
 
@@ -133,7 +133,7 @@ Pass `format: HOLON_JSONLD_LINEAGE` (`-o report.lineage.holon.jsonld`), `format:
 | `TAVI` | `tavi` | `application/json` |
 | `XBRL_2_1` | `xbrl-2.1` | `application/zip` |
 
-`omittedContent` names report content the chosen format leaves out. It is empty for the holon, which carries everything. The Tavi omits four items, `ib_envelopes`, `definition_links`, `framework_pins` and `filing_lifecycle` (see [Tavi](#tavi)); XBRL 2.1 omits `disclosure_notes`. The field returns `null` for a `reportId` that does not resolve. Error codes are listed under [Troubleshooting](#troubleshooting).
+`omittedContent` names report content the chosen format leaves out. It is empty for the holon. The Tavi names four items, `ib_envelopes`, `definition_links`, `framework_pins` and `filing_lifecycle` (see [Tavi](#tavi)); XBRL 2.1 names `disclosure_notes`. The holon is written from the same model as the Tavi and does not carry those four either, though its `omittedContent` is empty: what it has of each section is an `rs:InformationBlock` node naming the section's structure, FactSet and block type, and of the filing lifecycle only `rs:filingDate` on a filed report. The field returns `null` for a `reportId` that does not resolve. Error codes are listed under [Troubleshooting](#troubleshooting).
 
 ## Downloading from Code
 
@@ -163,7 +163,7 @@ print(bundle.filename, bundle.generation_count, len(bundle.content))
 
 ### Holon JSON-LD
 
-The report as JSON-LD in **dataset form**: named graphs for the report's scene, boundary, and projection. It is the file stored at publish, and the one format that keeps every platform-specific item: the Information Block envelopes, definition arcs, framework pins, and filing lifecycle that the Tavi leaves out, and the disclosure notes that XBRL 2.1 leaves out.
+The report as JSON-LD in **dataset form**: named graphs for the report's scene, boundary, and projection. It is the file stored at publish. It carries the statements, the disclosure notes that XBRL 2.1 leaves out, the Reporting Style, each section's structure and FactSet, and each fact's provenance kind and content hash. The rendered Information Block envelopes, the definition arcs, the framework pins and the filing status are read from the API (`reportPackage`, `report`), not from the file.
 
 ### Lineage
 
@@ -233,9 +233,10 @@ Platform content that Tavi has no built-in slot for rides as **model-defined pro
 | `rs:blockType` | a network | The statement or note kind, such as `balance_sheet` |
 | `rs:structureId` | a network, a fact | The structure the network presents, and the one a fact is pinned to |
 | `rs:factSetId` | a network | The FactSet the structure's facts belong to |
-| `rs:structureOrder` | a network | The structure's display order |
 
-Four items still have no place in the file: the Information Block envelopes, the definition arcs, the framework pins, and the filing lifecycle. `omittedContent` lists them (`ib_envelopes`, `definition_links`, `framework_pins`, `filing_lifecycle`), and the holon carries all of them.
+A section's order is the leading number of its role definition (`0001 - Statement - Balance Sheet`, `0103 - Disclosure - Inventory`), the same shape an SEC filing uses. A fact whose construction is recorded also carries `rs:sourceKind` (`pivot`, `rollup`, `derived`, `asserted`, `document`, …), `prov:wasAttributedTo`, and, once its column is frozen or its text is bound from a document, `rs:contentHash`.
+
+Four items have no place in the file: the Information Block envelopes, the definition arcs, the framework pins, and the filing lifecycle. `omittedContent` lists them (`ib_envelopes`, `definition_links`, `framework_pins`, `filing_lifecycle`).
 
 The Tavi is built from the same generation as the holon on its first download. The format follows XBRL International's working draft, PWD-2026-09-01, and will track it as the draft moves.
 
@@ -256,16 +257,20 @@ The package carries the statements only. Tenant-authored disclosure notes render
 
 ### What each format keeps
 
-XBRL 2.1 has no standard place for the platform-specific content, so the package leaves it out; only the disclosure notes are named in its `omittedContent`.
+XBRL 2.1 has no standard place for the platform-specific content, so the package leaves it out; only the disclosure notes are named in its `omittedContent`. The definition arcs reach a file only in the XBRL package.
 
 | Content | Holon | Tavi | XBRL 2.1 |
 | --- | --- | --- | --- |
 | Statement facts and networks | Yes | Yes | Yes |
 | Disclosure notes | Yes | Yes | No |
-| Information Block envelopes | Yes | No | No |
-| Definition arcs | Yes | No | Yes, when present |
+| Information Block envelopes | No (each section's structure, FactSet and block type only) | No | No |
+| Definition arcs | No | No | Yes, when present |
 | Reporting Style, FactSets | Yes | Yes | No |
-| Framework pins, filing lifecycle | Yes | No | No |
+| Framework pins, filing lifecycle | No (the filing date only) | No | No |
+
+### Received reports
+
+A report this graph did not author (`origin` `shared` or `uploaded`; see [Reporting & Rendering § The Report Is the Package](Reporting-and-Rendering.md#the-report-is-the-package)) downloads as the file that arrived, never as one rebuilt from the copied rows. A report shared in from another graph has the sender's holon and Tavi as of the share. A report loaded from a file is kept as a holon only: ask for `HOLON_JSONLD`, and convert with xbrlkit if you need another form. Neither has lineage. A format a received report does not have answers `REPORT_BUNDLE_NOT_AVAILABLE`, with a message saying whether to ask the sender to share again or to load the file again.
 
 ## Reading an Export Without the Platform
 
@@ -293,7 +298,7 @@ uv run python -m examples._common.validate --zip report.zip --label fy2025
 
 ## Changing What a Report Contains
 
-A report's content is the ledger's facts, mapped through the chart of accounts to framework concepts. To change it, change those: post or correct events ([Event-Driven Ledger](Event-Driven-Ledger.md)), adjust the mapping ([Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md)), then run `regenerate-report`. That writes a new generation, and the next download returns it.
+A report's content is the ledger's facts, mapped through the chart of accounts to framework concepts. A column for an open period follows the books on its own: the next read or download brings it up to date and, when it moved, stamps a new generation. A column whose period is closed is frozen, and neither a later posting nor a mapping change moves it; to change it, reopen the period, correct the books ([Event-Driven Ledger](Event-Driven-Ledger.md)) or the mapping ([Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md)), and close again. `regenerate-report` rewrites the live columns on demand and is how you change the report's window (`period_start`, `period_end` or `periods`); it writes a new generation, and the next download returns it.
 
 A filed report is fixed. `regenerate-report` on a report whose filing status is `filed` or `archived` is refused with `422`; to replace a filed report, archive it and create a new report for the period.
 
@@ -308,9 +313,9 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
 
 ### `REPORT_BUNDLE_NOT_AVAILABLE`
 
-The report has no bundle to serve: it was never published, or its generation did not finish. (A published report whose holon was never stamped is not this case: its first download stamps one.)
+The report has no bundle in that format: it was never published, its generation did not finish, or it is a received report that does not carry the format asked for (the lineage holon for any received report; the Tavi or XBRL package for one loaded from a file). (A published report whose holon was never stamped is not this case: its first download stamps one.)
 
-**Solution:** Run `regenerate-report` to write a current generation.
+**Solution:** For a report this graph authored, run `regenerate-report` to write a current generation. For a received report, download `HOLON_JSONLD`.
 
 ### `INVALID_EXPIRES_IN`
 
@@ -358,7 +363,7 @@ just demo-roboledger
 
 **API & Codebase:**
 
-- **[API reference](https://robosystems.ai/docs/api)** - Request and response schemas for the report operations
+- **[API reference](https://robosystems.ai/docs/extensions)** - Request and response schemas for the report operations
 - **[Operations](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md)** - The operations kernel
 
 ## Support

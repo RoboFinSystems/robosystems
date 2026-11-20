@@ -119,7 +119,7 @@ Nothing was written: a synchronous operation that raises rolls back its whole un
 
 ## Idempotency-Key
 
-Every operation accepts an optional `Idempotency-Key` header. Without one, a retried POST runs the operation again. With one, the platform recognises the retry, except on the analytical view operations, which accept the key and ignore it: a read has nothing to deduplicate, so each call runs fresh.
+Every operation accepts an optional `Idempotency-Key` header. Without one, a retried POST runs the operation again. With one, the platform recognises the retry, except on the analytical view operations, which accept the key and ignore it: a read has nothing to deduplicate, so each call runs fresh. The three operations that read the ledger itself (`live-financial-statement`, `consolidation-worksheet`, `preview-consolidation-entries`) are not in that group: they replay on a key like a write, so send no key, or a fresh one, when you want the books as they stand now.
 
 | Situation | Response |
 | --- | --- |

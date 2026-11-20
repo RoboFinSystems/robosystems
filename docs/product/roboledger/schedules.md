@@ -29,6 +29,7 @@ A schedule books one amount, from one account to another, every month from a fir
 - **A first and last month.** Schedules are finite. Depreciation runs for the asset's useful life, and a prepaid runs until it's used up.
 - **A monthly amount.** By default the amount is the same every month, and the final month takes up any rounding. An amortization that isn't even, like a loan fee under the effective interest method, takes an amount for each month instead.
 - **The original cost, if you have it.** With a cost, useful life and salvage value, RoboLedger also checks that the schedule adds up to what it should. Without them it books the monthly amount and that's all. You can add the detail later.
+- **A loan, from its terms.** For a loan or a line of credit, choose the loan method and give the principal, the annual rate, the day it was drawn and how often it is paid. RoboLedger works out each month's interest and principal, books the interest every month, and either books the payment too or leaves it to arrive on your bank feed, where you sort it against the note. The loan's balance is then reconciled against the schedule like any other scheduled account.
 
 ## Set one up
 
@@ -57,7 +58,7 @@ Ending a schedule keeps its history. Deleting a schedule erases it, so end a sch
 
 ## Change a schedule
 
-Your assistant can change a schedule's name, its debit and credit accounts, and its details: the original cost, useful life, salvage value and the date the cost was booked. Its first and last month and its monthly amount can't change, because they decide every entry it makes. To change those, end the schedule and set up a new one. In the app you can delete a schedule but not edit one.
+Your assistant can change a schedule's name, its debit and credit accounts, and its details: the original cost, useful life, salvage value and the date the cost was booked. Until one of its entries has posted, it can also rebuild the schedule with a different first or last month or a different amount. Once a month has posted, those are fixed, because they decided the entries already made: end the schedule after its last posted month and set up a new one from the month after. In the app, open the schedule in **Ledger → Closing Book** and choose **Edit schedule**, **End schedule** or **Delete schedule**; the edit form tells you whether saving rebuilds the schedule or whether it has to be ended and replaced.
 
 Changes apply going forward. Entries that already posted stay posted. To correct a month that's closed, reopen it, post a correcting entry, and close it again.
 

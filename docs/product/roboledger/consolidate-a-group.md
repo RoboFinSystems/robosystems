@@ -37,6 +37,12 @@ A transaction is intercompany when it names another company in the group as its 
 
 **You sell it, or it is dissolved.** Close its books through its last month, disconnect any bank feed on it, and settle anything the companies still disagree about. Then set the month it left. From the next month the group sums none of it, it shows as a former member, and the drafts reverse its eliminations on their own. Record the parent's sale in its books, and have your assistant record the deconsolidation with the price: goodwill and the outside owners' interest come off, the results the company earned while in the group go back to the group's equity, and the difference is the group's gain or loss, which is smaller than the parent's own because the group had already counted those results as its income. The month after, the group's cash flow shows the cash that left on the divestiture row.
 
+## In the app
+
+Pick the consolidation entity and open **Ledger → Closing Book**: the period close view shows **Consolidating entries** for the month, with **Draft entries**, what was withheld until explained, and the intercompany figures that do not agree. Pick a subsidiary with outside owners and the same view shows their share of the month, with **Override the share** for a preferred return or a waterfall.
+
+**Entity → Entity Info** on a subsidiary has **Member since**, **Left the group** and a **Group lifecycle** card: **Record the acquisition**, **Record a change in share** and **Record the deconsolidation**. Each records a draft in the consolidation entity that the group close posts.
+
 ## What you read
 
 On the group parent, **Ledger → Statements** has a Scope control: *This entity*, *Combined* (the companies summed, nothing eliminated), *Consolidated* (with the consolidation entity's adjustments), and *Worksheet*, each company in its own column, then the combined sum, the adjustments and the consolidated total, with an equity-method company beside the sum. The worksheet is where to check a consolidating entry.

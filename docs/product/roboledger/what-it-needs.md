@@ -11,7 +11,7 @@ Your AI assistant's answers are only as good as the books behind them. Four thin
 
 RoboLedger syncs each connection on its own once a day. For anything more recent, press **Sync Now** on the QuickBooks card, or ask your assistant to sync, before you ask about recent activity.
 
-- **Sync Now** asks how far back to go. **Last 60 days** picks up recent changes. If something older changed in QuickBooks, choose **From a specific date** or **Full rebuild**, or ask your assistant to sync from a date.
+- **Sync Now** asks how far back to go. **Last 60 days** is the regular sync, and it also picks up older transactions edited or deleted in QuickBooks since the last sync. Choose **From a specific date** or **Full rebuild** if the company hasn't synced in more than a month, or ask your assistant to sync from a date.
 - A close is blocked until QuickBooks has synced after the month ended.
 - If a transaction was edited in QuickBooks after it synced, RoboLedger flags it and asks you how to treat it. See [When QuickBooks changes after a sync](changes-after-sync.md).
 
@@ -33,7 +33,7 @@ Ask: "Which accounts aren't mapped yet? Suggest where each one belongs."
 
 ## A fiscal calendar
 
-The calendar records which months are closed and which month you're working towards. The first sync sets it up with the month two months back marked as the last one closed, and last month as the next to close. The fiscal year starts in January.
+The calendar records which months are closed and which month you're working towards. The first sync sets it up with the month two months back marked as the last one closed, and last month as the next to close. The fiscal year starts in the month QuickBooks has for your company, or January if QuickBooks doesn't say.
 
 A company with no calendar shows **Set up calendar** on the **Entities** page. Setting one up asks where that company's books start:
 

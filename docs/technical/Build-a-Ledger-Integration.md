@@ -142,9 +142,35 @@ The connection becomes that entity's ledger of record with the `shadow` write po
 - The opening balance (`record-opening-balance`) is the mirror's starting point, so history before it need not be sent.
 - One source keeps one entity's books. A group with several companies registers a source per company.
 
-Registration is refused with a 409 when another ledger already keeps the entity's books (`BOOKS_KEPT_ELSEWHERE`), when the entity has books of its own (`NATIVE_BOOKS_PRESENT`), or for the consolidation entity (`CONSOLIDATION_ENTITY`). When every company of a group is mirrored this way, the group is read combined; consolidating entries are not drafted for it.
+Send each entry with `apply_handlers: true`. That is what writes it: without it the event is only captured, nothing posts until someone commits it, and a later version of it is refused as a repeat.
 
-**Correcting an entry.** The ledger changes what it sent by sending it again. Give each `journal_entry_recorded` event a `source_version`, a number that only grows (the record's revision counter, or its last-modified time as an integer). The same `external_id` with a higher version replaces the entry: the lines it posted leave the books, the new ones are posted, and the event keeps its id. An equal or lower version, or none, is the 409 of a repeat delivery, so a retry is still safe. The later version is the whole record: its lines, dates, amount and dimensions replace the earlier ones. An entry first sent with no version is replaced by any version sent later, so version every entry from the first delivery if deliveries can arrive out of order.
+```json
+{
+  "event_type": "journal_entry_recorded",
+  "event_category": "adjustment",
+  "occurred_at": "2026-09-15T00:00:00Z",
+  "source": "netsuite-uk",
+  "external_id": "JE-1042",
+  "source_version": 1,
+  "entity_id": "ent_01...",
+  "amount": 480000,
+  "apply_handlers": true,
+  "metadata": {
+    "posting_date": "2026-09-15",
+    "memo": "JE-1042",
+    "line_items": [
+      { "element_id": "elem_01...", "debit_amount": 480000 },
+      { "element_id": "elem_01...", "credit_amount": 480000 }
+    ]
+  }
+}
+```
+
+Omit `entity_id` for the group parent.
+
+Registration is refused with a 409 when another ledger already keeps the entity's books (`BOOKS_KEPT_ELSEWHERE`), when the entity has books of its own (`NATIVE_BOOKS_PRESENT`), or for the consolidation entity (`CONSOLIDATION_ENTITY`). An `entity_id` the graph does not have is a 404 (`ENTITY_NOT_FOUND`), and `entity_id` without `ledger` is a 422. Books of its own means a bank feed account on the entity's chart or an entry that landed from any other source; an opening balance is no bar. When every company of a group is mirrored this way, the group is read combined; consolidating entries are not drafted for it.
+
+**Correcting an entry.** The ledger changes what it sent by sending it again. Give each `journal_entry_recorded` event a `source_version`, a number that only grows (the record's revision counter, or its last-modified time as an integer). The same `external_id` with a higher version, sent like the first with `apply_handlers: true`, replaces the entry: the lines it posted leave the books, the new ones are posted, and the event keeps its id. An equal or lower version, or none, is the 409 of a repeat delivery, so a retry is still safe. The later version is the whole record: its lines, dates, amount and dimensions replace the earlier ones. An entry first sent with no version is replaced by any version sent later, so version every entry from the first delivery if deliveries can arrive out of order.
 
 **Withdrawing an entry.** When the ledger no longer holds a record, void its event with `source_retracted`:
 
@@ -152,7 +178,7 @@ Registration is refused with a 409 when another ledger already keeps the entity'
 { "event_id": "evt_01...", "transition_to": "voided", "source_retracted": true }
 ```
 
-The entry leaves the books and the event is voided. A withdrawn record cannot be brought back under the same `external_id`.
+The entry leaves the books and the event is voided. A withdrawn record cannot be brought back under the same `external_id`: a later version sent under it is a 422, so send the record under a new id. `source_retracted` goes only with `transition_to: "voided"`, and only on an event the ledger that keeps the entity's books sent; on any other event it is a 422.
 
 An integration that kept no event ids finds one by the id it sent the record under: `eventBlocks(source: "netsuite-uk", externalId: "JE-1042", entityId: "ent_01...") { id status }` returns at most one event.
 
@@ -165,9 +191,43 @@ curl -s -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/connections/$CON
   -d '{"status": "succeeded", "counts": {"entries_sent": 12, "entries_replaced": 1}}'
 ```
 
+`status` is `succeeded` or `failed`. `counts` is yours to name (up to 50 non-negative integers), and an optional `message` of up to 500 characters says what the run covered or why it failed. The report comes back on the connection as `metadata.last_sync_result`. The call is for external connections only: on a connection the platform syncs itself it answers 400.
+
 A `succeeded` report sets the connection's `last_sync` to now; a `failed` one records the outcome and leaves it. A period close reads `last_sync` to tell whether the books it mirrors are current, and on these books a stale or missing one is a finding on the close's receipt, not a refusal.
 
 Corrections work in open periods only. A change that reaches into a closed month is refused by the closed-period gate: reopen the month, send the change, and close it again, which on these books posts nothing. Only the ledger that keeps the entity's books corrects this way; from any other source `source_version` is stored and has no effect.
+
+The template wraps these calls in [`emit/ledger.py`](https://github.com/RoboFinSystems/robosystems-integration-template/blob/main/src/integration/emit/ledger.py):
+
+```python
+from datetime import date
+
+from integration.emit.ledger import (
+  emit_journal_entry,
+  register_ledger,
+  report_sync,
+  withdraw_entry,
+)
+
+connection = register_ledger(
+  client, entity_id="ent_01...", display_name="NetSuite (UK)"
+)
+emit_journal_entry(
+  client,
+  external_id="JE-1042",
+  version=1,
+  posting_date=date(2026, 9, 15),
+  lines=[
+    {"element_id": "elem_01...", "debit_amount": 480000},
+    {"element_id": "elem_01...", "credit_amount": 480000},
+  ],
+  entity_id="ent_01...",
+)
+withdraw_entry(client, "JE-0977", entity_id="ent_01...")
+report_sync(client, connection["connection_id"], counts={"entries_sent": 1})
+```
+
+`register_ledger` is safe to call on every run, `emit_journal_entry` sends `apply_handlers` and the version for you, and `withdraw_entry` finds the event by the `external_id` the record was sent under.
 
 ## Step 2: Find the Accounts
 
@@ -314,10 +374,13 @@ Capture does not validate the handler metadata — that happens at commit — wh
 from integration.emit.events import emit_event
 
 created = emit_event(client, event, idempotency_key="driftline-INV-10042-v1")
-event_id = created["result"]["id"]
+if created.get("already_ingested"):
+  event_id = None  # sent on an earlier run; look it up by externalId if you need it
+else:
+  event_id = created["result"]["id"]
 ```
 
-`emit_event` stamps `source` from `INTEGRATION_SOURCE_NAME` if the payload has none and refuses a payload without `external_id`. It raises `IntegrationAPIError` on any HTTP error, including the 409 for an already-ingested record — catch it if your loop re-sends history.
+`emit_event` stamps `source` from `INTEGRATION_SOURCE_NAME` if the payload has none and refuses a payload without `external_id`. A repeat of `(source, external_id)` does not raise: the 409 comes back as `{"already_ingested": True, "source": …, "external_id": …}` in place of the envelope, so a loop that re-sends history carries on. Any other HTTP error raises `IntegrationAPIError`.
 
 **Skipping the inbox.** Sending `"apply_handlers": true` runs the handler at capture: the event lands `classified` with its draft entry already written, and that draft posts at the next close unless the event is voided first. Use it only once you trust the integration's output.
 

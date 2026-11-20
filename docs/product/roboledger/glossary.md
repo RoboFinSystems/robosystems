@@ -7,13 +7,13 @@ section: Reference
 
 The words RoboLedger and your AI assistant use, in plain terms. Where the technical documentation calls something by another name, that name is given too, so you can follow a term from one to the other.
 
-**Agent.** A customer, vendor or employee: someone your company does business with. They come over from QuickBooks and are listed under **Agents** in the app. See [Find your way around the app](the-roboledger-app.md).
+**Agent.** A customer, vendor or employee: someone your company does business with. They come over from QuickBooks, or from a bank feed as its counterparties appear, and are listed under **Agents** in the app. See [Find your way around the app](the-roboledger-app.md).
 
 **Captured.** An event that is waiting for a person. Nothing is in the ledger yet. It sits in the Inbox until someone approves or rejects it. See [Review events in the Inbox](inbox.md).
 
-**Changed transaction.** A transaction someone edited in QuickBooks after RoboLedger recorded it. RoboLedger flags it instead of overwriting what it posted, and a close won't run over changes nobody has looked at. You settle each one: restate the month, catch up the difference in an open month, or mark it as handled. See [When QuickBooks changes after a sync](changes-after-sync.md). In the technical docs: [reconciling item](https://robosystems.ai/docs/technical/quickbooks-sync-and-write-policy).
+**Changed transaction.** A transaction that changed in QuickBooks, or at the bank, after RoboLedger recorded it. RoboLedger flags it instead of overwriting what it posted, and a close won't run over changes nobody has looked at. You settle each one: restate the month, catch up the difference in an open month, or mark it as handled. See [When QuickBooks changes after a sync](changes-after-sync.md). In the technical docs: [reconciling item](https://robosystems.ai/docs/technical/quickbooks-sync-and-write-policy).
 
-**Chart of accounts.** Your company's own list of accounts, as it comes from QuickBooks. See [Map your chart of accounts](map-your-chart-of-accounts.md). In the technical docs: [chart-of-accounts elements](https://robosystems.ai/docs/technical/chart-of-accounts-mapping).
+**Chart of accounts.** Your company's own list of accounts, as it comes from QuickBooks or from the template you started with. See [Map your chart of accounts](map-your-chart-of-accounts.md). In the technical docs: [chart-of-accounts elements](https://robosystems.ai/docs/technical/chart-of-accounts-mapping).
 
 **Classified.** An event whose accounts have been decided. If it arrived with its entry worked out, such as an adjustment your assistant drafted, that draft is already in the ledger and the next close posts it unless someone rejects it. One classified by hand in the Inbox has no entry until it's committed. See [Review events in the Inbox](inbox.md).
 
@@ -23,7 +23,7 @@ The words RoboLedger and your AI assistant use, in plain terms. Where the techni
 
 **Committed.** An event someone approved. Its draft entry posts at the next close. See [Review events in the Inbox](inbox.md).
 
-**Connection.** Two things share the name. A graph's connection to QuickBooks, under **Entity → Connections**, links it to one QuickBooks company; see [Connect your books to your AI assistant](connect-your-books.md). A connection in Claude, ChatGPT or another MCP client reaches one graph; see [Work across several companies](working-across-companies.md).
+**Connection.** Two things share the name. A graph's connection to a source of books, under **Entity → Connections**, links it to one QuickBooks company, a bank, or another ledger that sends its entries through the API; see [Connect your books to your AI assistant](connect-your-books.md). A connection in Claude, ChatGPT or another MCP client reaches one graph; see [Work across several companies](working-across-companies.md).
 
 **Consolidated statements.** A reporting group's statements as one company: the combined statements plus the consolidating entries, which eliminate what the companies owe and invest in each other and carry an outside owner's share as noncontrolling interest. The group close saves them each month. See [Work across several companies](working-across-companies.md#consolidate-the-group).
 
@@ -87,10 +87,10 @@ The words RoboLedger and your AI assistant use, in plain terms. Where the techni
 
 **Subsidiary.** A company in a reporting group under the group parent, with the share the parent holds recorded. Its books, chart and close are its own.
 
-**Sync.** Bringing QuickBooks changes into RoboLedger. It happens when you ask, not on a schedule, and a regular sync looks back 60 days. See [Connect your books to your AI assistant](connect-your-books.md#2-connect-quickbooks).
+**Sync.** Bringing changes from QuickBooks or a bank feed into RoboLedger. Each connection syncs on its own once a day, and whenever you press **Sync Now** or ask your assistant. A regular QuickBooks sync re-reads the last 60 days and picks up older transactions that were edited or deleted since the last sync. See [Connect your books to your AI assistant](connect-your-books.md#2-connect-quickbooks).
 
 **Tavi.** A compiled model of a report, in JSON, and one of its downloads. It opens in the same viewer as the holon but leaves out some of what the holon carries. See [Reports and sharing](reports-and-sharing.md#download-it).
 
 **Voided.** An event that will never post: one someone rejected in the Inbox, or a schedule month the ledger retired. Rejecting an event voids it; there is no separate rejected status. See [Review events in the Inbox](inbox.md).
 
-**Write-back.** Sending an entry RoboLedger posted to QuickBooks. Only entries RoboLedger drafted are written back, when they post, unless one is marked to stay in RoboLedger. A catch-up entry for a change made in QuickBooks always stays. Syncing, reading and reporting never write. See [Nothing writes to QuickBooks until you post](quickbooks-write-back.md). In the technical docs: [write policy](https://robosystems.ai/docs/technical/quickbooks-sync-and-write-policy).
+**Write-back.** Sending an entry RoboLedger posted to QuickBooks. Only entries RoboLedger drafted are written back, when they post, unless one is marked to stay in RoboLedger. A catch-up entry for a change made in QuickBooks always stays, and with the **Shadow** setting nothing is written back at all. Syncing, reading and reporting never write. See [Nothing writes to QuickBooks until you post](quickbooks-write-back.md). In the technical docs: [write policy](https://robosystems.ai/docs/technical/quickbooks-sync-and-write-policy).
