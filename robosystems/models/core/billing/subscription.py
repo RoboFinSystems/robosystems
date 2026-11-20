@@ -569,6 +569,30 @@ class BillingSubscription(Base):
       f"(type={self.cancellation_type}, ends={self.ends_at})"
     )
 
+  @property
+  def is_resumable(self) -> bool:
+    """A period-end cancel whose period has not ended yet can be taken back."""
+    ends_at = _as_utc(self.ends_at)
+    return (
+      self.status == SubscriptionStatus.CANCELED.value
+      and self.cancellation_type == CancellationType.PERIOD_END.value
+      and ends_at is not None
+      and ends_at > datetime.now(UTC)
+    )
+
+  def resume(self, session: Session) -> None:
+    """Take back a period-end cancel: the subscription renews as before."""
+    self.status = SubscriptionStatus.ACTIVE.value
+    # setattr: a None assigned in the class body widens the column's type
+    # for every query that compares it.
+    for field in ("canceled_at", "ends_at", "cancellation_type"):
+      setattr(self, field, None)
+    self.updated_at = datetime.now(UTC)
+    session.commit()
+    session.refresh(self)
+    self._invalidate_access_cache()
+    logger.info(f"Resumed subscription {self.id}")
+
   def update_plan(
     self, new_plan_name: str, new_price_cents: int, session: Session
   ) -> None:

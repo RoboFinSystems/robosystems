@@ -614,7 +614,9 @@ class TestOperatorLifecycleGate:
         await _enforce_shared_repository_agent_limits("kg0123456789abcdef", user, db)
 
     assert exc.value.status_code == 403
-    gate.assert_called_once_with("kg0123456789abcdef", db, require_write=False)
+    gate.assert_called_once_with(
+      "kg0123456789abcdef", db, require_write=False, spends_credits=True
+    )
     mock_check.assert_not_awaited()
 
 

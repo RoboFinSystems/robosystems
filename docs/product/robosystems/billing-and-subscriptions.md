@@ -52,13 +52,13 @@ Each row carries a status:
 | **Free trial**, with its end date | An SEC seat on its 14-day trial | The analysis tools at the trial's limits. See [the SEC trial](#the-sec-trial) |
 | **Setting up** | Being created after a checkout or a subscription | Opens when setup finishes |
 | **Upgrading** | A graph is moving to a new tier | The graph is read-only for a few minutes, and no backup can be made until it's done |
-| **Cancelling**, with its end date | Cancelled at the end of the period, or a trial that won't continue | A graph can be read and exported but not changed until that date; a seat keeps full access until then |
-| **Payment failed** | A charge was declined, and is being retried | A graph refuses every read and write until the payment goes through. A seat keeps its access while the payment is retried |
+| **Cancelling**, with its end date | Cancelled at the end of the period, or a trial that won't continue | A graph works as usual until that date; a seat keeps full access until then |
+| **Payment failed** | A charge was declined, and is being retried | A graph can be read and exported but not changed, and its AI operators don't run, until the payment goes through. A seat keeps its access while the payment is retried |
 | **Paused** | Paused by RoboSystems support. Nothing pauses a subscription automatically | A paused graph refuses reads and writes until it is resumed. Contact support |
 
 ### When a payment fails
 
-The graph's row says "The last payment for this graph failed." Update the card on the **Billing** tab; the graph opens again as soon as the payment goes through. The charge is retried for a while. If the retries run out with the payment still failed, the subscription lapses: a graph is suspended and removed seven days later, as a cancelled graph is (see [Take your data with you](take-your-data-with-you.md)), and a seat loses its access.
+The graph's row says "The last payment for this graph failed." The graph stays readable, so you can still look things up and export. Add a new card with **Manage Payment Methods** on the **Billing** tab: RoboSystems uses it to pay the overdue charge straight away, and the graph takes changes again as soon as the payment goes through. The charge is retried for a while. If the retries run out with the payment still failed, the subscription lapses: a graph is suspended and removed seven days later, as a cancelled graph is (see [Take your data with you](take-your-data-with-you.md)), and a seat loses its access.
 
 ## Change a graph's tier
 

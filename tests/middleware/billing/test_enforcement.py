@@ -561,21 +561,21 @@ class TestRequireGraphAccessGracePeriod:
   @patch("robosystems.middleware.billing.enforcement.env")
   @patch("robosystems.middleware.billing.enforcement.BillingSubscription")
   @patch("robosystems.middleware.billing.enforcement.Graph")
-  def test_naive_future_ends_at_blocks_writes(
+  def test_naive_future_ends_at_allows_writes_and_ai(
     self, mock_graph_class, mock_subscription_class, mock_env, mock_session
   ):
-    """Grace period allows reads only — writes must 403, not 500."""
+    """The period it paid for is served in full: writes and AI pass."""
     mock_env.BILLING_ENABLED = True
     mock_graph_class.get_by_id.return_value = self._active_graph()
     mock_subscription_class.get_by_resource.return_value = self._canceled_subscription(
       datetime.now(UTC).replace(tzinfo=None) + timedelta(days=10)
     )
 
-    with pytest.raises(HTTPException) as exc:
-      require_graph_access("kg_gracetest2", mock_session, require_write=True)
+    graph = require_graph_access(
+      "kg_gracetest2", mock_session, require_write=True, spends_credits=True
+    )
 
-    assert exc.value.status_code == 403
-    assert "canceled" in exc.value.detail.lower()
+    assert graph is mock_graph_class.get_by_id.return_value
 
   @patch("robosystems.middleware.billing.enforcement.env")
   @patch("robosystems.middleware.billing.enforcement.BillingSubscription")
@@ -633,8 +633,61 @@ class TestRequireGraphAccessGracePeriod:
     require_graph_access("kg_gracetest5", mock_session)
 
     [(result, expires_at)] = enforcement._subscription_cache.values()
-    assert result == "canceled_grace"
+    assert result == "active"
     assert expires_at <= time.time() + 10
+
+
+class TestRequireGraphAccessPaymentFailed:
+  """A failed renewal (past_due) keeps the graph readable while the payment is
+  retried; writes and AI credits wait for the payment."""
+
+  @pytest.fixture(autouse=True)
+  def clear_subscription_cache(self):
+    from robosystems.middleware.billing import enforcement
+
+    enforcement._subscription_cache.clear()
+    yield
+    enforcement._subscription_cache.clear()
+
+  def _call(self, status, **kwargs):
+    graph = Mock()
+    graph.status = "active"
+    graph.is_repository = False
+    graph.deleted_at = None
+    graph.is_subgraph = False
+    graph.parent_graph_id = None
+    subscription = Mock()
+    subscription.status = status
+    subscription.ends_at = None
+    with (
+      patch("robosystems.middleware.billing.enforcement.env") as env,
+      patch("robosystems.middleware.billing.enforcement.Graph") as graphs,
+      patch(
+        "robosystems.middleware.billing.enforcement.BillingSubscription"
+      ) as subscriptions,
+    ):
+      env.BILLING_ENABLED = True
+      graphs.get_by_id.return_value = graph
+      subscriptions.get_by_resource.return_value = subscription
+      return require_graph_access("kg_pastdue1", Mock(), **kwargs)
+
+  @pytest.mark.parametrize("kwargs", [{}, {"export": True}], ids=["read", "export"])
+  def test_reads_and_export_pass(self, kwargs):
+    assert self._call("past_due", **kwargs) is not None
+
+  @pytest.mark.parametrize(
+    "kwargs", [{"require_write": True}, {"spends_credits": True}], ids=["write", "ai"]
+  )
+  def test_writes_and_ai_are_refused(self, kwargs):
+    with pytest.raises(HTTPException) as exc:
+      self._call("past_due", **kwargs)
+    assert exc.value.status_code == 403
+    assert "payment" in exc.value.detail.lower()
+
+  def test_unpaid_refuses_reads(self):
+    with pytest.raises(HTTPException) as exc:
+      self._call("unpaid")
+    assert exc.value.status_code == 403
 
 
 class TestRequireGraphAccessLifecycle:

@@ -97,8 +97,9 @@ async def _enforce_shared_repository_agent_limits(
   )
 
   # Read strength; write-capable operators get the write check through
-  # `enforce_operator_write_role`.
-  require_graph_access(graph_id, db, require_write=False)
+  # `enforce_operator_write_role`. An operator spends AI credits, which a graph
+  # with a failed payment may not.
+  require_graph_access(graph_id, db, require_write=False, spends_credits=True)
 
   await _check_shared_repository_limits(
     graph_id, current_user, db, endpoint="agent", operation="agent"
