@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -19,6 +20,7 @@ from tests.adapters.mercury.fixtures import (
 )
 
 KERNEL = "robosystems.adapters.bank_feed.load.create_event_block_in_session"
+LOAD = "robosystems.adapters.mercury.pipeline.load"
 ELEMENTS = {
   CHECKING_ID: "e_chk",
   SAVINGS_ID: "e_sav",
@@ -63,6 +65,16 @@ class _Session:
   @contextmanager
   def begin_nested(self):
     self.nested += 1
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _no_pairs_or_waiting_legs():
+  # The jsonb lookups need a real database; test_load_db.py runs them.
+  with (
+    patch(f"{LOAD}.pair_events_by_leg", return_value={}),
+    patch(f"{LOAD}.find_waiting_leg", return_value=None),
+  ):
     yield
 
 
@@ -148,13 +160,21 @@ class TestLoadFeed:
 
   def test_rerun_reports_existing_and_refreshes_captured_hints(self):
     stale = SimpleNamespace(
+      id="evt_office",
       external_id="mercury_txn_txn_office",
       status="captured",
+      amount=-4250,
+      occurred_at=datetime(2026, 3, 14, 15, 4, 5),
+      payload_drift=False,
       metadata_={"connection_id": "conn_1", "classification_source": "none"},
     )
     posted = SimpleNamespace(
+      id="evt_stripe",
       external_id="mercury_txn_txn_stripe",
       status="fulfilled",
+      amount=9514,
+      occurred_at=datetime(2026, 3, 14, 15, 4, 5),
+      payload_drift=False,
       metadata_={"classification_source": "none"},
     )
     session = _Session(existing_events=[stale, posted])

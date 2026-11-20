@@ -167,7 +167,9 @@ def _run_mercury_sync(
   context.log.info(
     f"Accounts: {link_result.linked} linked, {link_result.created} created. "
     f"Events: {report.events_created} captured, {report.events_existing} existing, "
-    f"{report.events_updated} refreshed, {report.events_failed} failed; "
+    f"{report.events_updated} refreshed, {report.events_removed} retracted, "
+    f"{report.transfers_matched} legs paired late, {report.legs_voided} voided, "
+    f"{report.reconciling_items} reconciling items, {report.events_failed} failed; "
     f"agents created {report.agents_created}; skipped {dict(report.skipped)}; "
     f"classified {dict(report.classification)}; suggestions {dict(report.resolved)}"
   )
@@ -223,8 +225,10 @@ def _since_date(
 
   An explicit ``since_date`` wins. A full rebuild — or a connection that has
   never synced — starts at the connect-time ``since_date`` (default: two
-  years back). An incremental sync looks back ``lookback_days``,
-  never earlier than the connect-time start.
+  years back). An incremental sync looks back ``lookback_days`` from the
+  last successful sync, or from today when that is earlier, so a feed that
+  went quiet for longer than the lookback still pulls the gap; never
+  earlier than the connect-time start.
   """
   if config.since_date:
     return date.fromisoformat(config.since_date)
@@ -232,5 +236,6 @@ def _since_date(
   start = date.fromisoformat(str(stored)) if stored else default_backfill_start()
   if config.full_rebuild or previous_sync is None:
     return start
-  lookback = date.today() - timedelta(days=max(int(config.lookback_days), 1))
+  anchor = min(date.today(), previous_sync.date())
+  lookback = anchor - timedelta(days=max(int(config.lookback_days), 1))
   return max(lookback, start)

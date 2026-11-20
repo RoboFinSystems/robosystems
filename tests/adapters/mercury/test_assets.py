@@ -55,6 +55,13 @@ class TestSinceDate:
       cfg, {"since_date": late_start}, datetime.now(UTC)
     ) == date.fromisoformat(late_start)
 
+  def test_a_feed_quiet_past_the_lookback_pulls_the_gap(self):
+    cfg = _config(lookback_days=60)
+    last = datetime.now(UTC) - timedelta(days=100)
+    assert _since_date(cfg, {"since_date": "2020-01-01"}, last) == (
+      last.date() - timedelta(days=60)
+    )
+
 
 @pytest.mark.unit
 class TestDagsterShape:

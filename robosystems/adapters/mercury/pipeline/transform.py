@@ -8,7 +8,9 @@ the inbox with a Tier-0 suggestion attached. Three event types:
   ``bank_fee``.
 - ``internal_transfer`` — one event per *pair* of legs between the org's own
   Mercury accounts (checking ↔ savings, the IO card autopay), so a movement
-  never double-counts.
+  never double-counts. The legs pair within ``TRANSFER_WINDOW_DAYS``, closest
+  dates first; a leg already on the graph keeps the pair it is in, and one
+  already captured on its own is settled by the load, not paired here.
 - ``external_transfer`` — a transfer to or from a bank account outside
   Mercury. Ownership is unknowable from the feed (owner draw? another
   entity? a loan?), so these carry no suggestion.
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 
 from robosystems.adapters.bank_feed.chart import BankAccount, ChartIndex, name_key
@@ -33,10 +36,13 @@ from robosystems.adapters.mercury.pipeline.tier0 import (
   hint_for_mercury_category,
 )
 
-# Failed / cancelled / blocked / reversed never become events. Pending ones
-# are deferred: an event is written once, when the transaction posts, so the
+# Failed / cancelled / blocked / reversed never become events; one that was
+# captured before it turned is retracted by the load. Pending ones are
+# deferred: an event is written once, when the transaction posts, so the
 # captured payload is the settled one.
-SKIP_STATUSES = frozenset({"failed", "cancelled", "blocked", "reversed", "pending"})
+RETRACTED_STATUSES = frozenset({"failed", "cancelled", "blocked", "reversed"})
+SKIP_STATUSES = RETRACTED_STATUSES | {"pending"}
+TRANSFER_WINDOW_DAYS = 3
 TRANSFER_KINDS = frozenset({"internalTransfer", "treasuryTransfer"})
 TREASURY_KINDS = frozenset({"treasury"})
 FEE_KINDS = frozenset(
@@ -59,6 +65,29 @@ class TransformResult:
   skipped: Counter[str] = field(default_factory=Counter)
   classification: Counter[str] = field(default_factory=Counter)
   resolved: Counter[str] = field(default_factory=Counter)
+
+
+def txn_external_id(txn_id: str) -> str:
+  return f"mercury_txn_{txn_id}"
+
+
+def pair_external_id(first_id: str, second_id: str) -> str:
+  return f"mercury_xfer_{min(first_id, second_id)}"
+
+
+def retracted_ids(raw: dict[str, Any]) -> list[str]:
+  """The transactions the bank reports as failed, cancelled, blocked or
+  reversed — any already captured is retracted by the load."""
+  return [
+    str(txn["id"])
+    for txn in raw.get("transactions") or []
+    if str(txn.get("status") or "") in RETRACTED_STATUSES
+  ]
+
+
+def is_transfer_shaped(kind: Any, counterparty_name: Any, own_names: set[str]) -> bool:
+  """A movement between the org's own accounts, by kind or by counterparty."""
+  return kind in TRANSFER_KINDS or counterparty_name in own_names
 
 
 def cents(amount: float | int | str) -> int:
@@ -174,14 +203,20 @@ def transform(
   include_treasury: bool = True,
   account_entities: dict[str, str] | None = None,
   charts_by_entity: dict[str, ChartIndex] | None = None,
+  paired_on_graph: dict[str, str | None] | None = None,
+  unpairable: frozenset[str] = frozenset(),
 ) -> TransformResult:
   """``account_elements`` maps a Mercury account id to the chart element
   linked to it; ``agent_ids`` maps a counterparty key to its agent id;
   ``account_entities`` maps an account to the entity its chart account
   belongs to, where its events land and whose chart (``charts_by_entity``)
-  its suggestions resolve on."""
+  its suggestions resolve on. ``paired_on_graph`` maps a leg already inside
+  a pair on the graph to its partner (``None`` when the pair has no other
+  leg): it is re-emitted with that partner or not at all. ``unpairable``
+  names legs already captured on their own."""
   chart = chart or ChartIndex()
   agent_ids = agent_ids or {}
+  paired_on_graph = paired_on_graph or {}
   account_entities = account_entities or {}
   charts_by_entity = charts_by_entity or {}
   accounts = {
@@ -203,34 +238,71 @@ def transform(
       continue
     live.append(txn)
 
-  # Pair the two legs of a movement between the org's own accounts — within
-  # one entity: a movement between two entities' accounts is intercompany.
-  buckets: dict[tuple[str, int, str | None], list[dict[str, Any]]] = defaultdict(list)
-  for txn in live:
-    if txn.get("kind") in TRANSFER_KINDS or txn.get("counterpartyName") in own_names:
-      entity = account_entities.get(str(txn.get("accountId")))
-      buckets[(_day(txn), abs(cents(txn.get("amount") or 0)), entity)].append(txn)
+  by_id = {str(txn["id"]): txn for txn in live}
   paired: set[str] = set()
-  for group in buckets.values():
-    debits = [t for t in group if cents(t.get("amount") or 0) < 0]
-    credits = [t for t in group if cents(t.get("amount") or 0) > 0]
-    for source_leg, target_leg in zip(debits, credits, strict=False):
-      paired.update({source_leg["id"], target_leg["id"]})
-      result.events.append(
-        _transfer_event(
-          source_leg,
-          target_leg,
-          accounts,
-          account_elements,
-          source,
-          connection_id,
-          account_entities,
-        )
+
+  def emit_pair(first: dict[str, Any], second: dict[str, Any]) -> None:
+    source_leg, target_leg = (
+      (first, second) if cents(first.get("amount") or 0) < 0 else (second, first)
+    )
+    paired.update({str(source_leg["id"]), str(target_leg["id"])})
+    result.events.append(
+      transfer_event(
+        source_leg,
+        target_leg,
+        accounts,
+        account_elements,
+        source,
+        connection_id,
+        account_entities,
       )
-      result.classification["transfer"] += 1
+    )
+    result.classification["transfer"] += 1
+
+  # A leg already inside a pair keeps it: re-emitted with its partner, so the
+  # load reconciles the pair; without its partner in this pull, not at all.
+  for txn_id, txn in by_id.items():
+    if txn_id not in paired_on_graph or txn_id in paired:
+      continue
+    partner = paired_on_graph[txn_id]
+    if partner and partner in by_id and partner not in paired:
+      emit_pair(txn, by_id[partner])
+    else:
+      paired.add(txn_id)
+      result.skipped["in_pair"] += 1
+
+  # Pair the two legs of a movement between the org's own accounts — within
+  # one entity (a movement between two entities' accounts is intercompany),
+  # on two accounts, within the transfer window, closest dates first.
+  buckets: dict[tuple[int, str | None], list[dict[str, Any]]] = defaultdict(list)
+  for txn_id, txn in by_id.items():
+    if txn_id in paired or txn_id in unpairable:
+      continue
+    if is_transfer_shaped(txn.get("kind"), txn.get("counterpartyName"), own_names):
+      entity = account_entities.get(str(txn.get("accountId")))
+      buckets[(abs(cents(txn.get("amount") or 0)), entity)].append(txn)
+  for group in buckets.values():
+    order = sorted(group, key=lambda t: (_day(t), str(t["id"])))
+    debits = [t for t in order if cents(t.get("amount") or 0) < 0]
+    credits = [t for t in order if cents(t.get("amount") or 0) > 0]
+    for source_leg in debits:
+      best: dict[str, Any] | None = None
+      best_gap: int | None = None
+      for target_leg in credits:
+        if str(target_leg["id"]) in paired:
+          continue
+        if target_leg.get("accountId") == source_leg.get("accountId"):
+          continue
+        gap = days_apart(_day(source_leg), _day(target_leg))
+        if gap is None or gap > TRANSFER_WINDOW_DAYS:
+          continue
+        if best_gap is None or gap < best_gap:
+          best, best_gap = target_leg, gap
+      if best is not None:
+        emit_pair(source_leg, best)
 
   for txn in live:
-    if txn["id"] in paired:
+    if str(txn["id"]) in paired:
       continue
     event, classification = _bank_event(
       txn,
@@ -276,6 +348,13 @@ def _when(txn: dict[str, Any]) -> str:
   return str(_posted_at(txn))
 
 
+def days_apart(first: str, second: str) -> int | None:
+  try:
+    return abs((date.fromisoformat(second[:10]) - date.fromisoformat(first[:10])).days)
+  except ValueError:
+    return None
+
+
 def _suggest(txn: dict[str, Any]) -> tuple[AccountHint | None, str]:
   allocations = txn.get("glAllocations") or []
   if allocations and allocations[0].get("glCodeName"):
@@ -291,7 +370,7 @@ def _suggest(txn: dict[str, Any]) -> tuple[AccountHint | None, str]:
   return None, "none"
 
 
-def _transfer_event(
+def transfer_event(
   source_leg: dict[str, Any],
   target_leg: dict[str, Any],
   accounts: dict[str, BankAccount],
@@ -318,6 +397,8 @@ def _transfer_event(
       "from_element_id": from_element,
       "to_element_id": to_element,
       "legs": [source_leg["id"], target_leg["id"]],
+      "from_date": _day(source_leg) or None,
+      "to_date": _day(target_leg) or None,
       "bank_description": target_leg.get("bankDescription")
       or source_leg.get("bankDescription"),
       "classification_source": "transfer",
@@ -331,9 +412,11 @@ def _transfer_event(
       "event_class": "economic",
       "event_action": "move",
       "resource_type": "money",
-      "occurred_at": _when(target_leg),
+      # Booked on the earlier leg: each account clears it on its own leg's
+      # date, so the later side carries it in transit until then.
+      "occurred_at": min(_when(source_leg), _when(target_leg)),
       "source": source,
-      "external_id": f"mercury_xfer_{min(source_leg['id'], target_leg['id'])}",
+      "external_id": pair_external_id(str(source_leg["id"]), str(target_leg["id"])),
       "external_url": target_leg.get("dashboardLink"),
       "amount": abs(cents(target_leg.get("amount") or 0)),
       "currency": "USD",
@@ -443,7 +526,7 @@ def _bank_event(
     "resource_type": "money",
     "occurred_at": _when(txn),
     "source": source,
-    "external_id": f"mercury_txn_{txn['id']}",
+    "external_id": txn_external_id(str(txn["id"])),
     "external_url": txn.get("dashboardLink"),
     "amount": amount,
     "currency": "USD",
