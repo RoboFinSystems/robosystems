@@ -689,6 +689,16 @@ class TestRequireGraphAccessPaymentFailed:
       self._call("unpaid")
     assert exc.value.status_code == 403
 
+  @pytest.mark.parametrize("status", ["past_due", "unpaid"])
+  def test_a_state_left_by_paying_is_not_cached(self, status):
+    from robosystems.middleware.billing import enforcement
+
+    try:
+      self._call(status, require_write=True)
+    except HTTPException:
+      pass
+    assert enforcement._subscription_cache == {}
+
 
 class TestRequireGraphAccessLifecycle:
   """Lifecycle layer of require_graph_access: gone graphs and subgraphs.

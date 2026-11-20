@@ -196,13 +196,26 @@ def require_graph_access(
   state = _get_cached_subscription(billing_graph_id)
   if state is None:
     state, ttl = _subscription_state(billing_graph_id, session)
-    _cache_subscription(billing_graph_id, state, ttl)
+    if state in _CACHED_STATES:
+      _cache_subscription(billing_graph_id, state, ttl)
 
   _enforce_subscription_state(
     state, require_write=require_write, export=export, spends_credits=spends_credits
   )
   return graph
 
+
+# The cache is per process and a webhook clears only its own, so a state a
+# customer can leave by paying (past_due, unpaid, paused, pending) is read
+# fresh: a payment opens the graph on the next request, not five minutes on.
+_CACHED_STATES = frozenset(
+  {
+    SubscriptionStatus.ACTIVE.value,
+    SubscriptionStatus.UPGRADING.value,
+    "canceled_expired",
+    "no_subscription",
+  }
+)
 
 _PAYMENT_FAILED_DETAIL = (
   "The last payment for this graph failed. It stays readable while the payment "
