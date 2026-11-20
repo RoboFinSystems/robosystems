@@ -10,6 +10,7 @@ from datetime import datetime
 import strawberry
 from strawberry.scalars import JSON
 
+from robosystems.graphql.scalars import BigInt
 from robosystems.graphql.types._pydantic import pydantic_type
 from robosystems.graphql.types.common import PaginationInfo
 from robosystems.models.api.extensions.investor import (
@@ -85,8 +86,8 @@ class Security:
   security_subtype: str | None
   terms: JSON
   is_active: bool
-  authorized_shares: int | None
-  outstanding_shares: int | None
+  authorized_shares: BigInt | None
+  outstanding_shares: BigInt | None
   created_at: datetime
   updated_at: datetime
 

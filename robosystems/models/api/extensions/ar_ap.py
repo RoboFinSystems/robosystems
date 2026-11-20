@@ -17,6 +17,8 @@ from datetime import date
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from robosystems.models.api.common import Cents
+
 
 class OpenBalanceAggregate(BaseModel):
   """Graph-wide open AR or open AP aggregate.
@@ -30,7 +32,7 @@ class OpenBalanceAggregate(BaseModel):
 
   model_config = ConfigDict(from_attributes=True)
 
-  total_open_cents: int = Field(
+  total_open_cents: Cents = Field(
     ..., description="Sum of unsettled balances in minor currency units."
   )
   counterparty_count: int = Field(
@@ -54,7 +56,7 @@ class OpenBalanceByAgent(BaseModel):
   model_config = ConfigDict(from_attributes=True)
 
   agent_id: str
-  open_balance_cents: int = Field(
+  open_balance_cents: Cents = Field(
     ...,
     description=(
       "Unsettled originating-event amounts minus discharges, in minor "
@@ -81,11 +83,11 @@ class OpenItem(BaseModel):
     None, description="The invoice or bill number, where the source has one."
   )
   description: str | None = Field(None, description="The event's description.")
-  original_cents: int = Field(..., description="The obligation's amount.")
-  settled_cents: int = Field(
+  original_cents: Cents = Field(..., description="The obligation's amount.")
+  settled_cents: Cents = Field(
     ..., description="Settled against it on or before the as-of date."
   )
-  open_cents: int = Field(
+  open_cents: Cents = Field(
     ...,
     description=(
       "What is left: original less settled. Negative when overpaid, an "
@@ -129,13 +131,13 @@ class IntercompanyPair(BaseModel):
 
   creditor_entity_id: str = Field(..., description="The entity owed.")
   debtor_entity_id: str = Field(..., description="The entity that owes.")
-  receivable_cents: int = Field(
+  receivable_cents: Cents = Field(
     ..., description="The creditor's open receivables from the debtor."
   )
-  payable_cents: int = Field(
+  payable_cents: Cents = Field(
     ..., description="The debtor's open payables to the creditor."
   )
-  difference_cents: int = Field(
+  difference_cents: Cents = Field(
     ..., description="Receivable less payable; zero when the two books agree."
   )
 
@@ -165,15 +167,15 @@ class AgingBuckets(BaseModel):
   """Open amounts by how far past due they are at the as-of date. An
   overpayment is an unapplied credit, never netted into a bucket."""
 
-  current_cents: int = Field(0, description="Not yet due.")
-  one_to_thirty_cents: int = Field(0, description="1 to 30 days past due.")
-  thirty_one_to_sixty_cents: int = Field(0, description="31 to 60 days past due.")
-  sixty_one_to_ninety_cents: int = Field(0, description="61 to 90 days past due.")
-  over_ninety_cents: int = Field(0, description="More than 90 days past due.")
-  unapplied_credit_cents: int = Field(
+  current_cents: Cents = Field(0, description="Not yet due.")
+  one_to_thirty_cents: Cents = Field(0, description="1 to 30 days past due.")
+  thirty_one_to_sixty_cents: Cents = Field(0, description="31 to 60 days past due.")
+  sixty_one_to_ninety_cents: Cents = Field(0, description="61 to 90 days past due.")
+  over_ninety_cents: Cents = Field(0, description="More than 90 days past due.")
+  unapplied_credit_cents: Cents = Field(
     0, description="Overpayments, negative: credit owed back or still to apply."
   )
-  total_cents: int = Field(
+  total_cents: Cents = Field(
     0, description="Every bucket and the unapplied credit together."
   )
 
@@ -212,17 +214,17 @@ class ControlTieOut(BaseModel):
       "concept, and QuickBooks' own A/R or A/P accounts."
     ),
   )
-  control_balance_cents: int | None = Field(
+  control_balance_cents: Cents | None = Field(
     None,
     description=(
       "The accounts' posted balance at the as-of date, in their natural sign; "
       "null when the entity has no control account."
     ),
   )
-  open_items_cents: int = Field(
+  open_items_cents: Cents = Field(
     ..., description="The entity's open items at the as-of date, intercompany included."
   )
-  difference_cents: int | None = Field(
+  difference_cents: Cents | None = Field(
     None,
     description=(
       "Open items less the control balance; null when there is no control "
@@ -280,7 +282,7 @@ class DischargeCandidates(BaseModel):
       "line has no amount to say which."
     ),
   )
-  amount_cents: int = Field(..., description="The payment's magnitude.")
+  amount_cents: Cents = Field(..., description="The payment's magnitude.")
   classified_to_control: bool = Field(
     ...,
     description=(

@@ -144,6 +144,8 @@ Adding `fiscalCalendar.daysUntilClose` to the existing type:
 3. **Nothing to do on the GraphQL side.** The Strawberry type uses `all_fields=True`, so the field appears as `daysUntilClose: Int` automatically.
 4. **Update SDK consumers if the field is client-facing** — the TypeScript and Python facades query fields explicitly, so the field name has to be added to their GraphQL query documents.
 
+**An amount in cents is `Cents`, not `int`.** GraphQL's `Int` is 32 bits, and a value past 2,147,483,647 ($21,474,836.47 in cents) fails the whole read. Annotate the Pydantic field `Cents` (`robosystems/models/api/common.py`): REST still describes an integer, and `pydantic_type` derives the GraphQL field as the `BigInt` scalar (`robosystems/graphql/scalars.py`), a JSON number of any size. A hand-written Strawberry type takes `BigInt` directly, as `Security` does for its share counts. A schema built outside `schema.py` (a test's) needs `config=StrawberryConfig(scalar_map=SCALAR_MAP)`. `tests/graphql/test_wide_integers.py` fails on a money-named field left as `Int`.
+
 For a whole new query rather than a new attribute:
 
 1. Add a Pydantic response model in `models/api/extensions/*.py` (domain) or `models/api/information_block.py` (cross-domain).

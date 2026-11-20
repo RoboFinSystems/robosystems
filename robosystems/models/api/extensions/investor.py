@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from robosystems.models.api.common import (  # noqa: F401  DeleteResult re-exported
+  Cents,
   DeleteResult,
   PaginationInfo,
 )
@@ -351,7 +352,7 @@ class PositionResponse(BaseModel):
     ...,
     description="Unit basis (`shares`, `units`, `principal`).",
   )
-  cost_basis: int = Field(
+  cost_basis: Cents = Field(
     ...,
     description="Cost basis in **cents** of `currency`. Authoritative.",
   )
@@ -366,7 +367,7 @@ class PositionResponse(BaseModel):
     ...,
     description="ISO 4217 currency code for `cost_basis` and `current_value`.",
   )
-  current_value: int | None = Field(
+  current_value: Cents | None = Field(
     None,
     description=("Latest mark-to-market value in **cents**, or `null` if unmarked."),
   )

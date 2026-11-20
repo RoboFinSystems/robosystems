@@ -8,6 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from robosystems.models.api.common import Cents
 from robosystems.models.api.extensions.journal_entries import (
   AdjustmentKind,
   JournalEntryResponse,
@@ -375,7 +376,7 @@ class AllocationOverrideRecord(BaseModel):
   """A member's allocation override for one month, as set."""
 
   period: str = Field(..., description="The month, as YYYY-MM.")
-  amount: int | None = Field(None, description="The share, in cents, when set so.")
+  amount: Cents | None = Field(None, description="The share, in cents, when set so.")
   percentage: float | None = Field(
     None, description="The share as a percentage of the month's result, when set so."
   )
@@ -400,17 +401,17 @@ class AllocationShareResponse(BaseModel):
   outside_pct: float = Field(
     ..., description="The outside owners' ownership, as a percentage."
   )
-  month_result: int = Field(
+  month_result: Cents = Field(
     ...,
     description="Cents: the member's result for the month, positive for a profit.",
   )
-  pro_rata_amount: int = Field(
+  pro_rata_amount: Cents = Field(
     ..., description="Cents: the outside owners' percentage of the month's result."
   )
   override: AllocationOverrideRecord | None = Field(
     None, description="The month's override, when one is set."
   )
-  effective_amount: int = Field(
+  effective_amount: Cents = Field(
     ...,
     description=(
       "Cents: the share the consolidating entries use, the override's when set."

@@ -1,10 +1,22 @@
 """Response and error shapes shared across every router."""
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
+
+
+class WideInteger:
+  """Marks an integer that outgrows 32 bits. REST describes it as any other
+  integer; GraphQL sends it as `BigInt`, since its `Int` stops at
+  2,147,483,647 and a larger value fails the read."""
+
+
+WIDE_INTEGER = WideInteger()
+
+# An amount in cents: $21,474,836.47 is where 32 bits end.
+Cents = Annotated[int, WIDE_INTEGER]
 
 
 class ErrorResponse(BaseModel):
