@@ -29,6 +29,7 @@ RoboSystems is the open-source knowledge graph for finance. It gives your AI cli
 - [Security and your data](security-and-your-data.md): how each graph is kept apart, encryption, and what an AI client sees.
 - [Take your data with you](take-your-data-with-you.md): reports, backups and your records, and what happens when you cancel.
 - [Invite your team](teams-and-roles.md): organization and graph roles, invitations, and removing someone.
+- [Billing and subscriptions](billing-and-subscriptions.md): what is billed, who can change it, each subscription status, and the SEC trial.
 
 ## By product
 

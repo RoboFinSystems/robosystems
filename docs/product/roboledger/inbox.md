@@ -10,7 +10,7 @@ section: Work with your books
 Most of what you'll find there comes from three places:
 
 - **QuickBooks transactions that couldn't post on sync.** Transactions from QuickBooks are already booked there, so they normally post straight to the journal. One lands here only if it can't, for example because an account it uses isn't in RoboLedger's chart of accounts yet, or its month is closed. Fix the cause and approve it, which posts it at once, or let the next sync that brings it try again.
-- **Lines from a bank feed.** Every transaction the bank has posted arrives here with a suggested account and nothing in the ledger. Nothing posts until someone sorts it. See [Lines from a bank feed](#lines-from-a-bank-feed).
+- **Lines from a bank feed.** Every transaction the bank has posted arrives here with a suggested account and nothing in the ledger. Nothing posts until someone sorts it. See [Lines from a bank feed](#lines-from-a-bank-feed), and [Connect a bank feed](connect-a-bank-feed.md) to set one up.
 - **Entries drafted in RoboLedger**, by your AI assistant or by a schedule. These are drafts until the close posts them.
 
 An event that's **Captured** or **Classified** with no entry yet holds the close of the month it's dated in, because once that month closes it could never post there. Approve or reject each one before you close.

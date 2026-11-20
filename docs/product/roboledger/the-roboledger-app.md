@@ -17,7 +17,7 @@ The menu at the top right picks the company you're looking at: every company in 
 
 - **Entity Info** holds the selected company's details and, for a subsidiary, names its parent and the share held.
 - **All Entities** is the graph's reporting group: each company, the share the parent holds and the month it's closed through, with **New Entity** to add one. See [Work across several companies](working-across-companies.md#several-companies-in-one-graph).
-- **Connections** is where you connect QuickBooks or a bank feed, press **Sync Now**, choose sync options, and disconnect. See [Connect your books to your AI assistant](connect-your-books.md).
+- **Connections** is where you connect QuickBooks or a bank feed, press **Sync Now**, choose sync options, and disconnect. See [Connect your books to your AI assistant](connect-your-books.md) and [Connect a bank feed](connect-a-bank-feed.md).
 
 ## Agents
 
