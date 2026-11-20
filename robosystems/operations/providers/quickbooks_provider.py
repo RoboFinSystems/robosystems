@@ -223,6 +223,35 @@ async def sync_quickbooks_connection(
   return SyncOutcome(status="dispatched", task_id=run_id)
 
 
+def _company_live_on_another_graph(
+  connection_id: str, graph_id: str, db: Session
+) -> str | None:
+  """Another graph still connected to this connection's QuickBooks company.
+
+  Intuit holds one authorization per app and company, so revoking one
+  connection's token ends it for every graph connected to that company.
+  """
+  from ...models.core import Connection, ConnectionCredentials
+
+  realm_id = (
+    db.query(Connection.realm_id).filter(Connection.id == connection_id).scalar()
+  )
+  if not realm_id:
+    return None
+  return (
+    db.query(Connection.graph_id)
+    .join(ConnectionCredentials, ConnectionCredentials.connection_id == Connection.id)
+    .filter(
+      Connection.realm_id == realm_id,
+      Connection.graph_id != graph_id,
+      Connection.deleted_at.is_(None),
+      ConnectionCredentials.is_active,
+    )
+    .limit(1)
+    .scalar()
+  )
+
+
 async def cleanup_quickbooks_connection(
   connection: dict[str, Any], graph_id: str
 ) -> None:
@@ -231,8 +260,9 @@ async def cleanup_quickbooks_connection(
   Called on disconnect BEFORE the connection + credentials are deleted. Loads
   the stored refresh token and revokes it at Intuit so the authorization is
   fully torn down provider-side (deleting the local credential alone stops sync
-  but leaves the grant live at Intuit). Best-effort: any failure is logged but
-  does not block connection deletion.
+  but leaves the grant live at Intuit). Skipped while another graph is
+  connected to the same company. Best-effort: any failure is logged but does
+  not block connection deletion.
   """
   from ...database import platform_session
   from ...models.core import ConnectionCredentials
@@ -252,10 +282,18 @@ async def cleanup_quickbooks_connection(
     # the network call — never hold a DB connection across an HTTP round-trip.
     token: str | None = None
     with platform_session() as db:
+      sibling_graph_id = _company_live_on_another_graph(connection_id, graph_id, db)
       creds = ConnectionCredentials.get_by_connection_id(connection_id, db)
-      if creds:
+      if creds and not sibling_graph_id:
         data = creds.get_credentials()
         token = data.get("refresh_token") or data.get("access_token")
+
+    if sibling_graph_id:
+      logger.info(
+        f"QuickBooks cleanup: connection {connection_id} shares its company "
+        f"with graph {sibling_graph_id}; leaving the Intuit grant in place"
+      )
+      return
 
     if not token:
       logger.info(

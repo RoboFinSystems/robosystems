@@ -32,6 +32,36 @@ def _creds(data: dict | None) -> MagicMock | None:
 
 @pytest.mark.unit
 class TestQuickBooksCleanupRevoke:
+  @pytest.fixture(autouse=True)
+  def _no_sibling(self):
+    with patch(f"{MODULE}._company_live_on_another_graph", return_value=None) as m:
+      yield m
+
+  @pytest.mark.asyncio
+  async def test_company_live_on_another_graph_keeps_the_grant(self) -> None:
+    """Revoking would end the other graph's authorization too."""
+    from robosystems.operations.providers.quickbooks_provider import (
+      cleanup_quickbooks_connection,
+    )
+
+    with (
+      patch(
+        "robosystems.database.platform_session", return_value=_session_cm(MagicMock())
+      ),
+      patch(
+        "robosystems.models.core.ConnectionCredentials.get_by_connection_id",
+        return_value=_creds({"refresh_token": "rt_abc"}),
+      ),
+      patch(f"{MODULE}._company_live_on_another_graph", return_value="kg" + "1" * 16),
+      patch(
+        f"{MODULE}.quickbooks_oauth_provider.revoke_token", new=AsyncMock()
+      ) as revoke,
+    ):
+      await cleanup_quickbooks_connection(
+        {"connection_id": "conn_1", "entity_id": "e1"}, GID
+      )
+    revoke.assert_not_awaited()
+
   @pytest.mark.asyncio
   async def test_revokes_stored_refresh_token(self) -> None:
     from robosystems.operations.providers.quickbooks_provider import (
