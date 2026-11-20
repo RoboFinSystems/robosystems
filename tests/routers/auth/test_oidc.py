@@ -26,6 +26,7 @@ from robosystems.operations.oidc import (
 )
 from robosystems.routers.auth.oidc import oidc_callback, oidc_login
 from robosystems.routers.auth.sso import sso_complete
+from robosystems.routers.auth.utils import dump_sso_session
 
 ISSUER = "https://test-org.okta.example"
 CONNECTION = OIDCConnection(
@@ -464,7 +465,8 @@ class TestCallbackToSsoCompleteSeam:
     payload["browser_nonce_hash"] = None
     mock_lock_manager.return_value = None
     redis_instance = AsyncMock()
-    redis_instance.get.return_value = json.dumps(payload)
+    # Resealed, so the refusal is the browser binding's, not the seal's.
+    redis_instance.get.return_value = dump_sso_session(_session_id, payload)
     mock_redis_client.return_value = redis_instance
     request = Mock()
     request.headers = {}

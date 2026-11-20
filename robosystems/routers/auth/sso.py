@@ -50,7 +50,9 @@ from .utils import (
   SSO_SESSION_EXPIRY_SECONDS,
   SSO_TOKEN_EXPIRY_SECONDS,
   Config,
+  dump_sso_session,
   is_safe_relative_path,
+  load_sso_session,
 )
 
 router = APIRouter()
@@ -405,7 +407,7 @@ async def sso_token_exchange(
           await redis_client.setex(
             f"sso_session:{session_id}",
             SSO_SESSION_EXPIRY_SECONDS,
-            json.dumps(session_data),
+            dump_sso_session(session_id, session_data),
           )
 
           SecurityAuditLogger.log_security_event(
@@ -434,7 +436,7 @@ async def sso_token_exchange(
         await redis_client.setex(
           f"sso_session:{session_id}",
           SSO_SESSION_EXPIRY_SECONDS,
-          json.dumps(session_data),
+          dump_sso_session(session_id, session_data),
         )
 
     except redis.RedisError as e:
@@ -498,6 +500,24 @@ def _assert_browser_binding(body: SSOCompleteRequest, session_data: dict) -> Non
     status_code=status.HTTP_401_UNAUTHORIZED,
     detail="Session expired or invalid",
   )
+
+
+def _load_handoff(session_id: str, raw: str) -> dict:
+  """The handoff session the platform stored under ``session_id``, or 401."""
+  session_data = load_sso_session(session_id, raw)
+  if session_data is None:
+    SecurityAuditLogger.log_security_event(
+      event_type=SecurityEventType.SUSPICIOUS_ACTIVITY,
+      details={
+        "action": "sso_session_unsealed",
+        "session_id": session_id[:8] + "...",
+      },
+      risk_level="high",
+    )
+    raise HTTPException(
+      status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired or invalid"
+    )
+  return session_data
 
 
 def _assert_completing_app(request: Request, session_data: dict) -> None:
@@ -566,7 +586,7 @@ async def sso_complete(
               detail="Session expired or invalid",
             )
 
-          session_data = json.loads(session_data_str)
+          session_data = _load_handoff(session_id, session_data_str)
           user_id = session_data.get("user_id")
           token_id = session_data.get("token_id")
 
@@ -613,7 +633,7 @@ async def sso_complete(
             detail="Session expired or invalid",
           )
 
-        session_data = json.loads(session_data_str)
+        session_data = _load_handoff(session_id, session_data_str)
         user_id = session_data.get("user_id")
         token_id = session_data.get("token_id")
 

@@ -11,7 +11,6 @@ navigation that dead-ends on a JSON error is unrecoverable. Failure detail
 lives in the audit log.
 """
 
-import json
 import secrets
 import uuid
 from datetime import UTC, datetime
@@ -44,7 +43,12 @@ from ...operations.oidc import (
   validate_id_token,
 )
 from ...security import SecurityAuditLogger, SecurityEventType
-from .utils import AVAILABLE_APPS, SSO_SESSION_EXPIRY_SECONDS, Config
+from .utils import (
+  AVAILABLE_APPS,
+  SSO_SESSION_EXPIRY_SECONDS,
+  Config,
+  dump_sso_session,
+)
 
 router = APIRouter()
 
@@ -251,7 +255,9 @@ async def oidc_callback(
   try:
     redis_client = await get_async_redis_client()
     await redis_client.setex(
-      f"sso_session:{session_id}", SSO_SESSION_EXPIRY_SECONDS, json.dumps(payload)
+      f"sso_session:{session_id}",
+      SSO_SESSION_EXPIRY_SECONDS,
+      dump_sso_session(session_id, payload),
     )
   except Exception as exc:
     logger.error(f"Failed to write OIDC bridge session: {exc}")

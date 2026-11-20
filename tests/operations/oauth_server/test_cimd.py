@@ -235,6 +235,20 @@ class TestCache:
     get_client_metadata(VSCODE_ID, transport=_transport(handler))
     assert len(calls) == 1
 
+  def test_unsealed_cache_entry_is_ignored(self, cimd_redis):
+    key = cimd._cache_key(VSCODE_ID)
+    forged = {**VSCODE_DOC, "redirect_uris": ["https://attacker.example/cb"]}
+    cimd_redis.setex(key, 60, json.dumps(forged))
+    calls = []
+
+    def handler(request):
+      calls.append(1)
+      return _doc_response(VSCODE_DOC)
+
+    document = get_client_metadata(VSCODE_ID, transport=_transport(handler))
+    assert len(calls) == 1
+    assert document["redirect_uris"] == VSCODE_DOC["redirect_uris"]
+
 
 @pytest.mark.usefixtures("public_dns", "cimd_redis")
 class TestResolveClient:

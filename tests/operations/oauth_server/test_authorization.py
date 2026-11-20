@@ -1,5 +1,7 @@
 """The authorize → consent → code leg."""
 
+import json
+from dataclasses import asdict
 from unittest.mock import AsyncMock, Mock, patch
 from urllib.parse import parse_qs, urlsplit
 
@@ -7,6 +9,7 @@ import pytest
 from fastapi import HTTPException
 
 from robosystems.models.core import OAuthClient, OAuthGrant
+from robosystems.operations.oauth_server import authorization
 from robosystems.operations.oauth_server.authorization import (
   AuthorizationCodeStore,
   AuthorizeError,
@@ -434,3 +437,44 @@ class TestGraphServesProduct:
 
   def test_missing_graph(self):
     assert self._serves(KG, None) is False
+
+
+@pytest.mark.usefixtures("fake_redis")
+class TestStoredRequestsAreSealed:
+  def _pending(self, request_id="req_1"):
+    return authorization.PendingAuthorization(
+      request_id=request_id,
+      client_row_id="ocl_1",
+      client_id="client",
+      client_name="Client",
+      client_uri=None,
+      logo_uri=None,
+      is_trusted=False,
+      redirect_uri="https://client.example/cb",
+      state=None,
+      code_challenge="c" * 43,
+      resource="https://api.test.example/v1/mcp",
+      graph_id=None,
+      scope="mcp",
+      created_at="2026-11-20T00:00:00+00:00",
+    )
+
+  def test_round_trip(self):
+    authorization.PendingAuthorizationStore.create(self._pending())
+    assert authorization.PendingAuthorizationStore.peek("req_1") == self._pending()
+
+  def test_unsealed_request_is_not_read(self, fake_redis):
+    key = authorization._key(authorization._PENDING_KEY_PREFIX, "req_1")
+    fake_redis.store[key] = json.dumps(asdict(self._pending()))
+    assert authorization.PendingAuthorizationStore.peek("req_1") is None
+    assert authorization.PendingAuthorizationStore.consume("req_1") is None
+
+  def test_request_moved_under_another_id_is_not_read(self, fake_redis):
+    authorization.PendingAuthorizationStore.create(self._pending())
+    stored = fake_redis.store.pop(
+      authorization._key(authorization._PENDING_KEY_PREFIX, "req_1")
+    )
+    fake_redis.store[authorization._key(authorization._PENDING_KEY_PREFIX, "req_2")] = (
+      stored
+    )
+    assert authorization.PendingAuthorizationStore.peek("req_2") is None

@@ -35,6 +35,7 @@ import httpx
 
 from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
 from robosystems.logger import logger
+from robosystems.security.sealed_records import seal, unseal
 
 from .clients import ClientError
 
@@ -210,6 +211,12 @@ async def _fetch(client_id: str, transport: Any) -> tuple[dict[str, Any], int]:
   return document, _cache_ttl(cache_control)
 
 
+# Valkey is shared with hosts that do not hold the platform's secret: a cached
+# document is read back only with the platform's seal (the client_id inside it
+# binds it to its key).
+_CACHE_SEAL = "cimd-document"
+
+
 def _cache_key(client_id: str) -> str:
   return f"{_CACHE_KEY_PREFIX}{hashlib.sha256(client_id.encode()).hexdigest()}"
 
@@ -220,15 +227,17 @@ def get_client_metadata(client_id: str, *, transport: Any = None) -> dict[str, A
   try:
     cached = create_redis_client(ValkeyDatabase.AUTH).get(key)
     if cached:
-      document = json.loads(cached)
-      if isinstance(document, dict) and document.get("client_id") == client_id:
+      document = unseal(_CACHE_SEAL, json.loads(cached))
+      if document is not None and document.get("client_id") == client_id:
         return document
   except Exception as exc:
     logger.warning(f"CIMD cache read failed: {exc}")
 
   document, ttl = fetch_client_metadata(client_id, transport=transport)
   try:
-    create_redis_client(ValkeyDatabase.AUTH).setex(key, ttl, json.dumps(document))
+    create_redis_client(ValkeyDatabase.AUTH).setex(
+      key, ttl, json.dumps(seal(_CACHE_SEAL, document))
+    )
   except Exception as exc:
     logger.warning(f"CIMD cache write failed: {exc}")
   return document
