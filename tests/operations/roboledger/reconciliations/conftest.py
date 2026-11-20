@@ -15,11 +15,11 @@ from robosystems.adapters.quickbooks.reports import (
   TrialBalanceAccount,
   TrialBalanceReport,
 )
-from robosystems.db.extensions import ExtensionsBase
 from robosystems.models.extensions.element import Element
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.line_item import LineItem
 from tests.ledger_entity import PARENT_ENTITY_ID, map_to_the_books, seed_parent_entity
+from tests.tenant_schema import claim_tenant_schema, release_tenant_schema
 
 GRAPH_ID = "kg0123456789abcdef03"
 LIVE_CONNECTION = "conn_live"
@@ -35,11 +35,10 @@ def ext_session():
   schema = f"ext_recs_{uuid.uuid4().hex[:12]}"
   engine = create_engine(database_url)
   with engine.begin() as conn:
-    conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+    claim_tenant_schema(conn, schema)
 
   session = sessionmaker(bind=engine)()
   session.execute(text(f'SET search_path TO "{schema}"'))
-  ExtensionsBase.metadata.create_all(bind=session.connection())
   seed_parent_entity(session, name="Fictional Co")
   session.commit()
   session.execute(text(f'SET search_path TO "{schema}"'))
@@ -50,7 +49,7 @@ def ext_session():
     session.rollback()
     session.close()
     with engine.begin() as conn:
-      conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+      release_tenant_schema(conn, schema)
     engine.dispose()
 
 

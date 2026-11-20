@@ -15,7 +15,6 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 import robosystems.models.extensions  # noqa: F401  (register models on ExtensionsBase)
-from robosystems.db.extensions import ExtensionsBase
 from robosystems.models.extensions import (
   Association,
   Element,
@@ -34,6 +33,7 @@ from robosystems.operations.roboledger.reads.taxonomies import (
   is_target_reachable,
   list_elements,
 )
+from tests.tenant_schema import claim_tenant_schema, release_tenant_schema
 
 pytestmark = pytest.mark.unit
 
@@ -47,14 +47,10 @@ def ext_session():
   schema = f"ext_tax_{uuid.uuid4().hex[:12]}"
   engine = create_engine(database_url)
   with engine.begin() as conn:
-    conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+    claim_tenant_schema(conn, schema)
 
   session = sessionmaker(bind=engine)()
   session.execute(text(f'SET search_path TO "{schema}"'))
-  ExtensionsBase.metadata.create_all(
-    bind=session.connection(),
-    tables=[t for t in ExtensionsBase.metadata.sorted_tables if t.schema is None],
-  )
   session.commit()
   session.execute(text(f'SET search_path TO "{schema}"'))
 
@@ -64,7 +60,7 @@ def ext_session():
     session.rollback()
     session.close()
     with engine.begin() as conn:
-      conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+      release_tenant_schema(conn, schema)
     engine.dispose()
 
 

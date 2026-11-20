@@ -18,7 +18,6 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 import robosystems.models.extensions  # noqa: F401  (register models on ExtensionsBase)
-from robosystems.db.extensions import ExtensionsBase
 from robosystems.models.api.taxonomy_block import (
   ElementUpdatePatch,
   TaxonomyBlockElementRequest,
@@ -28,6 +27,7 @@ from robosystems.models.extensions import Element, ElementTrait, Taxonomy, Trait
 from robosystems.operations.taxonomy_block.update_validator import (
   validate_update_envelope,
 )
+from tests.tenant_schema import claim_tenant_schema, release_tenant_schema
 
 pytestmark = pytest.mark.unit
 
@@ -42,11 +42,10 @@ def ext_session():
   schema = f"ext_coaupd_{uuid.uuid4().hex[:12]}"
   engine = create_engine(database_url)
   with engine.begin() as conn:
-    conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+    claim_tenant_schema(conn, schema)
 
   session = sessionmaker(bind=engine)()
   session.execute(text(f'SET search_path TO "{schema}"'))
-  ExtensionsBase.metadata.create_all(bind=session.connection())
   session.commit()
   session.execute(text(f'SET search_path TO "{schema}"'))
 
@@ -56,7 +55,7 @@ def ext_session():
     session.rollback()
     session.close()
     with engine.begin() as conn:
-      conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+      release_tenant_schema(conn, schema)
     engine.dispose()
 
 

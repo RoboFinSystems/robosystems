@@ -18,7 +18,6 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 import robosystems.models.extensions  # noqa: F401  (register models)
-from robosystems.db.extensions import ExtensionsBase
 from robosystems.models.api.information_block import ForecastMechanics
 from robosystems.operations.information_block.forecast_history import (
   newest_actual_structure_id,
@@ -30,6 +29,7 @@ from robosystems.operations.information_block.reads import (
 )
 from robosystems.operations.roboledger.entity_scope import EntityNotInGraphError
 from robosystems.operations.roboledger.fact_set import create_fact_set
+from tests.tenant_schema import claim_tenant_schema, release_tenant_schema
 
 pytestmark = pytest.mark.unit
 
@@ -49,11 +49,10 @@ def ext_session():
   schema = f"ext_scope_{uuid.uuid4().hex[:12]}"
   engine = create_engine(database_url)
   with engine.begin() as conn:
-    conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+    claim_tenant_schema(conn, schema)
 
   session = sessionmaker(bind=engine)()
   session.execute(text(f'SET search_path TO "{schema}"'))
-  ExtensionsBase.metadata.create_all(bind=session.connection())
   session.commit()
   session.execute(text(f'SET search_path TO "{schema}"'))
 
@@ -63,7 +62,7 @@ def ext_session():
     session.rollback()
     session.close()
     with engine.begin() as conn:
-      conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+      release_tenant_schema(conn, schema)
     engine.dispose()
 
 

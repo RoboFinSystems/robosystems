@@ -1346,11 +1346,10 @@ def tenant_books():
   import uuid
   from contextlib import contextmanager
 
-  from sqlalchemy import create_engine, text
+  from sqlalchemy import create_engine
   from sqlalchemy.orm import sessionmaker
 
-  import robosystems.models.extensions  # noqa: F401  (register models)
-  from robosystems.db.extensions import ExtensionsBase
+  from tests.tenant_schema import claim_tenant_schema, release_tenant_schema
 
   database_url = os.environ.get("TEST_DATABASE_URL")
   if not database_url:
@@ -1359,11 +1358,10 @@ def tenant_books():
   schema = f"ext_oauth_{uuid.uuid4().hex[:12]}"
   admin = create_engine(database_url)
   with admin.begin() as conn:
-    conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+    claim_tenant_schema(conn, schema)
   engine = create_engine(
     database_url, connect_args={"options": f"-csearch_path={schema}"}
   )
-  ExtensionsBase.metadata.create_all(bind=engine)
   make_session = sessionmaker(bind=engine)
 
   @contextmanager
@@ -1380,7 +1378,7 @@ def tenant_books():
   finally:
     engine.dispose()
     with admin.begin() as conn:
-      conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+      release_tenant_schema(conn, schema)
     admin.dispose()
 
 

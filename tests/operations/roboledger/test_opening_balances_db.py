@@ -13,7 +13,7 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.exc import OperationalError
 
 from robosystems.config import env
-from robosystems.db.extensions import extensions_session, provision_tenant_schema
+from robosystems.db.extensions import extensions_session
 from robosystems.models.api.extensions.chart_of_accounts import (
   InitializeChartOfAccountsRequest,
 )
@@ -59,6 +59,7 @@ from robosystems.operations.taxonomy_block.coa_mappings import (
   BOOK_FRAMEWORK,
   find_entity_mapping,
 )
+from tests.tenant_schema import claim_provisioned_schema, release_tenant_schema
 
 pytestmark = pytest.mark.integration
 
@@ -82,10 +83,8 @@ def tenant():
   except OperationalError as exc:
     engine.dispose()
     pytest.skip(f"extensions database unreachable: {exc.orig}")
-  with engine.begin() as conn:
-    conn.execute(text(f"DROP SCHEMA IF EXISTS {GRAPH} CASCADE"))
   try:
-    provision_tenant_schema(GRAPH)
+    claim_provisioned_schema(GRAPH)
     with extensions_session(GRAPH) as session:
       session.add(
         Entity(
@@ -113,7 +112,7 @@ def tenant():
     yield chart
   finally:
     with engine.begin() as conn:
-      conn.execute(text(f"DROP SCHEMA IF EXISTS {GRAPH} CASCADE"))
+      release_tenant_schema(conn, GRAPH)
     engine.dispose()
 
 

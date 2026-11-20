@@ -27,7 +27,7 @@ from xbrlkit.author import (
 from xbrlkit.serialize import to_holon
 
 from robosystems.config import env
-from robosystems.db.extensions import extensions_session, provision_tenant_schema
+from robosystems.db.extensions import extensions_session
 from robosystems.models.extensions import (
   Association,
   Element,
@@ -45,6 +45,7 @@ from robosystems.operations.roboledger.commands.report_import import (
   remove_unused_concepts,
 )
 from robosystems.operations.roboledger.commands.reports import delete_report
+from tests.tenant_schema import claim_provisioned_schema, release_tenant_schema
 
 pytestmark = pytest.mark.integration
 
@@ -70,10 +71,8 @@ def tenant():
   except OperationalError as exc:
     db.dispose()
     pytest.skip(f"extensions database unreachable: {exc.orig}")
-  with db.begin() as conn:
-    conn.execute(text(f"DROP SCHEMA IF EXISTS {GRAPH} CASCADE"))
   try:
-    provision_tenant_schema(GRAPH)
+    claim_provisioned_schema(GRAPH)
     with (
       patch(_S3) as s3,
       patch(_DELETE_ARTIFACTS) as delete_artifacts,
@@ -98,7 +97,7 @@ def tenant():
       }
   finally:
     with db.begin() as conn:
-      conn.execute(text(f"DROP SCHEMA IF EXISTS {GRAPH} CASCADE"))
+      release_tenant_schema(conn, GRAPH)
     db.dispose()
 
 

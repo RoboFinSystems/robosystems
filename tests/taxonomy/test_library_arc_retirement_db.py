@@ -16,7 +16,6 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 import robosystems.models.extensions  # noqa: F401  (register models on ExtensionsBase)
-from robosystems.db.extensions import ExtensionsBase
 from robosystems.operations.taxonomy_block.library_creator import (
   create_library_arcs,
   create_library_taxonomy_elements,
@@ -33,6 +32,7 @@ from robosystems.taxonomy.writer import (
   find_unsourced_library_arcs,
   resync_library_into_tenant,
 )
+from tests.tenant_schema import claim_tenant_schema, release_tenant_schema
 
 pytestmark = pytest.mark.unit
 
@@ -83,12 +83,9 @@ def schemas():
   suffix = uuid.uuid4().hex[:10]
   source, tenant = f"lib_src_{suffix}", f"lib_tnt_{suffix}"
   engine = create_engine(database_url)
-  tables = [t for t in ExtensionsBase.metadata.sorted_tables if t.schema is None]
   with engine.begin() as conn:
     for schema in (source, tenant):
-      conn.execute(text(f'CREATE SCHEMA "{schema}"'))
-      conn.execute(text(f'SET search_path TO "{schema}"'))
-      ExtensionsBase.metadata.create_all(bind=conn, tables=tables)
+      claim_tenant_schema(conn, schema)
 
   session = sessionmaker(bind=engine)()
   try:
@@ -98,7 +95,7 @@ def schemas():
     session.close()
     with engine.begin() as conn:
       for schema in (source, tenant):
-        conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        release_tenant_schema(conn, schema)
     engine.dispose()
 
 

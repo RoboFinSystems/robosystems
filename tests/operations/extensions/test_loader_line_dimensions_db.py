@@ -17,7 +17,6 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 import robosystems.models.extensions  # noqa: F401  (register models on ExtensionsBase)
-from robosystems.db.extensions import ExtensionsBase
 from robosystems.models.extensions import Dimension
 from robosystems.models.extensions.element import Element
 from robosystems.models.extensions.roboledger.entry import Entry
@@ -27,6 +26,7 @@ from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.operations.extensions.loader import OLTPLoader, _upsert_dimensions
 from robosystems.operations.roboledger.line_dimensions import line_dimensions
 from tests.ledger_entity import PARENT_ENTITY_ID, seed_parent_entity
+from tests.tenant_schema import claim_tenant_schema, release_tenant_schema
 
 pytestmark = pytest.mark.unit
 
@@ -49,10 +49,9 @@ def db():
   schema = f"ext_dims_{uuid.uuid4().hex[:12]}"
   engine = create_engine(url)
   with engine.begin() as conn:
-    conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+    claim_tenant_schema(conn, schema)
   session = sessionmaker(bind=engine)()
   session.execute(text(f'SET search_path TO "{schema}"'))
-  ExtensionsBase.metadata.create_all(bind=session.connection())
   seed_parent_entity(session)
   for ext, code, name in ((AR, "1100", "Receivables"), (REVENUE, "4000", "Sales")):
     session.add(
@@ -84,7 +83,7 @@ def db():
     session.rollback()
     session.close()
     with engine.begin() as conn:
-      conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+      release_tenant_schema(conn, schema)
     engine.dispose()
 
 

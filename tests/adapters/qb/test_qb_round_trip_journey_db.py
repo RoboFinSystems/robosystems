@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 import robosystems.models.extensions  # noqa: F401  (register models on ExtensionsBase)
 from robosystems.config import env
-from robosystems.db.extensions import ExtensionsBase, bind_search_path
+from robosystems.db.extensions import bind_search_path
 from robosystems.models.api.event_block import (
   CreateEventBlockRequest,
   ExecuteEventBlockRequest,
@@ -71,6 +71,7 @@ from tests.ledger_entity import (
   map_to_the_books,
   seed_parent_entity_on,
 )
+from tests.tenant_schema import claim_tenant_schema, release_tenant_schema
 
 pytestmark = pytest.mark.unit
 
@@ -204,9 +205,8 @@ def tenant(test_db, test_user, sample_graph, monkeypatch):
   graph_id = str(sample_graph.graph_id)
   engine = create_engine(url)
   with engine.begin() as conn:
-    conn.execute(text(f'CREATE SCHEMA "{graph_id}"'))
+    claim_tenant_schema(conn, graph_id)
     conn.execute(text(f'SET search_path TO "{graph_id}"'))
-    ExtensionsBase.metadata.create_all(bind=conn)
     seed_parent_entity_on(conn)
 
   monkeypatch.setattr(env, "CONNECTION_CREDENTIALS_KEY", Fernet.generate_key().decode())
@@ -295,7 +295,7 @@ def tenant(test_db, test_user, sample_graph, monkeypatch):
     yield t
   finally:
     with engine.begin() as conn:
-      conn.execute(text(f'DROP SCHEMA "{graph_id}" CASCADE'))
+      release_tenant_schema(conn, graph_id)
     engine.dispose()
 
 

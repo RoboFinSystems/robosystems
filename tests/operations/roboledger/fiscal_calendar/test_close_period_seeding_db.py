@@ -10,7 +10,6 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 import robosystems.models.extensions  # noqa: F401  (register models on ExtensionsBase)
-from robosystems.db.extensions import ExtensionsBase
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
 from robosystems.operations.roboledger.fiscal_calendar import (
   FiscalCalendarService,
@@ -20,6 +19,7 @@ from robosystems.operations.roboledger.reports.statement_sets import (
   StatementStampResult,
 )
 from tests.ledger_entity import seed_parent_entity
+from tests.tenant_schema import claim_tenant_schema, release_tenant_schema
 
 pytestmark = pytest.mark.unit
 
@@ -35,11 +35,10 @@ def session():
   schema = f"ext_seed_{uuid.uuid4().hex[:12]}"
   engine = create_engine(database_url)
   with engine.begin() as conn:
-    conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+    claim_tenant_schema(conn, schema)
 
   db = sessionmaker(bind=engine)()
   db.execute(text(f'SET search_path TO "{schema}"'))
-  ExtensionsBase.metadata.create_all(bind=db.connection())
   seed_parent_entity(db)
   db.commit()
   db.execute(text(f'SET search_path TO "{schema}"'))
@@ -49,7 +48,7 @@ def session():
     db.rollback()
     db.close()
     with engine.begin() as conn:
-      conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+      release_tenant_schema(conn, schema)
     engine.dispose()
 
 
