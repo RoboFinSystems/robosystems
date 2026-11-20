@@ -257,6 +257,27 @@ async def test_memories_are_prefetched_into_the_user_turn_not_the_prefix():
   assert "recall" in kwargs["tool_names"]
 
 
+async def test_a_long_question_is_recalled_on_what_recall_accepts():
+  from robosystems.models.api.memory import MemoryRecallRequest
+  from robosystems.operations.operators.implementations.analyst import (
+    _RECALL_QUERY_MAX,
+  )
+
+  tools = _tools(["recall"], {"recall": MEMORIES})
+  ctx = _ctx(tools)
+  ctx.query = "Reconcile the intercompany balance. " * 40
+
+  hits = await AnalystOperator()._fetch_memories(ctx)
+
+  sent = tools.call_tool.await_args.args[1]["query"]
+  assert sent == ctx.query[:_RECALL_QUERY_MAX]
+  # The cut is the request model's own limit, so the two cannot drift.
+  assert MemoryRecallRequest(query=sent).query == sent
+  with pytest.raises(ValueError):
+    MemoryRecallRequest(query=sent + "x")
+  assert hits and hits[0]["id"] == "m1"
+
+
 async def test_empty_memory_store_sends_the_bare_question():
   tools = _tools(
     ["get-graph-schema", "read-graph-cypher", "recall"],
