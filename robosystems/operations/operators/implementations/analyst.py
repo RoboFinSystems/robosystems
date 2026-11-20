@@ -37,6 +37,9 @@ _MAX_ORIENTATION_CHARS = 48000
 # Memory hits depend on the question, so they go in the user turn, not the
 # cached prefix.
 _RECALL_K = 5
+# `recall` refuses a longer query; the opening of a long question is enough
+# to rank on.
+_RECALL_QUERY_MAX = 500
 _MAX_MEMORY_CHARS = 800
 
 
@@ -280,7 +283,9 @@ class AnalystOperator(Operator):
     spent a step on `recall`. None when empty, disabled or failed."""
     try:
       result = await ctx.tools.call_tool(
-        "recall", {"query": ctx.query, "k": _RECALL_K}, return_raw=True
+        "recall",
+        {"query": ctx.query[:_RECALL_QUERY_MAX], "k": _RECALL_K},
+        return_raw=True,
       )
     except Exception as e:
       logger.warning(
