@@ -86,6 +86,13 @@ class TestNotFoundAndNotAvailable:
     assert resp is not None
     assert resp.download_url == "https://signed.example/holon"
     assert resp.format == "holon-jsonld"
+    # Written by the same model bridge as the Tavi, so it drops the same content.
+    assert resp.omitted_content == [
+      "ib_envelopes",
+      "definition_links",
+      "framework_pins",
+      "filing_lifecycle",
+    ]
 
   @pytest.mark.unit
   def test_an_unpublished_report_still_has_no_holon(self):

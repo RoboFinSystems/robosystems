@@ -88,6 +88,7 @@ from robosystems.operations.roboledger.reports.network_picker import (
   load_primary_reporting_style,
 )
 from robosystems.operations.serialization.flavors import RdfFlavor, XbrlFlavor
+from robosystems.operations.serialization.xbrl.tavi import TAVI_OMITTED_CONTENT
 from robosystems.operations.taxonomy_block.coa_mappings import (
   BOOK_FRAMEWORK,
   find_entity_mapping,
@@ -819,6 +820,7 @@ def _materialize_and_presign_holon(
     content_type="application/ld+json",
     format=RdfFlavor.HOLON_JSONLD.value,
     generation_count=generation_count,
+    omitted_content=list(TAVI_OMITTED_CONTENT),
   )
 
 
@@ -957,8 +959,6 @@ def _materialize_and_presign_tavi(
     raise BundleSigningError(
       f"Failed to sign download URL for report '{report_id}' Tavi model."
     )
-
-  from robosystems.operations.serialization.xbrl.tavi import TAVI_OMITTED_CONTENT
 
   return ReportBundleDownloadResponse(
     download_url=download_url,

@@ -221,7 +221,7 @@ class GetReportBundleTool:
 
 **PARAMETERS:**
 - `report_id`: the report. `list-reports` lists them with their `generation_status`
-- `format`: `holon-jsonld` (default) is the JSON-LD holon, the one format that carries the whole report; `holon-jsonld-lineage` the same holon with its `#lineage` graph — the ledger lines, entries and events behind every frozen figure, for this graph's own members, never shared to another graph; `tavi` the Project Tavi compiled model; `xbrl-2.1` the XBRL 2.1 package
+- `format`: `holon-jsonld` (default) is the JSON-LD holon; `holon-jsonld-lineage` the same holon with its `#lineage` graph — the ledger lines, entries and events behind every frozen figure, for this graph's own members, never shared to another graph; `tavi` the Project Tavi compiled model; `xbrl-2.1` the XBRL 2.1 package
 
 **RETURNS:** `download_url`, `expires_at`, `content_type`, `format`, and `omitted_content` — what the report carries that this format does not.
 

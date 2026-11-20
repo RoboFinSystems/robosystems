@@ -126,6 +126,22 @@ class TestConnectionCredentialsModel:
     mock_logger.warning.assert_called_once()
 
   @patch("robosystems.models.core.connection.connection_credentials.env")
+  def test_the_example_env_gives_a_working_key(self, mock_env):
+    """A stack started from .env.example can store a connection's tokens."""
+    from pathlib import Path
+
+    example = {}
+    for line in (Path(__file__).parents[4] / ".env.example").read_text().splitlines():
+      if "=" in line and not line.lstrip().startswith("#"):
+        name, _, value = line.partition("=")
+        example[name.strip()] = value.strip()
+    mock_env.CONNECTION_CREDENTIALS_KEY = example["CONNECTION_CREDENTIALS_KEY"]
+    mock_env.JWT_SECRET_KEY = example["JWT_SECRET_KEY"]
+    mock_env.ENVIRONMENT = "dev"
+
+    Fernet(ConnectionCredentials._get_encryption_key())
+
+  @patch("robosystems.models.core.connection.connection_credentials.env")
   @patch("robosystems.models.core.connection.connection_credentials.logger")
   def test_get_encryption_key_invalid_format(self, mock_logger, mock_env):
     """Test error when encryption key has invalid format."""

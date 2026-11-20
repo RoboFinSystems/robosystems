@@ -1018,8 +1018,7 @@ class ReportDownloadFormat(Enum):
   the `.value` to the ops read.
 
   `HOLON_JSONLD` is the dataset-form named-graph holon (scene / boundary /
-  projection), stamped at publish — the one flavor that carries the whole
-  report; `HOLON_JSONLD_LINEAGE` is the same holon with its fourth graph,
+  projection), stamped at publish; `HOLON_JSONLD_LINEAGE` is the same holon with its fourth graph,
   `#lineage`: the ledger lines, entries and events behind every frozen
   figure, for this graph's own members and never carried by a report shared
   in from another graph; `TAVI` is the Project Tavi compiled model, the

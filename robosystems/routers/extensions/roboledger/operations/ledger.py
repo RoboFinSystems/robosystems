@@ -419,6 +419,8 @@ create_event_block_op = _registrar.register(
         lambda _e: "Event already ingested for this source and external_id",
       ),
       ReservedEventTypeError: 422,
+      # A system-maintained metadata key, refused before anything is written.
+      InvalidEventTransitionError: 422,
       HandlerNotFoundError: 404,
       HandlerAmbiguousError: 409,
       TemplateInterpolationError: 422,
