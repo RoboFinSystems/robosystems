@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import operator
 from typing import Any, NewType
 
 import strawberry
@@ -17,7 +18,9 @@ SCALAR_MAP: dict[object, Any] = {
       "A whole number of any size, sent as a JSON number: an amount in cents, "
       "or a count of shares. GraphQL's `Int` stops at 2,147,483,647."
     ),
-    serialize=int,
-    parse_value=int,
+    # `operator.index` takes an integer and nothing else: `int()` would
+    # truncate a float that reached here by mistake.
+    serialize=operator.index,
+    parse_value=operator.index,
   ),
 }

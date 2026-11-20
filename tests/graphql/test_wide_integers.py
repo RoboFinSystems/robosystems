@@ -25,7 +25,7 @@ _TYPE = re.compile(r"^type (\w+)")
 # How a field holding money or a quantity of shares is named. A count, a
 # depth or an order stays an `Int`.
 _WIDE_NAME = re.compile(
-  r"(Cents|Amount|Debit|Credit|Basis|Value|Shares)$|^amount$|^monthResult$"
+  r"(Cents|Amount|Debit|Credit|Balance|Basis|Value|Shares)$|^amount$|^monthResult$"
 )
 
 
@@ -112,3 +112,10 @@ def test_a_cents_field_derives_as_bigint_and_reads_past_32_bits():
 def test_rest_still_describes_cents_as_an_integer():
   properties = _Sample.model_json_schema()["properties"]
   assert properties["amount"]["type"] == "integer"
+
+
+def test_a_value_that_is_not_a_whole_number_is_refused_not_truncated():
+  serialize = next(iter(SCALAR_MAP.values())).serialize
+  assert serialize(OVER_32_BITS) == OVER_32_BITS
+  with pytest.raises(TypeError):
+    serialize(1250.75)
