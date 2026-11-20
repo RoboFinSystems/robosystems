@@ -47,7 +47,10 @@ from robosystems.operations.roboledger.entity_scope import (
   group_members,
   resolve_entity_id,
 )
-from robosystems.operations.roboledger.entry_status import LANDED_ENTRY_STATUSES
+from robosystems.operations.roboledger.entry_status import (
+  LANDED_ENTRY_STATUSES,
+  STANDING_ENTRY_STATUS,
+)
 from robosystems.operations.roboledger.reads.accounts import (
   account_scope,
   entity_accounts_clause,
@@ -71,11 +74,12 @@ _CLAIMING_STATUSES: tuple[str, ...] = ("captured", "classified")
 
 def _in_the_books(events):
   """Whether an event's document is in the ledger: by its status, or by an
-  entry of its own that landed. A document drafted on native books stays
-  ``classified`` after the close posts it."""
+  entry of its own that stands posted. A document drafted on native books
+  stays ``classified`` after the close posts it, and an entry since reversed
+  has taken its document back out."""
   landed = exists().where(
     Entry.triggered_by_event_id == events.c.id,
-    Entry.status.in_(LANDED_ENTRY_STATUSES),
+    Entry.status == STANDING_ENTRY_STATUS,
   )
   return or_(
     events.c.status.in_(_OPEN_BALANCE_STATUSES),

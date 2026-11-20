@@ -8,13 +8,24 @@ from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
+from sqlalchemy import select
 
 from robosystems.models.api.event_block import CreateEventBlockRequest
+from robosystems.models.api.extensions.journal_entries import (
+  ReverseJournalEntryRequest,
+)
 from robosystems.models.api.fact_provenance import AssertedProvenance
 from robosystems.models.extensions.element import Element
 from robosystems.models.extensions.roboledger import Agent, Event
+from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.operations.event_block.commands import create_event_block_in_session
-from robosystems.operations.roboledger.commands.fiscal_calendar import close_period
+from robosystems.operations.roboledger.commands.fiscal_calendar import (
+  close_period,
+  reopen_period,
+)
+from robosystems.operations.roboledger.commands.journal_entries import (
+  reverse_journal_entry,
+)
 from robosystems.operations.roboledger.fact_set import create_fact_set
 from robosystems.operations.roboledger.fiscal_calendar import (
   FiscalCalendarService,
@@ -203,3 +214,76 @@ def test_a_payment_the_close_posted_settles_its_invoice(books):
   (tie_out,) = aged.tie_outs
   assert tie_out.open_items_cents == 70_000
   assert tie_out.control_balance_cents == 70_000
+
+
+def _reopen_and_reverse(t, event_id: str) -> None:
+  """The correction on native books: reopen the month and reverse the entry."""
+  reopen_period(
+    t.session,
+    MagicMock(),
+    GRAPH_ID,
+    "2026-07",
+    "usr_1",
+    "document was wrong",
+    None,
+    t.service,
+    entity_id=t.parent.id,
+  )
+  t.session.commit()
+  entry = t.session.execute(
+    select(Entry).where(Entry.triggered_by_event_id == event_id)
+  ).scalar_one()
+  reverse_journal_entry(
+    t.session,
+    ReverseJournalEntryRequest(entry_id=str(entry.id), posting_date=JULY_END),
+    "usr_1",
+  )
+  t.session.commit()
+  t.session.expire_all()
+
+
+def test_a_reversed_invoice_no_longer_ages(books):
+  t = books
+  invoice = _document(
+    t, "invoice_issued", 120_000, 5, debit=t.receivables, credit=t.revenue
+  )
+  _close_july(t)
+
+  _reopen_and_reverse(t, invoice)
+
+  assert _open_receivables(t) == []
+  aged = get_aged_balances(
+    t.session, "receivables", as_of=JULY_END, entity_id=t.parent.id
+  )
+  (tie_out,) = aged.tie_outs
+  assert aged.buckets.total_cents == 0
+  assert (tie_out.control_balance_cents, tie_out.difference_cents) == (0, 0)
+
+
+def test_a_reversed_payment_no_longer_settles_its_invoice(books):
+  t = books
+  invoice = _document(
+    t, "invoice_issued", 120_000, 5, debit=t.receivables, credit=t.revenue
+  )
+  payment = _document(
+    t,
+    "payment_received",
+    50_000,
+    20,
+    debit=t.cash,
+    credit=t.receivables,
+    settles=invoice,
+  )
+  _close_july(t)
+
+  _reopen_and_reverse(t, payment)
+
+  assert _open_receivables(t) == [120_000]
+  aged = get_aged_balances(
+    t.session, "receivables", as_of=JULY_END, entity_id=t.parent.id
+  )
+  (tie_out,) = aged.tie_outs
+  assert (tie_out.open_items_cents, tie_out.control_balance_cents) == (
+    120_000,
+    120_000,
+  )

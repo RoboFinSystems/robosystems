@@ -17,6 +17,11 @@ from sqlalchemy import BindParameter, bindparam
 
 LANDED_ENTRY_STATUSES: frozenset[str] = frozenset({"posted", "reversed"})
 
+# An entry that stands: posted and not since reversed. Not a balance question
+# (balances sum both halves of a reversal, above); it asks whether the document
+# behind the entry is still in force, as an open invoice or a payment is.
+STANDING_ENTRY_STATUS = "posted"
+
 # A draft a shadow close took: never posted, never published, never
 # redrafted or deleted. It is the expectation the close compares with what
 # the source ledger holds, so it is terminal without being in the books.
