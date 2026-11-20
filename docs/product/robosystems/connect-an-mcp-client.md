@@ -29,7 +29,7 @@ To read SEC filings with no address to paste, add [RoboSystems SEC](https://clau
 claude mcp add --transport http robosystems https://api.robosystems.ai/v1/mcp
 ```
 
-Claude Code can also install the RoboSystems plugin for Claude Code, which adds the same server plus four skills: finding its way around a graph, analyzing SEC filings, closing the month on RoboLedger, and building a board pack from a closed period. See [Skills and the RoboSystems plugin](skills-and-the-plugin.md).
+Claude Code can also install the RoboSystems plugin for Claude Code, which adds the same server plus five skills: finding its way around a graph, analyzing SEC filings, closing the month on RoboLedger, building a board pack from a closed period, and loading a portfolio company's report from a file onto a RoboInvestor graph. See [Skills and the RoboSystems plugin](skills-and-the-plugin.md).
 
 ```bash
 claude plugin marketplace add RoboFinSystems/robosystems-plugin

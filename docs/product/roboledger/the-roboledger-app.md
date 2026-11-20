@@ -40,7 +40,11 @@ The people and companies you do business with: customers, vendors and employees.
 
 An entry in a closed month can't be changed until the month is reopened. While QuickBooks is connected, an entry synced from it is corrected in QuickBooks. While QuickBooks is also your book of record, which is the default, every posted entry is: a reversal posted in RoboLedger alone would leave the two ledgers disagreeing. See [Nothing writes to QuickBooks until you post](quickbooks-write-back.md).
 
-**Trial Balance** shows each account's debits and credits, and whether they agree.
+**Trial Balance** shows each account's debits and credits as of today, the date in its heading, and whether they agree. An entry dated after today isn't in it yet. Switch the view from your chart of accounts to the reporting concepts the accounts roll up to, and export either as CSV.
+
+**Account Register** is one account's posted lines between two dates, oldest first, each with the balance it leaves, between an opening and a closing balance. Choose an account, or open one from the trial balance, the closing book or a statement figure. **Show drafts** adds entries that haven't posted.
+
+**Receivables & Payables** shows who owes the company and how late it is, and whom it owes and when it falls due: current, 1–30, 31–60, 61–90 and over 90 days, by counterparty, as of any date. On a group parent, **Scope** switches from this company to the group.
 
 **Statements** shows the balance sheet, income statement, cash flow and statement of equity straight from the current ledger, for any period. On a group parent, a Scope control switches between the company's own statement, the combined one across the group, the consolidated one, and a worksheet with each company in its own column. Nothing is saved, and no close is needed.
 
@@ -50,12 +54,14 @@ An entry in a closed month can't be changed until the month is reopened. While Q
 
 ![The Closing Book period close view, showing August closed, September as the close target and closeable now, and six schedule entries drafted for September](images/closing-book.png)
 
+**Posting Rules** lists the rules that turn a matching event into journal entries. Bank lines and the common transactions post through built-in handling; a rule adds a pattern of your own. One your AI assistant writes waits here as **Waiting for approval** and books nothing until you approve it.
+
 ## Reports
 
 - **View Reports** lists the reports you've created. Open one to read its statements and notes, download it, share it, regenerate it, or file it once it's final.
-- **Create Report** builds a report for a period: this month or last, this quarter or last, monthly year to date, a full year by month, year over year, or dates you choose.
+- **Create Report** builds a report for a period: this month or last, this quarter or last, monthly year to date, the trailing twelve months by month, year over year, or dates you choose.
 - **Publish Lists** are the sets of graphs you send reports to.
-- **Blocked Senders** are graphs you don't accept reports from.
+- **Blocked Senders** lists the graphs you've stopped accepting reports from. You block a sender from a report they sent you; a graph admin lifts a block here.
 
 See [Reports and sharing](reports-and-sharing.md).
 
@@ -75,7 +81,7 @@ The reporting concepts your accounts map to, with their definitions and how they
 
 ## Console
 
-Ask questions about your books inside the app, from the Console bar at the bottom of every page. Start a request with `/do` to have it make a change: add a metric block or run a forecast, add or update a customer or vendor, remember something, draft a report, draft the schedule entries that are due, or sort bank-feed lines in the **Inbox** into accounts. It lists what it changed, and Plan and Explorer refresh to show it. A line it sorts posts only when someone commits it. Filing or sharing a report, closing a period, posting entries and deleting stay out of the Console. The Console runs on RoboLedger's own AI, so questions and changes use credits from your plan's monthly allowance. A change runs on a more capable model than a question, because a wrong change costs more than a wrong answer, so it usually uses more. Claude, ChatGPT and other clients you connect yourself don't use credits.
+Ask questions about your books inside the app, from the Console bar at the bottom of every page. Start a request with `/do` to have it make a change: add a metric block or a new forecast scenario and run it, add a customer or vendor, remember something, draft a report, draft the schedule entries that are due, or sort bank-feed lines in the **Inbox** into accounts. It changes only what the same request created: an existing customer, vendor, scenario or schedule is edited on its own page or through your AI assistant. `/do` needs a member or admin role on the graph; a viewer can ask questions only. It lists what it changed, and Plan and Explorer refresh to show it. A line it sorts posts only when someone commits it. Filing or sharing a report, closing a period, posting entries and deleting stay out of the Console. The Console runs on RoboLedger's own AI, so questions and changes use credits from your plan's monthly allowance. A change runs on a more capable model than a question, because a wrong change costs more than a wrong answer, so it usually uses more. Claude, ChatGPT and other clients you connect yourself don't use credits.
 
 ## Search
 

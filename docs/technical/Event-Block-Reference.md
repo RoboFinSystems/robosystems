@@ -14,6 +14,7 @@ All operations are `POST /extensions/roboledger/{graph_id}/operations/{name}`, r
 - [preview-event-block](#preview-event-block)
 - [execute-event-block](#execute-event-block)
 - [Validation and Idempotency](#validation-and-idempotency)
+- [Corrections from an external ledger](#corrections-from-an-external-ledger)
 - [Reconciling Items](#reconciling-items)
 - [Handlers](#handlers)
 - [Ledger Records](#ledger-records)
@@ -27,7 +28,8 @@ All operations are `POST /extensions/roboledger/{graph_id}/operations/{name}`, r
 
 | Field | Required | Default | Meaning |
 | --- | --- | --- | --- |
-| `event_type` | yes | | Open string naming what happened. Selects the handler. |
+| `entity_id` | no | the group parent | The entity whose books the event lands in; every ledger row its handler writes follows it |
+| `event_type` | yes | | Open string naming what happened. Selects the handler. Three types are written only by their own operations and refused here: `reconciliation_signed_off`, `reconciliation_policy_changed`, `balance_observed`. |
 | `event_category` | yes | | Closed set, and must agree with `event_class`. See [Vocabularies](#vocabularies). |
 | `event_class` | no | `economic` | `economic` or `support` |
 | `event_action` | no | null | One of the 19 action verbs |
@@ -36,9 +38,12 @@ All operations are `POST /extensions/roboledger/{graph_id}/operations/{name}`, r
 | `resource_element_id` | no | null | The element for the resource, when there is one |
 | `occurred_at` | yes | | When it happened |
 | `effective_at` | no | null | The accounting recognition date, when it differs |
+| `due_date` | no | null | When an `invoice_issued` or `bill_received` falls due. With neither this nor `terms_days`, it is due on receipt. Refused on any other type |
+| `terms_days` | no | null | Net terms in days from `occurred_at` (30 for net 30), 0 to 3650, in place of `due_date`; not both |
 | `source` | yes | | Where the event came from. See [Validation and Idempotency](#validation-and-idempotency). |
 | `external_id` | no | null | The source's own id for the event; the dedup key |
 | `external_url` | no | null | A link to the event in the source system |
+| `source_version` | no | null | The source's revision of the record, an integer of 1 or more that only grows. See [Corrections from an external ledger](#corrections-from-an-external-ledger) |
 | `amount` | no | null | Signed integer cents, from the graph owner's point of view |
 | `currency` | no | `USD` | ISO 4217 |
 | `description` | no | null | Free text |
@@ -46,11 +51,12 @@ All operations are `POST /extensions/roboledger/{graph_id}/operations/{name}`, r
 | `dimension_ids` | no | `[]` | Dimensions to tag the event with |
 | `obligated_by_event_id` | no | null | The event this one was obligated by |
 | `discharges_event_id` | no | null | The event this one settles |
+| `document_id` | no | null | A stored document on this graph that the event rests on (the invoice PDF, the receipt). It cannot be deleted while the event is live |
 | `apply_handlers` | no | `false` | Fire the handler and write the entry in this call |
 
 ## The Event Block Envelope
 
-`EventBlockEnvelope` is what every event write and read returns. It echoes the request fields (`event_type`, `event_category`, `event_class`, `event_action`, `agent_id`, `resource_type`, `resource_element_id`, `occurred_at`, `effective_at`, `source`, `external_id`, `external_url`, `amount`, `currency`, `description`, `metadata`, `dimension_ids`, `obligated_by_event_id`, `discharges_event_id`) and adds:
+`EventBlockEnvelope` is what every event write and read returns. It echoes the request fields (`event_type`, `event_category`, `event_class`, `event_action`, `agent_id`, `resource_type`, `resource_element_id`, `occurred_at`, `effective_at`, `due_date`, `source`, `external_id`, `external_url`, `amount`, `currency`, `description`, `metadata`, `dimension_ids`, `obligated_by_event_id`, `discharges_event_id`, `document_id`) and adds:
 
 | Field | Meaning |
 | --- | --- |
@@ -59,6 +65,8 @@ All operations are `POST /extensions/roboledger/{graph_id}/operations/{name}`, r
 | `is_reconciling_item` | The event has a changed upstream payload awaiting a disposition |
 | `replaced_by_event_id`, `replaces_event_id` | The correction chain, set by a supersede |
 | `created_at`, `created_by` | Audit |
+
+`source_version` is not a field of the envelope; the last version a source sent is on `metadata.source_version`.
 
 ## Vocabularies
 
@@ -90,9 +98,11 @@ Support events record value-chain and audit-trail steps and have no ledger effec
 | `superseded` | none |
 
 - **Landing status on create.** Capture-only: `captured`. With `apply_handlers: true`, the handler sets it (see [Handlers](#handlers)); the journal-entry handler lands `classified` for a draft and `fulfilled` for an entry posted immediately, and a DSL handler lands `classified`.
-- **Retractions are guarded.** `voided` and `superseded` are refused, whatever the current status, once any of the event's entries or transactions have posted, or the event has published to QuickBooks. Reverse the posted entry instead.
+- **Retractions are guarded.** `voided` and `superseded` are refused, whatever the current status, once any of the event's entries or transactions have posted, or the event has published to QuickBooks. Reverse the posted entry instead. The one exception is `source_retracted`, for an event from the entity's ledger of record (see [Corrections from an external ledger](#corrections-from-an-external-ledger)).
+- **A retracted event is closed.** Once `voided` or `superseded`, its fields can no longer be corrected.
 - **`superseded` needs `superseded_by_id`**, naming an existing event other than itself. Both sides of the chain are set together.
-- **`captured` or `classified` → `committed`** fires the event's Python handler unless the event already has an entry linked to it.
+- **`captured` or `classified` → `committed`** fires the event's handler unless the event already has an entry linked to it: its Python handler, or, for a type with none, the DSL handler that matches it. A type that matches neither commits with no entry.
+- **No skipping the commit.** `captured` or `classified` → `pending` or `fulfilled` is refused for an event that has written no ledger rows and has a handler that would: commit it, or void it.
 - **`captured` → `classified`** gives the handler a chance to refuse a classification it could not post. The [bank-feed handlers](#bank-feed-handlers) use it; other types accept the move and are checked at commit.
 - Scheduled obligations (`schedule_entry_due`) are created `pending` and moved to `classified` by the promotion sweep (`promote-obligations`, or its background sensor) when their month matures.
 
@@ -105,14 +115,17 @@ Support events record value-chain and audit-trail steps and have no ledger effec
 | `superseded_by_id` | Required with `superseded` |
 | `description` | Replacement text; empty string clears it |
 | `effective_at` | New recognition date |
+| `due_date` | New due date of an `invoice_issued` or `bill_received`, such as an extension granted. It moves no ledger row, so it is accepted in a closed period |
+| `document_id` | Set or replace the stored document the event rests on; an empty string detaches it |
+| `source_retracted` | `true` with `transition_to: voided` only. See [Corrections from an external ledger](#corrections-from-an-external-ledger) |
 | `metadata_patch` | Merged into `metadata` key by key (a supplied key replaces that key's value) |
 | `event_action` | Set or correct the verb |
 | `obligated_by_event_id`, `discharges_event_id` | Late-bind the duality links, for example marking a payment as settling an invoice after the fact. A settlement is checked: an invoice for money in, a bill for money out, on the payment's own entity, not voided. An empty `discharges_event_id` clears it |
-| `discharge_allocations` | What a payment settles, document by document: `[{obligation_event_id, amount}]` in positive cents, together at most the payment's amount. Replaces any held; an empty list clears them. Use it when one payment, or one bank line, pays several invoices or bills, or only part of one. A QuickBooks payment's settlement comes from its sync and is changed in QuickBooks, so both fields refuse it |
+| `discharge_allocations` | What a payment settles, document by document: `[{obligation_event_id, amount}]` in positive cents, together at most the payment's amount. Replaces any held; an empty list clears them. Use it when one payment, or one bank line, pays several invoices or bills, or only part of one. Give this or `discharges_event_id`, not both. A QuickBooks payment's settlement comes from its sync and is changed in QuickBooks, so both fields refuse it |
 
 The metadata patch is applied before the handler runs, so a commit sees the final shape. A handler error rolls back the whole update, status change included. Returns the updated envelope.
 
-Some metadata keys are written only by the platform, by write-back and the sync, and a create's `metadata` or an update's `metadata_patch` that sets one is refused with `422`: `qb_external_id`, `qb_entry_ids`, `qb_round_trip_baseline`, `qb_sync_confirmed_at`, `qb_sync_token`, `routed_via`, `last_outbound_error`, `reconciles_event_id`, `round_trip_duplicate_of`, `drift_payload`, `drift_detected_at`, `reconciliation_history`, and any key starting `dispatch_`.
+Some metadata keys are written only by the platform, by write-back and the sync, and a create's `metadata` or an update's `metadata_patch` that sets one is refused with `422`: `qb_external_id`, `qb_entry_ids`, `qb_round_trip_baseline`, `qb_sync_confirmed_at`, `qb_sync_token`, `routed_via`, `last_outbound_error`, `reconciles_event_id`, `round_trip_duplicate_of`, `drift_payload`, `drift_detected_at`, `reconciliation_history`, `source_version` (set it with the request's own `source_version` field), the suggestion record (`suggestion_source`, `suggestion_basis`, `suggestion_outcome`, `suggestion_caution`, `feed_suggested_element_id`, `feed_suggested_account_name`, `suggested_discharges_event_id`), and any key starting `dispatch_`.
 
 ## preview-event-block
 
@@ -136,7 +149,7 @@ Publishes an event to its connection's system of record. Request: `event_id`, an
 | --- | --- |
 | No connection on the event | Returned unchanged; nothing is written externally |
 | A connection that does not keep the books of the event's entity | Refused; an entity's entries are never published to another entity's ledger |
-| `write_policy: native` | Returned unchanged; RoboLedger is the system of record |
+| `write_policy: native` or `shadow` | Returned unchanged; nothing is written to QuickBooks |
 | `write_policy: qb_authoritative` | Each unpublished draft entry is written to QuickBooks as its own journal entry, with the entry id as the request id, and recorded in `metadata.qb_entry_ids` (entry id → QuickBooks id). Each entry that lands posts. Once no draft is left, the event moves to `fulfilled` and its transactions post. On rejection, the entries sent before it stay posted, the rejection is stored on `metadata.last_outbound_error`, the event keeps its status, and the rest stay draft for a retry, which sends only the entries not yet in `qb_entry_ids`. |
 
 Response: `event_id`, `status`, `qb_external_id` (the first entry this call published), `qb_entry_ids` (every entry of the event now in QuickBooks), and `qb_error` (`{code, message, qb_response_at}` on rejection). An event already `fulfilled` is returned as-is. A `voided` or `superseded` event, or one with no drafted ledger entries (commit it first), is refused with `409`. A `401` means QuickBooks refused the credentials and the connection needs a fresh consent; a `503` means Intuit was unreachable, and the call can be retried. Write policies are covered in [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md).
@@ -151,7 +164,17 @@ A create is validated in three phases:
 
 A capture-only event clears the first two phases and is stored without handler logic.
 
-**Idempotency is `(source, external_id)`.** A second create with the same pair is refused as a duplicate. Omit `external_id` and there is no dedup; supply it for anything a sender might retry. This is separate from the `Idempotency-Key` header, which replays the response to a retried request.
+**Idempotency is `(source, external_id)`.** A second create with the same pair is refused as a duplicate with `409`, unless it is a later version from the entity's ledger of record ([below](#corrections-from-an-external-ledger)). Omit `external_id` and there is no dedup; supply it for anything a sender might retry. This is separate from the `Idempotency-Key` header, which replays the response to a retried request.
+
+## Corrections from an external ledger
+
+A source registered as the general ledger that keeps an entity's books (`ledger: true` on its connection; see [Build a Ledger Integration](Build-a-Ledger-Integration.md#when-the-source-is-the-general-ledger)) corrects what it sent through the same two operations.
+
+**A later version.** Send the `journal_entry_recorded` event again with the same `source` and `external_id`, `apply_handlers: true`, and a higher `source_version`. The entries the event posted leave the books (status `superseded`) and the handler posts the new ones. The event keeps its id, and its amount, dates, description, counterparty, metadata and dimensions become the new version's. An equal or lower version, or none, is the `409` of a repeat delivery. From any other source, or on any other event type, `source_version` is stored and has no effect.
+
+**A withdrawal.** When the source no longer holds the record, `update-event-block` with `transition_to: "voided"` and `source_retracted: true` takes the event's posted entries out of the books and voids it. This is the one retraction allowed after posting; it is refused with `422` for an event that did not come from the entity's ledger of record.
+
+Both work in open periods only: every date the old entries hold, and every date the new ones take, must be open. A later version cannot move the event to another entity, bring back a voided or superseded event (send the record under a new `external_id`), or name `resolves_reconciling_items`.
 
 ## Reconciling Items
 
@@ -189,8 +212,10 @@ Source transaction types that book the same way share the journal-entry handler:
 
 **`journal_entry_recorded` metadata** takes exactly one of two shapes; both or neither is rejected.
 
-- **Flat**, one entry: `posting_date`, `memo`, `line_items[]` (each `element_id`, `debit_amount`, `credit_amount` in cents with exactly one non-zero, optional `description` and `metadata`), `type` (`standard` default, `adjusting`, `closing`, `reversing`), `status` (`draft` default, or `posted`), optional `transaction_id`.
-- **Nested**, several entries from one event: `entries[]`, each with `posting_date`, `memo`, `line_items[]` (at least two; a line may name `element_external_id` instead of `element_id`, resolved through the source connection), `type`, and optional `external_id`. `status` applies to all of them. This is the shape an importer uses when one source transaction produces several journals.
+- **Flat**, one entry: `posting_date`, `memo`, `line_items[]` (each `element_id`, `debit_amount`, `credit_amount` in cents with exactly one non-zero, optional `description`, `metadata`, `dimension_ids` and `flow_qname`), `type` (`standard` default, `adjusting`, `closing`, `reversing`), `status` (`draft` default, or `posted`), optional `transaction_id`, and on the consolidation entity `adjustment_kind` with `adjusts_entity_id`.
+- **Nested**, several entries from one event: `entries[]`, each with `posting_date`, `memo`, `line_items[]` (at least two; a line may name `element_external_id` instead of `element_id`, resolved through the source connection), `type`, and optional `external_id`. `status` applies to all of them. This is the shape an importer uses when one source transaction produces several journals. A nested line may carry `dimension_refs` (`[{type, value}]`), the source's own tags by axis.
+
+On a flat line, `dimension_ids` are the management dimension members it carries, one per axis, and `flow_qname` is the cash flow row its cash belongs to: an rs-gaap flow concept such as `rs-gaap:ProceedsFromIssuanceOfLongTermDebt`, for a loan drawn or repaid, capital put in or taken out, an asset bought or sold. Omitted, the account's default flow applies. A flow set on one side of the entry tags the untagged lines on the other, and one that is not a row of the entity's cash flow statement is refused. The rows on offer are the GraphQL `flowCandidates(entityId:)`, or `list-flow-candidates` from an MCP client. `resolves_reconciling_items` names the reconciling items an alignment entry settles (see [Reconciling Items](#reconciling-items)).
 
 `publish_to_source` (true or false) overrides whether the entry is published back to the source system; left unset it follows the event's `source`.
 
@@ -203,13 +228,17 @@ A feed captures each posted bank line as one event, with the bank account's char
 | Key | Meaning |
 | --- | --- |
 | `classified_element_id` | The one account the whole line books to |
-| `classified_allocations` | A split: `[{element_id, amount}]`, positive cents that sum to the line's absolute amount. Wins over `classified_element_id`. |
+| `classified_allocations` | A split: `[{element_id, amount}]`, positive cents that sum to the line's absolute amount, each part with an optional `flow_qname` and `dimension_ids`. Wins over `classified_element_id`. |
+| `classified_flow_qname` | The cash flow row the line is, when it is not its account's default: an rs-gaap flow concept (a loan drawn, a capital contribution, an equipment purchase). On a split, `flow_qname` on each part. Patching it on a posted line re-tags the line in place, in a closed month too; an empty string clears it. |
+| `classified_dimension_ids` | The management dimension members the account side carries, one per axis; a split part's own `dimension_ids` win. |
 | `accept_suggestion` | `true` takes `suggested_element_id`. Refused when the line carries no suggested element, as with a name-only suggestion. |
 | `not_a_settlement` | `true` says a line suggested as the settlement of an open bill or invoice (`suggestion_source: open_item`) is a separate transaction. Without it, classifying that line to an account other than the suggested one is refused. |
 | `from_element_id`, `to_element_id` | `internal_transfer` only: the two bank legs. `to_element_id` defaults to `resource_element_id`. The feed sets both when it knows both accounts. |
 | `classified_by`, `basis` | Who chose, and why. Recorded, not interpreted. |
 
 `captured` → `classified` checks the choice and refuses one that could not post, with the reason: no account chosen, a split that does not sum to the line, or the line classified to the bank account it moved through. On commit the handler writes a draft journal entry: money in is debit bank and credit the chosen account, money out the reverse. An unclassified line falls back to the graph's DSL handlers and is refused when none matches. A bank line is always pinned to the local lane (`publish_to_source: false`), so it never writes back to QuickBooks. When the bank later changes a posted line, the event becomes a reconciling item and a restate posts the bank's new amount and date; a line the bank removed is refused and reverses through `catch_up`. The handlers land `classified`.
+
+`metadata.suggestion_source` says where a suggestion came from: `open_item` (the line pays an open bill or invoice of its counterparty exactly, named in `suggestion_basis`), `agent_default` (the account that counterparty's earlier lines went to), or `tier0` (the bank's own category). Taking an `open_item` suggestion also settles the item, so the cost is not counted twice; it is refused if the item has been paid or claimed since. A suggestion can be taken only before the line posts. A bank line you capture yourself with an `agent_id` gets the same suggestion a feed line gets.
 
 A learned suggestion on a line more than three times the largest the counterparty has posted says so in `suggestion_basis` and carries `suggestion_caution: unusual_amount`. `accept-suggestions` skips such a line with the reason `needs_review`, so it is classified on its own.
 
@@ -252,7 +281,7 @@ What a handler writes, level by level:
 | Record | Id | Fields |
 | --- | --- | --- |
 | **Transaction** | `txn_…` | `type`, `amount` (cents, non-negative), `date`, `currency`, `source`, `status` (`pending` / `posted` / `void`), `triggered_by_event_id` |
-| **Entry** | `je_…` | `transaction_id`, `type` (`standard` / `adjusting` / `closing` / `reversing`), `posting_date`, `status` (`draft` / `posted` / `reversed`), `provenance`, `memo`, `triggered_by_event_id` |
+| **Entry** | `je_…` | `transaction_id`, `type` (`standard` / `adjusting` / `closing` / `reversing`, and `opening`, which only `record-opening-balance` writes), `posting_date`, `status` (`draft` / `posted` / `reversed`; `shadowed`, a draft a shadow close kept as an expectation instead of posting; `superseded`, a posted entry a correction took out of the books and replaced, kept so references to it resolve), `provenance`, `memo`, `triggered_by_event_id` |
 | **LineItem** | `li_…` | `entry_id`, `element_id`, `debit_amount`, `credit_amount` (cents; exactly one non-zero), `flow_element_id` (the cash-flow or equity flow the line belongs to), `description`, `line_order` |
 
 An entry needs at least two line items and must balance. A posted entry is corrected by reversing it, never by editing it, and an entry can be reversed at most once.
@@ -295,10 +324,13 @@ Run it with the MCP `read-graph-cypher` tool or the query endpoint in [Querying 
 
 GraphQL at `POST /extensions/{graph_id}/graphql`:
 
-- `eventBlocks(eventType, eventCategory, status, agentId, source, externalId, isReconcilingItem, limit, offset)`
+- `eventBlocks(eventType, eventCategory, eventClass, status, agentId, source, externalId, isReconcilingItem, entityId, limit, offset)`. `source` with `externalId` finds the event a source record made.
 - `eventBlock(id)`
+- `dischargeCandidates(eventId)`: the open invoices or bills a payment or bank line may settle, an exact amount match first, then the oldest due date
+- `openItemsForAgent(agentId, kind, asOf, entityId)`, `agedReceivables` and `agedPayables(asOf, entityId, scope)`: what is still open at a date
+- `flowCandidates(entityId)`: the cash flow rows a `flow_qname` may name
 
-MCP: `list-event-blocks`, `get-event-block`, and the write tools `create-event-block`, `update-event-block`, `preview-event-block`, `execute-event-block`, `promote-obligations`.
+MCP: `list-event-blocks`, `get-event-block`, `list-discharge-candidates`, `list-flow-candidates`, `aged-balances`, and the write tools `create-event-block`, `update-event-block`, `preview-event-block`, `execute-event-block`, `accept-suggestions`, `promote-obligations`.
 
 ## Errors
 
@@ -307,7 +339,8 @@ MCP: `list-event-blocks`, `get-event-block`, and the write tools `create-event-b
 | A create wrote no ledger rows | `apply_handlers` defaults to `false`; the event was captured |
 | Category rejected | `event_category` does not belong to `event_class` |
 | Source rejected | `source` is not a platform value or a connection registered on the graph |
-| Duplicate event | The `(source, external_id)` pair already exists |
+| Duplicate event | The `(source, external_id)` pair already exists, and the create is not a later `source_version` from the entity's ledger of record |
+| Reserved event type | `event_type` is one only its own operation writes (`reconciliation_signed_off`, `reconciliation_policy_changed`, `balance_observed`) |
 | Handler not found, or ambiguous | No active handler matches the `event_type`, or two DSL handlers tie at the top priority |
 | Metadata validation failed | The handler's metadata schema rejected `metadata`, or both or neither journal shape was supplied |
 | Unbalanced entry | Fewer than two line items, a line with both or neither side set, or Σ debits ≠ Σ credits |

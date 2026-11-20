@@ -121,6 +121,7 @@ Graph lifecycle and content writes use the same `OperationEnvelope` / idempotenc
 
 - **create-file-upload** / **ingest-file** / **delete-file** — Presign an S3 upload, stage the uploaded file into DuckDB, remove it
 - **index-document** / **delete-document** — Write a document to PostgreSQL and the OpenSearch index, or remove it
+- **create-document-upload** / **complete-document-upload** — Presign a document file upload, then check and store the uploaded file
 
 **Memory** (`routers/graphs/content_ops.py`) — the semantic memory store:
 
@@ -198,9 +199,9 @@ The surface is gated by `SEMANTIC_MEMORY_ENABLED` (the master switch over REST, 
 
 **Location**: `/robosystems/worker/`
 
-Always-on ECS service that runs every operator task, period close, and other background operations:
+ECS service (`worker.yaml`, deployed when `WORKER_ENABLED_*` is on) that runs graph creation, materialization, every operator task, period close, and other queued operations:
 
-- **Valkey Queue**: BRPOP consumer loop on DB 6 with graceful shutdown
+- **Valkey Queue**: BLMOVE consumer loop on DB 6 (each task moves to a per-worker inflight list, so a crashed worker's task is requeued) with graceful shutdown
 - **Task Registry**: `@register_task` decorator for handler discovery
 - **SSE Progress**: Real-time streaming via OperationManager (Valkey DB 3)
 - **Dagster Reporting**: Fire-and-forget AssetMaterialization events for observability
@@ -257,9 +258,9 @@ Each adapter's pipeline is collected only when its flag is on (`SEC_PIPELINE_ENA
 
 | Category | Description |
 |----------|-------------|
-| **Billing** | Credit allocation, storage billing, usage collection |
+| **Billing** | Monthly credit allocation, Stripe subscription events, invoice billing, usage reports |
 | **Infrastructure** | Auth cleanup, health checks, instance monitoring |
-| **Graph Operations** | Database creation, backups, materialization |
+| **Graph Operations** | Backups and restores, file staging, materialization |
 | **Data Pipelines** | Adapter pipelines (SEC XBRL: download, process, stage, materialize, publish; QuickBooks sync; bank feeds when enabled) |
 | **Event Triggers** | Graph lifecycle transitions, stale-graph rematerialization, repository sync, adapter sensors |
 
@@ -439,7 +440,7 @@ Subgraphs provide isolated database environments within a parent graph, availabl
 
 For current tier specifications including instance types, memory allocation, subgraph limits, and pricing, see:
 - **[Graph Configuration](https://github.com/RoboFinSystems/robosystems/blob/main/.github/configs/graph.yml)** - Infrastructure specifications
-- **[Billing Configuration](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/billing/)** - Subscription plans, AI costs, and storage pricing
+- **[Billing Configuration](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/billing/)** - Subscription plans and AI credit costs (storage is included in the tier)
 - **[Shared Repository Registry](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/shared_repositories.py)** - Repository plans, rate limits, and credit costs (defined in adapter manifests)
 
 ## Data Processing Layer
@@ -487,7 +488,8 @@ operations/roboledger/
 
 operations/roboinvestor/
 ├── reads/       # portfolios, portfolio_block, securities, positions, holdings
-└── commands/    # portfolio_block (portfolios and positions as one envelope), securities
+└── commands/    # portfolio_block (portfolios and positions as one envelope), securities,
+                 # reports (an issuer and the reports received about it)
 
 operations/information_block/  # Cross-domain; not nested under roboledger
 ├── types.py        # BlockTypeRegistryEntry — the code-owned per-block-type descriptor
@@ -797,7 +799,8 @@ S3 storage is organized into four canonical buckets with consistent naming (`rob
 ```
 # Shared data (SEC)
 s3://robosystems-shared-raw-{env}/
-  sec/{cik}/{accession}.zip
+  sec/year={year}/{cik}/{accession}.zip
+  sec/8k/filed={quarter}/{cik}/{accession}.zip
 
 s3://robosystems-shared-processed-{env}/
   sec/processed/filed=2024-Q1/nodes/Entity/part_*.parquet
@@ -1067,7 +1070,7 @@ See individual app repositories for specific deployment workflows.
 
 **Purpose**: AI-powered financial operations
 
-- AWS Bedrock (the Converse API) for model access: Claude Sonnet 5.5 by default (the balanced profile), with Claude Opus 5.5 (quality) and OpenAI GPT-5.6 Luna (economy) as the other profiles; the `author` operator runs on the quality profile
+- AWS Bedrock (the Converse API) for model access: Claude Sonnet 5.5 by default (the balanced profile), with Claude Opus 5.5 (quality) and Claude Haiku 5.5 (economy) as the other profiles; the `author` operator runs on the quality profile
 - Self-hosted stacks can point operators at any OpenAI-compatible server instead (see [Self-Hosted AI Models](Self-Hosted-AI-Models.md))
 - Unified operator system: stateless operators with automatic credit tracking per call
 - Three registered operators: `analyst` (`AnalystOperator`, answers a question from the graph's read-only tools), `author` (`AuthorOperator`, makes a requested change through writes that are reversible or wait on a person's step — metric and forecast blocks, counterparties, memories, draft reports, inbox classifications), and `mapping` (`MappingOperator`, automatic CoA→rs-gaap taxonomy mapping)

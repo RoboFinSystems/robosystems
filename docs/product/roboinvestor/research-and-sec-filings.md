@@ -11,11 +11,13 @@ RoboInvestor has two ways into public companies, and they are not the same graph
 
 **Research** (`/companies` once you are signed in, and [roboinvestor.ai/research](https://roboinvestor.ai/research) on the public site) reads a catalog of filings and research briefs. It does not use your investment graph. You can browse a company, open a filing, and read a brief where one has been published.
 
-Reading filings and briefs doesn't touch the SEC knowledge graph. The **Ask about this filing** box on a company page does: it needs the SEC subscription below, and it uses credits.
+Reading filings and briefs doesn't touch the SEC knowledge graph. The **Ask about this filing** box on a company page does: it needs the SEC subscription below, past its trial, and it uses credits.
 
 ## The SEC filings graph
 
 The structured filings of 8,000+ public companies live in a shared RoboSystems repository. Access is a subscription. In the app, open **Repositories**, browse to **SEC EDGAR Filings** and choose a plan. Plans and prices are on the [pricing page](https://robosystems.ai/pricing).
+
+Your first subscription starts with a 14-day free trial, and no card is needed to start it. The trial covers the analysis tools your own AI assistant uses once it is connected. Three things wait for your first payment: **Ask about this filing**, the AI analyst in the **Console**, and raw graph queries. On a trial the filing box says so and links to **start your plan now**, which opens them without waiting for the trial to end. The trial's terms are in [Analyze SEC filings](https://robosystems.ai/docs/guides/sec-filings).
 
 After you subscribe, the repository's getting-started page shows how to connect. The graph is read-only and shared: everyone who subscribes reads the same filings.
 
@@ -37,7 +39,7 @@ What you can ask of the filings, and the rules that decide whether a number is r
 
 ## Console and Search
 
-With a graph selected (your portfolio graph or the SEC filings), **Console** asks questions inside the app. It runs on RoboSystems' own AI and uses credits. **Search** finds text in the SEC filings, or, on your portfolio graph, in the documents saved there.
+With a graph selected (your portfolio graph or the SEC filings), **Console** asks questions inside the app. It sits in a drawer at the bottom of every page: click the **Console** bar to open it. It runs on RoboSystems' own AI and uses credits. **Search** finds text in the SEC filings, or, on your portfolio graph, in the documents saved there.
 
 Claude, ChatGPT and other clients you connect yourself don't use RoboSystems credits. See [Graphs, tiers and credits](https://robosystems.ai/docs/guides/graphs-tiers-and-credits).
 

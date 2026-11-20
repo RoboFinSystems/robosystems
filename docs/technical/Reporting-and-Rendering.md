@@ -51,7 +51,7 @@ Phase 1 emits more facts than you mapped. Four derivations are worth understandi
 
 - **Auto-derived Retained Earnings.** Net Income (the sum of revenue minus expenses, netting dividends and buybacks) is folded into the equity close-target concept at render time, so `Assets = Liabilities + Equity` holds *without a posted closing journal entry*. This is the QuickBooks pattern, and it makes backdating safe: Retained Earnings is recomputed on every render, so a backdated transaction can never leave a stale balance behind.
 - **Net Income as a standalone fact.** The same earnings figure is emitted as its own fact so the Income Statement bottom line and the Equity roll-forward agree by construction.
-- **Flow-as-fact cash flow.** Gross cash-flow facts are emitted directly from each ledger line's flow tag (`flow_element_id`), or from the account's default flow when the line has none: every investing and financing row, and an operating row that is a receipt rather than an adjustment (a concept with an `activityType` trait). The rest of operating cash flow is derived from period-over-period balance-sheet deltas (the indirect method). This is why untagged accounting data still renders a cash-flow statement — provided accounts are mapped at the grain the arcs key on (for example, PP&E Gross for capex). An equity-method investment's share of income is removed in operating as non-cash, in full, and a distribution received on the investment account is an operating row of its own (`EquityMethodInvestmentDividendsOrDistributions`), a return on the investment (ASC 230-10-45-21D). A distribution past the investor's share of earnings is a return of the investment: tag the cash line `ProceedsFromEquityMethodInvestmentDividendsOrDistributionsReturnOfCapital` and it is presented in investing. A sale of the investment is tagged `ProceedsFromSaleOfEquityMethodInvestments`.
+- **Flow-as-fact cash flow.** Gross cash-flow facts are emitted directly from each ledger line's flow tag (`flow_element_id`), or from the account's default flow when the line has none: every investing and financing row, and an operating row that is a receipt rather than an adjustment (a concept with an `activityType` trait). The rest of operating cash flow is derived from period-over-period balance-sheet deltas (the indirect method). This is why untagged accounting data still renders a cash-flow statement — provided accounts are mapped at the grain the arcs key on (for example, PP&E Gross for capex). An equity-method investment's share of income is removed in operating as non-cash, in full, and a distribution received on the investment account is an operating row of its own (`EquityMethodInvestmentDividendsOrDistributions`), a return on the investment (ASC 230-10-45-21D). A distribution past the investor's share of earnings is a return of the investment: tag the cash line `ProceedsFromEquityMethodInvestmentDividendsOrDistributionsReturnOfCapital` and it is presented in investing. A sale of the investment is tagged `ProceedsFromSaleOfEquityMethodInvestments`. A payment is looked through to what it settled: where a payment's event discharges a bill (or a receipt an invoice), the share that settles the bill's investing or financing lines takes those lines' flows and comes out of the payable's change, so equipment bought on a bill and paid later is capital expenditure, not operating cash; one payment of several bills is split across them by the amounts it was applied at. An entry with no cash line moves no cash: its effect is backed out of operating as non-cash, and an asset it acquires is disclosed (capital expenditures incurred but not yet paid, or a non-cash acquisition). Cash paid for interest and income taxes is disclosed from the entries that carry cash. When payments to payables carry no link to their bill while a bill with investing or financing lines is open, what they settled stays in operating and the statement's `validation.warnings` says so.
 - **PP&E net synthesis.** Gross property and accumulated depreciation roll up into a net line so the Balance Sheet presents the figure readers expect.
 
 All of these are computed, not stored on the ledger — which is exactly why backdating, restatement, and re-mapping stay safe: the next render recomputes everything from current facts.
@@ -71,7 +71,7 @@ A Style is named by a four-segment code, `{BS-layout}-{equity-form}-{IS-layout}-
 
 Three Styles ship, `BSC-{CORP|PART|LLC}-IS02-CF1`: the equity form is the only axis with variants today. The reserved codes (other balance-sheet layouts, a single-step income statement, the direct cash-flow method) are room in the grammar, not shipped styles.
 
-The Style is pinned **per Entity**, not per graph. Every entity has one, defaulted from its legal form when it is created (corporation → `CORP`, partnership → `PART`, LLC → `LLC`), so subsidiaries of different forms each carry their own style while resolving to the same calc-DAG subtotals. A Style composes one **Network** (a presentation tree) per statement type, and at render time the engine does one deterministic join: Style → Network → the leaves the calc DAG rolls up. It never guesses which structure to walk.
+The Style is pinned **per Entity**, not per graph. Every entity has one, defaulted from its legal form when it is created (corporation → `CORP`, partnership → `PART`, LLC → `LLC`), so subsidiaries of different forms each carry their own style while resolving to the same calc-DAG subtotals. A group statement is the exception: the combined and consolidated views, and a report made from the consolidation entity's mapping, render every member under the group parent's Style. A Style composes one **Network** (a presentation tree) per statement type, and at render time the engine does one deterministic join: Style → Network → the leaves the calc DAG rolls up. It never guesses which structure to walk.
 
 ```text
 Reporting Style  ──▶  Network (per statement type)  ──▶  leaves  ──▶  calc DAG roll-up
@@ -102,12 +102,12 @@ RenderingLite
   rows[]        element_id, element_qname, element_name, classification,
                 balance_type, item_type, depth, is_subtotal, text_value,
                 values[]  (one per period)
-  periods[]     label, start, end, forecast
+  periods[]     label, start, end, forecast, presentation, stamped_at
   validation    passed, status, checks[], failures[], warnings[]
   unmapped_count
 ```
 
-Each row's `classification` follows FASB SFAC 6 (`asset`, `liability`, `equity`, `revenue`, `expense`), `depth` drives indentation, and `is_subtotal` marks derived roll-up rows. `element_id` / `element_qname` are the join key the chart keys off, `item_type` carries the value-domain format family (monetary, ratio, percent, multiple, days) that drives per-row formatting, and `text_value` holds a non-numeric row's text. On a period column, `forecast` marks a column sourced from a forecast scenario's FactSet; labels also carry a `(forecast)` suffix, but style off the flag, not the label. The browser renders all of this directly, with no calculation.
+Each row's `classification` follows FASB SFAC 6 (`asset`, `liability`, `equity`, `revenue`, `expense`), `depth` drives indentation, and `is_subtotal` marks derived roll-up rows. `element_id` / `element_qname` are the join key the chart keys off, `item_type` carries the value-domain format family (monetary, ratio, percent, multiple, days) that drives per-row formatting, and `text_value` holds a non-numeric row's text. On a period column, `forecast` marks a column sourced from a forecast scenario's FactSet; labels also carry a `(forecast)` suffix, but style off the flag, not the label. `presentation` is `as_closed` on a column whose figures are the ones its month's close stamped, with `stamped_at` saying when; a live read can differ from it once a mapping is reclassified after the close. Rendering rows carry no `period_role`: on a roll-forward (the equity statement, the cash reconciliation) the beginning and ending balance rows share one element, and the field that tells them apart is on `live-financial-statement` and on the `statement(reportId, blockType)` read. The browser renders all of this directly, with no calculation.
 
 ## Guard Rails
 
@@ -117,6 +117,8 @@ Rendering runs **synchronous footing checks** at the moment a statement is produ
 - `Net Income = Revenue − Expenses`
 - The cash-flow statement foots (operating + investing + financing reconciles to the change in cash), and rolls forward: cash at the beginning of the period plus the net change equals cash at the end
 - The statement of equity rolls forward: each beginning balance plus the changes beneath it equals its ending balance (the parent's capital, and a group's noncontrolling interest beside it)
+- Every subtotal equals the sum of its children
+- A warning, not a failure, when the operating section's reconciling line is large against operating cash: the cash flow foots by construction, so a large reconciling line usually means a misclassified flow
 
 Guard-rail results surface in the `validation` block of a `RenderingLite` payload (`passed`, `status`, `checks`, `failures`, `warnings`) and, with the same shape, on saved-report statements and the live statement. Every check runs on every rendered column; on a comparative statement each failure and warning is prefixed with the column it was found in (`[Prior] Balance sheet does not balance …`). `status` is `passed`, `failed`, or `inconclusive` — the last means nothing was checked, because no rules exist for that block type (the comprehensive income statement today) or because no column has any activity, and `passed` is `false` rather than vacuously `true`.
 
@@ -130,13 +132,13 @@ The `reports` table **is** the package container. A Report row carries:
 
 - Identity and period: `name`, `period_start`, `period_end`, `periods` (JSON), `taxonomy_id`
 - Two independent lifecycles:
-  - **Generation** — `generation_status` moves `pending → generating → complete → published`
+  - **Generation** — `generation_status` is `published` once the report's facts and its holon are written. `create-report` and `regenerate-report` hold it at `generating` only inside the write, so a reader sees `published`; a report shared in or loaded from a file arrives `published`
   - **Filing** — `filing_status` moves `draft → under_review → filed → archived`, with `filed_at` / `filed_by`
 - **Restatement fields** `supersedes_id` / `superseded_by_id`, reserved for linking a corrected report to the one it replaces. No operation sets them today, so they read as null
 - How it arrived: `origin` is `authored` (from this graph's own books), `shared` (in from another graph) or `uploaded` (as a file). Anything but `authored` is a received report: read-only here, and served as the artifact that arrived rather than rebuilt from the rows
 - Sharing provenance, on a shared report: `source_graph_id`, `source_report_id`, `shared_at`
 
-Package membership is **implicit in fact dual-stamping**: a Report owns FactSets (`fact_sets.report_id`), and FactSets own Facts (`facts.fact_set_id`). That dual stamp *is* the membership — there is no separate join table listing which statements belong to a report. The statement display order is fixed: Balance Sheet (1), Income Statement (2), Cash Flow (3), Equity (4), then Schedules (100).
+Package membership is **implicit in fact dual-stamping**: a Report owns FactSets (`fact_sets.report_id`), and FactSets own Facts (`facts.fact_set_id`). That dual stamp *is* the membership — there is no separate join table listing which statements belong to a report. The statement display order is fixed: Balance Sheet (1), Income Statement (2), Cash Flow (3), Equity (4), disclosure notes (50), then Schedules (100).
 
 This is why a statement is a view, not a stored artifact: the Report holds facts; the envelope renders them on demand.
 
@@ -148,7 +150,7 @@ Each fact also carries its own `provenance`, beside the FactSet's. A pivoted lea
 
 There are several addressable surfaces, depending on whether you want a saved Report, a live ad-hoc statement, or a slice of facts. All authenticated `curl` examples target `https://api.robosystems.ai` and send your API key from `$ROBOSYSTEMS_API_KEY` in the `X-API-Key` header; to get an account, a key, and a graph, see [Quick Start](Quick-Start.md). Replace `$GRAPH_ID` with your tenant graph id. The read surfaces `build-fact-grid` and `financial-statement-analysis` also take `sec`, the shared SEC repository; `create-report` and `live-financial-statement` need a tenant graph with a RoboLedger ledger, so `sec` is not valid there.
 
-Full request/response schemas live in the [live OpenAPI spec](https://robosystems.ai/docs/api) — this page shows usage, not the full endpoint surface.
+Full request and response schemas are in the [extensions reference](https://robosystems.ai/docs/extensions) — this page shows usage, not the full endpoint surface.
 
 ### Build a Fact Grid (Scoped Slice of the Hypercube)
 
@@ -174,7 +176,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
   }'
 ```
 
-The `mapping_id` is the id of the graph's chart-of-accounts mapping structure (a `struct_…` id); the `mappings` GraphQL field or the `list-mapping-structures` MCP tool returns it. See [Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md). The operation returns an `OperationEnvelope` and accepts an `Idempotency-Key` header so retries are safe.
+The `mapping_id` is the id of the graph's chart-of-accounts mapping structure (a `struct_…` id); the `mappings` GraphQL field or the `list-mapping-structures` MCP tool returns it. See [Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md). The operation returns an `OperationEnvelope` and accepts an `Idempotency-Key` header so retries are safe. `entity_id` names the entity when a graph has several (it must be the one whose chart `mapping_id` maps from); `periods` replaces `period_start` / `period_end` / `comparative` with explicit columns. Made from the consolidation entity's mapping, the report is the group's consolidated statements; see [Group Consolidation](Group-Consolidation.md).
 
 ### Fetch a Rendered Statement via GraphQL
 
@@ -202,7 +204,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
   -d '{"statement_type": "income_statement", "period_type": "annual", "fiscal_year": 2026}'
 ```
 
-Each cash-flow column computes its indirect-method deltas from its own opening balances, the day before it starts, so a single period renders on its own. For comparative graph-hypercube analysis on the SEC repo, use `financial-statement-analysis` instead.
+Each cash-flow column computes its indirect-method deltas from its own opening balances, the day before it starts, so a single period renders on its own. The request also takes `entity_id` (omit for the group parent), `scope` (`entity`, the default; `combined` and `consolidated` on the group parent, see [Group Consolidation](Group-Consolidation.md)), `dimension` (an income statement sliced by department, class, location or project) and `include_sources` (each row's `origin` and the accounts each figure was summed from). For comparative graph-hypercube analysis on the SEC repo, use `financial-statement-analysis` instead.
 
 ### From an MCP Client
 
@@ -229,7 +231,7 @@ If a rendered number is wrong, the fix is almost never in the renderer. It is in
 
 - **[Operations](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md)** - Business-logic kernel; the operations the renderer delegates to
 - **[GraphQL](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)** - The Strawberry extensions surface that serves `informationBlock` and `reportPackage`
-- **[API reference](https://robosystems.ai/docs/api)** - API reference with machine-readable OpenAPI spec
+- **[API reference](https://robosystems.ai/docs/extensions)** - The extensions reference: every operation's request and response
 
 ## Support
 

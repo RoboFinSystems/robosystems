@@ -83,7 +83,7 @@ curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/operations/index-do
   -H "Content-Type: application/json" \
   -d '{
     "title": "Property, Plant & Equipment Depreciation Policy",
-    "content": "# PP&E Depreciation Policy\n\n## Method\nThe Company depreciates property, plant and equipment on a straight-line basis over the estimated useful lives of the assets.\n\n## Useful Lives\n- Buildings: 30 years\n- Machinery & equipment: 7 years\n- Computer hardware: 3 years\n\n## Capitalization Threshold\nIndividual assets with a cost of $5,000 or more are capitalized; smaller purchases are expensed.",
+    "content": "# PP&E Depreciation Policy\n\n## Method\nThe Company depreciates property, plant and equipment on a straight-line basis over the estimated useful lives of the assets, beginning in the month each asset is placed in service.\n\n## Useful Lives\nBuildings are depreciated over 30 years, machinery and equipment over 7 years, and computer hardware over 3 years. Land is not depreciated.\n\n## Capitalization Threshold\nIndividual assets with a cost of $5,000 or more are capitalized and depreciated; smaller purchases are expensed in the period they are incurred.",
     "folder": "policies",
     "tags": ["depreciation", "fixed-assets", "ppe"]
   }'
@@ -99,11 +99,11 @@ The operation returns an `OperationEnvelope` (camelCase keys), with the indexing
   "result": {
     "id": "doc_abc123def456",
     "document_id": "udoc_doc_abc123def456",
-    "sections_indexed": 4,
-    "total_content_length": 512,
-    "section_ids": ["udoc_doc_abc123def456_0", "udoc_doc_abc123def456_1", "..."]
+    "sections_indexed": 3,
+    "total_content_length": 549,
+    "section_ids": ["udoc_doc_abc123def456_0", "udoc_doc_abc123def456_1", "udoc_doc_abc123def456_2"]
   },
-  "at": "2026-08-09T18:04:11.921Z",
+  "at": "2026-08-09T18:04:11Z",
   "createdBy": "user_01K2...",
   "idempotentReplay": false
 }
@@ -111,7 +111,7 @@ The operation returns an `OperationEnvelope` (camelCase keys), with the indexing
 
 The bare `id` (`doc_…`) is the PostgreSQL document id used by `get-document` and the REST `/documents/{id}` route. The `document_id` and `section_ids` (`udoc_doc_…`) are the OpenSearch ids; a per-section id (ending in `_N`) is what search hits return and what `get-document-section` takes.
 
-**Note:** Sections under 20 words are merged into a neighboring section, so a bare one-line heading will not become its own searchable chunk.
+**Note:** Sections under 20 words are merged into a neighboring section, so a bare one-line heading will not become its own searchable chunk. The title line here has no body of its own and becomes part of the Method section, which is why three sections come back and not four.
 
 ### Step 2: Search the Documents
 
@@ -135,7 +135,7 @@ curl -X GET "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/search/udoc_doc_abc1
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
-This returns the full section content (here, the "Useful Lives" list with the 7-year figure for machinery).
+This returns the full section content (here, the "Useful Lives" section with the 7-year figure for machinery).
 
 ### Step 4: The Operator Does This Automatically
 
@@ -150,7 +150,7 @@ The Operator will:
                       "semantic": true }
      -> top hit document_id: "udoc_doc_abc123def456_1", section_label: "Useful Lives"
 2. get-document-section { "document_id": "udoc_doc_abc123def456_1" }
-     -> the section text: "Machinery & equipment: 7 years"
+     -> the section text: "...machinery and equipment over 7 years..."
 3. Answers, grounded in the actual policy: "7 years, straight-line."
 ```
 
@@ -183,8 +183,10 @@ AI Operators interact with the index through MCP tools. All of them require docu
 - `list-documents` — browse documents by metadata; filter by `folder` or `source_type`.
 - `update-document` — update an existing document.
 - `delete-document` — remove a document from PostgreSQL and OpenSearch together.
+- `create-document-upload` / `complete-document-upload` — store a PDF, PNG or JPEG as a document. A stored file is not indexed, so it never appears in search.
+- `read-document-file` — read a stored PDF's text, page by page.
 
-**Note:** The document tools register only on your own graphs, not on shared repositories. The write tools (`create-document`, `update-document`, `delete-document`) additionally require a writable graph. The search tools (`search-documents`, `get-document-section`) work against both your graphs and shared repositories like `sec`.
+**Note:** The document tools register only on your own graphs, not on shared repositories. The write tools (`create-document`, `update-document`, `delete-document`, and the two upload tools) additionally require a writable graph. The search tools (`search-documents`, `get-document-section`) work against both your graphs and shared repositories like `sec`.
 
 For an iXBRL disclosure, `get-document-section` returns the XBRL elements tagged in that section (`xbrl_elements`); the MCP `search-documents` hits leave them out to stay small. An Operator can hand one to `resolve-element` to look up the XBRL element, then run `read-graph-cypher` to pull the structured values — pivoting from narrative to numbers.
 
@@ -250,7 +252,7 @@ Those five are the whole set. `memory` is **not** among them — semantic memori
 **Markdown sectioning** (for uploaded documents):
 
 - Content is split on markdown headings (`#` through `######`).
-- YAML frontmatter (`title`, `tags`, `folder`) fills any field you didn't set on the request; an explicit request value always wins over frontmatter.
+- YAML frontmatter fills `tags` and `folder` when the request leaves them out (and `title` on an update that sends content without one; a create always needs `title` in the request); an explicit request value always wins over frontmatter.
 - Sections under 20 words are merged into a neighbor; the maximum is 50,000 characters per section, and 500,000 characters per document.
 
 **The iXBRL bridge:** an SEC disclosure section carries the XBRL elements tagged in it (`xbrl_elements` on the section read, and on REST search hits). This lets an Operator move from the narrative ("goodwill impairment discussion") to the structured fact (`us-gaap:Goodwill`) by handing the element to `resolve-element`, then querying values with `read-graph-cypher`. For how the SEC corpus is built, see [SEC XBRL Pipeline](SEC-XBRL-Pipeline.md).
@@ -261,7 +263,7 @@ Those five are the whole set. `memory` is **not** among them — semantic memori
 
 **Local embeddings, no credits.** Embeddings are produced in-image by a small open model (`BAAI/bge-small-en-v1.5`, 384 dimensions). There are no external API calls and **no AI credits are consumed** for indexing or semantic search.
 
-**Tenant isolation.** Every search and document operation is filtered by `graph_id`. Your uploaded documents are scoped to their graph and never surface in another graph's results. The MCP search tools resolve a shared repository's subgraph to the parent repository's index, so a repository's subgraphs search as one. A subgraph of your own graph is its own search scope: its documents are indexed under the subgraph's id and do not appear in the parent's results, or the parent's in the subgraph's.
+**Tenant isolation.** Every search and document operation is filtered by `graph_id`. Your uploaded documents are scoped to their graph and never surface in another graph's results. The MCP search tools resolve a shared repository's subgraph to the parent repository's index, so a repository's subgraphs search as one. A subgraph of your own graph is its own search scope: its documents are indexed under the subgraph's id and do not appear in the parent's results, or the parent's in the subgraph's. That scope is reached over REST; a subgraph's MCP connection serves schema, Cypher and memory only, so `search-documents` is not on it.
 
 ## Semantic Memory: The Second Retrieval Plane
 

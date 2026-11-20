@@ -36,7 +36,7 @@ Pick the lane that matches your data's nature (an integration can use more than 
 - **Lane 2** is for data that is *facts but not bookkeeping*: usage numbers, operational KPIs, marketing counts. Author your vocabulary once, then assert observed values each period; the series then renders in fact grids, GraphQL, and MCP with no further work.
 - **Lane 3** is for graph-shaped domain data: upload files, stage them, materialize. Combined with the per-graph schema operations you can stand up a complete custom knowledge graph.
 
-The template ships one emitter per lane: `emit/events.py`, `emit/metrics.py`, and `emit/graph.py`.
+The template ships one emitter per lane (`emit/events.py`, `emit/metrics.py`, and `emit/graph.py`) and a fourth for lane 1's mirrored case, `emit/ledger.py`: a general ledger kept elsewhere that the graph mirrors read-only (see [When the source is the general ledger](Build-a-Ledger-Integration.md#when-the-source-is-the-general-ledger)).
 
 ## The Contract Every Integration Relies On
 

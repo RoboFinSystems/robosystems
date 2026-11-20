@@ -64,7 +64,7 @@ The SCIM provisioning surface (`/scim/v2`) is the one exception to this shape: i
 | **403** | Not allowed — no access to this graph, a role too low for a write, a key scoped to a different graph, a feature not provisioned on this graph, or a write to a read-only shared repository. On a REST or MCP route with a `graph_id`, an API key that fails validation also answers 403, not 401 | Check the key is live, then the graph id, the key's scope, and your role. A graph that does not exist also answers 403, so a typo in `graph_id` looks like this |
 | **404** | The named resource doesn't exist in this graph — an event, a period, an operation whose records have expired | Check the id. For extension operations, a 404 can also mean the graph's RoboLedger or RoboInvestor data has not been initialized |
 | **409** | Conflict with current state. Three kinds: an `Idempotency-Key` in use or reused with a different body; a duplicate (an event with the same `source` + `external_id`, a connection that already exists); a row locked by another writer, such as a running sync ("Retry in a moment") | Read `detail`. Retry the lock case after a short delay; treat a duplicate as already done; fix the key for a key conflict |
-| **413** | The work is too large for the graph's tier, e.g. a materialization over its limits | Reduce the input or change tier |
+| **413** | The work is too large — a request body over the size limit, a file over the upload limit, or a materialization over the graph's tier limits | Reduce the input or change tier. An oversized request body is refused before the request is read, so that one 413 carries `detail` only, with no `request_id` |
 | **422** | Validation (`code: "VALIDATION_ERROR"`) or a domain rule refusal (no `code`) | Fix the request per `detail`. A retry of the same body fails the same way |
 | **429** | Rate limit exceeded | Wait for `Retry-After` seconds, then retry. See [Rate Limits](#rate-limits) |
 | **500** | Unexpected server error | Retry once with the same `Idempotency-Key`; if it persists, report the `request_id` |
@@ -142,7 +142,7 @@ Branch on `extensions.code`, not on `message`:
 | `EXTENSION_NOT_PROVISIONED` | The graph does not have the extension the field belongs to |
 | `LEDGER_NOT_INITIALIZED`, `INVESTOR_NOT_INITIALIZED` | The graph's RoboLedger or RoboInvestor data has not been set up yet |
 | `INVALID_PAGINATION` | `limit` or `offset` out of range |
-| `INVALID_ARGUMENT`, `INVALID_PERIOD` | An argument failed a resolver-level check |
+| `INVALID_ARGUMENT`, `INVALID_PERIOD`, `BAD_USER_INPUT` | An argument failed a resolver-level check — a malformed value, an unknown entity or account, a cursor that does not parse |
 | `INVALID_EXPIRES_IN`, `REPORT_BUNDLE_NOT_AVAILABLE`, `REPORT_BUNDLE_SIGNING_FAILED` | A report download link could not be issued |
 | `STATEMENT_TIMEOUT` | The read exceeded the per-statement time limit; narrow it |
 | `INTERNAL_ERROR` | An unexpected failure; the error's `extensions.requestId` is the value to quote |
@@ -169,7 +169,7 @@ Rate limits protect shared infrastructure from bursts. They are separate from cr
 **How they are shaped.**
 
 - Limits are **per endpoint category** — graph reads, graph writes, Cypher queries, MCP, AI Operators, search, backups, extension GraphQL reads, extension operations, and so on — so a burst of one kind of traffic does not starve another.
-- Windows are **short** — the configured limits are per minute. They absorb normal bursts rather than cap monthly volume; volume is what credits and tier limits are for.
+- Windows are **short** — the per-category limits are per minute. They absorb normal bursts rather than cap monthly volume; volume is what credits and tier limits are for. The one exception is the sign-in endpoints, which are counted per IP address over longer windows (five minutes for login and the other pre-login calls, an hour for registration); their `Retry-After` says how long.
 - Categories served by the graph's own dedicated instance (queries, reads, writes, MCP, operators, analytics) **scale with the graph's tier** and are counted per graph. Categories that land on shared infrastructure (search, backups, imports, management, sync) are the same on every tier and are counted per user.
 - Shared repositories such as `sec` carry their own per-plan limits — see [Shared Repositories](Shared-Repositories.md).
 
@@ -206,7 +206,7 @@ X-RateLimit-Category: extensions_write
 }
 ```
 
-`Retry-After` is in seconds; `X-RateLimit-Reset` is a Unix timestamp in seconds. Limits outside the tier-aware categories (authentication, SSE connections, billing) send `X-RateLimit-Type` in place of the tier and category headers. Wait at least `Retry-After` before retrying; spreading a backfill evenly across windows is faster overall than bursting and backing off.
+`Retry-After` is in seconds; `X-RateLimit-Reset` is a Unix timestamp in seconds. Limits outside the tier-aware categories send no tier or category header. SSE connections, billing and the named account buckets send `X-RateLimit-Type` instead. The sign-in endpoints (login, registration, password reset, email verification) send only `Retry-After`, `X-RateLimit-Limit` and `X-RateLimit-Remaining`, so read `Retry-After` there rather than `X-RateLimit-Reset`. Wait at least `Retry-After` before retrying; spreading a backfill evenly across windows is faster overall than bursting and backing off.
 
 Server-Sent Event streams have their own limit on concurrent connections per user — see [Operations Contract](Operations-Contract.md#following-an-async-operation).
 

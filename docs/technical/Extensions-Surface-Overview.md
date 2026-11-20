@@ -56,7 +56,7 @@ Right:  { entity { name } }
 
 Putting the tenant in the URL rather than the query body eliminates a whole class of "I queried the wrong tenant" bugs: the scope is fixed before the resolver runs, and there is no way to override it from inside the query.
 
-Subgraph IDs are the one case where matching the pattern is not enough. GraphQL and the command operations reject a subgraph with **HTTP 403** — a subgraph is a modality container with no extensions schema of its own, so the request is refused rather than quietly resolved to its parent. On GraphQL the check runs after authentication and before the access check, so the denial stays attributable. Target the parent graph instead. The seven analytical view operations accept a subgraph id, since they read the graph or a report rather than the extensions schema; `live-financial-statement`, which reads the extensions schema, refuses one like the commands.
+Subgraph IDs are the one case where matching the pattern is not enough. GraphQL and the command operations reject a subgraph with **HTTP 403** — a subgraph is a modality container with no extensions schema of its own, so the request is refused rather than quietly resolved to its parent. On GraphQL the check runs after authentication and before the access check, so the denial stays attributable. Target the parent graph instead. The seven analytical view operations accept a subgraph id, since they read the graph or a report rather than the extensions schema; `live-financial-statement`, `consolidation-worksheet` and `preview-consolidation-entries`, which read the extensions schema, refuse one like the commands. The commands and these three also refuse a shared repository such as `sec` with 403: a repository is written only by its pipeline.
 
 ## Auth Runs Before the Handler
 
@@ -65,7 +65,7 @@ Authentication and per-graph access are enforced by FastAPI dependencies that ru
 - GraphQL requests resolve the user and graph through the context dependency, then check graph access before the query is executed.
 - Command and view operations resolve the user and validate per-graph access via the operation dependency before the runner is invoked.
 
-Authenticate API calls with the **`X-API-Key`** header. Create the key in the app under **Settings → API keys** — it is shown once, and can be scoped to all your graphs or to one graph. The key has the format `rfs` followed by 64 hex characters:
+Authenticate API calls with the **`X-API-Key`** header. Create the key in the app under **Settings → API keys** — it is shown once, and can be scoped to all your graphs or to one graph. An account-wide key is `rfs` followed by 64 hex characters; a key scoped to one graph begins `rfsc`:
 
 ```bash
 -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
@@ -99,7 +99,7 @@ Because the schema is built at construction time, a ledger-only deployment liter
 
 ## The OperationEnvelope Contract
 
-Command writes and analytical view operations return the same `OperationEnvelope`, and accept the same `Idempotency-Key` header, as the graph lifecycle operations under `/v1/graphs/{graph_id}/operations/{op_name}`; long-running commands return `status: "pending"` and are followed over SSE. The views in `views.py` accept the key and don't replay on it: a read has nothing to deduplicate, so each call runs fresh. The field reference, idempotency rules, failure shapes, and progress events are in [Operations Contract](Operations-Contract.md).
+Command writes and analytical view operations return the same `OperationEnvelope`, and accept the same `Idempotency-Key` header, as the graph lifecycle operations under `/v1/graphs/{graph_id}/operations/{op_name}`; long-running commands return `status: "pending"` and are followed over SSE. The views in `views.py` accept the key and don't replay on it: a read has nothing to deduplicate, so each call runs fresh. The three reads of the ledger itself (`live-financial-statement`, `consolidation-worksheet`, `preview-consolidation-entries`) do replay on a key, like a write. The field reference, idempotency rules, failure shapes, and progress events are in [Operations Contract](Operations-Contract.md).
 
 ## One Invariant: The Ops Layer Is the Single Source of Truth
 
@@ -143,7 +143,7 @@ curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
   -d '{"query": "{ fiscalCalendar { closedThrough closeTarget } entity { name } }"}'
 ```
 
-GraphQL list resolvers take `limit` (per-resolver default, must be 1–1000) and `offset` (default 0, must be ≥ 0). A success returns `{"data": {...}}`; a typed error returns `{"errors": [{"extensions": {"code": "..."}}]}`. Clients should branch on `extensions.code` (for example `UNAUTHENTICATED`, `INVALID_PAGINATION`, `EXTENSION_NOT_PROVISIONED`, `LEDGER_NOT_INITIALIZED`, `INVESTOR_NOT_INITIALIZED`), not on the human-readable message. A valid key without access to the graph never gets that far: it is refused with **HTTP 403** before the query runs, with no GraphQL error body. The full code list is in [GraphQL Reads](GraphQL-Reads.md#error-surface).
+GraphQL list resolvers take `limit` (per-resolver default, must be 1–1000) and `offset` (default 0, must be ≥ 0). A success returns `{"data": {...}}`; a typed error returns `{"errors": [{"extensions": {"code": "..."}}]}`. Clients should branch on `extensions.code` (for example `UNAUTHENTICATED`, `INVALID_PAGINATION`, `EXTENSION_NOT_PROVISIONED`, `LEDGER_NOT_INITIALIZED`, `INVESTOR_NOT_INITIALIZED`), not on the human-readable message. A valid key without access to the graph never gets that far: it is refused with **HTTP 403** before the query runs, with no GraphQL error body (a key scoped to one graph, sent to another graph's endpoint, is refused as an invalid key with HTTP 401). The full code list is in [GraphQL Reads](GraphQL-Reads.md#error-surface).
 
 ### Command Write — Close a Period
 
@@ -204,7 +204,7 @@ For the exact request-body fields of any operation, consult the [extensions API 
 - **GraphQL takes no `graphId` argument.** Use `{ entity { … } }`, never `{ entity(graphId: "kg_x") }`. The graph is the URL.
 - **Use `X-API-Key` for API calls**, not `Authorization: Bearer`. Send the key as a header, never in the URL.
 - **The analytical views in `views.py` (`build-fact-grid`, `financial-statement-analysis` and the five read-whole views) are gated by `FACT_GRID_ENABLED`, not `ROBOLEDGER_ENABLED`.** They live under the `/extensions/roboledger/...` path but are flagged independently, so they remain available on SEC-only deployments. `live-financial-statement`, which reads the OLTP database rather than the graph, follows `ROBOLEDGER_ENABLED` like the command writes.
-- **Subgraph IDs are rejected on GraphQL and the command operations with HTTP 403.** They match the path pattern, so the failure surfaces at runtime rather than as a validation error. Target the parent graph. The seven analytical view operations accept them; `live-financial-statement` does not.
+- **Subgraph IDs are rejected on GraphQL and the command operations with HTTP 403.** They match the path pattern, so the failure surfaces at runtime rather than as a validation error. Target the parent graph. The seven analytical view operations accept them; the three OLTP reads (`live-financial-statement`, `consolidation-worksheet`, `preview-consolidation-entries`) do not.
 - **`build-fact-grid` requires a scoping filter** — `elements` and/or `canonical_concepts`, plus at least one of `periods` / `period_type` / `fiscal_year`, or you get HTTP 400.
 - **A GraphQL "error" can still return HTTP 200.** Anonymous introspection is allowed, so an unauthenticated request can return a `200` with an `UNAUTHENTICATED` error code in `extensions.code`; HTTP 401 means credentials were presented but invalid.
 - **Idempotency conflicts return HTTP 409** when the same key is reused with a different request body. Identical replays return `idempotentReplay: true` without re-executing.

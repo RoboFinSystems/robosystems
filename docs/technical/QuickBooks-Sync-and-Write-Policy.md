@@ -66,7 +66,7 @@ The same call is the `sync-connection` MCP tool, which takes `full_rebuild` and 
 
 ### The initial sync
 
-Completing the OAuth consent starts a sync on its own. When the connection has never synced before, that first sync is a `full_rebuild`, so the graph receives the company's full history. If you reconnect a connection that has synced before, it gets the default 60-day window.
+Completing the OAuth consent starts a sync on its own. When the connection has never synced before, that first sync is a `full_rebuild`, so the graph receives the company's full history. If you reconnect a connection that has synced before, it gets the default 60-day window. Until a sync has succeeded, every sync takes full history: if the first one failed, the next does too, whatever window it asked for and whether a person or the schedule started it.
 
 The first sync also does two one-time setup steps:
 
@@ -111,6 +111,8 @@ curl "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/connections/$CONN_ID" \
 }
 ```
 
+The result also carries `cdc`, what the change-history read found, and `baseline`, true for the import that first loaded the books.
+
 A failed run records `last_sync_result` without advancing `last_sync`. The distinction matters because the close gate reads `last_sync`: a failed sync never makes the books look current. On MCP, `get-graph-sync-status` reads the same fields.
 
 ## What a Sync Loads
@@ -143,7 +145,7 @@ A connection's `write_policy` decides which ledger is the book of record, and th
 
 **The policy belongs to one entity's books.** A graph is a reporting group, and a connected ledger keeps the books of exactly one entity in it: the connection's `entity_id`, with `keeps_books: true` on the connection that is that entity's ledger of record. QuickBooks keeps the group parent's. Every question the policy answers is asked about an entity and read from the connection that keeps that entity's books: whether its close writes back, where its drafts would publish, whether a bank feed may book there. A subsidiary with no such connection keeps its books natively whatever the parent's connection says. When a company is authorized again, the newest authorization becomes the keeper. The policy can be set only on a connection that keeps books.
 
-A new QuickBooks connection defaults to `qb_authoritative`, and a live connection chooses between `qb_authoritative` and `shadow`. `shadow` is for running RoboLedger's close beside the one already done in QuickBooks, before letting it post. Other connection types default to `native`. `native` describes a graph with no authoritative external ledger: before any connection, after a sever, or books kept natively. It is what severing leaves, not a setting for a live connection, and it does not mean "connected, but keep the ledgers apart." The platform assumes no steady state in which QuickBooks stays connected while the two ledgers diverge.
+A new QuickBooks connection defaults to `qb_authoritative`, and a live connection chooses between `qb_authoritative` and `shadow`. `shadow` is for running RoboLedger's close beside the one already done in QuickBooks (what that close checks and records is in [The Shadow Close](Period-Close.md#the-shadow-close)), before letting it post. An external ledger source (an `external` connection registered with `ledger`; see [Build a Ledger Integration](Build-a-Ledger-Integration.md#when-the-source-is-the-general-ledger)) is created in `shadow`, the only policy it can hold, since nothing can be written back to it. Every other connection type defaults to `native` and keeps no books. `native` describes a graph with no authoritative external ledger: before any connection, after a sever, or books kept natively. It is what severing leaves, not a setting for a live connection, and it does not mean "connected, but keep the ledgers apart." The platform assumes no steady state in which QuickBooks stays connected while the two ledgers diverge.
 
 **`hybrid` is reserved and cannot be set.** The `WritePolicy` enum declares a fourth value, `hybrid`, for a future QuickBooks-authoritative mode that would flag exceptions (low-confidence mappings, amounts over a threshold) for review. That mode is not implemented, and the write-policy endpoint rejects it. The close and publish code paths list `hybrid` alongside `qb_authoritative` in their eligibility checks, so a row that somehow carried it would behave exactly like `qb_authoritative`. No supported path creates such a row. In practice a live connection has two policies to choose from, and `native` is where a sever leaves the books.
 
@@ -156,7 +158,7 @@ curl -X PUT "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/connections/$CONN_ID
   -d '{"write_policy": "shadow"}'
 ```
 
-The request accepts `qb_authoritative` or `shadow`, and `native` is refused: a graph reaches it by severing the connection (see [Disconnect vs. Sever](#disconnect-vs-sever)). The policy can be set only on a connection that keeps books. The same control is the `set-write-policy` MCP tool. Changing the policy requires a member or admin role on the graph. A viewer can't opt a graph into writing to its book of record.
+The request accepts `qb_authoritative` or `shadow`, and `native` is refused: a graph reaches it by severing the connection (see [Disconnect vs. Sever](#disconnect-vs-sever)). The policy can be set only on a connection that keeps books: on one that keeps none (a bank feed, an external source that is not a ledger) either value is refused with a 400, and so is `qb_authoritative` on an external ledger. The same control is the `set-write-policy` MCP tool. Changing the policy requires a member or admin role on the graph. A viewer can't opt a graph into writing to its book of record.
 
 ## The Write-Back Outbox
 
@@ -263,7 +265,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
 
 On a write-back connection it sends each of the event's unpublished draft entries to QuickBooks as its own journal entry, records them in `qb_entry_ids`, posts them, and moves the event to `fulfilled`. If QuickBooks rejects an entry, the entries sent before it are kept and posted, the rejection is stored on `metadata.last_outbound_error`, and the event keeps its status, so a retry sends only the entries not yet in `qb_entry_ids`. The response reports `qb_entry_ids` (every entry of the event now in QuickBooks) and, on a rejection, `qb_error`. A `native` event, or one carrying `publish_to_source: false`, passes through with no external write.
 
-Errors: `409` for an event with no drafted ledger entries (commit it first) or one that is `voided` or `superseded`, and `422` when its period is closed. A `401` means QuickBooks refused the credentials. The connection is flagged for re-authorization and needs a fresh OAuth consent. A `503` means Intuit was unreachable or busy. The connection is fine, and the call can be retried.
+Errors: `409` for an event with no drafted ledger entries (commit it first) or one that is `voided` or `superseded`, and `422` when its period is closed. A `422` also answers a `connection_id` that is not this graph's, and an event on a subsidiary's books: QuickBooks keeps the group parent's only, so a subsidiary's entries post at its own close and are never published. A `401` means QuickBooks refused the credentials. The connection is flagged for re-authorization and needs a fresh OAuth consent. A `503` means Intuit was unreachable or busy. The connection is fine, and the call can be retried.
 
 ## Reconciling Items
 
@@ -376,13 +378,15 @@ curl -X DELETE "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/connections/$CONN
 
 | | `disconnect` | `sever` |
 | --- | --- | --- |
-| OAuth grant | Revoked | Revoked |
+| OAuth grant | Revoked, unless another graph is connected to the same company | Same |
 | Synced books | Stay in the graph | Stay in the graph |
 | Chart of accounts | Still owned by the QuickBooks connection | Stamped as the graph's own native chart |
 | Write policy | Kept on the connection, inert while it is disconnected. Reconnecting keeps the choice. | Drops to `native` |
 | Reconnecting the same company | Revives the connection and picks up where it left off | Never revives it. QuickBooks can't resume over books kept natively since. |
 
 Both require the admin role on the graph. `sever` applies to QuickBooks only, and other providers return `400`. Choose `sever` when the graph is leaving QuickBooks for good and will keep its books in RoboLedger from now on. Choose `disconnect` for everything else.
+
+Intuit holds one authorization per company, so when another of your graphs is connected to the same QuickBooks company the grant is left in place for it; this graph's stored credentials are still given up. Either call answers `409` while a sync is running for the connection. Wait for the sync to finish, then send it again.
 
 ## Gotchas and Pitfalls
 
@@ -408,7 +412,7 @@ The sync loads amounts in USD only. A sync that finds a transaction in another c
 
 ## Self-hosted deployments
 
-Connecting QuickBooks to your own stack needs your own Intuit app, OAuth redirect and tunnel. That setup is on [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally.md). Everything on this page applies unchanged once the connection exists. Use `http://localhost:8000` and the key from `just demo-user`.
+Connecting QuickBooks to your own stack needs your own Intuit app, OAuth redirect and tunnel. That setup is on [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally.md). Everything on this page applies unchanged once the connection exists, with one difference: on a development stack (`ENVIRONMENT=dev`) the daily sync schedule is stopped until you start it in the Dagster UI. Its cadence is `CONNECTION_SYNC_INTERVAL_HOURS` (default 24). Use `http://localhost:8000` and the key from `just demo-user`.
 
 ## Related Documentation
 

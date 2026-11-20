@@ -23,7 +23,7 @@ A table of gross margin by quarter: yours at 56 to 61%, the peers at roughly 30 
 
 ## Set it up
 
-1. **Subscribe to the SEC filings graph.** It's a separate RoboSystems subscription from your RoboLedger graph. Plans and how to subscribe are in the [SEC filings guide](https://robosystems.ai/docs/guides/sec-filings).
+1. **Subscribe to the SEC filings graph.** It's a separate RoboSystems subscription from your RoboLedger graph. A first subscription starts with a 14-day free trial, and no card is needed to start it. Plans and how to subscribe are in the [SEC filings guide](https://robosystems.ai/docs/guides/sec-filings).
 2. **Add it as a second connection.** One connection is one graph, so the filings sit beside your books as a connection of their own. Add a connector with the SEC graph's address:
 
 ```text

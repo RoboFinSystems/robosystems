@@ -84,7 +84,7 @@ Key element columns include `qname`, `name`, `balance_type` (`debit | credit`), 
 | `essence-alias` | One element is an alias for another |
 | `has-part` | The Conceptual Model posting arcs — `cm:Debit` / `cm:Credit` to a CoA element, declaring a posting template's legs as first-class atoms |
 
-Six of these are authorable from the public write path; `derivation` and `has-part` are system-emitted, so `create-taxonomy-block` rejects them.
+Six of these are authorable from the public write path; `derivation` and `has-part` are system-emitted, so `create-taxonomy-block` rejects them. The column admits a ninth value, `definition`, which the write path rejects as well.
 
 Associations are unique on `(structure_id, from, to, association_type)`, so the same two elements can participate in several linkbases at once — a concept can sit in a presentation tree *and* a calculation rollup with different parents. The `calculation` linkbase is the DAG the renderer walks to derive and foot subtotals; see [Reporting & Rendering](Reporting-and-Rendering.md) for how that projection works.
 
@@ -272,6 +272,41 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
   }'
 ```
 
+### Step 3b: Put the Extension's Row on a Statement
+
+Step 3 made a concept; nothing renders it yet. A row reaches a statement when the extension's structure names the Reporting Style network it extends, in `extends_network`, and anchors the row under a parent that the statement sums. Read the network's role URI from the library (`{ libraryStructures(blockType: "income_statement") { name roleUri } }`) and take the one the entity's Reporting Style composes.
+
+```bash
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operations/create-taxonomy-block" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Idempotency-Key: $(date +%s)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Acme Statement Rows",
+    "taxonomy_type": "reporting_extension",
+    "parent_taxonomy_id": "<rs-gaap reporting_standard taxonomy id>",
+    "standard": "acme",
+    "elements": [
+      {"qname": "acme:AuditFees", "name": "Audit Fees", "balance_type": "debit", "period_type": "duration", "parent_ref": "rs-gaap:ProfessionalFees"}
+    ],
+    "structures": [
+      {"name": "Acme income statement rows", "block_type": "income_statement", "extends_network": "<role URI of the income statement network>"}
+    ],
+    "associations": [
+      {"structure_ref": "Acme income statement rows", "from_ref": "rs-gaap:OperatingExpenses", "to_ref": "acme:AuditFees", "association_type": "presentation", "order_value": 10413},
+      {"structure_ref": "Acme income statement rows", "from_ref": "rs-gaap:OperatingExpenses", "to_ref": "acme:AuditFees", "association_type": "calculation", "weight": 1.0}
+    ]
+  }'
+```
+
+The anchoring is checked when the block is written, and a row that would not anchor is refused with `422` and the reason:
+
+- **The network is in use.** `extends_network` must be a network a Reporting Style composes and an entity of the graph uses, and `block_type` must be that network's statement type.
+- **The parent is on the statement.** Every presentation parent is a row of the network or one the extension adds. An extension adds rows; it never moves one the network already presents.
+- **Something sums it.** On the balance sheet, income statement and cash flow, every new row needs a calculation arc to a subtotal the statement presents, and only one: a second calculation parent on the same statement would count it twice. A path through a presented leaf does not count, because the leaf's own fact wins over a sum.
+- **An equity movement hangs from the root** of the roll-forward and is a duration amount.
+- **A tenant concept refines a library one.** A concept of your own placed as a row must set `parent_ref` to the rs-gaap concept it refines. It inherits that concept's traits, balance type and period type, so mapping candidates, metrics and the plan read it as that concept. Prefer the rs-gaap concept itself where one fits: any library concept may be named as a row, including one the tenant copy left out, which is then brought in.
+
 ### Step 4: Read the Block Back
 
 Use the tenant-scoped GraphQL endpoint and the taxonomy id from the create response. Fields are camelCase in the GraphQL schema even though the Python resolvers are snake_case:
@@ -345,6 +380,10 @@ Once a library concept is copied into a tenant, it can never be updated or delet
 ### Deletes Are Blocked by References
 
 `delete-taxonomy-block` is rejected if the taxonomy has live facts (unless you pass `cascade_facts=true`), referencing journal line items, or cross-taxonomy mapping associations from other taxonomies.
+
+### An Account With Activity Is Retired, Not Removed
+
+`update-taxonomy-block` adds, renames and reclassifies accounts freely, but an account with facts or journal lines is never removed. Retire it with `elements_to_update[].is_active: false`: its history stays, new postings to it are refused and pickers hide it; `true` brings it back. Removal, and deleting the whole chart, work only with no activity.
 
 ### CoA Elements Require a Trait
 

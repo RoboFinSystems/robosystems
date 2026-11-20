@@ -81,6 +81,8 @@ The former REST pair (`GET …/mcp/tools`, `POST …/mcp/call-tool`) was removed
 
 **Tool availability is per-deployment and per-graph.** The catalog is gated by feature flags, by each graph's `schema_extensions`, and by the kind of graph: a RoboLedger or RoboInvestor tenant graph, the read-only `sec` repository, a subgraph, or a custom graph with no extension. A read-only shared repository drops every write and every tool that reads a tenant's OLTP ledger. Always call `tools/list` (or a schema-discovery tool) first rather than assuming a tool exists.
 
+**A shared repository is reached by subscription.** During the free trial a connection to `sec` lists every tool except `read-graph-cypher`, which opens with the first payment; a call to it is refused with the link that starts the plan. When no subscription is in force — a trial or a plan that ended — an OAuth connection answers `403` with an `insufficient_scope` challenge and a message that names the repository and where to subscribe, and a tool call that fails the access check comes back as an `isError` result carrying the reason, so the model can pass it on. See [Shared Repositories](Shared-Repositories.md#the-free-trial).
+
 ### Tool Catalog
 
 The tool names below are the exact `name` strings for `tools/call`, grouped by family, with where each is served. Every tool also carries a `title` and the four MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) in `tools/list`, declared per tool: the Cypher read tools are hinted read-only, matching what the server enforces; a write that only adds is hinted non-destructive; a write that reaches QuickBooks is hinted open-world; and a write not yet classified gets the most cautious hint on all four. The [three planes](#the-three-retrieval-planes) below describe *retrieval*; most families here sit beside them rather than inside one.
@@ -91,9 +93,9 @@ The tool names below are the exact `name` strings for `tools/call`, grouped by f
 
 | Tool | Purpose | Served on |
 | --- | --- | --- |
-| `get-graph-info` | Graph id, approximate node count, node labels, relationship types, and whether the graph is read-only; takes no arguments | Every graph |
+| `get-graph-info` | Graph id, approximate node count, node labels, relationship types, whether the graph is read-only, and on a ledger graph its `entities` — the reporting group, each with the `entity_id` the ledger tools take; takes no arguments | Every graph |
 | `get-graph-schema` | The Cypher schema: node tables with their properties, relationship tables with their endpoints | Every graph |
-| `read-graph-cypher` | Read-only Cypher (Plane B) | Every graph |
+| `read-graph-cypher` | Read-only Cypher (Plane B) | Every graph (left out of a trial connection to a shared repository) |
 | `get-example-queries` | Working Cypher patterns for the graph's schema | Graphs with the `roboledger` extension, `sec` included |
 | `get-graphql-schema` / `query-graphql` | The GraphQL SDL, and a read-only GraphQL query over the extensions OLTP (Plane A) | Tenant graphs, not shared repositories; `EXTENSIONS_GRAPHQL_ENABLED` + `MCP_GRAPHQL_ENABLED` |
 
@@ -129,6 +131,8 @@ The tool names below are the exact `name` strings for `tools/call`, grouped by f
 | `get-document-section` | One hit's section text, a window at a time | Every graph; `SEMANTIC_SEARCH_ENABLED` |
 | `get-document` / `list-documents` | Read your document rows | Your own graphs (shared repositories have no document rows); `SEMANTIC_SEARCH_ENABLED` |
 | `create-document` / `update-document` / `delete-document` | Write them; the search index follows each write | Same, plus a writable graph |
+| `create-document-upload` / `complete-document-upload` | Store a PDF, PNG or JPEG as a document (a statement, an invoice, a receipt): the first answers with a presigned upload command, the second checks and hashes the file and creates the document | Same, plus a writable graph; not on subgraphs |
+| `read-document-file` | A stored PDF's text, page by page, at most 10 pages a call | Your own graphs; `SEMANTIC_SEARCH_ENABLED` |
 | `bind-text-block` | Bind a document, or one of its sections, to a disclosure element as a text-block fact | Writable RoboLedger tenant |
 
 **Memory** — a per-graph vector store that gives an Operator state across turns; `SEMANTIC_MEMORY_ENABLED` + `MCP_SEMANTIC_MEMORY_ENABLED`, never on shared repositories:
@@ -160,11 +164,13 @@ The tool names below are the exact `name` strings for `tools/call`, grouped by f
 | --- | --- |
 | `get-close-playbook` | The close's tool sequence, setup decisions and gotchas — call it before setting up or running a close |
 | `get-fiscal-calendar` | What period is next to close and what blocks it |
+| `initialize-fiscal-calendar` / `change-calendar-start` | Set up an entity's fiscal calendar, the one-time step before its first close; move where it starts, allowed only before the first close |
 | `get-period-close-status` | What schedule-derived work is done for a period |
 | `list-period-drafts` | The period's draft closing entries, line by line |
 | `close-period` / `reopen-period` | Post the drafts and lock the period; reopen a closed one for adjustments |
 | `promote-obligations` | Move matured schedule obligations forward and draft their closing entries |
 | `rebuild-schedule` / `terminate-schedule` | Regenerate a schedule in place; end one early at a month-end cutoff |
+| `preview-schedule` | Generate a schedule from a definition without keeping it, with its period-by-period roll-forward |
 | `update-journal-entry` / `delete-journal-entry` | Edit or delete a draft entry (posted entries are reversed, never edited) |
 | `propose-consolidation-entries` | Draft a group's consolidating entries for a month in the consolidation entity, replacing the engine's earlier drafts; its close posts them |
 | `set-allocation-override` | Set the outside owners' share of a member's result for a month in place of the pro-rata share, with its basis |
@@ -195,7 +201,7 @@ The tool names below are the exact `name` strings for `tools/call`, grouped by f
 | `list-accounts` | One entity's chart of accounts, paginated, with each account's classification and place in the hierarchy |
 | `search-library-elements` | Taxonomy elements found by a phrase or a qname: reporting concepts and the graph's own accounts |
 | `create-mapping-association` / `delete-mapping-association` | Add or remove one account → reporting-concept mapping |
-| `initialize-chart-of-accounts` | Create the chart from a shipped template, for a graph that has none |
+| `initialize-chart-of-accounts` | Create the chart from a shipped template, for an entity that has none (`entity_id`; omitted means the group parent) |
 | `create-taxonomy-block` / `update-taxonomy-block` / `delete-taxonomy-block` | Author a taxonomy — a chart of accounts, a reporting extension, a custom ontology — as one envelope |
 | `link-entity-taxonomy` | Point the entity at a different primary chart |
 
@@ -221,7 +227,10 @@ The tool names below are the exact `name` strings for `tools/call`, grouped by f
 | `list-flow-candidates` | The cash flow rows a bank line or journal-entry line may be tagged with |
 | `list-discharge-candidates` | The open invoices or bills a payment or bank line may settle, best match first |
 | `get-classification-stats` | How a month's bank-feed lines were classified, per suggestion source |
+| `accept-suggestions` | Take the suggestion on every open bank line the filters select, oldest first, and post them too with `commit: true`; `dry_run` reports without writing |
+| `learn-classification-defaults` | Seed each counterparty's default account from the bank lines already committed to the books |
 | `list-bank-accounts` | The group's bank and card accounts, the entity each belongs to, and the connection that writes to it |
+| `link-bank-account` | Point a bank feed's account at a chart account, which also decides whose books its lines go into |
 | `execute-event-block` | Publish an event's entries to QuickBooks, for a connection whose write policy sends them |
 | `list-event-handlers` / `get-event-handler` / `create-event-handler` / `update-event-handler` | The rules that turn events into entries |
 
@@ -249,7 +258,8 @@ The tool names below are the exact `name` strings for `tools/call`, grouped by f
 | `create-report` / `regenerate-report` | Generate a report's facts from the ledger; re-run them against the latest ledger |
 | `delete-report` | Delete a report that has not been filed, with its facts and published files |
 | `get-report-bundle` | A short-lived download link for a published report, for a tool that opens a file by URL |
-| `update-entity` / `change-reporting-style` | Edit the graph's entity; switch how its statements are laid out |
+| `create-entity` / `update-entity` / `change-reporting-style` | Add a company to the graph's reporting group; edit one of its entities (the group parent when `entity_id` is omitted); switch how its statements are laid out |
+| `record-opening-balance` | Record the balance sheet an entity's books start from, as one `opening` entry dated the day before its first fiscal month |
 
 **RoboInvestor** — RoboInvestor tenant (the `roboinvestor` extension, `ROBOINVESTOR_ENABLED`); reads go through `query-graphql`:
 
@@ -270,7 +280,7 @@ A tenant subgraph has no extensions OLTP schema, no connections and no materiali
 
 #### The RoboLedger route
 
-`/v1/mcp/roboledger` serves a RoboLedger tenant graph's full catalog minus what a chat client cannot use or should not drive. It withholds the subgraph tools (`write-graph-cypher`, `add-node-table`, `add-relationship-table`), the workspace administration tools (`create-subgraph`, `delete-subgraph`, `list-subgraphs`, `create-backup`, `materialize`), `get-report-bundle` (its credentialed link has nowhere to go but the transcript), `set-write-policy` (QuickBooks write-back is an owner decision made in the app), `rebuild-schedule` and `backfill-plan-history` (maintenance, not the close), and `delete-taxonomy-block`. Everything else a tenant connection serves, the route serves the same way: the event blocks with every event kind, the handlers that post them, and the GraphQL pair. It is an exclusion list, so a new ledger tool appears on the route by default.
+`/v1/mcp/roboledger` serves a RoboLedger tenant graph's full catalog minus what a chat client cannot use or should not drive. It withholds the subgraph tools (`write-graph-cypher`, `add-node-table`, `add-relationship-table`), the workspace administration tools (`create-subgraph`, `delete-subgraph`, `list-subgraphs`, `create-backup`, `materialize`), `get-report-bundle` (its credentialed link has nowhere to go but the transcript), `set-write-policy` (QuickBooks write-back is an owner decision made in the app), `rebuild-schedule` and `backfill-plan-history` (maintenance, not the close), and `delete-taxonomy-block`. Everything else a tenant connection serves, the route serves the same way: the event blocks with every event kind, the handlers that post them, and the GraphQL pair. It is an exclusion list, so a new ledger tool appears on the route by default. A withheld tool is absent from `tools/list` and refused on call (`Tool '<name>' is not available on this connection.`); the per-graph and universal routes serve it.
 
 Every tenant connection also serves the common ledger reads as tools of their own, so an agent needs no GraphQL for them: `list-accounts`, `list-journal-entries`, `list-transactions`, `get-trial-balance`, `get-mapped-trial-balance`, `get-account-register`, `list-reconciliations`, `list-flow-candidates`, `get-classification-stats`, `list-discharge-candidates`, `list-bank-accounts`, `list-reports`, `list-element-arcs` and `search-library-elements`. They read the live ledger, which the materialized graph behind `read-graph-cypher` trails until its next rebuild.
 
@@ -384,7 +394,7 @@ The Operator endpoint runs a model-driven executor against a graph. It is mounte
 
 Effort controls how hard the model thinks and how many tool calls it chooses to make. It is sent only to models that support it, which today are Claude Haiku 5.5 (the `economy` tier), Claude Sonnet 5.5 (the `balanced` tier, the platform default) and Claude Opus 5.5 (the `quality` tier); on other models the request is unchanged. The author operator (below) replaces the tool-call budget with a fixed 25-step backstop, since a write plan cut off partway would leave some changes made and some not.
 
-**Where a run executes.** Every operator run executes on the background worker. By default an operator `POST` queues the run and answers **202** with the operation's `_links` (`stream`, `status`, `cancel`); follow `stream` for progress and the result. `?mode=sync` waits up to 50 seconds and answers **200** with the `OperatorResponse` when the run finishes in time, or 202 with the links when it is still going. `async`, `stream` and `auto` are accepted and behave like the default.
+**Where a run executes.** Every operator run executes on the background worker. By default an operator `POST` queues the run and answers **202** with the operation's `_links` (`stream`, `status`, `cancel`); follow `stream` for progress and the result. `?mode=sync` waits up to 50 seconds and answers **200** with the `OperatorResponse` when the run finishes in time, or 202 with the links when it is still going. `async`, `stream` and `auto` are accepted and behave like the default. A run the graph's credits cannot fund is refused before it is queued, with `402` and `INSUFFICIENT_CREDITS`, `required_credits` and `available_credits` in the detail.
 
 The Operator `POST` path can be disabled by deployment via `OPERATOR_POST_ENABLED=false` (returns 403). The GraphQL MCP tools have a separate kill switch, `MCP_GRAPHQL_ENABLED`.
 
@@ -420,7 +430,7 @@ Because operators call the same `middleware/mcp/tools/` classes as the external 
 Three operators ship today:
 
 - **AnalystOperator** (`analyst`; `cypher` is accepted as its former name) — answers natural-language questions over the graph from its read-only tool surface: curated financial reads (`live-financial-statement`, `build-fact-grid`, close and mapping status), `search-documents`, `recall`, GraphQL, and read-only Cypher as the general fallback. It answers questions like "What are my five largest expense accounts this year?".
-- **AuthorOperator** (`author`) — makes the change a request asks for, on top of the analyst's read tools. It writes only through an allowlist of tools whose writes are additive and reversible, or wait on a step only a person takes: `create-taxonomy-block` (metric structures; never a chart of accounts, which would replace the entity's primary chart), `create-information-block`, `update-information-block`, `assert-metrics`, `compute-metrics`, `compute-forecast`, `create-agent`, `update-agent`, `remember`, and three ledger-bound ones, each narrowed to the arguments it may use: `create-report` (it generates the report; filing and sharing it stay with a person), `update-event-block` (only to classify a captured bank-feed line; committing, voiding or editing an event stays with a person), and `promote-obligations` (always drafting the closing entries it promotes; close-period posts them). Deletes, journal-entry edits, period close and reopen, connection sync, taxonomy updates, and Cypher writes are never offered to it, so a request that needs one gets an explanation instead of a change. (Bank-feed lines exist only on a deployment that turns on `CONNECTION_MERCURY_ENABLED` or `CONNECTION_PLAID_ENABLED`, both off by default.) It asks when a request is ambiguous, reads before it writes, and reports each change it made. It is selected by name only (the auto-select path never picks it), requires the graph's write role, runs on the `quality` tier, and has a default `max_credits` of 750 when the request sets none. Its response lists each successful write in `metadata.writes` (`operation`, `id`, `name`), including when the run stops early. In the RoboLedger console, `/do <change>` runs it and shows the writes as a receipt.
+- **AuthorOperator** (`author`) — makes the change a request asks for, on top of the analyst's read tools. It writes only through an allowlist of tools whose writes are additive and reversible, or wait on a step only a person takes: `create-taxonomy-block` (metric structures; never a chart of accounts, which would replace the entity's primary chart), `create-information-block`, `assert-metrics`, `compute-metrics`, `compute-forecast`, `create-agent`, `remember`, two update tools that change only what the same request created (`update-information-block` for a block it made with `create-information-block`, `update-agent` for a counterparty it made with `create-agent`; a block or counterparty that already existed is refused, and the operator says where to edit it), and three ledger-bound ones, each narrowed to the arguments it may use: `create-report` (it generates the report; filing and sharing it stay with a person), `update-event-block` (only to classify a captured bank-feed line; committing, voiding or editing an event stays with a person), and `promote-obligations` (always drafting the closing entries it promotes; close-period posts them). Deletes, journal-entry edits, period close and reopen, connection sync, taxonomy updates, and Cypher writes are never offered to it, so a request that needs one gets an explanation instead of a change. (Bank-feed lines exist only on a deployment that turns on `CONNECTION_MERCURY_ENABLED` or `CONNECTION_PLAID_ENABLED`, both off by default.) It asks when a request is ambiguous, reads before it writes, and reports each change it made. It is selected by name only (the auto-select path never picks it), requires the graph's write role, runs on the `quality` tier, and has a default `max_credits` of 750 when the request sets none. Its response lists each successful write in `metadata.writes` (`operation`, `id`, `name`), including when the run stops early. In the RoboLedger console, `/do <change>` runs it and shows the writes as a receipt.
 - **MappingOperator** (`mapping`) — maps a chart of accounts to rs-gaap reporting concepts, in `extended` mode only; scoped to graphs carrying the `roboledger` schema extension (it will not run on a graph without it).
 
 An operator declares its capabilities through an `OperatorSpec` (`name`, `description`, `capabilities`, `supported_modes`, `requires_credits`, `execution_profile`, and a `graph_scope`). The `graph_scope` restricts which graphs the operator runs on — by `shared_repo` or by `schema_extension` — which is how MappingOperator is confined to ledger graphs.

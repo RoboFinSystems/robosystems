@@ -13,9 +13,9 @@ You don't have to move your books to use RoboLedger. You can keep closing in the
 |---|---|---|
 | QuickBooks Online | Connect it and it syncs daily | Only entries you post, or nothing at all with the **Shadow** setting |
 | Another ledger or an ERP | An integration sends its journal through the API | Nothing, ever |
-| RoboLedger | They are already here | Not applicable |
+| RoboLedger | They are already here: a bank feed brings in transactions for you to sort, and entries are made here | Not applicable |
 
-Each company in a group makes this choice on its own, so one company's books can stay in an ERP while another's are kept in RoboLedger.
+Each company in a group makes this choice on its own, with one limit: QuickBooks can keep only the group parent's books. A subsidiary's books are kept in RoboLedger or in another ledger sent through the API. So the parent can stay in QuickBooks while one subsidiary's books are kept in RoboLedger and another's stay in an ERP. A bank feed connects only for a company whose books are kept in RoboLedger, not one QuickBooks or another ledger keeps.
 
 ## QuickBooks stays your ledger
 

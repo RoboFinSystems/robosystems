@@ -65,6 +65,22 @@ curl -X POST "https://api.robosystems.ai/v1/graphs/sec/subscriptions" \
   -d '{"plan_name": "starter"}'
 ```
 
+That call needs a payment method on the organization (or invoice billing): with neither it answers `402`. An organization with no card starts through checkout instead, which is how the [free trial](#the-free-trial) opens without one. The organization's owner asks for a session, opens the `checkout_url` it returns, and polls the status until it reads `active`:
+
+```bash
+curl -X POST "https://api.robosystems.ai/v1/billing/checkout" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"plan_name": "starter", "resource_type": "repository", "resource_config": {"repository_name": "sec"}}'
+
+curl "https://api.robosystems.ai/v1/billing/checkout/SESSION_ID/status" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
+```
+
+Checkout is for the organization's owner (`403` for anyone else) and for an organization with no card yet: once one is on file it answers `400`, and the subscribe call above is the one to use. **Repositories** in the app makes the right call for you.
+
+There is one subscription per subscriber. While yours is in force, a trial included, both the subscribe call and checkout answer `409`; change the plan with `PATCH`, below, rather than buying the seat again.
+
 A repository's plans are named in its manifest — for `sec`, `starter` and `advanced`. The repository-prefixed spellings (`sec-starter`, `sec-advanced`) are accepted as well, and the subscription records the bare plan name. Checking your subscription uses the same endpoint, which auto-detects graphs versus repositories:
 
 ```bash
@@ -112,14 +128,14 @@ Prices, monthly AI credit allocations and download allowances are served live an
 
 ### The free trial
 
-A first subscription to `sec` opens with a 14-day free trial, on either plan, and checkout asks for no card to start it. When the trial ends, a card on file is charged and the subscription carries on as the plan you chose; with no card, the subscription ends, access with it, and nothing is charged. A card added during the trial (on the Billing tab of your organization page) is what the plan starts on. The repository's `trial_days` in `GET /v1/offering` is the length, and a subscription's `trial_ends_at` is the day the trial ends.
+A first subscription to `sec` opens with a 14-day free trial, on either plan, and checkout asks for no card to start it. It does need a verified email address: an account that has not confirmed its address gets `403` from checkout, with the way to send the link again. When the trial ends, a card on file is charged and the subscription carries on as the plan you chose; with no card, the subscription ends, access with it, and nothing is charged. A card added during the trial (on the Billing tab of your organization page) is what the plan starts on. The repository's `trial_days` in `GET /v1/offering` is the length, and a subscription's `trial_ends_at` is the day the trial ends.
 
 During the trial:
 
 - **The analysis tools are open** — `financial-statement-analysis`, `build-fact-grid`, `disclosures`, `information-block`, `resolve-element`, `search-documents`, `search-text`, `read-text` and `describe-filing`, over MCP or their REST operations — along with the snapshot download.
 - **Raw Cypher is not.** `POST /v1/graphs/sec/query/cypher` and the `read-graph-cypher` tool answer `403` with the way to open them, and the tool is left out of a trial connection's MCP tool list.
 - **The AI analyst is not**, and no AI credits are granted. The plan's monthly allocation arrives with the first charge.
-- **The trial has its own rate limits**, lower than either plan's and the same whichever plan it converts to: 5 tool calls a minute, 50 an hour and 300 a day over MCP, and 5, 25 and 150 for search. A `429` at one of them says it is the trial's limit, names your plan's own, and gives the link that starts the plan, or, with no card on file, the link to add one and the day the trial ends. `X-RateLimit-Plan` reads `trial`.
+- **The trial has its own rate limits**, lower than either plan's and the same whichever plan it converts to: 5 tool calls a minute, 50 an hour and 300 a day over MCP, and 5, 25 and 150 for search. A `429` at one of them says it is the trial's limit, names your plan's own, and gives the link that starts the plan, or, with no card on file, the link to add one and the day the trial ends. Every such `429` carries `Retry-After`; on an MCP tool call `X-RateLimit-Plan` also reads `trial`.
 
 Cancelling during the trial keeps access until the trial's last day and nothing is charged. To skip the rest of the trial and start the plan at once:
 
@@ -144,7 +160,8 @@ The repository moves on two clocks, on business days:
 Subscribers whose plan carries a download allowance can pull the whole repository down as a LadybugDB file rather than querying it over the API. Ask for a presigned URL, then fetch it:
 
 ```bash
-# Latest published snapshot — one backup record per repository, republished on each pipeline run
+# Latest published snapshot — one backup record per repository. It is cut apart from the
+# nightly rebuild, so it can trail the hosted graph; the record's date says when
 curl -s "https://api.robosystems.ai/v1/graphs/sec/backups" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 

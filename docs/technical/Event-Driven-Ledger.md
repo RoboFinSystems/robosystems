@@ -45,7 +45,7 @@ LineItem      one debit or one credit against a chart-of-accounts element
 ```
 
 - A **Transaction** (`txn_…`) is the business event as it occurred, linked back to the Event that caused it.
-- An **Entry** (`je_…`) is a journal entry: `standard`, `adjusting`, `closing`, or `reversing`, and `draft`, `posted`, or `reversed`. It needs at least two line items, and Σ debits must equal Σ credits; an unbalanced entry is rejected before anything is written.
+- An **Entry** (`je_…`) is a journal entry: `standard`, `adjusting`, `closing`, `reversing`, or the one `opening` entry an entity's books start from, and `draft`, `posted`, or `reversed` (plus `shadowed` and `superseded`, which leave the entry out of the books; see [Event Block Reference § Ledger Records](Event-Block-Reference.md#ledger-records)). It needs at least two line items, and Σ debits must equal Σ credits; an unbalanced entry is rejected before anything is written.
 - A **LineItem** (`li_…`) carries exactly one non-zero side against an `element_id`.
 
 **The chart of accounts is the `Element`.** There is no separate account table. A line item points at the element it debits or credits, and the same associations that drive taxonomy roll-ups map those elements to reporting concepts. See [Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md).
@@ -83,7 +83,7 @@ An event moves through a small state machine. The forward path runs from the inb
  superseded   replaced by a corrected event (superseded_by_id)
 ```
 
-There is no separate `void` or `supersede` operation: every move goes through `update-event-block` with `transition_to`. A retraction is refused, from any status, once the event's entries or transactions have posted or it has published to QuickBooks; reverse the posted entry instead. The full transition table is in [Event Block Reference § Statuses and Transitions](Event-Block-Reference.md#statuses-and-transitions).
+There is no separate `void` or `supersede` operation: every move goes through `update-event-block` with `transition_to`. A retraction is refused, from any status, once the event's entries or transactions have posted or it has published to QuickBooks; reverse the posted entry instead (an external ledger of record withdrawing its own entry is the one exception). The full transition table is in [Event Block Reference § Statuses and Transitions](Event-Block-Reference.md#statuses-and-transitions).
 
 **The event's status tracks the work; the entry's status tracks the books.** Close does not look at event status to decide what to post. It posts every draft entry dated in the period whose event is not voided or superseded.
 
@@ -121,7 +121,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
 - A `classified` event whose handler has **already written a draft** (the fire-handler path, or a scheduled obligation promoted when its month matures) is booked. Its draft posts at the next close of that period unless the event is voided or superseded first.
 - A `classified` event from the **capture path** has an account choice but no entry. It does not post at close; it posts once it is committed and its draft is then included in the close.
 
-To see what a close will post, list the period's drafts with `list-period-drafts`. The close itself is covered in [Period Close](Period-Close.md).
+To see what a close will post, list the period's drafts with the GraphQL field `periodDrafts(period:)`, or `list-period-drafts` from an MCP client. The close itself is covered in [Period Close](Period-Close.md).
 
 Two operations move events forward without a new create:
 
@@ -147,9 +147,9 @@ To change a closed month, reopen it with `reopen-period`, make the correction, a
 
 ## Source Systems and Reconciling Items
 
-`source` names where an event came from. The platform's own values (`manual`, `system`, `schedule`) are always accepted; any other value must be a provider or source name registered as a connection on the graph. Supply `external_id` with the source's own id: events are idempotent on `(source, external_id)`, so a retried delivery does not create a duplicate.
+`source` names where an event came from. The platform's own values (`manual`, `system`, `schedule`) are always accepted; any other value must be a provider or source name registered as a connection on the graph. Supply `external_id` with the source's own id: events are idempotent on `(source, external_id)`, so a retried delivery does not create a duplicate. A source that is the entity's general ledger corrects an entry by sending it again with a higher `source_version`, and withdraws one by voiding its event with `source_retracted`; see [Event Block Reference § Corrections from an external ledger](Event-Block-Reference.md#corrections-from-an-external-ledger).
 
-**Write policy** decides who is the system of record for a connection. `qb_authoritative` means QuickBooks is, and RoboLedger's own entries are published to it (at `execute-event-block`, or in a batch at close). `shadow` keeps QuickBooks the system of record and writes nothing to it: the close posts nothing locally and compares its drafts with what QuickBooks holds. These are the two policies a live connection can set. `native` means RoboLedger is the system of record and nothing is written back; it is what severing a connection leaves, not a setting. `hybrid` is reserved and is rejected. Detail is in [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md).
+**Write policy** decides who is the system of record for a connection. `qb_authoritative` means QuickBooks is, and RoboLedger's own entries are published to it (at `execute-event-block`, or in a batch at close). `shadow` keeps the connected ledger the system of record and writes nothing to it: the close posts nothing locally and compares its drafts with what that ledger holds. For QuickBooks these are the two policies a live connection can set. An external general ledger (a source registered with `ledger: true`) is always `shadow`: its `journal_entry_recorded` events land posted whatever `status` they carry, and nothing else posts to those books. A policy governs the books of one entity, the one its connection keeps. `native` means RoboLedger is the system of record and nothing is written back; it is what severing a connection leaves, not a setting. `hybrid` is reserved and is rejected. Detail is in [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md).
 
 **Reconciling items** handle a source that changes its mind. When a re-sync brings a changed payload for an event whose entry has already posted, the platform does not rewrite the books. It keeps the posted entry and the stored payload, holds the incoming one aside, and flags the event as a reconciling item (`isReconcilingItem` on `eventBlocks`). Each one waits for an explicit disposition: **restate** the affected months, **catch up** with an entry in the open period, or **acknowledge** it as handled, with a note. `preview-reconciling-item` shows what each would do and `resolve-reconciling-item` applies one. See [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md).
 

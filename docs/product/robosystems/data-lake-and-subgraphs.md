@@ -28,7 +28,7 @@ Open **Subgraphs** to list them and create one. A subgraph created here starts e
 
 ## Backups
 
-Every graph and subgraph is backed up automatically each night. **Backups** lists those copies and lets you make your own: create one, choose how many days to keep it (up to your tier's limit, 7 days on Standard), wait for it to finish, and download it. Downloads are limited per month on every graph, and on a repository you can download the system-generated backups only.
+Every graph and subgraph is backed up automatically each night. **Backups** lists those copies and lets you make your own: create one, choose how many days to keep it (up to your tier's limit, 7 days on Standard), wait for it to finish, and download it. Backups you make yourself are limited per day by tier (two a day on Standard); the nightly ones don't count against that. Downloads are limited per month on every graph, and on a repository you can download the system-generated backups only.
 
 There is no restore button in the app. A RoboLedger or RoboInvestor graph rebuilds from its own records with **Sync to Graph**. A generic graph rebuilds from the files still in its data lake: run **Ingest to Graph** with **Rebuild entire graph**. For anything else, contact support.
 

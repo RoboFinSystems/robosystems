@@ -46,7 +46,7 @@ Everything that does not call an AI model is free and unmetered by credits:
 
 AI operations are priced on the tokens consumed by the model call, not as a flat per-call fee. Nothing is reserved up front: the charge is computed *after* the model responds, from the token counts it actually reported, at a per-1,000-token rate for each of four classes: uncached input, output, prompt-cache reads and prompt-cache writes. A **minimum charge of 1 credit** then applies, so a very small call still costs something — but a call that consumed nothing costs nothing rather than being rounded up. An unregistered model raises at billing time rather than guessing a rate, so a model has to be priced before it can be used.
 
-The current rates are served as `operation_costs.token_pricing` from `GET /v1/offering`, which is where to read them rather than from a copy on this page. What a call costs depends on how many tokens it uses, so the way to plan is to run representative calls and read their actual charges from the transaction history (see [Reviewing Usage and Transaction History](#reviewing-usage-and-transaction-history)); the charge is always the real measured token cost, never a fixed estimate.
+The input and output rates are served as `operation_costs.token_pricing` from `GET /v1/offering` (`input_per_1k_tokens` and `output_per_1k_tokens`, keyed by model), which is where to read them rather than from a copy on this page. The two cache rates are not served there: a cache write bills at 1.25 times the model's input rate and a cache read at a tenth of it (a twentieth on Claude Opus 5.5), as set in [`config/billing/ai.py`](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/billing/ai.py). What a call costs depends on how many tokens it uses, so the way to plan is to run representative calls and read their actual charges from the transaction history (see [Reviewing Usage and Transaction History](#reviewing-usage-and-transaction-history)); the charge is always the real measured token cost, never a fixed estimate.
 
 ### Capping a Run
 
@@ -165,6 +165,8 @@ curl -X GET "https://api.robosystems.ai/v1/graphs/sec/credits" \
 
 This keeps shared-repository AI usage metered independently from the credits attached to your own graphs. As with graph pools, only AI operations against the repository consume these credits — browsing and querying the repository data is free.
 
+A repository on a free trial has no credits: the pool is created empty, and AI Operator calls against the repository are not available until the plan's first charge, which grants the plan's monthly credits. `POST /v1/graphs/{repo_id}/subscriptions/end-trial` ends the trial and starts the paid plan at once, when a payment method is on file.
+
 ## Low-Balance Thresholds
 
 The credit configuration defines three balance states. The platform does not send low-balance notifications today, so watch `current_balance` and `usage_percentage` on the `/credits` response yourself:
@@ -201,7 +203,7 @@ The organization carries one account-level limit, independent of credits and sto
 
 ## Billing Endpoints
 
-Credits meter AI usage inside a graph; the `/v1/billing/*` surface is where money moves. **Every route on it is scoped by `{org_id}`, not by graph** — the organization is the billing entity — and each is gated on the caller's org role:
+Credits meter AI usage inside a graph; the `/v1/billing/*` surface is where money moves. **It is scoped by organization, not by graph** — the organization is the billing entity. The customer, invoice and subscription routes name it as `{org_id}`; checkout bills the caller's own organization. Each is gated on the caller's org role:
 
 | Endpoint | Purpose | Who can call it |
 | --- | --- | --- |
@@ -217,7 +219,9 @@ Credits meter AI usage inside a graph; the `/v1/billing/*` surface is where mone
 
 The read scoping on the last two is deliberate rather than incidental: billing is org-level but repository access is per-user, so an unfiltered org-wide list would hand every member a roster of everybody else's seats. Owners and admins manage billing and see the whole org; a plain member sees the rows attributed to them.
 
-Checkout is asynchronous. After the user returns from Stripe, the status endpoint progresses `pending_payment → provisioning → active`; once it reads `active` the `resource_id` is populated, and for a graph an `operation_id` tracks provisioning over SSE.
+Checkout is asynchronous. After the user returns from Stripe, the status endpoint progresses `pending_payment → provisioning → active`; once it reads `active` the `resource_id` is populated. There is no stream to follow: `operation_id` on this response is always null, so poll the status endpoint. A checkout that does not complete reads `failed` or `canceled`, with the reason in `error`.
+
+**What checkout takes and refuses.** The body is `plan_name`, `resource_type` (`graph` or `repository`) and `resource_config` (for a repository, `{"repository_name": "sec"}`). There is no promotion-code field. A first subscription to a shared repository opens with a free trial where the repository offers one (`trial_days` on the repository in `GET /v1/offering`): the Stripe page asks for no card, the account's email must be verified first (HTTP 403 otherwise), and a trial that ends with no card on file is cancelled rather than charged. One trial is given per subscriber and per organization. Checkout refuses, before any payment: a repository seat the user already holds, with HTTP 409 (change its plan or add a card from the organization's subscriptions instead); a resource whose earlier checkout was already paid and is provisioning (409); a graph tier with no capacity available (409); an organization at its graph limit (403); and an organization that already has a card on file or is billed by invoice (400 — create the resource directly). On a deployment with billing off it returns `billing_disabled: true` and no URL.
 
 **Buying under contract instead of by card.** The managed platform can also be bought on paper: the public MSA with a one-page Order Form. A Dedicated Deployment — the platform in an AWS account dedicated to your organization — is bought under the MSA and an Order Form, or as an AWS Marketplace private offer billed on your AWS invoice. See [robosystems.ai/enterprise](https://robosystems.ai/enterprise).
 
@@ -243,14 +247,14 @@ For operators of a self-hosted deployment, the admin CLI exposes credit-pool ins
 ```bash
 just admin dev credits list                       # List graph credit pools
 just admin dev credits get <graph_id>             # Detail for one graph
-just admin dev credits bonus <graph_id> --amount 500 --description "Pilot"   # Grant bonus credits
+just admin dev credits bonus <graph_id> --amount 500 --description "Deployment credit"   # Grant bonus credits
 just admin dev credits reset <graph_id> --reason "Support"                   # Refill to the monthly allocation
 just admin dev credits analytics                  # Tier-level analytics
 just admin dev credits health                     # Credit system health
 
 just admin dev credits repos list                 # Shared-repository credit pools
 just admin dev credits repos get <user_repository_id>
-just admin dev credits repos bonus <user_repository_id> --amount 500 --description "Pilot"
+just admin dev credits repos bonus <user_repository_id> --amount 500 --description "Deployment credit"
 ```
 
 `credits reset` asks for confirmation, then forfeits the pool's remaining balance (recorded as an `expiration` transaction) and refills it to the monthly allocation. The scheduled monthly reset still runs when the month turns.
@@ -264,7 +268,7 @@ just admin dev credits repos bonus <user_repository_id> --amount 500 --descripti
 - **[Architecture Overview](Architecture-Overview.md)** - Platform architecture, tiers, and the operations layer
 
 **Codebase Documentation:**
-- **[Billing Configuration](https://github.com/RoboFinSystems/robosystems/tree/main/robosystems/config/billing)** - Subscription plans, AI token pricing, and storage limits
+- **[Billing Configuration](https://github.com/RoboFinSystems/robosystems/tree/main/robosystems/config/billing)** - Subscription plans and AI token pricing
 - **[Shared Repository Registry](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/shared_repositories.py)** - Repository plans, rate limits, and credit costs
 - **[API reference](https://robosystems.ai/docs/api)** - API reference with machine-readable OpenAPI spec
 

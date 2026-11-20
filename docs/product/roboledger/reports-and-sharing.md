@@ -35,12 +35,13 @@ An open month's column follows the ledger on its own, and a reopened month's col
 Open a report in **Reports → View Reports** and choose a format from its menu (⋮):
 
 - **Holon (JSON-LD)**, the complete report. It opens in the free viewer at [xbrlkit.com](https://xbrlkit.com).
+- **Holon with lineage (JSON-LD)**, the same holon with the ledger lines, entries and events behind each closed figure. It holds your books, not just the statements, so it's offered only on your own reports and never travels with a share. Send it only to someone who should see the ledger.
 - **Tavi (JSON)**, a compiled model of the report, which also opens in that viewer. It leaves out some of what the holon carries, such as the report's filing status.
 - **XBRL 2.1 package**, the standard behind public company SEC filings, for tools that read XBRL. It leaves out the report's notes.
 
 **Which file to send.** Send the holon unless the person asks for something else. It is the only one that carries the whole report. Send the XBRL package to someone whose software needs XBRL, and the notes separately if they need them.
 
-An assistant that works with files on your computer, such as Claude Code, can also fetch a short-lived link to a report and open it in a tool there. The link expires after a few minutes.
+An assistant that works with files on your computer, such as Claude Code, can also fetch a short-lived link to a report and open it in a tool there. The link expires after five minutes. This works over the general address or your graph's own, not RoboLedger's own address. See [Which address to use](connect-your-books.md#which-address-to-use).
 
 ## File it
 
@@ -62,7 +63,9 @@ A report shared before it's filed arrives marked as a draft or under review. Fil
 
 To withdraw a report, open it and choose **Manage shares**. Revoking a share deletes the recipient's copy from their graph. The report's author or a graph admin can revoke. A report that is still shared can't be deleted: revoke each share first.
 
-If someone sends you reports you don't want, add them under **Reports → Blocked Senders**.
+A report shared to your graph appears in **Reports → View Reports**, marked as shared. You can read and download it, but not change, file or share it onward. To be rid of one, a graph admin opens it and chooses **Delete this copy** from its menu (⋮). The sender isn't notified.
+
+If someone sends you reports you don't want, open one of them and choose **Block sender** from its menu (⋮). Nothing more arrives from that graph, and they're told when they next try to share. A graph admin can tick **Also delete reports already shared in** to remove what they already sent. **Reports → Blocked Senders** lists who is blocked, and a graph admin can lift a block there.
 
 Someone without a RoboLedger or RoboInvestor graph can still read your report. Download the holon and send it to them. It opens in the free viewer at [xbrlkit.com](https://xbrlkit.com), in their browser, with no account.
 

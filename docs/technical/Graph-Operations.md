@@ -54,6 +54,8 @@ The rest move content and memory in and out of the graph, using the identical en
 | **delete-file** | Removes a staged file | Sync |
 | **index-document** | Adds a document to the search index | Sync |
 | **delete-document** | Removes a document from the index | Sync |
+| **create-document-upload** | Presigns an upload target for a document file (PDF, PNG, JPEG) | Sync |
+| **complete-document-upload** | Stores the uploaded file as a document | Sync |
 | **remember** | Stores a semantic memory | Sync |
 | **update-memory** | Revises a stored memory | Sync |
 | **forget** | Deletes a stored memory | Sync |
@@ -138,7 +140,7 @@ Adds a child graph under a parent. The resulting subgraph id is `{parent_graph_i
 - **Body:** `name` (alphanumeric, 1–20 chars, lowercased), `display_name` (required), optional `description`, `metadata`, `subgraph_type`, and `fork_parent`.
 - **The schema follows `subgraph_type`:** `static` (the default) gets the parent's base schema plus the parent's extensions, `knowledge` a knowledge-only schema, and `empty` a bare database. The request model also carries a `schema_extensions` field, but the operation does not read it — choose the schema with `subgraph_type`.
 - **Sync/async:** Creating an empty subgraph is **synchronous**. Setting `fork_parent: true` copies the parent's data and runs **asynchronously** — the envelope comes back `pending` (over HTTP 200) with an `operationId` to follow.
-- **Requires admin on the parent graph.** A name already in use is a **409**; a parent at its tier's subgraph cap, a tier with no subgraph capacity, or a shared repository is a **403**. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy.md#subgraphs).
+- **Requires admin on the parent graph.** A name already in use is a **409**; a parent at its tier's subgraph cap, a tier with no subgraph capacity, or a shared repository is a **403**. A suspended parent graph is a 403 too, and so is every call when the deployment sets `SUBGRAPH_CREATION_ENABLED=false`. See [Graphs and Multi-Tenancy](Graphs-and-Multi-Tenancy.md#subgraphs).
 
 ```bash
 curl -s -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e6f7a8b/operations/create-subgraph" \
@@ -195,7 +197,7 @@ curl -s -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e6f7a8b/operati
 
 ### materialize
 
-Rebuilds the analytical graph (LadybugDB) from OLTP or staged source data. **Asynchronous** (202), except a dry run which runs **synchronously** — it returns a `completed` envelope reporting what it would do, without executing.
+Rebuilds the analytical graph (LadybugDB) from OLTP or staged source data. **Asynchronous** (202), except a dry run, which runs **synchronously**: it returns a `completed` envelope whose `result.limit_check` says whether the graph is inside its tier's materialization limits, and materializes nothing. A dry run takes no lock and does not test for the `rebuild` conflict below, so the real call can still answer 409.
 
 - **Body:** `source` (`staged` or `extensions`), `rebuild`, `force`, `dry_run`, `materialize_embeddings` — all four booleans default `false`.
 - **Omit `source` and it follows the graph type:** an entity graph materializes from the extensions database, a custom graph from its staged uploads. Naming the other one is a **400** — an entity graph cannot take `staged`, nor a custom graph `extensions`. An `extensions` run always rebuilds a graph that already exists, building the new copy alongside and swapping it in.
@@ -213,7 +215,7 @@ curl -s -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e6f7a8b/operati
 ```
 
 ```bash
-# Dry run — synchronous, returns a completed envelope with the plan, materializes nothing
+# Dry run — synchronous, returns a completed envelope with the tier limit check, materializes nothing
 curl -s -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e6f7a8b/operations/materialize" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
@@ -246,6 +248,7 @@ Deletes the graph itself. **Synchronous** in the envelope — it comes back `com
 
 - **Body:** `confirm` (required — must equal the `graph_id` in the URL) and `at_period_end` (default `false`). With `at_period_end: true`, cancellation and teardown are deferred to the end of the current billing period and the graph stays usable until then; that needs an active subscription (400 otherwise).
 - The caller must be both an org **owner** and a graph **admin**.
+- **Refusals.** A graph with no subscription is a 404. A graph already being deleted, or one mid tier change, is a 400. If the payment provider cannot cancel the subscription the call is a **502** and nothing has changed — retry it.
 - **An immediate delete credits the unused period; it is never refunded.** A period buys time and an AI-credit allocation, and the credit is the smaller unused share of the two: credits consumed ahead of the time elapsed reduce it, so a graph whose allocation was burned on day one gets nothing back for the days it did not use. On an active card-billed subscription, Stripe's time-based proration and the credits offset appear as two lines on the final invoice, which is finalized in the same call rather than left as a draft, so the net credit lands on the organization's account balance at once and is applied to its next invoice; a graph created right after is charged the difference. On an invoiced plan the single credit line carries the reduced amount, with the time-only figure and the consumed share in its metadata. On an invoiced plan, the credit is a negative line on that period's invoice while it is open, so the invoice charges only for the time used; once that invoice is paid, the credit is issued as a separate invoice with a negative total. A past-due card subscription gets no credit, and a deferred delete needs none — the graph runs to the end of the period it paid for.
 - **A final backup is taken before teardown.** It is recorded with `initiated_by: "final"`, and a graph admin can still download it for a grace period after the graph is torn down — the export copy of a departing graph.
 
@@ -255,9 +258,10 @@ The content and memory operations share the surface and the contract, and all bu
 
 - **`create-file-upload` / `ingest-file` / `delete-file`** — the staging-file path: presign an upload target, stage the uploaded file into a columnar table, then `materialize` to move it into the graph.
 - **`index-document` / `delete-document`** — add and remove documents in the search index. See [Search and AI Retrieval](Search-and-AI-Retrieval.md).
+- **`create-document-upload` / `complete-document-upload`** — store a PDF, PNG or JPEG as a document: presign, `PUT` the file, then complete. See [Document Management](Document-Management.md).
 - **`remember` / `update-memory` / `forget`** — the per-graph semantic memory store an Operator writes to. See [AI Operators and MCP](AI-Operators-and-MCP.md).
 
-Two of these families are refused on a subgraph with 403: the staging-file path (`create-file-upload`, `ingest-file`), because a staging rebuild would discard the subgraph's direct writes, and `remember` / `update-memory`, because memory lives on the parent graph. `delete-file` and `forget` stay open on a subgraph, so anything stored there earlier can still be removed.
+Three of these families are refused on a subgraph with 403: the staging-file path (`create-file-upload`, `ingest-file`), because a staging rebuild would discard the subgraph's direct writes; document files (`create-document-upload`, `complete-document-upload`), because a subgraph keeps no ledger for a file to evidence; and `remember` / `update-memory`, because memory lives on the parent graph. `delete-file` and `forget` stay open on a subgraph, so anything stored there earlier can still be removed.
 
 ## Worked Example: Create a Backup and Watch It Complete
 
@@ -285,6 +289,7 @@ curl -s -X POST "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e6f7a8b/operati
   "result": {
     "status": "accepted",
     "message": "Backup creation started",
+    "retention_days": 30,
     "monitoring": { "sse_endpoint": "/v1/operations/op_01J9ZK7M3QABCDEF.../stream" }
   },
   "at": "2026-06-11T18:22:05Z",

@@ -10,7 +10,7 @@ RoboInvestor is focused on private-company portfolio management. This page docum
 
 - [Overview](#overview)
 - [Prerequisites](#prerequisites)
-- [The Two Write Surfaces](#the-two-write-surfaces)
+- [The Write Surfaces](#the-write-surfaces)
 - [Core Concepts](#core-concepts)
 - [Quick Start](#quick-start)
 - [Walkthrough](#walkthrough)
@@ -44,7 +44,7 @@ The surface is intentionally small. Portfolios and positions are written through
 - RoboInvestor enabled on the deployment. The `ROBOINVESTOR_ENABLED` flag gates both the RoboInvestor operations and the GraphQL investor fields; on robosystems.ai it is on. On a deployment where it is off, the operation routes aren't mounted, so a call is a plain HTTP 404, and the investor fields are absent from the GraphQL schema.
 - A graph provisioned with the `roboinvestor` schema extension. The operations and the GraphQL investor fields only appear on graphs that carry this extension. In the app, **Create Graph** lets you select it among the graph's schema extensions. The extension is enough on its own to receive reports: an investor graph carries the reporting tables (reports, fact sets and facts), so a report an issuer shares in materializes into the graph and `Portfolio → Position → Security → Entity → Report → Fact` resolves without the `roboledger` extension. Add `roboledger` when the fund keeps its own books in the same graph.
 
-## The Two Write Surfaces
+## The Write Surfaces
 
 RoboInvestor exposes three write surfaces plus a read surface:
 
@@ -207,17 +207,20 @@ Sharing covers a company that keeps its books in its own graph. Most companies a
 
 ```bash
 curl -X POST "https://api.robosystems.ai/extensions/roboinvestor/$GRAPH_ID/operations/create-issuer" \
-  -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Content-Type: application/json" \
   -d '{"name": "Northwind Robotics, Inc.", "tax_id": "98-7654321"}'
 ```
 
 Pass the returned `id` as `entity_id` to `create-security` and to `ingest-report`. An identifier (`lei`, `cik` or `tax_id`) that another entity already carries is refused with HTTP 409.
 
-**`ingest-report`** loads one report onto that entity. The entity must be an issuer: one of the graph's own entities reports from its ledger, and a report sent for it is refused (`own_entity`). The fund does not need a position in the issuer. Give it one of:
+**`ingest-report`** loads one report onto that entity. The entity must be an issuer: one of the graph's own entities reports from its ledger, and a report sent for it is refused with HTTP 422, in a message that names the entity and points at `create-issuer`. The fund does not need a position in the issuer. Give it one of:
 
 - `holon`: the text of a `.holon.jsonld` report file.
 - `tavi`: the text of a `.tavi.json` compiled model.
 - `report`: the report as rows, read from the PDF or the workbook. Each value carries its concept, its period, its unit and the page or cell it was read from.
+
+Give exactly one of the three; none, or more than one, is HTTP 422. A report sent as rows takes at most 3,000 values, 750 declared concepts, 50 sections and 500 lines in a section, and a Tavi model is held to the same 3,000 values and 750 concepts; a `holon` or `tavi` text may be up to 25 MB. A monthly package is a few hundred values, so the limits leave room for a full annual report. A report past a limit is refused with HTTP 422 and nothing is loaded.
 
 For a balance sheet or an income statement, rows are values only. Name the section with its `block_type` and leave out `lines`:
 
@@ -282,11 +285,22 @@ A primary statement keeps the library's structure, so a line means the same thin
 
 Any other section gives all of its `lines`, top to bottom: a KPI table, a cash flow statement, a statement of equity. A line names its `parent`, and a `weight` (`1` adds, `-1` subtracts) makes it a term of the parent's total. With `layout` set to `given`, a balance sheet or an income statement is taken that way too.
 
+A flat table, where no line sits under another, needs a `head`: an abstract concept, declared in `concepts` with `abstract: true`, that its lines hang from.
+
+```json
+{"name": "Operating KPIs", "head": "kpi:KpiHead", "lines": [
+  {"concept": "kpi:Headcount"},
+  {"concept": "kpi:UnitsShipped"}
+]}
+```
+
 A value whose concept no section places still loads, and the response names it in `unplaced_concepts`.
 
 Rows and a Tavi model are turned into a holon on the server, so whichever is sent the graph loads a report from a serialization, and that file is kept as the record of what was received. It downloads through `reportDownloadUrl` like any published report.
 
-Before anything is written the report is checked: every value resolves to a concept and a period, two values for one line agree, every total with a `weight` on its lines foots to them at the total's `decimals`, and total assets equal total liabilities and equity where both are present. With `require_source`, every value must name where it came from. A report that fails comes back as HTTP 422 naming each reason, and nothing is loaded. `dry_run: true` runs the same checks and reports what would load without writing.
+Before anything is written the report is checked: every value resolves to a concept and a period, two values for one line agree, every total with a `weight` on its lines foots to them at the total's `decimals`, and total assets equal total liabilities and equity where both are present. With `require_source`, every value must name where it came from. A report that fails comes back as HTTP 422 naming each reason, and nothing is loaded. `dry_run: true` runs the same checks and reports what would load without writing. A value the report states twice (a rounded figure on a summary page and the exact one on the statement) loads once, as the more precise of the two, so `fact_count` can be lower than the number of rows sent.
+
+The result says what loaded: `report_id` (null on a dry run), `fact_count` and `section_count`, `calculations_checked` (the totals compared with their terms) and `balance_checked`, `concepts_added` (the concepts new to the graph), `replaced_report_ids`, and, described above, `unplaced_concepts`, `dimensional_facts_not_loaded`, `conforms_to_library` and `departures`. `conforms_to_library` is null for a holon or a Tavi model, which is not compared with the library.
 
 What lands:
 
@@ -346,7 +360,7 @@ The full request and response schemas are published in the live OpenAPI spec —
 | `create-issuer` | `CreateIssuerRequest` | `IssuerResponse` |
 | `ingest-report` | `IngestReportRequest` | `IngestReportResponse` |
 
-Every response is wrapped in an `OperationEnvelope` with these wire fields: `operation` (the kebab-case op name), `operationId` (an `op_`-prefixed ULID), `status` (`completed` for these synchronous operations, HTTP 200), `result` (the domain payload), `at` (ISO-8601 UTC), `createdBy`, and `idempotentReplay`. All six accept an `Idempotency-Key` header.
+Every response is wrapped in an `OperationEnvelope` with these wire fields: `operation` (the kebab-case op name), `operationId` (an `op_`-prefixed ULID), `status` (`completed` for these synchronous operations, HTTP 200), `result` (the domain payload), `at` (ISO-8601 UTC), `createdBy`, and `idempotentReplay`. All eight accept an `Idempotency-Key` header.
 
 Common error responses:
 
@@ -358,6 +372,12 @@ Common error responses:
 | Position id belongs to a different portfolio | 409 | `PositionPortfolioMismatchError` |
 | Second active position for same (portfolio, security) | 409 | `DuplicateActivePositionError` |
 | Delete portfolio with active positions, no confirmation | 409 | `ActivePositionsRequireConfirmationError` |
+| Portfolio id matches no portfolio | 404 | `PortfolioNotFoundError` |
+| `create-issuer` with an `lei`, `cik` or `tax_id` another entity carries | 409 | `IssuerAlreadyExistsError` (the message names the existing entity and its id) |
+| `ingest-report` for an `entity_id` not in this graph | 404 | `ReportImportEntityNotFoundError` |
+| `ingest-report` with none, or more than one, of `holon`, `tavi` and `report` | 422 | `IngestRequestError` |
+| `ingest-report` for a report that cannot be read or does not check | 422 | `ReportImportRefusedError` (`detail` begins "The report was not loaded." and gives each reason as a sentence) |
+| The same `Idempotency-Key` sent with a different body | 409 | — |
 
 ### Errors by layer
 
@@ -399,7 +419,7 @@ The RoboInvestor surface covers private-company portfolio management:
 - Portfolio Block writes: create, update (with add / update / dispose position deltas), delete (with active-position confirmation).
 - GraphQL reads across portfolios, securities, positions, holdings, and the assembled Portfolio Block.
 - Cross-graph issuer linking via `source_graph_id` and the report-sharing handshake.
-- Issuers that keep their books elsewhere, and their reports ingested from a holon or from rows.
+- Issuers that keep their books elsewhere, and their reports ingested from a holon, a Tavi model or rows.
 
 Atom-level portfolio and position CRUD endpoints do not exist — all portfolio and position writes go through the Portfolio Block. The surface is deliberately narrow; the molecule is the contract.
 

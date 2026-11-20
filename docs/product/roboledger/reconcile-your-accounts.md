@@ -15,7 +15,7 @@ A reconciliation checks the ledger against something outside it at a month end a
 
 ## Run them
 
-Open **Ledger → Closing Book → Reconciliations**, pick the month, and choose **Run reconciliations**. That runs the check against the synced books and the check for each scheduled account, and records the result of each. Open a row to see what was compared and which accounts differ.
+Open **Ledger → Closing Book → Reconciliations**, pick the month, and choose **Run reconciliations**. That runs the check against the synced books (the group parent's), the check for each scheduled account, and the check for each account with a statement covering the month, and records the result of each. Open a row to see what was compared and which accounts differ.
 
 Each row shows its status:
 
@@ -25,7 +25,7 @@ Each row shows its status:
 - **Reconciled**: the two sides agree within the materiality.
 - **Reviewed**: reconciled and signed off.
 
-Materiality is zero unless you set one, so the two sides have to agree to the cent. Ask your assistant to set a materiality on a reconciliation, and a difference up to that amount still counts as tied. It applies from the next comparison.
+Materiality is zero unless you set one, so the two sides have to agree to the cent. Open a row and set **Counts as reconciled within**, or ask your assistant, and a difference up to that amount still counts as tied. It applies from the next comparison.
 
 ## Record a statement balance
 
@@ -41,7 +41,7 @@ Not every statement ends on the last day of the month. A card's cycle might end 
 
 ## Bank accounts on a bank feed
 
-When a bank feed keeps an account, every line the feed brought in is the bank's own record, so it has already cleared. The lines that may not have cleared are the ones that didn't come from the feed, such as a payment you recorded against a bill or a journal entry. Those dated on or before the statement are listed under **Not yet cleared by the bank** and explain the gap between the statement and the ledger. Only a difference nothing explains keeps the reconciliation from tying. Lines dated before the feed started, such as an opening balance, count as cleared.
+When a bank feed keeps an account, every line the feed brought in is the bank's own record, so it has already cleared. The lines that may not have cleared are the ones that didn't come from the feed, such as a payment you recorded against a bill or a journal entry. Those dated on or before the statement are listed under **Not yet cleared by the bank** and explain the gap between the statement and the ledger. One the bank has had a full statement cycle to clear is listed apart, under **Older than this statement's cycle — not counted**: it no longer explains anything, so the difference stays open until the line clears, or is voided or re-dated. Only a difference nothing explains keeps the reconciliation from tying. Lines dated before the feed started, such as an opening balance, count as cleared.
 
 A statement that ends before the month end is carried forward to it by the feed's lines after the statement. That gives the bank balance at the month end, set beside the ledger's balance. The bank feed's own reported balance is shown next to it as a check. If the two disagree, a line may be missing or dated differently. It's a check only: the statement is what you reconcile and sign off.
 
@@ -53,7 +53,7 @@ A reconciliation with **Holds the close** ticked must be **Reconciled** before i
 
 The first time you run reconciliations, the check against the synced books starts holding the close. A scheduled account's check holds it only if it ties on that first run; one that doesn't is reported without holding the close, so you can look into it first. A statement check holds the close only once you tick the box, which makes it a statement you owe every month.
 
-Once you've run reconciliations, each QuickBooks sync runs the next month's again, so the close never waits on a comparison nobody remembered to run. A sync refreshes the checks you have and doesn't add new ones.
+Once you've run reconciliations and closed your first month, each QuickBooks sync runs the next month's again for the group parent's books, so the close never waits on a comparison nobody remembered to run. Before the first close, and for a subsidiary, run them yourself. A sync refreshes the checks you have and doesn't add new ones.
 
 A month's comparison only goes out of date while the month is open. Once it closes, the comparison stands as the record the close was made on.
 
@@ -63,10 +63,10 @@ On a reconciled row, choose **Sign off**. Only someone added to the graph itself
 
 A sign-off is for the figures as they stood. If a balance at that month end changes, the sign-off lapses, and the reconciliation needs running and signing again. A run that finds the same balances keeps it.
 
-Two settings, which your assistant can change for you, make the review part of the close:
+Two settings, on the opened row or through your assistant, make the review part of the close:
 
-- *Review required.* The close waits for a sign-off, not only for the two sides to tie.
-- *Separate reviewer.* The person who signs off must be someone other than the one who ran the comparison or recorded the statement balance. It needs at least two members of the graph who can make changes.
+- *Needs a sign-off to close.* The close waits for a sign-off, not only for the two sides to tie.
+- *Signed off by someone other than who ran it.* The person who signs off must be someone other than the one who ran the comparison or recorded the statement balance. It needs at least two members of the graph who can make changes, and the first setting ticked.
 
 If a reconciliation can't be cleared before the close, the close can still run without it: the app offers **Close without reconciling** when it's the only thing in the way, and the override is kept in the close's audit note. See [Close the month with your AI assistant](month-end-close.md).
 

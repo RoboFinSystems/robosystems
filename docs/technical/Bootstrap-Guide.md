@@ -146,7 +146,7 @@ While bootstrap sets the core OIDC variables (`AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, 
 | Database | `DATABASE_INSTANCE_SIZE_*`, `DATABASE_POSTGRES_VERSION_*` | RDS sizing and configuration |
 | RDS Proxy | `RDS_PROXY_ENABLED_*`, `RDS_PROXY_MAX_CONNECTIONS_PERCENT_*` | Connection pooling in front of RDS (optional) |
 | Dagster | `DAGSTER_DAEMON_CPU_*`, `DAGSTER_MAX_CONCURRENT_RUNS_*` | Orchestration resources and Spot config |
-| Worker | `WORKER_ENABLED_*`, `WORKER_CPU_*`, `WORKER_MEMORY_*`, `WORKER_MIN_COUNT_*`, `WORKER_MAX_COUNT_*`, `WORKER_AUTOSCALING_ENABLED_*` | Background worker service (off by default) |
+| Worker | `WORKER_ENABLED_*`, `WORKER_CPU_*`, `WORKER_MEMORY_*`, `WORKER_MIN_COUNT_*`, `WORKER_MAX_COUNT_*`, `WORKER_AUTOSCALING_ENABLED_*` | Background worker service (off by default; needed for graph creation, materialization, period close and operators — see [Turn On What You Need](#turn-on-what-you-need)) |
 | LadybugDB | `LBUG_*_ENABLED_*`, `LBUG_*_MIN_INSTANCES_*` | Graph database tier configuration |
 | Shared Replicas | `SHARED_REPLICAS_*`, `SHARED_REPOSITORIES_*` | Read-only replica fleet for shared repos |
 | Valkey | `VALKEY_NODE_TYPE_*`, `VALKEY_ENCRYPTION_ENABLED_*` | Cache configuration |
@@ -200,12 +200,11 @@ robosystems/{env}                      # Single JSON secret per environment
   ├── PLAID_ENVIRONMENT                # "production" or "sandbox"
   ├── SEC_GOV_USER_AGENT               # SEC EDGAR API identification
   ├── OPENFIGI_API_KEY                 # OpenFIGI security resolution
-  ├── STRIPE_SECRET_KEY                # Stripe billing
-  ├── STRIPE_PUBLISHABLE_KEY
-  ├── STRIPE_WEBHOOK_SECRET
   ├── TURNSTILE_SECRET_KEY             # Cloudflare Turnstile captcha
   └── TURNSTILE_SITE_KEY
 ```
+
+**Stripe keys are not seeded.** Add `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY` and `STRIPE_WEBHOOK_SECRET` to the same secret by hand when you turn billing on (`BILLING_ENABLED`); a placeholder webhook secret would be a publicly known signing key.
 
 **Enterprise SSO keys are deliberately not seeded.** A deployment that enables OIDC login and SCIM provisioning adds these to the same secret by hand:
 
@@ -233,7 +232,7 @@ aws secretsmanager get-secret-value --secret-id robosystems/prod --query SecretS
 aws secretsmanager put-secret-value --secret-id robosystems/prod --secret-string "$(cat updated.json)"
 ```
 
-Safe to re-run `just setup-aws` — existing secrets are never overwritten. Two keys (`JWT_SECRET_KEY`, `CONNECTION_CREDENTIALS_KEY`) are auto-generated; all others are placeholders to configure later. Graph backups carry no application-layer key of their own — they rely on S3 server-side encryption (SSE-AES256).
+Safe to re-run `just setup-aws` — existing secrets are never overwritten. Two keys (`JWT_SECRET_KEY`, `CONNECTION_CREDENTIALS_KEY`) are auto-generated; the others it seeds are placeholders to configure later. Graph backups carry no application-layer key of their own — they rely on S3 server-side encryption (SSE-AES256).
 
 #### SSM Parameter Store
 
@@ -268,9 +267,10 @@ Feature flags and tuning parameters. Uses SSM for cost efficiency (FREE tier vs 
     load_shedding/    # Load shedding (START_PRESSURE, STOP_PRESSURE)
     mcp/              # MCP limits (MAX_RESULT_ROWS, MAX_RESULT_SIZE_MB, POOL_*)
     workers/          # Worker pool (MAX_WORKERS)
-    timeouts/         # HTTP/query timeouts (GRAPH_HTTP, GRAPH_QUERY)
+    timeouts/         # HTTP/query timeouts (GRAPH_HTTP, GRAPH_QUERY, GRAPH_ENGINE_QUERY)
     sse/              # Server-sent events (MAX_CONNECTIONS_PER_USER, QUEUE_SIZE)
     limits/           # Org limits (ORG_GRAPHS_DEFAULT)
+    materialization/  # Rematerialization cadence and timeouts (MIN_STALE_AGE, MAX_STALE_WAIT, STAGE_TIMEOUT, COPY_TIMEOUT, ENGINE_COPY_TIMEOUT)
 ```
 
 **Managing parameters:**
@@ -307,6 +307,15 @@ just tunnel prod all    # Connect to all services
 ```
 
 ## Turn On What You Need
+
+**Turn the worker on first.** Graph creation, subgraph creation, materialization, tier changes, period close and every operator run are queued for the background worker, and its stack (`worker.yaml`, deployed by the Dagster deploy job) is off until the `WORKER_ENABLED_PROD` / `WORKER_ENABLED_STAGING` GitHub variable is `true`. The workflows default it to `false`, and so does `just setup-gha`. Set it, then deploy:
+
+```bash
+just gha-set WORKER_ENABLED_PROD true    # or: gh variable set WORKER_ENABLED_PROD --body true
+just deploy prod
+```
+
+Without it those requests answer `202` and stay pending. `WORKER_CPU_*`, `WORKER_MEMORY_*`, `WORKER_MIN_COUNT_*`, `WORKER_MAX_COUNT_*` and `WORKER_AUTOSCALING_ENABLED_*` size the service. A later `just setup-gha` run resets the variable to `false`, as it does every variable it manages.
 
 A fresh environment comes up with its product surfaces off. `just setup-aws` seeds these flags `false` (most default to `true` in code), so each is an explicit opt-in:
 
@@ -581,7 +590,7 @@ aws sts get-caller-identity
 | `api.yaml` | GitHub Actions | ECS API service |
 | `waf.yaml` | GitHub Actions | Web Application Firewall (optional) |
 | `dagster.yaml` | GitHub Actions | ECS Dagster service |
-| `worker.yaml` | GitHub Actions | ECS background worker service (optional, `WORKER_ENABLED_*`) |
+| `worker.yaml` | GitHub Actions | ECS background worker service (`WORKER_ENABLED_*`; off by default, required for graph creation and other queued work) |
 | `opensearch.yaml` | GitHub Actions | OpenSearch document search (optional) |
 | `graph-*.yaml` | GitHub Actions | LadybugDB infrastructure |
 | `prometheus.yaml` | GitHub Actions | Managed Prometheus (optional) |

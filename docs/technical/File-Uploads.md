@@ -38,7 +38,7 @@ This surface lets you load bulk data — nodes and relationships — into a cust
 2. **Stage** it into a DuckDB table (queryable immediately).
 3. **Ingest** it into the LadybugDB graph, either per-file or in a single batch.
 
-This is a different surface from document management. The file pipeline moves **structured tabular data into the graph**; it does not store or index documents. For narrative content — policies, procedures and notes, uploaded as markdown and indexed for full-text and semantic search — see [Document Management](Document-Management.md) instead. That store takes markdown text, not binary files such as PDFs.
+This is a different surface from document management. The file pipeline moves **structured tabular data into the graph**; it does not store or index documents. For narrative content — policies, procedures and notes, uploaded as markdown and indexed for full-text and semantic search — see [Document Management](Document-Management.md) instead. That page also covers document files (a PDF, or a PNG or JPEG image) stored with a graph; those are kept as documents and never loaded into the graph as rows.
 
 ## When to Use This
 
@@ -69,6 +69,8 @@ Every file lives across three layers, each with its own independent status. The 
 **The uploaded files are the source of truth; staging and the graph are derived from them.** The staging tables are rebuilt from every uploaded file, and the graph is a materialized view of the staging tables, so the graph can always be rebuilt from what you uploaded. That makes `materialize` (rebuild) a safe, repeatable operation.
 
 **Tables auto-create on first upload.** You do not pre-declare tables. When you request an upload URL with a `table_name`, the table is created if it does not exist, and the table type (node vs relationship) is inferred from the name. You can review staging tables at any time with `GET /v1/graphs/{graph_id}/tables`.
+
+**Naming and columns.** Name the table for the node or relationship type in your schema. A `table_name` in upper case with an underscore (`PERSON_WORKS_FOR_COMPANY`) is registered as a relationship table; any other name (`Person`) as a node table. A node file carries the node's properties as columns, including its primary key. A relationship file carries `from` and `to` columns holding the primary-key values of the source and target nodes, then the relationship's own properties; staging reads those two column names to recognise a relationship, and exposes them as `src` and `dst` to SQL.
 
 ## Prerequisites
 
@@ -130,7 +132,7 @@ The response is an `OperationEnvelope`; the presign payload sits inside `result`
     "file_id": "<uuid>",
     "s3_key": "user-staging/<user_id>/kg1a2b3c4d5e6f7a8b/Person/<file_id>/Person.parquet"
   },
-  "at": "2026-08-09T18:04:11.921Z",
+  "at": "2026-08-09T18:04:11Z",
   "createdBy": "user_01K2...",
   "idempotentReplay": false
 }
@@ -140,7 +142,7 @@ Envelope keys are camelCase on the wire, and the payload you want is one level d
 
 **Note:** `table_name` is required for this operation. The presigned URL expires in 3600 seconds (1 hour) — re-request it if it lapses.
 
-**Declaring the size.** `file_size_bytes` is optional. When you send it, a file over the size limit is refused here with **413** instead of after the upload, and the size is signed into the presigned URL — the `PUT` in step 2 must then send exactly that many bytes, or S3 rejects it. Without it, the size is checked by `ingest-file` after the upload.
+**Declaring the size.** `file_size_bytes` is optional. When you send it, a file over the size limit is refused here with **413** instead of after the upload, and the size is signed into the presigned URL — the `PUT` in step 2 must then send exactly that many bytes, or S3 rejects it. Without it, the size is checked by `ingest-file` after the upload, which refuses an oversize object with **400**.
 
 ### Step 2: Upload the Bytes to S3
 
@@ -170,7 +172,7 @@ Before staging, `ingest-file` measures the object in S3: its size, its row count
 ```json
 {
   "operation": "ingest-file",
-  "operationId": "op_01K2...",
+  "operationId": "op_01K2ABCDEFGHJKMNPQRSTVWXYZ",
   "status": "pending",
   "result": {
     "status": "success",
@@ -178,10 +180,14 @@ Before staging, `ingest-file` measures the object in S3: its size, its row count
     "upload_status": "uploaded",
     "file_size_bytes": 12345,
     "row_count": 50,
-    "operation_id": "<uuid>",
-    "monitor_url": "/v1/operations/<uuid>/stream"
+    "message": "File staged to DuckDB. Graph ingestion in progress. Monitor at /v1/operations/op_01K2ABCDEFGHJKMNPQRSTVWXYZ/stream",
+    "duckdb_status": "staged",
+    "staged": true,
+    "operation_id": "op_01K2ABCDEFGHJKMNPQRSTVWXYZ",
+    "monitor_url": "/v1/operations/op_01K2ABCDEFGHJKMNPQRSTVWXYZ/stream",
+    "ingest_to_graph": true
   },
-  "at": "2026-08-09T18:04:19.402Z",
+  "at": "2026-08-09T18:04:19Z",
   "createdBy": "user_01K2...",
   "idempotentReplay": false
 }
@@ -237,11 +243,11 @@ Three file formats are supported. The file extension must match the content type
 
 Key constraints:
 
-- **Maximum file size:** 100 MB per file.
+- **Maximum file size:** 100 MB per file — a 413 from `create-file-upload` when you declared the size, a 400 from `ingest-file` when you did not.
 - **Presigned URL expiry:** 3600 seconds (1 hour).
 - **Size-based routing is automatic and invisible.** Files under 50 MB take a synchronous "direct staging" fast path; files 50 MB and larger go through an async Dagster job. Either way you may receive an `operation_id` for SSE monitoring.
 - **Rows per file:** capped by tier, at the tier's `max_single_table_rows` — `GET /v1/graphs/{graph_id}/limits` reports it. A file over the cap is refused by `ingest-file` with **413**, since it could never materialize.
-- **Filename safety:** `file_name` is 1–255 characters and cannot contain `..`, `/`, or `\`.
+- **Filename safety:** `file_name` is a plain name of 1–255 characters: no `/` or `\`, no leading dot, no double quote and no control characters. Anything else is a 400.
 - **Table name pattern:** `table_name` must match `^[A-Za-z_][A-Za-z0-9_]*$`.
 - **Column names** become staging identifiers, so they follow the same rule: a letter or underscore first, then letters, digits and underscores, up to 128 characters. A parquet file with any other column name is refused by `ingest-file` with **400** (it reads the names from the file footer); for CSV and JSON the staging step refuses it.
 
@@ -263,7 +269,7 @@ curl "https://api.robosystems.ai/v1/graphs/kg1a2b3c4d5e6f7a8b/files/<file_id>" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY"
 ```
 
-A file's upload status is one of `pending`, `uploaded`, or `failed`. Nothing sets it directly — `pending` is minted by `create-file-upload`, and `ingest-file` moves it to `uploaded` (or `failed`) as a side effect of staging.
+A file's upload status is `pending` or `uploaded` (the enum also defines `failed`, which nothing sets today). Nothing sets it directly — `pending` is minted by `create-file-upload`, and `ingest-file` moves it to `uploaded` once the object has passed its checks. An `ingest-file` call that is refused leaves the file `pending`; fix the cause and call it again, or remove the file with `delete-file`.
 
 **Delete a file** with `POST /v1/graphs/{graph_id}/operations/delete-file`. A plain delete removes the S3 object and the database record. Set `cascade: true` in the body to also remove the file's rows from DuckDB and mark the graph stale (a rebuild is then recommended).
 
@@ -338,7 +344,7 @@ For the full request and response schemas (`FileUploadRequest`, `IngestFileOp`, 
 - **Subgraphs are rejected (HTTP 403)** on `create-file-upload` and `ingest-file`. Upload to the parent graph, or write to the subgraph directly through its own MCP connector. `delete-file` still works on a subgraph.
 - **`table_name` is required** in the `create-file-upload` body. Omitting it returns a 400.
 - **Extension must match content type.** A `.csv` uploaded with `application/x-parquet` returns a 400.
-- **Filename safety.** `..`, `/`, and `\` are rejected; the name is capped at 255 characters.
+- **Filename safety.** A path separator, a leading dot, a double quote or a control character is rejected with 400; the name is capped at 255 characters.
 - **`ingest_to_graph: true` takes the graph's materialize lock.** While another materialization of the graph is running, `ingest-file` returns **409** and leaves the upload untouched — retry once it finishes, or stage with `ingest_to_graph: false` and `materialize` later.
 - **A declared `file_size_bytes` is binding.** The presigned URL is signed for exactly that length, so a `PUT` of any other size fails at S3.
 - **Files over the tier's row cap are rejected (HTTP 413)** at `ingest-file`.

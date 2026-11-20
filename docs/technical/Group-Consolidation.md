@@ -27,10 +27,10 @@ The product doc *Consolidate a group* at roboledger.ai describes the workflow fo
 | Field | Values | What it decides |
 |---|---|---|
 | `entity_role` | `operating`, `consolidation` | `operating` keeps a company's books. `consolidation` is the group's one entity for the consolidating entries; only the consolidated statements read it, and no operating company's statements ever include it. Its method is `none`. |
-| `consolidation_method` | `full`, `equity`, `cost`, `none` | `full`: the books are summed and an outside owner's share is carried as noncontrolling interest. `equity`: never summed; the group carries one investment line and one income line, the parent's share of the result. `cost`: an investment at cost. `none`: the parent, the consolidation entity, a linked counterparty. Derived from `ownership_pct` when not given, 50 and above `full`, 20 to 50 `equity`, less `cost`, and set by hand where control is not the percentage. |
+| `consolidation_method` | `full`, `equity`, `cost`, `none` | `full`: the books are summed and an outside owner's share is carried as noncontrolling interest. `equity`: never summed; the group carries one investment line and one income line, the parent's share of the result. `cost`: an investment at cost. `none`: the parent, the consolidation entity, a linked counterparty. Derived from `ownership_pct` when not given: 50 and above `full`, 20 to 50 `equity`, below 20 `cost`, and `full` when no share is recorded. Setting a new `ownership_pct` derives it again unless the method is given in the same call. Set it by hand where control is not the percentage. |
 | `joined_on`, `left_on` | a date, or null | Membership is by whole month. Null `joined_on` is a member since the beginning; null `left_on` is a member still. The consolidated statements include an entity from the month of `joined_on` through the month of `left_on`. Once the month of `left_on` is over, the entity reads `is_former: true`, its closed months stay readable on their own, and the group sums none of it. |
 
-Neither date, nor the method, may move inside the months the group has already closed: that would restate them, and `update-entity` refuses.
+Neither date, nor the method, may move inside the months the group has already closed: that would restate them, and `update-entity` refuses. The same holds for a new member: once the group has closed a month, `create-entity` for a company in full or on the equity method needs a `joined_on` after the last month the group closed.
 
 **Counterparties.** Every company in the group is also one of the group's counterparty agents, and a transaction is intercompany when its event names another group entity as its counterparty. `create-entity` makes the agent. The engine pairs intercompany balances and charges by that agent, never by account, so a parent's fee-revenue account can hold fees from two subsidiaries and from outsiders without splitting the chart.
 
@@ -53,6 +53,8 @@ A consolidation entity has no form of its own. Its books are the group's adjustm
 ## The Consolidating Entries
 
 `preview-consolidation-entries` computes what a month needs from the books and posts nothing; `propose-consolidation-entries` writes the same entries as drafts in the consolidation entity, which its close posts. Both take `period` as `YYYY-MM`. The shapes are on [RoboLedger Operations](RoboLedger-Operations.md#preview-consolidation-entries--tenant-graphs).
+
+**The opening.** Members usually have history before the group's first consolidated month. What that history already needed eliminated is not a movement of the first month, so the first `propose-consolidation-entries` records it as the consolidation entity's opening balance: one posted entry dated the eve of its first month, each line carrying its kind and member. Proposals that belong to it come back with `opening: true`. Proposing again replaces it until the first group close; `adjustments_unposted` names it while it is missing.
 
 **Target minus held.** For each kind and each member the engine computes the month-end target, subtracts what the consolidation entity already holds of that kind for that member, and proposes the difference. A hand entry that names its kind and the member it adjusts counts toward the target by construction, and drafting a month again replaces only the engine's own drafts. The kinds:
 
@@ -128,6 +130,7 @@ A consolidated report saves the group's statements for a period: `create-report`
 
 - **A change across methods**, equity to full as a step acquisition with the earlier interest remeasured, or full to equity with a retained interest, is not supported. The read takes the method off the entity row, so a method switched from a date would be summed back through every month; once the group has closed a month with the member on a method, changing it is refused. A change of share within the method, either way, is `record-ownership-change`.
 - **Multi-level groups** are not modelled: the tree is flat, every member under the one parent, and noncontrolling interest is not computed bottom-up.
+- **A group mirrored whole** drafts nothing: when every company's books are kept by a ledger elsewhere and read here in `shadow`, `propose-consolidation-entries` is refused, since the group is consolidated in that ledger. Read it `combined`, or send the consolidating entries with the ledger that holds them.
 - **A foreign member** is not translated; one currency per entity is queued, not built.
 - **Unrealized intercompany profit** in inventory or fixed assets is a hand entry with a basis.
 - **Shares bought from or sold to outside owners** ride the equity statement's contribution and distribution rows for noncontrolling interest; us-gaap's dedicated rows are not yet in the library.

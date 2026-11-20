@@ -9,7 +9,7 @@ A graph holds documents as well as numbers. Your AI assistant can search them, q
 
 ## Knowledge Base
 
-**Knowledge Base** lists the documents on the selected graph, whether you created them here or your assistant saved them. Each is markdown, with an optional folder and tags. Anyone who can write to the graph can create, edit and delete them. Memories are kept separately, on the **Memory** page.
+**Knowledge Base** lists the documents on the selected graph, whether you created them here or your assistant saved them. Most are markdown, with an optional folder and tags. Anyone who can write to the graph can create, edit and delete them. A document can also be a file kept as it is, such as a bank statement, an invoice or a receipt (PDF, PNG or JPEG, up to 25 MB), added in RoboLedger or by an assistant that can reach the file. A file is listed with the rest but isn't edited here: the file is the record. Memories are kept separately, on the **Memory** page.
 
 Shared repositories such as SEC filings don't have a Knowledge Base of your own. Their filing text is searched through **Search** and through an MCP client connected to that graph.
 

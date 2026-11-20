@@ -13,14 +13,14 @@ The graph is read-only and shared: everyone who subscribes reads the same filing
 
 ## Get access
 
-Access is a subscription. In the app, open **Repositories**, browse to **SEC EDGAR Filings** and choose a plan. There are two plans, **Starter** and **Advanced**. Each limits how many requests a connected client can make a minute and an hour, and Advanced allows five times as many. A client that goes over is refused until the limit resets. Current plans and prices are on the [pricing page](https://robosystems.ai/pricing).
+Access is a subscription. In the app, open **Repositories**, browse to **SEC EDGAR Filings** and choose a plan. There are two plans, **Starter** and **Advanced**. Each limits how many requests a connected client can make a minute, an hour and a day, and Advanced allows five times as many. A client that goes over is refused until the limit resets. Current plans and prices are on the [pricing page](https://robosystems.ai/pricing).
 
 Your first subscription starts with a 14-day free trial of the plan you picked, and no card is needed to start it. You need a verified email address to start one. Add a card on the **Billing** tab of your organization page before the trial ends and the plan starts when it does; without one the trial ends on its last day and nothing is charged. If your organization already has a card on file, it is charged when the trial ends, and you can cancel before then and keep access until its last day.
 
 What the trial is, compared with the plan:
 
 - **Open:** the analysis tools (statements, disclosures, fact grids and filing text) from Claude, ChatGPT or any MCP client and over the API, search, and the download of the repository.
-- **At lower limits:** a trial allows fewer calls a minute, an hour and a day than either plan. If you reach one, the message says it is the trial's limit and what your plan allows.
+- **At lower limits:** a trial allows fewer calls an hour and a day than either plan. If you reach one, the message says it is the trial's limit and what your plan allows.
 - **Opens with your first payment:** writing your own graph queries, the AI analyst, and the plan's monthly AI credits.
 
 You do not have to wait 14 days for the rest. **Start Plan Now**, on the **Subscriptions** tab of your organization page, ends the trial and charges the card on file (add one first if you started without), and the plan's limits and everything above open as soon as the payment confirms. Your connection and your API key stay the same.

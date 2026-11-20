@@ -1,6 +1,6 @@
 # Period Close
 
-Closing a month in RoboLedger is one atomic operation that checks the month is ready, posts its entries, stamps its statements and records a receipt. It publishes RoboLedger-originated drafts to QuickBooks where the graph writes back, posts the rest, and advances the close boundary. This page covers the fiscal calendar the close runs against, the blockers that stop it, the account reconciliations it waits on, the close itself and its receipt, reopening a month, ending a schedule early, and the write gate that makes closed months immutable.
+Closing a month in RoboLedger is one atomic operation that checks the month is ready, posts its entries, stamps its statements and records a receipt. For an entity whose books QuickBooks keeps with write-back on, it publishes that entity's RoboLedger-originated drafts to QuickBooks and posts the rest; for one kept in `shadow`, it observes instead and posts nothing; for books kept natively, it posts every draft. It then advances the close boundary. This page covers the fiscal calendar the close runs against, the blockers that stop it, the account reconciliations it waits on, the close itself and its receipt, reopening a month, ending a schedule early, and the write gate that makes closed months immutable.
 
 The product doc *Close the month with your AI assistant* at roboledger.ai describes the workflow for end users. This page covers the operations, payloads and guarantees underneath.
 
@@ -15,6 +15,7 @@ The product doc *Close the month with your AI assistant* at roboledger.ai descri
 - [Preparing a Close](#preparing-a-close)
 - [Closing a Period](#closing-a-period)
 - [What a Close Does](#what-a-close-does)
+- [The Shadow Close](#the-shadow-close)
 - [Closing from MCP: Async and Polling](#closing-from-mcp-async-and-polling)
 - [Reopening a Period](#reopening-a-period)
 - [Ending a Schedule Early](#ending-a-schedule-early)
@@ -31,6 +32,7 @@ The close workflow lives on the RoboLedger operations surface:
 | Operation | Purpose |
 | --- | --- |
 | `initialize` | One-time: create the fiscal calendar and seed its periods. A QuickBooks graph gets this on its first sync. |
+| `change-calendar-start` | Move the calendar's first month (`first_open_period`) before the first close: earlier adds open months for history that predates the start, later removes empty leading months. `409` once a month has closed, or when moving later would drop months that hold entries or unposted source lines. |
 | `set-close-target` | Set the month you are working toward. Closes nothing. |
 | `promote-obligations` | Draft the month's schedule entries now instead of waiting for the background sweep |
 | `terminate-schedule` | End a schedule at a month-end with no entry booked |
@@ -84,7 +86,7 @@ The closeable gate returns structured codes. The calendar read lists them, and `
 | `sequence_violation` | The month isn't `closed_through + 1` | Close the earlier months first, in order | — |
 | `period_already_closed` | The month is at or before `closed_through` | Nothing to do, or reopen it | — |
 | `period_incomplete` | The month isn't over. A month closes from the day **after** its last calendar day, so late same-day postings can't be missed. | Wait | — |
-| `sync_stale` | The graph has a sync connection and its last successful sync finished before the month's last day, or it has never synced. `sync_stale_days` says by how much. | Run a sync and let it finish | `allow_stale_sync`, only after verifying the source data by hand |
+| `sync_stale` | The graph has a sync connection and its last successful sync did not run after the month ended: a sync counts only from noon UTC on the day after the month's last day, so one made on the last day itself has not seen the rest of it. A connection that has never synced blocks too. `sync_stale_days` says by how much. | Run a sync and let it finish | `allow_stale_sync`, only after verifying the source data by hand |
 | `pending_obligations` | A schedule's entry for this month or earlier is still `pending`: its obligation hasn't been promoted and drafted | `promote-obligations` | — |
 | `stranded_obligations` | An obligation was promoted to `classified` but its entry was never drafted | `promote-obligations` with `dispatch_handlers: true` | `allow_stranded_obligations` |
 | `reconciling_items` | A posted transaction dated in or before this month changed in QuickBooks and nobody has settled it | `preview-reconciling-item`, then `resolve-reconciling-item` | `allow_reconciling_items` |
@@ -102,7 +104,7 @@ Every override the close accepts is written into the close's audit note. A close
 
 ### Unposted source events
 
-A source event is a transaction that arrived from outside RoboLedger, such as a QuickBooks bill. Most post on their own: the sync commits them and their handler writes the entry. One that stopped at `captured` or `classified`, with no entry behind it, would be locked out for good once its month closed, because the write gate refuses a commit into a closed month. The gate counts every such event whose posting date falls in the month. A QuickBooks transaction whose automatic posting failed is the usual case. Manual journal entries don't count, because their drafted entry already exists and the close posts it, and neither do schedule obligations, which have blockers of their own.
+A source event is a transaction that arrived from outside RoboLedger, such as a QuickBooks bill. Most post on their own: the sync commits them and their handler writes the entry. One that stopped at `captured` or `classified`, with no entry behind it, would be locked out for good once its month closed, because the write gate refuses a commit into a closed month. The gate counts every such event whose posting date falls in the month. Two cases are usual: a bank-feed line still waiting to be classified and committed (every feed line lands `captured`), and a QuickBooks transaction whose automatic posting failed. Manual journal entries don't count, because their drafted entry already exists and the close posts it, and neither do schedule obligations, which have blockers of their own.
 
 To clear one, commit it with `update-event-block` (`transition_to: "committed"`) once its accounts are right, or retire it with `transition_to: "voided"` when it shouldn't be in the books. Find them with GraphQL `eventBlocks(status:)` or MCP `list-event-blocks`, filtered to `captured` or `classified`.
 
@@ -146,7 +148,7 @@ A block is created the first time its check applies, and whether it starts out h
 
 - **Source ledger.** The first refresh on a ledger synced from QuickBooks creates its block, and the close waits on it from then on.
 - **Schedule register.** The first refresh creates a block for each account a schedule carries a balance on. One that ties starts out holding the close. One that doesn't is created without holding it, so a difference found on first contact is reported rather than freezing the month. Turn `required_for_close` on once it has been cleared.
-- **Statement.** The first statement recorded for an account creates its block, which doesn't hold the close until `required_for_close` is turned on. A required statement is a statement owed every month.
+- **Statement.** The first statement recorded for an account creates its block, which doesn't hold the close until `required_for_close` is turned on. A required statement is a statement owed every cycle: every month unless `statement_cycle` says quarterly or annual.
 
 ### Recording a statement balance
 
@@ -169,6 +171,8 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
 
 Recording the same account and date again replaces the earlier balance. When more than one statement ends in a month, the one with the latest date stands.
 
+On a bank-fed account the statement side is the statement's balance adjusted by the ledger's cash lines the bank had not cleared by the statement's date. Each is a `components` entry of kind `outstanding`; one the bank should have seen within the cycle is listed as `stale_outstanding` and not counted, so its amount stays in the difference. `rollForward` carries the bank's side of the walk.
+
 ### Policy
 
 `set-reconciliation-policy` changes how much the close cares about one reconciliation. Pass the block's `structure_id` and any of these; omitted fields keep their value.
@@ -179,6 +183,7 @@ Recording the same account and date again replaces the earlier balance. When mor
 | `materiality` | `0` | A difference up to this amount still counts as reconciled. `0` means the two sides must agree to the cent. |
 | `review_required` | `false` | Whether the close also waits for a sign-off, not only for the two sides to reconcile |
 | `separate_reviewer` | `false` | Whether the person who signs off must be someone other than the person who ran the comparison or recorded its balance. It can be turned on only while the graph has at least two members who can write (`409` otherwise). |
+| `statement_cycle` | `monthly` | `statement` blocks only: how often the account's statement is issued, `monthly`, `quarterly` or `annual`. A month is covered by the latest statement ending within the cycle that ends with it, so a quarterly statement covers the two months before the next one. |
 
 The next comparison uses a new materiality. Comparisons already recorded aren't judged again. Each change is recorded with who made it.
 
@@ -255,6 +260,8 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
 
 The body takes `period` (`^\d{4}-(0[1-9]|1[0-2])$`), an optional `note` for the audit trail, and the override flags `allow_stale_sync`, `allow_stranded_obligations`, `allow_reconciling_items`, `allow_unposted_source_events`, `allow_unreconciled_accounts` and `allow_held_bank_lines`, plus `allow_unexplained_residuals` for the group close on the consolidation entity ([Group Consolidation](Group-Consolidation.md#the-group-close)). All default to `false`.
 
+Each entity of a group has its own calendar, so the body also takes `entity_id` (omitted, the group parent), as do `set-close-target`, `reopen-period` and `initialize`; the GraphQL reads take `entityId` the same way. A subsidiary closes its own months, and the consolidation entity's close is the group's.
+
 On success, the envelope's `result` is the close summary:
 
 ```json
@@ -277,6 +284,10 @@ On success, the envelope's `result` is the close summary:
     "rule_summary": {"pass": 38, "fail": 0, "error": 0, "skipped": 0},
     "evaluated_structure_ids": ["..."],
     "statements_stamped": true,
+    "shadow": false,
+    "entries_shadowed": 0,
+    "gate_findings": [],
+    "gate_finding_counts": {},
     "statement_stamp_note": null,
     "stamped_statement_sets": {"struct_...": "fs_..."},
     "statement_rule_summary": {"pass": 12, "fail": 0, "error": 0, "skipped": 0}
@@ -296,6 +307,9 @@ On success, the envelope's `result` is the close summary:
 | `statements_stamped` / `stamped_statement_sets` | Whether the month's statement FactSets were stamped, and `structure_id → fact_set_id` for each |
 | `statement_stamp_note` | Why stamping was skipped: `no_coa_mapping`, `no_entity`, `no_statement_structures` or `no_taxonomy`. The close still succeeds. |
 | `statement_rule_summary` | Verification of the stamped statements, separate from `rule_summary` |
+| `shadow` | `true` when the close ran in shadow: nothing written to QuickBooks, nothing posted. See [The Shadow Close](#the-shadow-close). |
+| `entries_shadowed` | Drafts a shadow close kept as expectations (status `shadowed`). `0` outside shadow. |
+| `gate_findings` / `gate_finding_counts` | The blocker codes a shadow close recorded instead of enforcing, and each one's size: days stale for `sync_stale`, a count for the rest. Empty outside shadow. |
 
 ### Refusals and errors
 
@@ -325,7 +339,7 @@ One close runs these steps in order. The ordering carries the atomicity guarante
 
 1. **Gate.** The blockers above. A failure raises before anything is touched.
 2. **Balance pre-flight.** Total debits and credits across the month's draft *and* posted entries must agree, so the close never has to undo a half-posted month.
-3. **QuickBooks publish.** On a write-back graph, eligible drafts are written to QuickBooks and promoted to `posted` one by one. This is the only step that commits separately: each entry's QuickBooks id, recorded in its event's `metadata.qb_entry_ids`, is committed before any failure is raised, so a retried close never writes the same entry to QuickBooks twice. Any rejection stops the close here.
+3. **QuickBooks publish.** When the entity being closed has its books kept by a QuickBooks connection that writes back, eligible drafts are written to QuickBooks and promoted to `posted` one by one. A subsidiary's drafts are never sent to the parent's company file. This is the only step that commits separately: each entry's QuickBooks id, recorded in its event's `metadata.qb_entry_ids`, is committed before any failure is raised, so a retried close never writes the same entry to QuickBooks twice. Any rejection stops the close here.
 4. **Post the rest.** Every remaining draft dated in the month is posted in one transition. Drafts belonging to voided or superseded events are left alone.
 5. **Advance the calendar.** `closed_through` moves to this month, and `close_target` advances if the close reached it.
 6. **Lock the month.** The `FiscalPeriod` row becomes `closed`, with `closed_at` and `closed_by`.
@@ -343,7 +357,7 @@ The receipt is the close's own record of itself, stored with the month:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "period": "2026-08",
   "closed_at": "2026-09-02T16:41:07+00:00",
   "closed_by": "user_...",
@@ -358,11 +372,30 @@ The receipt is the close's own record of itself, stored with the month:
   "statements_stamped": true,
   "statement_stamp_note": null,
   "stamped_statement_sets": {"struct_...": "fs_..."},
-  "statement_rule_summary": {"pass": 12, "fail": 0, "error": 0, "skipped": 0}
+  "statement_rule_summary": {"pass": 12, "fail": 0, "error": 0, "skipped": 0},
+  "shadow": false,
+  "entries_shadowed": 0,
+  "gate_findings": [],
+  "gate_finding_counts": {}
 }
 ```
 
+Receipts written before the shadow fields existed are `version: 1` and lack the last four keys.
+
 `actor_type` separates closes an AI assistant ran over MCP (`agent`) from those a person ran over REST (`user`). The receipt is available as `closeReceipt` on GraphQL `periodCloseStatus(periodStart:, periodEnd:)` and as `close_receipt` on MCP `get-period-close-status`. The calendar's period rows carry `hasCloseReceipt`. Months closed before receipts were stored have none.
+
+## The Shadow Close
+
+An entity whose books are kept by a connection with the `shadow` write policy is closed as an observation. `close-period` is the same call and the same month sequence applies, but the ledger of record is elsewhere, so the close decides nothing about the books:
+
+| | Native books | Write-back (`qb_authoritative`) | `shadow` |
+| --- | --- | --- | --- |
+| Gate | Every blocker refuses | Every blocker refuses | `calendar_not_initialized`, `sequence_violation`, `period_already_closed`, `period_incomplete` and the group blockers refuse. `sync_stale`, `pending_obligations`, `stranded_obligations`, `reconciling_items`, `unposted_source_events`, `unreconciled_accounts`, `unmapped_accounts` and `held_bank_lines` are recorded as findings instead |
+| Drafts in the month | Posted | RoboLedger-originated ones written to QuickBooks, the rest posted | Neither: each becomes `shadowed`, an expectation that no later policy change can post or publish |
+| Statements | Stamped from the posted ledger | Stamped from the posted ledger | Stamped from what has landed, which is the source ledger's own entries |
+| Result | `entries_posted` | `entries_published_to_qb` + `entries_posted_locally` | `shadow: true`, `entries_shadowed`, `gate_findings`, `gate_finding_counts`; `entries_posted` is `0` |
+
+An override flag set on a shadow close only keeps its code out of the findings, and `allow_held_bank_lines` records no decision on the lines. The audit note reads `[shadow close — nothing posted or published; findings: …]`, and the receipt carries the same four fields, so a closed month says which kind of close made it. Before the close, `periodDrafts` shows `shadow: true`, `shadowedCount` and `closeDisposition: "shadow"` on each draft. See [QuickBooks Sync and Write Policy](QuickBooks-Sync-and-Write-Policy.md#write-policy) for setting the policy.
 
 ## Closing from MCP: Async and Polling
 
@@ -384,13 +417,14 @@ curl -X POST "https://api.robosystems.ai/extensions/roboledger/$GRAPH_ID/operati
   -d '{"period": "2026-08", "reason": "Missed accrual for the August roaster lease."}'
 ```
 
-`reason` is required and recorded in the calendar's audit trail with the actor. `note` is optional. The REST result is the refreshed fiscal calendar. The MCP tool also reports how many statement sets were retracted.
+`reason` is required and recorded in the calendar's audit trail with the actor. `note` is optional. The REST result is the refreshed fiscal calendar. The MCP tool also reports `statement_sets_retracted` and `held_bank_lines_restored`, the bank lines held out of the month that the reopen gave back.
 
-A reopen does three things besides moving the boundary:
+A reopen does these things besides moving the boundary:
 
 - **Retracts the month's stamped statements.** A reopened month no longer makes a closed statement, and its next close stamps new ones. The retracted sets are kept as the month as it was closed, and nothing current reads them.
 - **Puts the month's report columns back to live.** A saved report's column the month was part of is no longer frozen; it refreshes from the books on its next read and freezes again at the re-close.
 - **Returns schedule facts for the month to scope**, so the re-close drafts and verifies them again.
+- **Gives back the month's held bank lines.** Lines a bank feed delivered for the month after it closed (`voided`, `void_reason: "feed_in_closed_month"`) return to `captured`, to classify and commit before the re-close.
 - **Leaves posted entries posted.** Reopening does not un-post anything. To undo a posted entry, record a reversal (`create-event-block` with `event_type: "journal_entry_reversed"`), then close the month again.
 
 Reopening an earlier month while a later one stays closed is refused with `422`, and the message lists the months to reopen in order:
@@ -401,7 +435,7 @@ Every later closed month carries statements stamped from this month's numbers.
 Reopen latest-first — 2026-08, 2026-07, 2026-06 — then close forward month by month.
 ```
 
-This is also the path the [mapping lock](Chart-of-Accounts-Mapping.md#the-closed-period-mapping-lock) points to. A month that isn't closed returns `422`, and an unknown month returns `404`. Reopening invalidates what trusted the closed state, such as shared reports and filings, so use it sparingly.
+This is also the path the [mapping lock](Chart-of-Accounts-Mapping.md#the-closed-period-mapping-lock) points to. A month that isn't closed returns `422`, and an unknown month returns `404`. In a group, a member's or the parent's month that the consolidation entity has closed is refused with `422` until the group's month is reopened first, because the consolidated statements were made from it. Reopening invalidates what trusted the closed state, such as shared reports and filings, so use it sparingly.
 
 ## Ending a Schedule Early
 

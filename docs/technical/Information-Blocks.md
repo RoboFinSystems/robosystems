@@ -161,7 +161,7 @@ All calls authenticate with `X-API-Key`, using a key from **Settings → API key
 
 ### Create a schedule with an uneven curve
 
-Cadence Labs amortizes a $1,301.40 discount on a term loan over six months using the effective-interest method, so the monthly amounts rise. `periodic_amounts` supplies one amount per month, in cents; it must have exactly one entry per month in the window and sum exactly to `original_amount` less `residual_value` (here zero). Leave it out and the schedule is straight-line from `monthly_amount`, which is still required.
+Cadence Labs amortizes a $1,301.40 discount on a term loan over six months using the effective-interest method, so the monthly amounts rise. `periodic_amounts` supplies one amount per month, in cents; it must have exactly one entry per month in the window and sum exactly to `original_amount` less `residual_value` (here zero). Leave `periodic_amounts` out and the schedule is straight-line from `monthly_amount`, which a straight-line schedule requires.
 
 Element ids are **chart-of-accounts element ids** (the `id` from `get-unmapped-elements`), not taxonomy qnames.
 

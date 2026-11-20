@@ -22,7 +22,7 @@ There are two ways in. **Scripts, SDKs, and integrations** call the REST and Gra
 
 - A browser, to create your account and key.
 - **curl** in a terminal, to follow the examples. **[jq](https://jqlang.github.io/jq/)** is optional, for reading JSON responses.
-- To create a graph: an organization owner or admin role and a payment method. Creating a graph starts a subscription; see [pricing](https://robosystems.ai/pricing). To query SEC filings instead, a subscription to the SEC repository.
+- To create a graph: an organization owner or admin role and a payment method. Creating a graph starts a subscription; see [pricing](https://robosystems.ai/pricing). To query SEC filings instead, a subscription to the SEC repository. A first subscription opens with a free trial that asks for no card; the trial has the analytical views and the MCP tools, and raw Cypher opens when the plan starts. See [Shared Repositories](Shared-Repositories.md#the-free-trial).
 
 ## Step 1: Create an Account
 
@@ -42,7 +42,7 @@ curl https://api.robosystems.ai/v1/status
 }
 ```
 
-**Important:** `GET /v1/status` is the only health check. `GET /health`, `GET /v1/health`, and the root `/` do **not** return health JSON — the root path serves the Swagger UI. The live OpenAPI spec is at [api.robosystems.ai/openapi.json](https://api.robosystems.ai/openapi.json), and the interactive reference is at [robosystems.ai/docs/api](https://robosystems.ai/docs/api).
+**Important:** `GET /v1/status` is the only health check. `GET /health`, `GET /v1/health`, and the root `/` do **not** return health JSON — the root path serves the Swagger UI. The live OpenAPI spec is at [api.robosystems.ai/openapi.json](https://api.robosystems.ai/openapi.json), the per-operation reference is at [robosystems.ai/docs/api](https://robosystems.ai/docs/api), and to try a call from the browser use the Swagger page at the API root, [api.robosystems.ai](https://api.robosystems.ai/).
 
 ## Step 2: Create an API Key
 
@@ -134,7 +134,23 @@ curl -X POST "https://api.robosystems.ai/v1/graphs/$GRAPH_ID/query/cypher" \
   -d '{"query": "MATCH (n) RETURN labels(n) AS label, count(*) AS count"}'
 ```
 
-A newly created graph returns no rows until you load data into it. With an SEC subscription, the same call against the `sec` repository counts real nodes:
+A newly created graph returns no rows until you load data into it. With an SEC subscription you can read real filings at once. During the free trial, use an analytical view; this one compares two filers' revenue:
+
+```bash
+curl -X POST "https://api.robosystems.ai/extensions/roboledger/sec/operations/build-fact-grid" \
+  -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "elements": ["us-gaap:Revenues", "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"],
+        "entities": ["NVDA", "AMD"],
+        "form": "10-K",
+        "fiscal_year": 2024,
+        "fiscal_period": "FY",
+        "view_config": {"rows": [{"type": "entity"}]}
+      }'
+```
+
+Raw Cypher against `sec` opens when the plan starts (during the trial it answers `403` and says how to open it):
 
 ```bash
 curl -X POST "https://api.robosystems.ai/v1/graphs/sec/query/cypher" \

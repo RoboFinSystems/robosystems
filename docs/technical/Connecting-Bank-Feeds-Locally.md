@@ -19,7 +19,7 @@ Both feeds work the same way once connected. Each posted transaction lands in th
    ```
 
    Keep it with your other secrets. Losing it makes every stored credential unreadable, and each feed has to be connected again.
-3. Give the company a chart of accounts. A feed links each account it reads to a chart account by name, or adds one, so the entity it books to needs a chart first: **Ledger → Chart of Accounts → start from a template**. While QuickBooks keeps the group parent's books, a feed connects for a subsidiary instead.
+3. Give the company a chart of accounts. A feed links each account it reads to a chart account by name, or adds one, so the entity it books to needs a chart first: **Ledger → Chart of Accounts → start from a template**. A feed cannot book to an entity whose books a connected ledger keeps: the group parent while QuickBooks is connected, or any entity an external ledger source mirrors. Connect the feed for another entity of the group. The consolidation entity takes no feed either.
 
 Flags and credentials are read when the containers start. After editing `.env`, run `just start` (not `just restart`, which keeps each container's old environment).
 
@@ -51,7 +51,7 @@ MERCURY_ENVIRONMENT=production   # "sandbox" for test tokens from sandbox.mercur
 
 1. In the company's Mercury account, open **Settings → API Tokens** and create a **read-only** token. Read-only tokens need no IP allowlist.
 2. In roboledger-app, open **Connections → Add Connection → Mercury**, pick the entity the accounts book to, paste the token, and choose **Connect with API token**.
-3. The backend checks the token against Mercury before saving it, stores it encrypted with the connection, records the consent, and starts the first sync. The first sync pulls every posted transaction from the backfill date, and later syncs pull the last 60 days.
+3. The backend checks the token against Mercury before saving it, stores it encrypted with the connection, records the consent, and starts the first sync. The first sync pulls every posted transaction from the backfill date (two years back unless the connection named another). Each later sync reaches 60 days back from the last sync that succeeded, so a feed that was quiet, or failing, for longer than that still pulls the days in between.
 
 A graph holds one Mercury connection, so one Mercury organization. Its accounts can still book to several entities in a group, each account moved to its own entity. Each company on the installation connects its own organization in its own graph.
 
