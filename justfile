@@ -490,7 +490,7 @@ tables-query graph_id query format="table" url="http://localhost:8001":
 # LadybugDB embedded database direct query (bypasses API)
 lbug-query graph_id query format="table":
     UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.lbug_query \
-        --db-path ./data/lbug-dbs/{{graph_id}}.lbug \
+        --db-path ./data/lbug-dbs/{{graph_id}}.lbdb \
         --query "{{query}}" \
         --format {{format}}
 
