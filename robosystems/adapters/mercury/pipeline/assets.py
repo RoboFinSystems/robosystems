@@ -62,7 +62,11 @@ mercury_sync_job = define_asset_job(
   name="mercury_sync",
   description="Mercury bank feed: pull, link accounts, capture events",
   selection=AssetSelection.assets(mercury_feed),
-  tags={"pipeline": "mercury", "dagster/max_retries": "3"},
+  tags={
+    "pipeline": "mercury",
+    "dagster/max_retries": "3",
+    "dagster/retry_on_asset_or_op_failure": "false",
+  },
 )
 
 
