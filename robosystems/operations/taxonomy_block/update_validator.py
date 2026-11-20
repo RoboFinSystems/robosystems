@@ -815,8 +815,9 @@ def _judge_remaps(
   for a in added:
     account_id = element_id_by_qname[a.from_ref]
     new_target_id = target_ids.get(a.to_ref)
-    if new_target_id is None or account_id in judged:
+    if new_target_id is None:
       continue
+    # Every arc the account gains is judged, not only its first.
     judged.add(account_id)
     try:
       judge_remap(

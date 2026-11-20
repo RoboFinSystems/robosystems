@@ -97,7 +97,9 @@ jobs:
       - name: Run type checking
         timeout-minutes: 3
         env:
-          NODE_OPTIONS: "--max-old-space-size=2048"
+          # The checker settles near 2 GB of heap on this codebase; a 2048 cap
+          # left it failing whenever a run landed just over.
+          NODE_OPTIONS: "--max-old-space-size=4096"
         run: uv run basedpyright
 
       - name: Lint CloudFormation templates
