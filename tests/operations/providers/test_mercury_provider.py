@@ -81,7 +81,11 @@ class TestMercuryOAuthProvider:
     client.__aenter__.return_value = client
     with patch(f"{MODULE}.httpx.AsyncClient", return_value=client):
       info = await provider.get_entity_info("tok")
-    assert info == {"legal_business_name": "Cascade Books LLC", "account_count": 2}
+    assert info == {
+      "legal_business_name": "Cascade Books LLC",
+      "account_count": 2,
+      "account_ids": ["a1", "a2"],
+    }
     assert client.get.call_args.kwargs["headers"]["Authorization"] == "Bearer tok"
 
   @pytest.mark.asyncio

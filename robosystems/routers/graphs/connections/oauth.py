@@ -57,6 +57,22 @@ def _oauth_handler_for(provider: str):
   return quickbooks_oauth_handler
 
 
+def _other_mercury_organization(
+  metadata: dict, organization: str | None, account_ids: list[str]
+) -> bool:
+  """Whether a consent reads a different organization from the one this
+  connection was first connected to. Account ids decide when both sides
+  have them (an organization that opened an account still overlaps); a
+  connection from before they were recorded is matched on the legal name.
+  A first consent has neither and is never refused."""
+  known_ids = {str(i) for i in metadata.get("mercury_account_ids") or []}
+  if known_ids and account_ids:
+    return known_ids.isdisjoint(account_ids)
+  known_name = str(metadata.get("entity_name") or "").strip().casefold()
+  new_name = str(organization or "").strip().casefold()
+  return bool(known_name and new_name and known_name != new_name)
+
+
 async def _complete_mercury_oauth(
   *,
   graph_id: str,
@@ -67,7 +83,7 @@ async def _complete_mercury_oauth(
   current_user: User,
   db: Session,
 ) -> dict:
-  """Finish a Mercury consent: exchange, store, record, validate, sync.
+  """Finish a Mercury consent: exchange, validate, store, record, sync.
 
   No realm and no revival path: a disconnected feed is purged and a reconnect
   is a new row. The consent is written to the security audit log (who
@@ -83,6 +99,35 @@ async def _complete_mercury_oauth(
 
   tokens = await mercury_oauth_handler.exchange_code_for_tokens(code, redirect_uri)
 
+  # Read the organization before anything is stored: a re-consent must stay
+  # with the organization this connection already feeds into the ledger.
+  info = await mercury_oauth_provider.get_entity_info(tokens["access_token"])
+  if not info:
+    raise create_error_response(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="Failed to validate Mercury connection",
+      code=ErrorCode.PROVIDER_ERROR,
+    )
+  organization = info.get("legal_business_name")
+  account_ids = [str(i) for i in info.get("account_ids") or []]
+  metadata = connection.get("metadata") or {}
+  if _other_mercury_organization(metadata, organization, account_ids):
+    refresh_token = tokens.get("refresh_token")
+    if refresh_token:
+      try:
+        await mercury_oauth_provider.revoke_token(refresh_token)
+      except Exception as exc:
+        logger.warning("Could not revoke the refused Mercury grant: %s", exc)
+    raise create_error_response(
+      status_code=status.HTTP_409_CONFLICT,
+      detail=(
+        "This connection belongs to a different Mercury organization. "
+        "Reconnect the same organization, or connect the other one in its "
+        "own graph."
+      ),
+      code=ErrorCode.INVALID_INPUT,
+    )
+
   existing = ConnectionCredentials.get_by_connection_id(connection_id, db)
   parked = existing.get_credentials() if existing else {}
   provider_data = mercury_oauth_provider.extract_provider_data(
@@ -92,22 +137,13 @@ async def _complete_mercury_oauth(
     connection_id, tokens, provider_data, db, user_id=str(current_user.id)
   )
 
-  info = await mercury_oauth_provider.get_entity_info(tokens["access_token"])
-  if not info:
-    raise create_error_response(
-      status_code=status.HTTP_400_BAD_REQUEST,
-      detail="Failed to validate Mercury connection",
-      code=ErrorCode.PROVIDER_ERROR,
-    )
-  organization = info.get("legal_business_name")
-
-  metadata = connection.get("metadata") or {}
   metadata.update(
     {
       "status": "connected",
       "entity_name": organization,
       "institution_name": "Mercury",
       "last_auth": datetime.now(UTC).isoformat(),
+      **({"mercury_account_ids": account_ids} if account_ids else {}),
     }
   )
   await ConnectionService.update(
