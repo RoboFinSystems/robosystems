@@ -66,7 +66,7 @@ _STATEMENT_BLOCK_TYPES = frozenset(
   {"balance_sheet", "income_statement", "cash_flow_statement", "equity_statement"}
 )
 _STRUCTURE_BLOCK_TYPES = _STATEMENT_BLOCK_TYPES | frozenset(
-  {"schedule", "rollforward", "reconciliation", "policy", "metric"}
+  {"schedule", "reconciliation", "policy", "metric"}
 )
 
 
