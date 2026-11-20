@@ -38,6 +38,10 @@ def ext_session():
   with engine.begin() as conn:
     claim_tenant_schema(conn, schema)
 
+    # A reused schema's heap holds the rows earlier tests deleted, and a row
+    # written into that space breaks the order the first test sets up.
+    conn.execute(text(f'TRUNCATE "{schema}".entities CASCADE'))
+
   session = sessionmaker(bind=engine)()
   session.execute(text(f'SET search_path TO "{schema}"'))
   session.commit()
