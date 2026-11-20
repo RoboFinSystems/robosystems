@@ -117,6 +117,7 @@ class MercuryOAuthProvider:
     return {
       "legal_business_name": accounts[0].get("legalBusinessName"),
       "account_count": len(accounts),
+      "account_ids": sorted(str(a["id"]) for a in accounts if a.get("id")),
     }
 
   async def validate_connection(self, access_token: str) -> bool:

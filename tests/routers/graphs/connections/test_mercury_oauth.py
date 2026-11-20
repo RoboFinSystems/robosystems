@@ -275,3 +275,155 @@ async def test_callback_reconsent_keeps_the_incremental_window():
       _rate_limit=None,
     )
   assert sync_mock.call_args.kwargs["full_rebuild"] is False
+
+
+# ── a re-consent stays with its organization ─────────────────────────────────
+
+
+async def _reconsent(metadata: dict, info: dict):
+  """Run the callback on a connection already connected with ``metadata``,
+  the new token reading ``info``; returns (handler, provider, update)."""
+  from robosystems.models.api.oauth import OAuthCallbackRequest
+
+  handler = MagicMock()
+  handler.exchange_code_for_tokens = AsyncMock(
+    return_value={"access_token": "acc", "refresh_token": "ref_new"}
+  )
+  provider = MagicMock()
+  provider.extract_provider_data.return_value = {
+    "auth_mode": "oauth",
+    "sync_config": {},
+  }
+  provider.get_entity_info = AsyncMock(return_value=info)
+  provider.revoke_token = AsyncMock(return_value=True)
+  connection = {
+    **_connection(last_sync="2026-09-01T00:00:00"),
+    "status": "needs_reauth",
+    "metadata": {"last_sync": "2026-09-01T00:00:00", **metadata},
+  }
+  update = AsyncMock()
+  with (
+    patch(
+      "robosystems.operations.providers.oauth_handler.OAuthState.validate",
+      return_value={
+        "user_id": USER_ID,
+        "connection_id": CONNECTION_ID,
+        "redirect_uri": "http://localhost:3001/connections/mercury-callback",
+      },
+    ),
+    patch(
+      f"{OAUTH_MODULE}.ConnectionService.get_connection",
+      new_callable=AsyncMock,
+      return_value=connection,
+    ),
+    patch(f"{OAUTH_MODULE}.ConnectionService.update", update),
+    patch(
+      "robosystems.models.core.ConnectionCredentials.get_by_connection_id",
+      return_value=None,
+    ),
+    patch(f"{PROVIDER_MODULE}.mercury_oauth_handler", handler),
+    patch(f"{PROVIDER_MODULE}.mercury_oauth_provider", provider),
+    patch(f"{PROVIDER_MODULE}.record_bank_feed_consent"),
+    patch(f"{OAUTH_MODULE}.dispatch_first_sync", AsyncMock(return_value="run_3")),
+  ):
+    await oauth_callback(
+      provider="mercury",
+      graph_id=GRAPH_ID,
+      request=OAuthCallbackRequest(code="code_1", state="state_1"),
+      current_user=_user(),
+      db=MagicMock(),
+      _rate_limit=None,
+    )
+  return handler, provider, update
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_reconsent_into_another_organization_is_409():
+  from fastapi import HTTPException
+
+  with pytest.raises(HTTPException) as excinfo:
+    await _reconsent(
+      {"entity_name": "Cascade Books LLC", "mercury_account_ids": ["a1", "a2"]},
+      {"legal_business_name": "Other Co", "account_ids": ["b1"]},
+    )
+  assert excinfo.value.status_code == 409
+  assert "different Mercury organization" in str(excinfo.value.detail)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_refused_reconsent_stores_no_tokens_and_revokes_the_new_grant():
+  from fastapi import HTTPException
+
+  handler = MagicMock()
+  handler.exchange_code_for_tokens = AsyncMock(
+    return_value={"access_token": "acc", "refresh_token": "ref_new"}
+  )
+  provider = MagicMock()
+  provider.get_entity_info = AsyncMock(
+    return_value={"legal_business_name": "Other Co", "account_ids": ["b1"]}
+  )
+  provider.revoke_token = AsyncMock(return_value=True)
+  update = AsyncMock()
+  from robosystems.routers.graphs.connections.oauth import _complete_mercury_oauth
+
+  with (
+    patch(f"{PROVIDER_MODULE}.mercury_oauth_handler", handler),
+    patch(f"{PROVIDER_MODULE}.mercury_oauth_provider", provider),
+    patch(f"{PROVIDER_MODULE}.record_bank_feed_consent") as consent,
+    patch(f"{OAUTH_MODULE}.ConnectionService.update", update),
+    pytest.raises(HTTPException),
+  ):
+    await _complete_mercury_oauth(
+      graph_id=GRAPH_ID,
+      connection={
+        "status": "needs_reauth",
+        "metadata": {
+          "entity_name": "Cascade Books LLC",
+          "mercury_account_ids": ["a1", "a2"],
+        },
+      },
+      connection_id=CONNECTION_ID,
+      code="code_1",
+      redirect_uri="http://localhost:3001/connections/mercury-callback",
+      current_user=_user(),
+      db=MagicMock(),
+    )
+  handler.store_tokens.assert_not_called()
+  update.assert_not_awaited()
+  consent.assert_not_called()
+  provider.revoke_token.assert_awaited_once_with("ref_new")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_reconsent_to_the_same_organization_with_a_new_account_is_allowed():
+  handler, _provider, update = await _reconsent(
+    {"entity_name": "Cascade Books LLC", "mercury_account_ids": ["a1", "a2"]},
+    {"legal_business_name": "Cascade Books LLC", "account_ids": ["a1", "a2", "a3"]},
+  )
+  handler.store_tokens.assert_called_once()
+  metadata = update.call_args.kwargs["metadata"]
+  assert metadata["mercury_account_ids"] == ["a1", "a2", "a3"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_connection_from_before_account_ids_is_matched_on_its_name():
+  from fastapi import HTTPException
+
+  with pytest.raises(HTTPException) as excinfo:
+    await _reconsent(
+      {"entity_name": "Cascade Books LLC"},
+      {"legal_business_name": "Other Co", "account_ids": ["b1"]},
+    )
+  assert excinfo.value.status_code == 409
+
+  handler, _provider, update = await _reconsent(
+    {"entity_name": "Cascade Books LLC"},
+    {"legal_business_name": "cascade books llc", "account_ids": ["a1"]},
+  )
+  handler.store_tokens.assert_called_once()
+  # The ids are recorded now, so the next re-consent compares on them.
+  assert update.call_args.kwargs["metadata"]["mercury_account_ids"] == ["a1"]
