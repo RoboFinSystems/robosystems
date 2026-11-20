@@ -306,8 +306,8 @@ class MappingCoverageResponse(BaseModel):
   mapped_count: int
   unmapped_count: int
   coverage_percent: float
-  high_confidence: int = 0  # >0.90
-  medium_confidence: int = 0  # 0.70-0.90
+  high_confidence: int = 0  # >=0.90
+  medium_confidence: int = 0  # 0.70 up to 0.90
   low_confidence: int = 0  # <0.70
   manual_confidence: int = 0  # no confidence score on any arc
   unreachable_count: int = 0

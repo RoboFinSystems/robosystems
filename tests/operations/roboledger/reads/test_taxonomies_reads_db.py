@@ -276,6 +276,15 @@ class TestMappingCoverage:
     assert coverage.unreachable[0].coa_code == "6100"
     assert coverage.unreachable[0].target_qname == "rs-gaap:Orphan"
 
+  def test_a_mapping_at_the_auto_approve_threshold_is_high(self, ledger):
+    # The operator approves at 0.90 without review, so 0.90 is high here too.
+    for arc in ledger.query(Association).filter_by(structure_id="map_1"):
+      arc.confidence = 0.90
+    ledger.flush()
+
+    coverage = get_mapping_coverage(ledger, "map_1")
+    assert (coverage.high_confidence, coverage.medium_confidence) == (3, 0)
+
   def test_bands_count_elements_not_arcs(self, ledger):
     # One element mapped twice (the Driftline inventory shape), one unscored.
     ledger.add(
