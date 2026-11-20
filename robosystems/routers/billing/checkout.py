@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from ...config import BillingConfig, env
+from ...config.shared_repositories import resolve_shared_repository_parent
 from ...database import get_db_session
 from ...logger import get_logger
 from ...middleware.auth.dependencies import get_current_user
@@ -18,6 +19,7 @@ from ...models.api.billing.checkout import (
 from ...models.api.common import AUTHENTICATED_ERROR_RESPONSES, RESOURCE_ERROR_RESPONSES
 from ...models.core import User
 from ...models.core.billing import BillingCustomer, BillingSubscription
+from ...models.core.billing.subscription import TERMINAL_SUBSCRIPTION_STATUSES
 from ...operations.graph.capacity import (
   tier_capacity_status as _tier_capacity_status,
 )
@@ -114,6 +116,27 @@ async def create_checkout_session(
         status_code=400,
         detail=f"Invalid plan '{request.plan_name}' for {request.resource_type}",
       )
+
+    # A seat the user already holds is changed, not bought again: a trial
+    # taken without a card leaves no card on file, so the check above lets a
+    # second checkout through and the seat would be billed twice.
+    if request.resource_type == "repository" and repo_name:
+      held = BillingSubscription.get_by_resource_and_user(
+        resource_type="repository",
+        resource_id=resolve_shared_repository_parent(repo_name),
+        user_id=current_user.id,
+        session=db,
+        exclude_statuses=TERMINAL_SUBSCRIPTION_STATUSES,
+      )
+      if held:
+        raise HTTPException(
+          status_code=409,
+          detail=(
+            f"You already have a subscription to the {repo_name} repository. "
+            "Change its plan or add a card from your organization's "
+            "subscriptions."
+          ),
+        )
 
     # Checked before payment: provisioning builds the graph from it afterwards.
     custom_schema = request.resource_config.get("custom_schema")
