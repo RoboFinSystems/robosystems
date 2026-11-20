@@ -154,6 +154,8 @@ Registration is refused with a 409 when another ledger already keeps the entity'
 
 The entry leaves the books and the event is voided. A withdrawn record cannot be brought back under the same `external_id`.
 
+An integration that kept no event ids finds one by the id it sent the record under: `eventBlocks(source: "netsuite-uk", externalId: "JE-1042", entityId: "ent_01...") { id status }` returns at most one event.
+
 **Reporting a run.** The platform runs no sync for an external source, so the integration says when it last ran. At the end of each run, post to the connection:
 
 ```bash

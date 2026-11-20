@@ -320,3 +320,29 @@ def test_a_retraction_into_a_stamped_month_is_refused(mirrored):
 def test_source_retracted_goes_with_a_void():
   with pytest.raises(ValueError, match="voided"):
     UpdateEventBlockRequest(event_id="evt_1", source_retracted=True)
+
+
+def test_the_ledger_finds_the_event_for_a_record_it_sent(mirrored):
+  """What a withdrawal needs when the integration kept no event ids."""
+  from robosystems.operations.roboledger.reads.event_block import list_event_blocks
+
+  first = _send(mirrored, amount=50_000, version=1, ref="JE-1")
+  _send(mirrored, amount=7_500, version=1, ref="JE-2")
+  sub = mirrored.sub.id
+
+  found = list_event_blocks(
+    mirrored.session, source=LEDGER, external_id="JE-1", entity_id=sub
+  )
+  assert [e.id for e in found] == [first]
+  assert (
+    list_event_blocks(
+      mirrored.session, source=LEDGER, external_id="JE-9", entity_id=sub
+    )
+    == []
+  )
+  assert (
+    list_event_blocks(
+      mirrored.session, source="billing", external_id="JE-1", entity_id=sub
+    )
+    == []
+  )

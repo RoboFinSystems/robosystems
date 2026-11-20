@@ -552,6 +552,7 @@ class LedgerQuery:
     status: str | None = None,
     agent_id: str | None = None,
     source: str | None = None,
+    external_id: str | None = None,
     is_reconciling_item: bool | None = None,
     limit: int | None = None,
     offset: int | None = None,
@@ -575,7 +576,11 @@ class LedgerQuery:
       status: Filter by lifecycle state: `captured` is the unposted queue, `committed`
         the audit trail.
       agent_id: Filter to events involving one counterparty.
-      source: Filter by originating system: `quickbooks`, `schedule` or `manual`.
+      source: Filter by originating system: `quickbooks`, `schedule`, `manual`, or
+        a source name registered by an external connection.
+      external_id: Filter to the event a source sent under this id of its own.
+        With `source` it names at most one event, which is how an integration
+        finds the event for a record it sent earlier.
       is_reconciling_item: True returns the post-sync reconciliation worklist -
         committed events whose upstream payload changed after posting.
       entity_id: The entity whose books to read. Omit for the group parent.
@@ -591,6 +596,7 @@ class LedgerQuery:
           status=status,
           agent_id=agent_id,
           source=source,
+          external_id=external_id,
           is_reconciling_item=is_reconciling_item,
           limit=limit,
           offset=offset,
