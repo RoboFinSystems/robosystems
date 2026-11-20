@@ -1149,6 +1149,16 @@ class IssuerResponse(BaseModel):
   entity_type: str | None = Field(None, description="Legal form.")
 
 
+# A report sent as rows is assembled in memory before it is stored, at a cost
+# that grows with every row, so the request bounds each list. A monthly
+# package is a few hundred values; these leave room for a full annual report.
+MAX_REPORT_FACTS = 3000
+MAX_REPORT_CONCEPTS = 750
+MAX_REPORT_SECTIONS = 50
+MAX_REPORT_SECTION_LINES = 500
+MAX_REPORT_NAMESPACES = 50
+
+
 class ReportConceptRow(BaseModel):
   """A concept the report uses that the library may not have."""
 
@@ -1226,6 +1236,7 @@ class ReportSectionRow(BaseModel):
   )
   lines: list[ReportLineRow] = Field(
     default_factory=list,
+    max_length=MAX_REPORT_SECTION_LINES,
     description=(
       "The lines, in order. With `layout: library` these are only the lines "
       "the library cannot place, or places differently than the document: a "
@@ -1286,10 +1297,12 @@ class ReportRowsInput(BaseModel):
   )
   namespaces: dict[str, str] = Field(
     default_factory=dict,
+    max_length=MAX_REPORT_NAMESPACES,
     description="Prefix to namespace URI, for concept prefixes that are not a library's.",
   )
   concepts: list[ReportConceptRow] = Field(
     default_factory=list,
+    max_length=MAX_REPORT_CONCEPTS,
     description=(
       "The concepts the library does not have, each declared once. A library "
       "concept (`rs-gaap:Assets`) needs no entry unless the report words it "
@@ -1298,6 +1311,7 @@ class ReportRowsInput(BaseModel):
   )
   labels: dict[str, str] = Field(
     default_factory=dict,
+    max_length=MAX_REPORT_FACTS,
     description=(
       "The document's own wording for a line, by library concept "
       "(`rs-gaap:LaborAndRelatedExpense`: `Personnel Expense`). The report "
@@ -1305,9 +1319,13 @@ class ReportRowsInput(BaseModel):
     ),
   )
   sections: list[ReportSectionRow] = Field(
-    default_factory=list, description="The report's statements and tables."
+    default_factory=list,
+    max_length=MAX_REPORT_SECTIONS,
+    description="The report's statements and tables.",
   )
-  facts: list[ReportFactRow] = Field(..., min_length=1, description="The values.")
+  facts: list[ReportFactRow] = Field(
+    ..., min_length=1, max_length=MAX_REPORT_FACTS, description="The values."
+  )
 
 
 class IngestReportRequest(BaseModel):

@@ -241,7 +241,9 @@ def validate_update_envelope(
     )
   virtual_associations.extend(payload.associations_to_add)
 
-  projection = CreateTaxonomyBlockRequest(
+  # Built without the create request's size caps: they bound what one caller
+  # may send, and the stored extension grows past them one update at a time.
+  projection = CreateTaxonomyBlockRequest.model_construct(
     name=str(taxonomy.name),
     taxonomy_type=str(taxonomy.taxonomy_type),
     parent_taxonomy_id=(

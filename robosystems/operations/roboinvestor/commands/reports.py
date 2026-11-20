@@ -29,6 +29,8 @@ from xbrlkit.namespaces import ENTITY_SCHEME
 from xbrlkit.serialize import to_holon
 
 from robosystems.models.api.extensions.investor import (
+  MAX_REPORT_CONCEPTS,
+  MAX_REPORT_FACTS,
   CreateIssuerRequest,
   IngestReportRequest,
   IngestReportResponse,
@@ -272,6 +274,19 @@ def _holon_from_tavi(tavi_text: str) -> tuple[str, int]:
           "message": (
             f"{gaps.skipped_facts} value(s) in the Tavi model name no concept "
             "or no readable period, so the report would not load whole."
+          ),
+        }
+      ]
+    )
+  if len(model.facts) > MAX_REPORT_FACTS or len(model.concepts) > MAX_REPORT_CONCEPTS:
+    raise ReportImportRefusedError(
+      [
+        {
+          "code": "too_large",
+          "message": (
+            f"The Tavi model holds {len(model.facts)} values and "
+            f"{len(model.concepts)} concepts; a report takes at most "
+            f"{MAX_REPORT_FACTS} values and {MAX_REPORT_CONCEPTS} concepts."
           ),
         }
       ]

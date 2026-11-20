@@ -3,10 +3,12 @@ database: the receiver's side of the importer, on a provisioned tenant."""
 
 from __future__ import annotations
 
-from datetime import date
+import copy
+from datetime import date, timedelta
 from unittest.mock import patch
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.exc import OperationalError
 from xbrlkit.check import check_report
@@ -16,6 +18,7 @@ from xbrlkit.serialize import to_tavi
 from robosystems.config import env
 from robosystems.db.extensions import extensions_session
 from robosystems.models.api.extensions.investor import (
+  MAX_REPORT_FACTS,
   CreateIssuerRequest,
   IngestReportRequest,
 )
@@ -445,6 +448,81 @@ def test_a_tavi_model_is_stored_as_a_holon_and_loaded(fund):
   assert len(model.facts) == 5
   headcount = next(f for f in model.facts if f.concept_qname == "kpi:Headcount")
   assert headcount.numeric_value == 42
+
+
+def test_a_tavi_model_past_the_size_limit_is_refused_before_it_is_built(fund):
+  _ingest(fund, report=_rows())
+  built, _ = from_holon_report(fund["s3"].upload_string.call_args.kwargs["content"])
+  commands = "robosystems.operations.roboinvestor.commands.reports"
+
+  with (
+    patch(f"{commands}.MAX_REPORT_FACTS", 4),
+    patch(f"{commands}.to_holon") as to_holon,
+    pytest.raises(ReportImportRefusedError) as refused,
+  ):
+    _ingest(fund, tavi=to_tavi(built), dry_run=True)
+
+  assert refused.value.problems[0]["code"] == "too_large"
+  to_holon.assert_not_called()
+
+
+def test_rows_past_the_size_limit_are_refused_by_the_request():
+  rows = _rows()
+  rows["facts"] = [rows["facts"][0]] * (MAX_REPORT_FACTS + 1)
+  with pytest.raises(ValidationError) as refused:
+    IngestReportRequest.model_validate({"entity_id": "ent_1", "report": rows})
+  assert refused.value.errors()[0]["type"] == "too_long"
+
+
+def _monthly(month: int) -> dict:
+  end = (date(2020, 1, 31) + timedelta(days=31 * month)).replace(day=28).isoformat()
+  rows = _rows()
+  rows["period_end"] = end
+  for fact in rows["facts"]:
+    fact["end"] = end
+  return rows
+
+
+@pytest.mark.timeout(300)
+def test_a_fund_keeps_receiving_reports_past_fifty(fund):
+  # Every report's sections land in the one extension for received reports,
+  # which an earlier build re-checked against a 100-section authoring cap.
+  for month in range(50):
+    _ingest(fund, report=_monthly(month))
+
+  result = _ingest(fund, report=_monthly(50))
+
+  assert result.report_id and result.section_count == 2
+  held = (
+    fund["session"].execute(select(Report.id).where(Report.origin == "uploaded")).all()
+  )
+  assert len(held) == 51
+
+
+def test_a_value_stated_twice_is_loaded_once(fund):
+  # A summary page restates cash in thousands. The check keeps the more
+  # precise of the two; so must the load, or the statement adds them.
+  rows = _rows()
+  rounded = copy.deepcopy(
+    next(f for f in rows["facts"] if f["concept"] == "rs-gaap:Cash")
+  )
+  rounded.update(value=1000, decimals=-3, source="package.pdf#page=1")
+  rows["facts"].append(rounded)
+
+  result = _ingest(fund, report=rows)
+
+  cash = (
+    fund["session"]
+    .execute(
+      select(Fact.value)
+      .join(Element, Fact.element_id == Element.id)
+      .join(FactSet, FactSet.id == Fact.fact_set_id)
+      .where(FactSet.report_id == result.report_id, Element.qname == "rs-gaap:Cash")
+    )
+    .all()
+  )
+  assert [value for (value,) in cash] == [600.0]
+  assert result.fact_count == 5
 
 
 def test_text_that_is_not_a_tavi_model_is_refused(fund):
