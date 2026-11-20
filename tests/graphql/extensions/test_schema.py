@@ -161,7 +161,9 @@ class TestSchemaPerDomainFlagGating:
   def _build_sdl_with_flags(self, *, ledger: bool, investor: bool) -> str:
     """Rebuild the Query type with the given flag combo and return SDL."""
     import strawberry
+    from strawberry.schema.config import StrawberryConfig
 
+    from robosystems.graphql.scalars import SCALAR_MAP
     from robosystems.graphql.schema import _build_query_type
 
     with (
@@ -169,7 +171,9 @@ class TestSchemaPerDomainFlagGating:
       patch("robosystems.graphql.schema.env.ROBOINVESTOR_ENABLED", investor),
     ):
       query_type = _build_query_type()
-      built = strawberry.Schema(query=query_type)
+      built = strawberry.Schema(
+        query=query_type, config=StrawberryConfig(scalar_map=SCALAR_MAP)
+      )
       return str(built)
 
   def test_ledger_only_deployment_excludes_investor_fields(self) -> None:

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from strawberry.dataloader import DataLoader
 from strawberry.scalars import JSON
 
+from robosystems.graphql.scalars import BigInt
 from robosystems.graphql.types._pydantic import pydantic_type
 
 # Must import first: the pydantic decorator fails on types referencing an
@@ -508,7 +509,7 @@ class EventBlock:
   source: str
   external_id: str | None
   external_url: str | None
-  amount: int | None
+  amount: BigInt | None
   currency: str
   description: str | None
   metadata: JSON

@@ -3,7 +3,9 @@ the client calls the field."""
 
 import pytest
 import strawberry
+from strawberry.schema.config import StrawberryConfig
 
+from robosystems.graphql.scalars import SCALAR_MAP
 from robosystems.graphql.types.ledger import Agent
 from robosystems.models.api.extensions.agent import LedgerAgentResponse
 
@@ -25,7 +27,7 @@ class Query:
     return Agent.from_pydantic(ROW)
 
 
-schema = strawberry.Schema(query=Query)
+schema = strawberry.Schema(query=Query, config=StrawberryConfig(scalar_map=SCALAR_MAP))
 
 
 @pytest.mark.unit

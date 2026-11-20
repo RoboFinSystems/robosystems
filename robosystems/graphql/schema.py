@@ -17,6 +17,7 @@ from strawberry.extensions import (
   QueryDepthLimiter,
 )
 from strawberry.extensions.tracing.opentelemetry import OpenTelemetryExtensionSync
+from strawberry.schema.config import StrawberryConfig
 from strawberry.types import Info
 
 from robosystems.config import env
@@ -36,6 +37,7 @@ from robosystems.graphql.resolvers.investor import InvestorQuery
 from robosystems.graphql.resolvers.ledger import LedgerQuery
 from robosystems.graphql.resolvers.library import LibraryQuery
 from robosystems.graphql.resolvers.taxonomy_block import TaxonomyBlockQuery
+from robosystems.graphql.scalars import SCALAR_MAP
 
 
 @strawberry.type
@@ -171,6 +173,7 @@ Query = _build_query_type()
 # is outermost, and the resolver span has to open inside the worker thread.
 schema = ExtensionsSchema(
   query=Query,
+  config=StrawberryConfig(scalar_map=SCALAR_MAP),
   extensions=[
     lambda: QueryDepthLimiter(max_depth=env.EXTENSIONS_GRAPHQL_MAX_DEPTH),
     lambda: MaxAliasesLimiter(max_alias_count=env.EXTENSIONS_GRAPHQL_MAX_ALIASES),

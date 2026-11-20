@@ -12,6 +12,8 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from robosystems.models.api.common import Cents
+
 PERIOD_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
 
 
@@ -882,8 +884,8 @@ class DraftLineItem(BaseModel):
   element_id: str
   element_code: str | None = None
   element_name: str
-  debit_amount: int = Field(..., description="Debit amount in cents")
-  credit_amount: int = Field(..., description="Credit amount in cents")
+  debit_amount: Cents = Field(..., description="Debit amount in cents")
+  credit_amount: Cents = Field(..., description="Credit amount in cents")
   description: str | None = None
 
 
@@ -908,8 +910,8 @@ class DraftEntryResponse(BaseModel):
     None, description="Human-readable name of the source schedule"
   )
   line_items: list[DraftLineItem]
-  total_debit: int = Field(..., description="Sum of debit amounts in cents")
-  total_credit: int = Field(..., description="Sum of credit amounts in cents")
+  total_debit: Cents = Field(..., description="Sum of debit amounts in cents")
+  total_credit: Cents = Field(..., description="Sum of credit amounts in cents")
   balanced: bool = Field(..., description="True if total_debit == total_credit")
   will_publish_to_qb: bool = Field(
     False,
@@ -937,8 +939,8 @@ class PeriodDraftsResponse(BaseModel):
   period_start: date
   period_end: date
   draft_count: int
-  total_debit: int = Field(..., description="Sum across all drafts, in cents")
-  total_credit: int = Field(..., description="Sum across all drafts, in cents")
+  total_debit: Cents = Field(..., description="Sum across all drafts, in cents")
+  total_credit: Cents = Field(..., description="Sum across all drafts, in cents")
   all_balanced: bool = Field(
     ..., description="True if every draft entry has debit == credit"
   )
