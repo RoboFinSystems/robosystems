@@ -12,6 +12,7 @@ from fastapi import HTTPException, status
 from robosystems.models.api.auth import SSOCompleteRequest
 from robosystems.models.core import User
 from robosystems.routers.auth.sso import sso_complete
+from robosystems.routers.auth.utils import dump_sso_session
 
 SESSION_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 BROWSER_NONCE = "c" * 32
@@ -25,6 +26,11 @@ SESSION_DATA = {
   "session_version": 0,
   "created_at": "2026-08-11T00:00:00+00:00",
 }
+
+
+def _stored(data: dict, session_id: str = SESSION_ID) -> str:
+  """A handoff session as the platform stores it."""
+  return dump_sso_session(session_id, data)
 
 
 class _AsyncCM:
@@ -81,7 +87,7 @@ class TestSSOComplete:
     mock_lock_manager.return_value = lock
 
     redis_instance = AsyncMock()
-    redis_instance.get.return_value = json.dumps(SESSION_DATA)
+    redis_instance.get.return_value = _stored(SESSION_DATA)
     mock_redis_client.return_value = redis_instance
     mock_get_by_id.return_value = mock_user
     mock_fingerprint.return_value = "fp"
@@ -118,7 +124,7 @@ class TestSSOComplete:
     mock_lock_manager.return_value = None
 
     redis_instance = AsyncMock()
-    redis_instance.get.return_value = json.dumps(SESSION_DATA)
+    redis_instance.get.return_value = _stored(SESSION_DATA)
     mock_redis_client.return_value = redis_instance
     mock_get_by_id.return_value = mock_user
     mock_fingerprint.return_value = "fp"
@@ -144,7 +150,7 @@ class TestSSOComplete:
     mock_lock_manager.return_value = None
 
     redis_instance = AsyncMock()
-    redis_instance.get.return_value = json.dumps(SESSION_DATA)
+    redis_instance.get.return_value = _stored(SESSION_DATA)
     mock_redis_client.return_value = redis_instance
     mock_user.session_version = 1
     mock_get_by_id.return_value = mock_user
@@ -169,7 +175,7 @@ class TestSSOComplete:
     mock_lock_manager.return_value = None
 
     redis_instance = AsyncMock()
-    redis_instance.get.return_value = json.dumps(
+    redis_instance.get.return_value = _stored(
       {**SESSION_DATA, "session_version": "garbage"}
     )
     mock_redis_client.return_value = redis_instance
@@ -210,7 +216,7 @@ class TestSSOComplete:
     mock_lock_manager.return_value = None
 
     redis_instance = AsyncMock()
-    redis_instance.get.return_value = json.dumps({"target_app": "roboledger"})
+    redis_instance.get.return_value = _stored({"target_app": "roboledger"})
     mock_redis_client.return_value = redis_instance
 
     with pytest.raises(HTTPException) as exc_info:
@@ -232,7 +238,7 @@ class TestSSOComplete:
     mock_lock_manager.return_value = None
 
     redis_instance = AsyncMock()
-    redis_instance.get.return_value = json.dumps(SESSION_DATA)
+    redis_instance.get.return_value = _stored(SESSION_DATA)
     mock_redis_client.return_value = redis_instance
     mock_user.is_active = False
     mock_get_by_id.return_value = mock_user
@@ -242,6 +248,43 @@ class TestSSOComplete:
 
     assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
     assert exc_info.value.detail == "User not found or inactive"
+
+
+class TestSSOCompleteSeal:
+  """Only a handoff the platform stored, for this session id, completes."""
+
+  @pytest.mark.parametrize(
+    "stored",
+    [
+      json.dumps(SESSION_DATA),
+      _stored(SESSION_DATA, session_id="ffffffff-bbbb-cccc-dddd-eeeeeeeeeeee"),
+      json.dumps({**json.loads(_stored(SESSION_DATA)), "user_id": "user_999"}),
+    ],
+    ids=["unsealed", "sealed_for_another_session", "altered_after_sealing"],
+  )
+  @pytest.mark.parametrize("locked", [True, False], ids=["locked", "fallback"])
+  async def test_refused_and_consumes_nothing(self, stored, locked):
+    lock = Mock()
+    lock.lock_sso_session.return_value = _AsyncCM()
+    redis_instance = AsyncMock()
+    redis_instance.get.return_value = stored
+    with (
+      patch(
+        "robosystems.routers.auth.sso.get_sso_lock_manager",
+        return_value=lock if locked else None,
+      ),
+      patch(
+        "robosystems.routers.auth.sso.get_async_redis_client",
+        return_value=redis_instance,
+      ),
+      patch("robosystems.routers.auth.sso.create_jwt_token") as mint,
+      pytest.raises(HTTPException) as exc,
+    ):
+      await sso_complete(**_call_args())
+    assert exc.value.status_code == status.HTTP_401_UNAUTHORIZED
+    assert exc.value.detail == "Session expired or invalid"
+    redis_instance.delete.assert_not_called()
+    mint.assert_not_called()
 
 
 class TestSSOCompleteRedeemingApp:
@@ -254,7 +297,7 @@ class TestSSOCompleteRedeemingApp:
 
   async def _complete(self, origin):
     redis_instance = AsyncMock()
-    redis_instance.get.return_value = json.dumps(SESSION_DATA)
+    redis_instance.get.return_value = _stored(SESSION_DATA)
     user = Mock(spec=User)
     user.id, user.name, user.email = "user_123", "Test", "t@example.com"
     user.email_verified, user.is_active, user.session_version = True, True, 0
@@ -286,7 +329,7 @@ class TestSSOCompleteRedeemingApp:
 
   async def test_another_origin_is_refused_and_consumes_nothing(self):
     redis_instance = AsyncMock()
-    redis_instance.get.return_value = json.dumps(SESSION_DATA)
+    redis_instance.get.return_value = _stored(SESSION_DATA)
     with (
       patch("robosystems.routers.auth.sso.get_sso_lock_manager", return_value=None),
       patch(

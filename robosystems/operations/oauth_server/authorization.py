@@ -30,6 +30,7 @@ from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_clie
 from robosystems.logger import logger
 from robosystems.models.core import OAuthClient, OAuthGrant, User
 from robosystems.security import SecurityAuditLogger, SecurityEventType
+from robosystems.security.sealed_records import seal, unseal
 
 from .clients import ClientError, pick_redirect_uri, resolve_client
 from .resources import (
@@ -119,6 +120,32 @@ def _key(prefix: str, value: str) -> str:
   return f"{prefix}{hashlib.sha256(value.encode()).hexdigest()}"
 
 
+# Valkey is shared with hosts that do not hold the platform's secret, so a
+# stored record is sealed to the key it is stored under and read back only
+# with a valid seal.
+_SEAL_PURPOSE = "oauth-authorization"
+_STORE_KEY_FIELD = "store_key"
+
+
+def _dump(store_key: str, record: dict[str, Any]) -> str:
+  return json.dumps(seal(_SEAL_PURPOSE, {**record, _STORE_KEY_FIELD: store_key}))
+
+
+def _load(store_key: str, raw: Any) -> dict[str, Any] | None:
+  """The record stored under ``store_key``, or None unless the platform
+  sealed it there."""
+  if not raw:
+    return None
+  try:
+    record = unseal(_SEAL_PURPOSE, json.loads(raw))
+  except TypeError, ValueError:
+    return None
+  if record is None or record.pop(_STORE_KEY_FIELD, None) != store_key:
+    logger.warning("Discarded an OAuth authorization record without a valid seal")
+    return None
+  return record
+
+
 class PendingAuthorizationStore:
   """Valkey-backed park for in-flight authorization requests."""
 
@@ -126,23 +153,24 @@ class PendingAuthorizationStore:
   def create(pending: PendingAuthorization) -> None:
     try:
       client = create_redis_client(ValkeyDatabase.AUTH)
+      store_key = _key(_PENDING_KEY_PREFIX, pending.request_id)
       client.setex(
-        _key(_PENDING_KEY_PREFIX, pending.request_id),
+        store_key,
         OAUTH_PENDING_AUTHORIZATION_TTL_SECONDS,
-        json.dumps(asdict(pending)),
+        _dump(store_key, asdict(pending)),
       )
     except Exception as exc:
       logger.error(f"Failed to persist pending OAuth authorization: {exc}")
       raise AuthorizationUnavailableError("Unable to start authorization") from exc
 
   @staticmethod
-  def _parse(raw: Any) -> PendingAuthorization | None:
-    if not raw:
+  def _parse(store_key: str, raw: Any) -> PendingAuthorization | None:
+    data = _load(store_key, raw)
+    if data is None:
       return None
     try:
-      data = json.loads(raw)
       return PendingAuthorization(**data)
-    except (TypeError, ValueError) as exc:
+    except TypeError as exc:
       logger.error(f"Discarding malformed pending OAuth authorization: {exc}")
       return None
 
@@ -152,12 +180,13 @@ class PendingAuthorizationStore:
     if not request_id or len(request_id) > 128:
       return None
     try:
+      store_key = _key(_PENDING_KEY_PREFIX, request_id)
       client = create_redis_client(ValkeyDatabase.AUTH)
-      raw = client.get(_key(_PENDING_KEY_PREFIX, request_id))
+      raw = client.get(store_key)
     except Exception as exc:
       logger.error(f"Failed to read pending OAuth authorization: {exc}")
       return None
-    return cls._parse(raw)
+    return cls._parse(store_key, raw)
 
   @classmethod
   def consume(cls, request_id: str) -> PendingAuthorization | None:
@@ -165,12 +194,13 @@ class PendingAuthorizationStore:
     if not request_id or len(request_id) > 128:
       return None
     try:
+      store_key = _key(_PENDING_KEY_PREFIX, request_id)
       client = create_redis_client(ValkeyDatabase.AUTH)
-      raw = client.getdel(_key(_PENDING_KEY_PREFIX, request_id))
+      raw = client.getdel(store_key)
     except Exception as exc:
       logger.error(f"Failed to consume pending OAuth authorization: {exc}")
       return None
-    return cls._parse(raw)
+    return cls._parse(store_key, raw)
 
 
 class AuthorizationCodeStore:
@@ -180,12 +210,13 @@ class AuthorizationCodeStore:
   @staticmethod
   def issue(payload: dict[str, Any]) -> str:
     code = secrets.token_urlsafe(32)
+    store_key = _key(_CODE_KEY_PREFIX, code)
     try:
       client = create_redis_client(ValkeyDatabase.AUTH)
       client.setex(
-        _key(_CODE_KEY_PREFIX, code),
+        store_key,
         OAUTH_AUTHORIZATION_CODE_TTL_SECONDS,
-        json.dumps(payload),
+        _dump(store_key, payload),
       )
     except Exception as exc:
       logger.error(f"Failed to persist OAuth authorization code: {exc}")
@@ -196,19 +227,14 @@ class AuthorizationCodeStore:
   def consume(code: str) -> dict[str, Any] | None:
     if not code or not isinstance(code, str) or len(code) > 128:
       return None
+    store_key = _key(_CODE_KEY_PREFIX, code)
     try:
       client = create_redis_client(ValkeyDatabase.AUTH)
-      raw = client.getdel(_key(_CODE_KEY_PREFIX, code))
+      raw = client.getdel(store_key)
     except Exception as exc:
       logger.error(f"Failed to consume OAuth authorization code: {exc}")
       return None
-    if not raw:
-      return None
-    try:
-      payload = json.loads(raw)
-    except TypeError, ValueError:
-      return None
-    return payload if isinstance(payload, dict) else None
+    return _load(store_key, raw)
 
 
 def append_query(url: str, params: dict[str, str]) -> str:

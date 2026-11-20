@@ -148,6 +148,8 @@ def exchange_authorization_code(
     raise TokenError("invalid_grant", "PKCE verification failed")
 
   grant, user = _live_grant(str(payload.get("grant_id", "")), session)
+  if str(grant.oauth_client_id) != str(client.id):
+    raise TokenError("invalid_grant", "Authorization code was issued to another client")
   access, access_plain, _, refresh_plain, ttl = OAuthToken.mint_pair(
     grant_id=str(grant.id), user_id=str(grant.user_id), session=session
   )

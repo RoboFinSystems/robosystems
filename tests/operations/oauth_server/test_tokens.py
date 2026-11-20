@@ -1,5 +1,6 @@
 """Code exchange, refresh rotation + replay, revocation, and validation."""
 
+import json
 import threading
 from datetime import UTC, datetime, timedelta
 from unittest.mock import Mock, patch
@@ -18,6 +19,7 @@ from robosystems.models.core.user.oauth_token import (
   TOKEN_TYPE_ACCESS,
   TOKEN_TYPE_REFRESH,
 )
+from robosystems.operations.oauth_server import authorization
 from robosystems.operations.oauth_server.authorization import AuthorizationCodeStore
 from robosystems.operations.oauth_server.tokens import (
   REFRESH_REUSE_GRACE_SECONDS,
@@ -150,6 +152,50 @@ class TestExchange:
       exchange_authorization_code(
         code=code,
         client=other_client,
+        code_verifier=VERIFIER,
+        redirect_uri=REDIRECT,
+        resource=RESOURCE,
+        session=test_db,
+      )
+    assert exc.value.error == "invalid_grant"
+
+  def test_a_code_naming_another_clients_grant_is_refused(
+    self, test_db, grant, client_row, other_client, test_user
+  ):
+    # The code is bound to other_client, the grant to client_row.
+    code = _issue_code(grant, other_client, str(test_user.id))
+    with pytest.raises(TokenError) as exc:
+      exchange_authorization_code(
+        code=code,
+        client=other_client,
+        code_verifier=VERIFIER,
+        redirect_uri=REDIRECT,
+        resource=RESOURCE,
+        session=test_db,
+      )
+    assert exc.value.error == "invalid_grant"
+
+  @pytest.mark.parametrize("tamper", ["unsealed", "moved", "altered"])
+  def test_a_code_the_platform_did_not_store_is_refused(
+    self, test_db, grant, client_row, test_user, fake_redis, tamper
+  ):
+    code = _issue_code(grant, client_row, str(test_user.id))
+    stored_key = authorization._key(authorization._CODE_KEY_PREFIX, code)
+    record = json.loads(fake_redis.store.pop(stored_key))
+    if tamper == "unsealed":
+      record.pop("seal")
+      record.pop("store_key")
+    elif tamper == "altered":
+      record["scope"] = "mcp admin"
+    else:
+      code = "another-code-the-holder-chose"
+    fake_redis.store[authorization._key(authorization._CODE_KEY_PREFIX, code)] = (
+      json.dumps(record)
+    )
+    with pytest.raises(TokenError) as exc:
+      exchange_authorization_code(
+        code=code,
+        client=client_row,
         code_verifier=VERIFIER,
         redirect_uri=REDIRECT,
         resource=RESOURCE,

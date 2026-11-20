@@ -1,6 +1,8 @@
 """Authentication utilities and helpers."""
 
 import hashlib
+import json
+from typing import Any
 
 from fastapi import HTTPException, status
 
@@ -8,12 +10,29 @@ from ...config import env
 from ...config.logging import get_logger
 from ...config.valkey_registry import ValkeyDatabase, ValkeyURLBuilder
 from ...security.password import PasswordSecurity
+from ...security.sealed_records import seal, unseal
 
 logger = get_logger("robosystems.auth.utils")
 
 SSO_TOKEN_EXPIRY_SECONDS = 300  # 5 minutes for better UX
 SSO_SESSION_EXPIRY_SECONDS = 30
 AVAILABLE_APPS = ["roboledger", "roboinvestor", "robosystems"]
+
+_SSO_SESSION_SEAL = "sso-session"
+
+
+def dump_sso_session(session_id: str, data: dict[str, Any]) -> str:
+  """The stored form of a handoff session: sealed to its session id."""
+  return json.dumps(seal(_SSO_SESSION_SEAL, {**data, "session_id": session_id}))
+
+
+def load_sso_session(session_id: str, raw: str) -> dict[str, Any] | None:
+  """A stored handoff session, or None unless the platform sealed it for this
+  session id. Raises ``json.JSONDecodeError`` on a value that is not JSON."""
+  record = unseal(_SSO_SESSION_SEAL, json.loads(raw))
+  if record is None or record.get("session_id") != session_id:
+    return None
+  return record
 
 
 class Config:
