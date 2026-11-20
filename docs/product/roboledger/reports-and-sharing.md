@@ -36,7 +36,7 @@ Open a report in **Reports → View Reports** and choose a format from its menu 
 
 - **Holon (JSON-LD)**, the complete report. It opens in the free viewer at [xbrlkit.com](https://xbrlkit.com).
 - **Holon with lineage (JSON-LD)**, the same holon with the ledger lines, entries and events behind each closed figure. It holds your books, not just the statements, so it's offered only on your own reports and never travels with a share. Send it only to someone who should see the ledger.
-- **Tavi (JSON)**, a compiled model of the report, which also opens in that viewer. It leaves out some of what the holon carries, such as the report's filing status.
+- **Tavi (JSON)**, a compiled model of the report, which also opens in that viewer. It holds the same statements and notes as the holon.
 - **XBRL 2.1 package**, the standard behind public company SEC filings, for tools that read XBRL. It leaves out the report's notes.
 
 **Which file to send.** Send the holon unless the person asks for something else. It carries the statements with their notes. Send the XBRL package to someone whose software needs XBRL, and the notes separately if they need them.

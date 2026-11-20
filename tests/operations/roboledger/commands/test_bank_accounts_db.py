@@ -502,10 +502,12 @@ def test_an_unknown_feed_account_is_refused(session):
 
 
 def test_a_pair_books_on_its_receiving_leg(session):
-  _chart, checking, _supplies, sub, _rent = _seed(session)
+  parent_chart, checking, _supplies, sub, _rent = _seed(session)
+  # The parent's chart: an unordered "first" taxonomy was sometimes the
+  # subsidiary's, and the pair then straddled two charts.
   savings = _element(
     session,
-    session.execute(select(Taxonomy.id)).scalars().first(),
+    parent_chart,
     "Chase Savings ••5678",
     metadata={BANK_FEED_KEY: _link("acc_sav")},
   )
