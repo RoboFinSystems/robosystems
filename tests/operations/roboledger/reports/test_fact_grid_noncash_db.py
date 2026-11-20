@@ -20,7 +20,7 @@ from sqlalchemy.exc import OperationalError
 
 from robosystems.config import env
 from robosystems.config.constants import ReportingStyleConstants
-from robosystems.db.extensions import extensions_session, provision_tenant_schema
+from robosystems.db.extensions import extensions_session
 from robosystems.models.extensions import Element, Entity
 from robosystems.models.extensions.association import Association
 from robosystems.models.extensions.element_trait import ElementTrait
@@ -35,6 +35,7 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   generate_report_facts,
   render_structure_view,
 )
+from tests.tenant_schema import claim_provisioned_schema, release_tenant_schema
 
 pytestmark = pytest.mark.integration
 
@@ -59,6 +60,7 @@ DISTRIBUTIONS = "rs-gaap:EquityMethodInvestmentDividendsOrDistributions"
 RETURN_OF_CAPITAL = (
   "rs-gaap:ProceedsFromEquityMethodInvestmentDividendsOrDistributionsReturnOfCapital"
 )
+
 EQUITY_METHOD_SALE = "rs-gaap:ProceedsFromSaleOfEquityMethodInvestments"
 
 ACCOUNTS = {
@@ -125,14 +127,12 @@ def tenant():
   except OperationalError as exc:
     engine.dispose()
     pytest.skip(f"extensions database unreachable: {exc.orig}")
-  with engine.begin() as conn:
-    conn.execute(text(f"DROP SCHEMA IF EXISTS {GRAPH} CASCADE"))
   try:
-    provision_tenant_schema(GRAPH)
+    claim_provisioned_schema(GRAPH)
     yield _seed()
   finally:
     with engine.begin() as conn:
-      conn.execute(text(f"DROP SCHEMA IF EXISTS {GRAPH} CASCADE"))
+      release_tenant_schema(conn, GRAPH)
     engine.dispose()
 
 

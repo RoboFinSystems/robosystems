@@ -17,7 +17,7 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.exc import OperationalError
 
 from robosystems.config import env
-from robosystems.db.extensions import extensions_session, provision_tenant_schema
+from robosystems.db.extensions import extensions_session
 from robosystems.models.api.extensions.chart_of_accounts import (
   InitializeChartOfAccountsRequest,
 )
@@ -65,6 +65,7 @@ from robosystems.operations.taxonomy_block.coa_mappings import (
 from robosystems.routers.extensions.roboledger.operations.reports import (
   RegenerateReportOperation,
 )
+from tests.tenant_schema import claim_provisioned_schema, release_tenant_schema
 
 pytestmark = pytest.mark.integration
 
@@ -91,10 +92,8 @@ def books(request):
   except OperationalError as exc:
     db.dispose()
     pytest.skip(f"extensions database unreachable: {exc.orig}")
-  with db.begin() as conn:
-    conn.execute(text(f"DROP SCHEMA IF EXISTS {graph} CASCADE"))
   try:
-    provision_tenant_schema(graph)
+    claim_provisioned_schema(graph)
     with (
       patch(f"{_COMMANDS}.exclusive_period_fence"),
       patch("robosystems.operations.extensions.staleness.mark_graph_stale"),
@@ -108,7 +107,7 @@ def books(request):
       yield _seed(session, graph)
   finally:
     with db.begin() as conn:
-      conn.execute(text(f"DROP SCHEMA IF EXISTS {graph} CASCADE"))
+      release_tenant_schema(conn, graph)
     db.dispose()
 
 

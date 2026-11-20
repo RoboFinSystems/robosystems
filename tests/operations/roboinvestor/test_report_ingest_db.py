@@ -14,7 +14,7 @@ from xbrlkit.deserialize import from_holon_report
 from xbrlkit.serialize import to_tavi
 
 from robosystems.config import env
-from robosystems.db.extensions import extensions_session, provision_tenant_schema
+from robosystems.db.extensions import extensions_session
 from robosystems.models.api.extensions.investor import (
   CreateIssuerRequest,
   IngestReportRequest,
@@ -33,6 +33,7 @@ from robosystems.operations.roboledger.commands.report_import import (
   ReportImportRefusedError,
 )
 from robosystems.operations.roboledger.reads.reports import list_reports
+from tests.tenant_schema import claim_provisioned_schema, release_tenant_schema
 
 pytestmark = pytest.mark.integration
 
@@ -52,10 +53,8 @@ def fund():
   except OperationalError as exc:
     db.dispose()
     pytest.skip(f"extensions database unreachable: {exc.orig}")
-  with db.begin() as conn:
-    conn.execute(text(f"DROP SCHEMA IF EXISTS {GRAPH} CASCADE"))
   try:
-    provision_tenant_schema(GRAPH)
+    claim_provisioned_schema(GRAPH)
     with (
       patch(_S3) as s3,
       patch(
@@ -72,7 +71,7 @@ def fund():
       yield {"session": session, "s3": s3.return_value, "issuer": issuer}
   finally:
     with db.begin() as conn:
-      conn.execute(text(f"DROP SCHEMA IF EXISTS {GRAPH} CASCADE"))
+      release_tenant_schema(conn, GRAPH)
     db.dispose()
 
 

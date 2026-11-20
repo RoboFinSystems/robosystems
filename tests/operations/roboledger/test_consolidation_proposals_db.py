@@ -18,7 +18,7 @@ import robosystems.models.extensions  # noqa: F401  (register models on the Base
 from robosystems.adapters.bank_feed.accounts import BANK_FEED_KEY
 from robosystems.config import env
 from robosystems.config.constants import ReportingStyleConstants
-from robosystems.db.extensions import ExtensionsBase, extensions_session
+from robosystems.db.extensions import extensions_session
 from robosystems.models.api.extensions.consolidation import (
   AcquisitionAllocation,
   ProposeConsolidationEntriesRequest,
@@ -80,6 +80,7 @@ from robosystems.operations.roboledger.commands.journal_entries import (
 )
 from robosystems.operations.roboledger.reads import consolidation as engine
 from tests.ledger_entity import PARENT_ENTITY_ID, entity_account, seed_parent_entity_on
+from tests.tenant_schema import claim_tenant_schema, release_tenant_schema
 
 pytestmark = pytest.mark.integration
 
@@ -193,15 +194,9 @@ def group(monkeypatch):
   except OperationalError as exc:
     db.dispose()
     pytest.skip(f"extensions database unreachable: {exc.orig}")
-  tables = [t for t in ExtensionsBase.metadata.sorted_tables if t.schema is None]
   try:
     with db.begin() as conn:
-      conn.execute(text(f"DROP SCHEMA IF EXISTS {GRAPH} CASCADE"))
-      conn.execute(text(f"CREATE SCHEMA {GRAPH}"))
-      ExtensionsBase.metadata.create_all(
-        bind=conn.execution_options(schema_translate_map={None: GRAPH}),
-        tables=tables,
-      )
+      claim_tenant_schema(conn, GRAPH)
       seed_parent_entity_on(
         conn.execution_options(schema_translate_map={None: GRAPH}),
         name="Parent Co",
@@ -217,7 +212,7 @@ def group(monkeypatch):
     yield group
   finally:
     with db.begin() as conn:
-      conn.execute(text(f"DROP SCHEMA IF EXISTS {GRAPH} CASCADE"))
+      release_tenant_schema(conn, GRAPH)
     db.dispose()
 
 

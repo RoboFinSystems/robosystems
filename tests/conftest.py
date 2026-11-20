@@ -24,6 +24,13 @@ password_module.PasswordSecurity.BCRYPT_ROUNDS = 4  # Fast for tests
 _UserAPIKey.BCRYPT_ROUNDS = 4  # Fast for tests
 
 
+def pytest_sessionfinish(session, exitstatus):
+  """Drop the tenant schemas this process parked for reuse."""
+  from tests.tenant_schema import drop_pooled_schemas
+
+  drop_pooled_schemas()
+
+
 @pytest.fixture(autouse=True)
 def guard_blocking_calls_on_loop():
   """Platform coroutines must not reach bcrypt, OpenSearch or requests inline."""

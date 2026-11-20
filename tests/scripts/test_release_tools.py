@@ -205,8 +205,8 @@ class TestUpgradeToRefusals:
     self, tmp_path: Path
   ):
     """The tags sort as versions, not strings, so v1.10.0 beats v1.9.0; the
-    registry check then runs against that tag, and this stub registry has no
-    daemon route, so the run stops there."""
+    registry check then runs against that tag, and the stub daemon cannot
+    reach this registry, so the run stops there."""
     git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com"]
     origin = tmp_path / "origin.git"
     subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
@@ -227,7 +227,9 @@ class TestUpgradeToRefusals:
       "ROBOSYSTEMS_IMAGE=registry.example.internal/robosystems:v1.9.0\n"
     )
 
-    result = run("upgrade-to.sh", "latest", "--dry-run", cwd=clone)
+    env = _stub_docker(tmp_path, "no route to the registry", 1)
+
+    result = run_env("upgrade-to.sh", "latest", "--dry-run", cwd=clone, env=env)
 
     assert "latest → v1.10.0" in result.stdout
     assert "Preflight for v1.10.0" in result.stdout

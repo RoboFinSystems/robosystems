@@ -18,12 +18,13 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.exc import DBAPIError, OperationalError
 
 from robosystems.config import env
-from robosystems.db.extensions import extensions_session, provision_tenant_schema
+from robosystems.db.extensions import extensions_session
 from robosystems.models.extensions import Element
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.models.extensions.roboledger.transaction import Transaction
+from tests.tenant_schema import claim_provisioned_schema, release_tenant_schema
 
 pytestmark = pytest.mark.integration
 
@@ -43,14 +44,12 @@ def tenant():
   except OperationalError as exc:
     engine.dispose()
     pytest.skip(f"extensions database unreachable: {exc.orig}")
-  with engine.begin() as conn:
-    conn.execute(text(f"DROP SCHEMA IF EXISTS {GRAPH} CASCADE"))
   try:
-    provision_tenant_schema(GRAPH)
+    claim_provisioned_schema(GRAPH)
     yield
   finally:
     with engine.begin() as conn:
-      conn.execute(text(f"DROP SCHEMA IF EXISTS {GRAPH} CASCADE"))
+      release_tenant_schema(conn, GRAPH)
     engine.dispose()
 
 

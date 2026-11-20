@@ -276,7 +276,19 @@ jobs:
           uv venv .venv
           uv sync --frozen --all-extras
 
+      # Migrating from empty seeds the taxonomy library, which takes over a
+      # minute. The result depends only on the files in this key, so a dump of
+      # it is reused until one of them changes; it is saved after a green run.
+      - name: Cache the migrated extensions database
+        id: extensions-db
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/robosystems-ci/extensions.dump
+          key: extensions-db-pg14-${{ hashFiles('migrations/extensions.ini', 'migrations/extensions/**', 'frameworks/**', 'robosystems/taxonomy/**', 'robosystems/operations/taxonomy_block/**', 'robosystems/models/extensions/**', 'robosystems/db/extensions.py', 'robosystems/utils/uuid.py', 'robosystems/utils/ulid.py', 'robosystems/config/constants.py', 'uv.lock') }}
+
       - name: Create and migrate the extensions database
+        env:
+          DUMP_RESTORED: ${{ steps.extensions-db.outputs.cache-hit }}
         run: |
           # The service container only creates the platform DB. DB-backed
           # extensions tests skip without this one, and the library-backed suites
@@ -294,8 +306,21 @@ jobs:
           PGPASSWORD=postgres psql -h localhost -U postgres -d postgres \
             -c "CREATE DATABASE extensions" \
             || echo "extensions database already exists"
-          echo "🚀 Applying extensions migrations..."
-          uv run alembic -c migrations/extensions.ini upgrade head
+          POSTGRES=$(docker ps --filter "ancestor=postgres:14" --format "{{.ID}}" | head -1)
+          test -n "$POSTGRES"
+          DUMP="$HOME/.cache/robosystems-ci/extensions.dump"
+          if [ "$DUMP_RESTORED" = "true" ]; then
+            echo "🚀 Restoring the migrated extensions database..."
+            docker exec -i "$POSTGRES" pg_restore -U postgres -d extensions \
+              --no-owner --exit-on-error < "$DUMP"
+          else
+            echo "🚀 Applying extensions migrations..."
+            uv run alembic -c migrations/extensions.ini upgrade head
+            mkdir -p "$(dirname "$DUMP")"
+            docker exec "$POSTGRES" pg_dump -U postgres -Fc extensions > "$DUMP"
+          fi
+          # Either way the database must be at the head this checkout defines.
+          uv run alembic -c migrations/extensions.ini current | grep -q "(head)"
           echo "✅ extensions database ready"
 
       - name: Configure Valkey authentication
@@ -341,21 +366,50 @@ jobs:
           AWS_SECRET_ACCESS_KEY: test
           AWS_DEFAULT_REGION: us-east-1
 
-      - name: Install the LadybugDB vector extension
+      # The pinned extension repository and version the image bakes in, read
+      # from the Dockerfile so the two cannot drift.
+      - name: Resolve the LadybugDB extension pin
+        id: lbug
         run: |
-          # The pinned extension repository and version the image bakes in,
-          # read from the Dockerfile so the two cannot drift.
           image=$(sed -n 's|^FROM \(ghcr.io/ladybugdb/extension-repo[^ ]*\) AS extensions$|\1|p' Dockerfile)
           version=$(sed -n 's|^ARG LADYBUG_EXT_VERSION=||p' Dockerfile | head -1)
           arch=$(dpkg --print-architecture)
-          target="$HOME/.lbdb/extension/${version}/linux_${arch}/vector"
           test -n "$image" && test -n "$version"
-          mkdir -p "$target"
-          container=$(docker create "$image")
-          docker cp "$container:/usr/share/nginx/html/v${version}/linux_${arch}/vector/libvector.lbug_extension" "$target/"
+          {
+            echo "image=$image"
+            echo "version=$version"
+            echo "arch=$arch"
+            echo "dir=$HOME/.lbdb/extension/${version}/linux_${arch}/vector"
+            echo "pin=$(printf '%s %s' "$image" "$version" | sha256sum | cut -c1-16)"
+          } >> "$GITHUB_OUTPUT"
+
+      # One file out of a large image: pulled once per pin, then cached.
+      - name: Cache the LadybugDB vector extension
+        id: vector
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.lbug.outputs.dir }}
+          key: lbug-vector-${{ steps.lbug.outputs.arch }}-${{ steps.lbug.outputs.pin }}
+
+      - name: Install the LadybugDB vector extension
+        if: steps.vector.outputs.cache-hit != 'true'
+        env:
+          IMAGE: ${{ steps.lbug.outputs.image }}
+          VERSION: ${{ steps.lbug.outputs.version }}
+          ARCH: ${{ steps.lbug.outputs.arch }}
+          TARGET: ${{ steps.lbug.outputs.dir }}
+        run: |
+          mkdir -p "$TARGET"
+          container=$(docker create "$IMAGE")
+          docker cp "$container:/usr/share/nginx/html/v${VERSION}/linux_${ARCH}/vector/libvector.lbug_extension" "$TARGET/"
           docker rm "$container" > /dev/null
-          test -s "$target/libvector.lbug_extension"
-          echo "✅ vector extension ${version} (${arch}) installed"
+
+      - name: Verify the LadybugDB vector extension
+        env:
+          TARGET: ${{ steps.lbug.outputs.dir }}
+        run: |
+          test -s "$TARGET/libvector.lbug_extension"
+          echo "✅ vector extension installed"
 
       - name: Run tests
         timeout-minutes: 15

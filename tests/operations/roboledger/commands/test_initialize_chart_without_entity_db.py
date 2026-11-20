@@ -14,7 +14,7 @@ from sqlalchemy.exc import OperationalError
 
 import robosystems.models.extensions  # noqa: F401  (register models on the Base)
 from robosystems.config import env
-from robosystems.db.extensions import ExtensionsBase, extensions_session
+from robosystems.db.extensions import extensions_session
 from robosystems.models.api.extensions.chart_of_accounts import (
   InitializeChartOfAccountsRequest,
 )
@@ -22,14 +22,11 @@ from robosystems.operations.roboledger.commands.chart_of_accounts import (
   initialize_chart_of_accounts,
 )
 from robosystems.operations.taxonomy_block.chart_templates import CHART_TEMPLATES
+from tests.tenant_schema import claim_tenant_schema, release_tenant_schema
 
 pytestmark = pytest.mark.integration
 
 GRAPH = "kgdddddddddddddddd24"
-
-
-def _tenant_tables():
-  return [t for t in ExtensionsBase.metadata.sorted_tables if t.schema is None]
 
 
 @pytest.fixture()
@@ -46,16 +43,11 @@ def tenant():
     pytest.skip(f"extensions database unreachable: {exc.orig}")
   try:
     with engine.begin() as conn:
-      conn.execute(text(f"DROP SCHEMA IF EXISTS {GRAPH} CASCADE"))
-      conn.execute(text(f"CREATE SCHEMA {GRAPH}"))
-      ExtensionsBase.metadata.create_all(
-        bind=conn.execution_options(schema_translate_map={None: GRAPH}),
-        tables=_tenant_tables(),
-      )
+      claim_tenant_schema(conn, GRAPH)
     yield
   finally:
     with engine.begin() as conn:
-      conn.execute(text(f"DROP SCHEMA IF EXISTS {GRAPH} CASCADE"))
+      release_tenant_schema(conn, GRAPH)
     engine.dispose()
 
 
