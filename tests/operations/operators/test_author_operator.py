@@ -392,6 +392,12 @@ class TestWriteGuards:
     analyst = await _loop_kwargs(AnalystOperator(), _tools(["read-graph-cypher"]))
     assert analyst["write_guards"] == {}
 
+  def test_no_update_tool_is_on_the_allowlist_without_a_guard(self):
+    # An update reaches what was already there, so each is narrowed.
+    updates = {t for t in AuthorOperator.WRITE_TOOLS if t.startswith("update-")}
+    assert updates
+    assert updates <= set(AuthorOperator.WRITE_GUARDS)
+
   def test_every_guard_narrows_an_allowlisted_tool(self):
     assert set(AuthorOperator.WRITE_GUARDS) <= set(AuthorOperator.WRITE_TOOLS)
 
