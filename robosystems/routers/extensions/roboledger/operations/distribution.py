@@ -74,6 +74,7 @@ from robosystems.operations.roboledger.commands.publish_lists import (
   update_publish_list as cmd_update_publish_list,
 )
 from robosystems.operations.roboledger.commands.reports import (
+  BundleUploadError,
   NotAuthorizedError,
   PublishListEmptyError,
   ReportNotFoundError,
@@ -94,6 +95,7 @@ from robosystems.routers.extensions.roboledger._common import (
   _RATE_LIMIT,
   _ctx,
   _dispatch,
+  _require_receiving_write,
   _require_roboledger_write,
   _result_payload,
   make_registrar,
@@ -276,6 +278,8 @@ async def share_report_op(
     except RowLockedError as e:
       # Another lifecycle write (or another share) holds the report.
       raise HTTPException(status_code=409, detail=str(e))
+    except BundleUploadError as e:
+      raise HTTPException(status_code=502, detail=str(e))
 
   def _mark_recipients_stale(envelope) -> None:
     # The recipient's LadybugDB projection only picks the report up on a
@@ -631,7 +635,7 @@ async def remove_publish_list_member_op(
 async def block_source_graph_op(
   body: BlockSourceGraphOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(_require_roboledger_write),
+  user: User = Depends(_require_receiving_write),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
@@ -700,7 +704,7 @@ async def block_source_graph_op(
 async def unblock_source_graph_op(
   body: UnblockSourceGraphOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(_require_roboledger_write),
+  user: User = Depends(_require_receiving_write),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:

@@ -762,7 +762,8 @@ def share_report(
   Takes `graph_id` rather than a session because it opens the source, each
   target, and the platform DB. Raises `PublishListNotFoundError`,
   `PublishListEmptyError`, `ReportNotFoundError`, `NotAuthorizedError`,
-  `ReportNotPublishedError`, or `RowLockedError`.
+  `ReportNotPublishedError`, `RowLockedError`, or `BundleUploadError` when
+  the holon had to be rebuilt and could not be stored.
 
   The source report stays row-locked for the whole share (snapshot, recipient
   copies, ``ReportShare`` rows), including the S3 read, so a concurrent
@@ -814,6 +815,14 @@ def share_report(
       raise NotAuthorizedError("A received report cannot be shared onward.")
     if report_def.generation_status != "published":
       raise ReportNotPublishedError("Only published reports can be shared.")
+
+    # The rows are copied as they stand and the holon is a snapshot of them:
+    # a share carries one of the same moment, as a download does. Unlike a
+    # download it fails rather than send the older file beside newer rows.
+    from robosystems.operations.roboledger.reads.reports import _bundle_outran
+
+    if _bundle_outran(report_def):
+      _stamp_report_bundle(source_session, graph_id, report_def)
 
     report_snapshot = {
       "id": report_def.id,

@@ -1087,6 +1087,74 @@ def test_share_report_records_the_share_in_the_same_transaction() -> None:
   assert _counts(TARGET_GRAPH)[0] == 1
 
 
+def _share_seeded_report(list_id: str) -> tuple[list[int], list[int]]:
+  """Share the seeded report; returns the generations the holon was stamped
+  at and the generations whose stored publication the share carried."""
+  from robosystems.models.api.extensions.reports import ShareReportRequest
+  from robosystems.operations.roboledger.commands.reports import share_report
+
+  stamped: list[int] = []
+  carried: list[int] = []
+
+  def _stamp(session, graph_id, report_def) -> None:
+    report_def.generation_count = (report_def.generation_count or 0) + 1
+    report_def.bundle_stamped_at = datetime.now(UTC)
+    stamped.append(report_def.generation_count)
+
+  def _load(graph_id, report_id, generation_count) -> dict:
+    carried.append(generation_count)
+    return {}
+
+  with (
+    _patch_platform_graph_lookup(),
+    patch(f"{_REPORTS_CMD}._stamp_report_bundle", side_effect=_stamp),
+    patch(f"{_REPORTS_CMD}._load_publication_artifacts", side_effect=_load),
+  ):
+    share_report(
+      SOURCE_GRAPH,
+      _REPORT_SNAPSHOT["id"],
+      ShareReportRequest(publish_list_id=list_id),
+      acting_user_id=_SENDER,
+    )
+  return stamped, carried
+
+
+def _set_report_stamps(last_generated: datetime, bundle_stamped_at: datetime) -> None:
+  with extensions_session(SOURCE_GRAPH) as session:
+    report = session.get(Report, _REPORT_SNAPSHOT["id"])
+    report.generation_count = 2
+    report.last_generated = last_generated
+    report.bundle_stamped_at = bundle_stamped_at
+
+
+def test_a_share_carries_a_fresh_holon_when_the_columns_moved_since_the_stamp() -> None:
+  # The recipient's rows are copied as they stand, so the file beside them
+  # must be of the same moment, as a download's is.
+  list_id = _seed_publishable_report()
+  _set_report_stamps(
+    last_generated=datetime(2026, 4, 10, tzinfo=UTC),
+    bundle_stamped_at=datetime(2026, 4, 2, tzinfo=UTC),
+  )
+
+  stamped, carried = _share_seeded_report(list_id)
+
+  assert stamped == [3]
+  assert carried == [3]
+
+
+def test_a_share_keeps_the_holon_that_is_already_current() -> None:
+  list_id = _seed_publishable_report()
+  _set_report_stamps(
+    last_generated=datetime(2026, 4, 2, tzinfo=UTC),
+    bundle_stamped_at=datetime(2026, 4, 2, tzinfo=UTC),
+  )
+
+  stamped, carried = _share_seeded_report(list_id)
+
+  assert stamped == []
+  assert carried == [2]
+
+
 def test_a_delete_cannot_slip_between_the_snapshot_and_the_share_rows() -> None:
   """Before the report was locked for the share, `delete_report` could run
   between the snapshot read and the `ReportShare` insert: it saw no active

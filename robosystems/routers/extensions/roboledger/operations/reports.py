@@ -63,6 +63,7 @@ from robosystems.routers.extensions.roboledger._common import (
   _RATE_LIMIT,
   _ctx,
   _dispatch,
+  _require_receiving_write,
   _require_roboledger_write,
   make_registrar,
 )
@@ -205,7 +206,7 @@ regenerate_report_op = _registrar.register(
 async def delete_report_op(
   body: DeleteReportOperation,
   graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(_require_roboledger_write),
+  user: User = Depends(_require_receiving_write),
   idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
   cache: IdempotencyCache = Depends(get_idempotency_cache),
 ) -> OperationEnvelope:
