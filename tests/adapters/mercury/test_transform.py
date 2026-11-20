@@ -9,6 +9,7 @@ from robosystems.adapters.mercury.pipeline.transform import (
   bank_accounts,
   counterparties,
   own_counterparty_names,
+  retracted_ids,
   transform,
 )
 from robosystems.models.api.event_block import CreateEventBlockRequest
@@ -286,3 +287,119 @@ class TestTransform:
     result, _ = _events()
     stamps = [e["occurred_at"] for e in result.events]
     assert stamps == sorted(stamps)
+
+
+def _set(raw, txn_id, **fields):
+  txn = next(t for t in raw["transactions"] if t["id"] == txn_id)
+  txn.update(fields)
+  return raw
+
+
+def _by_id(result):
+  return {event["external_id"]: event for event in result.events}
+
+
+@pytest.mark.unit
+class TestTransferPairing:
+  def test_legs_on_different_days_pair_within_the_window(self):
+    raw = _set(raw_pull(), "txn_xfer_in", postedAt="2026-03-16T09:00:00Z")
+    result = transform(
+      raw, source="mercury", connection_id="conn_1", account_elements=ELEMENTS
+    )
+    xfer = _by_id(result)["mercury_xfer_txn_xfer_in"]
+    # Booked on the earlier leg, each leg's date beside it.
+    assert xfer["occurred_at"] == "2026-03-14T15:04:05Z"
+    assert (xfer["metadata"]["from_date"], xfer["metadata"]["to_date"]) == (
+      "2026-03-14",
+      "2026-03-16",
+    )
+
+  def test_legs_further_apart_than_the_window_stay_single(self):
+    raw = _set(raw_pull(), "txn_xfer_in", postedAt="2026-03-20T09:00:00Z")
+    by_id = _by_id(
+      transform(
+        raw, source="mercury", connection_id="conn_1", account_elements=ELEMENTS
+      )
+    )
+    assert "mercury_xfer_txn_xfer_in" not in by_id
+    assert {"mercury_txn_txn_xfer_out", "mercury_txn_txn_xfer_in"} <= set(by_id)
+
+  def test_legs_on_one_account_never_pair(self):
+    raw = _set(raw_pull(), "txn_xfer_in", accountId=CHECKING_ID)
+    by_id = _by_id(
+      transform(
+        raw, source="mercury", connection_id="conn_1", account_elements=ELEMENTS
+      )
+    )
+    assert "mercury_xfer_txn_xfer_in" not in by_id
+
+  def test_the_closest_leg_wins(self):
+    raw = raw_pull()
+    far = dict(
+      next(t for t in raw["transactions"] if t["id"] == "txn_xfer_in"),
+      id="txn_xfer_in_far",
+      postedAt="2026-03-16T09:00:00Z",
+    )
+    raw["transactions"].append(far)
+    by_id = _by_id(
+      transform(
+        raw, source="mercury", connection_id="conn_1", account_elements=ELEMENTS
+      )
+    )
+    assert sorted(by_id["mercury_xfer_txn_xfer_in"]["metadata"]["legs"]) == [
+      "txn_xfer_in",
+      "txn_xfer_out",
+    ]
+    assert "mercury_txn_txn_xfer_in_far" in by_id
+
+  def test_a_leg_already_paired_keeps_its_partner(self):
+    raw = raw_pull()
+    stray = dict(
+      next(t for t in raw["transactions"] if t["id"] == "txn_xfer_in"),
+      id="txn_xfer_a",  # sorts first and is the same day
+    )
+    raw["transactions"].append(stray)
+    result = transform(
+      raw,
+      source="mercury",
+      connection_id="conn_1",
+      account_elements=ELEMENTS,
+      paired_on_graph={"txn_xfer_out": "txn_xfer_in", "txn_xfer_in": "txn_xfer_out"},
+    )
+    by_id = _by_id(result)
+    assert sorted(by_id["mercury_xfer_txn_xfer_in"]["metadata"]["legs"]) == [
+      "txn_xfer_in",
+      "txn_xfer_out",
+    ]
+    assert "mercury_txn_txn_xfer_a" in by_id
+
+  def test_a_paired_leg_without_its_partner_is_left_to_its_pair(self):
+    raw = raw_pull()
+    raw["transactions"] = [t for t in raw["transactions"] if t["id"] != "txn_xfer_in"]
+    result = transform(
+      raw,
+      source="mercury",
+      connection_id="conn_1",
+      account_elements=ELEMENTS,
+      paired_on_graph={"txn_xfer_out": "txn_xfer_in"},
+    )
+    assert "mercury_txn_txn_xfer_out" not in _by_id(result)
+    assert result.skipped["in_pair"] == 1
+
+  def test_a_leg_already_captured_alone_is_not_paired_here(self):
+    result = transform(
+      raw_pull(),
+      source="mercury",
+      connection_id="conn_1",
+      account_elements=ELEMENTS,
+      unpairable=frozenset({"txn_xfer_out"}),
+    )
+    by_id = _by_id(result)
+    assert "mercury_xfer_txn_xfer_in" not in by_id
+    assert "mercury_txn_txn_xfer_in" in by_id
+
+
+@pytest.mark.unit
+def test_retracted_ids_are_the_lines_that_did_not_settle():
+  raw = _set(raw_pull(), "txn_stripe", status="reversed")
+  assert sorted(retracted_ids(raw)) == ["txn_failed", "txn_stripe"]

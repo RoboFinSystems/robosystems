@@ -1115,12 +1115,12 @@ def test_restate_reposts_a_bank_line_at_the_banks_amount_and_date(session):
 
 
 def test_a_retracted_bank_line_is_reversed_never_restated(session):
-  from robosystems.adapters.plaid.pipeline.load import _flag_removed
+  from robosystems.adapters.bank_feed.drift import flag_removed
 
   ids = _seed_elements(session)
   _seed_periods(session)
   event = _post_bank_line(session, ids)
-  _flag_removed(event, ["t1"])
+  flag_removed(event, ["t1"])
   session.flush()
 
   plan = plan_reconciling_item(session, str(event.id), graph_id=GRAPH_ID)
