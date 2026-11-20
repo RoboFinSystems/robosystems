@@ -51,6 +51,12 @@ from robosystems.operations.roboledger.fiscal_calendar import (
 from robosystems.operations.roboledger.fiscal_calendar.close_outcomes import (
   close_error_payload,
 )
+from robosystems.operations.roboledger.fiscal_calendar.close_service import (
+  gate_refusal,
+)
+from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+  shadow_close_for_entity,
+)
 from robosystems.operations.roboledger.fiscal_calendar.service import (
   CalendarAlreadyInitializedError,
   CalendarStartBlockedError,
@@ -863,12 +869,11 @@ The receipt:
     period = arguments["period"]
     try:
       with extensions_session(graph_id) as session, _platform_session() as platform_db:
+        entity_id = find_entity_id(session, arguments.get("entity_id"))
         has_sync, last_sync_at = entity_sync_state(
-          session,
-          platform_db,
-          graph_id,
-          find_entity_id(session, arguments.get("entity_id")),
+          session, platform_db, graph_id, entity_id
         )
+        shadow = shadow_close_for_entity(platform_db, graph_id, entity_id)
         gate = FiscalCalendarService().closeable_gate(
           session,
           graph_id,
@@ -892,9 +897,12 @@ The receipt:
           ),
           allow_held_bank_lines=bool(arguments.get("allow_held_bank_lines", False)),
         )
-        if gate.is_closeable:
+        # What the close itself would refuse: a shadow close records most
+        # gates as findings.
+        refusal = gate_refusal(gate, shadow=shadow)
+        if refusal is None:
           return None
-        return close_error_payload(CloseGateFailed(gate), period=period)
+        return close_error_payload(CloseGateFailed(refusal), period=period)
     except SQLAlchemyError as exc:
       return database_failure("close-period", exc)
     except FiscalCalendarError as exc:

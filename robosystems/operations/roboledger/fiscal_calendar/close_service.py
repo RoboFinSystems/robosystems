@@ -69,6 +69,18 @@ SHADOW_FINDING_BLOCKERS = (
 )
 
 
+def gate_refusal(
+  gate: CloseableGateResult, *, shadow: bool
+) -> CloseableGateResult | None:
+  """The gate a close of this kind is refused on, or None when it may run. A
+  shadow close is refused on the structural blockers alone; the rest it
+  records as findings."""
+  if not shadow:
+    return None if gate.is_closeable else gate
+  hard = [b for b in gate.blockers if b not in SHADOW_FINDING_BLOCKERS]
+  return replace(gate, is_closeable=False, blockers=hard) if hard else None
+
+
 def gate_finding_counts(gate: CloseableGateResult) -> dict[str, int]:
   """Each finding's size, from the gate's own detail fields."""
   counts = {
@@ -333,14 +345,12 @@ class PeriodCloseService:
       allow_held_bank_lines=allow_held_bank_lines,
       entity_id=entity_id,
     )
+    refusal = gate_refusal(gate, shadow=shadow)
+    if refusal is not None:
+      raise CloseGateFailed(refusal)
     findings: tuple[str, ...] = ()
     if shadow:
       findings = tuple(b for b in gate.blockers if b in SHADOW_FINDING_BLOCKERS)
-      hard = [b for b in gate.blockers if b not in SHADOW_FINDING_BLOCKERS]
-      if hard:
-        raise CloseGateFailed(replace(gate, is_closeable=False, blockers=hard))
-    elif not gate.is_closeable:
-      raise CloseGateFailed(gate)
     # A closeable gate found the entity's calendar, so the entity resolves.
     entity_id = entity_id or resolve_entity_id(session)
 
