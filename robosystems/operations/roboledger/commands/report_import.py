@@ -17,7 +17,7 @@ from typing import Any
 
 from sqlalchemy import event, exists, or_, select, text, update
 from sqlalchemy.orm import Session, aliased
-from xbrlkit.check import check_report
+from xbrlkit.check import check_report, precision
 from xbrlkit.deserialize import from_holon_report
 from xbrlkit.deserialize.holon import HolonError
 from xbrlkit.information_block import InformationBlock, fact_membership, plan_blocks
@@ -134,9 +134,28 @@ def import_report(
   entity = session.get(Entity, entity_id, with_for_update=not dry_run)
   if entity is None:
     raise ReportImportEntityNotFoundError(f"Entity '{entity_id}' is not in this graph.")
+  # A received report is about an outside company. One of the graph's own
+  # entities reports from its ledger, and a report loaded onto it would be
+  # read as its own figures.
+  if entity.source != "linked":
+    raise ReportImportRefusedError(
+      [
+        {
+          "code": "own_entity",
+          "message": (
+            f"'{entity.name}' is one of this graph's own entities, whose "
+            "reports come from its ledger. A received report is loaded onto "
+            "an issuer: add the company with `create-issuer`, whether or not "
+            "the fund holds a position in it."
+          ),
+        }
+      ]
+    )
 
   # A nil value states that nothing was disclosed; there is nothing to load.
-  loadable = [f for f in model.facts if not f.dims and not f.is_nil]
+  loadable = _one_per_coordinate(
+    [f for f in model.facts if not f.dims and not f.is_nil]
+  )
   if not loadable:
     raise ReportImportRefusedError(
       [
@@ -556,6 +575,19 @@ def _unknown_qnames(session: Session, cited: set[str]) -> list[str]:
     ).scalars()
   )
   return sorted(missing - in_library)
+
+
+def _one_per_coordinate(facts: list[XbrlFact]) -> list[XbrlFact]:
+  """The fact the check kept for each concept, period and unit: the most
+  precise. A report may state one value twice (a rounded figure on a summary
+  page); loading both would have the reader add them."""
+  best: dict[tuple[Any, ...], XbrlFact] = {}
+  for fact in facts:
+    key = (fact.concept_qname, fact.period_id, fact.unit_id, fact.language)
+    current = best.get(key)
+    if current is None or precision(fact.decimals) > precision(current.decimals):
+      best[key] = fact
+  return list(best.values())
 
 
 def _write_vocabulary(

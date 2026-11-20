@@ -213,7 +213,7 @@ curl -X POST "https://api.robosystems.ai/extensions/roboinvestor/$GRAPH_ID/opera
 
 Pass the returned `id` as `entity_id` to `create-security` and to `ingest-report`. An identifier (`lei`, `cik` or `tax_id`) that another entity already carries is refused with HTTP 409.
 
-**`ingest-report`** loads one report onto that entity. Give it one of:
+**`ingest-report`** loads one report onto that entity. The entity must be an issuer: one of the graph's own entities reports from its ledger, and a report sent for it is refused (`own_entity`). The fund does not need a position in the issuer. Give it one of:
 
 - `holon`: the text of a `.holon.jsonld` report file.
 - `tavi`: the text of a `.tavi.json` compiled model.
