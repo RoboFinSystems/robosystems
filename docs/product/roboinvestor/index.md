@@ -1,10 +1,10 @@
 ---
 title: RoboInvestor documentation
-description: Private-company portfolios, reports shared from RoboLedger, and public-company research. Connect an AI client on RoboSystems.
+description: Private-company portfolios, reports shared from RoboLedger or loaded from a file, and public-company research. Connect an AI client on RoboSystems.
 order: 0
 ---
 
-RoboInvestor: equity research on public companies, your fund's positions with their terms, and the reports your portfolio companies share from RoboLedger. It is the holder's view of a company: what you own, in whom, and the statements they send you. Today it covers private-company portfolios, reports shared from a RoboLedger graph or loaded from a file a company sent, the SEC filings of public companies, and research written from those filings.
+RoboInvestor: equity research on public companies, your fund's positions with their terms, and your portfolio companies' reports, shared from RoboLedger or read from the PDF or spreadsheet they send. It is the holder's view of a company: what you own, in whom, and the statements they send you. Today it covers private-company portfolios, reports shared from a RoboLedger graph or loaded from a file a company sent, the SEC filings of public companies, and research written from those filings.
 
 Sign up at [roboinvestor.ai](https://roboinvestor.ai/register). One account covers RoboSystems, RoboLedger and RoboInvestor. Creating a graph, your password, API keys and billing live in your RoboSystems account at [robosystems.ai](https://robosystems.ai). The SEC filings subscription can also be bought here, under **Repositories**.
 
