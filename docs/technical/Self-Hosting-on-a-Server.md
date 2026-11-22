@@ -18,12 +18,12 @@ The same compose stack as Local Development, on a server, running the published 
 
 ## A Name, a Certificate, One Port
 
-Give the API a hostname on your network's DNS, an A record to the server's address, and keep that address fixed with a DHCP reservation or a static address. Get a certificate for the name from your own certificate authority, or from a public one through a DNS challenge if the name is in public DNS. Then run one reverse proxy on 443 that terminates TLS and forwards to the API on 8000. With Caddy:
+Give the API a hostname on your network's DNS, an A record to the server's address, and keep that address fixed with a DHCP reservation or a static address. Get a certificate for the name from your own certificate authority, or from a public one through a DNS challenge if the name is in public DNS. Then run one reverse proxy on 443 that terminates TLS and forwards to the API on 8000. Run it on the host itself: the stack publishes its ports on the loopback address only, so a proxy on another machine, or in a container of its own, cannot reach them. With Caddy:
 
 ```
 api.example.internal {
 	tls /etc/caddy/certs/api.pem /etc/caddy/certs/api-key.pem
-	reverse_proxy localhost:8000 {
+	reverse_proxy 127.0.0.1:8000 {
 		flush_interval -1
 	}
 }
@@ -52,22 +52,22 @@ Give each app a name, and the object store one as well. Browsers upload and down
 ```
 app.example.internal {
 	tls /etc/caddy/certs/app.pem /etc/caddy/certs/app-key.pem
-	reverse_proxy localhost:3000
+	reverse_proxy 127.0.0.1:3000
 }
 
 ledger.example.internal {
 	tls /etc/caddy/certs/ledger.pem /etc/caddy/certs/ledger-key.pem
-	reverse_proxy localhost:3001
+	reverse_proxy 127.0.0.1:3001
 }
 
 investor.example.internal {
 	tls /etc/caddy/certs/investor.pem /etc/caddy/certs/investor-key.pem
-	reverse_proxy localhost:3002
+	reverse_proxy 127.0.0.1:3002
 }
 
 s3.example.internal {
 	tls /etc/caddy/certs/s3.pem /etc/caddy/certs/s3-key.pem
-	reverse_proxy localhost:8333
+	reverse_proxy 127.0.0.1:8333
 }
 ```
 
@@ -127,7 +127,7 @@ The operators, the server-side AI, call Claude through AWS Bedrock by default an
 
 What this shape does not do yet, and what to do about it:
 
-- **Every service port is published on all of the server's interfaces**: 8000, 8001, 8002, 5432, 6379, 8333, 1025, 8025 and 9200 in the `robosystems` profile, 3000 to 3002 with the apps, and 4318, 8889, 9090 and 4000 with observability. Put a host firewall in front that allows 443 from your users and ssh from your administrator and nothing else, or bind the published ports to loopback in a compose override (`127.0.0.1:8000:8000`).
+- **Service ports listen on the loopback address only** (`127.0.0.1`): 8000, 8001, 8002, 5432, 6379, 8333, 1025, 8025 and 9200 in the `robosystems` profile, 3000 to 3002 with the apps, and 4318, 8889, 9090 and 4000 with observability. Users reach the stack through the proxy and nothing else. To open the Dagster UI or Mailpit from another machine, forward the port over ssh (`ssh -L 8002:127.0.0.1:8002 <server>`) rather than publishing it.
 - **The object store's credentials are fixed.** The S3 identity the stack uses (`test`/`test`) is the same on every installation, and the public-data bucket allows anonymous reads, which the browser needs. The keys are set in four places that must agree: `bin/setup/seaweedfs-s3.json`, `.env`, `.env.local` (the `just` recipes run on the host), and the `storage-init` service's environment in `compose.yaml`, which the backend services wait on. Change all four before exposing the box beyond a trusted network (the two tracked files then count as local changes, which `just upgrade-to` refuses to run over until they are committed or stashed), and keep port 8333 behind the host firewall like the others.
 - **Outbound access the box needs**: Docker Hub for image pulls, the model endpoint if it is not on the box, and the APIs of any connector you turn on.
 

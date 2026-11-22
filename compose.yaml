@@ -19,7 +19,7 @@ services:
     env_file:
       - .env
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./robosystems:${ROBOSYSTEMS_IMAGE:+/mnt/checkout}/app/robosystems
     depends_on:
@@ -62,7 +62,7 @@ services:
     env_file:
       - .env
     ports:
-      - "8001:8001"
+      - "127.0.0.1:8001:8001"
     volumes:
       - ./robosystems:${ROBOSYSTEMS_IMAGE:+/mnt/checkout}/app/robosystems
       - ./data/lbug-dbs:/app/data/lbug-dbs
@@ -102,7 +102,7 @@ services:
     env_file:
       - .env
     ports:
-      - "8002:8002"
+      - "127.0.0.1:8002:8002"
     volumes:
       - ./robosystems:${ROBOSYSTEMS_IMAGE:+/mnt/checkout}/app/robosystems
       # Run logs and step outputs, shared by the two Dagster services.
@@ -226,7 +226,7 @@ services:
     env_file:
       - .env
     ports:
-      - 5432:5432
+      - "127.0.0.1:5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
       - ./bin/setup/postgres-init.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
@@ -251,7 +251,7 @@ services:
     container_name: robosystems-valkey
     image: valkey/valkey:8.1-alpine
     ports:
-      - 6379:6379
+      - "127.0.0.1:6379:6379"
     volumes:
       - valkey_data:/data
     command: valkey-server
@@ -291,7 +291,7 @@ services:
       -master.volumeSizeLimitMB=1024 -master.telemetry=false
       -admin.ui=false -webdav=false -s3.port.iceberg=0 -s3.port.lance=0
     ports:
-      - "8333:8333"
+      - "127.0.0.1:8333:8333"
     volumes:
       - seaweedfs_data:/data
       - ./bin/setup/seaweedfs-s3.json:/etc/seaweedfs/s3.json:ro
@@ -364,8 +364,8 @@ services:
     container_name: robosystems-mailpit
     image: axllent/mailpit:v1.33.1
     ports:
-      - 1025:1025
-      - 8025:8025
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
     healthcheck:
       test: ["CMD", "/mailpit", "readyz"]
       interval: 10s
@@ -390,7 +390,7 @@ services:
       - DISABLE_SECURITY_PLUGIN=true
       - OPENSEARCH_JAVA_OPTS=${OPENSEARCH_JAVA_OPTS:--Xms512m -Xmx512m}
     ports:
-      - "9200:9200"
+      - "127.0.0.1:9200:9200"
     volumes:
       - opensearch_data:/usr/share/opensearch/data
     healthcheck:
@@ -422,8 +422,8 @@ services:
     volumes:
       - ./robosystems/middleware/otel/config/otel-collector-config.yaml:/etc/otel/config.yaml
     ports:
-      - "4318:4318" # OTLP HTTP receiver
-      - "8889:8889" # Prometheus exporter
+      - "127.0.0.1:4318:4318" # OTLP HTTP receiver
+      - "127.0.0.1:8889:8889" # Prometheus exporter
     restart: always
     profiles: ["observability"]
 
@@ -435,7 +435,7 @@ services:
       - ./robosystems/middleware/otel/config/prometheus.yaml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     restart: always
     profiles: ["observability"]
 
@@ -444,7 +444,7 @@ services:
     image: grafana/grafana:11.2.1
     container_name: robosystems-grafana
     ports:
-      - "4000:3000"
+      - "127.0.0.1:4000:3000"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./robosystems/middleware/otel/config/datasources:/etc/grafana/provisioning/datasources
@@ -477,7 +477,7 @@ services:
       - NEXT_PUBLIC_S3_ENDPOINT_URL=${AWS_S3_PRESIGN_ENDPOINT_URL:-http://localhost:8333}
       - NEXT_PUBLIC_MAINTENANCE_MODE=true
     ports:
-      - 3000:3000
+      - "127.0.0.1:3000:3000"
     restart: always
     deploy:
       resources:
@@ -507,7 +507,7 @@ services:
       - NEXT_PUBLIC_S3_ENDPOINT_URL=${AWS_S3_PRESIGN_ENDPOINT_URL:-http://localhost:8333}
       - NEXT_PUBLIC_MAINTENANCE_MODE=true
     ports:
-      - 3001:3000
+      - "127.0.0.1:3001:3000"
     restart: always
     deploy:
       resources:
@@ -538,7 +538,7 @@ services:
       - NEXT_PUBLIC_FILINGS_CDN_URL=${AWS_S3_PRESIGN_ENDPOINT_URL:-http://localhost:8333}/robosystems-public-data
       - NEXT_PUBLIC_MAINTENANCE_MODE=true
     ports:
-      - 3002:3000
+      - "127.0.0.1:3002:3000"
     restart: always
     deploy:
       resources:
