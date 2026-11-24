@@ -1,8 +1,9 @@
 """The industry classification vocabulary, as ``public.industries``.
 
 One copy in ``public`` that every tenant reads; nothing is added to a tenant
-schema. Seeded from ``frameworks/industries/industries.csv``, so a re-run after
-the file changes refreshes the rows.
+schema. Seeded from ``frameworks/industries/industries.csv`` as it stands when
+this runs. A later change to that file reaches an existing database through a
+new migration that calls ``seed_industries`` again.
 
 Autogenerate also proposed unrelated drift on other tables; only the new table
 is kept.

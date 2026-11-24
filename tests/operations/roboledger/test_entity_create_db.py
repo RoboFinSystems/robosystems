@@ -7,6 +7,7 @@ from datetime import date
 from unittest.mock import patch
 
 import pytest
+from sqlalchemy import text
 
 from robosystems.config.constants import ReportingStyleConstants
 from robosystems.models.api.extensions.entity import (
@@ -35,11 +36,94 @@ from robosystems.operations.roboledger.entity_scope import (
   resolve_entity_id,
 )
 from robosystems.operations.roboledger.reads.entity import get_entity, list_entities
+from robosystems.operations.roboledger.reads.industries import (
+  UnknownIndustryError,
+  list_industries,
+)
 from robosystems.operations.roboledger.reports.network_picker import (
   load_entity_reporting_style,
 )
+from robosystems.taxonomy.industries import seed_industries
 
 pytestmark = pytest.mark.unit
+
+
+class TestIndustry:
+  """``industry`` is an id from the classification in ``public.industries``."""
+
+  def test_the_vocabulary_is_one_list_read_from_public(self, tenant_session):
+    nodes = list_industries(tenant_session)
+    by_id = {n.id: n for n in nodes}
+    assert {n.level for n in nodes} == {
+      "sector",
+      "subsector",
+      "industry",
+      "sub-industry",
+    }
+    node = by_id["health-care/biotechnology/clinical-stage"]
+    assert node.path == ["Health Care", "Biotechnology", "Clinical Stage"]
+    assert node.parent_id == "health-care/biotechnology"
+    # A carried industry repeats its subsector's name and is shown once.
+    carried = next(n for n in nodes if n.carried)
+    assert carried.path == by_id[carried.parent_id].path
+    # A parent comes before its children.
+    order = [n.id for n in nodes]
+    assert all(order.index(n.parent_id) < i for i, n in enumerate(nodes) if n.parent_id)
+
+  def test_seeding_again_restores_the_file_and_adds_nothing(self, tenant_session):
+    before = len(list_industries(tenant_session))
+    tenant_session.execute(
+      text("UPDATE public.industries SET label = 'Changed' WHERE id = 'technology'")
+    )
+    assert seed_industries(tenant_session.connection()) == before
+    nodes = {n.id: n for n in list_industries(tenant_session)}
+    assert len(nodes) == before
+    assert nodes["technology"].label == "Technology"
+
+  @pytest.mark.parametrize(
+    "node",
+    ["technology", "health-care/biotechnology", "technology/software/application"],
+  )
+  def test_an_entity_takes_a_node_at_any_level(self, two_entities, node):
+    created = create_entity(
+      two_entities.session,
+      CreateEntityRequest(name="Cedar Row LLC", industry=node),
+      created_by="u",
+    )
+    assert created.industry == node
+
+  def test_free_text_is_refused_with_the_closest_ids(self, two_entities):
+    with pytest.raises(UnknownIndustryError) as raised:
+      create_entity(
+        two_entities.session,
+        CreateEntityRequest(name="Cedar Row LLC", industry="Biotechnology"),
+        created_by="u",
+      )
+    assert "health-care/biotechnology" in raised.value.suggestions
+
+  def test_update_sets_refuses_and_clears(self, two_entities):
+    session = two_entities.session
+    set_ = update_entity(
+      session, UpdateEntityRequest(industry=" technology/software "), created_by="u"
+    )
+    assert set_.industry == "technology/software"
+    with pytest.raises(UnknownIndustryError):
+      update_entity(session, UpdateEntityRequest(industry="widgets"), created_by="u")
+    session.rollback()
+    cleared = update_entity(session, UpdateEntityRequest(industry=None), created_by="u")
+    assert cleared.industry is None
+
+  def test_a_value_from_before_the_classification_survives_other_edits(
+    self, two_entities
+  ):
+    session = two_entities.session
+    parent = session.query(Entity).filter(Entity.is_parent.is_(True)).one()
+    parent.industry = "Industrial robotics"
+    session.flush()
+    updated = update_entity(
+      session, UpdateEntityRequest(phone="555-0100"), created_by="u"
+    )
+    assert updated.industry == "Industrial robotics"
 
 
 class TestConsolidationFields:

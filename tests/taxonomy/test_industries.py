@@ -71,6 +71,7 @@ def test_check_reports_a_bad_row(tmp_path, monkeypatch):
     "ONE,0000000001,One,a/b/c,yes,filing,high,\n"
     "TWO,0000000002,Two,a,yes,filing,high,\n"
     "THREE,0000000003,Three,a/b/c,,guess,high,\n"
+    "FOUR,0000000004,Four,a/b/c,Yes,filing,high,y\n"
   )
   monkeypatch.setattr(industries, "INDUSTRIES_CSV", nodes)
   monkeypatch.setattr(industries, "COMPANIES_CSV", companies)
@@ -79,6 +80,8 @@ def test_check_reports_a_bad_row(tmp_path, monkeypatch):
   assert "TWO: attach at an industry or deeper" in problems
   assert "THREE: method 'guess'" in problems
   assert "THREE: needs exactly one primary industry, has 0" in problems
+  assert "FOUR: primary is 'Yes', not yes or empty" in problems
+  assert "FOUR: review is 'y', not yes or empty" in problems
   assert "ONE" not in problems
 
 

@@ -41,6 +41,8 @@ LEVELS = ("sector", "subsector", "industry", "sub-industry")
 # How a filer was placed: the SIC crosswalk alone, recall of the company, or its filing.
 METHODS = frozenset({"crosswalk", "recall", "filing"})
 CONFIDENCE = frozenset({"high", "medium", "low"})
+# A flag column is "yes" or empty, so a typo cannot read as "no".
+_FLAG = frozenset({"yes", ""})
 
 
 def _rows(path: Path) -> list[dict[str, str]]:
@@ -50,7 +52,7 @@ def _rows(path: Path) -> list[dict[str, str]]:
 
 @lru_cache(maxsize=1)
 def load_industries() -> dict[str, dict[str, str]]:
-  """id -> row, in file order."""
+  """id -> row, in file order. Cached: read it, never change it."""
   return {r["id"]: r for r in _rows(INDUSTRIES_CSV)}
 
 
@@ -112,6 +114,10 @@ def check() -> list[str]:
       problems.append(f"{i}: parent '{r['parent']}' is not a node")
     if depth >= len(LEVELS) or r["level"] != LEVELS[depth]:
       problems.append(f"{i}: level '{r['level']}' does not match its depth")
+    if not r["label"].strip():
+      problems.append(f"{i}: has no label")
+    if r["carried"] not in _FLAG:
+      problems.append(f"{i}: carried is '{r['carried']}', not yes or empty")
     if r["replaced_by"]:
       successor = industries.get(r["replaced_by"])
       if successor is None or successor["replaced_by"]:
@@ -143,6 +149,11 @@ def check() -> list[str]:
     if (cik, node) in seen:
       problems.append(f"{key}: listed twice in {node}")
     seen.add((cik, node))
+    if not key.strip() or not r["name"].strip():
+      problems.append(f"{key or cik}: needs a key and a name")
+    for flag in ("primary", "review"):
+      if r[flag] not in _FLAG:
+        problems.append(f"{key}: {flag} is '{r[flag]}', not yes or empty")
     if said.setdefault(cik, (key, r["name"])) != (key, r["name"]):
       problems.append(f"{key}: cik {cik} is written under two keys or names")
     if keys.setdefault(key, cik) != cik:
