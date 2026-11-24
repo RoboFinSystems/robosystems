@@ -138,6 +138,9 @@ from robosystems.models.api.extensions.dimensions import (
   LineDimension as PydanticLineDimension,
 )
 from robosystems.models.api.extensions.entity import (
+  IndustryResponse as PydanticIndustry,
+)
+from robosystems.models.api.extensions.entity import (
   LedgerEntityResponse as PydanticLedgerEntity,
 )
 from robosystems.models.api.extensions.fiscal_calendar import (
@@ -306,6 +309,11 @@ from robosystems.models.api.extensions.trial_balance import (
 @pydantic_type(model=PydanticLedgerEntity, all_fields=True)
 class LedgerEntity:
   """The top-level ledger entity (company/organization) for a graph."""
+
+
+@pydantic_type(model=PydanticIndustry, all_fields=True)
+class Industry:
+  """One node of the industry classification an entity's `industry` names."""
 
 
 # ── Agents ────────────────────────────────────────────────────────────────

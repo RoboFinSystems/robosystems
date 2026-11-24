@@ -93,6 +93,7 @@ from robosystems.operations.roboledger.fiscal_calendar.service import (
   FiscalCalendarError,
   InvalidCloseTargetError,
 )
+from robosystems.operations.roboledger.reads.industries import UnknownIndustryError
 from robosystems.routers.extensions.roboledger._common import (
   _RATE_LIMIT,
   _ctx,
@@ -285,7 +286,10 @@ create_entity_op = _registrar.register(
       "20 cost) unless one is given; `entity_role: consolidation` makes "
       "this the group's entity for consolidating entries, read by the "
       "consolidated statements only; `joined_on` dates an acquired "
-      "subsidiary's membership."
+      "subsidiary's membership. `industry` is an id from the industry "
+      "classification, at any level (`technology`, "
+      "`health-care/biotechnology`); an unknown value is refused (422) with "
+      "the closest ids."
     ),
     command=cmd_create_entity,
     request_model=CreateEntityRequest,
@@ -296,6 +300,7 @@ create_entity_op = _registrar.register(
       EntityHierarchyError: 422,
       EntityTickerTakenError: 409,
       ReportingStyleInvalidError: 422,
+      UnknownIndustryError: 422,
     },
     mark_stale_reason="entity_created",
   )
@@ -325,7 +330,9 @@ update_entity_op = _registrar.register(
       "`entity_role: consolidation` marks the group's entity for "
       "consolidating entries, and `joined_on` / `left_on` bound its "
       "membership by month — set `left_on` when a subsidiary leaves the "
-      "group and its history stays readable under it."
+      "group and its history stays readable under it. `industry` is an id "
+      "from the industry classification, refused (422) with the closest ids "
+      "when unknown; an explicit null clears it."
     ),
     command=cmd_update_entity,
     request_model=UpdateEntityRequest,
@@ -340,6 +347,7 @@ update_entity_op = _registrar.register(
       EntityHierarchyError: 422,
       EntityExitError: 422,
       EntityTickerTakenError: 409,
+      UnknownIndustryError: 422,
     },
     mark_stale_reason="entity_updated",
   )

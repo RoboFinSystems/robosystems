@@ -36,6 +36,7 @@ from sqlalchemy.pool import NullPool
 
 import robosystems.models.extensions  # noqa: F401  (register models on ExtensionsBase)
 from robosystems.db.extensions import ExtensionsBase
+from robosystems.taxonomy.industries import seed_industries
 
 _WORKER = os.environ.get("PYTEST_XDIST_WORKER", "main")
 _BARE = "bare"
@@ -107,6 +108,8 @@ def _build(conn: Connection, schema: str) -> None:
   if database not in _shared_tables_ready:
     shared = [t for t in ExtensionsBase.metadata.sorted_tables if t.schema is not None]
     ExtensionsBase.metadata.create_all(bind=conn, tables=shared)
+    # The one shared table tests read without provisioning a tenant.
+    seed_industries(conn)
     _shared_tables_ready.add(database)
   conn.execute(text(f'CREATE SCHEMA "{schema}"'))
   before = conn.execute(text("SELECT current_setting('search_path')")).scalar()

@@ -52,6 +52,7 @@ from robosystems.graphql.types.ledger import (
   EventHandlerList,
   FiscalCalendar,
   FlowCandidate,
+  Industry,
   LedgerEntity,
   LedgerJournalEntryList,
   LedgerSummary,
@@ -140,6 +141,9 @@ from robosystems.operations.roboledger.reads import (
 )
 from robosystems.operations.roboledger.reads import (
   fiscal_calendar as reads_fiscal_calendar,
+)
+from robosystems.operations.roboledger.reads import (
+  industries as reads_industries,
 )
 from robosystems.operations.roboledger.reads import (
   journal_entries as reads_journal_entries,
@@ -283,6 +287,17 @@ class LedgerQuery:
     if response is None:
       return None
     return LedgerEntity.from_pydantic(response)
+
+  @strawberry.field
+  def industries(self, info: Info[GraphQLContext, None]) -> list[Industry]:
+    """The industry classification: every node an entity's `industry` can name,
+    parents before children. One list for every graph."""
+    try:
+      with _open_session_for_any(info, _ENTITY_EXTENSIONS) as session:
+        rows = reads_industries.list_industries(session)
+    except ValueError, ProgrammingError:
+      _raise_ledger_not_initialized()
+    return [Industry.from_pydantic(row) for row in rows]
 
   @strawberry.field
   def entities(

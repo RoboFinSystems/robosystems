@@ -89,7 +89,13 @@ class LedgerEntityResponse(BaseModel):
   lei: str | None = Field(None, description="Legal Entity Identifier (ISO 17442).")
 
   # Business info
-  industry: str | None = Field(None, description="Free-form industry label.")
+  industry: str | None = Field(
+    None,
+    description=(
+      "Industry, as an id from the industry classification (the `industries` "
+      "field). An entity set before the classification may still hold free text."
+    ),
+  )
   entity_type: str | None = Field(
     None, description="Legal form (e.g. 'corporation', 'llc', 'lp')."
   )
@@ -195,7 +201,15 @@ class UpdateEntityRequest(BaseModel):
   )
   tax_id: str | None = None
   lei: str | None = None
-  industry: str | None = None
+  industry: str | None = Field(
+    None,
+    description=(
+      "Industry, as an id from the industry classification (the `industries` "
+      "GraphQL field), at any level: `technology`, `health-care/biotechnology`, "
+      "`technology/software/application/payroll-and-hcm`. An unknown value is "
+      "refused with the closest ids."
+    ),
+  )
   entity_type: str | None = None
   phone: str | None = None
   website: str | None = None
@@ -365,7 +379,15 @@ class CreateEntityRequest(BaseModel):
   )
   tax_id: str | None = None
   lei: str | None = None
-  industry: str | None = None
+  industry: str | None = Field(
+    None,
+    description=(
+      "Industry, as an id from the industry classification (the `industries` "
+      "GraphQL field), at any level: `technology`, `health-care/biotechnology`, "
+      "`technology/software/application/payroll-and-hcm`. An unknown value is "
+      "refused with the closest ids."
+    ),
+  )
   phone: str | None = None
   website: str | None = None
   address_line1: str | None = None
@@ -444,4 +466,31 @@ class ChangeReportingStyleResponse(BaseModel):
   )
   changed: bool = Field(
     ..., description="False when the target equals the current Style (no-op)."
+  )
+
+
+class IndustryResponse(BaseModel):
+  """One node of the industry classification."""
+
+  id: str = Field(
+    ..., description="The node's slug path; its ancestors are its id's prefixes."
+  )
+  parent_id: str | None = Field(None, description="The parent node; null on a sector.")
+  level: str = Field(
+    ..., description="`sector`, `subsector`, `industry` or `sub-industry`."
+  )
+  label: str = Field(..., description="The node's own name.")
+  path: list[str] = Field(
+    ..., description="The names from the sector down to this node, for display."
+  )
+  carried: bool = Field(
+    ...,
+    description=(
+      "True on the single industry of a subsector nobody has divided; it repeats "
+      "the subsector's name and `path` shows it once."
+    ),
+  )
+  replaced_by: str | None = Field(
+    None,
+    description="Set on a retired node: the id that stands for it now. Not offered for new choices.",
   )

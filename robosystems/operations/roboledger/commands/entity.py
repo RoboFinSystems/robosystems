@@ -28,6 +28,7 @@ from robosystems.operations.roboledger.entity_scope import (
   resolve_entity,
 )
 from robosystems.operations.roboledger.reads.entity import entity_to_response
+from robosystems.operations.roboledger.reads.industries import resolve_industry
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 __all__ = [
@@ -44,7 +45,7 @@ __all__ = [
 
 _TICKER_MAX = 10
 # The fields an explicit null clears: membership reopens by clearing left_on.
-CLEARABLE_FIELDS = ("joined_on", "left_on")
+CLEARABLE_FIELDS = ("joined_on", "left_on", "industry")
 _METHOD_NONE = "none"
 # The methods whose member the group's statements read, summed or picked up.
 _METHODS_READ = ("full", "equity")
@@ -399,6 +400,8 @@ def _apply_updates(session: Session, entity: Entity, updates: dict[str, Any]):
     if _ticker_taken(session, ticker, exclude_id=str(entity.id)):
       raise EntityTickerTakenError(ticker)
     updates["ticker"] = ticker
+  if updates.get("industry") is not None:
+    updates["industry"] = resolve_industry(session, updates["industry"])
   for field_name, value in updates.items():
     setattr(entity, field_name, value)
 
@@ -436,7 +439,7 @@ def update_entity(
   """Update an entity of the group from a validated request body.
 
   Only non-null fields are applied, except that an explicit null clears
-  ``joined_on`` or ``left_on``. Raises `ValueError` for an empty body,
+  ``joined_on``, ``left_on`` or ``industry``. Raises `ValueError` for an empty body,
   `ParentEntityNotFoundError` when the graph has no entity, and
   `EntityNotInGraphError` for an `entity_id` that is not this graph's.
   ``created_by`` is unused (registrar signature).
@@ -567,7 +570,7 @@ def create_entity(
     or (parent.fiscal_year_end if parent is not None else None),
     tax_id=body.tax_id,
     lei=body.lei,
-    industry=body.industry,
+    industry=resolve_industry(session, body.industry) if body.industry else None,
     entity_type=body.entity_type,
     reporting_style_id=reporting_style_id,
     phone=body.phone,
