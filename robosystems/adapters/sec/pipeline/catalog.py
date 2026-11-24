@@ -36,6 +36,8 @@ from robosystems.config.storage.shared import (
   FILING_CATALOG_ALIASES_KEY,
   FILING_CATALOG_INDEX_KEY,
   FILING_ROBOTS_KEY,
+  INDUSTRY_COMPANIES_KEY,
+  INDUSTRY_VOCABULARY_KEY,
   PUBLIC_DATA_STORAGE_CLASS,
   DataSourceType,
   get_filing_artifact_key,
@@ -45,6 +47,12 @@ from robosystems.config.storage.shared import (
 )
 from robosystems.logger import logger
 from robosystems.operations.aws.s3 import S3Client
+from robosystems.taxonomy.industries import labels as industry_labels
+from robosystems.taxonomy.industries import (
+  load_companies,
+  load_industries,
+  memberships_by_cik,
+)
 
 from .configs import SEC_QUARTERS, SECFilingCatalogConfig, sec_quarter_partitions
 from .text_index import _get_s3_client
@@ -141,8 +149,60 @@ def filers(entities: pd.DataFrame) -> dict[str, dict[str, Any]]:
       "exchange": _text(row.get("exchange")),
       "sic": _text(row.get("sic")),
       "sic_description": _text(row.get("sic_description")),
+      "industries": filer_industries(cik),
     }
   return out
+
+
+def filer_industries(cik: str) -> list[dict[str, Any]]:
+  """The filer's place in the industry classification, primary first; empty for
+  a filer it does not place. Joined on the CIK."""
+  return [dict(m) for m in memberships_by_cik().get(cik, ())]
+
+
+def industry_documents() -> tuple[dict[str, Any], dict[str, Any]]:
+  """The classification as published beside the catalog: its nodes, and the
+  filers placed in it."""
+  stamp = {
+    "version": CATALOG_VERSION,
+    "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+  }
+  nodes = load_industries()
+  vocabulary = {
+    **stamp,
+    "count": len(nodes),
+    "industries": [
+      {
+        "id": n["id"],
+        "parent": n["parent"] or None,
+        "level": n["level"],
+        "label": n["label"],
+        "labels": industry_labels(n["id"]),
+        "carried": n["carried"] == "yes",
+        "replaced_by": n["replaced_by"] or None,
+      }
+      for n in nodes.values()
+    ],
+  }
+  placements = load_companies()
+  companies = {
+    **stamp,
+    "count": len(placements),
+    "companies": [
+      {
+        "cik": p["cik"],
+        "key": p["key"],
+        "name": p["name"],
+        "industry": p["industry"],
+        "primary": p["primary"] == "yes",
+        "method": p["method"],
+        "confidence": p["confidence"],
+        "review": p["review"] == "yes",
+      }
+      for p in placements
+    ],
+  }
+  return vocabulary, companies
 
 
 def one_filer_per_ticker(
@@ -369,6 +429,7 @@ def index_row(
     "name": filer["name"],
     "exchange": filer["exchange"],
     "sic_description": filer["sic_description"],
+    "industries": filer.get("industries") or [],
     "filings": len(filings),
     "latest": {
       "accession": newest["accession"],
@@ -570,6 +631,7 @@ def read_prior_index(s3: Any, bucket: str) -> dict[str, dict[str, Any]]:
       "renderable": row.get("renderable", False),
       "latest_renderable": row.get("latest_renderable"),
       "predecessors": row.get("predecessors"),
+      "industries": row.get("industries"),
     }
     for row in companies
     if row.get("cik")
@@ -690,6 +752,14 @@ def sec_filing_catalog(
       cik
       for cik, (filer, _) in listed.items()
       if ((prior.get(cik) or {}).get("ticker") or "").upper() != filer["ticker"].upper()
+    }
+    # A filer placed, moved or dropped by the industry classification since its
+    # file was written.
+    touched |= {
+      cik
+      for cik, (filer, _) in listed.items()
+      if (filer.get("industries") or [])
+      != ((prior.get(cik) or {}).get("industries") or [])
     }
     # A filer whose file gains or loses a predecessor's filings.
     touched |= {
@@ -814,6 +884,20 @@ def sec_filing_catalog(
     cache_control=CATALOG_CACHE_CONTROL,
     storage_class=PUBLIC_DATA_STORAGE_CLASS,
   )
+
+  for key, body in zip(
+    (INDUSTRY_VOCABULARY_KEY, INDUSTRY_COMPANIES_KEY),
+    industry_documents(),
+    strict=True,
+  ):
+    writer.upload_string(
+      _dump(body),
+      public_bucket,
+      key,
+      content_type=CATALOG_MEDIA_TYPE,
+      cache_control=ROBOTS_CACHE_CONTROL,
+      storage_class=PUBLIC_DATA_STORAGE_CLASS,
+    )
 
   writer.upload_string(
     ROBOTS_TXT,

@@ -190,6 +190,32 @@ class TestCatalogWhenTickersMove:
 
     assert bucket.json("companies/newl.json")["cik"] == NEWLY_LISTED
 
+  def test_a_filer_the_classification_moved_is_rewritten(self, bucket):
+    placed = (
+      {
+        "id": "technology/software",
+        "labels": ["Technology", "Software"],
+        "primary": True,
+      },
+    )
+    with patch.object(
+      catalog_module, "memberships_by_cik", return_value={UNTOUCHED: placed}
+    ):
+      _run(self._seeded(bucket))
+      assert bucket.json("companies/unt.json")["industries"] == list(placed)
+      index = {r["cik"]: r for r in bucket.json(FILING_CATALOG_INDEX_KEY)["companies"]}
+      assert index[UNTOUCHED]["industries"] == list(placed)
+      # The next run finds the index agrees and leaves the file alone.
+      bucket.writes.clear()
+      _run(bucket)
+      assert "companies/unt.json" not in bucket.writes
+
+  def test_the_classification_is_published_beside_the_catalog(self, bucket):
+    _run(self._seeded(bucket))
+
+    assert bucket.json("industries/industries.json")["count"] > 500
+    assert bucket.json("industries/companies.json")["count"] > 7000
+
   def test_an_untouched_filer_carries_its_renderability_forward(self, bucket):
     _run(self._seeded(bucket))
 

@@ -271,6 +271,12 @@ every 30 min, 06:00–20:30 ET — sec_current_reports_intraday_schedule
   the two cannot disagree. A renamed filer's old file stays whole, with
   `moved_to`, and `aliases.json` names it. Tools go by CIK for a renamed filer,
   so they work in the hours before the graph catches up.
+- **Industries:** each filer's file and index row carry `industries`, its place
+  in the industry classification (`frameworks/industries/`), joined on CIK and
+  primary first. A filer the classification places, moves or drops is rewritten
+  on the next run whichever partition it files in. The classification itself is
+  published beside the catalog as `industries/industries.json` and
+  `industries/companies.json`.
 - **Registrants:** a ticker that moves to another CIK is decided by
   `adapters/sec/successions.py`. A recorded successor's file carries its
   predecessors' filings (each entry names the `cik` that filed it), and the
