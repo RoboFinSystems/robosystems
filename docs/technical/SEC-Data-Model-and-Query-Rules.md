@@ -103,7 +103,7 @@ The graph holds each filing as XBRL facts linked to the aspects that give them m
 
 | Node | Holds | Key properties |
 | --- | --- | --- |
-| **`Entity`** | A filer | `ticker`, `cik`, `name`, `sic`, `sic_description`, `fiscal_year_end`, `state_of_incorporation` |
+| **`Entity`** | A filer | `ticker`, `cik`, `name`, `industry` (its primary industry's identifier), `sic`, `sic_description`, `fiscal_year_end`, `state_of_incorporation` |
 | **`Report`** | One filing | `form` (`10-K`, `10-Q`, `20-F`, `40-F`), `filing_date`, `report_date` (period end), `accession_number`, `fiscal_year_focus`, `fiscal_period_focus` (`FY`, `Q1`–`Q3`), `fiscal_year_end_month` |
 | **`Fact`** | One reported value | `numeric_value`, `value`, `fact_type` (`Numeric` / `Nonnumeric`), `value_type` (`inline` / `external`), `content_type`, `decimals`, `has_dimensions`, `dimension_count` |
 | **`Element`** | The concept a fact reports | `qname` (e.g. `us-gaap:Revenues`), `name`, `period_type`, `balance`, `canonical_concept`, `canonical_confidence`, `is_numeric`, `is_textblock` |
@@ -120,6 +120,8 @@ The graph holds each filing as XBRL facts linked to the aspects that give them m
 | **`Association`** | A parent–child arc within a structure | `association_type`, `weight`, `order_value`, `preferred_label` |
 | **`Classification`** | The pattern an arrangement forms (e.g. a roll-up) | `category`, `type` |
 
+**Classification nodes** — where a filer sits among other companies: **`Industry`**, one node of the industry classification, a tree of sector > subsector > industry > sub-industry. `identifier` is the node's path (`health-care/biotechnology/clinical-stage`), so a branch is every identifier that starts with it; `label` is its name, `level` its depth, `parent` the node above, and `sector`, `subsector` and `industry` its ancestors' names.
+
 **Reference nodes** — taxonomy metadata: **`Label`** (human-readable element labels), **`Reference`** (authoritative literature references), and **`Taxonomy`**.
 
 A large value — a text block — is moved out to the CDN: its `value_type` is `external`, `value` holds the URL, and `content_type` is its MIME type. Read it with `information-block` or the text views rather than from `value`.
@@ -131,6 +133,7 @@ A `Period` places a fact on the calendar, not on the filer's fiscal calendar: `c
 | Relationship | From → To |
 | --- | --- |
 | `ENTITY_HAS_REPORT` | `Entity` → `Report` |
+| `ENTITY_HAS_INDUSTRY` | `Entity` → `Industry`, with `is_primary`, `method`, `confidence`, `review` |
 | `REPORT_HAS_FACT` | `Report` → `Fact` |
 | `REPORT_HAS_FACT_SET` | `Report` → `FactSet` |
 | `REPORT_USES_TAXONOMY` | `Report` → `Taxonomy` |
@@ -178,9 +181,10 @@ Every filing has its own `Structure` nodes, so tens of thousands share `canonica
 
 ### Enriched Properties
 
-Two properties are added during processing, beyond what the filings carry:
+Three things are added during processing, beyond what the filings carry:
 
 - **`Element.canonical_concept`** — a normalized concept id shared across filers, with `canonical_confidence` beside it. Income statement: `revenue`, `cost_of_revenue`, `gross_profit`, `research_and_development`, `selling_general_admin`, `operating_expenses`, `operating_income`, `interest_income`, `interest_expense`, `nonoperating_income`, `pretax_income`, `income_tax_expense`, `net_income`, `eps_basic`, `eps_diluted`, `weighted_average_shares_basic`, `weighted_average_shares_diluted`. Balance sheet: `cash_and_equivalents`, `accounts_receivable`, `inventory`, `current_assets`, `property_plant_equipment`, `goodwill`, `intangible_assets`, `total_assets`, `accounts_payable`, `deferred_revenue`, `current_liabilities`, `long_term_debt`, `total_debt`, `total_liabilities`, `retained_earnings`, `stockholders_equity`, `total_liabilities_and_equity`, among others. Cash flow: `operating_cash_flow`, `capital_expenditures`, `investing_cash_flow`, `financing_cash_flow`, `dividends_paid`, `share_repurchases`, `net_change_in_cash`. The labels come from a curated table of standard `us-gaap` and `ifrs-full` elements, each naming the element that reports that line, the same on every filer and taxonomy year. Filer extensions carry none, so a filer that reports a line under its own element is missing from a concept — name the qnames ([Rule 2](#rule-2-name-each-filers-elements--elementqname)).
+- **`Entity.industry`** and the **`ENTITY_HAS_INDUSTRY`** edges — each filer placed in the industry classification. A filer has one edge with `is_primary` (and `Entity.industry` repeats that node's identifier) and may have others where it earns a material share of revenue elsewhere. The edge says how the filer was placed: `method` is `filing` (read from its annual report), `recall` or `crosswalk` (its SIC code alone), `confidence` is `high`, `medium` or `low`, and `review` marks a placement two readings disagreed on. A filer not yet placed has no edge and a null `industry`. `sic` and `sic_description` are the SEC's own, coarser assignment and are unchanged.
 - **`Structure.canonical_type`** — the statement a structure is: `income_statement`, `balance_sheet`, `cash_flow_statement`, `equity_statement` or `comprehensive_income`. Other structures carry a pattern label or null.
 
 ## The Four Rules
@@ -374,6 +378,19 @@ RETURN DISTINCT ent.ticker AS ticker, e.qname AS qname,
 ORDER BY ticker, end_date DESC, qname
 LIMIT 50
 ```
+
+To pick the peers, start from a company's industry:
+
+```cypher
+MATCH (:Entity {ticker: $ticker})-[:ENTITY_HAS_INDUSTRY {is_primary: true}]->(i:Industry),
+      (peer:Entity)-[r:ENTITY_HAS_INDUSTRY]->(j:Industry)
+WHERE j.identifier STARTS WITH i.parent AND r.is_primary
+RETURN DISTINCT peer.ticker AS ticker, peer.name AS name, j.label AS industry
+ORDER BY ticker
+LIMIT 50
+```
+
+`i.parent` widens the match one level, to every company in the same branch; use `i.identifier` for the company's own industry only.
 
 `$qnames` holds the revenue and gross-profit elements resolved for each company; the result shows which one each company reports. Fiscal years differ: compare each company's fiscal year by its own `end_date` rather than assuming the years line up on the calendar.
 

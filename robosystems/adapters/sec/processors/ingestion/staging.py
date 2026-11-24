@@ -167,6 +167,7 @@ class DuckDBStager:
         await self.stamp_canonical_concepts(client, log_progress)
       if "Entity" in successful_tables:
         await self.stamp_entity_identity(client, log_progress)
+        await self.stamp_entity_industry(client, log_progress)
 
       expected_table_count = len(tables_by_type)
       status = (
@@ -517,6 +518,7 @@ class DuckDBStager:
       # After the Entity upsert above, which writes back the rows' frozen values.
       if "Entity" in existing_table_names:
         await self.stamp_entity_identity(client, log_progress)
+        await self.stamp_entity_industry(client, log_progress)
 
       if not quarter_has_files:
         logger.warning(
@@ -690,6 +692,116 @@ class DuckDBStager:
     if log_progress:
       log_progress(message)
     return stamped
+
+  async def stamp_entity_industry(
+    self,
+    client: GraphClient,
+    log_progress: ProgressCallback | None = None,
+  ) -> tuple[int, int]:
+    """Place the filers in the industry classification, from its curated tables.
+
+    Rebuilds the ``Industry`` nodes and the ``ENTITY_HAS_INDUSTRY`` edges, and sets
+    ``Entity.industry`` to each filer's primary industry. The join is on the CIK:
+    the tables' ticker and name only record who a row was written about. A filer
+    the tables do not place is cleared, so the column never holds the SIC
+    description the filing's projection wrote. Runs after every stage, so an edit
+    to the tables reaches every row. Returns (edges written, entities stamped).
+    """
+    from robosystems.taxonomy import industries as vocabulary
+
+    nodes = [n for n in vocabulary.load_industries().values() if not n["replaced_by"]]
+    placements = vocabulary.load_companies()
+    by_id = vocabulary.load_industries()
+
+    def ancestor(node_id: str, depth: int) -> str | None:
+      lineage = vocabulary.lineage(node_id)
+      return by_id[lineage[depth]]["label"] if len(lineage) > depth else None
+
+    timeout = get_staging_timeout("Entity")
+    started = time.time()
+
+    await client.execute_write(
+      graph_id=self.graph_id,
+      sql=(
+        'CREATE OR REPLACE TABLE "Industry" AS SELECT '
+        "unnest(?::VARCHAR[]) AS identifier, unnest(?::VARCHAR[]) AS label, "
+        "unnest(?::VARCHAR[]) AS level, unnest(?::VARCHAR[]) AS parent, "
+        "unnest(?::VARCHAR[]) AS sector, unnest(?::VARCHAR[]) AS subsector, "
+        "unnest(?::VARCHAR[]) AS industry, unnest(?::BOOLEAN[]) AS carried"
+      ),
+      parameters=[
+        [n["id"] for n in nodes],
+        [n["label"] for n in nodes],
+        [n["level"] for n in nodes],
+        [n["parent"] or None for n in nodes],
+        [ancestor(n["id"], 0) for n in nodes],
+        [ancestor(n["id"], 1) for n in nodes],
+        [ancestor(n["id"], 2) for n in nodes],
+        [n["carried"] == "yes" for n in nodes],
+      ],
+      timeout=timeout,
+    )
+    edges = await client.execute_write(
+      graph_id=self.graph_id,
+      sql=(
+        'CREATE OR REPLACE TABLE "ENTITY_HAS_INDUSTRY" AS '
+        "SELECT DISTINCT e.identifier AS src, m.industry AS dst, m.is_primary, "
+        "m.method, m.confidence, m.review "
+        "FROM (SELECT unnest(?::VARCHAR[]) AS cik, unnest(?::VARCHAR[]) AS industry, "
+        "unnest(?::BOOLEAN[]) AS is_primary, unnest(?::VARCHAR[]) AS method, "
+        "unnest(?::VARCHAR[]) AS confidence, unnest(?::BOOLEAN[]) AS review) AS m "
+        'JOIN "Entity" e ON e.cik = m.cik AND e.scheme = ?'
+      ),
+      parameters=[
+        [p["cik"] for p in placements],
+        [p["industry"] for p in placements],
+        [p["primary"] == "yes" for p in placements],
+        [p["method"] for p in placements],
+        [p["confidence"] for p in placements],
+        [p["review"] == "yes" for p in placements],
+        CIK_SCHEME,
+      ],
+      timeout=timeout,
+    )
+    primaries = [p for p in placements if p["primary"] == "yes"]
+    ciks = [p["cik"] for p in primaries]
+    stamped = await client.execute_write(
+      graph_id=self.graph_id,
+      sql=(
+        'UPDATE "Entity" SET industry = m.industry '
+        "FROM (SELECT unnest(?::VARCHAR[]) AS cik, "
+        "unnest(?::VARCHAR[]) AS industry) AS m "
+        'WHERE "Entity".cik = m.cik AND "Entity".scheme = ? '
+        'AND "Entity".industry IS DISTINCT FROM m.industry'
+      ),
+      parameters=[ciks, [p["industry"] for p in primaries], CIK_SCHEME],
+      timeout=timeout,
+    )
+    await client.execute_write(
+      graph_id=self.graph_id,
+      sql=(
+        'UPDATE "Entity" SET industry = NULL WHERE industry IS NOT NULL '
+        "AND (scheme IS DISTINCT FROM ? OR cik IS NULL "
+        "OR cik NOT IN (SELECT unnest(?::VARCHAR[])))"
+      ),
+      parameters=[CIK_SCHEME, ciks],
+      timeout=timeout,
+    )
+
+    def _count(response: dict) -> int:
+      rows = response.get("rows") or []
+      return int(rows[0][0]) if rows and rows[0] else 0
+
+    counts = (_count(edges), _count(stamped))
+    message = (
+      f"Industry: {len(nodes)} nodes, {counts[0]:,} filer edges, "
+      f"{counts[1]:,} Entity rows stamped from {len(primaries):,} placed filers "
+      f"in {time.time() - started:.1f}s"
+    )
+    logger.info(message)
+    if log_progress:
+      log_progress(message)
+    return counts
 
   # Chunking threshold when the DuckDB memory limit is unknown.
   DEFAULT_CHUNKING_THRESHOLD_BYTES = 15 * 1024 * 1024 * 1024  # 15 GiB
