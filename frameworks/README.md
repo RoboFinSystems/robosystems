@@ -5,7 +5,8 @@ artifacts that every tenant graph copies into its per-tenant schema at
 provision time. Each child directory carrying a top-level `v*.json`
 manifest is a **framework** (cm, fac, rs-gaap today) — the sibling
 `ontology/` holds the canonical RDF ontology + SHACL shapes and is
-deliberately _not_ a framework. The Python code that discovers, parses,
+deliberately _not_ a framework, and neither is `industries/`, the industry
+classification (its own [README](industries/README.md)). The Python code that discovers, parses,
 writes, and pins this content lives at `robosystems/taxonomy/`.
 
 The directory name matches the DB tables it seeds: `frameworks`,

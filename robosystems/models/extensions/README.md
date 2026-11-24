@@ -29,7 +29,7 @@ extensions database:
 
 Isolation is enforced by PostgreSQL via a per-transaction `search_path` bind. Two tenants can hold rows with the same ULID and never collide, because they live in different schemas.
 
-**Almost every table in this directory is tenant-scoped.** A model with no explicit `__table_args__` schema belongs in each `kg*` schema — that absence is the signal to `provision_tenant_schema`. The exceptions are the shared tables in `framework.py`, `framework_package.py`, `framework_bridge.py`, and `bridge.py`, which declare `{"schema": "public"}`: one copy, read by every tenant.
+**Almost every table in this directory is tenant-scoped.** A model with no explicit `__table_args__` schema belongs in each `kg*` schema — that absence is the signal to `provision_tenant_schema`. The exceptions are the shared tables in `framework.py`, `framework_package.py`, `framework_bridge.py`, `bridge.py`, and `industry.py`, which declare `{"schema": "public"}`: one copy, read by every tenant.
 
 ### Opening a session
 
