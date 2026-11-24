@@ -199,6 +199,7 @@ class DeleteReportTool:
 _BUNDLE_FORMATS = (
   RdfFlavor.HOLON_JSONLD.value,
   RdfFlavor.HOLON_JSONLD_LINEAGE.value,
+  RdfFlavor.DATABOOK.value,
   XbrlFlavor.TAVI.value,
   XbrlFlavor.XBRL_2_1.value,
 )
@@ -218,10 +219,11 @@ class GetReportBundleTool:
 **WHEN TO USE:**
 - To open a report in a local XBRL reader or report viewer that loads a file by URL
 - To hand a report to a tool outside this graph as a standards-form document
+- To give a person the report as a document they can read (`databook`)
 
 **PARAMETERS:**
 - `report_id`: the report. `list-reports` lists them with their `generation_status`
-- `format`: `holon-jsonld` (default) is the JSON-LD holon; `holon-jsonld-lineage` the same holon with its `#lineage` graph — the ledger lines, entries and events behind every frozen figure, for this graph's own members, never shared to another graph; `tavi` the Project Tavi compiled model; `xbrl-2.1` the XBRL 2.1 package
+- `format`: `holon-jsonld` (default) is the JSON-LD holon; `holon-jsonld-lineage` the same holon with its `#lineage` graph — the ledger lines, entries and events behind every frozen figure, for this graph's own members, never shared to another graph; `databook` the report as a Markdown document to read, each value linked to its fact in the holon, with the holon named as its source; `tavi` the Project Tavi compiled model; `xbrl-2.1` the XBRL 2.1 package
 
 **RETURNS:** `download_url`, `expires_at`, `content_type`, `format`, and `omitted_content` — what the report carries that this format does not.
 

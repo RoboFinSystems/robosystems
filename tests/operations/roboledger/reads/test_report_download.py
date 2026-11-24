@@ -216,6 +216,165 @@ class TestRetiredFlatJsonLd:
     assert kwargs["key"] == "report-bundles/kg1/rpt_1/g3.holon.jsonld"
 
 
+class TestDataBook:
+  """The DataBook is written from the stored holon, never from the rows."""
+
+  @staticmethod
+  def _exists(present: set[str]):
+    return lambda bucket, key: key.rsplit("/", 1)[-1] in present
+
+  @pytest.mark.unit
+  def test_cache_hit_presigns_without_reading_the_holon(self):
+    session = _session(_report())
+    with patch(f"{_REPORTS}.S3Client") as s3_cls:
+      s3 = s3_cls.return_value
+      s3.object_exists.return_value = True
+      s3.generate_presigned_url.return_value = "https://signed.example/databook"
+      resp = get_report_download_url(session, "kg1", "rpt_1", flavor="databook")
+
+    assert resp is not None
+    assert resp.format == "databook"
+    assert resp.content_type == "text/markdown; charset=utf-8"
+    s3.read_string.assert_not_called()
+    s3.upload_string.assert_not_called()
+    _, kwargs = s3.generate_presigned_url.call_args
+    assert kwargs["key"] == "report-bundles/kg1/rpt_1/g3.databook.md"
+    assert kwargs["response_content_disposition"].endswith('rpt_1-g3.databook.md"')
+    # A projection by design: what it leaves to the holon is declared on a
+    # cache hit too.
+    assert "dimensional_facts" in resp.omitted_content
+    assert "calculation_links" in resp.omitted_content
+
+  @pytest.mark.unit
+  def test_cache_miss_writes_it_from_the_stored_holon(self):
+    session = _session(_report())
+    with (
+      patch(f"{_REPORTS}.S3Client") as s3_cls,
+      patch("robosystems.operations.serialization.build_report_bundle") as build,
+      patch(
+        "robosystems.operations.serialization.rdf.databook.databook_from_holon",
+        return_value="# the report",
+      ) as project,
+    ):
+      s3 = s3_cls.return_value
+      s3.object_exists.side_effect = self._exists({"g3.holon.jsonld"})
+      s3.read_string.return_value = '{"@graph": []}'
+      s3.upload_string.return_value = True
+      s3.generate_presigned_url.return_value = "https://signed.example/databook"
+      resp = get_report_download_url(session, "kg1", "rpt_1", flavor="databook")
+
+    assert resp is not None
+    # The holon was already in storage: nothing is rebuilt from the rows.
+    build.assert_not_called()
+    _, read_args = s3.read_string.call_args[0]
+    assert read_args == "report-bundles/kg1/rpt_1/g3.holon.jsonld"
+    project.assert_called_once_with('{"@graph": []}', href="rpt_1-g3.holon.jsonld")
+    _, up_kwargs = s3.upload_string.call_args
+    assert up_kwargs["content"] == "# the report"
+    assert up_kwargs["key"] == "report-bundles/kg1/rpt_1/g3.databook.md"
+    assert up_kwargs["content_type"] == "text/markdown; charset=utf-8"
+
+  @pytest.mark.unit
+  def test_an_authored_report_with_no_holon_in_storage_gets_one_first(self):
+    session = _session(_report())
+    with (
+      patch(f"{_REPORTS}.S3Client") as s3_cls,
+      patch("robosystems.operations.serialization.build_report_bundle") as build,
+      patch(
+        "robosystems.operations.serialization.serialize_to_holon_jsonld",
+        return_value='{"@graph": []}',
+      ),
+      patch(
+        "robosystems.operations.serialization.rdf.databook.databook_from_holon",
+        return_value="# the report",
+      ),
+    ):
+      s3 = s3_cls.return_value
+      s3.object_exists.return_value = False
+      s3.read_string.return_value = '{"@graph": []}'
+      s3.upload_string.return_value = True
+      s3.generate_presigned_url.return_value = "https://signed.example/databook"
+      resp = get_report_download_url(session, "kg1", "rpt_1", flavor="databook")
+
+    assert resp is not None
+    build.assert_called_once()
+    keys = [call.kwargs["key"] for call in s3.upload_string.call_args_list]
+    assert keys == [
+      "report-bundles/kg1/rpt_1/g3.holon.jsonld",
+      "report-bundles/kg1/rpt_1/g3.databook.md",
+    ]
+
+  @pytest.mark.unit
+  def test_a_received_report_has_one_when_its_holon_is_in_storage(self):
+    """Written from the file that arrived, so it is not a local re-derivation."""
+    report = _report()
+    report.origin, report.is_received = "uploaded", True
+    session = _session(report)
+    with (
+      patch(f"{_REPORTS}.S3Client") as s3_cls,
+      patch("robosystems.operations.serialization.build_report_bundle") as build,
+      patch(
+        "robosystems.operations.serialization.rdf.databook.databook_from_holon",
+        return_value="# the report",
+      ),
+    ):
+      s3 = s3_cls.return_value
+      s3.object_exists.side_effect = self._exists({"g3.holon.jsonld"})
+      s3.read_string.return_value = '{"@graph": []}'
+      s3.upload_string.return_value = True
+      s3.generate_presigned_url.return_value = "https://signed.example/databook"
+      resp = get_report_download_url(session, "kg1", "rpt_1", flavor="databook")
+
+    assert resp is not None and resp.format == "databook"
+    build.assert_not_called()
+
+  @pytest.mark.unit
+  def test_a_received_report_whose_holon_is_gone_has_none(self):
+    session = _session(_report(source_graph_id="kg_sender"))
+    with (
+      patch(f"{_REPORTS}.S3Client") as s3_cls,
+      patch("robosystems.operations.serialization.build_report_bundle") as build,
+    ):
+      s3_cls.return_value.object_exists.return_value = False
+      with pytest.raises(ReportBundleNotAvailableError, match="holon"):
+        get_report_download_url(session, "kg1", "rpt_1", flavor="databook")
+
+    build.assert_not_called()
+
+  @pytest.mark.unit
+  def test_an_unpublished_report_has_no_databook(self):
+    session = _session(_report(generation_status="generating"))
+    with pytest.raises(ReportBundleNotAvailableError, match="DataBook"):
+      get_report_download_url(session, "kg1", "rpt_1", flavor="databook")
+
+  @pytest.mark.unit
+  def test_a_holon_that_cannot_be_read_back_is_a_signing_error(self):
+    session = _session(_report())
+    with patch(f"{_REPORTS}.S3Client") as s3_cls:
+      s3 = s3_cls.return_value
+      s3.object_exists.side_effect = self._exists({"g3.holon.jsonld"})
+      s3.read_string.return_value = None
+      with pytest.raises(BundleSigningError, match="holon"):
+        get_report_download_url(session, "kg1", "rpt_1", flavor="databook")
+
+  @pytest.mark.unit
+  def test_upload_failure_raises_signing_error(self):
+    session = _session(_report())
+    with (
+      patch(f"{_REPORTS}.S3Client") as s3_cls,
+      patch(
+        "robosystems.operations.serialization.rdf.databook.databook_from_holon",
+        return_value="# the report",
+      ),
+    ):
+      s3 = s3_cls.return_value
+      s3.object_exists.side_effect = self._exists({"g3.holon.jsonld"})
+      s3.read_string.return_value = '{"@graph": []}'
+      s3.upload_string.return_value = False
+      with pytest.raises(BundleSigningError, match="DataBook"):
+        get_report_download_url(session, "kg1", "rpt_1", flavor="databook")
+
+
 class TestXbrl:
   @pytest.mark.unit
   def test_cache_hit_presigns_without_rebuilding(self):

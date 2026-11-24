@@ -24,7 +24,7 @@ shapes:
   - "https://robosystems.ai/vocab/shapes/boundary"
   - "https://robosystems.ai/vocab/shapes/dataset"
 process:
-  transformer: "xbrlkit 0.23.1"
+  transformer: "xbrlkit 0.24.1"
   transformer_type: "script"
   transformer_iri: "https://github.com/RoboFinSystems/xbrlkit"
   inputs:
@@ -32,7 +32,7 @@ process:
       role: "primary"
       description: "The report's holon (sha256:5c35ee392fc8feb17d7841790996def6447f12ec863ee00f8b0db04656834203). This DataBook is a projection of it; every value here is a fact in its #scene graph."
     - {iri: "https://robosystems.ai/vocab/shapes/", role: "constraint", description: "The holon format's SHACL shapes, one set per named graph."}
-  timestamp: "2026-11-24T20:08:02Z"
+  timestamp: "2026-11-24T20:59:25Z"
   note: "Written from the holon alone: nothing here was read from anywhere else, so the DataBook can be made again from the file it describes."
 xbrl_holon:
   report:
@@ -93,26 +93,67 @@ This is a report as a document to read. Each section below is one information bl
 
 | | 2026-08-31 | 2025-08-31 |
 |---|---:|---:|
-| **Assets** | 421,027.73 | 204,844.90 |
-| &nbsp;&nbsp;**Assets, Current** | 320,147.61 | 98,987.74 |
-| &nbsp;&nbsp;&nbsp;&nbsp;Cash and Cash Equivalents, at Carrying Value | 106,225.94 | 50,066.07 |
-| &nbsp;&nbsp;&nbsp;&nbsp;Receivables, Net, Current | 107,666.67 | 16,666.67 |
-| &nbsp;&nbsp;&nbsp;&nbsp;Due from Affiliate, Current | 1,255.00 | 1,255.00 |
-| &nbsp;&nbsp;&nbsp;&nbsp;Inventory, Net of Allowances, Customer Advances and Progress Billings | 94,000.00 | 20,000.00 |
-| &nbsp;&nbsp;&nbsp;&nbsp;Prepaid Expense, Current | 11,000.00 | 11,000.00 |
-| &nbsp;&nbsp;**Assets, Noncurrent** | 100,880.12 | 105,857.16 |
-| &nbsp;&nbsp;&nbsp;&nbsp;Property, Plant and Equipment, Net | 67,000.12 | 57,857.16 |
-| &nbsp;&nbsp;&nbsp;&nbsp;Long-Term Investments and Receivables, Net | 5,000.00 | 5,000.00 |
-| &nbsp;&nbsp;&nbsp;&nbsp;Investments in and Advance to Affiliates, Subsidiaries, Associates, and Joint Ventures | 26,800.00 | 39,000.00 |
-| &nbsp;&nbsp;&nbsp;&nbsp;Equity Method Investments | 2,080.00 | 4,000.00 |
-| **Liabilities and Equity** | 421,027.73 | 204,844.90 |
-| &nbsp;&nbsp;**Liabilities** | 51,244.43 | 37,644.44 |
-| &nbsp;&nbsp;&nbsp;&nbsp;**Liabilities, Current** | 51,244.43 | 37,644.44 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Accounts Payable, Current | 0.00 | 0.00 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Deferred Revenue, Current | 51,244.43 | 37,644.44 |
-| &nbsp;&nbsp;**Stockholders' Equity Attributable to Parent** | 369,783.30 | 167,200.46 |
-| &nbsp;&nbsp;&nbsp;&nbsp;Additional Paid in Capital | 124,000.00 | 124,000.00 |
-| &nbsp;&nbsp;&nbsp;&nbsp;Retained Earnings (Accumulated Deficit) | 245,783.30 | 43,200.46 |
+| **Assets** | [421,027.73][f1] | [204,844.90][f2] |
+| &nbsp;&nbsp;**Assets, Current** | [320,147.61][f3] | [98,987.74][f4] |
+| &nbsp;&nbsp;&nbsp;&nbsp;Cash and Cash Equivalents, at Carrying Value | [106,225.94][f5] | [50,066.07][f6] |
+| &nbsp;&nbsp;&nbsp;&nbsp;Receivables, Net, Current | [107,666.67][f7] | [16,666.67][f8] |
+| &nbsp;&nbsp;&nbsp;&nbsp;Due from Affiliate, Current | [1,255.00][f9] | [1,255.00][f10] |
+| &nbsp;&nbsp;&nbsp;&nbsp;Inventory, Net of Allowances, Customer Advances and Progress Billings | [94,000.00][f11] | [20,000.00][f12] |
+| &nbsp;&nbsp;&nbsp;&nbsp;Prepaid Expense, Current | [11,000.00][f13] | [11,000.00][f14] |
+| &nbsp;&nbsp;**Assets, Noncurrent** | [100,880.12][f15] | [105,857.16][f16] |
+| &nbsp;&nbsp;&nbsp;&nbsp;Property, Plant and Equipment, Net | [67,000.12][f17] | [57,857.16][f18] |
+| &nbsp;&nbsp;&nbsp;&nbsp;Long-Term Investments and Receivables, Net | [5,000.00][f19] | [5,000.00][f20] |
+| &nbsp;&nbsp;&nbsp;&nbsp;Investments in and Advance to Affiliates, Subsidiaries, Associates, and Joint Ventures | [26,800.00][f21] | [39,000.00][f22] |
+| &nbsp;&nbsp;&nbsp;&nbsp;Equity Method Investments | [2,080.00][f23] | [4,000.00][f24] |
+| **Liabilities and Equity** | [421,027.73][f25] | [204,844.90][f26] |
+| &nbsp;&nbsp;**Liabilities** | [51,244.43][f27] | [37,644.44][f28] |
+| &nbsp;&nbsp;&nbsp;&nbsp;**Liabilities, Current** | [51,244.43][f29] | [37,644.44][f30] |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Accounts Payable, Current | [0.00][f31] | [0.00][f32] |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Deferred Revenue, Current | [51,244.43][f33] | [37,644.44][f34] |
+| &nbsp;&nbsp;**Stockholders' Equity Attributable to Parent** | [369,783.30][f35] | [167,200.46][f36] |
+| &nbsp;&nbsp;&nbsp;&nbsp;Additional Paid in Capital | [124,000.00][f37] | [124,000.00][f38] |
+| &nbsp;&nbsp;&nbsp;&nbsp;Retained Earnings (Accumulated Deficit) | [245,783.30][f39] | [43,200.46][f40] |
+
+[f1]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP6E>
+[f2]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP6Y>
+[f3]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP6C>
+[f4]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP6W>
+[f5]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP4P>
+[f6]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP5F>
+[f7]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP56>
+[f8]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP5R>
+[f9]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP4V>
+[f10]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP5H>
+[f11]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP50>
+[f12]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP5K>
+[f13]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP55>
+[f14]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP5Q>
+[f15]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP6D>
+[f16]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP6X>
+[f17]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP5X>
+[f18]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP5Y>
+[f19]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP54>
+[f20]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP5P>
+[f21]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP53>
+[f22]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP5N>
+[f23]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP4W>
+[f24]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP5J>
+[f25]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP6K>
+[f26]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP71>
+[f27]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP6T>
+[f28]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP73>
+[f29]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP6Q>
+[f30]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP72>
+[f31]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP4M>
+[f32]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP5D>
+[f33]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP4R>
+[f34]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP5G>
+[f35]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP6H>
+[f36]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP6Z>
+[f37]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP4N>
+[f38]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP5E>
+[f39]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP57>
+[f40]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP5S>
 
 - Section role: `https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified`
 
@@ -499,22 +540,39 @@ The element, period and unit each fact points at are described in the holon.
 
 | | 2025-09-01 to 2026-08-31 |
 |---|---:|
-| **Revenues** | 1,173,239.88 |
-| &nbsp;&nbsp;Revenue from Contract with Customer, Excluding Assessed Tax | 1,173,239.88 |
-| **Cost of Revenue** | 476,000.00 |
-| &nbsp;&nbsp;Cost of Product and Service Sold | 476,000.00 |
-| **Gross Profit** | 697,239.88 |
-| **Operating Expenses** | 530,857.04 |
-| &nbsp;&nbsp;General and Administrative Expense | 356,000.00 |
-| &nbsp;&nbsp;Selling and Marketing Expense | 160,000.00 |
-| &nbsp;&nbsp;Depreciation, Depletion and Amortization | 14,857.04 |
-| **Operating Income (Loss)** | 166,382.84 |
-| **Nonoperating Income (Expense)** | 36,200.00 |
-| &nbsp;&nbsp;Investment Income, Interest | 300.00 |
-| &nbsp;&nbsp;Gain (Loss) on Disposition of Stock in Subsidiary | 35,900.00 |
-| **Income (Loss) from Continuing Operations before Income Taxes, Noncontrolling Interest** | 202,582.84 |
-| **Income (Loss) from Continuing Operations, Net of Tax, Attributable to Parent** | 202,582.84 |
-| **Net Income (Loss) Attributable to Parent** | 202,582.84 |
+| **Revenues** | [1,173,239.88][f41] |
+| &nbsp;&nbsp;Revenue from Contract with Customer, Excluding Assessed Tax | [1,173,239.88][f42] |
+| **Cost of Revenue** | [476,000.00][f43] |
+| &nbsp;&nbsp;Cost of Product and Service Sold | [476,000.00][f44] |
+| **Gross Profit** | [697,239.88][f45] |
+| **Operating Expenses** | [530,857.04][f46] |
+| &nbsp;&nbsp;General and Administrative Expense | [356,000.00][f47] |
+| &nbsp;&nbsp;Selling and Marketing Expense | [160,000.00][f48] |
+| &nbsp;&nbsp;Depreciation, Depletion and Amortization | [14,857.04][f49] |
+| **Operating Income (Loss)** | [166,382.84][f50] |
+| **Nonoperating Income (Expense)** | [36,200.00][f51] |
+| &nbsp;&nbsp;Investment Income, Interest | [300.00][f52] |
+| &nbsp;&nbsp;Gain (Loss) on Disposition of Stock in Subsidiary | [35,900.00][f53] |
+| **Income (Loss) from Continuing Operations before Income Taxes, Noncontrolling Interest** | [202,582.84][f54] |
+| **Income (Loss) from Continuing Operations, Net of Tax, Attributable to Parent** | [202,582.84][f55] |
+| **Net Income (Loss) Attributable to Parent** | [202,582.84][f56] |
+
+[f41]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP6M>
+[f42]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP58>
+[f43]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP6N>
+[f44]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP4Q>
+[f45]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP69>
+[f46]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP6R>
+[f47]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP4Z>
+[f48]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP59>
+[f49]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP4S>
+[f50]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP6P>
+[f51]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP6G>
+[f52]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP52>
+[f53]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP4X>
+[f54]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP68>
+[f55]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP6A>
+[f56]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP5T>
 
 - Section role: `https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep`
 
@@ -686,20 +744,35 @@ The element, period and unit each fact points at are described in the holon.
 | | 2025-09-01 to 2026-08-31 |
 |---|---:|
 | **Statement of Cash Flows [Abstract]** |  |
-| &nbsp;&nbsp;**Cash and Cash Equivalents, Period Increase (Decrease)** | 56,159.87 |
-| &nbsp;&nbsp;&nbsp;&nbsp;Cash Provided by (Used in) Operating Activity, Including Discontinued Operation | 30,139.87 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Net Income (Loss) Attributable to Parent | 202,582.84 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Depreciation, Depletion and Amortization | 14,857.04 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Gain (Loss) on Disposition of Stock in Subsidiary | 35,900.00 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Increase (Decrease) in Accounts Receivable | (91,000.00) |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Increase (Decrease) in Inventories | (74,000.00) |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Increase (Decrease) in Contract with Customer, Liability | 13,599.99 |
-| &nbsp;&nbsp;&nbsp;&nbsp;Cash Provided by (Used in) Investing Activity, Including Discontinued Operation | 26,020.00 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Payments to Acquire Property, Plant, and Equipment | (24,000.00) |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Payments to Acquire Businesses, Net of Cash Acquired | (31,500.00) |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Payments to Acquire Interest in Subsidiaries and Affiliates | (4,000.00) |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Proceeds from Divestiture of Interest in Subsidiaries and Affiliates | 83,600.00 |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Proceeds from Sale of Equity Method Investments | 1,920.00 |
+| &nbsp;&nbsp;**Cash and Cash Equivalents, Period Increase (Decrease)** | [56,159.87][f57] |
+| &nbsp;&nbsp;&nbsp;&nbsp;Cash Provided by (Used in) Operating Activity, Including Discontinued Operation | [30,139.87][f58] |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Net Income (Loss) Attributable to Parent | [202,582.84][f59] |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Depreciation, Depletion and Amortization | [14,857.04][f60] |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Gain (Loss) on Disposition of Stock in Subsidiary | [35,900.00][f61] |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Increase (Decrease) in Accounts Receivable | [(91,000.00)][f62] |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Increase (Decrease) in Inventories | [(74,000.00)][f63] |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Increase (Decrease) in Contract with Customer, Liability | [13,599.99][f64] |
+| &nbsp;&nbsp;&nbsp;&nbsp;Cash Provided by (Used in) Investing Activity, Including Discontinued Operation | [26,020.00][f65] |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Payments to Acquire Property, Plant, and Equipment | [(24,000.00)][f66] |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Payments to Acquire Businesses, Net of Cash Acquired | [(31,500.00)][f67] |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Payments to Acquire Interest in Subsidiaries and Affiliates | [(4,000.00)][f68] |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Proceeds from Divestiture of Interest in Subsidiaries and Affiliates | [83,600.00][f69] |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Proceeds from Sale of Equity Method Investments | [1,920.00][f70] |
+
+[f57]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP6F>
+[f58]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP6S>
+[f59]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP5W>
+[f60]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP4T>
+[f61]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP4Y>
+[f62]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP64>
+[f63]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP65>
+[f64]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP63>
+[f65]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP6B>
+[f66]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP66>
+[f67]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP5Z>
+[f68]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP62>
+[f69]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP60>
+[f70]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP61>
 
 - Section role: `https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect`
 
@@ -852,9 +925,13 @@ The element, period and unit each fact points at are described in the holon.
 
 | | 2025-09-01 to 2026-08-31 | 2026-08-31 | 2025-08-31 |
 |---|---:|---:|---:|
-| Stockholders' Equity Attributable to Parent, beginning balance |  | 369,783.30 | 167,200.46 |
-| Net Income (Loss) Attributable to Parent | 202,582.84 |  |  |
-| **Stockholders' Equity Attributable to Parent, ending balance** |  | 369,783.30 | 167,200.46 |
+| Stockholders' Equity Attributable to Parent, beginning balance |  | [369,783.30][f71] | [167,200.46][f72] |
+| Net Income (Loss) Attributable to Parent | [202,582.84][f73] |  |  |
+| **Stockholders' Equity Attributable to Parent, ending balance** |  | [369,783.30][f71] | [167,200.46][f72] |
+
+[f71]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP6J>
+[f72]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP70>
+[f73]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP5V>
 
 - Section role: `https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward`
 
@@ -908,9 +985,13 @@ The element, period and unit each fact points at are described in the holon.
 
 | | 2025-09-01 to 2026-08-31 |
 |---|---:|
-| &nbsp;&nbsp;Inventory and Cost of Goods Sold Policy | *text, 1,091 characters* |
-| &nbsp;&nbsp;Revenue Recognition Policy | *text, 1,166 characters* |
-| &nbsp;&nbsp;Depreciation and Prepaid Policy | *text, 980 characters* |
+| &nbsp;&nbsp;Inventory and Cost of Goods Sold Policy | [*text, 1,091 characters*][f74] |
+| &nbsp;&nbsp;Revenue Recognition Policy | [*text, 1,166 characters*][f75] |
+| &nbsp;&nbsp;Depreciation and Prepaid Policy | [*text, 980 characters*][f76] |
+
+[f74]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B485MW59C7ZG3T8NB3EB>
+[f75]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B485MW59C7ZG3T8NB3ED>
+[f76]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B485MW59C7ZG3T8NB3EC>
 
 **Inventory and Cost of Goods Sold Policy**
 
@@ -932,10 +1013,19 @@ The element, period and unit each fact points at are described in the holon.
 
 | | 2026-08-31 | 2025-08-31 |
 |---|---:|---:|
-| **Inventory, Net of Allowances, Customer Advances and Progress Billings** | 94,000.00 | 20,000.00 |
-| &nbsp;&nbsp;Raw Materials — Green Coffee | 86,000.00 | 12,000.00 |
-| &nbsp;&nbsp;Work in Process — Roasting | 3,000.00 | 3,000.00 |
-| &nbsp;&nbsp;Finished Goods — Bagged Coffee | 5,000.00 | 5,000.00 |
+| **Inventory, Net of Allowances, Customer Advances and Progress Billings** | [94,000.00][f77] | [20,000.00][f78] |
+| &nbsp;&nbsp;Raw Materials — Green Coffee | [86,000.00][f79] | [12,000.00][f80] |
+| &nbsp;&nbsp;Work in Process — Roasting | [3,000.00][f81] | [3,000.00][f82] |
+| &nbsp;&nbsp;Finished Goods — Bagged Coffee | [5,000.00][f83] | [5,000.00][f84] |
+
+[f77]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP51>
+[f78]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP5M>
+[f79]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP4J>
+[f80]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP5B>
+[f81]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP4K>
+[f82]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP5C>
+[f83]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP4H>
+[f84]: <https://robosystems.ai/report/rpt_01M5Z6B3VBT6AX0H67HDPCYH3K/fact/fact_01M5Z6B47N01AGSZDB6KW7YP5A>
 
 - Section role: `https://driftlinecoffee.example.com/roles/disclosures/InventoryComponents`
 

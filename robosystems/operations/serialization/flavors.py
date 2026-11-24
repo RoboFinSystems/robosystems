@@ -14,6 +14,10 @@ class RdfFlavor(StrEnum):
   # behind the frozen facts (``rdf/lineage.py``); derived on first download,
   # for the graph's own members.
   HOLON_JSONLD_LINEAGE = "holon-jsonld-lineage"
+  # The holon as a DataBook (``rdf/databook.py``): Markdown a person reads,
+  # each value linked to its fact; derived from the stored holon on first
+  # download.
+  DATABOOK = "databook"
 
 
 class XbrlFlavor(StrEnum):

@@ -1032,11 +1032,17 @@ class ReportDownloadFormat(Enum):
   in from another graph; `TAVI` is the Project Tavi compiled model, the
   standards form the SEC pipeline also publishes per filing, and `XBRL_2_1`
   the XBRL 2.1 package. The last three are materialized on first download
-  off the same bundle.
+  off the same bundle. `DATABOOK` is the holon as a document to read: Markdown
+  in which each section is a table whose values link to their facts in the
+  holon, with the same facts as RDF beneath it. It is to the holon what
+  inline XBRL is to XBRL, a rendering with the facts in it, so it leaves the
+  arrangement, the roll-ups and the breakdowns by axis to the holon, which it
+  names by digest. Written from the stored holon on first download.
   """
 
   HOLON_JSONLD = "holon-jsonld"
   HOLON_JSONLD_LINEAGE = "holon-jsonld-lineage"
+  DATABOOK = "databook"
   XBRL_2_1 = "xbrl-2.1"
   TAVI = "tavi"
 

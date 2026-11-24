@@ -541,9 +541,10 @@ def get_report_download_url(
   """Resolve a presigned URL for a published Report's serialization bundle.
 
   The API never streams bytes. The holon is stamped at publish and again at
-  filing; the Tavi, the XBRL 2.1 and the holon with lineage are materialized
-  on first download and cached under a ``generation_count``-versioned key,
-  which never goes stale. (A generation stamped before the holon became the
+  filing; the Tavi, the XBRL 2.1, the DataBook and the holon with lineage are
+  materialized on first download and cached under a
+  ``generation_count``-versioned key, which never goes stale. The DataBook is
+  written from the stored holon, so a received report has one too. (A generation stamped before the holon became the
   anchor materializes it the same way.) The holon with lineage is the books
   behind the report, so the download is logged with ``actor_id``, and a report
   shared in from another graph never has one: lineage does not cross the
@@ -620,6 +621,21 @@ def get_report_download_url(
         f"report to produce a holon."
       )
     return _materialize_and_presign_holon(
+      session=session,
+      graph_id=graph_id,
+      report_id=report_id,
+      generation_count=generation_count,
+      expires_in=expires_in,
+      origin=report.origin,
+    )
+
+  if flavor == RdfFlavor.DATABOOK.value:
+    if report.generation_status != "published":
+      raise ReportBundleNotAvailableError(
+        f"Report '{report_id}' is not published — publish or regenerate the "
+        f"report to produce a DataBook."
+      )
+    return _materialize_and_presign_databook(
       session=session,
       graph_id=graph_id,
       report_id=report_id,
@@ -761,6 +777,49 @@ def _materialize_and_presign_xbrl(
   )
 
 
+def _ensure_holon_stored(
+  s3: S3Client,
+  session: Session,
+  graph_id: str,
+  report_id: str,
+  generation_count: int,
+  origin: str,
+) -> str:
+  """The holon's storage key, with the holon written there if it was not.
+
+  An authored report's holon is rebuilt from the bundle on a miss; a received
+  report's is the file that arrived, and a miss refuses.
+  """
+  bucket = env.USER_DATA_BUCKET
+  key = get_report_bundle_key(
+    graph_id, report_id, generation_count, extension=".holon.jsonld"
+  )
+  if s3.object_exists(bucket, key):
+    return key
+  _refuse_local_rederivation(report_id, origin, "holon")
+  from robosystems.operations.serialization import (
+    build_report_bundle,
+    serialize_to_holon_jsonld,
+  )
+
+  bundle = build_report_bundle(session, graph_id, report_id)
+  uploaded = s3.upload_string(
+    content=serialize_to_holon_jsonld(bundle),
+    bucket=bucket,
+    key=key,
+    content_type="application/ld+json",
+    metadata={"report-id": report_id, "graph-id": graph_id},
+  )
+  if not uploaded:
+    logger.error(
+      "Holon upload failed for report %s at s3://%s/%s", report_id, bucket, key
+    )
+    raise BundleSigningError(
+      f"Failed to materialize holon bundle for report '{report_id}'."
+    )
+  return key
+
+
 def _materialize_and_presign_holon(
   session: Session,
   graph_id: str,
@@ -771,34 +830,8 @@ def _materialize_and_presign_holon(
 ) -> ReportBundleDownloadResponse:
   """Presign the JSON-LD holon, materializing + caching it on first download."""
   bucket = env.USER_DATA_BUCKET
-  key = get_report_bundle_key(
-    graph_id, report_id, generation_count, extension=".holon.jsonld"
-  )
   s3 = S3Client()
-
-  if not s3.object_exists(bucket, key):
-    _refuse_local_rederivation(report_id, origin, "holon")
-    from robosystems.operations.serialization import (
-      build_report_bundle,
-      serialize_to_holon_jsonld,
-    )
-
-    bundle = build_report_bundle(session, graph_id, report_id)
-    holon = serialize_to_holon_jsonld(bundle)
-    uploaded = s3.upload_string(
-      content=holon,
-      bucket=bucket,
-      key=key,
-      content_type="application/ld+json",
-      metadata={"report-id": report_id, "graph-id": graph_id},
-    )
-    if not uploaded:
-      logger.error(
-        "Holon upload failed for report %s at s3://%s/%s", report_id, bucket, key
-      )
-      raise BundleSigningError(
-        f"Failed to materialize holon bundle for report '{report_id}'."
-      )
+  key = _ensure_holon_stored(s3, session, graph_id, report_id, generation_count, origin)
 
   download_url = s3.generate_presigned_url(
     bucket=bucket,
@@ -821,6 +854,85 @@ def _materialize_and_presign_holon(
     format=RdfFlavor.HOLON_JSONLD.value,
     generation_count=generation_count,
     omitted_content=list(TAVI_OMITTED_CONTENT),
+  )
+
+
+def _materialize_and_presign_databook(
+  session: Session,
+  graph_id: str,
+  report_id: str,
+  generation_count: int,
+  expires_in: int,
+  origin: str = "authored",
+) -> ReportBundleDownloadResponse:
+  """Presign the DataBook, writing it from the stored holon on first download.
+
+  The holon is the source, not the rows: it is put in storage first if it is
+  not there (for a received report whose holon is gone, that refuses), then
+  read back and projected. So the document describes the file a reader can
+  download beside it, digest and all.
+  """
+  from robosystems.operations.serialization.rdf.databook import (
+    DATABOOK_CONTENT_TYPE,
+    DATABOOK_EXTENSION,
+    DATABOOK_OMITTED_CONTENT,
+    serialize_holon_to_databook,
+  )
+
+  bucket = env.USER_DATA_BUCKET
+  key = get_report_bundle_key(
+    graph_id, report_id, generation_count, extension=DATABOOK_EXTENSION
+  )
+  s3 = S3Client()
+
+  if not s3.object_exists(bucket, key):
+    holon_key = _ensure_holon_stored(
+      s3, session, graph_id, report_id, generation_count, origin
+    )
+    holon = s3.read_string(bucket, holon_key)
+    if holon is None:
+      raise BundleSigningError(
+        f"Failed to read the holon for report '{report_id}' to write its DataBook."
+      )
+    uploaded = s3.upload_string(
+      content=serialize_holon_to_databook(
+        holon, holon_filename=f"{report_id}-g{generation_count}.holon.jsonld"
+      ),
+      bucket=bucket,
+      key=key,
+      content_type=DATABOOK_CONTENT_TYPE,
+      metadata={"report-id": report_id, "graph-id": graph_id},
+    )
+    if not uploaded:
+      logger.error(
+        "DataBook upload failed for report %s at s3://%s/%s", report_id, bucket, key
+      )
+      raise BundleSigningError(
+        f"Failed to materialize DataBook for report '{report_id}'."
+      )
+
+  download_url = s3.generate_presigned_url(
+    bucket=bucket,
+    key=key,
+    expires_in=expires_in,
+    response_content_type=DATABOOK_CONTENT_TYPE,
+    response_content_disposition=(
+      f'attachment; filename="{report_id}-g{generation_count}{DATABOOK_EXTENSION}"'
+    ),
+  )
+  if download_url is None:
+    raise BundleSigningError(
+      f"Failed to sign download URL for report '{report_id}' DataBook."
+    )
+
+  return ReportBundleDownloadResponse(
+    download_url=download_url,
+    expires_at=datetime.now(UTC) + timedelta(seconds=expires_in),
+    content_type=DATABOOK_CONTENT_TYPE,
+    format=RdfFlavor.DATABOOK.value,
+    generation_count=generation_count,
+    # A projection by design: what it leaves to the holon, on every response.
+    omitted_content=list(DATABOOK_OMITTED_CONTENT),
   )
 
 
