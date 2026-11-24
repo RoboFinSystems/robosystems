@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """Container-free validation of demo bundle artifacts.
 
-Validates the XBRL 2.1 package a demo already wrote to ``output/`` —
-**without the running stack**: no API, no database, no Docker — against the
-XBRL 2.1 spec with Arelle (the de-facto processor SEC EDGAR uses).
+Validates what a demo already wrote to ``output/`` — **without the running
+stack**: no API, no database, no Docker. The XBRL 2.1 package is checked
+against the XBRL 2.1 spec with Arelle (the de-facto processor SEC EDGAR uses),
+and the holons against the holon format with xbrlkit, one verdict per named
+graph.
 
-It writes a markdown evidence report next to the artifact. Because it reads
-the on-disk ``.zip`` (rather than re-fetching from the API), it runs anywhere
+Each writes a markdown evidence report next to the artifact. Because they read
+the on-disk files (rather than re-fetching from the API), they run anywhere
 the host venv is installed, with the container down.
 
 Usage:
     uv run python -m examples._common.validate \
         --zip    examples/roboledger_demo/output/roboledger-demo.zip \
+        --holon  examples/roboledger_demo/output/roboledger-demo.holon.jsonld \
+        --holon  examples/roboledger_demo/output/roboledger-demo.lineage.holon.jsonld \
         --label  "RoboLedger Demo"
 """
 
@@ -127,12 +131,101 @@ def validate_arelle(zip_path: Path, out_md: Path, label: str) -> bool:
   return valid
 
 
+# ── Holon → xbrlkit ─────────────────────────────────────────────────────────
+
+
+def validate_holons(holon_paths: list[Path], out_md: Path, label: str) -> bool:
+  """Validate on-disk holons against the holon format; write one report.
+
+  Each named graph is checked against its own SHACL shapes and the graphs
+  together for references that cross them (``xbrlkit.holon``); the report is
+  then read back and checked: it is whole, its calculations foot, its balance
+  sheet balances. A demo's report has to pass both.
+  """
+  from xbrlkit.holon import validate_holon_file
+
+  results = [(path, validate_holon_file(path)) for path in holon_paths]
+  valid = all(result.ok for _, result in results)
+  verdict = (
+    "✅ **Conforms to the holon format**" if valid else "❌ **Validation failed**"
+  )
+  lines = [f"# {label} — Holon Validation (xbrlkit)", "", f"## Result: {verdict}", ""]
+  for path, result in results:
+    lines += [
+      f"### `{path.name}`",
+      "",
+      "| Graph | Verdict | Triples | Shapes | Violations | Warnings |",
+      "|---|---|---:|---:|---:|---:|",
+    ]
+    verdicts = [*result.graphs.values(), *([result.dataset] if result.dataset else [])]
+    for graph in verdicts:
+      name = graph.name if graph.name == "dataset" else f"`#{graph.name}`"
+      if not graph.present:
+        lines.append(f"| {name} | absent | | | | |")
+        continue
+      lines.append(
+        f"| {name} | {'conforms' if graph.conforms else 'FAILS'} | "
+        + f"{graph.triples:,} | {graph.shapes} | {graph.violations} | "
+        + f"{graph.warnings} |"
+      )
+    lines.append("")
+    if result.unreadable:
+      lines += [f"- **Report**: unreadable: {result.unreadable}", ""]
+    elif result.check is not None:
+      check = result.check
+      balance = (
+        "no balance-sheet totals to compare"
+        if check.balance_checked is None
+        else f"{check.balance_checked} balance-sheet comparison(s) made"
+      )
+      lines += [
+        f"- **Report**: {'holds together' if check.ok else 'FAILS'} — "
+        + f"{check.facts} facts, {check.calculations_footed} of "
+        + f"{check.calculations_checked} calculations foot, {balance}",
+        "",
+      ]
+    findings = [f"- {problem}" for problem in result.problems] + [
+      f"- `{finding.focus}`: {finding.message}"
+      for graph in verdicts
+      for finding in graph.findings
+    ]
+    if result.check is not None:
+      findings += [f"- {p.code}: {p.message}" for p in result.check.problems]
+    if findings:
+      lines += ["#### Findings", "", *findings, ""]
+  lines += [
+    (
+      "Validated on the host with **xbrlkit** directly against the on-disk "
+      + "holons — no API, no container. Each named graph (`#scene`, what the "
+      + "report states; `#projection`, how it is arranged; `#boundary`, the "
+      + "roll-ups it must obey; `#lineage`, the ledger behind it) is checked "
+      + "against its own SHACL shapes, and the graphs together for references "
+      + "that cross them. Conformance is the claim about the *file*. The "
+      + "*report* line is a second check, on the report read back from it: "
+      + "every fact points at a concept, period and unit that exist, every "
+      + "calculation foots and the balance sheet balances. Neither says the "
+      + "report is complete or true; they say the file is what it claims to be "
+      + "and the report is consistent with itself."
+    ),
+    "",
+  ]
+  out_md.write_text("\n".join(lines))
+  return valid
+
+
 # ── CLI ─────────────────────────────────────────────────────────────────────
 
 
 def main() -> None:
   parser = argparse.ArgumentParser(description="Container-free bundle validation.")
   parser.add_argument("--zip", type=Path, required=True, help="XBRL 2.1 zip → Arelle")
+  parser.add_argument(
+    "--holon",
+    type=Path,
+    action="append",
+    default=[],
+    help="A holon.jsonld → xbrlkit (repeatable: the holon and its lineage form)",
+  )
   parser.add_argument("--out-dir", type=Path, help="Where to write the reports")
   parser.add_argument("--label", required=True)
   args = parser.parse_args()
@@ -143,7 +236,16 @@ def main() -> None:
   out = (args.out_dir or zpath.parent) / f"{zpath.stem}-xbrl-validation.md"
   valid = validate_arelle(zpath, out, args.label)
   print(f"Arelle: {zpath.name} {'valid' if valid else 'INVALID'} → {_rel(out)}")
-  if not valid:
+  holons = [path.resolve() for path in args.holon]
+  conforms = True
+  if holons:
+    holon_out = (args.out_dir or zpath.parent) / f"{zpath.stem}-holon-validation.md"
+    conforms = validate_holons(holons, holon_out, args.label)
+    print(
+      f"xbrlkit: {len(holons)} holon(s) "
+      + f"{'conform' if conforms else 'DO NOT CONFORM'} → {_rel(holon_out)}"
+    )
+  if not (valid and conforms):
     raise SystemExit(1)
 
 

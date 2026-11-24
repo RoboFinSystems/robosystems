@@ -81,6 +81,52 @@ def test_artifacts_exist() -> None:
 
 
 @pytest.mark.parametrize("path", ARTIFACTS, ids=[p.name for p in ARTIFACTS])
+def test_every_holon_meets_the_format_and_its_report_holds(path: Path) -> None:
+  """Each named graph against its own shapes, the graphs together, and the
+  report read back: whole, footing, balanced. The external check on the
+  primary serialization, as Arelle is on the XBRL 2.1 package."""
+  from xbrlkit.holon import render, validate_holon_file
+
+  result = validate_holon_file(path)
+  assert result.ok, f"{path.name}:\n{render(result)}"
+  expected = {"scene", "projection", "boundary"}
+  if ".lineage." in path.name:
+    expected.add("lineage")
+  present = {name for name, graph in result.graphs.items() if graph.present}
+  assert present == expected, f"{path.name} carries {sorted(present)}"
+
+
+PUBLISHED = [p for p in ARTIFACTS if ".lineage." not in p.name]
+
+
+@pytest.mark.parametrize("path", PUBLISHED, ids=[p.name for p in PUBLISHED])
+def test_the_databook_beside_a_holon_is_a_projection_of_that_holon(path: Path) -> None:
+  """A DataBook names the holon it was written from by digest, and every
+  triple in its RDF blocks is one the holon's ``#scene`` states."""
+  import hashlib
+  import re
+
+  from rdflib import Dataset, Graph
+
+  book = path.with_name(path.name.replace(".holon.jsonld", ".databook.md"))
+  assert book.exists(), f"{path.name} has no DataBook beside it: regenerate that demo"
+  text = book.read_text(encoding="utf-8")
+  digest = hashlib.sha256(path.read_bytes()).hexdigest()
+  assert f'sha256: "{digest}"' in text, f"{book.name} was written from another holon"
+  assert f'href: "{path.name}"' in text
+
+  dataset = Dataset()
+  dataset.parse(data=path.read_text(encoding="utf-8"), format="json-ld")
+  scene = next(g for g in dataset.graphs() if str(g.identifier).endswith("#scene"))
+  blocks = re.findall(r"```turtle\n(.*?)\n```", text, re.S)
+  assert blocks, f"{book.name} carries no RDF"
+  inline = Graph()
+  for block in blocks:
+    inline.parse(data=block, format="turtle")
+  assert all(triple in scene for triple in inline)
+
+
+@pytest.mark.parametrize("path", ARTIFACTS, ids=[p.name for p in ARTIFACTS])
 def test_every_element_is_labelled(path: Path) -> None:
   """Drift 1: all five holons once carried zero element labels."""
   unlabelled = sorted(
