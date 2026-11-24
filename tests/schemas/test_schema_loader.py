@@ -217,6 +217,31 @@ class TestContextAwareSchemaLoader:
     loader = ContextAwareSchemaLoader(extension="roboledger", context="full_accounting")
     assert len(loader.nodes) > 0
 
+  def test_the_industry_tables_are_on_the_sec_repository_only(self):
+    """The schema DDL and the materialization list agree: the SEC repository has
+    the Industry node and its edge, nodes before relationships, and a tenant
+    graph has neither."""
+    from robosystems.schemas.extensions.roboledger import RoboLedgerContext
+
+    sec_loader = ContextAwareSchemaLoader("roboledger", "sec_repository")
+    sec = RoboLedgerContext.get_all_table_names_for_context(
+      RoboLedgerContext.SEC_REPOSITORY
+    )
+    assert "Industry" in sec_loader.nodes
+    assert "ENTITY_HAS_INDUSTRY" in sec_loader.relationships
+    assert sec["Industry"] == "nodes"
+    assert sec["ENTITY_HAS_INDUSTRY"] == "relationships"
+    kinds = list(sec.values())
+    assert kinds == sorted(kinds), "every node table comes before any relationship"
+
+    tenant_loader = ContextAwareSchemaLoader("roboledger", "full_accounting")
+    tenant = RoboLedgerContext.get_all_table_names_for_context(
+      RoboLedgerContext.FULL_ACCOUNTING
+    )
+    assert "Industry" not in tenant_loader.nodes
+    assert "ENTITY_HAS_INDUSTRY" not in tenant_loader.relationships
+    assert "Industry" not in tenant and "ENTITY_HAS_INDUSTRY" not in tenant
+
   def test_sec_materialization_list_excludes_rea_substrate(self):
     """The materialization table list (get_all_table_names_for_context) must
     agree with the loader-built DDL: SEC excludes the REA/trait base tables;

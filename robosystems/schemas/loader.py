@@ -19,6 +19,8 @@ from robosystems.schemas.base import (
   BASE_RELATIONSHIPS,
   REPORTING_ONLY_EXCLUDED_NODES,
   REPORTING_ONLY_EXCLUDED_RELATIONSHIPS,
+  REPOSITORY_ONLY_NODES,
+  REPOSITORY_ONLY_RELATIONSHIPS,
 )
 from robosystems.schemas.models import Node, Relationship, Schema
 
@@ -402,6 +404,8 @@ class ContextAwareSchemaLoader(LadybugSchemaLoader):
         for rel in BASE_RELATIONSHIPS
         if rel.name not in REPORTING_ONLY_EXCLUDED_RELATIONSHIPS
       ]
+      all_nodes.extend(REPOSITORY_ONLY_NODES)
+      all_relationships.extend(REPOSITORY_ONLY_RELATIONSHIPS)
     else:
       # For other contexts, use all base schemas
       all_nodes = list(BASE_NODES)

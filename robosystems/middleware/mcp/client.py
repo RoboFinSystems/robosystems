@@ -399,6 +399,7 @@ class GraphMCPClient:
         "cik",
         "ticker",
         "identifier",
+        "industry",
         "sic",
         "sic_description",
         "legal_name",

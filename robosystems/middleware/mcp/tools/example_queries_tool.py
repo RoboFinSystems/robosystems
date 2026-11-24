@@ -124,8 +124,17 @@ List of example queries with explanations, tailored to the actual schema present
             {
               "category": "financial",
               "description": "Get company information",
-              "query": "MATCH (e:Entity) RETURN e.name, e.cik, e.ticker, e.sic_description LIMIT 25",
-              "explanation": "Entity nodes contain company master data. Filter by ticker (e.ticker = 'NVDA') or CIK for one company — this repo holds thousands of entities, so always LIMIT or filter.",
+              "query": "MATCH (e:Entity) RETURN e.name, e.cik, e.ticker, e.industry, e.sic_description LIMIT 25",
+              "explanation": "Entity nodes contain company master data. Filter by ticker (e.ticker = 'NVDA') or CIK for one company — this repo holds thousands of entities, so always LIMIT or filter. e.industry is the filer's primary industry as a path (technology/semiconductors/...); e.sic_description is the SEC's own, coarser label.",
+            },
+            {
+              "category": "financial",
+              "description": "Companies in an industry (peers)",
+              "query": """MATCH (e:Entity)-[r:ENTITY_HAS_INDUSTRY]->(i:Industry)
+WHERE i.identifier STARTS WITH 'health-care/biotechnology' AND r.is_primary
+RETURN DISTINCT e.ticker, e.name, i.label AS industry, r.confidence
+ORDER BY e.ticker LIMIT 50""",
+              "explanation": "Industry nodes form a tree: sector > subsector > industry > sub-industry, and a node's identifier is its path, so STARTS WITH takes a whole branch. Find a branch with MATCH (i:Industry) WHERE i.level = 'subsector' RETURN i.identifier, i.label. One company's peers: match its primary Industry, then the other entities on the same node or its parent. r.is_primary keeps each filer once; drop it to include companies with a second industry there. r.method and r.confidence say how firmly a filer was placed.",
             },
             {
               "category": "financial",
