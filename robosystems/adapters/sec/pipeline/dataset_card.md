@@ -47,7 +47,7 @@ This is not a Parquet dataset: it is a database file. The dataset viewer is disa
 | **Cadence** | monthly; the fixed path `sec.lbdb.zst` is overwritten each snapshot, so `main` is always the latest and this URL never changes |
 
 Node types: `Entity`, `Report`, `Fact`, `FactSet`, `Element`, `Label`, `Reference`, `Period`, `Unit`,
-`Dimension`, `Structure`, `Association`, `Classification`, `Taxonomy`. The full schema — every
+`Dimension`, `Structure`, `Association`, `Classification`, `Taxonomy`, `Industry`. The full schema — every
 property and relationship — is one call away once the file is open (`CALL show_tables()`), and is
 documented in [Querying the Analytical Graph](https://robosystems.ai/docs/technical/querying-the-analytical-graph).
 

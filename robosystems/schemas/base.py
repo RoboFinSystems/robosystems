@@ -396,6 +396,52 @@ BASE_RELATIONSHIPS = [
 
 
 # ---------------------------------------------------------------------------
+# Repository-only tables
+# ---------------------------------------------------------------------------
+# The industry classification as graph tables, on the SEC repository only: its
+# filers are placed in it from a curated table at staging. A tenant graph holds
+# no copy; its entities carry a node's identifier in Entity.industry.
+REPOSITORY_ONLY_NODES = [
+  Node(
+    name="Industry",
+    description="One node of the industry classification: a sector, subsector, "
+    "industry or sub-industry (level). identifier is the slug path "
+    "(health-care/biotechnology/clinical-stage), so a node's descendants are the "
+    "identifiers that start with it; parent is the node one level up; sector, "
+    "subsector and industry are its ancestors' names. carried marks the single "
+    "industry of a subsector nobody has divided, which repeats its name.",
+    properties=[
+      Property(name="identifier", type="STRING", is_primary_key=True),
+      Property(name="label", type="STRING"),
+      Property(name="level", type="STRING"),
+      Property(name="parent", type="STRING"),
+      Property(name="sector", type="STRING"),
+      Property(name="subsector", type="STRING"),
+      Property(name="industry", type="STRING"),
+      Property(name="carried", type="BOOLEAN"),
+    ],
+  ),
+]
+REPOSITORY_ONLY_RELATIONSHIPS = [
+  Relationship(
+    name="ENTITY_HAS_INDUSTRY",
+    from_node="Entity",
+    to_node="Industry",
+    description="A filer is in an industry. Exactly one edge per filer has "
+    "is_primary; Entity.industry repeats that node's identifier. method says how "
+    "the filer was placed (filing: read from its annual report; recall: from "
+    "knowledge of the company; crosswalk: its SIC code alone), confidence is high, "
+    "medium or low, and review marks a placement two readings disagreed on.",
+    properties=[
+      Property(name="is_primary", type="BOOLEAN"),
+      Property(name="method", type="STRING"),
+      Property(name="confidence", type="STRING"),
+      Property(name="review", type="BOOLEAN"),
+    ],
+  ),
+]
+
+# ---------------------------------------------------------------------------
 # Reporting-only exclusions
 # ---------------------------------------------------------------------------
 # Tables a reporting-only repository (SEC) never populates: REA events and

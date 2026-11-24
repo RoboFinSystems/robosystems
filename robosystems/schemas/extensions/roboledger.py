@@ -379,6 +379,8 @@ class RoboLedgerContext:
       BASE_RELATIONSHIPS,
       REPORTING_ONLY_EXCLUDED_NODES,
       REPORTING_ONLY_EXCLUDED_RELATIONSHIPS,
+      REPOSITORY_ONLY_NODES,
+      REPOSITORY_ONLY_RELATIONSHIPS,
     )
 
     tables: dict[str, str] = {}
@@ -399,6 +401,11 @@ class RoboLedgerContext:
         if node.name not in excluded_nodes:
           tables[node.name] = "nodes"
 
+    repository = include_base and context == cls.SEC_REPOSITORY
+    if repository:
+      for node in REPOSITORY_ONLY_NODES:
+        tables[node.name] = "nodes"
+
     for node in ext_nodes:
       tables[node.name] = "nodes"
 
@@ -407,6 +414,9 @@ class RoboLedgerContext:
       for rel in BASE_RELATIONSHIPS:
         if rel.name not in excluded_rels:
           tables[rel.name] = "relationships"
+    if repository:
+      for rel in REPOSITORY_ONLY_RELATIONSHIPS:
+        tables[rel.name] = "relationships"
 
     for rel in ext_relationships:
       tables[rel.name] = "relationships"

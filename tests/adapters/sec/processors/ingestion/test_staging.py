@@ -16,6 +16,21 @@ from robosystems.adapters.sec.processors.ingestion.models import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _industry_stamp_off(request):
+  """The industry stamp runs after every stage and has its own tests below; the
+  staging tests here drive a mocked client it cannot read a count from."""
+  if request.node.get_closest_marker("industry_stamp"):
+    yield
+    return
+  with patch(
+    "robosystems.adapters.sec.processors.ingestion.staging.DuckDBStager"
+    ".stamp_entity_industry",
+    AsyncMock(return_value=(0, 0)),
+  ):
+    yield
+
+
 def _make_stager():
   """Create a DuckDBStager with mocked dependencies."""
   with (
@@ -1180,3 +1195,131 @@ class TestStampCanonicalConcepts:
 
     assert result.status == "error"
     assert "Write failed" in result.error
+
+
+class _DuckClient:
+  """Runs the stager's staging SQL on an in-memory DuckDB, as the Graph API does."""
+
+  def __init__(self, conn):
+    self.conn = conn
+    self.statements: list[str] = []
+
+  async def execute_write(self, graph_id, sql, parameters=None, timeout=None):
+    self.statements.append(sql)
+    return {"rows": [list(r) for r in self.conn.execute(sql, parameters).fetchall()]}
+
+
+@pytest.mark.industry_stamp
+class TestStampEntityIndustry:
+  """The curated industry tables become nodes, edges and Entity.industry."""
+
+  CIK = "http://www.sec.gov/CIK"
+
+  def _staged(self):
+    import duckdb
+
+    conn = duckdb.connect()
+    conn.execute(
+      'CREATE TABLE "Entity" (identifier VARCHAR, scheme VARCHAR, cik VARCHAR, '
+      "name VARCHAR, industry VARCHAR, sic_description VARCHAR)"
+    )
+    return conn
+
+  @pytest.mark.asyncio
+  async def test_places_filers_by_cik_and_clears_the_rest(self):
+    from robosystems.taxonomy import industries as vocabulary
+
+    placed = [p for p in vocabulary.load_companies() if p["primary"] == "yes"]
+    one = placed[0]
+    # A filer with a second industry, to see both edges and one primary.
+    counts = {}
+    for p in vocabulary.load_companies():
+      counts[p["cik"]] = counts.get(p["cik"], 0) + 1
+    two = next(p for p in placed if counts[p["cik"]] == 2)
+    conn = self._staged()
+    conn.executemany(
+      'INSERT INTO "Entity" VALUES (?, ?, ?, ?, ?, ?)',
+      [
+        (
+          "e-one",
+          self.CIK,
+          one["cik"],
+          "Renamed Since",
+          "Old SIC text",
+          "Old SIC text",
+        ),
+        ("e-two", self.CIK, two["cik"], "Two", None, None),
+        (
+          "e-unplaced",
+          self.CIK,
+          "9999999999",
+          "Unplaced",
+          "Blank Checks",
+          "Blank Checks",
+        ),
+        ("e-other-scheme", "http://example.test", one["cik"], "Other", "Text", "Text"),
+      ],
+    )
+    client = _DuckClient(conn)
+
+    edges, stamped = await _make_stager().stamp_entity_industry(client)
+
+    nodes = vocabulary.load_industries()
+    assert conn.execute('SELECT count(*) FROM "Industry"').fetchone()[0] == len(nodes)
+    assert (edges, stamped) == (3, 2)
+    assert dict(
+      conn.execute('SELECT identifier, industry FROM "Entity"').fetchall()
+    ) == {
+      "e-one": one["industry"],
+      "e-two": two["industry"],
+      "e-unplaced": None,
+      "e-other-scheme": None,
+    }
+    # The SIC description is the SEC's and is left alone.
+    assert conn.execute(
+      "SELECT sic_description FROM \"Entity\" WHERE identifier = 'e-one'"
+    ).fetchone() == ("Old SIC text",)
+    rows = conn.execute(
+      "SELECT src, dst, is_primary, method, confidence, review "
+      'FROM "ENTITY_HAS_INDUSTRY" ORDER BY src, is_primary DESC'
+    ).fetchall()
+    assert [r[0] for r in rows] == ["e-one", "e-two", "e-two"]
+    assert [r[2] for r in rows] == [True, True, False]
+    assert rows[0][1] == one["industry"] and rows[0][3] == one["method"]
+    assert all(r[1] in nodes for r in rows)
+
+  @pytest.mark.asyncio
+  async def test_a_node_carries_its_ancestors_names(self):
+    conn = self._staged()
+    await _make_stager().stamp_entity_industry(_DuckClient(conn))
+    row = conn.execute(
+      "SELECT label, level, parent, sector, subsector, industry, carried "
+      "FROM \"Industry\" WHERE identifier = 'health-care/biotechnology/clinical-stage'"
+    ).fetchone()
+    assert row == (
+      "Clinical Stage",
+      "industry",
+      "health-care/biotechnology",
+      "Health Care",
+      "Biotechnology",
+      "Clinical Stage",
+      False,
+    )
+    sector = conn.execute(
+      "SELECT parent, sector, subsector FROM \"Industry\" WHERE identifier = 'health-care'"
+    ).fetchone()
+    assert sector == (None, "Health Care", None)
+
+  @pytest.mark.asyncio
+  async def test_a_second_run_changes_nothing(self):
+    from robosystems.taxonomy import industries as vocabulary
+
+    one = next(p for p in vocabulary.load_companies() if p["primary"] == "yes")
+    conn = self._staged()
+    conn.execute(
+      'INSERT INTO "Entity" VALUES (?, ?, ?, ?, ?, ?)',
+      ("e-one", self.CIK, one["cik"], "One", None, None),
+    )
+    stager = _make_stager()
+    assert await stager.stamp_entity_industry(_DuckClient(conn)) == (1, 1)
+    assert await stager.stamp_entity_industry(_DuckClient(conn)) == (1, 0)
