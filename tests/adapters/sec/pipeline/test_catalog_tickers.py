@@ -210,6 +210,35 @@ class TestCatalogWhenTickersMove:
       _run(bucket)
       assert "companies/unt.json" not in bucket.writes
 
+  def test_a_file_that_failed_to_upload_is_written_again_next_run(self, bucket):
+    placed = (
+      {
+        "id": "technology/software",
+        "labels": ["Technology", "Software"],
+        "primary": True,
+      },
+    )
+    upload = bucket.upload_string
+
+    def failing(content, public, key, **kwargs):
+      if key == "companies/unt.json":
+        return False
+      return upload(content, public, key, **kwargs)
+
+    with patch.object(
+      catalog_module, "memberships_by_cik", return_value={UNTOUCHED: placed}
+    ):
+      bucket.upload_string = failing
+      result = _run(self._seeded(bucket))
+      assert "partial" in str(result.metadata["status"])
+      index = {r["cik"]: r for r in bucket.json(FILING_CATALOG_INDEX_KEY)["companies"]}
+      # The index does not claim what the file never received.
+      assert index[UNTOUCHED]["industries"] == []
+
+      bucket.upload_string = upload
+      _run(bucket)
+      assert bucket.json("companies/unt.json")["industries"] == list(placed)
+
   def test_the_classification_is_published_beside_the_catalog(self, bucket):
     _run(self._seeded(bucket))
 

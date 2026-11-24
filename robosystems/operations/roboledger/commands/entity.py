@@ -400,8 +400,13 @@ def _apply_updates(session: Session, entity: Entity, updates: dict[str, Any]):
     if _ticker_taken(session, ticker, exclude_id=str(entity.id)):
       raise EntityTickerTakenError(ticker)
     updates["ticker"] = ticker
-  if updates.get("industry") is not None:
-    updates["industry"] = resolve_industry(session, updates["industry"])
+  # A blank industry is no industry, as on create.
+  if isinstance(updates.get("industry"), str):
+    updates["industry"] = (
+      resolve_industry(session, updates["industry"])
+      if updates["industry"].strip()
+      else None
+    )
   for field_name, value in updates.items():
     setattr(entity, field_name, value)
 
@@ -570,7 +575,9 @@ def create_entity(
     or (parent.fiscal_year_end if parent is not None else None),
     tax_id=body.tax_id,
     lei=body.lei,
-    industry=resolve_industry(session, body.industry) if body.industry else None,
+    industry=resolve_industry(session, body.industry)
+    if body.industry and body.industry.strip()
+    else None,
     entity_type=body.entity_type,
     reporting_style_id=reporting_style_id,
     phone=body.phone,
