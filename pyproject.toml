@@ -114,7 +114,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     # RoboSystems client for demo and testing.
-    "robosystems-client>=2.40,<3",
+    "robosystems-client>=2.45,<3",
     # Testing framework
     "pytest>=9.0.0,<10.0",
     "pytest-asyncio>=1.4.0,<2.0",
