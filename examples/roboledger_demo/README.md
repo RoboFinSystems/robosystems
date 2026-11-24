@@ -157,7 +157,7 @@ Schedules are anchored to month offsets from the demo start date, so they stay a
 | `mappings.py` | CoA → GAAP mapping definitions |
 | `policies.py` | Accounting policy document content (markdown) |
 | `validate.py` | Post-setup checks on the Information Block machinery behind the schedules; everything it creates is torn down before it returns |
-| `download_bundles.py` | Pulls the filed Report's artifact set (Tavi, holon, XBRL zip, the Arelle verdict on the zip and the xbrlkit verdict on the holons) into `output/` |
+| `download_bundles.py` | Pulls the filed Report's artifact set (Tavi, holon, XBRL zip, the Arelle verdict on the zip, the xbrlkit verdict on the holons, and the DataBook) into `output/` |
 | `_reset.py` | Demo-only cleanup between re-runs — the single path that touches PostgreSQL directly, deliberately with no API surface |
 | `prompt.md` | Claude prompt for the close workflow — paste into Claude Desktop |
 

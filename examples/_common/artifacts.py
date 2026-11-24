@@ -20,6 +20,9 @@ For a report at ``(graph_id, report_id)`` it writes, under ``out_dir``:
 * ``{stem}-xbrl-validation.md``  — Arelle verdict (over the XBRL zip)
 * ``{stem}-holon-validation.md`` — xbrlkit verdict (over both holons, one per
   named graph, plus the check that the report holds together)
+* ``{stem}.databook.md``       — the report as a document to read: a
+  projection of the holon (tables, the same facts as RDF, the verdict) that
+  names the holon as its source
 
 Every flavor comes from the product endpoint via the published SDK — the
 demos exercise the real download path, they don't reconstruct artifacts
@@ -83,3 +86,14 @@ def render_report_artifacts(
   holon_md = out_dir / f"{stem}-holon-validation.md"
   conforms = validate_holons([holon_path, lineage_path], holon_md, label)
   print(f"  xbrlkit:  {holon_md} ({'conforms' if conforms else 'DOES NOT CONFORM'})")
+
+  # The holon as a document a person reads. Written from the downloaded file
+  # alone, so it regenerates from the artifact it describes.
+  from xbrlkit.holon.databook import databook_from_holon
+
+  databook_path = out_dir / f"{stem}.databook.md"
+  databook = databook_from_holon(
+    holon_path.read_text(encoding="utf-8"), href=holon_path.name
+  )
+  databook_path.write_text(databook, encoding="utf-8")
+  print(f"  DataBook: {databook_path} ({len(databook):,} bytes)")
