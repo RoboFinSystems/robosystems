@@ -1209,13 +1209,78 @@ class _DuckClient:
     return {"rows": [list(r) for r in self.conn.execute(sql, parameters).fetchall()]}
 
 
+# A small classification, so editing the curated tables never moves these tests.
+_NODES = {
+  r["id"]: r
+  for r in (
+    {"id": "tech", "parent": "", "level": "sector", "label": "Technology"},
+    {"id": "tech/chips", "parent": "tech", "level": "subsector", "label": "Chips"},
+    {
+      "id": "tech/chips/memory",
+      "parent": "tech/chips",
+      "level": "industry",
+      "label": "Memory",
+    },
+    {"id": "tech/tools", "parent": "tech", "level": "subsector", "label": "Tools"},
+    {
+      "id": "tech/tools/tools",
+      "parent": "tech/tools",
+      "level": "industry",
+      "label": "Tools",
+      "carried": "yes",
+    },
+    {
+      "id": "tech/chips/old",
+      "parent": "tech/chips",
+      "level": "industry",
+      "label": "Old",
+      "replaced_by": "tech/chips/memory",
+    },
+  )
+}
+for _node in _NODES.values():
+  _node.setdefault("carried", "")
+  _node.setdefault("replaced_by", "")
+
+
+def _placement(cik, industry, primary="yes", method="filing", review=""):
+  return {
+    "key": f"T{cik[-1]}",
+    "cik": cik,
+    "name": f"Filer {cik[-1]}",
+    "industry": industry,
+    "primary": primary,
+    "method": method,
+    "confidence": "high",
+    "review": review,
+  }
+
+
+_ONE, _TWO = "0000000001", "0000000002"
+_PLACEMENTS = (
+  _placement(_ONE, "tech/chips/memory"),
+  _placement(_TWO, "tech/tools/tools", method="recall", review="yes"),
+  _placement(_TWO, "tech/chips/memory", primary=""),
+)
+
+
+@pytest.fixture
+def small_classification():
+  with (
+    patch("robosystems.taxonomy.industries.load_industries", return_value=_NODES),
+    patch("robosystems.taxonomy.industries.load_companies", return_value=_PLACEMENTS),
+  ):
+    yield
+
+
 @pytest.mark.industry_stamp
+@pytest.mark.usefixtures("small_classification")
 class TestStampEntityIndustry:
   """The curated industry tables become nodes, edges and Entity.industry."""
 
   CIK = "http://www.sec.gov/CIK"
 
-  def _staged(self):
+  def _staged(self, *rows):
     import duckdb
 
     conn = duckdb.connect()
@@ -1223,55 +1288,27 @@ class TestStampEntityIndustry:
       'CREATE TABLE "Entity" (identifier VARCHAR, scheme VARCHAR, cik VARCHAR, '
       "name VARCHAR, industry VARCHAR, sic_description VARCHAR)"
     )
+    if rows:
+      conn.executemany('INSERT INTO "Entity" VALUES (?, ?, ?, ?, ?, ?)', list(rows))
     return conn
 
   @pytest.mark.asyncio
   async def test_places_filers_by_cik_and_clears_the_rest(self):
-    from robosystems.taxonomy import industries as vocabulary
-
-    placed = [p for p in vocabulary.load_companies() if p["primary"] == "yes"]
-    one = placed[0]
-    # A filer with a second industry, to see both edges and one primary.
-    counts = {}
-    for p in vocabulary.load_companies():
-      counts[p["cik"]] = counts.get(p["cik"], 0) + 1
-    two = next(p for p in placed if counts[p["cik"]] == 2)
-    conn = self._staged()
-    conn.executemany(
-      'INSERT INTO "Entity" VALUES (?, ?, ?, ?, ?, ?)',
-      [
-        (
-          "e-one",
-          self.CIK,
-          one["cik"],
-          "Renamed Since",
-          "Old SIC text",
-          "Old SIC text",
-        ),
-        ("e-two", self.CIK, two["cik"], "Two", None, None),
-        (
-          "e-unplaced",
-          self.CIK,
-          "9999999999",
-          "Unplaced",
-          "Blank Checks",
-          "Blank Checks",
-        ),
-        ("e-other-scheme", "http://example.test", one["cik"], "Other", "Text", "Text"),
-      ],
+    conn = self._staged(
+      ("e-one", self.CIK, _ONE, "Renamed Since", "Old SIC text", "Old SIC text"),
+      ("e-two", self.CIK, _TWO, "Two", None, None),
+      ("e-unplaced", self.CIK, "9999999999", "Unplaced", "Blank Checks", "Blank"),
+      ("e-other-scheme", "http://example.test", _ONE, "Other", "Text", "Text"),
     )
-    client = _DuckClient(conn)
 
-    edges, stamped = await _make_stager().stamp_entity_industry(client)
+    edges, changed = await _make_stager().stamp_entity_industry(_DuckClient(conn))
 
-    nodes = vocabulary.load_industries()
-    assert conn.execute('SELECT count(*) FROM "Industry"').fetchone()[0] == len(nodes)
-    assert (edges, stamped) == (3, 2)
+    assert (edges, changed) == (3, 2)
     assert dict(
       conn.execute('SELECT identifier, industry FROM "Entity"').fetchall()
     ) == {
-      "e-one": one["industry"],
-      "e-two": two["industry"],
+      "e-one": "tech/chips/memory",
+      "e-two": "tech/tools/tools",
       "e-unplaced": None,
       "e-other-scheme": None,
     }
@@ -1279,47 +1316,53 @@ class TestStampEntityIndustry:
     assert conn.execute(
       "SELECT sic_description FROM \"Entity\" WHERE identifier = 'e-one'"
     ).fetchone() == ("Old SIC text",)
-    rows = conn.execute(
+    assert conn.execute(
       "SELECT src, dst, is_primary, method, confidence, review "
       'FROM "ENTITY_HAS_INDUSTRY" ORDER BY src, is_primary DESC'
-    ).fetchall()
-    assert [r[0] for r in rows] == ["e-one", "e-two", "e-two"]
-    assert [r[2] for r in rows] == [True, True, False]
-    assert rows[0][1] == one["industry"] and rows[0][3] == one["method"]
-    assert all(r[1] in nodes for r in rows)
+    ).fetchall() == [
+      ("e-one", "tech/chips/memory", True, "filing", "high", False),
+      ("e-two", "tech/tools/tools", True, "recall", "high", True),
+      ("e-two", "tech/chips/memory", False, "filing", "high", False),
+    ]
 
   @pytest.mark.asyncio
-  async def test_a_node_carries_its_ancestors_names(self):
+  async def test_a_node_carries_its_ancestors_names_and_a_retired_one_is_left_out(
+    self,
+  ):
     conn = self._staged()
     await _make_stager().stamp_entity_industry(_DuckClient(conn))
-    row = conn.execute(
-      "SELECT label, level, parent, sector, subsector, industry, carried "
-      "FROM \"Industry\" WHERE identifier = 'health-care/biotechnology/clinical-stage'"
-    ).fetchone()
-    assert row == (
-      "Clinical Stage",
+
+    rows = {
+      r[0]: r[1:]
+      for r in conn.execute(
+        "SELECT identifier, label, level, parent, sector, subsector, industry, "
+        'carried FROM "Industry"'
+      ).fetchall()
+    }
+    assert set(rows) == set(_NODES) - {"tech/chips/old"}
+    assert rows["tech/chips/memory"] == (
+      "Memory",
       "industry",
-      "health-care/biotechnology",
-      "Health Care",
-      "Biotechnology",
-      "Clinical Stage",
+      "tech/chips",
+      "Technology",
+      "Chips",
+      "Memory",
       False,
     )
-    sector = conn.execute(
-      "SELECT parent, sector, subsector FROM \"Industry\" WHERE identifier = 'health-care'"
-    ).fetchone()
-    assert sector == (None, "Health Care", None)
+    assert rows["tech"] == (
+      "Technology",
+      "sector",
+      None,
+      "Technology",
+      None,
+      None,
+      False,
+    )
+    assert rows["tech/tools/tools"][-1] is True
 
   @pytest.mark.asyncio
   async def test_a_second_run_changes_nothing(self):
-    from robosystems.taxonomy import industries as vocabulary
-
-    one = next(p for p in vocabulary.load_companies() if p["primary"] == "yes")
-    conn = self._staged()
-    conn.execute(
-      'INSERT INTO "Entity" VALUES (?, ?, ?, ?, ?, ?)',
-      ("e-one", self.CIK, one["cik"], "One", None, None),
-    )
+    conn = self._staged(("e-one", self.CIK, _ONE, "One", None, None))
     stager = _make_stager()
     assert await stager.stamp_entity_industry(_DuckClient(conn)) == (1, 1)
     assert await stager.stamp_entity_industry(_DuckClient(conn)) == (1, 0)
