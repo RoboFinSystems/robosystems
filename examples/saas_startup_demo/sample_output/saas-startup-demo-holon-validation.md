@@ -6,11 +6,11 @@
 
 | Graph | Verdict | Triples | Shapes | Violations | Warnings |
 |---|---|---:|---:|---:|---:|
-| `#scene` | conforms | 1,406 | 12 | 0 | 0 |
-| `#projection` | conforms | 3,412 | 8 | 0 | 0 |
+| `#scene` | conforms | 1,407 | 12 | 0 | 0 |
+| `#projection` | conforms | 3,472 | 8 | 0 | 0 |
 | `#boundary` | conforms | 800 | 5 | 0 | 0 |
 | `#lineage` | absent | | | | |
-| dataset | conforms | 5,094 | 11 | 0 | 0 |
+| dataset | conforms | 5,154 | 11 | 0 | 0 |
 
 - **Report**: holds together — 62 facts, 24 of 24 calculations foot, 2 balance-sheet comparison(s) made
 
@@ -18,11 +18,11 @@
 
 | Graph | Verdict | Triples | Shapes | Violations | Warnings |
 |---|---|---:|---:|---:|---:|
-| `#scene` | conforms | 1,434 | 12 | 0 | 0 |
-| `#projection` | conforms | 3,412 | 8 | 0 | 0 |
+| `#scene` | conforms | 1,435 | 12 | 0 | 0 |
+| `#projection` | conforms | 3,472 | 8 | 0 | 0 |
 | `#boundary` | conforms | 800 | 5 | 0 | 0 |
-| `#lineage` | conforms | 27,333 | 13 | 0 | 0 |
-| dataset | conforms | 32,454 | 11 | 0 | 0 |
+| `#lineage` | conforms | 27,445 | 13 | 0 | 0 |
+| dataset | conforms | 32,626 | 11 | 0 | 0 |
 
 - **Report**: holds together — 62 facts, 24 of 24 calculations foot, 2 balance-sheet comparison(s) made
 

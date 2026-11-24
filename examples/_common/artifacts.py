@@ -20,9 +20,9 @@ For a report at ``(graph_id, report_id)`` it writes, under ``out_dir``:
 * ``{stem}-xbrl-validation.md``  — Arelle verdict (over the XBRL zip)
 * ``{stem}-holon-validation.md`` — xbrlkit verdict (over both holons, one per
   named graph, plus the check that the report holds together)
-* ``{stem}.databook.md``       — the report as a document to read: a
-  projection of the holon (tables, the same facts as RDF, the verdict) that
-  names the holon as its source
+* ``{stem}.databook.md``       — the report as a document to read: the
+  holon as Markdown tables whose values link to their facts, the same facts
+  as RDF, the verdict, and the holon named as its source
 
 Every flavor comes from the product endpoint via the published SDK — the
 demos exercise the real download path, they don't reconstruct artifacts
@@ -67,12 +67,19 @@ def render_report_artifacts(
   lineage = client.download_report_bundle(
     graph_id, report_id, format="holon-jsonld-lineage", to=lineage_path
   )
+  # The holon as a document a person reads; the server writes it from the
+  # stored holon, so it names the same file the holon download returns.
+  databook_path = out_dir / f"{stem}.databook.md"
+  databook = client.download_report_bundle(
+    graph_id, report_id, format="databook", to=databook_path
+  )
   xbrl = client.download_report_bundle(
     graph_id, report_id, format="xbrl-2.1", to=xbrl_path
   )
   print(f"  Tavi:     {tavi.path} ({len(tavi.content):,} bytes)")
   print(f"  Holon:    {holon.path} ({len(holon.content):,} bytes)")
   print(f"  Lineage:  {lineage.path} ({len(lineage.content):,} bytes)")
+  print(f"  DataBook: {databook.path} ({len(databook.content):,} bytes)")
   print(f"  XBRL 2.1: {xbrl.path} ({len(xbrl.content):,} bytes)")
 
   # Container-free validation of the XBRL zip (Arelle) and of both holons
@@ -87,13 +94,3 @@ def render_report_artifacts(
   conforms = validate_holons([holon_path, lineage_path], holon_md, label)
   print(f"  xbrlkit:  {holon_md} ({'conforms' if conforms else 'DOES NOT CONFORM'})")
 
-  # The holon as a document a person reads. Written from the downloaded file
-  # alone, so it regenerates from the artifact it describes.
-  from xbrlkit.holon.databook import databook_from_holon
-
-  databook_path = out_dir / f"{stem}.databook.md"
-  databook = databook_from_holon(
-    holon_path.read_text(encoding="utf-8"), href=holon_path.name
-  )
-  databook_path.write_text(databook, encoding="utf-8")
-  print(f"  DataBook: {databook_path} ({len(databook):,} bytes)")

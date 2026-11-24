@@ -112,8 +112,11 @@ def test_the_databook_beside_a_holon_is_a_projection_of_that_holon(path: Path) -
   assert book.exists(), f"{path.name} has no DataBook beside it: regenerate that demo"
   text = book.read_text(encoding="utf-8")
   digest = hashlib.sha256(path.read_bytes()).hexdigest()
+  # The digest is what binds the two. The server names the holon by the
+  # filename it downloads under, which a demo saving it under its own stem
+  # does not keep, so the name is checked only for being a holon's.
   assert f'sha256: "{digest}"' in text, f"{book.name} was written from another holon"
-  assert f'href: "{path.name}"' in text
+  assert re.search(r'href: "[^"]+\.holon\.jsonld"', text)
 
   dataset = Dataset()
   dataset.parse(data=path.read_text(encoding="utf-8"), format="json-ld")
