@@ -11,9 +11,11 @@ from robosystems.adapters.sec.pipeline.catalog import (
   build_company,
   build_index,
   corpus_partitions,
+  filer_industries,
   filers,
   filings_by_cik,
   index_row,
+  industry_documents,
   one_filer_per_ticker,
   read_corpus,
   read_manifests,
@@ -241,6 +243,60 @@ class TestFold:
 
 
 @pytest.mark.unit
+class TestIndustries:
+  """A filer's place in the industry classification, joined on its CIK."""
+
+  def test_a_placed_filer_carries_its_industries_primary_first(self, corpus):
+    entities, _, _ = corpus
+    industries = filers(entities)[NVDA]["industries"]
+    assert industries[0]["primary"] is True
+    assert industries[0]["id"].startswith("technology/semiconductors")
+    assert industries[0]["labels"][:2] == ["Technology", "Semiconductors"]
+    assert [m["primary"] for m in industries[1:]] == [False] * (len(industries) - 1)
+
+  def test_a_filer_the_classification_does_not_place_has_none(self, corpus):
+    entities, _, _ = corpus
+    assert filers(entities)["0009999999"]["industries"] == []
+    assert filer_industries("0009999999") == []
+
+  def test_the_index_row_and_the_filer_file_carry_them(self, corpus):
+    entities, reports, links = corpus
+    rows = filers(entities)
+    by_cik = filings_by_cik(reports, links, entities, ["10-K", "10-Q"])
+    assert index_row(rows[NVDA], by_cik[NVDA])["industries"] == rows[NVDA]["industries"]
+    document = build_company(rows[NVDA], by_cik[NVDA], {}, viewer_url="https://v.test")
+    assert document["industries"] == rows[NVDA]["industries"]
+
+  def test_the_published_classification_names_no_private_columns(self):
+    vocabulary, companies = industry_documents()
+    assert vocabulary["count"] == len(vocabulary["industries"]) > 500
+    node = next(
+      n
+      for n in vocabulary["industries"]
+      if n["id"] == "health-care/biotechnology/clinical-stage"
+    )
+    assert node == {
+      "id": "health-care/biotechnology/clinical-stage",
+      "parent": "health-care/biotechnology",
+      "level": "industry",
+      "label": "Clinical Stage",
+      "labels": ["Health Care", "Biotechnology", "Clinical Stage"],
+      "carried": False,
+      "replaced_by": None,
+    }
+    assert companies["count"] == len(companies["companies"])
+    assert set(companies["companies"][0]) == {
+      "cik",
+      "key",
+      "name",
+      "industry",
+      "primary",
+      "method",
+      "confidence",
+      "review",
+    }
+
+
 class TestOneFilerPerTicker:
   """The catalog has one file per ticker; two filers can carry the same one."""
 
@@ -558,6 +614,7 @@ class TestPriorIndex:
       "renderable": True,
       "latest_renderable": {"accession": "x", "form": "10-K"},
       "predecessors": None,
+      "industries": None,
     }
     assert prior[NVDA]["renderable"] is False
     # A row with no CIK cannot be keyed and is dropped rather than crashing.
@@ -579,5 +636,6 @@ class TestPriorIndex:
         "renderable": False,
         "latest_renderable": None,
         "predecessors": None,
+        "industries": None,
       }
     }

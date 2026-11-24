@@ -78,6 +78,24 @@ def labels(node_id: str) -> list[str]:
   ]
 
 
+@lru_cache(maxsize=1)
+def memberships_by_cik() -> dict[str, tuple[dict[str, object], ...]]:
+  """cik -> the filer's industries as ``{id, labels, primary}``, primary first."""
+  out: dict[str, list[dict[str, object]]] = defaultdict(list)
+  for r in load_companies():
+    out[r["cik"]].append(
+      {
+        "id": r["industry"],
+        "labels": labels(r["industry"]),
+        "primary": r["primary"] == "yes",
+      }
+    )
+  return {
+    cik: tuple(sorted(rows, key=lambda m: not m["primary"]))
+    for cik, rows in out.items()
+  }
+
+
 def resolve(node_id: str) -> str | None:
   """The active id a stored id stands for: itself, or its successor when it has been
   retired. None when it is not in the vocabulary."""
