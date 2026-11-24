@@ -19,6 +19,7 @@ from .entity_taxonomy import EntityTaxonomy
 from .framework import Framework
 from .framework_bridge import FrameworkBridge
 from .framework_package import FrameworkPackage
+from .industry import Industry
 from .reporting_style_network import ReportingStyleNetwork
 
 # RoboInvestor extension
@@ -90,6 +91,7 @@ __all__ = [
   "Framework",
   "FrameworkBridge",
   "FrameworkPackage",
+  "Industry",
   "LineItem",
   # RoboInvestor
   "Portfolio",
