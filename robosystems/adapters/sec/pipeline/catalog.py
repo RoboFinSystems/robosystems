@@ -819,6 +819,9 @@ def sec_filing_catalog(
 
   written = 0
   failed = 0
+  # Filers whose own file did not upload: the index keeps what it last published
+  # for them, so the next run sees the difference and writes the file again.
+  unwritten: set[str] = set()
   summaries: dict[str, dict[str, Any]] = {}
   for cik in sorted(touched):
     filer, filings = listed[cik]
@@ -851,6 +854,8 @@ def sec_filing_catalog(
       )
       written += int(ok)
       failed += int(not ok)
+      if not ok and key == filer["ticker"]:
+        unwritten.add(cik)
 
   aliases_ok = writer.upload_string(
     _dump(
@@ -869,7 +874,14 @@ def sec_filing_catalog(
 
   index = build_index(
     [
-      index_row(filer, fs, summaries.get(cik) or prior.get(cik), merged.get(cik))
+      index_row(
+        {**filer, "industries": (prior.get(cik) or {}).get("industries") or []}
+        if cik in unwritten
+        else filer,
+        fs,
+        summaries.get(cik) or prior.get(cik),
+        merged.get(cik),
+      )
       for cik, (filer, fs) in listed.items()
     ],
     released_tickers(listed_tickers),
@@ -890,7 +902,7 @@ def sec_filing_catalog(
     industry_documents(),
     strict=True,
   ):
-    writer.upload_string(
+    failed += not writer.upload_string(
       _dump(body),
       public_bucket,
       key,

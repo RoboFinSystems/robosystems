@@ -101,6 +101,33 @@ class TestIndustry:
       )
     assert "health-care/biotechnology" in raised.value.suggestions
 
+  def test_a_label_suggests_its_broadest_node_first_and_a_long_value_is_cut(
+    self, two_entities
+  ):
+    with pytest.raises(UnknownIndustryError) as raised:
+      create_entity(
+        two_entities.session,
+        CreateEntityRequest(name="Cedar Row LLC", industry="Technology"),
+        created_by="u",
+      )
+    assert raised.value.suggestions[0] == "technology"
+    two_entities.session.rollback()
+    with pytest.raises(UnknownIndustryError) as raised:
+      update_entity(
+        two_entities.session, UpdateEntityRequest(industry="x" * 500), created_by="u"
+      )
+    assert len(str(raised.value)) < 200
+
+  def test_a_blank_industry_is_no_industry_on_create_and_update(self, two_entities):
+    session = two_entities.session
+    created = create_entity(
+      session, CreateEntityRequest(name="Cedar Row LLC", industry="  "), created_by="u"
+    )
+    assert created.industry is None
+    update_entity(session, UpdateEntityRequest(industry="technology"), created_by="u")
+    blanked = update_entity(session, UpdateEntityRequest(industry=""), created_by="u")
+    assert blanked.industry is None
+
   def test_update_sets_refuses_and_clears(self, two_entities):
     session = two_entities.session
     set_ = update_entity(

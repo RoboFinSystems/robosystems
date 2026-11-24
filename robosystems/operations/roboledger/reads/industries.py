@@ -17,6 +17,8 @@ from robosystems.models.extensions import Industry
 __all__ = ["UnknownIndustryError", "list_industries", "resolve_industry"]
 
 _SUGGESTIONS = 5
+# How much of a refused value the message repeats.
+_ECHO = 80
 
 
 class UnknownIndustryError(ValueError):
@@ -28,7 +30,8 @@ class UnknownIndustryError(ValueError):
       if suggestions
       else " Read the `industries` field for the list."
     )
-    super().__init__(f"Industry {value!r} is not in the classification.{hint}")
+    shown = value if len(value) <= _ECHO else f"{value[:_ECHO]}…"
+    super().__init__(f"Industry {shown!r} is not in the classification.{hint}")
     self.suggestions = suggestions
 
 
@@ -80,11 +83,18 @@ def resolve_industry(session: Session, value: str) -> str:
 
   active = [r for r in _rows(session) if not r.replaced_by]
   needle = wanted.lower()
+
   # A label typed as the value ("Biotechnology") names its nodes outright.
-  by_label = [str(r.id) for r in active if str(r.label).lower() == needle]
+  # The broadest node of that name first: "Technology" means the sector.
+  def depth(node_id: str) -> tuple[int, str]:
+    return (node_id.count("/"), node_id)
+
+  by_label = sorted(
+    (str(r.id) for r in active if str(r.label).lower() == needle), key=depth
+  )
   ids = [str(r.id) for r in active]
   slug = needle.replace(" & ", "-and-").replace(" ", "-")
-  by_tail = [i for i in ids if i.rsplit("/", 1)[-1] == slug]
+  by_tail = sorted((i for i in ids if i.rsplit("/", 1)[-1] == slug), key=depth)
   close = get_close_matches(slug, ids, n=_SUGGESTIONS, cutoff=0.6)
   suggestions = list(dict.fromkeys([*by_label, *by_tail, *close]))[:_SUGGESTIONS]
   raise UnknownIndustryError(value, suggestions)
