@@ -705,14 +705,17 @@ class DuckDBStager:
     the tables' ticker and name only record who a row was written about. A filer
     the tables do not place is cleared, so the column never holds the SIC
     description the filing's projection wrote. Runs after every stage, so an edit
-    to the tables reaches every row. Returns (edges written, entities stamped).
+    to the tables reaches every row. Four writes, not one transaction: a failure
+    between them fails the stage, and the next run rebuilds all of it. Returns
+    (edges written, Entity rows changed), so an unchanged rerun reports 0 changed.
     """
     from robosystems.taxonomy import industries as vocabulary
 
-    nodes = [n for n in vocabulary.load_industries().values() if not n["replaced_by"]]
-    placements = vocabulary.load_companies()
     by_id = vocabulary.load_industries()
+    nodes = [n for n in by_id.values() if not n["replaced_by"]]
+    placements = vocabulary.load_companies()
 
+    # The tables' checker holds every node's parents to exist.
     def ancestor(node_id: str, depth: int) -> str | None:
       lineage = vocabulary.lineage(node_id)
       return by_id[lineage[depth]]["label"] if len(lineage) > depth else None
@@ -795,7 +798,7 @@ class DuckDBStager:
     counts = (_count(edges), _count(stamped))
     message = (
       f"Industry: {len(nodes)} nodes, {counts[0]:,} filer edges, "
-      f"{counts[1]:,} Entity rows stamped from {len(primaries):,} placed filers "
+      f"{counts[1]:,} Entity rows changed, {len(primaries):,} filers placed "
       f"in {time.time() - started:.1f}s"
     )
     logger.info(message)
