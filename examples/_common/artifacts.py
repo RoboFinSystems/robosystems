@@ -18,6 +18,8 @@ For a report at ``(graph_id, report_id)`` it writes, under ``out_dir``:
   frozen figure (this graph's own members only)
 * ``{stem}.zip``               — the XBRL 2.1 report package
 * ``{stem}-xbrl-validation.md``  — Arelle verdict (over the XBRL zip)
+* ``{stem}-holon-validation.md`` — xbrlkit verdict (over both holons, one per
+  named graph, plus the check that the report holds together)
 
 Every flavor comes from the product endpoint via the published SDK — the
 demos exercise the real download path, they don't reconstruct artifacts
@@ -53,9 +55,7 @@ def render_report_artifacts(
   lineage_path = out_dir / f"{stem}.lineage.holon.jsonld"
   xbrl_path = out_dir / f"{stem}.zip"
 
-  tavi = client.download_report_bundle(
-    graph_id, report_id, format="tavi", to=tavi_path
-  )
+  tavi = client.download_report_bundle(graph_id, report_id, format="tavi", to=tavi_path)
   holon = client.download_report_bundle(
     graph_id, report_id, format="holon-jsonld", to=holon_path
   )
@@ -72,10 +72,14 @@ def render_report_artifacts(
   print(f"  Lineage:  {lineage.path} ({len(lineage.content):,} bytes)")
   print(f"  XBRL 2.1: {xbrl.path} ({len(xbrl.content):,} bytes)")
 
-  # Container-free validation of the XBRL zip (Arelle). Deferred import keeps
-  # this module light for callers that only need the download.
-  from examples._common.validate import validate_arelle
+  # Container-free validation of the XBRL zip (Arelle) and of both holons
+  # (xbrlkit). Deferred import keeps this module light for callers that only
+  # need the download.
+  from examples._common.validate import validate_arelle, validate_holons
 
   xbrl_md = out_dir / f"{stem}-xbrl-validation.md"
   valid = validate_arelle(xbrl_path, xbrl_md, label)
   print(f"  Arelle:   {xbrl_md} ({'valid' if valid else 'INVALID'})")
+  holon_md = out_dir / f"{stem}-holon-validation.md"
+  conforms = validate_holons([holon_path, lineage_path], holon_md, label)
+  print(f"  xbrlkit:  {holon_md} ({'conforms' if conforms else 'DOES NOT CONFORM'})")

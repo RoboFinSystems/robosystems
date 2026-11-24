@@ -81,6 +81,22 @@ def test_artifacts_exist() -> None:
 
 
 @pytest.mark.parametrize("path", ARTIFACTS, ids=[p.name for p in ARTIFACTS])
+def test_every_holon_meets_the_format_and_its_report_holds(path: Path) -> None:
+  """Each named graph against its own shapes, the graphs together, and the
+  report read back: whole, footing, balanced. The external check on the
+  primary serialization, as Arelle is on the XBRL 2.1 package."""
+  from xbrlkit.holon import render, validate_holon_file
+
+  result = validate_holon_file(path)
+  assert result.ok, f"{path.name}:\n{render(result)}"
+  expected = {"scene", "projection", "boundary"}
+  if ".lineage." in path.name:
+    expected.add("lineage")
+  present = {name for name, graph in result.graphs.items() if graph.present}
+  assert present == expected, f"{path.name} carries {sorted(present)}"
+
+
+@pytest.mark.parametrize("path", ARTIFACTS, ids=[p.name for p in ARTIFACTS])
 def test_every_element_is_labelled(path: Path) -> None:
   """Drift 1: all five holons once carried zero element labels."""
   unlabelled = sorted(
