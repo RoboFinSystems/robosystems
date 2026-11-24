@@ -135,7 +135,7 @@ Parameters:
   # Email Configuration
   EmailFromAddress:
     Type: String
-    Default: "noreply@robosystems.ai"
+    Default: "hello@robosystems.ai"
     AllowedPattern: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$
 
   # Security Alerting

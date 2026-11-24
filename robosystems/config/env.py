@@ -366,7 +366,7 @@ class EnvConfig:
   # Email service configuration
   EMAIL_FROM_ADDRESS = get_str_env(
     "EMAIL_FROM_ADDRESS",
-    get_secret_value("EMAIL_FROM_ADDRESS", "noreply@robosystems.ai"),
+    get_secret_value("EMAIL_FROM_ADDRESS", "hello@robosystems.ai"),
   )
   EMAIL_FROM_NAME = get_str_env(
     "EMAIL_FROM_NAME",
