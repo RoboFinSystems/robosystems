@@ -354,6 +354,7 @@ jobs:
                 ParameterKey=ApiSecurityGroupId,ParameterValue=${{ steps.resolve-api-sg.outputs.api_sg_id }} \
                 ParameterKey=ContainerInsightsEnabled,ParameterValue=${{ inputs.container_insights_enabled }} \
                 ParameterKey=SNSAlertEmail,ParameterValue=\"${{ inputs.aws_sns_alert_email }}\" \
+                ParameterKey=EmailFromAddress,ParameterValue=\"${{ vars.EMAIL_FROM_ADDRESS || inputs.aws_sns_alert_email }}\" \
                 ParameterKey=SharedRawBucketArn,ParameterValue=\"${{ inputs.shared_raw_bucket_arn }}\" \
                 ParameterKey=SharedProcessedBucketArn,ParameterValue=\"${{ inputs.shared_processed_bucket_arn }}\" \
                 ParameterKey=DeploymentBucketArn,ParameterValue=\"${{ inputs.deployment_bucket_arn }}\" \

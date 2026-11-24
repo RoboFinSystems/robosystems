@@ -16,6 +16,13 @@ Parameters:
     Default: ""
     Description: Email for Dagster alerts (run failures, backup coverage gaps, stalled-provisioning write-offs); empty disables alarm notifications
 
+  # Email Configuration
+  EmailFromAddress:
+    Type: String
+    Default: "hello@robosystems.ai"
+    AllowedPattern: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$
+    Description: Sender of transactional email (the email job, storage capacity warnings); the same value the API stack takes, so both send from one address
+
   # Infrastructure & Networking
   VpcId:
     Type: AWS::EC2::VPC::Id
@@ -722,6 +729,8 @@ Resources:
             # Run coordinator configuration
             - Name: DAGSTER_MAX_CONCURRENT_RUNS
               Value: !Ref MaxConcurrentRuns
+            - Name: EMAIL_FROM_ADDRESS
+              Value: !Ref EmailFromAddress
             # Frontend URLs (for transactional email links)
             - Name: ROBOSYSTEMS_URL
               Value: !Ref RoboSystemsAppUrl
@@ -944,6 +953,8 @@ Resources:
               Value: !Ref PublicDataCDNURL
             - Name: DAGSTER_MAX_CONCURRENT_RUNS
               Value: !Ref MaxConcurrentRuns
+            - Name: EMAIL_FROM_ADDRESS
+              Value: !Ref EmailFromAddress
             # Frontend URLs (for transactional email links)
             - Name: ROBOSYSTEMS_URL
               Value: !Ref RoboSystemsAppUrl
