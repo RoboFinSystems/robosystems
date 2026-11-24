@@ -543,9 +543,10 @@ def get_report_download_url(
   The API never streams bytes. The holon is stamped at publish and again at
   filing; the Tavi, the XBRL 2.1, the DataBook and the holon with lineage are
   materialized on first download and cached under a
-  ``generation_count``-versioned key, which never goes stale. The DataBook is
-  written from the stored holon, so a received report has one too. (A generation stamped before the holon became the
-  anchor materializes it the same way.) The holon with lineage is the books
+  ``generation_count``-versioned key, which never goes stale. (A generation
+  stamped before the holon became the anchor materializes the holon the same
+  way.) The DataBook is written from the stored holon, so a received report
+  has one too. The holon with lineage is the books
   behind the report, so the download is logged with ``actor_id``, and a report
   shared in from another graph never has one: lineage does not cross the
   graph boundary.
@@ -694,8 +695,8 @@ def _refuse_local_rederivation(report_id: str, origin: str, artifact: str) -> No
       # Only the holon is kept for a report that arrived as a file.
       raise ReportBundleNotAvailableError(
         f"Report '{report_id}' was received as a file and is kept as a holon "
-        f"only, so it has no {artifact}. Download it as `holon-jsonld`; "
-        f"xbrlkit converts a holon to other formats."
+        f"only, so it has no {artifact}. Download it as `holon-jsonld`, or as "
+        f"`databook` to read it; xbrlkit converts a holon to other formats."
       )
     raise ReportBundleNotAvailableError(
       f"Report '{report_id}' was received as a file and its {artifact} is no "

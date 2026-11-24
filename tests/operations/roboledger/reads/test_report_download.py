@@ -152,10 +152,14 @@ class TestReceivedReportsAreNeverRederived:
       expected = (
         "ingest the file again" if flavor == "holon-jsonld" else "kept as a holon only"
       )
-      with pytest.raises(ReportBundleNotAvailableError, match=expected):
+      with pytest.raises(ReportBundleNotAvailableError, match=expected) as refused:
         get_report_download_url(session, "kg1", "rpt_1", flavor=flavor)
 
     build.assert_not_called()
+    # A format the file does not have points at the two it does.
+    if flavor != "holon-jsonld":
+      assert "`holon-jsonld`" in str(refused.value)
+      assert "`databook`" in str(refused.value)
 
   @pytest.mark.unit
   @pytest.mark.parametrize("flavor", ["holon-jsonld", "xbrl-2.1", "tavi"])
@@ -273,6 +277,11 @@ class TestDataBook:
     assert up_kwargs["content"] == "# the report"
     assert up_kwargs["key"] == "report-bundles/kg1/rpt_1/g3.databook.md"
     assert up_kwargs["content_type"] == "text/markdown; charset=utf-8"
+    # The link serves what was just written, as Markdown, under its own name.
+    _, sign_kwargs = s3.generate_presigned_url.call_args
+    assert sign_kwargs["key"] == "report-bundles/kg1/rpt_1/g3.databook.md"
+    assert sign_kwargs["response_content_type"] == "text/markdown; charset=utf-8"
+    assert sign_kwargs["response_content_disposition"].endswith('rpt_1-g3.databook.md"')
 
   @pytest.mark.unit
   def test_an_authored_report_with_no_holon_in_storage_gets_one_first(self):

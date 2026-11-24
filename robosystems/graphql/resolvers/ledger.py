@@ -1629,11 +1629,11 @@ class LedgerQuery:
     field returns the URL, never the bytes. The holon is stamped at
     publish time; the Tavi, the XBRL, the DataBook and the holon with lineage
     are materialized and cached on first request. `DATABOOK` is the report as
-    Markdown a person reads, written from the holon and pointing back at it. `HOLON_JSONLD_LINEAGE` carries
-    the books behind the report's frozen figures, so it is for this graph's
-    members only: a report shared in from another graph raises
-    `REPORT_BUNDLE_NOT_AVAILABLE` for it. `expiresIn`
-    is the URL's lifetime in seconds, bounded 60-3600.
+    Markdown a person reads, written from the holon and pointing back at it.
+    `HOLON_JSONLD_LINEAGE` carries the books behind the report's frozen
+    figures, so it is for this graph's members only: a report shared in from
+    another graph raises `REPORT_BUNDLE_NOT_AVAILABLE` for it. `expiresIn` is
+    the URL's lifetime in seconds, bounded 60-3600.
 
     Returns null when the report doesn't exist; raises
     `REPORT_BUNDLE_NOT_AVAILABLE` when it exists but has no published
