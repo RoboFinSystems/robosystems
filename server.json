@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "ai.robosystems/robosystems",
   "title": "RoboSystems",
-  "description": "The open-source knowledge graph for finance: your ledger and 8,000+ public companies' XBRL filings",
-  "version": "1.10.3",
+  "description": "The open-source knowledge graph for finance: your books or portfolio beside 8,000+ SEC filers",
+  "version": "1.10.4",
   "websiteUrl": "https://robosystems.ai",
   "repository": {
     "url": "https://github.com/RoboFinSystems/robosystems",
