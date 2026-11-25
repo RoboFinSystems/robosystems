@@ -16,6 +16,7 @@ import pytest
 
 from robosystems.operations.operators.implementations.mapping.constants import (
   FAC_TO_RS_GAAP_FALLBACK,
+  TRAIT_FALLBACK,
 )
 from robosystems.taxonomy.discovery import framework_root
 from robosystems.taxonomy.loader import load_taxonomy_package
@@ -73,3 +74,7 @@ class TestFallbackBucketsWired:
       FAC_TO_RS_GAAP_FALLBACK["fac:CostOfRevenue"]
       == "rs-gaap:OtherCostOfOperatingRevenue"
     )
+
+  def test_every_trait_bucket_is_one_of_the_wired_fallbacks(self) -> None:
+    # The operator's buckets come from the table the test above pins.
+    assert set(TRAIT_FALLBACK.values()) <= set(FAC_TO_RS_GAAP_FALLBACK.values())

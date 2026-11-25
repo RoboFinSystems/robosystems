@@ -23,6 +23,7 @@ from robosystems.operations.operators.base import (
 )
 from robosystems.operations.operators.implementations.mapping.constants import (
   RS_GAAP_NAME_PATTERN_OVERRIDES,
+  TRAIT_FALLBACK,
 )
 from robosystems.operations.operators.implementations.mapping.prompt import (
   MAPPING_SYSTEM_PROMPT,
@@ -59,6 +60,33 @@ def _deterministic_rs_gaap_override(coa_elem: dict) -> str | None:
     if pattern.search(text):
       return qname
   return None
+
+
+async def _write_mapping(
+  create_tool, mapping_id: str, element_id: str, target: str, confidence: float
+) -> str:
+  """Write one mapping arc: ``written``, ``refused`` (history in a closed
+  month) or ``failed``. The tool reports a rejection rather than raising."""
+  try:
+    written = await create_tool.execute(
+      {
+        "mapping_id": mapping_id,
+        "from_element_id": element_id,
+        "to_element_id": target,
+        "confidence": confidence,
+        "association_type": "mapping",
+        "suggested_by": "mapping-agent",
+      }
+    )
+  except Exception as e:
+    logger.warning(f"rs-gaap mapping create failed for {element_id}: {e}")
+    return "failed"
+  if isinstance(written, dict) and written.get("error"):
+    logger.warning(
+      f"rs-gaap mapping create rejected for {element_id}: {written.get('error')}"
+    )
+    return "refused" if written.get("error") in _CLOSED_HISTORY_CODES else "failed"
+  return "written"
 
 
 @register_operator("mapping")
@@ -232,31 +260,20 @@ class MappingOperator(Operator):
       if e.get("nets_against") and not _deterministic_rs_gaap_override(e)
     ]
     for elem in netted:
-      try:
-        written = await create_tool.execute(
-          {
-            "mapping_id": mapping_id,
-            "from_element_id": elem["id"],
-            "to_element_id": elem["nets_against"]["element_id"],
-            "confidence": 1.0,
-            "association_type": "mapping",
-            "suggested_by": "mapping-agent",
-          }
-        )
-      except Exception as e:
-        logger.warning(f"contra mapping create failed for {elem['id']}: {e}")
+      outcome = await _write_mapping(
+        create_tool, mapping_id, elem["id"], elem["nets_against"]["element_id"], 1.0
+      )
+      if outcome == "written":
+        mapped += 1
+      elif outcome == "refused":
+        refused_closed_history += 1
+      else:
         skipped += 1
-        continue
-      if isinstance(written, dict) and written.get("error"):
-        if written.get("error") in _CLOSED_HISTORY_CODES:
-          refused_closed_history += 1
-        else:
-          skipped += 1
-        continue
-      mapped += 1
     processed += len(netted)
     netted_ids = {e["id"] for e in netted}
     elements = [e for e in elements if e["id"] not in netted_ids]
+    # What the model could not place, for the bucket of its kind.
+    unplaced: list[dict] = []
 
     # Group by (EFS trait, liquidity); liquidity is None outside assets and
     # liabilities. Elements with no EFS trait are reported as ``unclassified``.
@@ -286,7 +303,7 @@ class MappingOperator(Operator):
     for (cls, liq), cls_elements in by_group.items():
       candidates = candidates_by_group.get((cls, liq), [])
       if not candidates:
-        skipped += len(cls_elements)
+        unplaced.extend(cls_elements)
         processed += len(cls_elements)
         continue
 
@@ -315,11 +332,11 @@ class MappingOperator(Operator):
           batch_ids = {e["id"] for e in batch}
           for missing_id in batch_ids - seen_in_batch.keys():
             logger.warning(
-              "Bedrock omitted element %s from %s mapping batch — counting as skipped",
+              "Bedrock omitted element %s from %s mapping batch",
               missing_id,
               cls,
             )
-            skipped += 1
+            unplaced.append(elem_by_id[missing_id])
 
           for m in seen_in_batch.values():
             target = m.get("target_id")
@@ -340,7 +357,7 @@ class MappingOperator(Operator):
             elif target and confidence >= CONFIDENCE_MIN_MAP:
               outcome = "flagged"
             else:
-              skipped += 1
+              unplaced.append(elem_by_id[m["element_id"]])
               continue
 
             # Count only once the write lands: the tool returns
@@ -390,6 +407,27 @@ class MappingOperator(Operator):
           percent=(processed / total) * 100,
         )
 
+    # An account the model could not place takes the "Other" line of its
+    # kind, flagged for review, so the statements balance on first sight and
+    # the account still reaches a person.
+    bucketed = 0
+    for elem in unplaced:
+      qname = TRAIT_FALLBACK.get((elem.get("trait") or "", elem.get("liquidity")))
+      target = await self._resolve_qname_to_id(ctx, qname) if qname else None
+      if target is None:
+        skipped += 1
+        continue
+      outcome = await _write_mapping(
+        create_tool, mapping_id, elem["id"], target, CONFIDENCE_MIN_MAP
+      )
+      if outcome == "written":
+        flagged += 1
+        bucketed += 1
+      elif outcome == "refused":
+        refused_closed_history += 1
+      else:
+        skipped += 1
+
     try:
       summary = await summary_tool.execute({"mapping_id": mapping_id})
       coverage_percent = summary.get("coverage_percent", 0)
@@ -399,6 +437,8 @@ class MappingOperator(Operator):
     content = (
       f"Mapped {mapped} elements, flagged {flagged} for review, skipped {skipped}"
     )
+    if bucketed:
+      content += f"; {bucketed} of the flagged placed on an Other line of their kind"
     if unclassified:
       content += (
         f"; {len(unclassified)} unclassified (no EFS trait — needs classification)"
@@ -416,6 +456,7 @@ class MappingOperator(Operator):
         "flagged": flagged,
         "skipped": skipped,
         "refused_closed_history": refused_closed_history,
+        "bucketed": bucketed,
         "unclassified": len(unclassified),
         "unclassified_elements": [
           {"id": e["id"], "name": e.get("name")} for e in unclassified[:50]

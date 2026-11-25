@@ -76,6 +76,19 @@ FAC_TO_RS_GAAP_FALLBACK: dict[str, str] = {
 }
 
 
+# The "Other" bucket for an account the model could not place, by its EFS
+# trait and liquidity. Written flagged for review, never approved: an unmapped
+# account stops the close, and a bucketed one must still reach a person.
+# Revenue, equity and contra accounts have no bucket that is safe to guess.
+TRAIT_FALLBACK: dict[tuple[str, str | None], str] = {
+  ("asset", "current"): FAC_TO_RS_GAAP_FALLBACK["fac:CurrentAssets"],
+  ("asset", "noncurrent"): FAC_TO_RS_GAAP_FALLBACK["fac:NoncurrentAssets"],
+  ("liability", "current"): FAC_TO_RS_GAAP_FALLBACK["fac:CurrentLiabilities"],
+  ("liability", "noncurrent"): FAC_TO_RS_GAAP_FALLBACK["fac:NoncurrentLiabilities"],
+  ("expense", None): FAC_TO_RS_GAAP_FALLBACK["fac:OperatingExpenses"],
+}
+
+
 # (regex, qname) overrides for synthesized-detail accounts the model collapses
 # into the net parent; matched case-insensitively on name + code. Only names
 # that are unambiguous belong here (accumulated amortization is not: it maps to
