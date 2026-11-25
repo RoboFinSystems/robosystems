@@ -964,7 +964,6 @@ def _associations_to_linkbases(
 
 
 NEGATED_LABEL_ROLE = "http://www.xbrl.org/2009/role/negatedLabel"
-TERSE_LABEL_ROLE = "http://www.xbrl.org/2003/role/terseLabel"
 PERIOD_START_LABEL_ROLE = "http://www.xbrl.org/2003/role/periodStartLabel"
 PERIOD_END_LABEL_ROLE = "http://www.xbrl.org/2003/role/periodEndLabel"
 _PARENT_CHILD = "http://www.xbrl.org/2003/arcrole/parent-child"
@@ -1003,10 +1002,9 @@ def _apply_preferred_labels(
   The engine keeps neither in its networks, so the export adds them:
 
   - a cash flow row its parent subtracts (a gain presented from its income
-    statement fact) takes ``negatedLabel``, shown at its cash effect, whether
-    or not the summation ships (``subtracted``);
-  - a cash flow row whose fact already holds its cash effect takes
-    ``terseLabel``, which words it for that sign and flips nothing;
+    statement fact, an asset's change in balance) takes ``negatedLabel``,
+    shown at its cash effect, whether or not the summation ships
+    (``subtracted``);
   - an equity roll-forward, whose capital concept the engine holds as the
     parent of its movements, takes the XBRL shape: a header with the capital
     concept first under ``periodStartLabel``, the movements, and the capital
@@ -1016,7 +1014,6 @@ def _apply_preferred_labels(
   bundle must also declare.
   """
   from robosystems.operations.roboledger.reports.fact_grid import (
-    CASH_EFFECT_ROWS,
     cash_effect_wording,
   )
 
@@ -1037,8 +1034,6 @@ def _apply_preferred_labels(
         concept = by_qname.get(arc.to_qname)
         if weight is not None and weight < 0:
           arc.preferred_label = NEGATED_LABEL_ROLE
-        elif arc.to_qname in CASH_EFFECT_ROWS:
-          arc.preferred_label = TERSE_LABEL_ROLE
         else:
           continue
         # The role, not the text, is what flips a negated row's sign.

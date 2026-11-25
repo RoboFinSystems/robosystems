@@ -14,7 +14,6 @@ from __future__ import annotations
 import pytest
 
 from robosystems.operations.roboledger.reports.fact_grid import (
-  CASH_EFFECT_ROWS,
   cash_effect_wording,
 )
 from robosystems.taxonomy import load_taxonomy_package
@@ -243,36 +242,54 @@ class TestSubsidiarySaleGain:
 
 
 class TestCashEffectRows:
-  """A change row derived from an asset holds its cash effect, so it is worded
-  "(Increase) Decrease"; one derived from a liability reads as named."""
+  """A change row states the change in its balance, as the concept names it
+  and as filers tag it: a rise in receivables is a positive fact. Operating
+  cash subtracts a change in an asset and adds a change in a liability, and a
+  subtracted row is worded "(Increase) Decrease" for its cash effect."""
 
-  def _derived_from(self, pkg: TaxonomyPackage) -> dict[str, float | None]:
-    return {
-      a.from_qname: a.weight
-      for a in pkg.associations
-      if a.role == _ROLE_BASE + "CashFlowStatement"
-      and a.from_qname.startswith("rs-gaap:IncreaseDecreaseIn")
-    }
+  def _operating(self, pkg: TaxonomyPackage) -> dict[str, float | None]:
+    return _equation(
+      pkg, "CashFlowStatement", "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+    )
 
-  def test_every_asset_change_row_is_worded_for_cash(
+  def test_a_change_row_states_the_change_in_its_balance(
     self, calculations: TaxonomyPackage
   ) -> None:
-    assets = {
-      qname
-      for qname, weight in self._derived_from(calculations).items()
-      if weight == -1.0
-    }
-    assert assets
-    assert assets <= CASH_EFFECT_ROWS
+    derived = [
+      a
+      for a in calculations.associations
+      if a.association_type == "derivation"
+      and a.role == _ROLE_BASE + "CashFlowStatement"
+      and a.from_qname.startswith("rs-gaap:IncreaseDecreaseIn")
+    ]
+    assert derived
+    assert {a.weight for a in derived} == {1.0}
 
-  def test_no_liability_change_row_is(self, calculations: TaxonomyPackage) -> None:
-    liabilities = {
-      qname
-      for qname, weight in self._derived_from(calculations).items()
-      if weight == 1.0
-    }
-    assert liabilities
-    assert not liabilities & CASH_EFFECT_ROWS
+  def test_operating_cash_subtracts_an_assets_change_and_adds_a_liabilitys(
+    self, calculations: TaxonomyPackage
+  ) -> None:
+    library = load_taxonomy_package(_PACKAGES / "rs-gaap" / "v1" / "taxonomy.jsonld")
+    balance = {e.qname: e.balance_type for e in library.elements}
+    operating = self._operating(calculations)
+    checked = 0
+    for arc in calculations.associations:
+      if (
+        arc.association_type == "derivation"
+        and arc.role == _ROLE_BASE + "CashFlowStatement"
+        and arc.from_qname.startswith("rs-gaap:IncreaseDecreaseIn")
+        and arc.from_qname in operating
+      ):
+        expected = -1.0 if balance[arc.to_qname] == "debit" else 1.0
+        assert operating[arc.from_qname] == expected, arc.from_qname
+        checked += 1
+    assert checked >= 10
+
+  def test_the_reconciling_leaf_is_a_change_in_operating_capital(
+    self, calculations: TaxonomyPackage
+  ) -> None:
+    """Net operating capital rises as cash goes out, so it is subtracted too."""
+    operating = self._operating(calculations)
+    assert operating["rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet"] == -1.0
 
   def test_every_row_worded_for_cash_has_a_pair_to_swap(
     self, calculations: TaxonomyPackage
@@ -288,7 +305,7 @@ class TestCashEffectRows:
       and a.from_qname == "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
       and a.weight == -1.0
     }
-    rows = subtracted | CASH_EFFECT_ROWS
+    rows = subtracted
     assert len(rows) == 11
     unchanged = {q for q in rows if cash_effect_wording(labels[q]) == labels[q]}
     assert unchanged == set()

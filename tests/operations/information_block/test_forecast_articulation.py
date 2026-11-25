@@ -337,6 +337,44 @@ class TestDerivedCashFlow:
     assert cf["recon"] == pytest.approx(plug)
     assert cf["cf_net"] == pytest.approx(delta_cash)  # foots exactly
 
+  def test_an_asset_change_and_the_plug_state_their_own_sign(self):
+    """Operating cash subtracts a change in an asset and the change in
+    operating capital: the facts state the change, the plug is negated onto
+    its leaf, and the statement still foots to the change in cash."""
+    calc = {
+      **CALC,
+      "cf_op": [
+        ("ni", 1.0),
+        ("dda", 1.0),
+        ("d_ar", -1.0),
+        ("d_prepaid", -1.0),
+        ("d_ap", 1.0),
+        ("recon", -1.0),
+      ],
+    }
+    order = topo_sort_calculations(calc)
+    ctx = _ctx()
+    ctx.derivations = {
+      **ctx.derivations,
+      "d_ar": [("ar", 1.0)],
+      "d_prepaid": [("prepaid", 1.0)],
+    }
+    bs = {**BS_PRIOR, "ar": 150.0, "ap": 62.0, "prepaid": 11.0, "re": 132.0}
+    bs["cash"] = 75.0
+    cf, plug = derive_cash_flow(
+      ctx,
+      bs=bs,
+      prior_bs=dict(BS_PRIOR),
+      resolved_is={"ni": 10.0},
+      calculations=calc,
+      calc_order=order,
+    )
+    assert cf["d_ar"] == pytest.approx(50.0)  # receivables rose 50
+    assert cf["d_prepaid"] == pytest.approx(-1.0)  # prepaid fell 1
+    assert plug == pytest.approx(2.0)  # the cash effect the lines miss
+    assert cf["recon"] == pytest.approx(-2.0)
+    assert cf["cf_net"] == pytest.approx(25.0)  # foots exactly
+
   def test_direct_leaf_never_double_counts_with_derivation(self):
     # dda has BOTH a direct IS value and a derivation source that moved.
     ctx = _ctx()

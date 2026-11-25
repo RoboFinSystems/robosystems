@@ -3125,14 +3125,17 @@ class TestCashFlowRowWording:
     _show_cash_signed(list(rows), hierarchy, {"operating": weights})
     return list(rows)
 
-  def test_an_asset_change_keeps_its_value_under_the_cash_wording(self) -> None:
+  def test_an_asset_change_is_shown_at_its_cash_effect(self) -> None:
+    """Receivables rose 667: the fact says so, and operating cash subtracts it,
+    so the row reads -667 under "(Increase) Decrease"."""
     [row] = self._shown(
       self._row(
         "ar",
         "rs-gaap:IncreaseDecreaseInAccountsReceivable",
         "Increase (Decrease) in Accounts Receivable",
-        -667.0,
-      )
+        667.0,
+      ),
+      subtract="ar",
     )
     assert row.element_name == "(Increase) Decrease in Accounts Receivable"
     assert row.values == [-667.0]

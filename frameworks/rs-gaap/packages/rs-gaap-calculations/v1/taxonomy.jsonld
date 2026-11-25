@@ -1259,7 +1259,7 @@
       },
       "associationType": "calculation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
-      "weight": 1.0,
+      "weight": -1.0,
       "order": 300.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
@@ -1274,7 +1274,7 @@
       },
       "associationType": "calculation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
-      "weight": 1.0,
+      "weight": -1.0,
       "order": 400.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
@@ -1289,7 +1289,7 @@
       },
       "associationType": "calculation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
-      "weight": 1.0,
+      "weight": -1.0,
       "order": 500.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
@@ -1319,7 +1319,7 @@
       },
       "associationType": "calculation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
-      "weight": 1.0,
+      "weight": -1.0,
       "order": 700.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
@@ -1334,7 +1334,7 @@
       },
       "associationType": "derivation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
-      "weight": -1.0,
+      "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association"
     },
@@ -1348,7 +1348,7 @@
       },
       "associationType": "derivation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
-      "weight": -1.0,
+      "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association"
     },
@@ -1362,7 +1362,7 @@
       },
       "associationType": "derivation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
-      "weight": -1.0,
+      "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association"
     },
@@ -1654,7 +1654,7 @@
       },
       "associationType": "derivation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
-      "weight": -1.0,
+      "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association"
     },
@@ -2231,7 +2231,7 @@
       },
       "associationType": "calculation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
-      "weight": 1.0,
+      "weight": -1.0,
       "order": 1100.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
@@ -2891,7 +2891,7 @@
       },
       "associationType": "calculation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
-      "weight": 1.0,
+      "weight": -1.0,
       "order": 1500.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
@@ -2981,7 +2981,7 @@
       },
       "associationType": "derivation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
-      "weight": -1.0,
+      "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association"
     },

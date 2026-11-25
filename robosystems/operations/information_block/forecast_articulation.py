@@ -39,6 +39,7 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   _CF_NET_CHANGE_QNAME,
   _CF_OPERATING_SUBTOTAL_QNAME,
   _CF_RECONCILING_LEAF_QNAME,
+  cash_effect_sign,
 )
 from robosystems.operations.roboledger.reports.flow_activity import FLOW_ACTIVITIES_SQL
 
@@ -512,7 +513,11 @@ def derive_cash_flow(
     computed = resolve_calc_dag(cf, set(cf), calculations, calc_order)
     residual = delta_cash - computed.get(ctx.net_change_element_id, 0.0)
     if abs(residual) > _RECONCILE_TOLERANCE and ctx.recon_element_id is not None:
-      cf[ctx.recon_element_id] = cf.get(ctx.recon_element_id, 0.0) + residual
+      # The plug is a cash effect; the leaf's fact states its own sign.
+      sign = cash_effect_sign(
+        calculations, ctx.operating_element_id, ctx.recon_element_id
+      )
+      cf[ctx.recon_element_id] = cf.get(ctx.recon_element_id, 0.0) + residual * sign
       plug = residual
 
   # Emission set mirrors the actual monthly CF sets: nonzero leaves plus
