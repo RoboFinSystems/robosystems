@@ -740,7 +740,8 @@ def test_the_consolidation_entitys_cash_flow_nets_to_nothing(tenant):
   cf = _cash_flow(tenant, entity_id=ADJUSTMENTS)
   assert cf[REPAYMENTS] == 100.0, cf
   assert cf.get(NET_CHANGE, 0.0) == 0.0, cf
-  assert cf[RECONCILING] == -100.0, cf
+  # A cash effect of -100, on a leaf operating cash subtracts.
+  assert cf[RECONCILING] == 100.0, cf
 
 
 DUE_FROM_ROW = "rs-gaap:IncreaseDecreaseInDueFromAffiliatesCurrent"
@@ -814,7 +815,8 @@ def test_an_elimination_that_falls_away_when_a_member_leaves_is_no_flow(
 
   while_in = _cash_flow(tenant, period=JAN, periods=[JAN, FEB], entity_id=ADJUSTMENTS)
   assert while_in[DUE_TO_ROW] == -435.0, while_in
-  assert while_in[DUE_FROM_ROW] == 435.0, while_in
+  # The receivable fell by 435: the fact is the change in the balance.
+  assert while_in[DUE_FROM_ROW] == -435.0, while_in
 
   after = _cash_flow(tenant, period=FEB, periods=[JAN, FEB], entity_id=ADJUSTMENTS)
   assert after.get(DUE_TO_ROW, 0.0) == 0.0, after
@@ -1155,7 +1157,8 @@ def test_a_multi_mapped_account_counts_once(tenant):
   _post(tenant, [("cogs", 364, 0), ("inventory", 0, 364)])
   cf = _cash_flow(tenant)
   assert cf.get(OTHER_NONCASH, 0.0) == 0.0, cf
-  assert cf["rs-gaap:IncreaseDecreaseInInventories"] == 364.0
+  # Inventory fell by 364: the fact is the change in the balance.
+  assert cf["rs-gaap:IncreaseDecreaseInInventories"] == -364.0
   _assert_no_reconciling_adjustment(cf)
 
 

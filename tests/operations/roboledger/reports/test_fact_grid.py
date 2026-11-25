@@ -3125,14 +3125,17 @@ class TestCashFlowRowWording:
     _show_cash_signed(list(rows), hierarchy, {"operating": weights})
     return list(rows)
 
-  def test_an_asset_change_keeps_its_value_under_the_cash_wording(self) -> None:
+  def test_an_asset_change_is_shown_at_its_cash_effect(self) -> None:
+    """Receivables rose 667: the fact says so, and operating cash subtracts it,
+    so the row reads -667 under "(Increase) Decrease"."""
     [row] = self._shown(
       self._row(
         "ar",
         "rs-gaap:IncreaseDecreaseInAccountsReceivable",
         "Increase (Decrease) in Accounts Receivable",
-        -667.0,
-      )
+        667.0,
+      ),
+      subtract="ar",
     )
     assert row.element_name == "(Increase) Decrease in Accounts Receivable"
     assert row.values == [-667.0]
@@ -3186,3 +3189,24 @@ class TestCashFlowRowWording:
   )
   def test_the_wording_swaps_the_paired_words(self, label: str, worded: str) -> None:
     assert cash_effect_wording(label) == worded
+
+
+class TestCashEffectSign:
+  CALCULATIONS = {"operating": [("d_ap", 1.0), ("d_ar", -1.0)]}
+
+  @pytest.mark.parametrize(
+    ("parent", "leaf", "sign"),
+    [
+      ("operating", "d_ap", 1.0),
+      ("operating", "d_ar", -1.0),
+      ("operating", "absent", 1.0),
+      ("other", "d_ar", 1.0),
+      (None, "d_ar", 1.0),
+    ],
+  )
+  def test_the_sign_is_the_leafs_weight_into_its_subtotal(
+    self, parent: str | None, leaf: str, sign: float
+  ) -> None:
+    from robosystems.operations.roboledger.reports.fact_grid import cash_effect_sign
+
+    assert cash_effect_sign(self.CALCULATIONS, parent, leaf) == sign

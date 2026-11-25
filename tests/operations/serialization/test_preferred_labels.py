@@ -21,7 +21,6 @@ from robosystems.operations.serialization.bundle import (
   NEGATED_LABEL_ROLE,
   PERIOD_END_LABEL_ROLE,
   PERIOD_START_LABEL_ROLE,
-  TERSE_LABEL_ROLE,
   BundleArc,
   BundleElement,
   BundleLinkbaseLink,
@@ -165,15 +164,16 @@ def test_a_subtracted_row_is_worded_for_its_cash_effect() -> None:
   }
 
 
-def test_a_row_holding_its_cash_effect_is_reworded_without_negating() -> None:
+def test_an_asset_change_is_negated_and_worded_for_its_cash_effect() -> None:
+  """The fact states the rise in receivables; operating cash subtracts it."""
   linkbases, concept = _cash_flow_row(
     "rs-gaap:IncreaseDecreaseInAccountsReceivable",
     "Increase (Decrease) in Accounts Receivable",
-    1.0,
+    -1.0,
   )
-  assert linkbases.presentation_links[0].arcs[0].preferred_label == TERSE_LABEL_ROLE
+  assert linkbases.presentation_links[0].arcs[0].preferred_label == NEGATED_LABEL_ROLE
   assert concept.role_labels == {
-    TERSE_LABEL_ROLE: "(Increase) Decrease in Accounts Receivable"
+    NEGATED_LABEL_ROLE: "(Increase) Decrease in Accounts Receivable"
   }
 
 
@@ -301,7 +301,7 @@ def test_the_holon_carries_the_reworded_row_to_the_report_page() -> None:
   linkbases, concept = _cash_flow_row(
     "rs-gaap:IncreaseDecreaseInAccountsReceivable",
     "Increase (Decrease) in Accounts Receivable",
-    1.0,
+    -1.0,
   )
   bundle = _bundle(
     schema_concepts=[concept, _element(OPERATING, period_type="duration")],
@@ -312,7 +312,7 @@ def test_the_holon_carries_the_reworded_row_to_the_report_page() -> None:
   model = from_holon_json(serialize_to_holon_jsonld(bundle))
   row = model.concepts[concept.qname]
   assert any(
-    label.role == TERSE_LABEL_ROLE
+    label.role == NEGATED_LABEL_ROLE
     and label.value == "(Increase) Decrease in Accounts Receivable"
     for label in row.labels
   )

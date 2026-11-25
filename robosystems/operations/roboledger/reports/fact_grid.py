@@ -732,20 +732,6 @@ def _equity_outside_every_rollforward(
   ]
 
 
-# Cash flow rows on an asset or on operating capital, whose facts hold the cash
-# effect: a rise in the balance is negative, which "Increase (Decrease)" would
-# read as a fall.
-CASH_EFFECT_ROWS: frozenset[str] = frozenset(
-  {
-    "rs-gaap:IncreaseDecreaseInAccountsReceivable",
-    "rs-gaap:IncreaseDecreaseInDueFromAffiliatesCurrent",
-    "rs-gaap:IncreaseDecreaseInInventories",
-    "rs-gaap:IncreaseDecreaseInOtherCurrentAssets",
-    "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet",
-    "rs-gaap:IncreaseDecreaseInPrepaidExpense",
-  }
-)
-
 _PAIRED_WORDING = re.compile(
   r"\b(Increase|Gains?|Income) \((Decrease|Loss(?:es)?|Expense)\)"
 )
@@ -764,8 +750,9 @@ def _show_cash_signed(
 ) -> None:
   """Show a cash flow row its section subtracts (a gain, presented from its
   income statement fact) at its cash effect, as a negated label would, so
-  every section reads as a plain sum, and word it and the rows already holding
-  their cash effect to match. The fact keeps its own sign."""
+  every section reads as a plain sum, and word it to match: an asset's change
+  in balance, subtracted, reads "(Increase) Decrease". The fact keeps its own
+  sign."""
   parent_of: dict[str, str] = {}
 
   def _walk(node: _HierarchyNode) -> None:
@@ -784,7 +771,7 @@ def _show_cash_signed(
   for row in rows:
     if row.element_id in subtracted:
       row.values = [None if v is None else 0.0 - v for v in row.values]
-    if row.element_id in subtracted or row.element_qname in CASH_EFFECT_ROWS:
+    if row.element_id in subtracted:
       row.element_name = cash_effect_wording(row.element_name)
 
 
@@ -1765,6 +1752,23 @@ _CF_OPERATING_SUBTOTAL_QNAME = "rs-gaap:NetCashProvidedByUsedInOperatingActiviti
 # A reconciling plug above this fraction of operating cash signals an
 # un-itemized non-cash item or a misclassified flow. Shared with guard_rails.
 _CF_PLUG_WARN_RATIO = 0.25
+
+
+def cash_effect_sign(
+  calculations: dict[str, list[tuple[str, float]]],
+  parent_id: str | None,
+  leaf_id: str,
+) -> float:
+  """The sign that turns a cash flow leaf's cash effect into its fact: its
+  calculation weight into its subtotal. A liability's change states its cash
+  effect (+1); an asset's change states the change in its balance, as the
+  concept says, and the subtotal subtracts it (-1). Cash flow arcs are unit
+  weights, so only the sign is read; a leaf with no arc states its cash
+  effect."""
+  for child, weight in calculations.get(parent_id or "", []):
+    if child == leaf_id:
+      return -1.0 if weight < 0 else 1.0
+  return 1.0
 
 
 def _primary_mapping(line: str) -> str:
@@ -2931,13 +2935,26 @@ def _emit_noncash_and_settlement_facts(
     ).fetchall()
   }
   working_leaves = set(working_leaf.values())
+  # A correction is reckoned as a cash effect; a leaf whose fact states the
+  # change in an asset's balance takes it negated.
+  signs: dict[str, float] = {}
+  if working_leaves & {element_id for element_id, _, _ in adjustments}:
+    calculations = load_rs_gaap_calculations(session)
+    operating_id = session.execute(
+      text("SELECT id FROM elements WHERE qname = :q"),
+      {"q": _CF_OPERATING_SUBTOTAL_QNAME},
+    ).scalar()
+    signs = {
+      leaf: cash_effect_sign(calculations, operating_id, leaf)
+      for leaf in working_leaves
+    }
   for (element_id, start, end), cents in adjustments.items():
     row = meta.get(element_id)
     if row is None or not round(cents):
       continue
     if element_id in working_leaves and (element_id, start, end) not in derived:
       continue
-    value = cents_to_dollars(round(cents))
+    value = cents_to_dollars(round(cents * signs.get(element_id, 1.0)))
     for f in facts:
       if f.element_id == element_id and f.period_start == start and f.period_end == end:
         # Marked before the addition: the mark keeps the value as it was.
@@ -3068,7 +3085,7 @@ def _reconcile_operating_to_cash(
         element_name=recon.name or _CF_RECONCILING_LEAF_QNAME,
         classification=None,
         balance_type=recon.balance_type or "debit",
-        value=residual,
+        value=residual * cash_effect_sign(calculations, operating_id, recon_leaf_id),
         period_start=current.start,
         period_end=current.end,
         period_type="duration",
