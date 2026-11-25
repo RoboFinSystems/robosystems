@@ -169,3 +169,68 @@ async def test_a_write_that_raises_is_skipped_not_mapped():
 
   assert result.metadata["mapped"] == 0
   assert result.metadata["skipped"] == 1
+
+
+async def _run_with(elements, create_result, mappings):
+  create = _Tool(create_result)
+  tools = _Tools(
+    {
+      "GetUnmappedElementsTool": _Tool(
+        {"elements": elements, "unmapped_count": len(elements)}
+      ),
+      "SuggestMappingTool": _Tool({"candidates": [{"id": "rs_cash"}]}),
+      "CreateMappingAssociationTool": create,
+      "GetMappingSummaryTool": _Tool({"error": "not measured"}),
+    }
+  )
+  op = MappingOperator.__new__(MappingOperator)
+  model = AsyncMock(return_value=mappings)
+  with patch.object(MappingOperator, "_map_batch", model):
+    result = await op._run_single_pass(_Ctx(tools))
+  return result, create, model
+
+
+_NETS = {"element_id": "rs_intangibles_net", "qname": "rs-gaap:X", "name": "Net"}
+
+
+@pytest.mark.asyncio
+async def test_a_contra_takes_its_gross_siblings_concept_without_the_model():
+  contra = {
+    "id": "el_amort",
+    "name": "Accumulated Amortization",
+    "trait": "contraAsset",
+    "nets_against": _NETS,
+  }
+  result, create, model = await _run_with([contra], {"association_id": "a"}, [])
+
+  assert create.calls == [
+    {
+      "mapping_id": "map_1",
+      "from_element_id": "el_amort",
+      "to_element_id": "rs_intangibles_net",
+      "confidence": 1.0,
+      "association_type": "mapping",
+      "suggested_by": "mapping-agent",
+    }
+  ]
+  model.assert_not_called()
+  assert result.metadata["mapped"] == 1
+
+
+@pytest.mark.asyncio
+async def test_accumulated_depreciation_keeps_its_name_rule():
+  """The PP&E contra concept wins over the gross sibling's, as before."""
+  contra = {
+    "id": "el_dep",
+    "name": "Accumulated Depreciation",
+    "trait": "contraAsset",
+    "nets_against": _NETS,
+  }
+  result, create, model = await _run_with(
+    [contra],
+    {"association_id": "a"},
+    [{"element_id": "el_dep", "target_id": "rs_cash", "confidence": 0.5}],
+  )
+
+  model.assert_called_once()
+  assert all(c["to_element_id"] != "rs_intangibles_net" for c in create.calls)

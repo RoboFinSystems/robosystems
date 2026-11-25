@@ -222,6 +222,42 @@ class MappingOperator(Operator):
     refused_closed_history = 0
     processed = 0
 
+    # A contra-asset nets against its gross sibling: the chart says what it
+    # reduces, which its name cannot, so it takes the sibling's concept
+    # without the model. The accumulated-depreciation name rule keeps
+    # precedence.
+    netted = [
+      e
+      for e in elements
+      if e.get("nets_against") and not _deterministic_rs_gaap_override(e)
+    ]
+    for elem in netted:
+      try:
+        written = await create_tool.execute(
+          {
+            "mapping_id": mapping_id,
+            "from_element_id": elem["id"],
+            "to_element_id": elem["nets_against"]["element_id"],
+            "confidence": 1.0,
+            "association_type": "mapping",
+            "suggested_by": "mapping-agent",
+          }
+        )
+      except Exception as e:
+        logger.warning(f"contra mapping create failed for {elem['id']}: {e}")
+        skipped += 1
+        continue
+      if isinstance(written, dict) and written.get("error"):
+        if written.get("error") in _CLOSED_HISTORY_CODES:
+          refused_closed_history += 1
+        else:
+          skipped += 1
+        continue
+      mapped += 1
+    processed += len(netted)
+    netted_ids = {e["id"] for e in netted}
+    elements = [e for e in elements if e["id"] not in netted_ids]
+
     # Group by (EFS trait, liquidity); liquidity is None outside assets and
     # liabilities. Elements with no EFS trait are reported as ``unclassified``.
     unclassified: list[dict] = []
