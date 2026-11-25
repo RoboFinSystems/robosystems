@@ -18,6 +18,10 @@ class RdfFlavor(StrEnum):
   # each value linked to its fact; derived from the stored holon on first
   # download.
   DATABOOK = "databook"
+  # The holon as an Excel workbook (``rdf/workbook.py``): a sheet per section,
+  # every number the reported fact; derived from the stored holon on first
+  # download.
+  WORKBOOK = "workbook"
 
 
 class XbrlFlavor(StrEnum):

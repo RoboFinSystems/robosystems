@@ -1038,11 +1038,16 @@ class ReportDownloadFormat(Enum):
   inline XBRL is to XBRL, a rendering with the facts in it, so it leaves the
   arrangement, the roll-ups and the breakdowns by axis to the holon, which it
   names by digest. Written from the stored holon on first download.
+  `WORKBOOK` is the holon as an Excel file: a sheet per section, a row per
+  line, a column per period and each line's breakdowns beneath it. Every
+  number is the reported fact and no cell is a formula. Also written from the
+  stored holon on first download.
   """
 
   HOLON_JSONLD = "holon-jsonld"
   HOLON_JSONLD_LINEAGE = "holon-jsonld-lineage"
   DATABOOK = "databook"
+  WORKBOOK = "workbook"
   XBRL_2_1 = "xbrl-2.1"
   TAVI = "tavi"
 

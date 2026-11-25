@@ -174,6 +174,7 @@ def test_bundle_definition_warns_the_link_is_a_credential(client):
     "holon-jsonld",
     "holon-jsonld-lineage",
     "databook",
+    "workbook",
     "tavi",
     "xbrl-2.1",
   ]

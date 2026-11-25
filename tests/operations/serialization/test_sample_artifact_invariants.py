@@ -217,3 +217,39 @@ def test_no_calculation_arc_is_emitted_twice(path: Path) -> None:
     f"the same role, which doubles the subtotal they foot — regenerate this demo. "
     f"First: {list(duplicated)[:2]}"
   )
+
+
+@pytest.mark.parametrize("path", PUBLISHED, ids=[p.name for p in PUBLISHED])
+def test_the_workbook_of_a_holon_opens_and_names_that_holon(path: Path) -> None:
+  """The workbook download, written from a real holon: it opens, it names the
+  holon by digest, and every section with a fact has a sheet of numbers."""
+  import hashlib
+  from io import BytesIO
+
+  import openpyxl
+  from xbrlkit.holon.pivot import pivot_sections
+
+  from robosystems.operations.serialization.rdf.workbook import (
+    serialize_holon_to_workbook,
+  )
+
+  text = path.read_text(encoding="utf-8")
+  book = openpyxl.load_workbook(
+    BytesIO(serialize_holon_to_workbook(text, holon_filename=path.name))
+  )
+  contents = book["Contents"]
+  stated = {row[0].value: row[1].value for row in contents.iter_rows(max_row=12)}
+  assert stated["Holon SHA-256"] == hashlib.sha256(text.encode("utf-8")).hexdigest()
+  assert stated["Holon file"] == path.name
+
+  sections = pivot_sections(from_holon_report(text)[0])
+  assert len(book.sheetnames) == len(sections) + 1
+  for sheet in book.worksheets[1:]:
+    cells = [c for row in sheet.iter_rows(min_row=6) for c in row]
+    assert all(c.data_type != "f" for c in cells), f"{sheet.title} holds a formula"
+  assert any(
+    isinstance(c.value, (int, float))
+    for sheet in book.worksheets[1:]
+    for row in sheet.iter_rows(min_row=6)
+    for c in row
+  )

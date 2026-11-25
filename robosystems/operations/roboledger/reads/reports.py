@@ -541,12 +541,12 @@ def get_report_download_url(
   """Resolve a presigned URL for a published Report's serialization bundle.
 
   The API never streams bytes. The holon is stamped at publish and again at
-  filing; the Tavi, the XBRL 2.1, the DataBook and the holon with lineage are
-  materialized on first download and cached under a
+  filing; the Tavi, the XBRL 2.1, the DataBook, the workbook and the holon
+  with lineage are materialized on first download and cached under a
   ``generation_count``-versioned key, which never goes stale. (A generation
   stamped before the holon became the anchor materializes the holon the same
-  way.) The DataBook is written from the stored holon, so a received report
-  has one too. The holon with lineage is the books
+  way.) The DataBook and the workbook are written from the stored holon, so a
+  received report has them too. The holon with lineage is the books
   behind the report, so the download is logged with ``actor_id``, and a report
   shared in from another graph never has one: lineage does not cross the
   graph boundary.
@@ -645,6 +645,21 @@ def get_report_download_url(
       origin=report.origin,
     )
 
+  if flavor == RdfFlavor.WORKBOOK.value:
+    if report.generation_status != "published":
+      raise ReportBundleNotAvailableError(
+        f"Report '{report_id}' is not published — publish or regenerate the "
+        f"report to produce a workbook."
+      )
+    return _materialize_and_presign_workbook(
+      session=session,
+      graph_id=graph_id,
+      report_id=report_id,
+      generation_count=generation_count,
+      expires_in=expires_in,
+      origin=report.origin,
+    )
+
   # TAVI is in XbrlFlavor, so it precedes that branch.
   if flavor == XbrlFlavor.TAVI.value:
     if report.generation_status != "published":
@@ -696,7 +711,8 @@ def _refuse_local_rederivation(report_id: str, origin: str, artifact: str) -> No
       raise ReportBundleNotAvailableError(
         f"Report '{report_id}' was received as a file and is kept as a holon "
         f"only, so it has no {artifact}. Download it as `holon-jsonld`, or as "
-        f"`databook` to read it; xbrlkit converts a holon to other formats."
+        f"`databook` or `workbook` to read it; xbrlkit converts a holon to "
+        f"other formats."
       )
     raise ReportBundleNotAvailableError(
       f"Report '{report_id}' was received as a file and its {artifact} is no "
@@ -934,6 +950,82 @@ def _materialize_and_presign_databook(
     generation_count=generation_count,
     # A projection by design: what it leaves to the holon, on every response.
     omitted_content=list(DATABOOK_OMITTED_CONTENT),
+  )
+
+
+def _materialize_and_presign_workbook(
+  session: Session,
+  graph_id: str,
+  report_id: str,
+  generation_count: int,
+  expires_in: int,
+  origin: str = "authored",
+) -> ReportBundleDownloadResponse:
+  """Presign the workbook, writing it from the stored holon on first download.
+
+  Built as the DataBook is: from the holon in storage, never from the rows,
+  so its contents sheet names the file a reader can download beside it.
+  """
+  from robosystems.operations.serialization.rdf.workbook import (
+    WORKBOOK_CONTENT_TYPE,
+    WORKBOOK_EXTENSION,
+    WORKBOOK_OMITTED_CONTENT,
+    serialize_holon_to_workbook,
+  )
+
+  bucket = env.USER_DATA_BUCKET
+  key = get_report_bundle_key(
+    graph_id, report_id, generation_count, extension=WORKBOOK_EXTENSION
+  )
+  s3 = S3Client()
+
+  if not s3.object_exists(bucket, key):
+    holon_key = _ensure_holon_stored(
+      s3, session, graph_id, report_id, generation_count, origin
+    )
+    holon = s3.read_string(bucket, holon_key)
+    if holon is None:
+      raise BundleSigningError(
+        f"Failed to read the holon for report '{report_id}' to write its workbook."
+      )
+    uploaded = s3.upload_bytes(
+      content=serialize_holon_to_workbook(
+        holon, holon_filename=f"{report_id}-g{generation_count}.holon.jsonld"
+      ),
+      bucket=bucket,
+      key=key,
+      content_type=WORKBOOK_CONTENT_TYPE,
+      metadata={"report-id": report_id, "graph-id": graph_id},
+    )
+    if not uploaded:
+      logger.error(
+        "Workbook upload failed for report %s at s3://%s/%s", report_id, bucket, key
+      )
+      raise BundleSigningError(
+        f"Failed to materialize workbook for report '{report_id}'."
+      )
+
+  download_url = s3.generate_presigned_url(
+    bucket=bucket,
+    key=key,
+    expires_in=expires_in,
+    response_content_type=WORKBOOK_CONTENT_TYPE,
+    response_content_disposition=(
+      f'attachment; filename="{report_id}-g{generation_count}{WORKBOOK_EXTENSION}"'
+    ),
+  )
+  if download_url is None:
+    raise BundleSigningError(
+      f"Failed to sign download URL for report '{report_id}' workbook."
+    )
+
+  return ReportBundleDownloadResponse(
+    download_url=download_url,
+    expires_at=datetime.now(UTC) + timedelta(seconds=expires_in),
+    content_type=WORKBOOK_CONTENT_TYPE,
+    format=RdfFlavor.WORKBOOK.value,
+    generation_count=generation_count,
+    omitted_content=list(WORKBOOK_OMITTED_CONTENT),
   )
 
 

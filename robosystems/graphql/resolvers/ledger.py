@@ -1627,9 +1627,10 @@ class LedgerQuery:
     The only way to download a report's bundle. Every format resolves to a
     short-lived presigned S3 URL which the client follows directly — the
     field returns the URL, never the bytes. The holon is stamped at
-    publish time; the Tavi, the XBRL, the DataBook and the holon with lineage
-    are materialized and cached on first request. `DATABOOK` is the report as
-    Markdown a person reads, written from the holon and pointing back at it.
+    publish time; the Tavi, the XBRL, the DataBook, the workbook and the holon
+    with lineage are materialized and cached on first request. `DATABOOK` is
+    the report as Markdown a person reads, written from the holon and pointing
+    back at it. `WORKBOOK` is the report as an Excel file, a sheet per section.
     `HOLON_JSONLD_LINEAGE` carries the books behind the report's frozen
     figures, so it is for this graph's members only: a report shared in from
     another graph raises `REPORT_BUNDLE_NOT_AVAILABLE` for it. `expiresIn` is

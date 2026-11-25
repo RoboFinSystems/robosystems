@@ -4000,7 +4000,7 @@ dependencies = [
     { name = "uvicorn" },
     { name = "uvloop", marker = "sys_platform != 'win32'" },
     { name = "webauthn" },
-    { name = "xbrlkit" },
+    { name = "xbrlkit", extra = ["xlsx"] },
     { name = "zstandard" },
 ]
 
@@ -4108,7 +4108,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.48.0,<1.0" },
     { name = "uvloop", marker = "sys_platform != 'win32'", specifier = ">=0.21.0,<1.0" },
     { name = "webauthn", specifier = ">=2.7.0,<3.0" },
-    { name = "xbrlkit", specifier = ">=0.24.0,<0.25.0" },
+    { name = "xbrlkit", extras = ["xlsx"], specifier = ">=0.25.0,<0.26.0" },
     { name = "zstandard", specifier = ">=0.23,<1" },
 ]
 provides-extras = ["dev"]
@@ -4983,7 +4983,7 @@ wheels = [
 
 [[package]]
 name = "xbrlkit"
-version = "0.24.1"
+version = "0.25.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "arelle-release" },
@@ -4995,9 +4995,14 @@ dependencies = [
     { name = "regex" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/71/3d/3ac93344c5667b67f77eb755a0a6d862758cc2975d4066513a652b3cbb9f/xbrlkit-0.24.1.tar.gz", hash = "sha256:89ab988798a8767ae0caaa2a5c003cd60541842cdbf83214c4a56ce1edb080d6", size = 2209944, upload-time = "2026-11-24T20:55:14.416Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cc/20/a48bbb6c18c7c06270bc31e01b6d6a3ecb0d60c7cb20007aebc6ccf9d8ee/xbrlkit-0.25.2.tar.gz", hash = "sha256:178c8724c1cf530a3dab9401ed6c0a0cae2474d820862641dd6cabd6b0366a06", size = 2225833, upload-time = "2026-11-25T03:41:47.359Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/63/f5/cc5d59d92851fff25f38660505015836fdccd7e2ef6fac6f47c4f9b63494/xbrlkit-0.24.1-py3-none-any.whl", hash = "sha256:e3357de14a5ce517498cbcb303bb2c786c5b02e21d6ba8f1a66ed58870825214", size = 2137247, upload-time = "2026-11-24T20:55:12.501Z" },
+    { url = "https://files.pythonhosted.org/packages/32/94/023f178f8f320dd6a4bf53380fbc7f8867a8224ca53e2d98242e4ffaf75a/xbrlkit-0.25.2-py3-none-any.whl", hash = "sha256:74d2bba2747547f5d82c242dc1282afb0749cf930809c28663a2cefc89cb2690", size = 2150129, upload-time = "2026-11-25T03:41:45.874Z" },
+]
+
+[package.optional-dependencies]
+xlsx = [
+    { name = "openpyxl" },
 ]
 
 [[package]]

@@ -590,7 +590,7 @@ class ReportBundleDownloadResponse(BaseModel):
 
   Every flavor resolves to a short-lived presigned URL pointing at the
   bundle in S3 — the holon is stamped at publish time; the Tavi, the
-  XBRL 2.1 and the DataBook are materialized on first download and cached by
+  XBRL 2.1, the DataBook and the workbook are materialized on first download and cached by
   `generation_count`.
   The client follows `download_url` to fetch the artifact directly
   from S3 (the API never streams the bytes). Mirrors the

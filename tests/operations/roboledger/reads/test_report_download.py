@@ -160,6 +160,7 @@ class TestReceivedReportsAreNeverRederived:
     if flavor != "holon-jsonld":
       assert "`holon-jsonld`" in str(refused.value)
       assert "`databook`" in str(refused.value)
+      assert "`workbook`" in str(refused.value)
 
   @pytest.mark.unit
   @pytest.mark.parametrize("flavor", ["holon-jsonld", "xbrl-2.1", "tavi"])
@@ -749,3 +750,85 @@ class TestLineageHolon:
     assert len(served) == 1
     message = served[0].args[0] % served[0].args[1:]
     assert "usr_9" in message and "rpt_1" in message and "g3" in message
+
+
+class TestWorkbook:
+  """The workbook is written from the stored holon, as the DataBook is."""
+
+  _TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+  @pytest.mark.unit
+  def test_cache_hit_presigns_without_reading_the_holon(self):
+    session = _session(_report())
+    with patch(f"{_REPORTS}.S3Client") as s3_cls:
+      s3 = s3_cls.return_value
+      s3.object_exists.return_value = True
+      s3.generate_presigned_url.return_value = "https://signed.example/workbook"
+      resp = get_report_download_url(session, "kg1", "rpt_1", flavor="workbook")
+
+    assert resp is not None
+    assert resp.format == "workbook"
+    assert resp.content_type == self._TYPE
+    s3.read_string.assert_not_called()
+    s3.upload_bytes.assert_not_called()
+    _, kwargs = s3.generate_presigned_url.call_args
+    assert kwargs["key"] == "report-bundles/kg1/rpt_1/g3.xlsx"
+    assert kwargs["response_content_disposition"].endswith('rpt_1-g3.xlsx"')
+    # It draws the breakdowns, so unlike the DataBook it does not omit them.
+    assert "dimensional_facts" not in resp.omitted_content
+    assert "sparse_period_facts" in resp.omitted_content
+    assert "calculation_links" in resp.omitted_content
+
+  @pytest.mark.unit
+  def test_cache_miss_writes_it_from_the_stored_holon(self):
+    session = _session(_report())
+    with (
+      patch(f"{_REPORTS}.S3Client") as s3_cls,
+      patch("robosystems.operations.serialization.build_report_bundle") as build,
+      patch(
+        "robosystems.operations.serialization.rdf.workbook.workbook_from_holon",
+        return_value=b"PK-the-workbook",
+      ) as project,
+    ):
+      s3 = s3_cls.return_value
+      s3.object_exists.side_effect = TestDataBook._exists({"g3.holon.jsonld"})
+      s3.read_string.return_value = '{"@graph": []}'
+      s3.upload_bytes.return_value = True
+      s3.generate_presigned_url.return_value = "https://signed.example/workbook"
+      resp = get_report_download_url(session, "kg1", "rpt_1", flavor="workbook")
+
+    assert resp is not None
+    # The holon was already in storage: nothing is rebuilt from the rows.
+    build.assert_not_called()
+    _, read_args = s3.read_string.call_args[0]
+    assert read_args == "report-bundles/kg1/rpt_1/g3.holon.jsonld"
+    project.assert_called_once_with('{"@graph": []}', href="rpt_1-g3.holon.jsonld")
+    _, up_kwargs = s3.upload_bytes.call_args
+    assert up_kwargs["content"] == b"PK-the-workbook"
+    assert up_kwargs["key"] == "report-bundles/kg1/rpt_1/g3.xlsx"
+    assert up_kwargs["content_type"] == self._TYPE
+    _, sign_kwargs = s3.generate_presigned_url.call_args
+    assert sign_kwargs["key"] == "report-bundles/kg1/rpt_1/g3.xlsx"
+    assert sign_kwargs["response_content_type"] == self._TYPE
+
+  @pytest.mark.unit
+  def test_a_draft_report_has_none(self):
+    report = _report()
+    report.generation_status = "draft"
+    session = _session(report)
+    with patch(f"{_REPORTS}.S3Client"):
+      with pytest.raises(ReportBundleNotAvailableError, match="workbook"):
+        get_report_download_url(session, "kg1", "rpt_1", flavor="workbook")
+
+  @pytest.mark.unit
+  def test_a_received_report_whose_holon_is_gone_has_none(self):
+    session = _session(_report(source_graph_id="kg_sender"))
+    with (
+      patch(f"{_REPORTS}.S3Client") as s3_cls,
+      patch("robosystems.operations.serialization.build_report_bundle") as build,
+    ):
+      s3_cls.return_value.object_exists.return_value = False
+      with pytest.raises(ReportBundleNotAvailableError, match="holon"):
+        get_report_download_url(session, "kg1", "rpt_1", flavor="workbook")
+
+    build.assert_not_called()
