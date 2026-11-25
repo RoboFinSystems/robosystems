@@ -9,9 +9,13 @@ alone, so it is derived from the stored artifact and never from the rows.
 
 from __future__ import annotations
 
+from xbrlkit import __version__ as XBRLKIT_VERSION
 from xbrlkit.holon.workbook import CONTENT_TYPE, EXTENSION, workbook_from_holon
 
 WORKBOOK_EXTENSION = EXTENSION
+# Where a built workbook is kept; the writer's version is in the name, as for
+# the DataBook, so an upgrade of xbrlkit is not answered from an older file.
+WORKBOOK_CACHE_EXTENSION = f".xbrlkit-{XBRLKIT_VERSION}{WORKBOOK_EXTENSION}"
 WORKBOOK_CONTENT_TYPE = CONTENT_TYPE
 
 # What the holon carries that the workbook does not. It draws every section

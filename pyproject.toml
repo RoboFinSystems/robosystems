@@ -9,7 +9,7 @@ authors = [
 license = {text = "Apache-2.0"}
 keywords = ["robosystems", "financial", "graph", "knowledge graph", "intelligence"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Framework :: FastAPI",
     "Intended Audience :: Developers",
     "Intended Audience :: Financial and Insurance Industry",
