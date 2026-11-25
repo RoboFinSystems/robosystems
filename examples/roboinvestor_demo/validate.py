@@ -97,6 +97,35 @@ def _first_row(
   return (result.data or [{}])[0]
 
 
+def _check_copy_renders(
+  checks: Checks,
+  ledger: Any,
+  investor_graph: str,
+  issuer_graph: str,
+  copy: Any,
+  report_id: str | None,
+) -> None:
+  """The shared copy renders every block the source report does.
+
+  Delivery and traversal can both pass over a copy whose package is empty,
+  so this reads the package the app renders from.
+  """
+  from .main import _field
+
+  package = ledger.get_report_package(investor_graph, _field(copy, "id"))
+  items = package.items if package else []
+  rendered = [
+    i for i in items if i.block.view.rendering and i.block.view.rendering.rows
+  ]
+  source = ledger.get_report_package(issuer_graph, report_id) if report_id else None
+  expected = len(source.items) if source else None
+  checks.check(
+    "shared copy renders every block of the source report",
+    bool(items) and len(rendered) == len(items) and len(items) == expected,
+    f"{len(rendered)} of {len(items)} items render; the source has {expected}",
+  )
+
+
 def _validate_received(
   checks: Checks,
   *,
@@ -418,6 +447,7 @@ def validate_run(
         _field(copy, "source_report_id", None),
         report_id,
       )
+      _check_copy_renders(checks, ledger, investor_graph, issuer_graph, copy, report_id)
 
     # Holdings roll up by issuer; the platform-native one must carry its
     # source graph rather than the "unlinked" sentinel.
