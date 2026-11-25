@@ -153,3 +153,16 @@ def test_a_contra_with_no_parent_is_left_to_a_person(chart) -> None:
   contra = _account(chart, "1420", "Accumulated Amortization", "contraAsset")
 
   assert _offer(chart, contra) is None
+
+
+def test_a_sibling_mapped_to_two_concepts_leaves_the_contra_to_a_person(chart) -> None:
+  """Read across every mapping, the sibling can name two concepts; neither is
+  the contra's to take."""
+  parent = _account(chart, "1400", "Intangible Assets", "asset")
+  gross = _account(chart, "1410", "Gross Intangible Assets", "asset", parent)
+  contra = _account(chart, "1420", "Accumulated Amortization", "contraAsset", parent)
+  _map(chart, gross, NET)
+  _map(chart, gross, "rs-gaap:Goodwill")
+
+  unmapped = list_unmapped_elements(chart["session"])
+  assert next(e for e in unmapped if e.id == contra.id).nets_against is None

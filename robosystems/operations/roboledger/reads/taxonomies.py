@@ -482,14 +482,21 @@ def _gross_sibling_targets(
   }
   if not sibling_of:
     return {}
-  targets = dict(
-    session.execute(
-      select(Association.from_element_id, Association.to_element_id).where(
-        *mapping_arcs,
-        Association.from_element_id.in_(set(sibling_of.values())),
-      )
-    ).all()
-  )
+  # Read across every mapping, a sibling can map to two concepts; then there
+  # is nothing to offer.
+  concepts_of: dict[str, set[str]] = {}
+  for sibling_id, concept_id in session.execute(
+    select(Association.from_element_id, Association.to_element_id).where(
+      *mapping_arcs,
+      Association.from_element_id.in_(set(sibling_of.values())),
+    )
+  ).all():
+    concepts_of.setdefault(sibling_id, set()).add(concept_id)
+  targets = {
+    sibling_id: next(iter(ids))
+    for sibling_id, ids in concepts_of.items()
+    if len(ids) == 1
+  }
   concepts = {
     e.id: e
     for e in session.execute(
