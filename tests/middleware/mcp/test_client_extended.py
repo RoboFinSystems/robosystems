@@ -328,6 +328,54 @@ class TestSchemaInference:
     desc = client._get_relationship_description("UNKNOWN_REL")
     assert "UNKNOWN_REL relationship" in desc
 
+  def test_node_description_falls_back_to_the_declared_schema(self):
+    """A node the curated map omits takes its declared description, repository-
+    only tables included, rather than the generic placeholder."""
+    client = _create_client()
+    desc = client._get_node_description("Industry")
+    assert "sector, subsector, industry or sub-industry" in desc
+
+  def test_relationship_description_falls_back_to_the_declared_schema(self):
+    client = _create_client()
+    desc = client._get_relationship_description("ENTITY_HAS_INDUSTRY")
+    assert "is_primary" in desc
+
+  def test_declared_lookup_survives_a_loader_fault(self):
+    client = _create_client()
+    with patch(
+      "robosystems.schemas.loader.get_schema_loader",
+      side_effect=RuntimeError("extensions not importable"),
+    ):
+      assert client._get_node_description("Industry") == (
+        "Industry entities in the graph"
+      )
+
+  @pytest.mark.asyncio
+  async def test_get_schema_lists_declared_relationship_properties(self):
+    """Edge properties come from the declared schema; an edge with none
+    carries no properties key."""
+    client = _create_client()
+    client.execute_query = AsyncMock(
+      return_value=[
+        {"name": "ENTITY_HAS_INDUSTRY", "type": "REL"},
+        {"name": "ENTITY_HAS_REPORT", "type": "REL"},
+      ]
+    )
+    schema = await client.get_schema()
+    by_label = {s["label"]: s for s in schema}
+    industry_edge = by_label["ENTITY_HAS_INDUSTRY"]
+    assert (industry_edge["from_node"], industry_edge["to_node"]) == (
+      "Entity",
+      "Industry",
+    )
+    assert industry_edge["properties"] == [
+      "is_primary",
+      "method",
+      "confidence",
+      "review",
+    ]
+    assert "properties" not in by_label["ENTITY_HAS_REPORT"]
+
   def test_infer_relationship_nodes_known(self):
     client = _create_client()
     from_node, to_node = client._infer_relationship_nodes("ENTITY_HAS_REPORT")

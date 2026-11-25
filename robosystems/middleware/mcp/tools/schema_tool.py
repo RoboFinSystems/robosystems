@@ -33,7 +33,7 @@ class SchemaTool(BaseTool):
 
 **RETURNS:** A list of tables, nodes first, then relationships:
 - **Node**: `label`, `properties` (names only; the core node types list their key properties), and a `description` / `comment` when one exists
-- **Relationship**: `label`, `from_node`, `to_node`, and a `description` / `comment` when one exists
+- **Relationship**: `label`, `from_node`, `to_node`, `properties` when it carries any, and a `description` / `comment` when one exists
 
 Property data types, keys and row counts are not included.
 

@@ -5,7 +5,7 @@ import json
 import os
 import re
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from httpx import HTTPError, TimeoutException
@@ -22,6 +22,9 @@ from .exceptions import (
   GraphQueryTimeoutError,
   GraphValidationError,
 )
+
+if TYPE_CHECKING:
+  from robosystems.schemas.models import Node, Relationship
 
 # The engine's words for a query it rejected: the caller's mistake.
 _CALLER_QUERY_ERROR_PATTERNS = (
@@ -366,16 +369,18 @@ class GraphMCPClient:
         elif table_type.upper() == "REL":
           from_node, to_node = self._infer_relationship_nodes(table_name)
 
-          relationships.append(
-            {
-              "label": table_name,
-              "type": "relationship",
-              "comment": table_comment,
-              "from_node": from_node,
-              "to_node": to_node,
-              "description": self._get_relationship_description(table_name),
-            }
-          )
+          relationship: dict[str, Any] = {
+            "label": table_name,
+            "type": "relationship",
+            "comment": table_comment,
+            "from_node": from_node,
+            "to_node": to_node,
+            "description": self._get_relationship_description(table_name),
+          }
+          declared = self._declared_relationship(table_name)
+          if declared is not None and declared.properties:
+            relationship["properties"] = [p.name for p in declared.properties]
+          relationships.append(relationship)
 
       # Nodes before edges, each alphabetical: byte-stable output keeps
       # prompt caching effective.
@@ -473,7 +478,12 @@ class GraphMCPClient:
       "Transaction": "Financial transactions from accounting systems",
       "LineItem": "Individual accounting entries with debits/credits",
     }
-    return descriptions.get(node_name, f"{node_name} entities in the graph")
+    if node_name in descriptions:
+      return descriptions[node_name]
+    declared = self._declared_node(node_name)
+    if declared is not None and declared.description:
+      return declared.description
+    return f"{node_name} entities in the graph"
 
   def _get_relationship_description(self, rel_name: str) -> str:
     descriptions = {
@@ -509,21 +519,51 @@ class GraphMCPClient:
       "ENTRY_HAS_DIMENSION": "Links entries to dimensional qualifiers (fund, trust account, product channel)",
       "LINE_ITEM_RELATES_TO_ELEMENT": "Maps line items to XBRL elements for reporting",
     }
-    return descriptions.get(rel_name, f"{rel_name} relationship in the graph")
+    if rel_name in descriptions:
+      return descriptions[rel_name]
+    declared = self._declared_relationship(rel_name)
+    if declared is not None and declared.description:
+      return declared.description
+    return f"{rel_name} relationship in the graph"
+
+  def _declared_node(self, node_name: str) -> Node | None:
+    """The node as the platform schema declares it, repository-only tables
+    included (the default loader leaves those out). SHOW_TABLES decides what
+    a graph has; this only describes it."""
+    try:
+      from robosystems.schemas.base import REPOSITORY_ONLY_NODES
+      from robosystems.schemas.loader import get_schema_loader
+
+      declared = get_schema_loader().get_node_schema(node_name)
+      if declared is None:
+        declared = next((n for n in REPOSITORY_ONLY_NODES if n.name == node_name), None)
+      return declared
+    except Exception as e:  # never let a loader fault break schema retrieval
+      logger.warning(f"Declared-schema lookup failed for {node_name}: {e}")
+      return None
+
+  def _declared_relationship(self, rel_name: str) -> Relationship | None:
+    """The relationship as the platform schema declares it, repository-only
+    tables included."""
+    try:
+      from robosystems.schemas.base import REPOSITORY_ONLY_RELATIONSHIPS
+      from robosystems.schemas.loader import get_schema_loader
+
+      declared = get_schema_loader().get_relationship_schema(rel_name)
+      if declared is None:
+        declared = next(
+          (r for r in REPOSITORY_ONLY_RELATIONSHIPS if r.name == rel_name), None
+        )
+      return declared
+    except Exception as e:  # never let a loader fault break schema retrieval
+      logger.warning(f"Declared-schema lookup failed for {rel_name}: {e}")
+      return None
 
   def _infer_relationship_nodes(self, rel_name: str) -> tuple[str, str]:
     """Source and target labels: the declared schema first (several platform
     relationships break the naming patterns), then name-pattern inference for
     custom tables."""
-    try:
-      from robosystems.schemas.loader import get_schema_loader
-
-      declared = get_schema_loader().get_relationship_schema(rel_name)
-    except (
-      Exception
-    ) as e:  # pragma: no cover - never let a loader fault break schema retrieval
-      logger.warning(f"Declared-schema lookup failed for {rel_name}: {e}")
-      declared = None
+    declared = self._declared_relationship(rel_name)
     if declared is not None:
       return (declared.from_node, declared.to_node)
 
