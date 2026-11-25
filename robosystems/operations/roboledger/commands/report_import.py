@@ -65,9 +65,10 @@ HOLON_MEDIA_TYPE = "application/ld+json"
 _STATEMENT_BLOCK_TYPES = frozenset(
   {"balance_sheet", "income_statement", "cash_flow_statement", "equity_statement"}
 )
-_STRUCTURE_BLOCK_TYPES = _STATEMENT_BLOCK_TYPES | frozenset(
-  {"schedule", "reconciliation", "policy", "metric"}
-)
+# Any other section is read as a disclosure: the one other type a report
+# package renders from presentation arcs and facts alone.
+_DISCLOSURE_BLOCK_TYPE = "regulatory_disclosure"
+_STRUCTURE_BLOCK_TYPES = _STATEMENT_BLOCK_TYPES | {_DISCLOSURE_BLOCK_TYPE}
 
 
 class ReportImportRefusedError(Exception):
@@ -239,7 +240,7 @@ def import_report(
   )
   periods = {p.id: p for p in model.periods}
   units = {u.id: u for u in model.units}
-  written = 0
+  written: set[str] = set()
   for role, facts in sections.membership.items():
     dated = [periods[f.period_id] for f in facts if periods[f.period_id].end]
     if not dated:
@@ -275,7 +276,7 @@ def import_report(
           basis=basis,
         )
       )
-      written += 1
+      written.add(fact.id)
   session.flush()
   if replaced.report_ids:
     # What the restatement no longer uses goes with the report it replaced.
@@ -288,7 +289,7 @@ def import_report(
     entity_id=entity_id,
     period_end=period_end,
     kind=kind,
-    fact_count=written,
+    fact_count=len(written),
     structure_count=len(structure_ids),
     concepts_added=concepts_added,
     replaced_report_ids=replaced.report_ids,
@@ -451,17 +452,20 @@ class _Sections:
 
 
 def _sections(model: XbrlModel, loadable: list[XbrlFact]) -> _Sections:
-  """Each fact in one section: the first, in report order, that presents it."""
+  """Each fact in every section that presents it, as a report the ledger
+  writes holds it: net income on three statements is a row on each."""
   blocks = [b for b in plan_blocks(model) if b.renderable]
   by_role = fact_membership(model, blocks)
   membership: dict[str, list[XbrlFact]] = {}
   placed: set[str] = set()
   wanted = {f.id for f in loadable}
   for block in blocks:
+    here: set[str] = set()
     for fact in by_role.get(block.role_uri, []):
-      if fact.id in wanted and fact.id not in placed:
-        placed.add(fact.id)
+      if fact.id in wanted and fact.id not in here:
+        here.add(fact.id)
         membership.setdefault(block.role_uri, []).append(fact)
+    placed |= here
   loose = [f for f in loadable if f.id not in placed]
   if loose:
     membership[""] = loose
@@ -631,12 +635,14 @@ def _write_vocabulary(
     structure_name = f"{report_label}: {block.name}"
     names[block.role_uri] = structure_name
     block_type = (
-      block.block_type if block.block_type in _STRUCTURE_BLOCK_TYPES else None
+      block.block_type
+      if block.block_type in _STATEMENT_BLOCK_TYPES
+      else _DISCLOSURE_BLOCK_TYPE
     )
     structures.append(
       TaxonomyBlockStructureRequest(
         name=structure_name,
-        block_type=block_type or "custom",  # type: ignore[arg-type]
+        block_type=block_type,  # type: ignore[arg-type]
         role_uri=block.role_uri,
         description=block.definition,
         metadata={"received": True},
