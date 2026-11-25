@@ -546,7 +546,8 @@ def get_report_download_url(
   ``generation_count``-versioned key, which never goes stale. (A generation
   stamped before the holon became the anchor materializes the holon the same
   way.) The DataBook and the workbook are written from the stored holon, so a
-  received report has them too. The holon with lineage is the books
+  received report has them too; their keys also carry the xbrlkit version, so
+  a file an earlier writer built is rebuilt after an upgrade. The holon with lineage is the books
   behind the report, so the download is logged with ``actor_id``, and a report
   shared in from another graph never has one: lineage does not cross the
   graph boundary.
@@ -890,6 +891,7 @@ def _materialize_and_presign_databook(
   download beside it, digest and all.
   """
   from robosystems.operations.serialization.rdf.databook import (
+    DATABOOK_CACHE_EXTENSION,
     DATABOOK_CONTENT_TYPE,
     DATABOOK_EXTENSION,
     DATABOOK_OMITTED_CONTENT,
@@ -898,7 +900,7 @@ def _materialize_and_presign_databook(
 
   bucket = env.USER_DATA_BUCKET
   key = get_report_bundle_key(
-    graph_id, report_id, generation_count, extension=DATABOOK_EXTENSION
+    graph_id, report_id, generation_count, extension=DATABOOK_CACHE_EXTENSION
   )
   s3 = S3Client()
 
@@ -967,6 +969,7 @@ def _materialize_and_presign_workbook(
   so its contents sheet names the file a reader can download beside it.
   """
   from robosystems.operations.serialization.rdf.workbook import (
+    WORKBOOK_CACHE_EXTENSION,
     WORKBOOK_CONTENT_TYPE,
     WORKBOOK_EXTENSION,
     WORKBOOK_OMITTED_CONTENT,
@@ -975,7 +978,7 @@ def _materialize_and_presign_workbook(
 
   bucket = env.USER_DATA_BUCKET
   key = get_report_bundle_key(
-    graph_id, report_id, generation_count, extension=WORKBOOK_EXTENSION
+    graph_id, report_id, generation_count, extension=WORKBOOK_CACHE_EXTENSION
   )
   s3 = S3Client()
 

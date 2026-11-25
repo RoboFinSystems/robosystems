@@ -10,9 +10,14 @@ is derived from the stored artifact and never from the rows.
 
 from __future__ import annotations
 
+from xbrlkit import __version__ as XBRLKIT_VERSION
 from xbrlkit.holon.databook import databook_from_holon
 
 DATABOOK_EXTENSION = ".databook.md"
+# Where a built DataBook is kept. The writer's version is in the name, so a
+# file an earlier xbrlkit wrote is not served after an upgrade: the next
+# download writes a new one.
+DATABOOK_CACHE_EXTENSION = f".xbrlkit-{XBRLKIT_VERSION}{DATABOOK_EXTENSION}"
 DATABOOK_CONTENT_TYPE = "text/markdown; charset=utf-8"
 
 # What the holon carries that the DataBook only points at.

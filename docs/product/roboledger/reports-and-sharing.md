@@ -1,6 +1,6 @@
 ---
 title: Reports and sharing
-description: Build financial statements from your books with your AI, download them as a holon, DataBook, Tavi or XBRL 2.1 file, and share them with another graph.
+description: Build financial statements from your books with your AI, download them as a holon, DataBook, Excel, Tavi or XBRL 2.1 file, and share them with another graph.
 order: 12
 section: Work with your books
 ---
@@ -37,10 +37,11 @@ Open a report in **Reports → View Reports** and choose a format from its menu 
 - **Holon (JSON-LD)**, the complete report. It opens in the free viewer at [xbrlkit.com](https://xbrlkit.com).
 - **Holon with lineage (JSON-LD)**, the same holon with the ledger lines, entries and events behind each closed figure. It holds your books, not just the statements, so it's offered only on your own reports and never travels with a share. Send it only to someone who should see the ledger.
 - **DataBook (Markdown)**, the report as a document to read: each statement and note as a table, with every figure linked to its fact in the holon. It opens in any Markdown viewer or text editor. It leaves the detail behind the figures to the holon, which it names.
+- **Workbook (Excel)**, the report as a spreadsheet: a sheet for each statement and note, a row for each line and a column for each period, with breakdowns by segment or another axis under the line they belong to. Every number is the figure the report states, and no cell holds a formula.
 - **Tavi (JSON)**, a compiled model of the report, which also opens in that viewer. It holds the same statements and notes as the holon.
 - **XBRL 2.1 package**, the standard behind public company SEC filings, for tools that read XBRL. It leaves out the report's notes.
 
-**Which file to send.** Send the holon unless the person asks for something else. It carries the statements with their notes. Send the DataBook beside it to someone who wants to read the report without opening a viewer. Send the XBRL package to someone whose software needs XBRL, and the notes separately if they need them.
+**Which file to send.** Send the holon unless the person asks for something else. It carries the statements with their notes. Send the DataBook beside it to someone who wants to read the report without opening a viewer, or the workbook to someone who works in a spreadsheet. Send the XBRL package to someone whose software needs XBRL, and the notes separately if they need them.
 
 An assistant that works with files on your computer, such as Claude Code, can also fetch a short-lived link to a report and open it in a tool there. The link expires after five minutes. This works over the general address or your graph's own, not RoboLedger's own address. See [Which address to use](connect-your-books.md#which-address-to-use).
 
