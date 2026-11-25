@@ -1762,7 +1762,9 @@ def cash_effect_sign(
   """The sign that turns a cash flow leaf's cash effect into its fact: its
   calculation weight into its subtotal. A liability's change states its cash
   effect (+1); an asset's change states the change in its balance, as the
-  concept says, and the subtotal subtracts it (-1)."""
+  concept says, and the subtotal subtracts it (-1). Cash flow arcs are unit
+  weights, so only the sign is read; a leaf with no arc states its cash
+  effect."""
   for child, weight in calculations.get(parent_id or "", []):
     if child == leaf_id:
       return -1.0 if weight < 0 else 1.0

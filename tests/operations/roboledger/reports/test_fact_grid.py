@@ -3189,3 +3189,24 @@ class TestCashFlowRowWording:
   )
   def test_the_wording_swaps_the_paired_words(self, label: str, worded: str) -> None:
     assert cash_effect_wording(label) == worded
+
+
+class TestCashEffectSign:
+  CALCULATIONS = {"operating": [("d_ap", 1.0), ("d_ar", -1.0)]}
+
+  @pytest.mark.parametrize(
+    ("parent", "leaf", "sign"),
+    [
+      ("operating", "d_ap", 1.0),
+      ("operating", "d_ar", -1.0),
+      ("operating", "absent", 1.0),
+      ("other", "d_ar", 1.0),
+      (None, "d_ar", 1.0),
+    ],
+  )
+  def test_the_sign_is_the_leafs_weight_into_its_subtotal(
+    self, parent: str | None, leaf: str, sign: float
+  ) -> None:
+    from robosystems.operations.roboledger.reports.fact_grid import cash_effect_sign
+
+    assert cash_effect_sign(self.CALCULATIONS, parent, leaf) == sign
