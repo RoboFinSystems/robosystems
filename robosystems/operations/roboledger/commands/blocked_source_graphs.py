@@ -7,7 +7,7 @@ the deny list lives there rather than in the platform DB.
 
 from __future__ import annotations
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -97,7 +97,7 @@ def block_source_graph(
 
   purged_ids: list[str] = []
   if body.purge:
-    purged_ids = _purge_shared_reports(session, body.source_graph_id)
+    purged_ids = _purge_shared_reports(session, body.source_graph_id, created_by)
 
   return BlockSourceGraphResult(
     block=enrich_blocks([existing])[0],
@@ -140,7 +140,9 @@ def unblock_source_graph(
   return response
 
 
-def _purge_shared_reports(session: Session, source_graph_id: str) -> list[str]:
+def _purge_shared_reports(
+  session: Session, source_graph_id: str, removed_by: str
+) -> list[str]:
   """Delete every report shared in from ``source_graph_id`` and return their ids.
 
   The router's after-success hook uses the ids to delete each copy's stored
@@ -155,14 +157,9 @@ def _purge_shared_reports(session: Session, source_graph_id: str) -> list[str]:
   if not report_ids:
     return []
 
-  from robosystems.operations.roboledger.commands.reports import (
-    delete_report_fact_sets,
+  from robosystems.operations.roboledger.commands.report_import import (
+    delete_received_reports,
   )
 
-  delete_report_fact_sets(session, report_ids)
-  session.execute(
-    text("DELETE FROM reports WHERE id = ANY(:report_ids)"),
-    {"report_ids": report_ids},
-  )
-  session.flush()
+  delete_received_reports(session, report_ids, removed_by)
   return report_ids

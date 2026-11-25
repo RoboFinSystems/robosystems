@@ -101,7 +101,13 @@ def tenant():
     db.dispose()
 
 
-def _holon(*, cash: float = 600, headcount: float = 42, drop_expenses: bool = False):
+def _holon(
+  *,
+  cash: float = 600,
+  headcount: float = 42,
+  drop_expenses: bool = False,
+  net_income_on_kpis: bool = False,
+):
   """October's package: a balance sheet, an income statement and one KPI the
   library does not have."""
 
@@ -228,7 +234,10 @@ def _holon(*, cash: float = 600, headcount: float = 42, drop_expenses: bool = Fa
           ],
         ),
         SectionRow(
-          name="KPIs", head="kpi:KpiHead", lines=[LineRow(concept="kpi:Headcount")]
+          name="KPIs",
+          head="kpi:KpiHead",
+          lines=[LineRow(concept="kpi:Headcount")]
+          + ([LineRow(concept="rs-gaap:NetIncomeLoss")] if net_income_on_kpis else []),
         ),
       ],
       facts=facts,
@@ -347,6 +356,125 @@ def test_a_package_lands_as_an_uploaded_report_on_its_entity(tenant):
     .all()
   )
   assert len(calc) == 4 and {a.weight for a in calc} == {1.0}
+
+
+def test_a_section_with_no_statement_type_renders_as_a_disclosure(tenant):
+  """A report package shows only block types it can render; the KPIs section
+  names none, so it is read as a disclosure rather than dropped."""
+  from robosystems.operations.roboledger.reads.reports import get_report_package
+
+  session = tenant["session"]
+  result = import_report(
+    session, GRAPH, holon_text=_holon(), entity_id=ISSUER, created_by="usr_1"
+  )
+  kinds = dict(
+    session.execute(
+      select(Structure.name, Structure.block_type).where(
+        Structure.id.in_(
+          select(FactSet.structure_id).where(FactSet.report_id == result.report_id)
+        )
+      )
+    ).all()
+  )
+  assert sorted(kinds.values()) == [
+    "balance_sheet",
+    "income_statement",
+    "regulatory_disclosure",
+  ]
+  package = get_report_package(session, result.report_id)
+  assert package is not None and len(package.items) == 3
+
+
+def test_a_note_of_text_blocks_renders_as_narrative(tenant):
+  """A note whose lines are all text blocks is read by the text-block reader;
+  read as a grid it shows nothing. Its facts are XBRL's escaped HTML."""
+  from robosystems.operations.roboledger.reads.reports import get_report_package
+
+  session = tenant["session"]
+  holon = to_holon(
+    build_report(
+      ReportRows(
+        report_id="pkg-acme-policies",
+        entity=EntityRow(identifier="acme-co", name="Acme Co"),
+        reporting_style="authored-package",
+        period_end=OCT,
+        form="policies",
+        attributed_to="package-reader",
+        namespaces={"acme": "https://example.com/taxonomy/acme/v1/"},
+        concepts=[
+          ConceptRow(qname="acme:PoliciesHead", label="Policies", abstract=True),
+          ConceptRow(
+            qname="acme:RevenuePolicyTextBlock",
+            label="Revenue recognition",
+            kind="text_block",
+            period_type="duration",
+          ),
+        ],
+        sections=[
+          SectionRow(
+            name="Accounting Policies",
+            head="acme:PoliciesHead",
+            lines=[LineRow(concept="acme:RevenuePolicyTextBlock")],
+          )
+        ],
+        facts=[
+          FactRow(
+            concept="acme:RevenuePolicyTextBlock",
+            value="<p>Revenue is recognized when control transfers.</p>",
+            start=OCT_1,
+            end=OCT,
+          )
+        ],
+      )
+    )
+  )
+  result = import_report(
+    session, GRAPH, holon_text=holon, entity_id=ISSUER, created_by="usr_1"
+  )
+
+  structure = session.execute(
+    select(Structure).where(
+      Structure.id.in_(
+        select(FactSet.structure_id).where(FactSet.report_id == result.report_id)
+      )
+    )
+  ).scalar_one()
+  assert (structure.block_type, structure.concept_arrangement) == (
+    "regulatory_disclosure",
+    "text_block",
+  )
+  [item] = get_report_package(session, result.report_id).items
+  assert len(item.block.view.rendering.rows) == 1
+  fact = session.execute(
+    select(Fact).join(FactSet).where(FactSet.report_id == result.report_id)
+  ).scalar_one()
+  assert fact.content_type == "text/html"
+
+
+def test_a_fact_on_two_sections_lands_on_both(tenant):
+  """As a report the ledger writes holds it: one row per section, so neither
+  section loses the line."""
+  session = tenant["session"]
+  result = import_report(
+    session,
+    GRAPH,
+    holon_text=_holon(net_income_on_kpis=True),
+    entity_id=ISSUER,
+    created_by="usr_1",
+  )
+  placed = session.execute(
+    select(Structure.block_type)
+    .join(FactSet, FactSet.structure_id == Structure.id)
+    .join(Fact, Fact.fact_set_id == FactSet.id)
+    .join(Element, Element.id == Fact.element_id)
+    .where(
+      FactSet.report_id == result.report_id,
+      Element.qname == "rs-gaap:NetIncomeLoss",
+    )
+  ).scalars()
+  assert sorted(placed) == ["income_statement", "regulatory_disclosure"]
+  # The count is of facts the report states, not of the rows that place them.
+  assert result.fact_count == 10
 
 
 def test_a_second_import_for_the_period_replaces_the_first(tenant):

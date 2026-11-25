@@ -7,9 +7,8 @@ nowhere else — and that the block and the recipient delete really keep them ou
 and take them away.
 
 Runs against the real extensions database (``EXTENSIONS_DATABASE_URL``) with two
-throwaway tenant schemas created from the model metadata, the same mechanism
-``create_tenant_schema`` uses. The taxonomy-library copy is skipped: none of
-these paths read library content.
+provisioned tenant schemas: the recipient reads the sender's holon against its
+own copy of the library, as a received file does.
 """
 
 from __future__ import annotations
@@ -18,12 +17,21 @@ from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.exc import OperationalError
+from xbrlkit.author import (
+  ConceptRow,
+  EntityRow,
+  FactRow,
+  LineRow,
+  ReportRows,
+  SectionRow,
+  build_report,
+)
+from xbrlkit.serialize import to_holon
 
-import robosystems.models.extensions  # noqa: F401  (register models on the Base)
 from robosystems.config import env
-from robosystems.db.extensions import ExtensionsBase, extensions_session
+from robosystems.db.extensions import extensions_session
 from robosystems.models.api.extensions.blocked_source_graphs import (
   BlockSourceGraphRequest,
 )
@@ -33,10 +41,8 @@ from robosystems.models.api.extensions.reports import (
 )
 from robosystems.models.extensions import (
   BlockedSourceGraph,
-  Element,
   Report,
   ReportShare,
-  Structure,
   Taxonomy,
 )
 from robosystems.operations.roboledger.commands.blocked_source_graphs import (
@@ -50,6 +56,7 @@ from robosystems.operations.roboledger.commands.reports import (
   revoke_report_share,
   share_report,
 )
+from tests.tenant_schema import claim_provisioned_schema, release_tenant_schema
 
 pytestmark = pytest.mark.integration
 
@@ -77,78 +84,85 @@ _REPORT_SNAPSHOT = {
   "periods": None,
 }
 
-# A library-seeded Structure id (deterministic UUID5, identical in every
-# tenant on the same taxonomy pin) and a tenant-local one (`struct_*` ULID,
-# meaningful only in the sender's schema). The share must carry the first
-# across and fall back for the second.
+# A library Structure id (deterministic UUID5, the same in every tenant) for
+# the sender's own statement sets.
 _LIBRARY_STRUCTURE_ID = "b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d"
-_TENANT_LOCAL_STRUCTURE_ID = "struct_0000000000000000000001"
-_STRUCTURE_TAXONOMY = "tax_structures_local"
-
-_SOURCE_FACT_SETS = [
-  {
-    "id": "fs_source_0001",
-    "structure_id": _LIBRARY_STRUCTURE_ID,
-    "factset_type": "report",
-    "period_start": date(2026, 1, 1),
-    "period_end": date(2026, 3, 31),
-    "entity_id": _ENTITY_ID,
-  },
-  {
-    "id": "fs_source_0002",
-    "structure_id": _TENANT_LOCAL_STRUCTURE_ID,
-    "factset_type": "disclosure",
-    "period_start": None,
-    "period_end": date(2026, 3, 31),
-    "entity_id": _ENTITY_ID,
-  },
-]
-
-_SOURCE_FACTS = [
-  {
-    "id": "fact_0001",
-    "fact_set_id": "fs_source_0001",
-    "element_id": "rs-gaap:Revenues",
-    "value": 1000,
-    "string_value": None,
-    "fact_type": "Numeric",
-    "value_type": "inline",
-    "content_type": None,
-    "decimals": 0,
-    "period_start": date(2026, 1, 1),
-    "period_end": date(2026, 3, 31),
-    "period_type": "duration",
-    "unit": "USD",
-    "entity_id": _ENTITY_ID,
-    "created_at": datetime(2026, 4, 1, tzinfo=UTC),
-  },
-  {
-    "id": "fact_0002",
-    "fact_set_id": "fs_source_0002",
-    "element_id": "rs-gaap:Assets",
-    "value": 5000,
-    "string_value": None,
-    "fact_type": "Numeric",
-    "value_type": "inline",
-    "content_type": None,
-    "decimals": 0,
-    "period_start": None,
-    "period_end": date(2026, 3, 31),
-    "period_type": "instant",
-    "unit": "USD",
-    "entity_id": _ENTITY_ID,
-    "created_at": datetime(2026, 4, 1, tzinfo=UTC),
-  },
-]
 
 
-def _tenant_tables():
-  return [t for t in ExtensionsBase.metadata.sorted_tables if t.schema is None]
+def _holon() -> str:
+  """The sender's publication: an income statement and a balance sheet."""
+  q1_start, q1_end = _REPORT_SNAPSHOT["period_start"], _REPORT_SNAPSHOT["period_end"]
+  model = build_report(
+    ReportRows(
+      report_id=_REPORT_SNAPSHOT["id"],
+      entity=EntityRow(identifier=_ENTITY_ID, name="Acme Co"),
+      reporting_style="authored-package",
+      period_end=q1_end,
+      form="report",
+      attributed_to="ledger",
+      namespaces={"acme": "https://example.com/taxonomy/acme/v1/"},
+      concepts=[
+        ConceptRow(qname="acme:IncomeHead", label="Income", abstract=True),
+        ConceptRow(qname="acme:PositionHead", label="Position", abstract=True),
+        ConceptRow.model_validate(
+          {
+            "qname": "rs-gaap:Revenues",
+            "label": "Revenue",
+            "period_type": "duration",
+            "balance": "credit",
+          }
+        ),
+        ConceptRow.model_validate(
+          {
+            "qname": "rs-gaap:Assets",
+            "label": "Total assets",
+            "period_type": "instant",
+            "balance": "debit",
+          }
+        ),
+      ],
+      sections=[
+        SectionRow(
+          name="Income Statement",
+          block_type="income_statement",
+          head="acme:IncomeHead",
+          lines=[LineRow(concept="rs-gaap:Revenues")],
+        ),
+        SectionRow(
+          name="Balance Sheet",
+          block_type="balance_sheet",
+          head="acme:PositionHead",
+          lines=[LineRow(concept="rs-gaap:Assets")],
+        ),
+      ],
+      facts=[
+        FactRow(
+          concept="rs-gaap:Revenues",
+          value=1000,
+          start=q1_start,
+          end=q1_end,
+          unit="USD",
+          decimals=0,
+        ),
+        FactRow(
+          concept="rs-gaap:Assets", value=5000, end=q1_end, unit="USD", decimals=0
+        ),
+      ],
+    )
+  )
+  return to_holon(model)
+
+
+_HOLON = _holon()
+_ARTIFACTS = {".holon.jsonld": _HOLON}
+# Two facts, one section each.
+_FACT_COUNT = 2
+_SECTION_COUNT = 2
 
 
 @pytest.fixture(scope="module")
 def two_tenants():
-  """Two real tenant schemas, dropped on the way out.
+  """Two provisioned tenant schemas, released on the way out.
 
   ``EXTENSIONS_DATABASE_URL`` always resolves to *something* — it falls back to
   a localhost default — so its presence proves nothing. Connect before deciding:
@@ -168,21 +182,14 @@ def two_tenants():
     engine.dispose()
     pytest.skip(f"extensions database unreachable: {exc.orig}")
 
-  tables = _tenant_tables()
   try:
-    with engine.begin() as conn:
-      for schema in (SOURCE_GRAPH, TARGET_GRAPH):
-        conn.execute(text(f"DROP SCHEMA IF EXISTS {schema} CASCADE"))
-        conn.execute(text(f"CREATE SCHEMA {schema}"))
-        ExtensionsBase.metadata.create_all(
-          bind=conn.execution_options(schema_translate_map={None: schema}),
-          tables=tables,
-        )
+    claim_provisioned_schema(SOURCE_GRAPH)
+    claim_provisioned_schema(TARGET_GRAPH)
     yield
   finally:
     with engine.begin() as conn:
       for schema in (SOURCE_GRAPH, TARGET_GRAPH):
-        conn.execute(text(f"DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        release_tenant_schema(conn, schema)
     engine.dispose()
 
 
@@ -198,11 +205,26 @@ def _clean_tenants(two_tenants):
       session.execute(text("DELETE FROM report_shares"))
       session.execute(text("DELETE FROM publish_list_members"))
       session.execute(text("DELETE FROM publish_lists"))
-      # Elements and structures before taxonomies: both carry a real FK to
-      # `taxonomies.id`.
-      session.execute(text("DELETE FROM elements"))
-      session.execute(text("DELETE FROM structures"))
-      session.execute(text("DELETE FROM taxonomies"))
+      # What received reports brought, leaving the library as provisioned.
+      received = (
+        "SELECT id FROM taxonomies WHERE metadata->>'received_reports' = 'true'"
+      )
+      session.execute(
+        text(
+          "DELETE FROM associations WHERE structure_id IN "
+          f"(SELECT id FROM structures WHERE taxonomy_id IN ({received}))"
+        )
+      )
+      session.execute(
+        text(
+          f"DELETE FROM rules WHERE taxonomy_id IN ({received}) "
+          "OR target_structure_id IN "
+          f"(SELECT id FROM structures WHERE taxonomy_id IN ({received}))"
+        )
+      )
+      session.execute(text(f"DELETE FROM structures WHERE taxonomy_id IN ({received})"))
+      session.execute(text(f"DELETE FROM elements WHERE taxonomy_id IN ({received})"))
+      session.execute(text(f"DELETE FROM taxonomies WHERE id IN ({received})"))
   yield
 
 
@@ -222,30 +244,10 @@ def _share(report_snapshot: dict | None = None) -> object:
     return _share_to_target(
       source_graph_id=SOURCE_GRAPH,
       report_snapshot=report_snapshot or _REPORT_SNAPSHOT,
-      source_fact_sets=_SOURCE_FACT_SETS,
-      source_facts=_SOURCE_FACTS,
       target_graph_id=TARGET_GRAPH,
       shared_by=_SENDER,
-    )
-
-
-def _seed_structure(graph_id: str, structure_id: str, block_type: str) -> None:
-  """Give `graph_id` one Structure row under an explicit id.
-
-  Stands in for the library copy: `provision_tenant_schema` seeds the
-  canonical library into every tenant schema, so in production both sides
-  already hold the same structure under the same deterministic id. These
-  throwaway schemas skip that copy, so the tests seed what they need.
-  """
-  with extensions_session(graph_id) as session:
-    session.add(
-      Structure(
-        id=structure_id,
-        name=f"Test {block_type}",
-        block_type=block_type,
-        taxonomy_id=_STRUCTURE_TAXONOMY,
-        created_by=_SENDER,
-      )
+      publication_artifacts=_ARTIFACTS,
+      source_entity_id=_ENTITY_ID,
     )
 
 
@@ -263,9 +265,9 @@ def test_share_writes_into_the_target_schema_only() -> None:
   result = _share()
 
   assert result.status == "shared"
-  assert result.fact_count == len(_SOURCE_FACTS)
+  assert result.fact_count == _FACT_COUNT
 
-  assert _counts(TARGET_GRAPH) == (1, 1, len(_SOURCE_FACTS))
+  assert _counts(TARGET_GRAPH) == (1, _SECTION_COUNT, _FACT_COUNT)
   assert _counts(SOURCE_GRAPH) == (0, 0, 0)
 
 
@@ -302,48 +304,16 @@ def _renderable_fact_sets(report_id: str) -> list[tuple[str, int]]:
     ]
 
 
-def test_a_library_structure_survives_the_graph_boundary() -> None:
+def test_every_section_of_the_holon_arrives_renderable() -> None:
   """The regression that made a delivered report render as "No statements
-  available for this report yet."
-
-  Library structures are seeded into every tenant schema under deterministic
-  UUID5 ids, so the sender's balance sheet *is* the recipient's — same id, same
-  presentation arcs. A share that drops ``structure_id`` therefore throws away
-  a reference that was valid on the far side, and the facts land where no read
-  path can join them.
-  """
-  _seed_taxonomy(SOURCE_GRAPH, _STRUCTURE_TAXONOMY, "reporting_standard")
-  _seed_taxonomy(TARGET_GRAPH, _STRUCTURE_TAXONOMY, "reporting_standard")
-  _seed_structure(SOURCE_GRAPH, _LIBRARY_STRUCTURE_ID, "balance_sheet")
-  _seed_structure(TARGET_GRAPH, _LIBRARY_STRUCTURE_ID, "balance_sheet")
-
+  available for this report yet": a section whose structure the recipient did
+  not have arrived on no structure at all. The holon carries every section, so
+  each lands on a structure the recipient's read path can join."""
   assert _share().status == "shared"
 
   renderable = _renderable_fact_sets(_copied_report_id())
-  assert renderable == [(_LIBRARY_STRUCTURE_ID, 1)], (
-    "the shared report's balance sheet did not survive the copy; the "
-    "recipient's report viewer renders nothing"
-  )
-
-
-def test_a_tenant_local_structure_falls_back_without_dropping_facts() -> None:
-  """The other half: an id that is meaningful only in the sender's schema.
-
-  A custom disclosure carries a `struct_*` ULID the recipient has never seen.
-  Its facts still cross — they are queryable, and they materialize into the
-  recipient's graph — but they pool on a structure-less set rather than
-  pointing at a Structure that does not exist. Nothing is silently dropped,
-  which is the property the catch-all exists to hold.
-  """
-  _seed_taxonomy(SOURCE_GRAPH, _STRUCTURE_TAXONOMY, "reporting_standard")
-  _seed_structure(SOURCE_GRAPH, _TENANT_LOCAL_STRUCTURE_ID, "regulatory_disclosure")
-
-  assert _share().status == "shared"
-
-  # Neither structure resolves in the recipient, so both facts pool on one
-  # structure-less set — and every fact still arrives.
-  assert _renderable_fact_sets(_copied_report_id()) == []
-  assert _counts(TARGET_GRAPH) == (1, 1, len(_SOURCE_FACTS))
+  assert len(renderable) == _SECTION_COUNT
+  assert sum(count for _, count in renderable) == _FACT_COUNT
 
 
 def test_the_copy_carries_honest_provenance() -> None:
@@ -383,7 +353,7 @@ def test_the_copy_reports_where_the_sender_was_in_the_filing_lifecycle() -> None
     _patch_platform_graph_lookup(),
     patch(
       "robosystems.operations.roboledger.commands.reports._load_publication_artifacts",
-      return_value={},
+      return_value=_ARTIFACTS,
     ),
   ):
     share_report(
@@ -413,7 +383,7 @@ def test_a_draft_shared_report_still_arrives_as_a_draft() -> None:
     _patch_platform_graph_lookup(),
     patch(
       "robosystems.operations.roboledger.commands.reports._load_publication_artifacts",
-      return_value={},
+      return_value=_ARTIFACTS,
     ),
   ):
     share_report(
@@ -589,7 +559,7 @@ def test_resharing_replaces_the_copy_rather_than_duplicating_it() -> None:
   assert len(rows) == 1
   assert rows[0].source_report_id == _REPORT_SNAPSHOT["id"]
   # The replaced copy took its fact sets and facts with it.
-  assert _counts(TARGET_GRAPH) == (1, 1, len(_SOURCE_FACTS))
+  assert _counts(TARGET_GRAPH) == (1, _SECTION_COUNT, _FACT_COUNT)
 
 
 def test_revoke_withdraws_the_stored_publication_too() -> None:
@@ -622,7 +592,7 @@ def test_revoke_withdraws_the_stored_publication_too() -> None:
         report_id=_REPORT_SNAPSHOT["id"],
         target_graph_id=TARGET_GRAPH,
         shared_by=_SENDER,
-        fact_count=len(_SOURCE_FACTS),
+        fact_count=_FACT_COUNT,
       )
     )
 
@@ -680,7 +650,7 @@ def test_revoke_clears_every_active_share_row_for_the_recipient() -> None:
           report_id=_REPORT_SNAPSHOT["id"],
           target_graph_id=TARGET_GRAPH,
           shared_by=_SENDER,
-          fact_count=len(_SOURCE_FACTS),
+          fact_count=_FACT_COUNT,
         )
       )
 
@@ -729,7 +699,7 @@ def test_a_report_with_live_shares_cannot_be_deleted_out_from_under_recipients()
         report_id=_REPORT_SNAPSHOT["id"],
         target_graph_id=TARGET_GRAPH,
         shared_by=_SENDER,
-        fact_count=len(_SOURCE_FACTS),
+        fact_count=_FACT_COUNT,
       )
     )
 
@@ -775,7 +745,7 @@ def test_sender_revoke_pulls_the_copy_and_stamps_the_share() -> None:
         report_id=_REPORT_SNAPSHOT["id"],
         target_graph_id=TARGET_GRAPH,
         shared_by=_SENDER,
-        fact_count=len(_SOURCE_FACTS),
+        fact_count=_FACT_COUNT,
       )
     )
 
@@ -821,103 +791,43 @@ def test_blocks_are_per_tenant_and_do_not_leak_across_schemas() -> None:
 _EXT_TAXONOMY = "tax_acme_reporting_ext"
 
 
-def _seed_taxonomy(graph_id: str, taxonomy_id: str, taxonomy_type: str) -> None:
-  with extensions_session(graph_id) as session:
-    session.add(
-      Taxonomy(
-        id=taxonomy_id,
-        name="Acme Reporting Extension",
-        taxonomy_type=taxonomy_type,
-        created_by=_SENDER,
-      )
-    )
-
-
-def _seed_elements(graph_id: str, taxonomy_id: str) -> None:
-  """Give `graph_id` a row for every concept the shared facts cite."""
-  with extensions_session(graph_id) as session:
-    for fact in _SOURCE_FACTS:
-      session.add(
-        Element(
-          id=fact["element_id"],
-          name=fact["element_id"],
-          qname=f"{graph_id}:{fact['element_id']}",
-          taxonomy_id=taxonomy_id,
-          created_by=_SENDER,
-        )
-      )
-
-
-def _share_with_taxonomy(taxonomy_id: str) -> object:
-  snapshot = {**_REPORT_SNAPSHOT, "taxonomy_id": taxonomy_id}
-  with _patch_platform_graph_lookup():
-    return _share_to_target(
-      source_graph_id=SOURCE_GRAPH,
-      report_snapshot=snapshot,
-      source_fact_sets=_SOURCE_FACT_SETS,
-      source_facts=_SOURCE_FACTS,
-      target_graph_id=TARGET_GRAPH,
-      shared_by=_SENDER,
-    )
-
-
-def _taxonomy_ids(graph_id: str) -> set[str]:
-  with extensions_session(graph_id) as session:
-    return {
-      row[0] for row in session.execute(text("SELECT id FROM taxonomies")).fetchall()
-    }
-
-
-def test_the_report_taxonomy_travels_even_when_every_fact_resolves() -> None:
-  """The dangling-taxonomy case the element copy could not see.
-
-  A report can be built on the sender's own reporting extension while every
-  fact in it cites a standard concept the recipient already has. The element
-  copy then finds nothing missing and returns immediately — and the copied
-  report keeps a `taxonomy_id` naming a row that exists only in the sender's
-  schema. `reports.taxonomy_id` has no foreign key, so the OLTP insert
-  succeeds and the damage surfaces one step later, when
-  `REPORT_USES_TAXONOMY` points at nothing and takes the recipient's whole
-  rebuild down with it.
-  """
-  _seed_taxonomy(SOURCE_GRAPH, _EXT_TAXONOMY, "reporting_extension")
-  # Both sides already hold every concept the facts cite, so `missing` is
-  # empty — the precondition that used to short-circuit the taxonomy copy.
-  _seed_taxonomy(SOURCE_GRAPH, "tax_std_local", "reporting_standard")
-  _seed_taxonomy(TARGET_GRAPH, "tax_std_local", "reporting_standard")
-  _seed_elements(SOURCE_GRAPH, "tax_std_local")
-  _seed_elements(TARGET_GRAPH, "tax_std_local")
-
-  result = _share_with_taxonomy(_EXT_TAXONOMY)
-
-  assert result.status == "shared"
-  assert _EXT_TAXONOMY in _taxonomy_ids(TARGET_GRAPH), (
-    "the shared report's taxonomy did not travel; REPORT_USES_TAXONOMY would "
-    "dangle in the recipient's next materialization"
-  )
-
+def _copied_taxonomy_id() -> str:
   with extensions_session(TARGET_GRAPH) as session:
-    copied_taxonomy_id = session.execute(
+    return session.execute(
       text("SELECT taxonomy_id FROM reports WHERE source_graph_id = :src"),
       {"src": SOURCE_GRAPH},
     ).scalar_one()
-  assert copied_taxonomy_id == _EXT_TAXONOMY
 
 
-def test_a_library_report_taxonomy_is_not_copied() -> None:
-  """Only reporting extensions travel. A report on a shared framework
-  resolves by deterministic id in every tenant, and a taxonomy that is not a
-  reporting extension must never be dragged across the boundary — the
-  materializer's own join drops the edge instead."""
-  _seed_taxonomy(SOURCE_GRAPH, "tax_library_gaap", "reporting_standard")
-  _seed_elements(SOURCE_GRAPH, "tax_library_gaap")
-  _seed_taxonomy(TARGET_GRAPH, "tax_std_local", "reporting_standard")
-  _seed_elements(TARGET_GRAPH, "tax_std_local")
+def test_a_report_taxonomy_the_recipient_lacks_becomes_its_received_vocabulary() -> (
+  None
+):
+  """`reports.taxonomy_id` has no foreign key, so a copy naming the sender's own
+  extension would insert fine and take the recipient's next rebuild down when
+  `REPORT_USES_TAXONOMY` points at nothing. The sender's concepts are in the
+  recipient's received vocabulary, so the copy names that."""
+  assert _share({**_REPORT_SNAPSHOT, "taxonomy_id": "tax_senders_own"}).status == (
+    "shared"
+  )
 
-  result = _share_with_taxonomy("tax_library_gaap")
+  with extensions_session(TARGET_GRAPH) as session:
+    received = session.execute(
+      select(Taxonomy.id).where(Taxonomy.metadata_["received_reports"].astext == "true")
+    ).scalar_one()
+  assert _copied_taxonomy_id() == received
 
-  assert result.status == "shared"
-  assert "tax_library_gaap" not in _taxonomy_ids(TARGET_GRAPH)
+
+def test_a_report_taxonomy_the_recipient_holds_is_kept() -> None:
+  """A report on the library names a taxonomy every tenant holds under the
+  same id."""
+  with extensions_session(TARGET_GRAPH) as session:
+    library = session.execute(
+      select(Taxonomy.id).where(
+        Taxonomy.taxonomy_type == "reporting_standard", Taxonomy.standard == "rs-gaap"
+      )
+    ).scalar_one()
+  assert _share({**_REPORT_SNAPSHOT, "taxonomy_id": library}).status == "shared"
+  assert _copied_taxonomy_id() == library
 
 
 # ── Revoking after the recipient is gone ───────────────────────────────────
@@ -953,7 +863,7 @@ def test_revoke_survives_a_recipient_whose_schema_was_dropped() -> None:
         report_id=_REPORT_SNAPSHOT["id"],
         target_graph_id=gone_graph,
         shared_by=_SENDER,
-        fact_count=len(_SOURCE_FACTS),
+        fact_count=_FACT_COUNT,
       )
     )
 
@@ -999,10 +909,6 @@ def _seed_publishable_report(
   )
   from robosystems.operations.roboledger.fact_set import create_fact_set
 
-  _seed_taxonomy(SOURCE_GRAPH, _STRUCTURE_TAXONOMY, "reporting_standard")
-  _seed_taxonomy(TARGET_GRAPH, _STRUCTURE_TAXONOMY, "reporting_standard")
-  _seed_structure(SOURCE_GRAPH, _LIBRARY_STRUCTURE_ID, "balance_sheet")
-  _seed_structure(TARGET_GRAPH, _LIBRARY_STRUCTURE_ID, "balance_sheet")
   with extensions_session(SOURCE_GRAPH) as session:
     session.add(
       Report(
@@ -1070,7 +976,7 @@ def test_share_report_records_the_share_in_the_same_transaction() -> None:
     _patch_platform_graph_lookup(),
     patch(
       "robosystems.operations.roboledger.commands.reports._load_publication_artifacts",
-      return_value={},
+      return_value=_ARTIFACTS,
     ),
   ):
     response = share_report(
@@ -1103,7 +1009,7 @@ def _share_seeded_report(list_id: str) -> tuple[list[int], list[int]]:
 
   def _load(graph_id, report_id, generation_count) -> dict:
     carried.append(generation_count)
-    return {}
+    return _ARTIFACTS
 
   with (
     _patch_platform_graph_lookup(),
@@ -1220,7 +1126,7 @@ def test_a_delete_cannot_slip_between_the_snapshot_and_the_share_rows() -> None:
       _patch_platform_graph_lookup(),
       patch(
         "robosystems.operations.roboledger.commands.reports._load_publication_artifacts",
-        return_value={},
+        return_value=_ARTIFACTS,
       ),
       patch(
         "robosystems.operations.roboledger.commands.reports._share_to_target",
@@ -1269,7 +1175,7 @@ def _share_through_the_list(list_id: str) -> None:
     _patch_platform_graph_lookup(),
     patch(
       "robosystems.operations.roboledger.commands.reports._load_publication_artifacts",
-      return_value={},
+      return_value=_ARTIFACTS,
     ),
   ):
     share_report(
@@ -1307,7 +1213,7 @@ def test_the_sender_reads_a_recipient_shared_revoked_and_shared_again() -> None:
 
   assert [s.target_graph_id for s in live.report_shares] == [TARGET_GRAPH]
   assert live.report_shares[0].revoked_at is None
-  assert live.report_shares[0].fact_count == 1
+  assert live.report_shares[0].fact_count == _FACT_COUNT
   assert live.pagination.total == 1
 
   assert [s.revoked_at is None for s in everything.report_shares] == [True, False]

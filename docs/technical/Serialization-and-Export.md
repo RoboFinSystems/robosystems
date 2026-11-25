@@ -312,7 +312,7 @@ XBRL 2.1 has no standard place for the platform-specific content, so the package
 
 ### Received reports
 
-A report this graph did not author (`origin` `shared` or `uploaded`; see [Reporting & Rendering § The Report Is the Package](Reporting-and-Rendering.md#the-report-is-the-package)) downloads as the file that arrived, never as one rebuilt from the copied rows. A report shared in from another graph has the sender's holon and Tavi as of the share. A report loaded from a file is kept as a holon only: ask for `HOLON_JSONLD`, or for `DATABOOK` or `WORKBOOK`, which are written from that holon, and convert with xbrlkit if you need another form. Neither has lineage. A format a received report does not have answers `REPORT_BUNDLE_NOT_AVAILABLE`, with a message saying whether to ask the sender to share again or to load the file again.
+A report this graph did not author (`origin` `shared` or `uploaded`; see [Reporting & Rendering § The Report Is the Package](Reporting-and-Rendering.md#the-report-is-the-package)) downloads as the file that arrived, never as one rebuilt from its rows. A report shared in from another graph has the sender's holon and Tavi as of the share. A report loaded from a file is kept as a holon only: ask for `HOLON_JSONLD`, or for `DATABOOK` or `WORKBOOK`, which are written from that holon, and convert with xbrlkit if you need another form. Neither has lineage. A format a received report does not have answers `REPORT_BUNDLE_NOT_AVAILABLE`, with a message saying whether to ask the sender to share again or to load the file again.
 
 ## Reading an Export Without the Platform
 
