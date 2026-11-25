@@ -223,7 +223,7 @@ If a rendered number is wrong, the fix is almost never in the renderer. It is in
 - **[Information Blocks](Information-Blocks.md)** - The data envelope, block types, FactSets, and the View projections at the data layer
 - **[Information Block Reference](Information-Block-Reference.md)** - Envelope fields and view projection status
 - **[RoboLedger Operations](RoboLedger-Operations.md)** - The command writes (`create-report`, `regenerate-report`, period close) that produce the facts this page renders
-- **[Serialization & Export](Serialization-and-Export.md)** - Downloading a published report as the holon, Tavi, or XBRL 2.1 (there is no iXBRL output)
+- **[Serialization & Export](Serialization-and-Export.md)** - Downloading a published report as the holon, the DataBook, Tavi, or XBRL 2.1 (there is no iXBRL output)
 - **[SEC XBRL Pipeline](SEC-XBRL-Pipeline.md)** - Load and query the SEC graph that `build-fact-grid` and `financial-statement-analysis` run against
 - **[Architecture Overview](Architecture-Overview.md)** - How the reporting layer fits the broader platform
 

@@ -16,6 +16,7 @@ RoboSystems treats accounting vocabulary as data: concepts, hierarchies, calcula
 - [Worked Example](#worked-example)
 - [Reading the Library](#reading-the-library)
 - [Mapping](#mapping)
+- [Industry Classification](#industry-classification)
 - [Common Pitfalls](#common-pitfalls)
 - [Self-hosted deployments](#self-hosted-deployments)
 - [Related Documentation](#related-documentation)
@@ -346,6 +347,25 @@ The two scopes differ in what the same fields see, not in which fields exist: `l
 ## Mapping
 
 A tenant's chart of accounts reaches the statements through `mapping` associations: one arc from each chart-of-accounts element to an `rs-gaap` leaf concept, held in a `coa_mapping` Structure. Each `coa_mapping` Structure is anchored to its own `mapping` taxonomy, whose source is the chart and whose target is one framework; the chart owns its mapping taxonomies, so the chart's Taxonomy Block is the chart plus every mapping sourced from it, created, read, edited, and deleted together. A chart holds at most one mapping per framework. Mapping arcs are written one at a time with `create-mapping-association` or in bulk by the AI MappingOperator, not through a Taxonomy Block. Candidate targets are limited to concepts that render under the entity's active Reporting Style, which is also the working set the tenant library keeps (see [The JSON-LD Package Library](#the-json-ld-package-library)). The mapping model, coverage vs. renderability, auto-map and its confidence thresholds, and the lock that protects closed months are on [Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md).
+
+## Industry Classification
+
+Which industry a company is in is its own vocabulary, kept beside the frameworks at [`frameworks/industries`](https://github.com/RoboFinSystems/robosystems/tree/main/frameworks/industries) and published with the rest of the repository. It is not a reporting framework: it has no manifest, defines no concepts, and is not copied into a tenant's schema. It is one list, shared by the SEC repository and every tenant's entities, so a company on your books and a public filer can be placed in the same industry.
+
+**The vocabulary** has four levels: sector, subsector, industry and sub-industry (11, 100, 333 and 99 of them). A node's id is its path, such as `health-care/biotechnology/clinical-stage`, so its ancestors are the prefixes of its id. Three rules keep it stable:
+
+- Every subsector has an industry. One nobody has divided yet carries itself over as its single industry, and dividing it later replaces that row.
+- An id is never deleted or reused. A node that goes away keeps its row and names its successor, so an id stored on an entity always resolves.
+- A thin industry is fine. Two or three similar companies are worth comparing, and they roll up to the subsector.
+
+**The filers.** 7,200 public companies each have one primary industry, and may have others where a second line of business is a material share of revenue. Each placement records how it was made (read from the annual report, placed from knowledge of the company, or carried from its SIC code unjudged), how confident it is, and whether two independent readings disagreed. SIC is a starting hint, never the answer. Funds are not classified.
+
+**Where it shows up.**
+
+- On a ledger graph, an entity's `industry` is an id from this list. The GraphQL field `industries` returns every node an entity can name, and `create-entity` and `update-entity` refuse an id that is not in it, answering with the closest ones.
+- On the SEC repository, a filer's `Entity.industry` is its primary industry's id ([SEC Data Model & Query Rules](SEC-Data-Model-and-Query-Rules.md)).
+
+To change it, edit the two CSVs and run `uv run pytest tests/taxonomy/test_industries.py`; the folder's README says how a change reaches the database.
 
 ## Common Pitfalls
 

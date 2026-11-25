@@ -73,9 +73,9 @@ The financial-content model underneath the products. Each concept page has a ref
 - **[Information Block Reference](Information-Block-Reference.md)** - Fields, per-type mechanics, the registry, rule patterns
 - **[Event-Driven Ledger](Event-Driven-Ledger.md)** - Events before entries: REA, the three-level ledger, capture, classify, commit
 - **[Event Block Reference](Event-Block-Reference.md)** - Fields, vocabularies, transitions, handlers, errors
-- **[Taxonomy & Frameworks](Taxonomy-and-Frameworks.md)** - The rs-gaap and fac frameworks, the library, and the Taxonomy Block
+- **[Taxonomy & Frameworks](Taxonomy-and-Frameworks.md)** - The rs-gaap and fac frameworks, the library, the Taxonomy Block, and the industry classification
 - **[Reporting & Rendering](Reporting-and-Rendering.md)** - The calc-DAG, what the renderer derives, reporting styles, views
-- **[Serialization & Export](Serialization-and-Export.md)** - Report exports (holon, XBRL 2.1 and a compiled JSON model), and reading them without the platform
+- **[Serialization & Export](Serialization-and-Export.md)** - Report exports (the holon, the DataBook, a compiled JSON model and XBRL 2.1), checking a holon against its format, and reading them without the platform
 
 ## Run It Yourself
 
