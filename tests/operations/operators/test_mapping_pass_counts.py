@@ -234,3 +234,68 @@ async def test_accumulated_depreciation_keeps_its_name_rule():
 
   model.assert_called_once()
   assert all(c["to_element_id"] != "rs_intangibles_net" for c in create.calls)
+
+
+async def _run_bucketed(elements, mappings, candidates=None):
+  create = _Tool({"association_id": "a"})
+  tools = _Tools(
+    {
+      "GetUnmappedElementsTool": _Tool(
+        {"elements": elements, "unmapped_count": len(elements)}
+      ),
+      "SuggestMappingTool": _Tool(
+        {"candidates": [{"id": "rs_cash"}] if candidates is None else candidates}
+      ),
+      "CreateMappingAssociationTool": create,
+      "GetMappingSummaryTool": _Tool({"error": "not measured"}),
+    }
+  )
+  op = MappingOperator.__new__(MappingOperator)
+
+  async def _resolve(_ctx, qname):
+    return f"id:{qname}"
+
+  with (
+    patch.object(MappingOperator, "_map_batch", AsyncMock(return_value=mappings)),
+    patch.object(MappingOperator, "_resolve_qname_to_id", side_effect=_resolve),
+  ):
+    result = await op._run_single_pass(_Ctx(tools))
+  return result, create
+
+
+@pytest.mark.asyncio
+async def test_an_asset_the_model_cannot_place_is_flagged_on_other_assets():
+  """The balance sheet balances on first sight, and the account still waits
+  for a person: written at the review floor, never approved."""
+  account = {"id": "el_0", "name": "Misc", "trait": "asset", "liquidity": "current"}
+  result, create = await _run_bucketed(
+    [account], [{"element_id": "el_0", "target_id": None, "confidence": 0.3}]
+  )
+
+  [write] = create.calls
+  assert write["to_element_id"] == "id:rs-gaap:OtherAssetsCurrent"
+  assert write["confidence"] == 0.70
+  assert result.metadata["flagged"] == 1
+  assert result.metadata["bucketed"] == 1
+  assert result.metadata["skipped"] == 0
+
+
+@pytest.mark.asyncio
+async def test_an_expense_with_no_candidates_takes_other_operating_expense():
+  account = {"id": "el_0", "name": "Sundry", "trait": "expense", "liquidity": None}
+  result, create = await _run_bucketed([account], [], candidates=[])
+
+  [write] = create.calls
+  assert write["to_element_id"] == "id:rs-gaap:OtherCostAndExpenseOperating"
+  assert result.metadata["bucketed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_revenue_and_an_asset_of_unknown_liquidity_are_left_to_a_person():
+  revenue = {"id": "el_0", "name": "Misc income", "trait": "revenue"}
+  asset = {"id": "el_1", "name": "Misc asset", "trait": "asset", "liquidity": None}
+  result, create = await _run_bucketed([revenue, asset], [])
+
+  assert create.calls == []
+  assert result.metadata["skipped"] == 2
+  assert result.metadata["bucketed"] == 0
