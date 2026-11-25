@@ -1,310 +1,153 @@
 # RoboSystems
 
-**Finance AI that ties to the books.** RoboSystems is an open-source knowledge graph that gives your AI agents your general ledger and public companies' filings as structured, traceable data, on your infrastructure, with the model you choose.
+**The open-source knowledge graph for finance.** RoboSystems is an open-source knowledge graph that gives your AI agents your company's books or portfolio, and public companies' filings to compare them against, as structured, traceable data, on your infrastructure, with the model you choose.
 
-Three kinds of graph on one platform. Your ledger and the public filings share the RoboSystems ontology, labelled in XBRL's standard terms wherever XBRL has one, so your numbers and a public company's line up. Graphs you model yourself take your own schema instead: define it, load it from Parquet, query it with Cypher. All three run on LadybugDB. Ledger reports use rs-gaap, the RoboSystems reporting taxonomy, and leave as XBRL 2.1 or a holon (RDF). Subgraphs give your AI a workspace it extends over MCP, and semantic memory carries its work between sessions.
+Three kinds of graph on one platform: a graph for your company (its books or its portfolio), shared repositories of public data to compare it against (today, 8,000+ SEC filers), and graphs you define yourself from your own schema, loaded from Parquet.
 
-[RoboLedger](https://roboledger.ai), the general ledger built on it, is in [roboledger-app](https://github.com/RoboFinSystems/roboledger-app): a full accounting system in its own right, every number traced to the entry. Our own companies' books are kept on it. [RoboInvestor](https://roboinvestor.ai) runs on it too: equity research on public companies, your fund's positions with their terms, and the reports your portfolio companies share from RoboLedger.
+- **Entity graph** (your company's graph): one reporting entity or group. Its books, kept on RoboLedger or read from the ledger it closes in, or its portfolio on RoboInvestor: positions and the reports portfolio companies send.
+- **Shared repository**: built by RoboSystems from public sources, kept current, and the same for every subscriber. Today: the SEC repository, to benchmark against public peers, research a company and compare filers.
+- **Generic graph** (your own graphs): your schema, Parquet in, Cypher out.
 
-Built by an inactive CPA and ex-Workiva knowledge engineer. Open source (Apache 2.0 here; MIT on the clients, the shared UI and xbrlkit): you keep the code and the data whatever happens to any vendor, including us.
+Your company's graph and the SEC repository share one ontology, labelled in XBRL's standard terms wherever XBRL has one, so your numbers and a public company's compare line for line. A generic graph takes its own schema. All three run on LadybugDB. Ledger reports use rs-gaap, the RoboSystems reporting taxonomy, and leave as XBRL 2.1 or a holon (RDF). Subgraphs give your AI a workspace it extends over MCP, and semantic memory carries its work between sessions.
+
+[RoboLedger](https://roboledger.ai), the general ledger built on it, is in [roboledger-app](https://github.com/RoboFinSystems/roboledger-app): a full accounting system in its own right, every number traced to the entry. Our own companies' books are kept on it. [RoboInvestor](https://roboinvestor.ai) runs on it too: equity research on public companies, your fund's positions with their terms, and the reports your portfolio companies send, shared from RoboLedger or as a PDF or spreadsheet.
+
+Built by an ex-Workiva principal financial knowledge engineer and inactive CPA. Open source (Apache 2.0 here; MIT on the clients, the shared UI and xbrlkit): you keep the code and the data whatever happens to any vendor, including us.
 
 **Run it yourself:** [on one server](https://robosystems.ai/docs/technical/self-hosting-on-a-server) · [in your AWS account](https://robosystems.ai/docs/technical/bootstrap-guide) · [with open-weight models](https://robosystems.ai/docs/technical/self-hosted-ai-models). Or let us run it: [robosystems.ai](https://robosystems.ai).
 
-**Every tenant gets their own graph.** Not a row-level slice of a shared table — a dedicated graph database on its own instance, with a dedicated OLTP schema behind it. Your schema, your taxonomies, and your calculation structures live in it as artifacts you can read, export, and take with you.
+**Every tenant gets their own graph.** A dedicated graph database on its own instance, with a dedicated OLTP schema behind it, never a row-level slice of a shared table. Your schema, your taxonomies, and your calculation structures live in it as artifacts you can read, export, and take with you.
 
 ## Platform
 
-The platform provides the core infrastructure that all extensions build on:
+What every graph gets, whichever kind it is:
 
-- **Dedicated Infrastructure**: Tiered LadybugDB graph infrastructure with dedicated instances and configurable memory allocation
-- **AI Operator System**: AI Operators (model-driven executors over the MCP tools) with automatic credit tracking and SSE progress streaming.
-- **Shared Repositories**: SEC XBRL filings knowledge graph for comparison and benchmarking
-- **Document Management**: Upload, index, and search documents with full-text and semantic search via OpenSearch
-- **Credit-Based Billing**: Flexible credits for AI operations based on token usage
-- **Subgraphs (Workspaces)**: isolated workspaces beside a graph, for agent scratch data, development and team collaboration (semantic memory stays on the parent graph)
-- **Web Application**: Primary web interface — graph management, the AI query console (natural-language + Cypher over MCP), schema explorer, document search, shared-repository access, and billing — [`robosystems-app`](https://github.com/RoboFinSystems/robosystems-app)
+- **A dedicated graph database**: LadybugDB on its own instance, sized by tier
+- **MCP on every graph**: the graph's URL is an MCP server, with OAuth or an API key
+- **AI Operators**: model-driven executors over the same MCP tools (analyst, author, mapping), run in the background with progress streamed back
+- **Documents and search**: upload, index and search with full-text and semantic search
+- **Subgraphs**: isolated workspaces beside a graph for agent scratch data, development and teams
+- **Credits for AI only**: Operator calls consume credits by token usage; MCP calls and database operations are free
+- **A web app**: graph management, the query console, schema explorer and billing, in [`robosystems-app`](https://github.com/RoboFinSystems/robosystems-app)
 
-The **core platform API** lives at `/v1` — auth, orgs, billing, graph lifecycle (subgraphs, backups, materialize, tier changes), Cypher, and MCP — with reads as REST `GET`. Every write — across both the core and extensions surfaces — is a named **`OperationEnvelope`** operation with `Idempotency-Key` support, audit logging, and SSE progress streaming via `/v1/operations/{id}/stream`.
+The core API is at `/v1`. Reads are REST `GET`; every write is a named operation with `Idempotency-Key` support, an audit record and progress over SSE.
 
 ## Extensions
 
-Extensions are domain-specific subsystems that bring their own schema, OLTP tables, API routes, data pipelines, and dedicated frontend apps. They share a single PostgreSQL database with schema-per-tenant isolation and materialize to the graph for analytical queries. Domain content is authored as **block molecules** — self-describing envelopes bundling atomic facts with their structure, rules, and verification — never bare rows.
+An extension is a product built on the platform: its own schema, tables, API and app. An extension's graph is built around a reporting entity, a company or a fund, and holds its books or its portfolio. Each graph's extension data lives in its own PostgreSQL schema and is materialized to the graph for analysis. The surface is scoped to a graph by URL:
 
-The extensions API surface is **graph-scoped at the URL level** — `graph_id` is always a path parameter, never a query argument — and splits reads from writes by transport:
+- **Reads**: `POST /extensions/{graph_id}/graphql`
+- **Writes and analytical views**: `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{name}`
 
-- **Reads** → `POST /extensions/{graph_id}/graphql` — Strawberry GraphQL, GraphiQL in dev, schema composed dynamically from enabled domains
-- **Writes** → `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{operation_name}` — named REST commands
-- **Analytical views** → `POST /extensions/{domain}/{graph_id}/operations/{view_name}` — read-only analytical operations (e.g. `build-fact-grid`, `live-financial-statement`), same envelope as writes
-
-Behind the API is a CQRS operations kernel (`reads/` + `commands/` per domain, plus graph-backed `views/`) that's the single source of truth for business logic — GraphQL resolvers, REST operation routes, and MCP tools all delegate to the same functions. Per-domain feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`) gate both the routers and the GraphQL schema composition.
+GraphQL, the operation routes, the MCP tools and the AI Operators all call the same functions, so there is one implementation of each rule. Details: [Extensions Surface Overview](https://robosystems.ai/docs/technical/extensions-surface-overview).
 
 ### [RoboLedger](https://roboledger.ai)
 
-Accounting and financial reporting extension — a ledger-grade system of record that AI and analysts can both query and operate. Writes land as self-describing **molecules**: atomic facts bundled with their structural wiring, rules, and verification in one typed envelope, never bare rows. Three block molecules are the authoring substrate:
+The general ledger and its financial reporting. Everything written is a block: the facts together with their structure, their rules and the check that they hold.
 
-- **Information Blocks** — the envelope for reportable content: schedules, statements, metrics, and text-block disclosures bundled with their period-versioned fact sets, typed mechanics, and rules. `evaluate-rules` runs arithmetic checks (EqualTo, RollUp, RollForward, SumEquals, Exists, CoExists) over materialized facts; pinning a fact set separates a live closing book from a frozen report.
-- **Event Blocks** — REA event capture: callers record what happened in the world (a sale, a payment, an asset disposal) through a structured action-verb vocabulary, and a handler registry derives the debits and credits across the three-level ledger (Transaction → Entry → LineItem). Preview handler resolution, execute to post GL atomically, and promote matured obligations (AR/AP, schedule entries) on demand.
-- **Taxonomy Blocks** — accounting frameworks as data, not code: Elements, linkbase Associations (presentation / calculation / mapping), Structures, and auto-generated structural rules in one atomic write. Ships `fac` (fundamentals) and `rs-gaap` (~2,000 curated US-GAAP concepts) behind a two-tier public→tenant library, with CoA→GAAP mapping anchored to calc-DAG leaves.
+- **[Event Blocks](https://robosystems.ai/docs/technical/event-driven-ledger)**: record what happened (a sale, a payment, a disposal) and the ledger derives the debits and credits
+- **[Information Blocks](https://robosystems.ai/docs/technical/information-blocks)**: statements, schedules, metrics and disclosures, each with its facts and the arithmetic rules that check them
+- **[Taxonomy Blocks](https://robosystems.ai/docs/technical/taxonomy-and-frameworks)**: accounting frameworks as data. Ships `rs-gaap` (about 2,000 curated US GAAP concepts) and `fac`, with the chart of accounts mapped to them, by hand or by the mapping operator
+- **Close**: a fiscal calendar and a period close that names whatever is holding it up
+- **[Reporting](https://robosystems.ai/docs/technical/reporting-and-rendering)**: multi-period reports through a reporting style, with a draft-to-filed lifecycle, forecasts through the same statement structures, and statements read live from the ledger
+- **[Serialization](https://robosystems.ai/docs/technical/serialization-and-export)**: a report is stored as a holon (RDF in named graphs) and downloads as that, as a DataBook (the holon as a Markdown document, every figure linked to its fact), with its ledger lineage, as a compiled JSON model, or as XBRL 2.1. [xbrlkit](https://xbrlkit.com) checks and reads the files with no account
+- **Industry classification**: one open vocabulary shared by a ledger's entities and every SEC filer: 543 industries in four levels, 7,200 public companies placed, in [`frameworks/industries`](/frameworks/industries/README.md)
+- **Connections**: [QuickBooks](https://quickbooks.intuit.com/partners/affiliates?cid=par_pim_4TcakSEFQs73) as the books of record, and bank feeds through [Plaid](https://plaid.com) and [Mercury](https://mercury.com/partner/robosystems). A bank transaction arrives with a suggested account, and nothing reaches the ledger until someone approves it
 
-Built on the blocks:
+<sub>Mercury is a fintech company, not an FDIC-insured bank. Banking services provided through Choice Financial Group and Column N.A., Members FDIC.</sub>
 
-- **Close lifecycle** — fiscal calendar, close-target catch-up sequencing, and period close/reopen gated on the balance equation, [QuickBooks](https://quickbooks.intuit.com/partners/affiliates?cid=par_pim_4TcakSEFQs73) sync-staleness, and outstanding schedule obligations; every blocker names what is holding the close
-- **Mapping** — CoA→GAAP mapping associations plus AI-assisted bulk mapping via the **MappingOperator** (confidence-tiered: auto-approve / review / skip)
-- **Reporting** — multi-period reports rendered from shared facts through a Reporting Style; a report lifecycle (draft → under_review → filed → archived) with publish lists for distribution
-- **Forecasting** — operating-plan scenarios projected through the same statement structures: rule-driven forecasts, per-line growth trajectories, and manual line assertions, with forecast periods returned alongside actuals on statement reads
-- **Analytical operations** — `live-financial-statement` renders a statement straight from the OLTP ledger (no materialization required); `build-fact-grid` and `financial-statement-analysis` query the materialized XBRL hypercube in the graph
-- **Serialization** — reports publish as a **holon** (dataset-form JSON-LD, the stored anchor and the one form that carries the whole report), with a compiled JSON model and a filing-grade **XBRL 2.1** package (Arelle-validated) built on first download, all three projections of the same assembled report
-- **Pipelines & data** — QuickBooks ELT via dbt/Dagster with a configurable `write_policy`, and SEC XBRL financial reporting
-
-Dedicated frontend app: [`roboledger-app`](https://github.com/RoboFinSystems/roboledger-app).
+App: [`roboledger-app`](https://github.com/RoboFinSystems/roboledger-app). Operations: [RoboLedger Operations](https://robosystems.ai/docs/technical/roboledger-operations).
 
 ### [RoboInvestor](https://roboinvestor.ai)
 
-The portfolio extension — a fund's positions with their terms, linked back to the businesses that issued them.
+A fund's positions with their terms, linked to the businesses that issued them.
 
-- **Portfolio Blocks** — the same molecule discipline as RoboLedger: a portfolio plus its positions and securities are validated and written as one envelope, with cost basis and current value held as integer cents and dollar totals computed at the boundary. A position is active until it is disposed, which keeps the row with its disposition date; reads expose `portfolios`, `positions`, `holdings` (rolled up by issuer), and the assembled `portfolioBlock`.
-- **Securities** — register and maintain ownership instruments (common stock, warrants, convertible notes, …) with an extensible `terms` blob for instrument-specific detail (strike price, liquidation preference, vesting)
-- **Cross-graph research** — a security can point at the graph of the company that issued it, when that company also runs on the platform. The investor records the issuer's `source_graph_id` up front as a pre-association; when the issuer later shares a published report into the investor's graph, the issuer's entity is materialized there and any securities waiting on that `source_graph_id` link to it. A holding then traverses through to the issuer's own reported facts — `Portfolio → Position → Security → Entity → Report → Fact` — with authorization enforced at the report-sharing boundary, not the OLTP layer.
+- **Portfolios, positions and securities**, with instrument terms (strike price, liquidation preference, vesting)
+- **Cross-graph research**: when a portfolio company on the platform shares a published report, the holding links through to that company's own reported facts
+- **Received reports**: load a report a company sent, from a holon, a compiled model, or rows read out of a PDF or workbook
 
-Dedicated frontend app: [`roboinvestor-app`](https://github.com/RoboFinSystems/roboinvestor-app).
+App: [`roboinvestor-app`](https://github.com/RoboFinSystems/roboinvestor-app). Operations: [RoboInvestor Operations](https://robosystems.ai/docs/technical/roboinvestor-operations).
 
 ## Quick Start
 
-### Docker Development Environment
+Needs Docker, 8 GB of RAM, 20 GB of disk, and `uv` and `just`. macOS and Linux; on Windows use [WSL2](https://robosystems.ai/docs/technical/windows-setup-with-wsl2).
 
 ```bash
-# Install uv and just
 brew install uv just
 
-# Start robosystems backend
-just start
-
-# Start frontend apps - robosystems-app, roboledger-app, roboinvestor-app
-just start apps
-
-# Refresh images and recreate the containers that changed (after a git pull)
-just upgrade
-
-# Local builds: restart to pick up code changes; rebuild after dependency changes
-just restart
-just rebuild
+just start          # the backend: API, Graph API, Dagster, PostgreSQL, Valkey, OpenSearch
+just start apps     # the three frontend apps
+just upgrade        # after a git pull: refresh images, recreate what changed
 ```
 
-This initializes the `.env` file and starts the complete RoboSystems stack with:
+| Service | URL | App | URL |
+| --- | --- | --- | --- |
+| Main API | http://localhost:8000 | RoboSystems | http://localhost:3000 |
+| Graph API | http://localhost:8001 | RoboLedger | http://localhost:3001 |
+| Dagster UI | http://localhost:8002 | RoboInvestor | http://localhost:3002 |
 
-- Graph API with LadybugDB and DuckDB backends
-- Dagster for data pipeline orchestration
-- PostgreSQL for IAM, graph metadata, extensions and Dagster
-- Valkey for caching, SSE messaging, and rate limiting
-- OpenSearch for full-text and semantic document search
-- SeaweedFS for S3-compatible object storage and DynamoDB Local for the graph registries
+`just start` runs the published images, so the checkout supplies configuration, not code. To run your own changes, comment out the image lines in `.env`: the stack is then built from the checkout, and an edit applies on `just restart` (`just rebuild` after a dependency change). `just init` sets up the Python environment. More: [Local Development](https://robosystems.ai/docs/technical/local-development).
 
-**Service URLs:**
+To deploy to your own AWS account, fork the repo and run `just bootstrap`: see the [Bootstrap Guide](https://robosystems.ai/docs/technical/bootstrap-guide).
 
-| Service    | URL                   |
-| ---------- | --------------------- |
-| Main API   | http://localhost:8000 |
-| Graph API  | http://localhost:8001 |
-| Dagster UI | http://localhost:8002 |
-
-With `just start apps` (frontend apps):
-
-| App              | URL                   |
-| ---------------- | --------------------- |
-| RoboSystems App  | http://localhost:3000 |
-| RoboLedger App   | http://localhost:3001 |
-| RoboInvestor App | http://localhost:3002 |
-
-### Local Development
-
-`just start` runs the published images as released, so the checkout supplies configuration, not code. To run your own changes, comment out the image lines in `.env`: the stack is then built from the checkout, with its source mounted so an edit applies on `just restart`.
+### Demos
 
 ```bash
-# Setup Python environment (uv automatically handles Python versions)
-just init
+just demo-sec               # NVIDIA's SEC filings through the pipeline
+just demo-roboledger        # a ledger end to end: entries, schedules, a filed FY 2025 report, an AI close
+just demo-roboinvestor      # from a private holding to its issuer's filed report
+just demo-custom-graph      # your own schema, loaded and queried
+just demo-coffee-roaster    # a synthetic manufacturer
+just demo-saas-startup      # a synthetic SaaS company
 ```
 
-## Examples
-
-See RoboSystems in action with runnable demos that create graphs, load data, and execute queries with the `robosystems-client`:
+### Development
 
 ```bash
-just demo-sec               # Loads NVIDIA's SEC XBRL data via Dagster pipeline
-just demo-roboledger        # End-to-end RoboLedger demo: bulk OLTP, schedules, FY 2025 filed report, AI close
-just demo-custom-graph      # Builds custom graph schema with relationship networks
-just demo-coffee-roaster    # Synthetic manufacturing scenario
-just demo-saas-startup      # Synthetic SaaS scenario
-just demo-roboinvestor      # Cross-graph traversal from a private holding to its issuer's filed report (builds the issuer's ledger itself on first run)
+just test                   # unit tests
+just test-all               # tests plus lint, format and type checks
+just test-code              # lint, format and type checks only
+just logs api               # a service's logs
 ```
 
-Each demo has a corresponding [documentation page](https://robosystems.ai/docs/technical) with detailed guides.
-
-## Development Commands
-
-### Testing
-
-```bash
-just test-all               # Tests with code quality
-just test                   # Default test suite
-just test adapters          # Test specific module
-just test-cov               # Tests with coverage
-```
-
-### Code Quality
-
-```bash
-just test-code              # Lint, format, and typecheck (what the git hooks run)
-just lint fix               # Auto-fix lint issues
-just typecheck              # Type checking
-```
-
-### Log Monitoring
-
-```bash
-just logs api                 # View API logs (last 100 lines by default)
-just logs graph-api           # View Graph API logs
-just logs dagster-webserver   # View Dagster Webserver logs
-just logs dagster-daemon      # View Dagster Daemon logs
-```
-
-**See [justfile](justfile) for 100+ development commands** including database migrations, CloudFormation linting, graph operations, administration, and more.
-
-### Prerequisites
-
-#### System Requirements
-
-- Docker & Docker Compose
-- 8GB RAM minimum
-- 20GB free disk space
-
-#### Required Tools
-
-- `uv` for Python package and version management
-- `just` for project command runner
-
-Developed and tested on macOS and Linux. On Windows, use WSL2 with the repo cloned inside the Linux filesystem — see the **[Windows Setup (WSL2) Guide](https://robosystems.ai/docs/technical/windows-setup-with-wsl2)**.
-
-#### Deployment Requirements
-
-- Fork this repo
-- AWS account with IAM Identity Center (SSO)
-- Run `just bootstrap` to configure OIDC and GitHub variables
-
-See the **[Bootstrap Guide](https://robosystems.ai/docs/technical/bootstrap-guide)** for complete instructions.
+The [justfile](justfile) has the rest: migrations, graph operations, administration.
 
 ## Architecture
 
-Built end-to-end on open-source engines — PostgreSQL, LadybugDB, DuckDB, LanceDB, OpenSearch, and Valkey — assembled into a transactional core with a materialized analytical graph and integrated vector search, with no proprietary database lock-in.
+Built on open-source engines (PostgreSQL, LadybugDB, DuckDB, LanceDB, OpenSearch, Valkey): a transactional core, an analytical graph materialized from it, and vector search, with no proprietary database. The ontology, reporting taxonomies and calculation structures are artifacts you own and can take with you: [semantic sovereignty](https://robosystems.ai/blog/semantic-sovereignty).
 
-That openness runs up the stack as well as down: the ontology, reporting taxonomies, and calculation structures are inspectable, portable artifacts you own, not configuration trapped in a vendor platform — [semantic sovereignty](https://robosystems.ai/blog/semantic-sovereignty) for your financial data.
+**Every isolation primitive keys on `graph_id`, never on an organization.** Two graphs in one organization are separated by the same mechanism as two unrelated customers.
 
-### Multi-Tenancy & Isolation
+- **One graph database per tenant.** Tiers differ by instance size, not by how many tenants share one
+- **A PostgreSQL schema per graph**, with `search_path` set on every request
+- **The graph is a projection.** The ledger rows are the record, and the graph is rebuilt from them
+- **Shared repositories are read-only**, queryable beside your graph and never writable through it
 
-One rule: **every isolation primitive keys on `graph_id`, never on an organization** — session `search_path`, cache keys, idempotency keys, rate-limit buckets, and credit accounting all namespace on the graph. Two graphs inside the same organization are separated by the identical mechanism that separates two unrelated customers; there is no "internal" path that skips the boundary.
+So one codebase serves the managed platform, a dedicated deployment and a self-hosted install with no fork. Details: [Graphs & Multi-Tenancy](https://robosystems.ai/docs/technical/graphs-and-multi-tenancy) · [Architecture Overview](https://robosystems.ai/docs/technical/architecture-overview).
 
-- **One graph database per tenant** — every tier runs `databases_per_instance: 1`, so tiers differ by instance size, not by how many tenants share one.
-- **Schema-per-graph OLTP** — each graph gets its own PostgreSQL schema, with `search_path` re-stamped on every request rather than inherited from a pooled connection. A CI structural test pins the contract.
-- **Two databases, two migration histories** — platform state (identity, orgs, billing) is separate from extensions OLTP; a migration to one never touches the other.
-- **The graph is a derived projection** — OLTP rows are the system of record and the analytical graph is rebuilt from them blue-green, which is what makes a rebuild routine rather than risky.
-- **Subgraphs** are isolated workspaces beside a tenant's graph, sharing the parent's credits and permissions: agent scratch data, development, team workspaces. Semantic memory stays on the parent graph.
-- **Shared repositories** (SEC XBRL) are the one multi-reader surface: read-only, separately replicated, queryable alongside your own graph but never writable through it.
+**Identity.** Programs use `X-API-Key`; the apps use short-lived JWTs. Sign-in is a deployment choice: password, passkey, or an enterprise identity provider. Enterprise SSO (OIDC) and SCIM 2.0 are in the repository with no license gate. Details: [Authentication & API Keys](https://robosystems.ai/docs/technical/authentication-and-api-keys) · [Enterprise SSO & SCIM](https://robosystems.ai/docs/technical/enterprise-sso-and-scim) · [`SECURITY.md`](/SECURITY.md).
 
-Because tenancy is enforced at the graph rather than in application predicates, the same codebase serves managed SaaS, a dedicated single-tenant deployment, and a fully self-hosted install with no fork. Details: [Graphs & Multi-Tenancy](https://robosystems.ai/docs/technical/graphs-and-multi-tenancy).
-
-### Identity & Access
-
-Programmatic access uses `X-API-Key`; the browser apps use short-lived JWTs. How a person _logs in_ is a deployment decision — password, WebAuthn passkey, or an enterprise identity provider — published at `GET /v1/auth/providers`, so one frontend build renders whichever posture the backend is configured for.
-
-Enterprise SSO (OIDC) and SCIM 2.0 provisioning ship in the repository, off by default — available to any fork without a license gate. Provisioning is link-only: SCIM creates accounts and OIDC only resolves already-provisioned ones, so the identity provider owns the account lifecycle in both directions.
-
-Details: [Enterprise SSO & SCIM](https://robosystems.ai/docs/technical/enterprise-sso-and-scim) · [Authentication & API Keys](https://robosystems.ai/docs/technical/authentication-and-api-keys) · [`SECURITY.md`](/SECURITY.md)
-
-### Components
-
-**Application Layer:**
-
-- FastAPI REST API with versioned endpoints
-- Extension GraphQL read API plus named REST command operations (CQRS)
-- MCP server for AI-powered graph database access — every graph speaks the MCP Streamable HTTP transport, with OAuth or API-key auth
-- AI Operators (analyst, author, mapping) with automatic credit tracking
-- Dagster for data pipeline orchestration and background jobs
-
-**LadybugDB Graph Database:**
-
-- Embedded columnar graph database purpose-built for financial analytics
-- Base + extension schema architecture — extensions define domain models
-- Native DuckDB integration for high-performance staging and ingestion
-- LanceDB as the semantic-modality engine — per-graph, on-disk vector stores (IVF-PQ, 384-dim embeddings) for AI memory (remember/recall) and vector-search offload
-- Tiered infrastructure with configurable memory, rate limits, and subgraph allocations
-- Shared tier hosts public repositories with read replicas
-
-**Data Layer:**
-
-- PostgreSQL (RDS) for IAM, graph metadata, Dagster, and extension OLTP databases (schema-per-tenant)
-- OpenSearch for full-text and semantic document search (BM25 + KNN)
-- Valkey (ElastiCache) for caching, SSE messaging, and rate limiting
-- S3 for data lake storage and static assets
-- DynamoDB for instance/graph/volume registry
-
-**Infrastructure:**
-
-- CloudFormation deployed via GitHub Actions with OIDC
-- ECS Fargate for API and Dagster
-- EC2 (ASG) for LadybugDB writer clusters; EC2 (ALB + ASG) for shared replica clusters
-
-## AI
-
-### Model Context Protocol (MCP)
-
-- **Financial Analysis**: Natural language queries across your own graph and public benchmark data
-- **Cross-Database Queries**: Compare user graph data against SEC shared repository data
-- **Tools**: Rich toolkit for graph queries, schema introspection, fact discovery, financial analysis, document search, and AI memory operations
-- **Handler Pool**: Managed MCP handler instances with resource limits
-
-### AI Operator System
-
-- Unified architecture: stateless Operators (Claude/MCP executors) with protocol-based service injection
-- One execution path: the API gates and enqueues, every Operator runs on the background worker (Valkey queue + SSE progress), and `?mode=sync` waits on the result
-- Automatic credit tracking per AI call — Operators cannot forget billing
-- Extensible: add new Operators for new AI workflows; they inherit execution, credit tracking, and progress streaming automatically
-
-### Credit System
-
-- **AI Operations Only**: Credits are consumed exclusively by AI Operator calls (a frontier model on the managed platform; the model you choose when you host it yourself)
-- **Token-Based Billing**: Credits based on actual token usage and model cost
-- **MCP Tool Access**: No credits consumed for MCP calls or database operations
+**On AWS:** ECS Fargate for the API and Dagster, EC2 for the graph instances, RDS, ElastiCache, OpenSearch, S3 and DynamoDB, deployed from CloudFormation by GitHub Actions over OIDC.
 
 ## SEC Shared Repository
 
-A curated knowledge graph of US public company financial data from SEC EDGAR XBRL filings. Runs on the shared LadybugDB tier, accessible via MCP tools, Cypher queries, and the AI Operator.
+A shared repository is a graph the platform maintains from outside sources, the same for everyone who reads it and writable by no one. Today: the SEC repository, US public companies' XBRL filings as one graph, there to benchmark your company against public peers, research a company and compare filers. It is read through MCP, Cypher and the AI Operators, beside your own graph. Every filing is parsed by [xbrlkit](https://xbrlkit.com), then enriched (element mapping, statement classification, disclosure tagging) and indexed for hybrid full-text and vector search.
 
-The full corpus is also published monthly as one LadybugDB file on Hugging Face — [robosystems/sec-xbrl-knowledge-graphs](https://huggingface.co/datasets/robosystems/sec-xbrl-knowledge-graphs) (tens of GiB to download, well over 100 GiB on disk; the dataset card carries each snapshot's exact sizes). `just sec-dump` pulls it into `data/lbug-dbs` for local Cypher, API, and MCP with no pipeline run; see the [SEC XBRL Pipeline](https://robosystems.ai/docs/technical/sec-xbrl-pipeline) guide.
+The whole corpus is published monthly as one LadybugDB file on Hugging Face: [robosystems/sec-xbrl-knowledge-graphs](https://huggingface.co/datasets/robosystems/sec-xbrl-knowledge-graphs) (tens of GiB to download, well over 100 GiB on disk). `just sec-dump` pulls it for local use with no pipeline run. See the [SEC XBRL Pipeline](https://robosystems.ai/docs/technical/sec-xbrl-pipeline) guide and the [SEC adapter](/robosystems/adapters/sec/README.md).
 
-- **Pipeline**: EDGAR → Download → Process (Parquet) → Stage (DuckDB) → Enrich (Icebug+fastembed) → Materialize (LadybugDB) → Index + Embed (OpenSearch)
-- **Graph**: the base schema plus the `roboledger` extension, modeling the full XBRL reporting hierarchy
-- **Extraction**: every filing is parsed by [xbrlkit](https://xbrlkit.com) — the same open library behind the `disclosures` and `information-block` tools, the holon viewer, and its own MCP server
-- **Search**: Hybrid BM25 + KNN vector search across narrative sections and iXBRL disclosures
-- **Enrichment**: Semantic element mapping, statement classification, and disclosure tagging across the shared repository's disclosures
+## Connecting
 
-See [SEC Adapter](/robosystems/adapters/sec/README.md) for detailed documentation.
+### MCP
 
-## Client Libraries
+Every graph is an MCP server. The URL picks the graph: `sec` for the public repository, your graph id for your own.
 
-RoboSystems provides comprehensive client libraries for building applications:
-
-### MCP (Model Context Protocol)
-
-Every graph is an MCP server, and the graph's URL is the preferred way to connect — Claude, Claude Code, Cursor, or any MCP client that supports HTTP transports, no install required. The URL picks the graph (`sec` for the public SEC repository, your graph id for your own); sign in with OAuth, or put your API key in the `X-API-Key` header — never in the URL.
-
-**OAuth — sign in and pick a graph.** The graph-agnostic endpoint `https://api.robosystems.ai/v1/mcp` accepts OAuth only: an OAuth-capable client (claude.ai, Claude Code, ChatGPT, VS Code, Cursor) discovers the authorization server from the endpoint, you sign in and choose the graph the connection covers, and the client holds a revocable token bound to that graph — no key to paste. Per-graph URLs accept OAuth too, alongside the key header. (Deployment flag: `MCP_OAUTH_ENABLED`.)
-
-**RoboLedger endpoint.** `https://api.robosystems.ai/v1/mcp/roboledger` is the same OAuth flow for RoboLedger graphs only: sign-in offers only your RoboLedger graphs, and the connection serves the accounting tool set without workspace and platform-administration tools (subgraphs, backups, materialization, write policy). It is the endpoint for RoboLedger directory listings, which freeze one tool list per URL.
+**OAuth.** `https://api.robosystems.ai/v1/mcp` takes any OAuth-capable client (claude.ai, Claude Code, ChatGPT, VS Code, Cursor): sign in, choose the graph, and the client holds a revocable token for it. `https://api.robosystems.ai/v1/mcp/roboledger` is the same for RoboLedger graphs, with the accounting tools only.
 
 ```bash
 claude mcp add --transport http robosystems https://api.robosystems.ai/v1/mcp
 ```
 
-**Claude Code with an API key** — one command:
+**API key**, in the `X-API-Key` header and never in the URL:
 
 ```bash
 claude mcp add --transport http robosystems-sec \
@@ -312,136 +155,38 @@ claude mcp add --transport http robosystems-sec \
   --header "X-API-Key: <your key>"
 ```
 
-**Cursor / VS Code** — add to `mcp.json`:
+The app's MCP page (`/connect`) has the snippet for each client, filled in for the selected graph. More: [AI Operators and MCP](https://robosystems.ai/docs/technical/ai-operators-and-mcp) · the [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) for clients without HTTP transport.
 
-```json
-"robosystems-sec": {
-  "url": "https://api.robosystems.ai/v1/graphs/sec/mcp",
-  "headers": { "X-API-Key": "<your key>" }
-}
-```
-
-**Claude (claude.ai / Desktop)** — Settings → Connectors → Add custom connector with `https://api.robosystems.ai/v1/mcp` (or a per-graph URL): Claude detects OAuth and you pick the graph at sign-in. The **MCP page** in the app (`/connect`) has every snippet filled in for the selected graph, and mints graph-scoped keys for header-only clients.
-
-- **Documentation**: [AI Operators and MCP](https://robosystems.ai/docs/technical/ai-operators-and-mcp) | [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) (proxy mode) for clients without HTTP transport support
-
-### TypeScript/JavaScript Client
-
-Full-featured SDK for web and Node.js applications with TypeScript support.
+### Client libraries
 
 ```bash
-npm install @robosystems/client
+npm install @robosystems/client     # TypeScript / JavaScript
+pip install robosystems-client      # Python
 ```
 
-- **Features**: Type-safe API calls, automatic retry logic, streaming support
-- **Use Cases**: Web applications, Node.js backends, React/Vue/Angular frontends
-- **Documentation**: [npm](https://www.npmjs.com/package/@robosystems/client) | [GitHub](https://github.com/RoboFinSystems/robosystems-typescript-client)
+[TypeScript client](https://github.com/RoboFinSystems/robosystems-typescript-client) · [Python client](https://github.com/RoboFinSystems/robosystems-python-client)
 
-### Python Client
+### API
 
-Native Python SDK for backend services and data science workflows.
-
-```bash
-pip install robosystems-client
-```
-
-- **Features**: Async/await support, pandas integration, Jupyter compatibility, batch operations
-- **Use Cases**: Data pipelines, ML workflows, backend services, analytics
-- **Documentation**: [PyPI](https://pypi.org/project/robosystems-client/) | [GitHub](https://github.com/RoboFinSystems/robosystems-python-client)
+- [API reference](https://robosystems.ai/docs/api): every endpoint, with its parameters, schemas and an example call
+- [Interactive console](https://api.robosystems.ai): Swagger UI, to run a call with your own key
+- [OpenAPI specification](https://api.robosystems.ai/openapi.json)
 
 ## Documentation
 
-### Technical Documentation
+The technical documentation is at **[robosystems.ai/docs/technical](https://robosystems.ai/docs/technical)**. Good places to start:
 
-**Getting Started & Platform:**
+- [Core Concepts](https://robosystems.ai/docs/technical/core-concepts) · [Architecture Overview](https://robosystems.ai/docs/technical/architecture-overview) · [Local Development](https://robosystems.ai/docs/technical/local-development)
+- [Information Blocks](https://robosystems.ai/docs/technical/information-blocks) · [Event-Driven Ledger](https://robosystems.ai/docs/technical/event-driven-ledger) · [Taxonomy & Frameworks](https://robosystems.ai/docs/technical/taxonomy-and-frameworks) · [Serialization & Export](https://robosystems.ai/docs/technical/serialization-and-export)
+- [Querying the Analytical Graph](https://robosystems.ai/docs/technical/querying-the-analytical-graph) · [Shared Repositories](https://robosystems.ai/docs/technical/shared-repositories) · [AI Operators & MCP](https://robosystems.ai/docs/technical/ai-operators-and-mcp)
+- [Self-hosting on one server](https://robosystems.ai/docs/technical/self-hosting-on-a-server) · [Bootstrap Guide](https://robosystems.ai/docs/technical/bootstrap-guide) · [Security & Compliance](https://robosystems.ai/docs/technical/security-and-compliance) · [Trust Center](https://trust.robosystems.ai)
 
-- [Home / Overview](https://robosystems.ai/docs/technical) · [Local Development](https://robosystems.ai/docs/technical/local-development) · [Core Concepts](https://robosystems.ai/docs/technical/core-concepts) · [Architecture Overview](https://robosystems.ai/docs/technical/architecture-overview) · [Bootstrap Guide](https://robosystems.ai/docs/technical/bootstrap-guide) · [Windows Setup (WSL2)](https://robosystems.ai/docs/technical/windows-setup-with-wsl2) · [Security & Compliance](https://robosystems.ai/docs/technical/security-and-compliance)
-
-**Operations Layer:**
-
-- [Graphs & Multi-Tenancy](https://robosystems.ai/docs/technical/graphs-and-multi-tenancy) · [Authentication & API Keys](https://robosystems.ai/docs/technical/authentication-and-api-keys) · [Enterprise SSO & SCIM](https://robosystems.ai/docs/technical/enterprise-sso-and-scim) · [Querying the Analytical Graph](https://robosystems.ai/docs/technical/querying-the-analytical-graph) · [Graph Operations](https://robosystems.ai/docs/technical/graph-operations) · [AI Operators & MCP](https://robosystems.ai/docs/technical/ai-operators-and-mcp) · [Shared Repositories](https://robosystems.ai/docs/technical/shared-repositories) · [Credits & Billing](https://robosystems.ai/docs/technical/credits-and-billing) · [Pipeline Guide](https://robosystems.ai/docs/technical/pipeline-guide)
-
-**Extensions Layer:**
-
-- [Extensions Surface Overview](https://robosystems.ai/docs/technical/extensions-surface-overview) · [GraphQL Reads](https://robosystems.ai/docs/technical/graphql-reads) · [RoboLedger Operations](https://robosystems.ai/docs/technical/roboledger-operations) · [RoboInvestor Operations](https://robosystems.ai/docs/technical/roboinvestor-operations) · [Connecting QuickBooks Locally](https://robosystems.ai/docs/technical/connecting-quickbooks-locally)
-
-**Content & Contribution Fabric:**
-
-- [Information Blocks](https://robosystems.ai/docs/technical/information-blocks) · [Taxonomy & Frameworks](https://robosystems.ai/docs/technical/taxonomy-and-frameworks) · [Event-Driven Ledger](https://robosystems.ai/docs/technical/event-driven-ledger) · [Reporting & Rendering](https://robosystems.ai/docs/technical/reporting-and-rendering) · [Serialization & Export](https://robosystems.ai/docs/technical/serialization-and-export)
-
-**Documents & Search:**
-
-- [Search & AI Retrieval](https://robosystems.ai/docs/technical/search-and-ai-retrieval) · [Document Management](https://robosystems.ai/docs/technical/document-management) · [File Uploads](https://robosystems.ai/docs/technical/file-uploads)
-
-**Demos:**
-
-- [RoboLedger Demo Walkthrough](https://robosystems.ai/docs/technical/roboledger-demo-walkthrough) · [SEC XBRL Pipeline](https://robosystems.ai/docs/technical/sec-xbrl-pipeline) · [Custom Graph Schema](https://robosystems.ai/docs/technical/custom-graph-schema)
-
-### Codebase Documentation
-
-Each package documents itself — read the README for a directory before working in it.
-
-**Core Services:**
-
-- **[Adapters](/robosystems/adapters/README.md)** - External service integrations
-- **[Operations](/robosystems/operations/README.md)** - Business workflow orchestration, CQRS reads/commands kernels for extensions
-- **[AI Operators](/robosystems/operations/operators/README.md)** - AI Operator framework: Claude/MCP executors, credit tracking, SSE streaming
-- **[Schemas](/robosystems/schemas/README.md)** - Graph schema definitions
-- **[Extensions GraphQL](/robosystems/graphql/README.md)** - Strawberry GraphQL read surface, Pydantic auto-derivation, resolver patterns
-- **[Configuration](/robosystems/config/README.md)** - Configuration management
-- **[Dagster](/robosystems/dagster/README.md)** - Data pipeline and task orchestration
-
-**Database Models:**
-
-- **[Platform Models](/robosystems/models/core/README.md)** - SQLAlchemy models for the platform database
-- **[Extensions Models](/robosystems/models/extensions/README.md)** - SQLAlchemy models for the extensions database with schema-per-graph tenancy
-- **[API Models](/robosystems/models/api/README.md)** - Pydantic request/response models for core platform and extensions surfaces
-
-**Graph Database System:**
-
-- **[Graph API](/robosystems/graph_api/README.md)** - Graph API overview
-- **[Client Factory](/robosystems/graph_api/client/README.md)** - Client factory system
-- **[Core Services](/robosystems/graph_api/core/README.md)** - Core services layer
-
-**Middleware Components:**
-
-- **[Authentication](/robosystems/middleware/auth/README.md)** - Authentication and authorization
-- **[Graph Routing](/robosystems/middleware/graph/README.md)** - Graph routing layer
-- **[MCP](/robosystems/middleware/mcp/README.md)** - MCP tools and pooling
-- **[Billing](/robosystems/middleware/billing/README.md)** - Subscription and billing management
-- **[Observability](/robosystems/middleware/otel/README.md)** - OpenTelemetry observability
-- **[Robustness](/robosystems/middleware/robustness/README.md)** - Circuit breakers and retry policies
-
-**Infrastructure:**
-
-- **[CloudFormation](/cloudformation/README.md)** - AWS infrastructure templates
-- **[Setup Scripts](/bin/setup/README.md)** - Bootstrap and configuration scripts
-
-**Development Resources:**
-
-- **[Examples](/examples/README.md)** - Runnable demos and integration examples
-- **[Tests](/tests/README.md)** - Testing strategy and organization
-- **[Admin Tools](/robosystems/admin/README.md)** - Administrative utilities and CLI
-
-**Security & Compliance:**
-
-- **[SECURITY.md](/SECURITY.md)** - Security control catalog with implementation references
-- **[Compliance](https://robosystems.ai/docs/technical/security-and-compliance)** - Compliance stacks, toggles, and SOC 2 posture
-- **[Trust Center](https://trust.robosystems.ai)** - Live compliance posture and audit artifacts
-
-## API Reference
-
-- [API reference](https://robosystems.ai/docs/api) — every endpoint, with its parameters, schemas and an example call
-- [Interactive API console](https://api.robosystems.ai) — Swagger UI, to run a call against the live API with your own key
-- [OpenAPI specification](https://api.robosystems.ai/openapi.json) — the machine-readable source, what the SDK generators read
+In the code, each package has a README; read it before working there. The main ones: [operations](/robosystems/operations/README.md) · [adapters](/robosystems/adapters/README.md) · [GraphQL](/robosystems/graphql/README.md) · [Graph API](/robosystems/graph_api/README.md) · [schemas](/robosystems/schemas/README.md) · [config](/robosystems/config/README.md) · [Dagster](/robosystems/dagster/README.md) · [auth](/robosystems/middleware/auth/README.md) · [MCP](/robosystems/middleware/mcp/README.md) · [CloudFormation](/cloudformation/README.md) · [examples](/examples/README.md) · [tests](/tests/README.md).
 
 ## Support
 
-- [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Documentation](https://robosystems.ai/docs/technical)
-- [Projects](https://github.com/orgs/RoboFinSystems/projects)
-- [Discussions](https://github.com/orgs/RoboFinSystems/discussions)
-- [CONTRIBUTING.md](/.github/CONTRIBUTING.md) — branch conventions, coding standards, and the pull request process
+- [Issues](https://github.com/RoboFinSystems/robosystems/issues) · [Discussions](https://github.com/orgs/RoboFinSystems/discussions) · [Projects](https://github.com/orgs/RoboFinSystems/projects)
+- [CONTRIBUTING.md](/.github/CONTRIBUTING.md): branch conventions, coding standards and the pull request process
 
 ## License
 

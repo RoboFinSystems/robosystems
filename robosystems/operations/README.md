@@ -40,7 +40,7 @@ Every operation on the platform is one of four shapes, and the shape determines 
 | `library/` | Taxonomy/framework library reads (shared and tenant) |
 | `search/` | Document search — client, embeddings, markdown parsing |
 | `memory/` | Per-graph semantic memory service |
-| `serialization/` | Report serialization for export: the report bundle, encoded as an RDF holon (and its lineage holon) or as XBRL (Tavi, XBRL 2.1) |
+| `serialization/` | Report serialization for export: the report bundle, encoded as an RDF holon (and its lineage holon) or as XBRL (Tavi, XBRL 2.1), and the DataBook written from a stored holon. See its [README](serialization/README.md) |
 | `providers/` | External provider integrations and the provider registry |
 | `aws/` | S3 and SES helpers |
 | `connection_service.py`, `document_service.py` | Connection and document lifecycle |

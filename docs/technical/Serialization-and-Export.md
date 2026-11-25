@@ -280,14 +280,16 @@ The package carries the statements only. Tenant-authored disclosure notes render
 
 XBRL 2.1 has no standard place for the platform-specific content, so the package leaves it out; only the disclosure notes are named in its `omittedContent`. The definition arcs reach a file only in the XBRL package.
 
-| Content | Holon | Tavi | XBRL 2.1 |
-| --- | --- | --- | --- |
-| Statement facts and networks | Yes | Yes | Yes |
-| Disclosure notes | Yes | Yes | No |
-| Information Block envelopes | No (each section's structure, FactSet and block type only) | No | No |
-| Definition arcs | No | No | Yes, when present |
-| Reporting Style, FactSets | Yes | Yes | No |
-| Framework pins, filing lifecycle | No (the filing date only) | No | No |
+| Content | Holon | DataBook | Tavi | XBRL 2.1 |
+| --- | --- | --- | --- | --- |
+| Statement facts | Yes | The consolidated values, as tables and as RDF; values broken out by an axis stay in the holon | Yes | Yes |
+| Presentation and calculation networks | Yes | No (named by their graph in the holon) | Yes | Yes |
+| Disclosure notes | Yes | Yes, long text as an excerpt | Yes | No |
+| Information Block envelopes | No (each section's structure, FactSet and block type only) | No | No | No |
+| Definition arcs | No | No | No | Yes, when present |
+| Reporting Style, FactSets | Yes | The Reporting Style only | Yes | No |
+| Framework pins, filing lifecycle | No (the filing date only) | No | No | No |
+| A validation verdict | No | Yes, the holon's | No | No |
 
 ### Received reports
 
@@ -304,18 +306,43 @@ Someone who receives a report file needs no RoboSystems account and no graph. Th
 uvx --from "xbrlkit[mcp]@latest" xbrlkit serve
 ```
 
+xbrlkit also checks a holon and turns one into a document, from the command line:
+
+```bash
+# Does the file meet the holon format? One verdict per named graph.
+uvx xbrlkit@latest validate report.holon.jsonld
+
+# Write the holon as a DataBook, the same document the DATABOOK download returns.
+uvx xbrlkit@latest databook report.holon.jsonld
+```
+
+The DataBook itself needs no tool: it is Markdown, and opens in any viewer or text editor.
+
 The holon also reads with any JSON-LD or RDF library, and the XBRL package with any XBRL 2.1 processor, such as Arelle. The RoboLedger guide [Reports and sharing](https://roboledger.ai/docs/reports-and-sharing) covers the same hand-off from the app.
 
 ## Validation
 
-The claim made about the output is that the XBRL package is valid XBRL 2.1. The holon and the Tavi are checked by reading them back: xbrlkit loads either into the same in-memory model the tools run on.
+Two claims are made about the output, each checked by a tool outside the platform.
 
-**Checking a download yourself.** The repository includes a small harness that runs Arelle over a downloaded package; it needs a checkout of the repository but no running stack:
+**The XBRL package is valid XBRL 2.1**, checked with Arelle.
+
+**The holon meets the holon format**, checked with xbrlkit. The format is defined in xbrlkit ([the holon](https://github.com/RoboFinSystems/xbrlkit/blob/main/xbrlkit/holon/README.md)): each named graph has its own SHACL shapes, and a further set runs over the graphs together for references that cross them. The check answers two questions and keeps them apart:
+
+- **Does the file meet the format?** Every node has what its graph requires, nothing sits in the wrong graph, and a reference from one graph lands on something another describes.
+- **Does the report hold together?** Read back, every fact points at a concept, period and unit that exist, every calculation foots, and the balance sheet balances.
+
+Neither says a report is complete or true. They say the file is what it claims to be and the report is consistent with itself. The platform does not run the check when a report is published; a DataBook carries the verdict for the holon it was written from. The Tavi is checked by reading it back: xbrlkit loads it into the same in-memory model the tools run on.
+
+**Checking a download yourself.** The repository includes a small harness that runs both checks over downloaded files and writes a verdict for each; it needs a checkout of the repository but no running stack:
 
 ```bash
-# Arelle: is the zip valid XBRL 2.1?
-uv run python -m examples._common.validate --zip report.zip --label fy2025
+uv run python -m examples._common.validate \
+  --zip report.zip \
+  --holon report.holon.jsonld \
+  --label fy2025
 ```
+
+Every report demo runs it, and the verdicts sit beside the sample files under `examples/*/sample_output/`.
 
 ## Changing What a Report Contains
 
