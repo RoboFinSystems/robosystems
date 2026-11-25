@@ -19,6 +19,7 @@ from robosystems.models.api.extensions.taxonomies import (
   MappingDetailResponse,
   StructureListResponse,
   StructureResponse,
+  SuggestedTarget,
   TaxonomyListResponse,
   TaxonomyResponse,
   UnmappedElementResponse,
@@ -414,21 +415,25 @@ def list_unmapped_elements(
   )
   coa_elements = session.execute(coa_query).scalars().all()
 
+  mapping_arcs = [Association.association_type == "mapping"]
   if mapping_id:
-    mapped_query = select(Association.from_element_id).where(
-      Association.structure_id == mapping_id,
-      Association.association_type == "mapping",
-    )
-  else:
-    mapped_query = select(Association.from_element_id).where(
-      Association.association_type == "mapping",
-    )
-  mapped_ids = set(session.execute(mapped_query).scalars().all())
+    mapping_arcs.append(Association.structure_id == mapping_id)
+  mapped_ids = set(
+    session.execute(select(Association.from_element_id).where(*mapping_arcs))
+    .scalars()
+    .all()
+  )
 
   unmapped = [e for e in coa_elements if e.id not in mapped_ids]
   unmapped_ids = [e.id for e in unmapped]
   efs_map = _efs_by_element(session, unmapped_ids)
   liquidity_map = _liquidity_by_element(session, unmapped_ids)
+  nets_against = _gross_sibling_targets(
+    session,
+    coa_elements,
+    [e for e in unmapped if efs_map.get(e.id) == _CONTRA_ASSET],
+    mapping_arcs,
+  )
 
   return [
     UnmappedElementResponse(
@@ -439,9 +444,72 @@ def list_unmapped_elements(
       liquidity=liquidity_map.get(e.id),
       balance_type=e.balance_type,
       external_source=e.external_source,
+      nets_against=nets_against.get(e.id),
     )
     for e in unmapped
   ]
+
+
+_ASSET = "asset"
+_CONTRA_ASSET = "contraAsset"
+
+
+def _gross_sibling_targets(
+  session: Session,
+  chart: list[Element],
+  contras: list[Element],
+  mapping_arcs: list,
+) -> dict[str, SuggestedTarget]:
+  """Each contra-asset account's gross sibling's concept: the one asset
+  account under the same parent, when it is mapped. A name cannot say what an
+  accumulated amortization reduces; the chart's structure can."""
+  parents = {e.parent_id for e in contras if e.parent_id}
+  if not parents:
+    return {}
+  children: dict[str, list[Element]] = {}
+  for e in chart:
+    if e.parent_id in parents:
+      children.setdefault(str(e.parent_id), []).append(e)
+  efs = _efs_by_element(session, [e.id for kids in children.values() for e in kids])
+  gross = {
+    parent: [e for e in kids if efs.get(e.id) == _ASSET]
+    for parent, kids in children.items()
+  }
+  sibling_of = {
+    contra.id: gross[str(contra.parent_id)][0].id
+    for contra in contras
+    if contra.parent_id and len(gross.get(str(contra.parent_id), [])) == 1
+  }
+  if not sibling_of:
+    return {}
+  # Read across every mapping, a sibling can map to two concepts; then there
+  # is nothing to offer.
+  concepts_of: dict[str, set[str]] = {}
+  for sibling_id, concept_id in session.execute(
+    select(Association.from_element_id, Association.to_element_id).where(
+      *mapping_arcs,
+      Association.from_element_id.in_(set(sibling_of.values())),
+    )
+  ).all():
+    concepts_of.setdefault(sibling_id, set()).add(concept_id)
+  targets = {
+    sibling_id: next(iter(ids))
+    for sibling_id, ids in concepts_of.items()
+    if len(ids) == 1
+  }
+  concepts = {
+    e.id: e
+    for e in session.execute(
+      select(Element).where(Element.id.in_(set(targets.values())))
+    ).scalars()
+  }
+  return {
+    contra_id: SuggestedTarget(
+      element_id=concept.id, qname=concept.qname or "", name=concept.name
+    )
+    for contra_id, sibling_id in sibling_of.items()
+    if (concept := concepts.get(targets.get(sibling_id, "")))
+  }
 
 
 _RS_GAAP_PRESENTATION_SET_ATTR = "_rs_gaap_presentation_set_cache"

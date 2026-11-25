@@ -123,6 +123,7 @@ class GetUnmappedElementsTool:
 - EFS trait (asset/liability/equity/revenue/expense) helps narrow the target reporting concept
 - On a group, one entity's chart: `entity_id` names it (or `mapping_id` does, through the entity whose chart it maps); default the group parent's
 - liquidity (current/noncurrent, assets/liabilities only) narrows further to the right BS section
+- nets_against, on a contra-asset account: the concept its one gross sibling under the same parent maps to. Map the contra there: it nets against that balance
 
 **WORKFLOW:**
 1. Call this tool to see unmapped elements

@@ -392,6 +392,16 @@ class UnmappedElementResponse(BaseModel):
   balance_type: str
   external_source: str | None = None
   suggested_targets: list[SuggestedTarget] = Field(default_factory=list)
+  nets_against: SuggestedTarget | None = Field(
+    None,
+    description=(
+      "For a contra-asset account: the reporting concept its gross sibling "
+      "maps to, the one asset account under the same parent, already "
+      "mapped. A contra nets against the balance it reduces, so it maps to "
+      "the same concept. Absent when the parent has no such sibling, more "
+      "than one, or one not yet mapped."
+    ),
+  )
 
 
 # ── Mapped Trial Balance ──────────────────────────────────────────────────
