@@ -233,3 +233,33 @@ class TestErrorCode:
     assert ErrorCode.ALREADY_EXISTS == "ALREADY_EXISTS"
     assert ErrorCode.INVALID_INPUT == "INVALID_INPUT"
     assert ErrorCode.DATABASE_ERROR == "DATABASE_ERROR"
+
+
+@pytest.mark.unit
+class TestLegalForm:
+  """Entity create and update take a legal form only from the list."""
+
+  @pytest.mark.parametrize(
+    "given,stored",
+    [
+      ("llc", "llc"),
+      ("  LLC ", "llc"),
+      ("Partnership", "partnership"),
+      ("non_profit", "non_profit"),
+      ("", None),
+      (None, None),
+    ],
+  )
+  def test_normalizes_to_the_stored_value(self, given, stored):
+    from robosystems.models.api.extensions.entity import UpdateEntityRequest
+
+    assert UpdateEntityRequest(entity_type=given).entity_type == stored
+
+  @pytest.mark.parametrize(
+    "given", ["limited_liability_company", "lp", "subsidiary", "S-Corp"]
+  )
+  def test_refuses_a_form_off_the_list(self, given):
+    from robosystems.models.api.extensions.entity import CreateEntityRequest
+
+    with pytest.raises(ValidationError, match="corporation"):
+      CreateEntityRequest(name="Pier", entity_type=given)

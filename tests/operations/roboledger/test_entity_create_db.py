@@ -544,7 +544,7 @@ class TestReportingStyle:
     )
     llc = create_entity(
       session,
-      CreateEntityRequest(name="Pier LLC", entity_type="Limited_Liability_Company"),
+      CreateEntityRequest(name="Pier LLC", entity_type="LLC"),
       created_by="u",
     )
     corp = create_entity(session, CreateEntityRequest(name="Pier Inc"), created_by="u")

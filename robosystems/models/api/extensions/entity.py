@@ -13,6 +13,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from robosystems.models.api.common import OptionalLegalForm
+
 ConsolidationMethod = Literal["full", "equity", "cost", "none"]
 EntityRole = Literal["operating", "consolidation"]
 
@@ -97,7 +99,11 @@ class LedgerEntityResponse(BaseModel):
     ),
   )
   entity_type: str | None = Field(
-    None, description="Legal form (e.g. 'corporation', 'llc', 'lp')."
+    None,
+    description=(
+      "Legal form: `corporation`, `llc`, `partnership`, `sole_proprietorship` "
+      "or `non_profit`. An entity set before the list may hold other text."
+    ),
   )
   reporting_style_id: str | None = Field(
     None,
@@ -210,7 +216,13 @@ class UpdateEntityRequest(BaseModel):
       "refused with the closest ids."
     ),
   )
-  entity_type: str | None = None
+  entity_type: OptionalLegalForm = Field(
+    None,
+    description=(
+      "Legal form: `corporation`, `llc`, `partnership`, `sole_proprietorship` "
+      "or `non_profit`. Changing it leaves the Reporting Style as it is."
+    ),
+  )
   phone: str | None = None
   website: str | None = None
   address_line1: str | None = None
@@ -299,7 +311,7 @@ class CreateEntityRequest(BaseModel):
   legal_name: str | None = Field(
     None, description="Registered legal name. Defaults to `name`."
   )
-  entity_type: str | None = Field(
+  entity_type: OptionalLegalForm = Field(
     None,
     description=(
       "Legal form: `corporation`, `llc`, `partnership`, "

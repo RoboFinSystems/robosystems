@@ -14,7 +14,6 @@ from robosystems.config.constants import ReportingStyleConstants as _RS
 _ENTITY_TYPE_STYLE: dict[str, str] = {
   "partnership": _RS.PARTNERSHIP_STYLE_ID,
   "llc": _RS.LLC_STYLE_ID,
-  "limited_liability_company": _RS.LLC_STYLE_ID,
 }
 
 

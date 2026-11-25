@@ -14,6 +14,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from robosystems.models.api.common import OptionalLegalForm
+
 ChartTemplateKey = Literal["saas", "services", "product", "consolidation"]
 
 
@@ -48,11 +50,12 @@ class InitializeChartOfAccountsRequest(BaseModel):
       "operating company's chart)."
     ),
   )
-  entity_type: str | None = Field(
+  entity_type: OptionalLegalForm = Field(
     None,
     description=(
       "Legal form for the equity mapping: `corporation`, `llc` or "
-      "`partnership`. Defaults to the graph's primary entity, then to "
+      "`partnership` have rows of their own; any other form maps as a "
+      "corporation. Defaults to the graph's primary entity, then to "
       "corporation."
     ),
   )

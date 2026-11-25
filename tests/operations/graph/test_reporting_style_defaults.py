@@ -26,7 +26,6 @@ class TestDefaultStyleFor:
       ("  PARTNERSHIP  ", RS.PARTNERSHIP_STYLE_ID),
       ("llc", RS.LLC_STYLE_ID),
       ("LLC", RS.LLC_STYLE_ID),
-      ("limited_liability_company", RS.LLC_STYLE_ID),
       ("corporation", RS.DEFAULT_STYLE_ID),
       ("subsidiary", RS.DEFAULT_STYLE_ID),
       ("sole_proprietorship", RS.DEFAULT_STYLE_ID),

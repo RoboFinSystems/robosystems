@@ -2,6 +2,8 @@
 
 from pydantic import BaseModel, Field, field_validator
 
+from robosystems.models.api.common import OptionalLegalForm
+
 
 class EntityCreate(BaseModel):
   name: str = Field(..., min_length=1, max_length=255)
@@ -19,11 +21,11 @@ class EntityCreate(BaseModel):
   state_of_incorporation: str | None = None
   fiscal_year_end: str | None = None
   ein: str | None = None
-  entity_type: str | None = Field(
+  entity_type: OptionalLegalForm = Field(
     default=None,
     description=(
-      "Entity legal form (corporation, llc / limited_liability_company, "
-      "partnership, sole_proprietorship, non_profit)."
+      "Entity legal form (corporation, llc, partnership, sole_proprietorship, "
+      "non_profit)."
     ),
   )
   tier: str | None = Field(
