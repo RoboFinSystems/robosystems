@@ -78,7 +78,6 @@ class TestGraphCreationEndpoint:
         sic_description="Motor Vehicles & Passenger Car Bodies",
         category="Manufacturing",
         state_of_incorporation="DE",
-        fiscal_year_end="1231",
         ein="12-3456789",
       ),
       tags=["entity", "test"],
@@ -661,20 +660,8 @@ class TestDataModels:
       )
     assert "at most 255 character" in str(exc_info.value).lower()
 
-    # Empty URI
-    with pytest.raises(ValidationError) as exc_info:
-      InitialEntityData(
-        name="Test",
-        uri="",
-        cik=None,
-        sic=None,
-        sic_description=None,
-        category=None,
-        state_of_incorporation=None,
-        fiscal_year_end=None,
-        ein=None,
-      )
-    assert "at least 1 character" in str(exc_info.value).lower()
+    # A blank website is accepted: the entity URI is assigned, not given.
+    assert InitialEntityData(name="Test", uri="").uri == ""
 
   def test_create_graph_request_validation(self):
     """Test CreateGraphRequest model validation."""

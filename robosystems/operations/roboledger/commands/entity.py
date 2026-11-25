@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
+from robosystems.config.constants import URIConstants
 from robosystems.models.api.extensions.entity import (
   CreateEntityRequest,
   LedgerEntityResponse,
@@ -27,7 +28,7 @@ from robosystems.operations.roboledger.entity_scope import (
   is_group_parent,
   resolve_entity,
 )
-from robosystems.operations.roboledger.reads.entity import entity_to_response
+from robosystems.operations.roboledger.reads.entity import load_entity_response
 from robosystems.operations.roboledger.reads.industries import resolve_industry
 from robosystems.utils.ulid import generate_prefixed_ulid
 
@@ -414,7 +415,7 @@ def _apply_updates(session: Session, entity: Entity, updates: dict[str, Any]):
   # Build the response before committing: commit expires the instance, and a
   # refresh would run on a pooled connection whose search_path was reset.
   session.flush()
-  response = entity_to_response(entity)
+  response = load_entity_response(session, entity)
   session.commit()
   return response
 
@@ -564,15 +565,13 @@ def create_entity(
     id=entity_id,
     name=body.name,
     legal_name=body.legal_name or body.name,
-    uri=body.uri or f"https://robosystems.ai/entities#{entity_id}",
+    uri=URIConstants.ENTITY_URI_BASE + entity_id,
     ticker=_ticker_for(session, body.ticker, body.name),
     cik=body.cik,
     sic=body.sic,
     sic_description=body.sic_description,
     category=body.category,
     state_of_incorporation=body.state_of_incorporation,
-    fiscal_year_end=body.fiscal_year_end
-    or (parent.fiscal_year_end if parent is not None else None),
     tax_id=body.tax_id,
     lei=body.lei,
     industry=resolve_industry(session, body.industry)
@@ -605,6 +604,6 @@ def create_entity(
     ensure_self_agent(session, parent, created_by)
     ensure_self_agent(session, entity, created_by)
     session.flush()
-  response = entity_to_response(entity)
+  response = load_entity_response(session, entity)
   session.commit()
   return response

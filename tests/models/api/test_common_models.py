@@ -263,3 +263,45 @@ class TestLegalForm:
 
     with pytest.raises(ValidationError, match="corporation"):
       CreateEntityRequest(name="Pier", entity_type=given)
+
+
+@pytest.mark.unit
+class TestEntityIdentifiers:
+  """LEI, CIK and country are checked for shape, uppercased; blank is none."""
+
+  def test_normalizes(self):
+    from robosystems.models.api.extensions.entity import UpdateEntityRequest
+
+    body = UpdateEntityRequest(
+      lei=" 5493001kj5x1kjt2j567 ", cik="0000320193", address_country="us"
+    )
+    assert body.lei == "5493001KJ5X1KJT2J567"
+    assert body.cik == "0000320193"
+    assert body.address_country == "US"
+    assert UpdateEntityRequest(lei="", cik="", address_country="").lei is None
+
+  @pytest.mark.parametrize(
+    "field,value",
+    [
+      ("lei", "5493001KJ5X1"),
+      ("lei", "5493001KJ5X1KJT2J5AB"),
+      ("cik", "CIK0000320193"),
+      ("cik", "12345678901"),
+      ("address_country", "USA"),
+      ("address_country", "United States"),
+    ],
+  )
+  def test_refuses_the_wrong_shape(self, field, value):
+    from robosystems.models.api.extensions.entity import CreateEntityRequest
+
+    with pytest.raises(ValidationError):
+      CreateEntityRequest(name="Pier", **{field: value})
+
+  def test_the_uri_is_not_an_input(self):
+    from robosystems.models.api.extensions.entity import (
+      CreateEntityRequest,
+      UpdateEntityRequest,
+    )
+
+    assert "uri" not in CreateEntityRequest.model_fields
+    assert "uri" not in UpdateEntityRequest.model_fields

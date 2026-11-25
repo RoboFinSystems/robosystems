@@ -13,7 +13,12 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from robosystems.models.api.common import OptionalLegalForm
+from robosystems.models.api.common import (
+  OptionalCik,
+  OptionalCountryCode,
+  OptionalLegalForm,
+  OptionalLei,
+)
 
 ConsolidationMethod = Literal["full", "equity", "cost", "none"]
 EntityRole = Literal["operating", "consolidation"]
@@ -68,7 +73,13 @@ class LedgerEntityResponse(BaseModel):
   legal_name: str | None = Field(
     None, description="Full registered legal name (when different from `name`)."
   )
-  uri: str | None = Field(None, description="Canonical URL / external identifier.")
+  uri: str | None = Field(
+    None,
+    description=(
+      "The entity's URI, assigned by RoboSystems: "
+      "`https://robosystems.ai/entities#<id>`."
+    ),
+  )
 
   # Identifiers
   cik: str | None = Field(None, description="SEC CIK (Central Index Key).")
@@ -85,7 +96,11 @@ class LedgerEntityResponse(BaseModel):
     None, description="US state or country of incorporation."
   )
   fiscal_year_end: str | None = Field(
-    None, description="Fiscal year-end as MM-DD (e.g. '12-31', '06-30')."
+    None,
+    description=(
+      "Fiscal year-end as MM-DD, from the entity's fiscal calendar; null "
+      "before the calendar is set up. Change it through the calendar."
+    ),
   )
   tax_id: str | None = Field(None, description="Tax ID (EIN / SSN).")
   lei: str | None = Field(None, description="Legal Entity Identifier (ISO 17442).")
@@ -194,19 +209,15 @@ class UpdateEntityRequest(BaseModel):
   )
   name: str | None = None
   legal_name: str | None = None
-  uri: str | None = None
-  cik: str | None = None
+  cik: OptionalCik = None
   ticker: str | None = None
   exchange: str | None = None
   sic: str | None = None
   sic_description: str | None = None
   category: str | None = None
   state_of_incorporation: str | None = None
-  fiscal_year_end: str | None = Field(
-    None, description="Fiscal year-end as MM-DD (e.g. '12-31', '06-30')."
-  )
   tax_id: str | None = None
-  lei: str | None = None
+  lei: OptionalLei = None
   industry: str | None = Field(
     None,
     description=(
@@ -229,7 +240,7 @@ class UpdateEntityRequest(BaseModel):
   address_city: str | None = None
   address_state: str | None = None
   address_postal_code: str | None = None
-  address_country: str | None = None
+  address_country: OptionalCountryCode = None
   ownership_pct: float | None = Field(
     None,
     gt=0,
@@ -273,7 +284,6 @@ class UpdateEntityRequest(BaseModel):
           "legal_name": "Acme Corporation, Inc.",
           "tax_id": "12-3456789",
           "state_of_incorporation": "DE",
-          "fiscal_year_end": "12-31",
           "entity_type": "corporation",
         },
         {
@@ -376,21 +386,13 @@ class CreateEntityRequest(BaseModel):
       "omitted."
     ),
   )
-  uri: str | None = Field(None, description="Canonical URL / external identifier.")
-  cik: str | None = None
+  cik: OptionalCik = None
   sic: str | None = None
   sic_description: str | None = None
   category: str | None = None
   state_of_incorporation: str | None = None
-  fiscal_year_end: str | None = Field(
-    None,
-    description=(
-      "Fiscal year-end as MM-DD. Defaults to the parent's: a graph has one "
-      "fiscal cadence, and every entity's calendar follows it."
-    ),
-  )
   tax_id: str | None = None
-  lei: str | None = None
+  lei: OptionalLei = None
   industry: str | None = Field(
     None,
     description=(
@@ -406,7 +408,7 @@ class CreateEntityRequest(BaseModel):
   address_city: str | None = None
   address_state: str | None = None
   address_postal_code: str | None = None
-  address_country: str | None = None
+  address_country: OptionalCountryCode = None
 
   model_config = ConfigDict(
     json_schema_extra={

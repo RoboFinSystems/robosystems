@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from robosystems.config import env
+from robosystems.config.constants import URIConstants
 from robosystems.config.graph_tier import GraphTier
 from robosystems.logger import get_logger
 from robosystems.middleware.graph.allocation_manager import (
@@ -27,6 +28,13 @@ logger = get_logger(__name__)
 # retries (~127s) plus deallocation and PostgreSQL cleanup. The worker's
 # per-task budget must exceed the pipeline's waits plus this.
 CLEANUP_TIMEOUT_SECONDS = 180
+
+
+def is_web_address(value: str | None) -> bool:
+  if not value:
+    return False
+  return value.strip().lower().startswith(("http://", "https://"))
+
 
 # Multiplied by the attempt number; a constant so tests can zero it.
 CREDIT_POOL_RETRY_BACKOFF_SECONDS = 1.0
@@ -413,7 +421,9 @@ class GraphCreationService:
     reporting_style_id = resolve_reporting_style_id(config.entity_data)
 
     entity_identifier = f"entity_{graph_id}"
-    entity_uri = entity_data.uri or f"https://robosystems.ai/entities#{graph_id}"
+    entity_uri = URIConstants.ENTITY_URI_BASE + entity_identifier
+    # The request's `uri` is the website, and only an http(s) address is one.
+    website = entity_data.uri if is_web_address(entity_data.uri) else None
 
     ticker = getattr(entity_data, "ticker", None) or derive_ticker(entity_data.name)
 
@@ -429,11 +439,10 @@ class GraphCreationService:
         sic_description=entity_data.sic_description,
         category=entity_data.category,
         state_of_incorporation=entity_data.state_of_incorporation,
-        fiscal_year_end=entity_data.fiscal_year_end,
         tax_id=entity_data.ein,
         entity_type=entity_data.entity_type,
         reporting_style_id=reporting_style_id,
-        website=entity_data.uri,
+        website=website,
         status="active",
         is_parent=True,
         source="native",

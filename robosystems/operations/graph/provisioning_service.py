@@ -168,7 +168,6 @@ async def run_graph_provisioning(
       if has_entity:
         entity_data = {
           "name": entity_name,
-          "uri": entity_name.lower().replace(" ", "-"),
           "extensions": schema_extensions,
           "ein": entity_identifier if entity_identifier_type == "ein" else None,
         }
