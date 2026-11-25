@@ -54,8 +54,6 @@ The general ledger and its financial reporting. Everything written is a block: t
 - **Industry classification**: one open vocabulary shared by a ledger's entities and every SEC filer: 543 industries in four levels, 7,200 public companies placed, in [`frameworks/industries`](/frameworks/industries/README.md)
 - **Connections**: [QuickBooks](https://quickbooks.intuit.com/partners/affiliates?cid=par_pim_4TcakSEFQs73) as the books of record, and bank feeds through [Plaid](https://plaid.com) and [Mercury](https://mercury.com/partner/robosystems). A bank transaction arrives with a suggested account, and nothing reaches the ledger until someone approves it
 
-<sub>Mercury is a fintech company, not an FDIC-insured bank. Banking services provided through Choice Financial Group and Column N.A., Members FDIC.</sub>
-
 App: [`roboledger-app`](https://github.com/RoboFinSystems/roboledger-app). Operations: [RoboLedger Operations](https://robosystems.ai/docs/technical/roboledger-operations).
 
 ### [RoboInvestor](https://roboinvestor.ai)
@@ -193,3 +191,7 @@ In the code, each package has a README; read it before working there. The main o
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
 Apache-2.0 © 2026 RFS LLC
+
+## Disclosures
+
+<sub>Mercury is a fintech company, not an FDIC-insured bank. Banking services provided through Choice Financial Group and Column N.A., Members FDIC.</sub>

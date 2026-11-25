@@ -173,6 +173,7 @@ serialization flavor of the Report bundle via the published Python SDK
 | `output/roboledger-demo.holon.jsonld` | holon — dataset-form JSON-LD (scene / boundary / projection), the anchor stamped at publish |
 | `output/roboledger-demo.lineage.holon.jsonld` | the same holon with its fourth named graph, `#lineage`: the ledger lines, entries and events behind every frozen figure |
 | `output/roboledger-demo.databook.md` | DataBook — the holon as a Markdown document to read: each value links to its fact, and the holon is named as its source by digest |
+| `output/roboledger-demo.xlsx` | Workbook — the holon as an Excel file: a sheet per section, a row per line, a column per period, every number the reported fact, and the holon named as its source on the contents sheet |
 | `output/roboledger-demo.zip` | XBRL 2.1 report package — `instance.xml` + `report.xsd` + presentation/calc/definition linkbases |
 
 Beside them the demo writes two verdicts, checked on the host with no running stack: `roboledger-demo-xbrl-validation.md` (Arelle, over the XBRL package) and `roboledger-demo-holon-validation.md` (xbrlkit, over both holons, one verdict per named graph).
@@ -182,4 +183,4 @@ Committed reference copies of the artifact set live in
 [`sample_output/`](sample_output/) so a reviewer can inspect a clean
 run without spinning up the platform — these are point-in-time
 snapshots, not synced every commit. Refresh with
-`cp output/*.{md,jsonld,tavi.json,zip} sample_output/`.
+`cp output/*.{md,jsonld,tavi.json,zip,xlsx} sample_output/`.

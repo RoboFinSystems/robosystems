@@ -23,6 +23,9 @@ For a report at ``(graph_id, report_id)`` it writes, under ``out_dir``:
 * ``{stem}.databook.md``       — the report as a document to read: the
   holon as Markdown tables whose values link to their facts, the same facts
   as RDF, the verdict, and the holon named as its source
+* ``{stem}.xlsx``              — the report as an Excel workbook: a sheet per
+  section, a row per line, a column per period, every number the reported
+  fact, and the holon named as its source on the contents sheet
 
 Every flavor comes from the product endpoint via the published SDK — the
 demos exercise the real download path, they don't reconstruct artifacts
@@ -73,6 +76,11 @@ def render_report_artifacts(
   databook = client.download_report_bundle(
     graph_id, report_id, format="databook", to=databook_path
   )
+  # The holon as an Excel file, written by the server from the same holon.
+  workbook_path = out_dir / f"{stem}.xlsx"
+  workbook = client.download_report_bundle(
+    graph_id, report_id, format="workbook", to=workbook_path
+  )
   xbrl = client.download_report_bundle(
     graph_id, report_id, format="xbrl-2.1", to=xbrl_path
   )
@@ -80,6 +88,7 @@ def render_report_artifacts(
   print(f"  Holon:    {holon.path} ({len(holon.content):,} bytes)")
   print(f"  Lineage:  {lineage.path} ({len(lineage.content):,} bytes)")
   print(f"  DataBook: {databook.path} ({len(databook.content):,} bytes)")
+  print(f"  Workbook: {workbook.path} ({len(workbook.content):,} bytes)")
   print(f"  XBRL 2.1: {xbrl.path} ({len(xbrl.content):,} bytes)")
 
   # Container-free validation of the XBRL zip (Arelle) and of both holons

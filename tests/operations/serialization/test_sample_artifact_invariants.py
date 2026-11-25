@@ -253,3 +253,23 @@ def test_the_workbook_of_a_holon_opens_and_names_that_holon(path: Path) -> None:
     for row in sheet.iter_rows(min_row=6)
     for c in row
   )
+
+
+@pytest.mark.parametrize("path", PUBLISHED, ids=[p.name for p in PUBLISHED])
+def test_the_workbook_beside_a_holon_was_written_from_that_holon(path: Path) -> None:
+  """The committed workbook names the holon beside it by digest, so the two
+  are one download: a demo that refreshes one refreshes both."""
+  import hashlib
+
+  import openpyxl
+
+  book = path.with_name(path.name.replace(".holon.jsonld", ".xlsx"))
+  assert book.exists(), f"{path.name} has no workbook beside it: regenerate that demo"
+  contents = openpyxl.load_workbook(book)["Contents"]
+  stated = {row[0].value: row[1].value for row in contents.iter_rows(max_row=12)}
+  digest = hashlib.sha256(path.read_bytes()).hexdigest()
+  assert stated["Holon SHA-256"] == digest, (
+    f"{book.name} was written from another holon"
+  )
+  # As with the DataBook, the server names the holon by its download filename.
+  assert str(stated["Holon file"]).endswith(".holon.jsonld")
