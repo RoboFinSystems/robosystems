@@ -336,3 +336,37 @@ def test_a_share_without_its_holon_sends_nothing(shared) -> None:
   assert result.status == "error"
   with extensions_session(TARGET) as session:
     assert session.execute(select(Report.id)).first() is None
+
+
+def test_a_share_that_names_no_company_sends_nothing(shared) -> None:
+  """Every fact needs the company it is about; a copy without one is refused
+  rather than written with an empty entity."""
+  target = MagicMock()
+  target.schema_extensions = ["roboledger"]
+  platform = MagicMock()
+  platform.__enter__.return_value.execute.return_value.scalar_one_or_none.return_value = target
+  with (
+    patch("robosystems.db.platform.SessionFactory", return_value=platform),
+    patch(f"{_REPORTS}._ensure_linked_entity", return_value=None),
+  ):
+    result = _share_to_target(
+      source_graph_id=SOURCE,
+      report_snapshot=shared["snapshot"],
+      target_graph_id=TARGET,
+      shared_by="usr_1",
+      publication_artifacts={".holon.jsonld": shared["holon"]},
+      source_entity_id=None,
+    )
+  assert result.status == "error"
+  with extensions_session(TARGET) as session:
+    assert session.execute(select(Report.id)).first() is None
+
+
+def test_a_holon_with_nothing_to_load_sends_nothing(shared) -> None:
+  from robosystems.operations.roboledger.commands import report_import
+
+  with patch.object(report_import, "_loadable", return_value=[]):
+    result = _share(shared)
+  assert result.status == "error"
+  with extensions_session(TARGET) as session:
+    assert session.execute(select(Report.id)).first() is None

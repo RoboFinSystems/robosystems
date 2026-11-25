@@ -1382,11 +1382,19 @@ def _share_to_target(
       )
       # The facts keep the sender's entity id: the graph finds the recipient's
       # row for the company through it.
+      entity_id = source_entity_id or linked_entity_id
+      if entity_id is None:
+        target_session.rollback()
+        return ShareResultItem(
+          target_graph_id=target_graph_id,
+          status="error",
+          error="The report names no company, so nothing was sent.",
+        )
       fact_count = receive_shared_report(
         target_session,
         holon_text,
         report=shared_report,
-        entity_id=source_entity_id or linked_entity_id or "",
+        entity_id=entity_id,
         created_by=shared_by,
       )
 

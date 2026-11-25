@@ -282,6 +282,10 @@ def receive_shared_report(
   """
   model = _read(holon_text)
   loadable = _loadable(model)
+  if not loadable:
+    raise ReportImportRefusedError(
+      [{"code": "no_totals", "message": "The report states no total to load."}]
+    )
   sections = _sections(model, loadable)
   # The copy's own id keeps its section names apart from every other report's.
   vocabulary = _write_vocabulary(
