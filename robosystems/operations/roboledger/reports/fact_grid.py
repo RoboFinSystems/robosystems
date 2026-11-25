@@ -2058,7 +2058,8 @@ def _derive_cash_flow_facts(
   """Append operating CF facts from BS deltas (indirect method).
 
   Each ``derivation`` arc says "this CF leaf is the change in this BS
-  element" with a signed weight (asset up = -1, liability up = +1). For each
+  element" with a signed weight (+1: the leaf states the change in the
+  balance; its calculation arc carries the cash effect's sign). For each
   period, ``Σ weight * (BS_end - BS_opening)``, the opening being the day
   before the period starts. Zero values are skipped. Returns the
   ``(leaf, start, end)`` keys derived from deltas, zero or not; a leaf a
@@ -2191,6 +2192,14 @@ _CF_PAYABLES_LEAF_QNAME = (
   "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities"
 )
 _CF_RECEIVABLES_LEAF_QNAME = "rs-gaap:IncreaseDecreaseInAccountsReceivable"
+# The proceeds row of a disposal gain, for cash the gain alone brings in:
+# insurance on equipment already written off, or the sale of an asset no
+# longer on the books. Tagging the cash line picks another row.
+_CF_DISPOSAL_PROCEEDS: dict[str, str] = {
+  "rs-gaap:GainLossOnDispositionOfAssets": (
+    "rs-gaap:ProceedsFromSaleOfPropertyPlantAndEquipment"
+  ),
+}
 _CF_INTEREST_PAID_QNAME = "rs-gaap:InterestPaidNet"
 _CF_TAXES_PAID_QNAME = "rs-gaap:IncomeTaxesPaidNet"
 # The expense concepts whose cash settlement is a supplemental disclosure.
@@ -2528,6 +2537,7 @@ def _emit_noncash_and_settlement_facts(
           _CF_NONCASH_ACQUISITION_QNAME,
           _CF_INTEREST_PAID_QNAME,
           _CF_TAXES_PAID_QNAME,
+          *_CF_DISPOSAL_PROCEEDS.values(),
         ]
       },
     ).fetchall()
@@ -2793,6 +2803,16 @@ def _emit_noncash_and_settlement_facts(
       _default_flow(ln.concept_id, -ln.net) for ln in lines if ln.kind == "nonoperating"
     }
     flows.discard(None)
+    if not flows and kinds <= {"cash", "pnl"}:
+      # No asset left with the cash, so the gain backed out of operating is
+      # the proceeds of a disposal booked elsewhere, investing.
+      for ln in disposal:
+        proceeds_id = element_ids.get(_CF_DISPOSAL_PROCEEDS.get(ln.qname or "", ""))
+        if proceeds_id is not None:
+          emitted_flows.add(str(proceeds_id))
+          for column in columns:
+            _add(str(proceeds_id), column, -ln.net)
+      continue
     if len(flows) != 1:
       continue
     flow_id = flows.pop()

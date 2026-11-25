@@ -786,7 +786,7 @@
       "@id": "_:rs-gaap-rollup-cf-investing",
       "ruleCategory": "FundamentalAccountingConceptRelation",
       "rulePattern": "RollUp",
-      "ruleExpression": "$NetCashProvidedByUsedInInvestingActivities = ($PaymentsToAcquirePropertyPlantAndEquipment + $ProceedsFromSaleOfPropertyPlantAndEquipment + $PaymentsToAcquireInvestments + $ProceedsFromSaleMaturityAndCollectionsOfInvestments + $PaymentsToAcquireIntangibleAssets + $ProceedsFromSaleOfIntangibleAssets + $PaymentsToAcquireShortTermInvestments + $ProceedsFromSaleOfShortTermInvestments + $PaymentsToAcquireOtherInvestments + $ProceedsFromSaleOfOtherInvestments + $PaymentsToAcquireBusinessesNetOfCashAcquired + $PaymentsToAcquireInterestInSubsidiariesAndAffiliates + $ProceedsFromDivestitureOfInterestInSubsidiariesAndAffiliates + $PaymentsToAcquireEquityMethodInvestments + $ProceedsFromSaleOfEquityMethodInvestments + $ProceedsFromEquityMethodInvestmentDividendsOrDistributionsReturnOfCapital)",
+      "ruleExpression": "$NetCashProvidedByUsedInInvestingActivities = ($PaymentsToAcquirePropertyPlantAndEquipment + $ProceedsFromSaleOfPropertyPlantAndEquipment + $PaymentsToAcquireInvestments + $ProceedsFromSaleMaturityAndCollectionsOfInvestments + $PaymentsToAcquireIntangibleAssets + $ProceedsFromSaleOfIntangibleAssets + $PaymentsToAcquireShortTermInvestments + $ProceedsFromSaleOfShortTermInvestments + $PaymentsToAcquireOtherInvestments + $ProceedsFromSaleOfOtherInvestments + $PaymentsToAcquireBusinessesNetOfCashAcquired + $PaymentsToAcquireInterestInSubsidiariesAndAffiliates + $ProceedsFromDivestitureOfInterestInSubsidiariesAndAffiliates + $PaymentsToAcquireEquityMethodInvestments + $ProceedsFromSaleOfEquityMethodInvestments + $ProceedsFromEquityMethodInvestmentDividendsOrDistributionsReturnOfCapital + $PaymentsToAcquireNotesReceivable + $ProceedsFromCollectionOfNotesReceivable + $ProceedsFromInsuranceSettlementInvestingActivities)",
       "ruleTarget": {
         "targetKind": "element",
         "targetRef": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
@@ -859,6 +859,18 @@
         {
           "variableName": "ProceedsFromEquityMethodInvestmentDividendsOrDistributionsReturnOfCapital",
           "variableQname": "rs-gaap:ProceedsFromEquityMethodInvestmentDividendsOrDistributionsReturnOfCapital"
+        },
+        {
+          "variableName": "PaymentsToAcquireNotesReceivable",
+          "variableQname": "rs-gaap:PaymentsToAcquireNotesReceivable"
+        },
+        {
+          "variableName": "ProceedsFromCollectionOfNotesReceivable",
+          "variableQname": "rs-gaap:ProceedsFromCollectionOfNotesReceivable"
+        },
+        {
+          "variableName": "ProceedsFromInsuranceSettlementInvestingActivities",
+          "variableQname": "rs-gaap:ProceedsFromInsuranceSettlementInvestingActivities"
         }
       ],
       "ruleMessage": "Calculation rollup: rs-gaap:NetCashProvidedByUsedInInvestingActivities = Σ Investing leaves (each pre-signed: outflows negative, proceeds positive)",
@@ -904,7 +916,7 @@
       "@id": "_:rs-gaap-rollup-cf-operating",
       "ruleCategory": "FundamentalAccountingConceptRelation",
       "rulePattern": "RollUp",
-      "ruleExpression": "$NetCashProvidedByUsedInOperatingActivities = ($NetIncomeLoss + $DepreciationDepletionAndAmortization + $ShareBasedCompensation - $GainLossOnDispositionOfAssets - $GainOrLossOnSaleOfStockInSubsidiary + $AssetImpairmentCharges - $GainsLossesOnExtinguishmentOfDebt - $OtherNoncashIncomeExpense - $IncreaseDecreaseInAccountsReceivable - $IncreaseDecreaseInInventories - $IncreaseDecreaseInPrepaidExpense + $IncreaseDecreaseInAccountsPayableAndAccruedLiabilities + $IncreaseDecreaseInOtherCurrentLiabilities - $IncreaseDecreaseInOtherOperatingCapitalNet + $IncreaseDecreaseInAccruedLiabilities + $IncreaseDecreaseInAccruedIncomeTaxesPayable + $DeferredIncomeTaxExpenseBenefit - $IncreaseDecreaseInOtherCurrentAssets + $IncreaseDecreaseInContractWithCustomerLiability + $IncreaseDecreaseInOperatingLeaseLiability + $NetIncomeLossAttributableToNoncontrollingInterest - $IncreaseDecreaseInDueFromAffiliatesCurrent + $IncreaseDecreaseInDueToAffiliatesCurrent - $IncomeLossFromEquityMethodInvestments + $EquityMethodInvestmentDividendsOrDistributions)",
+      "ruleExpression": "$NetCashProvidedByUsedInOperatingActivities = ($NetIncomeLoss + $DepreciationDepletionAndAmortization + $ShareBasedCompensation - $GainLossOnDispositionOfAssets - $GainOrLossOnSaleOfStockInSubsidiary + $AssetImpairmentCharges - $GainsLossesOnExtinguishmentOfDebt - $OtherNoncashIncomeExpense - $IncreaseDecreaseInAccountsReceivable - $IncreaseDecreaseInInventories - $IncreaseDecreaseInPrepaidExpense + $IncreaseDecreaseInAccountsPayableAndAccruedLiabilities + $IncreaseDecreaseInOtherCurrentLiabilities - $IncreaseDecreaseInOtherOperatingCapitalNet + $IncreaseDecreaseInAccruedLiabilities + $IncreaseDecreaseInAccruedIncomeTaxesPayable + $DeferredIncomeTaxExpenseBenefit - $IncreaseDecreaseInOtherCurrentAssets - $IncreaseDecreaseInOtherNoncurrentAssets + $IncreaseDecreaseInContractWithCustomerLiability + $IncreaseDecreaseInOperatingLeaseLiability + $IncreaseDecreaseInOtherNoncurrentLiabilities + $NetIncomeLossAttributableToNoncontrollingInterest - $IncreaseDecreaseInDueFromAffiliatesCurrent + $IncreaseDecreaseInDueToAffiliatesCurrent - $IncomeLossFromEquityMethodInvestments + $EquityMethodInvestmentDividendsOrDistributions)",
       "ruleTarget": {
         "targetKind": "element",
         "targetRef": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
@@ -987,12 +999,20 @@
           "variableQname": "rs-gaap:IncreaseDecreaseInOtherCurrentAssets"
         },
         {
+          "variableName": "IncreaseDecreaseInOtherNoncurrentAssets",
+          "variableQname": "rs-gaap:IncreaseDecreaseInOtherNoncurrentAssets"
+        },
+        {
           "variableName": "IncreaseDecreaseInContractWithCustomerLiability",
           "variableQname": "rs-gaap:IncreaseDecreaseInContractWithCustomerLiability"
         },
         {
           "variableName": "IncreaseDecreaseInOperatingLeaseLiability",
           "variableQname": "rs-gaap:IncreaseDecreaseInOperatingLeaseLiability"
+        },
+        {
+          "variableName": "IncreaseDecreaseInOtherNoncurrentLiabilities",
+          "variableQname": "rs-gaap:IncreaseDecreaseInOtherNoncurrentLiabilities"
         },
         {
           "variableName": "NetIncomeLossAttributableToNoncontrollingInterest",

@@ -68,8 +68,12 @@ ACCOUNTS = {
   "payable": ("rs-gaap:AccountsPayableCurrent", "credit", "instant"),
   "card": ("rs-gaap:OtherLiabilitiesCurrent", "credit", "instant"),
   "equipment": ("rs-gaap:PropertyPlantAndEquipmentGross", "debit", "instant"),
-  "credit_line": ("rs-gaap:OtherLiabilitiesNoncurrent", "credit", "instant"),
-  "metals": ("rs-gaap:OtherAssetsNoncurrent", "debit", "instant"),
+  "credit_line": (
+    "rs-gaap:LongTermDebtAndCapitalLeaseObligations",
+    "credit",
+    "instant",
+  ),
+  "metals": ("rs-gaap:LongTermInvestmentsAndReceivablesNet", "debit", "instant"),
   "clearing": ("rs-gaap:OtherAssetsCurrent", "debit", "instant"),
   "capital": ("rs-gaap:AdditionalPaidInCapital", "credit", "instant"),
   "revenue": (

@@ -306,6 +306,6 @@ class TestCashEffectRows:
       and a.weight == -1.0
     }
     rows = subtracted
-    assert len(rows) == 11
+    assert len(rows) == 12
     unchanged = {q for q in rows if cash_effect_wording(labels[q]) == labels[q]}
     assert unchanged == set()
